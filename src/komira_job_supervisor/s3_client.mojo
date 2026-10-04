@@ -1,10 +1,10 @@
 # =============================================================================
-# komira_agent/s3_client.mojo: the agent's S3 client.
+# komira_job_supervisor/s3_client.mojo: the job supervisor's S3 client.
 # =============================================================================
 #
-# The three things the agent does with S3 (GET the job binary, PUT each
+# The three things the job supervisor does with S3 (GET the job binary, PUT each
 # streamed log chunk, PUT the terminal logs.txt / crash_report.json) go through
-# `AgentS3Client[C]`, a thin owner of komira_objectstore_s3's `S3Store` over the
+# `JobSupervisorS3Client[C]`, a thin owner of komira_objectstore_s3's `S3Store` over the
 # transport `C`. `C` is the S3 transport and nothing else: `KernelTcpConnector`
 # for MinIO/LocalStack over plaintext, `TlsConnector[KernelTcpConnector]` for
 # real S3 or an `https://` endpoint (boot.mojo §4b picks it).
@@ -14,10 +14,10 @@
 # once at construction so a client with no credential is refused where it is
 # built, then cached and refreshed before expiry by the source. Its HTTP
 # requests (STS, the container endpoint, IMDS) go through
-# `AgentCredentialTransport`: plaintext for an `http` request, TLS over the
+# `JobSupervisorCredentialTransport`: plaintext for an `http` request, TLS over the
 # system public-CA trust store for an `https` one.
 #
-# CLOCK: `AgentAwsClock` signs with the live system clock, unless BOTH
+# CLOCK: `JobSupervisorAwsClock` signs with the live system clock, unless BOTH
 # `MINIO_E2E_AMZ_DATE` and `MINIO_E2E_SHORT_DATE` are set, in which case it is
 # stopped at the `MINIO_E2E_AMZ_DATE` instant (the deterministic-test override
 # `amz_stamps_now` also honours).
@@ -53,13 +53,13 @@ from komira_objectstore.types import WritePrecondition
 from komira_objectstore_s3.config import S3Config
 from komira_objectstore_s3.store import S3Store
 
-from komira_agent.clock_helper import amz_override_unix_seconds
+from komira_job_supervisor.clock_helper import amz_override_unix_seconds
 
 
 # =============================================================================
 # §1: the credential chain's HTTP transport.
 # =============================================================================
-struct AgentCredentialTransport(CredentialTransport, Movable, Deinitable):
+struct JobSupervisorCredentialTransport(CredentialTransport, Movable, Deinitable):
     """Sends one credential-provider request (STS, the container endpoint,
     instance metadata) on a fresh HTTP client. `http` requests go in the
     clear (the container endpoint and IMDS are link-local / loopback);
@@ -85,7 +85,7 @@ struct AgentCredentialTransport(CredentialTransport, Movable, Deinitable):
             var res = plain.send(req)
             return CredentialHttpResponse.of_bytes(res.status, Span(res.body))
         raise Error(
-            "agent credentials: a provider asked for scheme "
+            "job supervisor credentials: a provider asked for scheme "
             + req.scheme
             + ", not http or https"
         )
@@ -94,7 +94,7 @@ struct AgentCredentialTransport(CredentialTransport, Movable, Deinitable):
 # =============================================================================
 # §2: the signing clock.
 # =============================================================================
-struct AgentAwsClock(AwsClock, Copyable, Movable, Deinitable):
+struct JobSupervisorAwsClock(AwsClock, Copyable, Movable, Deinitable):
     """The SigV4 signing clock: the system wall clock, or a stopped clock
     when the `MINIO_E2E_*` override is set (see the module header)."""
 
@@ -104,8 +104,8 @@ struct AgentAwsClock(AwsClock, Copyable, Movable, Deinitable):
         self.fixed_unix_seconds = fixed_unix_seconds
 
     @staticmethod
-    def from_env() raises -> AgentAwsClock:
-        return AgentAwsClock(amz_override_unix_seconds())
+    def from_env() raises -> JobSupervisorAwsClock:
+        return JobSupervisorAwsClock(amz_override_unix_seconds())
 
     def now_unix_seconds(mut self) -> Int:
         if self.fixed_unix_seconds:
@@ -114,24 +114,24 @@ struct AgentAwsClock(AwsClock, Copyable, Movable, Deinitable):
         return system.now_unix_seconds()
 
 
-comptime AgentCredsSource = DefaultChainCredsSource[
-    ProcessEnv, ProcessFiles, AgentCredentialTransport, SystemAwsClock
+comptime JobSupervisorCredsSource = DefaultChainCredsSource[
+    ProcessEnv, ProcessFiles, JobSupervisorCredentialTransport, SystemAwsClock
 ]
 """The AWS default credential chain over the process environment, the local
-filesystem and `AgentCredentialTransport`, expiring on the system clock."""
+filesystem and `JobSupervisorCredentialTransport`, expiring on the system clock."""
 
 
-def agent_creds_source(region: String) raises -> AgentCredsSource:
+def job_supervisor_creds_source(region: String) raises -> JobSupervisorCredsSource:
     """The default chain for `region`, resolved once now: raises when no
     credential can be found (the message names the setting, never a
     secret)."""
     var params = AwsCredentialParams()
     params.region = region
-    var source = AgentCredsSource(
+    var source = JobSupervisorCredsSource(
         params,
         ProcessEnv(),
         ProcessFiles(),
-        AgentCredentialTransport(),
+        JobSupervisorCredentialTransport(),
         SystemAwsClock(),
     )
     _ = source.credentials()
@@ -141,13 +141,13 @@ def agent_creds_source(region: String) raises -> AgentCredsSource:
 # =============================================================================
 # §3: the client.
 # =============================================================================
-struct AgentS3Client[C: Connector](Movable):
-    """The agent's S3 verbs over transport `C`: whole-object GET and an
+struct JobSupervisorS3Client[C: Connector](Movable):
+    """The job supervisor's S3 verbs over transport `C`: whole-object GET and an
     unconditional PUT. A None `endpoint` is AWS's own regional endpoint
     (virtual-hosted, https); a set one is an S3-compatible service addressed
     by path, with the scheme the endpoint string carries."""
 
-    var _store: S3Store[Self.C, AgentCredsSource, AgentAwsClock]
+    var _store: S3Store[Self.C, JobSupervisorCredsSource, JobSupervisorAwsClock]
 
     def __init__(
         out self,
@@ -160,12 +160,12 @@ struct AgentS3Client[C: Connector](Movable):
             config = S3Config.custom_endpoint(region, endpoint.value())
         else:
             config = S3Config.aws(region)
-        self._store = S3Store[Self.C, AgentCredsSource, AgentAwsClock](
+        self._store = S3Store[Self.C, JobSupervisorCredsSource, JobSupervisorAwsClock](
             config^,
             mk_connector,
             HttpClientConfig.defaults(),
-            agent_creds_source(region),
-            AgentAwsClock.from_env(),
+            job_supervisor_creds_source(region),
+            JobSupervisorAwsClock.from_env(),
         )
 
     def endpoint(self) -> Optional[String]:

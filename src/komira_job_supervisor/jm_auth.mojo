@@ -1,12 +1,12 @@
 # =============================================================================
-# komira_agent/jm_auth.mojo — THE SUPERVISOR'S AUTHENTICATED PATH TO THE JM.
+# komira_job_supervisor/jm_auth.mojo — THE SUPERVISOR'S AUTHENTICATED PATH TO THE JM.
 # =============================================================================
 #
 # ⛔⛔ THE DEFECT. Every finite job's supervisor beats to
-# `POST /internal/heartbeat` on the job manager, and the agent had ZERO token
+# `POST /internal/heartbeat` on the job manager, and the job supervisor had ZERO token
 # support — `send_heartbeat` built exactly one header (`Content-Type:
 # application/protobuf`) and there was no metadata-server client in the
-# agent. A job manager deployed as a Cloud Run service that does not allow
+# job supervisor. A job manager deployed as a Cloud Run service that does not allow
 # unauthenticated invocation answers an anonymous request 403 at the Google
 # Frontend on every route, before it reaches the container.
 #
@@ -77,7 +77,7 @@ comptime _METADATA_IDENTITY_PATH: String = (
 comptime _METADATA_FLAVOR_HEADER: String = "Metadata-Flavor"
 comptime _METADATA_FLAVOR_VALUE: String = "Google"
 
-# The accepted spellings of KOMIRA_AGENT_JM_AUTH, rendered into the refusal so
+# The accepted spellings of KOMIRA_JOB_SUPERVISOR_JM_AUTH, rendered into the refusal so
 # a typo tells the operator what it should have been.
 comptime JM_AUTH_MODE_NONE_SPELLING: String = ""
 comptime JM_AUTH_MODE_GCP_METADATA_SPELLING: String = "gcp-metadata"
@@ -89,7 +89,7 @@ comptime JM_AUTH_MODE_GCP_METADATA_SPELLING: String = "gcp-metadata"
 struct JmAuthMode(Copyable, Movable, ImplicitlyCopyable):
     """How the supervisor authenticates to the job manager.
 
-    A small Int tag, the `AgentPhase` idiom. Two arms today; the AWS SigV4 arm
+    A small Int tag, the `JobSupervisorPhase` idiom. Two arms today; the AWS SigV4 arm
     is the next tag and needs no change to this struct's shape."""
 
     var _tag: Int32  # 0 = none (bearer-less), 1 = GCP metadata ID token
@@ -101,7 +101,7 @@ struct JmAuthMode(Copyable, Movable, ImplicitlyCopyable):
     @staticmethod
     @always_inline
     def none() -> JmAuthMode:
-        """No credential. Byte-identical to the agent's behaviour before this seam existed, and
+        """No credential. Byte-identical to the job supervisor's behaviour before this seam existed, and
         the default — so an unset posture changes nothing about an in-cluster
         plaintext deploy."""
         return JmAuthMode(Int32(0))
@@ -140,7 +140,7 @@ def parse_jm_auth_mode(s: String) raises -> JmAuthMode:
 
     ⛔ A TYPO RAISES RATHER THAN FALLING BACK TO `none`, and that is the point.
     Silently degrading a misspelled `gcp_metadata` to bearer-less would beat
-    into a 403 forever while every log line said the agent was healthy — the
+    into a 403 forever while every log line said the job supervisor was healthy — the
     exact fail-open shape the heartbeat contract removes. Refusing at boot surfaces
     the mistake at its cause.
 
@@ -152,7 +152,7 @@ def parse_jm_auth_mode(s: String) raises -> JmAuthMode:
     if s == JM_AUTH_MODE_GCP_METADATA_SPELLING:
         return JmAuthMode.gcp_metadata()
     raise Error(
-        String("agent: KOMIRA_AGENT_JM_AUTH: unknown posture '")
+        String("job supervisor: KOMIRA_JOB_SUPERVISOR_JM_AUTH: unknown posture '")
         + s
         + String("' (accepted: '' for none, '")
         + JM_AUTH_MODE_GCP_METADATA_SPELLING
@@ -170,11 +170,11 @@ def jm_audience(scheme: String, host: String, port: UInt16) -> String:
     Google validates the ID token's `aud` against the service URL, which is
     `https://job-manager-….run.app` — with NO `:443`. Minting for
     `https://host:443` produces a token the ingress edge rejects, which is
-    indistinguishable at the agent from having no token at all. A non-default
+    indistinguishable at the job supervisor from having no token at all. A non-default
     port IS rendered, so a self-hosted JM on `:8443` still gets a correct
     audience.
 
-    Deriving this from the host/port the agent already has means the ordinary
+    Deriving this from the host/port the job supervisor already has means the ordinary
     case needs no new deploy surface at all."""
     var default_port = UInt16(443) if scheme == String("https") else UInt16(80)
     if port == default_port:
@@ -194,7 +194,7 @@ def jm_credential_rides_in_clear(use_tls: Bool, mode: JmAuthMode) -> Bool:
     bearer-less would 403 at an IAM-gated door and read as a network blip.
 
     ★ ONE DEFINITION, THREE REFUSALS. `send_heartbeat_blocking` refuses the
-    pair per beat, before the mint and before the dial; `AgentConfig.from_env`
+    pair per beat, before the mint and before the dial; `JobSupervisorConfig.from_env`
     and `PodLoaderSupervisorConfig.from_env` refuse it once, at boot. They ask
     this function so the three cannot disagree about what "in the clear"
     means. (`GcpCloudProvider.create` refuses the same pair at placement with
@@ -251,7 +251,7 @@ struct GcpMetadataMinter(JmTokenMinter):
         A non-2xx / empty / non-JWT body RAISES. ⛔ The error message NEVER
         carries the token or any part of it."""
         if audience.byte_length() == 0:
-            raise Error("agent jm auth: empty audience")
+            raise Error("job supervisor jm auth: empty audience")
         var path = (
             _METADATA_IDENTITY_PATH
             + String("?audience=")
@@ -279,7 +279,7 @@ struct GcpMetadataMinter(JmTokenMinter):
         var resp_bytes = cr.body.take_bytes()
         if status < 200 or status >= 300:
             raise Error(
-                String("agent jm auth: metadata identity GET failed: HTTP ")
+                String("job supervisor jm auth: metadata identity GET failed: HTTP ")
                 + String(status)
             )
         var jwt = _strip_trailing_newline(
@@ -287,7 +287,7 @@ struct GcpMetadataMinter(JmTokenMinter):
         )
         if _dot_count(jwt) != 2 or jwt.byte_length() < 20:
             raise Error(
-                "agent jm auth: metadata identity response is not a JWT"
+                "job supervisor jm auth: metadata identity response is not a JWT"
             )
         return jwt^
 
@@ -310,7 +310,7 @@ def jm_auth_headers[
 
     ⛔ A MINT FAILURE RAISES; IT DOES NOT RETURN AN EMPTY LIST. Degrading a
     declared posture to bearer-less is the fail-open path — the request would
-    then 403 at the ingress edge and be reported to the agent loop as an
+    then 403 at the ingress edge and be reported to the job supervisor loop as an
     ordinary transport failure, making "this image cannot authenticate"
     indistinguishable from "the network blipped". The heartbeat contract's premise
     is that those two must never share a code path.
@@ -344,7 +344,7 @@ def jm_auth_headers[
     # Unreachable while the tag set is {0,1}; a new tag that forgets to add an
     # arm here must REFUSE rather than silently send bearer-less.
     raise Error(
-        String("agent jm auth: no header arm for posture '")
+        String("job supervisor jm auth: no header arm for posture '")
         + mode.name()
         + String("'")
     )

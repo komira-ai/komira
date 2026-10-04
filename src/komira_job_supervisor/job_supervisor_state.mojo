@@ -1,13 +1,13 @@
 # =============================================================================
-# komira_agent/agent_state.mojo — the supervisor agent's run-loop state.
+# komira_job_supervisor/job_supervisor_state.mojo — the job supervisor's run-loop state.
 # =============================================================================
 #
-# The pod-side supervisor's in-loop state. The agent is a SINGLE
+# The pod-side supervisor's in-loop state. The job supervisor is a SINGLE
 # poll-then-heartbeat loop (no concurrent heartbeat and child-wait tasks), so
 # the state is a plain
 # struct the loop reads / writes directly — no mutex, no watch.
 #
-#   AgentPhase    — the four agent-reported phases (RUNNING / COMPLETED /
+#   JobSupervisorPhase    — the four job-supervisor-reported phases (RUNNING / COMPLETED /
 #                   FAILED / CANCELLED). These map 1:1 onto the wire `phase`
 #                   string the job-manager's heartbeat handler parses
 #                   (`_phase_from_wire`), and onto the JobStore FSM target
@@ -17,7 +17,7 @@
 #                   last_record_offset). Serialized into the proto3-JSON
 #                   `failure` sub-object the handler's `_failure_from_json`
 #                   parses.
-#   AgentState    — phase + progress + message + Optional[FailureReport] +
+#   JobSupervisorState    — phase + progress + message + Optional[FailureReport] +
 #                   cancel_requested. The loop mutates this as the child runs
 #                   and the job-manager's heartbeat responses arrive.
 #
@@ -28,13 +28,13 @@
 
 
 # =============================================================================
-# §1 — AgentPhase — the four agent-reported phases.
+# §1 — JobSupervisorPhase — the four job-supervisor-reported phases.
 # =============================================================================
-struct AgentPhase(Copyable, Movable, ImplicitlyCopyable):
-    """An agent-reported job phase. Agents only ever report the four
+struct JobSupervisorPhase(Copyable, Movable, ImplicitlyCopyable):
+    """A job-supervisor-reported job phase. Job supervisors only ever report the four
     terminal-ish phases — RUNNING (periodic liveness) + the three terminals
     (COMPLETED / FAILED / CANCELLED). PENDING / ASSIGNED / RECONCILING are
-    control-plane-internal and an agent reporting them is a wire validation
+    control-plane-internal and a job supervisor reporting them is a wire validation
     error (the handler raises a 4xx).
 
     Stored as a small Int tag; `wire_str()` projects the SCREAMING_SNAKE form
@@ -48,30 +48,30 @@ struct AgentPhase(Copyable, Movable, ImplicitlyCopyable):
 
     @staticmethod
     @always_inline
-    def running() -> AgentPhase:
-        return AgentPhase(Int32(0))
+    def running() -> JobSupervisorPhase:
+        return JobSupervisorPhase(Int32(0))
 
     @staticmethod
     @always_inline
-    def completed() -> AgentPhase:
-        return AgentPhase(Int32(1))
+    def completed() -> JobSupervisorPhase:
+        return JobSupervisorPhase(Int32(1))
 
     @staticmethod
     @always_inline
-    def failed() -> AgentPhase:
-        return AgentPhase(Int32(2))
+    def failed() -> JobSupervisorPhase:
+        return JobSupervisorPhase(Int32(2))
 
     @staticmethod
     @always_inline
-    def cancelled() -> AgentPhase:
-        return AgentPhase(Int32(3))
+    def cancelled() -> JobSupervisorPhase:
+        return JobSupervisorPhase(Int32(3))
 
     @always_inline
-    def __eq__(self, other: AgentPhase) -> Bool:
+    def __eq__(self, other: JobSupervisorPhase) -> Bool:
         return self._tag == other._tag
 
     @always_inline
-    def __ne__(self, other: AgentPhase) -> Bool:
+    def __ne__(self, other: JobSupervisorPhase) -> Bool:
         return self._tag != other._tag
 
     @always_inline
@@ -147,13 +147,13 @@ struct FailureReport(Movable):
 
 
 # =============================================================================
-# §3 — AgentState — the loop's working state.
+# §3 — JobSupervisorState — the loop's working state.
 # =============================================================================
-struct AgentState(Movable):
-    """The supervisor agent's in-loop state. The single poll-then-heartbeat
+struct JobSupervisorState(Movable):
+    """The job supervisor's in-loop state. The single poll-then-heartbeat
     loop reads / writes this directly (no mutex — single-threaded MVP).
 
-      phase             — the current agent phase (starts RUNNING).
+      phase             — the current job supervisor phase (starts RUNNING).
       progress          — Optional[Int32] progress percent (None in the MVP;
                           the trivial child doesn't report progress).
       message           — Optional[String] human status line.
@@ -161,14 +161,14 @@ struct AgentState(Movable):
       cancel_requested  — set True when a heartbeat response carries
                           {cancel:true}; the loop then terminates the child."""
 
-    var phase: AgentPhase
+    var phase: JobSupervisorPhase
     var progress: Optional[Int32]
     var message: Optional[String]
     var failure: Optional[FailureReport]
     var cancel_requested: Bool
 
     def __init__(out self):
-        self.phase = AgentPhase.running()
+        self.phase = JobSupervisorPhase.running()
         self.progress = Optional[Int32]()
         self.message = Optional[String]()
         self.failure = Optional[FailureReport]()

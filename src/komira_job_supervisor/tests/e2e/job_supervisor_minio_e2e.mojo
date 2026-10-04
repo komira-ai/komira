@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_agent/tests/e2e/agent_minio_e2e.mojo -- what the agent's MinIO
+# komira_job_supervisor/tests/e2e/job_supervisor_minio_e2e.mojo -- what the job supervisor's MinIO
 # end-to-end tests share: a process runner that really starts the embedded
 # MinIO, an object-store client that really talks to it, and the opening of
 # the run's test bucket from the test's flags.
@@ -7,7 +7,7 @@
 #
 # komira_test_bucket and komira_test_minio hold the seams and the fakes; a
 # real process runner and a real S3 client live outside them. These two are
-# the smallest real ones the agent's tests need:
+# the smallest real ones the job supervisor's tests need:
 #
 #   * `SpawnedProcessRunner` (komira_test_minio's `ProcessRunner`) starts the
 #     server with komira_supervisor's `spawn_detached`, through
@@ -26,17 +26,17 @@
 #     with one signed `PUT /<bucket>` (komira_aws_s3 generates no
 #     CreateBucket). Its messages name the operation and never the bucket.
 #
-# `open_agent_test_bucket()` reads the flags and acts on the choice: no flag
+# `open_job_supervisor_test_bucket()` reads the flags and acts on the choice: no flag
 # is SKIP (exit 77), and anything but `--test-minio-binary` is CANNOT_TELL
-# (exit 3), because these tests run the agent against an embedded MinIO
+# (exit 3), because these tests run the job supervisor against an embedded MinIO
 # only. A test ends with `close()`, which deletes the run's prefix, lists it
 # again to prove it empty, and stops the server; `require_clean()` turns a
 # verdict that is not CLEAN into a failure.
 #
-# `point_agent_at()` makes the agent's own AWS default chain find the
+# `point_job_supervisor_at()` makes the job supervisor's own AWS default chain find the
 # embedded server's credential: AWS_SHARED_CREDENTIALS_FILE names its
 # credentials file, AWS_CONFIG_FILE an empty file, and every variable that
-# would win over the file is removed. The agent is the code under test, so
+# would win over the file is removed. The job supervisor is the code under test, so
 # its credential takes the path production takes.
 # =============================================================================
 
@@ -84,7 +84,7 @@ from komira_test_verdict import exit_cannot_tell
 
 
 comptime SETPRIV: String = "/usr/bin/setpriv"
-comptime _P: String = "agent e2e: "
+comptime _P: String = "job supervisor e2e: "
 
 
 def sleep_ms(ms: Int):
@@ -322,7 +322,7 @@ struct MinioObjectStore(ObjectStoreClient):
 
     def get(mut self, key: String) raises -> List[UInt8]:
         """GetObject: the whole object (for a test reading back what the
-        agent wrote)."""
+        job supervisor wrote)."""
         var bucket = self._bucket()
         try:
             return self._store.value().get(bucket, key)
@@ -348,9 +348,9 @@ struct MinioObjectStore(ObjectStoreClient):
 
 
 # =============================================================================
-# §3 -- opening the run's bucket, and pointing the agent at it.
+# §3 -- opening the run's bucket, and pointing the job supervisor at it.
 # =============================================================================
-comptime AgentTestBucket = TestBucket[MinioObjectStore, SpawnedProcessRunner]
+comptime JobSupervisorTestBucket = TestBucket[MinioObjectStore, SpawnedProcessRunner]
 
 
 def scratch_root() -> String:
@@ -363,7 +363,7 @@ def scratch_root() -> String:
     return t^
 
 
-def open_agent_test_bucket(target_label: String) raises -> AgentTestBucket:
+def open_job_supervisor_test_bucket(target_label: String) raises -> JobSupervisorTestBucket:
     """The run's bucket on the embedded MinIO the flags name; SKIP (77) with
     no flags, CANNOT_TELL (3) for any other store (module header)."""
     var flags = TestStoreFlags.from_process_args()
@@ -373,7 +373,7 @@ def open_agent_test_bucket(target_label: String) raises -> AgentTestBucket:
     choice.exit_unless_runnable()
     if choice.kind != BACKEND_CHOICE_EMBEDDED_MINIO:
         exit_cannot_tell(
-            String("the agent's MinIO end-to-end tests run on an embedded MinIO only; give ")
+            String("the job supervisor's MinIO end-to-end tests run on an embedded MinIO only; give ")
             + FLAG_MINIO_BINARY
             + " and no --test-s3-* flag"
         )
@@ -405,8 +405,8 @@ def _unsetenv(name: String):
     _ = external_call["unsetenv", Int32](n.as_c_string_slice().unsafe_ptr())
 
 
-def point_agent_at(bucket: AgentTestBucket):
-    """Make the AWS default chain the agent builds find the embedded server's
+def point_job_supervisor_at(bucket: JobSupervisorTestBucket):
+    """Make the AWS default chain the job supervisor builds find the embedded server's
     credential, and nothing else (module header)."""
     var gone: List[String] = [
         "AWS_ACCESS_KEY_ID",

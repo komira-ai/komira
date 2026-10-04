@@ -209,8 +209,8 @@ trait HookCredential(Movable, Deinitable):
     ⚠ THE SIGNATURE IS DELIBERATELY `jm_auth.jm_auth_headers`' SIGNATURE. The
     GCP conformer is then a ~10-line adapter over the EXISTING
     `jm_audience()` + `GcpMetadataMinter`, written at the app layer (which sees
-    both `komira_agent` and `komira_http`; this package cannot, because
-    `komira_agent` depends on it). Nothing here re-implements a token minter.
+    both `komira_job_supervisor` and `komira_http`; this package cannot, because
+    `komira_job_supervisor` depends on it). Nothing here re-implements a token minter.
 
     `scheme`/`host`/`port` are passed so a conformer can derive the audience
     itself — including the rule that the audience must OMIT the default port,

@@ -1,11 +1,11 @@
 # =============================================================================
-# komira_agent/tests/test_heartbeat_proto_roundtrip.mojo
+# komira_job_supervisor/tests/test_heartbeat_proto_roundtrip.mojo
 # =============================================================================
 #
 # The heartbeat proto-binary encode->decode IDENTITY gate
 # for the GENERATED supervisor.proto heartbeat messages, driven through the SAME
 # `komira_proto_codec` protobuf-binary entry points (`encode_proto` / `decode_proto`)
-# the supervisor agent + the job-manager heartbeat handler now use on the wire.
+# the job supervisor + the job-manager heartbeat handler now use on the wire.
 #
 # The job manager's end-to-end test proves the binary path works through the
 # real HTTP server; THIS proves the generated

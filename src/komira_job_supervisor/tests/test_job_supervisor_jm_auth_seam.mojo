@@ -1,23 +1,23 @@
 # =============================================================================
-# komira_agent/tests/test_agent_jm_auth_seam.mojo
+# komira_job_supervisor/tests/test_job_supervisor_jm_auth_seam.mojo
 #   THE SUPERVISOR CAN AUTHENTICATE TO AN IAM-GATED JOB MANAGER.
 # =============================================================================
 #
 # ⛔⛔ THE DEFECT. Every finite job's supervisor beats to
-# `POST /internal/heartbeat`, and the agent had ZERO token support:
+# `POST /internal/heartbeat`, and the job supervisor had ZERO token support:
 # `send_heartbeat` built exactly ONE header (`Content-Type:
-# application/protobuf`) and no metadata-server client existed in the agent.
+# application/protobuf`) and no metadata-server client existed in the job supervisor.
 # A job manager deployed as a Cloud Run service that does not allow
 # unauthenticated invocation answers 403 at the Google Frontend on EVERY
 # route. So a supervisor in a customer container could not authenticate and
 # every beat was refused at the door.
 #
 # ⛔ AND A SECOND, INDEPENDENT DEFECT ON THE SAME PATH, WHICH ARM 3 IS ABOUT.
-# `AgentConfig.from_env` defaulted `KOMIRA_AGENT_JM_PORT` to a flat `8081`
+# `JobSupervisorConfig.from_env` defaulted `KOMIRA_JOB_SUPERVISOR_JM_PORT` to a flat `8081`
 # regardless of scheme. The placement passes an EMPTY port for a job-manager
 # URL carrying none — and a Cloud Run URL
 # (`https://job-manager-….run.app`) carries none — so a correctly `https`-
-# schemed agent dialled `https://host:8081` while Cloud Run serves 443. TLS was
+# schemed job supervisor dialled `https://host:8081` while Cloud Run serves 443. TLS was
 # threaded CORRECTLY and the port was still wrong. Fixing auth without fixing
 # this produces a perfectly-signed request sent to a closed port.
 #
@@ -28,7 +28,7 @@
 # test of the header list alone passes with an audience that the ingress edge
 # rejects.
 #
-# ⚠ EVERY ARM CARRIES A CONTROL, per `test_agent_https_transport_seam.mojo`'s
+# ⚠ EVERY ARM CARRIES A CONTROL, per `test_job_supervisor_https_transport_seam.mojo`'s
 # rule: an assertion that "gcp-metadata yields a token" is satisfied by a
 # function that returns a header unconditionally, so each arm is paired with the
 # case that must come back EMPTY / REFUSED.
@@ -54,14 +54,14 @@ from komira_http_client.header_map import HeaderEntry, HeaderMap
 from komira_http_client.url import Url
 from komira_http_core.codec.types import HTTP_METHOD_POST, HttpMethod
 
-from komira_agent.agent_config import AgentConfig
-from komira_agent.heartbeat_client import HEARTBEAT_STATUS_AUTH_UNAVAILABLE
-# The env names ARM 9 sets: the agent's placement contract, the names the job
-# manager's pod render stamps and `AgentConfig.from_env` reads.
-comptime AGENT_ENV_JM_PORT: StaticString = "KOMIRA_AGENT_JM_PORT"
-comptime AGENT_ENV_JM_SCHEME: StaticString = "KOMIRA_AGENT_JM_SCHEME"
-comptime AGENT_ENV_JM_AUTH: StaticString = "KOMIRA_AGENT_JM_AUTH"
-from komira_agent.jm_auth import (
+from komira_job_supervisor.job_supervisor_config import JobSupervisorConfig
+from komira_job_supervisor.heartbeat_client import HEARTBEAT_STATUS_AUTH_UNAVAILABLE
+# The env names ARM 9 sets: the job supervisor's placement contract, the names the job
+# manager's pod render stamps and `JobSupervisorConfig.from_env` reads.
+comptime JOB_SUPERVISOR_ENV_JM_PORT: StaticString = "KOMIRA_JOB_SUPERVISOR_JM_PORT"
+comptime JOB_SUPERVISOR_ENV_JM_SCHEME: StaticString = "KOMIRA_JOB_SUPERVISOR_JM_SCHEME"
+comptime JOB_SUPERVISOR_ENV_JM_AUTH: StaticString = "KOMIRA_JOB_SUPERVISOR_JM_AUTH"
+from komira_job_supervisor.jm_auth import (
     GcpMetadataMinter,
     JmAuthMode,
     JmTokenMinter,
@@ -80,7 +80,7 @@ comptime _CANNED_JWT: String = (
 
 
 def _setenv(name: String, value: String):
-    """libc setenv (tests only — the `test_agent_https_transport_seam` idiom)."""
+    """libc setenv (tests only — the `test_job_supervisor_https_transport_seam` idiom)."""
     var name_str = name
     var value_str = value
     var name_ptr = name_str.as_c_string_slice().unsafe_ptr()
@@ -90,7 +90,7 @@ def _setenv(name: String, value: String):
 
 def _unsetenv(name: String):
     """libc unsetenv. ⚠ LOAD-BEARING FOR ARM 3, NOT TIDINESS: the arm's whole
-    subject is what happens when KOMIRA_AGENT_JM_PORT is ABSENT, and env is
+    subject is what happens when KOMIRA_JOB_SUPERVISOR_JM_PORT is ABSENT, and env is
     process-global — a sibling arm's `_setenv` would otherwise decide this
     arm's verdict."""
     var name_str = name
@@ -98,20 +98,20 @@ def _unsetenv(name: String):
     var _rc = external_call["unsetenv", Int32](name_ptr)
 
 
-def _required_agent_env():
-    """The three REQUIRED KOMIRA_AGENT_* vars, so `from_env` reaches the
+def _required_job_supervisor_env():
+    """The three REQUIRED KOMIRA_JOB_SUPERVISOR_* vars, so `from_env` reaches the
     fields the arms are about instead of fail-fasting on a missing job id."""
     _setenv(
-        String("KOMIRA_AGENT_JOB_ID"),
+        String("KOMIRA_JOB_SUPERVISOR_JOB_ID"),
         String("11111111-2222-3333-4444-555555555555"),
     )
-    _setenv(String("KOMIRA_AGENT_POD_NAME"), String("pod-jm-auth-seam"))
-    _setenv(String("KOMIRA_AGENT_JOB_BINARY"), String("/bin/true"))
-    _setenv(String("KOMIRA_AGENT_JM_HOST"), String("jm.example.com"))
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_POD_NAME"), String("pod-jm-auth-seam"))
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JOB_BINARY"), String("/bin/true"))
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JM_HOST"), String("jm.example.com"))
     # This file is about auth + port; keep the posture arms from leaking into
     # the port arms and vice versa.
-    _unsetenv(String("KOMIRA_AGENT_JM_AUTH"))
-    _unsetenv(String("KOMIRA_AGENT_JM_AUDIENCE"))
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_AUTH"))
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_AUDIENCE"))
 
 
 def _contains(haystack: String, needle: String) -> Bool:
@@ -154,7 +154,7 @@ struct FailingMinter(JmTokenMinter):
         self._placeholder = UInt8(0)
 
     def mint(mut self, audience: String) raises -> String:
-        raise Error("agent jm auth: metadata identity GET failed: HTTP 404")
+        raise Error("job supervisor jm auth: metadata identity GET failed: HTTP 404")
 
 
 # =============================================================================
@@ -163,7 +163,7 @@ struct FailingMinter(JmTokenMinter):
 def test_jm_audience_omits_the_default_port() raises:
     """Google validates an ID token's `aud` against the Cloud Run service URL —
     `https://job-manager-….run.app`, with NO `:443`. A token minted for
-    `https://host:443` is REJECTED at the ingress edge, and the agent cannot
+    `https://host:443` is REJECTED at the ingress edge, and the job supervisor cannot
     tell that apart from having sent no token at all.
 
     RED before the fix: `jm_audience` did not exist — there was nothing to mint
@@ -202,7 +202,7 @@ def test_jm_audience_omits_the_default_port() raises:
 def test_jm_auth_posture_is_a_closed_set() raises:
     """⛔ A TYPO MUST RAISE, NOT FALL BACK TO `none`. A misspelled posture that
     silently degraded would beat bearer-less into a 403 forever while every log
-    line said the agent was healthy — the fail-open shape the heartbeat contract exists
+    line said the job supervisor was healthy — the fail-open shape the heartbeat contract exists
     to remove. Refusing at boot surfaces the mistake at its cause.
 
     RED before the fix: `parse_jm_auth_mode` and `JmAuthMode` did not exist."""
@@ -212,7 +212,7 @@ def test_jm_auth_posture_is_a_closed_set() raises:
         "'gcp-metadata' must select a real posture",
     )
     # CONTROL: absent/empty is `none`, which is today's behaviour -- so an
-    # unstamped placement is byte-identical to the pre-fix agent.
+    # unstamped placement is byte-identical to the pre-fix job supervisor.
     var none_mode = parse_jm_auth_mode(String(""))
     assert_true(
         none_mode.is_none(),
@@ -250,15 +250,15 @@ def test_jm_auth_posture_is_a_closed_set() raises:
 def test_https_with_no_port_defaults_to_443() raises:
     """⛔ THE ONE ARM THAT WAS RED ON UNMODIFIED SOURCE WITHOUT A COMPILE ERROR.
 
-    Measured against the untouched tree: with KOMIRA_AGENT_JM_SCHEME=https and
-    KOMIRA_AGENT_JM_PORT UNSET, `from_env()` produced jm_port=8081 and
+    Measured against the untouched tree: with KOMIRA_JOB_SUPERVISOR_JM_SCHEME=https and
+    KOMIRA_JOB_SUPERVISOR_JM_PORT UNSET, `from_env()` produced jm_port=8081 and
     jm_uses_tls=True — i.e. `https://jm.example.com:8081`, while Cloud Run
     serves 443. Every other arm in this file is red BEFORE only as a compile
     error (the surface did not exist), which is a weaker red than this one."""
-    _required_agent_env()
-    _setenv(String("KOMIRA_AGENT_JM_SCHEME"), String("https"))
-    _unsetenv(String("KOMIRA_AGENT_JM_PORT"))
-    var cfg = AgentConfig.from_env()
+    _required_job_supervisor_env()
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JM_SCHEME"), String("https"))
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_PORT"))
+    var cfg = JobSupervisorConfig.from_env()
     assert_true(
         cfg.jm_uses_tls(),
         "precondition: the https scheme still selects TLS",
@@ -279,9 +279,9 @@ def test_https_with_no_port_defaults_to_443() raises:
     # CONTROL: http with no port keeps TODAY'S 8081 exactly, so every
     # in-cluster manifest renders byte-identically. Without this control the
     # arm above is satisfied by defaulting everything to 443.
-    _setenv(String("KOMIRA_AGENT_JM_SCHEME"), String("http"))
-    _unsetenv(String("KOMIRA_AGENT_JM_PORT"))
-    var http_cfg = AgentConfig.from_env()
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JM_SCHEME"), String("http"))
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_PORT"))
+    var http_cfg = JobSupervisorConfig.from_env()
     assert_equal(
         Int(http_cfg.jm_port),
         8081,
@@ -291,9 +291,9 @@ def test_https_with_no_port_defaults_to_443() raises:
     # CONTROL: an EXPLICIT port always wins over the scheme default, under both
     # schemes -- a default that overrode an operator's explicit value would be
     # a worse bug than the one being fixed.
-    _setenv(String("KOMIRA_AGENT_JM_SCHEME"), String("https"))
-    _setenv(String("KOMIRA_AGENT_JM_PORT"), String("9443"))
-    var explicit_cfg = AgentConfig.from_env()
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JM_SCHEME"), String("https"))
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JM_PORT"), String("9443"))
+    var explicit_cfg = JobSupervisorConfig.from_env()
     assert_equal(
         Int(explicit_cfg.jm_port),
         9443,
@@ -304,7 +304,7 @@ def test_https_with_no_port_defaults_to_443() raises:
         String("https://jm.example.com:9443"),
         "CONTROL: a non-default explicit port reaches the audience",
     )
-    _unsetenv(String("KOMIRA_AGENT_JM_PORT"))
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_PORT"))
     print("  test_https_with_no_port_defaults_to_443: PASS")
 
 
@@ -313,46 +313,46 @@ def test_the_posture_and_audience_come_off_the_placement_env() raises:
     env into the config. ⛔ A TYPO IN THE POSTURE ABORTS `from_env` ITSELF —
     at boot, not at the first 403.
 
-    RED before the fix: neither var was read; `AgentConfig` had no such field."""
-    _required_agent_env()
-    _setenv(String("KOMIRA_AGENT_JM_SCHEME"), String("https"))
-    _unsetenv(String("KOMIRA_AGENT_JM_PORT"))
+    RED before the fix: neither var was read; `JobSupervisorConfig` had no such field."""
+    _required_job_supervisor_env()
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JM_SCHEME"), String("https"))
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_PORT"))
 
-    _setenv(String("KOMIRA_AGENT_JM_AUTH"), String("gcp-metadata"))
-    var cfg = AgentConfig.from_env()
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JM_AUTH"), String("gcp-metadata"))
+    var cfg = JobSupervisorConfig.from_env()
     assert_false(
         cfg.jm_auth_mode.is_none(),
-        "a stamped KOMIRA_AGENT_JM_AUTH must reach AgentConfig -- without"
+        "a stamped KOMIRA_JOB_SUPERVISOR_JM_AUTH must reach JobSupervisorConfig -- without"
         " this the placement cannot turn auth on at all",
     )
 
     # The override wins over the derived audience when present.
     _setenv(
-        String("KOMIRA_AGENT_JM_AUDIENCE"),
+        String("KOMIRA_JOB_SUPERVISOR_JM_AUDIENCE"),
         String("https://proxy.example.com"),
     )
-    var over_cfg = AgentConfig.from_env()
+    var over_cfg = JobSupervisorConfig.from_env()
     assert_equal(
         over_cfg.jm_auth_audience(),
         String("https://proxy.example.com"),
         "an explicit audience override must win over the derived one",
     )
-    _unsetenv(String("KOMIRA_AGENT_JM_AUDIENCE"))
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_AUDIENCE"))
 
     # CONTROL: an ABSENT posture is `none` -- the default, and byte-identical
-    # to the pre-fix agent.
-    _unsetenv(String("KOMIRA_AGENT_JM_AUTH"))
-    var default_cfg = AgentConfig.from_env()
+    # to the pre-fix job supervisor.
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_AUTH"))
+    var default_cfg = JobSupervisorConfig.from_env()
     assert_true(
         default_cfg.jm_auth_mode.is_none(),
         "CONTROL: an unstamped placement must default to `none`",
     )
 
     # CONTROL: a TYPO'd posture refuses `from_env` outright.
-    _setenv(String("KOMIRA_AGENT_JM_AUTH"), String("gcp_metadata"))
+    _setenv(String("KOMIRA_JOB_SUPERVISOR_JM_AUTH"), String("gcp_metadata"))
     var raised = False
     try:
-        var _c = AgentConfig.from_env()
+        var _c = JobSupervisorConfig.from_env()
     except e:
         raised = True
     assert_true(
@@ -360,7 +360,7 @@ def test_the_posture_and_audience_come_off_the_placement_env() raises:
         "CONTROL: a misspelled posture must abort boot -- degrading it to"
         " `none` would beat bearer-less into a 403 forever",
     )
-    _unsetenv(String("KOMIRA_AGENT_JM_AUTH"))
+    _unsetenv(String("KOMIRA_JOB_SUPERVISOR_JM_AUTH"))
     print("  test_the_posture_and_audience_come_off_the_placement_env: PASS")
 
 
@@ -474,7 +474,7 @@ def test_the_bearer_reaches_the_serialized_request() raises:
 def test_a_mint_failure_refuses_rather_than_sending_bearer_less() raises:
     """⛔ THE ARM THAT KEEPS THE TWO FAILURES APART. If a mint failure returned
     an empty header list, the beat would go out bearer-less, 403 at the ingress
-    edge, and arrive back at the agent loop as an ordinary transport failure —
+    edge, and arrive back at the job supervisor loop as an ordinary transport failure —
     making "this image cannot authenticate" indistinguishable from "the network
     blipped". The heartbeat contract's premise is that those two must never share a code
     path.
@@ -520,7 +520,7 @@ def test_a_mint_failure_refuses_rather_than_sending_bearer_less() raises:
         " no raise -- the refusal is the posture's, not the minter's",
     )
 
-    # The agent-visible outcome of that refusal is DISTINCT from "never
+    # The job-supervisor-visible outcome of that refusal is DISTINCT from "never
     # connected" (status 0). Conflating them is the collapse the heartbeat contract
     # removes, so the sentinel must not be 0 and must not be a real HTTP status.
     assert_true(
@@ -596,7 +596,7 @@ def test_the_token_never_reaches_an_error_or_a_mode_name() raises:
 # ARM 7 — the PRODUCTION minter is a real conformer, constructible off GCP.
 # =============================================================================
 def test_the_gcp_minter_is_a_constructible_conformer() raises:
-    """`GcpMetadataMinter` is a real `JmTokenMinter` the agent can hold.
+    """`GcpMetadataMinter` is a real `JmTokenMinter` the job supervisor can hold.
 
     ⚠ CONSTRUCTION ONLY — NOTHING IS DIALLED. Proving it mints needs a metadata
     server, which is a host-bound rig; what this arm establishes is that the
@@ -609,20 +609,20 @@ def test_the_gcp_minter_is_a_constructible_conformer() raises:
 
 
 # =============================================================================
-# ARM 9 — (plaintext, credential) is refused where the agent's posture is
+# ARM 9 — (plaintext, credential) is refused where the job supervisor's posture is
 #         RESOLVED. The send-site half: `test_heartbeat_no_credential_in_clear`.
 # =============================================================================
 def _from_env_refusal() -> String:
-    """`AgentConfig.from_env()`'s error text, or "" when it did not raise."""
+    """`JobSupervisorConfig.from_env()`'s error text, or "" when it did not raise."""
     try:
-        var _c = AgentConfig.from_env()
+        var _c = JobSupervisorConfig.from_env()
     except e:
         return String(e)
     return String("")
 
 
 def test_from_env_refuses_a_credential_posture_over_plaintext() raises:
-    """⛔ `AgentConfig.from_env` REFUSES (plaintext, gcp-metadata) AT BOOT, naming
+    """⛔ `JobSupervisorConfig.from_env` REFUSES (plaintext, gcp-metadata) AT BOOT, naming
     both variables. The send-time refusal (`test_heartbeat_no_credential_in_
     clear`) keeps the token off the wire; this one says so at the cause, once,
     instead of as a stream of refused beats.
@@ -632,10 +632,10 @@ def test_from_env_refuses_a_credential_posture_over_plaintext() raises:
 
     RED before the fix: `from_env` accepted the pair and returned a config
     whose every beat would have minted and sent the token in the clear."""
-    var scheme_var = String(AGENT_ENV_JM_SCHEME)
-    var auth_var = String(AGENT_ENV_JM_AUTH)
-    _required_agent_env()
-    _unsetenv(String(AGENT_ENV_JM_PORT))
+    var scheme_var = String(JOB_SUPERVISOR_ENV_JM_SCHEME)
+    var auth_var = String(JOB_SUPERVISOR_ENV_JM_AUTH)
+    _required_job_supervisor_env()
+    _unsetenv(String(JOB_SUPERVISOR_ENV_JM_PORT))
     _setenv(auth_var, String("gcp-metadata"))
 
     _setenv(scheme_var, String("http"))
@@ -697,7 +697,7 @@ def test_from_env_refuses_a_credential_posture_over_plaintext() raises:
 
 
 def main() raises:
-    print("test_agent_jm_auth_seam:")
+    print("test_job_supervisor_jm_auth_seam:")
     test_jm_audience_omits_the_default_port()
     test_jm_auth_posture_is_a_closed_set()
     test_https_with_no_port_defaults_to_443()
@@ -707,4 +707,4 @@ def main() raises:
     test_the_token_never_reaches_an_error_or_a_mode_name()
     test_the_gcp_minter_is_a_constructible_conformer()
     test_from_env_refuses_a_credential_posture_over_plaintext()
-    print("test_agent_jm_auth_seam: ALL PASS")
+    print("test_job_supervisor_jm_auth_seam: ALL PASS")

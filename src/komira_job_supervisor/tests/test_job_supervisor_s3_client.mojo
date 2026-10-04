@@ -1,14 +1,14 @@
 # =============================================================================
-# komira_agent/tests/test_agent_s3_client.mojo
-#   The agent's S3 verbs, the binary download and the signing clock, over a
+# komira_job_supervisor/tests/test_job_supervisor_s3_client.mojo
+#   The job supervisor's S3 verbs, the binary download and the signing clock, over a
 #   scripted connector: no socket, no S3, no cloud.
 # =============================================================================
 #
-# `AgentS3Client` (s3_client.mojo) is the agent's one S3 surface: the boot
+# `JobSupervisorS3Client` (s3_client.mojo) is the job supervisor's one S3 surface: the boot
 # download, the live log stream and the terminal upload all go through its
 # `get_object` / `put_object`. These arms drive it over komira_http_core's
 # `ScriptedConnector`, which answers each request with a fixed HTTP response,
-# so what is tested is the agent's side: the bytes it hands back, the
+# so what is tested is the job supervisor's side: the bytes it hands back, the
 # SHA-256 refusal before anything is written, the raise on an error status,
 # and the `MINIO_E2E_*` clock override.
 #
@@ -29,17 +29,17 @@ from komira_crypto.sha256 import sha256
 from komira_core_ffi.posix import _read_env
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
-from komira_agent.agent_config import AgentConfig
-from komira_agent.boot import download_binary
-from komira_agent.clock_helper import (
+from komira_job_supervisor.job_supervisor_config import JobSupervisorConfig
+from komira_job_supervisor.boot import download_binary
+from komira_job_supervisor.clock_helper import (
     amz_override_unix_seconds,
     amz_stamps_from_unix_ms,
     unix_seconds_from_amz_date,
 )
-from komira_agent.s3_client import AgentS3Client
+from komira_job_supervisor.s3_client import JobSupervisorS3Client
 
 
-comptime _BODY = "#!/bin/sh\necho agent-s3-client\n"
+comptime _BODY = "#!/bin/sh\necho job-supervisor-s3-client\n"
 comptime _ENDPOINT = "http://127.0.0.1:9000"
 
 
@@ -117,9 +117,9 @@ def _tmp_path(name: String) raises -> String:
     return tmp + "/" + name
 
 
-def _download_config(var uri: String, var sha: Optional[String], var path: String) -> AgentConfig:
+def _download_config(var uri: String, var sha: Optional[String], var path: String) -> JobSupervisorConfig:
     var argv = List[String]()
-    return AgentConfig(
+    return JobSupervisorConfig(
         String("11111111-2222-3333-4444-555555555555"),
         String("pod-s3"),
         String("/bin/true"),
@@ -148,7 +148,7 @@ def _read_file(path: String) raises -> String:
 # =============================================================================
 def test_get_object_returns_the_body() raises:
     _stub_aws_credentials()
-    var client = AgentS3Client[ScriptedConnector](
+    var client = JobSupervisorS3Client[ScriptedConnector](
         _mk_get_ok, String("us-east-1"), Optional[String](String(_ENDPOINT))
     )
     assert_equal(client.endpoint().value(), String(_ENDPOINT))
@@ -169,7 +169,7 @@ def test_download_binary_verifies_then_writes() raises:
     var config = _download_config(
         String("s3://bin/") + sha + "/binary", Optional[String](), path
     )
-    var client = AgentS3Client[ScriptedConnector](
+    var client = JobSupervisorS3Client[ScriptedConnector](
         _mk_get_ok, String("us-east-1"), Optional[String](String(_ENDPOINT))
     )
     var written = download_binary[ScriptedConnector](config, client)
@@ -184,7 +184,7 @@ def test_download_binary_verifies_then_writes() raises:
         Optional[String](String("0" * 64)),
         bad_path,
     )
-    var bad_client = AgentS3Client[ScriptedConnector](
+    var bad_client = JobSupervisorS3Client[ScriptedConnector](
         _mk_get_ok, String("us-east-1"), Optional[String](String(_ENDPOINT))
     )
     var refused = False
@@ -202,13 +202,13 @@ def test_download_binary_verifies_then_writes() raises:
 # =============================================================================
 def test_put_object_raises_on_an_error_status() raises:
     _stub_aws_credentials()
-    var ok = AgentS3Client[ScriptedConnector](
+    var ok = JobSupervisorS3Client[ScriptedConnector](
         _mk_put_ok, String("us-east-1"), Optional[String](String(_ENDPOINT))
     )
     ok.put_object(String("logs"), String("job/logs.txt"), _bytes(String("hello")))
 
     # CONTROL: a 403 is an error the caller sees.
-    var denied = AgentS3Client[ScriptedConnector](
+    var denied = JobSupervisorS3Client[ScriptedConnector](
         _mk_put_denied, String("us-east-1"), Optional[String](String(_ENDPOINT))
     )
     var raised = False
@@ -266,10 +266,10 @@ def test_override_needs_both_variables() raises:
 
 
 def main() raises:
-    print("test_agent_s3_client:")
+    print("test_job_supervisor_s3_client:")
     test_get_object_returns_the_body()
     test_download_binary_verifies_then_writes()
     test_put_object_raises_on_an_error_status()
     test_amz_date_parse_inverts_the_stamp()
     test_override_needs_both_variables()
-    print("test_agent_s3_client: ALL PASS")
+    print("test_job_supervisor_s3_client: ALL PASS")

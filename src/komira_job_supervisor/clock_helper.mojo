@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_agent/clock_helper.mojo — system-clock -> AWS SigV4 date stamps.
+# komira_job_supervisor/clock_helper.mojo — system-clock -> AWS SigV4 date stamps.
 # =============================================================================
 #
 # The two SigV4 date stamps, from the LIVE system clock:
@@ -138,7 +138,7 @@ def amz_stamps_now() -> AmzStamps:
          (`komira_clock.now_unix_ms`).
 
     This is the SAME helper for both the deterministic MinIO e2e and the
-    live-clock production agent — the only difference is whether the env
+    live-clock production job supervisor — the only difference is whether the env
     override is present."""
     var amz_env = _read_env("MINIO_E2E_AMZ_DATE")
     var short_env = _read_env("MINIO_E2E_SHORT_DATE")
@@ -179,7 +179,7 @@ def unix_seconds_from_amz_date(amz_date: String) raises -> Int:
     var b = amz_date.as_bytes()
     if len(b) != 16 or b[8] != UInt8(0x54) or b[15] != UInt8(0x5A):
         raise Error(
-            "agent clock: an amz date is YYYYMMDDTHHMMSSZ, got " + amz_date
+            "job supervisor clock: an amz date is YYYYMMDDTHHMMSSZ, got " + amz_date
         )
     try:
         var year = _digits(amz_date, 0, 4)
@@ -195,7 +195,7 @@ def unix_seconds_from_amz_date(amz_date: String) raises -> Int:
         return _days_from_civil(year, month, day) * 86400 + hh * 3600 + mm * 60 + ss
     except:
         raise Error(
-            "agent clock: an amz date is YYYYMMDDTHHMMSSZ, got " + amz_date
+            "job supervisor clock: an amz date is YYYYMMDDTHHMMSSZ, got " + amz_date
         )
 
 

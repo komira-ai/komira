@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_agent/agent.mojo — the supervisor agent run loop.
+# komira_job_supervisor/job_supervisor.mojo — the job supervisor run loop.
 # =============================================================================
 #
 # The pod-side supervisor: spawn the job binary, heartbeat the job-manager,
@@ -19,12 +19,12 @@
 #      panic_message) -> send the TERMINAL heartbeat (COMPLETED/FAILED/
 #      CANCELLED) -> return.
 #
-# THE `Agent` STRUCT vs `run_agent`: the lifecycle is decomposed into discrete
-# stepping methods on an `Agent` struct (spawn_child / do_heartbeat /
+# THE `JobSupervisor` STRUCT vs `run_job_supervisor`: the lifecycle is decomposed into discrete
+# stepping methods on an `JobSupervisor` struct (spawn_child / do_heartbeat /
 # poll_and_drain / finalize) so a SAME-PROCESS e2e test can INTERLEAVE the
-# agent's heartbeat POSTs with the job-manager service's `run_once` serving (the
-# agent-loop-wants-to-block vs server-loop-wants-to-block problem the brief
-# flagged). `run_agent(config)` composes the same steps into the continuous
+# job supervisor's heartbeat POSTs with the job-manager service's `run_once` serving (the
+# job-supervisor-loop-wants-to-block vs server-loop-wants-to-block problem the brief
+# flagged). `run_job_supervisor(config)` composes the same steps into the continuous
 # blocking loop the prod binary runs.
 #
 # MVP SCOPE (deferred, noted in __init__.mojo): S3 binary download, S3 log
@@ -33,7 +33,7 @@
 # heartbeat (this uses proto3-JSON).
 #
 # ENCAPSULATION + gap6: the Supervisor encapsulates ALL fd/pipe/pid internals
-# (komira_supervisor) — the agent only sees typed scalars + Strings. The stderr
+# (komira_supervisor) — the job supervisor only sees typed scalars + Strings. The stderr
 # ring is owned Strings. No UnsafePointer crosses any boundary; no wildcard
 # origin. Mojo 1.0.0b1.
 # =============================================================================
@@ -63,25 +63,25 @@ def _sleep_secs(secs: Int):
         return
     _ = external_call["usleep", Int32](UInt32(secs * 1_000_000))
 
-from komira_agent.agent_config import AgentConfig
-from komira_agent.agent_state import AgentPhase, AgentState, FailureReport
-from komira_agent.boot import (
+from komira_job_supervisor.job_supervisor_config import JobSupervisorConfig
+from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase, JobSupervisorState, FailureReport
+from komira_job_supervisor.boot import (
     download_binary,
     make_s3_client_from_chain,
     make_s3_client_over,
     make_tls_s3_client_from_chain,
-    mk_agent_s3_plain_connector,
-    mk_agent_s3_tls_connector,
+    mk_job_supervisor_s3_plain_connector,
+    mk_job_supervisor_s3_tls_connector,
 )
-from komira_agent.heartbeat_client import (
+from komira_job_supervisor.heartbeat_client import (
     SupervisorHeartbeat,
     HeartbeatOutcome,
     send_heartbeat_blocking,
 )
-from komira_agent.upload import upload_crash_report, upload_logs
-from komira_agent.log_streamer import LogStreamSink
+from komira_job_supervisor.upload import upload_crash_report, upload_logs
+from komira_job_supervisor.log_streamer import LogStreamSink
 
-from komira_agent.s3_client import AgentS3Client
+from komira_job_supervisor.s3_client import JobSupervisorS3Client
 from komira_http_client.tls_connector import TlsConnector
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
@@ -95,7 +95,7 @@ from komira_log import ArgStr
 # =============================================================================
 def _split_lines(text: String) -> List[String]:
     """Split captured stderr text into lines (on '\\n'), dropping a trailing
-    empty line. The agent keeps the last N for failure forensics."""
+    empty line. The job supervisor keeps the last N for failure forensics."""
     var lines = List[String]()
     var cur = String("")
     var bytes = text.as_bytes()
@@ -140,24 +140,24 @@ def _detect_panic(lines: List[String]) -> Optional[String]:
 
 
 # =============================================================================
-# §2 — Agent — the supervisor state machine, decomposed into stepping methods.
+# §2 — JobSupervisor — the supervisor state machine, decomposed into stepping methods.
 # =============================================================================
-struct Agent[
+struct JobSupervisor[
     C: Connector,
 ](Movable):
-    """The supervisor agent for ONE job. Owns the `AgentConfig`, the
-    `AgentState`, the `Supervisor` (the spawned child), and the stderr ring.
+    """The job supervisor for ONE job. Owns the `JobSupervisorConfig`, the
+    `JobSupervisorState`, the `Supervisor` (the spawned child), and the stderr ring.
 
     The stepping methods (spawn_child / do_heartbeat / poll_and_drain /
-    finalize_heartbeat) are the SAME steps `run_agent` composes into the
+    finalize_heartbeat) are the SAME steps `run_job_supervisor` composes into the
     continuous loop — exposed individually so a same-process e2e can interleave
     them with the job-manager service's serving.
 
     ★ `C` IS THE **S3** TRANSPORT, AND ONLY THE S3 TRANSPORT.
     `KernelTcpConnector` for MinIO/LocalStack over plaintext,
     `TlsConnector[KernelTcpConnector]` for real S3 or an `https://` endpoint.
-    `run_agent` picks it from `AgentConfig.s3_uses_tls()`; the aliases
-    `PlainAgent` / `TlsAgent` below are the two instantiations that exist.
+    `run_job_supervisor` picks it from `JobSupervisorConfig.s3_uses_tls()`; the aliases
+    `PlainJobSupervisor` / `TlsJobSupervisor` below are the two instantiations that exist.
 
     ⚠ THE HEARTBEAT TRANSPORT IS **NOT** `C`, AND THAT ASYMMETRY IS DELIBERATE
     RATHER THAN AN OVERSIGHT. The heartbeat client is built per-POST inside
@@ -168,8 +168,8 @@ struct Agent[
     the type. Making both type parameters would force every construction site to
     name two, and the second would always be inferable from config."""
 
-    var config: AgentConfig
-    var state: AgentState
+    var config: JobSupervisorConfig
+    var state: JobSupervisorState
     var supervisor: Supervisor
     var stderr_ring: List[String]
     var stdout_ring: List[String]
@@ -193,11 +193,11 @@ struct Agent[
     # chunks; `stream_client` is the attached S3 client used to PUT each chunk
     # DURING the run. Both are engaged only when a log bucket is configured AND
     # a client is attached (attach_stream_client) — otherwise the sink is
-    # `disabled()` and the agent keeps the in-memory logs.txt path.
+    # `disabled()` and the job supervisor keeps the in-memory logs.txt path.
     var log_sink: LogStreamSink
-    var stream_client: Optional[AgentS3Client[Self.C]]
+    var stream_client: Optional[JobSupervisorS3Client[Self.C]]
 
-    def __init__(out self, var config: AgentConfig):
+    def __init__(out self, var config: JobSupervisorConfig):
         # Build the (initially disabled) streaming sink BEFORE moving config.
         var sink = LogStreamSink.disabled()
         if config.log_bucket:
@@ -209,7 +209,7 @@ struct Agent[
                 False,  # not enabled until a client is attached
             )
         self.config = config^
-        self.state = AgentState()
+        self.state = JobSupervisorState()
         self.supervisor = Supervisor()
         self.stderr_ring = List[String]()
         self.stdout_ring = List[String]()
@@ -222,15 +222,15 @@ struct Agent[
         self.stdout_truncated = False
         self.capture_nonblocking = False
         self.log_sink = sink^
-        self.stream_client = Optional[AgentS3Client[Self.C]]()
+        self.stream_client = Optional[JobSupervisorS3Client[Self.C]]()
 
     # ---- a heartbeat value from the current state ----
 
-    def _make_heartbeat(self, phase: AgentPhase) -> SupervisorHeartbeat:
+    def _make_heartbeat(self, phase: JobSupervisorPhase) -> SupervisorHeartbeat:
         """Build a SupervisorHeartbeat for `phase` from the current config +
         state. A FAILED phase carries the failure forensics."""
         var failure = Optional[FailureReport]()
-        if phase == AgentPhase.failed() and self.state.failure:
+        if phase == JobSupervisorPhase.failed() and self.state.failure:
             failure = Optional[FailureReport](self.state.failure.value().copy())
         var msg = Optional[String]()
         if self.state.message:
@@ -263,7 +263,7 @@ struct Agent[
         var pid = self.supervisor.spawn(spec)
         if pid <= Int32(0):
             raise Error(
-                String("agent: spawn failed for job ")
+                String("job supervisor: spawn failed for job ")
                 + self.config.job_id
                 + String(" (rc=")
                 + String(Int(pid))
@@ -281,14 +281,14 @@ struct Agent[
 
     # ---- streaming logs: attach the S3 client + engage the sink ----
 
-    def attach_stream_client(mut self, var client: AgentS3Client[Self.C]):
+    def attach_stream_client(mut self, var client: JobSupervisorS3Client[Self.C]):
         """Attach an S3 client for LIVE log streaming and engage the sink. Only
         engages when a log bucket is configured (the sink was built non-disabled
         in __init__ in that case); a no-op effect on a no-bucket config (the
         sink stays disabled, the client is simply held). Call BEFORE spawn so the
         first drained stdout streams. Idempotent — re-attaching replaces the
         client."""
-        self.stream_client = Optional[AgentS3Client[Self.C]](client^)
+        self.stream_client = Optional[JobSupervisorS3Client[Self.C]](client^)
         if self.config.log_bucket:
             self.log_sink.enabled = True
 
@@ -317,7 +317,7 @@ struct Agent[
         """POST one RUNNING heartbeat. On {cancel:true}, mark
         cancel_requested (the caller acts on it — see act_on_cancel). Best-effort
         — a network failure is logged + swallowed (never crashes the loop)."""
-        var hb = self._make_heartbeat(AgentPhase.running())
+        var hb = self._make_heartbeat(JobSupervisorPhase.running())
         var outcome = send_heartbeat_blocking(
             self.config.jm_host,
             self.config.jm_port,
@@ -334,7 +334,7 @@ struct Agent[
 
     def act_on_cancel(mut self, grace_ms: Int):
         """If the job-manager requested cancellation, SIGTERM->grace->SIGKILL
-        the child and mark the agent CANCELLED. Idempotent: a no-op if the child
+        the child and mark the job supervisor CANCELLED. Idempotent: a no-op if the child
         already exited."""
         if not self.state.cancel_requested:
             return
@@ -342,7 +342,7 @@ struct Agent[
             return
         self.exit_info = self.supervisor.terminate(grace_ms)
         self.child_exited = True
-        self.state.phase = AgentPhase.cancelled()
+        self.state.phase = JobSupervisorPhase.cancelled()
 
     # ---- step: incremental drain + poll the child for exit ----
 
@@ -496,17 +496,17 @@ struct Agent[
           * exit_code == 0          -> COMPLETED.
           * else (non-zero / signal)-> FAILED, build a FailureReport.
         Must be called after the child has exited (child_exited == True)."""
-        if self.state.phase == AgentPhase.cancelled():
+        if self.state.phase == JobSupervisorPhase.cancelled():
             # act_on_cancel already finalized the phase.
             return
         if (
             self.exit_info.exit_code == Int32(0)
             and self.exit_info.signal == Int32(-1)
         ):
-            self.state.phase = AgentPhase.completed()
+            self.state.phase = JobSupervisorPhase.completed()
             return
         # Failed — build the forensic report.
-        self.state.phase = AgentPhase.failed()
+        self.state.phase = JobSupervisorPhase.failed()
         var exit_code = Optional[Int32]()
         if self.exit_info.exit_code >= Int32(0):
             exit_code = Optional[Int32](self.exit_info.exit_code)
@@ -547,7 +547,7 @@ struct Agent[
 
     def upload_terminal_artifacts(mut self) raises:
         """(DEPLOYMENT-REAL) Best-effort terminal S3 upload: logs.txt always,
-        plus crash_report.json on FAILED. Builds a fresh production AgentS3Client
+        plus crash_report.json on FAILED. Builds a fresh production JobSupervisorS3Client
         (credentials via the chain + clock via the helper). The per-upload
         failures are swallowed inside upload_logs / upload_crash_report (they
         return Bool); this method only raises if the client itself can't be
@@ -560,7 +560,7 @@ struct Agent[
             _ = upload_logs[TlsConnector[KernelTcpConnector]](
                 self.config, tls_client, self.log_lines()
             )
-            if self.state.phase == AgentPhase.failed() and self.state.failure:
+            if self.state.phase == JobSupervisorPhase.failed() and self.state.failure:
                 _ = upload_crash_report[TlsConnector[KernelTcpConnector]](
                     self.config,
                     tls_client,
@@ -573,30 +573,30 @@ struct Agent[
         _ = upload_logs[KernelTcpConnector](
             self.config, client, self.log_lines()
         )
-        if self.state.phase == AgentPhase.failed() and self.state.failure:
+        if self.state.phase == JobSupervisorPhase.failed() and self.state.failure:
             _ = upload_crash_report[KernelTcpConnector](
                 self.config, client, self.state.failure.value().copy()
             )
 
-    def terminal_phase(self) -> AgentPhase:
+    def terminal_phase(self) -> JobSupervisorPhase:
         return self.state.phase
 
 
 # =============================================================================
-# §3 — run_agent — the continuous blocking loop (the prod path).
+# §3 — run_job_supervisor — the continuous blocking loop (the prod path).
 # =============================================================================
 # The two instantiations that exist. Named so a call site says which transport
 # it means instead of spelling a nested generic.
-comptime PlainAgent = Agent[KernelTcpConnector]
-comptime TlsAgent = Agent[TlsConnector[KernelTcpConnector]]
+comptime PlainJobSupervisor = JobSupervisor[KernelTcpConnector]
+comptime TlsJobSupervisor = JobSupervisor[TlsConnector[KernelTcpConnector]]
 
 
-def run_agent(var config: AgentConfig) raises:
-    """The prod agent lifecycle, over the S3 transport the CONFIG selects.
+def run_job_supervisor(var config: JobSupervisorConfig) raises:
+    """The prod job supervisor lifecycle, over the S3 transport the CONFIG selects.
 
-    ★ THIS IS THE ONE PLACE THE AGENT'S S3 TRANSPORT IS CHOSEN. When there
-    was no choice to make, `Agent` held a plaintext S3 client and the binary download, the live log stream
-    and the terminal upload were all plaintext, unconditionally. An agent
+    ★ THIS IS THE ONE PLACE THE JOB SUPERVISOR'S S3 TRANSPORT IS CHOSEN. When there
+    was no choice to make, `JobSupervisor` held a plaintext S3 client and the binary download, the live log stream
+    and the terminal upload were all plaintext, unconditionally. A job supervisor
     pointed at real S3 therefore signed a correct SigV4 request for an
     `https://` URL -- `S3Config.aws(region)` is HTTPS -- and sent it in the
     clear to port 443.
@@ -606,83 +606,83 @@ def run_agent(var config: AgentConfig) raises:
     arm byte-for-byte and needs no new env var to do it.
 
     ⚠ THE BRANCH IS AT THE TOP AND MONOMORPHISES THE WHOLE LOOP. It is not a
-    per-call dispatch: `run_agent_over[C]` is instantiated twice and each
+    per-call dispatch: `run_job_supervisor_over[C]` is instantiated twice and each
     instantiation is entirely one transport, so no code path can mix them."""
     if config.s3_uses_tls():
-        run_agent_over[TlsConnector[KernelTcpConnector]](
-            config^, mk_agent_s3_tls_connector
+        run_job_supervisor_over[TlsConnector[KernelTcpConnector]](
+            config^, mk_job_supervisor_s3_tls_connector
         )
     else:
-        run_agent_over[KernelTcpConnector](
-            config^, mk_agent_s3_plain_connector
+        run_job_supervisor_over[KernelTcpConnector](
+            config^, mk_job_supervisor_s3_plain_connector
         )
 
 
-def run_agent_over[
+def run_job_supervisor_over[
     C: Connector,
 ](
-    var config: AgentConfig,
+    var config: JobSupervisorConfig,
     mk_connector: def () raises thin -> C,
 ) raises:
-    """The prod agent lifecycle over an EXPLICIT S3 transport `C`: initial
+    """The prod job supervisor lifecycle over an EXPLICIT S3 transport `C`: initial
     Running heartbeat -> spawn -> the poll-then-heartbeat loop (terminate on
     cancel) -> analyze exit -> terminal heartbeat. Blocks until the child exits
-    (or is cancelled). `run_agent` above is the entry the prod binary's `main`
+    (or is cancelled). `run_job_supervisor` above is the entry the prod binary's `main`
     calls; this is what it dispatches to.
 
     MVP: a simple poll-then-sleep loop (reactor-async drain deferred). The grace
     window for a cancel is 5s (5000ms).
 
-    DEPLOYMENT-REAL: when `config.binary_s3_uri` is set, the agent downloads +
+    DEPLOYMENT-REAL: when `config.binary_s3_uri` is set, the job supervisor downloads +
     SHA-verifies + chmods the binary from S3 BEFORE spawn (reusing the
-    production AgentS3Client + the credential chain + the clock helper), and on
+    production JobSupervisorS3Client + the credential chain + the clock helper), and on
     terminal uploads logs (+ a crash-report on FAILED) to the log bucket. When
-    no S3 URI is configured the agent runs the LOCAL job_binary_path and skips
+    no S3 URI is configured the job supervisor runs the LOCAL job_binary_path and skips
     the S3 path entirely (the MVP / in-process e2e path)."""
     comptime GRACE_MS = 5000
     var uses_s3 = config.uses_s3_binary()
-    var agent = Agent[C](config^)
+    var job_supervisor = JobSupervisor[C](config^)
 
     # 0. (DEPLOYMENT-REAL) download the job binary from S3 before spawn.
     if uses_s3:
         var dl_client = make_s3_client_over[C](
-            mk_connector, agent.config.s3_region, agent.config.s3_endpoint
+            mk_connector, job_supervisor.config.s3_region, job_supervisor.config.s3_endpoint
         )
-        _ = download_binary[C](agent.config, dl_client)
+        _ = download_binary[C](job_supervisor.config, dl_client)
 
     # 1. initial Running heartbeat (ASSIGNED -> RUNNING).
-    _ = agent.do_heartbeat()
+    _ = job_supervisor.do_heartbeat()
 
     # 1b. (DEPLOYMENT-REAL) engage LIVE log streaming when a log bucket is
     #     configured: attach a fresh production S3 client so each drained stdout
     #     chunk PUTs to `{log_bucket}/{job_id}/chunks/{n}.log` DURING the run.
     #     Best-effort — a client-construction failure must NOT abort the job, so
     #     it is swallowed (the terminal logs.txt path still runs).
-    if agent.config.log_bucket:
+    if job_supervisor.config.log_bucket:
         try:
             var stream_client = make_s3_client_over[C](
-                mk_connector, agent.config.s3_region, agent.config.s3_endpoint
+                mk_connector, job_supervisor.config.s3_region, job_supervisor.config.s3_endpoint
             )
-            agent.attach_stream_client(stream_client^)
+            job_supervisor.attach_stream_client(stream_client^)
         except e:
             log.warn[
-                "agent: log-stream client build failed (best-effort, falling"
+                "job supervisor: log-stream client build failed (best-effort, falling"
                 " back to terminal logs.txt): {}",
-                "komira_agent",
+                "komira_job_supervisor",
             ](ArgStr(String(e)))
 
     # 2. spawn the job binary.
-    agent.spawn_child()
+    job_supervisor.spawn_child()
 
     # 3. poll-then-heartbeat loop.
-    var hb_interval = agent.config.heartbeat_interval_secs
+    var hb_interval = job_supervisor.config.heartbeat_interval_secs
     while True:
-        agent.poll_and_drain()
-        if agent.child_exited:
+        job_supervisor.poll_and_drain()
+        if job_supervisor.child_exited:
             break
-        var outcome = agent.do_heartbeat()
+        var outcome = job_supervisor.do_heartbeat()
         if outcome.ok and outcome.cancel:
-            agent.act_on_cancel(GRACE_MS)
+            job_supervisor.act_on_cancel(GRACE_MS)
             break
         # Sleep the heartbeat interval (MVP: a coarse whole-second sleep; the
         # reactor-deadline await is the deferred hardening).
@@ -691,34 +691,34 @@ def run_agent_over[
             _sleep_secs(1)
             slept += 1
             # Drain + check exit each second so a fast child is noticed promptly.
-            agent.poll_and_drain()
-            if agent.child_exited:
+            job_supervisor.poll_and_drain()
+            if job_supervisor.child_exited:
                 break
             # Time-based streaming flush: a quiet-but-nonempty chunk flushes on
             # the flush interval even when no new stdout arrived this second.
-            agent._tick_stream_timer()
-        if agent.child_exited:
+            job_supervisor._tick_stream_timer()
+        if job_supervisor.child_exited:
             break
 
     # 4. analyze the exit + send the terminal heartbeat.
-    agent.analyze_exit()
-    _ = agent.finalize_heartbeat()
+    job_supervisor.analyze_exit()
+    _ = job_supervisor.finalize_heartbeat()
 
     # 5. (DEPLOYMENT-REAL) best-effort S3 upload of logs (+ crash-report on
     #    FAILED) to the log bucket. Skipped when no log bucket is configured.
     #    A fresh client is built (the download client was dropped after spawn)
     #    so credentials/clock are re-resolved at terminal time.
-    if agent.config.log_bucket:
+    if job_supervisor.config.log_bucket:
         try:
-            agent.upload_terminal_artifacts()
+            job_supervisor.upload_terminal_artifacts()
         except e:
             # Best-effort: the heartbeat already carried the forensics.
             log.warn[
-                "agent: terminal S3 upload failed (best-effort): {}",
-                "komira_agent",
+                "job supervisor: terminal S3 upload failed (best-effort): {}",
+                "komira_job_supervisor",
             ](ArgStr(String(e)))
 
-    log.info["agent: job {} finished phase={}", "komira_agent"](
-        ArgStr(agent.config.job_id),
-        ArgStr(agent.terminal_phase().wire_str()),
+    log.info["job supervisor: job {} finished phase={}", "komira_job_supervisor"](
+        ArgStr(job_supervisor.config.job_id),
+        ArgStr(job_supervisor.terminal_phase().wire_str()),
     )

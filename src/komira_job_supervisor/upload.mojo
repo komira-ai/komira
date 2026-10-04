@@ -1,9 +1,9 @@
 # =============================================================================
-# komira_agent/upload.mojo — S3 crash-report + log upload (the terminal write).
+# komira_job_supervisor/upload.mojo — S3 crash-report + log upload (the terminal write).
 # =============================================================================
 #
 # The deployment-real terminal-write path (crash-report + log upload):
-# on a terminal phase, the agent pushes forensics to the log bucket so the
+# on a terminal phase, the job supervisor pushes forensics to the log bucket so the
 # control plane has a durable record after the pod is gone:
 #
 #   * On FAILED: a crash-report JSON to `{log_bucket}/{job_id}/crash_report.json`
@@ -13,10 +13,10 @@
 #     `{log_bucket}/{job_id}/logs.txt`. Streaming / chunked + the stderr-separate
 #     path is a DEFERRED hardening (note below).
 #
-# Both writes go through `AgentS3Client.put_object` (one PutObject; the small
+# Both writes go through `JobSupervisorS3Client.put_object` (one PutObject; the small
 # JSON / text objects need no multipart upload).
 #
-# BEST-EFFORT: an upload failure must NOT crash the agent's terminal path — the
+# BEST-EFFORT: an upload failure must NOT crash the job supervisor's terminal path — the
 # heartbeat already carried the forensics to the job-manager DB; the S3 objects
 # are a supplementary durable record. `upload_crash_report` / `upload_logs`
 # return a Bool (True on success) and swallow errors with a stderr log.
@@ -26,14 +26,14 @@
 # wildcard origin. Mojo 1.0.0b1.
 # =============================================================================
 
-from komira_agent.s3_client import AgentS3Client
+from komira_job_supervisor.s3_client import JobSupervisorS3Client
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 
-from komira_agent.agent_config import AgentConfig
-from komira_agent.agent_state import FailureReport
-from komira_agent.clock_helper import amz_stamps_now
-from komira_agent.heartbeat_client import _json_escape
+from komira_job_supervisor.job_supervisor_config import JobSupervisorConfig
+from komira_job_supervisor.job_supervisor_state import FailureReport
+from komira_job_supervisor.clock_helper import amz_stamps_now
+from komira_job_supervisor.heartbeat_client import _json_escape
 
 import komira_log as log
 from komira_log import ArgStr, ArgI64
@@ -113,8 +113,8 @@ def _string_to_bytes(s: String) -> List[UInt8]:
 def upload_crash_report[
     C: Connector,
 ](
-    config: AgentConfig,
-    mut s3_client: AgentS3Client[C],
+    config: JobSupervisorConfig,
+    mut s3_client: JobSupervisorS3Client[C],
     failure: FailureReport,
 ) -> Bool:
     """Upload the crash-report JSON to
@@ -132,13 +132,13 @@ def upload_crash_report[
         )
         s3_client.put_object(bucket, key, _string_to_bytes(body))
         log.info[
-            "agent upload: crash_report.json -> s3://{}/{}", "komira_agent"
+            "job supervisor upload: crash_report.json -> s3://{}/{}", "komira_job_supervisor"
         ](ArgStr(bucket), ArgStr(key))
         return True
     except e:
         log.warn[
-            "agent upload: crash_report upload failed (best-effort): {}",
-            "komira_agent",
+            "job supervisor upload: crash_report upload failed (best-effort): {}",
+            "komira_job_supervisor",
         ](ArgStr(String(e)))
         return False
 
@@ -149,8 +149,8 @@ def upload_crash_report[
 def upload_logs[
     C: Connector,
 ](
-    config: AgentConfig,
-    mut s3_client: AgentS3Client[C],
+    config: JobSupervisorConfig,
+    mut s3_client: JobSupervisorS3Client[C],
     log_lines: List[String],
 ) -> Bool:
     """Upload the captured log lines as a single object
@@ -172,12 +172,12 @@ def upload_logs[
             body += log_lines[i]
         s3_client.put_object(bucket, key, _string_to_bytes(body))
         log.info[
-            "agent upload: logs.txt ({} lines) -> s3://{}/{}", "komira_agent"
+            "job supervisor upload: logs.txt ({} lines) -> s3://{}/{}", "komira_job_supervisor"
         ](ArgI64(Int64(len(log_lines))), ArgStr(bucket), ArgStr(key))
         return True
     except e:
         log.warn[
-            "agent upload: logs upload failed (best-effort): {}",
-            "komira_agent",
+            "job supervisor upload: logs upload failed (best-effort): {}",
+            "komira_job_supervisor",
         ](ArgStr(String(e)))
         return False

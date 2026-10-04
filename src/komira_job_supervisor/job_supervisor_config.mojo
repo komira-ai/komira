@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_agent/agent_config.mojo — the supervisor agent's startup config.
+# komira_job_supervisor/job_supervisor_config.mojo — the job supervisor's startup config.
 # =============================================================================
 #
 # The pod-side supervisor's configuration. Built from env in
@@ -14,29 +14,29 @@
 #     `k8s_https_request_authed`'s host+port surface (the HttpClient parses a
 #     dotted-quad / hostname directly, no URL-parse step).
 #
-# ENV CONTRACT (KOMIRA_AGENT_*):
-#   KOMIRA_AGENT_JOB_ID             hyphenated job UUID            (REQUIRED)
-#   KOMIRA_AGENT_POD_NAME           this pod's name                (REQUIRED)
-#   KOMIRA_AGENT_JOB_BINARY         local path to the job binary   (REQUIRED)
-#   KOMIRA_AGENT_JM_HOST            job-manager host               (default 127.0.0.1)
-#   KOMIRA_AGENT_JM_PORT            job-manager port               (default 8081)
-#   KOMIRA_AGENT_JM_SCHEME          `http` | `https`               (default http)
-#   KOMIRA_AGENT_HEARTBEAT_SECS     heartbeat interval seconds     (default 5)
-#   KOMIRA_AGENT_MAX_STDERR_LINES   stderr ring capacity           (default 100)
-#   KOMIRA_AGENT_LOG_CHUNK_BYTES    streaming-log chunk threshold  (default 64 KiB)
-#   KOMIRA_AGENT_LOG_FLUSH_SECS     streaming-log flush interval   (default 10s)
+# ENV CONTRACT (KOMIRA_JOB_SUPERVISOR_*):
+#   KOMIRA_JOB_SUPERVISOR_JOB_ID             hyphenated job UUID            (REQUIRED)
+#   KOMIRA_JOB_SUPERVISOR_POD_NAME           this pod's name                (REQUIRED)
+#   KOMIRA_JOB_SUPERVISOR_JOB_BINARY         local path to the job binary   (REQUIRED)
+#   KOMIRA_JOB_SUPERVISOR_JM_HOST            job-manager host               (default 127.0.0.1)
+#   KOMIRA_JOB_SUPERVISOR_JM_PORT            job-manager port               (default 8081)
+#   KOMIRA_JOB_SUPERVISOR_JM_SCHEME          `http` | `https`               (default http)
+#   KOMIRA_JOB_SUPERVISOR_HEARTBEAT_SECS     heartbeat interval seconds     (default 5)
+#   KOMIRA_JOB_SUPERVISOR_MAX_STDERR_LINES   stderr ring capacity           (default 100)
+#   KOMIRA_JOB_SUPERVISOR_LOG_CHUNK_BYTES    streaming-log chunk threshold  (default 64 KiB)
+#   KOMIRA_JOB_SUPERVISOR_LOG_FLUSH_SECS     streaming-log flush interval   (default 10s)
 #
 # DEPLOYMENT-REAL S3 surface (all OPTIONAL — when BINARY_S3_URI is unset the
-# agent runs the LOCAL JOB_BINARY and skips the S3 download/upload entirely, so
+# job supervisor runs the LOCAL JOB_BINARY and skips the S3 download/upload entirely, so
 # the in-process e2e keeps working):
-#   KOMIRA_AGENT_BINARY_S3_URI      s3://bucket/<sha>/binary       (optional)
-#   KOMIRA_AGENT_BINARY_SHA256      expected SHA-256 hex override  (optional)
-#   KOMIRA_AGENT_LOG_BUCKET         bucket for crash-report+logs   (optional)
-#   KOMIRA_AGENT_S3_ENDPOINT        S3 endpoint override (MinIO)   (optional)
+#   KOMIRA_JOB_SUPERVISOR_BINARY_S3_URI      s3://bucket/<sha>/binary       (optional)
+#   KOMIRA_JOB_SUPERVISOR_BINARY_SHA256      expected SHA-256 hex override  (optional)
+#   KOMIRA_JOB_SUPERVISOR_LOG_BUCKET         bucket for crash-report+logs   (optional)
+#   KOMIRA_JOB_SUPERVISOR_S3_ENDPOINT        S3 endpoint override (MinIO)   (optional)
 #                                   ⚠ UNSET MEANS **REAL AWS S3**, which is
 #                                   HTTPS-ONLY -- so absence selects TLS here,
 #                                   it does not select plaintext.
-#   KOMIRA_AGENT_S3_REGION          AWS region                     (default us-east-1)
+#   KOMIRA_JOB_SUPERVISOR_S3_REGION          AWS region                     (default us-east-1)
 #   (+ the AWS cred env the default chain reads: AWS_ACCESS_KEY_ID /
 #    AWS_SECRET_ACCESS_KEY / AWS_WEB_IDENTITY_TOKEN_FILE / AWS_ROLE_ARN / ...)
 #
@@ -49,7 +49,7 @@ from komira_core_ffi.posix import _read_env
 
 # ★ THE JM AUTH POSTURE. Declared, not derived from the scheme --
 # see `jm_auth.mojo`'s banner for why deriving breaks the AWS arm.
-from komira_agent.jm_auth import (
+from komira_job_supervisor.jm_auth import (
     JmAuthMode,
     jm_audience,
     jm_credential_rides_in_clear,
@@ -59,20 +59,20 @@ from komira_agent.jm_auth import (
 # The two names the (scheme, posture) refusal in `from_env` has to cite. Each
 # is ALSO the name `from_env` reads, so the refusal cannot name a variable the
 # reader does not.
-comptime _ENV_JM_SCHEME: StaticString = "KOMIRA_AGENT_JM_SCHEME"
-comptime _ENV_JM_AUTH: StaticString = "KOMIRA_AGENT_JM_AUTH"
+comptime _ENV_JM_SCHEME: StaticString = "KOMIRA_JOB_SUPERVISOR_JM_SCHEME"
+comptime _ENV_JM_AUTH: StaticString = "KOMIRA_JOB_SUPERVISOR_JM_AUTH"
 
 
 # =============================================================================
 # §1 — env helpers: read-with-default and read-or-refuse.
 # =============================================================================
-def _agent_env_or(name: StaticString, default: String) -> String:
+def _job_supervisor_env_or(name: StaticString, default: String) -> String:
     """Return env `name`'s value, or `default` when unset/empty."""
     var v = _read_env(name)
     return v if v.byte_length() > 0 else default
 
 
-def _agent_env_bool(name: StaticString) -> Bool:
+def _job_supervisor_env_bool(name: StaticString) -> Bool:
     """Parse env `name` as a truthy boolean (DEFAULT FALSE). True iff the value
     (case-insensitive) is one of `1` / `true` / `yes` / `on`. Anything else —
     unset, empty, `0`, `false`, garbage — is False. Used for SUBLINEAGE_ENABLED
@@ -90,7 +90,7 @@ def _agent_env_bool(name: StaticString) -> Bool:
     )
 
 
-def _agent_env_bool_default_true(name: StaticString) -> Bool:
+def _job_supervisor_env_bool_default_true(name: StaticString) -> Bool:
     """Parse env `name` as a boolean whose DEFAULT (unset/empty) is TRUE.
 
     the SERVER-boundary
@@ -120,30 +120,30 @@ def _agent_env_bool_default_true(name: StaticString) -> Bool:
     return True
 
 
-def _agent_require_env(name: StaticString, label: String) raises -> String:
+def _job_supervisor_require_env(name: StaticString, label: String) raises -> String:
     """Return env `name`'s value, or RAISE a clear "missing required config"
     error (fail-fast — a missing job_id must abort before spawn, not crash
     deep in the heartbeat path)."""
     var v = _read_env(name)
     if v.byte_length() == 0:
         raise Error(
-            String("agent: missing required env var ")
+            String("job supervisor: missing required env var ")
             + String(name)
             + String(" (")
             + label
             + String(
-                "). Set KOMIRA_AGENT_JOB_ID / KOMIRA_AGENT_POD_NAME /"
-                " KOMIRA_AGENT_JOB_BINARY before starting the agent."
+                "). Set KOMIRA_JOB_SUPERVISOR_JOB_ID / KOMIRA_JOB_SUPERVISOR_POD_NAME /"
+                " KOMIRA_JOB_SUPERVISOR_JOB_BINARY before starting the job supervisor."
             )
         )
     return v^
 
 
 # =============================================================================
-# §2 — AgentConfig.
+# §2 — JobSupervisorConfig.
 # =============================================================================
-struct AgentConfig(Movable):
-    """The supervisor agent configuration. MVP: a local job binary path + argv,
+struct JobSupervisorConfig(Movable):
+    """The job supervisor configuration. MVP: a local job binary path + argv,
     a job-manager host+port to heartbeat, and the heartbeat cadence + stderr
     ring capacity.
 
@@ -195,9 +195,9 @@ struct AgentConfig(Movable):
     # ★ THE JOB-MANAGER URL **SCHEME**. `http` or `https`.
     #
     # ⛔ IT IS A FIELD BECAUSE THE PLACEMENT HANDS THE JM URL OVER IN PIECES.
-    # The agent receives the job manager's HOST and PORT as separate values, so
+    # The job supervisor receives the job manager's HOST and PORT as separate values, so
     # the scheme travels only if it has its own value. Without this field no
-    # job-manager URL -- not `https://...` -- could make this agent speak TLS,
+    # job-manager URL -- not `https://...` -- could make this job supervisor speak TLS,
     # which is what a Lambda-backed job manager behind API Gateway requires.
     #
     # Appended at the END of the field list + the `__init__` signature, keyword
@@ -215,7 +215,7 @@ struct AgentConfig(Movable):
     # beat-then-stopped ambiguity the heartbeat contract exists to remove.
     #
     # ⚠ DEFAULTING TO `none` MEANS THIS FIELD ALONE CHANGES NOTHING. Nothing
-    # authenticates until the placement STAMPS KOMIRA_AGENT_JM_AUTH, which is
+    # authenticates until the placement STAMPS KOMIRA_JOB_SUPERVISOR_JM_AUTH, which is
     # the placing side's job, not this file's.
     var jm_auth_mode: JmAuthMode
 
@@ -311,7 +311,7 @@ struct AgentConfig(Movable):
         default port -- Google validates an ID token's `aud` against
         `https://job-manager-....run.app`, with no `:443`, and a token minted
         for `https://host:443` is REJECTED at the ingress edge in a way the
-        agent cannot tell apart from having sent no token at all."""
+        job supervisor cannot tell apart from having sent no token at all."""
         if self.jm_audience_override.byte_length() > 0:
             return self.jm_audience_override
         return jm_audience(self.jm_scheme, self.jm_host, self.jm_port)
@@ -320,15 +320,15 @@ struct AgentConfig(Movable):
         """True iff the S3 transport must be TLS.
 
         ★ ABSENCE MEANS TLS HERE, AND GETTING THAT BACKWARDS IS THE WHOLE BUG.
-        `AgentS3Client` maps a None endpoint onto `S3Config.aws(region)`
-        -- virtual-hosted, **HTTPS**, the AWS regional host. So an agent with no
+        `JobSupervisorS3Client` maps a None endpoint onto `S3Config.aws(region)`
+        -- virtual-hosted, **HTTPS**, the AWS regional host. So a job supervisor with no
         endpoint override is already building `https://` URLs; before this method
         existed it dialled them through a `KernelTcpConnector` on port 443 and
         sent a plaintext GET into a TLS listener. Defaulting to plaintext here
         would preserve exactly that.
 
         An explicit endpoint carries its own scheme (`http://minio:9000` ->
-        plaintext, `https://...` -> TLS), which `AgentS3Client` already honours for
+        plaintext, `https://...` -> TLS), which `JobSupervisorS3Client` already honours for
         the URL and now honours for the TRANSPORT too."""
         if not self.s3_endpoint.__bool__():
             return True  # real AWS S3: HTTPS-only.
@@ -342,23 +342,23 @@ struct AgentConfig(Movable):
         return self.binary_s3_uri.__bool__()
 
     @staticmethod
-    def from_env() raises -> AgentConfig:
-        """Build the config from KOMIRA_AGENT_* env (the deploy surface).
+    def from_env() raises -> JobSupervisorConfig:
+        """Build the config from KOMIRA_JOB_SUPERVISOR_* env (the deploy surface).
         job_id / pod_name / job_binary are REQUIRED (fail-fast); host / port /
         cadence / ring-size are defaulted. argv is read as a single
-        space-joined KOMIRA_AGENT_JOB_ARGV (MVP — no shell quoting; the prod
+        space-joined KOMIRA_JOB_SUPERVISOR_JOB_ARGV (MVP — no shell quoting; the prod
         job is a single binary path with simple positional args)."""
-        var job_id = _agent_require_env(
-            "KOMIRA_AGENT_JOB_ID", String("job uuid")
+        var job_id = _job_supervisor_require_env(
+            "KOMIRA_JOB_SUPERVISOR_JOB_ID", String("job uuid")
         )
-        var pod_name = _agent_require_env(
-            "KOMIRA_AGENT_POD_NAME", String("pod name")
+        var pod_name = _job_supervisor_require_env(
+            "KOMIRA_JOB_SUPERVISOR_POD_NAME", String("pod name")
         )
-        var job_binary = _agent_require_env(
-            "KOMIRA_AGENT_JOB_BINARY", String("job binary path")
+        var job_binary = _job_supervisor_require_env(
+            "KOMIRA_JOB_SUPERVISOR_JOB_BINARY", String("job binary path")
         )
-        var host = _agent_env_or(
-            "KOMIRA_AGENT_JM_HOST", String("127.0.0.1")
+        var host = _job_supervisor_env_or(
+            "KOMIRA_JOB_SUPERVISOR_JM_HOST", String("127.0.0.1")
         )
         # ★ THE SCHEME IS READ BEFORE THE PORT BECAUSE THE PORT'S DEFAULT
         # DEPENDS ON IT, AND GETTING THAT ORDER WRONG WAS A LIVE DEFECT.
@@ -367,12 +367,12 @@ struct AgentConfig(Movable):
         # scheme. The placement passes an EMPTY port for a job-manager URL that
         # carries none -- and a Cloud Run URL
         # (`https://job-manager-....run.app`) carries none -- so a correctly
-        # `https`-schemed agent dialled `https://host:8081` while Cloud Run
+        # `https`-schemed job supervisor dialled `https://host:8081` while Cloud Run
         # serves 443. TLS was threaded correctly and the port was still wrong,
         # which is the worst shape: the transport decision LOOKS right in every
         # log line and the connection goes nowhere.
-        var jm_scheme = _agent_env_or(_ENV_JM_SCHEME, String("http"))
-        var port_raw = _read_env("KOMIRA_AGENT_JM_PORT")
+        var jm_scheme = _job_supervisor_env_or(_ENV_JM_SCHEME, String("http"))
+        var port_raw = _read_env("KOMIRA_JOB_SUPERVISOR_JM_PORT")
         var port_s = port_raw
         if port_raw.byte_length() == 0:
             # `http` keeps TODAY'S 8081 exactly, so every in-cluster manifest
@@ -382,26 +382,26 @@ struct AgentConfig(Movable):
                 else String("8081")
             )
         # ★ THE AUTH POSTURE. Absent => `none` => byte-identical to the
-        # agent from before the auth seam. ⛔ `parse_jm_auth_mode` RAISES on a typo rather
+        # job supervisor from before the auth seam. ⛔ `parse_jm_auth_mode` RAISES on a typo rather
         # than falling back to `none`: a misspelled posture that silently
         # degraded would beat bearer-less into a 403 forever while every log
-        # line said the agent was healthy. Refusing here surfaces it at boot.
+        # line said the job supervisor was healthy. Refusing here surfaces it at boot.
         var jm_auth_mode = parse_jm_auth_mode(_read_env(_ENV_JM_AUTH))
         # Absent => derive from scheme/host/port (the ordinary Cloud Run case).
-        var jm_audience_override = _read_env("KOMIRA_AGENT_JM_AUDIENCE")
+        var jm_audience_override = _read_env("KOMIRA_JOB_SUPERVISOR_JM_AUDIENCE")
 
-        var hb_s = _agent_env_or("KOMIRA_AGENT_HEARTBEAT_SECS", String("5"))
-        var ring_s = _agent_env_or(
-            "KOMIRA_AGENT_MAX_STDERR_LINES", String("100")
+        var hb_s = _job_supervisor_env_or("KOMIRA_JOB_SUPERVISOR_HEARTBEAT_SECS", String("5"))
+        var ring_s = _job_supervisor_env_or(
+            "KOMIRA_JOB_SUPERVISOR_MAX_STDERR_LINES", String("100")
         )
-        var stdout_bytes_s = _agent_env_or(
-            "KOMIRA_AGENT_MAX_STDOUT_BYTES", String("8388608")  # 8 MiB
+        var stdout_bytes_s = _job_supervisor_env_or(
+            "KOMIRA_JOB_SUPERVISOR_MAX_STDOUT_BYTES", String("8388608")  # 8 MiB
         )
 
         var port = atol(port_s)
         if port <= 0 or port > 65535:
             raise Error(
-                String("agent: KOMIRA_AGENT_JM_PORT out of range: ") + port_s
+                String("job supervisor: KOMIRA_JOB_SUPERVISOR_JM_PORT out of range: ") + port_s
             )
         var hb = atol(hb_s)
         if hb <= 0:
@@ -416,7 +416,7 @@ struct AgentConfig(Movable):
         # MVP argv: a single space-split env (no shell quoting). Empty when
         # unset — most jobs are a bare binary path.
         var argv = List[String]()
-        var argv_raw = _read_env("KOMIRA_AGENT_JOB_ARGV")
+        var argv_raw = _read_env("KOMIRA_JOB_SUPERVISOR_JOB_ARGV")
         if argv_raw.byte_length() > 0:
             var cur = String("")
             var bytes = argv_raw.as_bytes()
@@ -433,32 +433,32 @@ struct AgentConfig(Movable):
 
         # ---- DEPLOYMENT-REAL S3 surface (all optional) ----
         var binary_s3_uri = Optional[String]()
-        var s3_uri_raw = _read_env("KOMIRA_AGENT_BINARY_S3_URI")
+        var s3_uri_raw = _read_env("KOMIRA_JOB_SUPERVISOR_BINARY_S3_URI")
         if s3_uri_raw.byte_length() > 0:
             binary_s3_uri = Optional[String](s3_uri_raw^)
         var binary_sha = Optional[String]()
-        var sha_raw = _read_env("KOMIRA_AGENT_BINARY_SHA256")
+        var sha_raw = _read_env("KOMIRA_JOB_SUPERVISOR_BINARY_SHA256")
         if sha_raw.byte_length() > 0:
             binary_sha = Optional[String](sha_raw^)
         var log_bucket = Optional[String]()
-        var lb_raw = _read_env("KOMIRA_AGENT_LOG_BUCKET")
+        var lb_raw = _read_env("KOMIRA_JOB_SUPERVISOR_LOG_BUCKET")
         if lb_raw.byte_length() > 0:
             log_bucket = Optional[String](lb_raw^)
         var s3_endpoint = Optional[String]()
-        var ep_raw = _read_env("KOMIRA_AGENT_S3_ENDPOINT")
+        var ep_raw = _read_env("KOMIRA_JOB_SUPERVISOR_S3_ENDPOINT")
         if ep_raw.byte_length() > 0:
             s3_endpoint = Optional[String](ep_raw^)
-        var s3_region = _agent_env_or(
-            "KOMIRA_AGENT_S3_REGION", String("us-east-1")
+        var s3_region = _job_supervisor_env_or(
+            "KOMIRA_JOB_SUPERVISOR_S3_REGION", String("us-east-1")
         )
 
         # Streaming-log tunables (defaults: 64 KiB / 10s). 0/neg falls back
         # to the default inside __init__.
-        var chunk_bytes_s = _agent_env_or(
-            "KOMIRA_AGENT_LOG_CHUNK_BYTES", String("65536")  # 64 KiB
+        var chunk_bytes_s = _job_supervisor_env_or(
+            "KOMIRA_JOB_SUPERVISOR_LOG_CHUNK_BYTES", String("65536")  # 64 KiB
         )
-        var flush_secs_s = _agent_env_or(
-            "KOMIRA_AGENT_LOG_FLUSH_SECS", String("10")
+        var flush_secs_s = _job_supervisor_env_or(
+            "KOMIRA_JOB_SUPERVISOR_LOG_FLUSH_SECS", String("10")
         )
         var chunk_bytes = atol(chunk_bytes_s)
         if chunk_bytes <= 0:
@@ -467,7 +467,7 @@ struct AgentConfig(Movable):
         if flush_secs <= 0:
             flush_secs = 10
 
-        var cfg = AgentConfig(
+        var cfg = JobSupervisorConfig(
             job_id^,
             pod_name^,
             job_binary^,
@@ -496,7 +496,7 @@ struct AgentConfig(Movable):
         # refuses per beat; this says it once, at the cause.
         if jm_credential_rides_in_clear(cfg.jm_uses_tls(), cfg.jm_auth_mode):
             raise Error(
-                String("agent: REFUSED ")
+                String("job supervisor: REFUSED ")
                 + String(_ENV_JM_AUTH)
                 + String("='")
                 + cfg.jm_auth_mode.name()
@@ -527,7 +527,7 @@ struct BrokerConfig(Movable):
     (node_id / load / owned_partitions) and applies the coordinator's
     `assigned_partitions[]` reply in-process (D1, the relay) — REPLACING the M6
     `--assignment=` CLI-arg channel. The container/k8s supervisor handles process
-    restart; this is NOT launched by the generic agent.mojo child-supervisor (an
+    restart; this is NOT launched by the generic job_supervisor.mojo child-supervisor (an
     impedance mismatch — that supervises jobs-that-EXIT).
 
       node_id            — this node's stable broker id (the heartbeat key + the
@@ -577,7 +577,7 @@ struct BrokerConfig(Movable):
     var serve_workers: Int
     # the server-boundary
     # sub-lineage flag. The SERVER default is now TRUE via from_env() (which
-    # reads SUBLINEAGE_ENABLED through _agent_env_bool_default_true): unset/empty
+    # reads SUBLINEAGE_ENABLED through _job_supervisor_env_bool_default_true): unset/empty
     # => ON; the OFF-switch is PRESERVED — an explicit SUBLINEAGE_ENABLED=
     # 0/false/no/off disables it. The struct FIELD/ctor default stays FALSE (and
     # every bind_* default stays FALSE): only from_env() defaults ON, so code
@@ -650,16 +650,16 @@ struct BrokerConfig(Movable):
                                         cores by overlapping N S3 round-trips.
                                         1..64; out-of-range -> 1)
         """
-        var node_id_s = _agent_require_env(
+        var node_id_s = _job_supervisor_require_env(
             "KOMIRA_BROKER_NODE_ID", String("broker node id")
         )
-        var bucket = _agent_require_env(
+        var bucket = _job_supervisor_require_env(
             "KOMIRA_BROKER_S3_BUCKET", String("S3 bucket")
         )
-        var cluster = _agent_require_env(
+        var cluster = _job_supervisor_require_env(
             "KOMIRA_BROKER_CLUSTER", String("cluster id")
         )
-        var s3_endpoint = _agent_require_env(
+        var s3_endpoint = _job_supervisor_require_env(
             "KOMIRA_BROKER_S3_ENDPOINT", String("S3 endpoint")
         )
 
@@ -671,7 +671,7 @@ struct BrokerConfig(Movable):
                 + String(")")
             )
 
-        var listen_port_s = _agent_env_or(
+        var listen_port_s = _job_supervisor_env_or(
             "KOMIRA_BROKER_LISTEN_PORT", String("0")
         )
         var listen_port = atol(listen_port_s)
@@ -681,10 +681,10 @@ struct BrokerConfig(Movable):
                 + listen_port_s
             )
 
-        var topic = _agent_env_or(
+        var topic = _job_supervisor_env_or(
             "KOMIRA_BROKER_TOPIC", String("komira-data")
         )
-        var parts_s = _agent_env_or("KOMIRA_BROKER_PARTITIONS", String("6"))
+        var parts_s = _job_supervisor_env_or("KOMIRA_BROKER_PARTITIONS", String("6"))
         var parts = atol(parts_s)
         if parts <= 0:
             raise Error(
@@ -693,32 +693,32 @@ struct BrokerConfig(Movable):
                 + String(")")
             )
 
-        var s3_region = _agent_env_or(
+        var s3_region = _job_supervisor_env_or(
             "KOMIRA_BROKER_S3_REGION", String("us-east-1")
         )
-        var jm_host = _agent_env_or(
+        var jm_host = _job_supervisor_env_or(
             "KOMIRA_BROKER_JM_HOST", String("127.0.0.1")
         )
-        var jm_port_s = _agent_env_or("KOMIRA_BROKER_JM_PORT", String("8082"))
+        var jm_port_s = _job_supervisor_env_or("KOMIRA_BROKER_JM_PORT", String("8082"))
         var jm_port = atol(jm_port_s)
         if jm_port <= 0 or jm_port > 65535:
             raise Error(
                 String("broker: KOMIRA_BROKER_JM_PORT out of range: ")
                 + jm_port_s
             )
-        var hb_s = _agent_env_or("KOMIRA_BROKER_HEARTBEAT_SECS", String("5"))
+        var hb_s = _job_supervisor_env_or("KOMIRA_BROKER_HEARTBEAT_SECS", String("5"))
         var hb = atol(hb_s)
         if hb <= 0:
             hb = 5
 
-        var advertised_host = _agent_env_or(
+        var advertised_host = _job_supervisor_env_or(
             "KOMIRA_BROKER_ADVERTISED_HOST", String("127.0.0.1")
         )
 
         # BROKER-PERF-CORE-SCALING: the number of share-nothing serve workers
         # (per-core pthreads). Default 1 (single-threaded back-compat). A garbage
         # / out-of-range value falls back to 1 rather than failing the boot.
-        var workers_s = _agent_env_or("KOMIRA_BROKER_SERVE_WORKERS", String("1"))
+        var workers_s = _job_supervisor_env_or("KOMIRA_BROKER_SERVE_WORKERS", String("1"))
         var workers = atol(workers_s)
         if workers < 1 or workers > 64:
             print(
@@ -736,7 +736,7 @@ struct BrokerConfig(Movable):
         # PURELY at the server config boundary: the BrokerCore/KafkaDataBroker
         # field initializers + every bind_* default stay OFF, so tests/code that
         # construct the data-plane structs DIRECTLY keep the legacy OFF default.
-        var sublineage_default = _agent_env_bool_default_true("SUBLINEAGE_ENABLED")
+        var sublineage_default = _job_supervisor_env_bool_default_true("SUBLINEAGE_ENABLED")
 
         return BrokerConfig(
             node_id=Int(node_id),

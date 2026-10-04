@@ -1,9 +1,9 @@
 # =============================================================================
-# komira_agent/log_streamer.mojo — streaming/chunked stdout -> S3 DURING the run.
+# komira_job_supervisor/log_streamer.mojo — streaming/chunked stdout -> S3 DURING the run.
 # =============================================================================
 #
 # The deployment-real LIVE log-streaming path: instead of buffering all of
-# stdout in memory and uploading one `logs.txt` on exit, the agent accumulates
+# stdout in memory and uploading one `logs.txt` on exit, the job supervisor accumulates
 # the stdout bytes drained each loop iteration into a CURRENT-CHUNK buffer and
 # flushes that chunk to `{log_bucket}/{job_id}/chunks/{n}.log` (n = a monotonic
 # counter) as soon as it crosses a BYTE THRESHOLD (default 64 KiB) OR a FLUSH
@@ -12,15 +12,15 @@
 # chatty job is no longer capped at the in-memory byte bound — only the current
 # (sub-threshold) chunk lives in memory at a time.
 #
-# BEST-EFFORT: a failed chunk upload must NOT crash the agent or
+# BEST-EFFORT: a failed chunk upload must NOT crash the job supervisor or
 # interrupt the child. `flush_current` tries the `put_object` once, then retries
 # ONCE, then DROPS the chunk (logging to stderr) and moves on. The chunk counter
 # still advances on a dropped chunk so a later partial-success listing reflects
 # the gap rather than silently re-using an index.
 #
-# WIRED INTO THE DRAIN LOOP: the agent's existing `poll_and_drain` already pulls
+# WIRED INTO THE DRAIN LOOP: the job supervisor's existing `poll_and_drain` already pulls
 # stdout incrementally (the deadlock-fix non-blocking drain). The streaming sink
-# is fed the SAME stdout bytes as they are absorbed (see Agent._absorb feeding
+# is fed the SAME stdout bytes as they are absorbed (see JobSupervisor._absorb feeding
 # `feed_stdout`). Streaming is engaged ONLY when an S3 `log_bucket` is configured
 # AND an S3 client is attached (`attach_client`); the no-S3 in-process e2e keeps
 # the no-streaming path (the sink is simply never fed/flushed). The stderr ring
@@ -33,7 +33,7 @@
 # byte-slab with heap-owning element. Mojo 1.0.0b1.
 # =============================================================================
 
-from komira_agent.s3_client import AgentS3Client
+from komira_job_supervisor.s3_client import JobSupervisorS3Client
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_clock import now_unix_ms
@@ -108,7 +108,7 @@ struct LogStreamSink(Movable):
     @staticmethod
     def disabled() -> LogStreamSink:
         """A no-op sink (streaming not engaged — no log bucket). feed/flush are
-        no-ops; the agent keeps the in-memory logs.txt path."""
+        no-ops; the job supervisor keeps the in-memory logs.txt path."""
         return LogStreamSink(String(""), String(""), 0, 0, False)
 
     # ---- feed: absorb freshly-drained stdout bytes ----
@@ -118,7 +118,7 @@ struct LogStreamSink(Movable):
     ](
         mut self,
         text: String,
-        mut s3_client: AgentS3Client[C],
+        mut s3_client: JobSupervisorS3Client[C],
     ):
         """Append `text`'s bytes to the current chunk; flush if the byte
         threshold is crossed OR the flush interval has elapsed. A no-op when
@@ -132,7 +132,7 @@ struct LogStreamSink(Movable):
 
     def maybe_flush[
         C: Connector,
-    ](mut self, mut s3_client: AgentS3Client[C]):
+    ](mut self, mut s3_client: JobSupervisorS3Client[C]):
         """Flush the current chunk iff (a) it has crossed the byte threshold,
         or (b) the flush interval has elapsed since the last flush AND there is
         something buffered. A no-op when streaming is not engaged or the buffer
@@ -153,11 +153,11 @@ struct LogStreamSink(Movable):
 
     def flush_current[
         C: Connector,
-    ](mut self, mut s3_client: AgentS3Client[C]):
+    ](mut self, mut s3_client: JobSupervisorS3Client[C]):
         """Upload the current chunk to `{bucket}/{job_id}/chunks/{n}.log`,
         advance the counter, and reset the buffer. BEST-EFFORT: try once, retry
         ONCE on failure, then DROP the chunk (a failed log upload must NOT crash
-        the agent). The counter advances even on a
+        the job supervisor). The counter advances even on a
         drop so the index reflects the produced-chunk sequence. A no-op when
         streaming is not engaged or the buffer is empty."""
         if not self.enabled:
@@ -182,9 +182,9 @@ struct LogStreamSink(Movable):
             ok = self._put_once[C](s3_client, key, payload^)
             if not ok:
                 log.warn[
-                    "agent stream: chunk {} upload failed after retry,"
+                    "job supervisor stream: chunk {} upload failed after retry,"
                     " dropping ({} bytes) key={}",
-                    "komira_agent.streamer",
+                    "komira_job_supervisor.streamer",
                 ](
                     ArgI64(Int64(n)),
                     ArgI64(Int64(byte_count)),
@@ -195,8 +195,8 @@ struct LogStreamSink(Movable):
             _ = payload^
         self.uploaded_count += 1
         log.debug[
-            "agent stream: chunk {} ({} bytes) -> s3://{}/{}",
-            "komira_agent.streamer",
+            "job supervisor stream: chunk {} ({} bytes) -> s3://{}/{}",
+            "komira_job_supervisor.streamer",
         ](
             ArgI64(Int64(n)),
             ArgI64(Int64(byte_count)),
@@ -208,7 +208,7 @@ struct LogStreamSink(Movable):
         C: Connector,
     ](
         mut self,
-        mut s3_client: AgentS3Client[C],
+        mut s3_client: JobSupervisorS3Client[C],
         key: String,
         var data: List[UInt8],
     ) -> Bool:
@@ -219,8 +219,8 @@ struct LogStreamSink(Movable):
             return True
         except e:
             log.warn[
-                "agent stream: chunk put failed (best-effort) key={}: {}",
-                "komira_agent.streamer",
+                "job supervisor stream: chunk put failed (best-effort) key={}: {}",
+                "komira_job_supervisor.streamer",
             ](ArgStr(key), ArgStr(String(e)))
             return False
 
@@ -228,7 +228,7 @@ struct LogStreamSink(Movable):
 
     def flush_final[
         C: Connector,
-    ](mut self, mut s3_client: AgentS3Client[C]):
+    ](mut self, mut s3_client: JobSupervisorS3Client[C]):
         """On terminal, flush whatever remains in the current chunk (the final
         partial chunk). A no-op when streaming is not engaged or nothing is
         buffered."""

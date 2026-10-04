@@ -1,8 +1,8 @@
 # =============================================================================
-# komira_agent/heartbeat_client.mojo — the agent -> job-manager heartbeat POST.
+# komira_job_supervisor/heartbeat_client.mojo — the job supervisor -> job-manager heartbeat POST.
 # =============================================================================
 #
-# The supervisor agent's heartbeat transport: builds the proto3-JSON
+# The job supervisor's heartbeat transport: builds the proto3-JSON
 # `SupervisorHeartbeat` body the job-manager's `heartbeat_handler`
 # (`parse_heartbeat_body` / `_failure_from_json`) parses, POSTs it to
 # `http://{host}:{port}/internal/heartbeat` over the shared `komira_http_client`
@@ -26,20 +26,20 @@
 # encoded to PROTOBUF-BINARY via `komira_proto_codec.encode_proto`, POSTed with
 # `Content-Type: application/protobuf`. The job-manager's handler `decode_proto`s
 # it back, and the `{cancel}` reply is the generated `HeartbeatResponse` message
-# encoded to protobuf-binary, which the agent `decode_proto`s for the cancel bit.
+# encoded to protobuf-binary, which the job supervisor `decode_proto`s for the cancel bit.
 #
 # WHY protobuf-binary (was proto3-JSON): the SAME `.proto` (supervisor.proto) that
 # defines the messages defines the wire, and BOTH sides drive the generated
 # Mojo structs through the one `komira_proto_codec` codec (no hand-rolled JSON
-# projection / hand-written parser to drift). The agent's own `AgentPhase` /
+# projection / hand-written parser to drift). The job supervisor's own `JobSupervisorPhase` /
 # `FailureReport` value types are mapped onto the generated message here.
 #
 # DRIVE MODEL (mirrors k8s_tls.k8s_https_request_authed): `send_heartbeat[RT]`
-# is `[RT]`-parametric over the runtime/reactor (so a future production agent
+# is `[RT]`-parametric over the runtime/reactor (so a future production job supervisor
 # can park the POST on a shared reactor); `send_heartbeat_blocking` is the SYNC
 # ESCAPE — it stands up a `BlockingRuntime[NoopSink]` on the calling thread and
 # drives the `[RT]` path, exactly the reactor-free single-shot control-plane
-# shape the k8s pod client + job-manager service use. The agent run loop calls
+# shape the k8s pod client + job-manager service use. The job supervisor run loop calls
 # the `_blocking` entry (single-threaded MVP loop).
 #
 # RESILIENCE: a network failure (connect refused, EOF) is caught and surfaced as
@@ -76,8 +76,8 @@ from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_proto_codec import encode_proto, decode_proto
 
 # The GENERATED supervisor/broker proto messages. Aliased so the
-# agent-facing `SupervisorHeartbeat` value struct below does not collide with
-# the generated wire message — the agent builds the value struct, then projects
+# job-supervisor-facing `SupervisorHeartbeat` value struct below does not collide with
+# the generated wire message — the job supervisor builds the value struct, then projects
 # it onto `PbSupervisorHeartbeat` for the wire.
 from komira_supervisor_proto.supervisor import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,
@@ -91,7 +91,7 @@ from komira_broker_proto.broker import (
     BrokerClusterMap as PbBrokerClusterMap,
 )
 
-from komira_agent.agent_state import AgentPhase, FailureReport
+from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase, FailureReport
 
 # ★ THE JM AUTH SEAM. `jm_auth_headers` returns the headers one
 # job-manager request must carry under the DECLARED posture -- an EMPTY list
@@ -99,7 +99,7 @@ from komira_agent.agent_state import AgentPhase, FailureReport
 # `Bearer <oidc-id-token>` under `gcp_metadata`. It RAISES rather than
 # degrading, which is why `send_heartbeat_blocking` below has an explicit
 # AUTH_UNAVAILABLE outcome instead of falling back to a bearer-less POST.
-from komira_agent.jm_auth import (
+from komira_job_supervisor.jm_auth import (
     GcpMetadataMinter,
     JmAuthMode,
     JmTokenMinter,
@@ -112,22 +112,22 @@ from komira_log import ArgStr
 
 
 # =============================================================================
-# §1 — SupervisorHeartbeat — the value the agent sends.
+# §1 — SupervisorHeartbeat — the value the job supervisor sends.
 # =============================================================================
 struct SupervisorHeartbeat(Movable):
-    """One supervisor heartbeat. The agent builds this from its AgentState +
+    """One supervisor heartbeat. The job supervisor builds this from its JobSupervisorState +
     config each cycle; the JSON builder below projects it onto the wire shape
     the handler parses.
 
       job_id    — hyphenated job UUID.
-      phase     — the agent-reported phase.
+      phase     — the job-supervisor-reported phase.
       pod_name  — this pod's name.
       progress  — Optional progress percent.
       message   — Optional status line.
       failure   — Some only on a FAILED report (forensics)."""
 
     var job_id: String
-    var phase: AgentPhase
+    var phase: JobSupervisorPhase
     var pod_name: String
     var progress: Optional[Int32]
     var message: Optional[String]
@@ -136,7 +136,7 @@ struct SupervisorHeartbeat(Movable):
     def __init__(
         out self,
         var job_id: String,
-        phase: AgentPhase,
+        phase: JobSupervisorPhase,
         var pod_name: String,
         progress: Optional[Int32],
         var message: Optional[String],
@@ -196,7 +196,7 @@ struct HeartbeatOutcome(Copyable, Movable, ImplicitlyCopyable):
 
 
 # =============================================================================
-# §3 — proto projection: AgentState value struct -> generated wire message.
+# §3 — proto projection: JobSupervisorState value struct -> generated wire message.
 # =============================================================================
 def _json_escape(s: String) -> String:
     """Escape a String for embedding inside a JSON string literal: backslash,
@@ -223,22 +223,22 @@ def _json_escape(s: String) -> String:
     return out^
 
 
-def _phase_to_proto(phase: AgentPhase) -> PbJobPhase:
-    """Map the agent-reported `AgentPhase` onto the generated supervisor.proto
-    `JobPhase` enum. Agents only ever report the four terminal-ish phases
+def _phase_to_proto(phase: JobSupervisorPhase) -> PbJobPhase:
+    """Map the job-supervisor-reported `JobSupervisorPhase` onto the generated supervisor.proto
+    `JobPhase` enum. Job supervisors only ever report the four terminal-ish phases
     (RUNNING / COMPLETED / FAILED / CANCELLED)."""
-    if phase == AgentPhase.completed():
+    if phase == JobSupervisorPhase.completed():
         return PbJobPhase(PbJobPhase.JOB_PHASE_COMPLETED)
-    if phase == AgentPhase.failed():
+    if phase == JobSupervisorPhase.failed():
         return PbJobPhase(PbJobPhase.JOB_PHASE_FAILED)
-    if phase == AgentPhase.cancelled():
+    if phase == JobSupervisorPhase.cancelled():
         return PbJobPhase(PbJobPhase.JOB_PHASE_CANCELLED)
     return PbJobPhase(PbJobPhase.JOB_PHASE_RUNNING)
 
 
 def _failure_to_proto(f: FailureReport) -> PbFailureReport:
-    """Project the agent's `FailureReport` value struct onto the generated
-    supervisor.proto `FailureReport` message. The agent does not populate the
+    """Project the job supervisor's `FailureReport` value struct onto the generated
+    supervisor.proto `FailureReport` message. The job supervisor does not populate the
     proto `reason` field (it carries exit_code / signal / stderr_tail /
     panic_message / last_record_offset); `reason` is left absent."""
     var tail = List[String]()
@@ -251,7 +251,7 @@ def _failure_to_proto(f: FailureReport) -> PbFailureReport:
 
     var lro = Optional[UInt64]()
     if f.last_record_offset:
-        # The agent stores the offset as Int64; the proto field is uint64.
+        # The job supervisor stores the offset as Int64; the proto field is uint64.
         lro = Optional[UInt64](UInt64(Int(f.last_record_offset.value())))
 
     return PbFailureReport(
@@ -259,17 +259,17 @@ def _failure_to_proto(f: FailureReport) -> PbFailureReport:
         f.signal,  # signal (Optional[Int32])
         tail^,  # stderr_tail (repeated string)
         pm^,  # panic_message (Optional[String])
-        Optional[String](),  # reason (agent leaves absent)
+        Optional[String](),  # reason (job supervisor leaves absent)
         lro^,  # last_record_offset (Optional[UInt64])
     )
 
 
 def _to_proto(hb: SupervisorHeartbeat) -> PbSupervisorHeartbeat:
-    """Project the agent-facing `SupervisorHeartbeat` value struct onto the
+    """Project the job-supervisor-facing `SupervisorHeartbeat` value struct onto the
     GENERATED supervisor.proto `SupervisorHeartbeat` wire message."""
     var progress = Optional[UInt32]()
     if hb.progress:
-        # Agent stores progress as Int32; the proto field is uint32.
+        # The job supervisor stores progress as Int32; the proto field is uint32.
         progress = Optional[UInt32](UInt32(Int(hb.progress.value())))
 
     var message = Optional[String]()
@@ -289,7 +289,7 @@ def _to_proto(hb: SupervisorHeartbeat) -> PbSupervisorHeartbeat:
         failure^,  # failure
         # M6 fields (field #7/8/9). A plain job supervisor owns no broker
         # partitions, so node_id/load are absent + owned_partitions is empty.
-        # The broker-node agent path populates these via _to_proto_node below.
+        # The broker-node job supervisor path populates these via _to_proto_node below.
         Optional[String](),  # node_id
         Optional[PbNodeLoad](),  # load
         List[UInt32](),  # owned_partitions
@@ -301,7 +301,7 @@ def _to_proto(hb: SupervisorHeartbeat) -> PbSupervisorHeartbeat:
 
 
 def encode_heartbeat(hb: SupervisorHeartbeat) raises -> List[UInt8]:
-    """Encode an agent heartbeat to protobuf-binary wire bytes via the generated
+    """Encode a job supervisor heartbeat to protobuf-binary wire bytes via the generated
     supervisor.proto `SupervisorHeartbeat` message + the `komira_proto_codec` codec."""
     return encode_proto[PbSupervisorHeartbeat](_to_proto(hb))
 
@@ -336,7 +336,7 @@ def send_heartbeat[
     the caller's HttpClient, whose transport `C` the caller chose.
 
     `auth_headers` are appended AFTER `Content-Type` and are whatever the
-    caller's DECLARED posture produced (`komira_agent.jm_auth.jm_auth_headers`).
+    caller's DECLARED posture produced (`komira_job_supervisor.jm_auth.jm_auth_headers`).
     An EMPTY list -- the default -- serializes byte-identically to this
     function's request before the auth seam, so every existing caller is unchanged.
 
@@ -361,7 +361,7 @@ def send_heartbeat[
     `HeartbeatResponse` reply.
 
     NEVER raises: a network failure (connect refused / EOF / decode error) is
-    caught and returned as `HeartbeatOutcome(ok=False, ...)` so the agent loop
+    caught and returned as `HeartbeatOutcome(ok=False, ...)` so the job supervisor loop
     logs + backs off WITHOUT interrupting the child (a lost heartbeat must not
     kill the job)."""
     try:
@@ -400,26 +400,26 @@ def send_heartbeat[
     except e:
         # Network / decode failure — best-effort, never crash the loop.
         log.warn[
-            "agent: heartbeat POST failed: {}", "komira_agent.heartbeat"
+            "job supervisor: heartbeat POST failed: {}", "komira_job_supervisor.heartbeat"
         ](ArgStr(String(e)))
         return HeartbeatOutcome(False, False, 0)
 
 
 # =============================================================================
-# §5b — the agent's job-manager TLS connector.
+# §5b — the job supervisor's job-manager TLS connector.
 # =============================================================================
-def build_agent_jm_tls_connector() raises -> TlsConnector[KernelTcpConnector]:
-    """The `TlsConnector` the agent dials an `https://` job manager through:
+def build_job_supervisor_jm_tls_connector() raises -> TlsConnector[KernelTcpConnector]:
+    """The `TlsConnector` the job supervisor dials an `https://` job manager through:
     the EXISTING unpinned public-CA connector, verbatim.
 
     ⛔ THIS FUNCTION DELIBERATELY ADDS NOTHING. It exists to give the choice a
     NAME and one place to change, not to configure anything -- writing a second
-    TLS setup for the agent is exactly the duplication to avoid, and
+    TLS setup for the job supervisor is exactly the duplication to avoid, and
     `komira_http_client`'s factory already carries the four decisions that matter
     (TLS 1.3 cipher preferences, the system public-CA trust store, verification
     ON, `verify_mode=VERIFY_PEER` so the session cache buckets correctly).
 
-    ⛔ NO `disable_verify()` ARM, AND NONE MAY BE ADDED. An agent that skips peer
+    ⛔ NO `disable_verify()` ARM, AND NONE MAY BE ADDED. A job supervisor that skips peer
     verification reports its job's terminal phase -- and takes its cancel
     signal -- from whatever answered the dial. The MVP-plaintext posture this
     replaces was at least honestly plaintext; a verify-skipping TLS arm would
@@ -442,7 +442,7 @@ def send_heartbeat_blocking(
     `BlockingRuntime[NoopSink]` (current-thread, single-task) on the CALLING
     thread, builds a fresh HttpClient, and drives
     `send_heartbeat[BlockingRuntime[NoopSink], C]` with the runtime's reactor —
-    the `k8s_https_request_authed_blocking` model. The agent run loop calls this
+    the `k8s_https_request_authed_blocking` model. The job supervisor run loop calls this
     (single-threaded MVP loop).
 
     ⛔⛔ THE TRANSPORT ARGUMENTS HAVE **NO DEFAULTS**, AND THEY MAY NOT GROW
@@ -481,7 +481,7 @@ def send_heartbeat_blocking(
     whatever `use_tls` said, so an ID token could go out in the clear -- the
     on-VM loader could reach that pair after a transient failure of the startup
     script's optional scheme fetch, where no placement check can see it. Both
-    config readers (`AgentConfig.from_env`, `PodLoaderSupervisorConfig
+    config readers (`JobSupervisorConfig.from_env`, `PodLoaderSupervisorConfig
     .from_env`) now refuse the pair at boot; this is the per-beat backstop for
     every caller, including one that builds its config by hand.
 
@@ -529,10 +529,10 @@ def send_heartbeat_blocking_with_minter[
     if jm_credential_rides_in_clear(use_tls, auth_mode):
         log.warn[
             (
-                "agent: heartbeat REFUSED: posture {} would send a credential"
+                "job supervisor: heartbeat REFUSED: posture {} would send a credential"
                 " over PLAINTEXT to {}:{} -- nothing minted, nothing dialled"
             ),
-            "komira_agent.heartbeat",
+            "komira_job_supervisor.heartbeat",
         ](ArgStr(auth_mode.name()), ArgStr(host), ArgStr(String(port)))
         return HeartbeatOutcome(False, False, HEARTBEAT_STATUS_AUTH_REFUSED)
 
@@ -560,9 +560,9 @@ def send_heartbeat_blocking_with_minter[
             # string is the most-copied text in an incident.
             log.warn[
                 (
-                    "agent: heartbeat auth unavailable (mode={}, aud={}): {}"
+                    "job supervisor: heartbeat auth unavailable (mode={}, aud={}): {}"
                 ),
-                "komira_agent.heartbeat",
+                "komira_job_supervisor.heartbeat",
             ](ArgStr(auth_mode.name()), ArgStr(audience), ArgStr(String(e)))
             return HeartbeatOutcome(
                 False, False, HEARTBEAT_STATUS_AUTH_UNAVAILABLE
@@ -574,7 +574,7 @@ def send_heartbeat_blocking_with_minter[
         if use_tls:
             var tls_client = HttpClient[
                 TlsConnector[KernelTcpConnector]
-            ].with_defaults(build_agent_jm_tls_connector())
+            ].with_defaults(build_job_supervisor_jm_tls_connector())
             return send_heartbeat[
                 BlockingRuntime[NoopSink], TlsConnector[KernelTcpConnector]
             ](tls_client, reactor, host, port, hb, True, auth_headers)
@@ -586,8 +586,8 @@ def send_heartbeat_blocking_with_minter[
         )
     except e:
         log.warn[
-            "agent: heartbeat runtime construction failed: {}",
-            "komira_agent.heartbeat",
+            "job supervisor: heartbeat runtime construction failed: {}",
+            "komira_job_supervisor.heartbeat",
         ](ArgStr(String(e)))
         return HeartbeatOutcome(False, False, 0)
 
@@ -596,10 +596,10 @@ def send_heartbeat_blocking_with_minter[
 # §7 — BROKER-NODE heartbeat (BROKER-M6-FOLLOWON M6F-1) — the co-located node
 # reports its identity + owned set and reconciles the JM's assignment reply.
 # =============================================================================
-# the agent-facing value projection of the coordinator's
+# the job-supervisor-facing value projection of the coordinator's
 # cluster routing map (the generated `BrokerClusterMap` decoded into plain value
 # structs so the broker entrypoint never touches the generated Pb types — clean
-# encapsulation: the agent owns the wire<->value projection).
+# encapsulation: the job supervisor owns the wire<->value projection).
 struct BrokerEndpointView(Copyable, Movable, ImplicitlyCopyable):
     """One live broker's reachable Kafka endpoint (node_id + host + port)."""
 
@@ -625,7 +625,7 @@ struct PartitionLeaderView(Copyable, Movable, ImplicitlyCopyable):
 
 
 struct BrokerClusterView(Movable):
-    """The agent-facing cluster routing map: every live broker's endpoint + the
+    """The job-supervisor-facing cluster routing map: every live broker's endpoint + the
     per-partition leader. Empty when the coordinator reply carried no
     broker_cluster (an older coordinator / a failed POST)."""
 
@@ -759,7 +759,7 @@ def _broker_heartbeat_proto(
 
 
 def _cluster_view_from_proto(map: PbBrokerClusterMap) -> BrokerClusterView:
-    """Project the generated `BrokerClusterMap` onto the agent-facing value
+    """Project the generated `BrokerClusterMap` onto the job-supervisor-facing value
     `BrokerClusterView` (so the broker entrypoint never touches the Pb types)."""
     var nodes = List[BrokerEndpointView]()
     for i in range(len(map.nodes)):
@@ -848,7 +848,7 @@ def send_broker_heartbeat_over[
         )
     except e:
         log.warn[
-            "broker: heartbeat POST failed: {}", "komira_agent.heartbeat"
+            "broker: heartbeat POST failed: {}", "komira_job_supervisor.heartbeat"
         ](ArgStr(String(e)))
         return BrokerHeartbeatOutcome(
             False, 0, List[UInt32](), BrokerClusterView()
@@ -913,7 +913,7 @@ def send_broker_heartbeat_blocking(
         # off; a lost heartbeat must not stop the data plane).
         log.warn[
             "broker: heartbeat runtime setup failed: {}",
-            "komira_agent.heartbeat",
+            "komira_job_supervisor.heartbeat",
         ](ArgStr(String(e)))
         return BrokerHeartbeatOutcome(
             False, 0, List[UInt32](), BrokerClusterView()

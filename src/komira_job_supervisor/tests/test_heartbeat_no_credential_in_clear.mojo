@@ -1,12 +1,12 @@
 # =============================================================================
-# komira_agent/tests/test_heartbeat_no_credential_in_clear.mojo
+# komira_job_supervisor/tests/test_heartbeat_no_credential_in_clear.mojo
 #   A CREDENTIAL NEVER RIDES A PLAINTEXT HEARTBEAT: nothing minted, nothing sent.
 # =============================================================================
 #
 # ⛔⛔ THE DEFECT. `send_heartbeat_blocking` minted a token
 # whenever the declared posture was not `none` -- REGARDLESS OF `use_tls` --
 # and then dialled. `PodLoaderSupervisorConfig.from_env` and
-# `AgentConfig.from_env` both accepted (plaintext, gcp-metadata). So a
+# `JobSupervisorConfig.from_env` both accepted (plaintext, gcp-metadata). So a
 # Google-signed OIDC ID token could go out in the CLEAR, readable on every hop,
 # for an `http://` audience Cloud Run does not even serve.
 #
@@ -46,14 +46,14 @@ from std.memory import OwnedPointer, UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_agent.agent_state import AgentPhase, FailureReport
-from komira_agent.heartbeat_client import (
+from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase, FailureReport
+from komira_job_supervisor.heartbeat_client import (
     HEARTBEAT_STATUS_AUTH_REFUSED,
     HEARTBEAT_STATUS_AUTH_UNAVAILABLE,
     SupervisorHeartbeat,
     send_heartbeat_blocking_with_minter,
 )
-from komira_agent.jm_auth import JmAuthMode, JmTokenMinter, jm_audience
+from komira_job_supervisor.jm_auth import JmAuthMode, JmTokenMinter, jm_audience
 
 
 comptime _CANNED_JWT: String = (
@@ -309,7 +309,7 @@ def _beat_through_loopback(
 
     var hb = SupervisorHeartbeat(
         String("11111111-2222-3333-4444-555555555555"),
-        AgentPhase.running(),
+        JobSupervisorPhase.running(),
         String("pod-cleartext-guard"),
         Optional[Int32](),
         Optional[String](),
