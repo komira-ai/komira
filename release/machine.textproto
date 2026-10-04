@@ -1,0 +1,51 @@
+# The release machine (src/kci_stage_graph, format kci.machine): the stages of a
+# komira release, in order, and the steps of each. `kci run --stage <S>` runs one
+# stage, every step of it in order (`--only step:<name>` runs a selection, which
+# is reported as SELECTIVE, never as a full run). kci reads THIS path by
+# convention (release/machine.textproto); `--machine <path>` overrides it. .github/workflows/kci.yml runs each stage as the job of the same name, in
+# the GitHub environment of the same name; `kci ci check` holds that workflow to
+# this file (a step of its build job, and the welded test
+# src/kci_ci_check/tests/test_repo_kci_yml.mojo, so a drift fails
+# `./buck2 build //...`). This file owns the stages: edit both together.
+#
+#   build  builds every artifact release/artifacts.textproto declares, for
+#          linux-x86_64, into a release directory with release.json.
+#   prod   publishes that release set to the channel `komira`
+#          (release/channels.textproto). The stage's name is the GitHub
+#          environment the channel's trusted publisher names
+#          (push_identity `...:environment:prod`); kci refuses a trusted
+#          publish from any other stage.
+#
+# Publishing and deploying are separate stages in separate GitHub environments:
+# a deploy stage, when there is one, is added here as a stage of its own, and
+# its DEPLOY step will name the cell it deploys to.
+# Relative paths are relative to the directory kci is started in (the
+# repository's root in kci.yml). Changes need the release approver's review
+# (.github/CODEOWNERS).
+
+# The file format's major (kci_contract's format table): kci refuses a file
+# without it, and one written for a newer kci.
+schema_version: 1
+
+stage {
+  name: "build"
+  step {
+    name: "build"
+    kind: BUILD
+    platform: "linux-x86_64"
+    declarations: "release/artifacts.textproto"
+  }
+}
+
+stage {
+  name: "prod"
+  after: "build"
+  step {
+    name: "publish"
+    kind: PUBLISH
+    platform: "linux-x86_64"
+    declarations: "release/artifacts.textproto"
+    channels: "release/channels.textproto"
+    channel: "komira"
+  }
+}
