@@ -9,7 +9,7 @@
 # `_XXX_cert_der` functions together; the chain still verifies).
 #
 # All three certs use:
-#   - validity period 2024-01-01T00:00:00Z to 2034-01-01T00:00:00Z
+#   - validity period 2026-10-01T00:00:00Z to 2034-01-01T00:00:00Z
 #   - "now" timestamp in tests = 2025-06-15T12:00:00Z (well inside)
 # =============================================================================
 
