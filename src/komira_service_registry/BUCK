@@ -1,0 +1,22 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The cross-cloud service discovery contract: name -> endpoint (last-writer-wins)
+# over one conditional-write object store, the provenance-carrying lookup
+# result, the TTL-cached read-through client, and the HTTP wire constants the
+# serving app and the peer client share. Enrollment (platform identity ->
+# service) is deliberately not part of this package. Its only dependency is
+# komira_objectstore (the compare-and-swap seam); the tests run against the
+# in-memory conformer.
+
+mojo_library(
+    name = "komira_service_registry",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    test_srcs = [
+        "tests/test_service_directory_cache_and_store_errors.mojo",
+        "tests/test_service_discovery_directory.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

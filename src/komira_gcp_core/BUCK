@@ -5,7 +5,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   token      - the `GcpTokenSource` contract the generated
 #                `komira_gcp_<service>` clients call, and a token cache on
 #                komira_retry's injected `MonotonicClock`;
-#   status     - the google.rpc.Status error envelope (never echoes a body);
+#   status     - the google.rpc.Status error envelope, and the gRPC status
+#                of a call over gRPC (never echoes a body or a grpc-message);
 #   pagination - the PURE paging pieces (`PageCursor`, `next_page_token`);
 #   retry      - `GcpRetryClassifier` and `gcp_retry_policy` for komira_retry.
 # and the Cloud Storage V4 signing primitives:

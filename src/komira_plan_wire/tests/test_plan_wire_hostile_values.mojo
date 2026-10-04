@@ -75,7 +75,15 @@ from komira_plan_wire import (
     PLAN_WIRE_EMPTY_SORT_KEYS,
     PLAN_WIRE_UNCHECKED_VALUE_SITE,
     PLAN_WIRE_UNSUPPORTED_REMOTE_FS,
+    PLAN_WIRE_MALFORMED,
+    binding_to_bytes,
+    scan_params_from_bytes,
 )
+from komira_core.arrow.schema import Schema, SchemaBuilder
+from komira_core.source.pushdown_gate import PushdownGate
+from komira_core.source.scan_binding import ScanBinding
+from komira_core.source.scan_params import ScanParams
+from komira_core.source.source_variant import SOURCE_VARIANT_BINDING
 
 
 comptime _FIXTURE_DIR: String = "src/komira_plan_wire/tests/fixtures/hostile/"
@@ -681,6 +689,122 @@ def test_a_correct_plan_still_decodes() raises:
         + " columns rather than 3 — either the fixture moved or the value gate"
         " is refusing a plan that is correct, which is the failure mode a"
         " fail-closed gate has and a fail-open one does not.",
+    )
+
+# =============================================================================
+# `scan_params_from_bytes`: THE PARAMS-ONLY REQUEST
+# =============================================================================
+
+
+def _empty_schema() -> Schema:
+    var sb = SchemaBuilder()
+    return sb.build()
+
+
+def _params_binding(var p: ScanParams) -> ScanBinding:
+    """A binding that carries `p` and leaves every author-refused field at its
+    default."""
+    return ScanBinding(
+        kind_id=UInt32(0),
+        kind_name=String(""),
+        name=String(""),
+        params=p^,
+        schema=_empty_schema(),
+        fingerprint=UInt64(0),
+        structural_id=UInt64(0),
+        gate=PushdownGate.reject_all(),
+    )
+
+
+def _params_only(var p: ScanParams) raises -> List[UInt8]:
+    """A `WireScanBinding` carrying `p` and nothing an author may not set --
+    the request shape `scan_params_from_bytes` reads, built with the codec's
+    own encoder."""
+    return binding_to_bytes(_params_binding(p^), SOURCE_VARIANT_BINDING)
+
+
+def _assert_refused_malformed(var bytes: List[UInt8], what: String) raises:
+    var raised = False
+    try:
+        _ = scan_params_from_bytes(bytes^)
+    except e:
+        raised = True
+        assert_true(
+            String(PLAN_WIRE_MALFORMED) in String(e),
+            what + ": the refusal must carry PLAN_WIRE_MALFORMED, got: "
+            + String(e),
+        )
+    assert_true(raised, what + ": a params request carrying it must be refused")
+
+
+def test_scan_params_from_bytes_round_trips_every_tag() raises:
+    """Every `PARAM_*` tag an author can send comes back as the SAME typed
+    value. `start_offset` is the case that matters: the `topic_live` golden
+    carries it as `PARAM_I64`, and a reader that widened it to a string would
+    author a different binding."""
+    var p = ScanParams()
+    p.put_str(String("topic"), String("orders"))
+    p.put_i64(String("start_offset"), Int64(1000))
+    p.put_i64(String("neg"), Int64(-7))
+    p.put_u64(String("gen"), UInt64(42))
+    p.put_f64(String("ratio"), Float64(0.5))
+    p.put_bool(String("flag"), True)
+    var want = p.render()
+    var got = scan_params_from_bytes(_params_only(p^))
+    assert_equal(got.render(), want)
+    assert_equal(got.get_i64(String("start_offset")), Int64(1000))
+    assert_equal(got.get_i64(String("neg")), Int64(-7))
+
+
+def test_scan_params_from_bytes_refuses_a_whole_binding() raises:
+    """A request that also names a kind is refused by name, never read for its
+    params alone: the kind builds `kind_name` / fingerprint / schema, and a
+    reader that dropped them silently would let an author believe they were
+    honoured."""
+    var p = ScanParams()
+    p.put_str(String("topic"), String("orders"))
+    var b = _params_binding(p^)
+    b.kind_id = UInt32(7)
+    b.kind_name = String("komira.broker.topic")
+    b.name = String("t")
+    _assert_refused_malformed(
+        binding_to_bytes(b, SOURCE_VARIANT_BINDING), "kind_id + kind_name + name"
+    )
+
+
+def test_scan_params_from_bytes_refuses_each_identity_field() raises:
+    """One field at a time, so a reader that checks only `kind_name` (the
+    field the whole-binding case happens to set) is red: a fingerprint, a
+    structural id or a snapshot token an author supplies is exactly the
+    plan-cache input the kind must compute itself."""
+    var p = ScanParams()
+    p.put_str(String("topic"), String("orders"))
+    var fp = _params_binding(p.copy())
+    fp.fingerprint = UInt64(9)
+    _assert_refused_malformed(
+        binding_to_bytes(fp, SOURCE_VARIANT_BINDING), "fingerprint"
+    )
+    var sid = _params_binding(p.copy())
+    sid.structural_id = UInt64(9)
+    _assert_refused_malformed(
+        binding_to_bytes(sid, SOURCE_VARIANT_BINDING), "structural_id"
+    )
+    var tok = _params_binding(p.copy())
+    tok.snapshot_token = UInt64(9)
+    _assert_refused_malformed(
+        binding_to_bytes(tok, SOURCE_VARIANT_BINDING), "snapshot_token"
+    )
+
+
+def test_scan_params_from_bytes_refuses_extra_pushdown_columns() raises:
+    """`pushdown_extra_cols` widens what the scan reads. It is the kind's to
+    state, so an author who sends one is refused rather than ignored."""
+    var p = ScanParams()
+    p.put_str(String("topic"), String("orders"))
+    var b = _params_binding(p^)
+    b.pushdown_extra_cols.append(String("secret_col"))
+    _assert_refused_malformed(
+        binding_to_bytes(b, SOURCE_VARIANT_BINDING), "pushdown_extra_cols"
     )
 
 

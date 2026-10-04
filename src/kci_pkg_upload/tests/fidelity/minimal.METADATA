@@ -1,0 +1,7 @@
+Metadata-Version: 2.1
+Name: komira_fidelity_probe
+Version: 1.1.7
+Summary: Komira Mojo package `komira_fidelity_probe`.
+Requires-Dist: mojo ==1.0.0
+Requires-Dist: komira_protobuf ==1.1.7
+
