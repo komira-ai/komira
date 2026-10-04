@@ -17,6 +17,16 @@
 #   gamma  publishes that release set to the channel `gamma` (prefix.dev
 #          komira-ai/gamma, release/channels.textproto), in the GitHub
 #          environment `gamma` that the channel's trusted publisher names.
+#          Its validation `install` then installs what was published the way
+#          a consumer gets it: the channel's index is read anonymously (it
+#          must list every file with the build's sha256 and serve those
+#          bytes), and in a container of the pinned image pixi installs
+#          komira_encoding and komira_all at this release's version and build
+#          from the channel, with mojo-compiler from Modular's channel, and
+#          runs release/smoke/smoke_komira_encoding.mojo against them.
+#          kci.yml runs the stage as two jobs: `gamma` (`--only
+#          step:publish`) and `validate` (`--only validation:install`, no
+#          environment, no identity token), and prod waits for both.
 #   prod   publishes the SAME release set (never rebuilt) to the channel
 #          `prod` (prefix.dev komira-ai/prod), in the GitHub environment `prod`,
 #          whose required reviewer approves the job. The gamma job's summary
@@ -25,8 +35,6 @@
 # A stage's `environment` is the GitHub environment its job runs in, and the
 # one its channel's trusted publisher names (push_identity
 # `...:environment:<env>`); kci refuses a trusted publish from any other.
-# No validation is declared yet: this kci refuses a declared validation
-# rather than skip it, until the validation runner lands.
 #
 # Publishing and deploying are separate stages in separate GitHub environments:
 # a deploy stage, when there is one, is added here as a stage of its own.
@@ -60,6 +68,23 @@ stage {
     declarations: "release/artifacts.textproto"
     channels: "release/channels.textproto"
     channel: "gamma"
+    validation {
+      name: "install"
+      kind: CONDA_INSTALL_SMOKE
+      # The consumer: pixi and a C++ runtime, nothing of ours. Pinned by the
+      # digest of its linux/amd64 manifest; the tag is only a label.
+      image: "ghcr.io/prefix-dev/pixi:0.67.2-bookworm-slim@sha256:f9a0835bdb9c2ec11d8c3ef926f4712a90b27993cb59ff2bbf9cbaaffa1e2337"
+      install: "komira_encoding"
+      install: "komira_all"
+      # mojo-compiler, pinned to the libraries' mojo_pin, comes from here.
+      compiler_channel: "https://conda.modular.com/max"
+      # mojo-compiler's own dependencies (python for mojo-python).
+      extra_channel: "conda-forge"
+      program: "release/smoke/smoke_komira_encoding.mojo"
+      # Only the ABSENCE of a file in the channel's index is waited for (the
+      # registry indexes an upload shortly after it lands); then it fails.
+      wait_for_index_seconds: 600
+    }
   }
 }
 

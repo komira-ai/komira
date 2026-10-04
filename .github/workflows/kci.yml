@@ -7,14 +7,19 @@
 # GITHUB_WORKFLOW_SHA; a mismatch is exit 3, nothing run), and the welded test
 # src/kci_ci_check/tests/test_repo_kci_yml.mojo, so a drift also fails
 # `./buck2 build //...` on every pull request. Edit both together. The rules:
-# each job's id is its stage's name and its GitHub environment the stage's
-# `environment`; its `needs` is the stage's `after`; `id-token: write` only on
-# a job whose stage publishes by trusted publishing or is farm-connected; the
-# farm-connect action exactly on the farm-connected stage; each job runs
-# exactly one `kci run --stage <its id>` with `--summary-file`, never with
-# `--only` (a release job runs its whole stage: a FULL run), and reading the
-# machine file being checked; no pull_request trigger; a `revision` input;
-# every action pinned.
+# each stage has a job whose id is its name and whose GitHub environment is
+# the stage's `environment`; its `needs` is the jobs that run the stage's
+# `after`; `id-token: write` only on a job whose stage publishes by trusted
+# publishing or is farm-connected; the farm-connect action exactly on the
+# farm-connected stage; each job runs exactly one `kci run` with
+# `--summary-file`, reading the machine file being checked; no pull_request
+# trigger; a `revision` input; every action pinned. A job runs its whole
+# stage (a FULL run) unless the stage is SPLIT: gamma is, into `gamma` (its
+# step, `--only step:publish`) and `validate` (its validation, `--only
+# validation:install`), which together run all of it exactly once; a job
+# that runs only validations has no environment and no identity token and
+# needs the stage's own job. [The split is PENDING A RULING on rules R1 and
+# R9 of the workflow check, src/kci_ci_check.]
 #
 #   build  on a GitHub-hosted runner joined to the build farm's tailnet
 #          (./.github/actions/farm-connect; the stage is farm_connected), in
@@ -25,12 +30,23 @@
 #          revision, so they publish the bytes `build` verified, never
 #          rebuilt. This job holds a tailnet node and no publishing token.
 #   gamma  on a GitHub-hosted runner, in the GitHub environment `gamma`, with
-#          `id-token: write`: `kci run --stage gamma` publishes to prefix.dev
-#          komira-ai/gamma. Its job summary also lists the names new to
-#          komira-ai/prod (NEW NAMES): read it before approving prod.
-#   prod   the same, in the GitHub environment `prod` (its required reviewer
-#          approves the job), to prefix.dev komira-ai/prod. Only a manual run
-#          reaches it, so a push to main never waits on the prod approval.
+#          `id-token: write`: `kci run --stage gamma --only step:publish`
+#          publishes to prefix.dev komira-ai/gamma. Its job summary also lists
+#          the names new to komira-ai/prod (NEW NAMES): read it before
+#          approving prod.
+#   validate
+#          on a plain GitHub-hosted runner (docker is installed there), in no
+#          environment and with `contents: read` only: `kci run --stage gamma
+#          --only validation:install` installs what gamma published from the
+#          channel, anonymously, in the digest-pinned container the machine
+#          file names, and runs the smoke program. It holds no identity
+#          token, so it cannot publish; a failed validation is exit 7 and
+#          prod does not start. Re-running it re-validates without
+#          re-publishing.
+#   prod   the same as gamma, after gamma AND validate, in the GitHub
+#          environment `prod` (its required reviewer approves the job), to
+#          prefix.dev komira-ai/prod. Only a manual run reaches it, so a push
+#          to main never waits on the prod approval.
 #
 # Each channel trusts this repository, this file (kci.yml) and one environment
 # (trusted publishing): no secret is stored anywhere. The publish jobs stay
@@ -255,12 +271,13 @@ jobs:
           fi
       # The channel's credential is trusted publishing (OIDC): kci reads the
       # job's ID token itself and resolves no secret, so the store is none. kci
-      # refuses the token unless its environment is this stage's, gamma.
-      - name: kci run --stage gamma
+      # refuses the token unless its environment is this stage's, gamma. The
+      # stage's validation runs in the `validate` job, not here.
+      - name: kci run --stage gamma --only step:publish
         run: |
           set --
           if [ "$DRY_RUN" = true ]; then set -- --plan; fi
-          "$RUNNER_TEMP/kci/kci" run --stage gamma \
+          "$RUNNER_TEMP/kci/kci" run --stage gamma --only step:publish \
             --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
             --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
@@ -276,8 +293,61 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  validate:
+    needs: [build, gamma]
+    if: needs.build.outputs.release == 'true'
+    # docker is on the hosted image; no farm, no tailnet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # No environment: no approval, and no environment secret to leak.
+    permissions:
+      # no id-token: this job cannot mint a publishing token
+      contents: read
+    env:
+      # ⛔ A push is ALWAYS a dry run: the validation then runs nothing
+      # (WOULD_VALIDATE), as gamma published nothing.
+      DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
+    steps:
+      # The machine file and the smoke program at the release revision; the
+      # full history kci's read of this workflow at its commit needs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The SAME artifact gamma published: the pins are its release.json's.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: kci-release-${{ env.REVISION }}
+          path: ${{ runner.temp }}/in
+      - name: unpack the release
+        run: tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/in/kci-release.tar"
+      # kci pulls the image itself (the digest is the machine file's), reads
+      # the channel anonymously and starts the container with nothing of this
+      # job's environment.
+      - name: kci run --stage gamma --only validation:install
+        run: |
+          set --
+          if [ "$DRY_RUN" = true ]; then set -- --plan; fi
+          "$RUNNER_TEMP/kci/kci" run --stage gamma --only validation:install \
+            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
+            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
+            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --release-dir "$RUNNER_TEMP/release" --scratch-dir "$RUNNER_TEMP/validate" \
+            --result-file "$RUNNER_TEMP/kci-result-validate.json" \
+            --summary-file "$GITHUB_STEP_SUMMARY" "$@"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: kci-result-validate-${{ env.REVISION }}
+          path: ${{ runner.temp }}/kci-result-validate.json
+          if-no-files-found: warn
+          retention-days: 90
+
   prod:
-    needs: gamma
+    # after the stage gamma: its publish AND its validation
+    needs: [gamma, validate]
     # A manual run only: a push to main stops at gamma's dry run, so it never
     # waits on the prod environment's reviewer. (Skipped with gamma when the
     # revision has no release machine.)

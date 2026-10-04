@@ -9,6 +9,8 @@
 #   artifacts.textproto  src/kci_artifact_declaration (test_release_artifacts_file)
 #   channels.textproto   src/kci_release_channel (test_release_channels_file),
 #                        src/kci_ci_check (test_repo_kci_yml)
+# The programs the machine file's validations run are in release/smoke, each a
+# mojo_test against the in-repository library.
 # Changes need the release approver's review (.github/CODEOWNERS).
 export_file(
     name = "artifacts.textproto",

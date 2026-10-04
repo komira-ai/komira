@@ -4,9 +4,9 @@
 #   release/machine.textproto, by the same check `kci run` makes at start-up
 #   (`check_running_workflow`): it finds nothing. A drift between the two (a
 #   renamed job or environment, a stage the workflow does not run, a
-#   pull_request trigger, an unpinned action, a `kci run` with --only, without
-#   --summary-file or reading another machine file, farm-connect on the wrong
-#   job) fails this test, and with it `./buck2 build //...` on every pull
+#   pull_request trigger, an unpinned action, a split of a stage that does not
+#   run all of it exactly once, a `kci run` without --summary-file or reading
+#   another machine file, farm-connect on the wrong job) fails this test, and with it `./buck2 build //...` on every pull
 #   request. The workflow's KCI_MACHINE (used only to skip a revision without a
 #   machine file) must be kci's default machine file, because no `kci` line of
 #   the workflow passes --machine. The workflow names no removed input or verb
@@ -14,8 +14,9 @@
 #   file's.
 # =============================================================================
 #
-# The three files are staged as test data (BUCK): `kci.yml` (the root BUCK
-# exports it), `machine.textproto` and `channels.textproto` (release/BUCK).
+# The files are staged as test data (BUCK): `kci.yml` (the root BUCK exports
+# it), `machine.textproto` and `channels.textproto` (release/BUCK), and the
+# program gamma's validation runs (release/smoke/BUCK).
 # =============================================================================
 
 from std.pathlib import Path
@@ -72,8 +73,24 @@ def test_the_release_machine() raises:
         assert_equal(p.steps[0].declarations, String("release/artifacts.textproto"))
         assert_equal(p.steps[0].channels, String("release/channels.textproto"))
         assert_equal(p.steps[0].channel, name)
-        # no validation yet: this kci refuses a declared one rather than skip it
-        assert_equal(len(p.steps[0].validations), 0)
+        # gamma's step carries the install validation; prod's none
+        if name == String("gamma"):
+            assert_equal(len(p.steps[0].validations), 1)
+            ref v = p.steps[0].validations[0]
+            assert_equal(v.name, String("install"))
+            assert_equal(v.kind, String("CONDA_INSTALL_SMOKE"))
+            assert_equal(len(v.installs), 2)
+            assert_equal(v.installs[0], String("komira_encoding"))
+            assert_equal(v.installs[1], String("komira_all"))
+            assert_equal(v.compiler_channel, String("https://conda.modular.com/max"))
+            assert_equal(v.program, String("release/smoke/smoke_komira_encoding.mojo"))
+            assert_true(v.image.startswith(String("ghcr.io/prefix-dev/pixi:")), v.image)
+            assert_equal(v.wait_for_index_seconds, 600)
+            # the program the validation names is there, and states its count
+            var program = Path(String("smoke_komira_encoding.mojo")).read_text()
+            assert_true(program.find(String("\"komira_encoding validation: \"")) >= 0, String("the smoke program prints no count line"))
+        else:
+            assert_equal(len(p.steps[0].validations), 0)
         # The stage's environment IS the one the channel's trusted publisher
         # names: kci refuses a trusted publish from any other.
         var ch = find_channel(channels, p.steps[0].channel)
@@ -100,18 +117,21 @@ def test_kci_yml_agrees_with_the_machine_file() raises:
         raise Error(String(".github/workflows/kci.yml disagrees with release/machine.textproto:") + all)
 
 
-def test_kci_yml_runs_full_stages_from_the_default_machine_file() raises:
+def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     var doc = read_workflow(Path(String("kci.yml")).read_text())
     var env = doc.child(0, String("env"))
     var m = doc.child(env, String("KCI_MACHINE"))
     assert_true(m >= 0 and doc.kind(m) == NODE_SCALAR, String("kci.yml sets no env KCI_MACHINE"))
     assert_equal(doc.text(m), String(DEFAULT_MACHINE_FILE))
-    # every `kci run` of every job: no --only (a FULL run, R9), no --machine
-    # (the default, R10), a --summary-file (R12)
+    # every `kci run` of every job: no --machine (the default, R10), a
+    # --summary-file (R12); --only only where gamma is split (R9): its step
+    # in the job gamma, its validation in the job validate
     var jobs = doc.child(0, String("jobs"))
     var nodes = doc.items(jobs)
     var runs = 0
     var farm = 0
+    var ids = doc.keys(jobs)
+    var only_seen = List[String]()
     for j in range(len(nodes)):
         var steps = doc.items(doc.child(nodes[j], String("steps")))
         for i in range(len(steps)):
@@ -124,12 +144,29 @@ def test_kci_yml_runs_full_stages_from_the_default_machine_file() raises:
             var calls = kci_run_calls(doc.text(r))
             for k in range(len(calls)):
                 runs += 1
-                assert_true(not calls[k].has_only, String("a kci run in kci.yml carries --only"))
+                for o in range(len(calls[k].only)):
+                    only_seen.append(ids[j] + String(" ") + calls[k].stage + String(" ") + calls[k].only[o])
                 assert_true(not calls[k].has_machine, String("a kci run in kci.yml passes --machine"))
                 assert_true(calls[k].has_summary_file, String("a kci run in kci.yml passes no --summary-file"))
-    assert_equal(runs, 3)
+    assert_equal(runs, 4)
+    assert_equal(len(only_seen), 2)
+    assert_equal(only_seen[0], String("gamma gamma step:publish"))
+    assert_equal(only_seen[1], String("validate gamma validation:install"))
     # the build job, and only it, joins the tailnet
     assert_equal(farm, 1)
+    # the validate job: no environment, no identity token, after the publish
+    var validate = doc.child(jobs, String("validate"))
+    assert_true(validate >= 0, String("kci.yml has no job validate"))
+    assert_true(doc.child(validate, String("environment")) < 0, String("the validate job runs in an environment"))
+    var perms = doc.child(validate, String("permissions"))
+    assert_true(doc.child(perms, String("id-token")) < 0, String("the validate job holds id-token"))
+    var needs = doc.scalar_or_list(doc.child(validate, String("needs")))
+    assert_equal(len(needs), 2)
+    assert_equal(needs[1], String("gamma"))
+    # prod waits for the validation
+    var prod_needs = doc.scalar_or_list(doc.child(doc.child(jobs, String("prod")), String("needs")))
+    assert_equal(len(prod_needs), 2)
+    assert_equal(prod_needs[1], String("validate"))
 
 
 def test_kci_yml_names_no_removed_input_and_no_other_channel() raises:
