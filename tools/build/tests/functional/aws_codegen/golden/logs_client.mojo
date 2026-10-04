@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 4
+#   generator    : aws-client-gen version 10
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -59,8 +59,7 @@ from komira_aws_core import (
     AwsResponse,
     aws_blob_from_json,
     aws_error_code,
-    aws_error_code_from_body,
-    aws_error_message_from_body,
+    aws_json_error_info,
     aws_is_error_status,
     aws_f64_from_json,
     aws_json_blob,
@@ -72,20 +71,32 @@ from komira_aws_core import (
     aws_json_string,
     aws_ts_from_json,
     aws_ts_to_json,
+    AwsClock,
     AwsCredential,
     AwsCredsSource,
     AwsEndpoint,
+    AwsHttpTransport,
+    AwsRetryQuota,
     Header,
     HttpResult,
     resolve_endpoint,
     send_sigv4_signed_request,
+    send_sigv4_signed_request_with,
 )
 from komira_json import (
     JsonValue,
     parse_json_bytes,
     parse_json_value,
 )
-from komira_http.transport.io_stream import Connector
+from komira_http_client.client import HttpClientConfig
+from komira_http_core.transport.io_stream import Connector
+from komira_retry import (
+    MonotonicClock,
+    RetryBudget,
+    RetryLoop,
+    RetryRng,
+    Sleeper,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +170,10 @@ struct CloudWatchLogsGetLogEventsRequest(Copyable, Movable, Deinitable):
         self.limit = Optional[Int32]()
         self.start_from_head = Optional[Bool]()
         self.unmask = Optional[Bool]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -349,6 +364,10 @@ struct CloudWatchLogsGetLogEventsResponse(Copyable, Movable, Deinitable):
         self.next_forward_token = Optional[String]()
         self.next_backward_token = Optional[String]()
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -450,6 +469,10 @@ struct CloudWatchLogsInvalidParameterException(Copyable, Movable, Deinitable):
     def __init__(out self):
         pass
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -505,6 +528,10 @@ struct CloudWatchLogsOutputLogEvent(Copyable, Movable, Deinitable):
         self.timestamp = Optional[Int64]()
         self.message = Optional[String]()
         self.ingestion_time = Optional[Int64]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -605,6 +632,10 @@ struct CloudWatchLogsResourceNotFoundException(Copyable, Movable, Deinitable):
     def __init__(out self):
         pass
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -652,6 +683,10 @@ struct CloudWatchLogsServiceUnavailableException(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         pass
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -715,11 +750,24 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
 
         The connector factory is a `def () raises thin -> C` function
         pointer (a code pointer, no heap); the credential source is moved
-        in. No field is an `UnsafePointer`."""
+        in. No field is an `UnsafePointer`.
+
+        `http_config` is the caller's and has no default: the HTTP client is
+        built inside `send_sigv4_signed_request`, so this argument is the only
+        way to bound it. A process serving requests under a platform deadline
+        passes `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling
+        in microseconds; a process with no containing deadline (a job, a CLI,
+        a test) passes `HttpClientConfig.defaults()`."""
 
     var _mk_connector: def () raises thin -> Self.C
+    # Handed to `send_sigv4_signed_request` on every send, unchanged.
+    var _http_config: HttpClientConfig
     var _creds_source: Self.T
     var _region: String
+    # The retry quota this client's calls share (botocore's standard mode
+    # keeps one per client): every retry spends from it, and a call that
+    # succeeds refills it.
+    var _retry_quota: AwsRetryQuota
     # WHERE this client sends. `None` = real AWS (the host derived from
     # the region). A VALUE, never an ambient env var — see
     # `komira_aws_core.AwsEndpoint`. This is what makes every verb this
@@ -729,13 +777,16 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
     def __init__(
         out self,
         mk_connector: def () raises thin -> Self.C,
+        http_config: HttpClientConfig,
         var creds_source: Self.T,
         region: String,
         endpoint_override: Optional[AwsEndpoint] = Optional[AwsEndpoint](),
     ):
         self._mk_connector = mk_connector
+        self._http_config = http_config.copy()
         self._creds_source = creds_source^
         self._region = region
+        self._retry_quota = AwsRetryQuota()
         self._endpoint_override = endpoint_override.copy()
 
     def into_creds_source(deinit self) -> Self.T:
@@ -775,6 +826,55 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
                 extra.append(Header(n^, req.header_values[_i].copy()))
         return send_sigv4_signed_request[Self.C](
             self._mk_connector,
+            self._http_config.copy(),
+            self._retry_quota,
+            req.method.copy(),
+            cred,
+            self._region.copy(),
+            String(CLOUDWATCHLOGS_SERVICE),
+            resolve_endpoint(self._endpoint_override, komira_aws_logs_host(self._region.copy())),
+            req.uri.copy(),
+            content_type^,
+            req.body.copy(),
+            extra^,
+        )
+
+    def send_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, var req: AwsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`send`, over the transport, signing clock, retry loop and budget
+            given (`komira_aws_core.send_sigv4_signed_request_with`) instead of a
+            connector from this client's factory, the wall clock and the
+            standard retry loop. It returns the response, successful or not.
+
+            The transport carries the HTTP config: `AwsConnectorTransport(
+            http_config, connector)` is built from the caller's
+            `HttpClientConfig`, as `send` builds its own from this client's. The
+            budget is the retry quota: an `AwsRetryQuota` the caller keeps, one
+            for all the calls it makes over this client, as botocore keeps one
+            per client. `send` spends this client's own quota instead.
+
+            A request carrying `If-Match` or `If-None-Match` is resent only
+            when the service cannot have acted on it (`aws_request_is_conditional`)."""
+        var cred = self._creds_source.credentials()
+        var extra = List[Header]()
+        var content_type = String(String(
+            CLOUDWATCHLOGS_CONTENT_TYPE
+        ))
+        for _i in range(len(req.header_names)):
+            var n = req.header_names[_i].copy()
+            if n.lower() == String("content-type"):
+                # Header names are case-insensitive, and the substrate refuses an
+                # `extra` Content-Type in any case.
+                # The substrate takes the content type as its own argument and
+                # puts it in BOTH the signed set and the wire headers. Passing it
+                # again here would emit it twice and break the signature.
+                content_type = req.header_values[_i].copy()
+            else:
+                extra.append(Header(n^, req.header_values[_i].copy()))
+        return send_sigv4_signed_request_with(
+            transport,
+            clock,
+            retry,
+            budget,
             req.method.copy(),
             cred,
             self._region.copy(),
@@ -794,17 +894,24 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
             return parse_get_log_events_response(res^.into_response())
         raise _komira_aws_logs_error(String("GetLogEvents"), res)
 
+    def get_log_events_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: CloudWatchLogsGetLogEventsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`GetLogEvents` over the given seams (`send_with`): the response, successful
+            or not. `parse_get_log_events_response` reads a successful one."""
+        var req = build_get_log_events_request(input)
+        return self.send_with(req^, transport, clock, retry, budget)
+
 
 def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:
     """A non-2xx as an `Error`.
 
         ⛔ IT NEVER ECHOES THE RESPONSE BODY. Only the HTTP status plus the
-        parsed short `__type` token and message ride out. A generated client
+        awsJson error code and message ride out. A generated client
         cannot know which of its shapes carry a secret, so the discipline is
         unconditional — the `secrets_manager_client._sm_error` rule, applied
         everywhere because the generator has no way to make the exception."""
-    var code = aws_error_code_from_body(res.body)
-    var msg = aws_error_message_from_body(res.body)
+    var info = aws_json_error_info(res.to_response())
+    var code = info.code.copy()
+    var msg = info.message.copy()
     return Error(
         String("CloudWatchLogsCloudWatchLogs.")
         + op

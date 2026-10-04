@@ -21,9 +21,9 @@ separate, gated step that belongs to the release tool (kci).
 |---|---|---|
 | 1. Mojo packages | `mojo_library`: built, and consumed by other libraries through `deps`. Unchanged by anything here | `src/*/BUCK` |
 | 2. packaging rules | `conda_package`: turns one library into a `.conda` directory (this page). A Python wheel rule is a design only, see below | `tools/build/package/conda.bzl`, `komira_pack` |
-| 3. the release tool | declares **which artifacts exist and how to build them**, builds them through the rules above, and publishes the BUILT files | kci: a reviewed list of artifact declarations |
+| 3. the release tool | declares **which artifacts exist and how to build them**, builds them through the rules above, and publishes the BUILT files | kci: a reviewed list of artifacts |
 
-So there is **one list of published packages, and it is kci's declarations**,
+So there is **one list of published packages, and it is kci's artifacts**,
 not a file in Buck. Buck states how to make a package of any library; kci says
 which of them ship.
 
@@ -72,7 +72,7 @@ it): ten keys, in this order, compact, one trailing newline.
 {"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"komira_json","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"komira_json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>","metadata":"metadata.json"}
 ```
 
-`format` and `schema_version` are kci's format name and major (kci_contract's
+`format` and `schema_version` are kci's format name and major (kci_api's
 format table): kci refuses another format or a major it does not read, and
 ignores a key it does not know inside a major it reads (a writer only ever
 adds keys inside a major). `platform` is the kci platform of `subdir`.
@@ -147,11 +147,11 @@ komira_pack conda-check --dir <dir> --kind metapackage --name komira --expect-su
     --member-manifest <dir>/manifest.json ... [--mojo-pin <compiler version>] [--require-stamped true] --out <marker>
 ```
 
-It reads each member (its manifest against the manifest contract, its file
+It reads each member (its manifest against the manifest format, its file
 against the manifest's sha256, its metadata), requires one release (one
 version, build string, subdir, source commit and commit time; no member twice; no member that
 is itself a metapackage; a name that is not a member's), and writes the same
-directory a library does (the same manifest contract). `conda-check` re-derives
+directory a library does (the same manifest format). `conda-check` re-derives
 the requirements from the member manifests it is given, independently of the
 writer.
 
@@ -163,7 +163,7 @@ Versions are in lockstep, so every release is a whole new set.
 ## What the release tool does with them
 
 The release tool (kci) owns the list. For each declared artifact it runs the
-build system on the declaration's build rule, collects the manifests, builds the
+build system on the artifact's build rule, collects the manifests, builds the
 metapackage with `conda-meta`, and publishes. What its publish step must do is
 its own requirements; the ones that depend on how this directory is built:
 
@@ -318,12 +318,12 @@ rule, when it is written:
   front end); there are few wheels, and each is a reviewed decision.
 - **front end only.** The wheel is the Python package that drives komira, not a
   per-library artifact.
-- **same contract as the conda rule**: `[release]` is a directory holding the
-  `.whl`, `manifest.json` in the artifact-manifest contract for a PYTHON
+- **same rules as the conda rule**: `[release]` is a directory holding the
+  `.whl`, `manifest.json` in the artifact-manifest format for a PYTHON
   artifact (`artifact_type`, `name`, `version`, `file`, `sha256`, `metadata`,
   where `metadata` is the wheel's `METADATA`), gated on a stamp tied to git, built
   reproducibly, read back by an independent check.
-- **declared in kci** like every other artifact (a `PYTHON_WHEEL` declaration
+- **declared in kci** like every other artifact (a `PYTHON_WHEEL` artifact
   whose build rule is that target); nothing in Buck lists it as published.
 
 ## Not done yet

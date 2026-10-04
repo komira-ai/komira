@@ -362,7 +362,7 @@ impl AwsEmitter<'_> {
         Ok(())
     }
 
-    fn emit_model_json(&mut self, msg: &IrMessage) -> Result<(), String> {
+    pub(super) fn emit_model_json(&mut self, msg: &IrMessage) -> Result<(), String> {
         self.line("def to_model_json(self) raises -> JsonValue:");
         self.push();
         self.line("\"\"\"This shape in botocore's MODEL convention: a timestamp is epoch");

@@ -1,0 +1,69 @@
+load(
+    "@komira//third_party/botocore:models.bzl",
+    "botocore_endpoint_file",
+    "botocore_endpoint_tests_path",
+    "botocore_model",
+)
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+
+# Amazon CloudWatch Logs: an awsJson 1.1 client generated at build time from
+# botocore's logs model (//third_party/botocore, pinned by sha256; nothing of
+# it is copied here), in pure mode: each operation's request builder and
+# response parser, and its endpoint resolved through the service's
+# published endpoint ruleset and partition table, embedded in the module.
+# No transport; a caller signs a built request with komira_aws_core's
+# build_sigv4_signed_request (signing name `logs`).
+#
+# Pure, not client, mode: komira_aws_core's `send_sigv4_signed_request` and
+# the client-mode emitter are in place (komira_aws_s3 and komira_aws_sqs
+# are client mode), and this library moves to client mode with client
+# tests of its own over a scripted connector, as theirs have.
+#
+# `operations` is what a log reader calls: GetLogEvents, a stream read page
+# by page. An operation joins the list with its own rows in the tests below.
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the CloudWatch Logs API reference (no upstream test body is
+# copied): test_logs_requests (the request each read builds, exactly, and
+# the model's bounds), test_logs_responses (pages decoded, and the error
+# forms read through komira_aws_core), test_logs_endpoints (botocore's
+# endpoint cases for logs through the generated config, the regional,
+# FIPS, dual-stack and custom endpoints, and one request signed end to end
+# against an independently computed signature) and test_no_env_reads (the
+# generated module reads no environment).
+#
+# No test here talks to the service.
+
+_LOGS = botocore_model("logs")
+
+_ENDPOINT_TESTS = botocore_endpoint_tests_path("logs")
+
+mojo_aws_client(
+    name = "komira_aws_logs",
+    endpoint_rules = _LOGS.endpoint_rules,
+    mode = "pure",
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    partitions = _LOGS.partitions,
+    test_data = {
+        "tests/test_logs_endpoints.mojo": {
+            _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
+        },
+        "tests/test_no_env_reads.mojo": {
+            "gen/" + f: ":komira_aws_logs_gen[{}]".format(f)
+            for f in ["__init__.mojo", "_layout_probe.mojo", "komira_aws_logs.mojo"]
+        },
+    },
+    test_srcs = [
+        "tests/test_logs_endpoints.mojo",
+        "tests/test_logs_requests.mojo",
+        "tests/test_logs_responses.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_json:komira_json",
+    ],
+)
