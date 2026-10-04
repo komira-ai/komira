@@ -1,4 +1,4 @@
-# The release machine (src/kci_stage_graph, format kci.machine): the stages of a
+# The release machine (src/kci_release_machine, format kci.machine): the stages of a
 # komira release, in order, and the steps of each. `kci run --stage <S>` runs one
 # stage, every step of it in order (`--only step:<name>` runs a selection, which
 # is reported as SELECTIVE, never as a full run). kci reads THIS path by
@@ -34,7 +34,7 @@
 # repository's root in kci.yml). Changes need the release approver's review
 # (.github/CODEOWNERS).
 
-# The file format's major (kci_contract's format table): kci refuses a file
+# The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
 schema_version: 1
 

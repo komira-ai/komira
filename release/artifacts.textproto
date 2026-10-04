@@ -40,7 +40,7 @@
 # Which farm buck2 builds on is the build job's machine configuration, written
 # by the farm-connect action (docs/ci.md), not this file's.
 #
-# The file format's major (kci_contract's format table): kci refuses a file
+# The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
 
 schema_version: 1
