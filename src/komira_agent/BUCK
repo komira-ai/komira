@@ -1,0 +1,57 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The job supervisor agent: the process a job manager places next to a job.
+# It downloads the job binary from S3 (SHA-256 verified, chmod 0o755), spawns
+# it through komira_supervisor with both output pipes drained without
+# blocking, heartbeats the job manager over HTTP or HTTPS (the generated
+# komira.supervisor.v1 SupervisorHeartbeat in protobuf binary, with an
+# optional bearer minted from the GCP metadata server), acts on a cancel
+# (SIGTERM -> grace -> SIGKILL), streams stdout to S3 in chunks while the job
+# runs, and on exit analyses the result, sends the terminal heartbeat and
+# uploads logs.txt (and crash_report.json on failure).
+#
+# The S3 transport is the type parameter of `Agent[C]`: `PlainAgent`
+# (KernelTcpConnector, an S3-compatible endpoint over http) and `TlsAgent`
+# (TlsConnector, real S3 or an https endpoint). S3 goes through
+# komira_objectstore_s3's S3Store on the generated komira_aws_s3 client, with
+# komira_aws_core's default credential chain (s3_client.mojo).
+#
+# The welded tests are hermetic: no job manager, no S3 and no cloud. They
+# spawn real children (test_agent_chatty_child), build both transports
+# without dialling (test_agent_https_transport_seam), drive the job-manager
+# auth posture and its refusals (test_agent_jm_auth_seam), refuse a
+# credential on a plaintext heartbeat against a loopback listener
+# (test_heartbeat_no_credential_in_clear), round-trip the heartbeat wire
+# messages (test_heartbeat_proto_roundtrip) and run the S3 verbs, the binary
+# download and the signing clock over a scripted connector
+# (test_agent_s3_client).
+mojo_library(
+    name = "komira_agent",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_broker_proto:komira_broker_proto",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_core:komira_core",
+        "//src/komira_core_ffi:komira_core_ffi",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_log:komira_log",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore_s3:komira_objectstore_s3",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_supervisor:komira_supervisor",
+        "//src/komira_supervisor_proto:komira_supervisor_proto",
+    ],
+    test_srcs = [
+        "tests/test_agent_chatty_child.mojo",
+        "tests/test_agent_https_transport_seam.mojo",
+        "tests/test_agent_jm_auth_seam.mojo",
+        "tests/test_agent_s3_client.mojo",
+        "tests/test_heartbeat_no_credential_in_clear.mojo",
+        "tests/test_heartbeat_proto_roundtrip.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
