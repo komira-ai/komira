@@ -71,6 +71,9 @@ clients.
   client keeps; every operation is retried alike, whatever its method,
   but a conditional write the service may have acted on
   (`aws_request_is_conditional`), which is not resent.
+- `idempotency.mojo`: `aws_idempotency_token`, the random UUID a
+  generated client fills an unset `idempotencyToken` member with, once per
+  call, as botocore does.
 - `echo_connector.mojo`: `AwsEchoConnector`, a test double whose stream
   answers each request with an error naming the request head as it reached
   the wire, so a test of a generated client asserts each verb's request.
@@ -188,6 +191,7 @@ from .aws_retry import (
     aws_transport_error_kind,
     aws_transport_error_unsent,
 )
+from .idempotency import aws_idempotency_token
 from .aws_send import (
     AwsConnectorTransport,
     AwsHttpTransport,
