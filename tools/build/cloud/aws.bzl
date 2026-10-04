@@ -79,8 +79,9 @@ it unless the model's serviceId is `S3` and its protocol is restXml.
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
 generated code imports its runtime (komira_aws_core; komira_json for a JSON
 protocol, komira_xml for restXml; and in client mode komira_http_core,
-komira_http_client and komira_retry), which the caller names as `komira//`
-labels, or as stubs in a test. They are the library's `deps`, so they take
+komira_http_client and komira_retry, and komira_uuid when an operation's
+input has an idempotency token the client fills), which the caller names as
+`komira//` labels, or as stubs in a test. They are the library's `deps`, so they take
 what `mojo_library.deps` takes; `<name>_gen` sees only their count.
 
 Every refusal of the rule happens at analysis, in `<name>_gen`, so a BUCK
