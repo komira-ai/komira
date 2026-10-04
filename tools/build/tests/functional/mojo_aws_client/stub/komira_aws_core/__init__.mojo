@@ -22,11 +22,17 @@ than validating UTF-8.
 
 The client half (the end of this file): `AwsCredential`, `AwsCredsSource`,
 `AwsEndpoint`, `AwsRetryQuota`, `Header`, `HttpResult`, `AwsErrorInfo`,
-`aws_json_error_info`, `resolve_endpoint` and `send_sigv4_signed_request`
-have the real core's types and signatures, and behave as the real ones do
-for what a generated client calls (`AwsRetryQuota` here is not a
-komira_retry budget: it starts at the real one's 500 and spends);
-`AwsEndpoint.https` checks nothing of the host. The real
+`aws_json_error_info`, `resolve_endpoint`, `send_sigv4_signed_request`,
+`AwsClock`, `AwsHttpTransport`, `CredentialHttpRequest`,
+`aws_request_is_conditional` and `send_sigv4_signed_request_with` have the
+real core's types and signatures (bar the last's defaulted payload-signing
+argument, which no generated code passes, and `CredentialHttpRequest`'s
+methods, of which only `header` and `body_text` are here), and behave as
+the real ones do for what a generated client calls (`AwsRetryQuota` here is
+not a komira_retry budget: it starts at the real one's 500 and spends);
+`AwsEndpoint.https` checks nothing of the host. The seam types
+`send_sigv4_signed_request_with` takes from komira_retry come from the stub
+komira_retry beside this one. The real
 `send_sigv4_signed_request` is komira//src/komira_aws_core/aws_send.mojo
 (a connector factory, standard-mode retries, the signed request of
 signed_request.mojo); signed_request.mojo's header states the signature,
@@ -52,6 +58,11 @@ only in an `X-Amzn-Errortype` header (the body has a message and no
 `__type`) and an `x-amzn-RequestId`, and any other host answers 200 with
 `{"nextForwardToken":"f/1","events":[]}`.
 
+`send_sigv4_signed_request_with` is a test double too, over the seams it is
+given: it sends ONE unsigned request through the caller's transport and
+answers the transport's response with what it was given added as
+`x-stub-*` headers (its docstring lists them).
+
 The error readers read `__type` (then `code`) and `message` (then
 `Message`, `errorMessage`) of a JSON object body, as the real ones do, and
 answer "" for any other body; the bytes overloads answer "" for a non-ASCII
@@ -66,6 +77,7 @@ not length-capped or checked for control bytes.
 from komira_json import JsonValue, parse_json_value
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
+from komira_retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleeper
 
 comptime AWS_TS_UNIX: Int = 0
 comptime AWS_TS_ISO8601: Int = 1
@@ -557,6 +569,164 @@ def send_sigv4_signed_request[
     res.add_header(String("x-stub-extra-count"), String(len(extra)))
     for i in range(len(extra)):
         res.add_header(extra[i].name, extra[i].value)
+    return res^
+
+
+# -----------------------------------------------------------------------------
+# The send over injected seams: `send_sigv4_signed_request_with`, the seams
+# it takes (`AwsHttpTransport`, `AwsClock`) and the request a transport is
+# handed (`CredentialHttpRequest`). The real ones are
+# komira//src/komira_aws_core/aws_send.mojo, sources.mojo and
+# credential_transport.mojo.
+# -----------------------------------------------------------------------------
+
+
+struct CredentialHttpRequest(Copyable, Movable):
+    """One HTTP request handed to a transport: method, scheme, host, port,
+    target (path and query), headers in send order (Host first) and body
+    bytes. The real one carries the signature headers too; this one is not
+    signed."""
+
+    var method: String
+    var scheme: String
+    var host: String
+    var port: Int
+    var target: String
+    var headers: List[Header]
+    var body: List[UInt8]
+
+    def __init__(
+        out self,
+        method: String,
+        scheme: String,
+        host: String,
+        port: Int,
+        target: String,
+    ):
+        self.method = method
+        self.scheme = scheme
+        self.host = host
+        self.port = port
+        self.target = target
+        self.headers = List[Header]()
+        self.body = List[UInt8]()
+
+    def header(self, name: String) -> String:
+        """The first header named `name` (exact case), "" when absent."""
+        for i in range(len(self.headers)):
+            if self.headers[i].name == name:
+                return self.headers[i].value
+        return String("")
+
+    def body_text(self) raises -> String:
+        return _ascii_text(self.body)
+
+
+trait AwsHttpTransport(Movable, Deinitable):
+    """Sends one request and returns the response; raises when no response
+    arrives."""
+
+    def send(mut self, req: CredentialHttpRequest) raises -> HttpResult:
+        ...
+
+
+trait AwsClock:
+    """The wall clock, in whole seconds since the Unix epoch (UTC)."""
+
+    def now_unix_seconds(mut self) -> Int:
+        ...
+
+
+def aws_request_is_conditional(method: String, headers: List[Header]) -> Bool:
+    """Whether a request is a conditional write: its method is not GET or
+    HEAD and it carries an `If-Match` or `If-None-Match` header (the name
+    in any case). The real rule, as komira//src/komira_aws_core/aws_retry.mojo
+    states it."""
+    if method == "GET" or method == "HEAD":
+        return False
+    for i in range(len(headers)):
+        var name = headers[i].name.lower()
+        if name == "if-match" or name == "if-none-match":
+            return True
+    return False
+
+
+def send_sigv4_signed_request_with[
+    X: AwsHttpTransport,
+    K: AwsClock,
+    L: MonotonicClock,
+    S: Sleeper,
+    R: RetryRng,
+    B: RetryBudget,
+](
+    mut transport: X,
+    mut clock: K,
+    mut retry: RetryLoop[L, S, R],
+    mut budget: B,
+    method: String,
+    cred: AwsCredential,
+    region: String,
+    service: String,
+    endpoint: AwsEndpoint,
+    uri: String,
+    content_type: String,
+    body: List[UInt8],
+    extra: List[Header],
+    s3_200_error: Bool = False,
+) raises -> HttpResult:
+    """A test double of the real send over seams (the real one also takes
+    a payload-signing mode, defaulted, which no generated code passes).
+
+    It refuses what `send_sigv4_signed_request` refuses, starts `retry`,
+    reads `clock` once, and hands `transport` ONE request: `method`, the
+    endpoint's scheme, host and port, `uri` as the target, the headers
+    Host, Content-Type and then `extra` as given, and `body`. It signs
+    nothing and never resends. On a response it calls `retry`'s
+    `after_success` with `budget` and answers the transport's response
+    with these headers added: `x-stub-region`, `x-stub-service`,
+    `x-stub-access-key-id`, `x-stub-clock` (the clock's reading),
+    `x-stub-attempts` (the loop's count), `x-stub-s3-200-error` as
+    given, and `x-stub-conditional`
+    (`aws_request_is_conditional` of `method` and `extra`), each "true" or
+    "false"."""
+    if _has_crlf(uri) or _has_crlf(content_type):
+        raise Error("an AWS request path or content type holds CR or LF")
+    for i in range(len(extra)):
+        var n = extra[i].name.lower()
+        if n == "host" or n == "content-type" or n == "content-length":
+            raise Error(
+                "the extra header "
+                + extra[i].name
+                + " is set by the request builder; pass it as its argument"
+            )
+        if _has_crlf(extra[i].name) or _has_crlf(extra[i].value):
+            raise Error("the AWS request header " + extra[i].name + " holds CR or LF")
+    var conditional = aws_request_is_conditional(method, extra)
+    retry.start()
+    var now = clock.now_unix_seconds()
+    var req = CredentialHttpRequest(
+        method, endpoint.scheme, endpoint.host, endpoint.port, uri
+    )
+    req.headers.append(Header(String("Host"), endpoint.host))
+    req.headers.append(Header(String("Content-Type"), content_type))
+    for i in range(len(extra)):
+        req.headers.append(extra[i])
+    req.body = body.copy()
+    var res = transport.send(req)
+    retry.after_success(budget)
+    res.add_header(String("x-stub-region"), region)
+    res.add_header(String("x-stub-service"), service)
+    res.add_header(String("x-stub-access-key-id"), cred.access_key_id)
+    res.add_header(String("x-stub-clock"), String(now))
+    res.add_header(String("x-stub-attempts"), String(retry.attempts()))
+    res.add_header(
+        String("x-stub-s3-200-error"),
+        String("true") if s3_200_error else String("false"),
+    )
+    res.add_header(
+        String("x-stub-conditional"),
+        String("true") if conditional else String("false"),
+    )
     return res^
 
 

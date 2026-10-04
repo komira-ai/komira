@@ -1064,7 +1064,18 @@ mod tests {
         for name in ["get", "get_bytes", "get_text", "drop", "put", "purge"] {
             assert!(verb(name).contains("var res = self.send(req^)\n"), "{name}: {src}");
         }
-        assert_eq!(src.matches("s3_200_error=True").count(), 1, "{src}");
+        // The verb over injected seams says the same.
+        let with = |name: &str| -> &str {
+            let at = src.find(&format!("    def {name}_with[")).expect(name);
+            let rest = &src[at..];
+            let end = rest[1..].find("\n    def ").map_or(rest.len(), |e| e + 1);
+            &rest[..end]
+        };
+        assert!(with("head").contains("budget, s3_200_error=True)\n"), "{src}");
+        for name in ["get", "get_bytes", "get_text", "drop", "put", "purge"] {
+            assert!(with(name).contains("budget)\n"), "{name}: {src}");
+        }
+        assert_eq!(src.matches("s3_200_error=True").count(), 2, "{src}");
         // A pure module has no send.
         assert!(!emit_s3("S3").unwrap().contains("s3_200_error"));
     }
