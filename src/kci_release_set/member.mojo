@@ -1,7 +1,7 @@
 # =============================================================================
 # src/kci_release_set/member.mojo -- one artifact's directory of a release,
-#   checked: what `kci build` refuses as soon as a build finishes and what
-#   `kci publish` re-checks over the bytes on disk. One function, so the two
+#   checked: what the BUILD step refuses as soon as a build finishes and what
+#   the PUBLISH step re-checks over the bytes on disk. One function, so the two
 #   cannot drift apart.
 # =============================================================================
 #
@@ -31,7 +31,7 @@
 #     with the manifest (`name`, `version`, `subdir`, `file_name` = `file`), or
 #     its `size` is not the file's, or it is not `stamped`.
 #
-# PYTHON is accepted as the manifest parser accepts it; `kci publish` refuses
+# PYTHON is accepted as the manifest parser accepts it; the PUBLISH step refuses
 # to publish it.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
@@ -49,6 +49,7 @@ from kci_artifact_declaration import (
     require_one_manifest,
 )
 from kci_artifact_manifest import ArtifactManifest, read_artifact_manifest
+from kci_contract import require_member_platform
 from kci_release_channel import ARTIFACT_TYPE_CONDA
 
 from kci_release_set.conda_metadata import CondaMetadata, read_conda_metadata
@@ -245,6 +246,19 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
         member.has_conda = True
         member.conda = md^
     return member^
+
+
+def member_platform(member: ReleaseMember, release_platform: String) raises -> String:
+    """The platform a verified member is for: its manifest's `platform`
+    (kci_artifact_manifest checked it against the platform table, and a
+    CONDA manifest's `subdir` against that platform's conda subdir). Refused:
+    a platform that is neither the release's nor `noarch`."""
+    var p = member.manifest.platform.copy()
+    try:
+        require_member_platform(release_platform, p)
+    except e:
+        _refuse(member.declaration, String(e))
+    return p^
 
 
 def _agree(declaration: String, key: String, metadata_value: String, manifest_value: String) raises:

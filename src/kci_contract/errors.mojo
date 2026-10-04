@@ -8,9 +8,10 @@
 # reason a run refused or failed survives as an id, never as an exit number
 # (the exit table keeps a handful of numbers; the ids say why).
 #
-# Two ids choose the exit number by themselves (exit_codes.mojo):
-# `KCI-E-INTERNAL` is exit 1 and `KCI-E-USAGE` is exit 2, whatever the
-# outcome word says. Every other id leaves the number to the outcome.
+# Three ids choose the exit number by themselves (exit_codes.mojo):
+# `KCI-E-INTERNAL` is exit 1, `KCI-E-USAGE` and `KCI-E-SELECTOR` are exit 2,
+# whatever the outcome word says. Every other id leaves the number to the
+# outcome.
 #
 # The table below is the only place an id is spelled. A welded test refuses
 # two rows with the same id and an id that does not match the grammar.
@@ -27,8 +28,9 @@ comptime ERROR_REVISION_MISMATCH: String = "KCI-E-REVISION-MISMATCH"
 comptime ERROR_PLATFORM: String = "KCI-E-PLATFORM"
 comptime ERROR_PLATFORM_MISMATCH: String = "KCI-E-PLATFORM-MISMATCH"
 comptime ERROR_STAGE_UNKNOWN: String = "KCI-E-STAGE-UNKNOWN"
-comptime ERROR_STAGE_KIND: String = "KCI-E-STAGE-KIND"
 comptime ERROR_STAGE_ENVIRONMENT: String = "KCI-E-STAGE-ENVIRONMENT"
+comptime ERROR_SELECTOR: String = "KCI-E-SELECTOR"
+comptime ERROR_SELECTOR_NO_MATCH: String = "KCI-E-SELECTOR-NO-MATCH"
 comptime ERROR_DECLARATION: String = "KCI-E-DECLARATION"
 comptime ERROR_BUILD_FAILED: String = "KCI-E-BUILD-FAILED"
 comptime ERROR_MEMBER: String = "KCI-E-MEMBER"
@@ -39,6 +41,8 @@ comptime ERROR_PUBLISH_NEW_NAME: String = "KCI-E-PUBLISH-NEW-NAME"
 comptime ERROR_PUBLISH_DIFFERENT_BYTES: String = "KCI-E-PUBLISH-DIFFERENT-BYTES"
 comptime ERROR_PUBLISH_UPLOAD: String = "KCI-E-PUBLISH-UPLOAD"
 comptime ERROR_PUBLISH_READ_BACK: String = "KCI-E-PUBLISH-READ-BACK"
+comptime ERROR_IMAGE_PLATFORM: String = "KCI-E-IMAGE-PLATFORM"
+comptime ERROR_IMAGE_PUSH: String = "KCI-E-IMAGE-PUSH"
 comptime ERROR_CANNOT_TELL: String = "KCI-E-CANNOT-TELL"
 
 
@@ -68,8 +72,9 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_PLATFORM), String("a platform is unknown or not released by this kci")))
     t.append(ErrorRow(String(ERROR_PLATFORM_MISMATCH), String("an artifact or release is for another platform")))
     t.append(ErrorRow(String(ERROR_STAGE_UNKNOWN), String("the machine file has no such stage")))
-    t.append(ErrorRow(String(ERROR_STAGE_KIND), String("the stage holds an action the invoked verb does not run")))
-    t.append(ErrorRow(String(ERROR_STAGE_ENVIRONMENT), String("the stage is not the environment its trusted publisher names")))
+    t.append(ErrorRow(String(ERROR_STAGE_ENVIRONMENT), String("the stage is not the GitHub environment its trusted publisher names")))
+    t.append(ErrorRow(String(ERROR_SELECTOR), String("an --only selector is malformed or given twice (exit 2)")))
+    t.append(ErrorRow(String(ERROR_SELECTOR_NO_MATCH), String("an --only selector names no step or validation of the stage")))
     t.append(ErrorRow(String(ERROR_DECLARATION), String("an artifact declaration is refused")))
     t.append(ErrorRow(String(ERROR_BUILD_FAILED), String("an artifact's build failed")))
     t.append(ErrorRow(String(ERROR_MEMBER), String("a built artifact's directory is refused")))
@@ -80,6 +85,8 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_PUBLISH_DIFFERENT_BYTES), String("the channel holds different bytes under the same file name")))
     t.append(ErrorRow(String(ERROR_PUBLISH_UPLOAD), String("an upload failed")))
     t.append(ErrorRow(String(ERROR_PUBLISH_READ_BACK), String("the bytes read back after an upload are not the bytes sent")))
+    t.append(ErrorRow(String(ERROR_IMAGE_PLATFORM), String("an image layout is for another platform than the step's")))
+    t.append(ErrorRow(String(ERROR_IMAGE_PUSH), String("an image push did not end in the pushed state")))
     t.append(ErrorRow(String(ERROR_CANNOT_TELL), String("kci cannot tell whether the end state holds")))
     return t^
 

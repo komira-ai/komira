@@ -29,8 +29,17 @@ def test_grammar() raises:
     assert_false(is_error_id_well_formed(String("KCI-W-USAGE")))
 
 
+def test_v13_ids() raises:
+    # the alias refusal went with the aliases; the selector and image ids are new
+    assert_false(is_error_id(String("KCI-E-STAGE-KIND")))
+    assert_true(is_error_id(String("KCI-E-SELECTOR")))
+    assert_true(is_error_id(String("KCI-E-SELECTOR-NO-MATCH")))
+    assert_true(is_error_id(String("KCI-E-IMAGE-PLATFORM")))
+    assert_true(is_error_id(String("KCI-E-IMAGE-PUSH")))
+
+
 def test_unknown_id_refused() raises:
-    assert_true(is_error_id(String("KCI-E-STAGE-KIND")))
+    assert_true(is_error_id(String("KCI-E-STAGE-UNKNOWN")))
     var refused = False
     try:
         require_error_id(String("KCI-E-NOT-A-THING"))

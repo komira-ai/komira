@@ -39,3 +39,7 @@ mojo_library(
     },
     visibility = ["PUBLIC"],
 )
+
+# The example declarations file, for tests in other packages that render from
+# it (kci_build's flow test stages it as test data).
+export_file(name = "example.textproto", visibility = ["PUBLIC"])
