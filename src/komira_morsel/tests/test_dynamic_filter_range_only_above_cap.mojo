@@ -53,7 +53,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.collections.selectivity_tracker import DYNAMIC_FILTER_BUILD_CAP
+from komira_morsel.dynamic_join_filter import DYNAMIC_FILTER_BUILD_CAP
 from komira_morsel.dynamic_join_filter import (
     DynamicJoinFilter,
     dynamic_filter_admits_build,

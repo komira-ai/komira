@@ -43,7 +43,6 @@ from std.memory import alloc, unsafe_memcpy, OwnedPointer
 from std.sys import size_of
 from std.time import perf_counter_ns
 
-from komira_core_ffi.posix import _env_is_set, _env_default_on
 from komira_core.arrow.schema import RecordBatch, RecordBatchBuilder, Schema, SchemaBuilder, Field
 from komira_core.arrow.column import Column
 from komira_core.arrow.arrow_types import ArrowType, arrow_fixed_byte_width
@@ -58,7 +57,6 @@ from komira_core.batch_format import BatchFormat, FormatKind
 
 from .bypass_ref import ParquetBypassRef
 from .varlen_slice import (
-    SPLIT_STRING_VIEW_ENV,
     _payload_window_shareable,
     _slice_variable_width,
 )
@@ -679,7 +677,10 @@ def split_into_views(
 
 
 def split_record_batch(
-    var batch: RecordBatch, morsel_size: Int
+    var batch: RecordBatch,
+    morsel_size: Int,
+    string_view: Bool = True,
+    trace_phases: Bool = False,
 ) raises -> MorselArray:
     """Split a RecordBatch into a MorselArray.
 
@@ -695,7 +696,7 @@ def split_record_batch(
     correctly localised 40.1 ms/rep to this function on q21 then attributed the
     cost to a data copy. MEASURED on that query, the largest of the three splits
     (3.79 M rows x 3 INT64) copies **zero** bytes — `copy_slices=0` on the
-    `KOMIRA_SPLIT_PHASE` line — and the cost was per-morsel CONSTRUCTION, most
+    `trace_phases` line — and the cost was per-morsel CONSTRUCTION, most
     of it rebuilding an invariant `Schema` once per morsel. Read the counter, do
     not read this paragraph.
 
@@ -709,12 +710,15 @@ def split_record_batch(
     buffer, and only the (rows + 1) Int32 offsets and the validity bits are
     rebuilt — see `_slice_variable_width` for the layout and the aliasing
     argument, and `strview_slices` / `strview_rows` on the counter line for
-    the arming count. `KOMIRA_SPLIT_STRING_VIEW=0` restores the payload copy
-    (the A/B arm and the rollback path).
+    the arming count. `string_view=False` restores the payload copy (the A/B
+    arm and the rollback path).
 
     Args:
         batch: The RecordBatch to split. Ownership is transferred.
         morsel_size: Maximum number of rows per morsel.
+        string_view: Whether a plain STRING / BINARY column's payload is an Arc
+            window share of the source's data buffer (the default) or a copy.
+        trace_phases: Print one `SPLIT_PHASE` counter line per call.
 
     Returns:
         A MorselArray covering all rows in the batch.
@@ -802,14 +806,14 @@ def split_record_batch(
     # to misread, so `_offset > 0` is safe). The nullable fallback copies the data
     # buffer too; only the non-null path stays zero-copy.
 
-    # DARK COUNTER (`KOMIRA_SPLIT_PHASE`) — the fire-set for the schema-hoist
+    # DARK COUNTER (`trace_phases`) — the fire-set for the schema-hoist
     # above. `schema_builds` is the falsifier: it is 1 with the hoist and would
     # be `num_morsels` without it, and unlike a wall it survives a loaded box.
     # `copy_slices` / `copy_rows` price the OTHER half of this window (the
     # layouts the zero-copy gate declines), so a future reader can tell a
     # per-morsel-overhead problem from a byte-copy problem without re-deriving
     # it — which is what this campaign had to do to find the lever at all.
-    var _dg = _env_is_set("KOMIRA_SPLIT_PHASE")
+    var _dg = trace_phases
     var _dg_t0 = perf_counter_ns() if _dg else 0
     var _dg_zc = 0
     var _dg_copy = 0
@@ -817,11 +821,9 @@ def split_record_batch(
     var _dg_view = 0
     var _dg_view_rows = 0
 
-    # LANE G L3 — STRING / BINARY PAYLOAD VIEWS (2026-09-25). Read once per
-    # split (one getenv per decoded row group), never per column or per morsel.
-    # DEFAULT ON; `KOMIRA_SPLIT_STRING_VIEW=0` sends every variable-width
-    # column back to the payload COPY, byte-identical by construction.
-    var string_view = _env_default_on(SPLIT_STRING_VIEW_ENV)
+    # LANE G L3 — STRING / BINARY PAYLOAD VIEWS. `string_view` is DEFAULT ON;
+    # `string_view=False` sends every variable-width column back to the payload
+    # COPY, byte-identical by construction.
 
     for m in range(num_morsels):
         var start_row = m * morsel_size

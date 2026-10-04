@@ -33,9 +33,6 @@ from komira_core.collections.bloom_filter import BloomFilter
 from komira_core.collections.constant_filter import ConstantFilter
 from komira_core.collections.in_list_filter import InListFilter
 from komira_core.collections.range_filter import RangeFilter
-from komira_core.collections.selectivity_tracker import (
-    DYNAMIC_FILTER_BUILD_CAP,
-)
 
 
 # v0.3 source: morsel_join.rs:468 (BLOOM_FILTER_THRESHOLD).
@@ -45,12 +42,19 @@ from komira_core.collections.selectivity_tracker import (
 # isn't supported. BF construction cost for 57 rows is ~1us.
 comptime BLOOM_FILTER_THRESHOLD: Int = 0
 
-# `DYNAMIC_FILTER_BUILD_CAP` (the build-row cap on dynamic-filter pushdown) is
-# DEFINED in `komira_core.collections.selectivity_tracker` and imported above.
-# It moved there so a module that needs only the cap (e.g.
-# `komira_engine_dispatch/join_stream_route_gate.mojo`) names nothing off
-# `komira_core` and stays copy-through for the SDK shadow facade
-# (`scripts/gen_sdk_facade.py`). Import it from its home, not from here.
+# Upper bound on the build-row count for dynamic-filter pushdown. Above this,
+# bloom selectivity on the probe side is unlikely to justify the per-row hash +
+# bit-test cost: every row passes the bloom, and the late-materialization
+# decode plus gather adds overhead against the full-decode fast path. DuckDB's
+# runtime-filter pushdown also gates on build-side cardinality and selectivity;
+# without a dynamic gate the bloom probe itself becomes the bottleneck on
+# bloom-saturated joins. The cap is tuned to keep joins whose build side is
+# large at parity with their pre-pushdown baselines while still firing where the
+# build side is small (for example post-HAVING).
+#
+# TODO: wire `SelectivityTracker` into the source's bloom-mask path so the cap
+# can be removed in favour of dynamic pause/resume.
+comptime DYNAMIC_FILTER_BUILD_CAP: Int = 65_536
 
 
 # =============================================================================

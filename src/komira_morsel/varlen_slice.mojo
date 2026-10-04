@@ -24,13 +24,6 @@ from komira_core.arrow.bitmap import Bitmap
 from komira_core.io.heap_region import HeapRegion
 
 
-# LANE G L3 kill switch. DEFAULT ON (`_env_default_on`): unset, `1`, `on` ->
-# the payload VIEW arm; `0` / `off` / `false` / `no` -> the payload COPY. The
-# A/B is `=0` against `=1` (same byte length, so the environment block does not
-# shift between arms -- an internal doc §2.2).
-comptime SPLIT_STRING_VIEW_ENV: StaticString = "KOMIRA_SPLIT_STRING_VIEW"
-
-
 def _payload_window_shareable(
     col: Column[HeapRegion], start: Int, length: Int
 ) -> Bool:

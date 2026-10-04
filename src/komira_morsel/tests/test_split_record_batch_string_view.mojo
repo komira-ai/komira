@@ -31,12 +31,14 @@
 #     sibling morsel, across allocator churn. A missed refcount on the window
 #     share reads freed/reused bytes here.
 #   * T6 a zero-byte window (all-empty morsel) and an all-empty column.
-#   * T7 the COPY arm (the `KOMIRA_SPLIT_STRING_VIEW=0` kill switch and the
+#   * T7 the COPY arm (the `string_view=False` argument and the
 #     malformed-short-payload fallback both route here) still copies and still
 #     reads identically.
 #   * T8 a payload buffer SHORTER than its own offsets claim falls back to the
 #     copy for the out-of-bounds windows instead of raising, and still shares
 #     the in-bounds ones.
+#   * T9 `split_record_batch(..., string_view=False)` takes the copy arm for the
+#     whole split.
 #
 # Encapsulation: no UnsafePointer. The aliasing proof is a write through a
 # retained `SharedAlignedBuffer.share()` of the source payload, the same
@@ -363,7 +365,7 @@ def test_split_string_view_empty_windows() raises:
 
 
 # -----------------------------------------------------------------------------
-# T7 -- the COPY arm still copies (kill switch / fallback target)
+# T7 -- the COPY arm still copies (the `string_view=False` / fallback target)
 # -----------------------------------------------------------------------------
 
 
@@ -438,6 +440,34 @@ def test_short_payload_falls_back_to_copy_per_window() raises:
         ma[2].column_at(0).as_string().get(4),
         vals[24],
         "an out-of-bounds window must have been COPIED (at split time)",
+    )
+    _ = src_alias^
+
+
+# -----------------------------------------------------------------------------
+# T9 -- `string_view=False` makes the whole split take the COPY arm
+# -----------------------------------------------------------------------------
+
+
+def test_split_with_string_view_off_copies_the_payload() raises:
+    var vals = _vals(300)
+    var col = Column.from_string(StringArray.from_strings(vals))
+    var src_alias = col._data.share()
+    var r = _first_nonempty_row(vals, 128, 256)
+    var pos = _src_offset(col, r)
+    var batch = _one_col_batch(col^, ArrowType.STRING, False)
+
+    var ma = split_record_batch(batch^, 128, string_view=False)
+    assert_equal(len(ma), 3, "300 rows / 128 -> 3 morsels")
+    _assert_copy_layout(ma, "T9")
+    _assert_string_values(ma, vals, "T9")
+
+    src_alias.write_u8_at(pos, UInt8(ord("Z")))
+    assert_equal(
+        ma[1].column_at(0).as_string().get(r - 128),
+        vals[r],
+        "string_view=False must COPY the payload: a write to the source must"
+        " not show through the split morsel",
     )
     _ = src_alias^
 
