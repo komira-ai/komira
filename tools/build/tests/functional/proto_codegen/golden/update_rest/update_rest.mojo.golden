@@ -264,6 +264,79 @@ def _rest_path_var(value: String, pattern: String, field: String) raises -> Stri
     return out^
 
 
+def _rest_drop_members(json: String, names: List[String]) raises -> String:
+    """`json` without its top-level members whose key is in `names`: the
+    `body: "*"` of a method whose path binds fields, which
+    `google/api/http.proto` defines as every field the path does not bind.
+    `json` is an object as `encode_json` writes it, with no whitespace; each
+    kept member is copied byte for byte, so no value is rendered again. An
+    error never echoes the text."""
+    var b = json.as_bytes()
+    var n = len(b)
+    if n < 2 or b[0] != 0x7B or b[n - 1] != 0x7D:
+        raise Error(String("REST body is not a JSON object"))
+    var out = List[UInt8](capacity=n)
+    out.append(0x7B)  # '{'
+    var kept = 0
+    var i = 1
+    while i < n - 1:
+        var start = i
+        # The key: a JSON string, its escapes skipped.
+        if b[i] != 0x22:
+            raise Error(String("REST body member has no key"))
+        var k = i + 1
+        while k < n - 1 and b[k] != 0x22:
+            if b[k] == 0x5C:
+                k += 1
+            k += 1
+        if k + 1 >= n - 1 or b[k] != 0x22 or b[k + 1] != 0x3A:
+            raise Error(String("REST body member has no key"))
+        var drop = False
+        for name in names:
+            var nb = name.as_bytes()
+            if len(nb) == k - i - 1:
+                var same = True
+                var t = 0
+                while same and t < len(nb):
+                    same = nb[t] == b[i + 1 + t]
+                    t += 1
+                if same:
+                    drop = True
+        # The value: up to the `,` at this depth, or the closing `}`.
+        var depth = 0
+        var in_str = False
+        var j = k + 2
+        while j < n - 1:
+            var c = b[j]
+            if in_str:
+                if c == 0x5C:
+                    j += 1
+                elif c == 0x22:
+                    in_str = False
+            elif c == 0x22:
+                in_str = True
+            elif c == 0x7B or c == 0x5B:
+                depth += 1
+            elif c == 0x7D or c == 0x5D:
+                depth -= 1
+            elif c == 0x2C and depth == 0:
+                break
+            j += 1
+        if in_str or depth != 0 or j > n - 1:
+            raise Error(String("REST body member has an unterminated value"))
+        if not drop:
+            if kept > 0:
+                out.append(0x2C)  # ','
+            var x = start
+            while x < j:
+                out.append(b[x])
+                x += 1
+            kept += 1
+        i = j + 1
+    out.append(0x7D)  # '}'
+    return String(unsafe_from_utf8=Span(out))
+
+
 def _rest_hex_upper(nibble: UInt8) -> String:
     """One uppercase hex digit for a 4-bit nibble."""
     if nibble < 10:
