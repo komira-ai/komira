@@ -7,16 +7,18 @@
 # content type, body bytes and the operation's extra headers -- into the
 # exact SigV4-signed request, at the time the clock says. It opens no
 # socket. The transport half, `send_sigv4_signed_request` (aws_send.mojo),
-# takes the same arguments plus the connector factory and the client's retry
-# quota, calls this once per attempt, and hands the request to
-# komira_http_client. Generated clients call it (emit_aws/mod.rs, a
-# client's `send`):
-# `send_sigv4_signed_request[C: Connector](mk_connector, mut retry_quota:
-# AwsRetryQuota, method, cred, region, service, endpoint, uri,
-# content_type, body: List[UInt8], extra: List[Header], s3_200_error: Bool
-# = False) raises -> HttpResult`. The tests cell's stand-in
-# (tools/build/tests/functional/mojo_aws_client/stub/komira_aws_core) has
-# that signature; the real one keeps it, or both change together.
+# takes the same arguments plus the connector factory, the caller's
+# `HttpClientConfig` and the client's retry quota, calls this once per
+# attempt, and hands the request to a komira_http_client built from that
+# config. Generated clients call it (emit_aws/mod.rs, a client's `send`):
+# `send_sigv4_signed_request[C: Connector](mk_connector, http_config:
+# HttpClientConfig, mut retry_quota: AwsRetryQuota, method, cred, region,
+# service, endpoint, uri, content_type, body: List[UInt8], extra:
+# List[Header], s3_200_error: Bool = False) raises -> HttpResult`. The tests
+# cell's stand-in (tools/build/tests/functional/mojo_aws_client/stub/
+# komira_aws_core) has that signature, and the generator's goldens pin the
+# call's leading arguments (tools/build/tests/functional/aws_codegen,
+# `must_contain`); the real one keeps it, or all three change together.
 #
 # Every operation header in `extra` is SIGNED. awsJson services include
 # X-Amz-Target in the canonical request, so an unsigned one is answered

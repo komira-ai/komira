@@ -84,7 +84,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "8";
+pub const AWS_GENERATOR_VERSION: &str = "10";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -237,14 +237,17 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
         names: &[
+            "AwsClock",
             "AwsCredential",
             "AwsCredsSource",
             "AwsEndpoint",
+            "AwsHttpTransport",
             "AwsRetryQuota",
             "Header",
             "HttpResult",
             "resolve_endpoint",
             "send_sigv4_signed_request",
+            "send_sigv4_signed_request_with",
         ],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,
@@ -344,8 +347,20 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         protocols: XML_BODY_PROTOCOLS,
     },
     AwsImport {
+        module: "komira_http_client.client",
+        names: &["HttpClientConfig"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
         module: "komira_http_core.transport.io_stream",
         names: &["Connector"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_retry",
+        names: &["MonotonicClock", "RetryBudget", "RetryLoop", "RetryRng", "Sleeper"],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,
     },
@@ -1772,6 +1787,86 @@ impl<'a> AwsEmitter<'a> {
         Ok(())
     }
 
+    /// The first half of a client send: the credential, and the headers
+    /// split into the content type (the substrate's own argument) and the
+    /// rest, the endpoint's own first when `ruleset`.
+    fn emit_send_assembly(&mut self, ruleset: bool) {
+        self.line("var cred = self._creds_source.credentials()");
+        self.line("var extra = List[Header]()");
+        if ruleset {
+            self.line("for _i in range(len(target.header_names)):");
+            self.push();
+            self.line("extra.append(Header(target.header_names[_i].copy(), target.header_values[_i].copy()))");
+            self.pop();
+        }
+        self.line("var content_type = String(String(");
+        self.push();
+        let default_content_type = self.binding.default_content_type(self);
+        self.line(&default_content_type);
+        self.pop();
+        self.line("))");
+        self.line("for _i in range(len(req.header_names)):");
+        self.push();
+        self.line("var n = req.header_names[_i].copy()");
+        self.line("if n.lower() == String(\"content-type\"):");
+        self.push();
+        self.line("# Header names are case-insensitive, and the substrate refuses an");
+        self.line("# `extra` Content-Type in any case.");
+        self.line("# The substrate takes the content type as its own argument and");
+        self.line("# puts it in BOTH the signed set and the wire headers. Passing it");
+        self.line("# again here would emit it twice and break the signature.");
+        self.line("content_type = req.header_values[_i].copy()");
+        self.pop();
+        self.line("else:");
+        self.push();
+        self.line("extra.append(Header(n^, req.header_values[_i].copy()))");
+        self.pop();
+        self.pop();
+    }
+
+    /// The request arguments both sends pass on, after their transport
+    /// arguments: method, credential, region, service, endpoint, target,
+    /// content type, body and the other headers.
+    fn emit_send_args(&mut self, ruleset: bool, p: &str) {
+        self.line("req.method.copy(),");
+        self.line("cred,");
+        if ruleset {
+            self.line("target.signing_region.copy(),");
+            self.line("target.signing_name.copy(),");
+            self.line("target.endpoint.copy(),");
+        } else {
+            self.line("self._region.copy(),");
+            self.line(&format!("String({p}_SERVICE),"));
+            self.line(&format!(
+                "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
+                self.module_name
+            ));
+        }
+        self.line("req.uri.copy(),");
+        self.line("content_type^,");
+        self.line("req.body.copy(),");
+        self.line("extra^,");
+    }
+
+    /// An operation's request, and with a ruleset the target it resolves
+    /// to: `req` and `target`, as both of its verbs send them.
+    fn emit_op_request(&mut self, m: &IrMethod, ruleset: bool, p: &str) {
+        let fp = self.fn_prefix();
+        self.line(&format!("var req = {fp}build_{}_request(input)", m.name));
+        if ruleset {
+            self.line("var target = aws_signing_target(");
+            self.push();
+            self.line(&format!(
+                "{fp}resolve_{}_endpoint(self._rules, self._endpoint_config, input),",
+                m.name
+            ));
+            self.line("self._region.copy(),");
+            self.line(&format!("String({p}_SERVICE),"));
+            self.pop();
+            self.line(")");
+        }
+    }
+
     fn emit_client(&mut self) -> Result<(), String> {
         let (svc_name, methods) = {
             let svc = &self.lowering.model.files[0].services[0];
@@ -1796,12 +1891,21 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
         self.line("    The connector factory is a `def () raises thin -> C` function");
         self.line("    pointer (a code pointer, no heap); the credential source is moved");
-        self.line("    in. No field is an `UnsafePointer`.\"\"\"");
+        self.line("    in. No field is an `UnsafePointer`.");
+        self.blank();
+        self.line("    `http_config` is the caller's and has no default: the HTTP client is");
+        self.line("    built inside `send_sigv4_signed_request`, so this argument is the only");
+        self.line("    way to bound it. A process serving requests under a platform deadline");
+        self.line("    passes `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling");
+        self.line("    in microseconds; a process with no containing deadline (a job, a CLI,");
+        self.line("    a test) passes `HttpClientConfig.defaults()`.\"\"\"");
         self.blank();
         let ruleset = self.endpoint_rules.is_some();
         let cfg = format!("{}EndpointConfig", self.prefix);
         let mn = self.module_name.clone();
         self.line("var _mk_connector: def () raises thin -> Self.C");
+        self.line("# Handed to `send_sigv4_signed_request` on every send, unchanged.");
+        self.line("var _http_config: HttpClientConfig");
         self.line("var _creds_source: Self.T");
         self.line("var _region: String");
         self.line("# The retry quota this client's calls share (botocore's standard mode");
@@ -1830,6 +1934,7 @@ impl<'a> AwsEmitter<'a> {
         self.push();
         self.line("out self,");
         self.line("mk_connector: def () raises thin -> Self.C,");
+        self.line("http_config: HttpClientConfig,");
         self.line("var creds_source: Self.T,");
         self.line("region: String,");
         if ruleset {
@@ -1846,6 +1951,7 @@ impl<'a> AwsEmitter<'a> {
             self.push();
         }
         self.line("self._mk_connector = mk_connector");
+        self.line("self._http_config = http_config.copy()");
         self.line("self._creds_source = creds_source^");
         self.line("self._region = region");
         self.line("self._retry_quota = AwsRetryQuota()");
@@ -1921,59 +2027,54 @@ impl<'a> AwsEmitter<'a> {
         for l in &doc {
             self.line(l);
         }
-        self.line("var cred = self._creds_source.credentials()");
-        self.line("var extra = List[Header]()");
-        if ruleset {
-            self.line("for _i in range(len(target.header_names)):");
-            self.push();
-            self.line("extra.append(Header(target.header_names[_i].copy(), target.header_values[_i].copy()))");
-            self.pop();
-        }
-        self.line("var content_type = String(String(" );
-        self.push();
-        let default_content_type = self.binding.default_content_type(self);
-        self.line(&default_content_type);
-        self.pop();
-        self.line("))");
-        self.line("for _i in range(len(req.header_names)):");
-        self.push();
-        self.line("var n = req.header_names[_i].copy()");
-        self.line("if n.lower() == String(\"content-type\"):");
-        self.push();
-        self.line("# Header names are case-insensitive, and the substrate refuses an");
-        self.line("# `extra` Content-Type in any case.");
-        self.line("# The substrate takes the content type as its own argument and");
-        self.line("# puts it in BOTH the signed set and the wire headers. Passing it");
-        self.line("# again here would emit it twice and break the signature.");
-        self.line("content_type = req.header_values[_i].copy()");
-        self.pop();
-        self.line("else:");
-        self.push();
-        self.line("extra.append(Header(n^, req.header_values[_i].copy()))");
-        self.pop();
-        self.pop();
+        self.emit_send_assembly(ruleset);
         self.line("return send_sigv4_signed_request[Self.C](");
         self.push();
         self.line("self._mk_connector,");
+        self.line("self._http_config.copy(),");
         self.line("self._retry_quota,");
-        self.line("req.method.copy(),");
-        self.line("cred,");
-        if ruleset {
-            self.line("target.signing_region.copy(),");
-            self.line("target.signing_name.copy(),");
-            self.line("target.endpoint.copy(),");
-        } else {
-            self.line("self._region.copy(),");
-            self.line(&format!("String({p}_SERVICE),"));
-            self.line(&format!(
-                "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
-                self.module_name
-            ));
+        self.emit_send_args(ruleset, &p);
+        if self.options.s3 {
+            self.line("s3_200_error=s3_200_error,");
         }
-        self.line("req.uri.copy(),");
-        self.line("content_type^,");
-        self.line("req.body.copy(),");
-        self.line("extra^,");
+        self.pop();
+        self.line(")");
+        self.pop();
+        self.blank();
+
+        // -- the send over injected seams ----------------------------------
+        let seams = "X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget";
+        let seam_args = "mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B";
+        let target_arg = if ruleset { ", target: AwsSigningTarget" } else { "" };
+        self.line(&format!(
+            "def send_with[{seams}](mut self, var req: AwsRequest{target_arg}, {seam_args}{s3_flag}) raises -> HttpResult:"
+        ));
+        self.push();
+        self.line("\"\"\"`send`, over the transport, signing clock, retry loop and budget");
+        self.line(&format!(
+            "    given (`{}.send_sigv4_signed_request_with`) instead of a",
+            AWS_CORE
+        ));
+        self.line("    connector from this client's factory, the wall clock and the");
+        self.line("    standard retry loop. It returns the response, successful or not.");
+        self.blank();
+        self.line("    The transport carries the HTTP config: `AwsConnectorTransport(");
+        self.line("    http_config, connector)` is built from the caller's");
+        self.line("    `HttpClientConfig`, as `send` builds its own from this client's. The");
+        self.line("    budget is the retry quota: an `AwsRetryQuota` the caller keeps, one");
+        self.line("    for all the calls it makes over this client, as botocore keeps one");
+        self.line("    per client. `send` spends this client's own quota instead.");
+        self.blank();
+        self.line("    A request carrying `If-Match` or `If-None-Match` is resent only");
+        self.line("    when the service cannot have acted on it (`aws_request_is_conditional`).\"\"\"");
+        self.emit_send_assembly(ruleset);
+        self.line("return send_sigv4_signed_request_with(");
+        self.push();
+        self.line("transport,");
+        self.line("clock,");
+        self.line("retry,");
+        self.line("budget,");
+        self.emit_send_args(ruleset, &p);
         if self.options.s3 {
             self.line("s3_200_error=s3_200_error,");
         }
@@ -2033,18 +2134,8 @@ impl<'a> AwsEmitter<'a> {
             } else {
                 ""
             };
-            self.line(&format!("var req = {fp}build_{}_request(input)", m.name));
+            self.emit_op_request(m, ruleset, &p);
             if ruleset {
-                self.line("var target = aws_signing_target(");
-                self.push();
-                self.line(&format!(
-                    "{fp}resolve_{}_endpoint(self._rules, self._endpoint_config, input),",
-                    m.name
-                ));
-                self.line("self._region.copy(),");
-                self.line(&format!("String({p}_SERVICE),"));
-                self.pop();
-                self.line(")");
                 self.line(&format!("var res = self.send(req^, target{s3_200})"));
             } else {
                 self.line(&format!("var res = self.send(req^{s3_200})"));
@@ -2057,6 +2148,29 @@ impl<'a> AwsEmitter<'a> {
                 "raise _{}_error(String(\"{}\"), res)",
                 self.module_name,
                 escape(&facts.name)
+            ));
+            self.pop();
+            self.blank();
+
+            // The same operation over injected seams, answering the raw
+            // response: a caller that branches on the status (a 412, a 206)
+            // or owns its clock and retry loop reads it with the parser.
+            self.line(&format!(
+                "def {verb}_with[{seams}](mut self, input: {in_ty}, {seam_args}) raises -> HttpResult:"
+            ));
+            self.push();
+            self.line(&format!(
+                "\"\"\"`{}` over the given seams (`send_with`): the response, successful",
+                facts.name
+            ));
+            self.line(&format!(
+                "    or not. `{fp}parse_{}_response` reads a successful one.\"\"\"",
+                m.name
+            ));
+            self.emit_op_request(m, ruleset, &p);
+            let tgt = if ruleset { "target, " } else { "" };
+            self.line(&format!(
+                "return self.send_with(req^, {tgt}transport, clock, retry, budget{s3_200})"
             ));
             self.pop();
             self.blank();
@@ -2538,7 +2652,8 @@ mod tests {
         assert!(
             src.contains(
                 "        return send_sigv4_signed_request[Self.C](\n            \
-                 self._mk_connector,\n            self._retry_quota,\n"
+                 self._mk_connector,\n            self._http_config.copy(),\n            \
+                 self._retry_quota,\n"
             ),
             "{src}"
         );

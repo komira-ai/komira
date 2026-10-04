@@ -1,18 +1,16 @@
-load("@komira//third_party/s2n-tls:srcs.bzl", "PROBE_GLOBAL_FLAGS", "PROBES")
+load("@komira//third_party/s2n-tls:features.bzl", "S2N_FEATURES")
+load("@komira//third_party/s2n-tls:srcs.bzl", "PROBES")
+load(":defs.bzl", "s2n_probe")
 
-# One target per s2n-tls feature probe (tests/features/<name>.c), compiled as
-# s2n-tls's CMake feature_probe compiles it: with GLOBAL.flags, the probe's
-# own <name>.flags and the Release flags, against aws-lc's headers. Building
-# `:probe_<name>` succeeds exactly when the probe passes. (CMake's
-# try_compile also links the probe; these compile it, which is what every
-# probe here tests: a header, a declaration, a builtin or a flag.)
-# tools/build/tests/c_libs_tests.sh holds features.bzl to these results.
+# The s2n-tls feature probes that pass on the one platform this repository
+# builds for (linux x86_64): the features third_party/s2n-tls/features.bzl
+# names. Every target here builds; a feature listed that does not compile is
+# a red build. The probes that fail on that platform are
+# tests//negative/s2n_probes: a probe that is expected to fail does not
+# belong in a package whose targets are all expected to build.
+# tools/build/tests/c_libs_tests.sh holds features.bzl to both packages.
 [
-    cxx_library(
-        name = "probe_" + name,
-        srcs = ["komira//third_party/s2n-tls:src[tests/features/{}.c]".format(name)],
-        compiler_flags = ["-O3", "-DNDEBUG"] + PROBE_GLOBAL_FLAGS.split(" ") + [f for f in flags.split(" ") if f],
-        deps = ["komira//third_party/aws-lc:crypto"],
-    )
+    cxx_library(**s2n_probe(name, flags))
     for name, flags in PROBES.items()
+    if name in S2N_FEATURES
 ]

@@ -26,6 +26,8 @@ komira_connect	origin/lib/komira_connect
 komira_crypto	origin/lib/komira_crypto-encoding
 komira_csv	origin/lib/komira_csv
 komira_db	origin/lib/komira_db
+komira_db_postgres	origin/lib/komira_db
+komira_db_sqlite	origin/lib/komira_db
 komira_deploy_bundle	origin/lib/komira_factory_build
 komira_eval	origin/lib/komira_eval
 komira_factory_build	origin/lib/komira_factory_build
@@ -43,7 +45,6 @@ komira_objectstore	origin/lib/komira_objectstore
 komira_obs	origin/lib/komira_obs
 komira_oci	origin/lib/komira_oci
 komira_orc	origin/lib/komira_orc
-komira_pg	origin/lib/komira_pg
 komira_placement	origin/lib/komira_placement
 komira_plan_proto	origin/lib/komira_rpc_plan
 komira_plan_wire	origin/lib/komira_plan_wire

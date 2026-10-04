@@ -11,7 +11,8 @@
 # per call, threading the one credential source through them with
 # `into_creds_source`, as a bootstrap threads one through several clients.
 #
-# Rows: a conditional PutObject that loses the race (412), a ranged
+# Rows: a conditional PutObject that loses the race (412), and one not
+# resent after a 500 though the plain verb states no precondition, a ranged
 # GetObject (206), two ListObjectsV2 pages, CreateMultipartUpload,
 # UploadPart and CompleteMultipartUpload, an AbortMultipartUpload of an
 # upload that is gone (404 NoSuchUpload), and a HeadObject 404 (no body).
@@ -24,7 +25,11 @@
 # the verb sends, through the generated client and its endpoint ruleset.
 #
 # The retries are test_s3_retry's: it drives the same send with a sleeper
-# that records, so no row here waits a real backoff.
+# that records, so no row here waits a real backoff. The last row drives the
+# verbs over injected seams (`<op>_with`): a transport over one scripted
+# connector, a fixed signing clock and a retry loop whose sleeper records,
+# the raw response answered, and a conditional PutObject not resent after a
+# 500 that an unconditional one is.
 from komira_aws_s3.komira_aws_s3 import (
     S3AbortMultipartUploadRequest,
     S3DeleteObjectRequest,
@@ -49,7 +54,18 @@ from komira_aws_core import (
     s3_content_range_total,
     s3_copy_source,
 )
+from komira_aws_core import AwsConnectorTransport, AwsRetryQuota, FixedClock
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_retry import (
+    Backoff,
+    Jitter,
+    ManualClock,
+    RecordingSleeper,
+    RetryLoop,
+    RetryPolicy,
+    SplitMix64Rng,
+)
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 
@@ -104,7 +120,9 @@ comptime _Client = S3S3Client[ScriptedConnector, StaticCredsSource]
 def _client(
     mk: def () raises thin -> ScriptedConnector, var creds: StaticCredsSource
 ) raises -> _Client:
-    return _Client(mk, creds^, String("us-east-1"), _config())
+    return _Client(
+        mk, HttpClientConfig.defaults(), creds^, String("us-east-1"), _config()
+    )
 
 
 # ---- the answers, one factory each ---------------------------------------------
@@ -121,6 +139,26 @@ def _mk_412() raises -> ScriptedConnector:
             "Content-Type: application/xml\r\n",
         )
     )
+
+
+def _mk_500_then_412() raises -> ScriptedConnector:
+    var c = ScriptedConnector.with_stream(
+        _answer(
+            500,
+            "Internal Server Error",
+            "<Error><Code>InternalError</Code></Error>",
+            "Content-Type: application/xml\r\n",
+        )
+    )
+    c.arm_next(
+        _answer(
+            412,
+            "Precondition Failed",
+            "<Error><Code>PreconditionFailed</Code></Error>",
+            "Content-Type: application/xml\r\n",
+        )
+    )
+    return c^
 
 
 def _mk_206() raises -> ScriptedConnector:
@@ -234,6 +272,19 @@ def test_conditional_put_loses_the_race() raises:
         _ = client.put_object(input)
 
 
+def test_plain_conditional_put_is_not_resent_after_a_500() raises:
+    # The plain verb states nothing about its precondition: the send reads
+    # the If-Match off the request, so a 500 that S3 may have answered
+    # having applied the write is returned as it is. Resent, the write
+    # would come back 412 and read as a lost race.
+    var client = _client(_mk_500_then_412, _creds())
+    var input = S3PutObjectRequest(String("lake"), String("manifest.json"))
+    input.set_body(_bytes(String('{"v":2}')))
+    input.set_if_match(String('"e1"'))
+    with assert_raises(contains="PutObject failed: HTTP 500 InternalError"):
+        _ = client.put_object(input)
+
+
 def test_ranged_get_206() raises:
     var client = _client(_mk_206, _creds())
     var input = S3GetObjectRequest(String("lake"), String("data/a.parquet"))
@@ -328,7 +379,9 @@ def _mk_echo() raises -> AwsEchoConnector:
 
 
 def _echo() raises -> _Echo:
-    return _Echo(_mk_echo, _creds(), String("us-east-1"), _config())
+    return _Echo(
+        _mk_echo, HttpClientConfig.defaults(), _creds(), String("us-east-1"), _config()
+    )
 
 
 def _wire(e: Error) raises -> String:
@@ -450,8 +503,76 @@ def test_copy_and_delete_on_the_wire() raises:
         _check(_wire(e), "DELETE /lake/b HTTP/1.1")
 
 
+def _never() raises -> ScriptedConnector:
+    raise Error("a verb over injected seams dialed through the factory")
+
+
+def _loop() raises -> RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng]:
+    return RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
+        RetryPolicy(
+            Backoff(initial_ms=1000, multiplier=2.0, max_ms=20_000, jitter=Jitter.full()),
+            max_attempts=3,
+            deadline_ms=Int64(600_000),
+        ),
+        ManualClock(),
+        RecordingSleeper(),
+        SplitMix64Rng(7),
+    )
+
+
+def test_verbs_over_injected_seams() raises:
+    # `<op>_with` sends over the transport, signing clock and retry loop it
+    # is given, never through the client's connector factory, and answers
+    # the response as it came, so a caller reads a 206 or a 412 itself.
+    var script = ScriptedConnector.with_stream(
+        _answer(
+            500,
+            "Internal Server Error",
+            "<Error><Code>InternalError</Code></Error>",
+        )
+    )
+    script.arm_next(_answer(200, "OK", "", 'ETag: "e2"\r\n'))
+    script.arm_next(
+        _answer(206, "Partial Content", "0123", "Content-Range: bytes 4-7/8\r\n")
+    )
+    # The transport is built from the caller's HTTP config, and the budget
+    # is a retry quota the caller keeps across its calls.
+    var transport = AwsConnectorTransport[ScriptedConnector](
+        HttpClientConfig.defaults(), script^
+    )
+    var clock = FixedClock(1790000000)
+    var budget = AwsRetryQuota()
+    var client = _client(_never, _creds())
+    # A conditional PutObject that met a 500 is not sent again: had S3
+    # applied it, the resend would be answered 412.
+    var put = S3PutObjectRequest(String("lake"), String("manifest.json"))
+    put.set_body(_bytes(String("{}")))
+    put.set_if_match(String('"e1"'))
+    var loop = _loop()
+    var res = client.put_object_with(put, transport, clock, loop, budget)
+    assert_equal(res.status, 500)
+    assert_equal(len(loop.sleeper().slept), 0)
+    # Unconditional, the same 500 is retried (the next answer is the 200).
+    var put2 = S3PutObjectRequest(String("lake"), String("other.json"))
+    put2.set_body(_bytes(String("{}")))
+    var loop2 = _loop()
+    var res2 = client.put_object_with(put2, transport, clock, loop2, budget)
+    assert_equal(res2.status, 200)
+    assert_equal(res2.header(String("etag")), '"e2"')
+    # A ranged GetObject answers the raw 206, which the parser reads.
+    var get = S3GetObjectRequest(String("lake"), String("data/a.parquet"))
+    get.set_range_(String("bytes=4-7"))
+    var loop3 = _loop()
+    var res3 = client.get_object_with(get, transport, clock, loop3, budget)
+    assert_equal(res3.status, 206)
+    assert_equal(res3.header(String("content-range")), "bytes 4-7/8")
+    assert_equal(len(res3.body), 4)
+
+
 def main() raises:
     test_conditional_put_loses_the_race()
+    test_plain_conditional_put_is_not_resent_after_a_500()
+    test_verbs_over_injected_seams()
     test_ranged_get_206()
     test_list_two_pages()
     test_multipart_create_upload_complete()

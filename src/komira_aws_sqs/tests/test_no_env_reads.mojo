@@ -72,7 +72,8 @@ def test_the_scan_saw_the_client() raises:
             text,
             "resolve_get_queue_url_endpoint(self._rules, self._endpoint_config, input)",
         ),
-        1,
+        # the verb and the same verb over injected seams (`<op>_with`)
+        2,
     )
 
 

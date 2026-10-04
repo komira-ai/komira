@@ -32,3 +32,9 @@ mojo_library(
     },
     visibility = ["PUBLIC"],
 )
+
+# The scan-kind goldens, for the test that links each kind's shipping binding
+# constructor to these bytes (tests/scan_binding_links). It lives outside this
+# package so that komira_plan_wire depends on no scan kind.
+export_file(name = "tests/fixtures/golden/index_pinned.hex", visibility = ["//tests/scan_binding_links:"])
+export_file(name = "tests/fixtures/golden/topic_live.hex", visibility = ["//tests/scan_binding_links:"])

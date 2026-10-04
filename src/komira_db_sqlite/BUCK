@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The SQLite driver for komira_db: `SqliteDatabase` conforms to the
+# backend-generic `SqlDatabase` trait over the in-process libsqlite3 library,
+# reached through the FFI declarations in ffi.mojo.
+#
+# This package has no tests of its own yet (test_srcs is deliberately absent);
+# compiling the library is its gate.
+
+# Carries the libsqlite3 link flag, so a binary that depends on this package
+# links it and one that does not never sees it. UNVERIFIED: whether the
+# hermetic C toolchain finds the system library has not been tested, and no
+# test exercises the link. If it does not resolve, drop this target and have
+# the final binary link `-lsqlite3` itself.
+cxx_library(
+    name = "sqlite3",
+    exported_linker_flags = ["-lsqlite3"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "komira_db_sqlite",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        ":sqlite3",
+        "//src/komira_async:komira_async",
+        "//src/komira_db:komira_db",
+    ],
+    visibility = ["PUBLIC"],
+)

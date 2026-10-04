@@ -42,6 +42,11 @@
 #
 # The connector is made once per call, so the attempts of one call share
 # its HTTP client (and a kept-alive connection) and the connector's dials.
+# That client is built from the caller's `HttpClientConfig`, which has no
+# default: it bounds each attempt (`request_timeout_us`) and the response
+# body. A process serving requests under a platform deadline passes
+# `HttpClientConfig.for_serving_ceiling(ceiling_us)`; clamping to that
+# ceiling is the caller's job, not this function's.
 # The HTTP client runs on a `BlockingRuntime`: the call blocks its thread.
 # Nothing is pooled across calls.
 #
@@ -65,7 +70,11 @@
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_http_client.body import BytesBody
-from komira_http_client.client import HttpClient, build_request_with_body
+from komira_http_client.client import (
+    HttpClient,
+    HttpClientConfig,
+    build_request_with_body,
+)
 from komira_http_client.header_map import HeaderMap
 from komira_http_client.url import Url
 from komira_http_core.codec.types import HttpMethod
@@ -158,8 +167,19 @@ struct AwsConnectorTransport[C: Connector](AwsHttpTransport, Movable, Deinitable
     var _rt: BlockingRuntime[NoopSink]
 
     def __init__(out self, var connector: Self.C) raises:
+        """A client from `HttpClientConfig.defaults()`: for a process with
+        no containing request deadline (a job, a CLI, a test)."""
         self._client = HttpClient[Self.C].with_defaults(connector^)
         self._rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
+
+    def __init__(out self, config: HttpClientConfig, var connector: Self.C) raises:
+        """A client from the caller's `config`."""
+        self._client = HttpClient[Self.C](config, connector^)
+        self._rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
+
+    def http_config(self) -> HttpClientConfig:
+        """The config this transport's HTTP client was built from."""
+        return self._client.config()
 
     def send(mut self, req: CredentialHttpRequest) raises -> HttpResult:
         var headers = HeaderMap()
@@ -356,6 +376,7 @@ def send_sigv4_signed_request_with[
 
 def send_sigv4_signed_request[C: Connector](
     mk_connector: def () raises thin -> C,
+    http_config: HttpClientConfig,
     mut retry_quota: AwsRetryQuota,
     method: String,
     cred: AwsCredential,
@@ -369,15 +390,17 @@ def send_sigv4_signed_request[C: Connector](
     s3_200_error: Bool = False,
 ) raises -> HttpResult:
     """Sign `method uri` for (`region`, `service`) with `cred`, send it to
-    `endpoint` over a connector `mk_connector` makes, and retry as the AWS
-    SDKs' standard mode does (aws_retry.mojo): at most three sends, full
-    jitter from 1 s, every attempt signed at the wall clock's time, each
-    retry paid for from `retry_quota`, the calling client's; a conditional
-    write is not resent once the service may have acted on it. The content type and every
-    `extra` header are signed (signed_request.mojo).
-    `s3_200_error` is `send_sigv4_signed_request_with`'s. Returns the last
-    response; raises when the last attempt got none."""
-    var transport = AwsConnectorTransport[C](mk_connector())
+    `endpoint` over a connector `mk_connector` makes, through an HTTP
+    client built from `http_config` (the caller's; it has no default), and
+    retry as the AWS SDKs' standard mode does (aws_retry.mojo): at most
+    three sends, full jitter from 1 s, every attempt signed at the wall
+    clock's time, each retry paid for from `retry_quota`, the calling
+    client's; a conditional write is not resent once the service may have
+    acted on it. The content type and every `extra` header are signed
+    (signed_request.mojo). `s3_200_error` is
+    `send_sigv4_signed_request_with`'s. Returns the last response; raises
+    when the last attempt got none."""
+    var transport = AwsConnectorTransport[C](http_config, mk_connector())
     var clock = SystemAwsClock()
     var loop = aws_system_retry_loop(aws_standard_retry_policy())
     return send_sigv4_signed_request_with(

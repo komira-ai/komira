@@ -2,8 +2,8 @@
 # test_cloud_validate_and_deploy.mojo
 # =============================================================================
 #
-# Over a stub cloud defined here (the reference clouds live in
-# kci_cloud_mem; this package must be testable without them):
+# Over a stub cloud defined here (the fake clouds live in
+# kci_cloud_fake; this package must be testable without them):
 #
 # 1. GRAPH FINDINGS, every one collected in one pass: duplicate and malformed
 #    ids, a missing type, refs to missing resources, an output the producer

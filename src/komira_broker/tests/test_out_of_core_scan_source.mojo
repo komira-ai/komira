@@ -30,8 +30,10 @@
 # schema-checked, pushdown-queried, EXPLAIN-rendered, cloned, cache-keyed, and
 # resolved against a registry owned by the source's own package.
 #
-# NOT SHOWN HERE: pulling morsels. That needs a morsel resolver for the kind
-# in `komira_morsel`.
+# NOT PROVEN HERE: draining the topic. The tier-2 conformer
+# (`BrokerScanRuntime`, `broker_scan_kind.mojo`) does that, and
+# `test_broker_scan_kind.mojo` pins it; the tier-1 half (the LIVE token) is
+# resolved here by that same runtime over an in-memory store.
 # =============================================================================
 
 from std.testing import (
@@ -68,12 +70,61 @@ from komira_core.source.source_variant import (
 # ACROSS a package boundary for its source. Nothing under `komira_core/`
 # names `komira_broker`.
 from komira_broker.broker_scan_binding import (
-    BrokerScanResolver,
     BROKER_SCAN_KIND_NAME,
     broker_scan_binding,
     broker_scan_descriptor,
     broker_scan_kind_id,
 )
+from komira_broker.broker_core import BrokerCore
+from komira_broker.broker_scan_kind import BrokerScanRuntime
+
+from komira_core.arrow.column import Column
+from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_core.arrow.record_batch import RecordBatch
+from komira_core.arrow.string_array import StringArray
+from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+
+comptime _Store = SharedInMemoryConditionalStore
+
+
+def _produce_orders_p3(store: _Store, rows: Int) raises:
+    """Append `rows` records to topic `orders`, partition 3 — the partition
+    `_binding()` names — as one segment."""
+    var manifest = CasManifestStore[_Store](
+        store=store.clone(),
+        prefix=String("ooc/_meta/topics/orders/3"),
+        retry=RetryPolicy.fast_test(),
+    )
+    var b = BrokerCore[_Store](
+        segment_store=store.clone(),
+        manifest=manifest^,
+        cluster=String("ooc"),
+        topic=String("orders"),
+        partition=Int64(3),
+        broker_id=String("broker-A"),
+    )
+    var off = PrimitiveArray[DType.int64].allocate(rows)
+    var payloads = List[String]()
+    var valid = List[Bool]()
+    for i in range(rows):
+        off.set(i, Int64(i))
+        payloads.append(String("p") + String(i))
+        valid.append(True)
+    var batch = RecordBatch.from_typed_columns_2(
+        _events_schema(),
+        Column.from_primitive[DType.int64](off^),
+        Column.from_string(StringArray.from_strings_with_validity(payloads, valid)),
+    )
+    _ = b.produce(batch^, Int64(1000))
+    _ = b.flush_if_buffered(Int64(1000))
+
+
+def _runtime(store: _Store) -> BrokerScanRuntime[_Store]:
+    return BrokerScanRuntime[_Store](store.clone(), String("ooc"))
 
 
 def _events_schema() -> Schema:
@@ -132,8 +183,9 @@ def test_registry_validates_the_broker_binding() raises:
 
 def test_missing_required_param_fails_at_plan_build_naming_the_key() raises:
     """The stated mitigation for stringly-typed param keys. The broker declares
-    `topic` and `partition` required; a binding without one fails HERE, naming
-    it, rather than producing a wrong answer at execute time."""
+    `topic` required (`partitions` defaults to every partition when the kind
+    builds the binding); a binding without it fails HERE, naming it, rather
+    than producing a wrong answer at execute time."""
     var reg = ScanKindRegistry()
     reg.register(broker_scan_descriptor())
     var stripped = broker_scan_binding(
@@ -153,7 +205,7 @@ def test_missing_required_param_fails_at_plan_build_naming_the_key() raises:
         snapshot_policy=stripped.snapshot_policy,
         orientation=stripped.orientation,
     )
-    with assert_raises(contains="partition"):
+    with assert_raises(contains="topic"):
         reg.validate(bare)
 
 
@@ -190,7 +242,7 @@ def test_plan_reads_the_sources_schema_and_params() raises:
     ref b = plan._scan.value()[].source.binding_ref()
     assert_equal(b.source_schema().num_columns(), 2)
     assert_equal(b.params.get_str(String("topic")), String("orders"))
-    assert_equal(b.params.get_i64(String("partition")), Int64(3))
+    assert_equal(b.params.get_str(String("partitions")), String("3"))
     assert_equal(b.params.get_i64(String("start_offset")), Int64(1000))
 
 
@@ -202,7 +254,7 @@ def test_explain_names_a_kind_core_never_registered() raises:
     assert_equal(
         _binding().render(),
         String(
-            "komira.broker.topic(orders, partition=3, start_offset=1000,"
+            "komira.broker.topic(orders, partitions=3, start_offset=1000,"
             " topic=orders)"
         ),
     )
@@ -350,14 +402,17 @@ def test_live_offset_is_refreshed_per_execution_without_moving_the_cache_key() r
     assert_equal(cached.snapshot_policy, SNAPSHOT_LIVE)
     assert_equal(cached.snapshot_token, UInt64(0))
 
-    var r1 = BrokerScanResolver(_epoch=UInt64(1), _high_watermark=UInt64(5000))
-    var e1 = resolve_for_execution(r1, cached)
-    assert_equal(e1.snapshot_token, UInt64(5000))
+    # The resolver the BROKER owns reads the partition's high-watermark.
+    var store = _Store()
+    _produce_orders_p3(store, 5)
+    var rt = _runtime(store)
+    var e1 = resolve_for_execution(rt, cached)
+    assert_equal(e1.snapshot_token, UInt64(5))
 
     # A later execution, after more produces.
-    var r2 = BrokerScanResolver(_epoch=UInt64(1), _high_watermark=UInt64(9999))
-    var e2 = resolve_for_execution(r2, cached)
-    assert_equal(e2.snapshot_token, UInt64(9999))
+    _produce_orders_p3(store, 4)
+    var e2 = resolve_for_execution(rt, cached)
+    assert_equal(e2.snapshot_token, UInt64(9))
 
     # THE CACHED PLAN NEVER MOVED, and neither did the cache key.
     assert_equal(cached.snapshot_token, UInt64(0))
@@ -368,7 +423,7 @@ def test_live_offset_is_refreshed_per_execution_without_moving_the_cache_key() r
 def test_resolver_refuses_a_foreign_kind() raises:
     """A resolver owns exactly the kinds its package registered. Dispatching a
     binding to the wrong one is a named error, not a silent mis-decode."""
-    var r = BrokerScanResolver(_epoch=UInt64(1), _high_watermark=UInt64(5000))
+    var r = _runtime(_Store())
     var foreign = _binding().copy()
     foreign.kind_id = UInt32(12345)
     foreign.kind_name = String("someone.elses.kind")
@@ -380,15 +435,26 @@ def test_a_handle_from_a_dead_registry_raises_rather_than_dangling() raises:
     """THE OWNERSHIP RULE, on an out-of-core source. This is the
     honest price of a Copyable binding: `ArcPointer` in the IR was a compile-time
     keep-alive and `handle: Int` is not. The epoch check turns what would be a
-    use-after-free into a named assertion."""
-    var live = BrokerScanResolver(_epoch=UInt64(2), _high_watermark=UInt64(5000))
+    use-after-free into a named assertion.
+
+    The broker kind is TIER 2: it holds no registry slots (its payload is
+    produced per execution), so its epoch is `SCAN_EPOCH_NONE` and NO handle
+    is bound in it — a handle from any registry is refused by name, and the
+    unbound binding a plan actually carries resolves."""
+    var store = _Store()
+    _produce_orders_p3(store, 5)
+    var live = _runtime(store)
     var stale = _binding().with_handle(0, UInt64(1))
     with assert_raises(contains="registry that minted it is gone"):
         check_binding(live, stale)
 
-    var current = _binding().with_handle(0, UInt64(2))
-    check_binding(live, current)
-    assert_equal(resolve_for_execution(live, current).snapshot_token, UInt64(5000))
+    var bound_here = _binding().with_handle(0, UInt64(0))
+    with assert_raises(contains="is not bound in this registry"):
+        check_binding(live, bound_here)
+
+    var unbound = _binding()
+    check_binding(live, unbound)
+    assert_equal(resolve_for_execution(live, unbound).snapshot_token, UInt64(5))
 
 
 # =============================================================================
@@ -469,8 +535,8 @@ def test_same_name_different_params_do_not_share_a_plan_cache_key() raises:
         p3._scan.value()[].source_path, p4._scan.value()[].source_path
     )
     assert_not_equal(
-        p3._scan.value()[].source.binding_ref().params.get_i64(String("partition")),
-        p4._scan.value()[].source.binding_ref().params.get_i64(String("partition")),
+        p3._scan.value()[].source.binding_ref().params.get_str(String("partitions")),
+        p4._scan.value()[].source.binding_ref().params.get_str(String("partitions")),
     )
 
     assert_not_equal(
@@ -535,14 +601,14 @@ def test_the_same_logical_binding_hashes_identically_across_two_constructions() 
     reach the key.
     """
     var fwd = ScanParams()
-    fwd.put_i64(String("partition"), Int64(3))
+    fwd.put_str(String("partitions"), String("3"))
     fwd.put_i64(String("start_offset"), Int64(1000))
     fwd.put_str(String("topic"), String("orders"))
 
     var rev = ScanParams()
     rev.put_str(String("topic"), String("orders"))
     rev.put_i64(String("start_offset"), Int64(1000))
-    rev.put_i64(String("partition"), Int64(3))
+    rev.put_str(String("partitions"), String("3"))
 
     var a = _plan_over(fwd^)
     var b = _plan_over(rev^)
@@ -552,9 +618,10 @@ def test_the_same_logical_binding_hashes_identically_across_two_constructions() 
     # And a LIVE snapshot token, resolved per execution, still may not move the
     # key — the identity/freshness split has to survive reaching the render.
     var cached = _binding()
-    var r = BrokerScanResolver(_epoch=UInt64(1), _high_watermark=UInt64(5000))
-    var refreshed = resolve_for_execution(r, cached)
-    assert_equal(refreshed.snapshot_token, UInt64(5000))
+    var store = _Store()
+    _produce_orders_p3(store, 5)
+    var refreshed = resolve_for_execution(_runtime(store), cached)
+    assert_equal(refreshed.snapshot_token, UInt64(5))
     var cached_plan = LogicalPlan.scan_from_source(
         SourceVariant.from_binding(cached.copy()), _events_schema()
     )
@@ -583,7 +650,7 @@ def test_explain_labels_the_binding_scan_and_shows_its_params() raises:
     # incidentally makes EXPLAIN able to describe a kind this build never
     # registered.
     assert_true(
-        "komira.broker.topic(orders, partition=3, start_offset=1000,"
+        "komira.broker.topic(orders, partitions=3, start_offset=1000,"
         " topic=orders)" in rendered,
         "binding params missing from EXPLAIN; got: " + rendered,
     )
