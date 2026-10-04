@@ -92,7 +92,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 
 ### Why does a lint refuse to check nothing?
 
-**Decision.** At analysis, `shell_lint` with no `srcs`, `no_endpoint` with no `buckconfigs`, `markdown_docs` with no Markdown, `lint_suite` with no `lints` and `retired_names` with no `names` fail. `action_pins` and `push_verdicts` have no analysis check: when the set holds no `uses:` or no push-triggered workflow, the report says `checked nothing` and the validation fails when the action runs. A `shell_lint` exclusion that names a file not in `srcs` fails too.
+**Decision.** At analysis, `shell_lint` with no `srcs`, `no_endpoint` with no `buckconfigs`, `markdown_docs` with no Markdown and `lint_suite` with no `lints` fail. `action_pins` and `push_verdicts` have no analysis check: when the set holds no `uses:` or no push-triggered workflow, the report says `checked nothing` and the validation fails when the action runs. A `shell_lint` exclusion that names a file not in `srcs` fails too.
 
 **Because.** A lint over an empty set is green by construction. A glob that matched nothing, or a file that was renamed, would turn the lint off while the build stayed green. An exclusion that outlives its file is the same failure in smaller form, so it has to be deleted along with the file.
 
@@ -120,7 +120,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 - **A passing test edit does not move the package.** Marker bytes do not depend on the run.
 - **A test sees only its declared data.** It runs from `root/share`, in a fixed environment.
 - **A package reaches the compiler only through `deps`.** `[ungated]` carries no `MojoInfo`.
-- **No lint is empty.** `shell_lint`, `workflow_lint`, `no_endpoint`, `lint_suite`, `markdown_docs` and `retired_names` refuse an empty set at analysis. `action_pins` and `push_verdicts` have no analysis check; they write `checked nothing` to the report, so the validation fails when the action runs.
+- **No lint is empty.** `shell_lint`, `workflow_lint`, `no_endpoint`, `lint_suite` and `markdown_docs` refuse an empty set at analysis. `action_pins` and `push_verdicts` have no analysis check; they write `checked nothing` to the report, so the validation fails when the action runs.
 - **A script the Mojo or Rust rules run is linted before any Mojo or Rust target builds.** Test 31 plants a finding in one script of each lint target on those lists and requires the build to fail.
 - **Every relative link in the Markdown resolves.** `//:docs`, test 17.
 
@@ -145,7 +145,6 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 | `push_verdicts` | a push-triggered workflow whose top-level `concurrency` group can hold more than one push keys that group on `github.sha`, so no push loses its run |
 | `no_endpoint` | no committed buckconfig sets a remote-execution endpoint or instance key, `.gitignore` ignores `/.buckconfig.local`, and no file names a `grpc://` or `grpcs://` address outside the `example.*` domains |
 | `markdown_docs` | every relative link and anchor in every Markdown file resolves |
-| `retired_names` | no file of the cell holds a renamed package's or type's old name, except on a line carrying a `YYYY-MM-DD` date (a history note) |
 | `lint_suite` | groups lints another graph does not reach, so their validations run in any build holding the suite |
 | `retired_names` | no file of the cell holds a renamed package's or type's old name except on a line carrying a `YYYY-MM-DD` date (a history note); `tools/build/lint/retired_names.bzl`, and a target with no `names` fails at analysis |
 
