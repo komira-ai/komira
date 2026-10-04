@@ -6,8 +6,9 @@ load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdow
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
 
-# The release workflow, read by kci_ci_check's welded test: `kci ci check` holds
-# it to release/machine.textproto, so a drift fails `./buck2 build //...`.
+# The release workflow, read by kci_ci_check's welded test, which holds it to
+# release/machine.textproto with the check `kci run` makes at start-up, so a
+# drift fails `./buck2 build //...`.
 export_file(
     name = "kci.yml",
     src = ".github/workflows/kci.yml",

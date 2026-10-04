@@ -2,23 +2,34 @@
 # komira release, in order, and the steps of each. `kci run --stage <S>` runs one
 # stage, every step of it in order (`--only step:<name>` runs a selection, which
 # is reported as SELECTIVE, never as a full run). kci reads THIS path by
-# convention (release/machine.textproto); `--machine <path>` overrides it. .github/workflows/kci.yml runs each stage as the job of the same name, in
-# the GitHub environment of the same name; `kci ci check` holds that workflow to
-# this file (a step of its build job, and the welded test
-# src/kci_ci_check/tests/test_repo_kci_yml.mojo, so a drift fails
-# `./buck2 build //...`). This file owns the stages: edit both together.
+# convention (release/machine.textproto); `--machine <path>` overrides it.
+# .github/workflows/kci.yml runs each stage as the job of the same name, in the
+# stage's GitHub environment. kci holds that workflow to this file at start-up
+# under GitHub Actions, and the welded test
+# src/kci_ci_check/tests/test_repo_kci_yml.mojo does the same on every build, so
+# a drift fails `./buck2 build //...`. This file owns the stages: edit both
+# together.
 #
 #   build  builds every artifact release/artifacts.textproto declares, for
-#          linux-x86_64, into a release directory with release.json.
-#   prod   publishes that release set to the channel `komira`
-#          (release/channels.textproto). The stage's name is the GitHub
-#          environment the channel's trusted publisher names
-#          (push_identity `...:environment:prod`); kci refuses a trusted
-#          publish from any other stage.
+#          linux-x86_64, into a release directory with release.json. It is
+#          FARM-CONNECTED: its job joins the tailnet to reach the build farm,
+#          and so it may never publish.
+#   gamma  publishes that release set to the channel `gamma` (prefix.dev
+#          komira-ai/gamma, release/channels.textproto), in the GitHub
+#          environment `gamma` that the channel's trusted publisher names.
+#   prod   publishes the SAME release set (never rebuilt) to the channel
+#          `prod` (prefix.dev komira-ai/prod), in the GitHub environment `prod`,
+#          whose required reviewer approves the job. The gamma job's summary
+#          lists the names new to prod (NEW NAMES) before that approval.
+#
+# A stage's `environment` is the GitHub environment its job runs in, and the
+# one its channel's trusted publisher names (push_identity
+# `...:environment:<env>`); kci refuses a trusted publish from any other.
+# No validation is declared yet: this kci refuses a declared validation
+# rather than skip it, until the validation runner lands.
 #
 # Publishing and deploying are separate stages in separate GitHub environments:
-# a deploy stage, when there is one, is added here as a stage of its own, and
-# its DEPLOY step will name the cell it deploys to.
+# a deploy stage, when there is one, is added here as a stage of its own.
 # Relative paths are relative to the directory kci is started in (the
 # repository's root in kci.yml). Changes need the release approver's review
 # (.github/CODEOWNERS).
@@ -29,6 +40,7 @@ schema_version: 1
 
 stage {
   name: "build"
+  farm_connected: true
   step {
     name: "build"
     kind: BUILD
@@ -38,7 +50,8 @@ stage {
 }
 
 stage {
-  name: "prod"
+  name: "gamma"
+  environment: "gamma"
   after: "build"
   step {
     name: "publish"
@@ -46,6 +59,20 @@ stage {
     platform: "linux-x86_64"
     declarations: "release/artifacts.textproto"
     channels: "release/channels.textproto"
-    channel: "komira"
+    channel: "gamma"
+  }
+}
+
+stage {
+  name: "prod"
+  environment: "prod"
+  after: "gamma"
+  step {
+    name: "publish"
+    kind: PUBLISH
+    platform: "linux-x86_64"
+    declarations: "release/artifacts.textproto"
+    channels: "release/channels.textproto"
+    channel: "prod"
   }
 }
