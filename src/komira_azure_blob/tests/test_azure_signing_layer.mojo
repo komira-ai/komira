@@ -14,8 +14,10 @@
 #   * a List Blobs request signs `comp`, `delimiter`, `prefix` (URL-decoded)
 #     and `restype`, sorted by name, so the Authorization equals the golden
 #     for a canonicalized resource that carries them;
-#   * a query string is read into URL-decoded pairs, and a bad escape is
-#     refused;
+#   * a date the caller already put on the request is kept when none is
+#     pinned, and a pinned date replaces it, leaving one x-ms-date;
+#   * a query string is read into URL-decoded pairs, and a bad escape or a
+#     decoded value that is not UTF-8 is refused;
 #   * `set_clock_override` changes the stamped date and the signature.
 #
 # Goldens, by Python, with key = base64.b64decode(FAKE_KEY):
@@ -45,11 +47,13 @@ from komira_azure_blob.azure_signing import (
 from komira_azure_core import AzureSharedKey
 from komira_clock import now_unix_ms
 from komira_datetime import parse_http_date
-from komira_http_client.body import RequestBody
+from komira_http_client.body import EmptyBody, RequestBody
 from komira_http_client.header_map import HeaderMap
 from komira_http_client.response_body import BufferedResponseBody
 from komira_http_client.service import ClientRequest, HttpService
 from komira_http_client.state_machine import ClientResponse
+from komira_http_client.url import Url
+from komira_http_core.codec.types import HttpMethod
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
@@ -76,6 +80,7 @@ struct CapturingService(HttpService, Movable, Deinitable):
     var calls: Int
     var x_ms_date: String
     var has_x_ms_date: Bool
+    var x_ms_date_count: Int
     var authorization: String
     var query: String
 
@@ -84,6 +89,7 @@ struct CapturingService(HttpService, Movable, Deinitable):
         self.calls = 0
         self.x_ms_date = String("")
         self.has_x_ms_date = False
+        self.x_ms_date_count = 0
         self.authorization = String("")
         self.query = String("")
 
@@ -97,6 +103,7 @@ struct CapturingService(HttpService, Movable, Deinitable):
         var d = req.headers.get(String("x-ms-date"))
         self.has_x_ms_date = Bool(d)
         self.x_ms_date = d.value() if d else String("")
+        self.x_ms_date_count = len(req.headers.get_all(String("x-ms-date")))
         var a = req.headers.get(String("authorization"))
         self.authorization = a.value() if a else String("")
         self.query = String(req.url.query)
@@ -224,6 +231,62 @@ def test_query_params_are_url_decoded() raises:
         _ = query_params_from(String("a=%zz"))
     with assert_raises(contains="truncated percent-escape"):
         _ = query_params_from(String("a=%2"))
+    # A decoded value must be UTF-8: %FF alone, a lone continuation byte
+    # and a truncated two-byte sequence are refused, never signed.
+    with assert_raises(contains="not valid UTF-8"):
+        _ = query_params_from(String("a=%FF"))
+    with assert_raises(contains="not valid UTF-8"):
+        _ = query_params_from(String("a=%A9"))
+    with assert_raises(contains="not valid UTF-8"):
+        _ = query_params_from(String("%C3=b"))
+
+
+def _call_layer_with_caller_date(mut layer: _Layer, caller_date: String) raises:
+    """Send the GET of the golden through `layer` directly, the request
+    already carrying `x-ms-date: caller_date`."""
+    var headers = HeaderMap()
+    headers.insert(String("x-ms-date"), caller_date)
+    headers.insert(String("x-ms-version"), String(API_VERSION))
+    headers.insert(String("range"), String("bytes=0-3"))
+    var req = ClientRequest[EmptyBody](
+        method=HttpMethod.get(),
+        url=Url.http(String("127.0.0.1"), UInt16(10000), String("/devstoreaccount1/c/k.bin")),
+        headers=headers^,
+        request_bytes=List[UInt8](),
+        body=EmptyBody.new(),
+    )
+    var conn = ScriptedConnector.with_stream(ScriptedStream.empty())
+    var reactor = _reactor()
+    var resp = layer.call[PerCoreAsyncRuntime[NoopSink], ScriptedConnector, EmptyBody](
+        req^, conn, reactor
+    )
+    assert_equal(Int(resp.status), 200)
+
+
+def test_caller_date_is_kept_when_none_is_pinned() raises:
+    var layer = _Layer.wrap(
+        CapturingService(String("DATA")),
+        StaticSharedKeyProvider.make(String(ACCOUNT), String(FAKE_KEY)),
+        String(""),
+    )
+    _call_layer_with_caller_date(layer, String(OTHER_DATE))
+    ref svc = layer._inner
+    assert_equal(svc.x_ms_date_count, 1)
+    assert_equal(svc.x_ms_date, OTHER_DATE)
+    assert_equal(svc.authorization, _get_golden_by_library(String(OTHER_DATE)))
+
+
+def test_pinned_date_replaces_the_callers_without_a_duplicate() raises:
+    var layer = _Layer.wrap(
+        CapturingService(String("DATA")),
+        StaticSharedKeyProvider.make(String(ACCOUNT), String(FAKE_KEY)),
+        String(PINNED_DATE),
+    )
+    _call_layer_with_caller_date(layer, String(OTHER_DATE))
+    ref svc = layer._inner
+    assert_equal(svc.x_ms_date_count, 1)
+    assert_equal(svc.x_ms_date, PINNED_DATE)
+    assert_equal(svc.authorization, GET_GOLDEN)
 
 
 def test_set_clock_override_changes_date_and_signature() raises:
@@ -254,6 +317,8 @@ def main() raises:
     test_no_pinned_date_stamps_the_wall_clock()
     test_list_request_signs_its_query_parameters()
     test_query_params_are_url_decoded()
+    test_caller_date_is_kept_when_none_is_pinned()
+    test_pinned_date_replaces_the_callers_without_a_duplicate()
     test_set_clock_override_changes_date_and_signature()
     test_anonymous_credential_is_not_signed()
     print("OK")

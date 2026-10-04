@@ -409,11 +409,55 @@ def _hex_value(c: UInt8) -> Int:
     return -1
 
 
+def _is_valid_utf8(b: Span[UInt8, _]) -> Bool:
+    """RFC 3629 well-formedness: no overlong form, no surrogate, nothing
+    above U+10FFFF, no truncated sequence."""
+    var i = 0
+    var n = len(b)
+    while i < n:
+        var c = Int(b[i])
+        if c < 0x80:
+            i += 1
+            continue
+        if c < 0xC2 or c > 0xF4:
+            return False  # a continuation byte, an overlong lead, > U+10FFFF
+        var need = 1
+        var lo = 0x80
+        var hi = 0xBF
+        if c == 0xE0:
+            need = 2
+            lo = 0xA0
+        elif c == 0xED:
+            need = 2
+            hi = 0x9F  # no UTF-16 surrogates
+        elif c >= 0xE1 and c <= 0xEF:
+            need = 2
+        elif c == 0xF0:
+            need = 3
+            lo = 0x90
+        elif c == 0xF4:
+            need = 3
+            hi = 0x8F
+        elif c >= 0xF1 and c <= 0xF3:
+            need = 3
+        if i + need >= n:  # the sequence needs bytes i+1 .. i+need
+            return False
+        var c1 = Int(b[i + 1])
+        if c1 < lo or c1 > hi:
+            return False
+        for k in range(2, need + 1):
+            var ck = Int(b[i + k])
+            if ck < 0x80 or ck > 0xBF:
+                return False
+        i += need + 1
+    return True
+
+
 def _percent_decode(bs: Span[UInt8, _], lo: Int, hi: Int) raises -> String:
     """Bytes `[lo, hi)` of `bs` with each `%XX` decoded, as a String. A `%`
-    not followed by two hex digits is refused: a URL this package builds
-    never carries one, and a value decoded wrongly signs a different
-    resource."""
+    not followed by two hex digits is refused, and so is a decoded value
+    that is not UTF-8: a URL this package builds never carries either, and
+    a value decoded wrongly signs a different resource."""
     var out = List[UInt8]()
     var i = lo
     while i < hi:
@@ -430,6 +474,8 @@ def _percent_decode(bs: Span[UInt8, _], lo: Int, hi: Int) raises -> String:
             continue
         out.append(c)
         i += 1
+    if not _is_valid_utf8(Span(out)):
+        raise Error("azure signing: decoded query value is not valid UTF-8")
     return String(unsafe_from_utf8=Span(out))
 
 
