@@ -883,8 +883,11 @@ def read_docstore_source[
         if uncompressed_len == 0:
             return String("")
         var decoded = lz4_decompress(stored, uncompressed_len)
+        # SAFETY: the docstore blob is the verbatim _source the builder wrote
+        # from a String; lz4 returns exactly those bytes.
         return String(StringSlice(unsafe_from_utf8=Span(decoded)))
     # UNCOMPRESSED: the stored bytes ARE the verbatim _source.
+    # SAFETY: as above, the builder wrote these bytes from a String.
     return String(StringSlice(unsafe_from_utf8=stored))
 
 

@@ -313,6 +313,7 @@ def _dict_values_of(col: Column[HeapRegion]) raises -> List[String]:
         var buf = List[UInt8](capacity=e_off - s_off)
         for k in range(s_off, e_off):
             buf.append(col._dict_data.value().get_typed[UInt8](k))
+        # SAFETY: dictionary values were written from Strings by the builder.
         out.append(String(StringSlice(unsafe_from_utf8=Span(buf))))
     return out^
 

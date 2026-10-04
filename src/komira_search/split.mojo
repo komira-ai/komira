@@ -1545,6 +1545,8 @@ struct SplitView(Movable, Deinitable):
             raise Error("SplitView.parse: footer field_name_len out of bounds")
         var fname_bytes = List[UInt8]()
         cur.read_into_list(fname_bytes, fname_len)
+        # SAFETY: the field name was written from a String by the split writer; its
+        # length was bounds-checked above.
         var field_name = String(StringSlice(unsafe_from_utf8=Span(fname_bytes)))
         var uuid = Array[UInt8, 16](fill=0)
         for i in range(16):

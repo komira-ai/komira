@@ -110,6 +110,7 @@ def _ingest_numeric_column[
         var col = bv.col_f64(ci)
         for r in range(n):
             var v = col.load[1](r)[0]
+            # SAFETY: value bitcast between same-width scalars; no memory is read.
             builder.append_float_bits(
                 bitcast[DType.uint64](v), bv.col_is_null(ci, r)
             )
@@ -117,6 +118,7 @@ def _ingest_numeric_column[
         var col = bv.col_f32(ci)
         for r in range(n):
             var v = col.load[1](r)[0]
+            # SAFETY: value bitcast between same-width scalars; no memory is read.
             builder.append_float_bits(
                 UInt64(bitcast[DType.uint32](v)), bv.col_is_null(ci, r)
             )
@@ -591,6 +593,8 @@ struct SearchSink(Sink, Movable):
         var prefix_buf = List[UInt8]()
         for i in range(plen):
             prefix_buf.append(pb[i])
+        # SAFETY: `prefix_buf` is a prefix of a String's bytes minus a trailing '/', so
+        # it is still UTF-8.
         var prefix = String(StringSlice(unsafe_from_utf8=Span(prefix_buf)))
         return prefix + "/" + self._index + "/splits/" + uuid_hex + ".split"
 

@@ -923,6 +923,8 @@ struct FastFieldReader(Movable, Deinitable):
             for k in range(name_len):
                 name_buf.append(region[pos + k])
             pos += name_len
+            # SAFETY: the name bytes were written from a String by the builder;
+            # bounds were checked above, so corrupt bytes cannot read out of range.
             var name = String(StringSlice(unsafe_from_utf8=Span(name_buf)))
             # field_class + arrow_type_id + encoding (3 u8)
             if pos + 3 > rlen:
@@ -1271,9 +1273,11 @@ struct FastFieldReader(Movable, Deinitable):
             return Optional[Float64](None)
         var bits = _unpack_one_unsigned(region, off, slot, fw)
         if fw == 32:
+            # SAFETY: value bitcast between same-width scalars; no memory is read.
             return Optional[Float64](
                 Float64(bitcast[DType.float32](UInt32(bits & UInt64(0xFFFFFFFF))))
             )
+        # SAFETY: value bitcast between same-width scalars; no memory is read.
         return Optional[Float64](bitcast[DType.float64](bits))
 
     def _decode_keyword_header(
@@ -1354,6 +1358,8 @@ struct FastFieldReader(Movable, Deinitable):
         var buf = List[UInt8](capacity=te - ts)
         for k in range(ts, te):
             buf.append(region[k])
+        # SAFETY: dictionary terms were written from Strings by the builder;
+        # their bounds were checked when the dictionary was parsed.
         return Optional[String](String(StringSlice(unsafe_from_utf8=Span(buf))))
 
     # ---- WHOLE-COLUMN materializer (aggregations / vectorized filters) ----
@@ -1584,6 +1590,7 @@ struct FastFieldReader(Movable, Deinitable):
             var buf = List[UInt8](capacity=te - ts)
             for k in range(ts, te):
                 buf.append(region[k])
+            # SAFETY: as above: builder-written String bytes, bounds checked.
             dict_values.append(String(StringSlice(unsafe_from_utf8=Span(buf))))
         # The per-doc codes -> Int64 indices.
         var codes = List[Int]()
@@ -1830,6 +1837,8 @@ struct KeywordFastFieldResolver(Copyable, Movable, Deinitable):
         var buf = List[UInt8](capacity=te - ts)
         for k in range(ts, te):
             buf.append(region[k])
+        # SAFETY: dictionary terms were written from Strings by the builder;
+        # their bounds were checked when the dictionary was parsed.
         return Optional[String](String(StringSlice(unsafe_from_utf8=Span(buf))))
 
 
@@ -1951,9 +1960,11 @@ struct FloatFastFieldResolver(Copyable, Movable, Deinitable):
             region, self._packed_off, slot, self._float_width
         )
         if self._float_width == 32:
+            # SAFETY: value bitcast between same-width scalars; no memory is read.
             return Optional[Float64](
                 Float64(bitcast[DType.float32](UInt32(bits & UInt64(0xFFFFFFFF))))
             )
+        # SAFETY: value bitcast between same-width scalars; no memory is read.
         return Optional[Float64](bitcast[DType.float64](bits))
 
 
@@ -2053,11 +2064,13 @@ def _build_float_primitive[
     for i in range(n_docs):
         var b = bits_list[i]
         comptime if dtype == DType.float32:
+            # SAFETY: value bitcast between same-width scalars; no memory is read.
             data_buf.set_typed[Scalar[dtype]](
                 i, Scalar[dtype](bitcast[DType.float32](UInt32(b & UInt64(0xFFFFFFFF))))
             )
         else:
             data_buf.set_typed[Scalar[dtype]](
+                # SAFETY: value bitcast between same-width scalars; no memory is read.
                 i, Scalar[dtype](bitcast[DType.float64](b))
             )
     data_buf.set_length(Int64(n_docs * elem_size))
