@@ -1,4 +1,4 @@
-"""`kci_cloud`: the clouds of the kci deploy side.
+"""`kci_cloud`: the clouds of kci's deploy side.
 
 The catalog (`kci_resource_proto`) says WHAT an author can deploy and the
 engine (`kci_reconciler`) knows how to reconcile a graph of nodes; this
