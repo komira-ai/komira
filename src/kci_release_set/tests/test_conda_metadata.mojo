@@ -71,7 +71,8 @@ def _expect(text: String, why: String) raises:
 
 def test_real_library_metadata_parses() raises:
     var md = read_conda_metadata(String(_LIB))
-    assert_equal(md.schema, 1)
+    assert_equal(md.schema_version, 1)
+    assert_equal(len(md.ignored_keys), 0)
     assert_equal(md.kind, String(KIND_LIBRARY))
     assert_equal(md.name, String("komira_name_registry"))
     assert_equal(md.version, String("0.1.7"))
@@ -166,8 +167,35 @@ def test_refuses_a_key_twice() raises:
     _expect(String('{"label":"x",') + String(t[byte = 1:]), String("'label' is given twice"))
 
 
-def test_refuses_an_unknown_key() raises:
-    _expect(_edit(String(_LIB), String("zzz"), String("1")), String("unknown key 'zzz'"))
+def test_an_unknown_key_of_a_known_major_is_ignored_and_listed() raises:
+    var md = parse_conda_metadata(_edit(String(_LIB), String("zzz"), String("1")), String(_SRC))
+    assert_equal(len(md.ignored_keys), 1)
+    assert_equal(md.ignored_keys[0], String("zzz"))
+    assert_equal(md.name, String("komira_name_registry"))
+
+
+def test_format_and_major_are_read_first() raises:
+    _expect(
+        _edit(String(_LIB), String("format"), drop=True),
+        String("no 'format' (a kci.conda_metadata document names its format)"),
+    )
+    _expect(_edit(String(_LIB), String("schema_version"), drop=True), String("no 'schema_version'"))
+    _expect(
+        _edit(String(_LIB), String("format"), String('"kci.artifact_manifest"')),
+        String("format 'kci.artifact_manifest' is not 'kci.conda_metadata'"),
+    )
+    _expect(
+        _edit(String(_LIB), String("schema_version"), String("2")),
+        String("schema_version 2 needs a newer kci (this kci reads kci.conda_metadata up to major 1)"),
+    )
+    _expect(
+        _edit(String(_LIB), String("schema_version"), String('"1"')),
+        String("'schema_version' is not an integer"),
+    )
+    # the old unversioned shape (`schema`, no `format`) is refused, not guessed
+    var old = _text(String(_LIB)).replace(String('"format":"kci.conda_metadata",'), String(""))
+    old = old.replace(String('"schema_version":1'), String('"schema":1'))
+    _expect(old, String("no 'format' (a kci.conda_metadata document names its format)"))
 
 
 def test_refuses_a_key_of_the_other_kind() raises:
@@ -191,7 +219,7 @@ def test_refuses_an_unknown_kind() raises:
 def test_refuses_every_missing_key() raises:
     var lib_keys = List[String]()
     for k in [
-        "schema", "kind", "name", "version", "subdir", "build", "build_number", "file_name",
+        "kind", "name", "version", "subdir", "build", "build_number", "file_name",
         "size", "depends", "timestamp_ms", "source_commit", "stamped", "label",
         "import_name", "mojo_pin", "payload_path", "payload_sha256",
     ]:
@@ -205,7 +233,6 @@ def test_refuses_every_missing_key() raises:
 
 
 def test_refuses_wrong_types() raises:
-    _expect(_edit(String(_LIB), String("schema"), String('"1"')), String("'schema' is not an integer"))
     _expect(_edit(String(_LIB), String("size"), String("1.5")), String("'size' is not an integer"))
     _expect(
         _edit(String(_LIB), String("build_number"), String("true")),
@@ -240,7 +267,6 @@ def test_refuses_empty_strings() raises:
 
 
 def test_refuses_bad_values() raises:
-    _expect(_edit(String(_LIB), String("schema"), String("2")), String("schema 2 is not 1"))
     _expect(_edit(String(_LIB), String("build_number"), String("-1")), String("'build_number' is negative"))
     _expect(_edit(String(_LIB), String("size"), String("0")), String("'size' is not positive"))
     _expect(
@@ -259,18 +285,21 @@ def test_refuses_bad_member_rows() raises:
         _edit(
             String(_META),
             String("members"),
-            String('[{"name":"a","version":"1","sha256":"') + h + String('","extra":1}]'),
-        ),
-        String("members[0]: unknown key 'extra'"),
-    )
-    _expect(
-        _edit(
-            String(_META),
-            String("members"),
             String('[{"name":"a","version":"1","sha256":"') + h + String('","name":"b"}]'),
         ),
         String("members[0]: 'name' is given twice"),
     )
+    # an unknown key in a member row of a known major is ignored and listed
+    var md = parse_conda_metadata(
+        _edit(
+            String(_META),
+            String("members"),
+            String('[{"name":"a","version":"1","sha256":"') + h + String('","extra":1}]'),
+        ),
+        String(_SRC),
+    )
+    assert_equal(len(md.ignored_keys), 1)
+    assert_equal(md.ignored_keys[0], String("members[0].extra"))
     _expect(
         _edit(String(_META), String("members"), String('[{"name":"a","version":"1"}]')),
         String("members[0]: missing 'sha256'"),
