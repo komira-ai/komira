@@ -563,7 +563,7 @@ fn cmdOci(alloc: Alloc, a: Args) !void {
 // is in packaging/conda/README.md.
 
 const conda_subdir = "linux-64";
-/// The kci platform of `conda_subdir` (kci_contract's platform table, which
+/// The kci platform of `conda_subdir` (kci_api's platform table, which
 /// the manifest probe holds this to: kci refuses a manifest whose platform
 /// and subdir disagree).
 const conda_platform = "linux-x86_64";
@@ -960,7 +960,7 @@ fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_entr
 //                              timestamp_ms, label, payload_path,
 //                              payload_sha256, ...
 //
-// The format names and majors are kci's (kci_contract's format table). Nothing
+// The format names and majors are kci's (kci_api's format table). Nothing
 // run-specific (a run id, an attempt) is written here: these files are action
 // outputs, and a per-run value would make every run a cache miss.
 //
