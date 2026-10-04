@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_stage_graph/tests/test_stage_selection.mojo
+# src/kci_release_machine/tests/test_stage_selection.mojo
 #   `resolve_selection`: `kci run --only ...` against one stage. A step
 #   selector selects its step; one that matches nothing is refused with the
 #   stage's names; a validation selector selects that validation and no
@@ -10,7 +10,7 @@
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_api import SCOPE_FULL, SCOPE_SELECTIVE, Selector, parse_selectors
-from kci_stage_graph import Selection, Stage, parse_machine_file, resolve_selection
+from kci_release_machine import Selection, Stage, parse_machine_file, resolve_selection
 
 
 comptime _MACHINE: String = (

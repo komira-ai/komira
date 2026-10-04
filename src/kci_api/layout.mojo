@@ -10,7 +10,7 @@
 #
 # `<release-dir>` is a flag (`--release-dir`) and has no default path.
 #
-# The machine file (the stage graph) is the ONE file kci finds by
+# The machine file (the release machine) is the ONE file kci finds by
 # convention: `release/machine.textproto`, relative to the working
 # directory, next to `release/artifacts.textproto` and
 # `release/channels.textproto`. `kci run --machine <path>` overrides it.

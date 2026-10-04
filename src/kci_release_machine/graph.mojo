@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_stage_graph/graph.mojo -- the stage graph of a release machine: its
+# src/kci_release_machine/graph.mojo -- a release machine: its
 #   stages, in file order, and the steps of each.
 # =============================================================================
 #
@@ -57,7 +57,7 @@
 # runs nothing is never a pass. Any `--only` makes the run SELECTIVE, even one
 # that selects every step.
 #
-# `validate_stage_graph` holds every rule the parser cannot see field by
+# `validate_release_machine` holds every rule the parser cannot see field by
 # field; a parsed graph is always a valid one. Paths are kept as written: a
 # relative one is relative to the directory kci is started in.
 #
@@ -195,7 +195,7 @@ struct Stage(Copyable, Movable):
         return out^
 
 
-struct StageGraph(Copyable, Movable):
+struct ReleaseMachine(Copyable, Movable):
     """Every stage of a machine file, in file order.
 
     Layout: owned values only. No pointer field."""
@@ -376,7 +376,7 @@ def _check_step_validations(source: String, stage: Stage, step: StageStep) raise
         _check_validation(source, stage, step, step.validations[i])
 
 
-def validate_stage_graph(g: StageGraph, source: String) raises:
+def validate_release_machine(g: ReleaseMachine, source: String) raises:
     """Every rule of the file header that the parser does not see field by
     field. Raises on the first, naming the line."""
     if len(g.stages) == 0:

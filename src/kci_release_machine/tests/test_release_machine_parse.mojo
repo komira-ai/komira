@@ -1,12 +1,12 @@
 # =============================================================================
-# src/kci_stage_graph/tests/test_stage_graph_parse.mojo
+# src/kci_release_machine/tests/test_release_machine_parse.mojo
 #   A machine file read back through the parser, and every refusal of
 #   parse.mojo and graph.mojo, each asserted by its message.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_stage_graph import machine_schema_version, parse_machine_file
+from kci_release_machine import machine_schema_version, parse_machine_file
 
 
 comptime _SRC: String = "machine file"

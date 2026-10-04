@@ -13,7 +13,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The welded tests: every refusal by its message, and the authored field
 # names pinned as a golden list (a rename is a visible edit of that test).
 mojo_library(
-    name = "kci_stage_graph",
+    name = "kci_release_machine",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_api:kci_api",
@@ -21,9 +21,9 @@ mojo_library(
     ],
     test_srcs = [
         # a valid file read back; every refusal, each naming its line
-        "tests/test_stage_graph_parse.mojo",
+        "tests/test_release_machine_parse.mojo",
         # the authored field names, golden
-        "tests/test_stage_graph_field_names.mojo",
+        "tests/test_release_machine_field_names.mojo",
         # `kci run --only` against one stage: steps and validations, match,
         # no-match, scope, order
         "tests/test_stage_selection.mojo",
