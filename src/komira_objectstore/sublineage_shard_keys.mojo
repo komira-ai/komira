@@ -8,9 +8,9 @@
 # These are the PURE String/LIST shard-id + sub-lineage path builders. They are
 # substrate-agnostic — they operate on plain `ConditionalWriteStore`, `Path`,
 # `ListResult`, `String`, and `List` only. NOTHING here is search-specific;
-# nothing here decodes a search `SplitSummary` or a pgstore `ColumnarFileEntry`.
+# nothing here decodes a search `SplitSummary` or a columnar-adapter `ColumnarFileEntry`.
 # They live low in the dependency graph, in `komira_objectstore` (which both
-# `komira_search_s3` AND the pgsql/pgstore path depend on), so the SAME helpers
+# `komira_search_s3` AND the pgsql/table-store path depend on), so the SAME helpers
 # serve:
 #   * the search writer / compactor (via a re-export in
 #     `komira_search_s3.metastore`);
@@ -20,7 +20,7 @@
 #
 # DEPENDENCY DIRECTION (cycle-free):
 #   komira_objectstore's deps never reach back into komira_search_s3 /
-#   komira_pgsql / komira_pgstore*. So the pgsql/pgstore path imports this
+#   komira_pgsql / komira_table_store and its adapters. So the pgsql/table-store path imports this
 #   module DIRECTLY without pulling in the SEARCH packages. The runtime
 #   `ShardedLineage` kernel lives in `sharded_lineage.mojo` and builds on these
 #   helpers.

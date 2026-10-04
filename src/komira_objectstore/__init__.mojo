@@ -123,7 +123,7 @@ from .coalesce import (
     plan_coalesce,
 )
 # The neutral, low-level shard-id + sub-lineage PATH KERNEL. It lives here,
-# low in the dependency graph, so the pgsql/pgstore index-sharding path can
+# low in the dependency graph, so the pgsql/table-store index-sharding path can
 # reuse it WITHOUT importing the search packages; the search metastore
 # re-exports it.
 from .sublineage_shard_keys import (
