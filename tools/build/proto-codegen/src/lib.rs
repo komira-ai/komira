@@ -71,6 +71,13 @@ pub struct PluginParameters {
     /// `layout_probe=true`: also write [`emit::LAYOUT_PROBE_FILE`], one
     /// `size_of` per emitted struct.
     pub layout_probe: bool,
+    /// `gcp=true`: a Google Cloud client. Its gRPC service clients take a
+    /// `komira_gcp_core` token source, set its token as each call's
+    /// `authorization` metadata, speak classic gRPC only, and raise a non-OK
+    /// status through `komira_gcp_core` (`emit::Emitter::with_options`).
+    /// Refused with `default_protocol=connect`; REST clients are Google Cloud
+    /// clients either way.
+    pub gcp: bool,
 }
 
 impl Default for PluginParameters {
@@ -81,6 +88,7 @@ impl Default for PluginParameters {
             package_prefix: "komira_rpc_storage".to_string(),
             scope: lower::Scope::default(),
             layout_probe: false,
+            gcp: false,
         }
     }
 }
@@ -122,11 +130,12 @@ impl PluginParameters {
                 "methods" => p.scope.methods = parse_list(k, v)?,
                 "messages_only" => p.scope.messages_only = parse_bool(k, v)?,
                 "layout_probe" => p.layout_probe = parse_bool(k, v)?,
+                "gcp" => p.gcp = parse_bool(k, v)?,
                 other => {
                     return Err(format!(
                         "unknown option `{other}` — expected one of: default_wire, \
                          default_protocol, package_prefix, roots, methods, \
-                         messages_only, layout_probe"
+                         messages_only, layout_probe, gcp"
                     ))
                 }
             }
@@ -141,6 +150,9 @@ impl PluginParameters {
             return Err(format!(
                 "{plugin} does not implement roots, methods, messages_only or layout_probe"
             ));
+        }
+        if self.gcp {
+            return Err(format!("{plugin} does not implement gcp"));
         }
         Ok(())
     }
@@ -177,6 +189,13 @@ fn generate_scoped(
     routing_rules: routing_options::RoutingRuleTable,
     mode: ProtocolMode,
 ) -> Result<Vec<(String, String)>, String> {
+    if params.gcp && mode == ProtocolMode::Connect {
+        return Err(
+            "option `gcp=true` emits a Google Cloud client, which speaks classic gRPC \
+             (`default_protocol=grpc`) or REST (`default_protocol=rest`), never Connect"
+                .to_string(),
+        );
+    }
     let model = lower::lower_scoped(
         &request.proto_file,
         &request.file_to_generate,
@@ -195,7 +214,7 @@ fn generate_scoped(
             }
         }
     }
-    let mut files = emit::emit_model_with_protocol(&model, mode);
+    let mut files = emit::emit_model_with_options(&model, mode, params.gcp);
     if params.layout_probe {
         files.push(emit::emit_layout_probe(&model));
     }

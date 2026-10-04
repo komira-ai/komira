@@ -23,8 +23,9 @@
 # returned as it is, the budget and a client's retry quota across calls,
 # the request as it reached the wire (komira_aws_core's AwsEchoConnector),
 # and the free `send_sigv4_signed_request` through a connector factory,
-# with three sends to every service, DynamoDB included (it sleeps for real
-# there).
+# whose client is built from the caller's config (a 150 ms request budget
+# ends each send to a server that never answers), with three sends to
+# every service, DynamoDB included (it sleeps for real there).
 #
 # One row opens a socket: a POST to a closed loopback port through
 # komira_http_core's KernelTcpConnector, the production dial, so the
@@ -35,6 +36,7 @@
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from komira_async.runtime.tcp_stream import TcpListener
+from komira_clock import now_ns
 from komira_aws_core import (
     AWS_ECHO_CODE,
     AwsClock,
@@ -53,6 +55,7 @@ from komira_aws_core import (
     send_sigv4_signed_request,
     send_sigv4_signed_request_with,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_retry import (
@@ -597,6 +600,7 @@ def _free_send_of(service: String) raises -> HttpResult:
     var quota = AwsRetryQuota()
     return send_sigv4_signed_request[ScriptedConnector](
         _mk_five_500s,
+        HttpClientConfig.defaults(),
         quota,
         String("POST"),
         _cred(),
@@ -829,6 +833,7 @@ def test_the_free_send_through_a_factory() raises:
     var quota = AwsRetryQuota()
     var res = send_sigv4_signed_request[ScriptedConnector](
         _mk_ok,
+        HttpClientConfig.defaults(),
         quota,
         String("POST"),
         _cred(),
@@ -843,6 +848,87 @@ def test_the_free_send_through_a_factory() raises:
     assert_equal(res.status, 200)
     assert_equal(res.header(String("x-amzn-RequestId")), "r-1")
     assert_equal(quota.available(), 500)
+
+
+def test_the_transport_builds_its_client_from_the_callers_config() raises:
+    # The two-argument transport builds its HTTP client from the config it
+    # is given; the one-argument one from the defaults.
+    var cfg = HttpClientConfig.for_serving_ceiling(4_500_000)
+    var t = AwsConnectorTransport[ScriptedConnector](cfg, _mk_ok())
+    assert_equal(t.http_config().context_ceiling_us, 4_500_000)
+    assert_true(t.http_config().budget_was_clamped())
+    var d = AwsConnectorTransport[ScriptedConnector](_mk_ok())
+    assert_equal(d.http_config().context_ceiling_us, 0)
+    assert_false(d.http_config().budget_was_clamped())
+
+
+comptime _STUCK_BUDGET_US: Int = 150_000
+"""The request budget the stuck-server row configures (150 ms)."""
+
+comptime _STUCK_CEILING_US: Int = 20_000_000
+"""The stuck-server row's elapsed ceiling (20 s): far above the 150 ms
+budget, far below the defaults' budget."""
+
+
+def _stuck_stream() -> ScriptedStream:
+    var s = ScriptedStream.empty()
+    s.queue_read_pending(50_000_000)
+    return s^
+
+
+def _mk_stuck() raises -> ScriptedConnector:
+    # A server that takes every connection and never answers: every read is
+    # Pending, so only the request deadline can end an attempt. One stream
+    # per send, the first and the two resends.
+    var c = ScriptedConnector.with_stream(_stuck_stream())
+    for _ in range(2):
+        c.arm_next(_stuck_stream())
+    return c^
+
+
+def test_the_free_send_honors_the_callers_request_timeout() raises:
+    # `send_sigv4_signed_request` sends through a client built from its
+    # `http_config`: a 150 ms request budget against a server that never
+    # answers ends each attempt at that budget. A POST that is not a
+    # conditional write is resent after a timeout (standard mode), so all
+    # three sends time out and the send raises the client's deadline error.
+    # A send that built its client from the defaults instead would not time
+    # out here.
+    var cfg = HttpClientConfig.defaults()
+    cfg.request_timeout_us = _STUCK_BUDGET_US
+    var extra = List[Header]()
+    extra.append(Header(String("X-Amz-Target"), String("AmazonSQS.ListQueues")))
+    var quota = AwsRetryQuota()
+    var raised = String("")
+    var start_us = Int(now_ns() // 1000)
+    try:
+        _ = send_sigv4_signed_request[ScriptedConnector](
+            _mk_stuck,
+            cfg,
+            quota,
+            String("POST"),
+            _cred(),
+            String("us-east-1"),
+            String("sqs"),
+            _endpoint(),
+            String("/"),
+            String("application/x-amz-json-1.0"),
+            _bytes(String("{}")),
+            extra^,
+        )
+    except e:
+        raised = String(e)
+    var elapsed_us = Int(now_ns() // 1000) - start_us
+    assert_true(raised.find("deadline exceeded") >= 0, "got: " + raised)
+    assert_true(raised.find("(3 attempts)") >= 0, "got: " + raised)
+    assert_true(
+        elapsed_us < _STUCK_CEILING_US,
+        "elapsed " + String(elapsed_us) + " us for a 150 ms budget",
+    )
+    assert_true(
+        elapsed_us >= 3 * _STUCK_BUDGET_US,
+        "ended before three budgets: " + String(elapsed_us) + " us",
+    )
 
 
 def test_the_request_on_the_wire() raises:
@@ -947,6 +1033,8 @@ def main() raises:
     test_a_budget_ends_retries()
     test_a_client_retry_quota()
     test_the_free_send_through_a_factory()
+    test_the_transport_builds_its_client_from_the_callers_config()
+    test_the_free_send_honors_the_callers_request_timeout()
     test_the_free_send_makes_three_attempts()
     test_the_request_on_the_wire()
     test_a_refused_kernel_dial_is_resent()

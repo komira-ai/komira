@@ -1,0 +1,32 @@
+Metadata-Version: 2.1
+Name: komira_fidelity_probe
+Version: 1.1.7
+Summary: Komira probe — café
+Home-page: https://example.invalid/komira
+Download-URL: https://example.invalid/dl
+Author: Komira Maintainers
+Author-email: Komira <maintainers@example.invalid>
+Maintainer: Komira Maintainers
+Maintainer-email: maintainers@example.invalid
+License: Apache-2.0  
+Keywords: mojo, komira ,probe
+Platform: linux
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: Apache Software License
+Dynamic: License
+License-File: LICENSE
+Project-URL: Source,https://example.invalid/src
+Project-URL: Docs ,  https://example.invalid/docs
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Provides-Extra: docs
+Requires-Dist: mojo ==1.0.0
+Requires-Dist: komira_protobuf ==1.1.7
+Requires-Dist: sphinx ; extra == 'docs'
+Requires-External: libc
+Obsoletes-Dist: komira_old_probe
+Provides-Dist: komira_fidelity_alias
+
+# komira_fidelity_probe
+
+A probe wheel. It is never uploaded anywhere but a loopback recorder.

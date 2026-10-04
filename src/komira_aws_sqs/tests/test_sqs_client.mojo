@@ -23,6 +23,7 @@ from komira_aws_core import (
     AwsEchoConnector,
     StaticCredsSource,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from std.testing import assert_equal, assert_raises, assert_true
@@ -82,6 +83,7 @@ def _client[C: Connector](
     config.endpoint = Optional[String](String("http://127.0.0.1:9324"))
     return SQSSQSClient[C, StaticCredsSource](
         mk,
+        HttpClientConfig.defaults(),
         StaticCredsSource(
             AwsCredential(
                 String("AKIDEXAMPLE"),

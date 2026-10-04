@@ -92,6 +92,7 @@ comptime _GRPC_NOT_FOUND: Int = 5
 comptime _GRPC_PERMISSION_DENIED: Int = 7
 comptime _GRPC_FAILED_PRECONDITION: Int = 9
 comptime _GRPC_UNIMPLEMENTED: Int = 12
+comptime _GRPC_DATA_LOSS: Int = 15
 
 
 # =============================================================================
@@ -541,6 +542,56 @@ def test_server_stream_trailers_only_error_surfaces_the_status() raises:
         )
 
 
+def test_server_stream_status_in_real_trailers_after_data_is_raised() raises:
+    """The shape of a stream that fails part way: initial HEADERS, DATA frames
+    the client has received, then a real HTTP/2 TRAILERS block with a non-OK
+    `grpc-status` (a `ReadObject` that ends in DATA_LOSS after some chunks).
+
+    `server_stream` reads the status from the trailer section too, so the call
+    must RAISE `[grpc:15]`, not hand back a decoder holding the chunks that
+    arrived, which a caller would read as the whole object.
+    """
+    var script = _h2_prologue()
+    var hpack = HpackEncoder(max_table_size=4096)
+    var body = List[UInt8]()
+    encode_stream_message[ProtocolGrpcProto](body, Span(_b(String("chunk-1"))))
+    encode_stream_message[ProtocolGrpcProto](body, Span(_b(String("chunk-2"))))
+    _append_body_then_real_trailers(1, _GRPC_DATA_LOSS, body^, hpack, script)
+
+    var client = _h2_client(script^)
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    var opts = CallOptions()
+    var req = _b(String("read"))
+
+    var raised = False
+    var message = String("")
+    var n_msgs = -1
+    try:
+        var decoder = client.server_stream[RT, ProtocolGrpcProto](
+            String(_PATH), Span(req), opts, Int(0), reactor, token
+        )
+        n_msgs = len(_drain(decoder^))
+    except e:
+        raised = True
+        message = String(e)
+
+    if not raised:
+        raise Error(
+            String(
+                "server_stream returned a decoder for a stream whose TRAILERS"
+                " said DATA_LOSS — the caller reads "
+            )
+            + String(n_msgs)
+            + " message(s) as a complete result"
+        )
+    assert_equal(
+        parse_grpc_status_code(message),
+        _GRPC_DATA_LOSS,
+        String("the trailer status must reach the caller. got: ") + message,
+    )
+
+
 # =============================================================================
 # §3 — `client_stream`
 # =============================================================================
@@ -939,6 +990,16 @@ def main() raises:
             + String(e)
         )
         print("  FAIL  server_stream trailers-only error surfaces the status")
+
+    try:
+        test_server_stream_status_in_real_trailers_after_data_is_raised()
+        print("  PASS  server_stream raises a status in real trailers after DATA")
+    except e:
+        failures.append(
+            String("server_stream_status_in_real_trailers_after_data_is_raised: ")
+            + String(e)
+        )
+        print("  FAIL  server_stream raises a status in real trailers after DATA")
 
     try:
         test_client_stream_returns_the_single_terminal_message()

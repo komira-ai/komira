@@ -3459,6 +3459,16 @@ def _is_precondition(msg: String) -> Bool:
 
 
 @always_inline
+def is_not_found(msg: String) -> Bool:
+    """True iff a raised store Error proves the object is absent. The public
+    spelling of `_is_not_found` for packages built on this one
+    (`komira_search_catalog`'s replay and reapers): the same anchored needles,
+    one definition. A message that merely contains `404`, for example in the
+    object key, is not absence."""
+    return _is_not_found(msg)
+
+
+@always_inline
 def is_precondition(msg: String) -> Bool:
     """True iff `msg` is a lost conditional write (HTTP 412 / precondition
     failed). The public spelling of `_is_precondition` for packages built on

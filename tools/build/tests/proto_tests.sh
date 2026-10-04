@@ -53,7 +53,13 @@ expect_red proto_bad_selection "which is not a .proto of the proto_deps closure"
 # each scoped client, which runs its welded tests (the generated layout probe
 # among them), each gen_check (the generated files, what is absent, what is
 # present) and each tests_check (exactly which welded tests passed). The
-# refusals of the rule, and each check going red, are expect_reds.
+# refusals of the rule, and each check going red, are expect_reds. A
+# `protocol = "grpc"` client with a service, compiled against the real
+# komira_grpc and komira_gcp_core (komira//tools/build/proto-codegen/gcp_grpc),
+# builds only once its welded test of the token hook and the status mapping
+# passes; that client's gen_check and tests_check are in
+# tests//functional/mojo_gcp_client, which is built next.
+expect_green gcp_grpc_client //tools/build/proto-codegen/gcp_grpc:
 if "$BUCK2" build tests//functional/mojo_gcp_client: > "$LOG/mojo_gcp_client.log" 2>&1; then
     pass "mojo_gcp_client: scoped clients, their welded tests, gen_check and tests_check"
 else
@@ -68,8 +74,13 @@ expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/mojo_g
 expect_red gcp_client_absence_check 'which must be absent' tests//negative/mojo_gcp_client:absence_check_can_fail
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/mojo_gcp_client:tests_check_can_fail
 expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/mojo_gcp_client:unknown_protocol
-expect_red gcp_client_grpc_not_wired '`protocol = "grpc"` with a service to emit: mojo_gcp_client does not wire' tests//negative/mojo_gcp_client:grpc_not_wired
 expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/mojo_gcp_client:rest_reaches_plugin
+
+# 23, protoc-gen-mojo's options and text goldens (tests//functional/proto_codegen):
+# each case runs protoc over a corpus with one option string and holds the
+# output to golden files, or protoc's error to the text the case states; the
+# REST URL helpers of a generated client compile and pass their welded test.
+expect_green proto_codegen tests//functional/proto_codegen:
 
 # 23, determinism. Generation is deterministic: two uncached builds (an
 #     isolated daemon, its buck-out cleaned, --no-remote-cache, so the plugin
