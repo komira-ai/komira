@@ -18,10 +18,14 @@ file at the pinned commit.
 | `:googleapis` | the files extracted from it, each a sub-target named by its path (`:googleapis[google/rpc/status.proto]`, `:googleapis[LICENSE]`) |
 | `:logging_v2` | the Cloud Logging v2 protos (roots `google/logging/v2/{logging,log_entry}.proto`, for `ListLogEntries`), checked to be exactly their import closure |
 | `:storage_v2` | the Cloud Storage v2 protos (root `google/storage/v2/storage.proto`, the gRPC storage API), checked the same way |
+| `:compute_v1` | the Compute Engine v1 protos (root `google/cloud/compute/v1/compute.proto`, the REST compute API), checked the same way |
+| `:artifactregistry_v1` | the Artifact Registry v1 protos (root `google/devtools/artifactregistry/v1/service.proto`), checked the same way |
+| `:apigateway_v1` | the API Gateway v1 protos (root `google/cloud/apigateway/v1/apigateway_service.proto`), checked the same way |
 
 ## Using the protos
 
-Depend on the closure target for your API (`:logging_v2`, `:storage_v2`). Its
+Depend on the closure target for your API (`:logging_v2`, `:storage_v2`,
+`:compute_v1`, `:artifactregistry_v1`, `:apigateway_v1`). Its
 `ProtoSrcsInfo` is the checked tree, so a `mojo_proto_library` names it in
 `proto_deps`; `:<target>[tree]` is that tree as a directory (the files at
 their import paths), and the default output is protoc's descriptor set for the
@@ -48,7 +52,8 @@ build on its own.
 3. Build `//tools/vendor/googleapis:` (every checked closure). If the new
    commit changed an import closure, its check names the file to add to (or
    drop from) that closure's list (`_LOGGING_V2_CLOSURE`,
-   `_STORAGE_V2_CLOSURE`).
+   `_STORAGE_V2_CLOSURE`, `_COMPUTE_V1_CLOSURE`,
+   `_ARTIFACTREGISTRY_V1_CLOSURE`, `_APIGATEWAY_V1_CLOSURE`).
 
 ## Adding a client
 

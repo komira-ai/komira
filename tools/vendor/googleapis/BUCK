@@ -65,6 +65,78 @@ _STORAGE_V2_CLOSURE = _STORAGE_V2_ROOTS + [
     "google/type/expr.proto",
 ]
 
+# Compute Engine v1 (the REST compute API, for the generated
+# komira_gcp_compute client): the root and its import closure,
+# google/protobuf/* excepted. :compute_v1 refuses this list unless it is
+# exactly that closure, so a bump that changes the imports fails the build
+# until the list follows.
+_COMPUTE_V1_ROOTS = [
+    "google/cloud/compute/v1/compute.proto",
+]
+
+_COMPUTE_V1_CLOSURE = _COMPUTE_V1_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/cloud/extended_operations.proto",
+]
+
+# Artifact Registry v1 (for the generated komira_gcp_artifactregistry
+# client): the root and its import closure, google/protobuf/* excepted, as
+# :compute_v1 above.
+_ARTIFACTREGISTRY_V1_ROOTS = [
+    "google/devtools/artifactregistry/v1/service.proto",
+]
+
+_ARTIFACTREGISTRY_V1_CLOSURE = _ARTIFACTREGISTRY_V1_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/devtools/artifactregistry/v1/apt_artifact.proto",
+    "google/devtools/artifactregistry/v1/artifact.proto",
+    "google/devtools/artifactregistry/v1/attachment.proto",
+    "google/devtools/artifactregistry/v1/export.proto",
+    "google/devtools/artifactregistry/v1/file.proto",
+    "google/devtools/artifactregistry/v1/package.proto",
+    "google/devtools/artifactregistry/v1/repository.proto",
+    "google/devtools/artifactregistry/v1/rule.proto",
+    "google/devtools/artifactregistry/v1/settings.proto",
+    "google/devtools/artifactregistry/v1/tag.proto",
+    "google/devtools/artifactregistry/v1/version.proto",
+    "google/devtools/artifactregistry/v1/vpcsc_config.proto",
+    "google/devtools/artifactregistry/v1/yum_artifact.proto",
+    "google/iam/v1/iam_policy.proto",
+    "google/iam/v1/options.proto",
+    "google/iam/v1/policy.proto",
+    "google/longrunning/operations.proto",
+    "google/rpc/status.proto",
+    "google/type/expr.proto",
+]
+
+# API Gateway v1 (for the generated komira_gcp_apigateway client): the root
+# and its import closure, google/protobuf/* excepted, as :compute_v1 above.
+_APIGATEWAY_V1_ROOTS = [
+    "google/cloud/apigateway/v1/apigateway_service.proto",
+]
+
+_APIGATEWAY_V1_CLOSURE = _APIGATEWAY_V1_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/cloud/apigateway/v1/apigateway.proto",
+    "google/longrunning/operations.proto",
+    "google/rpc/status.proto",
+]
+
 # The `(google.api.http)` method option alone, for a REST client of a proto
 # that imports nothing else of googleapis: annotations.proto and its import
 # closure, google/protobuf/* excepted. :api_http refuses this list unless it
@@ -79,7 +151,14 @@ _API_HTTP_CLOSURE = _API_HTTP_ROOTS + [
 
 # Every client's closure; a new client appends its list here, and :googleapis
 # extracts the union.
-_ALL_CLOSURES = _LOGGING_V2_CLOSURE + _STORAGE_V2_CLOSURE + _API_HTTP_CLOSURE
+_ALL_CLOSURES = (
+    _LOGGING_V2_CLOSURE +
+    _STORAGE_V2_CLOSURE +
+    _COMPUTE_V1_CLOSURE +
+    _ARTIFACTREGISTRY_V1_CLOSURE +
+    _APIGATEWAY_V1_CLOSURE +
+    _API_HTTP_CLOSURE
+)
 
 # The files out of the archive, each a sub-target named by its path:
 # :googleapis[LICENSE] is googleapis's license file at the pin. A file several
@@ -110,6 +189,33 @@ proto_check(
     name = "storage_v2",
     roots = _STORAGE_V2_ROOTS,
     srcs = [":googleapis[{}]".format(f) for f in sorted(_STORAGE_V2_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The Compute Engine v1 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "compute_v1",
+    roots = _COMPUTE_V1_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_COMPUTE_V1_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The Artifact Registry v1 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "artifactregistry_v1",
+    roots = _ARTIFACTREGISTRY_V1_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_ARTIFACTREGISTRY_V1_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The API Gateway v1 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "apigateway_v1",
+    roots = _APIGATEWAY_V1_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_APIGATEWAY_V1_CLOSURE)],
     strip_prefix = "files",
     visibility = ["PUBLIC"],
 )

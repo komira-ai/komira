@@ -1,0 +1,104 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# Artifact Registry v1: a REST/JSON client generated at build time from the
+# googleapis protos //tools/vendor/googleapis:artifactregistry_v1 extracts
+# from its pinned archive (nothing of them is copied here).
+# `ArtifactRegistryClient` sends through komira_http_client's `HttpClient`
+# over the komira_http_core `Connector` it is given, takes each request's
+# bearer token from a komira_gcp_core `GcpTokenSource`, and raises a non-2xx
+# answer through komira_gcp_core's `gcp_status_error`. It reads no
+# environment.
+#
+# `methods` is what the callers make, each for one use:
+#
+#   CreateRepository   a deploy creates the image repository it owns
+#   GetRepository      it reads the repository back (exists, format, URI)
+#   DeleteRepository   a teardown removes it
+#   ListRepositories   a teardown check lists what is left in a location
+#   GetFile            a package upload reads an uploaded file's size and
+#                      hashes back
+#
+# Not generated: the service's other methods. Two of them have callers and
+# are refused here, both on the generator: GetIamPolicy (its `options`
+# field is a message, and a REST GET can only put a scalar in the query),
+# and with it SetIamPolicy, which the same callers use as a
+# read-modify-write pair with GetIamPolicy. Docker images, packages,
+# versions, tags, rules, settings and the file listing have no caller.
+#
+# CreateRepository and DeleteRepository answer a google.longrunning
+# `Operation` (`done`, then `error` or `response`). Following one needs
+# google.longrunning's GetOperation at the service's own route
+# (`/v1/{name=projects/*/locations/*/operations/*}`), which the service's
+# API configuration declares and the protos do not, so it is not generated
+# here: the generic `google/longrunning/operations.proto` route
+# (`/v1/{name=operations/**}`) does not match an Artifact Registry
+# operation name.
+#
+# The client starts at artifactregistry.googleapis.com, the
+# `google.api.default_host` ArtifactRegistry declares; a caller reaching a
+# regional endpoint (`<region>-artifactregistry.googleapis.com`) names it
+# with `set_rest_host`.
+#
+# `bundle_only` is the files the methods reach, each generated into this
+# package: the service, the repository and file messages, and
+# google.longrunning's Operation with google.rpc's Status. The service and
+# its request messages are in separate files, which the generator's REST
+# emitter resolves across the package.
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Artifact Registry v1 REST reference (no upstream test body is
+# copied), each sending through the generated client over komira_http_core's
+# ScriptedConnector pointed at `localhost` (no socket, no name lookup):
+# test_artifactregistry_requests (each method's request line and body, a
+# name outside its pattern refused before a dial, the list query, an escaped
+# file id), test_artifactregistry_responses (a repository with its configs,
+# a list page, the long-running operation in each state),
+# test_artifactregistry_errors (the google.rpc.Status envelope mapped to a
+# code, the body never quoted), test_artifactregistry_default_host and
+# test_no_env_reads (no generated file reads the environment; exactly the
+# five methods above are generated).
+#
+# No test here talks to the service.
+
+mojo_gcp_client(
+    name = "komira_gcp_artifactregistry",
+    bundle_only = [
+        "google/devtools/artifactregistry/v1/service.proto",
+        "google/devtools/artifactregistry/v1/repository.proto",
+        "google/devtools/artifactregistry/v1/file.proto",
+        "google/longrunning/operations.proto",
+        "google/rpc/status.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = [
+        "ArtifactRegistry.CreateRepository",
+        "ArtifactRegistry.GetRepository",
+        "ArtifactRegistry.DeleteRepository",
+        "ArtifactRegistry.ListRepositories",
+        "ArtifactRegistry.GetFile",
+    ],
+    proto_deps = ["//tools/vendor/googleapis:artifactregistry_v1"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        # The whole generated package, so the scan covers every file the
+        # generator writes with no second list of them to drift.
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_artifactregistry_gen"},
+    },
+    test_srcs = [
+        "tests/test_artifactregistry_default_host.mojo",
+        "tests/test_artifactregistry_errors.mojo",
+        "tests/test_artifactregistry_requests.mojo",
+        "tests/test_artifactregistry_responses.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)
