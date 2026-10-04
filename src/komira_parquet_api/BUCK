@@ -1,0 +1,33 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Parquet format's own vocabulary, as plain values: the Thrift enums
+# (page type, encoding, compression codec, physical type, field repetition,
+# boundary order) and the footer metadata structs (FileMetaData, RowGroup,
+# ColumnChunk, ColumnMetaData, Statistics, SchemaElement, PageHeader,
+# SortingColumn, KeyValue). It reads no file and decodes no byte; a reader
+# fills these structs and a writer serializes them.
+#
+# A zero-dependency leaf: the empty `deps` is load-bearing, because a Parquet
+# codec, reader or writer depends on this library, so anything added here
+# lands in each of their closures.
+#
+# The welded tests: test_no_env_reads (the package's sources read no
+# environment, import no first-party package and hold no raw pointer). It is
+# staged every source `srcs` compiles, subdirectories included, so a module
+# the scan does not read fails it.
+_SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
+
+mojo_library(
+    name = "komira_parquet_api",
+    srcs = _SRCS,
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in _SRCS
+        },
+    },
+    test_srcs = [
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
