@@ -1,0 +1,92 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# Service Usage v1: a REST/JSON client generated at build time from the
+# googleapis protos //tools/vendor/googleapis:serviceusage_v1 extracts from
+# its pinned archive (nothing of them is copied here). `ServiceUsageClient`
+# sends through komira_http_client's `HttpClient` over the komira_http_core
+# `Connector` it is given, takes each request's bearer token from a
+# komira_gcp_core `GcpTokenSource`, and raises a non-2xx answer through
+# komira_gcp_core's `gcp_status_error`. It reads no environment.
+#
+# `methods` is what komira's deploy side calls, each for:
+#
+#   EnableService   the project-service resource turns on an API a
+#                   deployment's resources need, before they are created
+#   GetService      it reads whether the API is on (before enabling it,
+#                   and while waiting for an enable to take effect)
+#   DisableService  it turns the API off when the resource is destroyed
+#
+# Enabling and disabling are long-running: each answers with a
+# google.longrunning `Operation`, which the client returns as read (still
+# running, finished with a `response`, or finished with an `error` status;
+# its Any payloads kept opaque). The callers converge by polling GetService
+# until the service's `state` is ENABLED, so the operation is never polled
+# by name and the Operations service (GetOperation) is not generated.
+#
+# Not generated, so not reachable through this package: ListServices,
+# BatchEnableServices and BatchGetServices (no caller enables or reads
+# services in bulk) and the Operations service. A method joins the list
+# with its own rows in the tests below.
+#
+# `omit_fields` leaves `Service.config` out of the generated Service: no
+# caller reads it, and its ServiceConfig reaches `google.protobuf.Api`
+# (which komira_wkt does not provide) and `map<string, int64>` fields (which
+# komira_proto_codec does not decode). An answer carrying it is read with
+# the config skipped like any unknown key.
+#
+# `bundle_only` is the files the methods reach, each generated into this
+# package: serviceusage (the service and its requests), resources (Service
+# and its State), operations (Operation) and status (an operation's error).
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Service Usage v1 REST reference (no upstream test body is
+# copied), each sending through the generated client over komira_http_core's
+# ScriptedConnector (no socket, no DNS): test_default_host (a fresh client
+# starts at serviceusage.googleapis.com; `set_rest_host` replaces it, and
+# the replacement is what is dialled and named in the Host header),
+# test_service_usage (the request line, headers and body of each method; a
+# running, a finished and a failed enable operation read back; a service's
+# state read with its config skipped; a name with no parent refused before
+# the dial), test_errors (the google.rpc.Status envelope mapped to its code,
+# the body never quoted) and test_no_env_reads (every generated module
+# reads no environment and holds no method but those listed).
+#
+# No test here talks to the service.
+
+mojo_gcp_client(
+    name = "komira_gcp_serviceusage",
+    bundle_only = [
+        "google/api/serviceusage/v1/resources.proto",
+        "google/api/serviceusage/v1/serviceusage.proto",
+        "google/longrunning/operations.proto",
+        "google/rpc/status.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = [
+        "google.api.serviceusage.v1.ServiceUsage.EnableService",
+        "google.api.serviceusage.v1.ServiceUsage.GetService",
+        "google.api.serviceusage.v1.ServiceUsage.DisableService",
+    ],
+    omit_fields = ["google.api.serviceusage.v1.Service.config"],
+    proto_deps = ["//tools/vendor/googleapis:serviceusage_v1"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_serviceusage_gen"},
+    },
+    test_srcs = [
+        "tests/test_default_host.mojo",
+        "tests/test_errors.mojo",
+        "tests/test_no_env_reads.mojo",
+        "tests/test_service_usage.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)
