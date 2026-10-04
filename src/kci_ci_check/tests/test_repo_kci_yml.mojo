@@ -4,7 +4,8 @@
 #   release/machine.textproto, by the same check `kci run` makes at start-up
 #   (`check_running_workflow`): it finds nothing. A drift between the two (a
 #   renamed job or environment, a stage the workflow does not run, a
-#   pull_request trigger, an unpinned action, a split of a stage that does not
+#   release job a pull request reaches, a pr job a fork reaches, an unpinned
+#   action, a split of a stage that does not
 #   run all of it exactly once, a `kci run` without --summary-file or reading
 #   another machine file, farm-connect on the wrong job) fails this test, and with it `./buck2 build //...` on every pull
 #   request. The workflow's KCI_MACHINE (used only to skip a revision without a
@@ -50,10 +51,22 @@ def _channels() raises -> List[ChannelsFile]:
 def test_the_release_machine() raises:
     var g = _graph()
     var names = g.stage_names()
-    assert_equal(len(names), 3)
+    assert_equal(len(names), 4)
     assert_equal(names[0], String("build"))
     assert_equal(names[1], String("gamma"))
     assert_equal(names[2], String("prod"))
+    assert_equal(names[3], String("pr"))
+    # the pull request's check: no environment, farm-connected, one BUILD
+    # step over the release's artifacts file, after nothing
+    var pr = g.stage(String("pr"))
+    assert_true(pr.is_pull_request())
+    assert_equal(pr.environment, String(""))
+    assert_true(pr.farm_connected)
+    assert_equal(pr.after, String(""))
+    assert_equal(len(pr.steps), 1)
+    assert_true(pr.steps[0].is_build())
+    assert_equal(pr.steps[0].platform, String("linux-x86_64"))
+    assert_equal(pr.steps[0].artifacts, String("release/artifacts.textproto"))
     var b = g.stage(String("build"))
     assert_equal(b.environment, String("build"))
     assert_true(b.farm_connected)
@@ -148,12 +161,12 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
                     only_seen.append(ids[j] + String(" ") + calls[k].stage + String(" ") + calls[k].only[o])
                 assert_true(not calls[k].has_machine, String("a kci run in kci.yml passes --machine"))
                 assert_true(calls[k].has_summary_file, String("a kci run in kci.yml passes no --summary-file"))
-    assert_equal(runs, 4)
+    assert_equal(runs, 5)
     assert_equal(len(only_seen), 2)
     assert_equal(only_seen[0], String("gamma gamma step:publish"))
     assert_equal(only_seen[1], String("validate gamma validation:install"))
-    # the build job, and only it, joins the tailnet
-    assert_equal(farm, 1)
+    # the build job and the pr job, and only they, join the tailnet
+    assert_equal(farm, 2)
     # the validate job: no environment, no identity token, after the publish
     var validate = doc.child(jobs, String("validate"))
     assert_true(validate >= 0, String("kci.yml has no job validate"))
