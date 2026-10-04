@@ -9,6 +9,9 @@
 # cwd, parent directories are created), which is how a test stands in for
 # what buck2 would have built and the build report it would have written.
 #
+# Every run is recorded in `calls`, its `env` included, so a test can assert
+# what environment a child would have been started with.
+#
 # Steps are consumed in order. A run with no step left, or whose argv does
 # not match the next step's, RAISES naming both argvs, and is still
 # recorded in `calls`. An expected argument equal to `ANY_ARG` matches any

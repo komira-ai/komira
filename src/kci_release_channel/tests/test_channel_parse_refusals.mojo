@@ -10,12 +10,12 @@
 
 from std.testing import TestSuite, assert_equal
 
-from kci_release_channel import ChannelDeclaration, parse_channels_file
+from kci_release_channel import Channel, parse_channels_file
 
 comptime _ID = "publisher@example.invalid"
 
 
-def _parse(text: String) raises -> List[ChannelDeclaration]:
+def _parse(text: String) raises -> List[Channel]:
     """`parse_channels_file` over `text` with `schema_version: 1` prepended on
     its FIRST line, so no line number a refusal names moves."""
     return parse_channels_file(String("schema_version: 1 ") + text)
@@ -378,8 +378,8 @@ def test_schema_version_inside_a_channel_is_unknown() raises:
 
 
 def test_schema_version_anywhere_at_the_top_level() raises:
-    var decls = parse_channels_file(_one_channel() + String("schema_version: 1\n"))
-    assert_equal(len(decls), 1)
+    var channels = parse_channels_file(_one_channel() + String("schema_version: 1\n"))
+    assert_equal(len(channels), 1)
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

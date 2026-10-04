@@ -16,8 +16,8 @@ from komira_libc.posix import _read_env
 
 from kci_build import BuildRequest
 from kci_cli import TMP_SUFFIX, CliRecorder, SecretStoreChoice, StageSteps, StepEnd, kci_main_with, recorder_for, write_whole_file
-from kci_contract import OUTCOME_SUCCEEDED, parse_result
-from kci_contract import RunResult as KciRunResult
+from kci_api import OUTCOME_SUCCEEDED, parse_result
+from kci_api import RunResult as KciRunResult
 from kci_publish import PublishRequest
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
@@ -62,7 +62,7 @@ def _args(dir: String, result_file: String) raises -> List[String]:
     var m = dir + String("/m.textproto")
     write_whole_file(
         m,
-        String("schema_version: 1\nstage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" } }\n"),
+        String("schema_version: 1\nstage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n"),
     )
     var l = List[String]()
     for s in ["run", "--stage", "build", "--run-id", "gh-3", "--attempt", "1", "--release-dir", "/r", "--work-dir", "/w", "--log-dir", "/l"]:

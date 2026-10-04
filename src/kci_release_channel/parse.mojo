@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # The channels file is textproto, every channel defined once, under its
-# format's major (kci_contract's format table, `kci.channels`):
+# format's major (kci_api's format table, `kci.channels`):
 #
 #   schema_version: 1
 #   channel {
@@ -17,7 +17,7 @@
 #     }
 #   }
 #
-# `schema_version` is read FIRST, before any other field (kci_contract's
+# `schema_version` is read FIRST, before any other field (kci_api's
 # `authored_schema_version`): missing, set twice, not an integer, or a major
 # this kci does not read is refused, so a file written for a newer kci says
 # "needs a newer kci" rather than naming a field the newer major added.
@@ -38,7 +38,7 @@
 # the token cursor into the error text and from there into a CI log. Those
 # refusals name the field and the line and say the value is not quoted.
 # Everything else (names, visibility, artifact types, empty values, sharing)
-# is `validate_channel_declarations`, which runs on the parsed list before it
+# is `validate_channels`, which runs on the parsed list before it
 # is returned, so a parsed list is always a valid one.
 # =============================================================================
 
@@ -53,13 +53,13 @@ from komira_textproto import (
     lex,
 )
 
-from kci_contract import FORMAT_CHANNELS, authored_schema_version, skip_schema_version
+from kci_api import FORMAT_CHANNELS, authored_schema_version, skip_schema_version
 
 from .channel_credential import ChannelCredential
-from .channel_declaration import (
-    ChannelDeclaration,
+from .channel import (
+    Channel,
     ChannelRepository,
-    validate_channel_declarations,
+    validate_channels,
 )
 
 
@@ -239,7 +239,7 @@ def _parse_repository(
 
 def _parse_channel(
     mut c: TokenCursor, ordinal: Int, open_line: Int
-) raises -> ChannelDeclaration:
+) raises -> Channel:
     var name = String("")
     var visibility = String("")
     var seen_name = False
@@ -276,16 +276,16 @@ def _parse_channel(
                 + _channel_label(name, ordinal)
                 + String(" (expected name, visibility, repository)")
             )
-    return ChannelDeclaration(name^, visibility^, repos^)
+    return Channel(name^, visibility^, repos^)
 
 
-def parse_channels_file(text: String) raises -> List[ChannelDeclaration]:
+def parse_channels_file(text: String) raises -> List[Channel]:
     """Parse and validate a channels file. Raises on the first refusal, by a
     message naming the offending field, channel, repository or location."""
     var tokens = lex(text, String(_SOURCE))
     _ = authored_schema_version(tokens, String(FORMAT_CHANNELS), String(_SOURCE))
     var c = TokenCursor(tokens^, String(_SOURCE))
-    var out = List[ChannelDeclaration]()
+    var out = List[Channel]()
     while not c.at_end():
         var f = c.expect(TOKEN_WORD)
         if f.text == "schema_version":
@@ -302,5 +302,5 @@ def parse_channels_file(text: String) raises -> List[ChannelDeclaration]:
         out.append(_parse_channel(c, len(out) + 1, open_line))
     if len(out) == 0:
         raise Error(String(_SOURCE) + String(" declares no channel"))
-    validate_channel_declarations(out)
+    validate_channels(out)
     return out^

@@ -10,6 +10,6 @@ mojo_binary(
     visibility = ["PUBLIC"],
 )
 
-# Read by kci_cli's test that no kci source but kci_contract spells an exit
+# Read by kci_cli's test that no kci source but kci_api spells an exit
 # number.
 export_file(name = "main.mojo", visibility = ["//src/kci_cli:"])

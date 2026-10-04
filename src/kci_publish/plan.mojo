@@ -10,35 +10,31 @@
 #   by how many set-internal requirements each has (fewer first; a stable
 #   sort key, never a correctness rule), the metapackage LAST.
 #
-# `plan_from_state(targets, channel_read, claims)` -- contract step 1's verdict, in
+# `plan_from_state(targets, channel_read)` -- contract step 1's verdict, in
 #   this order:
-#   1. any file present with OTHER bytes (member or metapackage): STOP, exit 7,
+#   1. any file present with OTHER bytes (member or metapackage): STOP, exit 3,
 #      naming every such file. Nothing is uploaded;
 #   2. any file or name listing that could not be read: exit 5. A listing that
 #      was not read never makes a name "new";
-#   3. NEW NAMES. A set name is HELD when the channel has any file of it:
-#      a listing (the set's subdir and `noarch`) names one, OR one of the
-#      set's own files under that name read present-same / present-different
-#      BY DOWNLOAD at step 1. The download counts because it is the
-#      authoritative read: the repodata can lag an upload, and a re-run after
-#      a partial publish must not see its own uploads as "new" just because
-#      the index has not caught up. A set name that is not held is NEW, a
-#      claim, and needs `--claim-new-name`; an unclaimed new name is STOP,
-#      exit 8. A claim for a name not in the set is STOP, exit 8. A claim for
-#      a HELD name is SATISFIED when everything the channel holds under it is
-#      this set's own files, each read present-same (the claim was made by an
-#      earlier run of this same release, which then stopped or finished), so
-#      re-running the same command is stable whatever the index shows; a
-#      claim for a name held by any OTHER file is STOP, exit 8 (it is not
-#      new);
-#   4. every file present and identical: nothing to do, exit 6;
-#   5. otherwise PROCEED: the members still absent are uploaded, then the
+#   3. every file present and identical: nothing to do, NOOP, exit 0;
+#   4. otherwise PROCEED: the members still absent are uploaded, then the
 #      metapackage.
 #
-# `approved_names_for(targets, channel_read, claims)` -- the uploader's last gate
-#   (`kci_pkg_upload.ApprovedNames`), built from the set names the channel
-#   already holds (the same HELD rule) plus the claims. Never read from a
-#   file.
+# NEW NAMES are reported, never refused. A set name is HELD when the channel
+#   has any file of it: a listing (the set's subdir and `noarch`) names one, OR
+#   one of the set's own files under that name read present-same /
+#   present-different BY DOWNLOAD at step 1. The download counts because it is
+#   the authoritative read: the repodata can lag an upload, and a re-run after
+#   a partial publish must not report its own uploads as "new" just because
+#   the index has not caught up. A set name that is not held is NEW
+#   (`new_names`). Which names a release publishes is its artifacts
+#   file's; the approver of the publishing stage reads the NEW NAMES report
+#   before approving, and a dry run shows the same report.
+#
+# `approved_names_for(targets)` -- the uploader's last gate
+#   (`kci_pkg_upload.ApprovedNames`): every name of the declared set, so an
+#   undeclared name cannot be uploaded even by a bug above this layer. Never
+#   read from a file or a flag.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -47,15 +43,14 @@ from kci_pkg_upload import (
     SUBSTRATE_PREFIX_DEV_CONDA,
     ApprovedNames,
     PackageCoordinate,
-    conda_package_name_of_file,
-    prefix_dev_repo_of_location,
+        prefix_dev_repo_of_location,
 )
 from kci_pkg_upload.identity import ascii_lower
 from kci_pkg_upload.prefix_dev_registry import (
     refuse_malformed_conda_coordinate,
     refuse_name_not_the_files,
 )
-from kci_release_channel import ARTIFACT_TYPE_CONDA, ChannelDeclaration
+from kci_release_channel import ARTIFACT_TYPE_CONDA, Channel
 from kci_release_set.conda_metadata import KIND_METAPACKAGE
 from kci_release_set.member import ReleaseMember
 
@@ -82,7 +77,6 @@ def state_name(kind: Int) -> String:
 comptime VERDICT_PROCEED: Int = 0
 comptime VERDICT_STOP_DIFFERENT: Int = 1
 comptime VERDICT_CANNOT_TELL: Int = 2
-comptime VERDICT_STOP_NEW_NAME: Int = 3
 comptime VERDICT_ALREADY_PUBLISHED: Int = 4
 
 comptime NOARCH_SUBDIR: String = "noarch"
@@ -93,7 +87,7 @@ struct PublishTarget(Copyable, Movable):
 
     Layout: owned values only. No pointer field."""
 
-    var declaration: String
+    var artifact: String
     var is_metapackage: Bool
     var coordinate: PackageCoordinate
     var sha256_hex: String
@@ -102,14 +96,14 @@ struct PublishTarget(Copyable, Movable):
 
     def __init__(
         out self,
-        var declaration: String,
+        var artifact: String,
         is_metapackage: Bool,
         var coordinate: PackageCoordinate,
         var sha256_hex: String,
         var file_path: String,
         internal_requirements: Int,
     ):
-        self.declaration = declaration^
+        self.artifact = artifact^
         self.is_metapackage = is_metapackage
         self.coordinate = coordinate^
         self.sha256_hex = sha256_hex^
@@ -163,16 +157,22 @@ struct ChannelRead(Copyable, Movable):
 
 
 struct StepOneVerdict(Copyable, Movable):
-    """`plan_from_state`'s answer: a VERDICT_* and the lines naming why.
+    """`plan_from_state`'s answer: a VERDICT_* and the lines naming why, and
+    the set names new to the channel (`names_known` False when the channel
+    was not read well enough to say: a CANNOT_TELL verdict).
 
-    Layout: an Int and an owned list. No pointer field."""
+    Layout: an Int, a Bool and owned lists. No pointer field."""
 
     var verdict: Int
     var lines: List[String]
+    var names_known: Bool
+    var new_names: List[String]
 
     def __init__(out self, verdict: Int):
         self.verdict = verdict
         self.lines = List[String]()
+        self.names_known = False
+        self.new_names = List[String]()
 
 
 def _internal_count(m: ReleaseMember, members: List[ReleaseMember]) -> Int:
@@ -187,7 +187,7 @@ def _internal_count(m: ReleaseMember, members: List[ReleaseMember]) -> Int:
 
 
 def resolve_targets(
-    channel: ChannelDeclaration, members: List[ReleaseMember]
+    channel: Channel, members: List[ReleaseMember]
 ) raises -> List[PublishTarget]:
     """See the file header. RAISES once, listing every refusal."""
     var repository = channel.repository_for(String(ARTIFACT_TYPE_CONDA))
@@ -211,10 +211,10 @@ def resolve_targets(
             refuse_malformed_conda_coordinate(c)
             refuse_name_not_the_files(c)
         except e:
-            refusals.append(String("artifact '") + m.declaration + String("': ") + String(e))
+            refusals.append(String("artifact '") + m.artifact + String("': ") + String(e))
             continue
         var t = PublishTarget(
-            m.declaration.copy(),
+            m.artifact.copy(),
             m.conda.kind == KIND_METAPACKAGE,
             c^,
             m.manifest.sha256_hex.copy(),
@@ -276,36 +276,6 @@ def is_held(targets: List[PublishTarget], channel_read: ChannelRead, name: Strin
     return False
 
 
-def holds_only_ours(targets: List[PublishTarget], channel_read: ChannelRead, name: String) -> Bool:
-    """Whether everything the channel holds under `name` is this set's own
-    files, each read present-same by download: every listed file of `name`
-    is one of the set's files, and every set file of `name` is present-same.
-    """
-    var want = ascii_lower(name)
-    var ours = List[String]()
-    for i in range(len(targets)):
-        if ascii_lower(targets[i].coordinate.distribution) != want:
-            continue
-        if channel_read.states[i].kind != STATE_SAME:
-            return False
-        ours.append(targets[i].where())
-    if len(ours) == 0:
-        return False
-    for f in range(len(channel_read.listed_files)):
-        ref p = channel_read.listed_files[f]
-        var slash = p.rfind(String("/"))
-        var file = String(p[byte = slash + 1 :]) if slash >= 0 else p.copy()
-        if conda_package_name_of_file(file) != want:
-            continue
-        var mine = False
-        for k in range(len(ours)):
-            if ours[k] == p:
-                mine = True
-        if not mine:
-            return False
-    return True
-
-
 def new_names(targets: List[PublishTarget], channel_read: ChannelRead) -> List[String]:
     """The set names the channel holds no file of, by listing or by download
     (lowercase, each once). Meaningful only when `read.names_read`."""
@@ -323,19 +293,9 @@ def new_names(targets: List[PublishTarget], channel_read: ChannelRead) -> List[S
     return out^
 
 
-def _in_set(targets: List[PublishTarget], name: String) -> Bool:
-    var want = ascii_lower(name)
-    for i in range(len(targets)):
-        if ascii_lower(targets[i].coordinate.distribution) == want:
-            return True
-    return False
-
-
-def plan_from_state(
-    targets: List[PublishTarget], channel_read: ChannelRead, claims: List[String]
-) raises -> StepOneVerdict:
-    """Step 1's verdict (see the file header). RAISES only when the states
-    and the targets differ in number."""
+def plan_from_state(targets: List[PublishTarget], channel_read: ChannelRead) raises -> StepOneVerdict:
+    """Step 1's verdict and the new names (see the file header). RAISES only
+    when the states and the targets differ in number."""
     if len(channel_read.states) != len(targets):
         raise Error(
             String("PUBLISH step: ")
@@ -360,93 +320,49 @@ def plan_from_state(
             cannot.lines.append(
                 String("CANNOT TELL ") + targets[i].where() + String(": ") + s.detail
             )
-    if len(different.lines) > 0:
-        return different^
     if not channel_read.names_read:
         cannot.lines.append(
             String("CANNOT TELL which names the channel holds: ") + channel_read.names_detail
         )
-    if len(cannot.lines) > 0:
+    if len(cannot.lines) > 0 and len(different.lines) == 0:
         return cannot^
-    var stop = StepOneVerdict(VERDICT_STOP_NEW_NAME)
-    var satisfied = List[String]()
-    var fresh = new_names(targets, channel_read)
+    var fresh = List[String]()
+    var known = len(cannot.lines) == 0
+    if known:
+        fresh = new_names(targets, channel_read)
+    var res: StepOneVerdict
+    if len(different.lines) > 0:
+        res = different^
+    else:
+        var all_same = True
+        for i in range(len(channel_read.states)):
+            if channel_read.states[i].kind != STATE_SAME:
+                all_same = False
+        if all_same:
+            res = StepOneVerdict(VERDICT_ALREADY_PUBLISHED)
+            res.lines.append(String("already published: every file is in the channel, identical"))
+        else:
+            res = StepOneVerdict(VERDICT_PROCEED)
+    res.names_known = known
     for i in range(len(fresh)):
-        var claimed = False
-        for j in range(len(claims)):
-            if ascii_lower(claims[j]) == fresh[i]:
-                claimed = True
-        if not claimed:
-            stop.lines.append(
-                String("STOP new name: '")
-                + fresh[i]
-                + String("' has no file in the channel. Publishing it claims the name for")
-                + String(" good; pass --claim-new-name ")
-                + fresh[i]
-                + String(" if that is intended")
-            )
-    for j in range(len(claims)):
-        if not _in_set(targets, claims[j]):
-            stop.lines.append(
-                String("STOP claim: --claim-new-name '")
-                + claims[j]
-                + String("' is not a package of this release set")
-            )
-        elif is_held(targets, channel_read, claims[j]):
-            if holds_only_ours(targets, channel_read, claims[j]):
-                satisfied.append(
-                    String("CLAIM --claim-new-name '")
-                    + claims[j]
-                    + String("' is satisfied: the channel holds only this release's own file(s)")
-                    + String(" of it, identical (an earlier run of this release claimed it)")
-                )
-            else:
-                stop.lines.append(
-                    String("STOP claim: --claim-new-name '")
-                    + claims[j]
-                    + String("' is already in the channel; it is not new")
-                )
-    if len(stop.lines) > 0:
-        return stop^
-    var all_same = True
-    for i in range(len(channel_read.states)):
-        if channel_read.states[i].kind != STATE_SAME:
-            all_same = False
-    if all_same:
-        var done = StepOneVerdict(VERDICT_ALREADY_PUBLISHED)
-        for k in range(len(satisfied)):
-            done.lines.append(satisfied[k].copy())
-        done.lines.append(String("already published: every file is in the channel, identical"))
-        return done^
-    var go = StepOneVerdict(VERDICT_PROCEED)
-    for k in range(len(satisfied)):
-        go.lines.append(satisfied[k].copy())
-    return go^
+        res.lines.append(
+            String("NEW NAME '") + fresh[i] + String("': the channel holds no file of it yet;")
+            + String(" this release publishes it for the first time")
+        )
+    res.new_names = fresh^
+    return res^
 
 
-def approved_names_for(
-    targets: List[PublishTarget], channel_read: ChannelRead, claims: List[String]
-) raises -> ApprovedNames:
-    """The names an upload may claim: set names the channel already holds,
-    plus the claims (see the file header)."""
+def approved_names_for(targets: List[PublishTarget]) raises -> ApprovedNames:
+    """The names an upload may carry: every name of the declared set (see
+    the file header)."""
     var names = ApprovedNames()
     var added = List[String]()
     for i in range(len(targets)):
         var n = ascii_lower(targets[i].coordinate.distribution)
-        if not is_held(targets, channel_read, n):
-            continue
         var seen = False
         for j in range(len(added)):
             if added[j] == n:
-                seen = True
-        if not seen:
-            added.append(n.copy())
-            names.approve(n^)
-    for j in range(len(claims)):
-        var n = ascii_lower(claims[j])
-        var seen = False
-        for k in range(len(added)):
-            if added[k] == n:
                 seen = True
         if not seen:
             added.append(n.copy())
