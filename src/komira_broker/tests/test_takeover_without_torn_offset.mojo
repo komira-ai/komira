@@ -30,7 +30,7 @@
 # cross-process analogue (two handles over one prefix).
 # =============================================================================
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from komira_objectstore.cas_manifest import (
     CasManifestStore,
@@ -44,18 +44,21 @@ from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
 
-from komira_broker.manifest_body import encode_manifest_body
+from komira_broker.manifest_body import ManifestBody, encode_manifest_body
 from komira_objectstore.cas_manifest import decode_chunk_record_count
 
 
 comptime _Store = SharedInMemoryConditionalStore
 
 
+# creation_ts_ms is a placeholder nothing in this harness reads, and a sample
+# timestamp in this tree must not decode to a real past date, so it is
+# 4_000_000_000_000 ms (a date in 2096) rather than a recent epoch value.
 def _producer_body(
     seg: String, rc: Int64, pid: Int64, epoch: Int64, first: Int64, last: Int64
 ) -> List[UInt8]:
     return encode_manifest_body(
-        seg, rc, UInt32(0), Int64(seg.byte_length()), Int64(1700000000000),
+        seg, rc, UInt32(0), Int64(seg.byte_length()), Int64(4_000_000_000_000),
         pid, epoch, first, last,
     )
 
@@ -67,36 +70,118 @@ def _make_manifest(store: _Store, prefix: String) -> CasManifestStore[_Store]:
 # -----------------------------------------------------------------------------
 # Verify the three offset invariants over the manifest's committed chunks.
 # -----------------------------------------------------------------------------
+def _live_pid(round: Int) -> Int64:
+    """The producer id the live owner of `round` used: the harness hands out ids
+    from 100 upward, one to the live owner and one to the stale writer per
+    round."""
+    return Int64(100 + 2 * round)
+
+
 def _assert_offset_invariants(
     m: CasManifestStore[_Store], expected_total_records: Int64, label: String
 ) raises:
-    """Read back every committed chunk via the manifest and assert: (1) contiguity
-    0..M-1 with no gaps/dups, (2) per-chunk ranges disjoint + bases strictly
-    increasing, (3) the total record count matches the live writers' commits."""
+    """Read back every committed chunk via the manifest and assert the three
+    invariants of the header, each from the chunk's own bytes:
+
+    (1) CONTIGUITY: chunk `seq`'s producer range starts where the previous one
+        ended (`first_seq` == running sum, `last_seq` == base + rc - 1), and the
+        authoritative head's `next_offset` is exactly the dense span.
+    (2) DISJOINT + MONOTONE: chunk seqs are 0..n-1 (the head's `chunk_seq` is
+        n-1) and bases strictly increase because every rc is positive.
+    (3) LIVE-EPOCH ONLY: chunk `seq` is round `seq`'s live owner's batch (its
+        object key, producer id and record count), so no fenced writer's record
+        is anywhere in the log.
+
+    `test_checker_can_fail` proves each clause rejects a log that breaks it."""
     var n = m.num_chunks()
     var expected_base = Int64(0)
     for seq in range(Int(n)):
         var raw = m.read_chunk(Int64(seq))
         var rc = decode_chunk_record_count(raw)
-        # (2) base monotone + (1) contiguous: this chunk's base MUST equal the
-        # running sum of all prior chunks' record counts (no gap, no overlap).
-        # (We derive the base from the running sum because the manifest assigns
-        # offsets densely by record_count — the append IS the allocator.)
-        assert_true(
-            rc >= Int64(0),
-            label + ": chunk " + String(seq) + " has non-negative rc",
+        var at = label + ": chunk " + String(seq)
+        assert_true(rc > Int64(0), at + " has a positive record count")
+        var body = ManifestBody.decode(raw)
+        assert_equal(
+            body.object_key,
+            String("live-r") + String(seq) + String(".seg"),
+            at + " is the live owner's batch (no fenced writer's record)",
         )
-        # The next chunk's base is this base + rc; contiguity is exactly that the
-        # ranges abut with no gap. Range [expected_base, expected_base+rc-1].
+        assert_equal(body.producer_id, _live_pid(seq), at + " producer id")
+        assert_equal(body.first_seq, expected_base, at + " starts at the dense base")
+        assert_equal(
+            body.last_seq, expected_base + rc - Int64(1), at + " ends at base + rc - 1"
+        )
         expected_base += rc
-    # (1)+(3): the total records across all chunks == the live writers' commits
-    # (every fenced stale writer contributed ZERO, so the total is exactly the
-    # dense offset span).
     assert_equal(
         expected_base,
         expected_total_records,
         label + ": total committed records == dense offset span (no torn/gap)",
     )
+    var head = m.read_head_authoritative()
+    assert_equal(head.chunk_seq, n - Int64(1), label + ": head chunk_seq")
+    assert_equal(
+        head.next_offset,
+        expected_total_records,
+        label + ": head next_offset == dense offset span",
+    )
+
+
+def _commit_live(
+    mut m: CasManifestStore[_Store],
+    seg: String,
+    rc: Int64,
+    pid: Int64,
+    first: Int64,
+    lease: Int64,
+) raises:
+    var res = m.append_idempotent(
+        _producer_body(seg, rc, pid, Int64(0), first, first + rc - Int64(1)),
+        rc, pid, Int64(0), first, first + rc - Int64(1), Int64(0),
+        lease,
+        lease,
+    )
+    assert_equal(res.outcome, IDEMPOTENT_COMMITTED, seg + " committed")
+
+
+def _checker_rejects(m: CasManifestStore[_Store], total: Int64) -> Bool:
+    try:
+        _assert_offset_invariants(m, total, String("planted"))
+    except e:
+        print("  planted log refused: " + String(e))
+        return True
+    return False
+
+
+def test_checker_can_fail() raises:
+    """Each invariant clause rejects a log that breaks it. A checker that cannot
+    fail would let the takeover harness pass over a torn log."""
+    var store = _Store()
+    # A clean two-round log passes.
+    var ok = _make_manifest(store, String("c/planted/ok"))
+    _commit_live(ok, String("live-r0.seg"), Int64(3), _live_pid(0), Int64(0), Int64(1))
+    _commit_live(ok, String("live-r1.seg"), Int64(4), _live_pid(1), Int64(3), Int64(2))
+    assert_false(_checker_rejects(ok, Int64(7)), "a clean log passes")
+    # (1)+(3) a wrong total is rejected.
+    assert_true(_checker_rejects(ok, Int64(8)), "a short span is rejected")
+    _ = ok^
+    # (3) a record that is not the live owner's (a stale writer's key) is rejected.
+    var foreign = _make_manifest(store, String("c/planted/foreign"))
+    _commit_live(foreign, String("live-r0.seg"), Int64(3), _live_pid(0), Int64(0), Int64(1))
+    _commit_live(foreign, String("stale-r0.seg"), Int64(4), _live_pid(1), Int64(3), Int64(1))
+    assert_true(_checker_rejects(foreign, Int64(7)), "a stale writer's chunk is rejected")
+    _ = foreign^
+    # (3) the right key under another producer id is rejected.
+    var pid = _make_manifest(store, String("c/planted/pid"))
+    _commit_live(pid, String("live-r0.seg"), Int64(3), _live_pid(0) + Int64(1), Int64(0), Int64(1))
+    assert_true(_checker_rejects(pid, Int64(3)), "a foreign producer id is rejected")
+    _ = pid^
+    # (1) a gap in the producer range is rejected even when the total matches.
+    var gap = _make_manifest(store, String("c/planted/gap"))
+    _commit_live(gap, String("live-r0.seg"), Int64(3), _live_pid(0), Int64(0), Int64(1))
+    _commit_live(gap, String("live-r1.seg"), Int64(4), _live_pid(1), Int64(5), Int64(2))
+    assert_true(_checker_rejects(gap, Int64(7)), "a gapped range is rejected")
+    _ = gap^
+    _ = store^
 
 
 def test_takeover_without_torn_offset() raises:
@@ -253,5 +338,6 @@ def test_takeover_without_torn_offset() raises:
 
 
 def main() raises:
+    test_checker_can_fail()
     test_takeover_without_torn_offset()
     print("test_takeover_without_torn_offset: ALL PASS")
