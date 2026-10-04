@@ -40,8 +40,7 @@
 #
 # Encapsulation: no UnsafePointer. The aliasing proof is a write through a
 # retained `SharedAlignedBuffer.share()` of the source payload, the same
-# technique `komira_compiler/tests/test_string_col_share_read_in_place.mojo`
-# uses for lane G L1/L2.
+# technique the batch evaluator's string-column share test uses.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true

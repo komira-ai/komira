@@ -69,7 +69,7 @@
 from .morsel import Morsel
 from komira_core.traits.exec_result import ExecResult
 
-from komira_obs.metrics_set import MetricsSet, MetricsSnapshot
+from komira_metrics.metrics_set import MetricsSet, MetricsSnapshot
 
 
 trait MorselOperatorImpl(Movable, Deinitable):
