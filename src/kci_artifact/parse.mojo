@@ -18,7 +18,17 @@
 #     args: "//src/komira_json:komira_json_conda[release]"
 #     args: "--out"
 #     args: "{out_dir}"
+#     targets: "//src/komira_json:komira_json_conda"
 #   }
+#   checks {
+#     name: "lints"
+#     build_system: "buck2"
+#     targets: "//:docs"
+#   }
+#
+# A build system may also hold the two per-change commands, each a block:
+# `affected { executable: "..." args: "..." }` and `build_targets { ... }`
+# (the .proto's header).
 #
 # which kci renders as `buck2 build
 # //src/komira_json:komira_json_conda[release] --out <dir>`. `build` belongs in
@@ -38,7 +48,7 @@
 # Refused here, each starting `<source>: line N:` (lexer refusals included):
 # an unknown field at any level, a non-repeated field set twice, an unquoted
 # value, a block never closed, any top-level field but `schema_version`,
-# `build_systems` and `artifacts`. Everything else is `validate_artifacts`, run on the
+# `build_systems`, `artifacts` and `checks`. Everything else is `validate_artifacts`, run on the
 # parsed value before it is returned, so a parsed value is always a valid one.
 #
 # Owned values only; no pointer.
@@ -63,6 +73,8 @@ from kci_artifact_proto.artifact import (
     Artifact,
     Artifacts,
     BuildSystem,
+    Check,
+    Command,
 )
 
 from .validate import validate_artifacts
@@ -140,12 +152,36 @@ def _label(kind: String, name: String, ordinal: Int) -> String:
     return kind + String(" #") + String(ordinal)
 
 
+def _parse_command(mut x: _Ctx, open_line: Int, where: String) raises -> Command:
+    """The body of an `affected` or `build_targets` block."""
+    var executable = String("")
+    var seen_executable = False
+    var args = List[String]()
+    while True:
+        var f = _field(x, open_line, where)
+        if not f:
+            break
+        var t = f.value().copy()
+        if t.text == "executable":
+            if seen_executable:
+                _twice(x, t.line, t.text, where)
+            executable = _string(x, t.text)
+            seen_executable = True
+        elif t.text == "args":
+            args.append(_string(x, t.text))
+        else:
+            _unknown(x, t.line, t.text, where, String("executable, args"))
+    return Command(executable^, args^)
+
+
 def _parse_build_system(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> BuildSystem:
     var name = String("")
     var seen_name = False
     var executable = String("")
     var seen_executable = False
     var args = List[String]()
+    var affected = Optional[Command](None)
+    var build_targets = Optional[Command](None)
     while True:
         var me = _label(String("build system"), name, ordinal)
         var f = _field(x, open_line, me)
@@ -164,9 +200,19 @@ def _parse_build_system(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Bui
             seen_executable = True
         elif t.text == "args":
             args.append(_string(x, t.text))
+        elif t.text == "affected":
+            if affected:
+                _twice(x, t.line, t.text, me)
+            var line = _open_block(x)
+            affected = _parse_command(x, line, String("the affected command of ") + me)
+        elif t.text == "build_targets":
+            if build_targets:
+                _twice(x, t.line, t.text, me)
+            var line = _open_block(x)
+            build_targets = _parse_command(x, line, String("the build_targets command of ") + me)
         else:
-            _unknown(x, t.line, t.text, me, String("name, executable, args"))
-    return BuildSystem(name^, executable^, args^)
+            _unknown(x, t.line, t.text, me, String("name, executable, args, affected, build_targets"))
+    return BuildSystem(name^, executable^, args^, affected^, build_targets^)
 
 
 def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Artifact:
@@ -175,6 +221,7 @@ def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Artifac
     var build_system = String("")
     var seen_build_system = False
     var args = List[String]()
+    var targets = List[String]()
     while True:
         var me = _label(String("artifact"), name, ordinal)
         var f = _field(x, open_line, me)
@@ -193,9 +240,40 @@ def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Artifac
             seen_build_system = True
         elif t.text == "args":
             args.append(_string(x, t.text))
+        elif t.text == "targets":
+            targets.append(_string(x, t.text))
         else:
-            _unknown(x, t.line, t.text, me, String("name, build_system, args"))
-    return Artifact(name^, build_system^, args^)
+            _unknown(x, t.line, t.text, me, String("name, build_system, args, targets"))
+    return Artifact(name^, build_system^, args^, targets^)
+
+
+def _parse_check(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Check:
+    var name = String("")
+    var seen_name = False
+    var build_system = String("")
+    var seen_build_system = False
+    var targets = List[String]()
+    while True:
+        var me = _label(String("check"), name, ordinal)
+        var f = _field(x, open_line, me)
+        if not f:
+            break
+        var t = f.value().copy()
+        if t.text == "name":
+            if seen_name:
+                _twice(x, t.line, t.text, me)
+            name = _string(x, t.text)
+            seen_name = True
+        elif t.text == "build_system":
+            if seen_build_system:
+                _twice(x, t.line, t.text, me)
+            build_system = _string(x, t.text)
+            seen_build_system = True
+        elif t.text == "targets":
+            targets.append(_string(x, t.text))
+        else:
+            _unknown(x, t.line, t.text, me, String("name, build_system, targets"))
+    return Check(name^, build_system^, targets^)
 
 
 def parse_artifacts(
@@ -208,6 +286,7 @@ def parse_artifacts(
     var x = _Ctx(TokenCursor(tokens^, source.copy()), source.copy())
     var systems = List[BuildSystem]()
     var artifacts = List[Artifact]()
+    var checks = List[Check]()
     while not x.c.at_end():
         var t = x.c.expect(TOKEN_WORD)
         if t.text == "schema_version":
@@ -218,14 +297,17 @@ def parse_artifacts(
         elif t.text == "artifacts":
             var line = _open_block(x)
             artifacts.append(_parse_artifact(x, len(artifacts) + 1, line))
+        elif t.text == "checks":
+            var line = _open_block(x)
+            checks.append(_parse_check(x, len(checks) + 1, line))
         else:
             raise Error(
                 x.at(t.line)
                 + String("unknown top-level field '")
                 + t.text
-                + String("' (expected schema_version, build_systems, artifacts)")
+                + String("' (expected schema_version, build_systems, artifacts, checks)")
             )
-    var arts = Artifacts(systems^, artifacts^, Int32(major))
+    var arts = Artifacts(systems^, artifacts^, Int32(major), checks^)
     validate_artifacts(arts, source)
     return arts^
 

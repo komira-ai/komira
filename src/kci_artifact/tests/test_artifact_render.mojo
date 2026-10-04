@@ -18,6 +18,7 @@ from kci_artifact_proto.artifact import (
     Artifact,
     Artifacts,
     BuildSystem,
+    Check,
 )
 from kci_artifact import (
     BUILD_NUMBER_PLACEHOLDER,
@@ -223,8 +224,8 @@ def test_render_refusals() raises:
     # A value that never went through the validator.
     var systems = List[BuildSystem]()
     var artifacts = List[Artifact]()
-    artifacts.append(Artifact(String("a"), String("zz"), _argv("{out_dir}")))
-    var raw = Artifacts(systems^, artifacts^, Int32(1))
+    artifacts.append(Artifact(String("a"), String("zz"), _argv("{out_dir}"), List[String]()))
+    var raw = Artifacts(systems^, artifacts^, Int32(1), List[Check]())
     assert_equal(
         _refusal(raw, String("a"), String("/o")),
         String("artifact 'a': build_system 'zz' is not declared"),
@@ -232,10 +233,10 @@ def test_render_refusals() raises:
     # An unknown placeholder in a value that never went through the
     # validator is refused, not passed through.
     var systems2 = List[BuildSystem]()
-    systems2.append(BuildSystem(String("t"), String("t"), List[String]()))
+    systems2.append(BuildSystem(String("t"), String("t"), List[String](), None, None))
     var artifacts2 = List[Artifact]()
-    artifacts2.append(Artifact(String("a"), String("t"), _argv("{out_dir}", "{nope}")))
-    var raw2 = Artifacts(systems2^, artifacts2^, Int32(1))
+    artifacts2.append(Artifact(String("a"), String("t"), _argv("{out_dir}", "{nope}"), List[String]()))
+    var raw2 = Artifacts(systems2^, artifacts2^, Int32(1), List[Check]())
     assert_equal(_refusal(raw2, String("a"), String("/o")), String("unknown placeholder '{nope}'"))
 
 

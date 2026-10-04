@@ -63,6 +63,7 @@ struct FakeSteps(StageSteps, Movable):
     var order: List[String]
     var validated: List[String]
     var validation_fails: Bool
+    var bases: List[String]
 
     def __init__(out self):
         self.calls = List[String]()
@@ -78,6 +79,7 @@ struct FakeSteps(StageSteps, Movable):
         self.order = List[String]()
         self.validated = List[String]()
         self.validation_fails = False
+        self.bases = List[String]()
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
         self.order.append(String("validate ") + req.validation.name)
@@ -154,6 +156,7 @@ struct FakeSteps(StageSteps, Movable):
 
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         self.order.append(String("build ") + req.step_name)
+        self.bases.append(req.affected_by.copy())
         self.calls.append(
             String("build ") + req.platform + String(" ") + req.artifacts_file + String(" ") + req.revision_id
             + String(" ") + req.work_dir + String(" ") + req.run.run_id + String(" step=") + req.step_name
@@ -863,6 +866,78 @@ def test_a_refused_command_line_reaches_the_summary() raises:
     assert_true(text.find(String("## kci: REFUSED (exit 2)")) >= 0, text)
     assert_true(text.find(String("there is one command: kci run")) >= 0, text)
     assert_equal(_last(rec).invoked_as, String("ci"))
+
+
+comptime _BASE: String = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _pr_run(machine: String, stage: String, *extra: String) -> List[String]:
+    """`kci run --affected-by _BASE`: no --release-dir."""
+    var l = List[String]()
+    for s in ["run", "--machine"]:
+        l.append(String(s))
+    l.append(machine.copy())
+    for s in ["--stage"]:
+        l.append(String(s))
+    l.append(stage.copy())
+    for s in ["--revision-id", _REV, "--affected-by", _BASE, "--run-id", "gh-7", "--attempt", "2"]:
+        l.append(String(s))
+    for s in extra:
+        l.append(String(s))
+    return l^
+
+
+def test_affected_by_reaches_the_build_step_and_is_selective() raises:
+    var d = _root(String("pr"))
+    var m = _machine(d)
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var summary = d + String("/summary.md")
+    var a = _pr_run(m, String("build"), "--summary-file", summary)
+    a.extend(_build_flags())
+    assert_equal(kci_main_with(a, steps, rec), 0)
+    assert_equal(len(steps.bases), 1)
+    assert_equal(steps.bases[0], String(_BASE))
+    # the RUNNING record already says SELECTIVE and names the base
+    var first = parse_result(rec.records[0], String("running"))
+    assert_equal(first.status, String("RUNNING"))
+    assert_equal(first.scope, String("SELECTIVE"))
+    assert_true(first.has_affected_by)
+    assert_equal(first.affected_base, String(_BASE))
+    var r = _last(rec)
+    assert_equal(r.outcome, String("SUCCEEDED"))
+    assert_equal(r.scope, String("SELECTIVE"))
+    assert_equal(len(r.only), 0)
+    assert_true(r.has_affected_by)
+    assert_true(r.steps[0].selected)
+    var text = Path(summary).read_text()
+    assert_true(
+        text.find(String("SELECTIVE run (affected-by ") + String(_BASE) + String("): not a full run.")) >= 0, text
+    )
+    assert_true(text.find(String("- affected: no answer")) >= 0, text)
+
+
+def test_a_release_build_carries_no_base() raises:
+    var m = _machine(_root(String("nobase")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var a = _run(m, String("build"))
+    a.extend(_build_flags())
+    assert_equal(kci_main_with(a, steps, rec), 0)
+    assert_equal(steps.bases[0], String(""))
+    assert_false(_last(rec).has_affected_by)
+
+
+def test_affected_by_on_a_publishing_stage_is_a_usage_error() raises:
+    var m = _machine(_root(String("prpub")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_pr_run(m, String("prod"), "--release-version", "rv"), steps, rec), 2)
+    assert_equal(len(steps.calls), 0)
+    var r = _last(rec)
+    assert_equal(r.error.id, String("KCI-E-USAGE"))
+    assert_true(r.error.message.find(String("stage 'prod' has the PUBLISH step 'p'")) >= 0, r.error.message)
+    assert_equal(r.scope, String("SELECTIVE"))
 
 
 def main() raises:

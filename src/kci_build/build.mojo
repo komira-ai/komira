@@ -5,6 +5,10 @@
 #
 # `run_build(req, result, recorder, runner, git)`:
 #
+# (With `req.affected_by` set the step is the per-change check instead:
+# affected.mojo's `run_affected`, which builds the units a change reaches
+# and nothing that ships. Everything below is the release build.)
+#
 # 0. Checks that read but change nothing, each REFUSED before anything is
 #    recorded or run: the platform is one kci releases (kci_api's
 #    platform table); `--revision-id` is a full commit id; then the path
@@ -130,6 +134,7 @@ from kci_release_set import (
     verify_member,
 )
 
+from kci_build.affected import run_affected
 from kci_build.request import BuildOutcome, BuildRequest
 from kci_build.revision import derive_release_stamp
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
@@ -522,7 +527,9 @@ def run_build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
     revision.mojo, `runner` the builds: two seams, so a test scripts each on
     its own. `recorder.begin` is called once, before the first effect; the
     step's row, artifacts, set hash and first error go into `result`.
-    Never raises."""
+    Never raises. With `req.affected_by` set: `run_affected`."""
+    if req.affected_by.byte_length() > 0:
+        return run_affected(req, result, recorder, runner, git)
     var members = List[ReleaseMember]()
     var planned = List[String]()
     var o = _build(req, result, recorder, runner, git, members, planned)

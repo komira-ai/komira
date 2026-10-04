@@ -7,7 +7,12 @@
 # `kci run --stage S`:
 #
 #   0. every `--only` parsed (args.mojo `selectors_of`): a malformed or
-#      repeated selector is KCI-E-SELECTOR, exit 2, before anything is read;
+#      repeated selector is KCI-E-SELECTOR, exit 2, before anything is read.
+#      `--affected-by <base>` makes the run SELECTIVE and records
+#      `affected_by` (its base) from the first record on; each BUILD step
+#      gets the base and runs the per-change check (kci_build affected.mojo:
+#      the units the change reaches, the verdict and the units recorded by
+#      the step);
 #   1. read the machine file (`--machine`, or args.mojo's default): a path
 #      that names no file is a usage error (KCI-E-USAGE, exit 2); a file
 #      whose schema_version this kci does not read is REFUSED
@@ -74,7 +79,8 @@
 #      written is said on stderr; the exit number stands;
 #  10. the LAST stderr line is the run's evidence (kci_api
 #      `run_evidence_line`): `kci: FULL run of stage S: <OUTCOME>`, or
-#      `kci: SELECTIVE run of stage S (<only>): <OUTCOME> -- not a full run`.
+#      `kci: SELECTIVE run of stage S (<only>): <OUTCOME> -- not a full run`
+#      (`(affected-by <base>)` for the per-change check).
 #      The result document says the same in `scope` and `only`. A selective
 #      success exits 0 like a full one, so the scope, never the number, is
 #      what tells them apart. A run refused before its selectors parse (a
@@ -324,7 +330,8 @@ def _split(e: Error) -> Tuple[String, String]:
 def _evidence(result: KciRunResult, outcome: String, rc: Int) -> Int:
     """Say the run's last line (file header, 6); return `rc`."""
     try:
-        _say(run_evidence_line(result.scope, result.stage, result.only, outcome))
+        var base = result.affected_base.copy() if result.has_affected_by else String("")
+        _say(run_evidence_line(result.scope, result.stage, result.only, outcome, base))
     except e:
         _say(String("kci: ") + String(e))
     return rc
@@ -354,6 +361,7 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
     req.platform = step.platform.copy()
     if cmd.build_timeout_s > 0:
         req.build_timeout_s = cmd.build_timeout_s
+    req.affected_by = cmd.affected_by.copy()
     return req^
 
 
@@ -576,6 +584,8 @@ def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead:
             if i > 0:
                 only += String(" ")
             only += result.only[i]
+        if result.has_affected_by:
+            only += String("affected-by ") + result.affected_base
         s += String("SELECTIVE run (") + only + String("): not a full run.")
     else:
         s += String("FULL run.")
@@ -587,6 +597,17 @@ def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead:
         s += String("- set hash: `") + result.set_hash + String("`\n")
     if result.channel.byte_length() > 0:
         s += String("- channel: `") + result.channel + String("`\n")
+    if result.has_affected_by:
+        if result.affected_verdict.byte_length() == 0:
+            s += String("- affected: no answer\n")
+        else:
+            s += String("- affected: ") + result.affected_verdict
+            if result.affected_reason.byte_length() > 0:
+                s += String(" (") + result.affected_reason + String(")")
+            s += String(", ") + String(len(result.affected_units)) + String(" unit(s):")
+            for i in range(len(result.affected_units)):
+                s += String(" `") + result.affected_units[i] + String("`")
+            s += String("\n")
     if result.workflow_checked:
         s += (
             String("- workflow: `") + result.workflow_path + String("` at `") + result.workflow_sha
@@ -695,6 +716,10 @@ def _run_stage[S: StageSteps](
         result.only.append(selectors[i].canonical())
     if len(selectors) > 0:
         result.scope = String(SCOPE_SELECTIVE)
+    if cmd.affected_by.byte_length() > 0:
+        result.scope = String(SCOPE_SELECTIVE)
+        result.has_affected_by = True
+        result.affected_base = cmd.affected_by.copy()
     var g: ReleaseMachine
     try:
         g = _load_graph(cmd, result)
@@ -714,6 +739,8 @@ def _run_stage[S: StageSteps](
     except e:
         return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_SELECTOR_NO_MATCH), String(e))
     result.scope = sel.scope.copy()
+    if result.has_affected_by:
+        result.scope = String(SCOPE_SELECTIVE)
     try:
         require_stage_flags(cmd, stage, sel)
     except e:
