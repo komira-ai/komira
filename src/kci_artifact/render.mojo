@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_artifact_declaration/render.mojo -- the argv kci runs to build one
+# kci_artifact/render.mojo -- the argv kci runs to build one
 #   artifact into one output directory.
 # =============================================================================
 #
@@ -11,9 +11,9 @@
 # directory of the platform (the caller passes `<--release-dir>/<platform>`,
 # kci_api's `release_platform_dir`), `{platform}` the platform, and the
 # four stamp placeholders the `ReleaseStamp`'s values
-# (contract.mojo). A PURE function: it creates no directory and runs
+# (placeholders.mojo). A PURE function: it creates no directory and runs
 # nothing; the BUILD step owns both. It expects a validated value
-# (`parse_artifact_declarations` returns only those) and refuses an unknown
+# (`parse_artifacts` returns only those) and refuses an unknown
 # artifact, an undeclared build system, a platform kci does not release
 # (kci_api's `require_release_platform`), and a release_dir that is not
 # an absolute path other than `/` or that ends in `/`, so a wrong call cannot
@@ -22,16 +22,16 @@
 # Owned values only; no pointer.
 # =============================================================================
 
-from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
+from kci_artifact_proto.artifact import Artifacts
 
 from kci_api import require_release_platform
 
-from .contract import BuildValues, ReleaseStamp, substitute_placeholders
+from .placeholders import BuildValues, ReleaseStamp, substitute_placeholders
 from .validate import find_artifact, find_build_system
 
 
 def render_build_argv(
-    decls: ArtifactDeclarations,
+    arts: Artifacts,
     artifact: String,
     release_dir: String,
     platform: String,
@@ -46,11 +46,11 @@ def render_build_argv(
             + release_dir
             + String("' is not an absolute path (other than '/', with no trailing '/')")
         )
-    var i = find_artifact(decls, artifact)
+    var i = find_artifact(arts, artifact)
     if i < 0:
         raise Error(String("no artifact '") + artifact + String("' is declared"))
-    ref a = decls.artifacts[i]
-    var j = find_build_system(decls, a.build_system)
+    ref a = arts.artifacts[i]
+    var j = find_build_system(arts, a.build_system)
     if j < 0:
         raise Error(
             String("artifact '")
@@ -59,7 +59,7 @@ def render_build_argv(
             + a.build_system
             + String("' is not declared")
         )
-    ref b = decls.build_systems[j]
+    ref b = arts.build_systems[j]
     var values = BuildValues(
         release_dir + String("/") + artifact, release_dir.copy(), platform.copy(), stamp.copy()
     )

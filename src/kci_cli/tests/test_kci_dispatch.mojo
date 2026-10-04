@@ -155,7 +155,7 @@ struct FakeSteps(StageSteps, Movable):
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         self.order.append(String("build ") + req.step_name)
         self.calls.append(
-            String("build ") + req.platform + String(" ") + req.declarations_file + String(" ") + req.revision_id
+            String("build ") + req.platform + String(" ") + req.artifacts_file + String(" ") + req.revision_id
             + String(" ") + req.work_dir + String(" ") + req.run.run_id + String(" step=") + req.step_name
             + String(" plan=") + String(req.plan)
         )
@@ -194,13 +194,13 @@ def _machine(dir: String) raises -> String:
     write_whole_file(
         p,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" } }\n")
+        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" } }\n")
         + String("stage { name: \"prod\" after: \"build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\"")
-        + String(" declarations: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
-        + String("stage { name: \"all\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" }")
-        + String(" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
-        + String("stage { name: \"pub-then-build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"")
-        + String(" channels: \"c.textproto\" channel: \"komira\" } step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" } }\n"),
+        + String(" artifacts: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
+        + String("stage { name: \"all\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }")
+        + String(" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
+        + String("stage { name: \"pub-then-build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"")
+        + String(" channels: \"c.textproto\" channel: \"komira\" } step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" } }\n"),
     )
     return p^
 
@@ -366,7 +366,7 @@ def test_the_machine_file() raises:
     assert_equal(kci_main_with(_run(newer, String("build")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT-VERSION"))
     var bad = d + String("/bad.textproto")
-    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" declarations: \"d\" } }\n"))
+    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
     assert_equal(kci_main_with(_run(bad, String("x")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
     assert_equal(len(steps.calls), 0)
@@ -500,12 +500,12 @@ def _release_machine(dir: String, validation: Bool = False) raises -> String:
     write_whole_file(
         m,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" } }\n")
+        + String("stage { name: \"build\" step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
         + String("stage { name: \"gamma\" environment: \"gamma\" after: \"build\" step { name: \"publish\" kind: PUBLISH")
-        + String(" platform: \"linux-x86_64\" declarations: \"d\" channels: \"") + c + String("\" channel: \"gamma\"")
+        + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"gamma\"")
         + v + String(" } }\n")
         + String("stage { name: \"prod\" environment: \"prod\" after: \"gamma\" step { name: \"publish\" kind: PUBLISH")
-        + String(" platform: \"linux-x86_64\" declarations: \"d\" channels: \"") + c + String("\" channel: \"prod\" } }\n"),
+        + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"prod\" } }\n"),
     )
     return m^
 

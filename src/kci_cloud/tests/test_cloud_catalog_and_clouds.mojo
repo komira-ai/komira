@@ -35,7 +35,7 @@ from kci_cloud import (
     FIELD_SERVICE,
     FIELD_JOB,
     body_field,
-    declaration_problems,
+    artifact_problems,
 )
 
 
@@ -138,64 +138,64 @@ def _ints(a: Int, b: Int = -1) -> List[Int]:
     return l^
 
 
-def test_declaration_rules() raises:
+def test_artifact_rules() raises:
     var c = _with_bound()
 
     # legal: complete, hosts both portable types, bound type absent by design
     var ok = List[Absence]()
     ok.append(Absence(18, ABSENT_BY_DESIGN, String("no such service here")))
-    assert_equal(len(declaration_problems(c, _entry(True, _ints(10, 11), ok^))), 0)
+    assert_equal(len(artifact_problems(c, _entry(True, _ints(10, 11), ok^))), 0)
 
     # legal: not complete, a portable type not yet
     var later = List[Absence]()
     later.append(Absence(11, NOT_YET, String("no runner")))
     later.append(Absence(18, ABSENT_BY_DESIGN, String("none")))
-    assert_equal(len(declaration_problems(c, _entry(False, _ints(10), later^))), 0)
+    assert_equal(len(artifact_problems(c, _entry(False, _ints(10), later^))), 0)
 
     # a type nobody decided about
-    var p = _joined(declaration_problems(c, _entry(True, _ints(10, 11), List[Absence]())))
+    var p = _joined(artifact_problems(c, _entry(True, _ints(10, 11), List[Absence]())))
     assert_true(_has(p, "'bound_thing' is neither implemented nor declared absent"), p)
 
     # ABSENT_BY_DESIGN on a portable type
     var a1 = List[Absence]()
     a1.append(Absence(11, ABSENT_BY_DESIGN, String("x")))
     a1.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
-    p = _joined(declaration_problems(c, _entry(False, _ints(10), a1^)))
+    p = _joined(artifact_problems(c, _entry(False, _ints(10), a1^)))
     assert_true(_has(p, "'job' is PORTABLE; ABSENT_BY_DESIGN is legal only"), p)
 
     # NOT_YET on a bound type
     var a2 = List[Absence]()
     a2.append(Absence(18, NOT_YET, String("x")))
-    p = _joined(declaration_problems(c, _entry(False, _ints(10, 11), a2^)))
+    p = _joined(artifact_problems(c, _entry(False, _ints(10, 11), a2^)))
     assert_true(_has(p, "'bound_thing' is CLOUD_BOUND; NOT_YET is legal only"), p)
 
     # complete, yet a portable type is not yet
     var a3 = List[Absence]()
     a3.append(Absence(11, NOT_YET, String("x")))
     a3.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
-    p = _joined(declaration_problems(c, _entry(True, _ints(10), a3^)))
+    p = _joined(artifact_problems(c, _entry(True, _ints(10), a3^)))
     assert_true(_has(p, "claims to be complete but does not host PORTABLE type 'job'"), p)
 
     # declared twice
     var a4 = List[Absence]()
     a4.append(Absence(11, NOT_YET, String("x")))
     a4.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
-    p = _joined(declaration_problems(c, _entry(False, _ints(10, 11), a4^)))
+    p = _joined(artifact_problems(c, _entry(False, _ints(10, 11), a4^)))
     assert_true(_has(p, "'job' is declared more than once"), p)
 
     # outside the catalog
     var a5 = List[Absence]()
     a5.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
     a5.append(Absence(77, NOT_YET, String("x")))
-    p = _joined(declaration_problems(c, _entry(True, _ints(10, 11), a5^)))
+    p = _joined(artifact_problems(c, _entry(True, _ints(10, 11), a5^)))
     assert_true(_has(p, "declares field 77 absent, which is not in the catalog"), p)
     var a6 = List[Absence]()
     a6.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
     var impl = _ints(10, 11)
     impl.append(40)
-    p = _joined(declaration_problems(c, _entry(True, impl^, a6^)))
+    p = _joined(artifact_problems(c, _entry(True, impl^, a6^)))
     assert_true(_has(p, "implements field 40, which is not in the catalog"), p)
-    print("  test_declaration_rules: PASS")
+    print("  test_artifact_rules: PASS")
 
 
 def test_clouds_refuse_at_add() raises:
@@ -269,7 +269,7 @@ def main() raises:
     test_catalog_arms_match_the_wire()
     test_catalog_names_are_generated_enum_values()
     test_catalog_refuses_unset_and_duplicates()
-    test_declaration_rules()
+    test_artifact_rules()
     test_clouds_refuse_at_add()
     test_resolve_names_the_built_in_clouds()
     test_cloud_id_compares_by_value()

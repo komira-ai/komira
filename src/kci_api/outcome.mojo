@@ -28,7 +28,7 @@
 #   NEEDS_HUMAN  re-running gives the same answer until someone changes
 #                something (a file, a flag, an approval)
 #
-# The words are the contract; their spelling lives here only.
+# The words are fixed; their spelling lives here only.
 # Pure functions over owned values; no pointer.
 # =============================================================================
 

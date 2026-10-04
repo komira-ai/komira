@@ -144,6 +144,10 @@ struct S3SuffixRead(Movable, Deinitable):
     var offset: Int64
     var total: Int64
 
+    def into_bytes(deinit self) -> List[UInt8]:
+        """The bytes, moved out (a footer window is not copied again)."""
+        return self.bytes^
+
 
 def _hex(c: UInt8) -> Int:
     var v = Int(c)
@@ -476,11 +480,15 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         prefix: String,
         delimiter: String,
         continuation_token: String,
+        max_keys: Int = 0,
     ) raises -> S3ListPage:
         """One ListObjectsV2 page under `prefix`, grouped at `delimiter`
-        ("" for none), from `continuation_token` ("" for the first page).
+        ("" for none), from `continuation_token` ("" for the first page), of
+        at most `max_keys` entries (0 for `S3Config.list_page_size`).
         Names are asked for URL-encoded (`encoding-type=url`), so a key
         holding a byte XML 1.0 cannot carry survives, and are decoded here."""
+        if max_keys < 0:
+            raise Error(String("S3Store.list_page: max_keys must be >= 0, got ") + String(max_keys))
         var input = S3ListObjectsV2Request(bucket)
         if prefix.byte_length() > 0:
             input.set_prefix(prefix)
@@ -489,7 +497,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         if continuation_token.byte_length() > 0:
             input.set_continuation_token(continuation_token)
         input.set_encoding_type(String(S3_ENCODING_TYPE_URL))
-        input.set_max_keys(Int32(self._config.list_page_size))
+        input.set_max_keys(Int32(max_keys if max_keys > 0 else self._config.list_page_size))
         var loop = aws_system_retry_loop(self._config.retry.copy())
         var res = self._client.list_objects_v2_with(
             input, self._transport, self._clock, loop, self._retry_quota

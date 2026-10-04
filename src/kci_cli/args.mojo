@@ -55,7 +55,7 @@
 #
 # Only the SELECTED steps and validations count (every one, without
 # `--only`; `--only step:<s>` selects no validation). Which names
-# a release publishes is its declarations file's: there is no per-run claim
+# a release publishes is its artifacts file's: there is no per-run claim
 # and no expected set hash on the command line.
 #
 # Every refusal here is a usage error (kci_api's KCI-E-USAGE, exit 2;

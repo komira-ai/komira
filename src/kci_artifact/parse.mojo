@@ -1,10 +1,10 @@
 # =============================================================================
-# kci_artifact_declaration/parse.mojo -- read a declarations file.
+# kci_artifact/parse.mojo -- read an artifacts file.
 # =============================================================================
 #
-# A declarations file is textproto for `kci.release.v1.ArtifactDeclarations`
-# (//src/kci_artifact_declaration_proto), under its format's major
-# (kci_api's format table, `kci.artifact_declarations`):
+# An artifacts file is textproto for `kci.release.v1.Artifacts`
+# (//src/kci_artifact_proto), under its format's major
+# (kci_api's format table, `kci.artifacts`):
 #
 #   schema_version: 1
 #   build_systems {
@@ -38,7 +38,7 @@
 # Refused here, each starting `<source>: line N:` (lexer refusals included):
 # an unknown field at any level, a non-repeated field set twice, an unquoted
 # value, a block never closed, any top-level field but `schema_version`,
-# `build_systems` and `artifacts`. Everything else is `validate_artifact_declarations`, run on the
+# `build_systems` and `artifacts`. Everything else is `validate_artifacts`, run on the
 # parsed value before it is returned, so a parsed value is always a valid one.
 #
 # Owned values only; no pointer.
@@ -57,15 +57,15 @@ from komira_textproto import (
     lex,
 )
 
-from kci_api import FORMAT_ARTIFACT_DECLARATIONS, authored_schema_version, skip_schema_version
+from kci_api import FORMAT_ARTIFACTS, authored_schema_version, skip_schema_version
 
-from kci_artifact_declaration_proto.artifact_declaration import (
-    ArtifactDeclaration,
-    ArtifactDeclarations,
+from kci_artifact_proto.artifact import (
+    Artifact,
+    Artifacts,
     BuildSystem,
 )
 
-from .validate import validate_artifact_declarations
+from .validate import validate_artifacts
 
 
 struct _Ctx(Movable):
@@ -169,7 +169,7 @@ def _parse_build_system(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Bui
     return BuildSystem(name^, executable^, args^)
 
 
-def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> ArtifactDeclaration:
+def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Artifact:
     var name = String("")
     var seen_name = False
     var build_system = String("")
@@ -195,19 +195,19 @@ def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Artifac
             args.append(_string(x, t.text))
         else:
             _unknown(x, t.line, t.text, me, String("name, build_system, args"))
-    return ArtifactDeclaration(name^, build_system^, args^)
+    return Artifact(name^, build_system^, args^)
 
 
-def parse_artifact_declarations(
+def parse_artifacts(
     text: String, source: String
-) raises -> ArtifactDeclarations:
-    """Parse and validate a declarations file. `source` (its path) starts
+) raises -> Artifacts:
+    """Parse and validate an artifacts file. `source` (its path) starts
     every refusal. Raises on the first refusal."""
     var tokens = lex(text, source)
-    var major = authored_schema_version(tokens, String(FORMAT_ARTIFACT_DECLARATIONS), source)
+    var major = authored_schema_version(tokens, String(FORMAT_ARTIFACTS), source)
     var x = _Ctx(TokenCursor(tokens^, source.copy()), source.copy())
     var systems = List[BuildSystem]()
-    var artifacts = List[ArtifactDeclaration]()
+    var artifacts = List[Artifact]()
     while not x.c.at_end():
         var t = x.c.expect(TOKEN_WORD)
         if t.text == "schema_version":
@@ -225,21 +225,21 @@ def parse_artifact_declarations(
                 + t.text
                 + String("' (expected schema_version, build_systems, artifacts)")
             )
-    var decls = ArtifactDeclarations(systems^, artifacts^, Int32(major))
-    validate_artifact_declarations(decls, source)
-    return decls^
+    var arts = Artifacts(systems^, artifacts^, Int32(major))
+    validate_artifacts(arts, source)
+    return arts^
 
 
-def read_artifact_declarations(path: String) raises -> ArtifactDeclarations:
-    """Read, parse and validate the declarations file at `path`."""
+def read_artifacts(path: String) raises -> Artifacts:
+    """Read, parse and validate the artifacts file at `path`."""
     var text: String
     try:
         text = Path(path).read_text()
     except e:
         raise Error(
-            String("declarations file '")
+            String("artifacts file '")
             + path
             + String("' cannot be read: ")
             + String(e)
         )
-    return parse_artifact_declarations(text, path)
+    return parse_artifacts(text, path)
