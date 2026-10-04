@@ -1,0 +1,35 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Fixed-arity C wrappers over the POSIX file and memory-map calls (19 symbols,
+# the only definition of each) and the two memory-map counters.
+staged_files(
+    name = "posix_files",
+    srcs = ["native/komira_libc_posix.c"],
+)
+
+cxx_library(
+    name = "komira_libc_posix",
+    srcs = [":posix_files[native/komira_libc_posix.c]"],
+    visibility = ["PUBLIC"],
+)
+
+# The libc and POSIX layer every package shares: one getenv, the access probes and pthread_self, file and memory-map syscall wrappers with the C shim symbols they call, chunked large writes, RAII file descriptor.
+mojo_library(
+    name = "komira_libc",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        ":komira_libc_posix",
+    ],
+    test_srcs = [
+        "tests/test_chunked_write.mojo",
+        "tests/test_fd_write_all_clamps_per_call_length.mojo",
+        "tests/test_owned_fd.mojo",
+        "tests/test_posix_io_relative_path_open.mojo",
+        "tests/test_posix_io_writev.mojo",
+        "tests/test_posix_read_env.mojo",
+        "tests/test_pwrite_at.mojo",
+        "tests/test_thread_self_discriminates.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

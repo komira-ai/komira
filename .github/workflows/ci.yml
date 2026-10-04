@@ -5,7 +5,10 @@
 # build every target, and a target cannot build unless the tests welded to
 # it, and to each of its dependencies, pass and every lint that guards it is
 # clean (lints are validations, tools/build/lint). `./buck2 test //...` runs
-# the standalone tests. The last step tests what a build of //... does not:
+# the standalone tests. The tests cell is a cell of its own, so //... does not
+# reach it: `./buck2 build tests//functional/...` builds every target there that
+# must work (the targets that must fail are tests//negative, which run_tests.sh
+# builds as expect_reds). The last step tests what a build does not:
 # buck2's own behaviour (where actions ran, cache identity, refusals). A
 # contributor runs the same commands locally; the last one needs a Linux
 # x86_64 client.
@@ -61,6 +64,9 @@ jobs:
         run: ./buck2 build //...
       - name: ./buck2 test //...
         run: ./buck2 test //...
+      # --keep-going: one run lists every red positive target.
+      - name: ./buck2 build tests//functional/...
+        run: ./buck2 build --keep-going tests//functional/...
       - name: tools/build/tests/run_tests.sh
         run: |
           mkdir -p "$RUNNER_TEMP/tests"

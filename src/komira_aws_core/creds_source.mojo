@@ -47,7 +47,7 @@ trait AwsCredsSource(Movable, Deinitable):
         ...
 
 
-struct StaticCredsSource(AwsCredsSource, Movable, Deinitable):
+struct StaticCredsSource(AwsCredsSource, Copyable, Movable, Deinitable):
     """One credential, stated by the caller. It never expires here."""
 
     var credential: AwsCredential

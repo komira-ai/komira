@@ -1,0 +1,30 @@
+// A tiny gRPC API shaped like a Google one: one method of each streaming
+// shape. The generated Google Cloud client is compiled against the real
+// runtime and its welded test drives every method over a scripted connector.
+syntax = "proto3";
+
+package example.tiny.v1;
+
+service TinyService {
+  rpc GetThing(GetThingRequest) returns (Thing);
+  rpc WatchThings(WatchThingsRequest) returns (stream Thing);
+  rpc UploadThings(stream Thing) returns (UploadThingsResponse);
+  rpc SyncThings(stream Thing) returns (stream Thing);
+}
+
+message GetThingRequest {
+  string name = 1;
+}
+
+message WatchThingsRequest {
+  string prefix = 1;
+}
+
+message Thing {
+  string name = 1;
+  int64 size = 2;
+}
+
+message UploadThingsResponse {
+  int64 count = 1;
+}
