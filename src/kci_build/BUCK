@@ -64,8 +64,12 @@ mojo_library(
         "tests/test_build_flow.mojo",
         # --revision-id against the checkout, the stamp from git, every refusal
         "tests/test_revision.mojo",
-        # SupervisorRunner over /bin/sh: output files, exit codes, the timeout
+        # SupervisorRunner over /bin/sh: output files, exit codes, the timeout,
+        # an explicit child environment and inheritance
         "tests/test_supervisor_runner.mojo",
+        # RunSpec's child environment: inherit by default, every refusal of an
+        # explicit one, recorded by ScriptedRunner
+        "tests/test_runner_env.mojo",
     ],
     test_data = {
         "tests/test_build_flow.mojo": {
