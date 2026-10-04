@@ -21,10 +21,22 @@ ruleset, `endpoint-rule-set-1.json` beside the model, is
 """
 
 BOTOCORE_MODELS = {
+    # Amazon API Gateway v2 (//src/komira_aws_apigatewayv2). Its endpoint
+    # prefix and signing name are `apigateway`; the directory is
+    # `apigatewayv2`.
+    "apigatewayv2": struct(
+        api_version = "2018-11-29",
+        sha256 = "fdb831dc9be4cb380b42e21525a1a7e6e379958b7d8a3df7fd71c6c7f50df47c",
+    ),
     # Amazon DynamoDB (//src/komira_aws_dynamodb).
     "dynamodb": struct(
         api_version = "2012-08-10",
         sha256 = "c9ee3a42d8c16be98f1029d368f0b6e7f62a47305c8f80cd6dd5318d6e4984c0",
+    ),
+    # AWS Lambda (//src/komira_aws_lambda).
+    "lambda": struct(
+        api_version = "2015-03-31",
+        sha256 = "ff0091ee22af3ea4c1c8e7521245ebc917d68250050d62e8462c78e404f914c0",
     ),
     # Amazon CloudWatch Logs (//src/komira_aws_logs), also the worked
     # example of mojo_aws_client's docstring (//tools/build/cloud:aws.bzl).
@@ -38,6 +50,17 @@ BOTOCORE_MODELS = {
     "s3": struct(
         api_version = "2006-03-01",
         sha256 = "429763d64912af5edae4c7a0f20a8ac3e6fecf734cde5fc465016bc8badcdef9",
+    ),
+    # Amazon EventBridge Scheduler (//src/komira_aws_scheduler).
+    "scheduler": struct(
+        api_version = "2021-06-30",
+        sha256 = "428fbc6d766436e7b5394010e98987af0c738980ccab60d541dd5e5720e643e1",
+    ),
+    # Amazon SES API v2 (//src/komira_aws_sesv2). Its endpoint prefix is
+    # `email` and its signing name `ses`.
+    "sesv2": struct(
+        api_version = "2019-09-27",
+        sha256 = "523f615366822edad2a31f43b3a93e2fcf582ee1f483176cabf939ec6bd77d23",
     ),
     # Amazon SQS (//src/komira_aws_sqs).
     "sqs": struct(
