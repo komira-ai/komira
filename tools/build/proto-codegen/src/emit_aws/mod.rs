@@ -12,7 +12,9 @@
 //! - `rest`: the REST binding (restJson1 and restXml): URI labels and query,
 //!   headers, prefix headers, the payload, the response status, and the
 //!   restJson1 and restXml errors.
-//! - `xml_codec`: the restXml body codec.
+//! - `xml_codec`: the restXml body codec, whose reader the awsQuery and
+//!   ec2Query responses use too.
+//! - `query`: the awsQuery and ec2Query form-body codec and binding.
 //! - [`endpoint`]: endpoint resolution through the service's endpoint
 //!   ruleset, emitted when the generator is given one.
 
@@ -26,12 +28,16 @@ use crate::overrides::AwsOverrides;
 pub mod endpoint;
 mod json_codec;
 pub mod proto;
+mod query;
 mod rest;
 mod rpc;
 mod xml_codec;
 
 pub use endpoint::AwsEndpointRules;
-pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, REST_PROTOCOLS, XML_BODY_PROTOCOLS};
+pub use proto::{
+    AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, QUERY_PROTOCOLS, REST_PROTOCOLS,
+    XML_BODY_PROTOCOLS, XML_RESPONSE_PROTOCOLS,
+};
 use proto::{select_protocol, Binding, BodyCodec};
 
 /// Emitter options.
@@ -77,7 +83,7 @@ pub const S3_CUSTOMIZATION: &str = "s3";
 
 /// The protocols this emitter implements, by botocore name. Anything else is
 /// refused.
-pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json", "rest-xml"];
+pub const SUPPORTED_PROTOCOLS: &[&str] = &["ec2", "json", "query", "rest-json", "rest-xml"];
 
 /// The `jsonVersion` values this emitter implements.
 pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
@@ -301,6 +307,44 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
         names: &[
+            "AWS_QUERY_CONTENT_TYPE",
+            "AwsQueryWriter",
+            "aws_query_key",
+            "aws_query_rename_last",
+            "aws_query_result",
+            "aws_query_set_body",
+            "aws_text_blob",
+            "aws_text_bool",
+            "aws_text_f32",
+            "aws_text_f64",
+            "aws_text_int",
+            "aws_text_ts",
+            "aws_xml_blob_of",
+            "aws_xml_bool_of",
+            "aws_xml_child",
+            "aws_xml_entry_key",
+            "aws_xml_entry_value",
+            "aws_xml_f32_of",
+            "aws_xml_f64_of",
+            "aws_xml_int_of",
+            "aws_xml_list_items",
+            "aws_xml_map_entries",
+            "aws_xml_parse",
+            "aws_xml_string_of",
+            "aws_xml_ts_of",
+        ],
+        mode: AwsImportMode::Always,
+        protocols: QUERY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_query_error"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: QUERY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
             "aws_json_bool",
             "aws_json_f32",
             "aws_json_f64",
@@ -309,7 +353,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
             "aws_json_string",
         ],
         mode: AwsImportMode::ModelJson,
-        protocols: XML_BODY_PROTOCOLS,
+        protocols: XML_RESPONSE_PROTOCOLS,
     },
     AwsImport {
         module: AWS_CORE,
@@ -338,13 +382,19 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         module: "komira_json",
         names: &["JsonValue"],
         mode: AwsImportMode::ModelJson,
-        protocols: XML_BODY_PROTOCOLS,
+        protocols: XML_RESPONSE_PROTOCOLS,
     },
     AwsImport {
         module: "komira_xml",
         names: &["XmlNode", "XmlWriter"],
         mode: AwsImportMode::Always,
         protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_xml",
+        names: &["XmlNode"],
+        mode: AwsImportMode::Always,
+        protocols: QUERY_PROTOCOLS,
     },
     AwsImport {
         module: "komira_http_client.client",
@@ -548,6 +598,9 @@ pub fn emit_aws_module_with_endpoints(
     check_modeled_retryable_errors(&lowering.facts, options)?;
     if selected.protocol == AwsProtocol::RestXml {
         xml_codec::check_rest_xml_features(&lowering.facts)?;
+    }
+    if QUERY_PROTOCOLS.contains(&selected.protocol) {
+        query::check_query_features(&lowering.facts, selected.protocol)?;
     }
     overrides.check_against(lowering)?;
 

@@ -150,7 +150,7 @@ The crate carries more emitters than the build exposes. `tools/build/proto-codeg
 
 The sources of three further binaries sit beside them (`main_openapi.rs`, `main_openapi_in.rs` and `main_index.rs`), and the library holds their emitters, but no Buck2 target builds them. Three more binaries serve the AWS generator's checks and are built: `aws-model-check`, `aws-conformance-gen` and `xml-equiv-verdicts`.
 
-The `DbStorable` output is a struct per `(komira.db.table)` message with `column_names`, `column_types`, `to_row`, `from_row`, `insert_sql[D: SqlDatabase]` and `create_table_ddl` (with `_pg` and `_sqlite` variants). `aws-client-gen` refuses an empty `--operations` list and emits only the named operations. `emit_aws/` covers the `awsJson1_0`, `awsJson1_1`, `restJson1` and `restXml` protocols and refuses the others by name.
+The `DbStorable` output is a struct per `(komira.db.table)` message with `column_names`, `column_types`, `to_row`, `from_row`, `insert_sql[D: SqlDatabase]` and `create_table_ddl` (with `_pg` and `_sqlite` variants). `aws-client-gen` refuses an empty `--operations` list and emits only the named operations. `emit_aws/` covers the `awsJson1_0`, `awsJson1_1`, `restJson1`, `restXml`, `awsQuery` and `ec2Query` protocols and refuses the others by name.
 
 A `default_protocol = "rest"` target gets a different client from `emit_rest.rs`: `<Svc>Client[C: Connector]` over `HttpClient[C]`, with no `Protocol` parameter. A unary method with a `(google.api.http)` rule fills the path template from request fields and sends the body as proto3 JSON. It decodes the reply with the strict `JsonDecoder.from_text`.
 
