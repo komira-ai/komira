@@ -45,7 +45,6 @@ comptime _EXPECTED_CASES = 49
 comptime _EXPECTED_ERROR_CASES = 3
 
 
-
 def _read(path: String) raises -> String:
     with open(path, "r") as f:
         return f.read()
@@ -112,20 +111,59 @@ def _case_config(tc: JsonValue) raises -> SecretsManagerEndpointConfig:
         elif name == "UseDualStack" and v.kind == JSON_BOOL:
             c.use_dual_stack = Optional[Bool](v.bool_val)
         else:
-            raise Error("a case parameter the secretsmanager config has no field for: " + name)
+            raise Error(
+                "a case parameter the secretsmanager config has no field for: " + name,
+            )
     return c^
 
 
-def _resolve_all(rules: EndpointRuleSet, config: SecretsManagerEndpointConfig) raises -> ResolvedEndpoint:
+def _resolve_all(
+    rules: EndpointRuleSet,
+    config: SecretsManagerEndpointConfig,
+) raises -> ResolvedEndpoint:
     """The endpoint of every operation, which must be one: no operation
     binds a ruleset parameter, so each resolves the config alone."""
-    var got = resolve_create_secret_endpoint(rules, config, SecretsManagerCreateSecretRequest(String("app/db")))
+    var got = resolve_create_secret_endpoint(
+        rules,
+        config,
+        SecretsManagerCreateSecretRequest(String("app/db")),
+    )
     var others = List[ResolvedEndpoint]()
-    others.append(resolve_delete_secret_endpoint(rules, config, SecretsManagerDeleteSecretRequest(String("app/db"))))
-    others.append(resolve_describe_secret_endpoint(rules, config, SecretsManagerDescribeSecretRequest(String("app/db"))))
-    others.append(resolve_get_secret_value_endpoint(rules, config, SecretsManagerGetSecretValueRequest(String("app/db"))))
-    others.append(resolve_put_secret_value_endpoint(rules, config, SecretsManagerPutSecretValueRequest(String("app/db"))))
-    others.append(resolve_restore_secret_endpoint(rules, config, SecretsManagerRestoreSecretRequest(String("app/db"))))
+    others.append(
+        resolve_delete_secret_endpoint(
+            rules,
+            config,
+            SecretsManagerDeleteSecretRequest(String("app/db")),
+        ),
+    )
+    others.append(
+        resolve_describe_secret_endpoint(
+            rules,
+            config,
+            SecretsManagerDescribeSecretRequest(String("app/db")),
+        ),
+    )
+    others.append(
+        resolve_get_secret_value_endpoint(
+            rules,
+            config,
+            SecretsManagerGetSecretValueRequest(String("app/db")),
+        ),
+    )
+    others.append(
+        resolve_put_secret_value_endpoint(
+            rules,
+            config,
+            SecretsManagerPutSecretValueRequest(String("app/db")),
+        ),
+    )
+    others.append(
+        resolve_restore_secret_endpoint(
+            rules,
+            config,
+            SecretsManagerRestoreSecretRequest(String("app/db")),
+        ),
+    )
     for i in range(len(others)):
         if others[i].url != got.url:
             raise Error("operations disagree: " + others[i].url + " and " + got.url)
@@ -162,7 +200,11 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
                 # A custom endpoint needs no region to resolve, and there is
                 # then none to sign with.
                 try:
-                    _ = aws_signing_target(got, String(""), String(SECRETSMANAGER_SERVICE))
+                    _ = aws_signing_target(
+                        got,
+                        String(""),
+                        String(SECRETSMANAGER_SERVICE),
+                    )
                     why = "signed with no region"
                     return False
                 except e:
@@ -206,7 +248,9 @@ def test_botocore_endpoint_cases() raises:
             report += "  " + (tc.children[d].text if d >= 0 else String("")) + ": " + why + "\n"
     assert_equal(errors, _EXPECTED_ERROR_CASES, "the error cases")
     if failed > 0:
-        raise Error(String(failed) + " of " + String(n) + " secretsmanager endpoint cases failed:\n" + report)
+        raise Error(
+            String(failed) + " of " + String(n) + " secretsmanager endpoint cases failed:\n" + report,
+        )
 
 
 # ---- the cases a caller depends on ---------------------------------------------
@@ -222,20 +266,29 @@ def test_regional_default() raises:
     var t = aws_signing_target(got, String("us-west-2"), String(SECRETSMANAGER_SERVICE))
     assert_equal(t.signing_name, "secretsmanager")
     assert_equal(t.signing_region, "us-west-2")
-    assert_equal(_resolve(SecretsManagerEndpointConfig(String("cn-north-1"))).url, "https://secretsmanager.cn-north-1.amazonaws.com.cn")
+    assert_equal(
+        _resolve(SecretsManagerEndpointConfig(String("cn-north-1"))).url,
+        "https://secretsmanager.cn-north-1.amazonaws.com.cn",
+    )
 
 
 def test_fips_and_dual_stack() raises:
     var fips = SecretsManagerEndpointConfig(String("us-east-1"))
     fips.use_fips = Optional[Bool](True)
-    assert_equal(_resolve(fips).url, "https://secretsmanager-fips.us-east-1.amazonaws.com")
+    assert_equal(
+        _resolve(fips).url,
+        "https://secretsmanager-fips.us-east-1.amazonaws.com",
+    )
     var dual = SecretsManagerEndpointConfig(String("us-east-1"))
     dual.use_dual_stack = Optional[Bool](True)
     assert_equal(_resolve(dual).url, "https://secretsmanager.us-east-1.amazonaws.com")
     # GovCloud has its own FIPS host.
     var gov = SecretsManagerEndpointConfig(String("us-gov-west-1"))
     gov.use_fips = Optional[Bool](True)
-    assert_equal(_resolve(gov).url, "https://secretsmanager-fips.us-gov-west-1.amazonaws.com")
+    assert_equal(
+        _resolve(gov).url,
+        "https://secretsmanager-fips.us-gov-west-1.amazonaws.com",
+    )
 
 
 def test_custom_endpoint() raises:

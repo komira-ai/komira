@@ -63,7 +63,6 @@ comptime _EXPECTED_CASES = 49
 comptime _EXPECTED_ERROR_CASES = 3
 
 
-
 def _read(path: String) raises -> String:
     with open(path, "r") as f:
         return f.read()
@@ -134,24 +133,86 @@ def _case_config(tc: JsonValue) raises -> ECSEndpointConfig:
     return c^
 
 
-def _resolve_all(rules: EndpointRuleSet, config: ECSEndpointConfig) raises -> ResolvedEndpoint:
+def _resolve_all(
+    rules: EndpointRuleSet,
+    config: ECSEndpointConfig,
+) raises -> ResolvedEndpoint:
     """The endpoint of every operation, which must be one: no operation
     binds a ruleset parameter, so each resolves the config alone."""
     var got = resolve_create_cluster_endpoint(rules, config, ECSCreateClusterRequest())
     var others = List[ResolvedEndpoint]()
-    others.append(resolve_deregister_task_definition_endpoint(rules, config, ECSDeregisterTaskDefinitionRequest(String("jobs:3"))))
-    others.append(resolve_describe_clusters_endpoint(rules, config, ECSDescribeClustersRequest()))
-    others.append(resolve_describe_task_definition_endpoint(rules, config, ECSDescribeTaskDefinitionRequest(String("jobs:3"))))
-    others.append(resolve_describe_tasks_endpoint(rules, config, ECSDescribeTasksRequest(List[String]())))
-    others.append(resolve_list_clusters_endpoint(rules, config, ECSListClustersRequest()))
-    others.append(resolve_list_services_endpoint(rules, config, ECSListServicesRequest()))
-    others.append(resolve_list_task_definition_families_endpoint(rules, config, ECSListTaskDefinitionFamiliesRequest()))
-    others.append(resolve_list_task_definitions_endpoint(rules, config, ECSListTaskDefinitionsRequest()))
+    others.append(
+        resolve_deregister_task_definition_endpoint(
+            rules,
+            config,
+            ECSDeregisterTaskDefinitionRequest(String("jobs:3")),
+        ),
+    )
+    others.append(
+        resolve_describe_clusters_endpoint(rules, config, ECSDescribeClustersRequest()),
+    )
+    others.append(
+        resolve_describe_task_definition_endpoint(
+            rules,
+            config,
+            ECSDescribeTaskDefinitionRequest(String("jobs:3")),
+        ),
+    )
+    others.append(
+        resolve_describe_tasks_endpoint(
+            rules,
+            config,
+            ECSDescribeTasksRequest(List[String]()),
+        ),
+    )
+    others.append(
+        resolve_list_clusters_endpoint(rules, config, ECSListClustersRequest()),
+    )
+    others.append(
+        resolve_list_services_endpoint(rules, config, ECSListServicesRequest()),
+    )
+    others.append(
+        resolve_list_task_definition_families_endpoint(
+            rules,
+            config,
+            ECSListTaskDefinitionFamiliesRequest(),
+        ),
+    )
+    others.append(
+        resolve_list_task_definitions_endpoint(
+            rules,
+            config,
+            ECSListTaskDefinitionsRequest(),
+        ),
+    )
     others.append(resolve_list_tasks_endpoint(rules, config, ECSListTasksRequest()))
-    others.append(resolve_put_cluster_capacity_providers_endpoint(rules, config, ECSPutClusterCapacityProvidersRequest(String("jobs"), List[String](), List[ECSCapacityProviderStrategyItem]())))
-    others.append(resolve_register_task_definition_endpoint(rules, config, ECSRegisterTaskDefinitionRequest(String("jobs"), List[ECSContainerDefinition]())))
-    others.append(resolve_run_task_endpoint(rules, config, ECSRunTaskRequest(String("jobs:3"))))
-    others.append(resolve_stop_task_endpoint(rules, config, ECSStopTaskRequest(String("t"))))
+    others.append(
+        resolve_put_cluster_capacity_providers_endpoint(
+            rules,
+            config,
+            ECSPutClusterCapacityProvidersRequest(
+                String("jobs"),
+                List[String](),
+                List[ECSCapacityProviderStrategyItem](),
+            ),
+        ),
+    )
+    others.append(
+        resolve_register_task_definition_endpoint(
+            rules,
+            config,
+            ECSRegisterTaskDefinitionRequest(
+                String("jobs"),
+                List[ECSContainerDefinition](),
+            ),
+        ),
+    )
+    others.append(
+        resolve_run_task_endpoint(rules, config, ECSRunTaskRequest(String("jobs:3"))),
+    )
+    others.append(
+        resolve_stop_task_endpoint(rules, config, ECSStopTaskRequest(String("t"))),
+    )
     for i in range(len(others)):
         if others[i].url != got.url:
             raise Error("operations disagree: " + others[i].url + " and " + got.url)
@@ -232,7 +293,9 @@ def test_botocore_endpoint_cases() raises:
             report += "  " + (tc.children[d].text if d >= 0 else String("")) + ": " + why + "\n"
     assert_equal(errors, _EXPECTED_ERROR_CASES, "the error cases")
     if failed > 0:
-        raise Error(String(failed) + " of " + String(n) + " ecs endpoint cases failed:\n" + report)
+        raise Error(
+            String(failed) + " of " + String(n) + " ecs endpoint cases failed:\n" + report,
+        )
 
 
 # ---- the cases a caller depends on ---------------------------------------------
@@ -248,7 +311,10 @@ def test_regional_default() raises:
     var t = aws_signing_target(got, String("us-west-2"), String(ECS_SERVICE))
     assert_equal(t.signing_name, "ecs")
     assert_equal(t.signing_region, "us-west-2")
-    assert_equal(_resolve(ECSEndpointConfig(String("cn-north-1"))).url, "https://ecs.cn-north-1.amazonaws.com.cn")
+    assert_equal(
+        _resolve(ECSEndpointConfig(String("cn-north-1"))).url,
+        "https://ecs.cn-north-1.amazonaws.com.cn",
+    )
 
 
 def test_fips_and_dual_stack() raises:

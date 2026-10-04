@@ -41,7 +41,6 @@ comptime _EXPECTED_CASES = 26
 comptime _EXPECTED_ERROR_CASES = 3
 
 
-
 def _read(path: String) raises -> String:
     with open(path, "r") as f:
         return f.read()
@@ -112,14 +111,39 @@ def _case_config(tc: JsonValue) raises -> ECREndpointConfig:
     return c^
 
 
-def _resolve_all(rules: EndpointRuleSet, config: ECREndpointConfig) raises -> ResolvedEndpoint:
+def _resolve_all(
+    rules: EndpointRuleSet,
+    config: ECREndpointConfig,
+) raises -> ResolvedEndpoint:
     """The endpoint of every operation, which must be one: no operation
     binds a ruleset parameter, so each resolves the config alone."""
-    var got = resolve_create_repository_endpoint(rules, config, ECRCreateRepositoryRequest(String("jobs")))
+    var got = resolve_create_repository_endpoint(
+        rules,
+        config,
+        ECRCreateRepositoryRequest(String("jobs")),
+    )
     var others = List[ResolvedEndpoint]()
-    others.append(resolve_describe_repositories_endpoint(rules, config, ECRDescribeRepositoriesRequest()))
-    others.append(resolve_get_authorization_token_endpoint(rules, config, ECRGetAuthorizationTokenRequest()))
-    others.append(resolve_put_image_tag_mutability_endpoint(rules, config, ECRPutImageTagMutabilityRequest(String("jobs"), String("IMMUTABLE"))))
+    others.append(
+        resolve_describe_repositories_endpoint(
+            rules,
+            config,
+            ECRDescribeRepositoriesRequest(),
+        ),
+    )
+    others.append(
+        resolve_get_authorization_token_endpoint(
+            rules,
+            config,
+            ECRGetAuthorizationTokenRequest(),
+        ),
+    )
+    others.append(
+        resolve_put_image_tag_mutability_endpoint(
+            rules,
+            config,
+            ECRPutImageTagMutabilityRequest(String("jobs"), String("IMMUTABLE")),
+        ),
+    )
     for i in range(len(others)):
         if others[i].url != got.url:
             raise Error("operations disagree: " + others[i].url + " and " + got.url)
@@ -200,7 +224,9 @@ def test_botocore_endpoint_cases() raises:
             report += "  " + (tc.children[d].text if d >= 0 else String("")) + ": " + why + "\n"
     assert_equal(errors, _EXPECTED_ERROR_CASES, "the error cases")
     if failed > 0:
-        raise Error(String(failed) + " of " + String(n) + " ecr endpoint cases failed:\n" + report)
+        raise Error(
+            String(failed) + " of " + String(n) + " ecr endpoint cases failed:\n" + report,
+        )
 
 
 # ---- the cases a caller depends on ---------------------------------------------
@@ -216,7 +242,10 @@ def test_regional_default() raises:
     var t = aws_signing_target(got, String("us-west-2"), String(ECR_SERVICE))
     assert_equal(t.signing_name, "ecr")
     assert_equal(t.signing_region, "us-west-2")
-    assert_equal(_resolve(ECREndpointConfig(String("cn-north-1"))).url, "https://api.ecr.cn-north-1.amazonaws.com.cn")
+    assert_equal(
+        _resolve(ECREndpointConfig(String("cn-north-1"))).url,
+        "https://api.ecr.cn-north-1.amazonaws.com.cn",
+    )
 
 
 def test_fips_and_dual_stack() raises:

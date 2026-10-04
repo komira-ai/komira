@@ -108,17 +108,42 @@ def _case_config(tc: JsonValue) raises -> DynamoDBStreamsEndpointConfig:
         elif name == "UseDualStack" and v.kind == JSON_BOOL:
             c.use_dual_stack = Optional[Bool](v.bool_val)
         else:
-            raise Error("a case parameter the dynamodbstreams config has no field for: " + name)
+            raise Error(
+                "a case parameter the dynamodbstreams config has no field for: " + name,
+            )
     return c^
 
 
-def _resolve_all(rules: EndpointRuleSet, config: DynamoDBStreamsEndpointConfig) raises -> ResolvedEndpoint:
+def _resolve_all(
+    rules: EndpointRuleSet,
+    config: DynamoDBStreamsEndpointConfig,
+) raises -> ResolvedEndpoint:
     """The endpoint of every operation, which must be one: no operation
     binds a ruleset parameter, so each resolves the config alone."""
-    var got = resolve_describe_stream_endpoint(rules, config, DynamoDBStreamsDescribeStreamInput(String(_ARN)))
+    var got = resolve_describe_stream_endpoint(
+        rules,
+        config,
+        DynamoDBStreamsDescribeStreamInput(String(_ARN)),
+    )
     var others = List[ResolvedEndpoint]()
-    others.append(resolve_get_records_endpoint(rules, config, DynamoDBStreamsGetRecordsInput(String("it"))))
-    others.append(resolve_get_shard_iterator_endpoint(rules, config, DynamoDBStreamsGetShardIteratorInput(String(_ARN), String(_SHARD), String("LATEST"))))
+    others.append(
+        resolve_get_records_endpoint(
+            rules,
+            config,
+            DynamoDBStreamsGetRecordsInput(String("it")),
+        ),
+    )
+    others.append(
+        resolve_get_shard_iterator_endpoint(
+            rules,
+            config,
+            DynamoDBStreamsGetShardIteratorInput(
+                String(_ARN),
+                String(_SHARD),
+                String("LATEST"),
+            ),
+        ),
+    )
     for i in range(len(others)):
         if others[i].url != got.url:
             raise Error("operations disagree: " + others[i].url + " and " + got.url)
@@ -155,7 +180,11 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
                 # A custom endpoint needs no region to resolve, and there is
                 # then none to sign with.
                 try:
-                    _ = aws_signing_target(got, String(""), String(DYNAMODBSTREAMS_SERVICE))
+                    _ = aws_signing_target(
+                        got,
+                        String(""),
+                        String(DYNAMODBSTREAMS_SERVICE),
+                    )
                     why = "signed with no region"
                     return False
                 except e:
@@ -199,7 +228,9 @@ def test_botocore_endpoint_cases() raises:
             report += "  " + (tc.children[d].text if d >= 0 else String("")) + ": " + why + "\n"
     assert_equal(errors, _EXPECTED_ERROR_CASES, "the error cases")
     if failed > 0:
-        raise Error(String(failed) + " of " + String(n) + " dynamodbstreams endpoint cases failed:\n" + report)
+        raise Error(
+            String(failed) + " of " + String(n) + " dynamodbstreams endpoint cases failed:\n" + report,
+        )
 
 
 # ---- the cases a caller depends on ---------------------------------------------
@@ -212,23 +243,36 @@ def _resolve(config: DynamoDBStreamsEndpointConfig) raises -> ResolvedEndpoint:
 def test_regional_default() raises:
     var got = _resolve(DynamoDBStreamsEndpointConfig(String("us-west-2")))
     assert_equal(got.url, "https://streams.dynamodb.us-west-2.amazonaws.com")
-    var t = aws_signing_target(got, String("us-west-2"), String(DYNAMODBSTREAMS_SERVICE))
+    var t = aws_signing_target(
+        got,
+        String("us-west-2"),
+        String(DYNAMODBSTREAMS_SERVICE),
+    )
     assert_equal(t.signing_name, "dynamodb")
     assert_equal(t.signing_region, "us-west-2")
-    assert_equal(_resolve(DynamoDBStreamsEndpointConfig(String("cn-north-1"))).url, "https://streams.dynamodb.cn-north-1.amazonaws.com.cn")
+    assert_equal(
+        _resolve(DynamoDBStreamsEndpointConfig(String("cn-north-1"))).url,
+        "https://streams.dynamodb.cn-north-1.amazonaws.com.cn",
+    )
 
 
 def test_fips_and_dual_stack() raises:
     var fips = DynamoDBStreamsEndpointConfig(String("us-east-1"))
     fips.use_fips = Optional[Bool](True)
-    assert_equal(_resolve(fips).url, "https://streams.dynamodb-fips.us-east-1.amazonaws.com")
+    assert_equal(
+        _resolve(fips).url,
+        "https://streams.dynamodb-fips.us-east-1.amazonaws.com",
+    )
     var dual = DynamoDBStreamsEndpointConfig(String("us-east-1"))
     dual.use_dual_stack = Optional[Bool](True)
     assert_equal(_resolve(dual).url, "https://streams-dynamodb.us-east-1.api.aws")
     # In GovCloud the FIPS endpoint is the plain regional host.
     var gov = DynamoDBStreamsEndpointConfig(String("us-gov-west-1"))
     gov.use_fips = Optional[Bool](True)
-    assert_equal(_resolve(gov).url, "https://streams.dynamodb.us-gov-west-1.amazonaws.com")
+    assert_equal(
+        _resolve(gov).url,
+        "https://streams.dynamodb.us-gov-west-1.amazonaws.com",
+    )
 
 
 def test_custom_endpoint() raises:
@@ -236,7 +280,11 @@ def test_custom_endpoint() raises:
     config.endpoint = Optional[String](String("http://localhost:4566"))
     var got = _resolve(config)
     assert_equal(got.url, "http://localhost:4566")
-    var t = aws_signing_target(got, String("us-east-1"), String(DYNAMODBSTREAMS_SERVICE))
+    var t = aws_signing_target(
+        got,
+        String("us-east-1"),
+        String(DYNAMODBSTREAMS_SERVICE),
+    )
     assert_equal(t.signing_name, "dynamodb")
     assert_equal(t.endpoint.host_header(), "localhost:4566")
     assert_equal(t.endpoint.url_for(String("/")), "http://localhost:4566/")
