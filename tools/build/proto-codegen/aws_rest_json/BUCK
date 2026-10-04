@@ -1,4 +1,4 @@
-load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 load(":model.bzl", "TINY_REST_JSON")
 
 # A restJson1 client of a tiny model, generated in pure mode and compiled
@@ -21,7 +21,7 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
-aws_client(
+mojo_aws_client(
     name = "komira_aws_tiny_rest",
     mode = "pure",
     model = "tiny_rest_json.json",

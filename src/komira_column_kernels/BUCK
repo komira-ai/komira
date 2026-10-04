@@ -1,0 +1,38 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Vectorized compute over Arrow columns: arithmetic, comparison, casts, string, regexp, dictionary, union, decimal, case mapping, and the batch helpers that import them.
+mojo_library(
+    name = "komira_column_kernels",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_concurrency:komira_concurrency",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scalar_arith:komira_scalar_arith",
+        "//src/komira_simd:komira_simd",
+    ],
+    test_srcs = [
+        "tests/test_arith_cast_offset_validity.mojo",
+        "tests/test_arrow_c_data_phase_f.mojo",
+        "tests/test_arrow_nested_compute_x3_union_t2.mojo",
+        "tests/test_batch_slice_binary.mojo",
+        "tests/test_batch_slice_large_string.mojo",
+        "tests/test_column_view_elim_oracle.mojo",
+        "tests/test_copy_column_validity.mojo",
+        "tests/test_copy_share_table.mojo",
+        "tests/test_g4_bool_carried_batch_slice.mojo",
+        "tests/test_g4_bool_union_hash_silent_overread.mojo",
+        "tests/test_g4_bool_union_take_silent_overread.mojo",
+        "tests/test_gather_string_copy_lengths.mojo",
+        "tests/test_parallel_sort_gather.mojo",
+        "tests/test_regexp_bitstate_differential.mojo",
+        "tests/test_selection_mask_c1.mojo",
+        "tests/test_unary_math_domain_guard.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
