@@ -37,7 +37,7 @@
 # nothing, and "zero mints" by a guard that refuses every credentialed beat.
 #
 # ENCAPSULATION: the raw-socket SERVER and the pthread are this test's own FFI
-# boundary (the `test_pod_loader_supervisor` precedent); the code under test
+# boundary; the code under test
 # never exposes a pointer. The thread's box holds only fixed-size fields.
 # =============================================================================
 
@@ -83,9 +83,8 @@ def _contains(haystack: String, needle: String) -> Bool:
 
 comptime _AF_INET: Int32 = 2
 comptime _SOCK_STREAM: Int32 = 1
-# setsockopt(2) level/optname are NOT portable; the pair and the reason are
-# `komira_gcp_cp/tests/test_pod_loader_supervisor.mojo`'s (measured there:
-# the Linux pair returns EINVAL on darwin).
+# setsockopt(2) level/optname are NOT portable: the Linux pair returns EINVAL
+# on darwin.
 comptime _SOL_SOCKET_LINUX: Int32 = Int32(1)
 comptime _SOL_SOCKET_MACOS: Int32 = Int32(0xFFFF)
 comptime _SO_REUSEADDR_LINUX: Int32 = Int32(2)
@@ -233,8 +232,8 @@ def _listener_thread_entry(
     the client's wait (EOF on a plaintext POST, a failed TLS handshake), so the
     client under test never sits on the 600s default request budget.
 
-    SAFETY (FFI carve-out, the `test_pod_loader_supervisor` `_srv_thread_entry`
-    precedent): `arg` is the `_OneShotListener*` the spawner heap-allocated;
+    SAFETY (FFI carve-out): `arg` is the `_OneShotListener*` the spawner
+    heap-allocated;
     the spawner owns the box and joins before reclaiming it, and pthread_join is
     a full barrier for every write below."""
     var job = arg.bitcast[_OneShotListener]()

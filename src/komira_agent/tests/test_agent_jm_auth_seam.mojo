@@ -7,15 +7,15 @@
 # `POST /internal/heartbeat`, and the agent had ZERO token support:
 # `send_heartbeat` built exactly ONE header (`Content-Type:
 # application/protobuf`) and no metadata-server client existed in the agent.
-# A job manager deployed as a Cloud Run service that is NOT `public_invoker`
-# answers 403 at the Google Frontend on EVERY route. So a supervisor in a
-# customer container could not authenticate and every beat was refused at the
-# door.
+# A job manager deployed as a Cloud Run service that does not allow
+# unauthenticated invocation answers 403 at the Google Frontend on EVERY
+# route. So a supervisor in a customer container could not authenticate and
+# every beat was refused at the door.
 #
 # ⛔ AND A SECOND, INDEPENDENT DEFECT ON THE SAME PATH, WHICH ARM 3 IS ABOUT.
 # `AgentConfig.from_env` defaulted `KOMIRA_AGENT_JM_PORT` to a flat `8081`
-# regardless of scheme. `pod_spec._split_url_host_port` returns an EMPTY port
-# for a URL carrying none — and a Cloud Run URL
+# regardless of scheme. The placement passes an EMPTY port for a job-manager
+# URL carrying none — and a Cloud Run URL
 # (`https://job-manager-….run.app`) carries none — so a correctly `https`-
 # schemed agent dialled `https://host:8081` while Cloud Run serves 443. TLS was
 # threaded CORRECTLY and the port was still wrong. Fixing auth without fixing

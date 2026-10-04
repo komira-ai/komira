@@ -16,8 +16,8 @@
 #
 # WHY THIS IS A DEFAULT (non-cluster) TEST: it only spawns a LOCAL shell child
 # (`/bin/sh -c 'for ...; echo ...'`) and drives the agent's lifecycle stepping
-# methods directly — no job-manager, no network, no S3. It runs under the plain
-# `bazel test`.
+# methods directly — no job-manager, no network, no S3. It is a welded test of
+# //src/komira_agent:komira_agent.
 #
 # FAIL-FIRST: with the pre-fix post-exit-only drain, the poll loop below would
 # spin until `spins` is exhausted WITHOUT the child ever being collected (the

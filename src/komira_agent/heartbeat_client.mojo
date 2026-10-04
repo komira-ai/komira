@@ -13,7 +13,7 @@
 # HTTP, NOT TLS in the MVP", and it hardcoded BOTH halves: the connector type in
 # the signature AND `Url.http` in the body. That is a deploy-topology assumption
 # baked into a transport, and it is false the moment the job manager is a Lambda
-# behind API Gateway. No value of `KOMIRA_JM_URL` could reach such an endpoint.
+# behind API Gateway. No job-manager URL could reach such an endpoint.
 #
 # `send_heartbeat` is now `[RT, C: Connector]`-parametric and takes the URL
 # scheme as an argument; `send_heartbeat_blocking` is the ONE place that decides

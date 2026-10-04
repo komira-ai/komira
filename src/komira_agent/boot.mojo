@@ -240,9 +240,9 @@ def make_s3_client_from_chain(
 # disagreed and nothing in either could see it.
 #
 # ★ THE FACTORY TAKES A CAPTURELESS CONNECTOR MAKER, which is how the rest of
-# this repo terminates a `[C]` transport generic (`komira_aws_relay`'s
-# `send_sigv4_signed_post[C](mk_connector: def () raises thin -> C, ...)` is the
-# worked example). A `def [C]() -> AgentS3Client[C]` could not work: it cannot
+# this repo terminates a `[C]` transport generic (a
+# `mk_connector: def () raises thin -> C` parameter). A
+# `def [C]() -> AgentS3Client[C]` could not work: it cannot
 # CONSTRUCT a `C`, because `Connector` declares no method that yields one.
 # =============================================================================
 def mk_agent_s3_tls_connector() raises -> TlsConnector[KernelTcpConnector]:

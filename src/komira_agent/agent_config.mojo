@@ -64,7 +64,7 @@ comptime _ENV_JM_AUTH: StaticString = "KOMIRA_AGENT_JM_AUTH"
 
 
 # =============================================================================
-# §1 — env helpers (mirror job_manager_main's _env_or / _require_env).
+# §1 — env helpers: read-with-default and read-or-refuse.
 # =============================================================================
 def _agent_env_or(name: StaticString, default: String) -> String:
     """Return env `name`'s value, or `default` when unset/empty."""
@@ -194,11 +194,10 @@ struct AgentConfig(Movable):
     var log_flush_secs: Int
     # ★ THE JOB-MANAGER URL **SCHEME**. `http` or `https`.
     #
-    # ⛔ IT IS A FIELD BECAUSE IT WAS BEING DISCARDED. `build_pod_spec` splits the
-    # scheduler's `job_manager_url` into HOST and PORT and threw the scheme away
-    # (`pod_spec._split_url_host_port` strips `scheme://` and never returns it),
-    # and `heartbeat_client` hardcoded `Url.http`. So no value of
-    # `KOMIRA_JM_URL` -- not `https://...` -- could make this agent speak TLS,
+    # ⛔ IT IS A FIELD BECAUSE THE PLACEMENT HANDS THE JM URL OVER IN PIECES.
+    # The agent receives the job manager's HOST and PORT as separate values, so
+    # the scheme travels only if it has its own value. Without this field no
+    # job-manager URL -- not `https://...` -- could make this agent speak TLS,
     # which is what a Lambda-backed job manager behind API Gateway requires.
     #
     # Appended at the END of the field list + the `__init__` signature, keyword
@@ -217,7 +216,7 @@ struct AgentConfig(Movable):
     #
     # ⚠ DEFAULTING TO `none` MEANS THIS FIELD ALONE CHANGES NOTHING. Nothing
     # authenticates until the placement STAMPS KOMIRA_AGENT_JM_AUTH, which is
-    # `komira_job_manager/pod_spec.mojo`'s job, not this file's.
+    # the placing side's job, not this file's.
     var jm_auth_mode: JmAuthMode
 
     # An explicit `aud` override. EMPTY means derive it from scheme/host/port,
@@ -295,7 +294,7 @@ struct AgentConfig(Movable):
 
     def jm_uses_tls(self) -> Bool:
         """True iff the heartbeat POST must go over TLS -- i.e. the scheduler's
-        `job_manager_url` was an `https://` URL.
+        job-manager URL was an `https://` URL.
 
         ⛔ THE DEFAULT IS PLAINTEXT AND THAT IS DELIBERATE, unlike `s3_uses_tls`
         below. An ABSENT S3 endpoint means real AWS (HTTPS-only, so absence
@@ -365,8 +364,8 @@ struct AgentConfig(Movable):
         # DEPENDS ON IT, AND GETTING THAT ORDER WRONG WAS A LIVE DEFECT.
         #
         # ⛔ THE BUG THIS REPLACES. The default was a flat `8081` regardless of
-        # scheme. `pod_spec._split_url_host_port` returns an EMPTY port for a
-        # URL that carries none -- and a Cloud Run URL
+        # scheme. The placement passes an EMPTY port for a job-manager URL that
+        # carries none -- and a Cloud Run URL
         # (`https://job-manager-....run.app`) carries none -- so a correctly
         # `https`-schemed agent dialled `https://host:8081` while Cloud Run
         # serves 443. TLS was threaded correctly and the port was still wrong,

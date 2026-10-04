@@ -6,32 +6,27 @@
 # `POST /internal/heartbeat` on the job manager, and the agent had ZERO token
 # support — `send_heartbeat` built exactly one header (`Content-Type:
 # application/protobuf`) and there was no metadata-server client in the
-# agent. A job manager deployed as a Cloud Run service that is NOT
-# `public_invoker` answers an anonymous request 403 at the Google Frontend on
-# every route, before it reaches the container.
+# agent. A job manager deployed as a Cloud Run service that does not allow
+# unauthenticated invocation answers an anonymous request 403 at the Google
+# Frontend on every route, before it reaches the container.
 #
 # So a supervisor running in a customer container could not authenticate, and
 # every beat 403'd at the Google Frontend: the workload cannot report its own
 # state if its report is refused at the door.
 #
-# ⚠ ONE CORRECTION TO THE FILING, RECORDED BECAUSE IT CHANGES WHERE YOU LOOK.
-# `/internal/heartbeat` is NOT behind `is_tick_authenticated`.
-# `job_manager_service.mojo:1918-1921` dispatches straight to
-# `_handle_heartbeat_route`, which never calls that predicate — line 2365 is
-# inside `_handle_tick_route`, gating `/internal/tick/*` and `/internal/place*`
-# only. The gate that actually refuses the beat is the CLOUD RUN IAM INGRESS
-# EDGE. The consequence for this file: the credential must be a Google-signed
-# OIDC **ID token** whose `aud` is the JM's own service URL — NOT an OAuth2
-# ACCESS token. `komira_gcp_core/creds_metadata.mojo` mints the latter off
-# `/token` and is the WRONG instrument here; the right shape is
-# `komira_peer_reachability/oidc.mojo`, whose identity-endpoint GET this file
-# copies.
+# ★ THE CONTRACT THIS FILE RELIES ON: the job manager's application code does
+# NOT authenticate `/internal/heartbeat`. The gate that refuses an
+# unauthenticated beat is the platform's IAM INGRESS EDGE in front of it. So
+# the credential must be a Google-signed OIDC **ID token** whose `aud` is the
+# JM's own service URL — NOT an OAuth2 ACCESS token. The metadata server's
+# `/token` endpoint mints the latter and is the WRONG instrument here; the
+# right one is its `/identity` endpoint, which this file calls.
 #
 # ★ WHY THE SEAM RETURNS **HEADERS**, NOT A TOKEN. The obvious signature is
 # `mint() -> String` and the caller writes `Authorization: Bearer <s>`. That
 # shape does not extend to AWS and would have to be torn out. Measured: the AWS
-# job-manager door is a Lambda **Function URL with `AuthType: AWS_IAM`**
-# (`job-manager-aws.deploy.textproto:499`, `pod_spec.mojo:105`) — i.e. SigV4,
+# job-manager door is a Lambda **Function URL with `AuthType: AWS_IAM`** —
+# i.e. SigV4,
 # which signs method + path + headers + body-hash and emits THREE headers, not
 # one. So `jm_auth_headers` takes the method, the path and the body and returns
 # a `List[HeaderEntry]`: the AWS arm is one more match arm with ZERO caller
@@ -43,8 +38,8 @@
 # fail-closed derive would red every AWS heartbeat, and a fail-OPEN derive would
 # silently send the beat bearer-less — re-creating exactly the
 # never-beat-at-all / beat-then-stopped ambiguity the heartbeat contract exists to
-# remove. A declared posture is also the symmetric answer to the JM's own
-# `KOMIRA_JM_INTERNAL_AUTH=iam`.
+# remove. A declared posture is also the symmetric answer to the JM, which
+# declares its own internal-auth posture rather than deriving it.
 #
 # ⛔ THE TOKEN IS SECRET MATERIAL AND LIVES ON NO CONFIGURATION CHANNEL. It is
 # minted at run time off the metadata server into a local var, attached to one
@@ -70,10 +65,9 @@ from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 
 
 # =============================================================================
-# §1 — the GCP metadata identity endpoint (copied in shape from
-#      komira_peer_reachability/oidc.mojo:89-178, which records why a COPY
-#      rather than a dependency: that package is a leaf and this one must not
-#      grow an edge to it for four constants).
+# §1 — the GCP metadata identity endpoint. Four constants, stated here
+#      rather than taken from a dependency: this package must not grow an
+#      edge for them.
 # =============================================================================
 comptime _METADATA_HOST: String = "metadata.google.internal"
 comptime _METADATA_PORT: UInt16 = 80
@@ -235,8 +229,7 @@ struct GcpMetadataMinter(JmTokenMinter):
     """Mints a Google-signed OIDC **ID token** off the instance metadata
     server. The production conformer on GCP (Cloud Run Job, GCE VM, GKE).
 
-    Copied in shape from `komira_peer_reachability/oidc.mojo:89-178` and from
-    the live bash reference `deploy/factory-build/build_flow.sh:170-183`: GET
+    The contract it relies on is the metadata server's own: GET
     the identity endpoint with `Metadata-Flavor: Google` over plain TCP on port
     80 — the metadata server is link-local (169.254.169.254) and is not
     TLS-fronted; dialling it over TLS fails.

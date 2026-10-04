@@ -6,10 +6,10 @@
 # ⛔⛔ THE DEFECT. The agent was PLAINTEXT-ONLY, in a way no configuration could
 # reach, and it failed silently at three seams that only production observes:
 #
-#   1. `pod_spec._split_url_host_port` strips `scheme://` off the scheduler's
-#      `job_manager_url` and returns (host, port). Nothing read the scheme.
+#   1. The placement hands the agent the job manager's host and port, not
+#      its URL, so the scheme has to travel as its own value. Nothing read it.
 #      `heartbeat_client` then hardcoded `Url.http` AND
-#      `HttpClient[KernelTcpConnector]`. So NO value of `KOMIRA_JM_URL` --
+#      `HttpClient[KernelTcpConnector]`. So NO job-manager URL --
 #      `https://` included -- could make a placed agent speak TLS, which is
 #      exactly what a Lambda-backed job manager behind API Gateway requires.
 #
@@ -22,8 +22,8 @@
 #
 #   3. The composite failure has the worst possible shape. ECS `RunTask` answers
 #      200 with a task ARN, placement is RECORDED, the task then cannot fetch
-#      its binary or report a phase, and the job is reaped 60s later at
-#      `stale_threshold_micros`. A post-deploy smoke test asserting "the JM
+#      its binary or report a phase, and the job is reaped 60s later as
+#      stale. A post-deploy smoke test asserting "the JM
 #      placed something" passes throughout.
 #
 # ★ WHAT THIS TEST IS. It walks the AGENT's half of the seam, in the order the
