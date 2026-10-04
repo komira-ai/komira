@@ -27,7 +27,7 @@
 #   the authoritative read: the repodata can lag an upload, and a re-run after
 #   a partial publish must not report its own uploads as "new" just because
 #   the index has not caught up. A set name that is not held is NEW
-#   (`new_names`). Which names a release publishes is its declarations
+#   (`new_names`). Which names a release publishes is its artifacts
 #   file's; the approver of the publishing stage reads the NEW NAMES report
 #   before approving, and a dry run shows the same report.
 #
@@ -50,7 +50,7 @@ from kci_pkg_upload.prefix_dev_registry import (
     refuse_malformed_conda_coordinate,
     refuse_name_not_the_files,
 )
-from kci_release_channel import ARTIFACT_TYPE_CONDA, ChannelDeclaration
+from kci_release_channel import ARTIFACT_TYPE_CONDA, Channel
 from kci_release_set.conda_metadata import KIND_METAPACKAGE
 from kci_release_set.member import ReleaseMember
 
@@ -87,7 +87,7 @@ struct PublishTarget(Copyable, Movable):
 
     Layout: owned values only. No pointer field."""
 
-    var declaration: String
+    var artifact: String
     var is_metapackage: Bool
     var coordinate: PackageCoordinate
     var sha256_hex: String
@@ -96,14 +96,14 @@ struct PublishTarget(Copyable, Movable):
 
     def __init__(
         out self,
-        var declaration: String,
+        var artifact: String,
         is_metapackage: Bool,
         var coordinate: PackageCoordinate,
         var sha256_hex: String,
         var file_path: String,
         internal_requirements: Int,
     ):
-        self.declaration = declaration^
+        self.artifact = artifact^
         self.is_metapackage = is_metapackage
         self.coordinate = coordinate^
         self.sha256_hex = sha256_hex^
@@ -187,7 +187,7 @@ def _internal_count(m: ReleaseMember, members: List[ReleaseMember]) -> Int:
 
 
 def resolve_targets(
-    channel: ChannelDeclaration, members: List[ReleaseMember]
+    channel: Channel, members: List[ReleaseMember]
 ) raises -> List[PublishTarget]:
     """See the file header. RAISES once, listing every refusal."""
     var repository = channel.repository_for(String(ARTIFACT_TYPE_CONDA))
@@ -211,10 +211,10 @@ def resolve_targets(
             refuse_malformed_conda_coordinate(c)
             refuse_name_not_the_files(c)
         except e:
-            refusals.append(String("artifact '") + m.declaration + String("': ") + String(e))
+            refusals.append(String("artifact '") + m.artifact + String("': ") + String(e))
             continue
         var t = PublishTarget(
-            m.declaration.copy(),
+            m.artifact.copy(),
             m.conda.kind == KIND_METAPACKAGE,
             c^,
             m.manifest.sha256_hex.copy(),

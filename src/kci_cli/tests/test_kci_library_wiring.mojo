@@ -96,7 +96,7 @@ def _plan_private(tag: String, store: String) raises -> Tuple[Int, String]:
         String("schema_version: 1\nstage { name: \"") + String(EXAMPLE_STAGE)
         + String("\" environment: \"") + String(EXAMPLE_ENVIRONMENT)
         + String("\" step { name: \"publish\" kind: PUBLISH platform: \"") + req.platform
-        + String("\" declarations: \"") + req.declarations_file + String("\" channels: \"") + req.channels_file
+        + String("\" artifacts: \"") + req.artifacts_file + String("\" channels: \"") + req.channels_file
         + String("\" channel: \"example-private\" } }\n"),
     )
     var a = List[String]()
@@ -135,7 +135,7 @@ def test_a_build_step_reaches_kci_build() raises:
     write_whole_file(
         m,
         String("schema_version: 1\nstage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\"")
-        + String(" declarations: \"") + d + String("/absent.textproto\" } }\n"),
+        + String(" artifacts: \"") + d + String("/absent.textproto\" } }\n"),
     )
     makedirs(d + String("/work"), exist_ok=True)
     var a = List[String]()
@@ -150,7 +150,7 @@ def test_a_build_step_reaches_kci_build() raises:
     var rec = recorder_for(a)
     assert_equal(kci_main_with(a, steps, rec), 3)
     var res = parse_result(Path(d + String("/result.json")).read_text(), String("result"))
-    assert_equal(res.error.id, String("KCI-E-DECLARATION"))
+    assert_equal(res.error.id, String("KCI-E-ARTIFACT"))
     assert_equal(res.steps[0].kind, String("BUILD"))
     assert_equal(res.steps[0].name, String("b"))
 

@@ -1,4 +1,4 @@
-// The artifact declarations: the one reviewed list of what kci builds and
+// The artifacts: the one reviewed list of what kci builds and
 // publishes, and the build system that builds each.
 //
 // kci models a build system generically and knows no build tool by name:
@@ -7,7 +7,7 @@
 // container kci runs in. There is no list of supported build tools, no
 // kind of artifact and no enum anywhere in this file.
 //
-// THE CONTRACT. For each artifact, one at a time and in the order of this
+// THE BUILD RULES. For each artifact, one at a time and in the order of this
 // file, kci creates an EMPTY output directory under the release directory
 // and runs
 //
@@ -30,18 +30,18 @@
 // The last four are the release stamp, derived by kci from git (never typed,
 // never read from the environment). Any other `{<identifier>}` is refused (a
 // brace not around an identifier is passed through as written). A
-// metapackage is an ordinary declaration placed LAST, reading its members'
+// metapackage is an ordinary artifact placed LAST, reading its members'
 // manifests under {release_dir}. One metapackage per subdir whose members
 // are every library of the file is the rule the PUBLISH step enforces (a
 // recommendation; the CEO has not answered it).
 //
-// ONE ARTIFACT PER DECLARATION. The build must leave, at the top of that
+// ONE ARTIFACT PER ENTRY. The build must leave, at the top of that
 // directory, EXACTLY ONE kci artifact manifest (the format of
 // //src/kci_artifact_manifest), named `manifest.json`, plus the files it
 // names (for a CONDA artifact: the `.conda` and `metadata.json`, both next
 // to it). kci refuses a build that leaves no `manifest.json` there, a
 // listing that names it more than once, and a manifest whose `name` is not
-// the declaration's `name`, compared exactly (byte for byte: no case
+// the artifact's `name`, compared exactly (byte for byte: no case
 // folding, no trimming, no `-`/`_` equivalence). kci ships exactly what
 // that manifest describes: the artifact type, version, platform, file,
 // sha256 and metadata all come from it, never from this file. A build that
@@ -53,7 +53,7 @@
 // artifact args
 // `["//src/komira_encoding:komira_encoding_conda[release]", "--out",
 // "{out_dir}"]`. The subcommand belongs in the build system's args because
-// those come first. The farm is machine configuration, not a declaration:
+// those come first. The farm is machine configuration, not an entry of this file:
 // a buckconfig buck2 reads when its daemon starts (`/etc/buckconfig.d/` or
 // `~/.buckconfig.d/`). `--config-file` and `-c` in args cannot name it:
 // the daemon reads `[buck2_re_client]` from config files only, at startup,
@@ -76,19 +76,19 @@
 // artifact type (the built manifest carries them), and where an artifact is
 // published to (the PUBLISH step's).
 //
-// Other `.proto` files import it as `kci/release/v1/artifact_declaration.proto`.
+// Other `.proto` files import it as `kci/release/v1/artifact.proto`.
 syntax = "proto3";
 
 package kci.release.v1;
 
-// A declarations file: the build systems, then every artifact kci may build
+// An artifacts file: the build systems, then every artifact kci may build
 // or publish, each once.
-message ArtifactDeclarations {
+message Artifacts {
   repeated BuildSystem build_systems = 1;
-  repeated ArtifactDeclaration artifacts = 2;
+  repeated Artifact artifacts = 2;
 
   // The file's format major (kci_api's format table,
-  // `kci.artifact_declarations`). Required: a file without it is refused
+  // `kci.artifacts`). Required: a file without it is refused
   // naming the field to add, and a major this kci does not read is refused
   // before any other field is read ("needs a newer kci"). Inside a major,
   // fields are only ever added.
@@ -112,7 +112,7 @@ message BuildSystem {
   repeated string args = 3;
 }
 
-message ArtifactDeclaration {
+message Artifact {
   // The artifact's name; `[a-z][a-z0-9_]*`, unique among the artifacts.
   // The built `manifest.json`'s `name` must equal it exactly, so this is the
   // published name too (a conda package's name has the same syntax).

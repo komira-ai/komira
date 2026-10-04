@@ -1,6 +1,6 @@
 # =============================================================================
 # kci_ci_check -- the workflow consistency check: a hand-written CI workflow
-#   held to the release machine (library code; used by the welded
+#   held to the machine file's release machine (library code; used by the welded
 #   test and by `kci run` at start-up).
 # =============================================================================
 #

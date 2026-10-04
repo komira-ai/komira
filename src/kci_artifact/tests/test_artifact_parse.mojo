@@ -1,6 +1,6 @@
 # =============================================================================
-# src/kci_artifact_declaration/tests/test_declaration_parse.mojo
-#   Read a declarations file, round-trip it on the wire, pin every field
+# src/kci_artifact/tests/test_artifact_parse.mojo
+#   Read an artifacts file, round-trip it on the wire, pin every field
 #   number as bytes, refuse what the parser refuses.
 # =============================================================================
 #
@@ -15,18 +15,18 @@ from std.testing import TestSuite, assert_equal
 
 from komira_proto_codec import decode_proto, encode_proto
 
-from kci_artifact_declaration_proto.artifact_declaration import (
-    ArtifactDeclaration,
-    ArtifactDeclarations,
+from kci_artifact_proto.artifact import (
+    Artifact,
+    Artifacts,
     BuildSystem,
 )
-from kci_artifact_declaration import parse_artifact_declarations
+from kci_artifact import parse_artifacts
 
 
-def _parse(text: String) raises -> ArtifactDeclarations:
-    """`parse_artifact_declarations` over `text` with `schema_version: 1`
+def _parse(text: String) raises -> Artifacts:
+    """`parse_artifacts` over `text` with `schema_version: 1`
     prepended on its FIRST line, so no line number a refusal names moves."""
-    return parse_artifact_declarations(String("schema_version: 1 ") + text, String("decl.textproto"))
+    return parse_artifacts(String("schema_version: 1 ") + text, String("artifacts.textproto"))
 
 
 def _file() -> String:
@@ -81,7 +81,7 @@ def test_control_file_parses_every_field() raises:
 
 def test_parsed_value_round_trips_on_the_wire() raises:
     var d = _parse(_file())
-    var back = decode_proto[ArtifactDeclarations](encode_proto[ArtifactDeclarations](d))
+    var back = decode_proto[Artifacts](encode_proto[Artifacts](d))
     assert_equal(len(back.build_systems), len(d.build_systems))
     for i in range(len(d.build_systems)):
         assert_equal(back.build_systems[i].name, d.build_systems[i].name)
@@ -123,8 +123,8 @@ def _bs() -> BuildSystem:
     return BuildSystem(String("b"), String("e"), _one(String("x")))
 
 
-def _art() -> ArtifactDeclaration:
-    return ArtifactDeclaration(String("a"), String("b"), _one(String("x")))
+def _art() -> Artifact:
+    return Artifact(String("a"), String("b"), _one(String("x")))
 
 
 def test_build_system_field_numbers_are_pinned() raises:
@@ -141,7 +141,7 @@ def test_artifact_field_numbers_are_pinned() raises:
     # name = 1 (0x0a), build_system = 3 (0x1a), args = 4 (0x22); 2 is
     # reserved, so no 0x12 byte.
     _expect_bytes(
-        encode_proto[ArtifactDeclaration](_art()),
+        encode_proto[Artifact](_art()),
         _bytes(0x0A, 1, 0x61, 0x1A, 1, 0x62, 0x22, 1, 0x78),
     )
 
@@ -151,10 +151,10 @@ def test_file_field_numbers_are_pinned() raises:
     # schema_version = 3 (0x18, varint 1).
     var systems = List[BuildSystem]()
     systems.append(_bs())
-    var artifacts = List[ArtifactDeclaration]()
+    var artifacts = List[Artifact]()
     artifacts.append(_art())
     _expect_bytes(
-        encode_proto[ArtifactDeclarations](ArtifactDeclarations(systems^, artifacts^, Int32(1))),
+        encode_proto[Artifacts](Artifacts(systems^, artifacts^, Int32(1))),
         _bytes(
             0x0A, 9, 0x0A, 1, 0x62, 0x12, 1, 0x65, 0x1A, 1, 0x78,
             0x12, 9, 0x0A, 1, 0x61, 0x1A, 1, 0x62, 0x22, 1, 0x78,
@@ -168,21 +168,21 @@ def test_parse_refusals() raises:
     assert_equal(
         _refusal(String("artifact {\n  name: \"a\"\n}\n")),
         String(
-            "decl.textproto: line 1: unknown top-level field 'artifact'"
+            "artifacts.textproto: line 1: unknown top-level field 'artifact'"
             " (expected schema_version, build_systems, artifacts)"
         ),
     )
     assert_equal(
         _refusal(f.replace(String("  args: \"build\"\n"), String("  args: \"build\"\n  kind: \"x\"\n"))),
         String(
-            "decl.textproto: line 5: unknown field 'kind' in build system 'buck2'"
+            "artifacts.textproto: line 5: unknown field 'kind' in build system 'buck2'"
             " (expected name, executable, args)"
         ),
     )
     assert_equal(
         _refusal(String("build_systems {\n  label: \"x\"\n}\n")),
         String(
-            "decl.textproto: line 2: unknown field 'label' in build system #1"
+            "artifacts.textproto: line 2: unknown field 'label' in build system #1"
             " (expected name, executable, args)"
         ),
     )
@@ -190,18 +190,18 @@ def test_parse_refusals() raises:
         _refusal(
             f.replace(String("  executable: \"buck2\"\n"), String("  executable: \"buck2\"\n  executable: \"b\"\n"))
         ),
-        String("decl.textproto: line 4: field 'executable' is set twice in build system 'buck2'"),
+        String("artifacts.textproto: line 4: field 'executable' is set twice in build system 'buck2'"),
     )
     assert_equal(
         _refusal(f.replace(String("  name: \"buck2\"\n"), String("  name: \"buck2\"\n  name: \"c\"\n"))),
-        String("decl.textproto: line 3: field 'name' is set twice in build system 'buck2'"),
+        String("artifacts.textproto: line 3: field 'name' is set twice in build system 'buck2'"),
     )
     assert_equal(
         _refusal(
             f.replace(String("  build_system: \"buck2\"\n  args: \"//pkg:a"), String("  build_system: \"buck2\"\n  version: \"1\"\n  args: \"//pkg:a"))
         ),
         String(
-            "decl.textproto: line 9: unknown field 'version' in artifact 'a'"
+            "artifacts.textproto: line 9: unknown field 'version' in artifact 'a'"
             " (expected name, build_system, args)"
         ),
     )
@@ -209,30 +209,30 @@ def test_parse_refusals() raises:
         _refusal(
             f.replace(String("  build_system: \"buck2\"\n  args: \"//pkg:a"), String("  build_system: \"buck2\"\n  build_system: \"x\"\n  args: \"//pkg:a"))
         ),
-        String("decl.textproto: line 9: field 'build_system' is set twice in artifact 'a'"),
+        String("artifacts.textproto: line 9: field 'build_system' is set twice in artifact 'a'"),
     )
     assert_equal(
         _refusal(f.replace(String("  name: \"a\"\n"), String("  name: \"a\"\n  name: \"z\"\n"))),
-        String("decl.textproto: line 8: field 'name' is set twice in artifact 'a'"),
+        String("artifacts.textproto: line 8: field 'name' is set twice in artifact 'a'"),
     )
     assert_equal(
         _refusal(f.replace(String("name: \"a\""), String("name: a"))),
-        String("decl.textproto: line 7: expected a quoted string for 'name' but got word 'a'"),
+        String("artifacts.textproto: line 7: expected a quoted string for 'name' but got word 'a'"),
     )
     assert_equal(
         _refusal(String("artifacts {\n  name: \"a\"\n")),
-        String("decl.textproto: line 1: artifact 'a' is not closed (expected '}')"),
+        String("artifacts.textproto: line 1: artifact 'a' is not closed (expected '}')"),
     )
     assert_equal(
         _refusal(String("build_systems {\n")),
-        String("decl.textproto: line 1: build system #1 is not closed (expected '}')"),
+        String("artifacts.textproto: line 1: build system #1 is not closed (expected '}')"),
     )
 
 
 
 def _raw_refusal(text: String) -> String:
     try:
-        _ = parse_artifact_declarations(text, String("decl.textproto"))
+        _ = parse_artifacts(text, String("artifacts.textproto"))
     except e:
         return String(e)
     return String("<parsed>")
@@ -241,7 +241,7 @@ def _raw_refusal(text: String) -> String:
 def test_schema_version_is_read_back() raises:
     var d = _parse(_file())
     assert_equal(d.schema_version, Int32(1))
-    var back = decode_proto[ArtifactDeclarations](encode_proto[ArtifactDeclarations](d))
+    var back = decode_proto[Artifacts](encode_proto[Artifacts](d))
     assert_equal(back.schema_version, Int32(1))
 
 
@@ -249,26 +249,26 @@ def test_schema_version_refusals() raises:
     assert_equal(
         _raw_refusal(_file()),
         String(
-            "decl.textproto: no schema_version; add `schema_version: 1`"
-            " (this kci reads kci.artifact_declarations up to major 1)"
+            "artifacts.textproto: no schema_version; add `schema_version: 1`"
+            " (this kci reads kci.artifacts up to major 1)"
         ),
     )
     # a newer major is refused before the field it added is read
     assert_equal(
         _raw_refusal(String("schema_version: 2\nbuild_systems { platforms: \"x\" }\n")),
         String(
-            "decl.textproto: schema_version 2 needs a newer kci"
-            " (this kci reads kci.artifact_declarations up to major 1)"
+            "artifacts.textproto: schema_version 2 needs a newer kci"
+            " (this kci reads kci.artifacts up to major 1)"
         ),
     )
     assert_equal(
         _raw_refusal(String("schema_version: 1\n") + _file() + String("schema_version: 1\n")),
-        String("decl.textproto: line 21: field 'schema_version' is set twice (first on line 1)"),
+        String("artifacts.textproto: line 21: field 'schema_version' is set twice (first on line 1)"),
     )
     assert_equal(
         _raw_refusal(String("schema_version: \"1\"\n") + _file()),
         String(
-            "decl.textproto: line 1: schema_version is not a decimal integer"
+            "artifacts.textproto: line 1: schema_version is not a decimal integer"
             " (expected `schema_version: <major>`)"
         ),
     )
@@ -276,7 +276,7 @@ def test_schema_version_refusals() raises:
     assert_equal(
         _refusal(_file().replace(String("  executable: \"buck2\"\n"), String("  executable: \"buck2\"\n  schema_version: 1\n"))),
         String(
-            "decl.textproto: line 4: unknown field 'schema_version' in build system 'buck2'"
+            "artifacts.textproto: line 4: unknown field 'schema_version' in build system 'buck2'"
             " (expected name, executable, args)"
         ),
     )

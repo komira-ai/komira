@@ -9,7 +9,7 @@ re-verified over its bytes by the SAME function a BUILD step ran
 requirement closure, and `release.json`'s set hash against the recomputation.
 Step 1 reads the channel by DOWNLOAD (other bytes under one of our file names
 stops the run) and reports every name the channel has never held (NEW NAMES):
-which names a release publishes is its declarations file's, never a per-run
+which names a release publishes is its artifacts file's, never a per-run
 claim. Steps 2 to 4 upload the
 members still missing, read every member back, and only then publish the
 metapackage; the missing members upload on up to `--concurrency` worker

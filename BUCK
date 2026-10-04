@@ -1,7 +1,8 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "push_verdicts", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "push_verdicts", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:retired_names.bzl", "retired_names")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -107,17 +108,23 @@ _TESTS_LINTS = [
     unchecked = ["tools/build/tests/negative/doc_links/dead.md"],
 ) for _ in _TESTS_LINTS[:1]]
 
-# Retired names: a package or type that was renamed may appear only in a
-# dated history note (a line carrying a YYYY-MM-DD date). The tree is every
-# file of the cell (`:doc_tree`) plus the dotfiles a glob skips. Each name is
-# spelt in parts so this file does not hold it.
+# Retired names (tools/build/lint/retired_names.bzl): a package or type that
+# was renamed may appear only in a dated history note, a line carrying a
+# YYYY-MM-DD date. The tree is every file of the cell (`:doc_tree`) plus the
+# dotfiles a glob skips. Each name is spelt in parts so this file does not
+# hold it.
 [retired_names(
     name = "retired_names",
     names = [
         "kci" + "_contract",
         "kci" + "_stage" + "_graph",
         "Stage" + "Graph",
+        "kci" + "_artifact" + "_declaration",
     ],
-    srcs = [".buckconfig.local.example"] + glob([".github/**"]),
+    srcs = [
+        ".buckconfig",
+        ".buckconfig.local.example",
+        ".gitignore",
+    ] + glob([".github/**"]),
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]

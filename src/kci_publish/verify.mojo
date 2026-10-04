@@ -26,7 +26,7 @@
 #     published), no row twice, no row a metapackage. Its `depends` is
 #     exactly G plus `<m> ==V B` for every row.
 #   "Exactly one metapackage, whose members are every library" is the rule
-#   the design recommends for its open question Q2 (the declarations no
+#   the design recommends for its open question Q2 (the artifacts no
 #   longer say which artifacts are members). Until that question is settled
 #   the rule is the strict one, which is the safe direction.
 #
@@ -34,7 +34,7 @@
 #   `release.json` whose set hash is not what the member directories
 #   recompute to, and the result records the recomputed one. There is no
 #   approved-hash input to compare it with: what a release publishes is its
-#   declarations file's.
+#   artifacts file's.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -75,7 +75,7 @@ def require_conda_only(members: List[ReleaseMember]) raises:
         if members[i].manifest.artifact_type != ARTIFACT_TYPE_CONDA:
             refusals.append(
                 String("artifact '")
-                + members[i].declaration
+                + members[i].artifact
                 + String("' is ")
                 + members[i].manifest.artifact_type
                 + String("; a PUBLISH step publishes CONDA packages only")
@@ -95,7 +95,7 @@ def _differs(
     if value != want:
         refusals.append(
             String("artifact '")
-            + m.declaration
+            + m.artifact
             + String("': ")
             + key
             + String(" is '")
@@ -115,7 +115,7 @@ def require_lockstep(members: List[ReleaseMember], rv: ReleaseVersion) raises:
         refusals.append(String("the release set has no member"))
         _refuse(String("lockstep"), refusals)
     ref first = members[0].conda
-    var the_set = String("the set's first member '") + members[0].declaration + String("' has")
+    var the_set = String("the set's first member '") + members[0].artifact + String("' has")
     var the_file = String("--release-version (") + rv.source + String(") says")
     for i in range(len(members)):
         ref m = members[i]
@@ -133,7 +133,7 @@ def require_lockstep(members: List[ReleaseMember], rv: ReleaseVersion) raises:
         if not c.stamped:
             refusals.append(
                 String("artifact '")
-                + m.declaration
+                + m.artifact
                 + String("' is not stamped: an unstamped package never ships")
             )
     if len(refusals) > 0:
@@ -179,7 +179,7 @@ def require_closure(members: List[ReleaseMember]) raises:
     var metas = List[Int]()
     for i in range(len(members)):
         ref c = members[i].conda
-        var who = String("artifact '") + members[i].declaration + String("': ")
+        var who = String("artifact '") + members[i].artifact + String("': ")
         if c.kind == KIND_METAPACKAGE:
             metas.append(i)
             continue
@@ -225,7 +225,7 @@ def require_closure(members: List[ReleaseMember]) raises:
         _refuse(String("requirement closure"), refusals)
     ref meta_m = members[metas[0]]
     ref meta = meta_m.conda
-    var who = String("metapackage '") + meta_m.declaration + String("': ")
+    var who = String("metapackage '") + meta_m.artifact + String("': ")
     var want = List[String]()
     want.append(guard.copy())
     var rows_seen = List[String]()

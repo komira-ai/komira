@@ -17,7 +17,7 @@ mojo_library(
     name = "kci_release_set",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_artifact_declaration:kci_artifact_declaration",
+        "//src/kci_artifact:kci_artifact",
         "//src/kci_artifact_manifest:kci_artifact_manifest",
         "//src/kci_api:kci_api",
         "//src/kci_release_channel:kci_release_channel",
