@@ -18,7 +18,7 @@ from kci_build import BuildRequest
 from kci_cli import TMP_SUFFIX, CliRecorder, SecretStoreChoice, StageSteps, StepEnd, kci_main_with, recorder_for, write_whole_file
 from kci_contract import OUTCOME_SUCCEEDED, parse_result
 from kci_contract import RunResult as KciRunResult
-from kci_publish import PublishRequest
+from kci_publish import NewNamesReport, PublishRequest
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 
@@ -45,6 +45,16 @@ struct SpySteps(StageSteps, Movable):
         mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
     ) -> StepEnd:
         return StepEnd(String(OUTCOME_SUCCEEDED), String(""), String(""))
+
+    def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
+        return NewNamesReport(req.stage.copy(), req.step_name.copy(), req.channel.copy())
+
+    def platform_env(mut self, name: String) -> String:
+        # not under GitHub Actions: the start-up workflow check is not made
+        return String("")
+
+    def committed_file(mut self, commit: String, path: String) raises -> String:
+        raise Error(String("no workflow is read here"))
 
 
 def _root(tag: String) raises -> String:
@@ -111,7 +121,7 @@ def test_a_refused_command_line_is_recorded() raises:
     assert_equal(end.exit_code, 2)
     assert_equal(end.error.id, String("KCI-E-USAGE"))
     assert_equal(end.invoked_as, String("publish"))
-    assert_true(end.error.message.find(String("unknown verb 'publish'")) >= 0, end.error.message)
+    assert_true(end.error.message.find(String("unknown command 'publish'")) >= 0, end.error.message)
     assert_equal(len(steps.seen_at_step), 0)
 
 
