@@ -30,13 +30,15 @@
 # src/kci_artifact/tests/test_release_artifacts_file.mojo refuses
 # it at build time.
 #
-# A FIRST-TIME NAME is not approved here: a PUBLISH step refuses to upload a
-# name the channel does not hold unless the run names it with
-# `--claim-new-name` (kci.yml's input claim_new_names). The first release
-# claims komira_encoding and komira_all.
+# THE NAMES A RELEASE PUBLISHES are the ones this file declares, and this file
+# is reviewed through CODEOWNERS; there is no per-run claim. A PUBLISH step
+# reads its channel first and reports every declared name the channel holds
+# no file of yet (NEW NAMES) in its result and the job summary; the gamma
+# stage reports prod's before the prod approval. The first release's new
+# names are komira_encoding and komira_all.
 #
-# Which farm buck2 builds on is the runner's machine configuration
-# (docs/ci.md), not this file's.
+# Which farm buck2 builds on is the build job's machine configuration, written
+# by the farm-connect action (docs/ci.md), not this file's.
 #
 # The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
