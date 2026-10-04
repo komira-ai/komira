@@ -1,26 +1,28 @@
 // The kci resource catalog (`kci.resource.v1`): what an author writes in a
-// deploy action. Typed resources, each a common, cloud-agnostic shape; a
-// platform adapter set linked into kci turns each one into engine nodes.
+// deploy step. Typed resources, each a common, cloud-agnostic shape; the
+// cloud adapter built into kci for the cell's cloud turns each one into
+// engine nodes.
 //
 // V1 IS TWO TYPES: `service` and `job`. The other planned types (worker,
-// table, bucket, queue, secret, site, domain, mail_relay) are not declared
-// yet; their `Resource.body` numbers are held (see `Resource`), so adding one
-// later is an addition, never a renumber.
+// table, bucket, queue, secret, site, domain) are not declared yet; their
+// `Resource.body` numbers are held (see `Resource`), so adding one later is
+// an addition, never a renumber.
 //
 // WHAT THIS FILE PROMISES
 //   * Every field is a BEHAVIOUR (a port, a scale, a public URL, an expiry),
 //     never a part of somebody's product. No vendor word appears in a
 //     message, field or enum value name.
 //   * The resource types are a CLOSED oneof. There is no kind string, no
-//     `google.protobuf.Any` and no provider enum: which platform a graph runs
-//     on is chosen by the invocation (`--platform=<id>`), never by this file.
+//     `google.protobuf.Any` and no provider enum: which cloud a graph runs
+//     on comes from the cell the stage deploys to (`--cloud=<id>`), never
+//     from this file.
 //   * Every field that names another resource is a `Ref`. The only
 //     id-bearing string is `Resource.id`. So one walk over `Ref` fields finds
 //     every edge of the graph.
 //
 // WHAT IS NOT HERE, ON PURPOSE
 //   * Identity, permissions, networks, gateways, load balancers and DNS
-//     records. The platform creates them while it builds a `service` or a
+//     records. The cloud adapter creates them while it builds a `service` or a
 //     `domain`; "this may read that" is one `Uses` line on the consumer.
 //   * Stage names. A stage's list of resources lives in the release machine
 //     file; no resource carries the name of a stage.
@@ -33,9 +35,15 @@
 //   * Retention. It serves data-bearing types v1 does not have; `Resource`
 //     field 3 is held for it.
 //
-// TWO MEANINGS OF "PLATFORM". `--platform=<id>` picks the deploy target (the
-// adapter set kci links). `ArtifactPlatform` is an OS and a CPU: which build
-// of an artifact a service or job runs. They are unrelated.
+// RESERVED NOW, BUILT LATER (held numbers, not declared; each is an addition
+// when it lands): `Resource` 5 a typed per-cloud settings map, `Resource` 6
+// `physical_name` (keep an existing cloud name), `Image` 4 an `artifact_ref
+// { name, platform, revision }` source arm beside `output`, `Service` 13 and
+// `Job` 8 a `source` that may also be a non-image artifact, and `Output` 5
+// REVISION (the cloud's own revision of a service, not kci's revision id).
+//
+// "PLATFORM" MEANS OS + CPU AND NOTHING ELSE (`Image.platform`). The deploy
+// target is the cloud, which this file never names.
 //
 // Field numbers are what is stored. They are pinned as literal wire bytes by
 // the welded tests in tests/; renumbering a field is protoc-legal and decodes
@@ -49,14 +57,14 @@ import "google/protobuf/duration.proto";
 
 // ---- the catalog's one declared bit ------------------------------------------
 
-// Whether every complete platform must host a type. PORTABLE: a complete
-// platform implements it or carries a ledgered gap. PLATFORM_BOUND: partial
-// coverage is legitimate, and applying it where no adapter exists is refused
+// Whether every complete cloud must host a type. PORTABLE: a complete cloud
+// implements it or carries a ledgered gap. CLOUD_BOUND: partial coverage is
+// legitimate, and applying it on a cloud with no adapter for it is refused
 // before anything is created. UNSET is never a legal marking.
 enum Portability {
   PORTABILITY_UNSET = 0;
   PORTABLE = 1;
-  PLATFORM_BOUND = 2;
+  CLOUD_BOUND = 2;
 }
 
 extend google.protobuf.MessageOptions {
@@ -70,7 +78,8 @@ extend google.protobuf.MessageOptions {
 // ---- references ----------------------------------------------------------------
 
 // What a produced value IS, never whose attribute it is. 3 and 4 are held
-// for ADDRESS and NAME, which only the later data types expose.
+// for ADDRESS and NAME, which only the later data types expose; 5 for
+// REVISION (the cloud's revision of a service, never kci's revision id).
 enum Output {
   OUTPUT_UNSET = 0;
   URL = 1;
@@ -98,7 +107,7 @@ enum Access {
   CALL = 1;
 }
 
-// "This resource may do `access` to `target`." The platform turns it into
+// "This resource may do `access` to `target`." The cloud adapter turns it into
 // whatever its own permission system needs. `target.output` must be unset:
 // access is granted to a resource, not to one of its values.
 message Uses {
@@ -117,65 +126,52 @@ message Value {
   }
 }
 
-// An output of an earlier BUILD action of the release machine. A different
-// namespace from `Ref`: resolved before the deploy graph exists, and never a
-// graph edge.
-message ActionOutput {
-  string action = 1;
+// An output of an earlier BUILD step of the same run of the release
+// machine. A different namespace from `Ref`: resolved before the deploy
+// graph exists, and never a graph edge.
+message StepOutput {
+  string step = 1;
   string name = 2;
 }
 
-// The OS of an artifact build. v1 declares one value.
-enum Os {
-  OS_UNSET = 0;
-  LINUX = 1;
-}
-
-// The CPU of an artifact build. v1 declares one value.
-enum Cpu {
-  CPU_UNSET = 0;
-  X86_64 = 1;
-}
-
-// Which build of an artifact: an OS and a CPU (not a cloud; see "TWO
-// MEANINGS OF PLATFORM" above). Artifacts are built per platform, so an
-// `Image` states the one it needs.
+// What to run: a build step's output, or a literal content digest. Never a
+// mutable tag. 4 is held for an `artifact_ref` arm (an artifact of another
+// revision).
 //
-// An unset field means its v1 default: `os` LINUX, `cpu` X86_64. That
-// default is fixed; declaring more values later does not move it, because
-// stored lists rely on it. In v1, linux x86_64 is the only platform a
-// reader accepts: any other value (one a later schema declares, or an
-// undeclared number) is refused when the graph is validated, before anything
-// is created.
-message ArtifactPlatform {
-  Os os = 1;
-  Cpu cpu = 2;
-}
-
-// What to run: a build action's output, or a literal content digest. Never a
-// mutable tag. `platform` says which build: the action output of that
-// platform, or, for a digest, that the digest is of that platform's single
-// image (not a multi-platform index).
+// `platform` is the OS + CPU of the build, an OCI-style string such as
+// "linux/amd64": the step output of that platform, or, for a digest, that
+// the digest is of that platform's single image (not a multi-platform
+// index). It is the same spelling every other kci file uses. Empty means the
+// v1 default, "linux/amd64"; that default is fixed, because stored lists
+// rely on it. In v1, linux/amd64 is the only platform a reader accepts: any
+// other value decodes, and is refused when the graph is validated, before
+// anything is created.
 message Image {
   oneof source {
-    ActionOutput output = 1;
+    StepOutput output = 1;
     string digest = 2;
   }
-  ArtifactPlatform platform = 3;
+  string platform = 3;
 }
 
-// A secret that already exists in the target environment's secret store,
-// named, never valued. kci passes the NAME to the platform, which makes the
-// secret's current value available to the container at run time; the value
-// is never in this file, in kci's state or in kci's memory. Creating or
-// rotating the secret is outside v1 (there is no secret resource). The map
+// A secret that already exists in the cell's secret store, named, never
+// valued. kci passes the REFERENCE to the cloud adapter, which makes the
+// secret's value available to the container at run time; the value is never
+// in this file, in kci's state or in kci's memory. Creating the secret's
+// container is bootstrap's job; there is no secret resource in v1. The map
 // key of a `secret_env` field is the environment variable the container
 // reads it from.
+//
+// `store` names the secret store (unset: the cell's default store);
+// `version` pins one version of the value (unset: the latest). Both have
+// presence, so "not written" is never confused with a written empty string.
 message SecretRef {
   string name = 1;
+  optional string store = 2;
+  optional string version = 3;
 }
 
-// ---- one entry of a deploy action's list --------------------------------------
+// ---- one entry of a deploy step's list ----------------------------------------
 
 message Resource {
   // Author-chosen and stable: the identity key for state.
@@ -186,17 +182,17 @@ message Resource {
   // live in the release machine file.
   reserved 4;
   reserved "only_in";
+  // 5 is held for a typed per-cloud settings map, 6 for `physical_name`.
 
   // Typed and closed. Held, not declared: 12 worker, 13 table, 14 bucket,
-  // 15 queue, 16 secret, 17 site, 18 domain, 19 mail_relay; 90 the escape
-  // hatch.
+  // 15 queue, 16 secret, 17 site, 18 domain; 90 the escape hatch.
   oneof body {
     Service service = 10;
     Job job = 11;
   }
 }
 
-// The resources of one deploy action, in no particular order: ordering is
+// The resources of one deploy step, in no particular order: ordering is
 // derived from the `Ref`s between them.
 message ResourceList {
   repeated Resource resource = 1;
@@ -210,9 +206,10 @@ message Size {
   uint32 memory_mb = 2;
 }
 
-// Instance bounds. `min = 0` allows scaling to zero.
+// Instance bounds. `min = 0` allows scaling to zero; `min` has presence, so
+// an explicit 0 is told apart from "not written" (the versioned default).
 message Scale {
-  uint32 min = 1;
+  optional uint32 min = 1;
   uint32 max = 2;
 }
 
@@ -233,7 +230,7 @@ message Service {
   Scale scale = 6;
   string health_path = 7;
   // Behaviours, not products: an adapter reports a finding when the
-  // platform's ceiling is lower.
+  // cloud's ceiling is lower.
   google.protobuf.Duration request_timeout = 8;
   uint32 max_concurrency = 9;
 
@@ -243,9 +240,10 @@ message Service {
     Internal internal = 11;
   }
 
-  // Secrets this service receives by name, keyed by environment variable.
-  // A key must not also appear in `env`.
+  // Secrets this service receives by reference, keyed by environment
+  // variable. A key must not also appear in `env`.
   map<string, SecretRef> secret_env = 12;
+  // 13 is held for a `source` that may be a non-image artifact.
 
   // Reachable from outside the graph at a URL.
   message Public {}
@@ -261,14 +259,17 @@ message Job {
   Image image = 1;
   repeated string args = 2;
   Size size = 3;
-  uint32 max_retries = 4;
+  // Presence: an explicit 0 ("never retry") is told apart from "not
+  // written" (the versioned default).
+  optional uint32 max_retries = 4;
   google.protobuf.Duration timeout = 5;
   // Plain values only, as on `Service.env`: a literal, a parameter or
   // another resource's output. Secrets go in `secret_env`.
   map<string, Value> env = 6;
-  // Secrets this job receives by name, keyed by environment variable. A key
-  // must not also appear in `env`.
+  // Secrets this job receives by reference, keyed by environment variable.
+  // A key must not also appear in `env`.
   map<string, SecretRef> secret_env = 7;
+  // 8 is held for a `source` that may be a non-image artifact.
 
   oneof trigger {
     OnDemand on_demand = 10;

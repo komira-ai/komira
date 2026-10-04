@@ -17,6 +17,7 @@ from std.testing import assert_equal, assert_raises, assert_true
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
 from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
 from komira_core.io.heap_region import HeapRegion
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_objectstore_s3 import AddressingStyle, S3Config, S3Fs, S3FsOptions
 from komira_retry import Backoff, Jitter, RetryPolicy
@@ -54,6 +55,10 @@ def _config() raises -> S3Config:
     )
 
 
+def _http() -> HttpClientConfig:
+    return HttpClientConfig.defaults()
+
+
 def _creds() -> StaticCredsSource:
     return StaticCredsSource(
         AwsCredential(
@@ -85,6 +90,7 @@ def test_s3fs_clone_keeps_bucket_config_and_options() raises:
         "my-bucket",
         _config(),
         _mk_one_range,
+        _http(),
         _creds(),
         FixedClock(1790000000),
         S3FsOptions(prefetch_max_inflight=3, prefetch_depth=32),
@@ -102,7 +108,7 @@ def test_s3fs_clone_keeps_bucket_config_and_options() raises:
 
 
 def test_s3fs_clone_builds_its_own_store() raises:
-    var fs = _Fs.built("lake", _config(), _mk_one_range, _creds(), FixedClock(1790000000))
+    var fs = _Fs.built("lake", _config(), _mk_one_range, _http(), _creds(), FixedClock(1790000000))
     var clone_fs = fs.clone()
     var file_a = fs.open("data/a.parquet")
     var file_b = clone_fs.open("data/b.parquet")
@@ -121,8 +127,8 @@ def test_s3fs_clone_builds_its_own_store() raises:
 
 def test_s3fs_whose_connector_cannot_be_made() raises:
     with assert_raises(contains="no connector here"):
-        _ = _Fs.built("lake", _config(), _mk_refused, _creds(), FixedClock(1790000000))
-    var fs = _Fs("lake", _config(), _mk_refused, _creds(), FixedClock(1790000000))
+        _ = _Fs.built("lake", _config(), _mk_refused, _http(), _creds(), FixedClock(1790000000))
+    var fs = _Fs("lake", _config(), _mk_refused, _http(), _creds(), FixedClock(1790000000))
     var clone_fs = fs.clone()
     var file_a = fs.open("k")
     with assert_raises(contains="no connector here"):

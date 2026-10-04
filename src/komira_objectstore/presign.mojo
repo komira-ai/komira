@@ -167,15 +167,17 @@ trait ObjectUrlSigner(Movable, Deinitable):
     signer that takes a `method: String` invites `presign("DELETE", key)` to
     compile. It should not compile.
 
-    `key` is the store-relative object key — the SAME string a
-    `ConditionalWriteStore` verb would take (`Path.parse(key)`), so a caller can
-    hold one key and reach either path. Conformers are responsible for mapping
-    it into their own URL shape (bucket prefix, container, path style).
+    `key` is the store-relative object key, an OPAQUE object name: conformers
+    sign it byte for byte and normalize nothing. A key in `Path`'s normal form
+    (what `Path.parse(key).raw()` returns) names the same object a
+    `ConditionalWriteStore` verb reaches through `Path.parse(key)`, so a caller
+    holding such a key can reach either path. A key `Path.parse` would rewrite
+    (a leading `/`, a `//`, a `.` or `..` segment) names a different object
+    here than through the store. Conformers are responsible for mapping it into
+    their own URL shape (bucket prefix, container, path style).
 
     Conformers in tree:
-      * `komira_gcp_gcs.GcsV4Signer`      — GOOG4-RSA-SHA256
-      * `komira_aws_s3.S3PresignSigner`   — AWS4-HMAC-SHA256
-      * `komira_azure_blob.AzureSasSigner`— Azure service SAS
+      * `komira_objectstore_gcs.GcsV4Signer` — GOOG4-RSA-SHA256
     """
 
     def presign_download(mut self, key: String, ttl_seconds: Int) raises -> PresignedUrl:

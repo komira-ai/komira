@@ -13,7 +13,7 @@
 #   model sha256 : 75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee
 #   operations   : GetThing, PutThing, SetConfig
 #   shapes       : 8 messages, 0 enums
-#   generator    : aws-client-gen version 8
+#   generator    : aws-client-gen version 10
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -70,6 +70,7 @@ from komira_aws_core import (
     AwsCredsSource,
     AwsEndpoint,
     AwsHttpTransport,
+    AwsRetryQuota,
     Header,
     HttpResult,
     resolve_endpoint,
@@ -82,6 +83,7 @@ from komira_json import (
     parse_json_bytes,
     parse_json_value,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_retry import (
     MonotonicClock,
@@ -940,11 +942,24 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
 
         The connector factory is a `def () raises thin -> C` function
         pointer (a code pointer, no heap); the credential source is moved
-        in. No field is an `UnsafePointer`."""
+        in. No field is an `UnsafePointer`.
+
+        `http_config` is the caller's and has no default: the HTTP client is
+        built inside `send_sigv4_signed_request`, so this argument is the only
+        way to bound it. A process serving requests under a platform deadline
+        passes `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling
+        in microseconds; a process with no containing deadline (a job, a CLI,
+        a test) passes `HttpClientConfig.defaults()`."""
 
     var _mk_connector: def () raises thin -> Self.C
+    # Handed to `send_sigv4_signed_request` on every send, unchanged.
+    var _http_config: HttpClientConfig
     var _creds_source: Self.T
     var _region: String
+    # The retry quota this client's calls share (botocore's standard mode
+    # keeps one per client): every retry spends from it, and a call that
+    # succeeds refills it.
+    var _retry_quota: AwsRetryQuota
     # WHERE this client sends. `None` = real AWS (the host derived from
     # the region). A VALUE, never an ambient env var — see
     # `komira_aws_core.AwsEndpoint`. This is what makes every verb this
@@ -954,13 +969,16 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
     def __init__(
         out self,
         mk_connector: def () raises thin -> Self.C,
+        http_config: HttpClientConfig,
         var creds_source: Self.T,
         region: String,
         endpoint_override: Optional[AwsEndpoint] = Optional[AwsEndpoint](),
     ):
         self._mk_connector = mk_connector
+        self._http_config = http_config.copy()
         self._creds_source = creds_source^
         self._region = region
+        self._retry_quota = AwsRetryQuota()
         self._endpoint_override = endpoint_override.copy()
 
     def into_creds_source(deinit self) -> Self.T:
@@ -997,6 +1015,8 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
                 extra.append(Header(n^, req.header_values[_i].copy()))
         return send_sigv4_signed_request[Self.C](
             self._mk_connector,
+            self._http_config.copy(),
+            self._retry_quota,
             req.method.copy(),
             cred,
             self._region.copy(),
@@ -1013,6 +1033,13 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
             given (`komira_aws_core.send_sigv4_signed_request_with`) instead of a
             connector from this client's factory, the wall clock and the
             standard retry loop. It returns the response, successful or not.
+
+            The transport carries the HTTP config: `AwsConnectorTransport(
+            http_config, connector)` is built from the caller's
+            `HttpClientConfig`, as `send` builds its own from this client's. The
+            budget is the retry quota: an `AwsRetryQuota` the caller keeps, one
+            for all the calls it makes over this client, as botocore keeps one
+            per client. `send` spends this client's own quota instead.
 
             A request carrying `If-Match` or `If-None-Match` is resent only
             when the service cannot have acted on it (`aws_request_is_conditional`)."""

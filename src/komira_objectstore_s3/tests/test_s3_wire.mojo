@@ -13,6 +13,7 @@
 from std.testing import assert_equal, assert_true
 
 from komira_aws_core import AwsCredential, AwsEchoConnector, FixedClock, StaticCredsSource
+from komira_http_client.client import HttpClientConfig
 from komira_objectstore.types import WritePrecondition
 from komira_objectstore_s3 import AddressingStyle, S3Config, S3Store
 from komira_retry import Backoff, Jitter, RetryPolicy
@@ -39,6 +40,7 @@ def _store(unix_seconds: Int = 1790000000) raises -> _Store:
     return _Store(
         config^,
         _mk_echo,
+        HttpClientConfig.defaults(),
         StaticCredsSource(
             AwsCredential(
                 String("AKIDEXAMPLE"),

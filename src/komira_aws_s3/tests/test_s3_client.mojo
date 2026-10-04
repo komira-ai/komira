@@ -54,13 +54,13 @@ from komira_aws_core import (
     s3_content_range_total,
     s3_copy_source,
 )
-from komira_aws_core import AwsConnectorTransport, FixedClock
+from komira_aws_core import AwsConnectorTransport, AwsRetryQuota, FixedClock
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_retry import (
     Backoff,
     Jitter,
     ManualClock,
-    NoBudget,
     RecordingSleeper,
     RetryLoop,
     RetryPolicy,
@@ -120,7 +120,9 @@ comptime _Client = S3S3Client[ScriptedConnector, StaticCredsSource]
 def _client(
     mk: def () raises thin -> ScriptedConnector, var creds: StaticCredsSource
 ) raises -> _Client:
-    return _Client(mk, creds^, String("us-east-1"), _config())
+    return _Client(
+        mk, HttpClientConfig.defaults(), creds^, String("us-east-1"), _config()
+    )
 
 
 # ---- the answers, one factory each ---------------------------------------------
@@ -377,7 +379,9 @@ def _mk_echo() raises -> AwsEchoConnector:
 
 
 def _echo() raises -> _Echo:
-    return _Echo(_mk_echo, _creds(), String("us-east-1"), _config())
+    return _Echo(
+        _mk_echo, HttpClientConfig.defaults(), _creds(), String("us-east-1"), _config()
+    )
 
 
 def _wire(e: Error) raises -> String:
@@ -531,9 +535,13 @@ def test_verbs_over_injected_seams() raises:
     script.arm_next(
         _answer(206, "Partial Content", "0123", "Content-Range: bytes 4-7/8\r\n")
     )
-    var transport = AwsConnectorTransport[ScriptedConnector](script^)
+    # The transport is built from the caller's HTTP config, and the budget
+    # is a retry quota the caller keeps across its calls.
+    var transport = AwsConnectorTransport[ScriptedConnector](
+        HttpClientConfig.defaults(), script^
+    )
     var clock = FixedClock(1790000000)
-    var budget = NoBudget()
+    var budget = AwsRetryQuota()
     var client = _client(_never, _creds())
     # A conditional PutObject that met a 500 is not sent again: had S3
     # applied it, the resend would be answered 412.

@@ -22,7 +22,13 @@
 # connection, and it is not shared between threads: a second thread takes
 # its own store (S3ConditionalStore.clone).
 #
-# Each request runs komira_aws_core's retry loop under `S3Config.retry`. A
+# Each request runs komira_aws_core's retry loop under `S3Config.retry`,
+# paying for each retry from the store's own `AwsRetryQuota` (botocore's
+# standard mode keeps one quota per client, and a store is one client). Its
+# HTTP client is built from the caller's `HttpClientConfig`, which has no
+# default: it bounds each attempt and the response body, and a process
+# serving requests under a platform deadline passes
+# `HttpClientConfig.for_serving_ceiling(ceiling_us)`. A
 # conditional PUT carries its `If-Match` or `If-None-Match`, which the send
 # reads: it is resent only when S3 cannot have acted on it (a throttle, a
 # request never sent), because a resend of a write S3 applied is answered
@@ -45,6 +51,7 @@ from komira_aws_core import (
     AwsClock,
     AwsConnectorTransport,
     AwsCredsSource,
+    AwsRetryQuota,
     HttpResult,
     aws_is_error_status,
     aws_system_retry_loop,
@@ -74,6 +81,7 @@ from komira_aws_s3.komira_aws_s3 import (
     parse_upload_part_response,
 )
 from komira_core.collections.byte_view import ByteView
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_objectstore.coalesce import plan_coalesce
 from komira_objectstore.types import (
@@ -85,7 +93,6 @@ from komira_objectstore.types import (
     RangeSet,
     WritePrecondition,
 )
-from komira_retry import NoBudget
 
 from .config import S3Config
 from .errors import s3_malformed, s3_store_error
@@ -199,7 +206,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
 
         var store = S3Store[KernelTcpConnector, StaticCredsSource, SystemAwsClock](
             S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
-            mk_connector, creds^, SystemAwsClock(),
+            mk_connector, HttpClientConfig.defaults(), creds^, SystemAwsClock(),
         )
         var meta = store.conditional_put(
             "lake", "manifest.json", bytes, WritePrecondition.if_none_match_star()
@@ -210,22 +217,33 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
     var _client: S3S3Client[Self.C, Self.T]
     var _transport: AwsConnectorTransport[Self.C]
     var _clock: Self.K
+    # The retry quota every request of this store spends from.
+    var _retry_quota: AwsRetryQuota
 
     def __init__(
         out self,
         var config: S3Config,
         mk_connector: def () raises thin -> Self.C,
+        http_config: HttpClientConfig,
         var creds: Self.T,
         var clock: Self.K,
     ) raises:
-        """A store over a connector `mk_connector` makes now. The client
-        loads S3's endpoint ruleset once, here."""
-        self._transport = AwsConnectorTransport[Self.C](mk_connector())
+        """A store over a connector `mk_connector` makes now, through an
+        HTTP client built from `http_config` (the caller's; it has no
+        default). The client loads S3's endpoint ruleset once, here."""
+        self._transport = AwsConnectorTransport[Self.C](
+            http_config, mk_connector()
+        )
         self._client = S3S3Client[Self.C, Self.T](
-            mk_connector, creds^, config.region, config.endpoint_config()
+            mk_connector,
+            http_config,
+            creds^,
+            config.region,
+            config.endpoint_config(),
         )
         self._config = config^
         self._clock = clock^
+        self._retry_quota = AwsRetryQuota()
 
     def config(self) -> S3Config:
         return self._config.copy()
@@ -245,9 +263,12 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         `version`) and the last-modified time. An absent key raises
         NOT_FOUND (S3 sends no body, so the code is "404")."""
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.head_object_with(
-            S3HeadObjectRequest(bucket, key), self._transport, self._clock, loop, budget
+            S3HeadObjectRequest(bucket, key),
+            self._transport,
+            self._clock,
+            loop,
+            self._retry_quota,
         )
         if _failed(res):
             raise self._fail("HeadObject", bucket, key, res)
@@ -276,9 +297,8 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         if if_match.byte_length() > 0:
             input.set_if_match(if_match)
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.get_object_with(
-            input, self._transport, self._clock, loop, budget
+            input, self._transport, self._clock, loop, self._retry_quota
         )
         if aws_is_error_status(res.status):
             raise self._fail("GetObject", bucket, key, res)
@@ -479,9 +499,8 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         input.set_encoding_type(String(S3_ENCODING_TYPE_URL))
         input.set_max_keys(Int32(max_keys if max_keys > 0 else self._config.list_page_size))
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.list_objects_v2_with(
-            input, self._transport, self._clock, loop, budget
+            input, self._transport, self._clock, loop, self._retry_quota
         )
         if _failed(res):
             raise self._fail("ListObjectsV2", bucket, prefix, res)
@@ -572,9 +591,12 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         NoSuchBucket, raises NOT_FOUND: the key was not deleted, the bucket
         or endpoint is wrong."""
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.delete_object_with(
-            S3DeleteObjectRequest(bucket, key), self._transport, self._clock, loop, budget
+            S3DeleteObjectRequest(bucket, key),
+            self._transport,
+            self._clock,
+            loop,
+            self._retry_quota,
         )
         if res.status == 404:
             if len(res.body) == 0:
@@ -630,9 +652,8 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
                 raise Error("S3Store.conditional_put: If-None-Match with an empty ETag")
             input.set_if_none_match(precond.etag)
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.put_object_with(
-            input, self._transport, self._clock, loop, budget
+            input, self._transport, self._clock, loop, self._retry_quota
         )
         if _failed(res):
             raise self._fail("PutObject", bucket, key, res)
@@ -655,13 +676,12 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         completion and the abort name. An upload once created costs storage
         until it is completed or aborted."""
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.create_multipart_upload_with(
             S3CreateMultipartUploadRequest(bucket, key),
             self._transport,
             self._clock,
             loop,
-            budget,
+            self._retry_quota,
         )
         if _failed(res):
             raise self._fail("CreateMultipartUpload", bucket, key, res)
@@ -689,9 +709,8 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         var input = S3UploadPartRequest(bucket, key, Int32(part_number), upload_id)
         input.set_body(bytes.copy())
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.upload_part_with(
-            input, self._transport, self._clock, loop, budget
+            input, self._transport, self._clock, loop, self._retry_quota
         )
         if _failed(res):
             raise self._fail("UploadPart", bucket, key, res)
@@ -728,9 +747,8 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         var input = S3CompleteMultipartUploadRequest(bucket, key, upload_id)
         input.set_multipart_upload(doc^)
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.complete_multipart_upload_with(
-            input, self._transport, self._clock, loop, budget
+            input, self._transport, self._clock, loop, self._retry_quota
         )
         if _failed(res):
             raise self._fail("CompleteMultipartUpload", bucket, key, res)
@@ -751,13 +769,12 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         NoSuchUpload) counts as aborted: it is gone either way. Any other
         404, such as NoSuchBucket, raises NOT_FOUND."""
         var loop = aws_system_retry_loop(self._config.retry.copy())
-        var budget = NoBudget()
         var res = self._client.abort_multipart_upload_with(
             S3AbortMultipartUploadRequest(bucket, key, upload_id),
             self._transport,
             self._clock,
             loop,
-            budget,
+            self._retry_quota,
         )
         if res.status == 404:
             if aws_xml_error_info(404, res.body, String("")).code == "NoSuchUpload":

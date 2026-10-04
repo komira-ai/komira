@@ -64,6 +64,7 @@ from komira_fs.pruned_hive_discovery import (
     PartitionPredicate,
     PrunedHiveDiscovery,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import (
     Connector,
     IoStream,
@@ -660,6 +661,10 @@ def _config() raises -> S3Config:
     )
 
 
+def _http() -> HttpClientConfig:
+    return HttpClientConfig.defaults()
+
+
 def _creds() -> StaticCredsSource:
     return StaticCredsSource(
         AwsCredential(
@@ -671,7 +676,7 @@ def _creds() -> StaticCredsSource:
 
 
 def _fs(mk: def () raises thin -> FakeS3Connector) raises -> _Fs:
-    return _Fs.built("lake", _config(), mk, _creds(), FixedClock(1790000000))
+    return _Fs.built("lake", _config(), mk, _http(), _creds(), FixedClock(1790000000))
 
 
 def _seed_tree(mut c: FakeS3Connector):
@@ -718,13 +723,13 @@ def _mk_refused() raises -> FakeS3Connector:
 def test_construction_dials_nothing() raises:
     # The store is built on the first verb, so a factory that cannot make a
     # connector is not called until then.
-    var fs = _Fs("lake", _config(), _mk_refused, _creds(), FixedClock(1790000000))
+    var fs = _Fs("lake", _config(), _mk_refused, _http(), _creds(), FixedClock(1790000000))
     assert_equal(fs.bucket(), "lake")
     with assert_raises(contains="no connector here"):
         _ = fs.file_size("d/digits")
     # `built` builds it now.
     with assert_raises(contains="no connector here"):
-        _ = _Fs.built("lake", _config(), _mk_refused, _creds(), FixedClock(1790000000))
+        _ = _Fs.built("lake", _config(), _mk_refused, _http(), _creds(), FixedClock(1790000000))
 
 
 def test_accessors() raises:
@@ -748,6 +753,7 @@ def test_accessors() raises:
         "lake",
         _config(),
         _mk_tree_budget_0,
+        _http(),
         _creds(),
         FixedClock(1790000000),
         S3FsOptions(prefetch_max_inflight=4, prefetch_depth=32),
@@ -904,6 +910,7 @@ def test_a_prefetch_reads_one_version() raises:
         "lake",
         _config(),
         _mk_big,
+        _http(),
         _creds(),
         FixedClock(1790000000),
         S3FsOptions(prefetch_max_inflight=1),
@@ -1013,7 +1020,7 @@ def _small_parts() raises -> S3FsOptions:
 
 
 def _fs_parts(mk: def () raises thin -> FakeS3Connector) raises -> _Fs:
-    return _Fs.built("lake", _config(), mk, _creds(), FixedClock(1790000000), _small_parts())
+    return _Fs.built("lake", _config(), mk, _http(), _creds(), FixedClock(1790000000), _small_parts())
 
 
 def _writes(fs: _Fs) raises -> String:

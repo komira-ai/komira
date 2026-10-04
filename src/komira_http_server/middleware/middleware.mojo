@@ -169,7 +169,7 @@ struct AuthedUser(
 #   attaches post-verify. Defined HERE in `komira_http` (NOT imported from
 #   the token package) for the SAME layering reason `AuthedUser` is defined here:
 #   the token package transitively depends on `komira_http` (through the
-#   secret store, the database layer and `komira_pg`), so
+#   secret store, the database layer and `komira_db_postgres`), so
 #   importing its `GrantClaim` into `RequestContext` would form a dependency CYCLE.
 #   This is a plain POD MIRROR of the token package's `GrantClaim` fields over the
 #   `komira_uuid` `Uuid` (the SAME Uuid `AuthedUser` already uses — no new dep);

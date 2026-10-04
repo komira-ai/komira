@@ -1,6 +1,8 @@
-"""`komira_oci` — a native OCI distribution client for image copies.
+"""`komira_oci` — a native OCI distribution client: image copies and layout pushes.
 
-It performs a registry-to-registry, DIGEST-PRESERVING image copy over HTTPS.
+It performs a registry-to-registry, DIGEST-PRESERVING image copy over HTTPS
+(`OciCopier`), and it pushes a LOCAL OCI layout directory to a registry and tags
+it with a revision id (`read_oci_layout` + `LayoutPusher`).
 
 WHY THIS EXISTS. A release `stage` promotes a built image from the build
 project's registry into each target environment's registry. That promote is a
@@ -32,6 +34,31 @@ WHAT IS IN HERE:
   * `OciCopier[T]` (oci_copy.mojo) — the copy: discover the manifest tree
     (INDEXES INCLUDED — a multi-arch image is a tree, not a manifest), mount or
     upload every blob, then PUT manifests leaves-first.
+  * `read_oci_layout` / `OciLayout` (oci_layout_reader.mojo) — read and VERIFY an
+    OCI layout DIRECTORY (`oci-layout`, `index.json`, `blobs/sha256/*`; no Docker
+    `manifest.json` needed): exactly one image manifest, every blob's size and
+    sha256 checked by STREAMING, no blob above `MAX_MONOLITHIC_BLOB_BYTES`, the
+    platform from the config. The one implementation of layout verification.
+  * `LayoutPusher[T]` / `PushResult` (oci_push.mojo) — push a verified layout:
+    HEAD each blob and skip what is there, open a session and monolithic-PUT
+    what is not (the body MOVED into the request), PUT the manifest by digest
+    (leaves first), PUT the tag (a caller-supplied revision id, checked against
+    the OCI tag grammar), then read both back. A re-run of the same digest is a
+    NOOP; a present manifest with a missing tag gets the tag added; and a failed
+    tag PUT is classified by READING the tag and comparing digests (same ->
+    success, different -> REFUSED, unreadable -> INDETERMINATE), never by the
+    status code. Retries are bounded: 5xx and transport faults, and 403 only
+    when the caller says the repository was just created.
+  * `resolve_upload_location` (oci_location.mojo) — an upload session's
+    `Location` may be relative or absolute; a cross-host or plaintext one is
+    REFUSED, so the credential never leaves the host it was issued for. Used by
+    both the copier and the pusher.
+  * `OciAuth` (oci_auth.mojo) — none, bearer, or basic; the secret is never in
+    an error message or a result.
+  * `FakeOciRegistry`, `write_test_layout` — TEST SUPPORT: a stateful in-process
+    registry (per-repository blobs, upload sessions, immutable tags with a
+    configurable conflict status, fault injection) and a real layout-directory
+    writer. Nothing production calls them.
   * `layout_image_digest` (oci_layout.mojo) — read the expected digest from a
     LOCAL OCI layout's `index.json` rather than asking a registry. Borrowed from
     `rules_oci`'s pusher and strictly better provenance than `crane digest`,
@@ -43,14 +70,24 @@ OUT OF SCOPE (deliberately, and not accidentally omitted):
     that token through the credential chain it already uses for the registry —
     inventing a second credential path here would be the more dangerous kind of
     completeness.
-  * Chunked/resumable blob upload. A monolithic PUT closes the session; layers
-    that need chunking are a possible follow-on, not a silent gap.
-  * Tag pushes, deletes, and garbage collection. `stage` copies by digest.
+  * Chunked/resumable blob upload. A monolithic PUT closes the session, and a
+    layer above `MAX_MONOLITHIC_BLOB_BYTES` is REFUSED up front, naming the
+    limit and saying chunked upload is not implemented — never a silent gap.
+  * Cross-repository mounts on a LAYOUT push (there is no source repository).
+    The copier still mounts within one registry.
+  * Multi-arch images: a layout whose one entry is itself an image index is
+    refused, never half-pushed.
+  * Tag deletes and garbage collection. Tags are written only by the pusher
+    (`stage` copies by digest, and re-tagging a digest elsewhere is not here).
+  * Never run against a real registry in this package: the tests use a scripted
+    transport and an in-process fake only. Whether a given registry answers an
+    immutable-tag overwrite with 400, 403 or 409 is deliberately NOT relied on.
 
 A self-contained, flat package (import name `komira_oci`). Depends on
 komira_http (the transport, and the shared redirect policy), komira_crypto
-(sha256), komira_json (the JSON DOM, used only to DISCOVER descriptors, never
-to re-serialize a manifest) and komira_async (BlockingRuntime).
+(sha256, streaming and one-shot), komira_encoding (base64, for Basic auth),
+komira_json (the JSON DOM, used only to DISCOVER descriptors, never to
+re-serialize a manifest) and komira_async (BlockingRuntime).
 
 Encapsulation: the public API exposes only typed values, owned
 `String` / `List[UInt8]`, and the seam conformer structs. No UnsafePointer
@@ -74,6 +111,15 @@ from .oci_digest import (
     verify_digest,
 )
 
+from .oci_auth import (
+    OCI_AUTH_BASIC,
+    OCI_AUTH_BEARER,
+    OCI_AUTH_NONE,
+    OciAuth,
+)
+
+from .oci_location import append_query, resolve_upload_location
+
 from .oci_transport import (
     OCI_REGISTRY_PORT,
     HttpOciTransport,
@@ -83,6 +129,36 @@ from .oci_transport import (
     ScriptedOciTransport,
 )
 
-from .oci_copy import OciCopier
+from .oci_copy import OciCopier, image_blob_digests
+
+from .oci_layout_reader import (
+    MAX_LAYOUT_DOCUMENT_BYTES,
+    MAX_MONOLITHIC_BLOB_BYTES,
+    LayoutBlob,
+    OciLayout,
+    read_oci_layout,
+)
+
+from .oci_push import (
+    MAX_FORBIDDEN_RETRIES,
+    MAX_SEND_ATTEMPTS,
+    MAX_UPLOAD_SESSION_ATTEMPTS,
+    PUSH_FAILED,
+    PUSH_INDETERMINATE,
+    PUSH_NOOP,
+    PUSH_PARTIAL,
+    PUSH_REFUSED,
+    PUSH_TAG_ADDED,
+    PUSH_UPLOADED,
+    LayoutPusher,
+    PushResult,
+    push_outcome_name,
+    validate_oci_tag,
+)
+
+# Test support (a stateful in-process registry; a real layout directory writer).
+# Nothing production calls these.
+from .oci_fake_registry import FakeOciRegistry
+from .oci_layout_fixture import write_test_layout
 
 from .oci_layout import layout_image_digest

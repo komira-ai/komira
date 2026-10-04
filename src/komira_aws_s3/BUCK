@@ -52,7 +52,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # `<op>_with`), and test_s3_retry drives the same
 # send with a recording sleeper and a stepping clock (a 503 retried and
 # signed again at a later date, the attempt limit, a 200-with-<Error>
-# retried, and the POSTs not resent).
+# retried, and the POSTs resent as botocore resends them).
 
 _S3 = botocore_model("s3")
 
@@ -96,6 +96,7 @@ mojo_aws_client(
     visibility = ["PUBLIC"],
     deps = [
         "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         # The client's `send_with` and `<op>_with` take a komira_retry loop.
         "//src/komira_retry:komira_retry",
