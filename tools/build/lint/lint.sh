@@ -35,6 +35,12 @@
 #       group and cancels it for a newer one, so a group shared by pushes
 #       loses the middle push's run. Checks nothing, so fails, when no
 #       workflow is push-triggered.
+#   kind "retired_names", args <tree> <prefix of tree> <name>... -- <file>...
+#       No file under <tree> (the cell's doc_tree, findings named <prefix of
+#       tree><path>) and no <file> holds a <name> (a fixed string) on a line
+#       that carries no YYYY-MM-DD date: a retired name survives only in a
+#       dated history note. Checks nothing, so fails, when the tree holds no
+#       file.
 #   kind "doc_links", tools <inspect runnable dir>, args <tree> <unchecked> [<path> <tree>]...
 #       Every relative link and #anchor in every .md file under <tree> resolves
 #       to a file, directory or heading under <tree>, with each further tree
@@ -143,6 +149,25 @@ push_verdicts)
             sed 1d "$T/pv.txt" >> "$REPORT"
         fi
     done
+    ;;
+retired_names)
+    [ "$1" = -- ] && shift
+    tree=$1 tprefix=$2
+    shift 2
+    : > "$T/names"
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do
+        printf '%s\n' "$1" >> "$T/names"
+        shift
+    done
+    [ $# -gt 0 ] && shift
+    checked=$( (cd "$tree" && find . \( -type f -o -type l \) -print) | wc -l | tr -d ' ')
+    checked=$((checked + $#))
+    (cd "$tree" && grep -rnF -f "$T/names" . || true) | sed "s#^\./#$tprefix#" > "$T/rn.txt"
+    for f in "$@"; do
+        grep -nF -f "$T/names" "$f" | sed "s#^#$f:#" >> "$T/rn.txt" || true
+    done
+    grep -vE '[0-9]{4}-[0-9]{2}-[0-9]{2}' "$T/rn.txt" |
+        sed 's#$# -- a retired name; only a dated history note may keep it#' >> "$REPORT" || true
     ;;
 doc_links)
     INSPECT=$(abs "$1"); shift
