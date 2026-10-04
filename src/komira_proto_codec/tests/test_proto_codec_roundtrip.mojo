@@ -449,6 +449,17 @@ def test_string_i64_map_roundtrip() raises:
     assert_equal(pb.aliases[String("big")], Int64(9007199254740993), "pb: big")
     assert_equal(pb.aliases[String("neg")], Int64(-7), "pb: neg")
 
+    # The mapping writes an int64 map value as quoted decimal text. The
+    # decode above takes a bare number too, so the bytes are pinned here
+    # (one entry: no key order to depend on).
+    var one = Dict[String, Int64]()
+    one[String("big")] = Int64(9007199254740993)
+    assert_equal(
+        encode_json(Aliases(one^)),
+        '{"aliases":{"big":"9007199254740993"}}',
+        "json: an int64 map value is quoted",
+    )
+
     var quoted = decode_json[Aliases](String('{"aliases":{"a":"12","b":-4}}'))
     assert_equal(quoted.aliases[String("a")], Int64(12), "quoted int64 value")
     assert_equal(quoted.aliases[String("b")], Int64(-4), "bare int64 value")
