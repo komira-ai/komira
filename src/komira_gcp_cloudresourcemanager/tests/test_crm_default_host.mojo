@@ -31,7 +31,7 @@ def _bytes(s: String) -> List[UInt8]:
 
 
 def _ok() -> List[UInt8]:
-    var body = String('{"name":"projects/415104041262"}')
+    var body = String('{"name":"projects/123456789012"}')
     return _bytes(
         String("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
         + "Content-Length: "

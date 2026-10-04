@@ -44,16 +44,16 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # The library is gated by its layout probe and these tests, hand-written
 # against the Resource Manager v3 REST reference (no upstream test body is
 # copied), each sending through the generated client over komira_http_core's
-# ScriptedConnector (no socket, no DNS): test_default_host (a fresh client
-# starts at cloudresourcemanager.googleapis.com; `set_rest_host` replaces
-# it, and the replacement is what is dialled and named in the Host header),
-# test_projects (the request line, headers and body of each method and the
-# answer read back, a project id without `projects/` refused before the
-# dial, the read-modify-write sending the etag it read byte for byte),
-# test_errors (the google.rpc.Status envelope mapped to its code, a stale
-# etag's ABORTED among them, the body never quoted) and test_no_env_reads
-# (every generated module reads no environment and holds no method but
-# those listed).
+# ScriptedConnector (no socket, no DNS): test_crm_default_host (a fresh
+# client starts at cloudresourcemanager.googleapis.com; `set_rest_host`
+# replaces it, and the replacement is what is dialled and named in the Host
+# header), test_crm_projects (the request line, headers and body of each
+# method and the answer read back, a project id without `projects/` refused
+# before the dial, the read-modify-write sending the etag it read byte for
+# byte), test_crm_errors (the google.rpc.Status envelope mapped to its code,
+# a stale etag's ABORTED among them, the body never quoted) and
+# test_no_env_reads (every generated module reads no environment and holds
+# no method but those listed).
 #
 # No test here talks to the service.
 
@@ -68,10 +68,10 @@ mojo_gcp_client(
     ],
     bundle_proto_deps = True,
     methods = [
-        "google.cloud.resourcemanager.v3.Projects.GetProject",
-        "google.cloud.resourcemanager.v3.Projects.GetIamPolicy",
-        "google.cloud.resourcemanager.v3.Projects.SetIamPolicy",
-        "google.cloud.resourcemanager.v3.Projects.TestIamPermissions",
+        "Projects.GetProject",
+        "Projects.GetIamPolicy",
+        "Projects.SetIamPolicy",
+        "Projects.TestIamPermissions",
     ],
     proto_deps = ["//tools/vendor/googleapis:resourcemanager_v3"],
     protocol = "rest",
@@ -80,10 +80,10 @@ mojo_gcp_client(
         "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_cloudresourcemanager_gen"},
     },
     test_srcs = [
-        "tests/test_default_host.mojo",
-        "tests/test_errors.mojo",
+        "tests/test_crm_default_host.mojo",
+        "tests/test_crm_errors.mojo",
+        "tests/test_crm_projects.mojo",
         "tests/test_no_env_reads.mojo",
-        "tests/test_projects.mojo",
     ],
     visibility = ["PUBLIC"],
     deps = [

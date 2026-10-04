@@ -41,15 +41,16 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # The library is gated by its layout probe and these tests, hand-written
 # against the Service Usage v1 REST reference (no upstream test body is
 # copied), each sending through the generated client over komira_http_core's
-# ScriptedConnector (no socket, no DNS): test_default_host (a fresh client
-# starts at serviceusage.googleapis.com; `set_rest_host` replaces it, and
-# the replacement is what is dialled and named in the Host header),
-# test_service_usage (the request line, headers and body of each method; a
-# running, a finished and a failed enable operation read back; a service's
-# state read with its config skipped; a name with no parent refused before
-# the dial), test_errors (the google.rpc.Status envelope mapped to its code,
-# the body never quoted) and test_no_env_reads (every generated module
-# reads no environment and holds no method but those listed).
+# ScriptedConnector (no socket, no DNS): test_serviceusage_default_host (a
+# fresh client starts at serviceusage.googleapis.com; `set_rest_host`
+# replaces it, and the replacement is what is dialled and named in the Host
+# header), test_serviceusage_services (the request line, headers and body of
+# each method; a running, a finished and a failed enable operation read
+# back; a service's state read with its config skipped; a name with no
+# parent refused before the dial), test_serviceusage_errors (the
+# google.rpc.Status envelope mapped to its code, the body never quoted) and
+# test_no_env_reads (every generated module reads no environment and holds
+# no method but those listed).
 #
 # No test here talks to the service.
 
@@ -63,9 +64,9 @@ mojo_gcp_client(
     ],
     bundle_proto_deps = True,
     methods = [
-        "google.api.serviceusage.v1.ServiceUsage.EnableService",
-        "google.api.serviceusage.v1.ServiceUsage.GetService",
-        "google.api.serviceusage.v1.ServiceUsage.DisableService",
+        "ServiceUsage.EnableService",
+        "ServiceUsage.GetService",
+        "ServiceUsage.DisableService",
     ],
     omit_fields = ["google.api.serviceusage.v1.Service.config"],
     proto_deps = ["//tools/vendor/googleapis:serviceusage_v1"],
@@ -75,10 +76,10 @@ mojo_gcp_client(
         "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_serviceusage_gen"},
     },
     test_srcs = [
-        "tests/test_default_host.mojo",
-        "tests/test_errors.mojo",
         "tests/test_no_env_reads.mojo",
-        "tests/test_service_usage.mojo",
+        "tests/test_serviceusage_default_host.mojo",
+        "tests/test_serviceusage_errors.mojo",
+        "tests/test_serviceusage_services.mojo",
     ],
     visibility = ["PUBLIC"],
     deps = [

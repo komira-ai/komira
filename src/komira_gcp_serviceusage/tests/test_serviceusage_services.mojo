@@ -27,7 +27,7 @@
 #
 # Default-valued body keys are komira_proto_codec's JsonEncoder writing
 # defaults, not the API. Every client is pointed at `localhost`, so no test
-# needs DNS; the default host is test_default_host's.
+# needs DNS; the default host is test_serviceusage_default_host's.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -103,20 +103,20 @@ def _rt() raises -> _RT:
 
 
 comptime _RUNNING = (
-    '{"name":"operations/acat.p2-415104041262-6a1b4c2e",'
+    '{"name":"operations/op-1",'
     + '"metadata":{"@type":"type.googleapis.com/google.api.serviceusage.v1.OperationMetadata",'
-    + '"resourceNames":["services/run.googleapis.com/projectSettings/415104041262"]}}'
+    + '"resourceNames":["services/run.googleapis.com/projectSettings/123456789012"]}}'
 )
 
 comptime _DONE = (
     '{"name":"operations/noop.DONE_OPERATION","done":true,"response":'
     + '{"@type":"type.googleapis.com/google.api.serviceusage.v1.EnableServiceResponse",'
-    + '"service":{"name":"projects/415104041262/services/run.googleapis.com",'
-    + '"parent":"projects/415104041262","state":"ENABLED"}}}'
+    + '"service":{"name":"projects/123456789012/services/run.googleapis.com",'
+    + '"parent":"projects/123456789012","state":"ENABLED"}}}'
 )
 
 comptime _FAILED = (
-    '{"name":"operations/acf.p2-415104041262-77","done":true,"error":'
+    '{"name":"operations/op-2","done":true,"error":'
     + '{"code":9,"message":"Billing must be enabled for activation of service",'
     + '"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",'
     + '"reason":"UREQ_PROJECT_BILLING_NOT_FOUND","domain":"serviceusage.googleapis.com"}]}}'
@@ -137,7 +137,7 @@ def test_enable_sends_the_name_and_reads_a_running_operation() raises:
     assert_true(_has_header(wire, "content-type"))
     assert_equal(_body(wire), String('{"name":"') + _SVC + '"}')
 
-    assert_equal(op.name, "operations/acat.p2-415104041262-6a1b4c2e")
+    assert_equal(op.name, "operations/op-1")
     assert_false(op.done)
     assert_false(Bool(op.error))
     assert_false(Bool(op.response))
@@ -214,12 +214,12 @@ def test_get_reads_the_state_and_skips_the_config() raises:
     # The answer as the API gives it, `config` included; only the name,
     # parent and state are read.
     var answer = String(
-        '{"name":"projects/415104041262/services/run.googleapis.com",'
+        '{"name":"projects/123456789012/services/run.googleapis.com",'
         + '"config":{"name":"run.googleapis.com","title":"Cloud Run Admin API",'
         + '"apis":[{"name":"google.cloud.run.v2.Services","methods":[{"name":"GetService"}]}],'
         + '"quota":{"limits":[{"name":"x","values":{"STANDARD":"600"}}]},'
         + '"usage":{"requirements":["serviceusage.googleapis.com/tos/cloud"]}},'
-        + '"state":"ENABLED","parent":"projects/415104041262"}'
+        + '"state":"ENABLED","parent":"projects/123456789012"}'
     )
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
     var c = _client(capture, answer)
@@ -233,8 +233,8 @@ def test_get_reads_the_state_and_skips_the_config() raises:
     )
     assert_equal(_body(wire), "")
     assert_false(_has_header(wire, "content-type"))
-    assert_equal(s.name, "projects/415104041262/services/run.googleapis.com")
-    assert_equal(s.parent, "projects/415104041262")
+    assert_equal(s.name, "projects/123456789012/services/run.googleapis.com")
+    assert_equal(s.parent, "projects/123456789012")
     assert_true(s.state == State(State.ENABLED))
 
 
@@ -243,8 +243,8 @@ def test_get_of_a_service_never_enabled_reads_disabled() raises:
     var c = _client(
         capture,
         String(
-            '{"name":"projects/415104041262/services/apigateway.googleapis.com",'
-            + '"state":"DISABLED","parent":"projects/415104041262"}'
+            '{"name":"projects/123456789012/services/apigateway.googleapis.com",'
+            + '"state":"DISABLED","parent":"projects/123456789012"}'
         ),
     )
     var rt = _rt()

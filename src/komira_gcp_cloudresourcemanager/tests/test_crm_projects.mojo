@@ -14,12 +14,12 @@
 #
 # A policy change is a read-modify-write: the etag the read answers with is
 # sent back with the write, unchanged, which makes the write conditional
-# (a policy changed since the read is refused, 409 ABORTED: test_errors).
+# (a policy changed since the read is refused, 409 ABORTED: test_crm_errors).
 #
 # Default-valued body keys are komira_proto_codec's JsonEncoder writing
 # defaults, not the API (the server reads each as unset). Every client is
 # pointed at `localhost`, so no test needs DNS; the default host is
-# test_default_host's.
+# test_crm_default_host's.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -45,7 +45,7 @@ from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStrea
 comptime _RT = BlockingRuntime[NoopSink]
 
 comptime _PROJECT = (
-    '{"name":"projects/415104041262","parent":"organizations/123456",'
+    '{"name":"projects/123456789012","parent":"organizations/123456",'
     + '"projectId":"demo-project","state":"ACTIVE","displayName":"Demo",'
     + '"createTime":"2026-09-12T10:00:00.000Z","updateTime":"2026-09-12T10:00:01Z",'
     + '"etag":"W/\\"5cbc0bfe\\"","labels":{"env":"test","team":"data"}}'
@@ -124,7 +124,7 @@ def test_get_project_reads_its_number() raises:
     assert_false(_has_header(wire, "content-type"))
     assert_true("\r\nauthorization: Bearer test-access-token\r\n" in wire, wire)
 
-    assert_equal(p.name, "projects/415104041262")
+    assert_equal(p.name, "projects/123456789012")
     assert_equal(p.project_id, "demo-project")
     assert_equal(p.parent, "organizations/123456")
     assert_true(p.state == Project_State(Project_State.ACTIVE))
@@ -142,8 +142,8 @@ def test_get_project_by_number() raises:
     var c = _client(capture, String(_PROJECT))
     var rt = _rt()
     ref reactor = rt.reactor()
-    _ = c.get_project[_RT](GetProjectRequest(String("projects/415104041262")), reactor)
-    assert_equal(_request_line(_wire(capture)), "GET /v3/projects/415104041262 HTTP/1.1")
+    _ = c.get_project[_RT](GetProjectRequest(String("projects/123456789012")), reactor)
+    assert_equal(_request_line(_wire(capture)), "GET /v3/projects/123456789012 HTTP/1.1")
 
 
 def test_a_bare_project_id_is_refused_before_the_dial() raises:

@@ -2,10 +2,11 @@
 # UpdateRole and DeleteRole, each sent through komira_http_core's
 # ScriptedConnector with a shared write capture (no socket).
 #
-# Each of these methods has more than one HTTP binding in iam.proto: a
-# predefined role is `roles/<id>`, a custom role
-# `projects/<project>/roles/<id>` or `organizations/<org>/roles/<id>`, and
-# each form has its own path. The generated method sends to the first
+# Each of these methods has more than one HTTP binding in iam.proto, one per
+# form of role name. GetRole has three: a predefined role `roles/<id>`, then
+# `organizations/<org>/roles/<id>` and `projects/<project>/roles/<id>`.
+# CreateRole, UpdateRole and DeleteRole have two, organization then project,
+# and none for a predefined role. The generated method sends to the first
 # binding whose path variables the request's values match, in the order
 # iam.proto declares them, and refuses a name matching none before the
 # token source or the connector is used. The forms are written here from
@@ -255,6 +256,64 @@ def test_update_sends_the_role_as_the_body_with_no_mask() raises:
     )
 
 
+def test_update_and_delete_take_each_of_their_two_bindings() raises:
+    # The organization binding is the first of UpdateRole's and DeleteRole's,
+    # the project one (the tests above) the second.
+    var org_role = String("organizations/123456/roles/auditor")
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var c = _client(capture, _role_json(False))
+    var rt = _rt()
+    ref reactor = rt.reactor()
+    _ = c.update_role[_RT](UpdateRoleRequest(org_role.copy(), _deployer(), None), reactor)
+    assert_equal(
+        _request_line(_wire(capture)),
+        "PATCH /v1/organizations/123456/roles/auditor HTTP/1.1",
+    )
+
+    var del_capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var d = _client(del_capture, _role_json(True))
+    _ = d.delete_role[_RT](DeleteRoleRequest(org_role.copy(), List[UInt8]()), reactor)
+    assert_equal(
+        _request_line(_wire(del_capture)),
+        "DELETE /v1/organizations/123456/roles/auditor HTTP/1.1",
+    )
+
+
+def test_a_predefined_role_cannot_be_updated_or_deleted() raises:
+    # UpdateRole and DeleteRole have no `roles/<id>` binding, so a predefined
+    # role's name matches neither of their two paths and is refused before
+    # the dial.
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var c = _client(capture, _role_json(False))
+    var rt = _rt()
+    ref reactor = rt.reactor()
+    var update_raised = String("")
+    try:
+        _ = c.update_role[_RT](
+            UpdateRoleRequest(String("roles/run.invoker"), _deployer(), None), reactor
+        )
+    except e:
+        update_raised = String(e)
+    assert_equal(
+        update_raised,
+        "REST method UpdateRole: the request matches none of its paths:"
+        " /v1/{name=organizations/*/roles/*}, /v1/{name=projects/*/roles/*}",
+    )
+    var delete_raised = String("")
+    try:
+        _ = c.delete_role[_RT](
+            DeleteRoleRequest(String("roles/run.invoker"), List[UInt8]()), reactor
+        )
+    except e:
+        delete_raised = String(e)
+    assert_equal(
+        delete_raised,
+        "REST method DeleteRole: the request matches none of its paths:"
+        " /v1/{name=organizations/*/roles/*}, /v1/{name=projects/*/roles/*}",
+    )
+    assert_equal(c._client._connector.connect_call_count(), 0)
+
+
 def test_update_with_a_mask_sends_it_in_the_query() raises:
     # The mask's JSON form: camelCase paths joined by `,` (sent as %2C).
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
@@ -316,6 +375,8 @@ def main() raises:
     test_create_sends_the_role_id_and_the_role()
     test_create_in_an_organization_takes_the_organization_path()
     test_update_sends_the_role_as_the_body_with_no_mask()
+    test_update_and_delete_take_each_of_their_two_bindings()
+    test_a_predefined_role_cannot_be_updated_or_deleted()
     test_update_with_a_mask_sends_it_in_the_query()
     test_delete_without_an_etag_sends_no_query()
     test_delete_with_an_etag_sends_it_base64_in_the_query()

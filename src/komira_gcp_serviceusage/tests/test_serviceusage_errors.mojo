@@ -6,8 +6,8 @@
 #
 # The envelopes are hand-written in the form the Cloud APIs error model
 # documents. (A failure that arrives inside a 200, as a finished operation's
-# `error`, is read as data: test_service_usage.) Through komira_http_core's
-# ScriptedConnector; no socket.
+# `error`, is read as data: test_serviceusage_services.) Through
+# komira_http_core's ScriptedConnector; no socket.
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink

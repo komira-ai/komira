@@ -267,6 +267,25 @@ def test_delete() raises:
     assert_equal(_body(wire), "")
 
 
+def test_delete_by_email_under_any_project() raises:
+    # `projects/-` with the account's email: the form a deploy uses, knowing
+    # the email and not the project. The `@` is percent-encoded like any
+    # byte outside the unreserved set; the `-` is unreserved and stays.
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var c = _client(capture, String("{}"))
+    var rt = _rt()
+    ref reactor = rt.reactor()
+    _ = c.delete_service_account[_RT](
+        DeleteServiceAccountRequest(String("projects/-/serviceAccounts/") + _EMAIL),
+        reactor,
+    )
+    assert_equal(
+        _request_line(_wire(capture)),
+        "DELETE /v1/projects/-/serviceAccounts/"
+        "runner%40demo-project.iam.gserviceaccount.com HTTP/1.1",
+    )
+
+
 def test_a_name_outside_the_pattern_is_refused_before_the_dial() raises:
     # `projects/*/serviceAccounts/*`: a bare email is not an account name.
     # Refused naming the field and the pattern, never the value, and before
@@ -297,5 +316,6 @@ def main() raises:
     test_get_by_unique_id_under_any_project()
     test_create()
     test_delete()
+    test_delete_by_email_under_any_project()
     test_a_name_outside_the_pattern_is_refused_before_the_dial()
     print("OK")

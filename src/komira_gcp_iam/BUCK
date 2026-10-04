@@ -44,13 +44,16 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # (generateIdToken) belongs with them in komira_gcp_core. No other caller
 # uses IAM Credentials.
 #
-# Each role method has three bindings in iam.proto (a predefined role
-# `roles/<id>`, `organizations/<org>/roles/<id>`,
-# `projects/<project>/roles/<id>`); the client sends to the first whose path
-# variables the request's values match and refuses a name matching none
-# before anything is sent. GetIamPolicy's binding has no body, so its
-# `GetPolicyOptions` (the policy version asked for) rides the query as
-# `options.requestedPolicyVersion`.
+# The role methods have more than one binding in iam.proto. GetRole has
+# three: a predefined role `roles/<id>`, `organizations/<org>/roles/<id>` and
+# `projects/<project>/roles/<id>`. CreateRole, UpdateRole and DeleteRole have
+# two, the organization one first and the project one second, and none for a
+# predefined role, which cannot be created, changed or deleted. The client
+# sends to the first binding whose path variables the request's values match
+# and refuses a name matching none before anything is sent.
+#
+# GetIamPolicy's binding has no body, so its `GetPolicyOptions` (the policy
+# version asked for) rides the query as `options.requestedPolicyVersion`.
 #
 # A policy change is a read-modify-write: the caller reads the policy with
 # GetIamPolicy, changes the bindings and sends it back with SetIamPolicy
@@ -96,16 +99,16 @@ mojo_gcp_client(
     ],
     bundle_proto_deps = True,
     methods = [
-        "google.iam.admin.v1.IAM.ListServiceAccounts",
-        "google.iam.admin.v1.IAM.GetServiceAccount",
-        "google.iam.admin.v1.IAM.CreateServiceAccount",
-        "google.iam.admin.v1.IAM.DeleteServiceAccount",
-        "google.iam.admin.v1.IAM.GetIamPolicy",
-        "google.iam.admin.v1.IAM.SetIamPolicy",
-        "google.iam.admin.v1.IAM.GetRole",
-        "google.iam.admin.v1.IAM.CreateRole",
-        "google.iam.admin.v1.IAM.UpdateRole",
-        "google.iam.admin.v1.IAM.DeleteRole",
+        "IAM.ListServiceAccounts",
+        "IAM.GetServiceAccount",
+        "IAM.CreateServiceAccount",
+        "IAM.DeleteServiceAccount",
+        "IAM.GetIamPolicy",
+        "IAM.SetIamPolicy",
+        "IAM.GetRole",
+        "IAM.CreateRole",
+        "IAM.UpdateRole",
+        "IAM.DeleteRole",
     ],
     proto_deps = ["//tools/vendor/googleapis:iam_admin_v1"],
     protocol = "rest",
