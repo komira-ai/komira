@@ -33,7 +33,7 @@
 #                    names. The same artifact text serves every platform
 #   {platform}       the platform the release is built for, a name from
 #                    kci_api's platform table (`linux-x86_64`)
-#   {revision_id}    the release commit (`kci build --revision-id`): the full
+#   {revision_id}    the release commit (`kci run --revision-id`): the full
 #                    40-hex id of the commit checked out in the work dir
 #   {source_commit}  the stamp's commit: the newest first-parent commit at
 #                    or below the release commit that touches anything but
@@ -63,7 +63,7 @@
 #
 # ONE METAPACKAGE (a recommendation; the CEO has not answered it): a set holds
 # exactly one metapackage per subdir, declared LAST, whose members are every
-# library of the set. kci build places it last by file order; kci publish
+# library of the set. The BUILD step places it last by file order; the PUBLISH step
 # refuses a set with zero or two metapackages, or one whose members are not
 # every library.
 #
@@ -83,7 +83,7 @@ comptime PLATFORM_PLACEHOLDER: String = "{platform}"
 """The release's platform (kci_api's platform table)."""
 
 comptime REVISION_ID_PLACEHOLDER: String = "{revision_id}"
-"""The release commit, full 40 hex (`kci build --revision-id`)."""
+"""The release commit, full 40 hex (`kci run --revision-id`)."""
 
 comptime SOURCE_COMMIT_PLACEHOLDER: String = "{source_commit}"
 """The stamp's commit, full 40 hex (the newest non-documentation commit)."""

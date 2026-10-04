@@ -20,7 +20,7 @@
 //                    <--release-dir>/<platform>: the output directory of
 //                    every artifact declared ABOVE, each built and verified
 //   {platform}       the platform the release is built for (`linux-x86_64`)
-//   {revision_id}    the release commit (`kci build --revision-id`, the full
+//   {revision_id}    the release commit (`kci run --revision-id`, the full
 //                    40-hex id of the commit checked out)
 //   {source_commit}  the newest first-parent commit at or below it that
 //                    touches anything but documentation
@@ -32,7 +32,7 @@
 // brace not around an identifier is passed through as written). A
 // metapackage is an ordinary artifact placed LAST, reading its members'
 // manifests under {release_dir}. One metapackage per subdir whose members
-// are every library of the file is the rule kci publish enforces (a
+// are every library of the file is the rule the PUBLISH step enforces (a
 // recommendation; the CEO has not answered it).
 //
 // ONE ARTIFACT PER ENTRY. The build must leave, at the top of that
@@ -74,7 +74,7 @@
 //
 // Deliberately absent: a version, a sha256, a file name, a platform and an
 // artifact type (the built manifest carries them), and where an artifact is
-// published to (kci publish's).
+// published to (the PUBLISH step's).
 //
 // Other `.proto` files import it as `kci/release/v1/artifact.proto`.
 syntax = "proto3";

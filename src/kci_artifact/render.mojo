@@ -12,7 +12,7 @@
 # kci_api's `release_platform_dir`), `{platform}` the platform, and the
 # four stamp placeholders the `ReleaseStamp`'s values
 # (placeholders.mojo). A PURE function: it creates no directory and runs
-# nothing; `kci build` owns both. It expects a validated value
+# nothing; the BUILD step owns both. It expects a validated value
 # (`parse_artifacts` returns only those) and refuses an unknown
 # artifact, an undeclared build system, a platform kci does not release
 # (kci_api's `require_release_platform`), and a release_dir that is not
