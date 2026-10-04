@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 # The job supervisor agent: the process a job manager places next to a job.
 # It downloads the job binary from S3 (SHA-256 verified, chmod 0o755), spawns
@@ -55,3 +55,56 @@ mojo_library(
     ],
     visibility = ["PUBLIC"],
 )
+
+# The MinIO end-to-end tests: the agent against a real S3-compatible server,
+# an embedded MinIO the test starts on 127.0.0.1 from a pinned binary
+# (komira_test_bucket / komira_test_minio). test_agent_s3_e2e downloads,
+# verifies, runs a job binary and uploads logs.txt and crash_report.json;
+# test_agent_stream_logs_e2e streams a running job's stdout in chunks.
+#
+# OPT-IN, so they are binaries and not welded tests or mojo_test targets: a
+# test is given its store by flags, and the build gives a test no flags and
+# no MinIO binary, so under `./buck2 build` or `./buck2 test` each would end
+# with SKIP (exit 77), which both read as a failure. `./buck2 build //...`
+# compiles them; a run is
+#
+#     ./buck2 run //src/komira_agent:test_agent_s3_e2e -- \
+#         --test-minio-binary=<path to the pinned MinIO server>
+#
+# With no flag a run SKIPS (exit 77, with the reason), never passes; with a
+# --test-s3-* flag it is CANNOT_TELL (exit 3). A run's objects live under its
+# own prefix and `close()` deletes them, lists again to prove the prefix
+# empty and stops the server; a verdict that is not CLEAN fails the run. The
+# server is started through setpriv (PR_SET_PDEATHSIG), so it dies with the
+# test: Linux only (tests/e2e/agent_minio_e2e.mojo).
+_E2E_DEPS = [
+    ":komira_agent",
+    "//src/komira_aws_core:komira_aws_core",
+    "//src/komira_core_ffi:komira_core_ffi",
+    "//src/komira_crypto:komira_crypto",
+    "//src/komira_http_client:komira_http_client",
+    "//src/komira_http_core:komira_http_core",
+    "//src/komira_objectstore:komira_objectstore",
+    "//src/komira_objectstore_s3:komira_objectstore_s3",
+    "//src/komira_supervisor:komira_supervisor",
+    "//src/komira_test_bucket:komira_test_bucket",
+    "//src/komira_test_minio:komira_test_minio",
+    "//src/komira_test_run_id:komira_test_run_id",
+    "//src/komira_test_verdict:komira_test_verdict",
+]
+
+[
+    mojo_binary(
+        name = name,
+        srcs = [
+            "tests/e2e/agent_minio_e2e.mojo",
+            "tests/e2e/{}.mojo".format(name),
+        ],
+        main = "tests/e2e/{}.mojo".format(name),
+        deps = _E2E_DEPS,
+    )
+    for name in [
+        "test_agent_s3_e2e",
+        "test_agent_stream_logs_e2e",
+    ]
+]

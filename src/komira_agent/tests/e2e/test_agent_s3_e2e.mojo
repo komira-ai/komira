@@ -1,0 +1,187 @@
+# =============================================================================
+# komira_agent/tests/e2e/test_agent_s3_e2e.mojo -- the agent's S3 path against
+# a real MinIO.
+# =============================================================================
+#
+# The agent downloads a job binary from an embedded MinIO (SHA-256 verified
+# against the digest in its key, chmod 0o755), spawns it, captures its
+# output, and uploads `logs.txt`, or `crash_report.json` when the job fails;
+# the test reads each object back from the server.
+#
+#   (1) a script that prints a marker and exits 0: COMPLETED, and the
+#       uploaded logs.txt holds the marker;
+#   (2) a script that prints to stderr and exits 7: FAILED with exit code 7,
+#       and the uploaded crash_report.json holds `"exit_code":7` and the
+#       stderr line.
+#
+# The test drives the agent's S3 and supervisor steps directly
+# (download_binary, spawn_child, poll_and_drain, analyze_exit, upload_logs,
+# upload_crash_report), not run_agent, so no job manager is needed.
+#
+# Flags (komira_test_bucket): `--test-minio-binary=<path>` names the pinned
+# MinIO server binary, which the test starts on 127.0.0.1 and stops. With no
+# flag the test SKIPS (exit 77); with `--test-s3-*` it is CANNOT_TELL (exit 3).
+# Everything the run writes lives under its own prefix, and `close()` proves
+# the prefix empty before the server stops; a verdict that is not CLEAN fails
+# the test.
+# =============================================================================
+
+from std.testing import assert_equal, assert_true
+
+from komira_crypto.hex import hex_lower_array_32
+from komira_crypto.sha256 import sha256
+
+from komira_agent.agent import PlainAgent
+from komira_agent.agent_config import AgentConfig
+from komira_agent.agent_state import AgentPhase
+from komira_agent.boot import (
+    download_binary,
+    make_s3_client_over,
+    mk_agent_s3_plain_connector,
+    parse_s3_uri,
+)
+from komira_agent.s3_client import AgentS3Client
+from komira_http_core.transport.kernel_tcp import KernelTcpConnector
+from komira_agent.upload import upload_crash_report, upload_logs
+
+from agent_minio_e2e import (
+    AgentTestBucket,
+    bytes_of,
+    open_agent_test_bucket,
+    point_agent_at,
+    remove_if_present,
+    scratch_root,
+    sleep_ms,
+    text_of,
+)
+
+
+def _agent_s3(bucket: AgentTestBucket) raises -> AgentS3Client[KernelTcpConnector]:
+    """The agent's own client, as boot.mojo builds it."""
+    return make_s3_client_over[KernelTcpConnector](
+        mk_agent_s3_plain_connector, bucket.region(), Optional[String](bucket.endpoint())
+    )
+
+
+def _config(
+    bucket: AgentTestBucket, job_id: String, s3_uri: String, download_path: String
+) -> AgentConfig:
+    """The S3 path's config: a binary URI, a download path and a log bucket.
+    The job manager fields point nowhere; no heartbeat is sent."""
+    return AgentConfig(
+        String(job_id),
+        String("test-pod"),
+        String(""),
+        List[String](),
+        String("127.0.0.1"),
+        UInt16(1),
+        5,
+        100,
+        binary_s3_uri=Optional[String](String(s3_uri)),
+        binary_sha256=Optional[String](),
+        binary_download_path=String(download_path),
+        log_bucket=Optional[String](bucket.bucket()),
+        s3_endpoint=Optional[String](bucket.endpoint()),
+        s3_region=bucket.region(),
+    )
+
+
+def _put_job(mut bucket: AgentTestBucket, script: String) raises -> String:
+    """Store `script` at `<prefix><sha256>/binary`; return its s3:// URI."""
+    var body = bytes_of(script)
+    var key = bucket.key(hex_lower_array_32(sha256(body)) + "/binary")
+    bucket.client().put(key, Span(body))
+    return String("s3://") + bucket.bucket() + "/" + key
+
+
+def _run_to_exit(mut agent: PlainAgent) raises:
+    agent.spawn_child()
+    var spins = 0
+    while not agent.child_exited and spins < 500:
+        agent.poll_and_drain()
+        if agent.child_exited:
+            break
+        sleep_ms(10)
+        spins += 1
+    assert_true(agent.child_exited, "the job did not exit")
+    agent.analyze_exit()
+
+
+def test_happy_download_run_upload(mut bucket: AgentTestBucket) raises:
+    print("[s3-e2e] scenario 1: download -> run -> upload logs.txt")
+    var marker = String("HELLO_FROM_AGENT_JOB_42")
+    var s3_uri = _put_job(bucket, String("#!/bin/sh\necho ") + marker + "\nexit 0\n")
+    var job_id = bucket.key("job-happy-0001")
+    var download_path = scratch_root() + "/agent-e2e-" + String(bucket.run_id().value) + "-happy.sh"
+    var config = _config(bucket, job_id, s3_uri, download_path)
+
+    var dl = _agent_s3(bucket)
+    var local = download_binary(config, dl)
+    assert_equal(local, download_path, "download path")
+
+    var agent = PlainAgent(config^)
+    _run_to_exit(agent)
+    remove_if_present(download_path)
+    assert_true(agent.terminal_phase() == AgentPhase.completed(), "exit 0 must be COMPLETED")
+
+    var joined = String("")
+    var captured = agent.log_lines()
+    for i in range(len(captured)):
+        joined += captured[i] + "\n"
+    assert_true(joined.find(marker) >= 0, "the captured stdout lacks the marker")
+
+    var up = _agent_s3(bucket)
+    assert_true(upload_logs(agent.config, up, agent.log_lines()), "upload_logs returned False")
+
+    var log_text = text_of(bucket.client().get(job_id + "/logs.txt"))
+    assert_true(log_text.find(marker) >= 0, "logs.txt lacks the marker: '" + log_text + "'")
+    print("[s3-e2e] scenario 1 PASS")
+
+
+def test_failure_crash_report(mut bucket: AgentTestBucket) raises:
+    print("[s3-e2e] scenario 2: exit 7 -> crash_report.json")
+    var err_line = String("FATAL_JOB_ERROR_99")
+    var s3_uri = _put_job(bucket, String("#!/bin/sh\necho ") + err_line + " 1>&2\nexit 7\n")
+    var job_id = bucket.key("job-fail-0002")
+    var download_path = scratch_root() + "/agent-e2e-" + String(bucket.run_id().value) + "-fail.sh"
+    var config = _config(bucket, job_id, s3_uri, download_path)
+
+    var dl = _agent_s3(bucket)
+    _ = download_binary(config, dl)
+
+    var agent = PlainAgent(config^)
+    _run_to_exit(agent)
+    remove_if_present(download_path)
+    assert_true(agent.terminal_phase() == AgentPhase.failed(), "exit 7 must be FAILED")
+    assert_true(Bool(agent.state.failure), "no failure report was built")
+    assert_equal(Int(agent.state.failure.value().exit_code.value()), 7, "exit code")
+
+    var up = _agent_s3(bucket)
+    assert_true(
+        upload_crash_report(agent.config, up, agent.state.failure.value().copy()),
+        "upload_crash_report returned False",
+    )
+
+    var cr_text = text_of(bucket.client().get(job_id + "/crash_report.json"))
+    assert_true(cr_text.find('"exit_code":7') >= 0, "crash_report.json lacks exit_code 7: '" + cr_text + "'")
+    assert_true(cr_text.find(err_line) >= 0, "crash_report.json lacks the stderr line: '" + cr_text + "'")
+    print("[s3-e2e] scenario 2 PASS")
+
+
+def main() raises:
+    var parsed = parse_s3_uri(String("s3://b/k1/k2"))
+    assert_equal(parsed.bucket, String("b"), "uri bucket")
+    assert_equal(parsed.key, String("k1/k2"), "uri key")
+
+    var bucket = open_agent_test_bucket(String("komira_agent:test_agent_s3_e2e"))
+    point_agent_at(bucket)
+    try:
+        test_happy_download_run_upload(bucket)
+        test_failure_crash_report(bucket)
+    except e:
+        var v = bucket.close()
+        raise Error(String(e) + " (teardown: " + v.kind_name() + ")")
+    var v = bucket.close()
+    print("[s3-e2e] teardown verdict: " + v.kind_name())
+    v.require_clean()
+    print("[s3-e2e] ALL SCENARIOS PASS")
