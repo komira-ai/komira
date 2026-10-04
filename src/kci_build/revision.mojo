@@ -9,7 +9,7 @@
 # prefix). Here, in
 # `--work-dir`, through the same `ProcessRunner` as the builds (argv, never a
 # shell; stdout to `<log>/_git_<k>.stdout`, a name no artifact can take:
-# declaration names start with a letter), kci runs, in order:
+# artifact names start with a letter), kci runs, in order:
 #
 #   1. git rev-parse --is-shallow-repository      must print `false`
 #   2. git rev-parse --verify HEAD                must print C exactly
@@ -51,9 +51,9 @@
 
 from std.pathlib import Path
 
-from kci_artifact_declaration import ReleaseStamp
+from kci_artifact import ReleaseStamp
 
-from kci_contract import (
+from kci_api import (
     ERROR_CANNOT_TELL,
     ERROR_REVISION,
     OUTCOME_INDETERMINATE,

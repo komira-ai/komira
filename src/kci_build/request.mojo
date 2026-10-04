@@ -7,17 +7,17 @@
 # environment or parses a command line (the kci binary's one parser builds
 # the request from its flags and the machine file's BUILD step).
 #
-# How a build ends is an OUTCOME word and an error id from kci_contract;
-# the exit number follows from those two (kci_contract's exit table), so
+# How a build ends is an OUTCOME word and an error id from kci_api;
+# the exit number follows from those two (kci_api's exit table), so
 # this package spells no exit number:
 #
 #   SUCCEEDED      every declared artifact was built and verified, and
 #                  `release.json` was written; under `plan`, every
-#                  declaration rendered for the resolved revision and
+#                  artifact rendered for the resolved revision and
 #                  nothing was built
 #   REFUSED        an input, the checkout, or a build's output breaks the
 #                  contract; later artifacts not built. Error ids:
-#                  KCI-E-DECLARATION, KCI-E-PLATFORM, KCI-E-REVISION,
+#                  KCI-E-ARTIFACT, KCI-E-PLATFORM, KCI-E-REVISION,
 #                  KCI-E-MEMBER, KCI-E-PLATFORM-MISMATCH; and KCI-E-USAGE
 #                  for a path flag that names a wrong place (a work dir
 #                  that is not one, a used release directory, a log dir
@@ -37,7 +37,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_contract import (
+from kci_api import (
     OUTCOME_SUCCEEDED,
     RunIdentity,
     exit_code_of,
@@ -54,13 +54,13 @@ struct BuildRequest(Copyable, Movable):
     """The inputs of one BUILD step. `step_name` is the step's name in the
     machine file (the result's `steps[].name`). `release_dir` is the top
     release directory (`--release-dir`); this step writes only under
-    `<release_dir>/<platform>` (kci_contract's layout). `plan` is `kci run
+    `<release_dir>/<platform>` (kci_api's layout). `plan` is `kci run
     --plan`: resolve and render, build nothing (build.mojo).
 
     Layout: owned values only. No pointer field."""
 
     var step_name: String
-    var declarations_file: String
+    var artifacts_file: String
     var work_dir: String
     var release_dir: String
     var log_dir: String
@@ -72,7 +72,7 @@ struct BuildRequest(Copyable, Movable):
 
     def __init__(out self, var run: RunIdentity):
         self.step_name = String("")
-        self.declarations_file = String("")
+        self.artifacts_file = String("")
         self.work_dir = String("")
         self.release_dir = String("")
         self.log_dir = String("")
@@ -84,7 +84,7 @@ struct BuildRequest(Copyable, Movable):
 
     def platform_dir(self) raises -> String:
         """`<release_dir>/<platform>`: the directory this step builds into,
-        and what `{release_dir}` stands for in the declarations."""
+        and what `{release_dir}` stands for in the artifacts."""
         return release_platform_dir(self.release_dir, self.platform)
 
 
@@ -116,7 +116,7 @@ struct BuildOutcome(Copyable, Movable):
         return self.outcome == OUTCOME_SUCCEEDED
 
     def exit_code(self) raises -> Int:
-        """The exit number of this outcome (kci_contract's exit table)."""
+        """The exit number of this outcome (kci_api's exit table)."""
         require_outcome(self.outcome)
         if self.error_id.byte_length() > 0:
             require_error_id(self.error_id)
