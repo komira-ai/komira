@@ -1,4 +1,4 @@
-# The two S3 header values no model states.
+# The S3 header values no model states.
 #
 # x-amz-copy-source (s3_copy_source): `<bucket>/<key>` percent-encoded as
 # UTF-8, every byte but the RFC 3986 section 2.3 unreserved set and '/'
@@ -12,10 +12,24 @@
 # Content-Range (s3_content_range_total): RFC 9110 section 14.4,
 # `bytes first-last/complete-length`, `bytes first-last/*` and the
 # unsatisfied form `bytes */complete-length`.
+#
+# The request checksum (s3_apply_request_checksum): CRC-32/ISO-HDLC, whose
+# published check value is CRC("123456789") = 0xCBF43926; the other vectors
+# were computed with zlib's crc32, an independent implementation, and
+# base64-encoded big-endian as the S3 API reference's `x-amz-checksum-crc32`
+# is. The header rules are botocore's `resolve_request_checksum_algorithm`
+# (botocore/httpchecksum.py) under `when_supported`.
 
-from std.testing import assert_equal, assert_false, assert_true
+from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
-from komira_aws_core import s3_content_range_total, s3_copy_source
+from komira_aws_core import (
+    AwsRequest,
+    s3_apply_request_checksum,
+    s3_checksum_crc32,
+    s3_content_range_total,
+    s3_copy_source,
+    s3_crc32,
+)
 
 
 def test_copy_source_plain() raises:
@@ -122,6 +136,89 @@ def test_content_range_refusals() raises:
     _refused("", "not a bytes range")
 
 
+def _bytes(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    out.extend(Span(s.as_bytes()))
+    return out^
+
+
+comptime _ALG = "x-amz-sdk-checksum-algorithm"
+
+
+def test_crc32_vectors() raises:
+    assert_equal(s3_crc32(Span(_bytes(String("123456789")))), UInt32(0xCBF43926))
+    assert_equal(s3_crc32(Span(_bytes(String("")))), UInt32(0))
+    var rows: List[List[String]] = [
+        ["", "AAAAAA=="],
+        ["123456789", "y/Q5Jg=="],
+        ["part three", "L8IwAg=="],
+        ['{"v":1}', "hNvnPQ=="],
+        ["Welcome to Amazon S3.", "Ox7nCg=="],
+    ]
+    for i in range(len(rows)):
+        assert_equal(
+            s3_checksum_crc32(Span(_bytes(rows[i][0]))), rows[i][1], rows[i][0]
+        )
+
+
+def test_checksum_default_is_crc32() raises:
+    var req = AwsRequest(String("PUT"), String("/k"))
+    req.body = _bytes(String("part three"))
+    s3_apply_request_checksum(req, String(_ALG), value_members=True)
+    assert_equal(req.header(String(_ALG)), "CRC32")
+    assert_equal(req.header(String("x-amz-checksum-crc32")), "L8IwAg==")
+    assert_equal(len(req.header_names), 2)
+    # An empty body has a checksum too.
+    var empty = AwsRequest(String("PUT"), String("/k"))
+    s3_apply_request_checksum(empty, String(_ALG), value_members=True)
+    assert_equal(empty.header(String("x-amz-checksum-crc32")), "AAAAAA==")
+
+
+def test_checksum_crc32_chosen() raises:
+    var req = AwsRequest(String("PUT"), String("/k"))
+    req.body = _bytes(String("x"))
+    req.set_header(String(_ALG), String("crc32"))
+    s3_apply_request_checksum(req, String(_ALG), value_members=True)
+    # The caller's value is kept as given.
+    assert_equal(req.header(String(_ALG)), "crc32")
+    assert_equal(req.header(String("x-amz-checksum-crc32")), "jNwWgw==")
+
+
+def test_checksum_supplied_by_the_caller() raises:
+    # A checksum header already set: nothing is added or replaced.
+    var req = AwsRequest(String("PUT"), String("/k"))
+    req.body = _bytes(String("x"))
+    req.set_header(String("X-Amz-Checksum-SHA256"), String("abc="))
+    s3_apply_request_checksum(req, String(_ALG), value_members=True)
+    assert_false(req.has_header(String(_ALG)))
+    assert_false(req.has_header(String("x-amz-checksum-crc32")))
+    assert_equal(len(req.header_names), 1)
+
+
+def test_checksum_other_algorithm_refused() raises:
+    var req = AwsRequest(String("PUT"), String("/k"))
+    req.set_header(String(_ALG), String("SHA256"))
+    with assert_raises(
+        contains=(
+            "S3 request checksum algorithm 'SHA256' is not computed by this"
+            + " client (only CRC32 is); set its x-amz-checksum-sha256 member too"
+        )
+    ):
+        s3_apply_request_checksum(req, String(_ALG), value_members=True)
+    # An operation with no member for the value: nothing to set, so the
+    # refusal says only CRC32 can be sent.
+    var bare = AwsRequest(String("POST"), String("/?delete"))
+    bare.set_header(String(_ALG), String("SHA1"))
+    with assert_raises(
+        contains=(
+            "S3 request checksum algorithm 'SHA1' is not computed by this"
+            + " client (only CRC32 is); this operation has no member to carry"
+            + " another algorithm's checksum, so only CRC32 can be sent"
+        )
+    ):
+        s3_apply_request_checksum(bare, String(_ALG), value_members=False)
+
+
 def main() raises:
     test_copy_source_plain()
     test_copy_source_escapes()
@@ -129,4 +226,9 @@ def main() raises:
     test_copy_source_access_points()
     test_content_range()
     test_content_range_refusals()
+    test_crc32_vectors()
+    test_checksum_default_is_crc32()
+    test_checksum_crc32_chosen()
+    test_checksum_supplied_by_the_caller()
+    test_checksum_other_algorithm_refused()
     print("OK")

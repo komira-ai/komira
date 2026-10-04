@@ -4244,3 +4244,54 @@ def binding_to_bytes(b: ScanBinding, variant_tag: UInt8) raises -> List[UInt8]:
     deliberately no `binding_from_bytes` twin — nothing in this process reads one
     back, and an unused decoder is an untested one."""
     return encode_proto[WireScanBinding](_binding_to_wire(b, variant_tag))
+
+
+def scan_params_from_bytes(var bytes: List[UInt8]) raises -> ScanParams:
+    """Decode the `params` of a bare `komira.plan.v1.WireScanBinding` into a
+    `ScanParams`: the READ half a non-Mojo author needs to name an open scan
+    kind's params. The kind then builds the rest of the binding from them.
+
+    ★ WHY THE CARRIER IS A `WireScanBinding` AND NOT A NEW MESSAGE. The params
+    an author sends are the SAME typed map the binding carries back:
+    `WireParam{key, tag, s|i|f}`. `topic_live`'s `start_offset` is
+    `PARAM_I64`, so a stringly `k=v` encoding cannot author that golden at all:
+    a typed map is required, and one already exists on the wire. The author
+    fills `params`.
+
+    ⛔ THE FIELDS THE KIND COMPUTES ARE REFUSED, NOT IGNORED: `kind_id`,
+    `kind_name`, `name`, schema fields, `fingerprint`, `structural_id`,
+    `snapshot_token`, `pushdown_extra_cols`, a legacy source type and stats.
+    An author that sent one is asking the engine to honour a value this reader
+    would otherwise drop, and a silently-dropped fingerprint is the plan-cache
+    fault `binding_to_bytes` exists to prevent.
+
+    ⚠ NOT READ, AND NOT REFUSED: `pushdown_gate`, `snapshot_policy`,
+    `orientation` and `variant_tag`. They are enum/gate fields every encoder
+    of a `WireScanBinding` writes (this package's included), and the kind's
+    descriptor states all four, so a value here cannot reach a binding. Only
+    `params` is returned.
+
+    Every tag goes through `_params_from_wire`, so its refusal of an unknown
+    tag is this reader's too."""
+    var w = decode_proto[WireScanBinding](bytes^)
+    if (
+        w.kind_id != UInt32(0)
+        or w.kind_name.byte_length() != 0
+        or w.name.byte_length() != 0
+        or (Bool(w.schema) and len(w.schema.value().fields) > 0)
+        or w.fingerprint != UInt64(0)
+        or w.structural_id != UInt64(0)
+        or w.snapshot_token != UInt64(0)
+        or len(w.pushdown_extra_cols) > 0
+        or w.has_legacy_source_type
+        or w.has_stats
+    ):
+        raise Error(
+            PLAN_WIRE_MALFORMED
+            + ": a scan-params request carries only `params`; this one also"
+            + " sets a field the kind computes (kind_id / kind_name / name /"
+            + " schema fields / fingerprint / structural_id / snapshot_token /"
+            + " pushdown_extra_cols / legacy_source_type / stats). The KIND"
+            + " builds those, so an author may not supply them"
+        )
+    return _params_from_wire(w.params)

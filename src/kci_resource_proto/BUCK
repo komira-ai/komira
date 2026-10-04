@@ -1,0 +1,16 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+mojo_proto_library(
+    name = "kci_resource_proto",
+    srcs = ["resource.proto"],
+    import_prefix = "kci/resource/v1",
+    deps = [
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+    test_srcs = [
+        "tests/test_resource_field_numbers.mojo",
+        "tests/test_resource_list_copy_and_json.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

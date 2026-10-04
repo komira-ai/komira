@@ -1,0 +1,22 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The typed expression vocabulary: the ExprX trait family, the Stage[Program]
+# IR, runtime_expr_bool, composite and sortable keys, typed projects and the
+# typed UDF sugar. Sits above komira_udf and komira_kernels; the row-mode
+# executor that implements these traits lives in komira_eval.
+mojo_library(
+    name = "komira_expr",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core:komira_core",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_runtime_expr_bool.mojo",
+        "tests/test_trait_conformance_across_mojoc.mojo",
+        "tests/test_typed_udf_sugar.mojo",
+        "tests/test_unified_trait_surface.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
