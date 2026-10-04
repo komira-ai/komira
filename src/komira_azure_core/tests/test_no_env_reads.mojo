@@ -1,8 +1,18 @@
-# The package reads no environment: an account key, a SAS, a tenant, a
+# The package reads no environment today: an account key, a SAS, a tenant, a
 # client id and secret, and an endpoint are each a parameter. The package's
 # sources are staged as this test's data, at src/<file>; the test reads each
 # one and fails if any names a way to read the environment or the FFI a read
-# would go through, and checks that the files it read are every staged one.
+# would go through, or the storage-account variables of the dropped
+# environment provider, and checks that the files it read are every staged
+# one.
+#
+# Policy: configuration is parameters; the environment is read only the way
+# the official SDK credential chains read it. So a future default credential
+# chain that reads the variables the official Azure chain reads
+# (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET, IDENTITY_ENDPOINT,
+# MSI_ENDPOINT) is allowed; the change that adds it narrows the generic bans
+# below for that one file, deliberately. Those names are therefore not banned
+# by name here.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -42,11 +52,6 @@ def test_no_environment_read() raises:
         "AZURE_STORAGE_ACCOUNT",
         "AZURE_STORAGE_KEY",
         "AZURE_STORAGE_SAS_TOKEN",
-        "AZURE_CLIENT_ID",
-        "AZURE_CLIENT_SECRET",
-        "AZURE_TENANT_ID",
-        "IDENTITY_ENDPOINT",
-        "MSI_ENDPOINT",
     ]
     var files = materialize[_FILES]()
     for i in range(len(files)):
