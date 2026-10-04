@@ -25,6 +25,7 @@ from komira_fs_registry import (
     fs_handle_from_typed_fs,
     fs_is_registry_arm,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_http_core.transport.scripted import ScriptedConnector
 from komira_objectstore_s3 import S3Config, S3Fs
@@ -41,6 +42,10 @@ def _never_script() raises -> ScriptedConnector:
 
 def _never_kernel() raises -> KernelTcpConnector:
     raise Error("test: the kernel S3Fs made a connector")
+
+
+def _http() -> HttpClientConfig:
+    return HttpClientConfig.defaults()
 
 
 def _creds() -> StaticCredsSource:
@@ -69,7 +74,7 @@ def test_local_fs_wraps_with_the_local_tag() raises:
 
 def test_prod_s3_fs_wraps_with_the_s3_tag() raises:
     var fs = S3Arm[S3ProdConnector](
-        "lake", S3Config.aws("eu-west-1"), _never_dial, _creds(), SystemAwsClock()
+        "lake", S3Config.aws("eu-west-1"), _never_dial, _http(), _creds(), SystemAwsClock()
     )
     var h = fs_handle_from_typed_fs(fs^)
     assert_true(Bool(h))
@@ -83,6 +88,7 @@ def test_scripted_s3_fs_is_not_an_arm() raises:
         "lake",
         S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
         _never_script,
+        _http(),
         _creds(),
         SystemAwsClock(),
     )
@@ -97,12 +103,13 @@ def test_other_s3_monomorphs_are_not_arms() raises:
         "lake",
         S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
         _never_kernel,
+        _http(),
         _creds(),
         SystemAwsClock(),
     )
     assert_false(Bool(fs_handle_from_typed_fs(kernel^)))
     var fixed = S3Fs[S3ProdConnector, StaticCredsSource, FixedClock](
-        "lake", S3Config.aws("us-east-1"), _never_dial, _creds(), FixedClock(1790000000)
+        "lake", S3Config.aws("us-east-1"), _never_dial, _http(), _creds(), FixedClock(1790000000)
     )
     assert_false(Bool(fs_handle_from_typed_fs(fixed^)))
 

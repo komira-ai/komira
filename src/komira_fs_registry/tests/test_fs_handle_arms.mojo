@@ -23,6 +23,7 @@ from komira_core.plan.fs_descriptor_pod import (
 )
 from komira_fs.local_fs import LocalFs
 from komira_fs_registry import FsHandle, LocalArm, S3Arm, S3ProdConnector
+from komira_http_client.client import HttpClientConfig
 from komira_objectstore_s3 import S3Config
 from komira_plan_expr.fs_descriptor_pod import (
     FS_SCHEME_AZURE,
@@ -34,6 +35,10 @@ from komira_plan_expr.fs_descriptor_pod import (
 
 def _never_dial() raises -> S3ProdConnector:
     raise Error("test: the S3 arm made a connector")
+
+
+def _http() -> HttpClientConfig:
+    return HttpClientConfig.defaults()
 
 
 def _creds() -> StaticCredsSource:
@@ -48,7 +53,7 @@ def _creds() -> StaticCredsSource:
 
 def _s3_arm() raises -> S3Arm[S3ProdConnector]:
     return S3Arm[S3ProdConnector](
-        "lake", S3Config.aws("us-east-1"), _never_dial, _creds(), SystemAwsClock()
+        "lake", S3Config.aws("us-east-1"), _never_dial, _http(), _creds(), SystemAwsClock()
     )
 
 

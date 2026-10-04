@@ -1,7 +1,8 @@
 # The S3 arm reads through the handle, over komira_http_core's
 # ScriptedConnector: no socket. Each factory call arms ONE answer (the 206 for
 # `bytes=0-3` of a 10-byte object), so a store reads once and its second read
-# finds its script spent.
+# finds its script spent. A spent read is retried: S3Config's default policy
+# makes 3 attempts, each a new dial (#2, #3, #4), so the error names dial #4.
 #
 # Rows: the handle and its clone each read once, and each one's second read
 # finds its own script spent (the clone's arm built a store of its own); a
@@ -13,6 +14,7 @@ from std.testing import assert_equal, assert_raises, assert_true
 
 from komira_aws_core import AwsCredential, StaticCredsSource, SystemAwsClock
 from komira_fs_registry import FsHandle, FsHandleOver, S3Arm, S3ProdConnector
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.tls import TlsConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
@@ -46,6 +48,10 @@ def _mk_tls() raises -> S3ProdConnector:
     return S3ProdConnector.over(TlsConfig(), KernelTcpConnector.new())
 
 
+def _http() -> HttpClientConfig:
+    return HttpClientConfig.defaults()
+
+
 def _creds() -> StaticCredsSource:
     return StaticCredsSource(
         AwsCredential(
@@ -72,6 +78,7 @@ def _scripted_arm() raises -> S3Arm[ScriptedConnector]:
         "lake",
         S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
         _mk_one_range,
+        _http(),
         _creds(),
         SystemAwsClock(),
     )
@@ -86,9 +93,9 @@ def test_s3_arm_reads_through_a_scripted_connector() raises:
     assert_equal(c.s3_ref().value().bucket(), "lake")
     assert_equal(_text(h, "data/a.parquet"), "abcd")
     assert_equal(_text(c, "data/b.parquet"), "abcd")
-    with assert_raises(contains="ScriptedConnector.connect: no stream armed for dial #2"):
+    with assert_raises(contains="ScriptedConnector.connect: no stream armed for dial #4"):
         _ = _text(h, "data/a.parquet")
-    with assert_raises(contains="ScriptedConnector.connect: no stream armed for dial #2"):
+    with assert_raises(contains="ScriptedConnector.connect: no stream armed for dial #4"):
         _ = _text(c, "data/b.parquet")
 
 
@@ -97,6 +104,7 @@ def test_wrapping_keeps_a_built_store() raises:
         "lake",
         S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
         _mk_one_range,
+        _http(),
         _creds(),
         SystemAwsClock(),
     )
@@ -110,7 +118,7 @@ def test_wrapping_keeps_a_built_store() raises:
     assert_equal(h.s3_ref().value().bucket(), "lake")
     # The same store: its script is still spent. A store rebuilt by the wrap
     # would have answered "abcd" again.
-    with assert_raises(contains="ScriptedConnector.connect: no stream armed for dial #2"):
+    with assert_raises(contains="ScriptedConnector.connect: no stream armed for dial #4"):
         _ = _text(h, "data/a.parquet")
 
 
@@ -120,6 +128,7 @@ def test_prod_arm_refuses_a_plaintext_endpoint() raises:
             "lake",
             S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
             _mk_tls,
+            _http(),
             _creds(),
             SystemAwsClock(),
         )
