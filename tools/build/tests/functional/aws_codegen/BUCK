@@ -1,7 +1,7 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/proto-codegen/aws_query:model.bzl", "TINY_EC2", "TINY_QUERY")
 load("@komira//tools/build/proto-codegen/aws_rest_json:model.bzl", "TINY_REST_JSON")
-load("@komira//tools/build/proto-codegen/aws_query:model.bzl", "TINY_QUERY")
 load("@komira//tools/build/proto-codegen/aws_rest_xml:model.bzl", "TINY_REST_XML")
 load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
@@ -16,10 +16,10 @@ load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
 # restXml models (a non-S3 one for the customization refusals, one per
 # restXml refusal, one that requires a request checksum), a tiny Smithy RPC
 # v2 CBOR model and a tiny awsJson model that declares SigV2. The tiny
-# restJson1, S3-shaped restXml and awsQuery models come from
+# restJson1, S3-shaped restXml, awsQuery and ec2Query models come from
 # komira//tools/build/proto-codegen/aws_rest_json, aws_rest_xml and
 # aws_query (model and digest in each one's model.bzl), where their
-# pure-mode clients are compiled against the real runtime, which only the
+# clients are compiled against the real runtime, which only the
 # komira cell can depend on; this package holds those clients' generated
 # files and welded tests to exact sets.
 
@@ -333,6 +333,91 @@ tests_check(
     ],
     markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client[tests]",
 )
+
+# The client-mode module of the tiny awsQuery model as a text golden, as for
+# logs_client and tiny_rest_json_client: the caller's HttpClientConfig
+# reaches the signed send.
+aws_codegen_golden(
+    name = "query_client",
+    gen_args = [
+        "--model-sha256",
+        TINY_QUERY.sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        ",".join(_TINY_QUERY_OPERATIONS),
+        "--probe-import",
+        "komira_aws_tiny_query.komira_aws_tiny_query",
+    ],
+    golden = "golden/query_client.mojo",
+    golden_probe = "golden/query_client_probe.mojo",
+    model = TINY_QUERY.model,
+    module = "komira_aws_tiny_query",
+    must_contain = _CONFIG_PINS,
+)
+
+# An ec2Query client of a tiny model, pure mode: queryName and capitalized
+# locationName parameter names, a plain member name kept, a list of
+# structures holding a list (never wrapped), an empty list writing nothing;
+# the response read from the root, with wrapped `item` lists of structures;
+# an operation with no input and no output. The model is
+# komira//tools/build/proto-codegen/aws_query's, where the same module is
+# compiled against the real runtime and tested.
+_TINY_EC2_OPERATIONS = ["DescribeThings", "Ping"]
+
+aws_codegen_golden(
+    name = "ec2_pure",
+    gen_args = [
+        "--model-sha256",
+        TINY_EC2.sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        ",".join(_TINY_EC2_OPERATIONS),
+        "--pure-only",
+        "--probe-import",
+        "komira_aws_tiny_ec2.komira_aws_tiny_ec2",
+    ],
+    golden = "golden/ec2_pure.mojo",
+    golden_probe = "golden/ec2_pure_probe.mojo",
+    model = TINY_EC2.model,
+    module = "komira_aws_tiny_ec2",
+)
+
+# The same module, built in the komira cell: exactly the package's three
+# files were generated, with no transport and no JSON runtime.
+gen_check(
+    name = "tiny_ec2_pure_scoped",
+    absent = [
+        "komira_http",
+        "komira_json",
+    ],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "komira_aws_tiny_ec2.mojo",
+    ],
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2[gen]",
+    present = [
+        "protocol     : ec2 (ec2Query)",
+        "mode         : pure (no transport)",
+        "operations   : " + ", ".join(_TINY_EC2_OPERATIONS),
+        "model sha256 : " + TINY_EC2.sha256,
+        "aws_query_set_body(req, q)",
+    ],
+)
+
+# Its layout probe and its caller test are welded into it, and each ran and
+# passed.
+tests_check(
+    name = "tiny_ec2_pure_tests",
+    expect = [
+        "_layout_probe",
+        "test_tiny_ec2",
+    ],
+    markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2[tests]",
+)
+
 
 aws_codegen_refusal(
     name = "refuse_unsupported_protocol",

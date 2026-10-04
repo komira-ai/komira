@@ -194,10 +194,11 @@
 #  34. aws-client-gen (tests//functional/aws_codegen): the CloudWatch Logs
 #      GetLogEvents module, pure and client, a restJson1 client of a tiny
 #      model, a restXml module of a tiny S3-shaped model (pure, with the `s3`
-#      customization), an awsQuery module of a tiny model (pure), and the
-#      layout probe of each, equal their text goldens
-#      byte for byte; the generator refuses an empty or missing operation
-#      list, an operation the model lacks, a protocol it does not implement, a
+#      customization), an awsQuery module of a tiny model (pure and client),
+#      an ec2Query module of a tiny model (pure), and the layout probe of
+#      each, equal their text goldens byte for byte; the generator refuses
+#      an empty or missing operation list, an operation the model lacks, a
+#      protocol it does not implement, a
 #      restXml model reaching a union, an XML attribute or a body map, the
 #      `s3` customization unless the model's serviceId is `S3` and its
 #      protocol restXml, or an unknown customization, a
@@ -205,16 +206,16 @@
 #      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
-#      go red (tests//negative/aws_codegen). Each client module (logs and
-#      the tiny restJson1 model) must also contain, as whole lines, the
-#      strings its must_contain names (the caller's HttpClientConfig
-#      reaching the send); a must_contain whose lines the module holds only
-#      non-adjacently, or only as the tail of a longer line, goes red, and
-#      for no other reason. The tiny models' pure-mode clients
-#      (komira//tools/build/proto-codegen/aws_rest_json, aws_rest_xml and
-#      aws_query) generated exactly their packages' files, and their welded
-#      tests ran:
-#      see test 36.
+#      go red (tests//negative/aws_codegen). Each client module (logs, the
+#      tiny restJson1 and the tiny awsQuery model) must also contain, as
+#      whole lines, the strings its must_contain names (the caller's
+#      HttpClientConfig reaching the send); a must_contain whose lines the
+#      module holds only non-adjacently, or only as the tail of a longer
+#      line, goes red, and for no other reason. The tiny models' clients
+#      built in the komira cell (komira//tools/build/proto-codegen/
+#      aws_rest_json and aws_rest_xml, pure; aws_query, the awsQuery client
+#      pure and client mode and the ec2Query client pure) generated exactly
+#      their files, and exactly their welded tests ran: see test 36.
 #  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
 #      inline tests of komira_proto_codegen run as a build action and pass,
 #      every one counted. In tests//negative/rust_test a failing #[test]
@@ -244,11 +245,14 @@
 #      the responses it reads pass; and a pure-mode restXml client of a tiny
 #      S3-shaped model with the `s3` customization
 #      (komira//tools/build/proto-codegen/aws_rest_xml), likewise, against
-#      komira_aws_core and komira_xml; and a pure-mode awsQuery client of a
-#      tiny model (komira//tools/build/proto-codegen/aws_query), likewise,
-#      against komira_aws_core and komira_xml.
-#      Exactly the package's files are generated, nothing of an operation not
-#      named, and exactly those two tests ran. A second client adds a
+#      komira_aws_core and komira_xml; and in
+#      komira//tools/build/proto-codegen/aws_query, a pure-mode awsQuery and
+#      a pure-mode ec2Query client of two tiny models, likewise, against
+#      komira_aws_core and komira_xml, and a client-mode awsQuery client,
+#      which builds only once its layout probe and a caller test over a
+#      scripted connector and komira_aws_core's echo connector pass. For
+#      each, exactly its files are generated, nothing of an operation not
+#      named, and exactly its two welded tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is
 #      copied into the package, the header names its owner, and a caller test
 #      imports it. A client-mode client (tests//functional/aws_client_mode)
