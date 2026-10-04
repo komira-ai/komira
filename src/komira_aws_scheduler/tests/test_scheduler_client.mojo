@@ -113,7 +113,7 @@ def _mk_conflict() raises -> ScriptedConnector:
             409,
             "Conflict",
             '{"Message":"Schedule nightly-reap already exists."}',
-            "X-Amzn-Errortype: ConflictException:http://internal.amazon.com/coral/com.amazonaws.chronos/\r\n",
+            "X-Amzn-Errortype: ConflictException:http://example.com/doc/scheduler/\r\n",
         )
     )
 
