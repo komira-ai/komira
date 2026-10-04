@@ -1,10 +1,10 @@
 # =============================================================================
-# komira_search_meta/split_summary.mojo
+# komira_search_catalog/split_summary.mojo
 #   The catalog record for one published search split, and its binary codec.
 # =============================================================================
 #
 # A `SplitSummary` is the body of one manifest chunk in an index's split
-# registry (see metastore.mojo). It is encoded with a small fixed binary
+# catalog (see metastore.mojo). It is encoded with a small fixed binary
 # envelope rather than JSON, so this layer needs no serialization library:
 # little-endian i64 fields plus length-prefixed byte and string slots, the
 # same framing `komira_objectstore.cas_manifest` uses for its own records.
