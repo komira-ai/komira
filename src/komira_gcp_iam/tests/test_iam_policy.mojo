@@ -184,7 +184,7 @@ def test_read_modify_write_sends_back_the_etag_it_read() raises:
         + '"members":["group:oncall@example.com"],'
         + '"condition":{"expression":"request.time.getHours(\\"UTC\\") < 18",'
         + '"title":"business hours","description":"","location":""}}],'
-        + '"auditConfigs":[],"etag":"BwXhqDuVJ8g="}}',
+        + '"etag":"BwXhqDuVJ8g="}}',
     )
     # The etag text sent is the etag text read.
     assert_equal(body.count('"etag":"BwXhqDuVJ8g="'), 1)
@@ -204,7 +204,12 @@ def test_set_with_no_etag_sends_none() raises:
     var p = Policy(Int32(1), bindings^, List[AuditConfig](), List[UInt8]())
     _ = c.set_iam_policy[_RT](SetIamPolicyRequest(String(_SA), p^, None), reactor)
     var body = _body(_wire(capture))
-    assert_true(body.endswith('"auditConfigs":[],"etag":""}}'), body)
+    # No audit configs: the empty list is left out, as proto3 JSON leaves
+    # out every field at its default.
+    assert_true(
+        body.endswith('"members":["user:owner@example.com"]}],"etag":""}}'), body
+    )
+    assert_equal(body.count("auditConfigs"), 0)
 
 
 def main() raises:
