@@ -2532,6 +2532,49 @@ mod tests {
     }
 
     #[test]
+    fn a_server_streaming_method_takes_bindings_and_a_whole_body_like_a_unary_one() {
+        // The two halves of the REST method emitter meet here: a
+        // server-streaming method (Firestore's RunQuery shape) whose rule has
+        // an additional binding and `body: "*"` gets the path alternatives
+        // and the whole body without its path-bound field, and still reads
+        // its response as the stream's JSON array.
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![scalar_field("parent", ScalarKind::String), scalar_field("q", ScalarKind::String)],
+        );
+        let mut svc = svc_over(
+            &req,
+            rule(
+                "post",
+                "/v1/{parent=projects/*/databases/*/documents}:runQuery",
+                "*",
+                &["/v1/{parent=projects/*/databases/*/documents/*/**}:runQuery"],
+            ),
+        );
+        svc.methods[0].server_streaming = true;
+        let file = file_with(vec![req], svc.clone());
+        let e = emit_rest_service(&file, &svc).unwrap();
+        let src = &e.source;
+        assert!(src.contains("mut reactor: Reactor[RT.Sink]) raises -> List[Req]:"), "{src}");
+        assert!(src.contains(
+            "\"\"\"POST `/v1/{parent=projects/*/databases/*/documents}:runQuery`, \
+             `/v1/{parent=projects/*/databases/*/documents/*/**}:runQuery` — REST/JSON, \
+             server-streaming, to the first path the request's values match: every response\n"
+        ), "{src}");
+        assert_eq!(src.matches("if path.byte_length() == 0:").count(), 2, "{src}");
+        assert!(src.contains(
+            "var body_text = _rest_drop_members(encode_json(req), _rest_path_members)\n"
+        ), "{src}");
+        let items = src
+            .find("var _rest_items = gcp_rest_stream_items(String(\"POST\"), String(\"M\"), status_int, resp_bytes)")
+            .unwrap();
+        assert!(src.find("_rest_drop_members(").unwrap() < items, "{src}");
+        assert!(!src.contains("return decode_json_lenient[Req](resp_text)"), "{src}");
+        assert!(!e.needs_base64);
+    }
+
+    #[test]
     fn a_binding_fallback_catches_only_the_path_helpers() {
         // The generated `except:` is bare, which is sound only while the
         // `try:` block holds nothing that can raise but the two path helpers
