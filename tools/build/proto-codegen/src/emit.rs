@@ -93,6 +93,15 @@ fn mojo_str_lit(s: &str) -> String {
     out
 }
 
+/// The error mapper of `komira_gcp_core` ([`crate::emit_rest::GCP_CORE`]) a
+/// generated Google Cloud gRPC client raises through. Its contract:
+/// `def gcp_grpc_status_error(rpc: String, grpc_status: Int, text: String) -> Error`
+/// maps the gRPC status to its `google.rpc.Code` and returns an `Error` that
+/// starts with a `[grpc:<code>]` anchor and names the RPC, the code, the
+/// attempt count of a call whose retries ran out, and the byte length of the
+/// status text; it reads `text` and keeps none of it.
+pub const GCP_GRPC_STATUS_ERROR: &str = "gcp_grpc_status_error";
+
 /// The programmatic Mojo emitter — one per generated `.mojo` file.
 pub struct Emitter<'a> {
     file: &'a IrFile,
@@ -101,6 +110,12 @@ pub struct Emitter<'a> {
     indent: usize,
     boxed: BTreeSet<(String, String)>,
     protocol: ProtocolMode,
+    /// A Google Cloud client (the plugin's `gcp=true`): gRPC service clients
+    /// take a `komira_gcp_core` token source, set its token as each call's
+    /// `authorization` metadata, speak classic gRPC only, and raise a non-OK
+    /// status through [`GCP_GRPC_STATUS_ERROR`]. REST clients are Google
+    /// Cloud clients either way.
+    gcp: bool,
 }
 
 impl<'a> Emitter<'a> {
@@ -115,13 +130,26 @@ impl<'a> Emitter<'a> {
     /// Construct an emitter for `file` emitting service clients for the
     /// given protocol `mode`.
     pub fn with_protocol(file: &'a IrFile, protocol: ProtocolMode) -> Self {
+        Self::with_options(file, protocol, false)
+    }
+
+    /// Construct an emitter for `file` with the given protocol `mode`, and
+    /// with `gcp` set, the Google Cloud shape of the gRPC service clients
+    /// (see the `gcp` field).
+    pub fn with_options(file: &'a IrFile, protocol: ProtocolMode, gcp: bool) -> Self {
         Self {
             boxed: recursion_breaking_edges(file),
             file,
             buf: String::new(),
             indent: 0,
             protocol,
+            gcp,
         }
+    }
+
+    /// Whether this file's service clients are Google Cloud gRPC clients.
+    fn gcp_grpc(&self) -> bool {
+        self.gcp && self.protocol != ProtocolMode::Rest && !self.file.services.is_empty()
     }
 
     /// Emit the whole file and return the generated Mojo source.
@@ -145,6 +173,9 @@ impl<'a> Emitter<'a> {
                 self.emit_rest_service_or_panic(svc);
             }
         } else {
+            if self.gcp_grpc() {
+                self.emit_gcp_grpc_error_helper();
+            }
             for svc in &self.file.services {
                 self.emit_service(svc);
             }
@@ -227,6 +258,24 @@ impl<'a> Emitter<'a> {
                 for imp in crate::emit_rest::rest_imports() {
                     self.line(imp);
                 }
+            } else if self.gcp {
+                self.line(&format!(
+                    "from {} import {}, {GCP_GRPC_STATUS_ERROR}",
+                    crate::emit_rest::GCP_CORE,
+                    crate::emit_rest::GCP_TOKEN_SOURCE,
+                ));
+                self.line("from komira_grpc import (");
+                self.line("    CallOptions,");
+                self.line("    GrpcClient,");
+                self.line("    ProtocolGrpcProto,");
+                self.line("    RetryPolicy,");
+                self.line("    UnaryResult,");
+                self.line("    ServerStreamDecoder,");
+                self.line("    ClientStreamEncoder,");
+                self.line("    BidiStreamCodec,");
+                self.line("    parse_grpc_status_code,");
+                self.line(")");
+                self.emit_grpc_runtime_imports();
             } else {
                 self.line(
                     "from komira_grpc import (",
@@ -240,24 +289,7 @@ impl<'a> Emitter<'a> {
                 self.line("    ClientStreamEncoder,");
                 self.line("    BidiStreamCodec,");
                 self.line(")");
-                self.line(
-                    "from komira_proto_codec.proto_binary import PbEncoder, PbDecoder",
-                );
-                self.line(
-                    "from komira_http_core.transport.io_stream import Connector",
-                );
-                self.line("from komira_async.reactor.reactor import Reactor");
-                self.line(
-                    "from komira_async.runtime.runtime_trait import Runtime",
-                );
-                self.line(
-                    "from komira_async.cancellation.token import CancellationToken",
-                );
-                if self.file_has_routing_rule() {
-                    self.line(
-                        "from komira_grpc import build_routing_params, match_path_template",
-                    );
-                }
+                self.emit_grpc_runtime_imports();
             }
         }
         for imp in &self.file.imports {
@@ -268,6 +300,30 @@ impl<'a> Emitter<'a> {
         }
         self.blank();
         self.blank();
+    }
+
+    /// The imports every gRPC service file takes after its `komira_grpc`
+    /// block: the binary codec, the connector, the async runtime and, when a
+    /// method carries a `(google.api.routing)` rule, the routing helpers.
+    fn emit_grpc_runtime_imports(&mut self) {
+        self.line(
+            "from komira_proto_codec.proto_binary import PbEncoder, PbDecoder",
+        );
+        self.line(
+            "from komira_http_core.transport.io_stream import Connector",
+        );
+        self.line("from komira_async.reactor.reactor import Reactor");
+        self.line(
+            "from komira_async.runtime.runtime_trait import Runtime",
+        );
+        self.line(
+            "from komira_async.cancellation.token import CancellationToken",
+        );
+        if self.file_has_routing_rule() {
+            self.line(
+                "from komira_grpc import build_routing_params, match_path_template",
+            );
+        }
     }
 
     // -- enum emission --------------------------------------------------
@@ -1368,7 +1424,123 @@ impl<'a> Emitter<'a> {
         FieldAccess::Guarded { guards, leaf: expr }
     }
 
+    /// The module-level mapper every method of a Google Cloud gRPC client
+    /// raises through: komira_grpc raises a status as `[grpc:N] <text>`, and
+    /// the client hands `N` and that error to [`GCP_GRPC_STATUS_ERROR`].
+    fn emit_gcp_grpc_error_helper(&mut self) {
+        self.blank();
+        self.blank();
+        self.line("def _gcp_grpc_error(rpc: String, text: String) -> Error:");
+        self.push_indent();
+        self.line("\"\"\"The error a call to `rpc` raises when the transport raised `text`.");
+        self.blank();
+        self.line("    komira_grpc raises every gRPC status as `[grpc:N] <grpc-message>`, also");
+        self.line("    inside its retry-exhaustion error. Such a status becomes");
+        self.line(&format!(
+            "    `{}.{GCP_GRPC_STATUS_ERROR}`, which keeps a `[grpc:<code>]` anchor,",
+            crate::emit_rest::GCP_CORE
+        ));
+        self.line("    the attempt count and the length of the status text, never the text:");
+        self.line("    the message is the server's. An error without a status (a transport");
+        self.line("    fault before any status arrived) is returned unchanged.\"\"\"");
+        self.line("var status = parse_grpc_status_code(text)");
+        self.line("if status < 0:");
+        self.push_indent();
+        self.line("return Error(text)");
+        self.pop_indent();
+        self.line(&format!(
+            "return {GCP_GRPC_STATUS_ERROR}(rpc, status, text)"
+        ));
+        self.pop_indent();
+        self.blank();
+    }
+
+    /// A Google Cloud gRPC client: classic gRPC, a token source, and the
+    /// token hook every method calls first.
+    fn emit_gcp_service_head(&mut self, svc: &IrService) {
+        let struct_name = format!("{}Client", svc.name);
+        let core = crate::emit_rest::GCP_CORE;
+        let ts = crate::emit_rest::GCP_TOKEN_SOURCE;
+        self.blank();
+        self.line(&format!(
+            "# gRPC client for `{}.{}`, authorized by a {core} token source.",
+            self.file.proto_package, svc.name
+        ));
+        self.line(&format!(
+            "struct {struct_name}[C: Connector, T: {ts}](Movable, Deinitable):"
+        ));
+        self.push_indent();
+        self.line(&format!(
+            "\"\"\"The generated gRPC client for the Google Cloud service `{}`,",
+            svc.name
+        ));
+        self.line("    parametric over the HTTP connector `C` and the access-token source `T`.");
+        self.blank();
+        self.line("    Classic gRPC (`ProtocolGrpcProto`) through `GrpcClient[C]`. Every call");
+        self.line("    carries `authorization: Bearer <token>`, a token `T` (a");
+        self.line(&format!(
+            "    `{core}.{ts}`) returns for that call, set on the call's"
+        ));
+        self.line("    `CallOptions.raw_metadata`: the client reads no environment and holds");
+        self.line("    no credential of its own. A call that ends in a gRPC status raises");
+        self.line(&format!("    `{core}.{GCP_GRPC_STATUS_ERROR}`, whose text starts with a"));
+        self.line("    `[grpc:<google.rpc.Code>]` anchor that komira_grpc's");
+        self.line("    `parse_grpc_status_code` reads.");
+        self.blank();
+        self.line(&format!(
+            "    The full path for each method is `/{}.{}/<MethodName>`.\"\"\"",
+            self.file.proto_package, svc.name,
+        ));
+        self.blank();
+        self.line("# Google APIs serve classic gRPC; Connect is not offered.");
+        self.line("comptime P = ProtocolGrpcProto");
+        self.blank();
+        self.line("var _client: GrpcClient[Self.C]");
+        self.line("\"\"\"The gRPC transport.\"\"\"");
+        self.blank();
+        self.line("var _token_source: Self.T");
+        self.line("\"\"\"Where each call's bearer token comes from.\"\"\"");
+        self.blank();
+        self.line(
+            "def __init__(out self, var client: GrpcClient[Self.C], var token_source: Self.T):",
+        );
+        self.push_indent();
+        self.line("self._client = client^");
+        self.line("self._token_source = token_source^");
+        self.pop_indent();
+        self.blank();
+        self.line("def token_source(mut self) -> ref [self._token_source] Self.T:");
+        self.push_indent();
+        self.line("\"\"\"The token source, for example to drop a cached token after a call");
+        self.line("    raised UNAUTHENTICATED (`parse_grpc_status_code(String(e)) == 16`).\"\"\"");
+        self.line("return self._token_source");
+        self.pop_indent();
+        self.blank();
+        self.line("def _authorize(mut self, mut opts: CallOptions) raises:");
+        self.push_indent();
+        self.line("\"\"\"The token hook: one token per call, set as the `authorization` entry");
+        self.line("    of `opts.raw_metadata`. komira_grpc sends that entry verbatim and once,");
+        self.line("    so a replayed attempt carries the same header, not a second one. An");
+        self.line("    empty token is refused rather than sent as `Bearer `.\"\"\"");
+        self.line("var bearer = self._token_source.access_token()");
+        self.line("if bearer.byte_length() == 0:");
+        self.push_indent();
+        self.line("raise Error(\"the token source returned an empty access token\")");
+        self.pop_indent();
+        self.line("opts.raw_metadata.set(String(\"authorization\"), String(\"Bearer \") + bearer)");
+        self.pop_indent();
+        self.blank();
+    }
+
     fn emit_service(&mut self, svc: &IrService) {
+        if self.gcp {
+            self.emit_gcp_service_head(svc);
+            for method in &svc.methods {
+                self.emit_service_method(svc, method);
+            }
+            self.pop_indent();
+            return;
+        }
         let struct_name = format!("{}Client", svc.name);
         self.blank();
         self.line(&format!(
@@ -1430,10 +1602,17 @@ impl<'a> Emitter<'a> {
         // encoder (no `req` param), so codegen cannot read the routing field;
         // the caller hand-sets the header on those (e.g. the GCS WriteObject
         // wrapper). When routing IS emitted, `opts` is taken `var` (owned) so
-        // the body can mutate it — callers already pass `opts^`.
+        // the body can mutate it — callers already pass `opts^`. A Google
+        // Cloud client's token hook mutates it on every method, so there
+        // `opts` is always `var`.
         let emits_routing =
             m.routing_rule.is_some() && !m.client_streaming;
-        let opts_decl = if emits_routing {
+        let opts_decl = if emits_routing || self.gcp {
+            "var opts: CallOptions"
+        } else {
+            "opts: CallOptions"
+        };
+        let stream_opts_decl = if self.gcp {
             "var opts: CallOptions"
         } else {
             "opts: CallOptions"
@@ -1452,6 +1631,7 @@ impl<'a> Emitter<'a> {
                 if emits_routing {
                     self.emit_routing_preamble(m);
                 }
+                self.emit_authorize();
                 // Encode the request message via the protobuf-binary wire.
                 self.line("var enc = PbEncoder()");
                 self.line("req.encode(enc)");
@@ -1459,21 +1639,18 @@ impl<'a> Emitter<'a> {
                 let (retry_class, retry_reason) =
                     crate::retry_policy::derive_retry_class(m);
                 self.line(&retry_class.rationale(retry_reason));
-                self.line(&format!(
-                    "var result = self._client.unary_call_retrying[RT, Self.P]("
-                ));
-                self.line(&format!("    String(\"{rpc_path}\"),"));
-                self.line("    Span(req_bytes),");
-                self.line("    opts,");
-                self.line("    now_us,");
-                self.line("    reactor,");
-                self.line("    token,");
-                self.line(&format!("    {},", retry_class.mojo_expr()));
-                self.line(")");
-                self.line("var resp_bytes = List[UInt8]()");
-                self.line("swap(resp_bytes, result.message_bytes)");
-                self.line("var dec = PbDecoder(resp_bytes^)");
-                self.line(&format!("return {resp_ty}.decode(dec)"));
+                let call = [
+                    "var result = self._client.unary_call_retrying[RT, Self.P](".to_string(),
+                    format!("    String(\"{rpc_path}\"),"),
+                    "    Span(req_bytes),".to_string(),
+                    "    opts,".to_string(),
+                    "    now_us,".to_string(),
+                    "    reactor,".to_string(),
+                    "    token,".to_string(),
+                    format!("    {},", retry_class.mojo_expr()),
+                    ")".to_string(),
+                ];
+                self.emit_message_call(&call, &rpc_path, &resp_ty);
                 self.pop_indent();
             }
             (false, true) => {
@@ -1501,19 +1678,21 @@ impl<'a> Emitter<'a> {
                 if emits_routing {
                     self.emit_routing_preamble(m);
                 }
+                self.emit_authorize();
                 self.line("var enc = PbEncoder()");
                 self.line("req.encode(enc)");
                 self.line("var req_bytes = enc.into_buf()");
-                self.line(
-                    "return self._client.server_stream[RT, Self.P](",
-                );
-                self.line(&format!("    String(\"{rpc_path}\"),"));
-                self.line("    Span(req_bytes),");
-                self.line("    opts,");
-                self.line("    now_us,");
-                self.line("    reactor,");
-                self.line("    token,");
-                self.line(")");
+                let call = [
+                    "return self._client.server_stream[RT, Self.P](".to_string(),
+                    format!("    String(\"{rpc_path}\"),"),
+                    "    Span(req_bytes),".to_string(),
+                    "    opts,".to_string(),
+                    "    now_us,".to_string(),
+                    "    reactor,".to_string(),
+                    "    token,".to_string(),
+                    ")".to_string(),
+                ];
+                self.emit_returning_call(&call, &rpc_path);
                 self.pop_indent();
             }
             (true, false) => {
@@ -1524,7 +1703,7 @@ impl<'a> Emitter<'a> {
                 self.line(&format!(
                     "def {method_name}[RT: Runtime](mut self, \
                      var encoder: ClientStreamEncoder[Self.P], \
-                     opts: CallOptions, {rt_args}) raises -> {resp_ty}:"
+                     {stream_opts_decl}, {rt_args}) raises -> {resp_ty}:"
                 ));
                 self.push_indent();
                 self.line(&format!(
@@ -1543,20 +1722,18 @@ impl<'a> Emitter<'a> {
                      single response.",
                 );
                 self.line("    \"\"\"");
-                self.line(
-                    "var result = self._client.client_stream[RT, Self.P](",
-                );
-                self.line(&format!("    String(\"{rpc_path}\"),"));
-                self.line("    encoder^,");
-                self.line("    opts,");
-                self.line("    now_us,");
-                self.line("    reactor,");
-                self.line("    token,");
-                self.line(")");
-                self.line("var resp_bytes = List[UInt8]()");
-                self.line("swap(resp_bytes, result.message_bytes)");
-                self.line("var dec = PbDecoder(resp_bytes^)");
-                self.line(&format!("return {resp_ty}.decode(dec)"));
+                self.emit_authorize();
+                let call = [
+                    "var result = self._client.client_stream[RT, Self.P](".to_string(),
+                    format!("    String(\"{rpc_path}\"),"),
+                    "    encoder^,".to_string(),
+                    "    opts,".to_string(),
+                    "    now_us,".to_string(),
+                    "    reactor,".to_string(),
+                    "    token,".to_string(),
+                    ")".to_string(),
+                ];
+                self.emit_message_call(&call, &rpc_path, &resp_ty);
                 self.pop_indent();
             }
             (true, true) => {
@@ -1566,7 +1743,7 @@ impl<'a> Emitter<'a> {
                 self.line(&format!(
                     "def {method_name}[RT: Runtime](mut self, \
                      var codec: BidiStreamCodec[Self.P], \
-                     opts: CallOptions, {rt_args}) raises \
+                     {stream_opts_decl}, {rt_args}) raises \
                      -> ServerStreamDecoder[Self.P]:"
                 ));
                 self.push_indent();
@@ -1582,20 +1759,84 @@ impl<'a> Emitter<'a> {
                      (decode each via `{resp_ty}.decode`)."
                 ));
                 self.line("    \"\"\"");
-                self.line(
-                    "return self._client.bidi_stream[RT, Self.P](",
-                );
-                self.line(&format!("    String(\"{rpc_path}\"),"));
-                self.line("    codec^,");
-                self.line("    opts,");
-                self.line("    now_us,");
-                self.line("    reactor,");
-                self.line("    token,");
-                self.line(")");
+                self.emit_authorize();
+                let call = [
+                    "return self._client.bidi_stream[RT, Self.P](".to_string(),
+                    format!("    String(\"{rpc_path}\"),"),
+                    "    codec^,".to_string(),
+                    "    opts,".to_string(),
+                    "    now_us,".to_string(),
+                    "    reactor,".to_string(),
+                    "    token,".to_string(),
+                    ")".to_string(),
+                ];
+                self.emit_returning_call(&call, &rpc_path);
                 self.pop_indent();
             }
         }
         self.blank();
+    }
+
+    /// A Google Cloud client's first statement after the routing preamble:
+    /// the token hook. Nothing for any other client.
+    fn emit_authorize(&mut self) {
+        if self.gcp {
+            self.line("self._authorize(opts)");
+        }
+    }
+
+    /// `call` (whose first line binds `result`, a `UnaryResult`), then the
+    /// decode of its message into `resp_ty`. A Google Cloud client runs the
+    /// call inside a `try` whose `except` raises through `_gcp_grpc_error`;
+    /// the decode stays outside it, so a malformed message is not reported
+    /// as a server status.
+    fn emit_message_call(&mut self, call: &[String], rpc_path: &str, resp_ty: &str) {
+        if self.gcp {
+            self.line("var resp_bytes = List[UInt8]()");
+            self.line("try:");
+            self.push_indent();
+            for l in call {
+                self.line(l);
+            }
+            self.line("swap(resp_bytes, result.message_bytes)");
+            self.pop_indent();
+            self.emit_gcp_except(rpc_path);
+        } else {
+            for l in call {
+                self.line(l);
+            }
+            self.line("var resp_bytes = List[UInt8]()");
+            self.line("swap(resp_bytes, result.message_bytes)");
+        }
+        self.line("var dec = PbDecoder(resp_bytes^)");
+        self.line(&format!("return {resp_ty}.decode(dec)"));
+    }
+
+    /// `call`, which returns the method's result; inside a `try` for a Google
+    /// Cloud client (see [`Self::emit_message_call`]).
+    fn emit_returning_call(&mut self, call: &[String], rpc_path: &str) {
+        if self.gcp {
+            self.line("try:");
+            self.push_indent();
+            for l in call {
+                self.line(l);
+            }
+            self.pop_indent();
+            self.emit_gcp_except(rpc_path);
+        } else {
+            for l in call {
+                self.line(l);
+            }
+        }
+    }
+
+    fn emit_gcp_except(&mut self, rpc_path: &str) {
+        self.line("except e:");
+        self.push_indent();
+        self.line(&format!(
+            "raise _gcp_grpc_error(String(\"{rpc_path}\"), String(e))"
+        ));
+        self.pop_indent();
     }
 }
 
@@ -1609,12 +1850,22 @@ pub fn emit_model_with_protocol(
     model: &IrModel,
     protocol: ProtocolMode,
 ) -> Vec<(String, String)> {
+    emit_model_with_options(model, protocol, false)
+}
+
+/// [`emit_model_with_protocol`], with `gcp` selecting the Google Cloud shape
+/// of the gRPC service clients ([`Emitter::with_options`]).
+pub fn emit_model_with_options(
+    model: &IrModel,
+    protocol: ProtocolMode,
+    gcp: bool,
+) -> Vec<(String, String)> {
     model
         .files
         .iter()
         .map(|file| {
             let mojo_path = proto_to_mojo_path(&file.proto_path);
-            let source = Emitter::with_protocol(file, protocol).emit();
+            let source = Emitter::with_options(file, protocol, gcp).emit();
             (mojo_path, source)
         })
         .collect()
@@ -1983,5 +2234,183 @@ mod mojo_100_service_client_tests {
             deinits, 2,
             "one destructor per MESSAGE struct, none on the client; got:\n{out}"
         );
+    }
+}
+
+#[cfg(test)]
+mod gcp_grpc_client_tests {
+    use super::*;
+    use crate::ir::{IrFile, IrMessage, IrMethod, IrService, TypeRef};
+
+    fn tref(name: &str) -> TypeRef {
+        TypeRef {
+            fq_name: format!(".svc.v1.{name}"),
+            mojo_name: name.to_string(),
+        }
+    }
+
+    fn empty_msg(name: &str) -> IrMessage {
+        IrMessage {
+            name: name.to_string(),
+            mojo_name: name.to_string(),
+            fq_name: format!(".svc.v1.{name}"),
+            is_map_entry: false,
+            fields: vec![],
+            oneofs: vec![],
+        }
+    }
+
+    fn method(name: &str, client_streaming: bool, server_streaming: bool) -> IrMethod {
+        IrMethod {
+            name: name.to_string(),
+            input: tref("Req"),
+            output: tref("Resp"),
+            client_streaming,
+            server_streaming,
+            idempotent: false,
+            http_rule: None,
+            routing_rule: None,
+        }
+    }
+
+    /// One method of each streaming shape.
+    fn file_with_every_shape() -> IrFile {
+        IrFile {
+            proto_path: "svc/v1/svc.proto".to_string(),
+            proto_package: "svc.v1".to_string(),
+            mojo_package: "komira_gcp_svc".to_string(),
+            messages: vec![empty_msg("Req"), empty_msg("Resp")],
+            enums: vec![],
+            services: vec![IrService {
+                name: "Thing".to_string(),
+                methods: vec![
+                    method("Get", false, false),
+                    method("Watch", false, true),
+                    method("Upload", true, false),
+                    method("Chat", true, true),
+                ],
+            }],
+            imports: vec![],
+        }
+    }
+
+    fn gcp(protocol: ProtocolMode) -> String {
+        Emitter::with_options(&file_with_every_shape(), protocol, true).emit()
+    }
+
+    #[test]
+    fn the_client_takes_a_token_source_and_fixes_classic_grpc() {
+        let out = gcp(ProtocolMode::Grpc);
+        assert!(
+            out.contains("struct ThingClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):"),
+            "got:\n{out}"
+        );
+        assert!(out.contains("    comptime P = ProtocolGrpcProto\n"), "got:\n{out}");
+        assert!(!out.contains("P: Protocol"), "the protocol is not a parameter; got:\n{out}");
+        assert!(
+            out.contains("from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error\n"),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains(
+                "def __init__(out self, var client: GrpcClient[Self.C], var token_source: Self.T):"
+            ),
+            "got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn every_method_runs_the_token_hook_first_and_owns_its_options() {
+        let out = gcp(ProtocolMode::Grpc);
+        assert_eq!(out.matches("        self._authorize(opts)\n").count(), 4, "got:\n{out}");
+        assert_eq!(out.matches("var opts: CallOptions").count(), 4, "got:\n{out}");
+        // The hook comes before the request is encoded.
+        let get = out.find("def get[RT: Runtime]").expect("get");
+        let hook = out[get..].find("self._authorize(opts)").expect("hook") + get;
+        let enc = out[get..].find("var enc = PbEncoder()").expect("enc") + get;
+        assert!(hook < enc, "got:\n{out}");
+        assert!(
+            out.contains(
+                "opts.raw_metadata.set(String(\"authorization\"), String(\"Bearer \") + bearer)"
+            ),
+            "got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn every_call_raises_a_status_through_the_core() {
+        let out = gcp(ProtocolMode::Grpc);
+        assert_eq!(out.matches("def _gcp_grpc_error(").count(), 1, "got:\n{out}");
+        for path in ["Get", "Watch", "Upload", "Chat"] {
+            assert!(
+                out.contains(&format!(
+                    "            raise _gcp_grpc_error(String(\"/svc.v1.Thing/{path}\"), String(e))\n"
+                )),
+                "{path}; got:\n{out}"
+            );
+        }
+        assert!(
+            out.contains("    return gcp_grpc_status_error(rpc, status, text)\n"),
+            "got:\n{out}"
+        );
+        // The decode is outside the `try`: a malformed message is not a status.
+        let get = out.find("def get[RT: Runtime]").expect("get");
+        let except = out[get..].find("except e:").expect("except") + get;
+        let decode = out[get..].find("return Resp.decode(dec)").expect("decode") + get;
+        assert!(except < decode, "got:\n{out}");
+    }
+
+    #[test]
+    fn without_gcp_the_service_client_is_unchanged() {
+        let f = file_with_every_shape();
+        let out = Emitter::with_options(&f, ProtocolMode::Grpc, false).emit();
+        assert_eq!(out, Emitter::with_protocol(&f, ProtocolMode::Grpc).emit());
+        for absent in ["komira_gcp_core", "_authorize", "_gcp_grpc_error", "        try:\n", "ProtocolGrpcProto"] {
+            assert!(!out.contains(absent), "{absent}; got:\n{out}");
+        }
+        assert!(out.contains("struct ThingClient[C: Connector, P: Protocol]("), "got:\n{out}");
+    }
+
+    #[test]
+    fn the_routing_header_and_the_token_share_the_owned_options() {
+        let mut f = file_with_every_shape();
+        f.messages[0].fields.push(crate::ir::IrField {
+            name: "bucket".to_string(),
+            ty: IrType::Scalar(crate::ir::ScalarKind::String),
+            label: crate::ir::Label::Single,
+            proto_field_number: 1,
+            json_name: "bucket".to_string(),
+            oneof_index: None,
+        });
+        f.services[0].methods[0].routing_rule = Some(crate::ir::IrRoutingRule {
+            parameters: vec![crate::ir::IrRoutingParameter {
+                field: "bucket".to_string(),
+                path_template: "{bucket=**}".to_string(),
+            }],
+        });
+        let out = Emitter::with_options(&f, ProtocolMode::Grpc, true).emit();
+        assert!(
+            out.contains("from komira_grpc import build_routing_params, match_path_template"),
+            "got:\n{out}"
+        );
+        let get = out.find("def get[RT: Runtime]").expect("get");
+        assert!(out[get..].starts_with(
+            "def get[RT: Runtime](mut self, req: Req, var opts: CallOptions,"
+        ));
+        let routing = out[get..]
+            .find("opts.raw_metadata.set(String(\"x-goog-request-params\"), _routing_hdr)")
+            .expect("routing header")
+            + get;
+        let hook = out[get..].find("self._authorize(opts)").expect("hook") + get;
+        assert!(routing < hook, "got:\n{out}");
+    }
+
+    #[test]
+    fn gcp_with_messages_only_imports_no_transport() {
+        let mut f = file_with_every_shape();
+        f.services.clear();
+        let out = Emitter::with_options(&f, ProtocolMode::Grpc, true).emit();
+        assert_eq!(out, Emitter::with_protocol(&f, ProtocolMode::Grpc).emit());
+        assert!(!out.contains("komira_gcp_core"), "got:\n{out}");
     }
 }

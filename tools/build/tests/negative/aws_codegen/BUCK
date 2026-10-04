@@ -24,6 +24,43 @@ aws_codegen_golden(
     module = "komira_aws_logs",
 )
 
+# The client module and its probe are generated exactly as
+# tests//functional/aws_codegen:logs_client generates them, so they equal
+# their goldens and the only red is the must_contain one.
+_LOGS_CLIENT = _LOGS + [
+    "--probe-import",
+    "komira_aws_logs.komira_aws_logs",
+]
+
+# Every line of this must_contain is in the module, in this order, but the
+# config line is split mid-token, so the lines are not adjacent as written:
+# the check goes red. A matcher that dropped the line separators, matched each
+# line anywhere, or matched the lines in order but not adjacently would find
+# it, and this build would wrongly pass.
+aws_codegen_golden(
+    name = "missing_contains",
+    gen_args = _LOGS_CLIENT,
+    golden = "//functional/aws_codegen:logs_client_golden",
+    golden_probe = "//functional/aws_codegen:logs_client_probe_golden",
+    model = _LOGS_MODEL.model,
+    module = "komira_aws_logs",
+    must_contain = ["return send_sigv4_signed_request[Self.C](\nself._mk_connector,\nself._http_config.copy\n(),"],
+)
+
+# The module holds this string only as the tail of the line
+# `http_config: HttpClientConfig,`, so the check goes red: a must_contain
+# matches whole lines. A matcher that did not anchor the start of a line would
+# find it, and this build would wrongly pass.
+aws_codegen_golden(
+    name = "prefixed_contains",
+    gen_args = _LOGS_CLIENT,
+    golden = "//functional/aws_codegen:logs_client_golden",
+    golden_probe = "//functional/aws_codegen:logs_client_probe_golden",
+    model = _LOGS_MODEL.model,
+    module = "komira_aws_logs",
+    must_contain = ["config: HttpClientConfig,"],
+)
+
 # A refusal check over inputs the generator accepts goes red.
 aws_codegen_refusal(
     name = "accepted",

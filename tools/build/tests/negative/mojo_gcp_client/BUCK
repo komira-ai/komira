@@ -1,0 +1,152 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
+
+# mojo_gcp_client targets that must fail, at analysis, over the fixture API of
+# ../../functional/mojo_gcp_client, and checks of that package that must fail in
+# their build action. Each refusal is in its own target, so this package
+# loads and every target fails on its own.
+#
+# proto_tests.sh (sourced by run_tests.sh) builds each target here as an
+# expect_red, requiring the text quoted above the target.
+
+_DEPS = ["//functional/mojo_gcp_client:shop_deps"]
+
+_RUNTIME = ["//functional/proto:komira_proto_codec"]
+
+_ITEM = ["example/shop/v1/item.proto"]
+
+# shop.proto, whose service ShopService has no `(google.api.http)` annotation,
+# with the item.proto it imports.
+_SHOP = [
+    "example/shop/v1/item.proto",
+    "example/shop/v1/shop.proto",
+]
+
+_SHOP_DEPS = ["//functional/mojo_gcp_client:shop_api"]
+
+# "neither `roots` nor `methods` is set"
+mojo_gcp_client(
+    name = "unscoped",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protos = [],
+    deps = _RUNTIME,
+)
+
+# "is not a proto name": two methods joined into one item would be split by
+# the plugin into a scope the BUCK file does not show.
+mojo_gcp_client(
+    name = "joined_items",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    methods = ["ShopService.GetItem+ShopService.DeleteItem"],
+    proto_deps = _DEPS,
+    protos = [],
+    deps = _RUNTIME,
+)
+
+# "`deps` is empty": no runtime is added by default.
+mojo_gcp_client(
+    name = "no_runtime",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = [],
+)
+
+# "with an empty `bundle_only`": the whole closure is never bundled.
+mojo_gcp_client(
+    name = "whole_closure",
+    bundle_only = [],
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "which must be absent": the absence check of ../../functional/mojo_gcp_client
+# reds on a type the generated client does hold, so it can fail.
+gen_check(
+    name = "absence_check_can_fail",
+    absent = ["struct GetItemRequest("],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "item.mojo",
+        "shop.mojo",
+    ],
+    gen = "//functional/mojo_gcp_client:komira_gcp_shop[gen]",
+    present = ["struct Item("],
+)
+
+# "expected exactly:": the welded-tests check of ../../functional/mojo_gcp_client
+# reds on a library whose `[tests]` lacks the layout probe (komira_proto_codec welds
+# no test at all), so dropping the probe from mojo_gcp_client cannot pass it.
+tests_check(
+    name = "tests_check_can_fail",
+    expect = ["_layout_probe"],
+    markers = "//functional/proto:komira_proto_codec[tests]",
+)
+
+# "is not a source path of a `.proto` file": a label in `protos` is refused
+# by the rule, not reported as an unknown sub-target of the library.
+mojo_gcp_client(
+    name = "label_in_protos",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protos = ["//functional/mojo_gcp_client:shop_deps"],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "GATED TEST FAILED": a failing caller `test_srcs` entry blocks the client
+# like any library's test, next to the generated layout probe.
+mojo_gcp_client(
+    name = "caller_test_red",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    test_srcs = ["test_item_deliberate_failure.mojo"],
+    deps = _RUNTIME,
+)
+
+# "`protocol` `connect` is not one of": a protocol outside "rest" and "grpc"
+# is refused at analysis, not handed to the plugin (which would accept it).
+mojo_gcp_client(
+    name = "unknown_protocol",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protocol = "connect",
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "no `(google.api.http)` annotation": the default protocol reaches the
+# plugin as "rest". The fixture service carries no HTTP annotations, which
+# only the REST emitter refuses; under "grpc", "connect" or no option at all
+# the service generates without this error.
+mojo_gcp_client(
+    name = "rest_reaches_plugin",
+    bundle_only = _SHOP,
+    bundle_proto_deps = True,
+    methods = ["ShopService.GetItem"],
+    proto_deps = _SHOP_DEPS,
+    protos = [],
+    deps = _RUNTIME,
+)
