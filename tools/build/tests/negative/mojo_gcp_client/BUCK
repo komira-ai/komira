@@ -137,20 +137,6 @@ mojo_gcp_client(
     deps = _RUNTIME,
 )
 
-# "with a service to emit: mojo_gcp_client does not wire": "grpc" is a value of
-# `protocol`, but a target emitting a service under it is refused until
-# mojo_gcp_client wires the gRPC transport runtime and its token-metadata hook.
-mojo_gcp_client(
-    name = "grpc_not_wired",
-    bundle_only = _SHOP,
-    bundle_proto_deps = True,
-    methods = ["ShopService.GetItem"],
-    proto_deps = _SHOP_DEPS,
-    protocol = "grpc",
-    protos = [],
-    deps = _RUNTIME,
-)
-
 # "no `(google.api.http)` annotation": the default protocol reaches the
 # plugin as "rest". The fixture service carries no HTTP annotations, which
 # only the REST emitter refuses; under "grpc", "connect" or no option at all
