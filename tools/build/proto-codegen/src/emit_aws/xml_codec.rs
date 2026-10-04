@@ -720,8 +720,11 @@ impl AwsEmitter<'_> {
             IrType::Map(_, v) => {
                 // A map nested in a list or a map: its element `src` is
                 // the wrapper of its <entry> elements, or, for a map shape
-                // that is flattened, the one entry (botocore's
-                // `_handle_map`).
+                // that is flattened, the one entry. Only the wrapper's
+                // `<entry>` children are read; botocore's `_handle_map`
+                // takes every child as an entry (and raises on an unknown
+                // key or value tag), so a child of another name is ignored
+                // here where botocore would fail.
                 let map = self.xml_map_of(shape, false)?;
                 let node = format!("_xn{depth}_{}", f.name);
                 let tmp = format!("_xm{depth}_{}", f.name);

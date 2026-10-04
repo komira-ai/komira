@@ -175,8 +175,8 @@ pub(super) fn select_protocol(meta: &AwsServiceMeta) -> Result<SelectedProtocol,
         _ => {
             return Err(format!(
                 "emit_aws: service `{}` declares protocol `{}`, and this emitter \
-                 implements only {:?} (awsJson1_0 / awsJson1_1, restJson1, restXml, awsQuery, \
-                 ec2Query). It is REFUSED by name \
+                 implements only {:?} (ec2Query, awsJson1_0 / awsJson1_1, awsQuery, restJson1, \
+                 restXml). It is REFUSED by name \
                  rather than emitted half-right: a `{}` client emitted by a `json` \
                  serializer produces requests that are syntactically valid and \
                  semantically wrong, which is the failure mode a conformance corpus \

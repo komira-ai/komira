@@ -83,7 +83,7 @@ pub const S3_CUSTOMIZATION: &str = "s3";
 
 /// The protocols this emitter implements, by botocore name. Anything else is
 /// refused.
-pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json", "rest-xml", "query", "ec2"];
+pub const SUPPORTED_PROTOCOLS: &[&str] = &["ec2", "json", "query", "rest-json", "rest-xml"];
 
 /// The `jsonVersion` values this emitter implements.
 pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];

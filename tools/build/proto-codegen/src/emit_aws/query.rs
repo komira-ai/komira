@@ -16,7 +16,10 @@
 //! - A scalar is `komira_aws_core`'s `aws_text_*` text: "true" / "false",
 //!   the decimal integer, the number or "NaN" / "Infinity" / "-Infinity",
 //!   standard base64, a timestamp in the member's format (date-time by
-//!   default).
+//!   default). One divergence from botocore: a fraction of a second is
+//!   written as milliseconds (`aws_text_ts`) in date-time and epoch-seconds,
+//!   where botocore writes six digits and whole seconds respectively
+//!   (`komira_aws_core/aws_query.mojo`'s header; pinned by test_aws_query).
 //! - awsQuery lists: wrapped, `<name>.<member>.<i>` from 1, the item name the
 //!   list member's `locationName` or `member`; flattened (the member or the
 //!   list shape says `flattened`), `<name>.<i>`, and when the list member
@@ -36,7 +39,8 @@
 //! wrapper). An operation with no output reads nothing.
 //!
 //! Errors: `komira_aws_core.aws_query_error`, which reads
-//! `<ErrorResponse><Error>` and ec2Query's `<Response><Errors><Error>`.
+//! `<ErrorResponse><Error>` and ec2Query's `<Response><Errors><Error>`
+//! through the shared XML error reader (`aws_xml_error_info`).
 //!
 //! REFUSED by name before any text is emitted ([`check_query_features`]): a
 //! `union` and an `xmlAttribute` member, which the XML codec does not read.
@@ -477,6 +481,11 @@ impl AwsEmitter<'_> {
             facts.http_method.to_uppercase(),
             escape(&facts.path)
         ));
+        // `endpoint.hostPrefix`, with its `hostLabel` members substituted.
+        // Not reached today: the front-end refuses an operation with a host
+        // prefix (host-prefix) because the generated `send` does not apply
+        // `req.host_prefix` yet. It is kept so lifting that refusal is the
+        // only change the builder needs, as in the other bindings.
         if let Some(hp) = &facts.host_prefix {
             let expr = self.host_prefix_expr(hp, &m.input.fq_name)?;
             self.line(&format!("req.host_prefix = {expr}"));
