@@ -21,7 +21,7 @@ from std.os.path import exists, realpath
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_contract import (
+from kci_api import (
     ERROR_CANNOT_TELL,
     ERROR_REVISION,
     OUTCOME_INDETERMINATE,
@@ -32,7 +32,7 @@ from kci_contract import (
     RunIdentity,
     exit_code_of,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_build import (
     BuildRequest,
     ProcessRunner,
@@ -64,7 +64,7 @@ def _fresh(tag: String) raises -> String:
 
 def _request(root: String) raises -> BuildRequest:
     var r = BuildRequest(RunIdentity(String("gh-1"), 1))
-    r.declarations_file = root + String("/decls.textproto")
+    r.artifacts_file = root + String("/artifacts.textproto")
     r.work_dir = root + String("/repo")
     r.release_dir = root + String("/release")
     r.log_dir = root + String("/logs")
@@ -336,7 +336,7 @@ def test_a_refused_stamp_runs_no_build_and_creates_no_release_dir() raises:
     var root = _fresh(String("flow"))
     var req = _request(root)
     write_text_file(
-        req.declarations_file,
+        req.artifacts_file,
         String(
             'schema_version: 1\n'
             'build_systems { name: "b" executable: "b" }\n'
