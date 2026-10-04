@@ -152,14 +152,17 @@ pub struct Scope {
     pub messages_only: bool,
     /// Fields left out of their message, each named by its fully-qualified
     /// proto name (`pkg.Message.field`, a leading `.` optional): for a field
-    /// whose type the runtime cannot represent (one reaching a
-    /// `google.protobuf.Api`, which `komira_wkt` does not provide) and which the client's callers do
-    /// not read. The generated message has no such member, so a response's
-    /// value for it is skipped as an unknown key (a lenient JSON read skips
-    /// one; a binary read skips an unknown field number), a request never
-    /// sends it, and its type is reached through it no longer. A name that
-    /// is not a field of a message of the files to generate is refused, and
-    /// so is a member of a `oneof`.
+    /// the client's callers do not read and whose type the runtime cannot
+    /// represent (one reaching a `google.protobuf.Api`, which `komira_wkt`
+    /// does not provide, or a `map<string, int64>`, which
+    /// `komira_proto_codec` does not decode). The generated message has no
+    /// such member, so a response's value for it is skipped as an unknown
+    /// key (a lenient JSON read skips one; a binary read skips an unknown
+    /// field number), a request never sends it, and its type is reached
+    /// through it no longer. A name that is not a field of a generated
+    /// message is refused: a field of no message in the files to generate,
+    /// and one of a message the scope prunes, which would leave out nothing.
+    /// So is a member of a `oneof`.
     pub omit_fields: Vec<String>,
 }
 
@@ -199,9 +202,25 @@ pub fn lower_scoped(
     if scope.is_everything() {
         return Ok(model);
     }
-    omit_fields(&mut model, &scope.omit_fields)?;
+    // Before the prune, so that the closure no longer reaches what an
+    // omitted field's type reaches; checked again after it, so that a field
+    // of a message the scope does not generate is not taken as omitted.
+    let omitted = omit_fields(&mut model, &scope.omit_fields)?;
     if scope.prunes() {
         prune(&lowerer, &mut model, scope)?;
+    }
+    for (name, msg_fq) in &omitted {
+        let generated = model
+            .files
+            .iter()
+            .flat_map(|f| f.messages.iter())
+            .any(|m| &m.fq_name == msg_fq);
+        if !generated {
+            return Err(format!(
+                "omit_fields: `{name}` is a field of `{msg_fq}`, which this scope does \
+                 not generate, so it leaves out nothing: drop it from omit_fields"
+            ));
+        }
     }
     if scope.messages_only {
         for file in &mut model.files {
@@ -226,7 +245,12 @@ pub fn lower_scoped(
 }
 
 /// Remove each field `names` names from its message (`Scope::omit_fields`).
-fn omit_fields(model: &mut IrModel, names: &[String]) -> Result<(), String> {
+/// Returns each name with the fully-qualified name of its message.
+fn omit_fields(
+    model: &mut IrModel,
+    names: &[String],
+) -> Result<Vec<(String, String)>, String> {
+    let mut omitted = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for name in names {
         let fq = if name.starts_with('.') { name.clone() } else { format!(".{name}") };
@@ -257,8 +281,9 @@ fn omit_fields(model: &mut IrModel, names: &[String]) -> Result<(), String> {
             ));
         }
         msg.fields.remove(at);
+        omitted.push((name.clone(), msg_fq.to_string()));
     }
-    Ok(())
+    Ok(omitted)
 }
 
 /// Whether `fq` (`.pkg.A.B`) is named by `name`. A name with a leading `.`

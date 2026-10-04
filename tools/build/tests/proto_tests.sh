@@ -75,6 +75,7 @@ expect_red gcp_client_no_runtime '`deps` is empty' tests//negative/mojo_gcp_clie
 expect_red gcp_client_whole_closure 'with an empty `bundle_only`' tests//negative/mojo_gcp_client:whole_closure
 expect_red gcp_client_label_in_protos 'is not a source path of a `.proto` file' tests//negative/mojo_gcp_client:label_in_protos
 expect_red gcp_client_omit_unknown_field 'message `.example.shop.v1.Item` has no field `colour`' tests//negative/mojo_gcp_client:omit_unknown_field
+expect_red gcp_client_omit_pruned_field 'omit_fields: `example.shop.v1.ItemTombstone.name` is a field of `.example.shop.v1.ItemTombstone`, which this scope does not generate' tests//negative/mojo_gcp_client:omit_pruned_field
 expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/mojo_gcp_client:caller_test_red
 expect_red gcp_client_absence_check 'which must be absent' tests//negative/mojo_gcp_client:absence_check_can_fail
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/mojo_gcp_client:tests_check_can_fail

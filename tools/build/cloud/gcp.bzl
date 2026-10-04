@@ -36,11 +36,12 @@ holding either, `=` or whitespace is refused here rather than mis-split.
 `omit_fields` names fields (`pkg.Message.field`) left out of their
 message: a field whose type the runtime cannot represent and no caller
 reads, such as Service Usage's `Service.config` (its `ServiceConfig` reaches
-`google.protobuf.Api`, which komira_wkt does not provide, and `map<string,
-int64>` fields, which komira_proto_codec does not decode). The message is generated without it, so
-a response's value for it is skipped like any unknown key, a request never
-sends it, and the closure no longer reaches its type. A name that is not a
-field of a generated message is refused at generation.
+`google.protobuf.Api`, which komira_wkt does not provide, and
+`map<string, int64>` fields, which komira_proto_codec does not decode). The
+message is generated without it, so a response's value for it is skipped
+like any unknown key, a request never sends it, and the closure no longer
+reaches its type. A name that is not a field of a generated message is
+refused at generation, including a field of a message the scope prunes.
 
 Protocol. `protocol` is the wire protocol of the generated service code,
 passed to protoc-gen-mojo as `default_protocol`. It is "rest" (JSON over
