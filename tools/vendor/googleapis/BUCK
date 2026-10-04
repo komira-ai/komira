@@ -65,9 +65,21 @@ _STORAGE_V2_CLOSURE = _STORAGE_V2_ROOTS + [
     "google/type/expr.proto",
 ]
 
+# The `(google.api.http)` method option alone, for a REST client of a proto
+# that imports nothing else of googleapis: annotations.proto and its import
+# closure, google/protobuf/* excepted. :api_http refuses this list unless it
+# is exactly that closure.
+_API_HTTP_ROOTS = [
+    "google/api/annotations.proto",
+]
+
+_API_HTTP_CLOSURE = _API_HTTP_ROOTS + [
+    "google/api/http.proto",
+]
+
 # Every client's closure; a new client appends its list here, and :googleapis
 # extracts the union.
-_ALL_CLOSURES = _LOGGING_V2_CLOSURE + _STORAGE_V2_CLOSURE
+_ALL_CLOSURES = _LOGGING_V2_CLOSURE + _STORAGE_V2_CLOSURE + _API_HTTP_CLOSURE
 
 # The files out of the archive, each a sub-target named by its path:
 # :googleapis[LICENSE] is googleapis's license file at the pin. A file several
@@ -98,6 +110,16 @@ proto_check(
     name = "storage_v2",
     roots = _STORAGE_V2_ROOTS,
     srcs = [":googleapis[{}]".format(f) for f in sorted(_STORAGE_V2_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The `(google.api.http)` option's protos, for a consumer, as :logging_v2
+# above.
+proto_check(
+    name = "api_http",
+    roots = _API_HTTP_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_API_HTTP_CLOSURE)],
     strip_prefix = "files",
     visibility = ["PUBLIC"],
 )

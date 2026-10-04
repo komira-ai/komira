@@ -19,10 +19,17 @@
 #       PRESENT_IDENTICAL (nothing to upload), other bytes PRESENT_DIFFERENT
 #       (a conflict the caller refuses); an upload is never redirected;
 #   (5) local refusals, each before any request: an empty Authorization, a non-conda file, no subdir, a repo with
-#       no channel or two segments, a coordinate whose name or version is not
+#       no channel or three segments, a coordinate whose name or version is not
 #       the file's, a file holding its own delimiter, an unapproved name;
-#   (6) `prefix_dev_repo_of_location` takes exactly `https://<host>/<channel>`;
-#   (7) an upload answer that echoes the token is withheld.
+#   (6) `prefix_dev_repo_of_location` takes exactly `https://<host>/<namespace>`
+#       or `https://<host>/<namespace>/<channel>`;
+#   (7) an upload answer that echoes the token is withheld;
+#   (8) a NAMESPACED channel (`<namespace>/<channel>`, prefix.dev's form for
+#       every non-primary channel): the upload is
+#       `POST /api/v1/upload/<namespace>/<channel>`, the read-back and the fetch
+#       are under `/<namespace>/<channel>/<subdir>/`; a third segment, an empty
+#       or dot segment and an `@` (the website route only) are refused before
+#       any request.
 #
 # Hermetic: ScriptedPkgTransport + ScriptedCredential; no network.
 # =============================================================================
@@ -266,8 +273,8 @@ def test_local_refusals_send_nothing() raises:
     )
     _refused(_file(_coord(repo=String("prefix.dev"))), String("names no channel"), _creds())
     _refused(
-        _file(_coord(repo=String("prefix.dev/a/b"))),
-        String("exactly one channel segment"),
+        _file(_coord(repo=String("prefix.dev/a/b/c"))),
+        String("<namespace> or <namespace>/<channel>"),
         _creds(),
     )
     _refused(
@@ -300,8 +307,8 @@ def test_location_parsing() raises:
         _ = prefix_dev_repo_of_location(String("https://prefix.dev:8443/c"))
     with assert_raises(contains="names no channel"):
         _ = prefix_dev_repo_of_location(String("https://prefix.dev"))
-    with assert_raises(contains="exactly one channel segment"):
-        _ = prefix_dev_repo_of_location(String("https://prefix.dev/a/b"))
+    with assert_raises(contains="<namespace> or <namespace>/<channel>"):
+        _ = prefix_dev_repo_of_location(String("https://prefix.dev/a/b/c"))
     with assert_raises(contains="trailing slash"):
         _ = prefix_dev_repo_of_location(String("https://prefix.dev/c/"))
     print("  test_location_parsing: PASS")
@@ -326,7 +333,83 @@ def test_an_answer_echoing_the_token_is_withheld() raises:
     print("  test_an_answer_echoing_the_token_is_withheld: PASS")
 
 
+comptime _NS_REPO: String = "prefix.dev/komira-ai/gamma"
+
+
+def test_a_namespaced_channel() raises:
+    # the location of a non-primary channel, and of a primary one
+    assert_equal(
+        prefix_dev_repo_of_location(String("https://prefix.dev/komira-ai/gamma")),
+        String(_NS_REPO),
+    )
+    assert_equal(
+        prefix_dev_repo_of_location(String("https://prefix.dev/komira-ai/prod")),
+        String("prefix.dev/komira-ai/prod"),
+    )
+    assert_equal(
+        prefix_dev_repo_of_location(String("https://prefix.dev/komira-ai")),
+        String("prefix.dev/komira-ai"),
+    )
+    # upload, then read back and fetch: the two segments travel unchanged
+    var ours = content_identity_of(bytes_of(String(_BYTES))).sha256_hex
+    var t = ScriptedPkgTransport()
+    t.queue(PkgResponse(201))
+    t.queue(_repodata(String(_FILE), ours))
+    var got = PkgResponse(200)
+    got.with_body(bytes_of(String(_BYTES)))
+    t.queue(got^)
+    var rs = _set(t^)
+    var f = _file(_coord(repo=String(_NS_REPO)))
+    var o = rs.upload(f, _names())
+    assert_equal(o.kind, UPLOAD_CREATED, upload_kind_name(o.kind) + o.detail)
+    var p = rs.presence(f.coordinate, f.identity)
+    assert_equal(p.kind, PRESENCE_PRESENT_IDENTICAL, presence_kind_name(p.kind) + p.detail)
+    _ = rs.fetch(f.coordinate)
+    assert_equal(rs.transport().call_count(), 3)
+    assert_equal(rs.transport().call(0).method, HTTP_METHOD_POST)
+    assert_equal(rs.transport().call(0).host, String("prefix.dev"))
+    assert_equal(rs.transport().call(0).path, String("/api/v1/upload/komira-ai/gamma"))
+    assert_equal(rs.transport().call(1).host, String("prefix.dev"))
+    assert_equal(
+        rs.transport().call(1).path, String("/komira-ai/gamma/linux-64/repodata.json")
+    )
+    assert_equal(
+        rs.transport().call(2).path, String("/komira-ai/gamma/linux-64/") + String(_FILE)
+    )
+    # refused before any request: a third segment, an empty segment, a dot
+    # segment, and an `@` in either segment (the website route's spelling)
+    _refused(
+        _file(_coord(repo=String("prefix.dev/komira-ai/gamma/x"))),
+        String("<namespace> or <namespace>/<channel>"),
+        _creds(),
+    )
+    _refused(
+        _file(_coord(repo=String("prefix.dev/komira-ai//gamma"))),
+        String("EMPTY channel path segment"),
+        _creds(),
+    )
+    _refused(
+        _file(_coord(repo=String("prefix.dev/komira-ai/.."))),
+        String("is not a channel path segment"),
+        _creds(),
+    )
+    _refused(
+        _file(_coord(repo=String("prefix.dev/@komira-ai/gamma"))),
+        String("website route"),
+        _creds(),
+    )
+    _refused(
+        _file(_coord(repo=String("prefix.dev/@komira-ai"))),
+        String("website route"),
+        _creds(),
+    )
+    with assert_raises(contains="website route"):
+        _ = prefix_dev_repo_of_location(String("https://prefix.dev/@komira-ai/gamma"))
+    print("  test_a_namespaced_channel: PASS")
+
+
 def main() raises:
+    test_a_namespaced_channel()
     test_the_golden_request()
     test_the_boundary_is_a_function_of_the_file()
     test_every_answer_is_a_kind()
