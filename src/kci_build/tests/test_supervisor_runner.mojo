@@ -1,8 +1,9 @@
 # =============================================================================
 # src/kci_build/tests/test_supervisor_runner.mojo
 #   SupervisorRunner over real /bin/sh processes: both streams reach their
-#   files byte for byte, the exit status comes back, the cwd is applied, and a
-#   run past its timeout is stopped and reported as timed out.
+#   files byte for byte, the exit status comes back, the cwd is applied, a
+#   run past its timeout is stopped and reported as timed out, and an explicit
+#   environment is exactly what the child sees (None inherits).
 # =============================================================================
 
 from std.ffi import external_call
@@ -70,6 +71,41 @@ def test_a_large_stderr_keeps_only_its_tail() raises:
     assert_equal(len(Path(spec.stderr_path).read_bytes()), 800 * (line.byte_length() + 1) + 5)
     assert_true(r.stderr_tail.byte_length() <= 4096)
     assert_true(r.stderr_tail.endswith(String("LAST\n")))
+
+
+def _env_spec(d: String) -> RunSpec:
+    return RunSpec(
+        String("/usr/bin/env"), List[String](), d.copy(), 30, d + String("/out.txt"), d + String("/err.txt")
+    )
+
+
+def test_an_explicit_env_is_all_the_child_sees() raises:
+    var d = _dir(String("env"))
+    var runner = SupervisorRunner()
+    var spec = _env_spec(d)
+    var entries = List[String]()
+    entries.append(String("PATH=/x"))
+    entries.append(String("KCI_PROBE=1"))
+    spec.set_env(entries^)
+    var r = runner.run(spec)
+    assert_true(r.ok(), r.describe())
+    # `env` prints its environment: exactly the two entries, nothing inherited
+    assert_equal(Path(spec.stdout_path).read_text(), String("PATH=/x\nKCI_PROBE=1\n"))
+
+
+def test_no_env_inherits() raises:
+    var d = _dir(String("inherit"))
+    var runner = SupervisorRunner()
+    var spec = _env_spec(d)
+    var r = runner.run(spec)
+    assert_true(r.ok(), r.describe())
+    var out = Path(spec.stdout_path).read_text()
+    # this test's own TMPDIR or TEST_TMPDIR reached the child
+    var name = String("TEST_TMPDIR=")
+    if getenv("TEST_TMPDIR").byte_length() == 0:
+        name = String("TMPDIR=")
+    assert_true(out.find(name) >= 0, out)
+    assert_true(out.find(String("KCI_PROBE=")) < 0)
 
 
 def test_a_run_past_its_timeout_is_stopped() raises:

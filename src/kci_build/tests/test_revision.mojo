@@ -21,7 +21,7 @@ from std.os.path import exists, realpath
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_contract import (
+from kci_api import (
     ERROR_CANNOT_TELL,
     ERROR_REVISION,
     OUTCOME_INDETERMINATE,
@@ -32,7 +32,7 @@ from kci_contract import (
     RunIdentity,
     exit_code_of,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_build import (
     BuildRequest,
     ProcessRunner,

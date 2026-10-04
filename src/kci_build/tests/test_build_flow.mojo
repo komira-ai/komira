@@ -34,7 +34,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_crypto import hex_lower_array_32, sha256_string
 
 from kci_artifact_declaration import ReleaseStamp, read_artifact_declarations, render_build_argv
-from kci_contract import (
+from kci_api import (
     ARTIFACT_BUILT,
     ARTIFACT_WOULD_BUILD,
     ERROR_BUILD_FAILED,
@@ -59,7 +59,7 @@ from kci_contract import (
     RunIdentity,
     RunRecorder,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_build import (
     BuildOutcome,
     BuildRequest,
@@ -351,6 +351,8 @@ def test_example_file_builds_the_stamped_library_then_the_metapackage() raises:
     assert_equal(spec.timeout_s, 99)
     assert_equal(spec.stdout_path, req.log_dir + String("/komira_encoding.stdout"))
     assert_equal(spec.stderr_path, req.log_dir + String("/komira_encoding.stderr"))
+    # the BUILD step's children inherit kci's environment unchanged
+    assert_false(Bool(spec.env))
     # the metapackage, last, through `buck2 run`, reading the library's manifest
     ref meta = runner.calls[1]
     assert_equal(meta.path, String("buck2"))
@@ -359,6 +361,7 @@ def test_example_file_builds_the_stamped_library_then_the_metapackage() raises:
     assert_equal(meta.argv[3], String("conda-meta"))
     assert_equal(meta.argv[7], req.platform_dir() + String("/komira_encoding/manifest.json"))
     assert_equal(meta.argv[len(meta.argv) - 1], req.platform_dir() + String("/komira_all"))
+    assert_false(Bool(meta.env))
     # the git commands ran in the work dir, logged where no artifact can be
     assert_equal(git.calls[0].cwd, req.work_dir)
     assert_equal(git.calls[0].stdout_path, req.log_dir + String("/_git_1.stdout"))
