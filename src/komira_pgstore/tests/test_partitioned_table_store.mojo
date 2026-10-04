@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_partitioned_table_store.mojo
+# src/komira_pgstore/tests/test_partitioned_table_store.mojo
 #   WS-2 — PartitionedTableStore router + per-shard commit (RELAXED §10 scope).
 #   (heap Model-2 sharding campaign).
 # =============================================================================

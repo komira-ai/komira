@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_recovery_chaos.mojo
+# src/komira_pgstore/tests/test_pgstore_recovery_chaos.mojo
 #   HARNESS 2 — CRASH-RECOVERY under FAILURE INJECTION (the chaos pass).
 # =============================================================================
 #

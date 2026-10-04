@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_async_commit_park.mojo
+# src/komira_pgstore/tests/test_pgstore_async_commit_park_e2e.mojo
 #   PARK-PROOF for the pgstore parkable AsyncCommitOp (P2) — THE
 #   GATE: while connection A's commit is PARKED on its in-flight create-CAS,
 #   connection B executes AND completes its own work; A's commit still lands

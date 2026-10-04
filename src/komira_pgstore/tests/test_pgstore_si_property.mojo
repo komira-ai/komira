@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_si_property.mojo
+# src/komira_pgstore/tests/test_pgstore_si_property.mojo
 #   HARNESS 1 — randomized Snapshot-Isolation PROPERTY check (Jepsen-style).
 # =============================================================================
 #

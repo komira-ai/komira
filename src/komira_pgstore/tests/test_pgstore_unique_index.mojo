@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_unique_index.mojo
+# src/komira_pgstore/tests/test_pgstore_unique_index.mojo
 #   SI-7 UNIQUE enforcement — the STORAGE-LEVEL discriminating falsifiers for
 #   the §7 first-committer-wins protocol over a pk-SUFFIXED unique index.
 # =============================================================================
@@ -26,8 +26,7 @@
 #   (c) NULL trap (§7.5) — multiple NULLs allowed (NULL ≠ NULL); a CONTRAST
 #       GUARD proves the unique check is still LIVE for non-null values.
 #   (d) COLD-TIER injectivity (§7.4 / slice-4(e)) — the SQL-face form is now LIVE
-#       at the DRIVER tier: see
-#       tests/komira_pgstore_driver/test_cold_tier_lifecycle.mojo
+#       at the DRIVER tier: see the driver's cold-tier lifecycle test,
 #       `test_b_cold_aware_unique_rejects_columnarized_reaped_duplicate`. The
 #       LEAF-level variant stays out of scope by design (the reuse-safe leaf has
 #       NO columnar dep). Documented at the bottom.
@@ -917,7 +916,7 @@ def test_c_null_multiple_allowed() raises:
 # The SQL-face cold-aware UNIQUE falsifier — INSERT a unique value, columnarize +
 # REAP the WAL, then INSERT the SAME value with a DIFFERENT pk and assert 23505 —
 # is now LIVE at the DRIVER tier:
-# `tests/komira_pgstore_driver/test_cold_tier_lifecycle.mojo`
+# the driver's cold-tier lifecycle test,
 # `test_b_cold_aware_unique_rejects_columnarized_reaped_duplicate`. There the
 # `PgstoreDatabase` owns a paired `ColumnarCatalog` and the SI-7 UNIQUE check
 # routes through `index_scan_visible_dual_tier`, so a columnarized+reaped

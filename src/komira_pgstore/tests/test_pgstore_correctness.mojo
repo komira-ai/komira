@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_correctness.mojo
+# src/komira_pgstore/tests/test_pgstore_correctness.mojo
 #   Serverless-Postgres correctness slice — the DETERMINISTIC invariant tests
 #   (a),(b),(c),(e),(f) + the (d) deterministic discriminating variant.
 # =============================================================================

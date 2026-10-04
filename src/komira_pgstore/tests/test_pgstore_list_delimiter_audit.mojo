@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_list_delimiter_audit.mojo
+# src/komira_pgstore/tests/test_pgstore_list_delimiter_audit.mojo
 #   C-LIST-DELIMITER (PRIORITY 1) — the highest-leverage production-bug guard.
 # =============================================================================
 #

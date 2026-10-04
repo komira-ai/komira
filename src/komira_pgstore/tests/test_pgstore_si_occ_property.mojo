@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_si_occ_property.mojo
+# src/komira_pgstore/tests/test_pgstore_si_occ_property.mojo
 #   PRIORITY 2 (storage-level SI/OCC) — the three additive deterministic
 #   witnesses the existing harnesses do not already pin:
 #     C-SI-WRITESKEW   — SI is NOT serializable (an explicit write-skew witness).

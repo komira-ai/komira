@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_group_commit_conflict_fuzz.mojo
+# src/komira_pgstore/tests/test_group_commit_conflict_fuzz.mojo
 #   MANDATORY adversarial conflict-FUZZ for pgstore GROUP-COMMIT.
 #   The HIGHEST-RISK surface: a missed key-intersection in the codec's
 #   arbitration / per-member OCC is a SILENT LOST-UPDATE.

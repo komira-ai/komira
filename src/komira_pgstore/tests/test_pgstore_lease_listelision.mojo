@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_lease_listelision.mojo
+# src/komira_pgstore/tests/test_pgstore_lease_listelision.mojo
 #   Single-writer LEASE LIST-elision fast-path — the
 #   correctness + win-mechanism tests. The concurrent + 412 tests are
 #   single-threaded DETERMINISTIC interleaves over a shared store (two

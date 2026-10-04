@@ -248,7 +248,7 @@ struct CommitResult(Copyable, Movable, Deinitable):
     (= the commit LSN); -1 for a read-only / empty txn. `did_append` is False
     for a read-only txn (no chunk was written).
 
-    S-a (D-A3, ): `attempts` is the CREATE-CAS slot-race count
+    S-a (D-A3): `attempts` is the CREATE-CAS slot-race count
     (`AppendResult.attempts`) — how many create-CAS attempts the winning append
     took (1 = won first try; >1 = lost the slot to a concurrent committer and
     re-drove). This is the per-lineage CONTENTION signal the adaptive-index-
@@ -373,7 +373,7 @@ struct Txn(Movable, Deinitable):
 # conformer (the stale-reuse contract), NOT here — this struct holds ONLY the consumed
 # txn's snapshot + write-set (the OCC + chunk-body inputs), the attempt counter,
 # the in-flight slot/auth-head, and the terminal outcome. Plain owned values +
-# PODs — NO byte-slab, NO wildcard origin, NO pointer (reuse-safe trivially; reuse-safe
+# PODs — NO byte-slab, NO wildcard origin, NO pointer (trivially reuse-safe, including
 # when stored on PgConnState's Slab by the concrete-origin Slab access).
 #
 # NOT a TableStore method-state: the op is SEPARATE from the store so the serve
@@ -657,7 +657,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # caught by the 412 -> re-LIST -> re-OCC against the now-visible competitor.
     #
     # stale-reuse: PLAIN VALUE FIELDS (Bool + Int64) — NO byte-slab element, NO heap-
-    # owning inner field, NO wildcard origin, NO UnsafePointer. reuse-safe (no heap fields) by the
+    # owning inner field, NO wildcard origin, NO UnsafePointer. reuse-safe (no heap fields), by the
     # same reasoning the `_LocalHeadCache` header gives (cas_manifest.mojo:546).
     #
     #   * `_lease_fastpath_enabled` — the DEFAULT-ON flag (was
@@ -845,7 +845,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         ONE replay pass routes every chunk into every index memtable in a
         SINGLE WAL scan.
 
-        PERF-CRITICAL (perf/pgstore-per-request-cache — the dominant
+        PERF-CRITICAL (the per-request cache work — the dominant
         per-request-open cost). The alternative ordering — `open()` (replay
         heap-only) THEN `register_index` per index — forces register_index's
         catch-up fold to RE-READ EVERY WAL chunk once PER INDEX (each
@@ -1143,7 +1143,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
                 "TableStore.commit_index_shard: the separate-index-shard-WAL"
                 " (Option-A S-b) path is DISABLED in production until the"
                 " T-INV3-* + T-CRASH-2 correctness falsifiers pass — pass"
-                " enable_separate_wal=True to opt in (gate, )"
+                " enable_separate_wal=True to opt in."
             )
         if dml_lsn < Int64(0):
             raise Error(
@@ -1387,7 +1387,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
                 "non-zero writer-lease epochs are not supported on the async/group"
                 " commit path yet — the epoch fence is wired only on sync commit();"
                 " the async/group create-CAS is unfenced (would silently drop the"
-                " fence → torn offset). See. Use epochs (0,0) until"
+                " fence → torn offset). Use epochs (0,0) until"
                 " that lands."
             )
         var auth_head = self.lease_auth_head_for_commit()
@@ -1537,7 +1537,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
                 "non-zero writer-lease epochs are not supported on the async/group"
                 " commit path yet — the epoch fence is wired only on sync commit();"
                 " the async/group create-CAS is unfenced (would silently drop the"
-                " fence → torn offset). See. Use epochs (0,0) until"
+                " fence → torn offset). Use epochs (0,0) until"
                 " that lands."
             )
         return self.lease_auth_head_for_commit()
@@ -1833,7 +1833,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
 
     def refresh_to_durable_head(mut self) raises -> Int64:
         """Refresh this handle's folded index to the DURABLE `_HEAD` pointer
-        (perf/pgstore-per-request-cache, lever 2 — the per-worker cached
+        (the per-request cache work, lever 2 — the per-worker cached
         handle). Reads the durable `_HEAD` OBJECT (`read_durable_head()`, ONE GET,
         O(1) — NOT the O(chunks) authoritative LIST) as the freshness ORACLE, and
         delta-folds ONLY the NEW chunks `(_folded_seq, durable_head]`. Returns the

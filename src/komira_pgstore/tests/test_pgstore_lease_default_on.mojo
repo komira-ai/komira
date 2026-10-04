@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_lease_default_on.mojo
+# src/komira_pgstore/tests/test_pgstore_lease_default_on.mojo
 #   DEFAULT-ON regression guard for the single-writer LEASE LIST-elision
 #   fast-path (the global default-ON flip).
 # =============================================================================

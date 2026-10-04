@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_concurrency.mojo
+# src/komira_pgstore/tests/test_pgstore_concurrency.mojo
 #   Serverless-Postgres correctness slice — the REAL-OS-THREAD tests:
 #   (d) real-thread OCC write-write + (g) K>=16 concurrency soak.
 # =============================================================================

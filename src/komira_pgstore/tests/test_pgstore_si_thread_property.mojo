@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_si_thread_property.mojo
+# src/komira_pgstore/tests/test_pgstore_si_thread_property.mojo
 #   C-SI-THREAD-PROPERTY (PRIORITY 2) — true OS-thread randomized N-conn x M-op
 #   interleavings, audited against a MERGED-HISTORY REFERENCE MODEL after join.
 # =============================================================================

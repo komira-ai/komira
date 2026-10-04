@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_secondary_index.mojo
+# src/komira_pgstore/tests/test_pgstore_secondary_index.mojo
 #   SI slice 1 — the STORAGE-LEVEL discriminating falsifiers for the per-index
 #   memtable family in TableStore (register_index + routed fold + index_scan_
 #   visible). These probe the index MEMTABLE directly, so a stub that does NOT
@@ -7,7 +7,7 @@
 #   whose result a full-scan fallback could reproduce.
 # =============================================================================
 #
-# The SQL-face test (tests/komira_pgsql/test_secondary_index.mojo) proves the
+# The SQL-layer secondary-index test proves the
 # end-to-end `WHERE col = ?` correctness, but a full-scan fallback yields the
 # SAME rows, so those asserts do not DISCRIMINATE "index consulted". This file
 # closes that gap: it asserts directly on `TableStore.index_scan_visible`, which

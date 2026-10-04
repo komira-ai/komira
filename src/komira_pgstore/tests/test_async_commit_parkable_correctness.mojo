@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_async_commit_parkable_correctness.mojo
+# src/komira_pgstore/tests/test_async_commit_parkable_correctness.mojo
 #   COMPREHENSIVE parkable-commit CORRECTNESS gate — the
 #   DRIVER-LEVEL half: scenarios that exercise the `commit_async_*` poll-shaped
 #   commit driver (table_store) DIRECTLY over a controllable-slow / one-shot-

@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_lease_enablement_battery.mojo
+# src/komira_pgstore/tests/test_pgstore_lease_enablement_battery.mojo
 #   COMPREHENSIVE ENABLEMENT CORRECTNESS BATTERY for the single-writer LEASE
 #   LIST-elision fast-path — the flip-readiness gate before a
 #   future default-ON flip.
@@ -1030,7 +1030,7 @@ def test_4_crash_recovery_lease_state_loss() raises:
 # =============================================================================
 
 
-def test_5_gap6_churn_soak() raises:
+def test_5_stale_reuse_churn_soak() raises:
     print(
         "[5] stale-reuse CHURN SOAK — destroy-recreate TableStore cycles, lease ENABLED"
         " across cycles, sustained: no stale-reuse/double-free/UAF, monotone exact"
@@ -1322,7 +1322,7 @@ def main() raises:
     test_2_high_concurrency_stress()               # shared-store interleave
     test_3_fault_injection_lease_recovers()        # transient fault self-heal
     test_4_crash_recovery_lease_state_loss()       # lease-state-loss recovery
-    test_5_gap6_churn_soak()                        # destroy-recreate stale-reuse soak
+    test_5_stale_reuse_churn_soak()                        # destroy-recreate stale-reuse soak
     test_6_elision_effectiveness_broad()           # broad win-mechanism
     print(
         "[OK] test_pgstore_lease_enablement_battery — the flip-readiness gate:"

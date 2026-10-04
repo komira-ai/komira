@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pgstore/tests/test_pgstore_head_regression_torn_read.mojo
+# src/komira_pgstore/tests/test_pgstore_head_regression_torn_read.mojo
 #   P0 CONCURRENCY BUG (found in production) — the
 #   pgstore-on-GCS `_HEAD`-advance protocol corrupts under a 2nd / interrupted
 #   writer, producing a torn read at a fresh open.

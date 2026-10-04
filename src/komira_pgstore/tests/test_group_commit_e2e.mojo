@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_group_commit_e2e.mojo
+# src/komira_pgstore/tests/test_group_commit_e2e.mojo
 #   GROUP-COMMIT Phase-3 e2e: N concurrent commits COALESCE into
 #   ONE create-CAS chunk via the CoalescingWindow over a slow AsyncCasStore on a
 #   real reactor.

@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_group_commit_crash_atomicity.mojo
+# src/komira_pgstore/tests/test_group_commit_crash_atomicity.mojo
 #   GROUP-COMMIT Phase-3 CRASH-ATOMICITY: a batch = exactly ONE
 #   encode body = exactly ONE create-CAS slot. Recovery folds ALL N winners at
 #   the shared commit_lsn, or NONE — never a partial subset.

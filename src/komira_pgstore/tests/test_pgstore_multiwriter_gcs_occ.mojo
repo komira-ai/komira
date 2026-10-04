@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_pgstore_multiwriter_gcs_occ.mojo
+# src/komira_pgstore/tests/test_pgstore_multiwriter_gcs_occ.mojo
 #   THE MULTI-WRITER PROOF — pgstore-on-GCS is safe for
 #   ANY number of concurrent writers. Retires the "single-writer discipline"
 #   posture; the base OCC path is multi-writer-safe by construction.

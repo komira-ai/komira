@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/komira_pgstore/test_async_commit_start_412_retry.mojo
+# src/komira_pgstore/tests/test_async_commit_start_412_retry.mojo
 #   START-PATH 412 RETRY PROOF for the parkable AsyncCommitOp (BLOCKER-1,
 #   adversarial review of ).
 # =============================================================================
