@@ -6,6 +6,8 @@ load(":defs.bzl", "shell_lint", "tar_member")
 
 export_file(name = "lint.sh", visibility = ["PUBLIC"])
 
+export_file(name = "retired_names.sh", visibility = ["PUBLIC"])
+
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
 tar_member(
@@ -24,9 +26,9 @@ tar_member(
     visibility = ["PUBLIC"],
 )
 
-# The lint action's own script.
+# The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["lint.sh"],
+    srcs = ["lint.sh", "retired_names.sh"],
     visibility = ["PUBLIC"],
 )

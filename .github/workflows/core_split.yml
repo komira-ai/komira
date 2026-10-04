@@ -7,6 +7,10 @@
 # checks. The rest of the gates are Buck test targets (`./buck2 test
 # //tools/core_split/...`), which ci.yml's `./buck2 test //...` runs too; they run
 # here again so that this workflow is one verdict for the split.
+#
+# Runs on a GitHub-hosted runner and reaches the farm as ci.yml does
+# (.github/actions/farm-connect). A pull request from a fork gets no farm
+# access, so it runs none of this; ci.yml's `fork-advisory` says so.
 name: core_split
 
 on:
@@ -29,15 +33,27 @@ concurrency:
 
 jobs:
   gates:
-    runs-on: [self-hosted, komira-farm]
+    # Fork pull requests get neither the OIDC token nor the repository
+    # variables, so the farm job is for this repository's own runs; a fork's
+    # pull request gets no job here (ci.yml's `fork-advisory` is the only one).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
 
       # F is the commit that recorded the digests. The two packages must be
       # what they were then, so editing a file and its digest together fails.

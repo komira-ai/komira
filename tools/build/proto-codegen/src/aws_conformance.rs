@@ -445,6 +445,7 @@ pub fn compare_request(case: &InputCase, actual: &ActualRequest) -> Vec<Mismatch
         if case.protocol == "rest-xml" && name.eq_ignore_ascii_case("content-type") {
             continue;
         }
+        let value = expected_header_value(&case.protocol, name, value);
         let got = actual_headers.get(&name.to_ascii_lowercase());
         if got.map(String::as_str) != Some(value.as_str()) {
             out.push(Mismatch {
@@ -473,6 +474,20 @@ pub fn compare_request(case: &InputCase, actual: &ActualRequest) -> Vec<Mismatch
         }
     }
     out
+}
+
+/// The value a header of `protocol` is held to. botocore sends a query and
+/// ec2 request's Content-Type with `; charset=utf-8`, which the case files
+/// do not state, and its harness appends it to the expected value before
+/// comparing (test_protocols.py, `_assert_expected_headers_in_request`).
+fn expected_header_value(protocol: &str, name: &str, value: &str) -> String {
+    if matches!(protocol, "query" | "ec2")
+        && name.eq_ignore_ascii_case("content-type")
+        && !value.contains("charset=utf-8")
+    {
+        return format!("{value}; charset=utf-8");
+    }
+    value.to_string()
 }
 
 /// Compare a deserialized response against what the case expects.
@@ -1226,6 +1241,22 @@ json output 2 2 0 refused[]
         a.headers.push(("x-forbidden".into(), "1".into()));
         let m = compare_request(&c.input[0], &a);
         assert_eq!(m[0].field, Field::ForbiddenHeader("X-Forbidden".into()));
+    }
+
+    #[test]
+    fn a_query_or_ec2_content_type_is_held_to_its_charset() {
+        for p in ["query", "ec2"] {
+            assert_eq!(
+                expected_header_value(p, "Content-Type", "application/x-www-form-urlencoded"),
+                "application/x-www-form-urlencoded; charset=utf-8"
+            );
+            assert_eq!(
+                expected_header_value(p, "content-type", "a; charset=utf-8"),
+                "a; charset=utf-8"
+            );
+            assert_eq!(expected_header_value(p, "X-Other", "v"), "v");
+        }
+        assert_eq!(expected_header_value("json", "Content-Type", "x"), "x");
     }
 
     #[test]
