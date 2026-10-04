@@ -6,6 +6,13 @@
 # Format `kci.result`, schema_version 1 (formats.mojo). Compact JSON, every
 # object's keys sorted bytewise, one trailing newline. Keys:
 #
+#   affected_by         {base, reason, units[], verdict}: `kci run
+#                       --affected-by <base>` (the per-change check); ABSENT
+#                       otherwise. verdict is AFFECTED or WIDENED once every
+#                       build system answered, "" before; reason is WIDENED's
+#                       and "" otherwise; units[] the units the run builds
+#                       (or would, under --plan), in build order. Such a run
+#                       is SELECTIVE, whatever it builds
 #   artifacts[]         {artifact_type, build, effect, file, indexed, name,
 #                       platform, revision, sha256, state_after,
 #                       state_before, subdir, version}: a BUILD step writes
@@ -40,7 +47,7 @@
 #   run_id              --run-id or "" (a usage error can precede it)
 #   schema_version      1
 #   scope               FULL or SELECTIVE (selection.mojo): SELECTIVE
-#                       whenever any --only is given
+#                       whenever any --only, or --affected-by, is given
 #   set_hash            build: computed; publish: recomputed; else ""
 #   stage               the stage run; "" when unknown
 #   stage_step_kinds    the kinds of the stage's steps, in order
@@ -73,9 +80,10 @@
 #                       is "". checked false: reason says why ("not under
 #                       GitHub Actions", or what could not be read)
 #
-# A FULL record with an unselected step, and a SELECTIVE record with an
-# empty `only`, are refused by the renderer and the parser alike: a selective
-# run can never read as a full one. The outcome and exit number do not say
+# A FULL record with an unselected step or an `affected_by`, and a SELECTIVE
+# record with an empty `only` and no `affected_by`, are refused by the
+# renderer and the parser alike: a selective run can never read as a full
+# one. The outcome and exit number do not say
 # which it was (a selective success is exit 0); `scope` does, and so does the
 # CLI's last stderr line (selection.mojo `run_evidence_line`).
 #
@@ -112,7 +120,14 @@ from kci_api.outcome import OUTCOME_INTERRUPTED, OUTCOME_SUCCEEDED, RETRY_UNSAFE
 from kci_api.platform import platform_row
 from kci_api.revision import is_full_commit_id
 from kci_api.run_identity import ContextEntry, RunIdentity
-from kci_api.selection import SCOPE_FULL, SCOPE_SELECTIVE, parse_selector, require_scope
+from kci_api.selection import (
+    AFFECTED_VERDICT_AFFECTED,
+    AFFECTED_VERDICT_WIDENED,
+    SCOPE_FULL,
+    SCOPE_SELECTIVE,
+    parse_selector,
+    require_scope,
+)
 from kci_api.verbs import STEP_KIND_PUBLISH, require_step_kind, require_validation_kind, require_verb
 
 comptime KCI_VERSION: String = "0.0.0-unreleased"
@@ -361,6 +376,11 @@ struct RunResult(Copyable, Movable):
     var workflow_path: String
     var workflow_sha: String
     var workflow_reason: String
+    var has_affected_by: Bool
+    var affected_base: String
+    var affected_verdict: String
+    var affected_reason: String
+    var affected_units: List[String]
     # Set by `parse_result` only: the keys it ignored (file header). Never
     # rendered.
     var ignored_keys: List[String]
@@ -402,6 +422,11 @@ struct RunResult(Copyable, Movable):
         self.workflow_path = String("")
         self.workflow_sha = String("")
         self.workflow_reason = String(WORKFLOW_NOT_REACHED)
+        self.has_affected_by = False
+        self.affected_base = String("")
+        self.affected_verdict = String("")
+        self.affected_reason = String("")
+        self.affected_units = List[String]()
         self.ignored_keys = List[String]()
 
     def set_run(mut self, run: RunIdentity):
@@ -582,10 +607,14 @@ def _check(r: RunResult) raises:
         for j in range(i):
             if r.only[j] == r.only[i]:
                 raise Error(String("result: only '") + r.only[i] + String("' is given twice"))
-    if r.scope == SCOPE_SELECTIVE and len(r.only) == 0:
-        raise Error(String("result: a SELECTIVE run names its --only selectors (only is EMPTY)"))
+    if r.scope == SCOPE_SELECTIVE and len(r.only) == 0 and not r.has_affected_by:
+        raise Error(
+            String("result: a SELECTIVE run names its --only selectors or its --affected-by")
+            + String(" (only is EMPTY and affected_by ABSENT)")
+        )
     if r.scope == SCOPE_FULL and len(r.only) > 0:
         raise Error(String("result: a FULL run has no --only selectors"))
+    _check_affected_by(r)
     for i in range(len(r.steps)):
         ref st = r.steps[i]
         var where = String("result: steps[") + String(i) + String("] '") + st.name + String("': ")
@@ -630,6 +659,32 @@ def _check(r: RunResult) raises:
         for j in range(i):
             if r.context[j].key == r.context[i].key:
                 raise Error(String("result: context key '") + r.context[i].key + String("' is given twice"))
+
+
+def _check_affected_by(r: RunResult) raises:
+    """`affected_by` (file header): only on a SELECTIVE run, a full base
+    commit, a known verdict, a reason exactly with WIDENED, units only once
+    answered and never twice."""
+    if not r.has_affected_by:
+        return
+    var where = String("result: affected_by: ")
+    if r.scope != SCOPE_SELECTIVE:
+        raise Error(where + String("a FULL run has no --affected-by"))
+    if not is_full_commit_id(r.affected_base):
+        raise Error(where + String("base '") + r.affected_base + String("' is not a full commit id"))
+    var v = r.affected_verdict.copy()
+    if v.byte_length() > 0 and v != AFFECTED_VERDICT_AFFECTED and v != AFFECTED_VERDICT_WIDENED:
+        raise Error(where + String("verdict '") + v + String("' is not AFFECTED, WIDENED or \"\""))
+    if (v == AFFECTED_VERDICT_WIDENED) != (r.affected_reason.byte_length() > 0):
+        raise Error(where + String("a reason comes with WIDENED, and only with it"))
+    if v.byte_length() == 0 and len(r.affected_units) > 0:
+        raise Error(where + String("units before any answer"))
+    for i in range(len(r.affected_units)):
+        if r.affected_units[i].byte_length() == 0:
+            raise Error(where + String("units[") + String(i) + String("] is empty"))
+        for j in range(i):
+            if r.affected_units[j] == r.affected_units[i]:
+                raise Error(where + String("unit '") + r.affected_units[i] + String("' is listed twice"))
 
 
 def _member(words: List[String], w: String) -> Bool:
@@ -755,6 +810,13 @@ def render_result(r: RunResult) raises -> String:
         o.put_str(String("version"), a.version)
         arts.push(o.build())
     top.put(String("artifacts"), arts^)
+    if r.has_affected_by:
+        var ab = _Obj()
+        ab.put_str(String("base"), r.affected_base)
+        ab.put_str(String("reason"), r.affected_reason)
+        ab.put(String("units"), _str_array(r.affected_units))
+        ab.put_str(String("verdict"), r.affected_verdict)
+        top.put(String("affected_by"), ab.build())
     top.put_int(String("attempt"), r.attempt)
     top.put_str(String("channel"), r.channel)
     var ctx = JsonValue.empty_object()
@@ -910,7 +972,7 @@ def parse_result(text: String, source: String) raises -> RunResult:
     _note_unknown(
         doc,
         _keys(
-            String("artifacts attempt channel context error exit_code")
+            String("affected_by artifacts attempt channel context error exit_code")
             + String(" finished_at_ms format invoked_as kci_version machine new_names")
             + String(" only outcome plan platform release_produced_by retry revision run_id")
             + String(" schema_version scope set_hash stage stage_step_kinds started_at_ms status")
@@ -993,6 +1055,21 @@ def parse_result(text: String, source: String) raises -> RunResult:
         r.has_release_produced_by = True
         r.release_produced_by_attempt = _i(p, String("attempt"), source, String("release_produced_by: "))
         r.release_produced_by_run_id = _s(p, String("run_id"), source, String("release_produced_by: "))
+    if doc.has(String("affected_by")):
+        var ab = _need(doc, String("affected_by"), JSON_OBJECT, source, String(""))
+        var where = String("affected_by: ")
+        _no_dup_keys(ab, source, where)
+        _note_unknown(ab, _keys(String("base reason units verdict")), String("affected_by."), r.ignored_keys)
+        r.has_affected_by = True
+        r.affected_base = _s(ab, String("base"), source, where)
+        r.affected_reason = _s(ab, String("reason"), source, where)
+        r.affected_verdict = _s(ab, String("verdict"), source, where)
+        var units = _need(ab, String("units"), JSON_ARRAY, source, where)
+        for i in range(units.array_len()):
+            var u = units.element_at(i)
+            if u.kind_tag() != JSON_STRING:
+                _refuse(source, where + String("units[") + String(i) + String("] is not a string"))
+            r.affected_units.append(u.as_string())
     var arts = _need(doc, String("artifacts"), JSON_ARRAY, source, String(""))
     var art_keys = _keys(
         String("artifact_type build effect file indexed name platform revision sha256")

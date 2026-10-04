@@ -99,6 +99,95 @@ comptime KCI_MANIFEST_NAME: String = ARTIFACT_MANIFEST_NAME
 (kci_api's `ARTIFACT_MANIFEST_NAME`; this name stays for callers)."""
 
 
+# THE AFFECTED COMMAND'S PLACEHOLDERS (a build system's `affected`, the
+# .proto's header): a separate set, because that command runs before any
+# build, unstamped, and outside any release directory. `{changed_files}` and
+# `{units_file}` are required in its args; `{base_commit}` (`--affected-by`)
+# and `{revision_id}` are optional. A `build_targets` command and a unit's
+# `targets` take no placeholder at all.
+
+comptime CHANGED_FILES_PLACEHOLDER: String = "{changed_files}"
+"""A file of the changed paths, NUL-terminated, as `git diff -z
+--name-only --no-renames <base>...<revision>` prints them."""
+
+comptime UNITS_FILE_PLACEHOLDER: String = "{units_file}"
+"""A file of `<unit>\t<target>\n` lines: every target of every unit the
+build system owns."""
+
+comptime BASE_COMMIT_PLACEHOLDER: String = "{base_commit}"
+"""The change's base, full 40 hex (`kci run --affected-by`)."""
+
+
+def affected_placeholders() -> List[String]:
+    """The four placeholders of an `affected` command, required ones first."""
+    var out = List[String]()
+    out.append(String(CHANGED_FILES_PLACEHOLDER))
+    out.append(String(UNITS_FILE_PLACEHOLDER))
+    out.append(String(BASE_COMMIT_PLACEHOLDER))
+    out.append(String(REVISION_ID_PLACEHOLDER))
+    return out^
+
+
+def is_affected_placeholder(p: String) -> Bool:
+    var known = affected_placeholders()
+    for i in range(len(known)):
+        if known[i] == p:
+            return True
+    return False
+
+
+struct AffectedValues(Copyable, Movable):
+    """What the placeholders of one `affected` command stand for.
+
+    Layout: owned values only. No pointer field."""
+
+    var changed_files: String
+    var units_file: String
+    var base_commit: String
+    var revision_id: String
+
+    def __init__(
+        out self, var changed_files: String, var units_file: String, var base_commit: String, var revision_id: String
+    ):
+        self.changed_files = changed_files^
+        self.units_file = units_file^
+        self.base_commit = base_commit^
+        self.revision_id = revision_id^
+
+    def value_of(self, placeholder: String) raises -> String:
+        if placeholder == CHANGED_FILES_PLACEHOLDER:
+            return self.changed_files.copy()
+        if placeholder == UNITS_FILE_PLACEHOLDER:
+            return self.units_file.copy()
+        if placeholder == BASE_COMMIT_PLACEHOLDER:
+            return self.base_commit.copy()
+        if placeholder == REVISION_ID_PLACEHOLDER:
+            return self.revision_id.copy()
+        raise Error(String("'") + placeholder + String("' is not a placeholder of an affected command"))
+
+
+def substitute_affected(arg: String, values: AffectedValues) raises -> String:
+    """`arg` with every placeholder replaced, in ONE pass, as
+    `substitute_placeholders`; raises on one that is not an affected
+    command's."""
+    var b = arg.as_bytes()
+    var n = len(b)
+    var out = String("")
+    var lit = 0
+    var i = 0
+    while i < n:
+        var end = _placeholder_end(arg, i)
+        if end < 0:
+            i += 1
+            continue
+        out += String(arg[byte = lit:i])
+        out += values.value_of(String(arg[byte = i:end]))
+        i = end
+        lit = end
+    out += String(arg[byte = lit:n])
+    return out^
+
+
 def _ident_start(c: Int) -> Bool:
     return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
 

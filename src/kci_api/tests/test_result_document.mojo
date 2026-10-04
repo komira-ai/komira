@@ -574,5 +574,81 @@ def test_recorder_trait_and_failing_begin() raises:
     assert_equal(len(bad.records), 0)
 
 
+def _affected_result() raises -> RunResult:
+    """A one-step pr stage run with --affected-by, answered AFFECTED."""
+    var r = RunResult(String(VERB_RUN), String(VERB_RUN))
+    r.stage = String("pr")
+    r.platform = String("linux-x86_64")
+    r.stage_step_kinds.append(String(STEP_KIND_BUILD))
+    r.scope = String(SCOPE_SELECTIVE)
+    r.has_affected_by = True
+    r.affected_base = String(_REV)
+    r.affected_verdict = String("AFFECTED")
+    r.affected_units.append(String("lib_a"))
+    r.affected_units.append(String("lints"))
+    r.steps.append(ResultStep(String("check"), String(STEP_KIND_BUILD), String("linux-x86_64"), String(OUTCOME_SUCCEEDED)))
+    return r^
+
+
+def test_affected_by_round_trips_and_is_selective() raises:
+    var t = render_result(_affected_result().finish_record(String(OUTCOME_SUCCEEDED), 9))
+    assert_true(
+        t.startswith(
+            String('{"affected_by":{"base":"') + String(_REV)
+            + String('","reason":"","units":["lib_a","lints"],"verdict":"AFFECTED"},"artifacts":[]')
+        ),
+        t,
+    )
+    assert_true(t.find(String('"only":[],')) >= 0)
+    assert_true(t.find(String('"scope":"SELECTIVE"')) >= 0)
+    var p = parse_result(t, String("r.json"))
+    assert_equal(render_result(p), t)
+    assert_true(p.has_affected_by)
+    assert_equal(p.affected_units[1], String("lints"))
+    # WIDENED carries its reason
+    var w = _affected_result()
+    w.affected_verdict = String("WIDENED")
+    w.affected_reason = String("tools/build/mojo/defs.bzl changed")
+    var wt = render_result(w)
+    assert_true(wt.find(String('"reason":"tools/build/mojo/defs.bzl changed"')) >= 0)
+    assert_equal(render_result(parse_result(wt, String("w.json"))), wt)
+    # a document without the key reads as no --affected-by
+    assert_false(parse_result(_golden(), String("g.json")).has_affected_by)
+
+
+def test_affected_by_refusals() raises:
+    var full = _affected_result()
+    full.scope = String("FULL")
+    assert_equal(_render_refusal(full), String("result: affected_by: a FULL run has no --affected-by"))
+    var short = _affected_result()
+    short.affected_base = String("0123456")
+    assert_equal(_render_refusal(short), String("result: affected_by: base '0123456' is not a full commit id"))
+    var word = _affected_result()
+    word.affected_verdict = String("VACUOUS")
+    assert_equal(_render_refusal(word), String("result: affected_by: verdict 'VACUOUS' is not AFFECTED, WIDENED or \"\""))
+    var why = _affected_result()
+    why.affected_reason = String("because")
+    assert_equal(_render_refusal(why), String("result: affected_by: a reason comes with WIDENED, and only with it"))
+    var bare = _affected_result()
+    bare.affected_verdict = String("WIDENED")
+    bare.affected_units.clear()
+    assert_equal(_render_refusal(bare), String("result: affected_by: a reason comes with WIDENED, and only with it"))
+    var early = _affected_result()
+    early.affected_verdict = String("")
+    assert_equal(_render_refusal(early), String("result: affected_by: units before any answer"))
+    var twice = _affected_result()
+    twice.affected_units.append(String("lib_a"))
+    assert_equal(_render_refusal(twice), String("result: affected_by: unit 'lib_a' is listed twice"))
+    # before the answer: no verdict, no units, still SELECTIVE
+    var pending = _affected_result()
+    pending.affected_verdict = String("")
+    pending.affected_units.clear()
+    assert_equal(_render_refusal(pending), String("<rendered>"))
+    # without affected_by and without --only, SELECTIVE is refused
+    var none = _affected_result()
+    none.has_affected_by = False
+    assert_true(_render_refusal(none).find(String("a SELECTIVE run names its --only selectors or its --affected-by")) >= 0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
