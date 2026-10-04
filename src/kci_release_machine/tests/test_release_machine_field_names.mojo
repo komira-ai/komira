@@ -1,12 +1,12 @@
 # =============================================================================
-# src/kci_stage_graph/tests/test_stage_graph_field_names.mojo
+# src/kci_release_machine/tests/test_release_machine_field_names.mojo
 #   The machine file's field names are an authored contract: this golden
 #   list pins them, so renaming one is a visible edit here.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal
 
-from kci_stage_graph import machine_field_names
+from kci_release_machine import machine_field_names
 
 
 def test_the_field_names_are_the_golden_list() raises:
@@ -22,7 +22,7 @@ def test_the_field_names_are_the_golden_list() raises:
     want.append(String("step.name"))
     want.append(String("step.kind"))
     want.append(String("step.platform"))
-    want.append(String("step.declarations"))
+    want.append(String("step.artifacts"))
     want.append(String("step.channels"))
     want.append(String("step.channel"))
     want.append(String("step.validation"))

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_stage_graph/graph.mojo -- the stage graph of a release machine: its
+# src/kci_release_machine/graph.mojo -- a release machine: its
 #   stages, in file order, and the steps of each.
 # =============================================================================
 #
@@ -19,15 +19,15 @@
 # kind:
 #
 #   kind      inputs                                    what it does
-#   BUILD     platform, declarations                    kci_build: one build per
+#   BUILD     platform, artifacts                    kci_build: one build per
 #                                                       declared artifact
-#   PUBLISH   platform, declarations, channels, channel kci_publish: the release
+#   PUBLISH   platform, artifacts, channels, channel kci_publish: the release
 #                                                       set to one channel
 #   DEPLOY    (none yet)                                reserved: refused as
 #                                                       "needs a newer kci"
 #
 # A stage may hold steps of different kinds. The kind words are
-# kci_contract's (verbs.mojo), and so is the name grammar (selection.mojo).
+# kci_api's (verbs.mojo), and so is the name grammar (selection.mojo).
 #
 # DEPLOY, reserved. When its body lands, a DEPLOY step names a CELL (one
 # deploy target: an account or project in one region), and the cell names
@@ -37,7 +37,7 @@
 #
 # VALIDATIONS. A PUBLISH step may carry `validation { ... }` blocks that check
 # what it published. A validation name is unique in its stage (the grammar of
-# a step name). The one kind is CONDA_INSTALL_SMOKE (kci_contract):
+# a step name). The one kind is CONDA_INSTALL_SMOKE (kci_api):
 #
 #   install        the package to install from the step's channel, at this
 #                  release's version and build (kci checks it is a declared
@@ -57,14 +57,14 @@
 # runs nothing is never a pass. Any `--only` makes the run SELECTIVE, even one
 # that selects every step.
 #
-# `validate_stage_graph` holds every rule the parser cannot see field by
+# `validate_release_machine` holds every rule the parser cannot see field by
 # field; a parsed graph is always a valid one. Paths are kept as written: a
 # relative one is relative to the directory kci is started in.
 #
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
-from kci_contract import (
+from kci_api import (
     SCOPE_FULL,
     SCOPE_SELECTIVE,
     STEP_KIND_BUILD,
@@ -85,7 +85,7 @@ comptime EXTRA_CHANNEL_CONDA_FORGE: String = "conda-forge"
 
 comptime NAME_MAX_BYTES: Int = STEP_NAME_MAX_BYTES
 """Longest stage or step name: a stage name is also a CI job id and a
-GitHub environment name (kci_contract states the number)."""
+GitHub environment name (kci_api states the number)."""
 
 
 struct StageValidation(Copyable, Movable):
@@ -122,7 +122,7 @@ struct StageStep(Copyable, Movable):
     var name: String
     var kind: String
     var platform: String
-    var declarations: String
+    var artifacts: String
     var channels: String
     var channel: String
     var validations: List[StageValidation]
@@ -132,7 +132,7 @@ struct StageStep(Copyable, Movable):
         self.name = String("")
         self.kind = String("")
         self.platform = String("")
-        self.declarations = String("")
+        self.artifacts = String("")
         self.channels = String("")
         self.channel = String("")
         self.validations = List[StageValidation]()
@@ -195,7 +195,7 @@ struct Stage(Copyable, Movable):
         return out^
 
 
-struct StageGraph(Copyable, Movable):
+struct ReleaseMachine(Copyable, Movable):
     """Every stage of a machine file, in file order.
 
     Layout: owned values only. No pointer field."""
@@ -242,7 +242,7 @@ def joined_names(names: List[String]) -> String:
 
 def is_stage_or_step_name(name: String) -> Bool:
     """`[a-z][a-z0-9-]*`, at most `NAME_MAX_BYTES` bytes, not ending in `-`
-    (kci_contract's `is_step_name`)."""
+    (kci_api's `is_step_name`)."""
     return is_step_name(name)
 
 
@@ -356,8 +356,8 @@ def _check_step(source: String, stage: Stage, step: StageStep) raises:
         require_release_platform(step.platform)
     except e:
         raise Error(_at(source, step.line) + where + String(": ") + String(e))
-    if step.declarations.byte_length() == 0:
-        raise Error(_at(source, step.line) + where + String(" has no declarations (the artifact declarations file)"))
+    if step.artifacts.byte_length() == 0:
+        raise Error(_at(source, step.line) + where + String(" has no artifacts (the artifacts file)"))
     if step.kind == STEP_KIND_BUILD:
         if step.channels.byte_length() > 0 or step.channel.byte_length() > 0:
             raise Error(
@@ -376,7 +376,7 @@ def _check_step_validations(source: String, stage: Stage, step: StageStep) raise
         _check_validation(source, stage, step, step.validations[i])
 
 
-def validate_stage_graph(g: StageGraph, source: String) raises:
+def validate_release_machine(g: ReleaseMachine, source: String) raises:
     """Every rule of the file header that the parser does not see field by
     field. Raises on the first, naming the line."""
     if len(g.stages) == 0:

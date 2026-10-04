@@ -1,23 +1,23 @@
 # =============================================================================
-# src/kci_stage_graph/tests/test_stage_graph_parse.mojo
+# src/kci_release_machine/tests/test_release_machine_parse.mojo
 #   A machine file read back through the parser, and every refusal of
 #   parse.mojo and graph.mojo, each asserted by its message.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_stage_graph import machine_schema_version, parse_machine_file
+from kci_release_machine import machine_schema_version, parse_machine_file
 
 
 comptime _SRC: String = "machine file"
 
 comptime _BUILD_STEP: String = (
     "step { name: \"build\" kind: BUILD platform: \"linux-x86_64\""
-    " declarations: \"release/artifacts.textproto\" }\n"
+    " artifacts: \"release/artifacts.textproto\" }\n"
 )
 comptime _PUBLISH_STEP: String = (
     "step {\n  name: \"publish\"\n  kind: PUBLISH\n  platform: \"linux-x86_64\"\n"
-    "  declarations: \"release/artifacts.textproto\"\n"
+    "  artifacts: \"release/artifacts.textproto\"\n"
     "  channels: \"release/channels.textproto\"\n  channel: \"prod\"\n}\n"
 )
 
@@ -57,7 +57,7 @@ def test_two_stages_read_back() raises:
     assert_equal(len(b.steps), 1)
     assert_true(b.steps[0].is_build())
     assert_equal(b.steps[0].platform, String("linux-x86_64"))
-    assert_equal(b.steps[0].declarations, String("release/artifacts.textproto"))
+    assert_equal(b.steps[0].artifacts, String("release/artifacts.textproto"))
     var p = g.stage(String("prod"))
     assert_equal(p.after, String("build"))
     assert_true(p.steps[0].is_publish())
@@ -107,7 +107,7 @@ def test_unknown_fields() raises:
     _assert_refused(String("schema_version: 1\nstages {}\n"), String("unknown top-level field 'stages'"))
     _assert_refused(_one_stage(String(" name: \"b\"\n env: \"b\"\n") + String(_BUILD_STEP)), String("unknown field 'env' in stage 'b'"))
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" action: BUILD }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" action: BUILD }\n")),
         String("unknown field 'action' in a step of stage 'b'"),
     )
 
@@ -115,7 +115,7 @@ def test_unknown_fields() raises:
 def test_set_twice_and_unclosed() raises:
     _assert_refused(_one_stage(String(" name: \"b\"\n name: \"c\"\n") + String(_BUILD_STEP)), String("field 'name' is set twice in stage 'b'"))
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" }\n")),
         String("field 'kind' is set twice"),
     )
     _assert_refused(String("schema_version: 1\nstage {\n name: \"b\"\n"), String("stage 'b' is not closed"))
@@ -150,22 +150,22 @@ def test_steps() raises:
     var two = _one_stage(String(" name: \"b\"\n") + String(_BUILD_STEP) + String(_BUILD_STEP))
     _assert_refused(two, String("stage 'b' has two steps named 'build'"))
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"Build\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"Build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" }\n")),
         String("has name 'Build'"),
     )
 
 
 def test_step_kinds() raises:
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" declarations: \"d\" }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" artifacts: \"d\" }\n")),
         String("is a DEPLOY step: that kind needs a newer kci"),
     )
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"d\" kind: VALIDATE platform: \"linux-x86_64\" declarations: \"d\" }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"d\" kind: VALIDATE platform: \"linux-x86_64\" artifacts: \"d\" }\n")),
         String("has kind 'VALIDATE'; a step is BUILD or PUBLISH"),
     )
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"d\" platform: \"linux-x86_64\" declarations: \"d\" }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"d\" platform: \"linux-x86_64\" artifacts: \"d\" }\n")),
         String("has no kind"),
     )
 
@@ -182,7 +182,7 @@ comptime _SMOKE: String = (
 def _publish_step(channel: String, validations: String) -> String:
     return (
         String("step {\n  name: \"publish\"\n  kind: PUBLISH\n  platform: \"linux-x86_64\"\n")
-        + String("  declarations: \"release/artifacts.textproto\"\n")
+        + String("  artifacts: \"release/artifacts.textproto\"\n")
         + String("  channels: \"release/channels.textproto\"\n  channel: \"") + channel + String("\"\n")
         + validations + String("}\n")
     )
@@ -289,7 +289,7 @@ def test_validation_reads_back_alone() raises:
 
 def test_validation_belongs_to_a_publish_step() raises:
     var text = _one_stage(
-        String(" name: \"b\"\n step {\n name: \"s\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\"\n")
+        String(" name: \"b\"\n step {\n name: \"s\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\"\n")
         + String(" validation { ") + String(_V_OK) + String(" }\n }\n")
     )
     assert_equal(
@@ -389,7 +389,7 @@ def test_validation_names_are_unique_in_a_stage() raises:
         String(" name: \"p\"\n")
         + _publish_step(String("gamma"), String("  validation { ") + String(_V_OK) + String(" }\n"))
         + String("step {\n  name: \"again\"\n  kind: PUBLISH\n  platform: \"linux-x86_64\"\n")
-        + String("  declarations: \"d\"\n  channels: \"c\"\n  channel: \"prod\"\n")
+        + String("  artifacts: \"d\"\n  channels: \"c\"\n  channel: \"prod\"\n")
         + String("  validation { ") + String(_V_OK) + String(" }\n}\n")
     )
     _assert_refused(two_steps, String("stage 'p' has two validations named 'v'"))
@@ -405,27 +405,27 @@ def test_validation_names_are_unique_in_a_stage() raises:
 
 def test_step_inputs() raises:
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD declarations: \"d\" }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD artifacts: \"d\" }\n")),
         String("step 's' of stage 'b' has no platform"),
     )
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD platform: \"darwin-arm64\" declarations: \"d\" }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD platform: \"darwin-arm64\" artifacts: \"d\" }\n")),
         String("darwin-arm64"),
     )
     _assert_refused(
         _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD platform: \"linux-x86_64\" }\n")),
-        String("has no declarations"),
+        String("has no artifacts"),
     )
     _assert_refused(
-        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" channel: \"prod\" }\n")),
+        _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" channel: \"prod\" }\n")),
         String("is a BUILD step: channels and channel belong to a PUBLISH step"),
     )
     _assert_refused(
-        _one_stage(String(" name: \"p\"\n step { name: \"s\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d\" channel: \"prod\" }\n")),
+        _one_stage(String(" name: \"p\"\n step { name: \"s\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d\" channel: \"prod\" }\n")),
         String("has no channels"),
     )
     _assert_refused(
-        _one_stage(String(" name: \"p\"\n step { name: \"s\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d\" channels: \"c\" }\n")),
+        _one_stage(String(" name: \"p\"\n step { name: \"s\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d\" channels: \"c\" }\n")),
         String("has no channel (the channel to publish to)"),
     )
 

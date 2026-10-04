@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_stage_graph/tests/test_stage_selection.mojo
+# src/kci_release_machine/tests/test_stage_selection.mojo
 #   `resolve_selection`: `kci run --only ...` against one stage. A step
 #   selector selects its step; one that matches nothing is refused with the
 #   stage's names; a validation selector selects that validation and no
@@ -9,15 +9,15 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_contract import SCOPE_FULL, SCOPE_SELECTIVE, Selector, parse_selectors
-from kci_stage_graph import Selection, Stage, parse_machine_file, resolve_selection
+from kci_api import SCOPE_FULL, SCOPE_SELECTIVE, Selector, parse_selectors
+from kci_release_machine import Selection, Stage, parse_machine_file, resolve_selection
 
 
 comptime _MACHINE: String = (
     "schema_version: 1\n"
     "stage { name: \"release\"\n"
-    "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" }\n"
-    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"\n"
+    "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
+    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\"\n"
     "    validation { name: \"install-smoke\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\" program: \"s.mojo\" }\n"
     "    validation { name: \"read-back\" kind: CONDA_INSTALL_SMOKE install: \"komira_encoding\" program: \"s.mojo\" }\n"
@@ -147,7 +147,7 @@ def test_unknown_validation_is_refused_with_the_names() raises:
 def test_a_stage_without_validations_says_none() raises:
     var g = parse_machine_file(
         String("schema_version: 1\nstage { name: \"build\"\n")
-        + String("  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" } }\n"),
+        + String("  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n"),
         String("machine file"),
     )
     var t = List[String]()
