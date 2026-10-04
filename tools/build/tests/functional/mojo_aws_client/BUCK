@@ -28,8 +28,10 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 # komira//src/komira_aws_core/aws_send.mojo;
 # its docstring says which are implemented);
 # stub/komira_http_core is the Connector trait client-mode code names;
-# stub/komira_retry is the retry seams and loop the client-mode send over
-# injected seams (`send_with`) names, as far as the stub core uses them;
+# stub/komira_http_client the HttpClientConfig a client-mode constructor
+# takes and its send hands on; stub/komira_retry is the retry seams and loop
+# the client-mode send over injected seams (`send_with`) names, as far as
+# the stub core uses them;
 # stub/komira_json is a minimal JSON value and parser with komira_json's
 # layout and the part of its API that code calls. Generated code is built
 # against the real core and komira_json in the komira cell, by the AWS
@@ -63,6 +65,15 @@ mojo_library(
 )
 
 mojo_library(
+    name = "komira_http_client",
+    srcs = [
+        "stub/komira_http_client/__init__.mojo",
+        "stub/komira_http_client/client.mojo",
+    ],
+    visibility = ["//functional/aws_client_mode:"],
+)
+
+mojo_library(
     name = "komira_retry",
     srcs = ["stub/komira_retry/__init__.mojo"],
     visibility = ["//functional/aws_client_mode:"],
@@ -76,6 +87,7 @@ mojo_library(
         "//negative/mojo_aws_client:",
     ],
     deps = [
+        ":komira_http_client",
         ":komira_http_core",
         ":komira_json",
         ":komira_retry",

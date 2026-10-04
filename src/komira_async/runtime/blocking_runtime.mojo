@@ -108,7 +108,7 @@ struct BlockingRuntime[
     `block_on` model.
 
     `[RT: Runtime]`-generic libraries (`HttpClient[RT]`, `TlsConnector`,
-    and the runtime-parametric `komira_pg` / k8s clients) pick
+    and the runtime-parametric `komira_db_postgres.wire` / k8s clients) pick
     `BlockingRuntime[S]` as their `RT` for single-shot synchronous calls
     (a k8s pod GET, a one-row query) and for tests, where standing up a
     full `PerCoreAsyncRuntime` (N pinned pthreads) is unwarranted. In

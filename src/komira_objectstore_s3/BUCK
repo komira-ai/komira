@@ -60,6 +60,7 @@ mojo_library(
         "//src/komira_aws_s3:komira_aws_s3",
         "//src/komira_core:komira_core",
         "//src/komira_fs:komira_fs",
+        "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_retry:komira_retry",

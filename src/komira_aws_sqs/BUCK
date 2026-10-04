@@ -13,10 +13,10 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # endpoint ruleset and partition table, embedded in the module, and
 # `SQSSQSClient`, which resolves each call's endpoint and sends through
 # komira_aws_core's send_sigv4_signed_request (signing name `sqs`) over the
-# komira_http_core Connector it is given. Every SQS operation is a POST, so
-# a call is resent only when SQS cannot have acted on it (a throttle, a
-# failed dial, an unread request), never after a 5xx (komira_aws_core's
-# aws_retry.mojo).
+# komira_http_core Connector it is given. Every SQS operation is a POST,
+# and a call is retried as botocore's standard mode retries it: after a
+# throttle, a 5xx or a failed send, whether or not SQS may have acted on it
+# (komira_aws_core's aws_retry.mojo).
 #
 # SQS's model is awsQueryCompatible: every request carries
 # `x-amzn-query-mode: true`, and the service names an error's legacy query
@@ -89,6 +89,7 @@ mojo_aws_client(
     visibility = ["PUBLIC"],
     deps = [
         "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         # The client's `send_with` takes a komira_retry loop.

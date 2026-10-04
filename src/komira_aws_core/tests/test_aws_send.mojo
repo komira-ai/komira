@@ -12,26 +12,31 @@
 #
 # Rows: one success, a 503 retried then answered (and its retry re-signed
 # at a later X-Amz-Date), the attempt limit and its exact backoff for a
-# fixed seed, a throttle and a dial failure resent for a POST, a 500 and a
-# dropped response not resent for a POST (and resent for a PUT), a
-# conditional PUT not resent after a 500 but resent after a throttle (the
-# precondition read off its headers, in any case; a conditional GET is
-# resent), S3's
-# 200-with-<Error> retried for an operation that can answer one and read as
-# a 200 for one that cannot, a 4xx returned as it is, the budget, the
-# request as it reached the wire (komira_aws_core's AwsEchoConnector), and
-# the free `send_sigv4_signed_request` through a connector factory.
+# fixed seed, a throttle and a dial failure resent for a POST, an SQS
+# SendMessage (a POST) resent after a 500 and a 503, each resend signed
+# again, and given up on after the third send, a dropped response resent
+# for a POST, a conditional PUT (If-None-Match or If-Match, in any case)
+# sent once after a 500 or a dropped response and resent after a throttle
+# or a failed dial, a conditional GET resent, S3's 200-with-<Error>
+# retried for an operation that can answer one and read as a 200 for one
+# that cannot, a DynamoDB 200 whose x-amz-crc32 is wrong retried, a 4xx
+# returned as it is, the budget and a client's retry quota across calls,
+# the request as it reached the wire (komira_aws_core's AwsEchoConnector),
+# and the free `send_sigv4_signed_request` through a connector factory,
+# whose client is built from the caller's config (a 150 ms request budget
+# ends each send to a server that never answers), with three sends to
+# every service, DynamoDB included (it sleeps for real there).
 #
 # One row opens a socket: a POST to a closed loopback port through
 # komira_http_core's KernelTcpConnector, the production dial, so the
 # classifier is held to the text that dial raises. It is refused at once
-# (no wait: the sleeper records), and resent as a request that never
-# reached the service.
+# (no wait: the sleeper records), and resent.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from komira_async.runtime.tcp_stream import TcpListener
+from komira_clock import now_ns
 from komira_aws_core import (
     AWS_ECHO_CODE,
     AwsClock,
@@ -40,16 +45,17 @@ from komira_aws_core import (
     AwsEchoConnector,
     AwsEndpoint,
     AwsHttpTransport,
+    AwsRetryQuota,
     CredentialHttpRequest,
     Header,
     HttpResult,
     aws_json_error_info,
-    aws_request_is_conditional,
     aws_response_error_code,
     aws_standard_retry_policy,
     send_sigv4_signed_request,
     send_sigv4_signed_request_with,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_retry import (
@@ -71,7 +77,9 @@ def _bytes(s: String) -> List[UInt8]:
     return out^
 
 
-def _response(status: Int, reason: String, body: String, extra: String = "") -> ScriptedStream:
+def _response(
+    status: Int, reason: String, body: String, extra: String = ""
+) -> ScriptedStream:
     """A scripted server answer, closing the connection after it."""
     var head = (
         String("HTTP/1.1 ")
@@ -128,7 +136,9 @@ struct Recording[X: AwsHttpTransport](AwsHttpTransport, Movable, Deinitable):
         return self.inner.send(req)
 
 
-def _transport(var c: ScriptedConnector) raises -> Recording[AwsConnectorTransport[ScriptedConnector]]:
+def _transport(
+    var c: ScriptedConnector,
+) raises -> Recording[AwsConnectorTransport[ScriptedConnector]]:
     return Recording(AwsConnectorTransport[ScriptedConnector](c^))
 
 
@@ -167,14 +177,9 @@ def _send[X: AwsHttpTransport](
     uri: String,
     body: String = "",
     s3_200_error: Bool = False,
-    precondition: String = "",
-    etag: String = "",
+    extra: List[Header] = List[Header](),
 ) raises -> HttpResult:
-    # `precondition`, when set, is a header name sent with the value `etag`.
     var budget = NoBudget()
-    var extra = List[Header]()
-    if precondition.byte_length() > 0:
-        extra.append(Header(precondition, etag))
     return send_sigv4_signed_request_with(
         t,
         clock,
@@ -191,6 +196,19 @@ def _send[X: AwsHttpTransport](
         extra,
         s3_200_error=s3_200_error,
     )
+
+
+# An SQS SendMessage as its client sends it: an awsJson POST, which is not
+# idempotent.
+comptime _SEND_MESSAGE = (
+    '{"QueueUrl":"http://127.0.0.1:9000/queue/q","MessageBody":"m"}'
+)
+
+
+def _send_message_target() -> List[Header]:
+    var extra = List[Header]()
+    extra.append(Header(String("X-Amz-Target"), String("AmazonSQS.SendMessage")))
+    return extra^
 
 
 def test_one_success() raises:
@@ -218,7 +236,11 @@ def test_one_success() raises:
 
 def test_503_retried_and_re_signed() raises:
     var c = ScriptedConnector.with_stream(
-        _response(503, "Service Unavailable", "<Error><Code>ServiceUnavailable</Code></Error>")
+        _response(
+            503,
+            "Service Unavailable",
+            "<Error><Code>ServiceUnavailable</Code></Error>",
+        )
     )
     c.arm_next(_response(200, "OK", ""))
     var t = _transport(c^)
@@ -293,135 +315,315 @@ def test_a_post_is_resent_after_a_failed_dial() raises:
     assert_equal(len(loop.sleeper().slept), 1)
 
 
-def test_a_post_is_not_resent_after_a_500() raises:
+def test_a_post_is_resent_after_a_500_and_a_503() raises:
+    # botocore's standard mode resends every operation after a 5xx, a POST
+    # that may have reached the service included.
     var c = ScriptedConnector.with_stream(
         _response(500, "Internal Server Error", '{"__type":"InternalFailure"}')
+    )
+    c.arm_next(_response(503, "Service Unavailable", '{"__type":"ServiceUnavailable"}'))
+    c.arm_next(_response(200, "OK", '{"MessageId":"m-1"}'))
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 7)
+    var loop = _loop()
+    var res = _send(
+        t,
+        clock,
+        loop,
+        String("POST"),
+        String("sqs"),
+        String("/"),
+        _SEND_MESSAGE,
+        extra=_send_message_target(),
+    )
+    assert_equal(res.status, 200)
+    assert_equal(String(unsafe_from_utf8=Span(res.body)), '{"MessageId":"m-1"}')
+    assert_equal(len(t.sent), 3)
+    assert_equal(len(loop.sleeper().slept), 2)
+    # Each resend is signed again at a later X-Amz-Date, for the same
+    # operation and body.
+    assert_equal(clock.reads, 3)
+    assert_equal(_header(t.sent[0], "X-Amz-Date"), "20260921T141320Z")
+    assert_equal(_header(t.sent[1], "X-Amz-Date"), "20260921T141327Z")
+    assert_equal(_header(t.sent[2], "X-Amz-Date"), "20260921T141334Z")
+    for i in range(3):
+        assert_equal(t.sent[i].method, "POST")
+        assert_equal(_header(t.sent[i], "X-Amz-Target"), "AmazonSQS.SendMessage")
+        assert_equal(String(unsafe_from_utf8=Span(t.sent[i].body)), _SEND_MESSAGE)
+    for i in range(2):
+        assert_true(
+            _header(t.sent[i], "Authorization")
+            != _header(t.sent[i + 1], "Authorization")
+        )
+
+
+def test_a_post_gives_up_after_max_attempts() raises:
+    # A 500, a 503 and a throttle: three sends, the standard mode's two
+    # waits, and the last answer returned for the client's error builder.
+    var c = ScriptedConnector.with_stream(
+        _response(500, "Internal Server Error", '{"__type":"InternalFailure"}')
+    )
+    c.arm_next(_response(503, "Service Unavailable", '{"__type":"ServiceUnavailable"}'))
+    c.arm_next(
+        _response(
+            400,
+            "Bad Request",
+            '{"__type":"com.amazonaws.sqs#ThrottlingException","message":"slow"}',
+        )
     )
     c.arm_next(_response(200, "OK", "{}"))
     var t = _transport(c^)
     var clock = SteppingClock(_T0, 1)
     var loop = _loop()
-    var res = _send(t, clock, loop, String("POST"), String("sqs"), String("/"), "{}")
-    assert_equal(res.status, 500)
-    assert_equal(aws_response_error_code(res), "InternalFailure")
-    assert_equal(len(t.sent), 1)
-    assert_equal(len(loop.sleeper().slept), 0)
-
-
-def test_a_conditional_put_is_not_resent_after_a_500() raises:
-    # A PUT is idempotent, so an unconditional one is resent after a 500
-    # (test_503_retried_and_re_signed). A conditional one is not: had the
-    # service applied it, the resend would be answered 412 and the caller
-    # would take its own write for a lost race.
-    var c = ScriptedConnector.with_stream(
-        _response(500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>")
-    )
-    c.arm_next(
-        _response(
-            412,
-            "Precondition Failed",
-            "<Error><Code>PreconditionFailed</Code></Error>",
-        )
-    )
-    var t = _transport(c^)
-    var clock = SteppingClock(_T0, 1)
-    var loop = _loop()
     var res = _send(
-        t, clock, loop, String("PUT"), String("s3"), String("/b/k"), "data",
-        precondition="If-Match", etag='"e1"',
+        t,
+        clock,
+        loop,
+        String("POST"),
+        String("sqs"),
+        String("/"),
+        _SEND_MESSAGE,
+        extra=_send_message_target(),
     )
-    assert_equal(res.status, 500)
-    assert_equal(len(t.sent), 1)
-    assert_equal(len(loop.sleeper().slept), 0)
+    assert_equal(res.status, 400)
+    assert_equal(aws_response_error_code(res), "ThrottlingException")
+    assert_equal(len(t.sent), 3)
+    assert_equal(len(loop.sleeper().slept), 2)
+    assert_equal(loop.sleeper().slept[0], Int64(390))
+    assert_equal(loop.sleeper().slept[1], Int64(33))
+    assert_equal(_header(t.sent[2], "X-Amz-Date"), "20260921T141322Z")
 
 
-def test_a_precondition_is_read_off_the_headers() raises:
-    # The send reads the precondition off the request itself, so a caller
-    # cannot forget to say so: the header's name in any case, either
-    # precondition, on any method but GET and HEAD.
-    var h = List[Header]()
-    assert_false(aws_request_is_conditional(String("PUT"), h))
-    h.append(Header(String("x-amz-meta-if-match"), String("*")))
-    assert_false(aws_request_is_conditional(String("PUT"), h))
-    h.append(Header(String("iF-nOnE-mAtCh"), String("*")))
-    assert_true(aws_request_is_conditional(String("PUT"), h))
-    assert_true(aws_request_is_conditional(String("POST"), h))
-    assert_true(aws_request_is_conditional(String("DELETE"), h))
-    assert_false(aws_request_is_conditional(String("GET"), h))
-    assert_false(aws_request_is_conditional(String("HEAD"), h))
-    # A lower-case If-None-Match on a PUT is held to the same rule end to
-    # end: not resent after a 500.
-    var c = ScriptedConnector.with_stream(
-        _response(500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>")
-    )
-    c.arm_next(_response(200, "OK", ""))
-    var t = _transport(c^)
-    var clock = SteppingClock(_T0, 1)
-    var loop = _loop()
-    var res = _send(
-        t, clock, loop, String("PUT"), String("s3"), String("/b/k"), "data",
-        precondition="if-none-match", etag="*",
-    )
-    assert_equal(res.status, 500)
-    assert_equal(len(t.sent), 1)
-    # A conditional GET is a read: resent after the same 500.
-    var g = ScriptedConnector.with_stream(
-        _response(500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>")
-    )
-    g.arm_next(_response(200, "OK", "x"))
-    var tg = _transport(g^)
-    var clock2 = SteppingClock(_T0, 1)
-    var loop2 = _loop()
-    var got = _send(
-        tg, clock2, loop2, String("GET"), String("s3"), String("/b/k"),
-        precondition="If-Match", etag='"e1"',
-    )
-    assert_equal(got.status, 200)
-    assert_equal(len(tg.sent), 2)
-
-
-def test_a_conditional_put_is_resent_after_a_throttle() raises:
-    # A throttling code says the service refused the request, so even a
-    # conditional one is sent again.
-    var c = ScriptedConnector.with_stream(
-        _response(503, "Slow Down", "<Error><Code>SlowDown</Code></Error>")
-    )
-    c.arm_next(_response(200, "OK", ""))
-    var t = _transport(c^)
-    var clock = SteppingClock(_T0, 1)
-    var loop = _loop()
-    var res = _send(
-        t, clock, loop, String("PUT"), String("s3"), String("/b/k"), "data",
-        precondition="If-Match", etag='"e1"',
-    )
-    assert_equal(res.status, 200)
-    assert_equal(len(t.sent), 2)
-
-
-def test_a_dropped_response() raises:
-    # A POST: the service may have acted, so the error is raised.
+def test_a_dropped_response_is_resent() raises:
+    # The response broke off after the request was sent: a POST is resent
+    # as any other request is (botocore retries every HTTPClientError).
     var c = ScriptedConnector.with_stream(_truncated())
     c.arm_next(_response(200, "OK", "{}"))
     var t = _transport(c^)
     var clock = SteppingClock(_T0, 1)
     var loop = _loop()
-    var raised = False
-    try:
-        _ = _send(t, clock, loop, String("POST"), String("sqs"), String("/"), "{}")
-    except e:
-        raised = True
-        assert_true(String(e).find("HttpError[") >= 0, String(e))
-        assert_true(String(e).find("not retry-safe") >= 0, String(e))
-    assert_true(raised)
-    assert_equal(len(t.sent), 1)
-    # A PUT: resent.
+    var res = _send(
+        t,
+        clock,
+        loop,
+        String("POST"),
+        String("sqs"),
+        String("/"),
+        _SEND_MESSAGE,
+        extra=_send_message_target(),
+    )
+    assert_equal(res.status, 200)
+    assert_equal(len(t.sent), 2)
+    assert_equal(len(loop.sleeper().slept), 1)
+    # Three dropped responses: the error of the last one is raised.
     var c2 = ScriptedConnector.with_stream(_truncated())
+    c2.arm_next(_truncated())
+    c2.arm_next(_truncated())
+    var t2 = _transport(c2^)
+    var loop2 = _loop()
+    var raised = String("")
+    try:
+        _ = _send(t2, clock, loop2, String("POST"), String("sqs"), String("/"), "{}")
+    except e:
+        raised = String(e)
+    assert_equal(len(t2.sent), 3, raised)
+    assert_true(raised.find("(3 attempts)") >= 0, raised)
+    assert_true(raised.find("HttpError[") >= 0, raised)
+
+
+def _precondition(name: String, value: String) -> List[Header]:
+    var extra = List[Header]()
+    extra.append(Header(name, value))
+    return extra^
+
+
+def _internal_error() -> ScriptedStream:
+    return _response(
+        500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>"
+    )
+
+
+def _precondition_failed() -> ScriptedStream:
+    return _response(
+        412, "Precondition Failed", "<Error><Code>PreconditionFailed</Code></Error>"
+    )
+
+
+def test_a_conditional_put_is_not_resent_after_a_500() raises:
+    # A create-if-absent and a compare-and-swap: had the service applied
+    # either before its 500, the resend would be answered 412, and the
+    # caller would take its own write for a lost race. One send, and the
+    # 500 is returned.
+    var names: List[String] = ["If-None-Match", "If-Match", "if-none-match"]
+    var values: List[String] = ["*", '"e1"', "*"]
+    for i in range(len(names)):
+        var c = ScriptedConnector.with_stream(_internal_error())
+        c.arm_next(_precondition_failed())
+        var t = _transport(c^)
+        var clock = SteppingClock(_T0, 1)
+        var loop = _loop()
+        var res = _send(
+            t,
+            clock,
+            loop,
+            String("PUT"),
+            String("s3"),
+            String("/b/k"),
+            "data",
+            extra=_precondition(names[i], values[i]),
+        )
+        assert_equal(res.status, 500, names[i])
+        assert_equal(aws_response_error_code(res), "InternalError")
+        assert_equal(len(t.sent), 1, names[i])
+        assert_equal(len(loop.sleeper().slept), 0, names[i])
+        assert_equal(_header(t.sent[0], names[i]), values[i])
+
+
+def test_a_conditional_put_is_resent_after_a_throttle() raises:
+    # A throttle says the service refused the request: resent, signed
+    # again, the precondition with it.
+    var c = ScriptedConnector.with_stream(
+        _response(503, "Slow Down", "<Error><Code>SlowDown</Code></Error>")
+    )
+    c.arm_next(_response(200, "OK", ""))
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 7)
+    var loop = _loop()
+    var res = _send(
+        t,
+        clock,
+        loop,
+        String("PUT"),
+        String("s3"),
+        String("/b/k"),
+        "data",
+        extra=_precondition(String("If-None-Match"), String("*")),
+    )
+    assert_equal(res.status, 200)
+    assert_equal(len(t.sent), 2)
+    assert_equal(len(loop.sleeper().slept), 1)
+    assert_equal(_header(t.sent[1], "If-None-Match"), "*")
+    assert_equal(_header(t.sent[0], "X-Amz-Date"), "20260921T141320Z")
+    assert_equal(_header(t.sent[1], "X-Amz-Date"), "20260921T141327Z")
+
+
+def test_a_conditional_put_is_resent_after_a_failed_dial() raises:
+    # No request byte was written: the service cannot have acted on it.
+    var c = ScriptedConnector()
+    c.arm_connect_error(111)
+    c.arm(_response(200, "OK", ""))
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    var res = _send(
+        t,
+        clock,
+        loop,
+        String("PUT"),
+        String("s3"),
+        String("/b/k"),
+        "data",
+        extra=_precondition(String("If-Match"), String('"e1"')),
+    )
+    assert_equal(res.status, 200)
+    assert_equal(len(t.sent), 2)
+
+
+def test_a_conditional_put_is_not_resent_after_a_dropped_response() raises:
+    # The response broke off once the request was sent: the write may have
+    # landed, so the transport's error is raised after one send.
+    var c = ScriptedConnector.with_stream(_truncated())
+    c.arm_next(_precondition_failed())
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    var raised = String("")
+    try:
+        _ = _send(
+            t,
+            clock,
+            loop,
+            String("PUT"),
+            String("s3"),
+            String("/b/k"),
+            "data",
+            extra=_precondition(String("If-None-Match"), String("*")),
+        )
+    except e:
+        raised = String(e)
+    assert_equal(len(t.sent), 1, raised)
+    assert_equal(len(loop.sleeper().slept), 0, raised)
+    assert_true(raised.find("conditional write") >= 0, raised)
+    assert_true(raised.find("HttpError[") >= 0, raised)
+
+
+def test_a_conditional_get_is_resent() raises:
+    # A read with a precondition changes nothing: resent after a 500.
+    var c = ScriptedConnector.with_stream(_internal_error())
+    c.arm_next(_response(200, "OK", "x"))
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    var res = _send(
+        t,
+        clock,
+        loop,
+        String("GET"),
+        String("s3"),
+        String("/b/k"),
+        extra=_precondition(String("If-Match"), String('"e1"')),
+    )
+    assert_equal(res.status, 200)
+    assert_equal(len(t.sent), 2)
+    # And a PUT without a precondition, after the same 500.
+    var c2 = ScriptedConnector.with_stream(_internal_error())
     c2.arm_next(_response(200, "OK", ""))
     var t2 = _transport(c2^)
     var loop2 = _loop()
-    var res = _send(t2, clock, loop2, String("PUT"), String("s3"), String("/b/k"), "x")
-    assert_equal(res.status, 200)
+    var res2 = _send(
+        t2, clock, loop2, String("PUT"), String("s3"), String("/b/k"), "data"
+    )
+    assert_equal(res2.status, 200)
     assert_equal(len(t2.sent), 2)
+
+
+def _mk_five_500s() raises -> ScriptedConnector:
+    """Five 500s, the n-th one's body `n`, so a caller reads which send's
+    answer it was given."""
+    var c = ScriptedConnector.with_stream(_response(500, "Internal Server Error", "1"))
+    for n in range(2, 6):
+        c.arm_next(_response(500, "Internal Server Error", String(n)))
+    return c^
+
+
+def _free_send_of(service: String) raises -> HttpResult:
+    var quota = AwsRetryQuota()
+    return send_sigv4_signed_request[ScriptedConnector](
+        _mk_five_500s,
+        HttpClientConfig.defaults(),
+        quota,
+        String("POST"),
+        _cred(),
+        String("us-east-1"),
+        service,
+        _endpoint(),
+        String("/"),
+        String("application/x-amz-json-1.0"),
+        _bytes(String("{}")),
+        List[Header](),
+    )
+
+
+def test_the_free_send_makes_three_attempts() raises:
+    # botocore's default `DEFAULT_MAX_ATTEMPTS` for every service: its
+    # `_SERVICE_MAX_ATTEMPTS` (four for DynamoDB) is read only behind the
+    # off-by-default `NEW_RETRIES_ENABLED`. The last answer is returned.
+    var ddb = _free_send_of(String("dynamodb"))
+    assert_equal(ddb.status, 500)
+    assert_equal(String(unsafe_from_utf8=Span(ddb.body)), "3")
+    var sqs = _free_send_of(String("sqs"))
+    assert_equal(sqs.status, 500)
+    assert_equal(String(unsafe_from_utf8=Span(sqs.body)), "3")
 
 
 def test_s3_200_with_error_is_retried() raises:
@@ -459,6 +661,49 @@ def test_a_200_is_a_200_unless_the_operation_says_otherwise() raises:
     assert_equal(res.status, 200)
     assert_equal(String(unsafe_from_utf8=Span(res.body)), body)
     assert_equal(len(t.sent), 1)
+
+
+def test_a_dynamodb_checksum_mismatch_is_retried() raises:
+    # zlib.crc32(b'{"Item":{}}') == 49613676. A 200 whose x-amz-crc32 names
+    # another number is resent (botocore's RetryDDBChecksumError), and the
+    # last one is returned as it is once no retry follows.
+    var body = String('{"Item":{}}')
+    var c = ScriptedConnector.with_stream(
+        _response(200, "OK", body, "x-amz-crc32: 1\r\n")
+    )
+    c.arm_next(_response(200, "OK", body, "x-amz-crc32: 49613676\r\n"))
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    var res = _send(
+        t, clock, loop, String("POST"), String("dynamodb"), String("/"), "{}"
+    )
+    assert_equal(res.status, 200)
+    assert_equal(res.header(String("x-amz-crc32")), "49613676")
+    assert_equal(len(t.sent), 2)
+    # Another service's x-amz-crc32 is not read.
+    var c2 = ScriptedConnector.with_stream(
+        _response(200, "OK", body, "x-amz-crc32: 1\r\n")
+    )
+    var t2 = _transport(c2^)
+    var loop2 = _loop()
+    var res2 = _send(t2, clock, loop2, String("POST"), String("sqs"), String("/"), "{}")
+    assert_equal(res2.status, 200)
+    assert_equal(len(t2.sent), 1)
+    # Wrong three times: the third 200 is returned.
+    var c3 = ScriptedConnector.with_stream(
+        _response(200, "OK", body, "x-amz-crc32: 1\r\n")
+    )
+    c3.arm_next(_response(200, "OK", body, "x-amz-crc32: 2\r\n"))
+    c3.arm_next(_response(200, "OK", body, "x-amz-crc32: 3\r\n"))
+    var t3 = _transport(c3^)
+    var loop3 = _loop()
+    var res3 = _send(
+        t3, clock, loop3, String("POST"), String("dynamodb"), String("/"), "{}"
+    )
+    assert_equal(res3.status, 200)
+    assert_equal(res3.header(String("x-amz-crc32")), "3")
+    assert_equal(len(t3.sent), 3)
 
 
 def test_a_client_error_is_returned_as_it_is() raises:
@@ -506,6 +751,76 @@ def test_a_budget_ends_retries() raises:
     assert_equal(len(t.sent), 1)
 
 
+def _quota_send(
+    mut quota: AwsRetryQuota, var c: ScriptedConnector
+) raises -> HttpResult:
+    """One call of a client holding `quota`."""
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    return send_sigv4_signed_request_with(
+        t,
+        clock,
+        loop,
+        quota,
+        String("POST"),
+        _cred(),
+        String("us-east-1"),
+        String("sqs"),
+        _endpoint(),
+        String("/"),
+        String("application/x-amz-json-1.0"),
+        _bytes(String(_SEND_MESSAGE)),
+        _send_message_target(),
+    )
+
+
+def test_a_client_retry_quota() raises:
+    # botocore's quota, kept across a client's calls: a retry spends 5 of
+    # 500, a success puts back what its last retry cost (or 1, never over
+    # 500), and a call that gives up puts nothing back.
+    var quota = AwsRetryQuota()
+    var c = ScriptedConnector.with_stream(_response(503, "Service Unavailable", ""))
+    c.arm_next(_response(200, "OK", "{}"))
+    assert_equal(_quota_send(quota, c^).status, 200)
+    assert_equal(quota.available(), 500)
+    var c2 = ScriptedConnector.with_stream(_response(500, "Internal Server Error", ""))
+    c2.arm_next(_response(500, "Internal Server Error", ""))
+    c2.arm_next(_response(500, "Internal Server Error", ""))
+    assert_equal(_quota_send(quota, c2^).status, 500)
+    assert_equal(quota.available(), 490)
+    # An empty quota: the call is not retried.
+    while quota.try_spend(5):
+        pass
+    var c3 = ScriptedConnector.with_stream(_response(503, "Service Unavailable", ""))
+    c3.arm_next(_response(200, "OK", "{}"))
+    var t3 = _transport(c3^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    var res = send_sigv4_signed_request_with(
+        t3,
+        clock,
+        loop,
+        quota,
+        String("POST"),
+        _cred(),
+        String("us-east-1"),
+        String("sqs"),
+        _endpoint(),
+        String("/"),
+        String("application/x-amz-json-1.0"),
+        _bytes(String(_SEND_MESSAGE)),
+        _send_message_target(),
+    )
+    assert_equal(res.status, 503)
+    assert_equal(len(t3.sent), 1)
+    assert_equal(quota.available(), 0)
+    # A call that succeeds first time puts back 1.
+    var ok = ScriptedConnector.with_stream(_response(200, "OK", "{}"))
+    assert_equal(_quota_send(quota, ok^).status, 200)
+    assert_equal(quota.available(), 1)
+
+
 def _mk_ok() raises -> ScriptedConnector:
     return ScriptedConnector.with_stream(
         _response(200, "OK", "{}", "x-amzn-RequestId: r-1\r\n")
@@ -515,8 +830,11 @@ def _mk_ok() raises -> ScriptedConnector:
 def test_the_free_send_through_a_factory() raises:
     var extra = List[Header]()
     extra.append(Header(String("X-Amz-Target"), String("AmazonSQS.ListQueues")))
+    var quota = AwsRetryQuota()
     var res = send_sigv4_signed_request[ScriptedConnector](
         _mk_ok,
+        HttpClientConfig.defaults(),
+        quota,
         String("POST"),
         _cred(),
         String("us-east-1"),
@@ -529,6 +847,88 @@ def test_the_free_send_through_a_factory() raises:
     )
     assert_equal(res.status, 200)
     assert_equal(res.header(String("x-amzn-RequestId")), "r-1")
+    assert_equal(quota.available(), 500)
+
+
+def test_the_transport_builds_its_client_from_the_callers_config() raises:
+    # The two-argument transport builds its HTTP client from the config it
+    # is given; the one-argument one from the defaults.
+    var cfg = HttpClientConfig.for_serving_ceiling(4_500_000)
+    var t = AwsConnectorTransport[ScriptedConnector](cfg, _mk_ok())
+    assert_equal(t.http_config().context_ceiling_us, 4_500_000)
+    assert_true(t.http_config().budget_was_clamped())
+    var d = AwsConnectorTransport[ScriptedConnector](_mk_ok())
+    assert_equal(d.http_config().context_ceiling_us, 0)
+    assert_false(d.http_config().budget_was_clamped())
+
+
+comptime _STUCK_BUDGET_US: Int = 150_000
+"""The request budget the stuck-server row configures (150 ms)."""
+
+comptime _STUCK_CEILING_US: Int = 20_000_000
+"""The stuck-server row's elapsed ceiling (20 s): far above the 150 ms
+budget, far below the defaults' budget."""
+
+
+def _stuck_stream() -> ScriptedStream:
+    var s = ScriptedStream.empty()
+    s.queue_read_pending(50_000_000)
+    return s^
+
+
+def _mk_stuck() raises -> ScriptedConnector:
+    # A server that takes every connection and never answers: every read is
+    # Pending, so only the request deadline can end an attempt. One stream
+    # per send, the first and the two resends.
+    var c = ScriptedConnector.with_stream(_stuck_stream())
+    for _ in range(2):
+        c.arm_next(_stuck_stream())
+    return c^
+
+
+def test_the_free_send_honors_the_callers_request_timeout() raises:
+    # `send_sigv4_signed_request` sends through a client built from its
+    # `http_config`: a 150 ms request budget against a server that never
+    # answers ends each attempt at that budget. A POST that is not a
+    # conditional write is resent after a timeout (standard mode), so all
+    # three sends time out and the send raises the client's deadline error.
+    # A send that built its client from the defaults instead would not time
+    # out here.
+    var cfg = HttpClientConfig.defaults()
+    cfg.request_timeout_us = _STUCK_BUDGET_US
+    var extra = List[Header]()
+    extra.append(Header(String("X-Amz-Target"), String("AmazonSQS.ListQueues")))
+    var quota = AwsRetryQuota()
+    var raised = String("")
+    var start_us = Int(now_ns() // 1000)
+    try:
+        _ = send_sigv4_signed_request[ScriptedConnector](
+            _mk_stuck,
+            cfg,
+            quota,
+            String("POST"),
+            _cred(),
+            String("us-east-1"),
+            String("sqs"),
+            _endpoint(),
+            String("/"),
+            String("application/x-amz-json-1.0"),
+            _bytes(String("{}")),
+            extra^,
+        )
+    except e:
+        raised = String(e)
+    var elapsed_us = Int(now_ns() // 1000) - start_us
+    assert_true(raised.find("deadline exceeded") >= 0, "got: " + raised)
+    assert_true(raised.find("(3 attempts)") >= 0, "got: " + raised)
+    assert_true(
+        elapsed_us < _STUCK_CEILING_US,
+        "elapsed " + String(elapsed_us) + " us for a 150 ms budget",
+    )
+    assert_true(
+        elapsed_us >= 3 * _STUCK_BUDGET_US,
+        "ended before three budgets: " + String(elapsed_us) + " us",
+    )
 
 
 def test_the_request_on_the_wire() raises:
@@ -604,12 +1004,12 @@ def test_a_refused_kernel_dial_is_resent() raises:
         )
     except e:
         raised = String(e)
-    # A POST, resent because the refusal came before any byte was sent:
-    # three dials, the standard mode's two waits, then the dial's own text.
+    # A POST, resent as any request is after a failed send: three dials,
+    # the standard mode's two waits, then the dial's own text.
     assert_equal(len(t.sent), 3, raised)
     assert_equal(len(loop.sleeper().slept), 2, raised)
     assert_true(raised.find("(3 attempts)") >= 0, raised)
-    assert_true(raised.find("before the request was sent: TcpStream.connect: ") >= 0, raised)
+    assert_true(raised.find("TcpStream.connect: ") >= 0, raised)
 
 
 def main() raises:
@@ -618,16 +1018,24 @@ def main() raises:
     test_gives_up_after_max_attempts()
     test_a_post_is_resent_after_a_throttle()
     test_a_post_is_resent_after_a_failed_dial()
-    test_a_post_is_not_resent_after_a_500()
+    test_a_post_is_resent_after_a_500_and_a_503()
+    test_a_post_gives_up_after_max_attempts()
+    test_a_dropped_response_is_resent()
     test_a_conditional_put_is_not_resent_after_a_500()
-    test_a_precondition_is_read_off_the_headers()
     test_a_conditional_put_is_resent_after_a_throttle()
-    test_a_dropped_response()
+    test_a_conditional_put_is_resent_after_a_failed_dial()
+    test_a_conditional_put_is_not_resent_after_a_dropped_response()
+    test_a_conditional_get_is_resent()
     test_s3_200_with_error_is_retried()
     test_a_200_is_a_200_unless_the_operation_says_otherwise()
+    test_a_dynamodb_checksum_mismatch_is_retried()
     test_a_client_error_is_returned_as_it_is()
     test_a_budget_ends_retries()
+    test_a_client_retry_quota()
     test_the_free_send_through_a_factory()
+    test_the_transport_builds_its_client_from_the_callers_config()
+    test_the_free_send_honors_the_callers_request_timeout()
+    test_the_free_send_makes_three_attempts()
     test_the_request_on_the_wire()
     test_a_refused_kernel_dial_is_resent()
     print("OK")

@@ -26,6 +26,7 @@
 # UnsafePointer crosses the boundary; no wildcard origin.
 # =============================================================================
 
+from komira_encoding.base64 import base64_encode
 from komira_http_client.client import HttpClient, build_request_with_body
 from komira_http_client.body import BytesBody, EmptyBody
 from komira_http_client.header_map import HeaderMap
@@ -99,8 +100,31 @@ struct OciRequest(Copyable, Movable, Deinitable):
         if token.byte_length() > 0:
             self.with_header(String("authorization"), String("Bearer ") + token)
 
+    def with_basic(mut self, user: String, password: String):
+        """Attach `Authorization: Basic base64(user:password)` — a NO-OP on an
+        empty password (the same anonymous/credentialed single-path rule as
+        `with_bearer`). Artifact Registry's documented form is user
+        `oauth2accesstoken` with the access token as the password; ECR hands out
+        a Basic credential directly.
+
+        ⚠ The credential is a SECRET: nothing here logs it, and no error text in
+        this package quotes a request header."""
+        if password.byte_length() > 0:
+            var raw = user + String(":") + password
+            self.with_header(
+                String("authorization"),
+                String("Basic ") + base64_encode(raw.as_bytes()),
+            )
+
     def with_body(mut self, var body: List[UInt8]):
         self.body = body^
+
+    def take_body(mut self) -> List[UInt8]:
+        """MOVE the body out, leaving this request bodiless. The way a transport
+        hands a large layer to the wire without a second resident copy."""
+        var out = self.body^
+        self.body = List[UInt8]()
+        return out^
 
     def header_value(self, name: String) -> String:
         """The value of header `name` (ASCII-case-insensitive), or EMPTY."""
@@ -155,6 +179,12 @@ struct OciResponse(Copyable, Movable, Deinitable):
     def with_body(mut self, var body: List[UInt8]):
         self.body = body^
 
+    def take_body(mut self) -> List[UInt8]:
+        """MOVE the body out (the response is left bodiless)."""
+        var out = self.body^
+        self.body = List[UInt8]()
+        return out^
+
     def header(self, name: String) -> String:
         """The value of response header `name` (ASCII-case-insensitive), or
         EMPTY. Case-insensitivity is load-bearing, not politeness: registries
@@ -203,7 +233,7 @@ trait OciTransport(Movable, Deinitable):
     `OciResponse` because the distribution protocol uses status as control
     flow (see `OciResponse`)."""
 
-    def send(mut self, request: OciRequest) raises -> OciResponse:
+    def send(mut self, var request: OciRequest) raises -> OciResponse:
         ...
 
 
@@ -264,7 +294,7 @@ struct ScriptedOciTransport(OciTransport, Movable, Deinitable):
     def call_body(self, i: Int) -> List[UInt8]:
         return self._call_bodies[i].copy()
 
-    def send(mut self, request: OciRequest) raises -> OciResponse:
+    def send(mut self, var request: OciRequest) raises -> OciResponse:
         self._call_methods.append(request.method)
         self._call_registries.append(request.registry.copy())
         self._call_paths.append(request.path.copy())
@@ -316,7 +346,7 @@ struct HttpOciTransport[C: Connector](
     def __init__(out self, mk_connector: def (String) thin -> Self.C):
         self._mk_connector = mk_connector
 
-    def send(mut self, request: OciRequest) raises -> OciResponse:
+    def send(mut self, var request: OciRequest) raises -> OciResponse:
         var headers = HeaderMap()
         for i in range(len(request.header_names)):
             headers.append(
@@ -346,8 +376,12 @@ struct HttpOciTransport[C: Connector](
             )
             return _lower_response(Int(cr.status), cr.headers, cr.body.take_bytes())
 
+        # The body is MOVED into the wire value, never copied: the request is
+        # taken by value precisely so a large layer is resident once here, not
+        # twice. (Whether the client then copies it into a send buffer is the
+        # client's concern; nothing in this file adds a copy.)
         var req2 = build_request_with_body[BytesBody](
-            method, url^, headers^, BytesBody.from_bytes(request.body.copy())
+            method, url^, headers^, BytesBody.from_bytes(request.take_body())
         )
         var cr2 = client.send_buffered[BlockingRuntime[NoopSink], BytesBody](
             req2^, reactor

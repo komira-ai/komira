@@ -1,0 +1,67 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Native package-registry clients: upload a package file, ask whether it is
+# there, read back what the registry holds, and fetch it, on PyPI and on a
+# prefix.dev conda channel. The PyPI legacy upload is byte for byte what
+# `uv publish` sends (pinned by recorded fixtures), and `RegistrySet` is the
+# one substrate ladder every caller goes through. The package names no channel, account or organisation: locations,
+# approved names and credentials all come from the caller.
+#
+# Deps: komira_http_client (the HTTPS client and its redirect policy),
+# komira_http_core (methods, the connector seam), komira_async
+# (the blocking runtime the transport drives), komira_crypto (digests),
+# komira_encoding (base64), komira_json (listings and token exchanges) and
+# komira_secret_store (tokens held as zeroizing values, resolved by name).
+#
+# Every welded test drives a scripted transport: no socket, no network. The
+# fidelity test reads the `uv publish` recordings under tests/fidelity.
+mojo_library(
+    name = "kci_pkg_upload",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = [
+        # an upload is claimed only under a name the caller approved
+        "tests/test_pkg_upload_approved_names.mojo",
+        # every upload answer is a kind; a POST's transport raise is UNKNOWN
+        "tests/test_pkg_upload_classify.mojo",
+        # UNKNOWN -> stale ABSENT -> duplicate -> MATCH, one accepted write
+        "tests/test_pkg_upload_convergence.mojo",
+        # surface-keyed credentials; the one substrate ladder; local refusals
+        "tests/test_pkg_upload_credential_dispatch.mojo",
+        # repodata reads: kinds, the 303 off-host, ABSENT only from a read listing;
+        # package_names never answers "no names" from a listing it did not read
+        "tests/test_pkg_upload_conda_reads.mojo",
+        # trusted publishing: ID-token request, both exchanges, every refusal
+        "tests/test_pkg_upload_github_oidc_credential.mojo",
+        # the HTTPS transport elaborates (nothing dials)
+        "tests/test_pkg_upload_http_transport_elaborates.mojo",
+        # field-by-field identity; NO_COMMON_FIELD is never MATCH
+        "tests/test_pkg_upload_identity.mojo",
+        # golden request bytes written out inline; every local form refusal
+        "tests/test_pkg_upload_legacy_form.mojo",
+        # the prefix.dev upload: golden form, kinds, 409 settled by read-back
+        "tests/test_pkg_upload_prefix_dev.mojo",
+        # read_back / presence / fetch; 404 is ABSENT, never a raise
+        "tests/test_pkg_upload_reads.mojo",
+        # one token by file or secret name, on one surface; anonymous never uploads
+        "tests/test_pkg_upload_static_token_credential.mojo",
+        # byte for byte what `uv publish` sends (loopback recordings)
+        "tests/test_pkg_upload_uv_fidelity.mojo",
+    ],
+    test_data = {
+        "tests/test_pkg_upload_uv_fidelity.mojo": glob([
+            "tests/fidelity/*.request",
+            "tests/fidelity/*.whl",
+            "tests/fidelity/*.METADATA",
+        ]),
+    },
+    visibility = ["PUBLIC"],
+)

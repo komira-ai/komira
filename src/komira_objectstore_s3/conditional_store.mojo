@@ -25,8 +25,9 @@
 # infallible. So the store is built lazily, behind an `ArcPointer[Optional]`
 # reached mutably through the Arc, and a clone gets a NEW empty Arc: no two
 # conformers share a store (its connection and HTTP client are not shared
-# between threads). A clone copies the configuration, the credential source
-# and the clock, so `T` and `K` are Copyable; the connector factory is a thin
+# between threads), and none shares a retry quota. A clone copies the
+# configuration, the caller's `HttpClientConfig`, the credential source and
+# the clock, so `T` and `K` are Copyable; the connector factory is a thin
 # function pointer (a code address, no heap).
 #
 # No UnsafePointer in any signature, no wildcard origin.
@@ -36,6 +37,7 @@ from std.memory import ArcPointer
 
 from komira_aws_core import AwsClock, AwsCredsSource
 from komira_core.collections.byte_view import ByteView
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_objectstore.path import Path
 from komira_objectstore.store import (
@@ -74,7 +76,7 @@ struct S3ConditionalStore[
 
         var store = S3ConditionalStore[KernelTcpConnector, StaticCredsSource, SystemAwsClock](
             "lake", S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
-            mk_connector, creds, SystemAwsClock(),
+            mk_connector, HttpClientConfig.defaults(), creds, SystemAwsClock(),
         )
         var meta = store.conditional_put(
             Path.parse("manifest/v1.json"), bytes,
@@ -86,6 +88,7 @@ struct S3ConditionalStore[
     var _bucket: String
     var _config: S3Config
     var _mk_connector: def () raises thin -> Self.C
+    var _http_config: HttpClientConfig
     var _creds: Self.T
     var _clock: Self.K
     var _store: ArcPointer[Optional[S3Store[Self.C, Self.T, Self.K]]]
@@ -95,6 +98,7 @@ struct S3ConditionalStore[
         var bucket: String,
         var config: S3Config,
         mk_connector: def () raises thin -> Self.C,
+        http_config: HttpClientConfig,
         var creds: Self.T,
         var clock: Self.K,
     ):
@@ -103,6 +107,7 @@ struct S3ConditionalStore[
         self._bucket = bucket^
         self._config = config^
         self._mk_connector = mk_connector
+        self._http_config = http_config.copy()
         self._creds = creds^
         self._clock = clock^
         self._store = ArcPointer[Optional[S3Store[Self.C, Self.T, Self.K]]](
@@ -114,13 +119,14 @@ struct S3ConditionalStore[
         var bucket: String,
         var config: S3Config,
         mk_connector: def () raises thin -> Self.C,
+        http_config: HttpClientConfig,
         var creds: Self.T,
         var clock: Self.K,
     ) raises -> Self:
         """A store whose S3 store is built now, so a failure to build it (a
         bad endpoint, a connector that cannot be made) raises here rather
         than on the first verb."""
-        var s = Self(bucket^, config^, mk_connector, creds^, clock^)
+        var s = Self(bucket^, config^, mk_connector, http_config, creds^, clock^)
         s._build_if_absent()
         return s^
 
@@ -131,6 +137,7 @@ struct S3ConditionalStore[
             self._bucket.copy(),
             self._config.copy(),
             self._mk_connector,
+            self._http_config,
             self._creds.copy(),
             self._clock.copy(),
         )
@@ -146,6 +153,7 @@ struct S3ConditionalStore[
                 S3Store[Self.C, Self.T, Self.K](
                     self._config.copy(),
                     self._mk_connector,
+                    self._http_config,
                     self._creds.copy(),
                     self._clock.copy(),
                 )

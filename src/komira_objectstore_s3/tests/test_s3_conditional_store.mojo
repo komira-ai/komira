@@ -31,6 +31,7 @@ from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
 from komira_core.collections.byte_view import ByteView
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import (
     Connector,
     IoStream,
@@ -448,6 +449,10 @@ def _config() raises -> S3Config:
     )
 
 
+def _http() -> HttpClientConfig:
+    return HttpClientConfig.defaults()
+
+
 def _creds() -> StaticCredsSource:
     return StaticCredsSource(
         AwsCredential(
@@ -470,7 +475,7 @@ def _mk_fake_one_conflict() raises -> FakeS3Connector:
 
 
 def _fake() raises -> _Fake:
-    return _Fake.built("lake", _config(), _mk_fake, _creds(), FixedClock(1790000000))
+    return _Fake.built("lake", _config(), _mk_fake, _http(), _creds(), FixedClock(1790000000))
 
 
 def _p(s: String) raises -> Path:
@@ -590,7 +595,7 @@ def _two_far_ranges() raises -> RangeSet:
 def test_a_range_fetch_reads_one_version() raises:
     # Two ranges too far apart to coalesce are two GETs. Untouched, both
     # land.
-    var b = _Fake.built("lake", _config(), _mk_fake_big, _creds(), FixedClock(1790000000))
+    var b = _Fake.built("lake", _config(), _mk_fake_big, _http(), _creds(), FixedClock(1790000000))
     var dst = List[UInt8](length=6, fill=UInt8(0))
     var view = ByteView[origin_of(dst)](dst.unsafe_ptr(), 6)
     _ = b.get_ranges(_p("r/big"), _two_far_ranges(), view)
@@ -600,7 +605,7 @@ def test_a_range_fetch_reads_one_version() raises:
     # ETag in If-Match, is answered 412, and the fetch raises rather than
     # return bytes of two versions.
     var g = _Fake.built(
-        "lake", _config(), _mk_fake_big_overwritten_after_get, _creds(), FixedClock(1790000000)
+        "lake", _config(), _mk_fake_big_overwritten_after_get, _http(), _creds(), FixedClock(1790000000)
     )
     var dst2 = List[UInt8](length=6, fill=UInt8(0))
     var view2 = ByteView[origin_of(dst2)](dst2.unsafe_ptr(), 6)
@@ -610,7 +615,7 @@ def test_a_range_fetch_reads_one_version() raises:
     # A suffix range sends a HEAD for the size first; overwritten after it,
     # the GET carries the HEAD's ETag and is answered 412.
     var h = _Fake.built(
-        "lake", _config(), _mk_fake_overwritten_after_head, _creds(), FixedClock(1790000000)
+        "lake", _config(), _mk_fake_overwritten_after_head, _http(), _creds(), FixedClock(1790000000)
     )
     var ranges = RangeSet.empty()
     ranges.append(GetRange.suffix(2), 0)
@@ -650,7 +655,7 @@ def _mk_status[status: Int, code: StringLiteral]() raises -> ScriptedConnector:
 
 def _kind_of(mk: def () raises thin -> ScriptedConnector) raises -> UInt8:
     var s = S3ConditionalStore[ScriptedConnector, StaticCredsSource, FixedClock].built(
-        "lake", _config(), mk, _creds(), FixedClock(1790000000)
+        "lake", _config(), mk, _http(), _creds(), FixedClock(1790000000)
     )
     try:
         _ = s.conditional_put(_p("k"), _bytes("v"), WritePrecondition.if_match('"e"'))
@@ -677,7 +682,7 @@ def test_each_status_is_a_named_error() raises:
 
 def test_cas_append_retries_a_409_conflict() raises:
     var store = _Fake.built(
-        "lake", _config(), _mk_fake_one_conflict, _creds(), FixedClock(1790000000)
+        "lake", _config(), _mk_fake_one_conflict, _http(), _creds(), FixedClock(1790000000)
     )
     var manifest = CasManifestStore[_Fake](
         store=store^, prefix=String("topic/p0"), retry=CasRetry.fast_test()
