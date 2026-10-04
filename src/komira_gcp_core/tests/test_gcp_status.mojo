@@ -27,6 +27,7 @@ from komira_gcp_core import (
     code_from_http_status,
     code_from_name,
     code_name,
+    gcp_grpc_error_code,
     gcp_grpc_status_error,
     gcp_status_error,
     parse_gcp_status,
@@ -419,6 +420,83 @@ def test_retry_exhaustion_is_stated_and_counts_only_the_last_status_text() raise
     )
 
 
+def _status_err(rpc: String, status: Int, message: String) -> String:
+    """What a generated client raises for komira_grpc's `[grpc:N] message`."""
+    return String(
+        gcp_grpc_status_error(rpc, status, String("[grpc:") + String(status) + "] " + message)
+    )
+
+
+def test_grpc_error_code_reads_back_every_code() raises:
+    """What `gcp_grpc_status_error` renders, `gcp_grpc_error_code` reads back:
+    every google.rpc.Code, a status outside it as UNKNOWN, and a call whose
+    retries ran out."""
+    var rpc = String("/google.storage.v2.Storage/WriteObject")
+    for c in range(17):
+        assert_equal(gcp_grpc_error_code(rpc, _status_err(rpc, c, "acme-secret-bucket")), c)
+    assert_equal(gcp_grpc_error_code(rpc, _status_err(rpc, 42, "")), CODE_UNKNOWN)
+    var big = String()
+    for _ in range(123456):
+        big += "x"
+    assert_equal(gcp_grpc_error_code(rpc, _status_err(rpc, 7, big)), CODE_PERMISSION_DENIED)
+    var exhausted = (
+        String("[grpc-retry:EXHAUSTED] gave up replaying ")
+        + rpc
+        + " after 4 attempt(s) (policy max_attempts=4, max_backoff_ms=1000);"
+        + " Last: [grpc:14] Service unavailable"
+    )
+    var mapped = String(gcp_grpc_status_error(rpc, 14, exhausted))
+    assert_true(_has(mapped, "retries exhausted after 4 attempts"))
+    assert_equal(gcp_grpc_error_code(rpc, mapped), CODE_UNAVAILABLE)
+
+
+def test_grpc_error_code_refuses_anything_else() raises:
+    """-1 for an error from another RPC, for an error that carries no status
+    (a transport fault the generated client passes on unchanged), for
+    komira_grpc's own `[grpc:N]` text, and for a message that only resembles
+    the rendered form."""
+    var rpc = String("/google.storage.v2.Storage/GetObject")
+    var other = _status_err("/google.storage.v2.Storage/ReadObject", 5, "abc")
+    assert_equal(gcp_grpc_error_code(rpc, other), -1)
+    assert_equal(gcp_grpc_error_code(rpc, "HttpError[EOF_MID_RESPONSE]: peer closed"), -1)
+    assert_equal(gcp_grpc_error_code(rpc, "[grpc:5] no such object"), -1)
+    var good = _status_err(rpc, 5, "abc")
+    assert_equal(good, "[grpc:5] gRPC " + rpc + ": NOT_FOUND (code 5), error text 3 bytes")
+    assert_equal(gcp_grpc_error_code(rpc, good), CODE_NOT_FOUND)
+    # A wrong name for the code, an anchor that disagrees with the code, a
+    # trailing byte, a missing count.
+    assert_equal(
+        gcp_grpc_error_code(rpc, "[grpc:5] gRPC " + rpc + ": INTERNAL (code 5), error text 3 bytes"),
+        -1,
+    )
+    assert_equal(
+        gcp_grpc_error_code(rpc, "[grpc:9] gRPC " + rpc + ": NOT_FOUND (code 5), error text 3 bytes"),
+        -1,
+    )
+    assert_equal(gcp_grpc_error_code(rpc, good + "x"), -1)
+    assert_equal(
+        gcp_grpc_error_code(rpc, "[grpc:5] gRPC " + rpc + ": NOT_FOUND (code 5), error text  bytes"),
+        -1,
+    )
+    # A grpc-status that is itself a google.rpc.Code is never rendered, nor
+    # is an exhaustion of one attempt.
+    assert_equal(
+        gcp_grpc_error_code(
+            rpc, "[grpc:5] gRPC " + rpc + ": NOT_FOUND (code 5), grpc-status 5, error text 3 bytes"
+        ),
+        -1,
+    )
+    assert_equal(
+        gcp_grpc_error_code(
+            rpc,
+            "[grpc:5] gRPC "
+            + rpc
+            + ": NOT_FOUND (code 5), retries exhausted after 1 attempts, error text 3 bytes",
+        ),
+        -1,
+    )
+
+
 def main() raises:
     test_full_envelope_is_classified()
     test_the_body_is_never_echoed()
@@ -440,4 +518,6 @@ def main() raises:
     test_grpc_status_error_keeps_a_readable_code_anchor()
     test_unknown_grpc_status_is_named_as_received()
     test_retry_exhaustion_is_stated_and_counts_only_the_last_status_text()
+    test_grpc_error_code_reads_back_every_code()
+    test_grpc_error_code_refuses_anything_else()
     print("all gcp status tests passed")

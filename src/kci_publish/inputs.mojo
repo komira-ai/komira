@@ -4,7 +4,7 @@
 #   disk, before anything is read from a channel.
 # =============================================================================
 #
-# `load_release(decls, dir)` refuses (RAISES once, listing every refusal):
+# `load_release(arts, dir)` refuses (RAISES once, listing every refusal):
 #   - `dir` is not a directory;
 #   - an entry of `dir` that is neither a declared artifact's directory nor
 #     `release.json` (nothing undeclared ships);
@@ -12,7 +12,7 @@
 #     ships: a partial release cannot publish);
 #   - each member's own refusals: `kci_release_set.verify_member`, the SAME
 #     function a BUILD step ran when the build finished (one manifest, its name
-#     the declaration's, bare `file`/`metadata`, nothing else at the top, the
+#     the artifact's, bare `file`/`metadata`, nothing else at the top, the
 #     file's sha256 and size, the conda metadata agreeing with the manifest);
 #   - `release.json` missing, unparsable, or not exactly what the members
 #     recompute to under the identity it records (revision, platform; the
@@ -31,7 +31,7 @@
 from std.os import listdir
 from std.os.path import isdir
 
-from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
+from kci_artifact_proto.artifact import Artifacts
 from kci_release_set.member import ReleaseMember, verify_member
 from kci_release_set.release_manifest import (
     RELEASE_MANIFEST_NAME,
@@ -43,7 +43,7 @@ from kci_release_set.release_manifest import (
 
 
 struct LoadedRelease(Copyable, Movable):
-    """Every member, verified, in declaration-file order, and the release
+    """Every member, verified, in artifacts-file order, and the release
     manifest they recompute to under the recorded identity (its `set_hash`
     is the recomputed one; `revision`, `platform` and `produced_by` are
     `release.json`'s).
@@ -81,7 +81,7 @@ def _refuse_all(refusals: List[String]) raises:
     )
 
 
-def load_release(decls: ArtifactDeclarations, dir: String) raises -> LoadedRelease:
+def load_release(arts: Artifacts, dir: String) raises -> LoadedRelease:
     """Contract steps 0.1 and 0.2 (see the file header)."""
     if not isdir(dir):
         raise Error(
@@ -97,8 +97,8 @@ def load_release(decls: ArtifactDeclarations, dir: String) raises -> LoadedRelea
             has_release_json = True
             continue
         var declared = False
-        for j in range(len(decls.artifacts)):
-            if decls.artifacts[j].name == entry:
+        for j in range(len(arts.artifacts)):
+            if arts.artifacts[j].name == entry:
                 declared = True
         if not declared:
             refusals.append(
@@ -107,8 +107,8 @@ def load_release(decls: ArtifactDeclarations, dir: String) raises -> LoadedRelea
                 + String("' is in the release directory but no artifact of that name is declared")
             )
     var members = List[ReleaseMember]()
-    for j in range(len(decls.artifacts)):
-        var name = decls.artifacts[j].name.copy()
+    for j in range(len(arts.artifacts)):
+        var name = arts.artifacts[j].name.copy()
         var member_dir = base + name
         if not isdir(member_dir):
             refusals.append(

@@ -14,11 +14,11 @@
 # convention: `release/machine.textproto`, relative to the working
 # directory, next to `release/artifacts.textproto` and
 # `release/channels.textproto`. `kci run --machine <path>` overrides it.
-# No other file (the result file, the release directory, a declaration, a
+# No other file (the result file, the release directory, an artifact, a
 # channel file) has a default.
 #
-# A declaration's `{release_dir}` placeholder stands
-# for `<release-dir>/<platform>`, so a declaration that reads an earlier
+# An artifact's `{release_dir}` placeholder stands
+# for `<release-dir>/<platform>`, so an artifact that reads an earlier
 # member (`{release_dir}/komira_encoding/manifest.json`) is the same text on
 # every platform.
 #

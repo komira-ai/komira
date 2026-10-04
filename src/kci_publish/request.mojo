@@ -9,7 +9,7 @@
 #
 #   step_name             the step's name in the machine file (the result's
 #                         `steps[].name`)
-#   declarations_file     the artifact declarations (what the release is)
+#   artifacts_file     the artifacts (what the release is)
 #   release_dir           --release-dir: the top release directory; this
 #                         step reads `<release_dir>/<platform>/`
 #                         (kci_api's layout), which a BUILD step wrote
@@ -35,7 +35,7 @@
 #                         discarded (flow.mojo)
 #   run                   --run-id, --attempt, --context (kci_api)
 #
-# Which names the release publishes is the declarations file's: there is no
+# Which names the release publishes is the artifacts file's: there is no
 # per-run claim and no approved-set input. A name new to the channel is
 # reported (`new_names`), never refused.
 #
@@ -55,7 +55,7 @@ struct PublishRequest(Copyable, Movable):
     Layout: owned values only. No pointer field."""
 
     var step_name: String
-    var declarations_file: String
+    var artifacts_file: String
     var release_dir: String
     var platform: String
     var revision_id: String
@@ -70,7 +70,7 @@ struct PublishRequest(Copyable, Movable):
 
     def __init__(out self, var run: RunIdentity):
         self.step_name = String("")
-        self.declarations_file = String("")
+        self.artifacts_file = String("")
         self.release_dir = String("")
         self.platform = String("")
         self.revision_id = String("")

@@ -198,7 +198,7 @@ def release_entry_of(member: ReleaseMember, release_platform: String) raises -> 
     var e = ReleaseEntry()
     e.artifact_type = member.manifest.artifact_type.copy()
     e.build = member.build()
-    e.dir = member.declaration.copy()
+    e.dir = member.artifact.copy()
     e.kind = member.kind()
     e.name = member.manifest.name.copy()
     e.platform = member_platform(member, release_platform)
