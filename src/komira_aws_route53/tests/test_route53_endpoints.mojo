@@ -219,11 +219,25 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
                 var region = config.region.value() if config.region else String("")
                 var t = aws_signing_target(got, region, String("route53"))
                 if t.signing_name != "route53" or t.signing_region != signing_region:
-                    why = "signs as " + t.signing_name + "/" + t.signing_region + ", expected route53/" + signing_region
+                    why = (
+                        "signs as " + t.signing_name + "/" + t.signing_region
+                        + ", expected route53/" + signing_region
+                    )
+                    return False
+            elif config.region:
+                # A custom endpoint states no scheme, and the client signs
+                # in its own region, as botocore signs it.
+                var region = config.region.value()
+                var t = aws_signing_target(got, region, String("route53"))
+                if t.signing_name != "route53" or t.signing_region != region:
+                    why = (
+                        "signs as " + t.signing_name + "/" + t.signing_region
+                        + ", expected route53/" + region
+                    )
                     return False
             else:
-                # A custom endpoint needs no region to resolve, and there is
-                # then none to sign with.
+                # A custom endpoint needs no region to resolve; a client
+                # given none has no region to sign in, and says so.
                 try:
                     _ = aws_signing_target(got, String(""), String("route53"))
                     why = "signed with no region"

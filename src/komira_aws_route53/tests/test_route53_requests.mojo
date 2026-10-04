@@ -11,11 +11,11 @@
 #                                  xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
 #
 # The trailing '/' of the ChangeResourceRecordSets path is the model's
-# requestUri and is kept. A hosted zone id is taken as Route 53 takes it,
-# bare (`Z1D633PJN98FT9`); the `/hostedzone/` prefix Route 53 answers with
-# is not stripped here (botocore strips it in a handler beyond the model,
-# `fix_route53_ids`), so a prefixed id is sent percent-encoded as one path
-# segment, which the last row pins.
+# requestUri and is kept. An Id is sent as the part after its last `/`, as
+# botocore's `fix_route53_ids` sends it (the generator's `route53`
+# customization), so `/hostedzone/Z1D633PJN98FT9`, as Route 53 answers a
+# zone's Id, and the bare `Z1D633PJN98FT9` build the same request; an Id
+# that is empty once cut is refused before a request exists.
 from komira_aws_route53.komira_aws_route53 import (
     ROUTE53_CHANGE_ACTION_DELETE,
     ROUTE53_CHANGE_ACTION_UPSERT,
@@ -33,7 +33,7 @@ from komira_aws_route53.komira_aws_route53 import (
     build_list_hosted_zones_by_name_request,
     build_list_resource_record_sets_request,
 )
-from std.testing import assert_equal, assert_false, assert_raises, assert_true
+from std.testing import assert_equal, assert_raises, assert_true
 
 
 comptime _NS = 'xmlns="https://route53.amazonaws.com/doc/2013-04-01/"'
@@ -104,8 +104,7 @@ def test_list_resource_record_sets_wildcard_name() raises:
 
 
 def test_list_resource_record_sets_refuses_what_the_model_bounds() raises:
-    # HostedZoneId is a required path label; the model bounds
-    # StartRecordIdentifier (SetIdentifier) at min length 1.
+    # The model bounds StartRecordIdentifier (SetIdentifier) at min length 1.
     var input = Route53ListResourceRecordSetsRequest(String(_ZONE))
     input.set_start_record_identifier(String(""))
     with assert_raises(contains="min length 1"):
@@ -221,19 +220,83 @@ def test_change_resource_record_sets_refuses_what_the_model_bounds() raises:
         )
 
 
-def test_a_prefixed_zone_id_is_one_encoded_segment() raises:
-    # `/hostedzone/Z1D633PJN98FT9`, as Route 53 answers an Id, is not a
-    # path: the label is not greedy, so its '/' is encoded and the request
-    # stays on the operation's path (Route 53 then answers it as an
-    # unknown zone). The caller passes the bare id.
-    var req = build_list_resource_record_sets_request(
-        Route53ListResourceRecordSetsRequest(String("/hostedzone/") + _ZONE)
-    )
+def test_a_prefixed_id_builds_the_bare_request() raises:
+    # Each verb, given the Id as Route 53 answers it, builds exactly the
+    # request the bare Id builds, and leaves the caller's input as it was.
+    var prefixed = String("/hostedzone/") + _ZONE
+    var rr = Route53ListResourceRecordSetsRequest(prefixed)
     assert_equal(
-        req.uri, "/2013-04-01/hostedzone/%2Fhostedzone%2FZ1D633PJN98FT9/rrset"
+        build_list_resource_record_sets_request(rr).uri,
+        build_list_resource_record_sets_request(
+            Route53ListResourceRecordSetsRequest(String(_ZONE))
+        ).uri,
     )
-    assert_false(req.uri.find("//") >= 0)
-    assert_true(req.uri.startswith("/2013-04-01/hostedzone/"))
+    assert_equal(rr.hosted_zone_id, prefixed)
+    var change = _txt_upsert()
+    change.hosted_zone_id = prefixed
+    var sent = build_change_resource_record_sets_request(change)
+    var bare = build_change_resource_record_sets_request(_txt_upsert())
+    assert_equal(sent.uri, "/2013-04-01/hostedzone/Z1D633PJN98FT9/rrset/")
+    assert_equal(sent.uri, bare.uri)
+    assert_equal(sent.body_text(), bare.body_text())
+    var zones = Route53ListHostedZonesByNameRequest()
+    zones.set_dns_name(String("example.org."))
+    zones.set_hosted_zone_id(prefixed)
+    assert_equal(
+        build_list_hosted_zones_by_name_request(zones).uri,
+        "/2013-04-01/hostedzonesbyname?dnsname=example.org.&hostedzoneid=Z1D633PJN98FT9",
+    )
+    # An Id with more than one '/' keeps only its last segment, as
+    # botocore's `split('/')[-1]` keeps it.
+    assert_equal(
+        build_list_resource_record_sets_request(
+            Route53ListResourceRecordSetsRequest(String("a/b/") + _ZONE)
+        ).uri,
+        "/2013-04-01/hostedzone/Z1D633PJN98FT9/rrset",
+    )
+
+
+def test_only_top_level_ids_are_cut() raises:
+    # botocore cuts the input's own members only: an alias target's
+    # HostedZoneId, inside the change batch, is sent as given.
+    var aliased = Route53ResourceRecordSet(String("www.example.com."), String(ROUTE53_RRTYPE_A))
+    aliased.set_alias_target(
+        Route53AliasTarget(
+            String("/hostedzone/Z2FDTNDATAQYW2"), String("d111111abcdef8.cloudfront.net."), False
+        )
+    )
+    var changes = List[Route53Change]()
+    changes.append(Route53Change(String(ROUTE53_CHANGE_ACTION_UPSERT), aliased^))
+    var req = build_change_resource_record_sets_request(
+        Route53ChangeResourceRecordSetsRequest(
+            String("/hostedzone/") + _ZONE, Route53ChangeBatch(changes^)
+        )
+    )
+    assert_equal(req.uri, "/2013-04-01/hostedzone/Z1D633PJN98FT9/rrset/")
+    assert_true(
+        req.body_text().find("<HostedZoneId>/hostedzone/Z2FDTNDATAQYW2</HostedZoneId>") >= 0,
+        req.body_text(),
+    )
+
+
+def test_an_empty_zone_id_is_refused() raises:
+    # The model bounds ResourceId at max 32 and states no min, so an empty
+    # Id passes validation; the empty path label is refused, and
+    # `/hostedzone//rrset` is never built. An Id that is only a prefix is
+    # empty once cut.
+    with assert_raises(contains="is empty"):
+        _ = build_list_resource_record_sets_request(
+            Route53ListResourceRecordSetsRequest(String(""))
+        )
+    with assert_raises(contains="is empty"):
+        _ = build_list_resource_record_sets_request(
+            Route53ListResourceRecordSetsRequest(String("/hostedzone/"))
+        )
+    var change = _txt_upsert()
+    change.hosted_zone_id = String("")
+    with assert_raises(contains="is empty"):
+        _ = build_change_resource_record_sets_request(change)
+
 
 
 def main() raises:
@@ -246,5 +309,7 @@ def main() raises:
     test_change_resource_record_sets_upsert()
     test_change_resource_record_sets_delete_and_alias()
     test_change_resource_record_sets_refuses_what_the_model_bounds()
-    test_a_prefixed_zone_id_is_one_encoded_segment()
+    test_a_prefixed_id_builds_the_bare_request()
+    test_only_top_level_ids_are_cut()
+    test_an_empty_zone_id_is_refused()
     print("OK")

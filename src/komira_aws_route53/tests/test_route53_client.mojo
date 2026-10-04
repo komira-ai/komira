@@ -11,6 +11,9 @@
 # naming the request head, so each row asserts the request line, the Host
 # the endpoint ruleset resolved, and the SigV4 scope. A custom endpoint
 # states no auth scheme, so these are signed in the client's own region.
+# A zone's Id as ListHostedZonesByName answers it (`/hostedzone/Z…`) is
+# passed back into ListResourceRecordSets and ChangeResourceRecordSets as
+# it came, and reaches the wire bare.
 #
 # The global endpoint, through the verbs over injected seams (`<op>_with`)
 # and a recording transport that answers without a connector: a client
@@ -241,6 +244,36 @@ def test_each_verb_on_the_wire() raises:
         )
 
 
+def test_a_found_zone_id_is_passed_back_as_it_came() raises:
+    # Find a zone, then read and change its records: the Id the answer
+    # carries (`/hostedzone/Z…`) goes back into the next calls unchanged,
+    # and each reaches the wire with the bare Id.
+    var finder = _local(_mk_zones)
+    var found = finder.list_hosted_zones_by_name(_zones_request())
+    var zone_id = found.hosted_zones[0].id.copy()
+    assert_equal(zone_id, "/hostedzone/Z1D633PJN98FT9")
+    var client = _local(_mk_echo)
+    try:
+        _ = client.list_resource_record_sets(Route53ListResourceRecordSetsRequest(zone_id))
+        raise Error("the echo answered ListResourceRecordSets with a success")
+    except e:
+        _check(
+            _wire(e, String("ListResourceRecordSets")),
+            String("GET /2013-04-01/hostedzone/Z1D633PJN98FT9/rrset HTTP/1.1"),
+        )
+    var change = _change()
+    change.hosted_zone_id = zone_id
+    try:
+        _ = client.change_resource_record_sets(change)
+        raise Error("the echo answered ChangeResourceRecordSets with a success")
+    except e:
+        _check(
+            _wire(e, String("ChangeResourceRecordSets")),
+            String("POST /2013-04-01/hostedzone/Z1D633PJN98FT9/rrset/ HTTP/1.1"),
+            String("content-type: application/xml"),
+        )
+
+
 # ---- the global endpoint, over injected seams ----------------------------------
 
 
@@ -368,6 +401,7 @@ def main() raises:
     test_list_hosted_zones_by_name()
     test_a_missing_zone_is_raised_under_its_code()
     test_each_verb_on_the_wire()
+    test_a_found_zone_id_is_passed_back_as_it_came()
     test_a_regional_client_signs_for_the_global_endpoint()
     test_prior_request_not_complete_is_resent()
     print("OK")

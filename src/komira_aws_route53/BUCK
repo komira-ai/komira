@@ -28,15 +28,17 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 #
 # `operations` is what a DNS-record resource needs: the hosted zone that
 # covers a name, the record sets at a name and type, and an UPSERT or
-# DELETE of a record set. An operation joins the list with its own rows in
-# the tests below. The generator refuses none of Route 53's operations at
-# the pinned model.
+# DELETE of a record set. GetChange (whether a change has propagated) is
+# not among them, because no caller waits on a change yet; it joins the
+# list with its own rows in the tests when one does. The generator
+# refuses none of Route 53's operations at the pinned model.
 #
-# Left to the caller, which botocore does for Route 53 in a handler beyond
-# the model (`fix_route53_ids`): an Id is passed bare (`Z1D633PJN98FT9`),
-# without the `/hostedzone/` or `/change/` prefix Route 53 answers with. A
-# prefixed one is sent percent-encoded as one path segment and answered as
-# an unknown zone (test_route53_requests).
+# The `route53` customization applies what botocore does to Route 53
+# beyond the model (`fix_route53_ids`): each top-level ResourceId,
+# DelegationSetId or ChangeId input member is sent as the part after its
+# last `/`. A zone's Id as Route 53 answers it (`/hostedzone/Z…`) can be
+# passed back as it came, and a bare Id is sent as itself
+# (test_route53_requests, test_route53_client).
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the Amazon Route 53 API reference (no upstream test body is
@@ -52,7 +54,8 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # module reads no environment) and test_route53_client (the generated
 # client over a scripted connector: a call answered, a missing zone
 # raised under its code, each verb's request as it reached the wire
-# through komira_aws_core's AwsEchoConnector, and over injected seams a
+# through komira_aws_core's AwsEchoConnector, a found zone's Id passed
+# back as it came and sent bare, and over injected seams a
 # regional client's calls to the global endpoint, a
 # PriorRequestNotComplete resent).
 #
@@ -64,6 +67,7 @@ _ENDPOINT_TESTS = botocore_endpoint_tests_path("route53")
 
 mojo_aws_client(
     name = "komira_aws_route53",
+    customizations = ["route53"],
     endpoint_rules = _ROUTE53.endpoint_rules,
     mode = "client",
     model = _ROUTE53.model,
@@ -95,6 +99,8 @@ mojo_aws_client(
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
+        # test_route53_endpoints parses botocore's endpoint case file.
+        "//src/komira_json:komira_json",
         # The client's `send_with` and `<op>_with` take a komira_retry loop.
         "//src/komira_retry:komira_retry",
         "//src/komira_xml:komira_xml",
