@@ -14,14 +14,14 @@ from kci_release_machine import parse_machine_file
 comptime _MACHINE: String = (
     "schema_version: 1\n"
     "stage { name: \"build\" farm_connected: true\n"
-    "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" }\n"
+    "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
     "}\n"
     "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\"\n"
-    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"\n"
+    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\" }\n"
     "}\n"
     "stage { name: \"publish-prod\" environment: \"prod\" after: \"publish-gamma\"\n"
-    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"\n"
+    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"prod\" }\n"
     "}\n"
 )

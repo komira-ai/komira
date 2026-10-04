@@ -14,8 +14,8 @@
 #    empty; and `--log-dir` is neither `--release-dir` nor under it (both
 #    compared absolute, `.`/`..` folded and every existing prefix resolved
 #    through its symlinks): the release directory holds only member
-#    directories and `release.json`; last, the declarations read and
-#    validate (kci_artifact_declaration).
+#    directories and `release.json`; last, the artifacts read and
+#    validate (kci_artifact).
 # 1. `recorder.begin` gets the RUNNING record (kci_api's result
 #    document) BEFORE the first effect (the first mkdir, the first git
 #    command). A recorder that cannot record stops the step FAILED with
@@ -24,20 +24,20 @@
 #    (revision.mojo, through the `git` runner): refused for a shallow
 #    clone, a HEAD that is not the revision, or modified tracked files,
 #    before any build runs.
-#    PLAN (`req.plan`, `kci run --plan`) stops here: each declaration's argv
-#    is rendered for the resolved stamp (a declaration that does not render
+#    PLAN (`req.plan`, `kci run --plan`) stops here: each artifact's argv
+#    is rendered for the resolved stamp (an artifact that does not render
 #    is REFUSED, as it would be in a real run), and nothing else happens: no
 #    build runs, the platform's release directory is not created and no
 #    `release.json` is written. The git reads above did run, and their logs
 #    went to `--log-dir` (never under `--release-dir`). Each artifact gets
 #    an `artifacts[]` row with effect WOULD_BUILD.
-# 3. For each artifact, in declarations-file order, one at a time (the order
+# 3. For each artifact, in artifacts-file order, one at a time (the order
 #    is the contract's: a metapackage declared last reads, under
 #    `{release_dir}`, the manifests of every artifact above it, each already
 #    built and verified), with `<P>` the platform's release directory:
 #      a. create `<P>/<name>/` (empty by construction: `<P>` was empty and
-#         declaration names are unique);
-#      b. run `render_build_argv(decls, name, <P>, platform, stamp)`
+#         artifact names are unique);
+#      b. run `render_build_argv(arts, name, <P>, platform, stamp)`
 #         (`{out_dir}` is `<P>/<name>`, `{release_dir}` is `<P>`,
 #         `{platform}` the platform) through the `ProcessRunner`, cwd
 #         `--work-dir`, stdout and stderr to `<log>/<name>.stdout|.stderr`,
@@ -81,11 +81,11 @@
 # still parallelises inside each build. Nothing here retries: a re-run is
 # cheap (the cache) and the empty-directory rule makes it safe.
 #
-# kci knows no build tool. "Never build locally" is the declarations' to
+# kci knows no build tool. "Never build locally" is the artifacts' to
 # say (buck2's `-c komira.execution=remote` is a build-system arg there) and
 # the machine's (the farm is a buckconfig buck2 reads at daemon start; see
-# kci_artifact_declaration's example), never a kci flag. The stamp reaches
-# the build only as the declarations' placeholders.
+# kci_artifact's example), never a kci flag. The stamp reaches
+# the build only as the artifacts' placeholders.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -94,14 +94,14 @@ from std.io import FileDescriptor
 from std.os import listdir, makedirs
 from std.os.path import exists, isdir, realpath
 
-from kci_artifact_declaration import read_artifact_declarations, render_build_argv
-from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
+from kci_artifact import read_artifacts, render_build_argv
+from kci_artifact_proto.artifact import Artifacts
 from kci_api import (
     ARTIFACT_BUILT,
     ARTIFACT_WOULD_BUILD,
     ERROR_BUILD_FAILED,
     ERROR_CANNOT_TELL,
-    ERROR_DECLARATION,
+    ERROR_ARTIFACT,
     ERROR_MEMBER,
     ERROR_PLATFORM,
     ERROR_PLATFORM_MISMATCH,
@@ -269,7 +269,7 @@ def _check_release_top(platform_dir: String, names: List[String]) raises -> Buil
                 + platform_dir
                 + String("' holds '")
                 + entry
-                + String("', which no declaration names: it holds only the member directories")
+                + String("', which no artifact names: it holds only the member directories")
                 + String(" and release.json (a build wrote outside its own directory)"),
             )
     for k in range(len(names)):
@@ -327,11 +327,11 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
         var logs = check_log_dir(req.release_dir, req.log_dir)
         if not logs.ok():
             return logs^
-        var decls: ArtifactDeclarations
+        var arts: Artifacts
         try:
-            decls = read_artifact_declarations(req.declarations_file)
+            arts = read_artifacts(req.artifacts_file)
         except e:
-            return _refused(String(ERROR_DECLARATION), String(e))
+            return _refused(String(ERROR_ARTIFACT), String(e))
         # ── step 1: RUNNING, before the first effect ────────────────────────
         result.revision = req.revision_id.copy()
         result.platform = req.platform.copy()
@@ -357,16 +357,16 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
             file=_STDERR,
         )
         if req.plan:
-            # PLAN (file header): render every declaration, build nothing,
+            # PLAN (file header): render every artifact, build nothing,
             # create nothing under --release-dir.
             var would = List[String]()
-            for i in range(len(decls.artifacts)):
-                var name = decls.artifacts[i].name.copy()
+            for i in range(len(arts.artifacts)):
+                var name = arts.artifacts[i].name.copy()
                 var argv: List[String]
                 try:
-                    argv = render_build_argv(decls, name, pdir, req.platform, stamp)
+                    argv = render_build_argv(arts, name, pdir, req.platform, stamp)
                 except e:
-                    return _refused(String(ERROR_DECLARATION), String("artifact '") + name + String("': ") + String(e))
+                    return _refused(String(ERROR_ARTIFACT), String("artifact '") + name + String("': ") + String(e))
                 var line = String("")
                 for k in range(len(argv)):
                     if k > 0:
@@ -385,11 +385,11 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
         makedirs(pdir, exist_ok=True)
         var out = realpath(pdir)
         var built = List[ReleaseMember]()
-        for i in range(len(decls.artifacts)):
-            var name = decls.artifacts[i].name.copy()
+        for i in range(len(arts.artifacts)):
+            var name = arts.artifacts[i].name.copy()
             var dir = out + String("/") + name
             makedirs(dir, exist_ok=False)
-            var argv = render_build_argv(decls, name, out, req.platform, stamp)
+            var argv = render_build_argv(arts, name, out, req.platform, stamp)
             var rest = List[String]()
             for k in range(1, len(argv)):
                 rest.append(argv[k].copy())
@@ -428,8 +428,8 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                 )
             built.append(m^)
         var names = List[String]()
-        for i in range(len(decls.artifacts)):
-            names.append(decls.artifacts[i].name.copy())
+        for i in range(len(arts.artifacts)):
+            names.append(arts.artifacts[i].name.copy())
         var top = _check_release_top(out, names)
         if not top.ok():
             return top^
@@ -438,14 +438,14 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
             ref first = built[i]
             var again: ReleaseMember
             try:
-                again = verify_member(first.declaration, first.dir)
+                again = verify_member(first.artifact, first.dir)
             except e:
                 return _refused(String(ERROR_MEMBER), String("after every build ran, ") + String(e))
             if _member_line(again) != _member_line(first) or again.size != first.size:
                 return _refused(
                     String(ERROR_MEMBER),
                     String("artifact '")
-                    + first.declaration
+                    + first.artifact
                     + String("': its directory changed after it was verified (a later build")
                     + String(" wrote into it): was `")
                     + _member_line(first)

@@ -5,7 +5,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # must be the checkout's HEAD, in a full-history clone; the platform one kci
 # releases), record the run's RUNNING result (kci_api) before the first
 # effect, derive the release stamp from git, then for each artifact of the
-# declarations file (kci_artifact_declaration), in file order and one at a
+# artifacts file (kci_artifact), in file order and one at a
 # time (a metapackage declared last reads its members under {release_dir}),
 # create an EMPTY directory under <--release-dir>/<platform>/, run the
 # declared build system's rendered argv into it, and check what it left with
@@ -14,7 +14,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (major 2: revision, platform, produced_by, members, set hash) LAST, as the
 # commit marker. The outcome is a kci_api outcome word and error id; no
 # exit number is spelled here. kci knows no build tool: the program, its args
-# and "build on the farm" are the declarations file's. The process is started
+# and "build on the farm" are the artifacts file's. The process is started
 # through the ProcessRunner seam: SupervisorRunner (komira_supervisor) for
 # real runs, ScriptedRunner for tests. Nothing here names a farm, a channel or
 # an account.
@@ -50,8 +50,8 @@ mojo_library(
     import_name = "kci_build",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_artifact_declaration:kci_artifact_declaration",
-        "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
+        "//src/kci_artifact:kci_artifact",
+        "//src/kci_artifact_proto:kci_artifact_proto",
         "//src/kci_artifact_manifest:kci_artifact_manifest",
         "//src/kci_api:kci_api",
         "//src/kci_release_set:kci_release_set",
@@ -73,7 +73,7 @@ mojo_library(
     ],
     test_data = {
         "tests/test_build_flow.mojo": {
-            "src/kci_artifact_declaration/example.textproto": "//src/kci_artifact_declaration:example.textproto",
+            "src/kci_artifact/example.textproto": "//src/kci_artifact:example.textproto",
         },
     },
     visibility = ["PUBLIC"],

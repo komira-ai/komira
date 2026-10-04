@@ -206,11 +206,11 @@ def test_find_result_file() raises:
 
 comptime _MACHINE: String = (
     "schema_version: 1\n"
-    "stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" } }\n"
+    "stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n"
     "stage { name: \"prod\" after: \"build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\""
-    " declarations: \"d\" channels: \"c\" channel: \"komira\" } }\n"
-    "stage { name: \"all\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" }"
-    " step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d\" channels: \"c\" channel: \"komira\" } }\n"
+    " artifacts: \"d\" channels: \"c\" channel: \"komira\" } }\n"
+    "stage { name: \"all\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" }"
+    " step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d\" channels: \"c\" channel: \"komira\" } }\n"
 )
 
 

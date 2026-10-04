@@ -22,7 +22,7 @@ def test_the_field_names_are_the_golden_list() raises:
     want.append(String("step.name"))
     want.append(String("step.kind"))
     want.append(String("step.platform"))
-    want.append(String("step.declarations"))
+    want.append(String("step.artifacts"))
     want.append(String("step.channels"))
     want.append(String("step.channel"))
     want.append(String("step.validation"))

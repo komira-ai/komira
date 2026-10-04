@@ -1,11 +1,11 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The workflow consistency check: a hand-written CI workflow
-# (.github/workflows/kci.yml) held to the release machine. It is
+# (.github/workflows/kci.yml) held to the machine file's release machine. It is
 # library code, not a command: the welded test that holds this repository's
 # kci.yml to release/machine.textproto uses it, and `kci run` runs it at
 # start-up on the workflow it runs under (`check_running_workflow`). The
-# machine file owns the stages; the workflow must agree: one job per stage with
+# machine file owns the graph; the workflow must agree: one job per stage with
 # the stage's name, running in the stage's environment, `needs` = the stage's
 # `after`, `id-token: write` exactly on the stages that publish by OIDC
 # trusted publishing or are farm-connected, the farm-connect action exactly on
@@ -20,7 +20,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # is "cannot tell", never a pass. actionlint (//:workflow_lint) stays the YAML
 # validity gate.
 #
-# Deps: kci_release_machine (the stages), kci_release_channel (which channels
+# Deps: kci_release_machine (the graph), kci_release_channel (which channels
 # publish by OIDC) and kci_api (the default machine file). Pure: it
 # checks text it is given.
 mojo_library(
