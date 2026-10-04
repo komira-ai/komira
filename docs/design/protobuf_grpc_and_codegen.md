@@ -152,7 +152,7 @@ The sources of three further binaries sit beside them (`main_openapi.rs`, `main_
 
 The `DbStorable` output is a struct per `(komira.db.table)` message with `column_names`, `column_types`, `to_row`, `from_row`, `insert_sql[D: SqlDatabase]` and `create_table_ddl` (with `_pg` and `_sqlite` variants). `aws-client-gen` refuses an empty `--operations` list and emits only the named operations. `emit_aws/` covers the `awsJson1_0`, `awsJson1_1`, `restJson1` and `restXml` protocols and refuses the others by name.
 
-A `default_protocol = "rest"` target gets a different client from `emit_rest.rs`: `<Svc>Client[C: Connector]` over `HttpClient[C]`, with no `Protocol` parameter. A unary method with a `(google.api.http)` rule fills the path template from request fields and sends the body as proto3 JSON. It decodes the reply with the strict `JsonDecoder.from_text`.
+A `default_protocol = "rest"` target gets a different client from `emit_rest.rs`: `<Svc>Client[C: Connector]` over `HttpClient[C]`, with no `Protocol` parameter. A unary method with a `(google.api.http)` rule fills the path template from request fields and sends the body as proto3 JSON. A server-streaming method returns a `List` of its responses: over REST the whole stream is one HTTP response, a JSON array, which `komira_gcp_core.gcp_rest_stream_items` splits (raising an `{"error": ...}` element as a failed status). A client-streaming or bidirectional method has no REST mapping, and a rest target that names one is refused by name (generate it with `protocol = "grpc"`). It decodes each reply with `decode_json_lenient`, which skips a field the server added after the protos were pinned.
 
 ## Why is it built this way?
 

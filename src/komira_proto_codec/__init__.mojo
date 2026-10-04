@@ -38,6 +38,7 @@ UnsafePointer crosses the module boundary; no wildcard origins; no
 
 from .wire_format import (
     ProtoEnum,
+    ProtoNullValueEnum,
     Serializable,
     Proto3JsonWkt,
     WireEncoder,

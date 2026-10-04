@@ -18,10 +18,12 @@ file at the pinned commit.
 | `:googleapis` | the files extracted from it, each a sub-target named by its path (`:googleapis[google/rpc/status.proto]`, `:googleapis[LICENSE]`) |
 | `:logging_v2` | the Cloud Logging v2 protos (roots `google/logging/v2/{logging,log_entry}.proto`, for `ListLogEntries`), checked to be exactly their import closure |
 | `:storage_v2` | the Cloud Storage v2 protos (root `google/storage/v2/storage.proto`, the gRPC storage API), checked the same way |
+| `:firestore_v1` | the Cloud Firestore v1 protos (root `google/firestore/v1/firestore.proto`: the document methods and `Listen`), checked the same way |
 
 ## Using the protos
 
-Depend on the closure target for your API (`:logging_v2`, `:storage_v2`). Its
+Depend on the closure target for your API (`:logging_v2`, `:storage_v2`,
+`:firestore_v1`). Its
 `ProtoSrcsInfo` is the checked tree, so a `mojo_proto_library` names it in
 `proto_deps`; `:<target>[tree]` is that tree as a directory (the files at
 their import paths), and the default output is protoc's descriptor set for the
@@ -48,7 +50,7 @@ build on its own.
 3. Build `//tools/vendor/googleapis:` (every checked closure). If the new
    commit changed an import closure, its check names the file to add to (or
    drop from) that closure's list (`_LOGGING_V2_CLOSURE`,
-   `_STORAGE_V2_CLOSURE`).
+   `_STORAGE_V2_CLOSURE`, `_FIRESTORE_V1_CLOSURE`).
 
 ## Adding a client
 

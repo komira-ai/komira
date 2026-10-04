@@ -123,6 +123,17 @@ trait ProtoEnum(Copyable, Movable):
         ...
 
 
+trait ProtoNullValueEnum(ProtoEnum):
+    """`google.protobuf.NullValue`, the one enum whose proto3-JSON form is
+    not its value name but the JSON literal `null` (the protobuf JSON
+    mapping, "NullValue: JSON null"). The JSON backend writes a field or
+    element of such an enum as `null` and reads `null` back as its single
+    value; the binary backend treats it as any enum. komira_wkt's
+    `NullValue` is the conformer."""
+
+    pass
+
+
 # =============================================================================
 # WireEncoder — a comptime-selected encode-side wire backend.
 #
@@ -609,6 +620,17 @@ trait WireDecoder(Copyable, Movable):
         opposite (*"reject unknown fields ... may provide an option to ignore
         unknown fields"*), so `JsonDecoder.skip` RAISES unless the decoder was
         built in its ignore-unknown mode."""
+        ...
+
+    def keep_null_fields(mut self, spellings: StringSlice):
+        """Declare the keys, `|`-separated spellings, whose JSON `null` is a
+        VALUE rather than an absent field: the fields of type
+        `google.protobuf.NullValue` (`ProtoNullValueEnum`). Called once by a
+        generated `decode` body that has such a field, before its loop; the
+        JSON backend's `next_field()` then yields such a key where it skips
+        any other `null` (proto3 reads `null` as the field's default, which
+        for a oneof arm is "not set" and would lose the arm). The binary
+        backend has no `null` and ignores it."""
         ...
 
     def expect_fields(
