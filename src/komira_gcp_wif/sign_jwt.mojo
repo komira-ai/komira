@@ -40,7 +40,7 @@ from komira_http_client.client import HttpClient
 from komira_http_core.transport.io_stream import Connector
 from komira_json import JsonValue, parse_json_bytes
 
-from ._post import new_runtime, post
+from ._post import check_host, new_runtime, post
 
 
 comptime IAMCREDENTIALS_HOST: String = "iamcredentials.googleapis.com"
@@ -138,7 +138,14 @@ struct WifTokenMinter[
       the minter's report.
     - `T`: the bearer's source (`CachingTokenSource[AwsWifTokenFetcher]` for
       AWS federation, or any other `GcpTokenSource`).
-    - `W`: the wall clock `iat` is read from."""
+    - `W`: the wall clock `iat` is read from.
+
+    ⚠ A cached bearer the server stops accepting is not dropped here:
+    `GcpTokenSource` has no way to say so, and a `CachingTokenSource` keeps
+    serving its token until the refresh margin. An HTTP 401 from signJwt
+    raises with `bearer rejected (HTTP 401)` in the text; a caller that sees
+    it calls `tokens().invalidate()` (on a `CachingTokenSource`) so the next
+    mint exchanges again. Any other refusal leaves the token in place."""
 
     var _iam: HttpClient[Self.C]
     var _rt: BlockingRuntime[NoopSink]
@@ -155,9 +162,11 @@ struct WifTokenMinter[
         self._wall = wall^
         self._iam_host = String(IAMCREDENTIALS_HOST)
 
-    def set_iam_host(mut self, var host: String):
+    def set_iam_host(mut self, var host: String) raises:
         """The IAM Credentials host (default
-        `iamcredentials.googleapis.com`)."""
+        `iamcredentials.googleapis.com`). Refused unless it is a non-empty run
+        of `[a-z0-9.-]`: the bearer is sent to it."""
+        check_host(String("IAM Credentials"), host)
         self._iam_host = host^
 
     def tokens(mut self) -> ref [self._tokens] Self.T:
@@ -189,8 +198,14 @@ struct WifTokenMinter[
             sign_jwt_request_body(claims),
         )
         if not reply.is_success():
+            var what = String("komira_gcp_wif: signJwt refused: ")
+            if reply.status == 401:
+                what = String(
+                    "komira_gcp_wif: signJwt refused, bearer rejected (HTTP 401;"
+                    " drop the cached token through tokens().invalidate()): "
+                )
             raise Error(
-                "komira_gcp_wif: signJwt refused: "
+                what
                 + parse_gcp_status(
                     String("POST"),
                     String("IAMCredentials.SignJwt"),

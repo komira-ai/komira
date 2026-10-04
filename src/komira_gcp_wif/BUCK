@@ -32,7 +32,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # sources, staged as its data, for any environment read.
 mojo_library(
     name = "komira_gcp_wif",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Top-level only, the same glob test_env_source_only is staged with: a
+    # module in a subdirectory would not be scanned, so it does not build.
+    srcs = glob(["*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_aws_core:komira_aws_core",

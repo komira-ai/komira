@@ -34,6 +34,28 @@ struct PostReply(Movable, Deinitable):
         return self.status >= 200 and self.status < 300
 
 
+def check_host(what: String, host: String) raises:
+    """A host override: a non-empty run of `[a-z0-9.-]`. It is spliced into
+    the URL a credential is sent to, so a `/`, `@`, `:` or `#` in it would
+    send that credential somewhere other than the host it names."""
+    var b = host.as_bytes()
+    if len(b) == 0:
+        raise Error("komira_gcp_wif: the " + what + " host is empty")
+    for i in range(len(b)):
+        var c = b[i]
+        var ok = (
+            (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+            or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+            or c == UInt8(ord("."))
+            or c == UInt8(ord("-"))
+        )
+        if not ok:
+            raise Error(
+                "komira_gcp_wif: the " + what + " host holds a byte outside"
+                " [a-z0-9.-]"
+            )
+
+
 def new_runtime() raises -> BlockingRuntime[NoopSink]:
     """The current-thread runtime each sender drives its client on."""
     return BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))

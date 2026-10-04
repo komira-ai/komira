@@ -21,9 +21,12 @@
 # ⛔ THE STATUS DECIDES SUCCESS, AND A FAILURE BODY IS NEVER ECHOED. A non-2xx
 # answer raises before the body is read for a token, so an error body that
 # happens to carry an `access_token` field cannot be mistaken for success.
-# The raised text comes from komira_gcp_core's `parse_gcp_status`: the HTTP
-# status, the derived code and byte counts, never a body byte (a 4xx from a
-# token endpoint can carry the credential it rejected).
+# The raised text comes from komira_gcp_core's `parse_gcp_status` (the HTTP
+# status, the derived code and byte counts) plus, when the body is an RFC 6749
+# error, its `error` code if that is one of the RFC's own codes
+# (`oauth_error_code`). No other body byte is repeated: a 4xx from a token
+# endpoint can carry the credential it rejected, and `error_description` is
+# free text.
 #
 # Configuration is by parameter. The AWS credential comes from a komira_aws_core
 # `AwsCredsSource`, which is where the AWS SDK's standard chain (environment,
@@ -39,7 +42,7 @@ from komira_http_client.client import HttpClient
 from komira_http_core.transport.io_stream import Connector
 from komira_json import parse_json_bytes
 
-from ._post import new_runtime, post
+from ._post import check_host, new_runtime, post
 from .aws_subject import AWS_SUBJECT_TOKEN_TYPE, aws1_subject_token, aws_sts_host
 
 
@@ -56,14 +59,61 @@ comptime CLOUD_PLATFORM_SCOPE: String = (
 )
 comptime FORM_CONTENT_TYPE: String = "application/x-www-form-urlencoded"
 comptime _MAX_RESPONSE_DEPTH: Int = 8
+comptime _MAX_ERROR_BODY_BYTES: Int = 65536
+
+
+def is_oauth_error_code(code: String) -> Bool:
+    """Whether `code` is one of the error codes of RFC 6749 section 5.2 and
+    RFC 8693 section 2.2.2: the only `error` values a refusal message
+    repeats."""
+    return (
+        code == "invalid_request"
+        or code == "invalid_client"
+        or code == "invalid_grant"
+        or code == "unauthorized_client"
+        or code == "unsupported_grant_type"
+        or code == "invalid_scope"
+        or code == "invalid_target"
+    )
+
+
+def oauth_error_code(body: List[UInt8]) -> String:
+    """What a refused token exchange's OAuth error says, for a message.
+
+    Google STS refuses in the RFC 6749 section 5.2 shape,
+    `{"error":"<code>","error_description":"..."}`, which komira_gcp_core's
+    `parse_gcp_status` (it reads a `google.rpc.Status` object under `error`)
+    reports as no envelope. Returns `OAuth error <code>` when `error` is a
+    string on the allow-list, `OAuth error not a known code` when it is
+    another string, and "" when there is none. Never raises, and never
+    returns a body byte that is not an allow-listed code:
+    `error_description` is not read at all."""
+    if len(body) > _MAX_ERROR_BODY_BYTES:
+        return String("")
+    try:
+        var doc = parse_json_bytes(body, _MAX_RESPONSE_DEPTH)
+        if not doc.is_object() or not doc.has(String("error")):
+            return String("")
+        var err = doc.get(String("error"))
+        if not err.is_string():
+            return String("")
+        var code = err.as_string()
+        if is_oauth_error_code(code):
+            return String("OAuth error ") + code
+        return String("OAuth error not a known code")
+    except:
+        return String("")
 
 
 def sts_exchange_form(
     audience: String, scope: String, subject_token: String
 ) -> String:
     """The token-exchange form body. Every value is percent-encoded with no
-    byte kept but RFC 3986 unreserved ones, which for these values is what
-    `urllib.parse.urlencode` writes (none of them holds a space)."""
+    byte kept but RFC 3986 unreserved ones. That is byte for byte what
+    `urllib.parse.urlencode` writes except for a space, which this writes as
+    `%20` and `urlencode` as `+`; a form decoder reads both as a space (a
+    scope set through `set_scope` may hold one, as OAuth joins scopes with
+    it)."""
     var out = String("grant_type=") + uri_encode(String(TOKEN_EXCHANGE_GRANT))
     out += String("&audience=") + uri_encode(audience)
     out += String("&scope=") + uri_encode(scope)
@@ -156,9 +206,11 @@ struct AwsWifTokenFetcher[
         (default `cloud-platform`)."""
         self._scope = scope^
 
-    def set_sts_host(mut self, var host: String):
+    def set_sts_host(mut self, var host: String) raises:
         """The STS host (default `sts.googleapis.com`): an emulator's, or a
-        private endpoint's."""
+        private endpoint's. Refused unless it is a non-empty run of
+        `[a-z0-9.-]`: the subject token is sent to it."""
+        check_host(String("STS"), host)
         self._sts_host = host^
 
     def audience(self) -> String:
@@ -179,10 +231,13 @@ struct AwsWifTokenFetcher[
             sts_exchange_form(self._audience, self._scope, subject),
         )
         if not reply.is_success():
-            raise Error(
+            var msg = String(
                 "komira_gcp_wif: AWS to Google federation refused: "
-                + parse_gcp_status(
-                    String("POST"), String("sts.v1.token"), reply.status, reply.body
-                ).message()
-            )
+            ) + parse_gcp_status(
+                String("POST"), String("sts.v1.token"), reply.status, reply.body
+            ).message()
+            var oauth = oauth_error_code(reply.body)
+            if oauth.byte_length() > 0:
+                msg += String(", ") + oauth
+            raise Error(msg)
         return parse_sts_token_response(reply.body, now_ms)

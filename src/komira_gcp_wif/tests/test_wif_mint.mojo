@@ -407,8 +407,52 @@ def test_a_refused_leg1_never_dials_signjwt() raises:
     assert_true("HTTP 403" in msg, msg)
     assert_false("NOT-A-REAL-TOKEN" in msg, msg)
     assert_false("attribute condition" in msg, msg)
+    assert_true("OAuth error unauthorized_client" in msg, msg)
     assert_equal(len(iam_cap[]), 0)
     assert_true(len(sts_cap[]) > 0)
+
+
+def _leg1_failure_message(var leg1: List[UInt8]) raises -> String:
+    var f = _fetcher(_armed(leg1^, _capture()))
+    try:
+        _ = f.fetch(0)
+    except e:
+        return String(e)
+    raise Error("leg 1 did not fail")
+
+
+def test_a_leg1_refusal_names_only_an_allow_listed_oauth_code() raises:
+    """Google STS refuses in the RFC 6749 shape (`error` a string), which
+    `parse_gcp_status` reads as no envelope. The code is repeated only when
+    it is on the RFC 6749 / RFC 8693 list; `error_description` never is,
+    and neither is an `error` string off that list."""
+    var grant = _leg1_failure_message(
+        _http(
+            String("400 Bad Request"),
+            String(
+                '{"error":"invalid_grant","error_description":'
+                '"The token is invalid: InvalidClientTokenId"}'
+            ),
+        )
+    )
+    assert_true("HTTP 400" in grant, grant)
+    assert_true("OAuth error invalid_grant" in grant, grant)
+    assert_false("InvalidClientTokenId" in grant, grant)
+
+    var odd = _leg1_failure_message(
+        _http(String("400 Bad Request"), String('{"error":"tok-ODD-VALUE"}'))
+    )
+    assert_true("OAuth error not a known code" in odd, odd)
+    assert_false("ODD-VALUE" in odd, odd)
+
+    var rpc = _leg1_failure_message(
+        _http(
+            String("403 Forbidden"),
+            String('{"error":{"code":403,"status":"PERMISSION_DENIED"}}'),
+        )
+    )
+    assert_true("PERMISSION_DENIED" in rpc, rpc)
+    assert_false("OAuth error" in rpc, rpc)
 
 
 def test_a_2xx_leg1_with_no_token_never_dials_signjwt() raises:
@@ -436,6 +480,16 @@ def test_a_missing_config_never_dials_at_all() raises:
             FixedClock(NOW_S),
             String(REGION),
             String(""),
+        )
+    with assert_raises(contains="AWS region holds a byte outside"):
+        _ = Fetcher(
+            HttpClient[ScriptedConnector].with_request_timeout_us(
+                _armed(_sts_ok(), _capture()), TIMEOUT_US
+            ),
+            StaticCredsSource(_cred()),
+            FixedClock(NOW_S),
+            String("us-east-1.evil.example"),
+            String(AUDIENCE),
         )
 
     var sts_cap = _capture()
@@ -484,6 +538,17 @@ def test_a_leg2_failure_quotes_neither_the_bearer_nor_the_body() raises:
     assert_false(FEDERATED in refused, refused)
     assert_false("permission denied on sa" in refused, refused)
 
+    var revoked = _leg2_failure_message(
+        _http(
+            String("401 Unauthorized"),
+            String('{"error":{"code":401,"status":"UNAUTHENTICATED"}}'),
+        )
+    )
+    assert_true("bearer rejected (HTTP 401" in revoked, revoked)
+    assert_true("invalidate()" in revoked, revoked)
+    assert_false("bearer rejected" in refused, refused)
+    assert_false(FEDERATED in revoked, revoked)
+
     var empty = _leg2_failure_message(_http(String("200 OK"), String('{"keyId":"k-only"}')))
     assert_true("no signedJwt" in empty, empty)
     assert_false(FEDERATED in empty, empty)
@@ -520,6 +585,31 @@ def test_the_federated_token_is_cached_then_refreshed() raises:
     assert_equal(_count(_text(iam_cap), ":signJwt "), 3)
 
 
+def test_a_host_override_must_be_a_bare_host() raises:
+    """Both host overrides receive a credential (the subject token, the
+    bearer), so each is refused unless it is a non-empty run of
+    `[a-z0-9.-]`; a bare host is accepted and is where the request goes.
+    The accepted overrides are IP literals because the client resolves the
+    host before it dials, even over a scripted connector: a literal is
+    parsed, never looked up."""
+    var f = _fetcher(_armed(_sts_ok(), _capture()))
+    with assert_raises(contains="STS host holds a byte outside"):
+        f.set_sts_host(String("sts.example.test@evil.example"))
+    with assert_raises(contains="STS host is empty"):
+        f.set_sts_host(String(""))
+
+    var sts_cap = _capture()
+    var iam_cap = _capture()
+    var m = _minter(_armed(_sts_ok(), sts_cap), _armed(_signjwt_ok(), iam_cap))
+    with assert_raises(contains="IAM Credentials host holds a byte outside"):
+        m.set_iam_host(String("evil.example/x"))
+    m.set_iam_host(String("127.0.0.2"))
+    m.tokens().fetcher().set_sts_host(String("127.0.0.1"))
+    assert_equal(m.mint_delivery_jwt(String(SA), String(JWT_AUD)), SIGNED)
+    assert_equal(_header_value(_text(sts_cap), String("host")), "127.0.0.1")
+    assert_equal(_header_value(_text(iam_cap), String("host")), "127.0.0.2")
+
+
 def main() raises:
     test_leg1_presents_no_credential_header_of_its_own()
     test_leg1_body_is_the_references_form()
@@ -527,8 +617,10 @@ def main() raises:
     test_the_signed_claims_are_iss_sub_aud_iat_exp()
     test_the_positive_control_both_legs_dial_and_the_jwt_is_returned()
     test_a_refused_leg1_never_dials_signjwt()
+    test_a_leg1_refusal_names_only_an_allow_listed_oauth_code()
     test_a_2xx_leg1_with_no_token_never_dials_signjwt()
     test_a_missing_config_never_dials_at_all()
     test_a_leg2_failure_quotes_neither_the_bearer_nor_the_body()
     test_the_federated_token_is_cached_then_refreshed()
+    test_a_host_override_must_be_a_bare_host()
     print("test_wif_mint: OK")

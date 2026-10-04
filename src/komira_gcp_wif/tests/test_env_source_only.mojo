@@ -7,7 +7,9 @@
 # standard variables in komira_aws_core, not here), and every other input is
 # a parameter. Every library source of the package is staged as test data
 # (src/komira_gcp_wif/*.mojo); the test fails if one names getenv, setenv,
-# `_read_env`, komira_core_ffi or an `external_call`.
+# `_read_env`, komira_core_ffi, an `external_call`, or a compile-time define
+# read (`env_get_*`, `is_defined`). The library's sources are the same
+# top-level glob (BUCK), so no module can compile in without being scanned.
 #
 # The scan is not vacuous: it must see each of the package's modules.
 # =============================================================================
@@ -36,6 +38,8 @@ def test_scan() raises:
         "_read_env",
         "komira_core_ffi",
         "external_call",
+        "env_get_",
+        "is_defined",
     ]
     var expected: List[String] = [
         "__init__.mojo",

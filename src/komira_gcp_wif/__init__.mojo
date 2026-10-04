@@ -34,7 +34,8 @@ Modules:
   - aws_subject.mojo : `aws1_signed_request`, `aws1_subject_token`,
                        `Aws1SignedRequest`, `aws_sts_host`.
   - sts.mojo         : `AwsWifTokenFetcher`, `sts_exchange_form`,
-                       `parse_sts_token_response`.
+                       `parse_sts_token_response`, `oauth_error_code`,
+                       `is_oauth_error_code`.
   - sign_jwt.mojo    : `WifTokenMinter`, `sign_jwt_claims`,
                        `sign_jwt_request_body`, `sign_jwt_path`,
                        `parse_sign_jwt_response`.
@@ -60,6 +61,8 @@ from .sts import (
     GOOGLE_STS_PATH,
     TOKEN_EXCHANGE_GRANT,
     AwsWifTokenFetcher,
+    is_oauth_error_code,
+    oauth_error_code,
     parse_sts_token_response,
     sts_exchange_form,
 )
