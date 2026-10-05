@@ -369,16 +369,16 @@ def _init_jkc_declines() -> OwnedPointer[AtomicI64]:
 
 
 comptime _JKC_SHARED_COLS = _Global[
-    "komira_core_join_key_cse_shared_cols", _init_jkc_shared_cols
+    "komira_join_assembly_join_key_cse_shared_cols", _init_jkc_shared_cols
 ]
 comptime _JKC_SHARED_BYTES = _Global[
-    "komira_core_join_key_cse_shared_bytes", _init_jkc_shared_bytes
+    "komira_join_assembly_join_key_cse_shared_bytes", _init_jkc_shared_bytes
 ]
 comptime _JKC_GATHERED_COLS = _Global[
-    "komira_core_join_key_cse_gathered_cols", _init_jkc_gathered_cols
+    "komira_join_assembly_join_key_cse_gathered_cols", _init_jkc_gathered_cols
 ]
 comptime _JKC_DECLINES = _Global[
-    "komira_core_join_key_cse_declines", _init_jkc_declines
+    "komira_join_assembly_join_key_cse_declines", _init_jkc_declines
 ]
 
 

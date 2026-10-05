@@ -38,6 +38,7 @@ ALWAYS_EXCLUDE=('src/komira_core/','src/komira_core_ffi/','tools/core_split/','.
 TEXT_EXT=('.mojo','.md','.bzl','.sh','.py','.tsv','.txt','.toml','.yml','.yaml','.textproto','.proto','.c','.h','.inc','.cc','.json')
 CORE=re.compile(r'(?<![A-Za-z0-9_])komira_core(?:_ffi)?(?![A-Za-z0-9_])')
 HARD=re.compile(r'(?m)^[ \t]*(?:from|import)[ \t]+komira_core(?:_ffi)?(?![A-Za-z0-9_])|//src/komira_core(?:_ffi)?:')
+KEY=re.compile(r'"komira_core_(?!ffi\b|posix\b)[a-z0-9_]+')  # a counter or metric key still spelled under the deleted package's name
 def word(n): return re.compile(r'(?<![A-Za-z0-9_])'+re.escape(n)+r'(?![A-Za-z0-9_])')
 def git(tree,*a): return subprocess.run(['git','-C',tree]+list(a),capture_output=True,text=True)
 def frozen_root(a):
@@ -196,14 +197,14 @@ def add_test_srcs(text,tests):
     return text[:m.start()]+'%stest_srcs = [\n%s\n%s]'%(ind,'\n'.join(lines),ind)+text[m.end():]
 # ---- main -----------------------------------------------------------------------------------------------------
 def check(a):
-    """No file outside tools/core_split names komira_core or komira_core_ffi (as a word). Exit 1 and list them if one does."""
+    """No file outside tools/core_split names komira_core or komira_core_ffi (as a word), or spells a string key "komira_core_<name>". Exit 1 and list them if one does."""
     tree=os.path.abspath(a.tree); hits=[]
     for f in tracked(tree):
         if under(f,ALWAYS_EXCLUDE) or under(f,a.exclude) or (a.only and not under(f,a.only)): continue
         t=read(os.path.join(tree,f))
         if t is None: continue
         for i,l in enumerate(t.split('\n')):
-            if CORE.search(l): hits.append('%s:%d: %s'%(f,i+1,l.strip()[:140]))
+            if CORE.search(l) or KEY.search(l): hits.append('%s:%d: %s'%(f,i+1,l.strip()[:140]))
     print('\n'.join(hits)); print('repoint --check: %d lines name komira_core or komira_core_ffi'%len(hits))
     return 1 if hits else 0
 def run(a):

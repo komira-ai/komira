@@ -1823,7 +1823,7 @@ def _process_physical_core_count() -> Int:
 
 
 comptime _ALLOWED_CPU_SNAPSHOT = _Global[
-    "komira_core_runtime_allowed_cpu_snapshot",
+    "komira_host_runtime_allowed_cpu_snapshot",
     _init_allowed_cpu_snapshot,
 ]
 
@@ -1914,7 +1914,7 @@ def _init_topology_snapshot() -> OwnedPointer[_TopologySnapshot]:
 
 
 comptime _DETECTED_TOPOLOGY = _Global[
-    "komira_core_runtime_detected_topology",
+    "komira_host_runtime_detected_topology",
     _init_topology_snapshot,
 ]
 
@@ -1927,7 +1927,7 @@ def _init_topology_probe_counter() -> OwnedPointer[Int]:
 
 
 comptime _TOPOLOGY_PROBE_COUNTER = _Global[
-    "komira_core_runtime_topology_probe_count",
+    "komira_host_runtime_topology_probe_count",
     _init_topology_probe_counter,
 ]
 
@@ -2080,7 +2080,7 @@ def _init_numa_local_snapshot() -> OwnedPointer[_NumaLocalSnapshot]:
 
 
 comptime _NUMA_LOCAL_SNAPSHOT = _Global[
-    "komira_core_runtime_numa_local_snapshot",
+    "komira_host_runtime_numa_local_snapshot",
     _init_numa_local_snapshot,
 ]
 

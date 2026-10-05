@@ -66,9 +66,13 @@
 from komira_counters.global_counter import GlobalCounter
 
 
-comptime _GW_TYPED = GlobalCounter["komira_core_gather_narrow_typed"]
-comptime _GW_NARROW_FB = GlobalCounter["komira_core_gather_narrow_fallback"]
-comptime _GW_WIDE_FB = GlobalCounter["komira_core_gather_wide_fallback"]
+comptime _GW_TYPED = GlobalCounter["komira_column_kernels_gather_narrow_typed"]
+comptime _GW_NARROW_FB = GlobalCounter[
+    "komira_column_kernels_gather_narrow_fallback"
+]
+comptime _GW_WIDE_FB = GlobalCounter[
+    "komira_column_kernels_gather_wide_fallback"
+]
 
 
 @always_inline
