@@ -251,6 +251,9 @@ impl<'a> Emitter<'a> {
                 for imp in crate::emit_rest::rest_imports() {
                     self.line(imp);
                 }
+                if let Some(imp) = crate::emit_rest::rest_stream_import(self.file) {
+                    self.line(&imp);
+                }
             } else if self.gcp {
                 self.line(&format!(
                     "from {} import {}, {GCP_GRPC_STATUS_ERROR}",
@@ -950,6 +953,27 @@ impl<'a> Emitter<'a> {
 
     // -- the `decode` body ---------------------------------------------
 
+    /// The JSON spellings (the `json_name`, then the proto name when it
+    /// differs) of every non-repeated field of `msg` whose type is the enum
+    /// `google.protobuf.NullValue`, in declaration order.
+    fn null_value_field_spellings(msg: &IrMessage) -> Vec<String> {
+        let mut out = Vec::new();
+        for f in &msg.fields {
+            let is_null_enum = matches!(
+                &f.ty,
+                IrType::Enum(t) if t.fq_name == ".google.protobuf.NullValue"
+            );
+            if !is_null_enum || f.label == Label::Repeated {
+                continue;
+            }
+            out.push(f.json_name.clone());
+            if f.name != f.json_name {
+                out.push(f.name.clone());
+            }
+        }
+        out
+    }
+
     fn emit_decode(&mut self, msg: &IrMessage) {
         Self::assert_field_spellings_are_injective(msg);
         self.line("@staticmethod");
@@ -969,6 +993,16 @@ impl<'a> Emitter<'a> {
             msg.fq_name.trim_start_matches('.'),
             Self::accepted_field_spellings(msg).join(","),
         ));
+        // A `google.protobuf.NullValue` field's JSON value IS `null`, which
+        // the JSON backend otherwise reads as an absent field (and, for a
+        // oneof arm, as no arm at all): name its spellings to the decoder.
+        let null_keys = Self::null_value_field_spellings(msg);
+        if !null_keys.is_empty() {
+            self.line(&format!(
+                "dec.keep_null_fields(\"{}\")",
+                null_keys.join("|")
+            ));
+        }
 
         // Local accumulators, default-initialised. The struct is built
         // from these once the field loop is exhausted.
@@ -2407,5 +2441,85 @@ mod gcp_grpc_client_tests {
         let out = Emitter::with_options(&f, ProtocolMode::Grpc, true).emit();
         assert_eq!(out, Emitter::with_protocol(&f, ProtocolMode::Grpc).emit());
         assert!(!out.contains("komira_gcp_core"), "got:\n{out}");
+    }
+}
+
+#[cfg(test)]
+mod null_value_field_tests {
+    use super::*;
+    use crate::ir::{IrField, IrFile, IrMessage, IrOneof, IrType, Label, TypeRef};
+
+    fn field(name: &str, json: &str, ty: IrType, label: Label, oneof: Option<u32>) -> IrField {
+        IrField {
+            name: name.to_string(),
+            ty,
+            label,
+            proto_field_number: 1,
+            json_name: json.to_string(),
+            oneof_index: oneof,
+        }
+    }
+
+    fn null_enum() -> IrType {
+        IrType::Enum(TypeRef {
+            fq_name: ".google.protobuf.NullValue".to_string(),
+            mojo_name: "NullValue".to_string(),
+        })
+    }
+
+    fn file(fields: Vec<IrField>, oneofs: Vec<IrOneof>) -> IrFile {
+        IrFile {
+            proto_path: "v/v.proto".to_string(),
+            proto_package: "v".to_string(),
+            mojo_package: "v".to_string(),
+            messages: vec![IrMessage {
+                name: "V".to_string(),
+                mojo_name: "V".to_string(),
+                fq_name: ".v.V".to_string(),
+                is_map_entry: false,
+                fields,
+                oneofs,
+            }],
+            enums: vec![],
+            services: vec![],
+            imports: vec![],
+        }
+    }
+
+    #[test]
+    fn a_null_value_arm_keeps_its_json_null() {
+        let f = file(
+            vec![
+                field("null_value", "nullValue", null_enum(), Label::Optional, Some(0)),
+                field("s", "s", IrType::Scalar(ScalarKind::String), Label::Optional, Some(0)),
+            ],
+            vec![IrOneof {
+                name: "kind".to_string(),
+                arms: vec!["null_value".to_string(), "s".to_string()],
+            }],
+        );
+        let src = Emitter::new(&f).emit();
+        let expect = src.find("dec.expect_fields(").unwrap();
+        let keep = src.find("dec.keep_null_fields(\"nullValue|null_value\")").unwrap();
+        let lp = src.find("while True:").unwrap();
+        assert!(expect < keep && keep < lp, "{src}");
+    }
+
+    #[test]
+    fn other_messages_and_repeated_null_values_declare_nothing() {
+        let plain = file(
+            vec![field("s", "s", IrType::Scalar(ScalarKind::String), Label::Single, None)],
+            vec![],
+        );
+        assert!(!Emitter::new(&plain).emit().contains("keep_null_fields"));
+        let repeated = file(
+            vec![field("nulls", "nulls", null_enum(), Label::Repeated, None)],
+            vec![],
+        );
+        assert!(!Emitter::new(&repeated).emit().contains("keep_null_fields"));
+        // A plain (non-oneof) field whose JSON name is its proto name is
+        // named once.
+        let single = file(vec![field("n", "n", null_enum(), Label::Single, None)], vec![]);
+        assert!(Emitter::new(&single).emit().contains("dec.keep_null_fields(\"n\")"));
     }
 }

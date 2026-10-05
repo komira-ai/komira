@@ -603,7 +603,7 @@ _REST_REFUSALS = [
 ]
 
 # A rest target lists the unary method of a service that also has a
-# streaming one: the client holds GetItem, and nothing of WatchItems.
+# bidirectional-streaming one: the client holds GetItem, and nothing of WatchItems.
 proto_codegen_golden(
     name = "rest_unary_beside_streaming",
     srcs = [
@@ -620,15 +620,17 @@ proto_codegen_golden(
     present = ["def get_item[RT: Runtime]"],
 )
 
-# A streaming method listed in `methods` is refused by name, not skipped:
-# skipped, the target would build a client without a method it lists.
+# A method that streams its requests (here bidirectional), listed in
+# `methods`, is refused by name, not skipped: skipped, the target would build
+# a client without a method it lists. (A server-streaming method has a REST
+# form, and is generated.)
 proto_codegen_golden(
     name = "refuse_rest_streaming_method_listed",
     srcs = [
         _ANNOTATIONS,
         "corpus/rest/v1/feed.proto",
     ],
-    expect_error = "--mojo_out: protoc-gen-mojo: service `Feed` method `WatchItems` is server-streaming, and a `rest` target generates unary methods only",
+    expect_error = "--mojo_out: protoc-gen-mojo: service `Feed` method `WatchItems` is bidirectional-streaming, and a `rest` target generates unary and server-streaming methods only",
     generate = ["rest/v1/feed.proto"],
     options = "default_protocol=rest,package_prefix=komira_test_feed,methods=Feed.GetItem+Feed.WatchItems",
 )

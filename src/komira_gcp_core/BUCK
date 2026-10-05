@@ -74,6 +74,7 @@ mojo_library(
         "tests/test_token_wire.mojo",
         "tests/test_token_sources.mojo",
         "tests/test_adc.mojo",
+        "tests/test_rest_stream.mojo",
     ],
     test_data = {
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),

@@ -186,13 +186,13 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
         )
         if self.envelope == ENVELOPE_PRESENT:
             if self.status.byte_length() == 0:
-                out += ", error.status absent or not a status token"
+                out += String(_UNLABELLED_NO_STATUS)
             if self.message_bytes >= 0:
                 out += ", error.message " + String(self.message_bytes) + " bytes"
         elif self.envelope == ENVELOPE_ABSENT:
-            out += ", no google.rpc.Status envelope"
+            out += String(_UNLABELLED_NO_ENVELOPE)
         else:
-            out += ", body is not a JSON document"
+            out += String(_UNLABELLED_NOT_JSON)
         out += ", body " + String(self.body_bytes) + " bytes"
         if self.retry_delay_ms >= 0:
             out += ", RetryInfo " + String(self.retry_delay_ms) + " ms"
@@ -341,6 +341,74 @@ def gcp_status_error(
 ) -> Error:
     """The `Error` a generated REST client raises for a non-2xx response."""
     return parse_gcp_status(verb, rpc, http_status, body).to_error()
+
+
+def gcp_status_error_code(verb: String, rpc: String, text: String) -> Int:
+    """The `google.rpc.Code` in an error a generated REST client raised for
+    `verb rpc` (`gcp_status_error`, or a mid-stream error element raised by
+    `gcp_rest_stream_items`), or -1 when `text` is not such an error.
+
+    `text` must begin as `GcpStatusError.message` renders it:
+    `<verb> <rpc>: HTTP <status>, <CODE_NAME> (code <code>)`, the name being
+    `code_name(<code>)`. An error raised before any response arrived (a
+    refused dial, a timeout), which a generated client passes on unchanged,
+    an error for another method, and a message that merely contains
+    `(code N)` all return -1. A caller that maps statuses onto its own
+    errors reads the code here instead of parsing the message itself."""
+    var head = verb + " " + rpc + ": HTTP "
+    if not text.startswith(head):
+        return -1
+    var http = _digits_at(text, head.byte_length())
+    if http[0] < 0 or not _starts_at(text, ", ", http[1]):
+        return -1
+    var name_at = http[1] + 2
+    var at = _find_bytes(text, " (code ", name_at)
+    if at < 0:
+        return -1
+    var code = _digits_at(text, at + 7)
+    if code[0] < 0:
+        return -1
+    var b = text.as_bytes()
+    if code[1] >= len(b) or b[code[1]] != UInt8(ord(")")):
+        return -1
+    var name = code_name(code[0])
+    if name.byte_length() == 0 or at - name_at != name.byte_length():
+        return -1
+    if not _starts_at(text, name, name_at):
+        return -1
+    return code[0]
+
+
+comptime _UNLABELLED_NO_ENVELOPE: StaticString = ", no google.rpc.Status envelope"
+comptime _UNLABELLED_NOT_JSON: StaticString = ", body is not a JSON document"
+comptime _UNLABELLED_NO_STATUS: StaticString = (
+    ", error.status absent or not a status token"
+)
+
+
+def gcp_status_error_unlabelled(verb: String, rpc: String, text: String) -> Bool:
+    """Whether `text`, an error a generated REST client raised for
+    `verb rpc` (as `gcp_status_error_code` reads it), came from a body that
+    named no status: no `google.rpc.Status` envelope, a body that is not
+    JSON, or an envelope whose `error.status` is absent or not a status
+    token. Its code was then derived from the HTTP status alone. False for
+    any text `gcp_status_error_code` does not read.
+
+    Like `gcp_status_error_code`, this reads komira_gcp_core's own rendering
+    (`GcpStatusError.message`), never a byte of Google's body, so the two
+    stay beside the renderer they parse."""
+    if gcp_status_error_code(verb, rpc, text) < 0:
+        return False
+    var at = _find_bytes(text, " (code ", 0)
+    var close = _find_bytes(text, ")", at)
+    if at < 0 or close < 0:
+        return False
+    var after = close + 1
+    return (
+        _starts_at(text, String(_UNLABELLED_NO_ENVELOPE), after)
+        or _starts_at(text, String(_UNLABELLED_NOT_JSON), after)
+        or _starts_at(text, String(_UNLABELLED_NO_STATUS), after)
+    )
 
 
 # =============================================================================
