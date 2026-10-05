@@ -127,6 +127,71 @@ def test_zstd_refuses_a_too_small_output() raises:
     assert_true(raised, "a 1000-byte frame into 999 bytes must raise")
 
 
+def _hello3() -> List[UInt8]:
+    # "Hello, Parquet! Hello, Parquet! Hello, Parquet!" (47 bytes).
+    var one: List[UInt8] = [
+        72, 101, 108, 108, 111, 44, 32, 80, 97, 114, 113, 117, 101, 116, 33,
+    ]
+    var out = List[UInt8]()
+    for k in range(3):
+        if k > 0:
+            out.append(32)
+        for i in range(len(one)):
+            out.append(one[i])
+    return out^
+
+
+def _hello3_zstd() -> List[UInt8]:
+    """`_hello3()` as one zstd frame holding one compressed block (a literal
+    section and a repeat match), 32 bytes. Generated with:
+
+        printf 'Hello, Parquet! Hello, Parquet! Hello, Parquet!' \\
+            | zstd -19 --no-check
+    """
+    return [
+        40, 181, 47, 253, 0, 104, 189, 0, 0, 136, 72, 101, 108, 108, 111, 44,
+        32, 80, 97, 114, 113, 117, 101, 116, 33, 32, 72, 1, 0, 71, 156, 75,
+    ]
+
+
+def test_zstd_decompress_known_frame() raises:
+    var want = _hello3()
+    assert_equal(len(want), 47)
+    var frame = _hello3_zstd()
+    var out = _filled(len(want), 0)
+    var n = decompress(CompressionCodec.ZSTD, Span(frame), Span(out))
+    assert_equal(n, len(want))
+    for i in range(len(want)):
+        assert_equal(Int(out[i]), Int(want[i]), "byte " + String(i))
+
+
+def test_zstd_refuses_a_truncated_frame() raises:
+    var frame = _hello3_zstd()
+    var cut = List[UInt8]()
+    for i in range(len(frame) - 1):
+        cut.append(frame[i])
+    var out = _filled(64, 0)
+    var raised = False
+    try:
+        _ = decompress(CompressionCodec.ZSTD, Span(cut), Span(out))
+    except:
+        raised = True
+    assert_true(raised, "a zstd frame missing its last byte must raise")
+
+
+def test_zstd_refuses_an_empty_input() raises:
+    # libzstd decodes no input to 0 bytes with no error; a page always holds
+    # a frame, so the dispatch refuses it, as it does for SNAPPY.
+    var empty = List[UInt8]()
+    var out = _filled(16, 0)
+    var raised = False
+    try:
+        _ = decompress(CompressionCodec.ZSTD, Span(empty), Span(out))
+    except:
+        raised = True
+    assert_true(raised, "an empty ZSTD input must raise")
+
+
 def test_lzo_is_refused() raises:
     var data = _varied(10)
     var out = _filled(10, 0)

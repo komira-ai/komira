@@ -2,95 +2,46 @@
 # brotli/brotli_ffi.mojo
 # =============================================================================
 #
-# Brotli DECOMPRESSION (read path only) — FFI wrapper to libbrotlidec's
+# Brotli DECOMPRESSION (read path only) — FFI wrapper to the Brotli decoder's
 # one-shot `BrotliDecoderDecompress` symbol.
 #
 # Parquet supports a BROTLI compression codec. This package reads it through
-# libbrotlidec, opened by name (`libbrotlidec.so.1` / `libbrotlidec.dylib`)
-# at first use; the loader resolves the dependent `libbrotlicommon`. Writing
-# Brotli is out of scope.
+# the Brotli decoder built from //third_party/brotli and linked statically
+# into every binary that depends on this package, as snappy is, so no
+# libbrotlidec is needed at run time. Writing Brotli is out of scope.
 #
 # # API
 #
-# Brotli's one-shot decode API:
+# Brotli's one-shot decode API (<brotli/decode.h>):
 #   BrotliDecoderResult BrotliDecoderDecompress(
 #       size_t encoded_size, const uint8_t* encoded_buffer,
 #       size_t* decoded_size, uint8_t* decoded_buffer);
 #
 # `decoded_size` is in/out: caller sets it to the output buffer capacity
 # (the Parquet page's uncompressed_page_size), and on SUCCESS it holds the
-# actual number of bytes written. The return value is a BrotliDecoderResult
-# enum; SUCCESS == 1.
+# actual number of bytes written. The return value is a BrotliDecoderResult,
+# a C `int` enum; SUCCESS == 1.
 #
-#   fn _brotli_decompress_into(dst: Span[mut UInt8], src: Span[UInt8]) -> Int
+#   _brotli_decompress_into(dst, src) raises -> Int
+#
+# `dst` is a Span with a mutable origin, `src` a Span; the full signature is
+# on the function.
 #
 # # Encapsulation
 #
 # Package-private: `_brotli_decompress_into` takes Spans with caller-chosen
 # origins and no raw pointer. The pointers taken from them are cast to an
-# untracked origin ONLY at the `handle.call[...]` site. The FFI call carries a
+# untracked origin ONLY at the `external_call` site, which carries a
 # `# SAFETY:` block.
 # =============================================================================
 
-from std.ffi import OwnedDLHandle, _Global
+from std.ffi import external_call
 
-from std.os import abort
-from std.sys.info import CompilationTarget
-
-
-# -----------------------------------------------------------------------------
-# Per-OS soname. Both branches type-check on every host; comptime-if elides
-# the non-host branch at codegen.
-# -----------------------------------------------------------------------------
-
-comptime _LIBBROTLIDEC: StaticString = (
-    "libbrotlidec.dylib" if CompilationTarget.is_macos() else "libbrotlidec.so.1"
-)
 
 # BrotliDecoderResult enum value for a complete, successful one-shot decode.
 # (BROTLI_DECODER_RESULT_SUCCESS == 1; ERROR == 0; NEEDS_MORE_INPUT == 2;
 #  NEEDS_MORE_OUTPUT == 3.)
-comptime _BROTLI_DECODER_RESULT_SUCCESS: Int = 1
-
-
-# -----------------------------------------------------------------------------
-# Process-lifetime OwnedDLHandle singleton via the stdlib `_Global` runtime slot.
-#
-# `_Global[name, init_fn]` provides a
-# name-keyed, process-global, init-once, cross-compile-unit-coherent slot managed
-# by the KGEN runtime — no env var, no address laundering.
-# -----------------------------------------------------------------------------
-
-
-def _init_brotli_ffi_handle() -> OwnedDLHandle:
-    """`_Global` init_fn: dlopen libbrotlidec once per process (KGEN-serialized).
-
-    SAFETY: `_Global`'s init_fn must be non-raising. The OwnedDLHandle ctor
-    raises only when the library cannot be loaded (a fatal provisioning
-    error), so we `abort`: without the library no Brotli page can be read.
-    """
-    try:
-        return OwnedDLHandle(_LIBBROTLIDEC)
-    except e:
-        abort("libbrotlidec dlopen failed (parquet brotli FFI handle init)")
-
-
-comptime _BROTLI_FFI_GLOBAL = _Global[
-    "komira_parquet_codec_brotlidec_handle", _init_brotli_ffi_handle
-]
-
-
-@always_inline
-def _default_brotli_ffi_handle() raises -> UnsafePointer[
-    OwnedDLHandle, MutUntrackedOrigin
-]:
-    """Return the process-lifetime libbrotlidec handle slot (init-once via `_Global`).
-
-    SAFETY: FFI boundary. Targets KGEN-runtime-managed static storage
-    (process-lifetime); `MutUntrackedOrigin` is the stdlib `_Global` API's own
-    return type, confined to this FFI helper. No env var, no address rebuilt from an integer.
-    """
-    return _BROTLI_FFI_GLOBAL.get_or_create_ptr()
+comptime _BROTLI_DECODER_RESULT_SUCCESS: Int32 = 1
 
 
 # -----------------------------------------------------------------------------
@@ -101,38 +52,45 @@ def _default_brotli_ffi_handle() raises -> UnsafePointer[
 def _brotli_decompress_into[
     dori: MutOrigin
 ](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
-    """Decompress a Brotli stream via libbrotlidec's one-shot
+    """Decompress a Brotli stream via the Brotli decoder's one-shot
     `BrotliDecoderDecompress`. Returns the number of bytes written to dst.
 
     `decoded_size` is passed in as `len(dst)` (the Parquet page's
-    uncompressed size) and read back as the actual decoded byte count.
+    uncompressed size) and read back as the actual decoded byte count. A
+    stream that decodes to more than `len(dst)`, or that ends early, raises.
 
     SAFETY: BrotliDecoderDecompress reads exactly `len(src)` bytes from
     `src` and writes up to `*decoded_size` bytes to `dst`. Both Spans keep
-    their buffers alive for the duration of this synchronous call;
-    libbrotlidec retains no pointer past the call. The handle is a
-    process-lifetime singleton (never freed). Origins are cast to an
+    their buffers alive for the duration of this synchronous call; the
+    decoder retains no pointer past the call. Origins are cast to an
     untracked origin ONLY at the call site. `decoded_size` is a stack local
     whose address is passed as the in/out size pointer; it is alive across
     the call.
     """
     var src_size = len(src)
     var dst_capacity = len(dst)
-    var handle_ptr = _default_brotli_ffi_handle()
 
     # In/out size: set to output capacity, read back as decoded length.
-    var decoded_size: Int = dst_capacity
-    var size_slot = UnsafePointer(to=decoded_size)
+    var decoded_size: UInt64 = UInt64(dst_capacity)
 
-    # SAFETY: see fn docstring. All four buffer/size pointers are owned by
-    # the caller's Spans (dst, src) or stack-local (size_slot) and outlive
-    # this synchronous call; libbrotlidec copies nothing past return.
-    var result = handle_ptr[].call["BrotliDecoderDecompress", Int](
-        src_size,
+    # SAFETY: see the docstring. The two buffers are the caller's Spans and
+    # the size is a stack local; all outlive this synchronous call, and the
+    # decoder copies nothing past return. The return is a C `int` enum,
+    # declared Int32, so the upper half of the 64-bit return register (left
+    # unspecified for a 32-bit return) is never read.
+    var result = external_call[
+        "BrotliDecoderDecompress",
+        Int32,
+        UInt64,
+        UnsafePointer[UInt8, MutUntrackedOrigin],
+        UnsafePointer[UInt64, MutUntrackedOrigin],
+        UnsafePointer[UInt8, MutUntrackedOrigin],
+    ](
+        UInt64(src_size),
         src.unsafe_ptr()
         .unsafe_mut_cast[True]()
         .unsafe_origin_cast[MutUntrackedOrigin](),
-        size_slot.unsafe_origin_cast[MutUntrackedOrigin](),
+        UnsafePointer(to=decoded_size).unsafe_origin_cast[MutUntrackedOrigin](),
         dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
     )
 
@@ -146,4 +104,4 @@ def _brotli_decompress_into[
             + String(dst_capacity)
             + ")"
         )
-    return decoded_size
+    return Int(decoded_size)

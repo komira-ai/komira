@@ -37,30 +37,33 @@ archive_files(
     templates = {"snappy-stubs-public.h": "snappy-stubs-public.h.in"},
 )
 
-# Test data of //src/komira_parquet_codec: the snappy correctness corpus
-# (the files snappy_unittest compresses and decompresses) and the three
-# corrupt blobs a decoder must refuse, out of the same pinned archive.
+# Test data of //src/komira_parquet_codec (tests/test_snappy_corpus.mojo): the
+# snappy correctness corpus (the files snappy_unittest compresses and
+# decompresses) and the three corrupt blobs a decoder must refuse, out of the
+# same pinned archive, as one tree.
 archive_files(
     name = "testdata",
     exec_compatible_with = LINUX_X86_64,
     archive = ":snappy-1.2.2.tar.gz",
+    one_tree = True,
     files = [
-        "alice29.txt",
-        "asyoulik.txt",
-        "baddata1.snappy",
-        "baddata2.snappy",
-        "baddata3.snappy",
-        "fireworks.jpeg",
-        "geo.protodata",
-        "html",
-        "html_x_4",
-        "kppkn.gtb",
-        "lcet10.txt",
-        "paper-100k.pdf",
-        "plrabn12.txt",
-        "urls.10K",
+        "COPYING",
+        "testdata/alice29.txt",
+        "testdata/asyoulik.txt",
+        "testdata/baddata1.snappy",
+        "testdata/baddata2.snappy",
+        "testdata/baddata3.snappy",
+        "testdata/fireworks.jpeg",
+        "testdata/geo.protodata",
+        "testdata/html",
+        "testdata/html_x_4",
+        "testdata/kppkn.gtb",
+        "testdata/lcet10.txt",
+        "testdata/paper-100k.pdf",
+        "testdata/plrabn12.txt",
+        "testdata/urls.10K",
     ],
-    strip_prefix = "snappy-1.2.2/testdata",
+    strip_prefix = "snappy-1.2.2",
     visibility = ["PUBLIC"],
 )
 

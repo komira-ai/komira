@@ -13,12 +13,14 @@
 #
 # # API (package-private: `compression.mojo` is the caller)
 #
+# `dst` is a Span with a mutable origin, `src` a Span; the full signatures
+# are on the functions.
+#
 # Stateless single-call FFI — no opaque context handle, no per-call alloc.
 #
-#   fn _zstd_decompress_into(dst: Span[mut UInt8], src: Span[UInt8]) -> Int
-#   fn _zstd_compress_into(dst: Span[mut UInt8], src: Span[UInt8],
-#                          compression_level: Int32) -> Int
-#   fn _zstd_compress_bound(src_size: Int) -> Int
+#   _zstd_decompress_into(dst, src) raises -> Int
+#   _zstd_compress_into(dst, src, compression_level) raises -> Int
+#   _zstd_compress_bound(src_size: Int) raises -> Int
 #
 # # OwnedDLHandle singleton
 #
@@ -116,6 +118,12 @@ def _zstd_decompress_into[
     """
     var src_size = len(src)
     var dst_capacity = len(dst)
+    # `ZSTD_decompress` returns 0 for a 0-byte input, with no error. A zstd
+    # page always holds at least one frame (an empty payload is still a
+    # frame header and an empty block), so no input is refused, as SNAPPY
+    # refuses it.
+    if src_size == 0:
+        raise Error("ZSTD_decompress: empty input holds no zstd frame")
     var handle_ptr = _default_zstd_ffi_handle()
     var result = handle_ptr[].call["ZSTD_decompress", Int](
         dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
@@ -125,7 +133,9 @@ def _zstd_decompress_into[
         .unsafe_origin_cast[MutUntrackedOrigin](),
         src_size,
     )
-    var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
+    # `unsigned ZSTD_isError(size_t)`: declared UInt32, so the unspecified
+    # upper half of the 64-bit return register is not read.
+    var is_err = handle_ptr[].call["ZSTD_isError", UInt32](result)
     if is_err != 0:
         raise Error(
             "ZSTD_decompress failed (result=" + String(result)
@@ -162,7 +172,7 @@ def _zstd_compress_into[
         src_size,
         compression_level,
     )
-    var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
+    var is_err = handle_ptr[].call["ZSTD_isError", UInt32](result)
     if is_err != 0:
         raise Error(
             "ZSTD_compress failed (result=" + String(result)

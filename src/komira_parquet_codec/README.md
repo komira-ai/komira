@@ -38,7 +38,8 @@ _ = decompress(CompressionCodec.ZSTD, Span(packed)[0:n], Span(out))
 
 ## Native libraries
 
-snappy is linked statically from `//third_party/snappy`, so no libsnappy is
+snappy and the Brotli decoder are linked statically, from
+`//third_party/snappy` and `//third_party/brotli`, so neither library is
 needed at run time. Everything else is opened by name with `dlopen` at first
 use, as `komira_avro` does for its codecs, and must be installed on the
 machine that runs the code:
@@ -48,14 +49,17 @@ machine that runs the code:
 | LZ4_RAW, LZ4 | `liblz4.so.1` (`liblz4.dylib`) | `komira_lz4` and this package's LZ4 frame shim |
 | GZIP | `libz.so.1` (`libz.dylib`) | `komira_zlib` |
 | ZSTD | `libzstd.so.1` (`libzstd.dylib`) | this package |
-| BROTLI | `libbrotlidec.so.1` (`libbrotlidec.dylib`) | this package |
 
 A missing library aborts the process at the first call that needs it.
 
 ## Tests
 
 The tests are welded into the build: the package cannot be built while one of
-them fails. Known answers come from pinned upstream data, never from files
-written here: the reference liblz4's golden frame (`//third_party/pierrec-lz4`)
-and google/snappy's correctness corpus and corrupt blobs
-(`//third_party/snappy:testdata`). BROTLI decoding has no test yet.
+them fails. The LZ4, snappy and Brotli known answers come from pinned upstream
+archives, extracted at build time and never copied here: the reference
+liblz4's golden frame (`//third_party/pierrec-lz4`), google/snappy's
+correctness corpus and corrupt blobs (`//third_party/snappy:testdata`), and
+google/brotli's decoder test vectors (`//third_party/brotli:testdata`). The
+small vectors are written in the tests: the gzip and zstd streams, each with
+the command that made it; hand-built snappy short-offset blobs; and the
+CRC-32C check values, with the publication they come from.

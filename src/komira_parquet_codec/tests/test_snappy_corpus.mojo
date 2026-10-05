@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # The Snappy correctness corpus of google/snappy (its testdata/ files, the
-# ones snappy_unittest round-trips), staged at corpus/ from the archive
-# //third_party/snappy pins by sha256. For each file:
+# ones snappy_unittest round-trips), staged at corpus/testdata/ from the
+# archive //third_party/snappy pins by sha256. For each file:
 #
 #   (a) C-library-encoded -> C-library-decoded == the file, and
 #   (b) C-library-encoded -> Mojo-decoded == the file, both into a buffer of
@@ -34,7 +34,7 @@ from komira_parquet_codec.snappy import (
 
 
 def _read(name: String) raises -> List[UInt8]:
-    return Path(String("corpus/") + name).read_bytes()
+    return Path(String("corpus/testdata/") + name).read_bytes()
 
 
 def _filled(n: Int, b: UInt8) -> List[UInt8]:
