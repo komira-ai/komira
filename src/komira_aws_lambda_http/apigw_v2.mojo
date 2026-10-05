@@ -150,9 +150,18 @@ struct AuthorizerHeaderPrefix(Copyable, Movable, Deinitable):
       * contains an UPPER-CASE letter. Client header names are ASCII-lowercased
         BEFORE the prefix is compared, so an upper-case prefix would match no
         client header and the strip would silently do nothing;
-      * does not END with `-`. The context key is appended verbatim, so the
+      * does not END with `-`. The context key is appended to it, so the
         separator belongs to the prefix; requiring it makes `x-app-authz-`
-        the one spelling and rules out `x-app-authzsubjectid`."""
+        the one spelling and rules out `x-app-authzsubjectid`;
+      * is a prefix of a header API Gateway v2 itself adds to every request
+        (`x-forwarded-for`, `x-forwarded-proto`, `x-forwarded-port`,
+        `x-amzn-trace-id`): `x-`, `x-forwarded-` or `x-amzn-` would strip the
+        gateway's own headers on every request. That is mechanical, not a
+        judgement, so it is refused here.
+
+    WHAT IT ACCEPTS that may still be a poor choice: a prefix shared with a
+    family clients send, such as `content-` or `x-auth-`. Those pass, and the
+    strip would drop the matching client headers."""
 
     var _value: String
 
@@ -230,10 +239,27 @@ def _validate_authorizer_header_prefix(prefix: String) raises:
             String("apigw: refused authorizer header prefix '")
             + prefix
             + String(
-                "': it must END with '-'. The context key is appended"
-                " verbatim, so the separator belongs to the prefix."
+                "': it must END with '-'. The context key is appended to it,"
+                " so the separator belongs to the prefix."
             )
         )
+    var gateway_headers: List[String] = [
+        String("x-forwarded-for"),
+        String("x-forwarded-proto"),
+        String("x-forwarded-port"),
+        String("x-amzn-trace-id"),
+    ]
+    for i in range(len(gateway_headers)):
+        if _starts_with(gateway_headers[i], prefix):
+            raise Error(
+                String("apigw: refused authorizer header prefix '")
+                + prefix
+                + String("': API Gateway adds the header '")
+                + gateway_headers[i]
+                + String(
+                    "' to every request, and this prefix would strip it."
+                )
+            )
 
 
 def _is_tchar(b: UInt8) -> Bool:
@@ -244,11 +270,34 @@ def _is_tchar(b: UInt8) -> Bool:
         return True
     if b >= UInt8(0x30) and b <= UInt8(0x39):
         return True
-    var specials = String("!#$%&'*+-.^_`|~").as_bytes()
-    for i in range(len(specials)):
-        if specials[i] == b:
-            return True
-    return False
+    return (
+        b == UInt8(0x21)  # !
+        or b == UInt8(0x23)  # #
+        or b == UInt8(0x24)  # $
+        or b == UInt8(0x25)  # %
+        or b == UInt8(0x26)  # &
+        or b == UInt8(0x27)  # '
+        or b == UInt8(0x2A)  # *
+        or b == UInt8(0x2B)  # +
+        or b == UInt8(0x2D)  # -
+        or b == UInt8(0x2E)  # .
+        or b == UInt8(0x5E)  # ^
+        or b == UInt8(0x5F)  # _
+        or b == UInt8(0x60)  # `
+        or b == UInt8(0x7C)  # |
+        or b == UInt8(0x7E)  # ~
+    )
+
+
+def _is_token(s: String) -> Bool:
+    """True iff `s` is a non-empty RFC 9110 `token` (every byte a `tchar`)."""
+    var bs = s.as_bytes()
+    if len(bs) == 0:
+        return False
+    for i in range(len(bs)):
+        if not _is_tchar(bs[i]):
+            return False
+    return True
 
 
 # =============================================================================
@@ -444,7 +493,12 @@ def _inject_authorizer_context(
     rc: JsonValue, prefix: String, mut headers: Dict[String, String]
 ) raises:
     """Copy `requestContext.authorizer.lambda`'s STRING members into `headers`
-    under the reserved prefix (§3).
+    under `prefix`, the caller's `AuthorizerHeaderPrefix` (§3).
+
+    ⚠ ONLY TOKEN KEYS. The prefix is validated, but the key is the other half
+    of the header name: a member named `a b`, `a:b` or one holding CR LF would
+    yield a name no header can carry, so a key that is empty or not an RFC 9110
+    token is skipped, the same way a non-string value is.
 
     ⚠ ONLY STRING MEMBERS. A Lambda authorizer's `context` is documented to carry
     strings; API Gateway stringifies numbers and booleans and REJECTS nested
@@ -466,7 +520,10 @@ def _inject_authorizer_context(
         var v = ctx.value_at(i)
         if v.kind_tag() != 3:  # JSON_STRING
             continue
-        var key = prefix + _ascii_lower(ctx.key_at(i))
+        var raw_key = ctx.key_at(i)
+        if not _is_token(raw_key):
+            continue
+        var key = prefix + _ascii_lower(raw_key)
         headers[key^] = v.as_string()
 
 

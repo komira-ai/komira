@@ -345,7 +345,8 @@ struct AuthorizerAnswer(Movable, Deinitable):
                 String(
                     "apigw-authorizer: refused an EMPTY context key. API"
                     " Gateway would accept it and the backend would receive a"
-                    " header named by the reserved prefix alone."
+                    " header named by the caller's authorizer header prefix"
+                    " alone."
                 )
             )
         for i in range(len(self._ctx_keys)):

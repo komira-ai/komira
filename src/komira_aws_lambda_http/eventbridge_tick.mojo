@@ -144,10 +144,10 @@
 # `apigw_v2.mojo` §3 spends its longest section on one hazard: the authorizer's
 # answer reaches the handler through `req.headers`, and the CLIENT controls
 # `headers` too, so every client header under the caller-chosen authorizer
-# prefix is DESTROYED on entry. The request this file builds starts with an EMPTY header
-# dict and never adds one, so the reserved namespace cannot be reached from a
-# tick payload at all — and §2's exact-shape rule refuses a payload that tries
-# to carry `headers` before the question arises.
+# prefix is DESTROYED on entry. The request this file builds starts with an
+# EMPTY header dict and never adds one, so the reserved namespace cannot be
+# reached from a tick payload at all — and §2's exact-shape rule refuses a
+# payload that tries to carry `headers` before the question arises.
 #
 # NO MARKER HEADER IS INJECTED EITHER (no `x-komira-tick`), deliberately. The
 # payload's keys are the proxy event's keys so that a handler written against

@@ -53,8 +53,8 @@ from komira_aws_lambda_http.apigw_v2 import (
 
 # The caller-chosen authorizer header namespace every fixture in this file uses.
 # Deliberately an application name, not the library's: the converter must carry
-# no namespace of its own (see `test_the_prefix_is_the_callers_and_only_the_
-# callers`).
+# no namespace of its own (see
+# `test_the_prefix_is_the_callers_and_only_the_callers`).
 comptime _PREFIX: String = "x-example-authz-"
 
 
@@ -285,7 +285,8 @@ def test_an_absent_body_is_empty_not_a_refusal() raises:
 
 def test_the_authorizer_context_reaches_the_request_as_reserved_headers() raises:
     """`requestContext.authorizer.lambda`'s STRING members become
-    `<prefix><key>` headers (here `x-example-authz-<key>`), key ASCII-lowercased.
+    `<prefix><key>` headers (here `x-example-authz-<key>`), key
+    ASCII-lowercased.
 
     `dispatch(reactor, req)` has no third argument, so `req.headers` is the only
     channel an authorizer's answer has. This is the assertion that the channel
@@ -365,6 +366,38 @@ def test_the_authorizer_wins_over_a_client_header_of_the_same_name() raises:
     )
 
 
+def test_a_context_key_that_is_not_a_header_token_is_skipped() raises:
+    """A context member whose KEY is not an RFC 9110 token (a space, a colon,
+    CR LF) or is empty is skipped, like a non-string value. The prefix is
+    validated, so the key is the only half of the injected name left to check.
+
+    FALSIFIES a converter that appends the key unchecked: it would inject
+    `x-example-authz-a b`, `x-example-authz-a:b` and a name carrying CR LF,
+    none of which a header can carry. The `subjectId` member is the non-empty
+    arm: a converter that skipped every key would fail on it."""
+    var event = String(
+        '{"version": "2.0", "rawPath": "/private", "rawQueryString": "",'
+        '"requestContext": {"http": {"method": "GET"},'
+        '"authorizer": {"lambda": {'
+        '"subjectId": "subject-real",'
+        '"a b": "space",'
+        '"a:b": "colon",'
+        '"a\\r\\nb": "crlf",'
+        '"": "empty"'
+        '}}}}'
+    )
+    var req = api_gateway_v2_event_to_request(event, _prefix())
+    assert_equal(
+        _header(req.headers, String(_PREFIX) + String("subjectid")),
+        String("subject-real"),
+    )
+    assert_false((String(_PREFIX) + String("a b")) in req.headers)
+    assert_false((String(_PREFIX) + String("a:b")) in req.headers)
+    assert_false((String(_PREFIX) + String("a\r\nb")) in req.headers)
+    assert_false(String(_PREFIX) in req.headers)
+    assert_equal(len(req.headers), 1)
+
+
 def test_a_jwt_authorizer_kind_is_not_read_as_a_context_entry() raises:
     """`requestContext.authorizer` keys are authorizer KINDS (`lambda`, `jwt`),
     not context entries. Reading the object flat would turn the `jwt` key into a
@@ -422,6 +455,9 @@ def test_the_prefix_is_the_callers_and_only_the_callers() raises:
 
 
 def test_a_valid_prefix_is_kept_exactly_as_given() raises:
+    """FALSIFIES a constructor that normalizes what it accepts (folding,
+    trimming, or appending a separator): the value comes back byte for
+    byte."""
     assert_equal(_prefix().value(), String(_PREFIX))
     assert_equal(
         AuthorizerHeaderPrefix(String("authz-")).value(), String("authz-")
@@ -455,6 +491,8 @@ def _prefix_must_be_refused(
 
 
 def test_refuses_an_empty_prefix() raises:
+    """FALSIFIES a constructor that accepts `""`, which reserves every header
+    name and makes the strip drop the whole client request's headers."""
     _prefix_must_be_refused(String(""), String("EMPTY"), String("empty"))
 
 
@@ -481,6 +519,8 @@ def test_refuses_an_upper_case_prefix() raises:
 
 
 def test_refuses_a_prefix_that_is_not_a_header_token() raises:
+    """FALSIFIES a constructor that accepts `x app-`, `x-app:`, `x/app-` or a
+    non-ASCII byte: no header name could ever carry such a prefix."""
     _prefix_must_be_refused(
         String("x app-"), String("token character"), String("space")
     )
@@ -498,6 +538,8 @@ def test_refuses_a_prefix_that_is_not_a_header_token() raises:
 
 
 def test_refuses_a_prefix_not_ending_in_a_dash() raises:
+    """FALSIFIES a constructor that accepts `x-app-authz` and yields the header
+    `x-app-authzsubjectid`."""
     _prefix_must_be_refused(
         String("x-app-authz"), String("END with '-'"), String("no dash")
     )
@@ -507,11 +549,57 @@ def test_refuses_a_prefix_not_ending_in_a_dash() raises:
 
 
 def test_refuses_a_prefix_naming_nothing() raises:
+    """FALSIFIES a constructor that accepts `-` or `--`, which reserve every
+    header starting with a dash and name no namespace."""
     _prefix_must_be_refused(
         String("-"), String("no letter or digit"), String("a lone dash")
     )
     _prefix_must_be_refused(
         String("--"), String("no letter or digit"), String("dashes only")
+    )
+
+
+def test_refuses_a_prefix_of_a_header_the_gateway_adds() raises:
+    """API Gateway v2 adds `x-forwarded-for`, `x-forwarded-proto`,
+    `x-forwarded-port` and `x-amzn-trace-id` to every request. A prefix that
+    starts any of them would strip it on every request.
+
+    FALSIFIES a constructor that accepts `x-`, `x-forwarded-`, `x-amzn-` or
+    `x-amzn-trace-`; the message must name the header that would be lost."""
+    _prefix_must_be_refused(
+        String("x-"), String("'x-forwarded-for'"), String("x-")
+    )
+    _prefix_must_be_refused(
+        String("x-forwarded-"),
+        String("'x-forwarded-for'"),
+        String("x-forwarded-"),
+    )
+    _prefix_must_be_refused(
+        String("x-amzn-"), String("'x-amzn-trace-id'"), String("x-amzn-")
+    )
+    _prefix_must_be_refused(
+        String("x-amzn-trace-"),
+        String("'x-amzn-trace-id'"),
+        String("x-amzn-trace-"),
+    )
+
+
+def test_a_short_prefix_shared_with_client_headers_is_accepted() raises:
+    """The stated LIMIT of the type: a prefix that only collides with headers
+    CLIENTS send (`content-`, `x-auth-`, `x-amz-`) is accepted, because whether
+    those headers matter is the application's judgement, not the library's.
+
+    Pinned so the limit is a checked fact, not only a docstring: if the type
+    starts refusing these, this test says the contract changed. `x-amz-` is
+    here because it is NOT a prefix of `x-amzn-trace-id`."""
+    assert_equal(
+        AuthorizerHeaderPrefix(String("content-")).value(), String("content-")
+    )
+    assert_equal(
+        AuthorizerHeaderPrefix(String("x-auth-")).value(), String("x-auth-")
+    )
+    assert_equal(
+        AuthorizerHeaderPrefix(String("x-amz-")).value(), String("x-amz-")
     )
 
 
@@ -1046,6 +1134,7 @@ def main() raises:
     test_a_non_string_authorizer_member_is_skipped_not_stringified()
     test_a_forged_authorizer_header_never_reaches_the_dispatcher()
     test_the_authorizer_wins_over_a_client_header_of_the_same_name()
+    test_a_context_key_that_is_not_a_header_token_is_skipped()
     test_a_jwt_authorizer_kind_is_not_read_as_a_context_entry()
     test_the_prefix_is_the_callers_and_only_the_callers()
     test_a_valid_prefix_is_kept_exactly_as_given()
@@ -1055,6 +1144,8 @@ def main() raises:
     test_refuses_a_prefix_that_is_not_a_header_token()
     test_refuses_a_prefix_not_ending_in_a_dash()
     test_refuses_a_prefix_naming_nothing()
+    test_refuses_a_prefix_of_a_header_the_gateway_adds()
+    test_a_short_prefix_shared_with_client_headers_is_accepted()
 
     test_refuses_a_1_0_event()
     test_refuses_a_REQUEST_AUTHORIZER_event()
