@@ -6,9 +6,10 @@
 # catalog type to that shape's own fixed roles and provider kinds.
 #
 # 1. THE TABLE: every row names a catalog field the fake implements; every
-#    implemented field has a `run` row on every shape; every role name is at
-#    most 8 bytes (the role vocabulary's bound, which the label budget counts
-#    on); the generic shape is the fake's own roles, unchanged.
+#    compute field (service, job) has a `run` row on every shape, and the
+#    bucket exactly one row, `bucket`, and no identity; every role name is
+#    at most 8 bytes (the role vocabulary's bound, which the label budget
+#    counts on); the generic shape is the fake's own roles.
 # 2. THE KIT ON EVERY SHAPE: the kci_cloud conformance kit (all eleven steps)
 #    passes on the aws, gcp and azure shapes, each registered under a random
 #    id, on the graph of test_fake_conformance (a public service, an internal
@@ -36,6 +37,7 @@ from kci_reconciler import (
     VERB_UPDATE,
 )
 from kci_cloud import (
+    FIELD_BUCKET,
     ApplyOutcome,
     Catalog,
     CellContext,
@@ -93,13 +95,17 @@ def test_the_shape_table() raises:
             assert_true(row.role.byte_length() <= 8, shape.name + ": role " + row.role + " is over 8 bytes")
             assert_true(row.kind.byte_length() > 0, shape.name + ": role " + row.role + " has a kind")
         for k in range(len(implemented)):
+            if implemented[k] == FIELD_BUCKET:
+                assert_equal(len(shape.roles_of(FIELD_BUCKET)), 1, shape.name + ": one bucket row")
+                assert_true(shape.has(FIELD_BUCKET, String("bucket")), shape.name + ": the bucket row")
+                continue
             assert_true(
                 shape.has(implemented[k], String("run")),
                 shape.name + ": field " + String(implemented[k]) + " has a run row",
             )
         assert_true(shape.grant_kind.byte_length() > 0, shape.name + " has a grant kind")
     var g = ProviderShape.generic()
-    assert_equal(len(g.rows), 4, "generic: service run, public; job run, schedule")
+    assert_equal(len(g.rows), 5, "generic: service run, public; job run, schedule; bucket")
     assert_true(not g.has(10, String("identity")), "generic has no identity role")
     assert_equal(g.grant_kind, "grant")
     print("  test_the_shape_table: PASS")
@@ -185,22 +191,22 @@ def _golden_with_roles(
     return (
         String("[\n")
         + String('  {"id":"api/identity","owner":"api","kind":"') + identity
-        + String('","wanted":true,"depends_on":[],"inputs":[],"desired":{}},\n')
+        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
         + String('  {"id":"api/run","owner":"api","kind":"') + service
-        + String('","wanted":true,"depends_on":["api/identity"],"inputs":[],"desired":{')
+        + String('","wanted":true,"retention":"delete","depends_on":["api/identity"],"inputs":[],"desired":{')
         + String(_SVC_FIELDS) + String(',"serves":"true"}},\n')
         + String('  {"id":"api/public","owner":"api","kind":"') + public
-        + String('","wanted":true,"depends_on":["api/run"],"inputs":[],"desired":{"mechanism":"invoker"}},\n')
+        + String('","wanted":true,"retention":"delete","depends_on":["api/run"],"inputs":[],"desired":{"mechanism":"invoker"}},\n')
         + String('  {"id":"nightly/identity","owner":"nightly","kind":"') + identity
-        + String('","wanted":true,"depends_on":[],"inputs":[],"desired":{}},\n')
+        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
         + String('  {"id":"nightly/run","owner":"nightly","kind":"') + job
-        + String('","wanted":true,"depends_on":["nightly/identity"],"inputs":[],"desired":{')
+        + String('","wanted":true,"retention":"delete","depends_on":["nightly/identity"],"inputs":[],"desired":{')
         + String(_JOB_FIELDS) + String(',"serves":"false"}},\n')
         + String('  {"id":"nightly/schedule","owner":"nightly","kind":"') + schedule
-        + String('","wanted":true,"depends_on":["nightly/run"],"inputs":[],')
+        + String('","wanted":true,"retention":"delete","depends_on":["nightly/run"],"inputs":[],')
         + String('"desired":{"cron":"0 3 * * *","tz":"UTC"}},\n')
         + String('  {"id":"nightly/uses/api","owner":"nightly","kind":"') + grant
-        + String('","wanted":true,"depends_on":["nightly/identity","api/run"],"inputs":[],')
+        + String('","wanted":true,"retention":"delete","depends_on":["nightly/identity","api/run"],"inputs":[],')
         + String('"desired":{"access":"CALL"}}\n')
         + String("]")
     )
@@ -244,18 +250,18 @@ def test_golden_lowering_azure() raises:
     var want = (
         String("[\n")
         + String('  {"id":"api/identity","owner":"api","kind":"') + ident
-        + String('","wanted":true,"depends_on":[],"inputs":[],"desired":{}},\n')
+        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
         + String('  {"id":"api/run","owner":"api","kind":"Microsoft.App/containerApps",')
-        + String('"wanted":true,"depends_on":["api/identity"],"inputs":[],"desired":{')
+        + String('"wanted":true,"retention":"delete","depends_on":["api/identity"],"inputs":[],"desired":{')
         + String(_SVC_FIELDS) + String(',"ingress":"invoker","serves":"true"}},\n')
         + String('  {"id":"nightly/identity","owner":"nightly","kind":"') + ident
-        + String('","wanted":true,"depends_on":[],"inputs":[],"desired":{}},\n')
+        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
         + String('  {"id":"nightly/run","owner":"nightly","kind":"Microsoft.App/jobs",')
-        + String('"wanted":true,"depends_on":["nightly/identity"],"inputs":[],"desired":{')
+        + String('"wanted":true,"retention":"delete","depends_on":["nightly/identity"],"inputs":[],"desired":{')
         + String(_JOB_FIELDS)
         + String(',"trigger":"schedule","trigger.cron":"0 3 * * *","trigger.tz":"UTC","serves":"false"}},\n')
         + String('  {"id":"nightly/uses/api","owner":"nightly","kind":"Microsoft.Authorization/roleAssignments",')
-        + String('"wanted":true,"depends_on":["nightly/identity","api/run"],"inputs":[],')
+        + String('"wanted":true,"retention":"delete","depends_on":["nightly/identity","api/run"],"inputs":[],')
         + String('"desired":{"access":"CALL"}}\n')
         + String("]")
     )

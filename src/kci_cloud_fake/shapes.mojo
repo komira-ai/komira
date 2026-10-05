@@ -8,22 +8,27 @@
 # the provider kind id it stands for (the CloudFormation type, the GCP asset
 # or API type, the ARM type), plus the kind a `uses` grant lowers to.
 #
-#   * `generic`   the fake's own shape, unchanged: service -> run, public;
-#                 job -> run, schedule; grant -> grant. No identity role.
+#   * `generic`   the fake's own shape: service -> run, public; job -> run,
+#                 schedule; bucket -> bucket; grant -> grant. No identity
+#                 role.
 #   * `aws`       service -> identity (AWS::IAM::Role), run
 #                 (AWS::Lambda::Function), public (AWS::Lambda::Url);
 #                 job -> identity, run (AWS::ECS::TaskDefinition), schedule
-#                 (AWS::Scheduler::Schedule); grant -> AWS::IAM::RolePolicy.
+#                 (AWS::Scheduler::Schedule); bucket -> bucket
+#                 (AWS::S3::Bucket); grant -> AWS::IAM::RolePolicy.
 #   * `gcp`       service -> identity (iam.googleapis.com/ServiceAccount), run
 #                 (run.googleapis.com/Service), public (an invoker member
 #                 binding); job -> identity, run (run.googleapis.com/Job),
-#                 schedule (cloudscheduler.googleapis.com/Job); grant -> a
+#                 schedule (cloudscheduler.googleapis.com/Job); bucket ->
+#                 bucket (storage.googleapis.com/Bucket); grant -> a
 #                 member binding. GCP has no asset type for one binding: the
 #                 kind id names the call that writes it, `setIamPolicy`.
 #   * `azure`     service -> identity
 #                 (Microsoft.ManagedIdentity/userAssignedIdentities), run
 #                 (Microsoft.App/containerApps); job -> identity, run
-#                 (Microsoft.App/jobs); grant ->
+#                 (Microsoft.App/jobs); bucket -> bucket
+#                 (Microsoft.Storage/storageAccounts/blobServices/containers,
+#                 in the cell's storage account); grant ->
 #                 Microsoft.Authorization/roleAssignments. There is NO public
 #                 row and NO schedule row: a container app's ingress and a
 #                 job's schedule trigger are settings of the run object, so
@@ -34,6 +39,9 @@
 # `wanted` False (the closed world). A FOLDED role has no node: turning it
 # off is an update of the run node.
 #
+# A bucket has ONE role on every shape, `bucket`, and no identity: it runs
+# as nobody, it is only granted to.
+#
 # The `identity` role is a compute primitive's PRIVATE identity: a helper
 # object that exists only for that primitive and dies with it. The run node
 # depends on it, and a `uses` grant hangs off it (on the generic shape, which
@@ -43,9 +51,10 @@
 # cloud's id: the id stays opaque.
 # =============================================================================
 
-from kci_cloud import FIELD_JOB, FIELD_SERVICE
+from kci_cloud import FIELD_BUCKET, FIELD_JOB, FIELD_SERVICE
 
 
+comptime ROLE_BUCKET = "bucket"
 comptime ROLE_IDENTITY = "identity"
 comptime ROLE_RUN = "run"
 comptime ROLE_PUBLIC = "public"
@@ -116,6 +125,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_SERVICE, String(ROLE_PUBLIC), String("public")))
         r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("run")))
         r.append(ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("schedule")))
+        r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("bucket")))
         return ProviderShape(String("generic"), r^, String("grant"))
 
     @staticmethod
@@ -127,6 +137,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_JOB, String(ROLE_IDENTITY), String("AWS::IAM::Role")))
         r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("AWS::ECS::TaskDefinition")))
         r.append(ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("AWS::Scheduler::Schedule")))
+        r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("AWS::S3::Bucket")))
         return ProviderShape(String("aws"), r^, String("AWS::IAM::RolePolicy"))
 
     @staticmethod
@@ -144,6 +155,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(
             ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("cloudscheduler.googleapis.com/Job"))
         )
+        r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("storage.googleapis.com/Bucket")))
         return ProviderShape(String("gcp"), r^, String("setIamPolicy"))
 
     @staticmethod
@@ -165,6 +177,13 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             )
         )
         r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("Microsoft.App/jobs")))
+        r.append(
+            ShapeRow(
+                FIELD_BUCKET,
+                String(ROLE_BUCKET),
+                String("Microsoft.Storage/storageAccounts/blobServices/containers"),
+            )
+        )
         return ProviderShape(
             String("azure"), r^, String("Microsoft.Authorization/roleAssignments")
         )

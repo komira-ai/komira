@@ -5,8 +5,22 @@
 #
 # One row per `Resource.body` arm of `kci.resource.v1`: the arm's field
 # number (the key every cloud adapter reports coverage by), the type's name,
-# its portability marker, the outputs it exposes to a `Ref`, and the access
-# verbs a `Uses` line may ask of it.
+# its portability marker, the outputs it exposes to a `Ref`, the access
+# verbs a `Uses` line may ask of it, its retention default, and its primary
+# role.
+#
+# RETENTION. A data primitive has a VERSIONED retention default, used while
+# `Resource.retention` is unset (KEEP for a bucket). A type whose default is
+# `RETENTION_NONE` takes no retention: it is deleted with its resource, and
+# writing `retention` on it is refused at validate. Changing a default is a
+# behaviour change for every stored list, so a default is never edited in
+# place; a new default is a new catalog version.
+#
+# THE PRIMARY ROLE is the role a reference to the resource lands on, on every
+# cloud: `run` for a service or a job, `bucket` for a bucket. A cloud adapter
+# writes a dependency or an input on ANOTHER resource as that resource's id
+# alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
+# an adapter lowers one resource without reading the others.
 #
 # ⚠ HAND-KEPT, BECAUSE THE GENERATED MOJO CANNOT ANSWER IT. The proto states
 # portability and `exposes` as message options; the Mojo the codec emits does
@@ -35,10 +49,38 @@ comptime FIELD_SERVICE: Int = 10
 """`Resource.body` field number of `service`."""
 comptime FIELD_JOB: Int = 11
 """`Resource.body` field number of `job`."""
+comptime FIELD_BUCKET: Int = 14
+"""`Resource.body` field number of `bucket`."""
 
 comptime OUTPUT_URL = "URL"
 comptime OUTPUT_HOST = "HOST"
+comptime OUTPUT_ADDRESS = "ADDRESS"
+comptime OUTPUT_NAME = "NAME"
 comptime ACCESS_CALL = "CALL"
+comptime ACCESS_READ = "READ"
+comptime ACCESS_WRITE = "WRITE"
+comptime ACCESS_READ_WRITE = "READ_WRITE"
+
+comptime RETENTION_NONE: Int = 0
+"""The type takes no retention: deleted with its resource (a catalog row's
+`retention_default`; the same number as `kci.resource.v1.RETENTION_UNSET`)."""
+comptime RETENTION_DELETE: Int = 1
+"""`kci.resource.v1.DELETE`."""
+comptime RETENTION_KEEP: Int = 2
+"""`kci.resource.v1.KEEP`."""
+
+comptime ROLE_RUN = "run"
+comptime ROLE_BUCKET = "bucket"
+
+
+def retention_word(r: Int) -> String:
+    if r == RETENTION_DELETE:
+        return String("DELETE")
+    if r == RETENTION_KEEP:
+        return String("KEEP")
+    if r == RETENTION_NONE:
+        return String("none")
+    return String(r)
 
 
 def portability_word(p: Int) -> String:
@@ -57,6 +99,8 @@ struct CatalogType(Copyable, Movable, Deinitable):
     var portability: Int
     var exposes: List[String]
     var accepts: List[String]
+    var retention_default: Int
+    var primary_role: String
 
     def __init__(
         out self,
@@ -65,12 +109,16 @@ struct CatalogType(Copyable, Movable, Deinitable):
         portability: Int,
         var exposes: List[String],
         var accepts: List[String],
+        retention_default: Int = RETENTION_NONE,
+        primary_role: String = String(ROLE_RUN),
     ):
         self.field = field
         self.name = name
         self.portability = portability
         self.exposes = exposes^
         self.accepts = accepts^
+        self.retention_default = retention_default
+        self.primary_role = primary_role
 
     def __init__(out self, *, copy: Self):
         # Explicit: a struct with String and List fields that lives in a List
@@ -80,6 +128,12 @@ struct CatalogType(Copyable, Movable, Deinitable):
         self.portability = copy.portability
         self.exposes = copy.exposes.copy()
         self.accepts = copy.accepts.copy()
+        self.retention_default = copy.retention_default
+        self.primary_role = copy.primary_role.copy()
+
+    def takes_retention(self) -> Bool:
+        """True iff `Resource.retention` may be written on this type."""
+        return self.retention_default != RETENTION_NONE
 
     def exposes_output(self, output: String) -> Bool:
         for i in range(len(self.exposes)):
@@ -132,7 +186,8 @@ struct Catalog(Copyable, Movable, Deinitable):
 
     @staticmethod
     def v1() raises -> Catalog:
-        """`kci.resource.v1` as declared today: `service` and `job`."""
+        """`kci.resource.v1` as declared today: `service`, `job` and
+        `bucket`."""
         var c = Catalog()
         var svc_out = List[String]()
         svc_out.append(String(OUTPUT_URL))
@@ -144,6 +199,24 @@ struct Catalog(Copyable, Movable, Deinitable):
         )
         # A job exposes nothing; CALL on a job is "may start a run of it".
         c.add(CatalogType(FIELD_JOB, String("job"), PORTABLE, List[String](), call^))
+        var bucket_out = List[String]()
+        bucket_out.append(String(OUTPUT_NAME))
+        bucket_out.append(String(OUTPUT_ADDRESS))
+        var data = List[String]()
+        data.append(String(ACCESS_READ))
+        data.append(String(ACCESS_WRITE))
+        data.append(String(ACCESS_READ_WRITE))
+        c.add(
+            CatalogType(
+                FIELD_BUCKET,
+                String("bucket"),
+                PORTABLE,
+                bucket_out^,
+                data^,
+                retention_default=RETENTION_KEEP,
+                primary_role=String(ROLE_BUCKET),
+            )
+        )
         return c^
 
 
@@ -163,6 +236,7 @@ def body_arms() -> List[BodyArm]:
     var l = List[BodyArm]()
     l.append(BodyArm(FIELD_SERVICE, String("service")))
     l.append(BodyArm(FIELD_JOB, String("job")))
+    l.append(BodyArm(FIELD_BUCKET, String("bucket")))
     return l^
 
 
@@ -196,3 +270,40 @@ def body_field(r: Resource) raises -> Int:
             + String(" is not in this kci's catalog table")
         )
     return arms[arm - 1].field
+
+
+def effective_retention(catalog: Catalog, r: Resource) raises -> Int:
+    """`r`'s retention: `Resource.retention` when written, else its type's
+    versioned default (`RETENTION_NONE` for a type that takes none). Raises
+    for a resource with no type, or a type outside `catalog`."""
+    var field = body_field(r)
+    var t = catalog.index_of(field)
+    if t < 0:
+        raise Error(
+            String("resource '")
+            + r.id
+            + String("': type field ")
+            + String(field)
+            + String(" is not in the catalog")
+        )
+    var written = r.retention.value
+    if written != RETENTION_NONE:
+        return written
+    return catalog.types[t].retention_default
+
+
+def primary_node(catalog: Catalog, resources: List[Resource], id: String) raises -> String:
+    """The node a reference to resource `id` lands on:
+    `<id>/<primary role of its type>`. Raises for an id not in `resources`
+    (validate refuses such a reference first)."""
+    for i in range(len(resources)):
+        if resources[i].id == id:
+            var t = catalog.index_of(body_field(resources[i]))
+            if t < 0:
+                break
+            return id + String("/") + catalog.types[t].primary_role
+    raise Error(
+        String("a reference to \"")
+        + id
+        + String("\" names no resource of the catalog in this list")
+    )

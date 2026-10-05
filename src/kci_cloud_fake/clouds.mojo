@@ -7,7 +7,8 @@
 #     double for everything above the cloud module.
 #   * `FakeLimitedCloud` ("fake-limited")   is DELIBERATELY PARTIAL: it does
 #     not host `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a
-#     catalog that marks `job` CLOUD_BOUND) and it has no public ingress, so a
+#     catalog that marks `job` CLOUD_BOUND) nor `bucket` (NOT_YET), and it
+#     has no public ingress, so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
 #     in full, before anything is lowered or created.
@@ -18,6 +19,10 @@
 #              `<id>/uses/<target>` per `Uses` line
 #   job     -> `<id>/run`, `<id>/schedule` (wanted iff scheduled), and the
 #              same grants
+#   bucket  -> `<id>/bucket` (it holds no identity, so no grants)
+# A grant depends on its target, and a value reads its producer, by the
+# producer's resource id alone: kci resolves that to the resource's primary
+# node (`run`, or `bucket`), so this lowering never reads another resource.
 # `FakeCloud` built with a provider shape (`shapes.mojo`: `aws`, `gcp`,
 # `azure`) lowers to THAT shape's fixed roles and provider kinds instead: a
 # private `<id>/identity` the run depends on and the grants hang off, and on
@@ -25,8 +30,10 @@
 # A run node's desired fields are EVERY field the catalog models, with the
 # catalog's default filled in where the author wrote none (kci owns every
 # modelled field: writing a default out is not a change, a console edit of
-# one is drift). `env` and `secret_env` of a job included. Provenance is
-# never a field.
+# one is drift). `env` and `secret_env` of a job included; a bucket's expiry
+# (`never` when unset), versioning and tier (`STANDARD` when unset).
+# Provenance is never a field, and neither is retention: kci sets it on the
+# lowered node, and the node carries it as the `kci_retain` label.
 #
 # THE CELL'S SETTINGS (`configure`): `public_mechanism` (`invoker` or
 # `gateway`, default `invoker`; `none` chooses none, and validate then
@@ -70,13 +77,16 @@ from kci_cloud import (
     Principal,
     RUN_UNKNOWN,
     Setting,
+    FIELD_BUCKET,
     FIELD_JOB,
     FIELD_SERVICE,
     FINDING_CELL,
     FINDING_LIMIT,
     NOT_YET,
     V1_IMAGE_PLATFORM,
+    body_field,
     decode_label_value,
+    retained_by,
     standard_identity_of,
     standard_label_rule,
 )
@@ -86,6 +96,7 @@ from kci_cloud_fake.fake_store import FakeStore
 from kci_cloud_fake.nodes import FakeNode
 from kci_cloud_fake.shapes import (
     ProviderShape,
+    ROLE_BUCKET,
     ROLE_IDENTITY,
     ROLE_PUBLIC,
     ROLE_RUN,
@@ -105,6 +116,8 @@ comptime DEFAULT_REQUEST_TIMEOUT = "60s0n"
 comptime DEFAULT_JOB_TIMEOUT = "600s0n"
 comptime DEFAULT_RETRIES = "0"
 comptime DEFAULT_TIMEZONE = "UTC"
+comptime DEFAULT_EXPIRY = "never"
+comptime DEFAULT_TIER = "STANDARD"
 
 
 def _image(img: Optional[Image]) -> String:
@@ -155,9 +168,8 @@ def _env(
         var field = kind + String(".env.") + sorted[i]
         if v._oneof0_case == 3:
             ref rf = v.ref_.value()
-            refs.append(
-                InputRef(rf.resource + String("/run"), rf.standard.value().json_name(), field)
-            )
+            # The producer by its resource id: kci resolves its primary node.
+            refs.append(InputRef(rf.resource.copy(), rf.standard.value().json_name(), field))
         else:
             fields.append(Setting(field, v.literal.value()))
 
@@ -187,10 +199,44 @@ def _duration(seconds: Int, nanos: Int) -> String:
     return String(seconds) + String("s") + String(nanos) + String("n")
 
 
+def _lower_bucket(r: Resource, shape: ProviderShape) raises -> List[LoweredNode]:
+    """A bucket's one role, every modelled field with its default filled in.
+    `stores` is how the node behaves (it exposes NAME and ADDRESS), not
+    state."""
+    if len(r.uses) > 0:
+        raise Error(String("fake: bucket \"") + r.id + String("\" has uses lines; validate refuses them"))
+    ref b = r.bucket.value()
+    var fields = List[Setting]()
+    var expiry = String(DEFAULT_EXPIRY)
+    if b.object_expiry_days:
+        expiry = String(Int(b.object_expiry_days.value()))
+    fields.append(Setting(String("expiry_days"), expiry^))
+    fields.append(Setting(String("versioning"), String("true") if b.versioning else String("false")))
+    var tier = String(DEFAULT_TIER)
+    if b.tier.value != 0:
+        tier = b.tier.json_name()
+    fields.append(Setting(String("tier"), tier^))
+    fields.append(Setting(String("stores"), String("true")))
+    var out = List[LoweredNode]()
+    out.append(
+        LoweredNode(
+            r.id + String("/") + String(ROLE_BUCKET),
+            r.id,
+            shape.kind_of(FIELD_BUCKET, String(ROLE_BUCKET)),
+            List[String](),
+            List[InputRef](),
+            fields^,
+        )
+    )
+    return out^
+
+
 def _lower(r: Resource, mechanism: String, shape: ProviderShape) raises -> List[LoweredNode]:
     """The complete fixed set of roles of `r` on `shape`, as data."""
+    var field = body_field(r)
+    if field == FIELD_BUCKET:
+        return _lower_bucket(r, shape)
     var out = List[LoweredNode]()
-    var field = FIELD_SERVICE if r._oneof0_case == 1 else FIELD_JOB
     var run = r.id + String("/run")
     var principal = run.copy()
     var run_deps = List[String]()
@@ -308,7 +354,8 @@ def _lower(r: Resource, mechanism: String, shape: ProviderShape) raises -> List[
         g.append(Setting(String("access"), use.access.json_name()))
         var deps = List[String]()
         deps.append(principal.copy())
-        deps.append(target + String("/run"))
+        # The target by its resource id: kci resolves its primary node.
+        deps.append(target.copy())
         out.append(
             LoweredNode(
                 r.id + String("/uses/") + target,
@@ -403,6 +450,7 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) -> List[OwnedRecord]:
                 run^,
                 True,
                 node^,
+                retained_by(labels),
             )
         )
     return out^
@@ -484,6 +532,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         var l = List[Int]()
         l.append(FIELD_SERVICE)
         l.append(FIELD_JOB)
+        l.append(FIELD_BUCKET)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -607,7 +656,8 @@ struct FakeCloud(ConformanceTarget, Movable):
 
 
 struct FakeLimitedCloud(ConformanceTarget, Movable):
-    """The deliberately partial fake cloud: no `job`, no public ingress.
+    """The deliberately partial fake cloud: no `job`, no `bucket` (NOT_YET),
+    no public ingress.
 
     `job_absence` is how it declares the missing `job`: NOT_YET (the default,
     for the v1 catalog, where `job` is PORTABLE) or ABSENT_BY_DESIGN (for a
@@ -653,6 +703,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
             l.append(
                 Absence(FIELD_JOB, NOT_YET, String("fake-limited has no run-to-completion runner"))
             )
+        l.append(Absence(FIELD_BUCKET, NOT_YET, String("fake-limited has no object store")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:

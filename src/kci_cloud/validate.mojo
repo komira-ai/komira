@@ -15,7 +15,11 @@
 #      facade before a cloud ever sees the resource) in `env` of a service
 #      AND of a job, a variable set by `env` or by `secret_env` but not both,
 #      a secret reference with a name, and an image platform written as
-#      `<os>/<cpu>` (empty means `linux/amd64`).
+#      `<os>/<cpu>` (empty means `linux/amd64`). And the data rules:
+#      `retention` only on a type that takes one (a service or a job is
+#      deleted with its resource) and only DELETE or KEEP; a bucket's
+#      `object_expiry_days` never an explicit 0; no `uses` on a bucket (it
+#      runs as no identity, so it can be granted to, never grant).
 #   2. COVERAGE findings: the chosen cloud has no adapter for a type. The
 #      text carries the cloud's typed absence and the built-in clouds
 #      that do host the type.
@@ -52,7 +56,17 @@ from kci_cloud.adapter import (
     FINDING_LIMIT,
     absence_word,
 )
-from kci_cloud.catalog import Catalog, body_field, portability_word
+from kci_cloud.catalog import (
+    Catalog,
+    FIELD_BUCKET,
+    FIELD_JOB,
+    FIELD_SERVICE,
+    RETENTION_DELETE,
+    RETENTION_KEEP,
+    RETENTION_NONE,
+    body_field,
+    portability_word,
+)
 from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
 from kci_cloud.labels import LABEL_VALUE_MAX, encoded_label_bytes
@@ -341,8 +355,64 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             )
             continue
         var tname = catalog.types[t].name.copy()
-        _check_image(id, tname + String(".image"), r, out)
-        if field == 10:
+        var retention = r.retention.value
+        if retention != RETENTION_NONE:
+            if not catalog.types[t].takes_retention():
+                out.append(
+                    Finding(
+                        FINDING_GRAPH,
+                        id,
+                        String("retention"),
+                        String("a ")
+                        + tname
+                        + String(
+                            " takes no retention: it is deleted with its resource;"
+                            " retention is for data types"
+                        ),
+                    )
+                )
+            elif retention != RETENTION_DELETE and retention != RETENTION_KEEP:
+                out.append(
+                    Finding(
+                        FINDING_GRAPH,
+                        id,
+                        String("retention"),
+                        String("retention value ")
+                        + String(retention)
+                        + String(" is not DELETE or KEEP"),
+                    )
+                )
+        if field == FIELD_SERVICE or field == FIELD_JOB:
+            _check_image(id, tname + String(".image"), r, out)
+        if field == FIELD_BUCKET:
+            ref bkt = r.bucket.value()
+            if Bool(bkt.object_expiry_days) and bkt.object_expiry_days.value() == 0:
+                out.append(
+                    Finding(
+                        FINDING_GRAPH,
+                        id,
+                        String("bucket.object_expiry_days"),
+                        String(
+                            "0 would expire every object at once; leave it unset"
+                            " to keep objects until they are deleted"
+                        ),
+                    )
+                )
+            if len(r.uses) > 0:
+                out.append(
+                    Finding(
+                        FINDING_GRAPH,
+                        id,
+                        String("uses"),
+                        String(
+                            "a bucket runs as no identity, so it cannot use another"
+                            " resource; write the uses line on the service or job"
+                            " that reads or writes it"
+                        ),
+                    )
+                )
+                continue
+        if field == FIELD_SERVICE:
             ref svc = r.service.value()
             for entry in svc.env.items():
                 _check_value(
@@ -361,7 +431,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                     entry.value.name,
                     out,
                 )
-        if field == 11:
+        if field == FIELD_JOB:
             ref job = r.job.value()
             for entry in job.env.items():
                 _check_value(
