@@ -20,10 +20,20 @@
 # keeps only: the HTTP status, the envelope's numeric `code`, the `status`
 # name IF it is a bare `[A-Z_]+` token of at most 64 bytes (so a server cannot
 # smuggle text through it), the BYTE LENGTH of `error.message`, the byte
-# count of the whole body, and the wait a `google.rpc.RetryInfo` detail asks
+# count of the whole body, the wait a `google.rpc.RetryInfo` detail asks
 # for, as a number of milliseconds (`retry_delay_ms`; the retry classifier's
-# server delay). `gcp_status_error` is the contract the generated
-# REST clients call (proto-codegen `emit_rest.rs`, `GCP_STATUS_ERROR`).
+# server delay), and the first `error.errors[].reason` IF it is a bare
+# `[A-Za-z0-9_]+` token of at most 64 bytes (`reason`).
+#
+# `reason` is the older envelope's (Compute Engine v1 answers with
+# `error.errors[]` of `{message, domain, reason}` and no `error.status`). Its
+# reason is a fixed machine token (`alreadyExists`, `notFound`,
+# `resourceNotReady`), and it is the only thing that tells a 409 for a
+# resource that already exists from any other 409, which an idempotent
+# insert needs. The `message` beside it is counted, never kept.
+#
+# `gcp_status_error` is the contract the generated REST clients call
+# (proto-codegen `emit_rest.rs`, `GCP_STATUS_ERROR`).
 #
 # The same API called over gRPC answers with a gRPC status instead;
 # `gcp_grpc_status_error` (at the end of this file) is the generated gRPC
@@ -142,6 +152,24 @@ def _is_status_token(s: String) -> Bool:
     return True
 
 
+def _is_reason_token(s: String) -> Bool:
+    """A bare `[A-Za-z0-9_]+` token of at most 64 bytes: an
+    `error.errors[].reason` this package will repeat."""
+    var b = s.as_bytes()
+    if len(b) == 0 or len(b) > _MAX_STATUS_TOKEN_BYTES:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not (
+            (c >= ord("A") and c <= ord("Z"))
+            or (c >= ord("a") and c <= ord("z"))
+            or (c >= ord("0") and c <= ord("9"))
+            or c == ord("_")
+        ):
+            return False
+    return True
+
+
 @fieldwise_init
 struct GcpStatusError(Copyable, Movable, Deinitable):
     """A failed Google API call, as much as can be said without the body.
@@ -150,7 +178,10 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
     field (or a wrong-typed one); `status` is "" when absent or not a bare
     status token. `retry_delay_ms` is the first `google.rpc.RetryInfo`
     detail's `retryDelay` in milliseconds (rounded up), or -1 when there is
-    none or it is not a well-formed non-negative proto3 JSON Duration."""
+    none or it is not a well-formed non-negative proto3 JSON Duration.
+    `reason` is the first `error.errors[]` entry's `reason` when it is a bare
+    token (`_is_reason_token`), else "" (the older envelope only; see the
+    module header)."""
 
     var verb: String
     var rpc: String
@@ -161,6 +192,7 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
     var message_bytes: Int
     var body_bytes: Int
     var retry_delay_ms: Int64
+    var reason: String
 
     def code(self) -> Int:
         """The canonical `google.rpc.Code`: the envelope's `status` name when it
@@ -184,6 +216,8 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
             + String(self.code())
             + ")"
         )
+        if self.reason.byte_length() > 0:
+            out += ", reason " + self.reason
         if self.envelope == ENVELOPE_PRESENT:
             if self.status.byte_length() == 0:
                 out += String(_UNLABELLED_NO_STATUS)
@@ -209,7 +243,7 @@ def parse_gcp_status(
     beyond the allow-listed fields described in the module header."""
     var out = GcpStatusError(
         verb.copy(), rpc.copy(), http_status, ENVELOPE_MALFORMED, -1, String(),
-        -1, len(body), -1,
+        -1, len(body), -1, String(),
     )
     # Whitespace-only (or empty) body: nothing to parse.
     var blank = True
@@ -257,9 +291,30 @@ def parse_gcp_status(
             out.message_bytes = err.get("message").as_string().byte_length()
         if err.has("details") and err.get("details").is_array():
             out.retry_delay_ms = _retry_info_delay_ms(err.get("details"))
+        if err.has("errors") and err.get("errors").is_array():
+            out.reason = _first_reason(err.get("errors"))
     except:
         pass
     return out^
+
+
+def _first_reason(errors: JsonValue) -> String:
+    """The first `errors[]` entry's `reason` if it is a bare token, else ""."""
+    try:
+        if errors.array_len() == 0:
+            return String()
+        var first = errors.element_at(0)
+        if not first.is_object() or not first.has("reason"):
+            return String()
+        var r = first.get("reason")
+        if r.kind_tag() != JSON_STRING:
+            return String()
+        var s = r.as_string()
+        if _is_reason_token(s):
+            return s^
+    except:
+        pass
+    return String()
 
 
 comptime RETRY_INFO_TYPE = "type.googleapis.com/google.rpc.RetryInfo"

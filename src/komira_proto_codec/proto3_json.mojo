@@ -96,6 +96,10 @@ struct JsonEncoder(WireEncoder):
     # separator inside the `{...}` object.
     var _map_phase: Int
     var _map_need_comma: Bool
+    # Where the open repeated or map field began, and the comma state before
+    # it: an empty one is cut back to here when it closes (see `_drop_empty`).
+    var _coll_start: Int
+    var _coll_prev_comma: Bool
 
     def __init__(out self):
         self.buf = List[UInt8]()
@@ -104,6 +108,8 @@ struct JsonEncoder(WireEncoder):
         self._list_need_comma = False
         self._map_phase = 0
         self._map_need_comma = False
+        self._coll_start = 0
+        self._coll_prev_comma = False
 
     def _ensure_open(mut self):
         """Emit the opening `{` lazily on the first field write."""
@@ -350,14 +356,19 @@ struct JsonEncoder(WireEncoder):
     # -- repeated (array) framing + element writers -----------------------
     #
     # `begin_list_field` opens `"<name>":[`; each `write_*_element` appends a
-    # comma-separated bare value; `end_list_field` closes `]`. An empty
-    # repeated field still emits `"<name>":[]` — proto3-JSON renders an empty
-    # array (and the decode of `[]` yields an empty list).
+    # comma-separated bare value; `end_list_field` closes `]`. An EMPTY
+    # repeated field is OMITTED, key and all, as the proto3 JSON mapping
+    # omits every field at its default (an absent array decodes to an empty
+    # list). This is not cosmetic: under a merge-patch (Compute's PATCH) a
+    # sent `"<name>":[]` means "set this list to empty", so emitting it would
+    # clear every list a sparse patch left unset.
 
     def begin_list_field(
         mut self, field_no: Int, json_name: StringSlice
     ) raises:
         self._ensure_open()
+        self._coll_start = len(self.buf)
+        self._coll_prev_comma = self._need_comma
         if self._need_comma:
             self.buf.append(0x2C)  # ','
         write_json_string(self.buf, String(json_name))
@@ -367,8 +378,21 @@ struct JsonEncoder(WireEncoder):
         self._list_need_comma = False
 
     def end_list_field(mut self) raises:
+        if not self._list_need_comma:
+            self._drop_empty()
+            return
         self.buf.append(0x5D)  # ']'
         self._list_need_comma = False
+
+    def _drop_empty(mut self):
+        """Cut an empty repeated or map field back out: its `[,]"<name>":[`
+        (or `{`) prefix is removed and the comma state restored, so the
+        field leaves no bytes. A list or map is never open inside another in
+        one encoder (a message element encodes into its own child encoder),
+        so one saved start suffices."""
+        while len(self.buf) > self._coll_start:
+            _ = self.buf.pop()
+        self._need_comma = self._coll_prev_comma
 
     def _list_sep(mut self):
         """Emit the element separator before a repeated array element."""
@@ -471,12 +495,15 @@ struct JsonEncoder(WireEncoder):
     # ordinary `write_*_field(1, "key", ..)` / `write_*_field(2, "value", ..)`
     # primitives — the `_map_phase` state machine renders the KEY's scalar as
     # the object key and the VALUE's scalar as the object value.
-    # `end_map_field` closes `}`. An empty map still emits `"<name>":{}`.
+    # `end_map_field` closes `}`. An EMPTY map is omitted, key and all, as an
+    # empty repeated field is (see above).
 
     def begin_map_field(
         mut self, field_no: Int, json_name: StringSlice
     ) raises:
         self._ensure_open()
+        self._coll_start = len(self.buf)
+        self._coll_prev_comma = self._need_comma
         if self._need_comma:
             self.buf.append(0x2C)  # ','
         write_json_string(self.buf, String(json_name))
@@ -487,8 +514,11 @@ struct JsonEncoder(WireEncoder):
         self._map_phase = 0
 
     def end_map_field(mut self) raises:
-        self.buf.append(0x7D)  # '}'
         self._map_phase = 0
+        if not self._map_need_comma:
+            self._drop_empty()
+            return
+        self.buf.append(0x7D)  # '}'
         self._map_need_comma = False
 
     def begin_map_entry(mut self) raises:

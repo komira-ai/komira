@@ -220,7 +220,7 @@ def test_read_modify_write_sends_back_the_etag_it_read() raises:
         _body(wire),
         '{"policy":{"version":1,"bindings":['
         + '{"role":"roles/viewer","members":["group:readers@example.com"]}],'
-        + '"auditConfigs":[],"etag":"BwXhqDuVJ8g="}}',
+        + '"etag":"BwXhqDuVJ8g="}}',
     )
     # The answer is the policy as stored (here the script's).
     assert_equal(len(written.bindings), 2)
