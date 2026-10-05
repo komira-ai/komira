@@ -15,7 +15,7 @@
 #
 # A grep of `komira_db` (and the whole tree) found NO existing KV / document /
 # key-value store trait to conform to. So this is a genuine design call: define the
-# MINIMAL document/KV seam a managed app needs to use Firestore (or any document
+# MINIMAL document/KV seam a caller needs to use Firestore (or any document
 # store) as its storage, matching HOW pgstore/sqlite conform to the SQL path (a
 # narrow trait + a concrete conformer), but shaped for documents, not rows.
 #
@@ -30,12 +30,12 @@
 # the thing the CDC listener later captures (ZERO conversion at any layer).
 #
 # WHERE THE SEAM LIVES. In the Firestore package (beside its only conformer today),
-# NOT in `komira_db` — a managed app uses Firestore-as-storage directly, and a
+# NOT in `komira_db` — a caller uses Firestore-as-storage directly, and a
 # shared cross-package seam is a larger decision to make once a SECOND document
 # backend (e.g. Cosmos) needs it. Lifting the trait to `komira_db` when that
 # happens is a mechanical move (the trait names no Firestore type — only FsValue,
-# which is already the shared CDC value type). Documented as the escalation so the
-# COO / principal can ratify the seam shape + placement.
+# which is already the shared CDC value type). The seam's shape and placement are
+# recorded here so that move can be reviewed when it comes.
 #
 # ENCAPSULATION. ZERO UnsafePointer in any signature; ZERO wildcard
 # origins; ZERO unsafe_from_address. `def`-based, Mojo 1.0.0b2.
@@ -77,7 +77,7 @@ struct DocumentEntry(Copyable, Movable, Deinitable):
 
 
 trait DocumentStore(Movable, Deinitable):
-    """The document/KV store seam a managed app uses for document storage. A
+    """The document/KV store seam a caller uses for document storage. A
     narrow get/put/delete/query surface over collections of documents whose values
     are typed `FsValue` field-maps. Conformed by `FirestoreDocumentStore` today; a
     second backend (Cosmos, etc.) conforms the SAME seam later.
