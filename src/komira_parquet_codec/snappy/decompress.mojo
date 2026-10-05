@@ -30,7 +30,7 @@
 # `-O` so the release codegen is a bare unaligned load/store).
 # =============================================================================
 
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 
 from .format import (
     LITERAL,

@@ -3,9 +3,9 @@
 # =============================================================================
 #
 # Each codec is reached through a per-codec FFI shim: snappy through the
-# statically linked snappy C API (snappy_mojo/snappy_ffi.mojo), zstd, LZ4
+# statically linked snappy C API (snappy/snappy_ffi.mojo), zstd, LZ4
 # frame and brotli through libraries opened at run time
-# (zstd_mojo/zstd_ffi.mojo, lz4_mojo/lz4_ffi.mojo, brotli_mojo/brotli_ffi.mojo),
+# (zstd/zstd_ffi.mojo, lz4_frame/lz4_ffi.mojo, brotli/brotli_ffi.mojo),
 # and LZ4 raw block and zlib through the komira_lz4 and komira_zlib packages.
 # Each shim keeps its own process-lifetime library handle.
 #
@@ -36,13 +36,13 @@
 
 from std.memory import unsafe_memcpy
 
-from .snappy_mojo.snappy_ffi import (
+from .snappy.snappy_ffi import (
     snappy_decompress as _snappy_decompress,
     snappy_compress as _snappy_compress,
     snappy_uncompressed_length as _snappy_uncompressed_length_view,
     snappy_max_compressed_length as _snappy_max_compressed_length,
 )
-from .zstd_mojo.zstd_ffi import (
+from .zstd.zstd_ffi import (
     zstd_decompress_ffi,
     zstd_compress_ffi,
     zstd_compress_bound_ffi,
@@ -56,23 +56,23 @@ from komira_zlib.zlib_ffi import (
 )
 # LZ4 RAW-BLOCK codec: a shared leaf library, so the Parquet page codec and
 # other LZ4 raw-block users depend on one copy and not on each other.
-from komira_core_ffi.lz4_codec import (
+from komira_lz4.codec import (
     lz4_decompress_ffi,
     lz4_compress_ffi,
     lz4_compress_bound_ffi,
 )
 # LZ4 FRAME codec (the interoperable framing Kafka and Arrow IPC use): a
 # distinct codec from the raw block, kept in this package.
-from .lz4_mojo.lz4_ffi import (
+from .lz4_frame.lz4_ffi import (
     lz4_frame_decompress_ffi,
     lz4_frame_compress_ffi,
     lz4_frame_compress_bound_ffi,
 )
-from .brotli_mojo.brotli_ffi import brotli_decompress_ffi
+from .brotli.brotli_ffi import brotli_decompress_ffi
 
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 
-from .types import CompressionCodec
+from komira_parquet_api import CompressionCodec
 
 
 # =============================================================================
@@ -288,7 +288,7 @@ def _decompress_uncompressed[
 
 
 # =============================================================================
-# SNAPPY — libsnappy FFI via snappy_mojo.snappy_ffi
+# SNAPPY — libsnappy FFI via snappy.snappy_ffi
 # =============================================================================
 
 
@@ -371,7 +371,7 @@ def snappy_uncompressed_length[
 
 
 # =============================================================================
-# ZSTD — libzstd FFI via zstd_mojo.zstd_ffi
+# ZSTD — libzstd FFI via zstd.zstd_ffi
 # =============================================================================
 
 
@@ -404,7 +404,7 @@ def _compress_zstd[
 
 
 # =============================================================================
-# LZ4_RAW — liblz4 raw block via komira_core_ffi.lz4_codec
+# LZ4_RAW — liblz4 raw block via komira_lz4.codec
 # =============================================================================
 
 
@@ -766,7 +766,7 @@ def lz4_frame_compress_bound(input_len: Int) raises -> Int:
 
 
 # =============================================================================
-# BROTLI — libbrotlidec FFI via brotli_mojo.brotli_ffi (decompress only)
+# BROTLI — libbrotlidec FFI via brotli.brotli_ffi (decompress only)
 # =============================================================================
 
 

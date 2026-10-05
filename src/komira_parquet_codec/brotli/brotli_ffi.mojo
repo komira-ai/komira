@@ -1,5 +1,5 @@
 # =============================================================================
-# brotli_mojo/brotli_ffi.mojo
+# brotli/brotli_ffi.mojo
 # =============================================================================
 #
 # Brotli DECOMPRESSION (read path only) — FFI wrapper to libbrotlidec's

@@ -23,13 +23,13 @@
 
 from std.memory import alloc
 
-from komira_core.collections.byte_view import ByteView
-from komira_parquet.snappy_mojo import (
+from komira_buffer.byte_view import ByteView
+from komira_parquet_codec.snappy import (
     snappy_compress,
     snappy_decompress,
     snappy_max_compressed_length,
 )
-from komira_parquet.snappy_mojo.decompress import snappy_decompress_mojo
+from komira_parquet_codec.snappy.decompress import snappy_decompress_mojo
 
 
 comptime _SLOP: Int = 64

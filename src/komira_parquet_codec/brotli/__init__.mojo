@@ -1,9 +1,9 @@
 # =============================================================================
-# brotli_mojo — FFI shim facade for libbrotlidec
+# brotli — FFI shim facade for libbrotlidec
 # =============================================================================
 #
 # A single FFI shim over libbrotlidec's one-shot `BrotliDecoderDecompress`
-# for the Parquet read path, laid out like zstd_mojo / lz4_mojo (libbrotlidec
+# for the Parquet read path, laid out like zstd / lz4_frame (libbrotlidec
 # opened at run time).
 #
 # Decompression only; this package does not write Brotli.

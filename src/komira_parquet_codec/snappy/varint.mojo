@@ -14,7 +14,7 @@
 # through ByteView's bounds-checked `read_u8_at`.
 # =============================================================================
 
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 
 
 # Up to 5 bytes for a 32-bit unsigned value (32 / 7 rounded up).

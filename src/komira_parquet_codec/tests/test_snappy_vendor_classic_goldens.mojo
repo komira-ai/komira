@@ -15,8 +15,8 @@ from std.io import FileHandle
 from std.memory import alloc
 from std.testing import TestSuite, assert_equal
 
-from komira_core.collections.byte_view import ByteView
-from komira_parquet.snappy_mojo import (
+from komira_buffer.byte_view import ByteView
+from komira_parquet_codec.snappy import (
     snappy_compress,
     snappy_decompress,
     snappy_max_compressed_length,

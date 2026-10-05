@@ -9,8 +9,8 @@
 from std.testing import TestSuite, assert_equal, assert_true
 from std.memory import alloc, unsafe_memcpy
 
-from komira_parquet.compression import decompress
-from komira_parquet.types import CompressionCodec
+from komira_parquet_codec.compression import decompress
+from komira_parquet_api import CompressionCodec
 
 
 def test_gzip_decompress_known_data() raises:

@@ -1,5 +1,5 @@
 # =============================================================================
-# snappy_mojo/snappy_ffi.mojo
+# snappy/snappy_ffi.mojo
 # =============================================================================
 #
 # Snappy compression — FFI wrapper around the statically linked snappy C API
@@ -43,7 +43,7 @@
 from std.ffi import external_call, _Global
 from std.memory import alloc, OwnedPointer
 
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 from komira_core_ffi.posix import _env_is_set
 
 from .decompress import (
@@ -70,7 +70,7 @@ comptime _SNAPPY_OK: Int32 = 0
 # -----------------------------------------------------------------------------
 
 
-def _init_snappy_mojo_flag() -> OwnedPointer[Bool]:
+def _init_snappy_flag() -> OwnedPointer[Bool]:
     """`_Global` init_fn: read KOMIRA_SNAPPY_MOJO EXACTLY once per process.
 
     `alloc` + raw store + `OwnedPointer(unsafe_from_raw_pointer=)`.
@@ -82,7 +82,7 @@ def _init_snappy_mojo_flag() -> OwnedPointer[Bool]:
 
 
 comptime _SNAPPY_MOJO_FLAG = _Global[
-    "komira_parquet_codec_snappy_decoder", _init_snappy_mojo_flag
+    "komira_parquet_codec_snappy_decoder", _init_snappy_flag
 ]
 
 

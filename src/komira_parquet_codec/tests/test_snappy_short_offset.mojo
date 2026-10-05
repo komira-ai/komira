@@ -2,8 +2,8 @@
 # and a long literal with a one-byte extended length, on hand-built blobs.
 
 from std.memory import UnsafePointer, alloc, unsafe_memcpy
-from komira_core.collections.byte_view import ByteView
-from komira_parquet.snappy_mojo import snappy_decompress
+from komira_buffer.byte_view import ByteView
+from komira_parquet_codec.snappy import snappy_decompress
 
 
 def main() raises:

@@ -1,5 +1,5 @@
 # =============================================================================
-# zstd_mojo/zstd_ffi.mojo
+# zstd/zstd_ffi.mojo
 # =============================================================================
 #
 # Zstandard — FFI wrapper to libzstd's `ZSTD_decompress` / `ZSTD_compress` /

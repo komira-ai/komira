@@ -1,5 +1,5 @@
 # =============================================================================
-# zstd_mojo — FFI shim facade for libzstd
+# zstd — FFI shim facade for libzstd
 # =============================================================================
 #
 # Public symbols (the surface `compression.mojo` uses):

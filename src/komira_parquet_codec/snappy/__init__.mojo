@@ -1,5 +1,5 @@
 # =============================================================================
-# snappy_mojo — the Snappy codec: the snappy C API and a Mojo decoder
+# snappy — the Snappy codec: the snappy C API and a Mojo decoder
 # =============================================================================
 #
 # Re-exports the FFI shim in `snappy_ffi.mojo` and the `kSlopBytes` constant

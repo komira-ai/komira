@@ -1,5 +1,5 @@
 # =============================================================================
-# lz4_mojo — FFI shim facade for liblz4's FRAME format
+# lz4_frame — FFI shim facade for liblz4's FRAME format
 # =============================================================================
 #
 # Public symbols (LZ4 FRAME codec only):

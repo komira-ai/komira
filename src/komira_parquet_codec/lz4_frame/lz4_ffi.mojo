@@ -1,5 +1,5 @@
 # =============================================================================
-# lz4_mojo/lz4_ffi.mojo
+# lz4_frame/lz4_ffi.mojo
 # =============================================================================
 #
 # LZ4 FRAME compression / decompression — FFI wrapper around liblz4's frame

@@ -9,12 +9,12 @@
 from std.testing import TestSuite, assert_equal, assert_true
 from std.memory import alloc, unsafe_memcpy
 
-from komira_parquet.compression import (
+from komira_parquet_codec.compression import (
     compress,
     decompress,
     compress_bound,
 )
-from komira_parquet.types import CompressionCodec
+from komira_parquet_api import CompressionCodec
 
 
 def test_zstd_compress_bound() raises:
