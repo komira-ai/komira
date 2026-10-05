@@ -226,9 +226,9 @@ convention (its one default path), so no line of the workflow names it.
 
 | job (stage) | runner | what it does |
 |---|---|---|
-| `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary, the build's result file and the pinned pixi (`//tools/build/toolchains:pixi`, downloaded by its platform-table sha256, with that sha256 beside it) leave the job as one workflow artifact named `kci-release-<REVISION>`. |
+| `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
 | `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
-| `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`), no environment, `contents: read` only | `kci run --stage gamma --only validation:install-komira-encoding --only validation:install-set --pixi <the pinned pixi> --pixi-sha256 <its pin>`: what `gamma` published, installed from the channel the way a consumer gets it, on the runner with no container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
+| `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`), no environment, `contents: read` only | downloads the platform table's linux-x86_64 pixi pin (its URL and sha256 are the job's `PIXI_URL` and `PIXI_SHA256`, held to the table by `test_repo_kci_yml`) and keeps it only at that sha256, then `kci run --stage gamma --only validation:install-komira-encoding --only validation:install-set --pixi <that file> --pixi-sha256 "$PIXI_SHA256"`: what `gamma` published, installed from the channel the way a consumer gets it, on the runner with no container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
 | `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
@@ -345,6 +345,17 @@ value, and the release's `release_produced_by` names the one build run.
   (`WOULD_VALIDATE`). The same examples are a welded test of each library's
   own build (`[tests][readme]`), so an API change fails `./buck2 build //...`
   before it can fail a release.
+- **Before publishing: a local channel.** The same validations run against a
+  release that is not published yet: `komira_pack conda-index --out-dir <dir>
+  --package-manifest <release dir>/<platform>/<name>/manifest.json ...`
+  writes a local conda channel (the files, each subdir's `repodata.json`
+  from the packages' own `info/index.json`), and `kci run --stage gamma
+  --only validation:<name> ... --channel file:///<dir>` reads and installs
+  from it instead of the step's channel (only the compiler and extra
+  channels are asked over the network). `--channel` is refused unless the
+  run selects only CONDA_INSTALL_ENV validations (no BUILD or PUBLISH step),
+  and under GitHub Actions: a workflow validates only what was published.
+  The result row records the location (`channel_url`).
 - **The channels.** prefix.dev channels `komira-ai/gamma` and
   `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),
   both public. Uploads go to `https://prefix.dev/api/v1/upload/komira-ai/<channel>`

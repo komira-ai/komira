@@ -15,8 +15,10 @@
 # =============================================================================
 #
 # The files are staged as test data (BUCK): `kci.yml` (the root BUCK exports
-# it), `machine.textproto` and `channels.textproto` (release/BUCK). gamma's
-# validations run each installed library's README, so they name no program.
+# it), `machine.textproto` and `channels.textproto` (release/BUCK), and
+# `pixi_pin.txt`, the platform table's linux-x86_64 pixi pin
+# (//tools/build/toolchains:pixi_pin_linux_x86_64). gamma's validations run
+# each installed library's README, so they name no program.
 # =============================================================================
 
 from std.pathlib import Path
@@ -172,31 +174,40 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     var needs = doc.scalar_or_list(doc.child(validate, String("needs")))
     assert_equal(len(needs), 2)
     assert_equal(needs[1], String("gamma"))
-    # the validate job installs with the pinned pixi from the release tar:
-    # the build job builds the table's pin and packs it beside kci, and the
-    # validate job's one `kci run` passes it and its sha256
+    # the validate job installs with the platform table's linux-x86_64 pixi
+    # pin: it downloads the pin's URL itself and keeps the bytes only at the
+    # pin's sha256, and its one `kci run` passes them and that sha256. Both
+    # values are the table's (the record //tools/build/toolchains writes from
+    # it), so neither the job nor any other job chooses which pixi runs.
+    var pin = Path(String("pixi_pin.txt")).read_text()
+    var venv = doc.child(validate, String("env"))
+    var url = doc.text(doc.child(venv, String("PIXI_URL")))
+    var sha = doc.text(doc.child(venv, String("PIXI_SHA256")))
+    assert_equal(String("url ") + url + String("\nsha256 ") + sha + String("\n"), pin)
     var vrun = String("")
+    var vall = String("")
     var vsteps = doc.items(doc.child(validate, String("steps")))
     for i in range(len(vsteps)):
         var r = doc.child(vsteps[i], String("run"))
-        if r >= 0 and doc.kind(r) == NODE_SCALAR and len(kci_run_calls(doc.text(r))) > 0:
-            vrun = doc.text(r)
-    assert_true(vrun.find(String("--pixi \"$RUNNER_TEMP/pixi/pixi\"")) >= 0, String("the validate job passes no --pixi: ") + vrun)
-    assert_true(vrun.find(String("--pixi-sha256 \"$pixi_sha256\"")) >= 0, String("the validate job passes no --pixi-sha256: ") + vrun)
-    var build_runs = String("")
-    var bsteps = doc.items(doc.child(doc.child(jobs, String("build")), String("steps")))
-    for i in range(len(bsteps)):
-        var r = doc.child(bsteps[i], String("run"))
         if r >= 0 and doc.kind(r) == NODE_SCALAR:
-            build_runs += doc.text(r) + String("\n")
-    assert_true(
-        build_runs.find(String("./buck2 build //tools/build/toolchains:pixi --out \"$RUNNER_TEMP/pixi/pixi\"")) >= 0,
-        String("the build job does not build the pinned pixi"),
-    )
-    assert_true(
-        build_runs.find(String("kci release kci-result-build.json pixi\n")) >= 0,
-        String("the build job does not pack the pinned pixi into the release tar"),
-    )
+            vall += doc.text(r) + String("\n")
+            if len(kci_run_calls(doc.text(r))) > 0:
+                vrun = doc.text(r)
+    assert_true(vall.find(String("curl -fsSL --retry 3 -o \"$RUNNER_TEMP/pixi/pixi\" \"$PIXI_URL\"")) >= 0, vall)
+    assert_true(vall.find(String("printf '%s  %s\\n' \"$PIXI_SHA256\" \"$RUNNER_TEMP/pixi/pixi\" | sha256sum -c -")) >= 0, vall)
+    assert_true(vrun.find(String("--pixi \"$RUNNER_TEMP/pixi/pixi\"")) >= 0, String("the validate job passes no --pixi: ") + vrun)
+    assert_true(vrun.find(String("--pixi-sha256 \"$PIXI_SHA256\"")) >= 0, String("the validate job passes no --pixi-sha256: ") + vrun)
+    # and no other job handles pixi: the build job's tar carries kci, the
+    # release and its result file only
+    var others = String("")
+    for job in [String("build"), String("gamma"), String("prod")]:
+        var jsteps = doc.items(doc.child(doc.child(jobs, job), String("steps")))
+        for i in range(len(jsteps)):
+            var r = doc.child(jsteps[i], String("run"))
+            if r >= 0 and doc.kind(r) == NODE_SCALAR:
+                others += doc.text(r) + String("\n")
+    assert_true(others.find(String("pixi")) < 0, String("a job other than validate handles pixi"))
+    assert_true(others.find(String("-cf \"$RUNNER_TEMP/kci-release.tar\" kci release kci-result-build.json\n")) >= 0, others)
     # prod waits for the validation
     var prod_needs = doc.scalar_or_list(doc.child(doc.child(jobs, String("prod")), String("needs")))
     assert_equal(len(prod_needs), 2)
