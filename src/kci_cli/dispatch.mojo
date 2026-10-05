@@ -24,7 +24,10 @@
 #      REFUSED (KCI-E-SELECTOR-NO-MATCH, exit 3, naming S's steps and
 #      validations); then the flags the SELECTED steps' kinds take, and
 #      `--scratch-dir` exactly when a validation is selected (args.mojo
-#      `require_stage_flags`, exit 2);
+#      `require_stage_flags`, exit 2); `--channel` (a local channel, the
+#      pre-publish mode) is refused, exit 2, when the platform-set
+#      `GITHUB_ACTIONS` is "true": a workflow validates only what was
+#      published;
 #   3. (no longer a refusal: validations run, step 6);
 #   4. THE WORKFLOW CHECK, when the platform-set `GITHUB_ACTIONS` is "true":
 #      the workflow file running this job is the one `GITHUB_WORKFLOW_REF`
@@ -403,6 +406,7 @@ def _validate_request(cmd: KciCommand, stage: Stage, step: StageStep, v: StageVa
     req.plan = cmd.plan
     req.pixi = cmd.pixi.copy()
     req.pixi_sha256 = cmd.pixi_sha256.copy()
+    req.channel_override = cmd.channel.copy()
     return req^
 
 
@@ -769,6 +773,12 @@ def _run_stage[S: StageSteps](
         require_stage_flags(cmd, stage, sel)
     except e:
         return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
+    if cmd.given(String("--channel")) and steps.platform_env(String(GITHUB_ACTIONS)) == String("true"):
+        return _stop_run(
+            result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE),
+            String("kci: --channel names a local channel, and ") + String(GITHUB_ACTIONS)
+            + String(" is true: a workflow validates only what was published, from the step's channel"),
+        )
     # 4. the workflow this job runs under, held to the machine file
     var verdict = _check_workflow_at_start(cmd, g, steps, result)
     if verdict.outcome.byte_length() > 0:

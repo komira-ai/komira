@@ -167,7 +167,10 @@ list equal to the release's libraries, never empty) while `pixi.toml` names
 only the metapackage. `kci run` then takes `--pixi` and `--pixi-sha256`, the
 pinned pixi and its sha256. gamma's two validations are of this kind:
 `install-komira-encoding` (the library alone) and `install-set` (`komira_all`
-alone).
+alone). Before anything is published, `--channel file:///<dir>` points such a
+run at a local channel that `komira_pack conda-index` wrote from the release
+directory; it is accepted only on a run that selects nothing but
+`CONDA_INSTALL_ENV` validations, and never under GitHub Actions.
 Its one result that is not a pass or a failure: when no declared host answers
 at all (no network), the validation is `INDETERMINATE`, exit 5, never a pass,
 and its row carries a `skip_reason`.

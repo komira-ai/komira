@@ -66,6 +66,7 @@ struct FakeSteps(StageSteps, Movable):
     var validation_fails: Bool
     var validation_skips: Bool
     var pixis: List[String]
+    var channels: List[String]
     var bases: List[String]
 
     def __init__(out self):
@@ -84,6 +85,7 @@ struct FakeSteps(StageSteps, Movable):
         self.validation_fails = False
         self.validation_skips = False
         self.pixis = List[String]()
+        self.channels = List[String]()
         self.bases = List[String]()
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
@@ -95,6 +97,7 @@ struct FakeSteps(StageSteps, Movable):
             + String(" plan=") + String(req.plan)
         )
         self.pixis.append(req.validation.name + String(" pixi=") + req.pixi + String(" sha=") + req.pixi_sha256)
+        self.channels.append(req.validation.name + String(" local=") + req.channel_override)
         if req.plan:
             return ResultValidation(
                 req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(),
@@ -833,6 +836,93 @@ def test_pixi_flags_are_refused_where_no_env_validation_runs() raises:
     )
     assert_true(_last(rec).error.message.find(String("--pixi is a CONDA_INSTALL_ENV validation's flag")) >= 0, _last(rec).error.message)
     assert_equal(len(steps.validated), 0)
+
+
+def _local(m: String, *extra: String) -> List[String]:
+    """A validation-only gamma run of install-env against a local channel."""
+    var a = _run(m, String("gamma"))
+    for s in ["--scratch-dir", "/s", "--pixi", "/t/pixi", "--pixi-sha256"]:
+        a.append(String(s))
+    a.append(String(_PIXI_SHA))
+    for s in ["--channel", "file:///w/channel"]:
+        a.append(String(s))
+    for s in extra:
+        a.append(String(s))
+    return a^
+
+
+def test_a_local_channel_reaches_the_env_validation_of_a_validation_only_run() raises:
+    var m = _release_machine(_root(String("localok")), False, True)
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_local(m, "--only", "validation:install-env"), steps, rec), 0)
+    assert_equal(len(steps.channels), 1)
+    assert_equal(steps.channels[0], String("install-env local=file:///w/channel"))
+    assert_equal(len(steps.calls), 0)
+    # without --channel the request names none: the step's channel is read
+    var plain = FakeSteps()
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(
+        kci_main_with(
+            _run(m, String("gamma"), "--only", "validation:install-env", "--scratch-dir", "/s", "--pixi", "/t/pixi", "--pixi-sha256", String(_PIXI_SHA)),
+            plain, rec2,
+        ),
+        0,
+    )
+    assert_equal(plain.channels[0], String("install-env local="))
+
+
+def test_a_local_channel_is_refused_when_a_step_is_selected() raises:
+    var m = _release_machine(_root(String("localpub")), False, True)
+    # the PUBLISH step selected, alone or with the validation, or the full stage
+    for which in [0, 1, 2]:
+        var steps = FakeSteps()
+        var rec = CliRecorder.memory(String(""))
+        var a = _local(m, "--release-version", "rv")
+        if which == 0:
+            for s in ["--only", "step:publish"]:
+                a.append(String(s))
+        elif which == 1:
+            for s in ["--only", "step:publish", "--only", "validation:install-env"]:
+                a.append(String(s))
+        assert_equal(kci_main_with(a, steps, rec), 2)
+        assert_true(
+            _last(rec).error.message.find(
+                String("--channel names a local channel, which only a validation-only run reads, and the run selects the PUBLISH step of stage 'gamma'")
+            ) >= 0,
+            _last(rec).error.message,
+        )
+        assert_equal(len(steps.calls), 0)
+        assert_equal(len(steps.validated), 0)
+
+
+def test_a_local_channel_is_refused_for_a_container_validation() raises:
+    var m = _release_machine(_root(String("localcontainer")), True, True)
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(
+        kci_main_with(_local(m, "--only", "validation:install-env", "--only", "validation:install"), steps, rec), 2
+    )
+    assert_true(
+        _last(rec).error.message.find(String("the selected validation 'install' is CONDA_INSTALL_SMOKE, not CONDA_INSTALL_ENV")) >= 0,
+        _last(rec).error.message,
+    )
+    assert_equal(len(steps.validated), 0)
+
+
+def test_a_local_channel_is_refused_under_github_actions() raises:
+    var m = _release_machine(_root(String("localgha")), False, True)
+    var steps = FakeSteps()
+    _under_actions(steps, _workflow(m))
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_local(m, "--only", "validation:install-env"), steps, rec), 2)
+    assert_true(
+        _last(rec).error.message.find(String("--channel names a local channel, and GITHUB_ACTIONS is true")) >= 0,
+        _last(rec).error.message,
+    )
+    assert_equal(len(steps.validated), 0)
+    # refused before the workflow is read
+    assert_equal(len(steps.reads), 0)
 
 
 def test_no_network_is_exit_5_never_a_pass() raises:

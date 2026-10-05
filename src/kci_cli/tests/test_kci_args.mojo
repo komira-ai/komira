@@ -212,6 +212,16 @@ def test_pixi_flags_values() raises:
     )
 
 
+def test_channel_is_a_plain_absolute_file_location() raises:
+    var c = parse_kci_args(_run("--channel", "file:///home/u/channel"))
+    assert_equal(c.channel, String("file:///home/u/channel"))
+    _refused(_run("--channel", "https://prefix.dev/komira-ai/gamma"), String("it is not a file:/// location"))
+    _refused(_run("--channel", "gamma"), String("--channel 'gamma' is not file:///<absolute directory>, a local channel"))
+    for bad in ["file:///", "file://host/c", "file:///a/../c", "file:///a/./c", "file:///a//c", "/home/u/channel"]:
+        _refused(_run("--channel", bad), String("--channel '") + String(bad) + String("' is not file:///<absolute directory>"))
+    _refused(_run("--channel", "file:///a", "--channel", "file:///b"), String("--channel is given twice"))
+
+
 def test_find_result_file() raises:
     assert_equal(find_result_file(_args("build", "--result-file", "/r.json")), String("/r.json"))
     assert_equal(find_result_file(_args("run", "--result-file=/q.json", "--bogus")), String("/q.json"))
