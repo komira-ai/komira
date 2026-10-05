@@ -18,6 +18,13 @@
 # libz is already the reference it would be measured against.
 #
 # Public symbols (stable surface for `komira_parquet`'s compression codec):
+#   * `zlib_inflate_into(dst, src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int`
+#   * `zlib_deflate_into(dst, src, level, window_bits) -> Int`
+#   * `zlib_compress_bound(src_len, window_bits) -> Int`
+#   * `zlib_skip_stream(src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int`
+#   * the `ZLIB_WINDOW_BITS_*` framing selectors and `ZLIB_LEVEL_DEFAULT`
+#   (Span in, caller-owned Span out; a too-small `dst` is refused), and the
+#   raw-pointer entries they wrap:
 #   * `zlib_inflate_ffi(dst, dst_cap, src, src_size, window_bits=15+32) -> Int`
 #   * `zlib_deflate_ffi(dst, dst_cap, src, src_size, level, window_bits) -> Int`
 #   * `zlib_compress_bound_ffi(src_size, window_bits) -> Int`
@@ -33,6 +40,15 @@
 # =============================================================================
 
 from .zlib_ffi import (
+    ZLIB_LEVEL_DEFAULT,
+    ZLIB_WINDOW_BITS_AUTO,
+    ZLIB_WINDOW_BITS_GZIP,
+    ZLIB_WINDOW_BITS_RAW,
+    ZLIB_WINDOW_BITS_ZLIB,
+    zlib_compress_bound,
+    zlib_deflate_into,
+    zlib_inflate_into,
+    zlib_skip_stream,
     zlib_inflate_ffi,
     zlib_deflate_ffi,
     zlib_compress_bound_ffi,

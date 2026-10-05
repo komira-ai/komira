@@ -5,9 +5,25 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # process-lifetime `_Global` slot, so there is no link dep, and there are no
 # first-party deps: the Parquet page codecs and the document store's `_source`
 # compression both depend on this leaf and on nothing of each other.
+#
+# The welded tests:
+# - test_codec: the List API (`lz4_compress` / `lz4_decompress`) round trips.
+# - test_codec_into: the into-buffer API (`lz4_compress_into` /
+#   `lz4_decompress_into`): a known-answer block from //third_party/lz4-golden
+#   (pinned by sha256, staged at golden/), round trips, the empty block, the
+#   too-small destination and corrupt blocks.
 mojo_library(
     name = "komira_lz4",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_codec.mojo"],
+    test_data = {
+        "tests/test_codec_into.mojo": {
+            "golden/gettysburg.txt": "//third_party/lz4-golden:gettysburg.txt",
+            "golden/gettysburg.txt.lz4": "//third_party/lz4-golden:gettysburg.txt.lz4",
+        },
+    },
+    test_srcs = [
+        "tests/test_codec.mojo",
+        "tests/test_codec_into.mojo",
+    ],
     visibility = ["PUBLIC"],
 )

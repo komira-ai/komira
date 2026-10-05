@@ -24,6 +24,9 @@
 #   * `lz4_compress(Span[UInt8]) -> List[UInt8]`
 #   * `lz4_decompress(Span[UInt8], uncompressed_len: Int) -> List[UInt8]`
 #   * `lz4_compress_bound(Int) -> Int`
+#   * `lz4_compress_into(dst: Span[mut], src: Span) -> Int` and
+#     `lz4_decompress_into(dst: Span[mut], src: Span) -> Int`: into a buffer
+#     the caller owns, bytes written back; a too-small `dst` is refused.
 #   No UnsafePointer in ANY of these signatures; the FFI raw pointers are
 #   confined to the `lz4_*_ffi` entries + the output-buffer alloc/free inside
 #   the safe wrappers. Nothing crosses a module boundary except Span/List/Int.
@@ -300,3 +303,112 @@ def lz4_decompress(
         out.append(out_buf[i])
     out_buf.free()
     return out^
+
+
+# =============================================================================
+# PUBLIC API — SAFE INTO-BUFFER entries (Span in, Span out, bytes written back).
+#
+# For a caller that owns its output buffer already (a page decoder writing into
+# a column buffer sized from the page header), without the List copy of
+# `lz4_compress` / `lz4_decompress`. The raw pointers are taken from the Spans
+# here, inside this module, for the one synchronous FFI call; the Span origins
+# are concrete, so the buffers are alive for the whole call.
+# =============================================================================
+
+# LZ4_MAX_INPUT_SIZE (lz4.h): the largest source either direction accepts.
+comptime _LZ4_MAX_INPUT_SIZE: Int = 0x7E000000
+# liblz4 takes its capacities as C `int`.
+comptime _C_INT_MAX: Int = 2147483647
+
+
+def lz4_decompress_into[
+    dori: MutOrigin
+](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
+    """Decode the LZ4 raw block `src` into `dst`; return the bytes written.
+
+    `dst` is the capacity: a block that decodes to more than `len(dst)` bytes
+    is refused (liblz4's `LZ4_decompress_safe` never writes past it), as is a
+    corrupt block. A caller that knows the decoded size (an LZ4 raw block does
+    not record it) checks the returned count against it.
+
+    An empty `src` is refused: the shortest LZ4 block is the one-byte empty
+    block `0x00`, which decodes to zero bytes (an empty `dst` is accepted).
+    """
+    var n = len(src)
+    if n == 0:
+        raise Error(
+            "lz4_decompress_into: empty source (the shortest LZ4 block is the"
+            " one-byte empty block 0x00)"
+        )
+    if n > _LZ4_MAX_INPUT_SIZE:
+        raise Error(
+            "lz4_decompress_into: source of " + String(n)
+            + " bytes exceeds LZ4_MAX_INPUT_SIZE (" + String(_LZ4_MAX_INPUT_SIZE)
+            + ")"
+        )
+    # Passing a smaller capacity than the buffer holds is always safe.
+    var cap = min(len(dst), _C_INT_MAX)
+    var written: Int
+    try:
+        if cap == 0:
+            # An empty Span may carry a null pointer; give liblz4 a real
+            # one-byte buffer with capacity 0, so only the empty block passes.
+            var scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+            # SAFETY: `scratch` and `src` are both alive across this
+            # synchronous call (local stack / the Span's concrete origin);
+            # liblz4 writes at most 0 bytes and reads exactly `n` from `src`.
+            written = lz4_decompress_ffi(scratch.unsafe_ptr(), 0, src.unsafe_ptr(), n)
+        else:
+            # SAFETY: `dst` holds `len(dst) >= cap` writable bytes and `src`
+            # holds `n` readable bytes, both kept alive by their Span origins
+            # for this synchronous call; liblz4 writes at most `cap` bytes into
+            # `dst`, reads at most `n` from `src`, and keeps neither pointer.
+            written = lz4_decompress_ffi(dst.unsafe_ptr(), cap, src.unsafe_ptr(), n)
+    except e:
+        raise Error(
+            "lz4_decompress_into: block is corrupt or decodes to more than "
+            + String(len(dst)) + " bytes: " + String(e)
+        )
+    if written > cap:
+        raise Error(
+            "lz4_decompress_into: liblz4 reported " + String(written)
+            + " bytes written into a " + String(cap) + "-byte buffer"
+        )
+    return written
+
+
+def lz4_compress_into[
+    dori: MutOrigin
+](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
+    """Encode `src` as one LZ4 raw block into `dst`; return the bytes written.
+
+    `dst` must hold at least `lz4_compress_bound(len(src))` bytes; a smaller one
+    is refused before liblz4 is called. An empty `src` encodes as the one-byte
+    empty block `0x00`, which `lz4_decompress_into` decodes to zero bytes.
+    """
+    var n = len(src)
+    if n > _LZ4_MAX_INPUT_SIZE:
+        raise Error(
+            "lz4_compress_into: source of " + String(n)
+            + " bytes exceeds LZ4_MAX_INPUT_SIZE (" + String(_LZ4_MAX_INPUT_SIZE)
+            + ")"
+        )
+    var need = lz4_compress_bound(n)
+    if len(dst) < need:
+        raise Error(
+            "lz4_compress_into: destination holds " + String(len(dst))
+            + " bytes, below lz4_compress_bound(" + String(n) + ") = "
+            + String(need)
+        )
+    var cap = min(len(dst), _C_INT_MAX)
+    # SAFETY: `dst` holds `len(dst) >= cap` writable bytes and `src` holds `n`
+    # readable bytes, both kept alive by their Span origins for this
+    # synchronous call; liblz4 writes at most `cap` bytes, reads exactly `n`
+    # (a null `src` is accepted when `n == 0`), and keeps neither pointer.
+    var written = lz4_compress_ffi(dst.unsafe_ptr(), cap, src.unsafe_ptr(), n)
+    if written > cap:
+        raise Error(
+            "lz4_compress_into: liblz4 reported " + String(written)
+            + " bytes written into a " + String(cap) + "-byte buffer"
+        )
+    return written
