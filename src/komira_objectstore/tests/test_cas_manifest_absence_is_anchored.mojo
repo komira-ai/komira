@@ -250,7 +250,7 @@ def test_a_real_s3_and_gcs_404_are_STILL_absence() raises:
 def test_the_in_tree_conformer_message_is_STILL_absence() raises:
     """Driven through a REAL conformer rather than a transcription: ask
     `InMemoryConditionalStore` for a key it does not hold and classify the
-    message it ACTUALLY raises. Every offline broker/pgstore test in the tree
+    message it ACTUALLY raises. Every offline broker/table-store test in the tree
     reaches `_is_not_found` through this exact string, so if the narrowing missed
     its spelling the whole offline suite would start failing on absence."""
     var store = InMemoryConditionalStore()

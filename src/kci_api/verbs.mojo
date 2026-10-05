@@ -17,8 +17,12 @@
 #
 # A validation belongs to a step and checks what the step produced:
 #   CONDA_INSTALL_SMOKE   install the just-published packages from the step's
-#                         channel into a clean environment and run a smoke
-#                         program against them
+#                         channel inside a digest-pinned container and run a
+#                         smoke program against them
+#   CONDA_INSTALL_ENV     install them on this machine, no container, with a
+#                         pinned pixi in a scratch directory and a cleared
+#                         environment, and run each installed library's README
+#                         examples against them
 #
 # The spellings are spelled here only.
 # Pure functions over owned values; no pointer.
@@ -31,6 +35,7 @@ comptime STEP_KIND_PUBLISH: String = "PUBLISH"
 comptime STEP_KIND_DEPLOY: String = "DEPLOY"
 
 comptime VALIDATION_KIND_CONDA_INSTALL_SMOKE: String = "CONDA_INSTALL_SMOKE"
+comptime VALIDATION_KIND_CONDA_INSTALL_ENV: String = "CONDA_INSTALL_ENV"
 
 
 def all_verbs() -> List[String]:
@@ -66,6 +71,7 @@ def require_step_kind(word: String) raises:
 def all_validation_kinds() -> List[String]:
     var out = List[String]()
     out.append(String(VALIDATION_KIND_CONDA_INSTALL_SMOKE))
+    out.append(String(VALIDATION_KIND_CONDA_INSTALL_ENV))
     return out^
 
 
@@ -74,4 +80,4 @@ def require_validation_kind(word: String) raises:
     for i in range(len(v)):
         if v[i] == word:
             return
-    raise Error(String("validation kind '") + word + String("' is not CONDA_INSTALL_SMOKE"))
+    raise Error(String("validation kind '") + word + String("' is not CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV"))

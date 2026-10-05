@@ -1,7 +1,7 @@
 # package	description: the one authored sentence of the package README and the docstring of its __init__.mojo. One row per derived package.
 package	description
 komira_simd	SIMD byte-class, mask, copy, gather and bit-unpack primitives.
-komira_collections	The typed slab, a type-erased inline value, a variadic pack: generic containers with no dependencies.
+komira_collections	The typed slab, a type-erased inline value, a variadic pack, a HyperLogLog cardinality sketch: generic containers with no dependencies.
 komira_concurrency	Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter.
 komira_counters	Process-global census and falsifier counters plus the build-gated runtime introspection probe.
 komira_compression	Byte-stream codec trait and the eight codec implementations.

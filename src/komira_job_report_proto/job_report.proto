@@ -1,0 +1,72 @@
+syntax = "proto3";
+package komira.job_report.v1;
+
+// A job report: what a supervised job is doing, sent by the process that
+// supervises it, and the reply that says whether the job should keep running.
+//
+// The sender reports a job's phase while the job runs (RUNNING) and once more
+// when it ends (COMPLETED, FAILED or CANCELLED). The receiver answers each
+// report with CONTINUE or CANCEL. What the receiver does with a report, and
+// which richer state it keeps for the job, is the receiver's own business:
+// this wire carries only what the sender knows.
+//
+// Both identifiers are opaque strings. The sender never parses them; the
+// receiver chooses what they mean.
+
+// The phase a report states.
+enum JobPhase {
+  // Never sent. A receiver that reads it got a message from a sender that
+  // did not set the field.
+  JOB_PHASE_UNSPECIFIED = 0;
+  // The job is running; sent periodically.
+  JOB_PHASE_RUNNING = 1;
+  // The job exited with status 0.
+  JOB_PHASE_COMPLETED = 2;
+  // The job exited non-zero or was killed by a signal; the report carries a
+  // JobFailure.
+  JOB_PHASE_FAILED = 3;
+  // The job was stopped because a reply said CANCEL.
+  JOB_PHASE_CANCELLED = 4;
+}
+
+// What the receiver asks of the sender.
+enum JobDirective {
+  // Keep running. The zero value on purpose: an empty reply body, and a reply
+  // whose directive the sender does not recognise, both mean CONTINUE, so a
+  // job is only ever stopped by an explicit CANCEL.
+  JOB_DIRECTIVE_CONTINUE = 0;
+  // Stop the job.
+  JOB_DIRECTIVE_CANCEL = 1;
+}
+
+// One report.
+message JobHeartbeat {
+  // The job's identifier, opaque to the sender.
+  string job_id = 1;
+  JobPhase phase = 2;
+  // The sending instance's name, opaque to the sender; may be empty.
+  string instance_name = 3;
+  // Progress, in percent, when the job reports one.
+  optional uint32 progress = 4;
+  // A one-line status message.
+  optional string message = 5;
+  // Set only when phase is JOB_PHASE_FAILED.
+  JobFailure failure = 6;
+}
+
+// The reply to one report.
+message JobHeartbeatReply {
+  JobDirective directive = 1;
+}
+
+// Why a job failed.
+message JobFailure {
+  // The exit status, when the job exited (absent when a signal killed it).
+  optional int32 exit_code = 1;
+  // The terminating signal, when a signal killed the job.
+  optional int32 signal = 2;
+  // The last lines the job wrote to stderr, oldest first.
+  repeated string stderr_tail = 3;
+  // The panic line found in stderr, when there is one.
+  optional string panic_message = 4;
+}

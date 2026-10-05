@@ -50,6 +50,7 @@ from kci_validate import (
     install_pins,
     load_validated_release,
     pull_argv,
+    RecordingIndexPollLog,
     run_argv,
     run_install_smoke,
 )
@@ -299,7 +300,8 @@ def _host() -> ContainerHost:
 
 
 def _run(mut runner: ScriptedRunner, mut t: ScriptedPkgTransport, mut sl: NoWaitSleeper, fx: Fixture) raises -> ResultValidation:
-    return run_install_smoke(runner, t, sl, fx.req, _host())
+    var log = RecordingIndexPollLog()
+    return run_install_smoke(runner, t, sl, log, fx.req, _host())
 
 
 def _failed(row: ResultValidation) -> String:
@@ -356,8 +358,13 @@ def test_pass() raises:
         row.checks[len(row.checks) - 1].got,
         String("program: mojo run of an import of example ran 61 checks, all passed"),
     )
-    # the channel rows say the bytes were served
-    assert_true(row.checks[1].got.startswith(String("channel: ") + fx.file(String("komira_alpha")) + String(" is listed and served")))
+    # the channel's index row says how long it waited, then the file rows
+    # say the bytes were served
+    assert_equal(
+        row.checks[1].got,
+        String("channel: ") + String(CHANNEL) + String("/linux-64/repodata.json answered 200; waited 0 of 600 s over 1 poll"),
+    )
+    assert_true(row.checks[2].got.startswith(String("channel: ") + fx.file(String("komira_alpha")) + String(" is listed and served")))
     # what kci wrote into the mount: the manifest and a copy of the program
     var toml = open(fx.dir() + String("/work/pixi.toml"), "r").read()
     assert_true(toml.find(String("komira_alpha = { version = \"==1.0.0\", build = \"") + fx.release.build()) >= 0, toml)
@@ -536,7 +543,7 @@ def test_404_then_listed_passes_after_one_wait() raises:
     var row = _run(runner, t, sl, fx)
     assert_equal(_failed(row), String(""))
     assert_equal(sl.waits, 1)
-    assert_true(row.checks[1].expected.find(String("waited 15 of 600 s")) >= 0, row.checks[1].expected)
+    assert_true(row.checks[1].expected.find(String("waited 15 of 600 s over 2 polls")) >= 0, row.checks[1].expected)
     assert_equal(t.unconsumed(), 0)
 
 
@@ -550,7 +557,10 @@ def test_404_until_the_budget_is_spent_fails_closed() raises:
     var sl = NoWaitSleeper()
     var row = _run(runner, t, sl, fx)
     _assert_fails_with(
-        row, String("channel: ") + String(CHANNEL) + String("/linux-64/repodata.json answered 404: no such channel, or nothing published to it")
+        row,
+        String("channel: ") + String(CHANNEL)
+        + String("/linux-64/repodata.json answered 404 at poll 3, after waiting 30 of 30 s: no such channel, nothing")
+        + String(" published to it, or the registry has not indexed it yet"),
     )
     # read at 0, 15 and 30 s
     assert_equal(t.call_count(), 3)
