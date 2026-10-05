@@ -173,6 +173,33 @@ def test_pull_request_target_is_never_a_trigger() raises:
     )
 
 
+def _other_triggers() -> List[String]:
+    """Events other than push, workflow_dispatch and pull_request. A release
+    job's `github.event_name != 'pull_request'` does not keep out the first
+    six: each can run a pull request's code (a review or a comment on it, a
+    merge-queue candidate, a calling workflow's event, the code workflow_run
+    follows). schedule is off the allow-list too."""
+    var t = List[String]()
+    t.append(String("pull_request_review"))
+    t.append(String("pull_request_review_comment"))
+    t.append(String("issue_comment"))
+    t.append(String("workflow_run"))
+    t.append(String("merge_group"))
+    t.append(String("workflow_call"))
+    t.append(String("schedule"))
+    return t^
+
+
+def test_an_event_off_the_allow_list_is_refused() raises:
+    var others = _other_triggers()
+    for i in range(len(others)):
+        var name = others[i].copy()
+        _reports(
+            _wf(String("  pull_request:\n"), String("  pull_request:\n  ") + name + String(":\n")),
+            String("R6: trigger '") + name + String("': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+        )
+
+
 def test_pull_request_with_no_pull_request_stage_is_refused() raises:
     var machine = String(_MACHINE).replace(String(" trigger: PULL_REQUEST"), String(""))
     _reports_on(

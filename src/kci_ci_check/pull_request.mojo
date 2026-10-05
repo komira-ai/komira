@@ -14,7 +14,10 @@
 #   * every other job is RELEASE-ONLY (`check_release_only`): its job-level
 #     `if:` is a TOP-LEVEL conjunction (no grouping, negation, call, `||` or
 #     partial `${{ }}`) one of whose terms keeps a pull request out
-#     (`excludes_pull_request`).
+#     (`excludes_pull_request`). `github.event_name != 'pull_request'`
+#     keeps out a pull request only because the triggers are an allow-list
+#     (rules.mojo, R6: push, workflow_dispatch and pull_request): any other
+#     event that runs a pull request's code is refused as a trigger.
 #
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
@@ -77,7 +80,10 @@ def _keeps_pull_request_out(term: String) -> Bool:
     """Exactly `github.event_name != 'pull_request'`, or exactly
     `github.event_name == 'push'` / `== 'workflow_dispatch'` (spaces around
     the operator aside). Any other term is not read as keeping a pull
-    request out."""
+    request out. The `!=` form holds only with R6's trigger allow-list
+    (push, workflow_dispatch, pull_request): an event such as merge_group
+    or pull_request_review also runs a pull request's code and is not
+    `pull_request`."""
     var t = String(term.strip())
     var head = String(EVENT_NAME)
     if not t.startswith(head):
