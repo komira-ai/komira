@@ -3,16 +3,16 @@
 #   A CONDA_INSTALL_ENV validation over a fake pixi (kci_build's
 #   ScriptedRunner, which plays `pixi install` by writing what it would leave
 #   in the scratch work dir, and `pixi run` by its output) and a scripted
-#   network (kci_pkg_upload's ScriptedPkgTransport): the pass, and the local
-#   proof's N1-N9 in ENV form:
-#     N1/N6 the channel lists another build, or nothing of that name   FAIL
-#     N2    the channel serves other bytes                              FAIL
-#     N3    a README example fails: the row names the README line       FAIL
-#     N4    a vacuous count (0 of 0)                                    FAIL
-#     N5    401: the host answered, so it is a FAIL, never a skip       FAIL
-#     N7    a record from an undeclared channel                         FAIL
-#     N8    no network at all: INDETERMINATE + skip_reason, nothing run
-#     N9    an image on an ENV validation: kci_release_machine's tests
+#   network (kci_pkg_upload's ScriptedPkgTransport): the pass, and each way
+#   it fails or cannot run:
+#     the channel lists another build, or nothing of that name        FAIL
+#     the channel serves other bytes                                   FAIL
+#     a README example fails: the row names the README line            FAIL
+#     a vacuous count (0 of 0)                                         FAIL
+#     401: the host answered, so it is a FAIL, never a skip            FAIL
+#     a record from an undeclared channel                              FAIL
+#     no network at all: INDETERMINATE + skip_reason, nothing run
+#     (an image on an ENV validation: kci_release_machine's tests)
 #   and what is ENV's own: some hosts not answering is a FAIL; every child
 #   runs with RunSpec.cwd = the scratch work dir, the cleared environment
 #   and the pixi link; a scratch dir inside the checkout (also through a
@@ -367,8 +367,8 @@ def test_pass() raises:
 # ---- the network --------------------------------------------------------------------
 
 
-def test_n8_no_network_is_indeterminate_with_a_skip_reason() raises:
-    var fx = Fixture(String("n8"))
+def test_no_network_is_indeterminate_with_a_skip_reason() raises:
+    var fx = Fixture(String("case8"))
     var runner = ScriptedRunner()
     var t = ScriptedPkgTransport()
     t.queue_fault(String("dns error: failed to lookup address information"))
@@ -401,8 +401,8 @@ def test_some_hosts_not_answering_is_a_fail() raises:
     assert_equal(len(runner.calls), 0)
 
 
-def test_n5_a_401_is_an_answer_so_a_fail_never_a_skip() raises:
-    var fx = Fixture(String("n5"))
+def test_a_401_is_an_answer_so_a_fail_never_a_skip() raises:
+    var fx = Fixture(String("case5"))
     var runner = ScriptedRunner()
     var t = ScriptedPkgTransport()
     t.queue(_resp(401))
@@ -419,8 +419,8 @@ def test_n5_a_401_is_an_answer_so_a_fail_never_a_skip() raises:
 # ---- 1 channel ----------------------------------------------------------------------
 
 
-def test_n1_another_build_listed_fails_closed() raises:
-    var fx = Fixture(String("n1"))
+def test_another_build_listed_fails_closed() raises:
+    var fx = Fixture(String("case1"))
     var runner = ScriptedRunner()
     var t = ScriptedPkgTransport()
     _network_up(t)
@@ -439,8 +439,8 @@ def test_n1_another_build_listed_fails_closed() raises:
     assert_equal(len(runner.calls), 0)
 
 
-def test_n6_a_build_the_channel_never_had() raises:
-    var fx = Fixture(String("n6"))
+def test_a_build_the_channel_never_had() raises:
+    var fx = Fixture(String("case6"))
     var runner = ScriptedRunner()
     var t = ScriptedPkgTransport()
     _network_up(t)
@@ -451,8 +451,8 @@ def test_n6_a_build_the_channel_never_had() raises:
     assert_equal(len(runner.calls), 0)
 
 
-def test_n2_other_bytes_served() raises:
-    var fx = Fixture(String("n2"))
+def test_other_bytes_served() raises:
+    var fx = Fixture(String("case2"))
     var runner = ScriptedRunner()
     var t = ScriptedPkgTransport()
     _network_up(t)
@@ -559,8 +559,8 @@ def test_an_environment_outside_the_work_dir_is_refused() raises:
     assert_equal(runner.remaining(), 0)
 
 
-def test_n7_a_record_from_an_undeclared_channel() raises:
-    var fx = Fixture(String("n7"))
+def test_a_record_from_an_undeclared_channel() raises:
+    var fx = Fixture(String("case7"))
     var runner = ScriptedRunner()
     var i = Install(fx)
     i.record_texts[0] = _record(fx, String("komira_alpha"), String("https://conda.anaconda.org/conda-forge"))
@@ -655,8 +655,8 @@ def _program_line_of(program: String, readme_line: Int) -> Int:
     return 0
 
 
-def test_n3_a_failing_example_names_the_readme_line() raises:
-    var fx = Fixture(String("n3"))
+def test_a_failing_example_names_the_readme_line() raises:
+    var fx = Fixture(String("case3"))
     var runner = ScriptedRunner()
     _expect_install(runner, fx, Install(fx))
     # the second example (fence on README line 12) fails; the assertion
@@ -708,8 +708,8 @@ def test_a_compile_error_is_mapped_to_the_readme_line() raises:
     assert_equal(open(fx.work() + String("/") + String(PROGRAM), "r").read(), p.text)
 
 
-def test_n4_a_vacuous_count_is_a_fail() raises:
-    var fx = Fixture(String("n4"))
+def test_a_vacuous_count_is_a_fail() raises:
+    var fx = Fixture(String("case4"))
     var runner = ScriptedRunner()
     _expect_install(runner, fx, Install(fx))
     _expect_run(runner, fx, String("readme_komira_alpha validation: 0 of 0 checks passed\n"))

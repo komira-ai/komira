@@ -50,10 +50,10 @@ mojo_library(
         # the exact docker argv, the script, pixi.toml and the docker CLI's
         # environment, golden
         "tests/test_install_smoke_container_golden.mojo",
-        # CONDA_INSTALL_ENV over a fake pixi: the pass; the local proof's
-        # N1-N9 in ENV form (no network is INDETERMINATE with a skip_reason,
-        # a 401 is a FAIL); RunSpec.cwd is the scratch work dir; the
-        # checkout, system-config and README refusals
+        # CONDA_INSTALL_ENV over a fake pixi: the pass; each channel,
+        # install and program failure (no network is INDETERMINATE with a
+        # skip_reason, a 401 is a FAIL); RunSpec.cwd is the scratch work dir;
+        # the checkout, system-config and README refusals
         "tests/test_conda_install_env.mojo",
         # the child's whole environment, the pixi argv, the manifest, and
         # the installed README's program byte-equal to SOURCE mode's, golden

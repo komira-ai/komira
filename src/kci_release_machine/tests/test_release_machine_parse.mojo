@@ -386,8 +386,7 @@ def test_env_validation_reads_back() raises:
 
 def test_env_validation_runs_no_container_and_names_no_program() raises:
     # an ENV validation runs on this machine: an image is refused, digest or
-    # not (the local proof's N9 refused a tag-only image on the container
-    # kind; here any image is the wrong kind's field)
+    # not (any image is the container kind's field)
     _assert_refused(
         _with_validation(String(_V_ENV) + String(" image: \"") + String(_IMAGE) + String("\"")),
         String("line 11: validation 'v' of step 'publish' of stage 'p' has image '") + String(_IMAGE)
