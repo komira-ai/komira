@@ -173,10 +173,22 @@ def test_estimator_saturated_is_unbounded() raises:
     # One register at 52: E = 1.53e20, above Int.MAX, so it saturates too.
     hll.set_register(0, UInt8(52))
     assert_equal(hll.estimate(), Int.MAX)
-    # Every register at 40: E = 4096 * 2^40 / (2 ln 2) ~= 3.2e15, in range.
+    # Every register at 40: z = 4096 / 2^40, E = 4096 * 2^40 / (2 ln 2)
+    # = 3248660424278399.4, in range. Above 2^52 one Float64 ulp is 1 or 2,
+    # so the pin allows 4.
     for i in range(HLL_NUM_REGISTERS):
         hll.set_register(i, UInt8(40))
-    assert_true(hll.estimate() < Int.MAX)
+    assert_true(abs(hll.estimate() - 3248660424278399) <= 4)
+
+
+def test_estimator_tau_term_known_answer() raises:
+    # 2048 registers at 53 and 2048 at 40: z = 4096 * tau(1/2) + 2048 / 2^40,
+    # E = 6496845229059777.x. Without the tau term E would be
+    # 6497320848556798, about 4.8e11 away, so this pins tau.
+    var hll = HyperLogLog()
+    for i in range(HLL_NUM_REGISTERS):
+        hll.set_register(i, UInt8(53) if i < 2048 else UInt8(40))
+    assert_true(abs(hll.estimate() - 6496845229059777) <= 4)
 
 
 def test_estimator_clamps_registers_above_maximum() raises:
@@ -185,6 +197,8 @@ def test_estimator_clamps_registers_above_maximum() raises:
     for i in range(10):
         at_max.set_register(i, UInt8(53))
         above.set_register(i, UInt8(200))
+    # C[0] = 4086, C[53] = 10: E = 10.012...
+    assert_equal(at_max.estimate(), 10)
     assert_equal(above.estimate(), at_max.estimate())
 
 

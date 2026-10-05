@@ -2,8 +2,8 @@
 # HyperLogLog (HLL) cardinality sketch
 # =============================================================================
 #
-# A fixed-precision HyperLogLog sketch (Flajolet, Fusy, Gandouet, Meunier
-# 2007): it estimates the number of distinct values in a stream in constant
+# A fixed-precision HyperLogLog sketch (Flajolet, Fusy, Gandouet,
+# Meunier): it estimates the number of distinct values in a stream in constant
 # memory, and two sketches merge into the sketch of their union. The value
 # is an approximate estimate (standard error ~1.6%, below). The Parquet spec
 # defines `Statistics.distinct_count` (parquet.thrift field 4) as the count of
@@ -19,7 +19,7 @@
 #     remaining (64 - p) bits feed the leading-zero count + 1 ("rho").
 #   - Estimator: Ertl's improved raw estimator (O. Ertl, "New cardinality
 #     estimation algorithms for HyperLogLog sketches", arXiv:1702.01284,
-#     2017, Algorithm 6). It reads the register histogram, accounts for
+#     Algorithm 6). It reads the register histogram, accounts for
 #     empty registers and for registers at the maximum value q + 1 inside
 #     the estimate itself, and so needs no switch to linear counting, no
 #     threshold and no empirical bias table. Its error stays near the
@@ -73,7 +73,7 @@ def _splitmix64(value: UInt64) -> UInt64:
     """splitmix64 finalizer — one-shot 64->64 bit mixer.
 
     Excellent avalanche, no dependencies. Same constants as the canonical
-    SplitMix64 PRNG (Steele, Lea, Flood 2014). Unlike a streaming hash,
+    SplitMix64 PRNG (Steele, Lea, Flood). Unlike a streaming hash,
     this is intended as a finalizer step on a value that already has
     moderate entropy in some of its bits.
     """
@@ -223,7 +223,8 @@ struct HyperLogLog(Movable, Copyable):
         """Set register `idx` to `value`, 0 <= idx < HLL_NUM_REGISTERS.
 
         Overwrites rather than takes the maximum; `add_hash` and `merge`
-        are the ingest paths.
+        are the ingest paths. Any UInt8 is stored, but `estimate` treats a
+        value above HLL_MAX_REGISTER (53) as 53.
         """
         self._registers[idx] = value
 
@@ -319,9 +320,7 @@ struct HyperLogLog(Movable, Copyable):
         A register set above q + 1 through `set_register` counts as q + 1.
         """
         var m = HLL_NUM_REGISTERS
-        var counts = List[Int](capacity=HLL_MAX_REGISTER + 1)
-        for _ in range(HLL_MAX_REGISTER + 1):
-            counts.append(0)
+        var counts = InlineArray[Int, HLL_MAX_REGISTER + 1](fill=0)
         for i in range(m):
             counts[min(Int(self._registers[i]), HLL_MAX_REGISTER)] += 1
 
