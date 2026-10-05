@@ -7,7 +7,7 @@
 #   Expr -> encode_expr -> bytes -> decode_expr -> Expr'  with
 #   Expr.structural_hash() == Expr'.structural_hash()  (identical plan hash).
 #
-# THE ALLOW-LIST (the security spine). The full komira_core Expr surface has
+# THE ALLOW-LIST (the security spine). The full komira_plan_expr Expr surface has
 # ~23 variant tags (agg-fn, window-fn, correlated-subquery, regexp, UDF,
 # json_extract, struct/map projection, ...). viewport protocol v1 serializes ONLY the SIX
 # grid-filter / sort / computed-column tags:

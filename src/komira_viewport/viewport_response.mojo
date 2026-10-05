@@ -11,7 +11,7 @@
 # opaque payload block); the payload bytes themselves are produced by the server (an
 # Arrow-IPC encode of the window RecordBatch via ipc_encoder_dispatch, or a JSON
 # render for test/MSW harnesses) and carried through here verbatim. Keeping the
-# envelope in the fast `komira_viewport` lib (komira_core only) means the honest
+# envelope in the fast `komira_viewport` lib (komira_plan_expr and komira_collections only) means the honest
 # rowcount contract — EXACT vs ESTIMATED-with-error-bound — is unit-testable
 # without linking the engine.
 #
