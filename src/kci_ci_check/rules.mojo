@@ -50,6 +50,13 @@
 #       check. [Amended: before, no trigger could be `pull_request`.]
 #         * `pull_request_target` is never a trigger (it runs a pull
 #           request's code with the base repository's secrets);
+#         * the triggers are an ALLOW-LIST: `push`, `workflow_dispatch` and
+#           `pull_request`, each written exactly. Any other event is a
+#           disagreement, because another event can run a pull request's
+#           code (`pull_request_review`, `pull_request_review_comment` and
+#           `issue_comment` on it, a `merge_group` queue candidate, the
+#           caller's event under `workflow_call`, the code `workflow_run`
+#           follows);
 #         * a workflow with a `pull_request` trigger is a PULL REQUEST
 #           WORKFLOW: `pull_request` is its only trigger, and its jobs run
 #           only the machine file's PULL_REQUEST stages (the typed `trigger`
@@ -442,6 +449,12 @@ def _member(xs: List[String], x: String) -> Bool:
         if xs[i] == x:
             return True
     return False
+
+
+def _allowed_trigger(name: String) -> Bool:
+    """R6: the events a workflow is triggered by, read by allow-list and
+    exactly: `push`, `workflow_dispatch` and `pull_request`."""
+    return name == String("push") or name == String("workflow_dispatch") or name == String("pull_request")
 
 
 def _triggers(doc: WorkflowDoc, on: Int) -> List[String]:
@@ -942,6 +955,13 @@ def check_workflow_doc(
             findings.append(
                 _at(doc, on) + String("R6: trigger 'pull_request_target': it runs a pull request's code with the")
                 + String(" base repository's secrets, and no workflow has it")
+            )
+        elif not _allowed_trigger(triggers[i]):
+            findings.append(
+                _at(doc, on) + String("R6: trigger '") + triggers[i]
+                + String("': a workflow's triggers are push, workflow_dispatch and pull_request only (another")
+                + String(" event can run a pull request's code: a review or a comment on it, a merge-queue")
+                + String(" candidate, a calling workflow's event)")
             )
         elif triggers[i] == String("pull_request") and pr_stages == 0:
             findings.append(

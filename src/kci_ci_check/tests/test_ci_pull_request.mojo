@@ -187,6 +187,11 @@ def test_a_pull_request_workflow_has_no_other_trigger() raises:
         _pr(String("  pull_request:\n"), String("  workflow_dispatch:\n  pull_request:\n")),
         String("R6: trigger 'workflow_dispatch' in a workflow triggered by pull_request"),
     )
+    # an event off the allow-list is refused as such in a pull request workflow too
+    _reports(
+        _pr(String("  pull_request:\n"), String("  merge_group:\n  pull_request:\n")),
+        String("R6: trigger 'merge_group': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+    )
 
 
 def test_pull_request_with_no_pull_request_stage_is_refused() raises:
