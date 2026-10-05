@@ -9,10 +9,11 @@
 #
 # The layering:
 #   * `AccessTokenFetcher` — ONE round trip to a token endpoint (the metadata
-#     server, a service-account JWT exchange, a workload-identity exchange).
-#     Their pure request/response codecs are part P18a-2 and the fetchers
-#     over komira_http's `Connector` are P18b; nothing here reads the
-#     environment or opens a socket.
+#     server, a service-account JWT exchange, an authorized_user refresh).
+#     The pure request/response codecs are token_wire.mojo and the fetchers
+#     over komira_http_client token_sources.mojo; Application Default
+#     Credentials, which picks one, is adc.mojo. Nothing in THIS file reads
+#     the environment or opens a socket.
 #   * `CachingTokenSource` — a `GcpTokenSource` over any fetcher and any
 #     komira_retry `MonotonicClock` (`SystemClock` in production,
 #     `ManualClock` in a test): it serves the cached token while it is

@@ -1,0 +1,33 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# A Google Cloud REST client (mojo_gcp_client, `protocol = "rest"`) of an API
+# whose service declares no `google.api.default_host`,
+# example/nohost/v1/nohost.proto. The `(google.api.http)` option it imports
+# comes from //tools/vendor/googleapis:api_http, the pinned googleapis
+# annotations.proto and http.proto and nothing else.
+#
+# The library is gated by its layout probe and test_nohost_rest, which drives
+# the client over a ScriptedConnector: with no host set, a call raises the
+# client's named refusal before it asks for a token or dials; once the caller
+# sets a host, the call dials that host and names it in the Host header.
+# The generated files and welded tests are held to exact sets in
+# tests//functional/mojo_gcp_client. run_tests.sh builds this package
+# (test 23).
+mojo_gcp_client(
+    name = "komira_gcp_nohost_rest",
+    bundle_only = [],
+    bundle_proto_deps = False,
+    methods = ["NoHostService.GetThing"],
+    proto_deps = ["//tools/vendor/googleapis:api_http"],
+    protocol = "rest",
+    protos = ["example/nohost/v1/nohost.proto"],
+    test_srcs = ["test_nohost_rest.mojo"],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+    ],
+)

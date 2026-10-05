@@ -7,6 +7,7 @@ the pattern) and never the value.
 """
 
 from rest_url.helpers import (
+    _rest_drop_members,
     _rest_path_segment,
     _rest_path_var,
     _rest_pct_encode,
@@ -91,6 +92,25 @@ def pct_eq(value: String, want: String) raises:
         raise Error(String("_rest_pct_encode(\"") + value + "\") = \"" + got + "\", want \"" + want + "\"")
 
 
+def drop_eq(json: String, names: List[String], want: String) raises:
+    var got = _rest_drop_members(json, names)
+    if got != want:
+        raise Error(String("_rest_drop_members(") + json + ") = " + got + ", want " + want)
+
+
+def drop_refused(json: String) raises:
+    var names: List[String] = [String("name")]
+    var refused = False
+    try:
+        _ = _rest_drop_members(json, names)
+    except e:
+        refused = True
+        if String(e).find("secret") >= 0:
+            raise Error(String("_rest_drop_members echoes the text: ") + String(e))
+    if not refused:
+        raise Error(String("_rest_drop_members(") + json + ") was accepted")
+
+
 def main() raises:
     # `*`: exactly one segment.
     var_ok("projects/p1", "projects/*", "projects/p1")
@@ -159,5 +179,34 @@ def main() raises:
     pct_eq(String("`{|}") + chr(0x7F), "%60%7B%7C%7D%7F")
     pct_eq("éÿ", "%C3%A9%C3%BF")
     pct_eq("", "")
+
+    # A `body: "*"` less the members its path binds: first, middle, last,
+    # only, absent. A value holding braces, brackets, commas, escaped quotes
+    # and a look-alike key is skipped whole; a nested member of the same name
+    # is not top-level and stays; every kept byte is the input's.
+    var name: List[String] = [String("name")]
+    var two: List[String] = [String("name"), String("parent")]
+    drop_eq('{"name":"a","x":1}', name, '{"x":1}')
+    drop_eq('{"x":1,"name":"a","y":true}', name, '{"x":1,"y":true}')
+    drop_eq('{"x":"1","name":"a"}', name, '{"x":"1"}')
+    drop_eq('{"name":"a"}', name, "{}")
+    drop_eq("{}", name, "{}")
+    drop_eq('{"x":1}', name, '{"x":1}')
+    drop_eq(
+        '{"parent":"p","name":"n","role":{"name":"r"}}',
+        two,
+        '{"role":{"name":"r"}}',
+    )
+    drop_eq(
+        '{"name":"a,\\"b}\\\\","p":{"q":[1,{"r":"],}\\""}],"name":"z"},"names":[]}',
+        name,
+        '{"p":{"q":[1,{"r":"],}\\""}],"name":"z"},"names":[]}',
+    )
+    drop_eq('{"nam":1,"namex":2}', name, '{"nam":1,"namex":2}')
+    drop_refused("")
+    drop_refused('["secret"]')
+    drop_refused('{"name":"secret}')
+    drop_refused('{"name":{"secret":1}')
+    drop_refused("{secret:1}")
 
     print("test_helpers: PASS")

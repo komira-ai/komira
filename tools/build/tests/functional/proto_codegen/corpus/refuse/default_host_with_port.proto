@@ -1,0 +1,23 @@
+// A `(google.api.default_host)` naming a port other than 443: the REST
+// client always speaks HTTPS on the default port, so the host is refused
+// rather than written into the client.
+syntax = "proto3";
+
+package refused.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+
+service Ported {
+  option (google.api.default_host) = "ported.example.com:8443";
+
+  rpc Get(GetRequest) returns (GetRequest) {
+    option (google.api.http) = {
+      get: "/v1/{name=things/*}"
+    };
+  }
+}
+
+message GetRequest {
+  string name = 1;
+}

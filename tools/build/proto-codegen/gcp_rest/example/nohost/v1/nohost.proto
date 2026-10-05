@@ -1,0 +1,25 @@
+// A REST API that declares no `google.api.default_host`: the generated
+// client has no host to start at, so it refuses to send until its caller
+// names one with `set_rest_host`.
+syntax = "proto3";
+
+package example.nohost.v1;
+
+import "google/api/annotations.proto";
+
+service NoHostService {
+  rpc GetThing(GetThingRequest) returns (Thing) {
+    option (google.api.http) = {
+      get: "/v1/{name=things/*}"
+    };
+  }
+}
+
+message GetThingRequest {
+  string name = 1;
+}
+
+message Thing {
+  string name = 1;
+  int64 size = 2;
+}
