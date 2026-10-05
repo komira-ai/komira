@@ -1,0 +1,20 @@
+# Code owners (GitHub reads this file from the default branch).
+#
+# THE RELEASE FILES. Everything under release/ decides what komira publishes
+# and where: the release artifacts (which packages a release builds and
+# ships) and the channels file (where, and with which credential). A name and
+# version published to the channel is permanent, so a change here needs the
+# release approver's review. The workflow that acts on them,
+# .github/workflows/kci.yml, is owned the same way: it decides when a run
+# publishes.
+#
+# ⚠ PLACEHOLDER OWNER. `@komira-ai/release-approvers` is a team that does not
+# exist yet: until the organisation creates it (with the release approver as
+# its member, and write access to this repository), GitHub reports the line
+# as an unknown owner and requires no review. Either create the team, or
+# replace the handle below with the approver's own. A code-owner review is
+# required only where the branch rules of main turn on "Require review from
+# Code Owners".
+/release/                   @komira-ai/release-approvers
+/.github/workflows/kci.yml  @komira-ai/release-approvers
+/.github/CODEOWNERS         @komira-ai/release-approvers

@@ -1,0 +1,17 @@
+// A streaming method beside the shop API: WatchItems streams requests from
+// the client and Items from the server (bidirectional), which has no REST
+// form. tests//negative/mojo_gcp_client lists it in a "rest" client's
+// `methods`, which the plugin refuses by name.
+syntax = "proto3";
+
+package example.shop.v1;
+
+import "example/shop/v1/item.proto";
+
+service WatchService {
+  rpc WatchItems(stream WatchItemsRequest) returns (stream Item);
+}
+
+message WatchItemsRequest {
+  string prefix = 1;
+}

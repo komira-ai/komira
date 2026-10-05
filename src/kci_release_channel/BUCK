@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Release-channel declarations. A release channel is a publish destination and
+# Release channels. A release channel is a publish destination and
 # nothing else: a name, a visibility (PUBLIC adds anonymous read, PRIVATE adds
 # none) and one repository per artifact type, each with the one identity that
 # may push to it and the credential it pushes with (a kind and a secret NAME,
@@ -8,16 +8,30 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # parser sees all of them and can refuse what no single channel can see: two
 # channels with one name, or two channels sharing a location.
 #
-# The one dep is the textproto lexer. The welded tests read declarations back
-# through the lookups, and assert each refusal by its message.
+# The deps are the textproto lexer and kci_api (the file's
+# `schema_version` and the format table it is checked against). The welded
+# tests read channels back through the lookups, and assert each refusal
+# by its message. One more reads the repository's own
+# release/channels.textproto through the parser, so a channels file kci would
+# refuse fails this library's build.
 mojo_library(
     name = "kci_release_channel",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    deps = ["//src/komira_textproto:komira_textproto"],
+    deps = [
+        "//src/kci_api:kci_api",
+        "//src/komira_textproto:komira_textproto",
+    ],
     test_srcs = [
         "tests/test_channel_credentials.mojo",
-        "tests/test_channel_declarations.mojo",
+        "tests/test_channels.mojo",
         "tests/test_channel_parse_refusals.mojo",
+        "tests/test_release_channels_file.mojo",
     ],
+    # The repository's own channels file (release/BUCK).
+    test_data = {
+        "tests/test_release_channels_file.mojo": {
+            "channels.textproto": "//release:channels.textproto",
+        },
+    },
     visibility = ["PUBLIC"],
 )

@@ -24,7 +24,9 @@
 #       The workflows pass actionlint (configured by <config>), with shellcheck
 #       over their `run:` steps.
 #   kind "action_pins", args <workflow>...
-#       Every `uses:` names an action by a full 40-hex commit SHA, not a tag.
+#       Every `uses:` names an action by a full 40-hex commit SHA, not a tag. A
+#       local action (`uses: ./path`) is part of this checkout, so it has no
+#       SHA to pin; its own file is among the <workflow>s, which pins what it uses.
 #   kind "no_endpoint", args <.gitignore> <n> <buckconfig>*n <file>...
 #       No committed buckconfig sets a remote-execution endpoint or instance
 #       key, .gitignore ignores /.buckconfig.local, and no buckconfig or <file>
@@ -101,7 +103,7 @@ action_pins)
         n=$(grep -cE '^[[:space:]]*(-[[:space:]]+)?uses:' "$f" || true)
         checked=$((checked + n))
         grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:' "$f" |
-            grep -vE 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)' |
+            grep -vE 'uses:[[:space:]]*([^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)|\./)' |
             sed "s#^#$f:#;s#\$# -- not pinned to a full commit SHA#" >> "$REPORT" || true
     done
     ;;

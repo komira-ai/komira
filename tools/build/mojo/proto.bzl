@@ -335,11 +335,13 @@ _COMMON_ATTRS = {
 
 # ---- mojo_proto_library --------------------------------------------------------
 
-def select_generated(ctx, own_paths, dep_paths):
+def select_generated(ctx, own_paths, dep_paths, module_names = {}):
     """The import paths to generate code for, and the `<stem>.mojo` each writes.
 
     `own_paths`, then the files `ctx.attrs.bundle_proto_deps` and
     `ctx.attrs.bundle_only` select from the proto_deps closure `dep_paths`.
+    A file named in `module_names` (import path -> module) writes
+    `<module>.mojo` instead of its stem's (the plugin's `module_names`).
     """
     bundled = []
     if ctx.attrs.bundle_only:
@@ -363,7 +365,7 @@ def select_generated(ctx, own_paths, dep_paths):
     # output is flat).
     names = []
     for p in generate:
-        name = proto_stem(ctx, p) + ".mojo"
+        name = module_names.get(p, proto_stem(ctx, p)) + ".mojo"
         if name in names:
             fail("{}: two .proto files generate `{}`; the generated package is flat".format(ctx.label, name))
         names.append(name)

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package komira.test.refuse.binding_with_another_verb;
+
+import "google/api/annotations.proto";
+
+service S {
+  rpc M(Req) returns (Req) {
+    option (google.api.http) = {
+      get: "/v1/{name=a/*}"
+      additional_bindings { post: "/v1/{name=b/*}" body: "*" }
+    };
+  }
+}
+
+// One generated method sends one verb and one body form, so a binding that
+// differs in either is refused rather than half-generated.
+message Req {
+  string name = 1;
+}

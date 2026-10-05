@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# What `kci build` and `kci publish` both know about a release set, in one
-# place so the two verbs cannot drift apart: `verify_member` (the checks over
+# What the BUILD step and the PUBLISH step both know about a release set, in one
+# place so the two steps cannot drift apart: `verify_member` (the checks over
 # one artifact's directory: one manifest, its name, bare file names, nothing
 # else in the directory, the sha256, the conda metadata agreeing and
 # stamped), the `metadata.json` reader, `release.json` and the set hash a
@@ -11,14 +11,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # shapes komira_pack writes (a library's and a metapackage's metadata.json,
 # and one real metapackage directory, staged as test data); every
 # verify_member refusal over directories written under TEST_TMPDIR;
-# release.json rendered byte-exact, round-tripped and refused; the set hash
-# against a golden vector.
+# release.json (major 2: revision, platform, produced_by) rendered
+# byte-exact, round-tripped and refused; the set hash against a golden vector.
 mojo_library(
     name = "kci_release_set",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_artifact_declaration:kci_artifact_declaration",
+        "//src/kci_artifact:kci_artifact",
         "//src/kci_artifact_manifest:kci_artifact_manifest",
+        "//src/kci_api:kci_api",
         "//src/kci_release_channel:kci_release_channel",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_json:komira_json",

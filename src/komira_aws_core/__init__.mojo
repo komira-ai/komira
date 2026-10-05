@@ -35,9 +35,16 @@ clients.
 - `aws_xml.mojo`: the restXml body codec over komira_xml (`aws_xml_write_*`
   and `aws_xml_get_*` scalars, wrapped and flattened lists and maps,
   xmlAttribute, xmlNamespace), `aws_rest_xml_error` /
-  `aws_xml_error_info` (<ErrorResponse><Error>, a bare <Error>, the status
-  as the code of an empty or non-XML body), and `aws_xml_body_is_error`,
+  `aws_xml_error_info` (<ErrorResponse><Error>, a bare <Error>, ec2's
+  <Response><Errors><Error>, the status as the code of an empty or non-XML
+  body or a 5xx <html> page), and `aws_xml_body_is_error`,
   S3's 200-with-<Error> check.
+- `aws_query.mojo`: the awsQuery / ec2Query runtime: `AwsQueryWriter` (the
+  form body, `Action` and `Version` first, botocore's percent-encoding),
+  `aws_query_key` / `aws_query_rename_last` (parameter names),
+  `aws_query_set_body`, `aws_query_result` (the `<OpResult>` element of a
+  response) and `aws_query_error` (<ErrorResponse><Error> and ec2's
+  <Response><Errors><Error>, through `aws_xml_error_info`).
 - `endpoint.mojo`: `AwsEndpoint`, the partitions, `aws_service_endpoint`,
   `resolve_endpoint`, and `aws_endpoint_config` (AWS_ENDPOINT_URL[_<SVC>],
   FIPS and dual-stack, from the standard settings only).
@@ -120,6 +127,15 @@ from .aws_error import (
     aws_json_error_info,
     aws_query_error_code,
     aws_request_id,
+)
+from .aws_query import (
+    AWS_QUERY_CONTENT_TYPE,
+    AwsQueryWriter,
+    aws_query_error,
+    aws_query_key,
+    aws_query_rename_last,
+    aws_query_result,
+    aws_query_set_body,
 )
 from .aws_request import AwsRequest, AwsResponse, HttpResult
 from .aws_rest import (
