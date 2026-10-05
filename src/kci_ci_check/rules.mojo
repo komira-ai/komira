@@ -52,6 +52,14 @@
 #       itself is in pull_request.mojo:
 #         * `pull_request_target` is never a trigger (it runs a pull
 #           request's code with the base repository's secrets);
+#         * the triggers are an ALLOW-LIST: `push`, `workflow_dispatch` and
+#           `pull_request`, each written exactly. Any other event is a
+#           disagreement, because another event can run a pull request's
+#           code (`pull_request_review`, `pull_request_review_comment` and
+#           `issue_comment` on it, a `merge_group` queue candidate, the
+#           caller's event under `workflow_call`, the code `workflow_run`
+#           follows), and a release job's `github.event_name !=
+#           'pull_request'` does not keep it out;
 #         * `pull_request` is a trigger exactly when the machine file
 #           declares a PULL_REQUEST stage (the typed `trigger` field,
 #           kci_release_machine), and R1 asks a job for that stage too;
@@ -65,8 +73,9 @@
 #           `github.event_name != 'pull_request'`, `github.event_name ==
 #           'push'` or `github.event_name == 'workflow_dispatch'` (a
 #           single-quoted [a-z_]+ literal, nothing after it; GitHub compares
-#           strings case-insensitively, so another case is not read). No
-#           release job, environment, publishing token or release tailnet
+#           strings case-insensitively, so another case is not read). With
+#           the trigger allow-list, a release job then runs only on `push`
+#           or `workflow_dispatch`: no release job, environment, publishing token or release tailnet
 #           node is reached from a pull request;
 #         * the PULL_REQUEST stage's job carries the job-level condition
 #           `if: github.event.pull_request.head.repo.full_name ==
@@ -437,6 +446,12 @@ def _member(xs: List[String], x: String) -> Bool:
         if xs[i] == x:
             return True
     return False
+
+
+def _allowed_trigger(name: String) -> Bool:
+    """R6: the events a workflow is triggered by, read by allow-list and
+    exactly: `push`, `workflow_dispatch` and `pull_request`."""
+    return name == String("push") or name == String("workflow_dispatch") or name == String("pull_request")
 
 
 def _triggers(doc: WorkflowDoc, on: Int) -> List[String]:
@@ -873,6 +888,13 @@ def check_workflow_doc(
             findings.append(
                 _at(doc, on) + String("R6: trigger 'pull_request_target': it runs a pull request's code with the")
                 + String(" base repository's secrets, and no workflow has it")
+            )
+        elif not _allowed_trigger(triggers[i]):
+            findings.append(
+                _at(doc, on) + String("R6: trigger '") + triggers[i]
+                + String("': a workflow's triggers are push, workflow_dispatch and pull_request only (another")
+                + String(" event can run a pull request's code: a review or a comment on it, a merge-queue")
+                + String(" candidate, a calling workflow's event)")
             )
         elif triggers[i] == String("pull_request") and len(pr_stages) == 0:
             findings.append(

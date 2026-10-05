@@ -199,6 +199,40 @@ def test_r6_never_pull_request() raises:
     _reports(_mutated(String("  push:\n"), String("  pull_request_target:\n  push:\n")), String("R6: trigger 'pull_request_target'"))
 
 
+def _other_triggers() -> List[String]:
+    """Events other than push, workflow_dispatch and pull_request: each can
+    run code a pull request carries (a review or a comment on it, a
+    merge-queue candidate, a calling workflow's event), or is simply not on
+    the allow-list (schedule)."""
+    var t = List[String]()
+    t.append(String("pull_request_review"))
+    t.append(String("pull_request_review_comment"))
+    t.append(String("issue_comment"))
+    t.append(String("workflow_run"))
+    t.append(String("merge_group"))
+    t.append(String("workflow_call"))
+    t.append(String("schedule"))
+    return t^
+
+
+def test_r6_triggers_are_an_allow_list() raises:
+    var others = _other_triggers()
+    for i in range(len(others)):
+        var name = others[i].copy()
+        _reports(
+            _mutated(String("  push:\n"), String("  ") + name + String(":\n  push:\n")),
+            String("R6: trigger '") + name + String("': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+        )
+    # the list form of `on:`
+    _reports(
+        _mutated(
+            String("on:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n        default: \"\"\n"),
+            String("on: [push, workflow_dispatch, merge_group]\n"),
+        ),
+        String("R6: trigger 'merge_group': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+    )
+
+
 def test_r7_revision_input() raises:
     _reports(_mutated(String("      revision:\n"), String("      commit:\n")), String("R7: workflow_dispatch takes no input `revision`"))
 
