@@ -9,8 +9,11 @@
 # the wall clock; the service principal POSTs the form-encoded
 # client-credentials grant to `/<tenant>/oauth2/v2.0/token` with its values
 # percent-encoded, and reads `expires_in` as the JSON number Entra sends; a
-# non-2xx answer and a body with no token are named errors that leave no
-# token cached; and a token near its expiry is due for a refresh.
+# non-2xx answer and a body that is not a token response are named errors
+# that leave no token cached; a login endpoint that is not https (or http on
+# loopback), a host or tenant outside `[A-Za-z0-9.-]` or with an empty label
+# are refused before the service is called, at construction and at refresh;
+# and a token near its expiry is due for a refresh.
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
@@ -175,7 +178,9 @@ def test_imds_refusals_cache_nothing() raises:
         _refresh_imds(p, denied)
     assert_false(p.has_credential())
     var empty = CapturingService(200, String('{"access_token":"","expires_in":"60"}'))
-    with assert_raises(contains="AzureImdsProvider: missing access_token"):
+    with assert_raises(
+        contains="AzureImdsProvider: the token response's access_token is empty"
+    ):
         _refresh_imds(p, empty)
     assert_false(p.has_credential())
     var bad = AzureImdsProvider.with_endpoint(String("169.254.169.254"))
@@ -238,12 +243,12 @@ def test_service_principal_defaults_and_refusals() raises:
     with assert_raises(contains="ServicePrincipalProvider: token POST returned status 401"):
         _refresh_sp(local, denied)
     assert_false(local.has_credential())
-    # Entra sends a number; a string `expires_in` is not its shape.
-    var stringy = CapturingService(
-        200, String('{"access_token":"x","expires_in":"3599"}')
+    # A body that is not JSON caches nothing.
+    var garbled = CapturingService(
+        200, String('{"access_token":"x","expires_in":3599')
     )
-    with assert_raises(contains="value not numeric"):
-        _refresh_sp(local, stringy)
+    with assert_raises(contains="the token response is not JSON"):
+        _refresh_sp(local, garbled)
     assert_false(local.has_credential())
 
 
@@ -263,6 +268,268 @@ def test_near_expiry_is_due_for_refresh() raises:
     assert_true(sp.is_expired_or_near_expiry())
 
 
+# -----------------------------------------------------------------------------
+# The login endpoint and the tenant are checked before anything is dialed:
+# the client secret is POSTed to that URL, and the tenant is its first path
+# segment. A refusal leaves the capturing service uncalled.
+# -----------------------------------------------------------------------------
+
+
+comptime _SP_OK = (
+    '{"token_type":"Bearer","expires_in":3599,"access_token":"sp-token"}'
+)
+
+
+def _sp_refused(
+    tenant: String,
+    scheme: String,
+    host: String,
+    port: UInt16,
+    contains: String,
+) raises:
+    """Constructing the provider, or refreshing it, raises `contains`; the
+    service is never called."""
+    var svc = CapturingService(200, String(_SP_OK))
+    with assert_raises(contains=contains):
+        var p = ServicePrincipalProvider.with_login_endpoint(
+            tenant, String("c"), String("s"), scheme, host, port
+        )
+        _refresh_sp(p, svc)
+    assert_equal(svc.calls, 0, host)
+
+
+def test_login_scheme_must_be_https() raises:
+    comptime msg = "login scheme must be https"
+    _sp_refused("t", "http", "login.microsoftonline.com", 0, msg)
+    _sp_refused("t", "http", "10.0.0.1", 0, msg)
+    _sp_refused("t", "ftp", "login.microsoftonline.com", 0, msg)
+    _sp_refused("t", "HTTPS", "login.microsoftonline.com", 0, msg)
+    _sp_refused("t", "", "login.microsoftonline.com", 0, msg)
+
+
+def test_login_host_charset() raises:
+    comptime msg = "login host holds a byte outside [A-Za-z0-9.-]"
+    # userinfo: the secret would go to evil.example
+    _sp_refused("t", "https", "login.microsoftonline.com@evil.example", 0, msg)
+    _sp_refused("t", "https", "login microsoftonline.com", 0, msg)
+    _sp_refused("t", "https", "login%2emicrosoftonline.com", 0, msg)
+    _sp_refused("t", "https", "evil.example/x", 0, msg)
+    _sp_refused("t", "https", "evil.example:8443", 0, msg)
+    _sp_refused("t", "https", "evil.example?x", 0, msg)
+    _sp_refused("t", "https", "evil.example#x", 0, msg)
+    _sp_refused("t", "https", "[::1]", 0, msg)
+    _sp_refused("t", "https", "", 0, "login host is empty")
+    _sp_refused("t", "https", "a..b", 0, "login host has an empty label")
+    _sp_refused("t", "https", ".example", 0, "login host has an empty label")
+    _sp_refused("t", "https", "example.", 0, "login host has an empty label")
+
+
+def test_tenant_id_charset() raises:
+    comptime msg = "tenant_id holds a byte outside [A-Za-z0-9.-]"
+    _sp_refused("a/b", "https", "login.microsoftonline.com", 0, msg)
+    _sp_refused("a?b", "https", "login.microsoftonline.com", 0, msg)
+    _sp_refused("a#b", "https", "login.microsoftonline.com", 0, msg)
+    _sp_refused("a%2Fb", "https", "login.microsoftonline.com", 0, msg)
+    _sp_refused("a b", "https", "login.microsoftonline.com", 0, msg)
+    _sp_refused("a\tb", "https", "login.microsoftonline.com", 0, msg)
+    _sp_refused("a\nb", "https", "login.microsoftonline.com", 0, msg)
+    _sp_refused("", "https", "login.microsoftonline.com", 0, "tenant_id is empty")
+    _sp_refused(
+        "..", "https", "login.microsoftonline.com", 0, "tenant_id has an empty label"
+    )
+    _sp_refused(
+        "a..b", "https", "login.microsoftonline.com", 0, "tenant_id has an empty label"
+    )
+    # make() checks the tenant too.
+    with assert_raises(contains=msg):
+        _ = ServicePrincipalProvider.make(
+            String("t/../other"), String("c"), String("s")
+        )
+
+
+def test_endpoint_rechecked_before_dialing() raises:
+    # The fields are public; one changed after construction is refused at
+    # refresh, still before the service is called.
+    var p = ServicePrincipalProvider.make(
+        String("contoso.onmicrosoft.com"), String("c"), String("s")
+    )
+    var svc = CapturingService(200, String(_SP_OK))
+    p.login_host = String("evil.example/x")
+    with assert_raises(contains="login host holds a byte outside"):
+        _refresh_sp(p, svc)
+    p.login_host = String("login.microsoftonline.com")
+    p.login_scheme = String("http")
+    with assert_raises(contains="login scheme must be https"):
+        _refresh_sp(p, svc)
+    p.login_scheme = String("https")
+    p.tenant_id = String("a/b")
+    with assert_raises(contains="tenant_id holds a byte outside"):
+        _refresh_sp(p, svc)
+    assert_equal(svc.calls, 0)
+    assert_false(p.has_credential())
+
+
+def test_valid_endpoints_and_tenants() raises:
+    # A GUID tenant on the default endpoint.
+    var guid = ServicePrincipalProvider.make(
+        String("72f988bf-86f1-41af-91ab-2d7cd011db47"), String("c"), String("s")
+    )
+    var svc = CapturingService(200, String(_SP_OK))
+    _refresh_sp(guid, svc)
+    assert_equal(
+        svc.url,
+        "https://login.microsoftonline.com/72f988bf-86f1-41af-91ab-2d7cd011db47"
+        "/oauth2/v2.0/token",
+    )
+    assert_equal(guid.credential().token, "sp-token")
+    # A verified-domain tenant on a sovereign-cloud authority, with a port.
+    var sov = ServicePrincipalProvider.with_login_endpoint(
+        String("Contoso.onmicrosoft.us"),
+        String("c"),
+        String("s"),
+        String("https"),
+        String("login.microsoftonline.us"),
+        UInt16(8443),
+    )
+    var svc2 = CapturingService(200, String(_SP_OK))
+    _refresh_sp(sov, svc2)
+    assert_equal(
+        svc2.url,
+        "https://login.microsoftonline.us:8443/Contoso.onmicrosoft.us"
+        "/oauth2/v2.0/token",
+    )
+    # Plain http is kept for a loopback host only (an emulator, a test).
+    var lo = ServicePrincipalProvider.with_login_endpoint(
+        String("t"), String("c"), String("s"),
+        String("http"), String("localhost"), UInt16(18081),
+    )
+    var svc3 = CapturingService(200, String(_SP_OK))
+    _refresh_sp(lo, svc3)
+    assert_equal(svc3.url, "http://localhost:18081/t/oauth2/v2.0/token")
+
+
+# -----------------------------------------------------------------------------
+# The token response is read as JSON.
+# -----------------------------------------------------------------------------
+
+
+def _sp_local() raises -> ServicePrincipalProvider:
+    return ServicePrincipalProvider.with_login_endpoint(
+        String("t"), String("c"), String("s"),
+        String("http"), String("127.0.0.1"), UInt16(18081),
+    )
+
+
+def _sp_token(body: String) raises -> AzureBearerToken:
+    var p = _sp_local()
+    var svc = CapturingService(200, body)
+    _refresh_sp(p, svc)
+    return p.credential()
+
+
+def _sp_body_refused(body: String, contains: String) raises:
+    var p = _sp_local()
+    var svc = CapturingService(200, body)
+    with assert_raises(contains=contains):
+        _refresh_sp(p, svc)
+    assert_false(p.has_credential())
+
+
+def test_token_response_json_shapes() raises:
+    # expires_in as a numeric string (IMDS's shape) and as a number.
+    var before = now_unix_ms()
+    var t = _sp_token(
+        String('{"access_token":"x","expires_in":"3599","token_type":"Bearer"}')
+    )
+    assert_equal(t.token, "x")
+    assert_true(t.expiry_unix_ms >= before + 3_599_000)
+    # Extra fields, nested objects and arrays are skipped; a decoy
+    # access_token inside a nested object is not the token.
+    t = _sp_token(
+        String(
+            '{"extra":{"access_token":"decoy","n":[1,{"k":"v"}]},'
+            '"token_type":"bearer","ext_expires_in":7199,'
+            '"access_token":"real","expires_in":3599,"foo":null}'
+        )
+    )
+    assert_equal(t.token, "real")
+    # Escapes in the token are decoded as JSON decodes them.
+    t = _sp_token(
+        String(
+            '{"access_token":"a\\"b\\\\c\\/d\\u0041","expires_in":60}'
+        )
+    )
+    assert_equal(t.token, 'a"b\\c/dA')
+    # IMDS reads the same way, and takes the number form too.
+    var p = AzureImdsProvider.with_endpoint(String("http://127.0.0.1:18080"))
+    var svc = CapturingService(
+        200, String('{"access_token":"i\\"t","expires_in":3599}')
+    )
+    _refresh_imds(p, svc)
+    assert_equal(p.credential().token, 'i"t')
+
+
+def test_token_response_refusals() raises:
+    _sp_body_refused(
+        String('{"access_token":"x","expires_in":3599'),
+        "ServicePrincipalProvider: the token response is not JSON",
+    )
+    _sp_body_refused(
+        String("access_token=x&expires_in=3599"),
+        "ServicePrincipalProvider: the token response is not JSON",
+    )
+    _sp_body_refused(
+        String('["access_token","x"]'),
+        "the token response is not a JSON object",
+    )
+    _sp_body_refused(
+        String('{"expires_in":3599,"extra":{"access_token":"decoy"}}'),
+        "the token response has no access_token string",
+    )
+    _sp_body_refused(
+        String('{"access_token":42,"expires_in":3599}'),
+        "the token response has no access_token string",
+    )
+    _sp_body_refused(
+        String('{"access_token":"","expires_in":3599}'),
+        "the token response's access_token is empty",
+    )
+    _sp_body_refused(
+        String('{"access_token":"x"}'),
+        "the token response has no expires_in",
+    )
+    _sp_body_refused(
+        String('{"access_token":"x","expires_in":"soon"}'),
+        "the token response's expires_in is not a positive whole number",
+    )
+    _sp_body_refused(
+        String('{"access_token":"x","expires_in":3599.5}'),
+        "the token response's expires_in is not a positive whole number",
+    )
+    _sp_body_refused(
+        String('{"access_token":"x","expires_in":0}'),
+        "the token response's expires_in is not a positive whole number",
+    )
+    _sp_body_refused(
+        String('{"access_token":"x","expires_in":3599,"token_type":"pop"}'),
+        "the token response's token_type is not Bearer",
+    )
+
+
+def test_token_response_refusal_quotes_no_token() raises:
+    var p = _sp_local()
+    var svc = CapturingService(
+        200, String('{"access_token":"SECRET-TOKEN","expires_in":"never"}')
+    )
+    var raised = False
+    try:
+        _refresh_sp(p, svc)
+    except e:
+        raised = True
+        assert_equal(String(e).find("SECRET-TOKEN"), -1, String(e))
+    assert_true(raised, "refresh should have raised")
+
+
 def main() raises:
     test_imds_request_and_cached_token()
     test_imds_user_assigned_identity_sends_client_id()
@@ -270,4 +537,12 @@ def main() raises:
     test_service_principal_grant_on_the_wire()
     test_service_principal_defaults_and_refusals()
     test_near_expiry_is_due_for_refresh()
+    test_login_scheme_must_be_https()
+    test_login_host_charset()
+    test_tenant_id_charset()
+    test_endpoint_rechecked_before_dialing()
+    test_valid_endpoints_and_tenants()
+    test_token_response_json_shapes()
+    test_token_response_refusals()
+    test_token_response_refusal_quotes_no_token()
     print("OK")
