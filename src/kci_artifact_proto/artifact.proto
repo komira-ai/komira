@@ -101,6 +101,29 @@
 //                  <the unit's targets...>, no placeholder, no output
 //                  directory and no manifest (nothing ships).
 //
+// A build system may also declare a third, which makes the checks it owns
+// DERIVED from its build graph when the check runs, rather than listed here:
+//
+//   derive_checks  run first, in the work dir, with the affected command's
+//                  placeholders ({units_file} required): {units_file} is a
+//                  file of `<unit>\t<target>\n` lines for every target of
+//                  every DECLARED unit, of every build system. It prints,
+//                  on stdout, `CHECK <name> <target>` per target of each
+//                  derived check, `UNMATCHED <unit> <target>` per declared
+//                  target that matches nothing in the graph, and exactly one
+//                  verdict line, LAST: `DERIVED <n>` (n the number of
+//                  derived checks; 0 is allowed). The derived checks are
+//                  added after the declared ones, owned by that build
+//                  system, under the file's rules (a name a declared unit
+//                  has is refused). An UNMATCHED artifact target is refused
+//                  (KCI-E-ARTIFACT); an UNMATCHED check target is a notice
+//                  (the package it named is gone). A tool that fails or
+//                  prints anything else is "cannot tell" (KCI-E-AFFECTED).
+//                  Which targets a derived check names, and how they are
+//                  grouped, is the tool's to say; a tool that names every
+//                  target no declared unit names keeps every target of the
+//                  graph in some unit with no edit to this file.
+//
 // kci builds exactly the affected units (every declared unit when any
 // build system's answer is WIDENED), one at a time in file order, artifacts
 // then checks. A non-empty change reaching no unit is refused, and so is an
@@ -170,6 +193,11 @@ message BuildSystem {
   // targets are appended (file header). Optional, except that a check
   // needs its build system to declare it.
   Command build_targets = 5;
+
+  // Derives this build system's checks from its build graph when the
+  // per-change check runs (file header). Optional; a build system that
+  // declares it declares `affected` and `build_targets` too.
+  Command derive_checks = 6;
 }
 
 message Artifact {

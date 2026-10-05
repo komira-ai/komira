@@ -4,7 +4,7 @@
 #
 # The P1 layout: `{ts} {LEVEL} [{module}] {message} {k=v fields}`
 #
-#   2026-10-01T14:32:07.182Z INFO [komira_agent] job abc finished phase=DONE
+#   2026-10-01T14:32:07.182Z INFO [komira_job_supervisor] job abc finished phase=DONE
 #
 # `{message}` is the `fmt` literal with its `{}` placeholders substituted
 # left-to-right by the POSITIONAL rendered args (the structured-positional

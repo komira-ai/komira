@@ -1430,6 +1430,7 @@ impl<'a> AwsLowerer<'a> {
                 // VERBATIM. See `AwsOperationFacts.request_uri`.
                 path_template: request_uri.to_string(),
                 body,
+                additional_bindings: vec![],
             }),
             // `(google.api.routing)` is a gRPC concern; AWS has none.
             routing_rule: None,

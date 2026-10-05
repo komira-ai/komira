@@ -13,15 +13,15 @@
 #   --log-level=info,komira_pg=debug,komira_http=warn
 #       → global default = INFO; module "komira_pg" = DEBUG;
 #         module "komira_http" = WARN.
-#   --log-level=debug,komira_agent.heartbeat=warn
+#   --log-level=debug,komira_job_supervisor.heartbeat=warn
 #       → global default = DEBUG; the dotted module path
-#         "komira_agent.heartbeat" = WARN (longest-prefix wins).
+#         "komira_job_supervisor.heartbeat" = WARN (longest-prefix wins).
 #
 # A bare token with no `=` sets the GLOBAL default. A `key=value` token sets a
 # per-module override. The effective level of a module is the LONGEST matching
 # prefix override, or the global default if none matches. Longest-prefix lets
-# `komira_agent=info` + `komira_agent.heartbeat=warn` coexist: a heartbeat
-# site resolves to WARN (more specific), everything else under komira_agent to
+# `komira_job_supervisor=info` + `komira_job_supervisor.heartbeat=warn` coexist: a heartbeat
+# site resolves to WARN (more specific), everything else under komira_job_supervisor to
 # INFO.
 #
 # Parsed ONCE at init into this struct, which the level gate consults.
@@ -192,8 +192,8 @@ struct EnvFilter(Movable):
         """Resolve a module's effective threshold via longest-prefix match.
 
         A rule `prefix` matches `module` iff `module == prefix` OR `module`
-        starts with `prefix + "."` (dotted-path prefixing — `komira_agent`
-        matches `komira_agent.heartbeat` but NOT `komira_agentx`). The
+        starts with `prefix + "."` (dotted-path prefixing — `komira_job_supervisor`
+        matches `komira_job_supervisor.heartbeat` but NOT `komira_job_supervisorx`). The
         LONGEST matching prefix wins; ties cannot occur (prefixes are distinct
         strings, and a longer match is strictly more specific).
 

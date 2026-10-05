@@ -94,7 +94,7 @@ from kci_reconciler.outputs import (
 from kci_reconciler.fault_domain import (
     FAULT_UNSET,
     FAULT_OURS,
-    FAULT_CUSTOMER,
+    FAULT_USER,
     FAULT_PROVIDER,
     FaultAttribution,
     is_our_responsibility,

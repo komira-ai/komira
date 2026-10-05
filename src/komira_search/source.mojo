@@ -855,9 +855,7 @@ def _read_docstore_blob[
     COMPRESSED bytes (callers wanting the decoded `_source` use
     `read_docstore_source`). Fail-loud bounds-checked."""
     var ext = _docstore_blob_extent(region, slot)
-    return Span[UInt8, o](
-        unsafe_ptr=region.unsafe_ptr() + ext[0], length=ext[1]
-    )
+    return region[ext[0] : ext[0] + ext[1]]
 
 
 def read_docstore_source[
@@ -878,17 +876,18 @@ def read_docstore_source[
     var blob_len = ext[1]
     var uncompressed_len = ext[2]
     # The STORED slot bytes as a borrowed Span tied to the SAME origin `o`.
-    var stored = Span[UInt8, o](
-        unsafe_ptr=region.unsafe_ptr() + blob_off, length=blob_len
-    )
+    var stored = region[blob_off : blob_off + blob_len]
     if flag == Int(DOCSTORE_FLAG_LZ4):
         # An empty blob (uncompressed_len == 0) has an empty stored slot — skip
         # the FFI and return "" (mirrors the builder's empty-blob convention).
         if uncompressed_len == 0:
             return String("")
         var decoded = lz4_decompress(stored, uncompressed_len)
+        # SAFETY: the docstore blob is the verbatim _source the builder wrote
+        # from a String; lz4 returns exactly those bytes.
         return String(StringSlice(unsafe_from_utf8=Span(decoded)))
     # UNCOMPRESSED: the stored bytes ARE the verbatim _source.
+    # SAFETY: as above, the builder wrote these bytes from a String.
     return String(StringSlice(unsafe_from_utf8=stored))
 
 

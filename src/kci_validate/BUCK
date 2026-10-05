@@ -1,7 +1,13 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The validations of a stage's steps (`kci run --stage S`; the machine file
-# declares them on a step, kci_release_machine parses them). One kind today,
+# declares them on a step, kci_release_machine parses them). Two kinds. The
+# ENV kind, CONDA_INSTALL_ENV, installs on the machine that runs kci with no
+# container (a pinned pixi linked into a scratch directory outside the
+# checkout, a cleared environment) and runs each installed library's README
+# examples, made into a program by //tools/build/readme_examples exactly as
+# the welded `[tests][readme]` test is; no network at all is INDETERMINATE
+# (exit 5) with a skip_reason, never a pass. The CONTAINER kind,
 # CONDA_INSTALL_SMOKE: after a PUBLISH step, read the step's channel
 # ANONYMOUSLY (the index lists each pinned file with the build's sha256 and
 # serves those bytes; the absence of a file is waited for, then it fails),
@@ -10,8 +16,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # installed (version, build, sha256 and channel of every record, the
 # compiler's pin, nothing from an undeclared channel), each library's
 # installed payload, and the program's `N of N checks passed`. Every failure
-# is VALIDATION_FAILED (exit 7); there is no skip. Under --plan it runs
-# nothing and reports WOULD_VALIDATE.
+# is VALIDATION_FAILED (exit 7). Under --plan either kind runs nothing and
+# reports WOULD_VALIDATE. Before publishing, an ENV validation can read and
+# install from a LOCAL channel instead (`file:///<dir>`, what `komira_pack
+# conda-index` writes; kci run --channel), through FileChannelTransport.
 #
 # The welded tests drive kci_build's ScriptedRunner as a fake docker (it
 # writes what the container would leave in the mount, and the exact argv is
@@ -31,17 +39,32 @@ mojo_library(
         "//src/kci_release_set:kci_release_set",
         "//src/kci_release_machine:kci_release_machine",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
+        "//tools/build/readme_examples:readme_examples",
     ],
     test_srcs = [
         # the pass; every row of checks 0 to 4 failing on its own, each
         # VALIDATION_FAILED; the wait (absent then listed, 404 then budget
         # spent, 401 at once, another sha256 at once); --plan runs nothing
         "tests/test_conda_install_smoke.mojo",
+        # check 1 alone over a prefix.dev-shaped location: the index URL
+        # (golden), 404 for N polls then listed (the wait and the poll count
+        # reported), 404 past the budget, a 303 followed, the poll log
+        "tests/test_channel_index_wait.mojo",
         # the exact docker argv, the script, pixi.toml and the docker CLI's
         # environment, golden
         "tests/test_install_smoke_container_golden.mojo",
+        # CONDA_INSTALL_ENV over a fake pixi: the pass; each channel,
+        # install and program failure (no network is INDETERMINATE with a
+        # skip_reason, a 401 is a FAIL); RunSpec.cwd is the scratch work dir;
+        # the checkout, system-config and README refusals; a LOCAL file:///
+        # channel read from its directory, and the file transport's refusals
+        "tests/test_conda_install_env.mojo",
+        # the child's whole environment, the pixi argv, the manifest, and
+        # the installed README's program byte-equal to SOURCE mode's, golden
+        "tests/test_install_env_golden.mojo",
     ],
     visibility = ["PUBLIC"],
 )

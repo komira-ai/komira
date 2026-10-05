@@ -1,0 +1,9 @@
+// A fixture whose basename (`thing.min`) is not a Mojo module name, for the
+// refusal of module_names_unrenamed_stem.
+syntax = "proto3";
+
+package example.neg.v1;
+
+message Thing {
+  string name = 1;
+}
