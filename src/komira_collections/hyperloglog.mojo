@@ -17,10 +17,15 @@
 #   - Standard error ~ 1.04 / sqrt(m) ~= 1.6%.
 #   - 64-bit hashing throughout. The high p bits index the register, the
 #     remaining (64 - p) bits feed the leading-zero count + 1 ("rho").
-#   - Bias-corrected estimator: small-range (linear counting) when the
-#     raw HLL estimate falls below 5/2 * m AND there are empty registers,
-#     pure HLL elsewhere. Large-range correction is unnecessary for 64-bit
-#     hashes (the original 32-bit large-range formula is wrong for u64).
+#   - Estimator: Ertl's improved raw estimator (O. Ertl, "New cardinality
+#     estimation algorithms for HyperLogLog sketches", arXiv:1702.01284,
+#     2017, Algorithm 6). It reads the register histogram, accounts for
+#     empty registers and for registers at the maximum value q + 1 inside
+#     the estimate itself, and so needs no switch to linear counting, no
+#     threshold and no empirical bias table. Its error stays near the
+#     standard error over the whole range, including n ~ 5/2 * m where the
+#     original estimator (linear counting below 5/2 * m, raw HLL above)
+#     overestimates by ~1.5% on average.
 #
 # Hash function: a `splitmix64` finalizer. `add_hash` takes a pre-mixed
 # UInt64 hash at face value, so callers can supply whatever upstream hash
@@ -36,7 +41,7 @@
 # `List[UInt64]`, `String` and `HyperLogLog`.
 # =============================================================================
 
-from std.math import log
+from std.math import sqrt
 
 
 # -----------------------------------------------------------------------------
@@ -49,17 +54,13 @@ comptime HLL_NUM_REGISTERS: Int = 1 << HLL_PRECISION  # 4096
 comptime HLL_HASH_REM_BITS: Int = 64 - HLL_PRECISION  # 52
 
 
-@always_inline
-def _alpha_m_squared() -> Float64:
-    """The bias-correction factor a_m * m^2 from Flajolet et al.
+# The largest register value: rho of an all-zero tail, q + 1 in Ertl's
+# notation (q = 64 - p).
+comptime HLL_MAX_REGISTER: Int = HLL_HASH_REM_BITS + 1  # 53
 
-    For p = 12 (m = 4096), a_m = 0.7213 / (1 + 1.079/m), so:
-        a_m  = 0.7213 / (1 + 1.079/4096) = 0.72110997...
-        a_m * m^2 = 0.72110997 * 4096^2 ~= 12098218.9
-    Every operand is a compile-time constant, so the expression folds.
-    """
-    var alpha_m = 0.7213 / (1.0 + 1.079 / Float64(HLL_NUM_REGISTERS))
-    return alpha_m * Float64(HLL_NUM_REGISTERS) * Float64(HLL_NUM_REGISTERS)
+# Ertl's alpha_inf = 1 / (2 ln 2), the limit of the HLL bias constant a_m
+# as m grows. ln 2 is written to the precision a Float64 holds.
+comptime _HLL_ALPHA_INF: Float64 = 1.0 / (2.0 * 0.6931471805599453)
 
 
 # -----------------------------------------------------------------------------
@@ -194,8 +195,8 @@ struct HyperLogLog(Movable, Copyable):
 
     State: 4096 register bytes. Each register holds the largest rho
     observed for any hash that mapped to that register's index. After
-    ingestion, `estimate()` returns a cardinality estimate corrected for
-    small-range bias via linear counting.
+    ingestion, `estimate()` returns a cardinality estimate from the
+    register histogram (Ertl's improved raw estimator).
 
     Memory footprint: 4 KiB (one byte per register), allocated as a
     `List[UInt8]` for safe ownership and cheap copy-construction.
@@ -300,71 +301,87 @@ struct HyperLogLog(Movable, Copyable):
     # -------------------------------------------------------------------------
 
     def estimate(self) -> Int:
-        """Compute the bias-corrected cardinality estimate.
+        """Estimate the number of distinct values added.
 
-        Returns 0 if all registers are empty (no values added). Otherwise
-        applies the standard HLL estimator with linear-counting small-range
-        correction. No large-range correction is needed for 64-bit hashes.
+        Ertl's improved raw estimator (arXiv:1702.01284, Algorithm 6), over
+        the histogram C[k] = number of registers holding k, k = 0 .. q + 1:
+
+            z = m * tau(1 - C[q+1] / m)
+            for k = q down to 1:  z = (z + C[k]) / 2
+            z = z + m * sigma(C[0] / m)
+            E = alpha_inf * m^2 / z
+
+        Returns 0 for an empty sketch. A sketch whose every register is at
+        q + 1 has an unbounded estimate, and a nearly saturated one an
+        estimate above `Int.MAX`; both return `Int.MAX`. (Either takes
+        thousands of hashes with all-zero or near-zero 52-bit tails, or
+        `set_register`.)
+        A register set above q + 1 through `set_register` counts as q + 1.
         """
         var m = HLL_NUM_REGISTERS
-        var num_empty = 0
-        var sum_inv = Float64(0.0)
-        # E = a_m * m^2 / sum_i(2^-M_i)
+        var counts = List[Int](capacity=HLL_MAX_REGISTER + 1)
+        for _ in range(HLL_MAX_REGISTER + 1):
+            counts.append(0)
         for i in range(m):
-            var r = self._registers[i]
-            if r == UInt8(0):
-                num_empty += 1
-                # 2^-0 = 1.0
-                sum_inv += 1.0
-            else:
-                # 2^-r
-                sum_inv += _pow2_neg(Int(r))
+            counts[min(Int(self._registers[i]), HLL_MAX_REGISTER)] += 1
 
-        if sum_inv <= 0.0:
-            # Pathological — should never happen since each register
-            # contributes >= 2^-255. Defensive zero.
+        if counts[0] == m:
             return 0
+        if counts[HLL_MAX_REGISTER] == m:
+            return Int.MAX
 
-        var raw_e = _alpha_m_squared() / sum_inv
-
-        # Small-range correction (linear counting) when raw estimate is
-        # small and we have empty registers. Threshold: 5/2 * m.
-        var small_range_threshold = 2.5 * Float64(m)
-        if raw_e <= small_range_threshold and num_empty > 0:
-            # E* = m * ln(m / V)  where V = number of empty registers
-            var v_f = Float64(num_empty)
-            var m_f = Float64(m)
-            var corrected = m_f * _ln(m_f / v_f)
-            return Int(corrected + 0.5)
-
-        # Pure HLL (no large-range correction needed for 64-bit hashes).
-        return Int(raw_e + 0.5)
+        var m_f = Float64(m)
+        var z = m_f * _ertl_tau(1.0 - Float64(counts[HLL_MAX_REGISTER]) / m_f)
+        for k in range(HLL_MAX_REGISTER - 1, 0, -1):
+            z = 0.5 * (z + Float64(counts[k]))
+        z += m_f * _ertl_sigma(Float64(counts[0]) / m_f)
+        var e = _HLL_ALPHA_INF * m_f * m_f / z
+        # 2^63 is the first Float64 that does not fit in Int.
+        if e + 0.5 >= 9223372036854775808.0:
+            return Int.MAX
+        return Int(e + 0.5)
 
 
 # -----------------------------------------------------------------------------
-# Float helpers
+# Ertl's sigma and tau series
 # -----------------------------------------------------------------------------
 
 
-@always_inline
-def _pow2_neg(exp: Int) -> Float64:
-    """Compute 2^-exp for exp in [1, 64].
+def _ertl_sigma(x_in: Float64) -> Float64:
+    """sigma(x) = x + sum_{k>=1} x^(2^k) * 2^(k-1), for 0 <= x < 1.
 
-    For exp <= 62 the denominator 2^exp fits in a UInt64; for exp > 62
-    it halves a Float64 exp times.
+    Ertl, arXiv:1702.01284, Algorithm 6: the series is summed until adding
+    a term no longer changes the Float64 sum. The caller never passes
+    x = 1 (an empty sketch returns before the estimate is formed).
     """
-    if exp <= 0:
-        return 1.0
-    if exp <= 62:
-        var denom = UInt64(1) << UInt64(exp)
-        return 1.0 / Float64(denom)
-    var v = 1.0
-    for _ in range(exp):
-        v *= 0.5
-    return v
+    var x = x_in
+    var y = 1.0
+    var z = x
+    while True:
+        x = x * x
+        var z_prev = z
+        z += x * y
+        y += y
+        if z == z_prev:
+            return z
 
 
-@always_inline
-def _ln(x: Float64) -> Float64:
-    """Natural log for x > 0, via `std.math.log`."""
-    return log(x)
+def _ertl_tau(x_in: Float64) -> Float64:
+    """tau(x) = (1 - x - sum_{k>=1} (1 - x^(2^-k))^2 * 2^-k) / 3, 0 <= x <= 1.
+
+    Ertl, arXiv:1702.01284, Algorithm 6, summed until the Float64 sum stops
+    changing; tau(0) = tau(1) = 0.
+    """
+    if x_in == 0.0 or x_in == 1.0:
+        return 0.0
+    var x = x_in
+    var y = 1.0
+    var z = 1.0 - x
+    while True:
+        x = sqrt(x)
+        var z_prev = z
+        y *= 0.5
+        var d = 1.0 - x
+        z -= d * d * y
+        if z == z_prev:
+            return z / 3.0

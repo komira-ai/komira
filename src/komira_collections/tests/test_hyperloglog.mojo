@@ -10,11 +10,11 @@
 #     3. the register update: top 12 bits pick the register, rho of the
 #        52-bit tail (leading 1 at bit 51 -> 1, tail 1 -> 52, tail 0 -> 53),
 #        and a register keeps its maximum
-#     4. the estimator's three branches: 100 registers at 1 and the rest
-#        empty is linear counting, round(4096 * ln(4096 / 3996)) = 101;
-#        every register at 1 is pure HLL, round(2 * a_m * 4096) = 5907; one
-#        register empty and the rest at 3 is pure HLL too, because the raw
-#        estimate 23589 is above 5/2 * m, round(a_m * m^2 / 512.875) = 23589
+#     4. the estimator (Ertl's improved raw estimator) on fixed register
+#        states: 100 registers at 1 and the rest empty is 101; every
+#        register at 1 is 5909; one register empty and the rest at 3 is
+#        23597; every register at the maximum 53, or an estimate above
+#        Int.MAX, saturates at Int.MAX; a register set above 53 counts as 53
 #     5. the hashes: FNV-1a-64 of "a" is the published 0xaf63dc4c8601ec8c,
 #        and string, bytes and integer hashing agree on it; the hash of
 #        UInt64 0 is the reference SplitMix64 output for state 0, so a
@@ -26,10 +26,14 @@
 #   Accuracy (standard error 1.04 / sqrt(4096) ~= 1.6%; 5% tolerance):
 #     9. 1k, 100k and 1M distinct values; duplicates do not inflate;
 #        Float64 and String inputs; a batch add equals one-by-one adds
+#   Accuracy across the small-range hand-over:
+#    10. n = 5,000 .. 20,000 step 1,000 over 64 independent hash streams:
+#        |mean relative error| <= 0.75% and rms <= 2.0% at every n
 #   Determinism:
-#    10. the same input gives the same registers in two sketches
+#    11. the same input gives the same registers in two sketches
 # =============================================================================
 
+from std.math import sqrt
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_collections.hyperloglog import (
@@ -128,31 +132,60 @@ def test_register_update() raises:
     assert_equal(touched, 3)
 
 
-def test_estimator_linear_counting_known_answer() raises:
+# The known answers below are Ertl's estimator (arXiv:1702.01284,
+# Algorithm 6) evaluated in Float64 on the stated register histogram:
+# E = m^2 / (2 ln 2) / z, z = m * tau(1 - C[53] / m), then z = (z + C[k]) / 2
+# for k = 52 .. 1, then z += m * sigma(C[0] / m).
+
+
+def test_estimator_mostly_empty_known_answer() raises:
     var hll = HyperLogLog()
     for i in range(100):
         hll.set_register(i, UInt8(1))
-    # 4096 * ln(4096 / 3996) = 101.24...
+    # C[0] = 3996, C[1] = 100: E = 101.226... Linear counting,
+    # 4096 * ln(4096 / 3996) = 101.24..., rounds to the same 101.
     assert_equal(hll.estimate(), 101)
 
 
-def test_estimator_pure_hll_known_answer() raises:
+def test_estimator_all_ones_known_answer() raises:
     var hll = HyperLogLog()
     for i in range(HLL_NUM_REGISTERS):
         hll.set_register(i, UInt8(1))
-    # No empty register: a_m * m^2 / (m / 2) = 2 * a_m * m = 5907.33...
-    assert_equal(hll.estimate(), 5907)
+    # C[1] = 4096: z = 4096 / 2, E = 4096 / ln 2 = 5909.278...
+    # (the a_m-based raw estimate, 2 * a_m * 4096, was 5907).
+    assert_equal(hll.estimate(), 5909)
 
 
-def test_estimator_empty_register_above_threshold_known_answer() raises:
+def test_estimator_one_empty_rest_three_known_answer() raises:
     var hll = HyperLogLog()
     for i in range(1, HLL_NUM_REGISTERS):
         hll.set_register(i, UInt8(3))
-    # One empty register, but the raw estimate is above 5/2 * m = 10240:
-    # sum = 1 + 4095 / 8 = 512.875, a_m * m^2 / sum = 23589.02..., so the
-    # estimator stays pure HLL. Linear counting would give
-    # round(4096 * ln(4096)) = 34070.
-    assert_equal(hll.estimate(), 23589)
+    # C[0] = 1, C[3] = 4095: z = 4095 / 8 + 4096 * sigma(1 / 4096),
+    # E = 23596.777... (the a_m-based raw estimate was 23589).
+    assert_equal(hll.estimate(), 23597)
+
+
+def test_estimator_saturated_is_unbounded() raises:
+    var hll = HyperLogLog()
+    for i in range(HLL_NUM_REGISTERS):
+        hll.set_register(i, UInt8(53))
+    assert_equal(hll.estimate(), Int.MAX)
+    # One register at 52: E = 1.53e20, above Int.MAX, so it saturates too.
+    hll.set_register(0, UInt8(52))
+    assert_equal(hll.estimate(), Int.MAX)
+    # Every register at 40: E = 4096 * 2^40 / (2 ln 2) ~= 3.2e15, in range.
+    for i in range(HLL_NUM_REGISTERS):
+        hll.set_register(i, UInt8(40))
+    assert_true(hll.estimate() < Int.MAX)
+
+
+def test_estimator_clamps_registers_above_maximum() raises:
+    var at_max = HyperLogLog()
+    var above = HyperLogLog()
+    for i in range(10):
+        at_max.set_register(i, UInt8(53))
+        above.set_register(i, UInt8(200))
+    assert_equal(above.estimate(), at_max.estimate())
 
 
 def test_hash_known_answers() raises:
@@ -343,6 +376,72 @@ def test_bytes_and_string_agree() raises:
         from_bytes.add_bytes(bytes)
         from_string.add_hash(hll_hash_string(s))
     _assert_same_registers(from_bytes, from_string)
+
+
+# -----------------------------------------------------------------------------
+# Accuracy across the small-range hand-over
+# -----------------------------------------------------------------------------
+
+# 64 independent streams: stream s ingests the values (s << 32) | i for
+# i = 0, 1, 2, ..., which the splitmix64 finalizer turns into 64 unrelated
+# hash sequences. Each stream is estimated at every grid point it passes.
+comptime HANDOVER_STREAMS: Int = 64
+comptime HANDOVER_GRID_LO: Int = 5000
+comptime HANDOVER_GRID_HI: Int = 20000
+comptime HANDOVER_GRID_STEP: Int = 1000
+comptime HANDOVER_GRID_POINTS: Int = (
+    HANDOVER_GRID_HI - HANDOVER_GRID_LO
+) // HANDOVER_GRID_STEP + 1
+# The standard error is 1.04 / sqrt(4096) ~= 1.63%. The rms over 64 streams
+# has a sampling spread of about 1.63% / sqrt(2 * 64) ~= 0.14%, so 2.0% is
+# more than two spreads above it; the mean has a spread of about
+# 1.63% / sqrt(64) ~= 0.2%, so 0.75% is more than three.
+comptime HANDOVER_RMS_BOUND: Float64 = 0.020
+comptime HANDOVER_MEAN_BOUND: Float64 = 0.0075
+
+
+def test_accuracy_across_small_range_handover() raises:
+    """Relative error stays unbiased and near the standard error for every n
+    from 5,000 to 20,000: the range around m * 5/2 = 10,240 where an
+    estimator that switches from linear counting to the raw HLL estimate
+    hands over."""
+    var sum_err = List[Float64](capacity=HANDOVER_GRID_POINTS)
+    var sum_sq = List[Float64](capacity=HANDOVER_GRID_POINTS)
+    for _ in range(HANDOVER_GRID_POINTS):
+        sum_err.append(0.0)
+        sum_sq.append(0.0)
+    for s in range(HANDOVER_STREAMS):
+        var hll = HyperLogLog()
+        var added = 0
+        for g in range(HANDOVER_GRID_POINTS):
+            var n = HANDOVER_GRID_LO + g * HANDOVER_GRID_STEP
+            while added < n:
+                hll.add_uint64((UInt64(s) << UInt64(32)) | UInt64(added))
+                added += 1
+            var err = Float64(hll.estimate() - n) / Float64(n)
+            sum_err[g] += err
+            sum_sq[g] += err * err
+    var failures = String()
+    for g in range(HANDOVER_GRID_POINTS):
+        var n = HANDOVER_GRID_LO + g * HANDOVER_GRID_STEP
+        var mean = sum_err[g] / Float64(HANDOVER_STREAMS)
+        var rms = sqrt(sum_sq[g] / Float64(HANDOVER_STREAMS))
+        if rms > HANDOVER_RMS_BOUND or abs(mean) > HANDOVER_MEAN_BOUND:
+            failures += (
+                " n="
+                + String(n)
+                + " mean="
+                + String(mean * 100.0)
+                + "% rms="
+                + String(rms * 100.0)
+                + "%;"
+            )
+    assert_equal(
+        failures,
+        String(),
+        "relative error out of bounds (|mean| <= 0.75%, rms <= 2.0%):"
+        + failures,
+    )
 
 
 # -----------------------------------------------------------------------------
