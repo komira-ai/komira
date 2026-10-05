@@ -22,17 +22,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # client; everything else a binary configures arrives as a parameter.
 #
 # The tests are hermetic: test_apigw_v2 (the conversion field by field in
-# both directions, every refusal, and an h1-parsed request as the parity
-# oracle), test_apigw_authorizer (the REQUEST-authorizer event, the simple
-# response, the deny direction pinned four ways), test_pump_flush_ordering
-# (the proxy loop: the drain after the result POST and before the next poll,
-# with a detector on each side, the two failure channels, and the authorizer
-# context reaching a recording dispatcher), test_authorizer_pump (the
-# authorizer loop: three answers, two channels, the same drain position),
-# test_eventbridge_tick (the tick converter, the classifying loop, the
-# mirror-image refusals between the tick and API Gateway converters, and the
-# drain position for that loop) and test_no_env_reads (the package's sources
-# read no environment).
+# both directions, every refusal, the authorizer header prefix's refusals,
+# the same event converted under two prefixes, and an h1-parsed request as
+# the parity oracle), test_apigw_authorizer (the REQUEST-authorizer event,
+# the simple response, the deny direction pinned four ways),
+# test_pump_flush_ordering (the proxy loop: the drain after the result POST
+# and before the next poll, with a detector on each side, the two failure
+# channels, and the authorizer context reaching a recording dispatcher under
+# the prefix the loop is given), test_authorizer_pump (the authorizer loop:
+# three answers, two channels, the same drain position),
+# test_eventbridge_tick (the tick converter, the classifying loop and the
+# prefix its API Gateway arm is given, the mirror-image refusals between the
+# tick and API Gateway converters, and the drain position for that loop) and
+# test_no_env_reads (the package's sources read no environment).
 mojo_library(
     name = "komira_aws_lambda_http",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
