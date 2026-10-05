@@ -77,6 +77,7 @@ def _bytes_to_string(s: Span[UInt8, _]) -> String:
     var buf = List[UInt8]()
     for i in range(len(s)):
         buf.append(s[i])
+    # SAFETY: callers pass bytes of a String the test wrote; they are UTF-8.
     return String(StringSlice(unsafe_from_utf8=Span(buf)))
 
 

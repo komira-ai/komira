@@ -74,12 +74,18 @@ expect_red gcp_client_joined_items 'is not a proto name' tests//negative/mojo_gc
 expect_red gcp_client_no_runtime '`deps` is empty' tests//negative/mojo_gcp_client:no_runtime
 expect_red gcp_client_whole_closure 'with an empty `bundle_only`' tests//negative/mojo_gcp_client:whole_closure
 expect_red gcp_client_label_in_protos 'is not a source path of a `.proto` file' tests//negative/mojo_gcp_client:label_in_protos
+expect_red gcp_client_omit_unknown_field 'message `.example.shop.v1.Item` has no field `colour`' tests//negative/mojo_gcp_client:omit_unknown_field
+expect_red gcp_client_omit_pruned_field 'omit_fields: `example.shop.v1.ItemTombstone.name` is a field of `.example.shop.v1.ItemTombstone`, which this scope does not generate' tests//negative/mojo_gcp_client:omit_pruned_field
 expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/mojo_gcp_client:caller_test_red
 expect_red gcp_client_absence_check 'which must be absent' tests//negative/mojo_gcp_client:absence_check_can_fail
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/mojo_gcp_client:tests_check_can_fail
 expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/mojo_gcp_client:unknown_protocol
 expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/mojo_gcp_client:rest_reaches_plugin
-expect_red gcp_client_rest_streaming_method 'method `WatchItems` is server-streaming' tests//negative/mojo_gcp_client:rest_streaming_method
+expect_red gcp_client_rest_streaming_method 'method `WatchItems` is bidirectional-streaming' tests//negative/mojo_gcp_client:rest_streaming_method
+expect_red gcp_client_module_names_stray 'which this target does not generate' tests//negative/mojo_gcp_client:module_names_stray
+expect_red gcp_client_module_names_not_a_module 'is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_not_a_module
+expect_red gcp_client_module_names_keyword 'gives `example/shop/v1/item.proto` the module `import`, which is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_keyword
+expect_red gcp_client_module_names_unrenamed 'would be generated as module `thing.min`, which is not a Mojo module name: give it one in `module_names`' tests//negative/mojo_gcp_client:module_names_unrenamed_stem
 
 # 23, protoc-gen-mojo's options and text goldens (tests//functional/proto_codegen):
 # each case runs protoc over a corpus with one option string and holds the

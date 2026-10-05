@@ -132,10 +132,10 @@ def write_all_fd(
             + ", which cannot make progress. It must be > 0."
         )
     var off = 0
+    # The Span's origin pins the backing storage alive across every iteration;
+    # `write(2)` copies into the kernel and retains nothing.
     # SAFETY: `payload.unsafe_ptr()` is the caller's own buffer, read-only, and
-    # never escapes this function. The Span's origin pins the backing storage
-    # alive across every iteration; `write(2)` copies into the kernel and
-    # retains nothing. No pointer crosses a module boundary.
+    # never escapes this function. No pointer crosses a module boundary.
     var base = payload.unsafe_ptr()
     while off < total:
         var remaining = total - off

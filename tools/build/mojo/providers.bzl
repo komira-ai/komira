@@ -32,6 +32,10 @@ MojoInfo = provider(fields = {
     "direct_conda": provider_field(typing.Any, default = {}),
     "import_name": provider_field(str),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
+    # The package's README.md (the source artifact), None without one. Its
+    # conda package installs it at share/doc/<conda name>/README.md
+    # (tools/build/package/conda.bzl).
+    "readme": provider_field(typing.Any, default = None),
 })
 
 MojoToolchainInfo = provider(fields = {

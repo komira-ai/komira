@@ -1,0 +1,51 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Regression detection over an abstract series: a change-point detector
+# (E-divisive with a seeded permutation test), an advisory CUSUM chart for
+# slow drift, O(1) running bounds, the state machine over them
+# (ACCUMULATING / NORMAL / ANOMALY / UNCALIBRATED, with an ANOMALY that
+# latches), a post-a-point online monitor, and the `SeriesSource` /
+# `MeasurementStore` seams a producer implements.
+#
+# The empty `deps` is the design: the surface is stated over `Int64`,
+# `Float64` and an opaque `String` key, so a producer on any data model and
+# any storage format can conform to the seams without this package changing.
+# A first `deps` entry would mean the detector started needing to know what a
+# measurement is.
+#
+# The welded tests are pure properties of this library (no fixture files, no
+# host requirement; the recorded calibration series are compiled into the test
+# sources):
+# - test_edivisive: the energy statistic, the split scan's boundaries, and
+#   determinism (golden PRNG stream, seed derivation, a repeated fit).
+# - test_cusum: the robust scale, the three refusals, the short-reference guard.
+# - test_detector_states: every state transition, the latch, and the
+#   activation boundary on both sides.
+# - test_series_source_seam: a `SeriesSource` conformer driven through the
+#   generic `evaluate_source`.
+# - test_known_zero_corpus: ten recorded sweeps of one binary (a known zero),
+#   every published false-positive and power figure asserted by equality.
+# - test_bounds: Welford against the naive estimator, judged-before-folded-in
+#   ordering, the bounded Phase-I prefix, unarmed-is-not-unbreached.
+# - test_online_api: the online verdict equals the batch verdict at every
+#   prefix.
+# - test_store_seam: three store conformers and the replay-after-restart
+#   property.
+# - test_real_launch_series: the advisory CUSUM arm measured on six real
+#   order-preserving known-zero series.
+mojo_library(
+    name = "komira_anomaly",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_bounds.mojo",
+        "tests/test_cusum.mojo",
+        "tests/test_detector_states.mojo",
+        "tests/test_edivisive.mojo",
+        "tests/test_known_zero_corpus.mojo",
+        "tests/test_online_api.mojo",
+        "tests/test_real_launch_series.mojo",
+        "tests/test_series_source_seam.mojo",
+        "tests/test_store_seam.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -242,6 +242,7 @@ def _ref_analyze(text: String, do_lower: Bool, do_fold: Bool) -> AnalyzedField:
                 i += 1
         if len(term_bytes) == 0:
             continue
+        # SAFETY: the oracle mirrors production: UTF-8 cell, whole-sequence fold output.
         var term = String(StringSlice(unsafe_from_utf8=Span(term_bytes)))
         result.tokens.append(Token(term^, position))
         position += 1
@@ -337,6 +338,7 @@ def test_03_latin_fold_scalar_fallback() raises:
     var trunc = List[UInt8]()
     trunc.append(UInt8(97))  # 'a'
     trunc.append(UInt8(0xC3))  # dangling lead at buffer end
+    # SAFETY: deliberately truncated UTF-8: the test is about this byte shape.
     var truncs = String(StringSlice(unsafe_from_utf8=Span(trunc)))
     # analyze with fold ON — both production + oracle must pass the lead through.
     var lf = _cfg(True, True)

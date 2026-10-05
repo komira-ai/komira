@@ -36,7 +36,10 @@
 //! (`xml_codec`, maps included) from the element the operation's
 //! `resultWrapper` names under the root (`komira_aws_core.aws_query_result`,
 //! botocore's `QueryParser`), else from the root itself (ec2Query has no
-//! wrapper). An operation with no output reads nothing.
+//! wrapper). An operation with no output reads nothing. One divergence from
+//! botocore: an empty body is read as an empty element, so a 200 with no
+//! body sets no member, where botocore's `QueryParser` and
+//! `EC2QueryParser` raise a `ResponseParserError` on it.
 //!
 //! Errors: `komira_aws_core.aws_query_error`, which reads
 //! `<ErrorResponse><Error>` and ec2Query's `<Response><Errors><Error>`

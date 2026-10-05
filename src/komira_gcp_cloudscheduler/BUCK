@@ -1,0 +1,79 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# Cloud Scheduler v1: a REST/JSON client generated at build time from the
+# googleapis protos //tools/vendor/googleapis:cloudscheduler_v1 extracts from
+# its pinned archive (nothing of them is copied here). `CloudSchedulerClient`
+# sends through komira_http_client's `HttpClient` over the komira_http_core
+# `Connector` it is given, takes each request's bearer token from a
+# komira_gcp_core `GcpTokenSource`, and raises a non-2xx answer through
+# komira_gcp_core's `gcp_status_error`. It reads no environment.
+#
+# `methods` is what komira's callers use to keep a scheduled call in step
+# with its declaration: read the job (GetJob; NOT_FOUND means absent),
+# create it (CreateJob), converge it in place (UpdateJob, PATCH
+# /v1/{job.name=...} with an update mask naming the fields stated), and
+# delete it (DeleteJob). The service's other methods are not generated. A
+# method joins the list with its own rows in the tests below. None of them
+# returns a long-running operation, and none has a request-id field.
+#
+# `bundle_only` is the part of the cloudscheduler_v1 closure those methods
+# reach: the requests (cloudscheduler), the Job (job), its targets
+# (target), and google.rpc.Status (a job's last attempt status).
+#
+# The client starts at cloudscheduler.googleapis.com, the
+# `google.api.default_host` of the pinned proto, the service's one
+# endpoint; a job's region is part of its name.
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Cloud Scheduler v1 REST reference (no upstream test body is
+# copied), each sending through the generated client over komira_http_core's
+# ScriptedConnector (no socket, no DNS: the wire tests send to localhost):
+# test_cloudscheduler_methods (each method's request line, headers and JSON
+# body byte for byte, the update mask as a query parameter, an UpdateJob
+# with no job refused before the token is asked, and each response
+# decoded), test_cloudscheduler_errors (one google.rpc.Status envelope per
+# method mapped to its code, the body never quoted),
+# test_cloudscheduler_endpoint (the default host read without sending, an
+# override dialled) and test_no_env_reads (no generated module reads the
+# environment, and only the methods above are generated).
+#
+# No test here talks to the service.
+mojo_gcp_client(
+    name = "komira_gcp_cloudscheduler",
+    bundle_only = [
+        "google/cloud/scheduler/v1/cloudscheduler.proto",
+        "google/cloud/scheduler/v1/job.proto",
+        "google/cloud/scheduler/v1/target.proto",
+        "google/rpc/status.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = [
+        "CloudScheduler.CreateJob",
+        "CloudScheduler.DeleteJob",
+        "CloudScheduler.GetJob",
+        "CloudScheduler.UpdateJob",
+    ],
+    proto_deps = ["//tools/vendor/googleapis:cloudscheduler_v1"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        # The whole generated package, so the scan covers every file the
+        # generator writes with no second list of them to drift.
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_cloudscheduler_gen"},
+    },
+    test_srcs = [
+        "tests/test_cloudscheduler_endpoint.mojo",
+        "tests/test_cloudscheduler_errors.mojo",
+        "tests/test_cloudscheduler_methods.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)

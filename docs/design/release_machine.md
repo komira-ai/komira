@@ -156,6 +156,25 @@ The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this
 file by `kci run` itself at start-up under GitHub Actions and by a welded test
 ([docs/ci.md](../ci.md#kciyml-the-release)).
 
+A second validation kind, `CONDA_INSTALL_ENV`, runs on the machine that runs
+kci, with no container. It takes the same fields as `CONDA_INSTALL_SMOKE`
+except `image` and `program`, plus an optional `smoke: README` (the one word,
+and the default): what it runs is each installed library's README examples
+(`share/doc/<name>/README.md`, whose bytes the release pins). An install of a
+metapackage is checked member by member: kci reads the members from the built
+metapackage's own requirements (each at the release's version and build, the
+list equal to the release's libraries, never empty) while `pixi.toml` names
+only the metapackage. `kci run` then takes `--pixi` and `--pixi-sha256`, the
+pinned pixi and its sha256. gamma's two validations are of this kind:
+`install-komira-encoding` (the library alone) and `install-set` (`komira_all`
+alone). Before anything is published, `--channel file:///<dir>` points such a
+run at a local channel that `komira_pack conda-index` wrote from the release
+directory; it is accepted only on a run that selects nothing but
+`CONDA_INSTALL_ENV` validations, and never under GitHub Actions.
+Its one result that is not a pass or a failure: when no declared host answers
+at all (no network), the validation is `INDETERMINATE`, exit 5, never a pass,
+and its row carries a `skip_reason`.
+
 ## Where is the code?
 
 | path | holds |

@@ -103,8 +103,8 @@ def write_chunked(
 
     Encapsulation: takes a borrowed `Span[UInt8, _]` (origin inferred at
     the call site); the public surface carries no `UnsafePointer` and no
-    wildcard origin. Internal `Span(ptr=..., length=...)` reconstruction
-    is confined to this function body.
+    wildcard origin. Each chunk is a slice of `bytes`, so it shares the
+    borrowed origin.
     """
     var n = len(bytes)
     if n == 0:
@@ -112,6 +112,8 @@ def write_chunked(
     if n <= CHUNK_BYTES:
         # Fast path: single-write for sub-chunk payloads. This is the
         # common case (per-batch writes are typically MB, not GB).
+        # SAFETY: the String is a byte carrier for `handle.write`, which
+        # writes the bytes as-is; nothing reads them as UTF-8 text.
         var s = String(unsafe_from_utf8=bytes)
         handle.write(s)
         return
@@ -122,14 +124,10 @@ def write_chunked(
         var end = off + CHUNK_BYTES
         if end > n:
             end = n
-        var chunk_len = end - off
-        # Build a Span over the sub-region. `bytes.unsafe_ptr()` returns
-        # an UnsafePointer scoped to the borrowed origin of `bytes`; the
-        # offset arithmetic stays inside this function (does not cross a
-        # module boundary). The resulting `Span` shares the origin.
-        var chunk = Span(
-            unsafe_ptr=bytes.unsafe_ptr() + off, length=chunk_len
-        )
+        # A slice of `bytes` keeps its origin; no pointer is built.
+        var chunk = bytes[off:end]
+        # SAFETY: as in the fast path, the String only carries bytes to
+        # `handle.write`; a chunk may split a UTF-8 sequence, which is fine.
         var s = String(unsafe_from_utf8=chunk)
         handle.write(s)
         off = end

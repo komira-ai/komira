@@ -252,7 +252,7 @@ trait ResourceDescriptor(Movable, Deinitable):
     def converge_mode(mut self, spec: Self.Spec, live: ResourceStatus) raises -> Int:
         """DEFAULT: CONVERGE_IN_PLACE — the common answer. A conformer that must
         raise a resource-specific refusal for a drift v1 must not act on (an
-        externally-owned bucket, a customer-owned role) OVERRIDES this.
+        externally-owned bucket, a user-owned role) OVERRIDES this.
         The default is the common case, never a claim that
         the uncommon one is unsupported."""
         return CONVERGE_IN_PLACE
@@ -269,7 +269,7 @@ trait ResourceDescriptor(Movable, Deinitable):
 
         The `spec` is here because a descriptor's attribution can legitimately
         depend on WHAT it was asked to build — the same conformer creating a
-        resource in OUR project vs the CUSTOMER's is the case that makes a
+        resource in OUR project vs the USER's is the case that makes a
         per-verb constant insufficient — and a descriptor that does not need it
         simply ignores it."""
         return FAULT_UNSET
