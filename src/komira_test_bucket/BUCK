@@ -16,7 +16,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Deps: komira_test_verdict (the verdict and the SKIP / CANNOT_TELL exits),
 # komira_test_run_id (the run id and the clock), komira_test_minio (the
 # embedded server a bucket can own; it never depends on this package),
-# komira_validation_run (the run-id rule) and komira_libc (`_read_env`,
+# komira_validation_run (the run-id rule) and komira_core_ffi (`_read_env`,
 # for the welded tests' TEST_TMPDIR only).
 #
 # The welded tests are hermetic: in-memory fakes, a scripted process runner,
@@ -25,7 +25,7 @@ mojo_library(
     name = "komira_test_bucket",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_libc:komira_libc",
+        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_test_minio:komira_test_minio",
         "//src/komira_test_run_id:komira_test_run_id",
         "//src/komira_test_verdict:komira_test_verdict",
