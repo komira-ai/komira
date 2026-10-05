@@ -62,8 +62,9 @@ A contributor runs the same three commands on any client. A green local
 prove, dead Markdown links included (`//:docs`).
 
 Publishing is not part of this job. It is a separate workflow,
-[kci.yml](#kciyml-the-release), whose only job on a pull request is the
-per-change check `pr`; its release jobs never run for one.
+[kci.yml](#kciyml-the-release), which has no `pull_request` trigger: a pull
+request's own check is [pr.yml](#pryml-the-pull-requests-check) (the check
+`pr / check`), so a pull request never shows a skipped release job.
 
 ## The runner
 
@@ -217,7 +218,9 @@ can start a scratch daemon or clone and are still to be analysed.
 packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
 It is written by hand. The stages are owned by the release machine,
 [`release/machine.textproto`](../release/machine.textproto): `build`, then
-`gamma`, then `prod`, and `pr`, the per-change check of a pull request. The workflow runs one job per stage, named for its
+`gamma`, then `prod`, and `pr`, the per-change check of a pull request, which is
+the one job of [`pr.yml`](#pryml-the-pull-requests-check), not of this file. The
+workflow runs one job per stage (but `pr`), named for its
 stage, running in the stage's GitHub environment and running exactly one
 `kci run --stage <its name>`, except that `gamma` is split over two jobs:
 `gamma` runs its step (`--only step:publish`) and `validate` its two
@@ -231,7 +234,6 @@ convention (its one default path), so no line of the workflow names it.
 | `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
 | `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`), no environment, `contents: read` only | downloads the platform table's linux-x86_64 pixi pin (its URL and sha256 are the job's `PIXI_URL` and `PIXI_SHA256`, held to the table by `test_repo_kci_yml`) and keeps it only at that sha256, then `kci run --stage gamma --only validation:install-komira-encoding --only validation:install-set --pixi <that file> --pixi-sha256 "$PIXI_SHA256"`: what `gamma` published, installed from the channel the way a consumer gets it, on the runner with no container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
 | `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
-| `pr` (the check `kci / pr`) | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), no environment, `contents: read` + `id-token: write` (for the tailnet only) | a pull request from a branch of this repository only (a fork's runs nothing): builds `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
 is published to each channel: it is never rebuilt. `build.set_hash`,
@@ -258,7 +260,7 @@ value, and the release's `release_produced_by` names the one build run.
   farm-connected, one `kci run` per job with `--summary-file`, `--only` only
   in a split stage whose jobs run all of it once (a validations-only job has
   no environment, no identity token, and needs the stage's own job), a
-  `pull_request` trigger only the PULL_REQUEST stage's job answers (rule R6),
+  `pull_request` trigger and no job for the PULL_REQUEST stage (rule R6),
   a `revision` input, every `uses:` pinned,
   `farm-connect` exactly on farm-connected stages). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
   finding listed, nothing run); an unreadable workflow or channels file, or a
@@ -267,35 +269,14 @@ value, and the release's `release_produced_by` names the one build run.
   fails `./buck2 build //...`. Consequence: a revision whose machine file
   disagrees with the running `kci.yml` cannot be released by it (a manual run
   of an old revision is refused, exit 3).
-- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`)
-  release; a pull request to `main` runs the job `pr` and nothing else.
-  Every release job's `if:` keeps a pull request out
-  (a top-level `&&` conjunction with the term
-  `github.event_name != 'pull_request'`, or prod's manual-run condition;
-  grouping, negation, a call or a partial `${{ }}` is refused), so
-  no environment, publishing token or release job is reached from a pull
-  request's code. The `pr` job's condition
-  (`github.event.pull_request.head.repo.full_name == github.repository`)
-  keeps a fork's code off the farm: a fork's run gets no tailnet credential,
-  and a maintainer reads the change and pushes it to a branch here. Both
-  conditions are written bare or as exactly `${{ <condition> }}`: a block
-  scalar (`if: |`) holding `${{`, or whitespace inside quotes around it,
-  makes GitHub read the `if:` as a format string, which is always true.
-  The `pr` job runs on `runs-on: ubuntu-24.04`, written as that plain
-  scalar: a fresh GitHub-hosted machine. A self-hosted label, a label list, a
-  runner group, an expression (`${{ vars.X }}`, a fork-conditional) or a
-  quoted value is refused, so a pull request's code never reaches a runner
-  that keeps state between jobs.
-  The push trigger is exactly `branches: [main]`: with no branch filter,
-  another pattern, `branches-ignore`, `tags` or a path filter, a push to a
-  pull request's head branch would run the release jobs, and
-  `github.event_name != 'pull_request'` holds for a push. The `pr` job has
-  its own `permissions:` (`contents: read`, `id-token: write` for the
-  tailnet only), so it never gets the workflow-level permissions or the
-  repository's default token, and no stored secret reaches it: no value of
-  that job, nor of the workflow-level `env:`, names the `secrets` context
-  other than `secrets.GITHUB_TOKEN`.
-  Rule R6 of `src/kci_ci_check` holds all of it.
+- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`), and
+  nothing else: kci.yml has **no `pull_request` trigger** (one added is refused
+  by rule R6, as is `pull_request_target` and every other event), so a pull
+  request never starts it and never shows a skipped gamma, validate, prod or
+  build job. No environment, publishing token or release job is reached from
+  a pull request's code. The push trigger is exactly `branches: [main]`.
+  Rule R6 of `src/kci_ci_check` holds all of it, and holds pr.yml to the pull
+  request's check alone (next section).
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
   the run started on). Every job checks it out, kci refuses a checkout whose
@@ -494,6 +475,29 @@ nested flow item; `---`, `...` and `%` directives. actionlint
 rule, not a style: a spelling found to read one way to kci and another to
 GitHub is answered by keeping it outside the subset, and each such spelling
 is a row of `src/kci_ci_check/tests/test_workflow_subset.mojo`.
+
+
+## pr.yml: the pull request's check
+
+[`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is the machine file's
+`pr` stage and nothing else: workflow `pr`, one job `check`, so the status check
+is **`pr / check`**. It is written by hand and held to the machine file the way
+kci.yml is (rule R6 of `src/kci_ci_check/rules.mojo`, `check_pull_request_workflow`):
+`kci run --stage pr` reads the file it runs under (`GITHUB_WORKFLOW_REF`) and
+holds it to the pull request's rules (a run of any other stage holds its file
+to the release workflow's), and the welded test
+`src/kci_ci_check/tests/test_repo_kci_yml.mojo` reads both files on every build.
+
+| | |
+|---|---|
+| trigger | `pull_request` alone: no push, manual run, `pull_request_target`, `workflow_run` or any other event |
+| job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
+| runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
+| permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
+| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
+| every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
+
+The repository's branch settings require the check **`pr / check`**.
 
 ## merge-from-live (not yet running)
 

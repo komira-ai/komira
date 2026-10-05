@@ -3,9 +3,11 @@
 # stage, every step of it in order (`--only step:<name>` runs a selection, which
 # is reported as SELECTIVE, never as a full run). kci reads THIS path by
 # convention (release/machine.textproto); `--machine <path>` overrides it.
-# .github/workflows/kci.yml runs each stage as the job of the same name, in the
-# stage's GitHub environment (the pr stage in none). kci holds that workflow to this file at start-up
-# under GitHub Actions, and the welded test
+# .github/workflows/kci.yml runs each stage but `pr` as the job of the same name,
+# in the stage's GitHub environment; the `pr` stage is the one job (`check`) of
+# .github/workflows/pr.yml, in none. kci holds the workflow it runs under to this
+# file at start-up under GitHub Actions (a run of the pr stage: pr.yml; any other
+# stage: kci.yml), and the welded test
 # src/kci_ci_check/tests/test_repo_kci_yml.mojo does the same on every build, so
 # a drift fails `./buck2 build //...`. This file owns the stages: edit both
 # together.
@@ -51,7 +53,9 @@
 #          the units of release/artifacts.textproto (its artifacts and
 #          checks) that the change reaches, as each build system's
 #          `affected` command says, and ships nothing. It is the only job of
-#          kci.yml that runs on a pull request, and only for a pull request
+#          pr.yml (the required check `pr / check`), which has no other
+#          trigger and no other job; kci.yml has no pull_request trigger. It
+#          runs only for a pull request
 #          from a branch of this repository (a fork's runs nothing). No
 #          environment, no publishing step; FARM-CONNECTED, like build, so its
 #          identity token is the farm connection's only. It runs after no
