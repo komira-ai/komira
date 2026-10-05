@@ -296,7 +296,18 @@ channel answers NOOP (exit 0).
   (rule R22). So `validate` validates FOR REAL on every push: a `validate`
   that ran `--plan` on a push (the earlier `github.event_name !=
   'workflow_dispatch' || inputs.dry_run`) would let `prod` publish what
-  nothing installed.
+  nothing installed. A release job's script also names `DRY_RUN` only in
+  that line and in the revision check (no shell assignment, no `export`),
+  and names `GITHUB_ENV` nowhere: a line a step writes there sets a
+  variable for every later step of its job, over the workflow's `env:`
+  (a `with: script:` calling `exportVariable` is refused the same way).
+  Those are lint rules a script could spell around. **The lock is kci**,
+  which on a push is built from `main`: it refuses `--plan` on a push to
+  `refs/heads/main` for every stage (exit 3, `KCI-E-PLAN-ON-RELEASE`), and
+  its result carries a `set_hash` only for a run that is not `--plan` and,
+  when it selects validations, whose every validation VALIDATED and
+  SUCCEEDED. `validate`'s `validated_set_hash` comes from that field, so a
+  dry run hands `prod` nothing, and `prod` refuses an empty hash.
 - **Queued runs: one release at a time, newest push wins.** A PUSH to `main`
   is in the concurrency group `kci-release-main` (rule R16 holds the group
   text byte for byte). A running release is never cancelled. GitHub keeps at
@@ -314,12 +325,14 @@ channel answers NOOP (exit 0).
   `kci-plan-<run id>` (it writes nothing), any other manual run in
   `kci-ref-<ref name>`. A pull request's runs are one group per pull request
   (a newer push cancels the older check).
-  - ⚠ **A RE-RUN of an old run of `main` is a push run** and joins
+  - ⚠ **A RE-RUN of an old PUSH run of `main` is a push run** and joins
     `kci-release-main`: it can replace a pending release, and then releases
     an older revision (prod refuses it, `KCI-E-SUPERSEDED`, or answers
     NOOP). Never re-run an old run of `main` while a release is pending. If
     one did replace a pending push, re-run the newest cancelled run of
-    `main`.
+    `main`. A re-run of a MANUAL run is a manual run, and a re-run of any
+    run uses that run's own `kci.yml` and `kci`: see
+    [Re-runs of runs from before auto-promotion](#re-runs-of-runs-from-before-auto-promotion-a-ceo-action).
   - `prod`'s last step says when `main` has moved past what it released
     (`prod: main is at <tip>, past <revision>: a newer run is pending, or
     was replaced or cancelled; if none is queued, re-run the newest
@@ -368,6 +381,57 @@ channel answers NOOP (exit 0).
   above. Whether `prod` is paused is not read by any job (it would need
   `actions: read`, which no job holds); the environment's page says so.
 
+### Re-runs of runs from before auto-promotion: a CEO action
+
+GitHub runs a re-run against the original run's `GITHUB_SHA` and
+`GITHUB_REF`, so it uses `kci.yml` exactly as committed at that commit
+(GitHub's documentation, "Re-running workflows and jobs"), and a run can be
+re-run for up to 30 days. "Re-run failed jobs" also reuses the run's own
+`kci-release-<revision>` artifact, so its `kci` binary too (kept 14 days;
+"Re-run all jobs" rebuilds it from the same commit). Every `kci.yml` on
+`main` before this one runs `prod` on `if: github.event_name ==
+'workflow_dispatch'`, and the `kci` of those commits has no
+`KCI-E-SUPERSEDED` and no `KCI-E-PLAN-ON-RELEASE` check. So a re-run of a
+MANUAL run of `main` started before this file merged is a way into `prod`
+that is not a push to `main`, and can publish an older build there. Its
+`gamma` job also runs in the environment `gamma` from a manual run, with no
+break-glass reason and no reviewer. Neither `kci.yml` nor `kci` can refuse
+it: the re-run runs neither of them as they are now.
+
+The runs, read on 2026-10-05 (`gh api
+repos/komira-ai/komira/actions/workflows/kci.yml/runs -f
+event=workflow_dispatch`; the only two such runs of `kci.yml`):
+
+| run | ref, commit | started | what a re-run reaches |
+|---|---|---|---|
+| `37239801770` | `main`, `6e843fe6e` | 2026-10-04 22:22Z | `prod` (its `prod` job printed `PUBLISH: the release is written to komira-ai/prod` and was cancelled in `kci run --stage prod`) |
+| `37238572861` | `main`, `6e843fe6e` | 2026-10-04 22:04Z | `gamma` in the environment `gamma`, then `prod` |
+
+**Any manual run of `main` started before this file merges adds a row.**
+Every PUSH run before it ran a `kci.yml` whose `prod` job is manual-only
+(checked for all 45 push runs of `kci.yml` on 2026-10-05), so re-running
+one never reaches `prod`.
+
+**The action (CEO), one of the two, before or when this merges:**
+
+1. **Delete those runs.** List every manual run of `kci.yml` on `main`
+   started before the merge, and delete each one (Actions -> the run ->
+   "Delete workflow run", or `gh run delete <id>`). A deleted run cannot be
+   re-run:
+
+       gh run list --workflow kci.yml --event workflow_dispatch --branch main --limit 100
+       gh run delete 37239801770
+       gh run delete 37238572861
+
+   Do not start a manual run of `main` between the deletion and the merge;
+   if one is started, delete it too.
+2. **Or pause `prod` until the last of them expires**: add a required
+   reviewer to the `prod` environment (see [Pausing promotion to
+   prod](#pausing-promotion-to-prod)) until 30 days after the last manual
+   run of `main` started before the merge (for the two runs above, until
+   2026-11-04), and reject any `prod` job whose run is a
+   `workflow_dispatch`. Every release waits for that reviewer meanwhile.
+
 ### Pausing promotion to prod
 
 **Pausing promotion to prod.** Settings -> Environments -> `prod` -> Required
@@ -402,11 +466,11 @@ channel trusts `gamma-breakglass` as a second trusted publisher
 publishes a break-glass run only from it (`KCI-E-STAGE-ENVIRONMENT`
 otherwise). The input `reason` is required; it reaches kci only through each
 job's `env:` (`--context reason=...`), never inside a `run:` script (rule
-R18; nor in a step's or job's `name:` or a `with: script:`), and kci refuses
-a break-glass run without one, with one that is only whitespace, or with
-one over 200 bytes once trimmed (exit 3, `KCI-E-BREAK-GLASS-REASON`). A
-break-glass run that can publish releases the commit it started on: a
-`revision` input is for a dry run only, on the history of that commit. Every job's summary of such a run
+R18; nor in a `with: script:`, and no step's or job's `name:` holds any
+expression at all), and kci refuses a break-glass run without one, with
+one that is only whitespace, or with one over 200 bytes once trimmed
+(exit 3, `KCI-E-BREAK-GLASS-REASON`). A break-glass run that can publish
+releases the commit it started on: a `revision` input is for a dry run only, on the history of that commit. Every job's summary of such a run
 starts `BREAK-GLASS: <ref> <revision> by <actor>: <reason>`.
 
 **What is the lock, and what is not.** A pull request's run uses the
@@ -476,6 +540,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
 | setting | value | what it locks |
 |---|---|---|
 | environment `prod`, deployment branches | Selected: `main` | only `main` publishes to prod (already set) |
+| manual runs of `main` started before this file merged (`37239801770`, `37238572861`, and any later one) | deleted, before or when this merges; or a required reviewer on `prod` until 30 days after the last of them | a re-run of one runs the OLD `kci.yml` (prod on any manual run) and the old `kci`, which nothing here can refuse ([Re-runs of runs from before auto-promotion](#re-runs-of-runs-from-before-auto-promotion-a-ceo-action)) |
 | environment `gamma`, deployment branches | Selected: `main` | only `main` publishes to gamma without break-glass |
 | environment `gamma-breakglass` (FIRST: before the next row) | any branch, **required reviewer**, **Prevent self-review**. It may already exist, auto-created by GitHub with no protection: confirm the reviewer rule is on it | every break-glass publish waits for a recorded approval by a second person (for a run of an unmodified `kci.yml` the reason is recorded too; for any other run, the reviewer refuses it) |
 | prefix.dev `komira-ai/gamma`, trusted publishers (ONLY AFTER `gamma-breakglass` shows a required reviewer) | `komira-ai/komira`, `kci.yml`, environment `gamma`, AND a second one for environment `gamma-breakglass` | a break-glass run can publish to gamma at all (without it, every break-glass publish is refused by prefix.dev) |

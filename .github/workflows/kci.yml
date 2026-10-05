@@ -57,9 +57,12 @@
 #          installed library's README examples. It holds no identity token, so it
 #          cannot publish; a failed validation is exit 7, no network at all
 #          exit 5, and prod does not start. On a push it validates FOR REAL
-#          (R22: a push is never a dry run). Its output
+#          (R22: a push is never a dry run; kci itself refuses `--plan` on a
+#          push to main, KCI-E-PLAN-ON-RELEASE). Its output
 #          `validated_set_hash` (read from its own kci result) is what prod
-#          publishes.
+#          publishes; kci writes a set hash there only for a run that is
+#          not a dry run and whose two validations both VALIDATED and
+#          SUCCEEDED, so a dry run's validate hands prod nothing.
 #   prod   the same as gamma, after gamma AND validate, in the GitHub
 #          environment `prod`, to prefix.dev komira-ai/prod. It runs only on
 #          a PUSH to main (`github.event_name == 'push' && github.ref ==
@@ -123,9 +126,14 @@
 # one group per pull request, a newer push cancelling the older check.
 # GitHub compares the group's `github.ref` ignoring case, so a push of a
 # branch `MAIN` would join it too: the repository ruleset that refuses such
-# branches (docs/ci.md) is what keeps them out. A RE-RUN of an old run of
-# main is a push run and joins `kci-release-main`: never re-run one while
-# a release is pending (docs/ci.md, "Queued runs").
+# branches (docs/ci.md) is what keeps them out. A RE-RUN of an old PUSH
+# run of main is a push run and joins `kci-release-main`: never re-run one
+# while a release is pending (docs/ci.md, "Queued runs"). ⚠ A re-run runs
+# the workflow file AS COMMITTED AT ITS RUN'S COMMIT, with that run's own
+# kci: a re-run of a MANUAL run of main started before this file was on
+# main runs the old file, whose prod job ran on any manual run of main.
+# Nothing in this file or in kci can refuse that; the CEO action in
+# docs/ci.md ("Re-runs of runs from before auto-promotion") closes it.
 #
 # BREAK-GLASS. Every manual run (of a branch, or of main) is break-glass:
 # it publishes its revision to GAMMA ONLY: build, gamma and validate are
@@ -146,7 +154,7 @@
 # recorded in every job's summary (`BREAK-GLASS: <ref> <revision> by
 # <actor>: <reason>`); kci refuses a break-glass run without one
 # (KCI-E-BREAK-GLASS-REASON). The reason reaches kci only through a job's
-# `env:`, never inside a `run:` (R18).
+# `env:`, never inside a `run:`, and no `name:` holds any expression (R18).
 #
 # THE REVISION. Everything a run builds and publishes is the commit REVISION:
 # the pushed commit, or a manual run's input `revision` (a full commit id; empty
@@ -163,7 +171,11 @@
 # `refs/remotes/origin/main`'s history on a push to main).
 #
 # DRY RUN. A push is a real run, validate included (R22: DRY_RUN is set
-# once, in this file's `env:`, from the manual run's input alone). A manual
+# once, in this file's `env:`, from the manual run's input alone; no
+# release job's script names DRY_RUN outside its plan line and the revision
+# check, or GITHUB_ENV at all, which would re-set it for later steps). The
+# lock is kci, built from main on a push: it refuses `--plan` on a push to
+# main (KCI-E-PLAN-ON-RELEASE). A manual
 # run is a real (break-glass) run unless its input dry_run is true (`kci run
 # --plan`: every check and the channel's reads; nothing written to a
 # channel). Under CI a dry run also asks GitHub for the job's ID token and
@@ -561,9 +573,17 @@ jobs:
             --result-file "$RUNNER_TEMP/kci-result-validate.json" \
             --summary-file "$GITHUB_STEP_SUMMARY" "$@"
       # The set kci recomputed and validated, from its result: prod's input.
+      # kci writes it only for a run that is not a dry run and whose
+      # validations all VALIDATED and SUCCEEDED; a dry run's result has none,
+      # and the output stays empty (prod runs only on a push, never a dry
+      # run, and refuses an empty hash).
       - name: the validated set hash
         id: validated
         run: |
+          if [ "$(jq -r '.plan' "$RUNNER_TEMP/kci-result-validate.json")" != false ]; then
+            echo "a dry run validates nothing: no validated set hash is handed on"
+            exit 0
+          fi
           h=$(jq -r '.set_hash' "$RUNNER_TEMP/kci-result-validate.json")
           case "$h" in
             *[!0-9a-f]*|"") echo "the validation's result holds no set hash ('$h')"; exit 1 ;;
