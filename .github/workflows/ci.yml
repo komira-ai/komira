@@ -24,10 +24,10 @@
 # alone and reads no secret.
 #
 # A pull request from a fork gets no OIDC token and no repository variables, so
-# it cannot reach the farm: the `build` job is skipped for it and the
-# `fork-advisory` job runs the lints that need no farm. A maintainer who has
-# read the change pushes it to a branch of this repository for the farm build.
-# There is no pull_request_target workflow here, on purpose.
+# it cannot reach the farm: the `build` job is skipped for it and no farm job
+# runs. A maintainer who has read the change pushes it to a branch of this
+# repository for the farm build. There is no pull_request_target workflow
+# here, on purpose.
 name: ci
 
 on:
@@ -51,7 +51,7 @@ jobs:
   build:
     # Fork pull requests get neither the OIDC token nor the repository
     # variables, so the farm job is for this repository's own runs; a fork's
-    # pull request gets the farm-less job below.
+    # pull request runs no job.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -84,36 +84,6 @@ jobs:
       # --keep-going: one run lists every red positive target.
       - name: ./buck2 build tests//functional/...
         run: ./buck2 build --keep-going tests//functional/...
-      - name: Stop buck2
-        if: always()
-        run: ./buck2 kill || true
-
-  # For a pull request from a fork, which cannot reach the farm (see the top of
-  # this file). No tailnet, no id-token, no variable: the lints of the files a
-  # fork changes that build and run on the runner itself. It is NOT the farm
-  # verdict: `build` is skipped for a fork, and the summary says so.
-  fork-advisory:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: the farm build was not run
-        run: |
-          echo "::warning title=no farm build::this pull request comes from a fork, which cannot reach the build farm. A maintainer must read the change and push it to a branch of this repository to get the farm build."
-          {
-            echo "### No farm build"
-            echo
-            echo "This pull request comes from a fork, and a fork's workflow run gets no tailnet credential, so the \`build\` job was skipped. The checks below are the lints that need no farm. A maintainer reads the change (\`.github/\` and \`tools/\` included) and pushes it to a branch of this repository to get the farm build."
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Built on this runner (no farm configured, so buck2 builds locally): the
-      # linters are pinned downloads.
-      - name: the lints that need no farm
-        run: ./buck2 build //:shell_lint //:workflow_lint //:action_pins //:push_verdicts //:no_endpoint
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
