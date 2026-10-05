@@ -646,7 +646,9 @@ def test_reserved_now_built_later_numbers_are_undeclared() raises:
     _same(encode_proto(decode_proto[Service](sb.copy())), shead, "Service 13")
     for n in range(50, 53):
         var sx = shead.copy()
-        _empty(sx, n)
+        # A NON-EMPTY payload: an empty one would decode as a declared
+        # field's zero value and re-encode to nothing, hiding it.
+        _str(sx, n, "x")
         _same(
             encode_proto(decode_proto[Service](sx.copy())),
             shead,
@@ -660,7 +662,9 @@ def test_reserved_now_built_later_numbers_are_undeclared() raises:
     _same(encode_proto(decode_proto[Job](jb.copy())), jhead, "Job 8")
     for n in range(50, 53):
         var jx = jhead.copy()
-        _empty(jx, n)
+        # A NON-EMPTY payload: an empty one would decode as a declared
+        # field's zero value and re-encode to nothing, hiding it.
+        _str(jx, n, "x")
         _same(
             encode_proto(decode_proto[Job](jx.copy())),
             jhead,
