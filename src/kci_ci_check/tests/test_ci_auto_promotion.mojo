@@ -71,6 +71,8 @@ comptime _VAL_PLAN: String = (
     "          \"$RUNNER_TEMP/kci/kci\" run --stage gamma \\\n"
     "            --only validation:install-komira-encoding"
 )
+comptime _GAMMA_RV_STEP: String = "      # kci compares this with every package before any request.\n      - name: release_version.sh\n"
+"""gamma's release_version.sh step, by the comment only gamma's carries."""
 comptime _REV_EQ: String = "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
 
 
@@ -155,6 +157,12 @@ def _rows() -> List[_Row]:
     r.append(_wf(String("13d inputs.reason in a step's name"), String(_VAL_KCI_STEP), String("      - name: validate ${{ inputs.reason }}\n"), _FINDING, String("job 'validate': R18: a `name:` holds `${{ inputs.reason }}`")))
     r.append(_wf(String("13e github.event.inputs.reason in a job's name"), String(_GAMMA_HEAD), String(_GAMMA_HEAD) + String("    name: gamma ${{ github.event.inputs.reason }}\n"), _FINDING, String("job 'gamma': R18: a `name:` holds")))
     r.append(_wf(String("13f inputs.reason in a github-script `with: script:`"), String(_VAL_KCI_STEP), String("      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1\n        with:\n          script: core.info('${{ inputs.reason }}')\n") + String(_VAL_KCI_STEP), _FINDING, String("job 'validate': R18: a `with: script:` holds `${{ inputs.reason }}`")))
+    # a name is shown, never run: EVERY expression in a name is refused, in any accessor form
+    r.append(_wf(String("13g inputs['reason'] in gamma's release_version.sh step (probe P2)"), String(_GAMMA_RV_STEP), String(_GAMMA_RV_STEP).replace(String("name: release_version.sh"), String("name: release_version.sh ${{ inputs['reason'] }}")), _FINDING, String("job 'gamma': R18: a `name:` holds `${{ inputs['reason'] }}`")))
+    r.append(_wf(String("13h toJSON(inputs) in a job's name"), String(_GAMMA_HEAD), String(_GAMMA_HEAD) + String("    name: gamma ${{ toJSON(inputs) }}\n"), _FINDING, String("job 'gamma': R18: a `name:` holds `${{ toJSON(inputs) }}`")))
+    r.append(_wf(String("13i github['event'] in a step's name"), String(_VAL_KCI_STEP), String("      - name: validate ${{ github['event']['inputs']['reason'] }}\n"), _FINDING, String("job 'validate': R18: a `name:` holds")))
+    r.append(_wf(String("13j format('{0}', inputs) in a step's name"), String(_VAL_KCI_STEP), String("      - name: validate ${{ format('{0}', inputs) }}\n"), _FINDING, String("job 'validate': R18: a `name:` holds")))
+    r.append(_wf(String("13k any expression in a name, even github.run_id"), String(_VAL_KCI_STEP), String("      - name: validate ${{ github.run_id }}\n"), _FINDING, String("job 'validate': R18: a `name:` holds `${{ github.run_id }}`")))
     # ---- R19 the set hash ------------------------------------------------------------------------
     r.append(_wf(String("14 prod's hash from build"), String(_PROD_HASH_ENV), String("      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n"), _FINDING, String("job 'prod': R19: its `env:` sets RELEASE_SET_HASH to exactly `${{ needs.validate.outputs.validated_set_hash }}`")))
     r.append(_wf(String("14b prod's hash from gamma"), String(_PROD_HASH_ENV), String("      RELEASE_SET_HASH: ${{ needs.gamma.outputs.set_hash }}\n"), _FINDING, String("job 'prod': R19: its `env:` sets RELEASE_SET_HASH")))
@@ -189,6 +197,13 @@ def _rows() -> List[_Row]:
     r.append(_wf(String("21f validate runs --plan whatever the run"), String(_VAL_PLAN), String(_VAL_PLAN).replace(String("--only validation:install-komira-encoding"), String("--plan --only validation:install-komira-encoding")), _FINDING, String("job 'validate': R22: a script holds")))
     r.append(_wf(String("21g an unconditional set -- --plan"), String(_VAL_PLAN), String(_VAL_PLAN).replace(String("if [ \"$DRY_RUN\" = true ]; then set -- --plan; fi"), String("set -- --plan")), _FINDING, String("job 'validate': R22: a script holds `set -- --plan`")))
     r.append(_wf(String("21h DRY_RUN in another case is DRY_RUN"), String(_WF_DRY), String("  DRY_RUN: ${{ GitHub.Event_Name == 'WORKFLOW_DISPATCH' && Inputs.Dry_Run }}\n"), _CLEAN, String("")))
+    # nothing re-sets DRY_RUN for a later step or line (probe P1: a GITHUB_ENV write overrides the workflow's env:)
+    r.append(_wf(String("21i a step writes DRY_RUN to GITHUB_ENV before validate's kci (probe P1)"), String(_VAL_KCI_STEP), String("      - name: tidy\n        run: echo \"DRY_RUN=true\" >> \"$GITHUB_ENV\"\n") + String(_VAL_KCI_STEP), _FINDING, String("job 'validate': R22: a script names GITHUB_ENV")))
+    r.append(_wf(String("21j a GITHUB_ENV write of another variable"), String(_GAMMA_RV_STEP), String("      - name: pin\n        run: echo \"REVISION=$GITHUB_SHA\" >> $GITHUB_ENV\n") + String(_GAMMA_RV_STEP), _FINDING, String("job 'gamma': R22: a script names GITHUB_ENV")))
+    r.append(_wf(String("21k a GITHUB_ENV write in the brace form, in prod"), String(_MAIN_STEP), String(_MAIN_STEP) + String("      - name: pin\n        run: printf 'RELEASE_SET_HASH=%s\\n' x >> \"${GITHUB_ENV}\"\n"), _FINDING, String("job 'prod': R22: a script names GITHUB_ENV")))
+    r.append(_wf(String("21l a shell assignment of DRY_RUN before the plan line"), String(_VAL_PLAN), String("          DRY_RUN=true\n") + String(_VAL_PLAN), _FINDING, String("job 'validate': R22: a script names DRY_RUN outside")))
+    r.append(_wf(String("21m export DRY_RUN in a step of its own"), String(_MAIN_STEP), String(_MAIN_STEP) + String("      - name: mode\n        run: export DRY_RUN=true\n"), _FINDING, String("job 'prod': R22: a script names DRY_RUN outside")))
+    r.append(_wf(String("21n a github-script exportVariable"), String(_VAL_KCI_STEP), String("      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1\n        with:\n          script: core.exportVariable('DRY_RUN', 'true')\n") + String(_VAL_KCI_STEP), _FINDING, String("job 'validate': R22: a `with: script:` sets an environment variable")))
     # ---- R2 the break-glass environment ----------------------------------------------------------
     r.append(_wf(String("20 gamma in its own environment on every run"), String(_GAMMA_ENV), String("    environment: gamma\n"), _FINDING, String("job 'gamma': R2: stage 'gamma' has break_glass_environment 'gamma-breakglass'")))
     r.append(_wf(String("20b the environments swapped"), String(_GAMMA_ENV), String("    environment: ${{ github.event_name == 'push' && 'gamma-breakglass' || 'gamma' }}\n"), _FINDING, String("job 'gamma': R2: stage 'gamma' has break_glass_environment")))

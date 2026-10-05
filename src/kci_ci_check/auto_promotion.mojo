@@ -57,10 +57,12 @@
 #       into a script is script injection, so a value reaches a script only
 #       through an `env:` value. The same holds for every `with: script:`
 #       (actions/github-script runs it as code), and no step's or job's
-#       `name:` holds an expression naming an input or the event payload
-#       (`inputs.`, `github.event.`, in any case): a name is shown in the
-#       run's log and summary, where the reason is the job summary's to
-#       record, never a name's.
+#       `name:` holds any expression at all: a name is shown in the run's
+#       log and summary, where the reason is the job summary's to record,
+#       never a name's, and an input or the event payload has too many
+#       accessor forms to list (`inputs['reason']`, `toJSON(inputs)`,
+#       `github['event']`, `format('{0}', inputs)`). A name is shown, not
+#       run: this is a display rule, not an injection one.
 #   R19 THE SAME SET, BY HASH. Every job of a PUSH stage with an `after`
 #       that runs a PUBLISH step or a validation (a part job always) passes
 #       its one `kci run` `--release-set-hash "$RELEASE_SET_HASH"`, and its
@@ -102,11 +104,21 @@
 #       GitHub does): only a manual run that asks is a dry run. No job and
 #       no step sets DRY_RUN in its own `env:`, and the word `--plan` stands
 #       in a release job's script only in the line
-#       `if [ "$DRY_RUN" = true ]; then set -- --plan; fi`. So
-#       validate cannot run `--plan` on a push while prod publishes what it
-#       did not validate (#311's and #312's
+#       `if [ "$DRY_RUN" = true ]; then set -- --plan; fi`. A release job's
+#       script names DRY_RUN only there and in R21's revision check (no
+#       shell assignment, no `export`), names GITHUB_ENV nowhere (a line
+#       written there sets a variable for every later step of the job, over
+#       the workflow's `env:`), and no `with: script:` of one calls
+#       `exportVariable` or names GITHUB_ENV. (#311's and #312's
 #       `github.event_name != 'workflow_dispatch' || inputs.dry_run`, a
-#       push pinned as a dry run, is refused by name).
+#       push pinned as a dry run, is refused by name.) THIS RULE IS A LINT,
+#       NOT THE LOCK: a script can spell `--plan` in pieces, and a pinned
+#       action's own code can set a variable. The lock is kci, built from
+#       main on a push: it refuses `--plan` on a push to main
+#       (KCI-E-PLAN-ON-RELEASE), and its result carries a set hash only for
+#       a run that is not `--plan` and whose every selected validation
+#       VALIDATED and SUCCEEDED, so prod is never handed a set that nothing
+#       installed.
 #   R4  (amended) a `permissions:` mapping, of the workflow or of a release
 #       job, grants `contents: read` and R4's `id-token` only: no other
 #       permission (no `actions: read`, no write) reaches a release job. The
@@ -183,6 +195,16 @@ comptime DRY_RUN_EXPRESSION: String = "github.event_name == 'workflow_dispatch' 
 
 comptime PLAN_LINE: String = "if [ \"$DRY_RUN\" = true ]; then set -- --plan; fi"
 """R22: the one line of a release job's script that may hold `--plan`."""
+
+comptime REVISION_DRY_RUN_LINE: String = (
+    "if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then"
+)
+"""R22: the line of R21's revision check that reads DRY_RUN (REVISION_STEP_RUN's
+fifth)."""
+
+comptime GITHUB_ENV_FILE: String = "GITHUB_ENV"
+"""R22: the file a step writes to set an environment variable for every later
+step of its job; no release job's script names it."""
 
 comptime SET_HASH_OUTPUT: String = "set_hash"
 comptime VALIDATED_SET_HASH_OUTPUT: String = "validated_set_hash"
@@ -485,21 +507,18 @@ def _check_script(doc: WorkflowDoc, job_id: String, node: Int, what: String, mut
 
 
 def _check_name(doc: WorkflowDoc, job_id: String, node: Int, mut findings: List[String]):
-    """R18 for one `name:`: no expression naming an input or the event
-    payload, in any case."""
+    """R18 for one `name:`: no expression at all (an input or the event
+    payload has too many accessor forms to list: `inputs.x`, `inputs['x']`,
+    `toJSON(inputs)`, `github['event']`, `format('{0}', inputs)`)."""
     if node < 0 or doc.kind(node) != NODE_SCALAR:
         return
     var exprs = _expressions(doc.text(node))
     for k in range(len(exprs)):
-        var low = exprs[k].lower()
-        if low.find(String("inputs.")) >= 0 or low.find(String("github.event.")) >= 0 or low.find(
-            String("github.event[")
-        ) >= 0:
-            findings.append(
-                _at(doc, node) + String("job '") + job_id + String("': R18: a `name:` holds `") + exprs[k]
-                + String("`: a manual run's reason, or the event payload, is recorded by the job summary, never")
-                + String(" shown as a name")
-            )
+        findings.append(
+            _at(doc, node) + String("job '") + job_id + String("': R18: a `name:` holds `") + exprs[k]
+            + String("`: no name holds an expression (a manual run's reason, or the event payload, is recorded")
+            + String(" by the job summary, never shown as a name)")
+        )
 
 
 def check_no_expression_in_run(doc: WorkflowDoc, mut findings: List[String]):
@@ -661,10 +680,21 @@ def check_workflow_dry_run(doc: WorkflowDoc, mut findings: List[String]):
 
 def check_dry_run(doc: WorkflowDoc, job_id: String, job: Int, mut findings: List[String]):
     """R22 for a job that runs a PUSH stage or a part of one: `--plan` only
-    in the plan line (file header)."""
+    in the plan line; DRY_RUN named only there and in R21's revision check;
+    no script names GITHUB_ENV and no `with: script:` exports a variable
+    (file header)."""
     var where = String("job '") + job_id + String("': R22: ")
     var steps = doc.items(doc.child(job, String("steps")))
     for i in range(len(steps)):
+        var sc = doc.child(doc.child(steps[i], String("with")), String("script"))
+        if sc >= 0 and doc.kind(sc) == NODE_SCALAR:
+            var t = doc.text(sc)
+            if t.find(String("exportVariable")) >= 0 or t.find(String(GITHUB_ENV_FILE)) >= 0:
+                findings.append(
+                    _at(doc, sc) + where + String("a `with: script:` sets an environment variable (`exportVariable`")
+                    + String(" or GITHUB_ENV): it would hold for every later step of the job, ")
+                    + String(DRY_RUN_ENV) + String(" included")
+                )
         var r = doc.child(steps[i], String("run"))
         if r < 0 or doc.kind(r) != NODE_SCALAR:
             continue
@@ -675,6 +705,18 @@ def check_dry_run(doc: WorkflowDoc, job_id: String, job: Int, mut findings: List
                 findings.append(
                     _at(doc, r) + where + String("a script holds `") + line + String("`: `--plan` stands only in `")
                     + String(PLAN_LINE) + String("`, so only a manual run that asks is a dry run")
+                )
+            if line.find(String(GITHUB_ENV_FILE)) >= 0:
+                findings.append(
+                    _at(doc, r) + where + String("a script names ") + String(GITHUB_ENV_FILE) + String(" (`") + line
+                    + String("`): a line written there sets an environment variable for every later step of the job")
+                    + String(" (DRY_RUN, REVISION, RELEASE_SET_HASH, REASON), over the workflow's `env:`")
+                )
+            if line.find(String(DRY_RUN_ENV)) >= 0 and line != String(PLAN_LINE) and line != String(REVISION_DRY_RUN_LINE):
+                findings.append(
+                    _at(doc, r) + where + String("a script names ") + String(DRY_RUN_ENV) + String(" outside `")
+                    + String(PLAN_LINE) + String("` and R21's revision check (`") + line
+                    + String("`): only the workflow's `env:` says whether this run is a dry run")
                 )
 
 
