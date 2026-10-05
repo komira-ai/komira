@@ -28,6 +28,7 @@ file at the pinned commit.
 | `:run_v2` | the Cloud Run Admin v2 protos (roots `google/cloud/run/v2/{execution,job,revision,service}.proto`), checked the same way |
 | `:cloudscheduler_v1` | the Cloud Scheduler v1 protos (root `google/cloud/scheduler/v1/cloudscheduler.proto`), checked the same way |
 | `:secretmanager_v1` | the Secret Manager v1 protos (root `google/cloud/secretmanager/v1/service.proto`), checked the same way |
+| `:monitoring_v3` | the Cloud Monitoring v3 protos (root `google/monitoring/v3/metric_service.proto`, for `ListTimeSeries`), checked the same way |
 | `:googleapis[google/cloud/run/v2/run_v2.yaml]` | the Cloud Run Admin v2 service configuration, whose `http.rules` bind the long-running operations mixin to Run's paths (no `.proto` states them) |
 
 ## Using the protos
@@ -35,7 +36,7 @@ file at the pinned commit.
 Depend on the closure target for your API (`:logging_v2`, `:storage_v2`,
 `:firestore_v1`, `:iam_admin_v1`, `:resourcemanager_v3`, `:serviceusage_v1`,
 `:compute_v1`, `:artifactregistry_v1`, `:apigateway_v1`, `:run_v2`,
-`:cloudscheduler_v1`, `:secretmanager_v1`). Its `ProtoSrcsInfo` is the checked
+`:cloudscheduler_v1`, `:secretmanager_v1`, `:monitoring_v3`). Its `ProtoSrcsInfo` is the checked
 tree, so a `mojo_proto_library` names it in
 `proto_deps`; `:<target>[tree]` is that tree as a directory (the files at
 their import paths), and the default output is protoc's descriptor set for the
