@@ -27,6 +27,14 @@
 #      (`CloudAdapter.public_mechanism`). The mechanism is chosen HERE, from
 #      the cell's settings, and never fallen back on at apply time.
 #
+#   4. The ROLE LABEL BUDGET (`role_budget_findings`), the one check that
+#      needs the lowering: every lowered node's role (the node id after its
+#      owner) must fit the 63-byte label value once encoded. It is a GRAPH
+#      finding naming the node, the byte count and every segment's length,
+#      and it runs after lowering (data, nothing realized) and before
+#      anything is created. Nesting is unbounded in the schema; this is its
+#      practical bound.
+#
 # ⛔ A FINDING IS A REFUSAL OF THE WHOLE GRAPH. There is no "skip what the
 # cloud cannot do": that turns "cannot do it yet" into a silently thinner
 # deploy.
@@ -38,6 +46,7 @@ from kci_cloud.adapter import (
     CloudAdapter,
     ArtifactNeed,
     Finding,
+    LoweredNode,
     FINDING_GRAPH,
     FINDING_COVERAGE,
     FINDING_LIMIT,
@@ -46,6 +55,7 @@ from kci_cloud.adapter import (
 from kci_cloud.catalog import Catalog, body_field, portability_word
 from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
+from kci_cloud.labels import LABEL_VALUE_MAX, encoded_label_bytes
 
 
 def _index_of_id(resources: List[Resource], id: String) -> Int:
@@ -551,3 +561,49 @@ def refusal_text(cloud: CloudId, findings: List[Finding]) -> String:
         if f.unverified:
             s += String(" [unverified]")
     return s^
+
+
+def node_role(node: LoweredNode) -> String:
+    """The role a node is stamped with: its id after `<owner>/`. A node whose
+    id does not start with its owner (the lowering contract refuses it) is
+    measured whole."""
+    var prefix = node.owner + String("/")
+    if node.owner.byte_length() > 0 and node.id.startswith(prefix):
+        return String(node.id[byte = prefix.byte_length() : node.id.byte_length()])
+    return node.id.copy()
+
+
+def role_budget_findings(nodes: List[LoweredNode]) -> List[Finding]:
+    """A GRAPH finding for every node whose role, encoded as a label value,
+    is over `LABEL_VALUE_MAX` bytes: the node, the byte count and the length
+    of each `/`-separated segment. Pure; empty when every role fits."""
+    var out = List[Finding]()
+    for i in range(len(nodes)):
+        ref n = nodes[i]
+        var role = node_role(n)
+        var size = encoded_label_bytes(role)
+        if size <= LABEL_VALUE_MAX:
+            continue
+        var segs = role.split("/")
+        var lens = String("")
+        for k in range(len(segs)):
+            if k > 0:
+                lens += String(", ")
+            lens += String(segs[k].byte_length())
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                n.owner,
+                String(""),
+                String("node \"")
+                + n.id
+                + String("\": its role label is ")
+                + String(size)
+                + String(" bytes encoded; at most ")
+                + String(LABEL_VALUE_MAX)
+                + String(" (segment lengths ")
+                + lens
+                + String("; shorter ids or less nesting fit)"),
+            )
+        )
+    return out^

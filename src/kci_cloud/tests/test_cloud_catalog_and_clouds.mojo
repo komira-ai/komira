@@ -34,6 +34,7 @@ from kci_cloud import (
     CLOUD_BOUND,
     FIELD_SERVICE,
     FIELD_JOB,
+    body_arms,
     body_field,
     artifact_problems,
 )
@@ -76,6 +77,24 @@ def test_catalog_arms_match_the_wire() raises:
         raised = True
         assert_true(_has(String(e), "has no type"), String(e))
     assert_true(raised, "a held, undeclared arm decodes to no type and is refused")
+
+    # The position -> field table: one row per catalog type, same names, and
+    # a position beyond it is refused, never mapped to some other type.
+    var arms = body_arms()
+    assert_equal(len(arms), len(c.types), "one arm row per catalog type")
+    for k in range(len(arms)):
+        var at = c.index_of(arms[k].field)
+        assert_true(at >= 0, String("arm field ") + String(arms[k].field) + " is a catalog type")
+        assert_equal(arms[k].name, c.types[at].name, "the arm row and the catalog row agree")
+    var beyond = decode_proto[Resource](_resource_with_body(FIELD_SERVICE))
+    beyond._oneof0_case = len(arms) + 1
+    var refused = False
+    try:
+        _ = body_field(beyond)
+    except e:
+        refused = True
+        assert_true(_has(String(e), "is not in this kci's catalog table"), String(e))
+    assert_true(refused, "an arm position beyond the table is refused")
     print("  test_catalog_arms_match_the_wire: PASS")
 
 

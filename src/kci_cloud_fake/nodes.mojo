@@ -14,6 +14,10 @@
 #                      mechanism the cell chose at validate time.
 #   * kind `schedule`  `<id>/schedule`: the trigger of a scheduled job.
 #   * kind `grant`     `<id>/uses/<target>`: one `Uses` line.
+# Those are the generic shape's kinds. On a provider shape (shapes.mojo) the
+# kind is the provider kind id, and an `<id>/identity` node is added; the node
+# behaves the same: `serves` (a desired field), not the kind, decides whether
+# it exposes URL and HOST.
 # A role the file turned off is the same node with `wanted` False.
 #
 # Every node is born stamped (`create_owned` writes the standard label rule's
