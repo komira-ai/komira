@@ -48,7 +48,8 @@
 # ⚠ THE PERF LEG IS A FLATNESS TEST, NOT AN ABSOLUTE ONE.  It compares a long
 # tail against a short one IN THE SAME PROCESS with the arms interleaved, so no
 # cross-machine constant is baked in and no allocator state from one arm can be
-# read as the other's cost.
+# read as the other's cost.  Its bar has a stated margin and the measurement is
+# retried (see `_FLAT_BAR`); the verdict itself is unit-tested without a clock.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -485,6 +486,43 @@ def _subjects(n: Int, tail: Int) -> List[List[UInt8]]:
     return out^
 
 
+# The flatness bar, and why it is 6.0.
+#
+# MEASURED: fused ~1.2x, unfused ~15x (the long tail walked byte by byte).  The
+# bar used to be 3.0, which sits only 2.5x above the fused figure: on a loaded
+# farm worker one arm's minimum can be inflated by a neighbour and a healthy run
+# read 3.018, failing on scheduler noise alone.  6.0 keeps a 5x margin above the
+# fused figure and still sits 2.5x BELOW the unfused cost, so a real regression
+# (the tail walked again) cannot hide under it.  The measurement is also retried:
+# load noise is independent between attempts, a regression is not, so the test
+# passes if ANY of `_FLAT_ATTEMPTS` attempts is flat and fails only when every
+# one of them is not.
+comptime _FLAT_BAR: Float64 = 6.0
+comptime _FLAT_ATTEMPTS: Int = 3
+
+
+def _flat_enough(long_ns: Int, short_ns: Int, bar: Float64) -> Bool:
+    """The verdict, kept free of any clock so it can be tested exactly."""
+    if long_ns <= 0 or short_ns <= 0:
+        return False
+    return Float64(long_ns) / Float64(short_ns) < bar
+
+
+def test_flatness_verdict_tolerates_noise_and_flags_the_unfused_walk() raises:
+    # The value that failed under farm load (3.018 against the old bar of 3.0)
+    # is flat; the measured fused figure and a mild 2x are flat.
+    assert_true(_flat_enough(3018, 1000, _FLAT_BAR), "3.018x must be flat")
+    assert_true(_flat_enough(1200, 1000, _FLAT_BAR), "the fused 1.2x must be flat")
+    assert_true(_flat_enough(5990, 1000, _FLAT_BAR), "just under the bar is flat")
+    # The bar itself, the measured unfused cost, and a worse one are not.
+    assert_false(_flat_enough(6000, 1000, _FLAT_BAR), "exactly the bar is not flat")
+    assert_false(_flat_enough(15000, 1000, _FLAT_BAR), "the unfused 15x is not flat")
+    assert_false(_flat_enough(49800, 750, _FLAT_BAR), "the per-row unfused cost is not flat")
+    # A timer that produced nothing is never a pass.
+    assert_false(_flat_enough(0, 1000, _FLAT_BAR), "no long time is not a pass")
+    assert_false(_flat_enough(1000, 0, _FLAT_BAR), "no short time is not a pass")
+
+
 def test_cost_is_flat_in_tail_length() raises:
     # ⛔ WHY A RATIO AND NOT AN ABSOLUTE ns FIGURE.  An absolute bar bakes in
     # one machine's clock.  This compares a 1,024-byte tail against a 4-byte
@@ -494,26 +532,36 @@ def test_cost_is_flat_in_tail_length() raises:
     # MEASURED, 20,000 real referers: without the early-out the marginal cost
     # is 48.85 ns per subject byte, with it 0.74 (66x).  Over a 1,020-byte
     # tail difference that is ~49,800 ns/row vs ~750 -- so the unfused ratio
-    # here is ~15x and the fused ratio ~1.2x.  The bar is 3.0: far above
-    # anything the `\n` scan can produce and far below the unfused cost.
+    # here is ~15x and the fused ratio ~1.2x.  The bar is `_FLAT_BAR` (see
+    # above): far above anything the `\n` scan can produce, far below the
+    # unfused cost, and robust to a loaded worker.
     var prog = RegexProgram.compile(_q28(), "")
     var short_ = _subjects(400, 4)
     var long_ = _subjects(400, 1024)
-    # ABAB: allocator state left by one arm must not be read as the other's.
-    var s1 = _bench_ns(prog, short_, 3)
-    var l1 = _bench_ns(prog, long_, 3)
-    var s2 = _bench_ns(prog, short_, 3)
-    var l2 = _bench_ns(prog, long_, 3)
-    var s = s1 if s1 < s2 else s2
-    var l = l1 if l1 < l2 else l2
-    assert_true(s > 0 and l > 0, "the timing loop produced no time")
-    var ratio = Float64(l) / Float64(s)
+    var last_ratio = Float64(0)
+    var last_l = 0
+    var last_s = 0
+    for _attempt in range(_FLAT_ATTEMPTS):
+        # ABAB: allocator state left by one arm must not be read as the other's.
+        var s1 = _bench_ns(prog, short_, 5)
+        var l1 = _bench_ns(prog, long_, 5)
+        var s2 = _bench_ns(prog, short_, 5)
+        var l2 = _bench_ns(prog, long_, 5)
+        var s = s1 if s1 < s2 else s2
+        var l = l1 if l1 < l2 else l2
+        assert_true(s > 0 and l > 0, "the timing loop produced no time")
+        if _flat_enough(l, s, _FLAT_BAR):
+            return
+        last_l = l
+        last_s = s
+        last_ratio = Float64(l) / Float64(s)
     assert_true(
-        ratio < 3.0,
+        False,
         String(
             "the trailing `.*$` is still being walked byte by byte: 1024B-tail=",
-            l, "ns 4B-tail=", s, "ns ratio=", ratio,
-            " (bar 3.0; measured ~15x unfused, ~1.2x fused)",
+            last_l, "ns 4B-tail=", last_s, "ns ratio=", last_ratio,
+            " in every one of ", _FLAT_ATTEMPTS, " attempts (bar ", _FLAT_BAR,
+            "; measured ~15x unfused, ~1.2x fused)",
         ),
     )
 
