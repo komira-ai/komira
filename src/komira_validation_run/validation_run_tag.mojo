@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_validation_run/validation_run_tag.mojo — THE ONE PLACE THE
-#   VALIDATION-RUN CORRELATOR'S TAG/LABEL KEY IS WRITTEN DOWN.
+#   VALIDATION-RUN CORRELATOR'S TAG/LABEL KEY SHAPE IS WRITTEN DOWN.
 # =============================================================================
 #
 # ── WHY THIS PACKAGE EXISTS, AND WHY IT IS A LEAF WITH NO DEPS ───────────────
@@ -11,7 +11,7 @@
 # is ownership — the only fact that could stop it: **whose it is.**
 #
 # Without a per-run correlation ("was resource R created by THIS validation
-# run"), a cloud-leak checker can only guess, fleet-wide, and a guess that
+# run"), a leak checker can only guess, fleet-wide, and a guess that
 # deletes is an outage waiting for a concurrent run. This constant is the fact
 # that replaces the guess: ONE id, generated once per validation RUN (never per step), stamped
 # on every billable resource that run creates, and the ONLY thing an unattended
@@ -19,7 +19,7 @@
 #
 # ── ⛔ WHY THE KEY LIVES HERE AND NOT BESIDE EITHER CLOUD'S CLIENT ───────────
 # It is stamped by BOTH clouds' creation paths (an ECS `RunTask` tag and a Cloud
-# Run label) and READ by a third party that is neither (an external cloud-leak
+# Run label) and READ by a third party that is neither (an external leak
 # checker). A copy in each would be three copies that drift silently — and a tag key that
 # drifts does not fail: it stamps a key nothing looks for, and the checker
 # reports a clean fleet forever. So it is written down ONCE, here, and every
@@ -33,8 +33,8 @@
 # ── ⛔ THE SPELLING IS CONSTRAINED BY BOTH CLOUDS AT ONCE, AND THE TWO
 #      COMMON KEY CONVENTIONS EACH FAIL ON THE OTHER CLOUD ──────────────────
 #
-#   `komira:placement` / `komira:managed-by` — the colon-namespaced AWS
-#       tag-key convention the AWS clients use. A COLON is
+#   `<vendor>:owner` / `<vendor>:managed-by` — the colon-namespaced AWS
+#       tag-key convention many AWS tools use. A COLON is
 #       legal in an AWS tag key (percent-encoded on the wire) and is REJECTED by
 #       GCP: a resource label key is `[a-z]([a-z0-9_-]{0,61}[a-z0-9])?` — no
 #       colon, no dot, no slash, no uppercase.
@@ -43,21 +43,29 @@
 #       label-key convention. A dot and a slash are legal in a
 #       k8s label key and are REJECTED by GCP resource labels for the same rule.
 #
-# ⇒ the key below is the intersection: lowercase alphanumerics and hyphens only,
-# starting with a letter. Legal verbatim as an AWS tag key AND as a GCP resource
+# ⇒ the keys below are the intersection: lowercase alphanumerics, `-` and `_`
+# only, starting with a letter. Legal verbatim as an AWS tag key AND as a GCP resource
 # label key, with no per-cloud rewriting — because a key that is rewritten per
 # cloud is two keys, which is what this file exists to prevent.
 #
 # ⚠ AND IT IS DELIBERATELY NOT SPELLED `run-id`. The bare term `run_id` already
-# names other things in a deploy system (a throwaway-run scope, a job-store
+# names other things in a release tool (a throwaway-run scope, a job-store
 # partition key), and neither of those meanings is this one. Another meaning
 # sharing the name would make every search for `run_id` ambiguous for a reader
 # trying to answer "who deletes this resource".
+#
+# ── THE PREFIX IS THE CALLER'S ───────────────────────────────────────────────
+# A key is `<prefix>-<suffix>`. The suffixes are fixed here; the prefix names
+# the tool that stamps and reads the mark, so the caller chooses it and passes
+# it to `validation_run_tag_key` / `resource_retention_tag_key`. The stamping
+# side and the reading side must pass the SAME prefix: build the key once and
+# share it, for the same reason this file exists.
 # =============================================================================
 
-comptime VALIDATION_RUN_TAG_KEY: String = "komira-ci-run-id"
-"""The AWS tag key / GCP label key carrying the id of the validation RUN that
-created a resource.
+comptime VALIDATION_RUN_TAG_SUFFIX: String = "run-id"
+"""The suffix of the AWS tag key / GCP label key carrying the id of the
+validation RUN that created a resource: the key is `<prefix>-run-id`, built by
+`validation_run_tag_key`.
 
 ⛔ THE VALUE IS PER-RUN, NEVER PER-STEP. A run's driver mints ONE id before its
 first step and passes the same one to every release-tool invocation underneath
@@ -126,7 +134,7 @@ def is_valid_validation_run_id(value: String) -> Bool:
 # delete set names, or one a replacement supersedes — is LEFT STANDING, outside
 # the graph, still live, still billing. That is the only coherent reading of
 # that rule and it is what CloudFormation does. It also manufactures EXACTLY the
-# shape a cloud-leak checker hunts: an orphan nothing in the
+# shape a leak checker hunts: an orphan nothing in the
 # declared state accounts for. Without an agreement, the platform honouring the
 # author's own instruction produces a resource the enforcement gate reports as a
 # leak on every run, FOREVER — and a gate that cries wolf on the correct path is
@@ -134,7 +142,7 @@ def is_valid_validation_run_id(value: String) -> Bool:
 #
 # ── ⛔ WHY A MARK ON THE RESOURCE, AND NOT A LEDGER ROW ──────────────────────
 # The alternative considered and rejected was a "deliberately retained" ledger
-# the deploy plane writes and the checker reads. Four grounds, in order of
+# the release tool writes and the checker reads. Four grounds, in order of
 # weight:
 #
 #   1. A LEDGER IS A SELF-REPORT; A MARK IS AN OBSERVATION. A ledger is written
@@ -164,11 +172,12 @@ def is_valid_validation_run_id(value: String) -> Bool:
 # ERROR in the checker, never a clean fleet: "found nothing to look for" and
 # "found nothing" must not be the same output.
 
-comptime RESOURCE_RETENTION_TAG_KEY: String = "komira-ci-retention"
-"""The AWS tag key / GCP label key carrying the AUTHORED `Retention` of the
-manifest node that created this resource.
+comptime RESOURCE_RETENTION_TAG_SUFFIX: String = "retention"
+"""The suffix of the AWS tag key / GCP label key carrying the AUTHORED
+`Retention` of the manifest node that created this resource: the key is
+`<prefix>-retention`, built by `resource_retention_tag_key`.
 
-⛔ SAME CHARACTER-SET INTERSECTION AS `VALIDATION_RUN_TAG_KEY` and for the same
+⛔ SAME CHARACTER-SET INTERSECTION AS THE RUN-ID KEY and for the same
 reason: legal verbatim as an AWS tag key AND as a GCP resource label key
 (`[a-z]([a-z0-9_-]{0,61}[a-z0-9])?`), with no per-cloud rewriting — a key
 rewritten per cloud is two keys.
@@ -176,7 +185,7 @@ rewritten per cloud is two keys.
 ⛔ IT IS A STATEMENT ABOUT POLICY, NOT AN AUTHORIZATION. It tells a reader why a
 resource the declared state no longer references is still standing. It grants
 nothing, and no code may take a capability from it — the same sentence
-`VALIDATION_RUN_TAG_KEY` carries."""
+`VALIDATION_RUN_TAG_SUFFIX` carries."""
 
 comptime RETENTION_TAG_VALUE_DELETE: String = "delete"
 """The mark on a node whose author did NOT ask for retention — the DEFAULT, and
@@ -244,4 +253,83 @@ def is_valid_retention_tag_value(value: String) -> Bool:
     return (
         value == String(RETENTION_TAG_VALUE_DELETE)
         or value == String(RETENTION_TAG_VALUE_RETAIN)
+    )
+
+
+# =============================================================================
+# THE KEYS — `<prefix>-<suffix>`, with the prefix chosen by the caller.
+# =============================================================================
+
+comptime TAG_KEY_MAX_LEN: Int = 63
+"""GCP caps a resource-label KEY at 63 bytes (AWS allows 128 for a tag key), so
+63 is the binding constraint on `<prefix>-<suffix>`."""
+
+
+def is_valid_tag_key_prefix(prefix: String) -> Bool:
+    """Can `prefix` start a key on BOTH clouds, for EVERY suffix in this file?
+
+    A lowercase letter first, then lowercase letters, digits, `-` and `_` (the
+    GCP label-key rule, which AWS also accepts), and short enough that the
+    LONGEST key built from it, `<prefix>-retention`, fits in
+    `TAG_KEY_MAX_LEN`. Checking against the longest suffix means a prefix
+    accepted here works for both keys, so the two marks never disagree about
+    which prefixes are usable. Empty is refused: a key with no prefix is a bare
+    suffix that any other tool could also be stamping."""
+    var n = prefix.byte_length()
+    if n == 0:
+        return False
+    var longest = String(RESOURCE_RETENTION_TAG_SUFFIX).byte_length()
+    var run_len = String(VALIDATION_RUN_TAG_SUFFIX).byte_length()
+    if run_len > longest:
+        longest = run_len
+    if n + 1 + longest > TAG_KEY_MAX_LEN:
+        return False
+    var first = Int(prefix.as_bytes()[0])
+    if not (first >= ord("a") and first <= ord("z")):
+        return False
+    for i in range(n):
+        var c = Int(prefix.as_bytes()[i])
+        var lower = c >= ord("a") and c <= ord("z")
+        var digit = c >= ord("0") and c <= ord("9")
+        var sep = c == ord("-") or c == ord("_")
+        if not (lower or digit or sep):
+            return False
+    return True
+
+
+def _tag_key(prefix: String, suffix: String, what: String) raises -> String:
+    if not is_valid_tag_key_prefix(prefix):
+        raise Error(
+            String(what)
+            + String(": tag key prefix '")
+            + prefix
+            + String(
+                "' is not usable on both clouds: it must start with a lowercase"
+                " letter, hold only lowercase letters, digits, '-' and '_', and"
+                " leave room for '-"
+            )
+            + String(RESOURCE_RETENTION_TAG_SUFFIX)
+            + String("' within ")
+            + String(TAG_KEY_MAX_LEN)
+            + String(" bytes")
+        )
+    return prefix + String("-") + suffix
+
+
+def validation_run_tag_key(prefix: String) raises -> String:
+    """The run-id key for `prefix`: `<prefix>-run-id`. Raises naming the rule
+    when `is_valid_tag_key_prefix(prefix)` is False, rather than returning a
+    key one of the clouds would reject or truncate."""
+    return _tag_key(
+        prefix, String(VALIDATION_RUN_TAG_SUFFIX), String("validation_run_tag_key")
+    )
+
+
+def resource_retention_tag_key(prefix: String) raises -> String:
+    """The retention key for `prefix`: `<prefix>-retention`. Raises under the
+    same rule as `validation_run_tag_key`."""
+    return _tag_key(
+        prefix,
+        String(RESOURCE_RETENTION_TAG_SUFFIX),
+        String("resource_retention_tag_key"),
     )

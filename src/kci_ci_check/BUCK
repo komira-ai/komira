@@ -10,8 +10,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # `after`, `id-token: write` exactly on the stages that publish by OIDC
 # trusted publishing or are farm-connected, the farm-connect action exactly on
 # the farm-connected stages, one literal `kci run --stage <id>` per job with a
-# `--summary-file`, no pull_request trigger, a `revision` input on
-# workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
+# `--summary-file`, a pull_request trigger exactly when the machine file
+# declares a PULL_REQUEST stage, whose job is then the only one a pull request
+# runs (same-repository pull requests only, no environment, `contents: read`
+# and the farm connection's token, `--affected-by` the pull request's base
+# commit, the full history) while every other job's `if:` keeps a pull request
+# out, a `revision` input on workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
 # action excepted), no `--only` on a release job unless the stage is SPLIT
 # (the job named after the stage runs its steps, other jobs run its
 # validations, and together they run each step and validation exactly once;
@@ -19,10 +23,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # job), and every `kci run` reading the machine file being checked (the
 # default, or its `--machine`).
 #
-# The workflow is read by a RESTRICTED reader of the YAML subset it uses;
-# anything else (anchors, aliases, tags, flow mappings, tabs, a second document)
-# is "cannot tell", never a pass. actionlint (//:workflow_lint) stays the YAML
-# validity gate.
+# The workflow is read by a FAIL-CLOSED reader of a strict YAML subset
+# (workflow_reader.mojo's header; docs/ci.md, "The workflow subset kci
+# reads"); any line outside it is "cannot tell", never a pass. actionlint
+# (//:workflow_lint) stays the YAML validity gate.
 #
 # Deps: kci_release_machine (the stages), kci_release_channel (which channels
 # publish by OIDC) and kci_api (the default machine file). Pure: it
@@ -36,25 +40,36 @@ mojo_library(
         "//src/kci_release_machine:kci_release_machine",
     ],
     test_srcs = [
-        # what the restricted reader reads, and each construct it cannot tell
+        # what the fail-closed reader reads, and each construct it cannot tell
         "tests/test_workflow_reader.mojo",
-        # a fixture that agrees, one mutation per rule R1-R12, the id-token
+        # the subset as a table: every spelling found to read one way to kci
+        # and another to GitHub ends in cannot tell or in the rule's finding
+        "tests/test_workflow_subset.mojo",
+        # a fixture that agrees, one mutation per rule R1-R12 and R14, the id-token
         # stages, the start-up entry point
         "tests/test_ci_rules.mojo",
         # one stage split over jobs whose --only parts run all of it once
         # (R1 and R9 as amended)
         "tests/test_ci_split_stage.mojo",
+        # R6 as amended: one workflow; on pull_request only the PULL_REQUEST
+        # stage's job runs (no fork, no environment, minimal permissions, the
+        # base commit, the full history), every release job keeps a pull
+        # request out; one mutation per branch
+        "tests/test_ci_pull_request.mojo",
         # the repository's own kci.yml held to its own release/machine.textproto
         "tests/test_repo_kci_yml.mojo",
     ],
     # The repository's own release workflow, machine file and channels file
-    # (the root BUCK and release/BUCK).
+    # (the root BUCK and release/BUCK), the pixi pin its validate job
+    # downloads (the platform table's, written by //tools/build/toolchains),
+    # and the validation targets' record (release/validations/BUCK).
     test_data = {
         "tests/test_repo_kci_yml.mojo": {
             "channels.textproto": "//release:channels.textproto",
             "kci.yml": "//:kci.yml",
             "machine.textproto": "//release:machine.textproto",
-            "smoke_komira_encoding.mojo": "//release/smoke:smoke_komira_encoding.mojo",
+            "pixi_pin.txt": "//tools/build/toolchains:pixi_pin_linux_x86_64",
+            "validations.txt": "//release/validations:names",
         },
     },
     visibility = ["PUBLIC"],

@@ -8,7 +8,7 @@
 from std.os.path import exists
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_libc.posix import _read_env
+from komira_core_ffi.posix import _read_env
 from komira_test_bucket import (
     BACKEND_EMBEDDED_MINIO,
     EMBEDDED_BUCKET,

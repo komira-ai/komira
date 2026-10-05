@@ -599,12 +599,12 @@ trait Resource(Movable, Deinitable):
         ⚠ THIS IS A PER-VERB CLAIM, NOT A PER-ERROR ONE, so it is the WEAKER of
         the two carriers on purpose. A conformer that needs per-raise precision
         (a 403 that means one thing on a grant and another on a project service)
-        states it AT THE RAISE with `fault_error(FAULT_CUSTOMER, "...")`, and the
+        states it AT THE RAISE with `fault_error(FAULT_USER, "...")`, and the
         engine takes that in preference to this. Use this for what is true of
         EVERY failure of the verb; use `fault_error` for what is true of one.
 
         A conformer whose verb can fail EITHER way and cannot tell must return
-        `FAULT_UNSET` and leave it ours. Guessing `FAULT_CUSTOMER` to reduce
+        `FAULT_UNSET` and leave it ours. Guessing `FAULT_USER` to reduce
         noise is the one change this design cannot survive.
 
         ⚠ `raises` ONLY BECAUSE THE ERASURE VTABLE IS UNIFORMLY RAISING — AN

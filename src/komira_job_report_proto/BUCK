@@ -1,0 +1,25 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# The job report wire (`komira/job_report/v1/job_report.proto`, package
+# `komira.job_report.v1`): a supervised job's phase, progress, message and
+# failure details (`JobHeartbeat`), and the reply that says CONTINUE or CANCEL
+# (`JobHeartbeatReply`). komira_job_supervisor sends it; a receiver depends on
+# this package alone, not on the supervisor.
+#
+#   from komira_job_report_proto.job_report import (
+#       JobHeartbeat, JobHeartbeatReply, JobFailure, JobPhase, JobDirective,
+#   )
+#
+# It imports no other `.proto`. The welded tests round-trip every message and
+# pin what an unknown enum number decodes to.
+mojo_proto_library(
+    name = "komira_job_report_proto",
+    srcs = ["job_report.proto"],
+    import_prefix = "komira/job_report/v1",
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    test_srcs = [
+        "tests/test_job_report_roundtrip.mojo",
+        "tests/test_job_report_unknown_enums.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

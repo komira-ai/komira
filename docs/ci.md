@@ -62,7 +62,8 @@ A contributor runs the same three commands on any client. A green local
 prove, dead Markdown links included (`//:docs`).
 
 Publishing is not part of this job. It is a separate workflow,
-[kci.yml](#kciyml-the-release), which never runs for a pull request.
+[kci.yml](#kciyml-the-release), whose only job on a pull request is the
+per-change check `pr`; its release jobs never run for one.
 
 ## The runner
 
@@ -216,19 +217,21 @@ can start a scratch daemon or clone and are still to be analysed.
 packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
 It is written by hand. The stages are owned by the release machine,
 [`release/machine.textproto`](../release/machine.textproto): `build`, then
-`gamma`, then `prod`. The workflow runs one job per stage, named for its
+`gamma`, then `prod`, and `pr`, the per-change check of a pull request. The workflow runs one job per stage, named for its
 stage, running in the stage's GitHub environment and running exactly one
 `kci run --stage <its name>`, except that `gamma` is split over two jobs:
-`gamma` runs its step (`--only step:publish`) and `validate` its validation
-(`--only validation:install`). kci reads `release/machine.textproto` by
+`gamma` runs its step (`--only step:publish`) and `validate` its two
+validations (`--only validation:install-komira-encoding --only
+validation:install-set`). kci reads `release/machine.textproto` by
 convention (its one default path), so no line of the workflow names it.
 
 | job (stage) | runner | what it does |
 |---|---|---|
 | `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
 | `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
-| `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`, docker installed), no environment, `contents: read` only | `kci run --stage gamma --only validation:install`: what `gamma` published, installed from the channel the way a consumer gets it, in a digest-pinned container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
+| `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`), no environment, `contents: read` only | downloads the platform table's linux-x86_64 pixi pin (its URL and sha256 are the job's `PIXI_URL` and `PIXI_SHA256`, held to the table by `test_repo_kci_yml`) and keeps it only at that sha256, then `kci run --stage gamma --only validation:install-komira-encoding --only validation:install-set --pixi <that file> --pixi-sha256 "$PIXI_SHA256"`: what `gamma` published, installed from the channel the way a consumer gets it, on the runner with no container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
 | `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
+| `pr` (the check `kci / pr`) | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), no environment, `contents: read` + `id-token: write` (for the tailnet only) | a pull request from a branch of this repository only (a fork's runs nothing): builds `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
 is published to each channel: it is never rebuilt. `build.set_hash`,
@@ -248,14 +251,15 @@ value, and the release's `release_produced_by` names the one build run.
   (`GITHUB_ACTIONS=true`), before it runs anything, `kci run` reads the
   workflow file it runs under as it was committed (`GITHUB_WORKFLOW_REF`'s
   path at `GITHUB_WORKFLOW_SHA`, through `git show`) and holds it to the
-  machine file and every channels file it names (rules R1-R12 of
+  machine file and every channels file it names (rules R1-R12 and R14 of
   `src/kci_ci_check/rules.mojo`: a job per stage named for it, each job's
   environment its stage's, `needs` the jobs that run the stage's `after`,
   `id-token: write` only where a stage publishes by trusted publishing or is
   farm-connected, one `kci run` per job with `--summary-file`, `--only` only
   in a split stage whose jobs run all of it once (a validations-only job has
-  no environment, no identity token, and needs the stage's own job), no
-  `pull_request` trigger, a `revision` input, every `uses:` pinned,
+  no environment, no identity token, and needs the stage's own job), a
+  `pull_request` trigger only the PULL_REQUEST stage's job answers (rule R6),
+  a `revision` input, every `uses:` pinned,
   `farm-connect` exactly on farm-connected stages). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
   finding listed, nothing run); an unreadable workflow or channels file, or a
   missing variable, is exit 5 and never a pass. The same check is the welded
@@ -263,9 +267,35 @@ value, and the release's `release_produced_by` names the one build run.
   fails `./buck2 build //...`. Consequence: a revision whose machine file
   disagrees with the running `kci.yml` cannot be released by it (a manual run
   of an old revision is refused, exit 3).
-- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`).
-  Never `pull_request`: the `build` job joins the tailnet, and the tailnet
-  credential must not reach a pull request's code.
+- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`)
+  release; a pull request to `main` runs the job `pr` and nothing else.
+  Every release job's `if:` keeps a pull request out
+  (a top-level `&&` conjunction with the term
+  `github.event_name != 'pull_request'`, or prod's manual-run condition;
+  grouping, negation, a call or a partial `${{ }}` is refused), so
+  no environment, publishing token or release job is reached from a pull
+  request's code. The `pr` job's condition
+  (`github.event.pull_request.head.repo.full_name == github.repository`)
+  keeps a fork's code off the farm: a fork's run gets no tailnet credential,
+  and a maintainer reads the change and pushes it to a branch here. Both
+  conditions are written bare or as exactly `${{ <condition> }}`: a block
+  scalar (`if: |`) holding `${{`, or whitespace inside quotes around it,
+  makes GitHub read the `if:` as a format string, which is always true.
+  The `pr` job runs on `runs-on: ubuntu-24.04`, written as that plain
+  scalar: a fresh GitHub-hosted machine. A self-hosted label, a label list, a
+  runner group, an expression (`${{ vars.X }}`, a fork-conditional) or a
+  quoted value is refused, so a pull request's code never reaches a runner
+  that keeps state between jobs.
+  The push trigger is exactly `branches: [main]`: with no branch filter,
+  another pattern, `branches-ignore`, `tags` or a path filter, a push to a
+  pull request's head branch would run the release jobs, and
+  `github.event_name != 'pull_request'` holds for a push. The `pr` job has
+  its own `permissions:` (`contents: read`, `id-token: write` for the
+  tailnet only), so it never gets the workflow-level permissions or the
+  repository's default token, and no stored secret reaches it: no value of
+  that job, nor of the workflow-level `env:`, names the `secrets` context
+  other than `secrets.GITHUB_TOKEN`.
+  Rule R6 of `src/kci_ci_check` holds all of it.
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
   the run started on). Every job checks it out, kci refuses a checkout whose
@@ -309,30 +339,64 @@ value, and the release's `release_produced_by` names the one build run.
   run is identified by `--run-id gh-<run id>`, `--attempt <run attempt>` and
   `--context` lines. The exit numbers are kci's one table: publishing a set
   the channel already holds, byte for byte, is exit 0.
-- **Validations.** A publish step can declare a validation (`validation {
-  kind: CONDA_INSTALL_SMOKE ... }`); gamma's is `install`. kci runs it after
-  the step in a FULL run, or alone with `--only validation:install` against
-  what is already published. In order, each failure exit 7
-  (`VALIDATION_FAILED`, a row per finding in the result and the job summary),
-  never a skip: (1) the pins: `release.json`'s version, build and sha256 of
-  `komira_encoding` and `komira_all`, `metadata.json`'s payload sha256 and
-  `mojo_pin`; (2) the channel, read from the runner ANONYMOUSLY: the index
-  lists each file with the build's sha256 and the channel serves those bytes
-  (only a file's absence, or a 404 index, is waited for, up to 600 s, then it
-  fails; a 401 or another sha256 fails at once); (3) `docker run` of
-  `ghcr.io/prefix-dev/pixi:0.67.2-bookworm-slim` pinned by digest, read-only,
-  no capabilities, as the runner's uid, with only `HOME`, `PIXI_HOME`,
-  `PIXI_CACHE_DIR` and `TMPDIR` set and one scratch mount: `pixi install` of
-  the pinned packages from the channel and `mojo-compiler ==<mojo_pin>` from
-  Modular's channel, then `mojo run` of
-  [release/smoke/smoke_komira_encoding.mojo](../release/smoke/smoke_komira_encoding.mojo);
-  (4) read back from the mount: every installed record has the release's
-  version, build and sha256 and comes from a declared channel, the
-  installed `.mojoc` is the build's, and the program printed
-  `komira_encoding validation: N of N checks passed`, N > 0. Under `--plan`
-  nothing runs (`WOULD_VALIDATE`). The same program is a `mojo_test` against
-  the in-repository library, so an API change fails `./buck2 test //...`
+- **Validations.** A publish step can declare validations (`validation {
+  kind: CONDA_INSTALL_ENV ... }`); gamma has two: `install-komira-encoding`
+  installs `komira_encoding` ALONE (its own requirements must suffice) and
+  `install-set` installs `komira_all` ALONE. kci runs them after the step in
+  a FULL run, or alone with `--only validation:<name>` against what is
+  already published. In order, each failure exit 7 (`VALIDATION_FAILED`, a
+  row per finding in the result and the job summary): (1) the pins:
+  `release.json`'s version, build and sha256 of each installed name and, for
+  the metapackage, of every member its own built requirements name (they
+  must be exactly the release's libraries, at the release's version and
+  build; none at all is refused), `metadata.json`'s payload sha256, README
+  sha256 and `mojo_pin`; (2) whether there is a network at all: every
+  declared host is asked once, anonymously; when NONE answers the run is
+  INDETERMINATE, exit 5, with a `skip_reason`, never a pass (any HTTP answer,
+  a 401 included, is a network, so the checks below run); (3) the channel,
+  read from the runner ANONYMOUSLY: the index lists each file with the
+  build's sha256 and the channel serves those bytes (only a file's absence,
+  or a 404 index, is waited for, up to `wait_for_index_seconds`, 1800 s here,
+  then it fails; a 401 or another sha256 fails at once); (4) on the runner,
+  with no container: the pinned pixi (`--pixi`, its bytes checked against
+  `--pixi-sha256`) in a fresh scratch directory outside the checkout, a
+  cleared environment, no system-wide pixi config, `pixi install` of the
+  NAMED packages only (so the solver must bring every member through the
+  metapackage) from the channel and `mojo-compiler ==<mojo_pin>` from
+  Modular's channel; (5) read back: every installed record has the release's
+  version, build and sha256 and comes from a declared channel, each
+  library's installed `.mojoc` is the build's, and each library's installed
+  `share/doc/<name>/README.md` has the sha256 its `metadata.json` records and
+  holds at least one ```mojo example; (6) each README's examples, made into
+  one program and run with `pixi run --as-is mojo run` from the scratch
+  directory, print `readme_<import> validation: N of N checks passed`,
+  N > 0, a failure naming the README line. Under `--plan` nothing runs
+  (`WOULD_VALIDATE`). The same examples are a welded test of each library's
+  own build (`[tests][readme]`), so an API change fails `./buck2 build //...`
   before it can fail a release.
+- **Before publishing: a local channel.** The same validations run against a
+  release that is not published yet: `komira_pack conda-index --out-dir <dir>
+  --package-manifest <release dir>/<platform>/<name>/manifest.json ...`
+  writes a local conda channel (the files, each subdir's `repodata.json`
+  from the packages' own `info/index.json`), and `kci run --stage gamma
+  --only validation:<name> ... --channel file:///<dir>` reads and installs
+  from it instead of the step's channel (only the compiler and extra
+  channels are asked over the network). `--channel` is refused unless the
+  run selects only CONDA_INSTALL_ENV validations (no BUILD or PUBLISH step),
+  and under GitHub Actions: a workflow validates only what was published
+  (rule R14 refuses a `kci run --channel` in the workflow itself). The
+  result row records the location (`channel_url`).
+- **Each validation is a target.** `./buck2 run
+  //release/validations:<name> -- --release-dir <R> --revision-id <C>
+  [--channel file:///<dir>]` runs `kci run --stage <stage> --only
+  validation:<name>` with kci and the pinned pixi of your platform's row,
+  from the repository's root whatever directory it starts in
+  ([release/validations/defs.bzl](../release/validations/defs.bzl)): no
+  `--scratch-dir` means a fresh directory under the system temp directory.
+  The targets are the machine file's validations, both ways
+  (`kci_release_machine`'s welded test), and the `validate` job's `kci run`
+  passes what they pass (`test_repo_kci_yml`), so a developer and the
+  workflow run the same thing.
 - **The channels.** prefix.dev channels `komira-ai/gamma` and
   `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),
   both public. Uploads go to `https://prefix.dev/api/v1/upload/komira-ai/<channel>`
@@ -357,6 +421,79 @@ value, and the release's `release_produced_by` names the one build run.
 - **Known residual:** the publish jobs run the kci binary the `build` job made
   (it travels in the workflow artifact). How kci itself reaches the runner is
   an open design question.
+
+### The per-change check's units
+
+`kci run --stage pr --affected-by <base>` builds UNITS, and a unit passes only
+when it builds and its tests pass. The units are derived when the check runs,
+so the release files list no package:
+
+- **Declared:** the artifacts of `release/artifacts.textproto` (and any
+  explicit `checks` it declares, to group targets its own way).
+- **Derived:** the buck2 build system's `derive_checks` command,
+  `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
+  from the live graph (`buck2 cquery`) and answers one check per path group
+  for every target no declared unit names or matches: `<p>` for each
+  library `//src/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
+  `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
+  for `tests//functional/...`; a name an artifact holds gets `_package`.
+  Every name is one kci accepts (`[a-z][a-z0-9_]*`) whatever the directory
+  is called: upper case becomes lower, any other character `_`, and a name
+  not starting with a letter gets `pkg_` (`//src/3d` is `pkg_3d`); groups
+  whose names meet are one check. kci adds them after the declared units,
+  under the file's own rules.
+- **Coverage by construction:** every target of the graph is in some unit. A
+  pull request that adds a package gets a check for it, and one that deletes
+  a package no longer derives one; neither edits a release file.
+- **A declared target that matches nothing:** for a check, a NOTICE line in
+  the result (the package it named is gone; the rest of the check builds);
+  for an artifact, a refusal (`KCI-E-ARTIFACT`): a release must build what an
+  artifact names. A derive tool that fails or answers outside its grammar is
+  "cannot tell" (`KCI-E-AFFECTED`), never a pass.
+
+To see the units a change would build, with nothing built:
+
+```sh
+kci run --stage pr --affected-by <base commit> --revision-id <HEAD> \
+  --work-dir "$PWD" --log-dir <dir> --result-file <file> --plan
+python3 release/ci/derive_checks.py --from release/artifacts.textproto  # the derived checks alone
+```
+
+### The workflow subset kci reads
+
+kci holds a workflow to the machine file by reading it with its own reader
+(`src/kci_ci_check/workflow_reader.mojo`), which accepts a strict subset of
+YAML and nothing else. Inside the subset every value it reads is exactly the
+value YAML, and so GitHub, reads. A line outside it is "cannot tell" (exit 5
+at start-up, a red welded test), naming the line: never read, never guessed
+at, never a pass. A workflow kci checks is written inside it:
+
+- **Lines:** printable ASCII. A full-line comment may also hold other UTF-8,
+  but not a YAML 1.1 line break (U+0085, U+2028, U+2029) or a byte order
+  mark. No TAB anywhere, no carriage return.
+- **Comments:** a line starting with `#`, or ` #` after a value.
+- **Mappings:** by indentation, `key: value` or `key:`. A key is plain
+  (`[A-Za-z0-9_.-]`), never quoted. Keys of one mapping differ ignoring case,
+  and a key the check reads (`on`, `jobs`, `permissions`, `id-token`, `if`,
+  `needs`, `runs-on`, `environment`, `steps`, `run`, `uses`, `with`, `fetch-depth`,
+  `inputs` and the trigger names) is written in lower case.
+- **Lists:** by indentation, `- value` or `- key: value`, one space after the
+  dash.
+- **Scalars:** on one line. Plain (no `: ` inside, no final `:`), or
+  single-quoted with no `'` inside (so no `''`), or double-quoted with no `"`
+  and no backslash inside. Only a comment may follow a quoted scalar.
+- **Flow:** `[]`, a list of plain words (`[main]`, `[build, gamma]`), and `{}`.
+- **Block scalar:** only a literal `|` (no chomping or indentation
+  indicator), and only as a `run:` value. It is read as YAML reads it.
+
+Refused, among others: folded `>`, `|-`, `|+`, and any block scalar not under
+`run:`; a value continued on the next line; any escape; anchors, aliases and
+tags; merge keys `<<`; `?` keys; flow mappings other than `{}`; a quoted or
+nested flow item; `---`, `...` and `%` directives. actionlint
+(`//:workflow_lint`) stays the YAML-validity gate. The subset is a reader
+rule, not a style: a spelling found to read one way to kci and another to
+GitHub is answered by keeping it outside the subset, and each such spelling
+is a row of `src/kci_ci_check/tests/test_workflow_subset.mojo`.
 
 ## merge-from-live (not yet running)
 

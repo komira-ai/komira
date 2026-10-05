@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Must build (test 38): the README has a relative link, and the library has
+# no conda package (`conda = False`), so the README ships nowhere and the link
+# is allowed. tests//negative/readme_examples/relative_link is the same
+# library with a package, and fails.
+mojo_library(
+    name = "unshipped",
+    srcs = [
+        "__init__.mojo",
+        "greet.mojo",
+    ],
+    conda = False,
+    test_srcs = ["tests/test_unshipped.mojo"],
+)

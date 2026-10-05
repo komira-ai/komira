@@ -32,6 +32,12 @@ library:
     attribute: a package cannot say `osx-arm64` over a linux `.mojoc`;
   * the payload is the library's gated `.mojoc`, so the package cannot exist
     until the library's own welded tests pass;
+  * the library's README.md, when its package holds one, is installed at
+    `share/doc/<name>/README.md` (a file of the package, listed in
+    info/paths.json): what a user reads is inside what they installed, and
+    the same bytes are the library's welded `[tests][readme]` examples. Both
+    the packer and its check are given it, so the check refuses a package
+    whose copy is missing, elsewhere or not byte-equal;
   * the version is the Mojo compiler version the library is built with
     (`MOJO_COMPILER_VERSION` below, derived from the pinned compiler in the
     platform table and stated nowhere else); the release iteration is the conda
@@ -72,7 +78,8 @@ nothing else:
                                build_number, size,
                                depends, mojo_pin, source_commit, stamped,
                                timestamp_ms, label, import_name, payload_path,
-                               payload_sha256 (sorted compact JSON)
+                               payload_sha256, doc_files (`[{path, sha256}]`,
+                               [] without a README) (sorted compact JSON)
 
 Sub-targets:
 
@@ -147,6 +154,14 @@ def _copy_dir(ctx, bb, src, dst, category, identifier, hidden):
         identifier = identifier,
     )
 
+def _doc_args(info):
+    # The package's documentation: its README.md, installed at
+    # share/doc/<name>/README.md. The same argument goes to the packer and to
+    # its check, so the check compares against the source, not the package.
+    if info.readme == None:
+        return []
+    return ["--doc-file", cmd_args(info.readme, format = "README.md={}")]
+
 def _conda_package_impl(ctx):
     lib = ctx.attrs.lib
     info = lib[MojoInfo]
@@ -201,6 +216,7 @@ def _conda_package_impl(ctx):
             "--label",
             str(ctx.label.raw_target()),
             [cmd_args("--dep", d) for d in deps],
+            _doc_args(info),
             "--out-dir",
             raw.as_output(),
         )
@@ -227,6 +243,7 @@ def _conda_package_impl(ctx):
         if payload != None:
             args += ["--payload", payload]
             args += [cmd_args("--dep", info.direct_conda[d].name) for d in info.direct]
+            args.append(_doc_args(info))
         ctx.actions.run(
             cmd_args(args, extra, "--out", marker.as_output()),
             category = "conda_check",
@@ -369,5 +386,65 @@ def conda_manifest_kci(**kwargs):
     """
     _conda_manifest_kci(exec_compatible_with = LINUX_X86_64, **kwargs)
 
+# ---- the package ships the library's README ---------------------------------
+
+def _conda_doc_check_impl(ctx):
+    lib = ctx.attrs.lib
+    info = lib[MojoInfo]
+    if info.readme == None:
+        fail("{}: {} has no README.md, so its package ships none".format(ctx.label, lib.label))
+    if info.conda_refusal != None:
+        fail("{}: {} has no conda package: {}".format(ctx.label, lib.label, info.conda_refusal))
+    marker = ctx.actions.declare_output(ctx.label.name + ".checked")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._pack[RunInfo],
+            "conda-check",
+            "--dir",
+            ctx.attrs.package[DefaultInfo].default_outputs[0],
+            "--kind",
+            "library",
+            "--name",
+            info.conda_name,
+            "--expect-subdir",
+            "linux-64",
+            "--import-name",
+            info.import_name,
+            "--mojo-pin",
+            MOJO_COMPILER_VERSION,
+            "--payload",
+            lib[DefaultInfo].default_outputs[0],
+            [cmd_args("--dep", info.direct_conda[d].name) for d in info.direct],
+            "--doc-file",
+            cmd_args(info.readme, format = "README.md={}"),
+            "--out",
+            marker.as_output(),
+        ),
+        category = "conda_doc_check",
+    )
+    return [DefaultInfo(default_output = marker)]
+
+_conda_doc_check = rule(
+    impl = _conda_doc_check_impl,
+    attrs = {
+        "lib": attrs.dep(providers = [MojoInfo]),
+        "package": attrs.dep(),
+        "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
+    },
+)
+
+def conda_doc_check(**kwargs):
+    """Reads `package` (the conda_package of `lib`) back and fails the build
+    unless it installs the library's README.md at share/doc/<name>/README.md,
+    byte-equal to the source, listed in info/paths.json and in metadata.json's
+    `doc_files`, beside the library's `.mojoc` and nothing else.
+
+    The README comes from the library (`MojoInfo.readme`), not from the
+    package rule's arguments, so a package rule that stopped passing it is
+    red here even though its own check, given the same nothing, passes.
+    """
+    _conda_doc_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+
 conda_package = declares_docs(conda_package)
 conda_manifest_kci = declares_docs(conda_manifest_kci)
+conda_doc_check = declares_docs(conda_doc_check)

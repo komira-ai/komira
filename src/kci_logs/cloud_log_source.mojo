@@ -714,7 +714,7 @@ trait CloudLogSource(Movable, Deinitable):
 
     ⛔ ONE VERB, AND `handle` IS DELIBERATELY THE PROVIDER'S OWN STRING. The
     alternative — a normalised `{project, region, kind, id}` POD — would put a
-    LOSSY re-encoding between the party that HAS the handle (the pod manager
+    LOSSY re-encoding between the party that HAS the handle (the scheduler that
     recorded it off the wire) and the party that must address the provider with
     it. Every arm's handle is already self-addressing:
 

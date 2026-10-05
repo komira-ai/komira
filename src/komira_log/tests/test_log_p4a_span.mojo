@@ -166,7 +166,7 @@ def test_logs_and_spans_interleaved() raises:
     # The log goes through the typed `Logger[origin]` surface (P2c), proving a
     # log and a span share the SAME per-core ring.
     var log_handle = Logger.borrow(eng)
-    var sid = tracer.start_span["request.handle", "komira_agent"](0)
+    var sid = tracer.start_span["request.handle", "komira_job_supervisor"](0)
     log_handle.info["scanned {} rows", "komira_engine"](ArgI64(6001215))
     tracer.end_span(sid, 0)
 
