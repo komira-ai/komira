@@ -137,7 +137,7 @@ tailnet and has no farm address. Remote execution also runs the commands a
 build describes, so running a stranger's build would be running its code on the
 farm's workers. Therefore:
 
-- The `build` job (and `core_split`'s) is **skipped** for a fork's pull
+- The `build` job is **skipped** for a fork's pull
   request: `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository`.
 - The job **`fork-advisory`** runs instead, on a hosted runner with no tailnet,
   no id-token and no variable: it builds the lints that need no farm
