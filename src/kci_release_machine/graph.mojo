@@ -15,6 +15,17 @@
 # farm-connected stage may hold no PUBLISH step: the job that holds a tailnet
 # node must not hold a publishing token.
 #
+# `trigger` says which CI event runs the stage's job: PUSH (the default: a
+# release workflow, run on a push or by hand) or PULL_REQUEST (the per-change
+# check of a pull request: `kci run --stage <S> --affected-by <base>`, in a
+# workflow triggered by `pull_request`, which kci_ci_check holds). A
+# PULL_REQUEST stage runs a pull request's code, so it may hold BUILD steps
+# only (nothing is published or deployed from it), runs in NO GitHub
+# environment (an `environment` field is refused, and none is defaulted:
+# an environment's secrets and approvals never reach a pull request), runs
+# after no stage and no stage runs after it (its job is in another workflow
+# than the release stages'). It may be farm-connected.
+#
 # A STEP has a name (unique in its stage), a kind and the inputs of that
 # kind:
 #
@@ -104,6 +115,12 @@ can take a quarter of an hour to make a new subdir's first index."""
 comptime EXTRA_CHANNEL_CONDA_FORGE: String = "conda-forge"
 """The one bare channel name an `extra_channel` may be."""
 
+comptime STAGE_TRIGGER_PUSH: String = "PUSH"
+"""A stage run by a release workflow (a push, or by hand): the default."""
+
+comptime STAGE_TRIGGER_PULL_REQUEST: String = "PULL_REQUEST"
+"""A stage run by a pull request's per-change check (file header)."""
+
 comptime NAME_MAX_BYTES: Int = STEP_NAME_MAX_BYTES
 """Longest stage or step name: a stage name is also a CI job id and a
 GitHub environment name (kci_api states the number)."""
@@ -173,8 +190,10 @@ struct StageStep(Copyable, Movable):
 
 struct Stage(Copyable, Movable):
     """One stage: a name, its GitHub environment (the parser sets it to the
-    name when the file does not), the stage it runs after ("" for none),
-    whether it is farm-connected, and its steps in file order.
+    name when the file does not, except on a PULL_REQUEST stage, which has
+    none), the stage it runs after ("" for none), whether it is
+    farm-connected, its trigger (PUSH or PULL_REQUEST) and its steps in file
+    order.
 
     Layout: owned values only. No pointer field."""
 
@@ -182,6 +201,7 @@ struct Stage(Copyable, Movable):
     var environment: String
     var after: String
     var farm_connected: Bool
+    var trigger: String
     var steps: List[StageStep]
     var line: Int
 
@@ -190,8 +210,13 @@ struct Stage(Copyable, Movable):
         self.environment = String("")
         self.after = String("")
         self.farm_connected = False
+        self.trigger = String(STAGE_TRIGGER_PUSH)
         self.steps = List[StageStep]()
         self.line = line
+
+    def is_pull_request(self) -> Bool:
+        """Whether a pull request's per-change check runs this stage."""
+        return self.trigger == STAGE_TRIGGER_PULL_REQUEST
 
     def has_kind(self, kind: String) -> Bool:
         for i in range(len(self.steps)):
@@ -504,7 +529,14 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                     _at(source, s.line) + String("stage '") + s.name
                     + String("' is declared twice (first on line ") + String(g.stages[j].line) + String(")")
                 )
-        if not is_stage_or_step_name(s.environment):
+        if s.trigger != STAGE_TRIGGER_PUSH and s.trigger != STAGE_TRIGGER_PULL_REQUEST:
+            raise Error(
+                _at(source, s.line) + String("stage '") + s.name + String("' has trigger '") + s.trigger
+                + String("'; a trigger is PUSH or PULL_REQUEST")
+            )
+        if s.is_pull_request():
+            _check_pull_request_stage(source, g, i)
+        elif not is_stage_or_step_name(s.environment):
             raise Error(
                 _at(source, s.line) + String("stage '") + s.name + String("' has environment '") + s.environment
                 + String("'; an environment name is [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
@@ -540,6 +572,37 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                 )
             _check_step_validations(source, s, s.steps[k])
         _check_validation_names_unique(source, s)
+
+
+def _check_pull_request_stage(source: String, g: ReleaseMachine, i: Int) raises:
+    """The rules of a PULL_REQUEST stage (file header): no environment, no
+    `after` either way, BUILD steps only."""
+    ref s = g.stages[i]
+    var where = String("stage '") + s.name + String("' is a PULL_REQUEST stage")
+    if s.environment.byte_length() > 0:
+        raise Error(
+            _at(source, s.line) + where + String(" and has environment '") + s.environment
+            + String("': its job runs a pull request's code in NO environment, so no environment secret")
+            + String(" or approval reaches it")
+        )
+    if s.after.byte_length() > 0:
+        raise Error(
+            _at(source, s.line) + where + String(" and runs after '") + s.after
+            + String("': its job is in the pull request's workflow, which runs no release stage")
+        )
+    for j in range(len(g.stages)):
+        if g.stages[j].after == s.name:
+            raise Error(
+                _at(source, g.stages[j].line) + String("stage '") + g.stages[j].name + String("' runs after '")
+                + s.name + String("', a PULL_REQUEST stage: no stage runs after a pull request's check")
+            )
+    for k in range(len(s.steps)):
+        if s.steps[k].kind != STEP_KIND_BUILD:
+            raise Error(
+                _at(source, s.steps[k].line) + where + String(" and has ") + s.steps[k].kind + String(" step '")
+                + s.steps[k].name + String("': a pull request's check builds and never publishes or deploys,")
+                + String(" so its steps are BUILD steps")
+            )
 
 
 def _check_validation_names_unique(source: String, s: Stage) raises:

@@ -265,7 +265,16 @@ value, and the release's `release_produced_by` names the one build run.
   of an old revision is refused, exit 3).
 - **Triggers:** a push to `main` and a manual run (`workflow_dispatch`).
   Never `pull_request`: the `build` job joins the tailnet, and the tailnet
-  credential must not reach a pull request's code.
+  credential must not reach a pull request's code. The push trigger is
+  exactly `branches: [main]` (rule R6): with no branch filter, another
+  pattern, `branches-ignore`, `tags` or a path filter, a push to any branch,
+  a pull request's head branch included, would run the release jobs. A
+  pull request's own job (a PULL_REQUEST stage) has its own `permissions:`
+  (`contents: read`, and `id-token: write` only for the farm connection),
+  so it never gets the workflow-level permissions or the repository's
+  default token, and no stored secret reaches it: no value of that job, nor
+  of the `env:` of a workflow with a `pull_request` trigger, names the
+  `secrets` context other than `secrets.GITHUB_TOKEN`.
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
   the run started on). Every job checks it out, kci refuses a checkout whose
@@ -357,6 +366,42 @@ value, and the release's `release_produced_by` names the one build run.
 - **Known residual:** the publish jobs run the kci binary the `build` job made
   (it travels in the workflow artifact). How kci itself reaches the runner is
   an open design question.
+
+### The workflow subset kci reads
+
+kci holds a workflow to the machine file by reading it with its own reader
+(`src/kci_ci_check/workflow_reader.mojo`), which accepts a strict subset of
+YAML and nothing else. Inside the subset every value it reads is exactly the
+value YAML, and so GitHub, reads. A line outside it is "cannot tell" (exit 5
+at start-up, a red welded test), naming the line: never read, never guessed
+at, never a pass. A workflow kci checks is written inside it:
+
+- **Lines:** printable ASCII. A full-line comment may also hold other UTF-8,
+  but not a YAML 1.1 line break (U+0085, U+2028, U+2029) or a byte order
+  mark. No TAB anywhere, no carriage return.
+- **Comments:** a line starting with `#`, or ` #` after a value.
+- **Mappings:** by indentation, `key: value` or `key:`. A key is plain
+  (`[A-Za-z0-9_.-]`), never quoted. Keys of one mapping differ ignoring case,
+  and a key the check reads (`on`, `jobs`, `permissions`, `id-token`, `if`,
+  `needs`, `environment`, `steps`, `run`, `uses`, `with`, `fetch-depth`,
+  `inputs` and the trigger names) is written in lower case.
+- **Lists:** by indentation, `- value` or `- key: value`, one space after the
+  dash.
+- **Scalars:** on one line. Plain (no `: ` inside, no final `:`), or
+  single-quoted with no `'` inside (so no `''`), or double-quoted with no `"`
+  and no backslash inside. Only a comment may follow a quoted scalar.
+- **Flow:** `[]`, a list of plain words (`[main]`, `[build, gamma]`), and `{}`.
+- **Block scalar:** only a literal `|` (no chomping or indentation
+  indicator), and only as a `run:` value. It is read as YAML reads it.
+
+Refused, among others: folded `>`, `|-`, `|+`, and any block scalar not under
+`run:`; a value continued on the next line; any escape; anchors, aliases and
+tags; merge keys `<<`; `?` keys; flow mappings other than `{}`; a quoted or
+nested flow item; `---`, `...` and `%` directives. actionlint
+(`//:workflow_lint`) stays the YAML-validity gate. The subset is a reader
+rule, not a style: a spelling found to read one way to kci and another to
+GitHub is answered by keeping it outside the subset, and each such spelling
+is a row of `src/kci_ci_check/tests/test_workflow_subset.mojo`.
 
 ## merge-from-live (not yet running)
 
