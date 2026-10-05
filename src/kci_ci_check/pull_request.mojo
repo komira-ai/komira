@@ -60,38 +60,51 @@ def _unwrapped(text: String) -> String:
     return t^
 
 
-def _quoted(word: String) -> String:
-    """The text of a `'...'` or `"..."` literal; "" when `word` is not one."""
-    var w = String(word.strip())
-    if w.byte_length() >= 2 and (
-        (w.startswith(String("'")) and w.endswith(String("'")))
-        or (w.startswith(String("\"")) and w.endswith(String("\"")))
-    ):
-        return String(w[byte = 1 : w.byte_length() - 1])
-    return String("")
+comptime EVENT_NAME: String = "github.event_name"
+"""The left-hand side of a release job's event term (R6)."""
+
+
+def _event_literal(text: String) -> String:
+    """The literal of `text` when `text` is exactly one single-quoted
+    literal of [a-z_]+ and nothing after it; "" otherwise. GitHub compares
+    strings case-insensitively, so a literal in another case is not read; a
+    GitHub literal is single-quoted, so a double-quoted one is not read."""
+    var b = text.as_bytes()
+    var n = len(b)
+    if n < 3 or b[0] != UInt8(ord("'")) or b[n - 1] != UInt8(ord("'")):
+        return String("")
+    for i in range(1, n - 1):
+        var c = b[i]
+        if not ((c >= UInt8(ord("a")) and c <= UInt8(ord("z"))) or c == UInt8(ord("_"))):
+            return String("")
+    return String(text[byte = 1 : n - 1])
 
 
 def _keeps_pull_request_out(term: String) -> Bool:
-    """`github.event_name != 'pull_request'`, or `github.event_name ==
-    '<event>'` naming another event (either quote)."""
+    """Exactly `github.event_name != 'pull_request'`, or exactly
+    `github.event_name == 'push'` / `== 'workflow_dispatch'` (spaces around
+    the operator aside). Any other term is not read as keeping a pull
+    request out."""
     var t = String(term.strip())
-    var head = String("github.event_name")
+    var head = String(EVENT_NAME)
     if not t.startswith(head):
         return False
-    var rest = String(String(t[byte = head.byte_length() :]).strip())
-    if rest.startswith(String("!=")):
-        return _quoted(String(rest[byte=2:])) == String(PULL_REQUEST_EVENT)
-    if rest.startswith(String("==")):
-        var ev = _quoted(String(rest[byte=2:]))
-        return ev.byte_length() > 0 and not ev.startswith(String(PULL_REQUEST_EVENT))
-    return False
+    var rest = String(String(t[byte = head.byte_length() :]).lstrip(String(" ")))
+    var op = String(rest[byte=0:2]) if rest.byte_length() >= 2 else String("")
+    if op != String("!=") and op != String("=="):
+        return False
+    var lit = _event_literal(String(String(rest[byte=2:]).lstrip(String(" "))))
+    if op == String("!="):
+        return lit == String(PULL_REQUEST_EVENT)
+    return lit == String("push") or lit == String("workflow_dispatch")
 
 
 def excludes_pull_request(condition: String) -> Bool:
     """A job condition that a pull request never satisfies (R6): bare or
     inside `${{ }}`, terms joined by `&&` only (no `||`), and one term is
-    `github.event_name != 'pull_request'` or `github.event_name == '<event>'`
-    naming another event. Anything else is not read as release-only."""
+    exactly `github.event_name != 'pull_request'`, `github.event_name ==
+    'push'` or `github.event_name == 'workflow_dispatch'`. Anything else is
+    not read as release-only."""
     var c = _unwrapped(condition)
     if c.find(String("||")) >= 0:
         return False

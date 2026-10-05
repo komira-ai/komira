@@ -219,7 +219,6 @@ def test_a_release_job_reachable_on_pull_request_is_refused() raises:
 
 def test_the_release_only_spellings() raises:
     assert_true(excludes_pull_request(String("github.event_name != 'pull_request'")))
-    assert_true(excludes_pull_request(String("github.event_name != \"pull_request\"")))
     assert_true(excludes_pull_request(String("${{ github.event_name != 'pull_request' }}")))
     assert_true(excludes_pull_request(String("github.event_name == 'workflow_dispatch'")))
     assert_true(excludes_pull_request(String("needs.build.outputs.release == 'true' && github.event_name == 'push'")))
@@ -234,6 +233,56 @@ def test_the_release_only_spellings() raises:
         String(_MACHINE),
         _wf(String("github.event_name != 'pull_request' && needs.build.outputs.release == 'true'"), String("github.event_name == 'workflow_dispatch'")),
     )
+
+
+def test_an_event_name_term_is_read_exactly() raises:
+    # accepted: `github.event_name` then `!=` or `==`, then one single-quoted
+    # literal of [a-z_]+, then nothing
+    assert_true(excludes_pull_request(String("github.event_name=='push'")))
+    assert_true(excludes_pull_request(String("github.event_name  !=  'pull_request'")))
+    # GitHub compares strings case-insensitively: a literal in another case is
+    # not read, whichever operator it follows
+    assert_false(excludes_pull_request(String("github.event_name == 'PULL_REQUEST'")))
+    assert_false(excludes_pull_request(String("github.event_name == 'Pull_Request'")))
+    assert_false(excludes_pull_request(String("github.event_name != 'PULL_REQUEST'")))
+    assert_false(excludes_pull_request(String("github.event_name == 'PUSH'")))
+    # nothing after the literal: an operator inside what looked like one literal
+    assert_false(excludes_pull_request(String("github.event_name == 'push' != 'x'")))
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' == 'x'")))
+    assert_false(excludes_pull_request(String("github.event_name == 'push')")))
+    assert_false(excludes_pull_request(String("github.event_name == 'push'x")))
+    # a GitHub literal is single-quoted; a double-quoted one is not read
+    assert_false(excludes_pull_request(String("github.event_name != \"pull_request\"")))
+    assert_false(excludes_pull_request(String("github.event_name == \"push\"")))
+    # the literal is [a-z_]+ only
+    assert_false(excludes_pull_request(String("github.event_name == 'pu-sh'")))
+    assert_false(excludes_pull_request(String("github.event_name == 'pu sh'")))
+    assert_false(excludes_pull_request(String("github.event_name == ''")))
+    assert_false(excludes_pull_request(String("github.event_name != ''")))
+    # `==` is read only for push and workflow_dispatch
+    assert_false(excludes_pull_request(String("github.event_name == 'release'")))
+    assert_false(excludes_pull_request(String("github.event_name == 'schedule'")))
+    assert_false(excludes_pull_request(String("github.event_name == 'pull_request_review'")))
+    # no other operator, no other left-hand side
+    assert_false(excludes_pull_request(String("github.event_name <= 'pull_request'")))
+    assert_false(excludes_pull_request(String("github.event_name <= 'push'")))
+    assert_false(excludes_pull_request(String("github.event_name = 'push'")))
+    assert_false(excludes_pull_request(String("github.event_names != 'pull_request'")))
+    assert_false(excludes_pull_request(String("GITHUB.EVENT_NAME == 'push'")))
+
+
+def test_a_release_job_condition_in_another_case_is_refused() raises:
+    var want = String("runs stage 'publish-gamma', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a pull request out")
+    var old = String("github.event_name != 'pull_request' && needs")
+    _reports(_wf(old, String("github.event_name == 'PULL_REQUEST' && needs")), want)
+    _reports(_wf(old, String("github.event_name == 'Pull_Request' && needs")), want)
+
+
+def test_a_release_job_condition_with_an_operator_in_the_literal_is_refused() raises:
+    var want = String("runs stage 'publish-gamma', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a pull request out")
+    var old = String("github.event_name != 'pull_request' && needs")
+    _reports(_wf(old, String("github.event_name == 'push' != 'x' && needs")), want)
+    _reports(_wf(old, String("github.event_name == 'release' && needs")), want)
 
 
 def test_a_pull_request_stage_runs_whole_in_its_own_job() raises:

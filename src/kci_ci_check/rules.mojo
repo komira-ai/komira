@@ -58,10 +58,13 @@
 #         * when it is, every job but the PULL_REQUEST stage's is
 #           RELEASE-ONLY: a PUSH stage's job, and a part job of one, carries
 #           a job-level `if:` that is a conjunction (`&&`, no `||`; bare or
-#           inside `${{ }}`) with a term `github.event_name !=
-#           'pull_request'` or `github.event_name == '<event>'` naming
-#           another event. No release job, environment, publishing token or
-#           release tailnet node is reached from a pull request;
+#           inside `${{ }}`) with a term that is exactly
+#           `github.event_name != 'pull_request'`, `github.event_name ==
+#           'push'` or `github.event_name == 'workflow_dispatch'` (a
+#           single-quoted [a-z_]+ literal, nothing after it; GitHub compares
+#           strings case-insensitively, so another case is not read). No
+#           release job, environment, publishing token or release tailnet
+#           node is reached from a pull request;
 #         * the PULL_REQUEST stage's job carries the job-level condition
 #           `if: github.event.pull_request.head.repo.full_name ==
 #           github.repository` (bare or inside `${{ }}`, nothing else): a
