@@ -132,6 +132,7 @@ def _pr_workflow(machine: String) -> String:
         + String("  build:\n    if: github.event_name != 'pull_request'\n    environment: build\n    steps:\n")
         + String("      - run: kci run --machine ") + machine + String(" --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
         + String("  pr:\n    if: github.event.pull_request.head.repo.full_name == github.repository\n")
+        + String("    runs-on: ubuntu-24.04\n")
         + String("    permissions:\n      contents: read\n      id-token: write\n    steps:\n")
         + String("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n")
         + String("        with:\n          fetch-depth: 0\n")

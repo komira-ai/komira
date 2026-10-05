@@ -54,8 +54,9 @@
 #          farm connection exchanges, nothing else: it builds bin/kci from
 #          the pull request's merge commit and runs `kci run --stage pr
 #          --affected-by <the pull request's base commit>`, which builds the
-#          units of release/artifacts.textproto the change reaches and ships
-#          nothing. It runs only for a pull request from a branch of this
+#          units the change reaches (the artifacts of
+#          release/artifacts.textproto and the checks derived from the build
+#          graph when it runs) and ships nothing. It runs only for a pull request from a branch of this
 #          repository: a fork's pull request runs nothing (a fork's run gets
 #          no tailnet credential; a maintainer reads the change and pushes it
 #          to a branch here). A push or a manual run skips it.
@@ -478,15 +479,11 @@ jobs:
           printf '#!/bin/sh\nexec "%s/buck2" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/bin/buck2"
           chmod +x "$RUNNER_TEMP/bin/buck2"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      # Every target of the graph is in some unit: read from the live graph,
-      # each target is named or matched by a unit of
-      # release/artifacts.textproto (a check names buck2 target patterns). A
-      # target in no unit, or a pattern matching nothing, fails here, naming
-      # the check its path maps to.
-      - name: every target is in a unit
-        run: python3 release/ci/unit_census.py --check
       # kci first holds this workflow (as committed) to the machine file, then
-      # builds the units the change reaches. The base is the pull request's
+      # builds the units the change reaches: the artifacts of
+      # release/artifacts.textproto and the checks its buck2 build system
+      # derives from the live graph (release/ci/derive_checks.py), so every
+      # target of the graph is in some unit. The base is the pull request's
       # base commit, a full commit id GitHub sets.
       - name: kci run --stage pr
         run: |

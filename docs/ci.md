@@ -230,7 +230,7 @@ convention (its one default path), so no line of the workflow names it.
 | `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
 | `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`, docker installed), no environment, `contents: read` only | `kci run --stage gamma --only validation:install`: what `gamma` published, installed from the channel the way a consumer gets it, in a digest-pinned container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
 | `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
-| `pr` (the check `kci / pr`) | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), no environment, `contents: read` + `id-token: write` (for the tailnet only) | a pull request from a branch of this repository only (a fork's runs nothing): builds `//bin/kci:kci[runnable]`, checks that every target of the graph is in a unit (`release/ci/unit_census.py --check`), then `kci run --stage pr --affected-by <the pull request's base commit>`: the units of `release/artifacts.textproto` the change reaches, built and tested on the farm. Nothing ships. |
+| `pr` (the check `kci / pr`) | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), no environment, `contents: read` + `id-token: write` (for the tailnet only) | a pull request from a branch of this repository only (a fork's runs nothing): builds `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
 is published to each channel: it is never rebuilt. `build.set_hash`,
@@ -386,6 +386,39 @@ value, and the release's `release_produced_by` names the one build run.
 - **Known residual:** the publish jobs run the kci binary the `build` job made
   (it travels in the workflow artifact). How kci itself reaches the runner is
   an open design question.
+
+### The per-change check's units
+
+`kci run --stage pr --affected-by <base>` builds UNITS, and a unit passes only
+when it builds and its tests pass. The units are derived when the check runs,
+so the release files list no package:
+
+- **Declared:** the artifacts of `release/artifacts.textproto` (and any
+  explicit `checks` it declares, to group targets its own way).
+- **Derived:** the buck2 build system's `derive_checks` command,
+  `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
+  from the live graph (`buck2 cquery`) and answers one check per path group
+  for every target no declared unit names or matches: `<p>` for each
+  library `//src/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
+  `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
+  for `tests//functional/...`; a name an artifact holds gets `_package`. kci
+  adds them after the declared units, under the file's own rules.
+- **Coverage by construction:** every target of the graph is in some unit. A
+  pull request that adds a package gets a check for it, and one that deletes
+  a package no longer derives one; neither edits a release file.
+- **A declared target that matches nothing:** for a check, a NOTICE line in
+  the result (the package it named is gone; the rest of the check builds);
+  for an artifact, a refusal (`KCI-E-ARTIFACT`): a release must build what an
+  artifact names. A derive tool that fails or answers outside its grammar is
+  "cannot tell" (`KCI-E-AFFECTED`), never a pass.
+
+To see the units a change would build, with nothing built:
+
+```sh
+kci run --stage pr --affected-by <base commit> --revision-id <HEAD> \
+  --work-dir "$PWD" --log-dir <dir> --result-file <file> --plan
+python3 release/ci/derive_checks.py --from release/artifacts.textproto  # the derived checks alone
+```
 
 ### The workflow subset kci reads
 

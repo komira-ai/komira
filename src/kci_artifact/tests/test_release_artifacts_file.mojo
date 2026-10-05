@@ -3,11 +3,12 @@
 #   The repository's own release artifacts, release/artifacts.textproto,
 #   read through the real reader: it parses and validates, the libraries
 #   build stamped, the metapackage is last with every library a member,
-#   each artifact's targets are the labels its args build, each check names
-#   buck2 target patterns only and no package is in two checks, and the
-#   per-change check is ready to run (both commands on every build system).
-#   That every target of the graph is in some unit is release/ci/
-#   unit_census.py --check's, over the live graph (the pr job runs it).
+#   each artifact's targets are the labels its args build, a declared check
+#   (there may be none) names buck2 target patterns only and no package is
+#   in two checks, and the per-change check is ready to run (both commands
+#   on every build system, and the buck2 build system derives the rest of
+#   the checks from the graph, release/ci/derive_checks.py, so every target
+#   of the graph is in some unit by construction).
 # =============================================================================
 #
 # The file is staged as test data at `artifacts.textproto` (BUCK). A typo
@@ -192,10 +193,10 @@ def _overlap(a: String, b: String) -> Bool:
 
 
 def test_every_check_names_target_patterns() raises:
-    """A check names buck2 target patterns, never an enumerated target, so a
-    target added to a covered package is in the check with no edit here."""
+    """A declared check names buck2 target patterns, never an enumerated
+    target, so a target added to a covered package is in the check with no
+    edit here."""
     var d = read_artifacts(String(_FILE))
-    assert_true(len(d.checks) > 10, String("nearly no checks: ") + String(len(d.checks)))
     var bad = String("")
     for i in range(len(d.checks)):
         for k in range(len(d.checks[i].targets)):
@@ -206,9 +207,8 @@ def test_every_check_names_target_patterns() raises:
 
 
 def test_no_package_is_in_two_checks() raises:
-    """The checks are grouped by path (release/ci/unit_census.py's
-    check_name): no package is matched by patterns of two checks, or twice
-    by one check."""
+    """No package is matched by patterns of two declared checks, or twice by
+    one check."""
     var d = read_artifacts(String(_FILE))
     var pats = List[String]()
     var owner = List[String]()
@@ -257,6 +257,21 @@ def test_the_per_change_check_is_ready() raises:
         assert_true(Bool(b.affected), b.name)
         assert_true(Bool(b.build_targets), b.name)
         assert_equal(b.build_targets.value().args[0], String("release/ci/build_targets.sh"), b.name)
+
+
+def test_the_buck2_build_system_derives_the_checks_from_the_graph() raises:
+    """The checks are not listed here: the buck2 build system's
+    derive_checks command answers them from the live graph when the check
+    runs, so a package added or deleted needs no edit to this file."""
+    var d = read_artifacts(String(_FILE))
+    var j = find_build_system(d, String("buck2"))
+    assert_true(j >= 0)
+    assert_true(Bool(d.build_systems[j].derive_checks))
+    ref c = d.build_systems[j].derive_checks.value()
+    assert_equal(c.executable, String("python3"))
+    assert_equal(len(c.args), 2)
+    assert_equal(c.args[0], String("release/ci/derive_checks.py"))
+    assert_equal(c.args[1], String("{units_file}"))
 
 
 def main() raises:
