@@ -114,6 +114,9 @@ pin=$(sed -n 's/.*"mojo_compiler_\(.*\)_linux-64\.conda".*/\1/p' tools/build/pla
 [ -n "$pin" ] && [ "$(printf '%s\n' "$pin" | wc -l)" = 1 ] || { echo "FAIL  conda cannot read the compiler pin from tools/build/platforms/table.bzl"; exit 1; }
 B0=h00000000_0 # the unstamped build string
 F0=komira_encoding-$pin-$B0.conda
+# The library's README, which its package installs at $DOC.
+README=$ROOT/src/komira_encoding/README.md
+DOC=share/doc/komira_encoding/README.md
 
 PKG=//src/komira_encoding:komira_encoding_conda
 FX=tests//negative/conda
@@ -187,8 +190,6 @@ done
 [ "$(tar -tf "$S/info.tar" | tr '\n' ' ')" = "info/about.json info/index.json info/licenses/LICENSE info/paths.json " ] || p "info-files:[$(tar -tf "$S/info.tar" | tr '\n' ' ')]"
 [ "$(tar -tf "$S/pkg.tar" | tr '\n' ' ')" = "lib/mojo/komira_encoding.mojoc $DOC " ] || p "pkg-files:[$(tar -tf "$S/pkg.tar" | tr '\n' ' ')]"
 cmp -s "$S/lib/mojo/komira_encoding.mojoc" "$LIBPKG" || p payload-differs-from-library
-README=$ROOT/src/komira_encoding/README.md
-DOC=share/doc/komira_encoding/README.md
 cmp -s "$S/$DOC" "$README" || p readme-differs-from-source
 cmp -s "$S/info/licenses/LICENSE" "$ROOT/LICENSE" || p licence
 for f in info/index.json info/paths.json info/about.json; do
