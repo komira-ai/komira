@@ -3,19 +3,19 @@
 #   The repository's own release artifacts, release/artifacts.textproto,
 #   read through the real reader: it parses and validates, the libraries
 #   build stamped, the metapackage is last with every library a member,
-#   each artifact's targets are the labels its args build, every target of
-#   release/unit_census.txt is a target of some unit (COVERAGE), and the
+#   each artifact's targets are the labels its args build, each check names
+#   buck2 target patterns only and no package is in two checks, and the
 #   per-change check is ready to run (both commands on every build system).
+#   That every target of the graph is in some unit is release/ci/
+#   unit_census.py --check's, over the live graph (the pr job runs it).
 # =============================================================================
 #
-# The file is staged as test data at `artifacts.textproto`, the census at
-# `unit_census.txt` (BUCK). A typo
+# The file is staged as test data at `artifacts.textproto` (BUCK). A typo
 # in it, a forgotten stamp, a library left out of the metapackage, or the
 # metapackage moved off the end fails this test, and with it
 # `./buck2 build //...`: the release workflow cannot be the first to find it.
 # =============================================================================
 
-from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_true
 
 from kci_artifact import (
@@ -24,11 +24,9 @@ from kci_artifact import (
     read_artifacts,
     render_build_argv,
     require_affected_ready,
-    units_of,
 )
 
 comptime _FILE = "artifacts.textproto"
-comptime _CENSUS = "unit_census.txt"
 comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
 comptime _REL = "/work/rel"
@@ -150,40 +148,105 @@ def test_every_artifact_names_the_labels_of_its_args_as_targets() raises:
             assert_equal(a.targets[k], want[k], a.name)
 
 
-def _census() raises -> List[String]:
-    var out = List[String]()
-    var lines = Path(String(_CENSUS)).read_text().split(String("\n"))
-    for i in range(len(lines)):
-        var l = String(String(lines[i]).strip())
-        if l.byte_length() == 0 or l.startswith(String("#")):
-            continue
-        out.append(l^)
-    return out^
+def _is_pattern(t: String) -> Bool:
+    """`<cell>//<path>/...` (a package and every package below it; the path
+    not empty) or `<cell>//<path>:` (one package's targets; `//:` is the
+    root's), the cell `[A-Za-z0-9_]*`: what buck2 resolves when the check is
+    built, so a new target of a covered package is in the check."""
+    var at = t.find(String("//"))
+    if at < 0 or not _is_label(t):
+        return False
+    var path = String(t[byte = at + 2 :])
+    if path.endswith(String("/...")):
+        var root = String(path[byte = 0 : path.byte_length() - 4])
+        return root.byte_length() > 0 and root.find(String(":")) < 0 and root.find(String("...")) < 0
+    if path.endswith(String(":")):
+        var root = String(path[byte = 0 : path.byte_length() - 1])
+        return root.find(String(":")) < 0 and root.find(String("...")) < 0 and not root.endswith(String("/"))
+    return False
 
 
-def test_every_census_target_is_in_a_unit() raises:
-    """COVERAGE: the per-change check reaches every target of the census
-    (release/ci/unit_census.py says what it holds). A target that no unit
-    names is refused by name."""
-    var census = _census()
-    assert_true(len(census) > 100, String("the census is nearly empty: ") + String(len(census)))
-    var units = units_of(read_artifacts(String(_FILE)))
-    var missing = String("")
+def _cell_and_root(t: String) -> Tuple[String, String, Bool]:
+    """(cell, package path, recursive) of a pattern."""
+    var at = t.find(String("//"))
+    var cell = String(t[byte=0:at])
+    var path = String(t[byte = at + 2 :])
+    if path.endswith(String("/...")):
+        return (cell^, String(path[byte = 0 : path.byte_length() - 4]), True)
+    return (cell^, String(path[byte = 0 : path.byte_length() - 1]), False)
+
+
+def _covers(outer: Tuple[String, String, Bool], pkg_cell: String, pkg: String) -> Bool:
+    if outer[0] != pkg_cell:
+        return False
+    if not outer[2]:
+        return pkg == outer[1]
+    return pkg == outer[1] or pkg.startswith(outer[1] + String("/"))
+
+
+def _overlap(a: String, b: String) -> Bool:
+    """Some package is matched by both patterns."""
+    var x = _cell_and_root(a)
+    var y = _cell_and_root(b)
+    return _covers(x, y[0], y[1]) or _covers(y, x[0], x[1])
+
+
+def test_every_check_names_target_patterns() raises:
+    """A check names buck2 target patterns, never an enumerated target, so a
+    target added to a covered package is in the check with no edit here."""
+    var d = read_artifacts(String(_FILE))
+    assert_true(len(d.checks) > 10, String("nearly no checks: ") + String(len(d.checks)))
+    var bad = String("")
+    for i in range(len(d.checks)):
+        for k in range(len(d.checks[i].targets)):
+            if not _is_pattern(d.checks[i].targets[k]):
+                bad += String("\n  ") + d.checks[i].name + String(": ") + d.checks[i].targets[k]
+    if bad.byte_length() > 0:
+        raise Error(String("check targets that are not `<cell>//<path>/...` or `<cell>//<path>:`:") + bad)
+
+
+def test_no_package_is_in_two_checks() raises:
+    """The checks are grouped by path (release/ci/unit_census.py's
+    check_name): no package is matched by patterns of two checks, or twice
+    by one check."""
+    var d = read_artifacts(String(_FILE))
+    var pats = List[String]()
+    var owner = List[String]()
+    for i in range(len(d.checks)):
+        for k in range(len(d.checks[i].targets)):
+            if _is_pattern(d.checks[i].targets[k]):  # the rest: the test above
+                pats.append(d.checks[i].targets[k].copy())
+                owner.append(d.checks[i].name.copy())
+    var bad = String("")
     var n = 0
-    for c in range(len(census)):
-        var found = False
-        for u in range(len(units)):
-            for t in range(len(units[u].targets)):
-                if units[u].targets[t] == census[c]:
-                    found = True
-        if not found:
-            missing += String("\n  ") + census[c]
-            n += 1
+    for i in range(len(pats)):
+        for j in range(i):
+            if _overlap(pats[i], pats[j]):
+                n += 1
+                if n <= 20:
+                    bad += String("\n  ") + owner[j] + String(" ") + pats[j] + String(" / ") + owner[i] + String(" ") + pats[i]
     if n > 0:
-        raise Error(
-            String(n) + String(" target(s) of release/unit_census.txt in no unit of release/artifacts.textproto")
-            + String(" (add each to the check its path maps to):") + missing
-        )
+        raise Error(String(n) + String(" pair(s) of check patterns that match one package twice:") + bad)
+
+
+def test_the_pattern_reader() raises:
+    assert_true(_is_pattern(String("//:")))
+    assert_true(_is_pattern(String("//src/kci_api/...")))
+    assert_true(_is_pattern(String("//src:")))
+    assert_true(_is_pattern(String("tests//functional/...")))
+    assert_true(not _is_pattern(String("//...")))
+    assert_true(not _is_pattern(String("//src/kci_api:kci_api")))
+    assert_true(not _is_pattern(String("//src/kci_api/...:x")))
+    assert_true(not _is_pattern(String("//src/.../x/...")))
+    assert_true(not _is_pattern(String("//src/:")))
+    assert_true(not _is_pattern(String("src/kci_api/...")))
+    assert_true(_overlap(String("//src/a/..."), String("//src/a/b/...")))
+    assert_true(_overlap(String("//src/a/..."), String("//src/a:")))
+    assert_true(_overlap(String("//src/a/b:"), String("//src/a/...")))
+    assert_true(not _overlap(String("//src/a/..."), String("//src/ab/...")))
+    assert_true(not _overlap(String("//:"), String("//src/...")))
+    assert_true(not _overlap(String("//src:"), String("//src/a/...")))
+    assert_true(not _overlap(String("//src/a/..."), String("tests//src/a/...")))
 
 
 def test_the_per_change_check_is_ready() raises:

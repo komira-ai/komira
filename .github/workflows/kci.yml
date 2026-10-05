@@ -478,11 +478,12 @@ jobs:
           printf '#!/bin/sh\nexec "%s/buck2" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/bin/buck2"
           chmod +x "$RUNNER_TEMP/bin/buck2"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      # Every target of the graph is named by some unit: the census
-      # (release/unit_census.txt) must be the graph's, and the welded test of
-      # release/artifacts.textproto holds every census target to a unit. A
-      # new target no unit reaches fails here, naming its check.
-      - name: the unit census is current
+      # Every target of the graph is in some unit: read from the live graph,
+      # each target is named or matched by a unit of
+      # release/artifacts.textproto (a check names buck2 target patterns). A
+      # target in no unit, or a pattern matching nothing, fails here, naming
+      # the check its path maps to.
+      - name: every target is in a unit
         run: python3 release/ci/unit_census.py --check
       # kci first holds this workflow (as committed) to the machine file, then
       # builds the units the change reaches. The base is the pull request's
