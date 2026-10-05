@@ -165,6 +165,34 @@ def test_declared_content_size() raises:
     assert_false(Bool(lz4_frame_declared_content_size(Span(block))))
 
 
+def _refuses_truncated(keep: Int) raises:
+    var text = _read(_GOLDEN_TEXT)
+    var frame = _read(_GOLDEN_FRAME)
+    var cut = List[UInt8]()
+    for i in range(keep):
+        cut.append(frame[i])
+    var out = _filled(len(text) + 64, 0)
+    var raised = False
+    try:
+        _ = decompress_lz4_frame(Span(cut), Span(out))
+    except:
+        raised = True
+    assert_true(raised, "a frame cut to " + String(keep) + " bytes must raise")
+
+
+def test_frame_without_its_end_mark_is_refused() raises:
+    # The frame ends with a 4-byte end mark (FLG bit 2 clear: no content
+    # checksum after it). Every block decodes, but the frame never ends.
+    var frame = _read(_GOLDEN_FRAME)
+    var trailer = 4 + (4 if Int(frame[4]) & 0x04 else 0)
+    _refuses_truncated(len(frame) - trailer)
+
+
+def test_frame_cut_inside_its_block_is_refused() raises:
+    var frame = _read(_GOLDEN_FRAME)
+    _refuses_truncated(len(frame) // 2)
+
+
 # --- codec id 5, the deprecated LZ4 -------------------------------------------
 
 

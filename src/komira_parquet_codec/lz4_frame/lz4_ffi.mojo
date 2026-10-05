@@ -137,15 +137,16 @@ def _lz4_frame_decompress_into[
 ](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
     """LZ4 FRAME decompression via liblz4's `LZ4F_decompress`.
 
-    Decodes a complete in-memory LZ4 frame (`src`) into `dst` (capacity
+    Decodes one complete in-memory LZ4 frame (`src`) into `dst` (capacity
     `len(dst)`). Drives `LZ4F_decompress` in a loop until the whole frame is
     consumed; liblz4 returns a hint of 0 once the frame is fully decoded.
     Returns the number of decompressed bytes written.
 
     Raises with the literal "LZ4F dst buffer too small" marker substring when
     the output buffer filled before the frame ended (a caller's grow-and-retry
-    loop matches on that substring); raises a distinct error on any
-    `LZ4F_isError`-flagged failure.
+    loop matches on that substring); raises "LZ4F frame truncated" when the
+    input ends before the frame does (a missing end mark, a cut block); raises
+    a distinct error on any `LZ4F_isError`-flagged failure.
 
     SAFETY: liblz4's frame decoder reads only `src` and writes only `dst`
     across the synchronous call sequence; it retains no pointer past each
@@ -190,9 +191,12 @@ def _lz4_frame_decompress_into[
     var raised_msg = String("")
     var failed = False
 
-    # Drive the frame decoder until the whole input is consumed. Each call
-    # tells us how many src bytes it ate and how many dst bytes it produced.
-    while src_pos < src_size:
+    # Drive the frame decoder until it reports the frame done (a hint of 0).
+    # Each call tells us how many src bytes it ate and how many dst bytes it
+    # produced. Once the input is used up, a call with no input left lets
+    # liblz4 flush what it buffered; a call that then makes no progress
+    # means the frame ended early (input used up) or the output is full.
+    while True:
         var dst_avail = dst_capacity - total_out
         # In/out size counters (size_t == UInt64 on LP64).
         var dst_sz = Array[UInt64, 1](fill=UInt64(dst_avail))
@@ -226,9 +230,15 @@ def _lz4_frame_decompress_into[
             # Frame fully decoded.
             break
         if consumed == 0 and produced == 0:
-            # No progress and the frame is not done — the dst buffer is full.
+            # No progress and the frame is not done.
             failed = True
-            raised_msg = "LZ4F dst buffer too small"
+            if src_pos >= src_size and total_out < dst_capacity:
+                raised_msg = (
+                    "LZ4F frame truncated: the " + String(src_size)
+                    + "-byte input ends before the frame does"
+                )
+            else:
+                raised_msg = "LZ4F dst buffer too small"
             break
 
     # SAFETY (FFI): `dctx` is the LZ4F_dctx handle returned by
