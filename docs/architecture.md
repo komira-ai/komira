@@ -61,6 +61,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 | [`komira_resources`](../src/komira_resources/) | the files a program reads at run time: `read_resource` and `resource_path`. |
 | [`komira_snapshotter`](../src/komira_snapshotter/) | the provider-agnostic change-stream seam: one trait every change-stream provider conforms to, so a snapshotter's apply, write, commit and checkpoint half is written once. It holds no provider client code. |
 | [`komira_retry`](../src/komira_retry/) | generic retry: when to retry and how long to wait, never which failures. A pure `RetryPolicy`, a `RetryLoop` over injected clock, sleeper and random-source seams, and an optional retry budget; classifying a failure belongs to the client library that knows the protocol. |
+| [`komira_inference_backend`](../src/komira_inference_backend/) | the local-inference engine seam: an `InferenceBackend` trait that launches, probes and tears down an OpenAI-`/v1` server, a connect-to-running backend, and backends that spawn `mlx_lm.server`, `llama-server` or `mlx-openai-server` as a supervised child, wait until it answers and stop it. It reads no environment. |
 
 ### Cloud
 

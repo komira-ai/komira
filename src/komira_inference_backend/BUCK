@@ -1,0 +1,38 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The local-inference engine seam: the InferenceBackend trait (launch, health,
+# teardown, base_url over an OpenAI /v1 endpoint), a connect-to-running
+# MlxBackend, and the conformers that spawn mlx_lm.server, llama-server or
+# mlx-openai-server as a supervised child (komira_supervisor), probe it over
+# HTTP (komira_http_client, on a komira_async BlockingRuntime) and stop it on
+# teardown. The probes are parametric over a komira_http_core Connector.
+#
+# The welded test is hermetic: it spawns nothing and opens no socket.
+# test_inference_backend_port declares its own InferenceBackend conformer and
+# drives it and MlxBackend through one generic, pins the argv each child-spec
+# factory assembles, and checks the comptime-OS default URL.
+mojo_library(
+    name = "komira_inference_backend",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_supervisor:komira_supervisor",
+    ],
+    test_srcs = [
+        "tests/test_inference_backend_port.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The library's deps name every komira package its sources import
+# (tools/build/lint: mojo_deps), so a missing dep fails here, in review, and
+# not only in the compile.
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
