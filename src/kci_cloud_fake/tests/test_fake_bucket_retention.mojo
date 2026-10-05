@@ -353,11 +353,12 @@ def test_a_retention_change_is_an_update() raises:
 
 def main() raises:
     print("test_fake_bucket_retention")
+    # The KEEP gap first: a probe that breaks retention must show it red.
+    test_a_kept_bucket_turned_off_is_left_behind()
     test_the_kit_with_a_bucket_on_every_shape()
     test_golden_bucket_lowering_per_shape()
     test_values_flow_from_a_bucket()
     test_keep_is_stamped_and_destroy_skips_it()
-    test_a_kept_bucket_turned_off_is_left_behind()
     test_a_kept_bucket_gone_from_the_file_is_leftover()
     test_a_retention_change_is_an_update()
     print("ALL kci_cloud_fake BUCKET AND RETENTION TESTS PASSED")
