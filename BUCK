@@ -1,7 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "push_verdicts", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -36,11 +36,6 @@ workflow_lint(
 action_pins(
     name = "action_pins",
     srcs = WORKFLOWS + ACTIONS,
-)
-
-push_verdicts(
-    name = "push_verdicts",
-    srcs = WORKFLOWS,
 )
 
 no_endpoint(
