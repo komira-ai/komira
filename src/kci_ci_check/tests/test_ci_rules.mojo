@@ -221,7 +221,7 @@ def test_r6_triggers_are_an_allow_list() raises:
         var name = others[i].copy()
         _reports(
             _mutated(String("  push:\n"), String("  ") + name + String(":\n  push:\n")),
-            String("R6: trigger '") + name + String("': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+            String("R6: trigger '") + name + String("': the release workflow's triggers are push and workflow_dispatch only"),
         )
     # the list form of `on:`
     _reports(
@@ -229,7 +229,7 @@ def test_r6_triggers_are_an_allow_list() raises:
             String("on:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n        default: \"\"\n"),
             String("on: [push, workflow_dispatch, merge_group]\n"),
         ),
-        String("R6: trigger 'merge_group': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+        String("R6: trigger 'merge_group': the release workflow's triggers are push and workflow_dispatch only"),
     )
 
 

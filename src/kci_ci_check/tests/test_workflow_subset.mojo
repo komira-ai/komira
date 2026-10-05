@@ -26,37 +26,16 @@ comptime _MACHINE: String = (
     "}\n"
 )
 
-# The one workflow (the release jobs and the pull request's job) that
-# agrees with _MACHINE.
+# pr.yml, the pull request's check (the PULL_REQUEST stage alone), which agrees
+# with _MACHINE; the table's rows mutate it and are checked as pr.yml.
 comptime _PR_WF: String = (
-    "name: kci\n"
+    "name: pr\n"
     "on:\n"
-    "  push:\n"
-    "    branches: [main]\n"
-    "  workflow_dispatch:\n"
-    "    inputs:\n"
-    "      revision:\n"
-    "        type: string\n"
     "  pull_request:\n"
+    "    branches: [main]\n"
     "permissions: {}\n"
     "jobs:\n"
-    "  build:\n"
-    "    if: github.event_name != 'pull_request'\n"
-    "    environment: build\n"
-    "    permissions:\n"
-    "      id-token: write\n"
-    "    steps:\n"
-    "      - uses: ./.github/actions/farm-connect\n"
-    "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-    "  publish-gamma:\n"
-    "    needs: build\n"
-    "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
-    "    environment: gamma\n"
-    "    permissions:\n"
-    "      id-token: write\n"
-    "    steps:\n"
-    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-    "  pr:\n"
+    "  check:\n"
     "    if: github.event.pull_request.head.repo.full_name == github.repository\n"
     "    runs-on: ubuntu-24.04\n"
     "    permissions:\n"
@@ -77,6 +56,35 @@ comptime _PR_WF: String = (
     "            --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
 )
 
+# kci.yml, the release workflow (no pull_request trigger), which agrees with
+# _MACHINE; the push-trigger rows mutate it and are checked as the release workflow.
+comptime _REL_WF: String = (
+    "name: kci\n"
+    "on:\n"
+    "  push:\n"
+    "    branches: [main]\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      revision:\n"
+    "        type: string\n"
+    "permissions: {}\n"
+    "jobs:\n"
+    "  build:\n"
+    "    environment: build\n"
+    "    permissions:\n"
+    "      id-token: write\n"
+    "    steps:\n"
+    "      - uses: ./.github/actions/farm-connect\n"
+    "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
+    "  publish-gamma:\n"
+    "    needs: build\n"
+    "    environment: gamma\n"
+    "    permissions:\n"
+    "      id-token: write\n"
+    "    steps:\n"
+    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
+)
+
 comptime _FORK: String = "github.event.pull_request.head.repo.full_name == github.repository"
 comptime _FORK_IF: String = "    if: github.event.pull_request.head.repo.full_name == github.repository\n"
 comptime _JOB_PERMS: String = "    permissions:\n      contents: read\n      id-token: write\n"
@@ -88,9 +96,6 @@ comptime _CANNOT: Int = 0
 comptime _FINDING: Int = 1
 
 comptime _R6_FORK: String = "R6: stage 'pr' is a PULL_REQUEST stage, so the job carries `if:"
-comptime _R6_BUILD: String = "job 'build': R6: runs stage 'build', a release stage"
-comptime _BUILD_IF: String = "    if: github.event_name != 'pull_request'\n"
-comptime _GAMMA_IF: String = "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
 comptime _R4_SCALAR: String = "R4: `permissions: "
 comptime _R4_TOP_TOKEN: String = "R4: `id-token: write` at the workflow level reaches every job"
 comptime _R6_PUSH: String = "R6: the push trigger is exactly `branches: [main]`"
@@ -108,12 +113,14 @@ struct _Row(Copyable, Movable):
     var workflow: String
     var expect: Int
     var needle: String
+    var release: Bool
 
-    def __init__(out self, var label: String, var workflow: String, expect: Int, var needle: String):
+    def __init__(out self, var label: String, var workflow: String, expect: Int, var needle: String, release: Bool = False):
         self.label = label^
         self.workflow = workflow^
         self.expect = expect
         self.needle = needle^
+        self.release = release
 
 
 def _swap(old: String, new: String) raises -> String:
@@ -124,9 +131,11 @@ def _swap(old: String, new: String) raises -> String:
 
 
 def _rel_swap(old: String, new: String) raises -> String:
-    """The workflow (its release jobs and the pull request's job) with
-    `old` replaced by `new`."""
-    return _swap(old, new)
+    """The release workflow with `old` replaced by `new`."""
+    var s = String(_REL_WF)
+    if s.find(old) < 0:
+        raise Error(String("fixture has no '") + old + String("'"))
+    return s.replace(old, new)
 
 
 def _push(value: String) raises -> String:
@@ -169,24 +178,6 @@ def _rows() raises -> List[_Row]:
     r.append(_Row(String("if: tab inside quotes"), _fork_if(String("\"") + expr + String("\t\"")), _CANNOT, String("a TAB")))
     r.append(_Row(String("if: tab after a plain scalar"), _fork_if(expr + String("\t")), _CANNOT, String("a TAB")))
     r.append(_Row(String("if: a partial ${{"), _fork_if(String(_FORK) + String(" && ${{ true")), _FINDING, String(_R6_FORK)))
-
-    # a release job's condition, read the same way
-    var build = String("${{ github.event_name != 'pull_request' }}")
-    r.append(_Row(String("build if: text before ${{"), _swap(String(_BUILD_IF), String("    if: x") + build + String("\n")), _FINDING, String(_R6_BUILD)))
-    r.append(_Row(String("build if: space inside quotes"), _swap(String(_BUILD_IF), String("    if: \"") + build + String(" \"\n")), _FINDING, String(_R6_BUILD)))
-    r.append(_Row(String("build if: block |"), _swap(String(_BUILD_IF), String("    if: |\n      ") + build + String("\n")), _CANNOT, String("block scalar")))
-    r.append(_Row(String("build if: block >-"), _swap(String(_BUILD_IF), String("    if: >-\n      github.event_name != 'pull_request'\n")), _CANNOT, String("block scalar")))
-    r.append(
-        _Row(
-            String("gamma if: '' carried on"),
-            _swap(
-                String(_GAMMA_IF),
-                String("    if: 'github.event_name != ''pull_request'' && needs.build.outputs.release == ''true''\n    || ''a: b'''\n"),
-            ),
-            _CANNOT,
-            String("an escaped quote"),
-        )
-    )
 
     # ---- block scalars, every style and chomping ---------------------------
     var headers = List[String]()
@@ -344,25 +335,26 @@ def _rows() raises -> List[_Row]:
     r.append(_Row(String("id-token: 'read' is a grant"), _top_perms(String("\n  id-token: 'read'")), _FINDING, String(_R4_TOP_TOKEN)))
 
     # ---- the push trigger: the release branch only (R6) -----------------------
-    r.append(_Row(String("push: no branch filter"), _push(String("  push:\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: branches '**'"), _push(String("  push:\n    branches:\n      - '**'\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: a branch pattern"), _push(String("  push:\n    branches:\n      - main*\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: branches-ignore"), _push(String("  push:\n    branches-ignore: [main]\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: a second branch"), _push(String("  push:\n    branches: [main, dev]\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: no branch"), _push(String("  push:\n    branches: []\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: tags beside branches"), _push(String(_PUSH_MAIN) + String("    tags: [v1]\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: paths beside branches"), _push(String(_PUSH_MAIN) + String("    paths: [src]\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: Branches in another case"), _push(String("  push:\n    Branches: [main]\n")), _FINDING, String(_R6_PUSH)))
-    r.append(_Row(String("push: branches a scalar"), _push(String("  push:\n    branches: main\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: no branch filter"), _push(String("  push:\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: branches '**'"), _push(String("  push:\n    branches:\n      - '**'\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: a branch pattern"), _push(String("  push:\n    branches:\n      - main*\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: branches-ignore"), _push(String("  push:\n    branches-ignore: [main]\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: a second branch"), _push(String("  push:\n    branches: [main, dev]\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: no branch"), _push(String("  push:\n    branches: []\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: tags beside branches"), _push(String(_PUSH_MAIN) + String("    tags: [v1]\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: paths beside branches"), _push(String(_PUSH_MAIN) + String("    paths: [src]\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: Branches in another case"), _push(String("  push:\n    Branches: [main]\n")), _FINDING, String(_R6_PUSH), release=True))
+    r.append(_Row(String("push: branches a scalar"), _push(String("  push:\n    branches: main\n")), _FINDING, String(_R6_PUSH), release=True))
     r.append(
         _Row(
             String("on: a list of events"),
             _rel_swap(
-                String("on:\n") + String(_PUSH_MAIN) + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n  pull_request:\n"),
-                String("on: [push, workflow_dispatch, pull_request]\n"),
+                String("on:\n") + String(_PUSH_MAIN) + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n"),
+                String("on: [push, workflow_dispatch]\n"),
             ),
             _FINDING,
             String(_R6_PUSH),
+            True,
         )
     )
 
@@ -457,7 +449,7 @@ def _outcome(row: _Row) raises -> String:
     tokens.append(String("publish-gamma"))
     var f: List[String]
     try:
-        f = check_workflow(row.workflow, g, tokens, String("release/machine.textproto"))
+        f = check_workflow(row.workflow, g, tokens, String("release/machine.textproto"), not row.release)
     except e:
         var m = String(e)
         if row.expect == _CANNOT and m.startswith(String("cannot tell: ")) and m.find(row.needle) >= 0:
@@ -475,8 +467,10 @@ def test_the_fixture_agrees() raises:
     var g = parse_machine_file(String(_MACHINE), String("machine file"))
     var tokens = List[String]()
     tokens.append(String("publish-gamma"))
-    var f = check_workflow(String(_PR_WF), g, tokens, String("release/machine.textproto"))
+    var f = check_workflow(String(_PR_WF), g, tokens, String("release/machine.textproto"), True)
     assert_equal(len(f), 0)
+    var r = check_workflow(String(_REL_WF), g, tokens, String("release/machine.textproto"), False)
+    assert_equal(len(r), 0)
 
 
 def test_the_pr_job_may_hold_its_own_token() raises:
@@ -484,7 +478,7 @@ def test_the_pr_job_may_hold_its_own_token() raises:
     var g = parse_machine_file(String(_MACHINE), String("machine file"))
     var tokens = List[String]()
     tokens.append(String("publish-gamma"))
-    var f = check_workflow(_step_env(String("${{ secrets.GITHUB_TOKEN }}")), g, tokens, String("release/machine.textproto"))
+    var f = check_workflow(_step_env(String("${{ secrets.GITHUB_TOKEN }}")), g, tokens, String("release/machine.textproto"), True)
     assert_equal(len(f), 0)
 
 

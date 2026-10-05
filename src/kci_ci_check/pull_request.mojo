@@ -272,6 +272,7 @@ def check_pull_request_job(
     doc: WorkflowDoc,
     job_id: String,
     job: Int,
+    stage: String,
     affected_by: List[String],
     has_affected_by: List[Bool],
     mut findings: List[String],
@@ -279,7 +280,7 @@ def check_pull_request_job(
     """R6 for the job of a PULL_REQUEST stage (rules.mojo's header): the
     base commit (each `kci run`'s `--affected-by`, given as two parallel
     lists), the full history, the fork condition and the permissions."""
-    var where = _at(doc, job) + String("job '") + job_id + String("': R6: stage '") + job_id + String("' is a PULL_REQUEST stage")
+    var where = _at(doc, job) + String("job '") + job_id + String("': R6: stage '") + stage + String("' is a PULL_REQUEST stage")
     var want = String("${{ ") + String(PULL_REQUEST_BASE_EXPRESSION) + String(" }}")
     for i in range(len(affected_by)):
         if not has_affected_by[i]:

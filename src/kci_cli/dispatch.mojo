@@ -35,7 +35,10 @@
 #      .github/workflows/), read as it was COMMITTED at `GITHUB_WORKFLOW_SHA`
 #      (`git show <sha>:<path>`; the checkout may be another revision), and
 #      held to the machine file by kci_ci_check's `check_running_workflow`
-#      with every channels file the machine file names. Any finding is
+#      with every channels file the machine file names: a run of the
+#      PULL_REQUEST stage is held to the pull request's workflow (pr.yml, the
+#      PULL_REQUEST stage alone), a run of any other stage to the release
+#      workflow (kci.yml). Any finding is
 #      REFUSED (KCI-E-WORKFLOW-MISMATCH, exit 3), every finding printed and
 #      no step run. A variable that is unset or malformed, a `git show` that
 #      fails, a channels file or a workflow that cannot be read is
@@ -549,9 +552,15 @@ def _check_workflow_at_start[S: StageSteps](
             return _WorkflowVerdict.cannot_tell(
                 String("the channels file '") + paths[i] + String("' cannot be read: ") + String(e)
             )
+    # A run of the PULL_REQUEST stage is held to pr.yml's rules (the file it runs
+    # under: GITHUB_WORKFLOW_REF), every other stage to the release workflow's.
+    var pull_request_file = False
+    for i in range(len(g.stages)):
+        if g.stages[i].name == cmd.stage and g.stages[i].is_pull_request():
+            pull_request_file = True
     var findings: List[String]
     try:
-        findings = check_running_workflow(g, files, text, cmd.machine)
+        findings = check_running_workflow(g, files, text, cmd.machine, pull_request_file)
     except e:
         result.workflow_reason = String("the workflow could not be checked")
         return _WorkflowVerdict.cannot_tell(path + String(" at ") + sha + String(": ") + String(e))

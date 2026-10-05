@@ -15,6 +15,13 @@ export_file(
     visibility = ["//src/kci_ci_check:"],
 )
 
+# The pull request's check, held to the same machine file by the same welded test.
+export_file(
+    name = "pr.yml",
+    src = ".github/workflows/pr.yml",
+    visibility = ["//src/kci_ci_check:"],
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = ["buck2"] + glob([".github/ci/*.sh"]),

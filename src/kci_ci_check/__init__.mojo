@@ -7,15 +7,18 @@
 #   workflow_reader.mojo  `read_workflow`: a FAIL-CLOSED reader of a strict
 #                         YAML subset (its header); anything else is
 #                         "cannot tell", never a pass
-#   rules.mojo            `check_workflow`: every disagreement (R1 to R12, R14);
+#   rules.mojo            `check_workflow`: every disagreement (R1 to R12, R14),
+#                         for the release workflow (kci.yml) or, with
+#                         `pull_request_file`, the pull request's check
+#                         (pr.yml, `check_pull_request_workflow`);
 #                         `check_running_workflow`: the start-up check `kci
 #                         run` makes; `id_token_stages`: which stages publish
 #                         by OIDC; `kci_run_calls`
-#   pull_request.mojo     R6: on a `pull_request` trigger only the
-#                         PULL_REQUEST stage's job runs (same-repository
-#                         pull requests only, `contents: read` and the farm
-#                         connection's token); every other job is
-#                         release-only (`excludes_pull_request`);
+#   pull_request.mojo     R6: pr.yml's one job runs the PULL_REQUEST stage
+#                         (same-repository pull requests only, `contents:
+#                         read` and the farm connection's token); the
+#                         release-only condition readers
+#                         (`excludes_pull_request`);
 #                         `condition_expression`: the expression GitHub
 #                         evaluates for a job's `if:`
 #
@@ -49,6 +52,7 @@ from kci_ci_check.rules import (
     KciRunCall,
     channels_paths,
     check_running_workflow,
+    check_pull_request_workflow,
     check_workflow,
     check_workflow_doc,
     id_token_stages,

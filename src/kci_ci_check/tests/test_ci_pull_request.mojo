@@ -1,12 +1,13 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_ci_pull_request.mojo -- R6 as amended: ONE
-#   workflow runs the release stages and a pull request's per-change check.
-#   On `pull_request` only the PULL_REQUEST stage's job runs (same-repository
-#   pull requests only, no environment, `contents: read` and the farm
-#   connection's token, the base commit, the full history); every release
-#   job's `if:` keeps a pull request out. A workflow that agrees, then one
-#   mutation per branch of the rule, each of which must be reported; and the
-#   start-up entry point `kci run` calls.
+# src/kci_ci_check/tests/test_ci_pull_request.mojo -- R6 for pr.yml, the pull
+#   request's check: the machine file's PULL_REQUEST stage as the ONE job of a
+#   workflow of its own (`check_pull_request_workflow`). It is triggered by
+#   `pull_request` alone, for a same-repository pull request only, in no
+#   environment, with `contents: read` and the farm connection's token, the
+#   base commit and the full history. A workflow that agrees, then one mutation
+#   per branch of the rule, each of which must be reported; and the start-up
+#   entry point `kci run` calls. The release workflow's half (no
+#   `pull_request` trigger, no job for this stage) is test_ci_two_workflows.mojo.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -42,34 +43,13 @@ comptime _MACHINE: String = (
 )
 
 comptime _WF: String = (
-    "name: kci\n"
+    "name: pr\n"
     "on:\n"
-    "  push:\n"
-    "    branches: [main]\n"
-    "  workflow_dispatch:\n"
-    "    inputs:\n"
-    "      revision:\n"
-    "        type: string\n"
     "  pull_request:\n"
+    "    branches: [main]\n"
     "permissions: {}\n"
     "jobs:\n"
-    "  build:\n"
-    "    if: github.event_name != 'pull_request'\n"
-    "    environment: build\n"
-    "    permissions:\n"
-    "      id-token: write\n"
-    "    steps:\n"
-    "      - uses: ./.github/actions/farm-connect\n"
-    "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-    "  publish-gamma:\n"
-    "    needs: build\n"
-    "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
-    "    environment: gamma\n"
-    "    permissions:\n"
-    "      id-token: write\n"
-    "    steps:\n"
-    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-    "  pr:\n"
+    "  check:\n"
     "    if: github.event.pull_request.head.repo.full_name == github.repository\n"
     "    runs-on: ubuntu-24.04\n"
     "    permissions:\n"
@@ -99,7 +79,7 @@ def _tokens() -> List[String]:
 
 def _check(machine: String, wf: String) raises -> List[String]:
     var g = parse_machine_file(machine, String("machine file"))
-    return check_workflow(wf, g, _tokens(), String("release/machine.textproto"))
+    return check_workflow(wf, g, _tokens(), String("release/machine.textproto"), True)
 
 
 def _all(f: List[String]) -> String:
@@ -141,15 +121,6 @@ def test_the_one_workflow_agrees() raises:
     _agrees(String(_MACHINE), String(_WF))
 
 
-def test_without_a_pull_request_stage_the_workflow_has_no_pull_request_trigger() raises:
-    var whole = String(_MACHINE)
-    var cut = whole.find(String("stage { name: \"pr\""))
-    var machine = String(whole[byte=0:cut])
-    var wf = _wf(String("  pull_request:\n"), String(""))
-    var pr_at = wf.find(String("  pr:\n"))
-    _agrees(machine, String(wf[byte=0:pr_at]))
-
-
 def test_the_affected_by_spellings_kci_accepts() raises:
     # quoted, `=`, and the spacing inside ${{ }} aside
     _agrees(String(_MACHINE), _wf(String("--affected-by ${{ github.event.pull_request.base.sha }}"), String("--affected-by \"${{ github.event.pull_request.base.sha }}\"")))
@@ -186,12 +157,14 @@ def test_pull_request_target_is_never_a_trigger() raises:
 
 
 def _other_triggers() -> List[String]:
-    """Events other than push, workflow_dispatch and pull_request. A release
-    job's `github.event_name != 'pull_request'` does not keep out the first
-    six: each can run a pull request's code (a review or a comment on it, a
-    merge-queue candidate, a calling workflow's event, the code workflow_run
-    follows). schedule is off the allow-list too."""
+    """Events other than pull_request: each is refused in pr.yml (a push and a
+    manual run included: pr.yml is the pull request's check and nothing else;
+    the others can run a pull request's code in a way this job's same-repository
+    condition does not read: a review or a comment on it, a merge-queue
+    candidate, a calling workflow's event, the code workflow_run follows)."""
     var t = List[String]()
+    t.append(String("push"))
+    t.append(String("workflow_dispatch"))
     t.append(String("pull_request_review"))
     t.append(String("pull_request_review_comment"))
     t.append(String("issue_comment"))
@@ -208,7 +181,7 @@ def test_an_event_off_the_allow_list_is_refused() raises:
         var name = others[i].copy()
         _reports(
             _wf(String("  pull_request:\n"), String("  pull_request:\n  ") + name + String(":\n")),
-            String("R6: trigger '") + name + String("': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+            String("R6: trigger '") + name + String("': pr.yml is triggered by `pull_request` alone"),
         )
 
 
@@ -217,43 +190,11 @@ def test_pull_request_with_no_pull_request_stage_is_refused() raises:
     _reports_on(
         machine,
         String(_WF),
-        String("R6: trigger 'pull_request': the machine file declares no PULL_REQUEST stage, and a release stage never runs a pull request's code"),
+        String("R6: pr.yml runs the machine file's PULL_REQUEST stage, and the machine file declares 0 of them"),
     )
-
-
-def test_a_pull_request_stage_needs_the_pull_request_trigger() raises:
-    _reports(
-        _wf(String("  pull_request:\n"), String("")),
-        String("R6: the machine file declares the PULL_REQUEST stage 'pr', so the workflow has a `pull_request` trigger"),
-    )
-    # and its job
-    _reports(_wf(String("  pr:\n"), String("  check:\n")), String("R1: stage 'pr' has no job of the same id"))
-
-
-def test_the_release_stays_on_push_and_dispatch() raises:
-    # the workflow still releases: R7 holds with the pull_request trigger
-    _reports(_wf(String("      revision:\n"), String("      rev:\n")), String("R7: workflow_dispatch takes no input `revision`"))
 
 
 # ---- every release job keeps a pull request out ---------------------------------
-
-
-def test_a_release_job_reachable_on_pull_request_is_refused() raises:
-    var want = String("runs stage 'publish-gamma', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a pull request out")
-    # no condition at all
-    _reports(_wf(String("    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"), String("")), want)
-    # a condition a pull request satisfies
-    _reports(
-        _wf(String("    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"), String("    if: needs.build.outputs.release == 'true'\n")),
-        want,
-    )
-    # `||` is not read as release-only
-    _reports(
-        _wf(String("github.event_name != 'pull_request' && needs"), String("github.event_name != 'pull_request' || needs")),
-        want,
-    )
-    # the event itself
-    _reports(_wf(String("    if: github.event_name != 'pull_request'\n"), String("    if: github.event_name == 'pull_request'\n")), String("job 'build': R6: runs stage 'build', a release stage"))
 
 
 def test_the_release_only_spellings() raises:
@@ -267,11 +208,6 @@ def test_the_release_only_spellings() raises:
     assert_false(excludes_pull_request(String("always() || github.event_name != 'pull_request'")))
     assert_false(excludes_pull_request(String("!(github.event_name != 'pull_request')")))
     assert_false(excludes_pull_request(String("")))
-    # a release job with the dispatch-only condition agrees
-    _agrees(
-        String(_MACHINE),
-        _wf(String("github.event_name != 'pull_request' && needs.build.outputs.release == 'true'"), String("github.event_name == 'workflow_dispatch'")),
-    )
 
 
 def test_an_event_name_term_is_read_exactly() raises:
@@ -308,20 +244,6 @@ def test_an_event_name_term_is_read_exactly() raises:
     assert_false(excludes_pull_request(String("github.event_name = 'push'")))
     assert_false(excludes_pull_request(String("github.event_names != 'pull_request'")))
     assert_false(excludes_pull_request(String("GITHUB.EVENT_NAME == 'push'")))
-
-
-def test_a_release_job_condition_in_another_case_is_refused() raises:
-    var want = String("runs stage 'publish-gamma', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a pull request out")
-    var old = String("github.event_name != 'pull_request' && needs")
-    _reports(_wf(old, String("github.event_name == 'PULL_REQUEST' && needs")), want)
-    _reports(_wf(old, String("github.event_name == 'Pull_Request' && needs")), want)
-
-
-def test_a_release_job_condition_with_an_operator_in_the_literal_is_refused() raises:
-    var want = String("runs stage 'publish-gamma', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a pull request out")
-    var old = String("github.event_name != 'pull_request' && needs")
-    _reports(_wf(old, String("github.event_name == 'push' != 'x' && needs")), want)
-    _reports(_wf(old, String("github.event_name == 'release' && needs")), want)
 
 
 # The probes: each holds the exact event term between two `&&`, and each is
@@ -365,112 +287,6 @@ def test_only_a_top_level_conjunction_is_read() raises:
     assert_true(excludes_pull_request(String("${{ github.event_name != 'pull_request' && needs.a.outputs.n >= 2 }}")))
 
 
-def test_a_release_job_condition_that_is_not_a_top_level_conjunction_is_refused() raises:
-    var want = String("runs stage 'publish-gamma', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a pull request out")
-    var old = String("    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n")
-    var probes = _probes()
-    for i in range(len(probes)):
-        # double-quoted: a plain scalar starting with `!` is a YAML tag (no probe
-        # holds a `"` or a backslash)
-        _reports(_wf(old, String("    if: \"") + probes[i] + String("\"\n")), want)
-    # every release job behind the negated conjunction: each is reported
-    var neg = String("    if: (true && github.event_name != 'pull_request' && needs.build.outputs.release == 'true') == false\n")
-    var wf = _wf(old, neg)
-    var build_old = String("    if: github.event_name != 'pull_request'\n")
-    if wf.find(build_old) < 0:
-        raise Error(String("fixture has no build condition"))
-    wf = wf.replace(build_old, neg)
-    _reports(wf, want)
-    _reports(wf, String("job 'build': R6: runs stage 'build', a release stage"))
-
-
-comptime _BUILD_IF: String = "    if: github.event_name != 'pull_request'\n"
-comptime _GAMMA_IF: String = "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
-comptime _BUILD_EXPR: String = "${{ github.event_name != 'pull_request' }}"
-comptime _GAMMA_EXPR: String = "${{ github.event_name != 'pull_request' && needs.build.outputs.release == 'true' }}"
-
-
-def _format_strings(expr: String) -> List[String]:
-    """`if:` values (written after `if:`, to the line's end) inside the
-    subset the reader reads that hold `expr` and are not exactly it: a space
-    inside quotes around it, text before it, a second `${{ }}`. GitHub reads
-    each as a format string, always true."""
-    var v = List[String]()
-    v.append(String("\" ") + expr + String("\""))
-    v.append(String("\"") + expr + String(" \""))
-    v.append(String("x") + expr)
-    v.append(expr + String(" && ${{ true }}"))
-    return v^
-
-
-def _reports_each(old: String, values: List[String], needle: String) raises:
-    for i in range(len(values)):
-        try:
-            _reports(_wf(old, String("    if: ") + values[i] + String("\n")), needle)
-        except e:
-            raise Error(String("`if: ") + values[i] + String("`: ") + String(e))
-
-
-def test_a_release_job_condition_github_reads_as_a_format_string_is_refused() raises:
-    _reports_each(
-        String(_BUILD_IF), _format_strings(String(_BUILD_EXPR)), String("job 'build': R6: runs stage 'build', a release stage")
-    )
-    _reports_each(
-        String(_GAMMA_IF),
-        _format_strings(String(_GAMMA_EXPR)),
-        String("job 'publish-gamma': R6: runs stage 'publish-gamma', a release stage"),
-    )
-    # the string reader alone: whitespace around one `${{ }}` is a format string
-    assert_false(excludes_pull_request(String(_BUILD_EXPR) + String(" ")))
-    assert_false(excludes_pull_request(String(" ") + String(_BUILD_EXPR)))
-    assert_false(excludes_pull_request(String(_BUILD_EXPR) + String("\t")))
-    assert_false(excludes_pull_request(String(_BUILD_EXPR) + String("\n")))
-
-
-def _outside_the_subset(expr: String) -> List[Tuple[String, String]]:
-    """`if:` values holding `expr` written outside the subset the reader
-    reads, each with what the reader says: block scalars (any style), a TAB,
-    a single-quoted scalar carried past its line by `''`."""
-    var v = List[Tuple[String, String]]()
-    for h in ["|", "|-", "|+", ">", ">-", ">+"]:
-        v.append((String(h) + String("\n      ") + expr, String("block scalar")))
-    v.append((expr + String("\t"), String("a TAB")))
-    v.append((String("\"") + expr + String("\t\""), String("a TAB")))
-    v.append((String("\"\t") + expr + String("\""), String("a TAB")))
-    v.append((String("'") + expr.replace(String("'"), String("''")) + String("''\n    || ''a: b''") + String("'"), String("an escaped quote")))
-    return v^
-
-
-def test_a_job_condition_outside_the_subset_is_cannot_tell() raises:
-    var conds = List[Tuple[String, String]]()
-    conds.append((String(_BUILD_IF), String(_BUILD_EXPR)))
-    conds.append((String(_GAMMA_IF), String(_GAMMA_EXPR)))
-    conds.append((String(_FORK_IF), String("${{ ") + String(_FORK) + String(" }}")))
-    conds.append((String(_BUILD_IF), String("github.event_name != 'pull_request'")))
-    conds.append((String(_FORK_IF), String(_FORK)))
-    for c in range(len(conds)):
-        var values = _outside_the_subset(conds[c][1])
-        for i in range(len(values)):
-            try:
-                _cannot_tell(String(_MACHINE), _wf(conds[c][0], String("    if: ") + values[i][0] + String("\n")), values[i][1])
-            except e:
-                raise Error(String("`if: ") + values[i][0] + String("`: ") + String(e))
-
-
-def _block_if_findings(job: String, old: String, expr: String, block: Bool) raises -> List[String]:
-    """The findings on the workflow whose job `job` has `if:` holding exactly
-    `expr` (read double-quoted), with that node's block flag set to `block`:
-    the reader never builds a block `if:`, so the rule's own guard is held
-    on a document built so."""
-    var doc = read_workflow(_wf(old, String("    if: \"") + expr + String("\"\n")))
-    var cond = doc.child(doc.child(doc.child(0, String("jobs")), String(job)), String("if"))
-    if cond < 0 or doc.text(cond) != expr:
-        raise Error(String("no `if:` holding the expression on job ") + job)
-    doc.nodes[cond].block = block
-    var g = parse_machine_file(String(_MACHINE), String("machine file"))
-    return check_workflow_doc(doc, g, _tokens(), String("release/machine.textproto"))
-
-
 def _has(f: List[String], needle: String) -> Bool:
     for i in range(len(f)):
         if f[i].find(needle) >= 0:
@@ -478,34 +294,59 @@ def _has(f: List[String], needle: String) -> Bool:
     return False
 
 
-def test_the_block_scalar_is_refused_by_its_style_not_its_indentation() raises:
-    # The block flag alone refuses each condition: with the text exactly
-    # `${{ <it> }}`, the same node read as a quoted scalar agrees.
-    var cases = List[Tuple[String, String, String, String]]()
-    cases.append((String("build"), String(_BUILD_IF), String(_BUILD_EXPR), String("job 'build': R6: runs stage 'build', a release stage")))
-    cases.append((String("publish-gamma"), String(_GAMMA_IF), String(_GAMMA_EXPR), String("job 'publish-gamma': R6: runs stage 'publish-gamma', a release stage")))
-    cases.append((String("pr"), String(_FORK_IF), String("${{ ") + String(_FORK) + String(" }}"), String("R6: stage 'pr' is a PULL_REQUEST stage, so the job carries `if: ")))
-    for i in range(len(cases)):
-        var job = cases[i][0]
-        assert_true(_has(_block_if_findings(job, cases[i][1], cases[i][2], True), cases[i][3]), job)
-        var quoted = _block_if_findings(job, cases[i][1], cases[i][2], False)
-        if len(quoted) != 0:
-            raise Error(job + String(": unexpected findings: ") + _all(quoted))
-
-
-def test_a_release_job_condition_that_is_exactly_one_expression_agrees() raises:
-    _agrees(String(_MACHINE), _wf(String(_BUILD_IF), String("    if: ") + String(_BUILD_EXPR) + String("\n")))
-    _agrees(String(_MACHINE), _wf(String(_GAMMA_IF), String("    if: \"") + String(_GAMMA_EXPR) + String("\"\n")))
-    # a trailing comment is not part of the value
-    _agrees(String(_MACHINE), _wf(String(_BUILD_IF), String("    if: ") + String(_BUILD_EXPR) + String(" # release only\n")))
-
-
-def test_a_pull_request_stage_runs_whole_in_its_own_job() raises:
-    var wf = String(_WF) + String(
+def test_pr_yml_runs_the_pull_request_stage_and_nothing_else() raises:
+    # a gamma, prod, validate or build job (or any other) added to pr.yml
+    var extra = List[String]()
+    extra.append(String("build"))
+    extra.append(String("publish-gamma"))
+    extra.append(String("gamma"))
+    extra.append(String("validate"))
+    extra.append(String("prod"))
+    for i in range(len(extra)):
+        var wf = String(_WF) + String("  ") + extra[i] + String(":\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo hi\n")
+        _reports(wf, String("R1: job '") + extra[i] + String("' is not the one job `check` of pr.yml"))
+    # a release job as a copy of the stage: still not the one job
+    var wf2 = String(_WF) + String(
         "  pr-part:\n    if: github.event.pull_request.head.repo.full_name == github.repository\n"
         "    steps:\n      - run: kci run --stage pr --only step:check --summary-file x\n"
     )
-    _reports(wf, String("R6: job 'pr-part' runs a part of stage 'pr', a PULL_REQUEST stage, which runs whole in the job of its name"))
+    _reports(wf2, String("R1: job 'pr-part' is not the one job `check` of pr.yml"))
+    # a second job holding the identity token or an environment
+    _reports(
+        String(_WF) + String("  second:\n    environment: gamma\n    permissions:\n      id-token: write\n    steps:\n      - run: echo hi\n"),
+        String("R1: job 'second' is not the one job `check`"),
+    )
+    # the one job renamed: no `pr / check`
+    _reports(_wf(String("  check:\n"), String("  pr:\n")), String("R1: pr.yml has no job `check`"))
+    # the workflow's name is the check's first half
+    _reports(_wf(String("name: pr\n"), String("name: kci\n")), String("R6: pr.yml's `name:` is `pr`, so the check is `pr / check`"))
+    _reports(_wf(String("name: pr\n"), String("")), String("R6: pr.yml's `name:` is `pr`"))
+
+
+def test_pr_yml_holds_no_secret() raises:
+    _reports(
+        _wf(String("          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"), String("          ts-client-id: ${{ secrets.TS_CLIENT_ID }}\n")),
+        String("names the `secrets` context"),
+    )
+    _reports(_wf(String("permissions: {}\n"), String("permissions: {}\nenv:\n  T: ${{ secrets.T }}\n")), String("workflow: R6"))
+    _reports(_wf(String("    runs-on: ubuntu-24.04\n"), String("    runs-on: ubuntu-24.04\n    secrets: inherit\n")), String("passes stored secrets"))
+
+
+def test_pr_yml_uses_are_pinned() raises:
+    _reports(
+        _wf(String("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"), String("actions/checkout@v4")),
+        String("R8: `uses: actions/checkout@v4` is not pinned"),
+    )
+    _reports(_wf(String("./.github/actions/farm-connect"), String("owner/repo@main")), String("R8:"))
+
+
+def test_pr_yml_has_no_publish_step() raises:
+    # a publish stage's `kci run` in the job is refused (R5: the job runs the pull request's stage once)
+    _reports(
+        _wf(String("run --stage pr \\\n"), String("run --stage publish-gamma \\\n")),
+        String("R5: `kci run --stage publish-gamma` in job 'check'"),
+    )
+    _reports(_wf(String("run --stage pr \\\n"), String("run --stage pr --channel local \\\n")), String("R14"))
 
 
 # ---- the pull request's job ------------------------------------------------------
@@ -514,7 +355,7 @@ def test_a_pull_request_stage_runs_whole_in_its_own_job() raises:
 def test_a_pull_request_job_runs_in_no_environment() raises:
     _reports(
         _wf(String("    runs-on: ubuntu-24.04\n"), String("    runs-on: ubuntu-24.04\n    environment: pr\n")),
-        String("job 'pr': R2: stage 'pr' is a PULL_REQUEST stage, so its job runs in no environment"),
+        String("job 'check': R2: stage 'pr' is a PULL_REQUEST stage, so its job runs in no environment"),
     )
 
 
@@ -541,6 +382,27 @@ def test_the_fork_condition_is_exactly_one_expression() raises:
     _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: \"") + expr + String("\"\n")))
     _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: '") + expr + String("'\n")))
     _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: \" ") + String(_FORK) + String(" \"\n")))
+
+
+def _format_strings(expr: String) -> List[String]:
+    """`if:` values (written after `if:`, to the line's end) inside the
+    subset the reader reads that hold `expr` and are not exactly it: a space
+    inside quotes around it, text before it, a second `${{ }}`. GitHub reads
+    each as a format string, always true."""
+    var v = List[String]()
+    v.append(String("\" ") + expr + String("\""))
+    v.append(String("\"") + expr + String(" \""))
+    v.append(String("x") + expr)
+    v.append(expr + String(" && ${{ true }}"))
+    return v^
+
+
+def _reports_each(old: String, values: List[String], needle: String) raises:
+    for i in range(len(values)):
+        try:
+            _reports(_wf(old, String("    if: ") + values[i] + String("\n")), needle)
+        except e:
+            raise Error(String("`if: ") + values[i] + String("`: ") + String(e))
 
 
 def test_a_fork_condition_github_reads_as_a_format_string_is_refused() raises:
@@ -600,7 +462,7 @@ def test_condition_expression_refuses_every_block_scalar_holding_an_expression()
 def test_a_pull_request_job_holds_minimal_permissions() raises:
     _reports(
         _wf(String("      contents: read\n      id-token: write\n"), String("      contents: read\n      id-token: write\n      pull-requests: write\n")),
-        String("job 'pr': R6: stage 'pr' is a PULL_REQUEST stage, so its permissions hold only `contents: read` and, for the farm connection, `id-token: write`; it grants `pull-requests: write`"),
+        String("job 'check': R6: stage 'pr' is a PULL_REQUEST stage, so its permissions hold only `contents: read` and, for the farm connection, `id-token: write`; it grants `pull-requests: write`"),
     )
     _reports(
         _wf(String("      contents: read\n      id-token: write\n"), String("      contents: write\n      id-token: write\n")),
@@ -615,7 +477,7 @@ def test_a_pull_request_job_holds_minimal_permissions() raises:
 def test_a_pull_request_job_passes_the_base_commit() raises:
     _reports(
         _wf(String("            --affected-by ${{ github.event.pull_request.base.sha }} \\\n"), String("")),
-        String("job 'pr': R6: stage 'pr' is a PULL_REQUEST stage, so its `kci run` carries --affected-by ${{ github.event.pull_request.base.sha }}"),
+        String("job 'check': R6: stage 'pr' is a PULL_REQUEST stage, so its `kci run` carries --affected-by ${{ github.event.pull_request.base.sha }}"),
     )
     _reports(
         _wf(String("${{ github.event.pull_request.base.sha }}"), String("origin/main")),
@@ -630,11 +492,11 @@ def test_a_pull_request_job_passes_the_base_commit() raises:
 def test_a_pull_request_job_fetches_the_full_history() raises:
     _reports(
         _wf(String("        with:\n          fetch-depth: 0\n"), String("")),
-        String("job 'pr': R6: its checkout has no `with: fetch-depth: 0`"),
+        String("job 'check': R6: its checkout has no `with: fetch-depth: 0`"),
     )
     _reports(
         _wf(String("          fetch-depth: 0\n"), String("          fetch-depth: 1\n")),
-        String("job 'pr': R6: its checkout has no `with: fetch-depth: 0`"),
+        String("job 'check': R6: its checkout has no `with: fetch-depth: 0`"),
     )
     _reports(
         _wf(String("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          fetch-depth: 0\n"), String("")),
@@ -650,7 +512,7 @@ def test_a_pull_request_stage_that_is_not_farm_connected() raises:
     _agrees(machine, wf)
     # the identity token is the farm connection's only: refused here
     var token = wf.replace(String("      contents: read\n"), String("      contents: read\n      id-token: write\n"))
-    _reports_on(machine, token, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel and is not farm-connected"))
+    _reports_on(machine, token, String("job 'check': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel and is not farm-connected"))
     # and a fork still runs nothing
     _reports_on(
         machine,
@@ -662,7 +524,7 @@ def test_a_pull_request_stage_that_is_not_farm_connected() raises:
 def test_a_farm_connected_pull_request_job_needs_its_token() raises:
     _reports(
         _wf(String("      contents: read\n      id-token: write\n"), String("      contents: read\n")),
-        String("job 'pr': R4: stage 'pr' is farm-connected, so the job needs `id-token: write`"),
+        String("job 'check': R4: stage 'pr' is farm-connected, so the job needs `id-token: write`"),
     )
 
 
@@ -671,21 +533,16 @@ def test_write_all_is_refused_on_a_pull_request_job() raises:
     var machine = String(_MACHINE).replace(String("trigger: PULL_REQUEST farm_connected: true"), String("trigger: PULL_REQUEST"))
     var wf = _wf(String("      - name: farm\n        uses: ./.github/actions/farm-connect\n        with:\n          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"), String(""))
     wf = wf.replace(String("    permissions:\n      contents: read\n      id-token: write\n"), String("    permissions: write-all\n"))
-    _reports_on(machine, wf, String("job 'pr': R4: `permissions: write-all` grants permissions no map names"))
-    _reports_on(machine, wf, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+    _reports_on(machine, wf, String("job 'check': R4: `permissions: write-all` grants permissions no map names"))
+    _reports_on(machine, wf, String("job 'check': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
     # on the farm-connected stage's job, which does need the token
-    _reports(_wf(String("    permissions:\n      contents: read\n      id-token: write\n"), String("    permissions: write-all\n")), String("job 'pr': R4: `permissions: write-all` grants permissions no map names"))
+    _reports(_wf(String("    permissions:\n      contents: read\n      id-token: write\n"), String("    permissions: write-all\n")), String("job 'check': R4: `permissions: write-all` grants permissions no map names"))
 
 
 def test_write_all_is_refused_at_the_workflow_level() raises:
     var wf = _wf(String("permissions: {}\n"), String("permissions: write-all\n"))
     _reports(wf, String("workflow: R4: `permissions: write-all` grants permissions no map names"))
     _reports(wf, String("R4: `id-token: write` at the workflow level reaches every job"))
-
-
-def test_write_all_is_refused_on_a_release_job() raises:
-    var wf = _wf(String("    environment: gamma\n    permissions:\n      id-token: write\n"), String("    environment: gamma\n    permissions: write-all\n"))
-    _reports_on(String(_MACHINE), wf, String("job 'publish-gamma': R4: `permissions: write-all` grants permissions no map names"))
 
 
 def _not_farm_connected() raises -> Tuple[String, String]:
@@ -728,18 +585,6 @@ def test_an_id_token_block_scalar_at_the_workflow_level_is_cannot_tell() raises:
         _cannot_tell(base[0], wf, String("block scalar"))
 
 
-def test_an_id_token_block_scalar_on_a_release_job_is_cannot_tell() raises:
-    # `build` without the farm connection needs no token
-    var machine = String(_MACHINE).replace(String("stage { name: \"build\" farm_connected: true"), String("stage { name: \"build\""))
-    var styles = _block_styles()
-    for i in range(len(styles)):
-        var job = _wf(
-            String("    environment: build\n    permissions:\n      id-token: write\n    steps:\n      - uses: ./.github/actions/farm-connect\n"),
-            String("    environment: build\n    permissions:\n      id-token: ") + styles[i] + String("\n        write\n    steps:\n"),
-        )
-        _cannot_tell(machine, job, String("block scalar"))
-
-
 def test_only_a_plain_read_or_none_withholds_the_id_token() raises:
     var base = _not_farm_connected()
     # plain `read` and `none` grant nothing
@@ -754,7 +599,7 @@ def test_only_a_plain_read_or_none_withholds_the_id_token() raises:
     others.append(String("\n"))
     for i in range(len(others)):
         var wf = base[1].replace(String("      contents: read\n"), String("      contents: read\n      id-token: ") + others[i])
-        _reports_on(base[0], wf, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+        _reports_on(base[0], wf, String("job 'check': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
 
 
 def test_a_permissions_scalar_other_than_plain_read_all_is_refused() raises:
@@ -825,7 +670,7 @@ def test_a_merge_key_in_permissions_is_cannot_tell() raises:
 
 def _doc_findings(machine: String, doc: WorkflowDoc) raises -> List[String]:
     var g = parse_machine_file(machine, String("machine file"))
-    return check_workflow_doc(doc, g, _tokens(), String("release/machine.textproto"))
+    return check_workflow_doc(doc, g, _tokens(), String("release/machine.textproto"), True)
 
 
 def _doc_reports(machine: String, doc: WorkflowDoc, needle: String) raises:
@@ -864,8 +709,8 @@ def test_an_id_token_key_in_another_case_is_refused() raises:
         _cannot_tell(base[0], _top_perms(base[1], keys[i]), String("in another case"))
     # the rule's own guard, on a document the reader never builds
     var job = _rekeyed(_job_perms(base[1], String("id-token: read")), String("id-token"), String("Id-Token"))
-    _doc_reports(base[0], job, String("job 'pr': R4: permissions key 'Id-Token'"))
-    _doc_reports(base[0], job, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+    _doc_reports(base[0], job, String("job 'check': R4: permissions key 'Id-Token'"))
+    _doc_reports(base[0], job, String("job 'check': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
     var top = _rekeyed(_top_perms(base[1], String("id-token: read")), String("id-token"), String("ID-TOKEN"))
     _doc_reports(base[0], top, String("workflow: R4: permissions key 'ID-TOKEN'"))
     _doc_reports(base[0], top, String("R4: `id-token: write` at the workflow level reaches every job"))
@@ -877,7 +722,7 @@ def test_permissions_keys_that_differ_only_in_case_are_refused() raises:
     _cannot_tell(base[0], _top_perms(base[1], String("contents: read\n  CONTENTS: write")), String("repeated"))
     # the rule's own guard
     var job = _rekeyed(_job_perms(base[1], String("actions: write")), String("actions"), String("Contents"))
-    _doc_reports(base[0], job, String("job 'pr': R4: permissions keys 'contents' and 'Contents'"))
+    _doc_reports(base[0], job, String("job 'check': R4: permissions keys 'contents' and 'Contents'"))
 
 
 def test_a_permissions_key_in_another_case_is_refused() raises:
@@ -888,18 +733,11 @@ def test_a_permissions_key_in_another_case_is_refused() raises:
     _cannot_tell(base[0], top, String("key 'PERMISSIONS' is the key 'permissions' in another case"))
     # the rule's own guard
     var jd = _rekeyed(base[1].replace(String("    permissions:\n      contents: read\n"), String("    permissions: write-all\n")), String("permissions"), String("Permissions"))
-    _doc_reports(base[0], jd, String("job 'pr': R4: key 'Permissions' is `permissions` in another case"))
+    _doc_reports(base[0], jd, String("job 'check': R4: key 'Permissions' is `permissions` in another case"))
 
 
 def test_read_all_and_an_empty_map_are_accepted() raises:
     _agrees(String(_MACHINE), _wf(String("permissions: {}\n"), String("permissions: read-all\n")))
-
-
-def test_a_push_stage_never_carries_affected_by() raises:
-    _reports(
-        _wf(String("kci run --stage build --summary-file"), String("kci run --stage build --affected-by ${{ github.event.pull_request.base.sha }} --summary-file")),
-        String("job 'build': R6: `kci run` carries --affected-by, but stage 'build' is a PUSH stage"),
-    )
 
 
 comptime _RUNS_ON: String = "    runs-on: ubuntu-24.04\n"
@@ -946,7 +784,7 @@ def test_a_pull_request_job_runs_on_the_hosted_runner_only() raises:
             if rows[i][2]:
                 _cannot_tell(String(_MACHINE), wf, rows[i][1])
             else:
-                _reports(wf, String("job 'pr': R6: stage 'pr' is a PULL_REQUEST stage, ") + rows[i][1])
+                _reports(wf, String("job 'check': R6: stage 'pr' is a PULL_REQUEST stage, ") + rows[i][1])
         except e:
             n += 1
             missed += String("\n  row ") + String(i) + String(" `") + String(rows[i][0].strip()) + String("`")
@@ -954,8 +792,6 @@ def test_a_pull_request_job_runs_on_the_hosted_runner_only() raises:
         raise Error(String(n) + String(" of ") + String(len(rows)) + String(" runs-on rows not refused:") + missed)
     # a trailing comment is not part of the value
     _agrees(String(_MACHINE), _wf(String(_RUNS_ON), String("    runs-on: ubuntu-24.04 # GitHub-hosted\n")))
-    # a release job's runner is not R6's
-    _agrees(String(_MACHINE), _wf(String("    environment: gamma\n"), String("    environment: gamma\n    runs-on: self-hosted\n")))
 
 
 def test_check_running_workflow_accepts_the_workflow() raises:
@@ -972,11 +808,11 @@ def test_check_running_workflow_accepts_the_workflow() raises:
             ),
         )
     )
-    var f = check_running_workflow(g, files, String(_WF), String("release/machine.textproto"))
+    var f = check_running_workflow(g, files, String(_WF), String("release/machine.textproto"), True)
     if len(f) != 0:
         raise Error(String("unexpected findings: ") + _all(f))
     var drift = check_running_workflow(
-        g, files, _wf(String("${{ github.event.pull_request.base.sha }}"), String("HEAD~1")), String("release/machine.textproto")
+        g, files, _wf(String("${{ github.event.pull_request.base.sha }}"), String("HEAD~1")), String("release/machine.textproto"), True
     )
     assert_equal(len(drift), 1)
 

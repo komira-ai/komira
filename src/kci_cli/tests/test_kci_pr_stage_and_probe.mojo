@@ -124,14 +124,10 @@ def _pr_machine(dir: String) raises -> String:
 
 
 def _pr_workflow(machine: String) -> String:
-    """ONE workflow: the release stage `build` (kept off pull requests) and
-    the pull request's check `pr`."""
+    """pr.yml: the pull request's check `pr`, the one job `check`."""
     return (
-        String("name: kci\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      revision:\n")
-        + String("        type: string\n  pull_request:\npermissions: {}\njobs:\n")
-        + String("  build:\n    if: github.event_name != 'pull_request'\n    environment: build\n    steps:\n")
-        + String("      - run: kci run --machine ") + machine + String(" --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
-        + String("  pr:\n    if: github.event.pull_request.head.repo.full_name == github.repository\n")
+        String("name: pr\non:\n  pull_request:\n    branches: [main]\npermissions: {}\njobs:\n")
+        + String("  check:\n    if: github.event.pull_request.head.repo.full_name == github.repository\n")
         + String("    runs-on: ubuntu-24.04\n")
         + String("    permissions:\n      contents: read\n      id-token: write\n    steps:\n")
         + String("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n")
@@ -142,10 +138,20 @@ def _pr_workflow(machine: String) -> String:
     )
 
 
+def _release_workflow(machine: String) -> String:
+    """kci.yml: the release stage `build`, and no pull_request trigger."""
+    return (
+        String("name: kci\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      revision:\n")
+        + String("        type: string\npermissions: {}\njobs:\n")
+        + String("  build:\n    environment: build\n    steps:\n")
+        + String("      - run: kci run --machine ") + machine + String(" --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
+    )
+
+
 def _under_pull_request(mut f: Fake, workflow: String):
     f.set_env(String("GITHUB_ACTIONS"), String("true"))
     f.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
-    f.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/kci.yml@refs/pull/7/merge"))
+    f.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/pr.yml@refs/pull/7/merge"))
     f.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
     f.workflow = workflow.copy()
 
@@ -164,11 +170,11 @@ def test_under_actions_a_pull_request_check_runs() raises:
     _under_pull_request(f, _pr_workflow(m))
     var rec = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_pr_run(m), f, rec), 0)
-    assert_equal(f.calls[0], String("git show ") + String(_SHA) + String(":.github/workflows/kci.yml"))
+    assert_equal(f.calls[0], String("git show ") + String(_SHA) + String(":.github/workflows/pr.yml"))
     assert_equal(f.calls[1], String("build check base=") + String(_BASE))
     var r = _last(rec)
     assert_true(r.workflow_checked)
-    assert_equal(r.workflow_path, String(".github/workflows/kci.yml"))
+    assert_equal(r.workflow_path, String(".github/workflows/pr.yml"))
     assert_equal(r.scope, String("SELECTIVE"))
 
 
@@ -191,17 +197,42 @@ def test_under_actions_a_drifted_pull_request_workflow_is_exit_3() raises:
     var rec2 = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_pr_run(m), fork, rec2), 3)
     assert_true(_last(rec2).error.message.find(String("a pull request from a fork runs nothing")) >= 0, _last(rec2).error.message)
-    # a release job a pull request reaches
-    var open_release = Fake()
-    _under_pull_request(
-        open_release, _pr_workflow(m).replace(String("    if: github.event_name != 'pull_request'\n"), String(""))
-    )
+    # a second job in pr.yml: it runs the pull request's check and nothing else
+    var extra = Fake()
+    _under_pull_request(extra, _pr_workflow(m) + String("  gamma:\n    environment: gamma\n    steps:\n      - run: echo hi\n"))
     var rec3 = CliRecorder.memory(String(""))
-    assert_equal(kci_main_with(_pr_run(m), open_release, rec3), 3)
+    assert_equal(kci_main_with(_pr_run(m), extra, rec3), 3)
     assert_true(
-        _last(rec3).error.message.find(String("job 'build': R6: runs stage 'build', a release stage")) >= 0,
+        _last(rec3).error.message.find(String("R1: job 'gamma' is not the one job `check` of pr.yml")) >= 0,
         _last(rec3).error.message,
     )
+
+
+def test_a_run_is_held_to_the_workflow_file_of_its_stage() raises:
+    var m = _pr_machine(_root(String("pr_role")))
+    # the pull request's stage run from the release workflow: refused
+    var f = Fake()
+    _under_pull_request(f, _release_workflow(m))
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_pr_run(m), f, rec), 3)
+    assert_equal(len(f.calls), 1)
+    assert_equal(_last(rec).error.id, String("KCI-E-WORKFLOW-MISMATCH"))
+    # a release stage run from pr.yml: refused
+    var g = Fake()
+    _under_pull_request(g, _pr_workflow(m))
+    var a = _args("run", "--machine")
+    a.append(m.copy())
+    a.extend(_args("--stage", "build", "--revision-id", _REV, "--run-id", "gh-7", "--attempt", "1"))
+    a.extend(_args("--work-dir", "/w", "--log-dir", "/l", "--release-dir", "/r"))
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(a, g, rec2), 3)
+    assert_equal(_last(rec2).error.id, String("KCI-E-WORKFLOW-MISMATCH"))
+    # a pull_request trigger in the release workflow: refused
+    var h = Fake()
+    _under_pull_request(h, _release_workflow(m).replace(String("  workflow_dispatch:\n"), String("  pull_request:\n  workflow_dispatch:\n")))
+    var rec3 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(a, h, rec3), 3)
+    assert_true(_last(rec3).error.message.find(String("R6: trigger 'pull_request'")) >= 0, _last(rec3).error.message)
 
 
 # ---- (2) the credential probe that did not run is said -------------------------
