@@ -71,6 +71,15 @@ def test_token_response_fields() raises:
     )
     assert_equal(r.access_token, "t")
     assert_equal(r.expires_in, 86399)
+    # The largest expires_in accepted, in both forms.
+    assert_equal(
+        _read('{"access_token":"t","expires_in":999999999999}').expires_in,
+        999999999999,
+    )
+    assert_equal(
+        _read('{"access_token":"t","expires_in":"999999999999"}').expires_in,
+        999999999999,
+    )
     # token_type is optional, and compared without case.
     assert_equal(_read('{"access_token":"t","expires_in":1}').token_type, "Bearer")
     assert_equal(
@@ -137,6 +146,23 @@ def test_token_response_refusals() raises:
     _refused('{"access_token":"SECRET","expires_in":1e3}', bad_exp)
     _refused('{"access_token":"SECRET","expires_in":true}', bad_exp)
     _refused('{"access_token":"SECRET","expires_in":99999999999999999999}', bad_exp)
+    # Inside Int64, but `* 1000` added to the clock would overflow.
+    _refused('{"access_token":"SECRET","expires_in":9223372036854775807}', bad_exp)
+    _refused('{"access_token":"SECRET","expires_in":1000000000000}', bad_exp)
+    # A repeated member is refused, whichever copy is the decoy.
+    _refused(
+        '{"access_token":"SECRET","access_token":"SECRET2","expires_in":1}',
+        "repeats access_token",
+    )
+    _refused(
+        '{"access_token":"SECRET","expires_in":1,"expires_in":2}',
+        "repeats expires_in",
+    )
+    _refused(
+        '{"access_token":"SECRET","expires_in":1,"token_type":"Bearer",'
+        '"token_type":"pop"}',
+        "repeats token_type",
+    )
     _refused(
         '{"access_token":"SECRET","expires_in":1,"token_type":"pop"}',
         "token_type is not Bearer",

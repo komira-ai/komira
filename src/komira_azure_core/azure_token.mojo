@@ -27,6 +27,10 @@ from komira_json import JsonValue, parse_json_bytes
 comptime _MAX_TOKEN_RESPONSE_DEPTH: Int = 8
 # More decimal digits than any lifetime in seconds needs (Int64 holds 18).
 comptime _MAX_EXPIRES_IN_DIGITS: Int = 12
+# The largest expires_in accepted, in either form: the most 12 digits hold.
+# The providers add `expires_in * 1000` to the clock in ms, which this keeps
+# far inside Int64.
+comptime _MAX_EXPIRES_IN_SECONDS: Int64 = 999_999_999_999
 
 
 # -----------------------------------------------------------------------------
@@ -101,6 +105,17 @@ def _is_bearer(s: String) -> Bool:
     return True
 
 
+def _refuse_repeated(doc: JsonValue, member: String) raises:
+    """Refuse a body naming `member` more than once: JSON leaves a repeated
+    name undefined, and parsers disagree on which one wins."""
+    var seen = 0
+    for i in range(doc.num_members()):
+        if doc.key_at(i) == member:
+            seen += 1
+    if seen > 1:
+        raise Error("the token response repeats " + member)
+
+
 def parse_oauth_token_response(body: List[UInt8]) raises -> OAuthTokenResponse:
     """Read a 2xx token endpoint answer
     (`{"access_token", "expires_in", "token_type", ...}`); other members are
@@ -110,7 +125,11 @@ def parse_oauth_token_response(body: List[UInt8]) raises -> OAuthTokenResponse:
     or not a JSON object; an `access_token` that is absent, not a string or
     empty; an `expires_in` that is absent, or is neither a whole JSON number
     nor a string of decimal digits, or is not positive; a `token_type` that
-    is present and is not the string `Bearer` (in any case)."""
+    is present and is not the string `Bearer` (in any case); any of those
+    three members appearing more than once.
+
+    `expires_in` is at most 999999999999 seconds in either form, so a
+    caller can add it, in ms, to the clock without overflow."""
     var doc: JsonValue
     try:
         doc = parse_json_bytes(body, _MAX_TOKEN_RESPONSE_DEPTH)
@@ -120,6 +139,9 @@ def parse_oauth_token_response(body: List[UInt8]) raises -> OAuthTokenResponse:
         raise Error("the token response is not JSON")
     if not doc.is_object():
         raise Error("the token response is not a JSON object")
+    _refuse_repeated(doc, String("access_token"))
+    _refuse_repeated(doc, String("expires_in"))
+    _refuse_repeated(doc, String("token_type"))
     if not doc.has(String("access_token")) or not doc.get(
         String("access_token")
     ).is_string():
@@ -139,7 +161,7 @@ def parse_oauth_token_response(body: List[UInt8]) raises -> OAuthTokenResponse:
             expires_in = exp.as_int64()
         except:
             expires_in = Int64(0)  # outside Int64: refused below
-    if expires_in <= 0:
+    if expires_in <= 0 or expires_in > _MAX_EXPIRES_IN_SECONDS:
         raise Error(
             "the token response's expires_in is not a positive whole number"
             " of seconds"
