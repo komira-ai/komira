@@ -38,10 +38,6 @@ mojo_library(
         # the per-change check: targets, checks, the two commands, the units,
         # both argvs and the affected tool's answer grammar
         "tests/test_artifact_units.mojo",
-        # the expect_red unit kind: parse, wire pins, one name space, every
-        # refusal, its place among the units, and a red passing only with
-        # its declared text
-        "tests/test_artifact_expect_red.mojo",
         "tests/test_artifact_validate.mojo",
         "tests/test_release_artifacts_file.mojo",
     ],

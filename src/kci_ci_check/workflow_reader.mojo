@@ -17,8 +17,9 @@
 #             `*x` or a tag `!x` where a value starts; a flow mapping other
 #             than `{}`; a nested flow list; a second document (`---` after
 #             content, or `...`); a key repeated in one mapping; a complex
-#             key `? `; a line indented in a way no open block can hold; a
-#             quoted scalar that is not closed on its line
+#             key `? `; a merge key `<<` (in any form); an escape (`\`) in a
+#             double-quoted key or value; a line indented in a way no open
+#             block can hold; a quoted scalar that is not closed on its line
 #
 # `actionlint` (the repository's workflow lint) stays the YAML-validity
 # gate; this reader only has to be right on what it accepts.
@@ -40,7 +41,8 @@ INDETERMINATE outcome, never onto a pass or a plain refusal."""
 
 struct WorkflowNode(Copyable, Movable):
     """One node. A MAP has `keys` and `children` (same length); a LIST has
-    `children`; a SCALAR has `text`.
+    `children`; a SCALAR has `text`, and `plain` says it was written as a
+    plain scalar (not quoted, not a block scalar).
 
     Layout: owned values only (children are indices into the arena). No
     pointer field."""
@@ -48,13 +50,15 @@ struct WorkflowNode(Copyable, Movable):
     var kind: Int
     var text: String
     var line: Int
+    var plain: Bool
     var keys: List[String]
     var children: List[Int]
 
-    def __init__(out self, kind: Int, var text: String, line: Int):
+    def __init__(out self, kind: Int, var text: String, line: Int, plain: Bool = True):
         self.kind = kind
         self.text = text^
         self.line = line
+        self.plain = plain
         self.keys = List[String]()
         self.children = List[Int]()
 
@@ -81,6 +85,11 @@ struct WorkflowDoc(Copyable, Movable):
 
     def line(self, i: Int) -> Int:
         return self.nodes[i].line
+
+    def is_plain(self, i: Int, text: String) -> Bool:
+        """Node `i` is a scalar written plain whose text is exactly `text`.
+        A quoted scalar or a block scalar is never plain."""
+        return i >= 0 and self.nodes[i].kind == NODE_SCALAR and self.nodes[i].plain and self.nodes[i].text == text
 
     def child(self, i: Int, key: String) -> Int:
         """The child of mapping `i` under `key`, or -1 (also -1 when `i` is
@@ -217,10 +226,16 @@ def _unquote(v: String, line: Int) raises -> String:
     return v.copy()
 
 
-def _flow_list(v: String, line: Int) raises -> List[String]:
-    """`[a, b]` as its scalars."""
+def _quoted(v: String) -> Bool:
+    """`v` (a value as written) is a single- or double-quoted scalar."""
+    var b = v.as_bytes()
+    return len(b) > 0 and (Int(b[0]) == 39 or Int(b[0]) == 34)
+
+
+def _flow_list(v: String, line: Int) raises -> List[Tuple[String, Bool]]:
+    """`[a, b]` as its scalars, each with whether it was written plain."""
     var inner = String(v[byte = 1 : v.byte_length() - 1])
-    var out = List[String]()
+    var out = List[Tuple[String, Bool]]()
     if inner.strip().byte_length() == 0:
         return out^
     if inner.find(String("[")) >= 0 or inner.find(String("{")) >= 0:
@@ -230,7 +245,7 @@ def _flow_list(v: String, line: Int) raises -> List[String]:
         var p = String(String(parts[i]).strip())
         if p.byte_length() == 0:
             raise _cannot(line, String("an empty item in a flow list"))
-        out.append(_unquote(p, line))
+        out.append((_unquote(p, line), not _quoted(p)))
     return out^
 
 
@@ -249,6 +264,10 @@ def _split_key(text: String, line: Int) raises -> Tuple[String, String, Bool]:
             j += 1
         if j + 1 < len(b) and Int(b[j + 1]) == 58 and (j + 2 == len(b) or Int(b[j + 2]) == 32):
             var key = String(text[byte = 1:j])
+            if q == 34 and key.find(String("\\")) >= 0:
+                # YAML decodes escapes in a double-quoted key as in a value:
+                # `"id\x2dtoken"` is `id-token`
+                raise _cannot(line, String("an escape in a double-quoted key"))
             var rest = String(String(text[byte = j + 2 :]).strip())
             return (key^, rest^, True)
         return (String(""), text.copy(), False)
@@ -335,7 +354,7 @@ struct _Reader(Movable):
             var ind = String(rest[byte = 1:])
             if ind != String("") and ind != String("-") and ind != String("+"):
                 raise _cannot(line, String("a block scalar header '") + rest + String("'"))
-            return self.doc.add(WorkflowNode(NODE_SCALAR, self._block_scalar(key_indent, line), line))
+            return self.doc.add(WorkflowNode(NODE_SCALAR, self._block_scalar(key_indent, line), line, False))
         if c == 91:  # [
             if Int(b[len(b) - 1]) != 93:
                 raise _cannot(line, String("a flow list not closed on its line"))
@@ -343,13 +362,13 @@ struct _Reader(Movable):
             var node = WorkflowNode(NODE_LIST, String(""), line)
             var idx = self.doc.add(node^)
             for i in range(len(items)):
-                var s = self.doc.add(WorkflowNode(NODE_SCALAR, items[i].copy(), line))
+                var s = self.doc.add(WorkflowNode(NODE_SCALAR, items[i][0].copy(), line, items[i][1]))
                 self.doc.nodes[idx].children.append(s)
             return idx
         var v = _unquote(rest, line)
         if v == String("{}"):
             return self.doc.add(WorkflowNode(NODE_MAP, String(""), line))
-        return self.doc.add(WorkflowNode(NODE_SCALAR, v^, line))
+        return self.doc.add(WorkflowNode(NODE_SCALAR, v^, line, not _quoted(rest)))
 
     def _list(mut self, indent: Int) raises -> Int:
         var idx = self.doc.add(WorkflowNode(NODE_LIST, String(""), self.lines[self.pos].number))
@@ -381,6 +400,10 @@ struct _Reader(Movable):
         return idx
 
     def _put(mut self, m: Int, key: String, child: Int, line: Int) raises:
+        if key == String("<<"):
+            # a merge key folds another mapping's keys into this one; read
+            # as an ordinary key, the merged keys would never be seen
+            raise _cannot(line, String("a merge key '<<'"))
         for k in range(len(self.doc.nodes[m].keys)):
             if self.doc.nodes[m].keys[k] == key:
                 raise _cannot(line, String("key '") + key + String("' repeated in one mapping"))

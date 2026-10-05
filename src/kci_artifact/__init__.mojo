@@ -20,8 +20,7 @@
 #                  `manifest.json`, and the two refusals over what a build
 #                  left (exactly one manifest; its `name` the artifact's)
 #   render.mojo    `render_build_argv`: the argv for one artifact (pure)
-#   affected.mojo  the per-change check: the units (artifacts, then checks,
-#                  then expect_red units, whose build must fail),
+#   affected.mojo  the per-change check: the units (artifacts, then checks),
 #                  `{units_file}`, the affected and build_targets argvs, and
 #                  the grammar of an affected command's answer (pure)
 #
@@ -71,7 +70,6 @@ from kci_artifact.validate import (
     find_artifact,
     find_build_system,
     find_check,
-    find_expect_red,
     is_valid_artifact_name,
     require_affected_ready,
     validate_artifacts,
@@ -82,8 +80,6 @@ from kci_artifact.affected import (
     VERDICT_WIDENED,
     AffectedAnswer,
     Unit,
-    expect_red_passed,
-    find_unit,
     parse_affected_answer,
     render_affected_argv,
     render_targets_argv,
