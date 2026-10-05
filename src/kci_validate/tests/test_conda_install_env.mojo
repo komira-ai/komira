@@ -20,6 +20,16 @@
 #   environment must be under the scratch dir (absent, or reached
 #   through a linked .pixi/envs); the README refusals (no
 #   README, other bytes, no example, no library); --plan runs nothing.
+#   The SET (install the metapackage only): pixi.toml names only it, and
+#   every member its own depends requires is checked and its README run; a
+#   member required at another build, a metapackage requiring no member,
+#   one that omits a library of the set, and a member without a README are
+#   each refused by name.
+#   A LOCAL channel (`file:///<dir>`, kci run --channel): its index and
+#   files read from the directory (only the declared hosts over the
+#   network), pixi.toml and every record's url on it, a record from the
+#   published channel refused, an empty directory a FAIL, only a plain
+#   absolute file:/// location accepted; the file transport's refusals.
 #
 # Hermetic: TEST_TMPDIR, kci_publish's ExampleRelease (komira_alpha with a
 # README in its doc_files, komira_beta, the metapackage komira), no pixi, no
@@ -40,12 +50,15 @@ from kci_api import (
     VALIDATION_WOULD_VALIDATE,
     ResultValidation,
 )
-from kci_pkg_upload import PkgResponse, ScriptedPkgTransport, content_identity_of
+from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_PUT
+
+from kci_pkg_upload import PkgRequest, PkgResponse, ScriptedPkgTransport, content_identity_of
 from kci_publish import NoWaitSleeper
 from kci_publish.release_fixture import ExampleRelease, write_example_inputs, write_text_file
 from kci_release_machine import StageValidation
 from kci_validate import (
     EnvHost,
+    FileChannelTransport,
     RecordingIndexPollLog,
     ValidateRequest,
     install_env_argv,
@@ -60,6 +73,19 @@ comptime META: String = ".pixi/envs/default/conda-meta/"
 comptime DOC: String = ".pixi/envs/default/share/doc/komira_alpha/README.md"
 comptime PROGRAM: String = "readme_komira_alpha.mojo"
 comptime COUNT_OK: String = "readme_komira_alpha validation: 2 of 2 checks passed"
+comptime DOC_BETA: String = ".pixi/envs/default/share/doc/komira_beta/README.md"
+comptime PROGRAM_BETA: String = "readme_komira_beta.mojo"
+comptime COUNT_BETA_OK: String = "readme_komira_beta validation: 1 of 1 checks passed"
+comptime README_BETA: String = (
+    "# komira_beta\n"
+    "\n"
+    "```mojo\n"
+    "from std.testing import assert_equal\n"
+    "from komira_beta import beta\n"
+    "\n"
+    "assert_equal(beta(1), 3)\n"
+    "```\n"
+)
 comptime PIXI_BYTES: String = "#!/bin/false\nthe pinned pixi, played\n"
 comptime README: String = (
     "# komira_alpha\n"
@@ -98,16 +124,16 @@ def _validation() -> StageValidation:
     var v = StageValidation(7)
     v.name = String("install-env")
     v.kind = String(VALIDATION_KIND_CONDA_INSTALL_ENV)
+    # the library alone (the set is installed by the tests of the SET)
     v.installs.append(String("komira_alpha"))
-    v.installs.append(String("komira"))
     v.compiler_channel = String(COMPILER)
     v.extra_channels.append(String("conda-forge"))
     v.wait_for_index_seconds = 0
     return v^
 
 
-def _doc_files(sha: String) -> String:
-    return String('[{"path":"share/doc/komira_alpha/README.md","sha256":"') + sha + String('"}]')
+def _doc_files(sha: String, name: String = String("komira_alpha")) -> String:
+    return String('[{"path":"share/doc/') + name + String('/README.md","sha256":"') + sha + String('"}]')
 
 
 struct Fixture(Movable):
@@ -120,7 +146,10 @@ struct Fixture(Movable):
     var req: ValidateRequest
     var host: EnvHost
 
-    def __init__(out self, sub: String, doc_files: String = String("<readme>")) raises:
+    def __init__(
+        out self, sub: String, doc_files: String = String("<readme>"), beta_doc_files: String = String(""),
+        meta_depends: String = String(""),
+    ) raises:
         var root = _tmp(sub)
         var release = ExampleRelease()
         var docs = doc_files.copy()
@@ -128,6 +157,10 @@ struct Fixture(Movable):
             docs = _doc_files(_sha(String(README)))
         if docs.byte_length() > 0:
             release.set_meta(String("komira_alpha"), String("doc_files"), docs^)
+        if beta_doc_files.byte_length() > 0:
+            release.set_meta(String("komira_beta"), String("doc_files"), beta_doc_files.copy())
+        if meta_depends.byte_length() > 0:
+            release.set_meta(String("komira"), String("depends"), meta_depends.copy())
         var p = write_example_inputs(release, root, String("gamma"))
         makedirs(root + String("/repo"), exist_ok=True)
         makedirs(root + String("/tools"), exist_ok=True)
@@ -214,7 +247,6 @@ def _good_channel(fx: Fixture) -> ScriptedPkgTransport:
     _network_up(t)
     t.queue(_resp(200, _good_index(fx)))
     t.queue(_resp(200, _content(fx, String("komira_alpha"))))
-    t.queue(_resp(200, _content(fx, String("komira"))))
     return t^
 
 
@@ -492,7 +524,6 @@ def test_other_bytes_served() raises:
     _network_up(t)
     t.queue(_resp(200, _good_index(fx)))
     t.queue(_resp(200, String("not the build's bytes")))
-    t.queue(_resp(200, _content(fx, String("komira"))))
     var sl = NoWaitSleeper()
     var row = _run(runner, t, sl, fx)
     _assert_fails_with(row, String("channel: the channel serves ") + fx.file(String("komira_alpha")) + String(" with sha256 "))
@@ -710,20 +741,145 @@ def test_a_readme_without_an_example_is_refused() raises:
     assert_equal(runner.remaining(), 0)
 
 
-def test_no_library_among_the_installs_is_refused() raises:
-    var fx = Fixture(String("metaonly"))
+# ---- the SET: the metapackage alone ---------------------------------------------------
+
+
+def _set_fixture(sub: String, beta_readme: Bool = True, meta_depends: String = String("")) raises -> Fixture:
+    """A release whose validation installs ONLY the metapackage `komira`;
+    komira_beta ships README_BETA when `beta_readme`."""
+    var beta = _doc_files(_sha(String(README_BETA)), String("komira_beta")) if beta_readme else String("")
+    var fx = Fixture(sub, String("<readme>"), beta, meta_depends)
     var installs = List[String]()
     installs.append(String("komira"))
     fx.req.validation.installs = installs^
-    var runner = ScriptedRunner()
-    _expect_install(runner, fx, Install(fx))
+    return fx^
+
+
+def _set_channel(fx: Fixture) -> ScriptedPkgTransport:
+    """The index, then the bytes of every pin: the metapackage, then each
+    member it requires."""
     var t = ScriptedPkgTransport()
     _network_up(t)
     t.queue(_resp(200, _good_index(fx)))
-    t.queue(_resp(200, _content(fx, String("komira"))))
+    for name in [String("komira"), String("komira_alpha"), String("komira_beta")]:
+        t.queue(_resp(200, _content(fx, name)))
+    return t^
+
+
+def _expect_set_install(mut runner: ScriptedRunner, fx: Fixture, beta_readme: Bool = True):
+    var i = Install(fx)
+    var step = ScriptedStep(install_env_argv(fx.work()), stderr_text=String("installed\n"))
+    for k in range(len(i.records)):
+        step.writes(String(META) + i.records[k], i.record_texts[k])
+    step.writes(String(DOC), String(README))
+    step.writes(String(".pixi/envs/default/lib/mojo/komira_alpha.mojoc"), String("komira_alpha"))
+    if beta_readme:
+        step.writes(String(DOC_BETA), String(README_BETA))
+    step.writes(String(".pixi/envs/default/lib/mojo/komira_beta.mojoc"), String("komira_beta"))
+    runner.expect(step^)
+
+
+def _meta_depends(v: String, alpha_build: String, beta_build: String) -> String:
+    return (
+        String('["__linux","komira_alpha ==') + v + String(" ") + alpha_build + String('","komira_beta ==') + v
+        + String(" ") + beta_build + String('"]')
+    )
+
+
+def test_the_set_installs_the_metapackage_alone_and_checks_every_member() raises:
+    var fx = _set_fixture(String("set"))
+    var runner = ScriptedRunner()
+    _expect_set_install(runner, fx)
+    _expect_run(runner, fx)
+    runner.expect(
+        ScriptedStep(
+            run_program_argv(fx.work(), String(PROGRAM_BETA)), stdout_text=String(COUNT_BETA_OK) + String("\n")
+        )
+    )
+    var t = _set_channel(fx)
     var sl = NoWaitSleeper()
     var row = _run(runner, t, sl, fx)
-    _assert_fails_with(row, String("readme: no library among the installs"))
+    assert_equal(_failed(row), String(""))
+    assert_equal(row.outcome, String(OUTCOME_SUCCEEDED))
+    assert_equal(runner.remaining(), 0)
+    assert_equal(t.unconsumed(), 0)
+    # every member is pinned, and named in the release row
+    assert_equal(
+        row.checks[0].got,
+        String("release: ") + fx.file(String("komira")) + String(", ") + fx.file(String("komira_alpha")) + String(", ")
+        + fx.file(String("komira_beta")) + String(" with mojo-compiler 1.0.0"),
+    )
+    # pixi.toml names the metapackage ONLY: the solver must bring each member
+    var toml = open(fx.work() + String("/pixi.toml"), "r").read()
+    assert_true(toml.find(String("\nkomira = { version = \"==1.0.0\", build = \"") + fx.release.build()) >= 0, toml)
+    assert_true(toml.find(String("komira_alpha =")) < 0, toml)
+    assert_true(toml.find(String("komira_beta =")) < 0, toml)
+    # each member's payload hashed, each member's README run
+    assert_true(open(fx.work() + String("/out/payload.komira_beta"), "r").read().startswith(_sha(String("komira_beta"))))
+    assert_equal(open(fx.work() + String("/out/readme_komira_alpha.exit"), "r").read(), String("0\n"))
+    assert_equal(open(fx.work() + String("/out/readme_komira_beta.exit"), "r").read(), String("0\n"))
+    assert_equal(
+        row.checks[len(row.checks) - 1].got,
+        String("program: mojo run of an import of readme_komira_beta ran 1 checks, all passed"),
+    )
+
+
+def test_a_member_installed_at_another_build_is_refused() raises:
+    # the built metapackage requires komira_beta at build _2; release.json
+    # has build _3: the solver would bring a build nobody validated
+    var probe = ExampleRelease()
+    var other = String("h") + String(probe.commit[byte=0:8]) + String("_2")
+    var fx = _set_fixture(String("setotherbuild"), True, _meta_depends(probe.version, probe.build(), other))
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var sl = NoWaitSleeper()
+    var row = _run(runner, t, sl, fx)
+    _assert_fails_with(
+        row,
+        String("release: metapackage 'komira' requires komira_beta 1.0.0 ") + other
+        + String(", but the release has komira_beta 1.0.0 ") + probe.build(),
+    )
+    assert_equal(len(runner.calls), 0)
+    assert_equal(t.call_count(), 0)
+
+
+def test_a_metapackage_requiring_no_member_is_refused() raises:
+    var fx = _set_fixture(String("setempty"), True, String('["__linux"]'))
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var sl = NoWaitSleeper()
+    var row = _run(runner, t, sl, fx)
+    _assert_fails_with(row, String("release: metapackage 'komira' requires no member, so installing it would check nothing"))
+    assert_equal(len(runner.calls), 0)
+
+
+def test_a_library_the_metapackage_does_not_require_is_refused() raises:
+    var probe = ExampleRelease()
+    var only_alpha = String('["__linux","komira_alpha ==1.0.0 ') + probe.build() + String('"]')
+    var fx = _set_fixture(String("setomits"), True, only_alpha)
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var sl = NoWaitSleeper()
+    var row = _run(runner, t, sl, fx)
+    _assert_fails_with(
+        row, String("release: library 'komira_beta' of the release set is not required by metapackage 'komira'")
+    )
+    assert_equal(len(runner.calls), 0)
+
+
+def test_a_member_without_a_readme_is_refused_by_name() raises:
+    var fx = _set_fixture(String("setnoreadme"), False)
+    var runner = ScriptedRunner()
+    _expect_set_install(runner, fx, False)
+    var t = _set_channel(fx)
+    var sl = NoWaitSleeper()
+    var row = _run(runner, t, sl, fx)
+    _assert_fails_with(
+        row,
+        String("readme: komira_beta ships no share/doc/komira_beta/README.md: a release needs a README;")
+        + String(" add src/komira_beta/README.md"),
+    )
+    # no program runs, komira_alpha's neither
     assert_equal(runner.remaining(), 0)
 
 
@@ -814,6 +970,158 @@ def test_the_payload_is_hashed_by_kci() raises:
     var sl = NoWaitSleeper()
     var row = _run(runner, t, sl, fx)
     _assert_fails_with(row, String("payload: the installed lib/mojo/komira_alpha.mojoc is missing or differs"))
+
+
+# ---- a LOCAL channel (kci run --channel file:///<dir>) -----------------------------
+
+
+def _local_channel(fx: Fixture, with_files: Bool = True) raises -> String:
+    """`<root>/channel`, laid out as `komira_pack conda-index` writes it:
+    linux-64/repodata.json listing the three files, and the files."""
+    var dir = fx.root + String("/channel")
+    makedirs(dir + String("/linux-64"), exist_ok=True)
+    makedirs(dir + String("/noarch"), exist_ok=True)
+    write_text_file(dir + String("/noarch/repodata.json"), String('{"packages":{},"packages.conda":{}}'))
+    if with_files:
+        write_text_file(dir + String("/linux-64/repodata.json"), _good_index(fx))
+        for name in [String("komira_alpha"), String("komira_beta"), String("komira")]:
+            write_text_file(dir + String("/linux-64/") + fx.file(name), _content(fx, name))
+    return dir^
+
+
+def _local_install(fx: Fixture, url: String) -> Install:
+    var i = Install(fx)
+    for k in range(3):
+        var name = String("komira_alpha") if k == 0 else (String("komira_beta") if k == 1 else String("komira"))
+        i.record_texts[k] = _record(fx, name, url)
+    return i^
+
+
+def test_a_local_channel_is_read_from_its_directory_and_installed_from() raises:
+    var fx = Fixture(String("local"))
+    var dir = _local_channel(fx)
+    var url = String("file://") + dir
+    # a trailing `/` is the same directory
+    fx.req.channel_override = url + String("/")
+    var runner = ScriptedRunner()
+    _expect_install(runner, fx, _local_install(fx, url))
+    _expect_run(runner, fx)
+    # only the declared HOSTS are asked over the network: the channel's
+    # index and file are read from the directory
+    var net = ScriptedPkgTransport()
+    _network_up(net)
+    var t = FileChannelTransport(net^)
+    var sl = NoWaitSleeper()
+    var log = RecordingIndexPollLog()
+    var row = run_install_env(runner, t, sl, log, fx.req, fx.host)
+    assert_equal(_failed(row), String(""))
+    assert_equal(row.outcome, String(OUTCOME_SUCCEEDED))
+    assert_equal(row.channel_url, url)
+    assert_equal(_order(row), String("release network channel host scratch pixi install readme payload program"))
+    assert_equal(t.inner.call_count(), 2)
+    assert_equal(t.inner.unconsumed(), 0)
+    assert_equal(t.inner.call(0).host, String("conda.example.invalid"))
+    assert_equal(t.inner.call(1).host, String("conda.anaconda.org"))
+    # check 1 read the directory's index, and the bytes it serves
+    assert_equal(log.lines[0], String("kci: channel index poll 1: ") + url + String("/linux-64/repodata.json answered 200, lists 1 of 1 pinned files; waited 0 of 0 s"))
+    var served = False
+    for i in range(len(row.checks)):
+        if row.checks[i].got.find(fx.file(String("komira_alpha")) + String(" is listed and served")) >= 0:
+            served = True
+    assert_true(served, _failed(row))
+    # pixi installs from the directory
+    var toml = open(fx.work() + String("/pixi.toml"), "r").read()
+    assert_true(toml.find(String("channel = \"") + url + String("\"")) >= 0, toml)
+    assert_true(toml.find(String(CHANNEL)) < 0, toml)
+
+
+def test_a_local_channel_record_from_the_published_channel_is_refused() raises:
+    # the local run must install what the directory holds, never the
+    # published channel's file of the same name
+    var fx = Fixture(String("local_pub"))
+    var dir = _local_channel(fx)
+    fx.req.channel_override = String("file://") + dir
+    var runner = ScriptedRunner()
+    _expect_install(runner, fx, Install(fx))
+    _expect_run(runner, fx)
+    var net = ScriptedPkgTransport()
+    _network_up(net)
+    var t = FileChannelTransport(net^)
+    var sl = NoWaitSleeper()
+    var log = RecordingIndexPollLog()
+    var row = run_install_env(runner, t, sl, log, fx.req, fx.host)
+    _assert_fails_with(
+        row,
+        String("install: komira_alpha came from '") + String(CHANNEL) + String("/linux-64/") + fx.file(String("komira_alpha"))
+        + String("', not from file://") + dir,
+    )
+
+
+def test_a_local_channel_without_the_index_fails_closed() raises:
+    var fx = Fixture(String("local_empty"))
+    var dir = _local_channel(fx, with_files=False)
+    fx.req.channel_override = String("file://") + dir
+    var runner = ScriptedRunner()
+    var net = ScriptedPkgTransport()
+    _network_up(net)
+    var t = FileChannelTransport(net^)
+    var sl = NoWaitSleeper()
+    var log = RecordingIndexPollLog()
+    var row = run_install_env(runner, t, sl, log, fx.req, fx.host)
+    _assert_fails_with(row, String("channel: file://") + dir + String("/linux-64/repodata.json answered 404 at poll 1"))
+    assert_equal(len(runner.calls), 0)
+
+
+def test_only_a_file_channel_replaces_the_steps() raises:
+    var fx = Fixture(String("local_https"))
+    fx.req.channel_override = String("https://conda.example.invalid/elsewhere")
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var sl = NoWaitSleeper()
+    var row = _run(runner, t, sl, fx)
+    _assert_fails_with(row, String("is not a file:/// directory: only a local channel replaces the step's"))
+    assert_equal(t.call_count(), 0)
+    var bads = [String("file:///"), String("file:///a/../b"), String("file:///a//b"), String("file://host/a")]
+    for k in range(len(bads)):
+        ref bad = bads[k]
+        var fb = Fixture(String("local_bad") + String(k))
+        fb.req.channel_override = bad.copy()
+        var r2 = ScriptedRunner()
+        var t2 = ScriptedPkgTransport()
+        var row2 = _run(r2, t2, sl, fb)
+        assert_equal(row2.outcome, String(OUTCOME_VALIDATION_FAILED), bad)
+        assert_equal(t2.call_count(), 0)
+
+
+def test_the_file_transport_reads_only_plain_absolute_paths() raises:
+    var fx = Fixture(String("local_transport"))
+    var dir = _local_channel(fx)
+    var net = ScriptedPkgTransport()
+    net.queue(_resp(204))
+    var t = FileChannelTransport(net^)
+    # a host goes over the network, untouched
+    assert_equal(t.exchange(PkgRequest(HTTP_METHOD_GET, String("conda.example.invalid"), String("/x"))).status, 204)
+    assert_equal(t.inner.call_count(), 1)
+    # no host: the file, or 404
+    var got = t.exchange(PkgRequest(HTTP_METHOD_GET, String(""), dir + String("/linux-64/repodata.json")))
+    assert_equal(got.status, 200)
+    assert_equal(len(got.body), _good_index(fx).byte_length())
+    assert_equal(t.exchange(PkgRequest(HTTP_METHOD_GET, String(""), dir + String("/linux-64/absent.conda"))).status, 404)
+    # never a directory, a relative path, a dot segment or another method
+    for path in [dir + String("/linux-64"), String("linux-64/repodata.json"), dir + String("/linux-64/../linux-64/repodata.json")]:
+        var raised = False
+        try:
+            _ = t.exchange(PkgRequest(HTTP_METHOD_GET, String(""), path.copy()))
+        except:
+            raised = True
+        assert_true(raised, path)
+    var put_raised = False
+    try:
+        _ = t.exchange(PkgRequest(HTTP_METHOD_PUT, String(""), dir + String("/linux-64/repodata.json")))
+    except:
+        put_raised = True
+    assert_true(put_raised)
+    assert_equal(t.inner.call_count(), 1)
 
 
 # ---- --plan ---------------------------------------------------------------------------------

@@ -112,6 +112,7 @@ def machine_field_names() -> List[String]:
     out.append(String("validation.compiler_channel"))
     out.append(String("validation.extra_channel"))
     out.append(String("validation.program"))
+    out.append(String("validation.smoke"))
     out.append(String("validation.wait_for_index_seconds"))
     return out^
 
@@ -195,13 +196,15 @@ def _parse_validation(mut c: TokenCursor, source: String, step_where: String, op
             v.extra_channels.append(_scalar(c, f.text, source))
         elif f.text == "program":
             v.program = _scalar(c, f.text, source)
+        elif f.text == "smoke":
+            v.smoke = _scalar(c, f.text, source)
         elif f.text == "wait_for_index_seconds":
             v.wait_for_index_seconds = _seconds(c, f.text, source, where)
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
                 + String(" (expected name, kind, image, install, compiler_channel, extra_channel, program,")
-                + String(" wait_for_index_seconds)")
+                + String(" smoke, wait_for_index_seconds)")
             )
         seen.append(f.text.copy())
     return v^

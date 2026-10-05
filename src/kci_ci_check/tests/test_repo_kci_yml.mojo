@@ -16,8 +16,10 @@
 # =============================================================================
 #
 # The files are staged as test data (BUCK): `kci.yml` (the root BUCK exports
-# it), `machine.textproto` and `channels.textproto` (release/BUCK), and the
-# program gamma's validation runs (release/smoke/BUCK).
+# it), `machine.textproto` and `channels.textproto` (release/BUCK), and
+# `pixi_pin.txt`, the platform table's linux-x86_64 pixi pin
+# (//tools/build/toolchains:pixi_pin_linux_x86_64). gamma's validations run
+# each installed library's README, so they name no program.
 # =============================================================================
 
 from std.pathlib import Path
@@ -46,6 +48,74 @@ def _channels() raises -> List[ChannelsFile]:
     var files = List[ChannelsFile]()
     files.append(ChannelsFile(String("release/channels.textproto"), Path(String("channels.textproto")).read_text()))
     return files^
+
+
+def _joined(findings: List[String]) -> String:
+    var all = String("")
+    for i in range(len(findings)):
+        all += String("\n  ") + findings[i]
+    return all^
+
+
+def _pixi_pin_findings(text: String, pin: String) raises -> List[String]:
+    """What keeps the workflow `text` from installing with the pixi `pin`.
+
+    The validate job downloads the pin's URL itself and keeps the bytes only
+    at the pin's sha256, and its one `kci run` passes them and that sha256.
+    Both values are the platform table's (the record //tools/build/toolchains
+    writes from it), so neither the job nor any other job chooses which pixi
+    runs: no other job handles pixi, and the build job's tar carries kci, the
+    release and its result file only. An empty or absent value is a finding
+    here, at build time, not a refusal of `kci run`.
+    """
+    var out = List[String]()
+    var doc = read_workflow(text)
+    var jobs = doc.child(0, String("jobs"))
+    var validate = doc.child(jobs, String("validate"))
+    if validate < 0:
+        out.append(String("kci.yml has no job validate"))
+        return out^
+    var venv = doc.child(validate, String("env"))
+    var vals = List[String]()
+    for name in [String("PIXI_URL"), String("PIXI_SHA256")]:
+        var n = doc.child(venv, name) if venv >= 0 else -1
+        if n < 0 or doc.kind(n) != NODE_SCALAR:
+            out.append(String("the validate job sets no env ") + name)
+            vals.append(String(""))
+        else:
+            vals.append(doc.text(n))
+    var got = String("url ") + vals[0] + String("\nsha256 ") + vals[1] + String("\n")
+    if got != pin:
+        out.append(String("the validate job's PIXI_URL/PIXI_SHA256 are not the pin: ") + got + String("!= ") + pin)
+    var vrun = String("")
+    var vall = String("")
+    var vsteps = doc.items(doc.child(validate, String("steps")))
+    for i in range(len(vsteps)):
+        var r = doc.child(vsteps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR:
+            vall += doc.text(r) + String("\n")
+            if len(kci_run_calls(doc.text(r))) > 0:
+                vrun = doc.text(r)
+    if vall.find(String("curl -fsSL --retry 3 -o \"$RUNNER_TEMP/pixi/pixi\" \"$PIXI_URL\"")) < 0:
+        out.append(String("the validate job does not download $PIXI_URL"))
+    if vall.find(String("printf '%s  %s\\n' \"$PIXI_SHA256\" \"$RUNNER_TEMP/pixi/pixi\" | sha256sum -c -")) < 0:
+        out.append(String("the validate job does not check the download against $PIXI_SHA256"))
+    if vrun.find(String("--pixi \"$RUNNER_TEMP/pixi/pixi\"")) < 0:
+        out.append(String("the validate job passes no --pixi"))
+    if vrun.find(String("--pixi-sha256 \"$PIXI_SHA256\"")) < 0:
+        out.append(String("the validate job passes no --pixi-sha256"))
+    var others = String("")
+    for job in [String("build"), String("gamma"), String("prod")]:
+        var jsteps = doc.items(doc.child(doc.child(jobs, job), String("steps")))
+        for i in range(len(jsteps)):
+            var r = doc.child(jsteps[i], String("run"))
+            if r >= 0 and doc.kind(r) == NODE_SCALAR:
+                others += doc.text(r) + String("\n")
+    if others.find(String("pixi")) >= 0:
+        out.append(String("a job other than validate handles pixi"))
+    if others.find(String("-cf \"$RUNNER_TEMP/kci-release.tar\" kci release kci-result-build.json\n")) < 0:
+        out.append(String("the build job's tar is not kci, the release and its result file only"))
+    return out^
 
 
 def test_the_release_machine() raises:
@@ -86,22 +156,30 @@ def test_the_release_machine() raises:
         assert_equal(p.steps[0].artifacts, String("release/artifacts.textproto"))
         assert_equal(p.steps[0].channels, String("release/channels.textproto"))
         assert_equal(p.steps[0].channel, name)
-        # gamma's step carries the install validation; prod's none
+        # gamma's step carries the two ENV validations, each installing ONE
+        # name: the library alone, and the metapackage alone (kci expands it
+        # to every member); prod's none
         if name == String("gamma"):
-            assert_equal(len(p.steps[0].validations), 1)
-            ref v = p.steps[0].validations[0]
-            assert_equal(v.name, String("install"))
-            assert_equal(v.kind, String("CONDA_INSTALL_SMOKE"))
-            assert_equal(len(v.installs), 2)
-            assert_equal(v.installs[0], String("komira_encoding"))
-            assert_equal(v.installs[1], String("komira_all"))
-            assert_equal(v.compiler_channel, String("https://conda.modular.com/max"))
-            assert_equal(v.program, String("release/smoke/smoke_komira_encoding.mojo"))
-            assert_true(v.image.startswith(String("ghcr.io/prefix-dev/pixi:")), v.image)
-            assert_equal(v.wait_for_index_seconds, 1800)
-            # the program the validation names is there, and states its count
-            var program = Path(String("smoke_komira_encoding.mojo")).read_text()
-            assert_true(program.find(String("\"komira_encoding validation: \"")) >= 0, String("the smoke program prints no count line"))
+            assert_equal(len(p.steps[0].validations), 2)
+            var want_names = List[String]()
+            want_names.append(String("install-komira-encoding"))
+            want_names.append(String("install-set"))
+            var want_installs = List[String]()
+            want_installs.append(String("komira_encoding"))
+            want_installs.append(String("komira_all"))
+            for k in range(2):
+                ref v = p.steps[0].validations[k]
+                assert_equal(v.name, want_names[k])
+                assert_equal(v.kind, String("CONDA_INSTALL_ENV"))
+                assert_equal(len(v.installs), 1)
+                assert_equal(v.installs[0], want_installs[k])
+                assert_equal(v.compiler_channel, String("https://conda.modular.com/max"))
+                assert_equal(len(v.extra_channels), 1)
+                assert_equal(v.extra_channels[0], String("conda-forge"))
+                assert_equal(v.smoke, String("README"))
+                assert_equal(v.program, String(""))
+                assert_equal(v.image, String(""))
+                assert_equal(v.wait_for_index_seconds, 1800)
         else:
             assert_equal(len(p.steps[0].validations), 0)
         # The stage's environment IS the one the channel's trusted publisher
@@ -162,9 +240,10 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
                 assert_true(not calls[k].has_machine, String("a kci run in kci.yml passes --machine"))
                 assert_true(calls[k].has_summary_file, String("a kci run in kci.yml passes no --summary-file"))
     assert_equal(runs, 5)
-    assert_equal(len(only_seen), 2)
+    assert_equal(len(only_seen), 3)
     assert_equal(only_seen[0], String("gamma gamma step:publish"))
-    assert_equal(only_seen[1], String("validate gamma validation:install"))
+    assert_equal(only_seen[1], String("validate gamma validation:install-komira-encoding"))
+    assert_equal(only_seen[2], String("validate gamma validation:install-set"))
     # the build job and the pr job, and only they, join the tailnet
     assert_equal(farm, 2)
     # the validate job: no environment, no identity token, after the publish
@@ -176,6 +255,10 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     var needs = doc.scalar_or_list(doc.child(validate, String("needs")))
     assert_equal(len(needs), 2)
     assert_equal(needs[1], String("gamma"))
+    # the validate job installs with the platform table's linux-x86_64 pixi
+    # pin, and no other job handles pixi (_pixi_pin_findings)
+    var pixi = _pixi_pin_findings(Path(String("kci.yml")).read_text(), Path(String("pixi_pin.txt")).read_text())
+    assert_equal(len(pixi), 0, _joined(pixi))
     # prod waits for the validation
     var prod_needs = doc.scalar_or_list(doc.child(doc.child(jobs, String("prod")), String("needs")))
     assert_equal(len(prod_needs), 2)
@@ -213,6 +296,31 @@ def test_kci_yml_names_no_removed_input_and_no_other_channel() raises:
             seen += 1
         at = text.find(String("komira-ai/"), end)
     assert_true(seen > 0, String("kci.yml names neither channel"))
+
+
+def test_an_empty_pixi_sha_is_refused_before_run_time() raises:
+    # A workflow edit that empties the pin's sha256, or has the build job
+    # write one, is refused by this build, not by `kci run` in the job.
+    var text = Path(String("kci.yml")).read_text()
+    var pin = Path(String("pixi_pin.txt")).read_text()
+    var at = pin.find(String("\nsha256 "))
+    assert_true(at >= 0, String("pixi_pin.txt has no sha256 line"))
+    var sha = String(pin[byte = at + String("\nsha256 ").byte_length() :]).strip()
+    var line = String("      PIXI_SHA256: ") + String(sha) + String("\n")
+    assert_true(text.find(line) >= 0, String("kci.yml has no PIXI_SHA256 line to mutate"))
+    for empty in [String("      PIXI_SHA256: ''\n"), String("      PIXI_SHA256: \"\"\n"), String("      PIXI_SHA256:\n"), String("")]:
+        var refused = False
+        try:
+            refused = len(_pixi_pin_findings(text.replace(line, empty), pin)) > 0
+        except:
+            refused = True  # the reader cannot tell: the check fails closed
+        assert_true(refused, String("an emptied PIXI_SHA256 is not refused: '") + empty + String("'"))
+    # the old shape: the build job ships a pixi and its sha in the release tar
+    var tar = String("kci release kci-result-build.json\n")
+    assert_true(text.find(tar) >= 0, String("kci.yml has no release tar line to mutate"))
+    var shipped = text.replace(tar, String("kci release kci-result-build.json pixi\n"))
+    var found = _pixi_pin_findings(shipped, pin)
+    assert_true(len(found) > 0, String("a build job writing a pixi sha is not refused"))
 
 
 def main() raises:

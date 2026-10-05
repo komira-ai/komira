@@ -6,7 +6,8 @@
 # Before the channel is read, kci asks each DECLARED remote host once,
 # anonymously (`GET /`, no Authorization header, no redirect followed): the
 # step's channel, the compiler channel and each extra channel (`conda-forge`
-# is conda.anaconda.org). The answer is classified by host:
+# is conda.anaconda.org). A LOCAL `file:///` channel has no host and is not
+# asked (the compiler channel still is: mojo-compiler comes from it). The answer is classified by host:
 #
 #   every host answered      the network is up; the validation runs.
 #                            ANY HTTP status is an answer: a 401, a 404 or a
@@ -68,8 +69,8 @@ struct HostAnswer(Copyable, Movable):
 
 def declared_hosts(channel_url: String, validation: StageValidation) raises -> List[String]:
     """The hosts of the step's channel, the compiler channel and the extra
-    channels, each once, in that order. RAISES on a location that is not an
-    https:// URL."""
+    channels, each once, in that order; a `file:///` channel names none.
+    RAISES on a location that is neither an https:// nor a file:/// URL."""
     var urls = List[String]()
     urls.append(channel_url.copy())
     urls.append(validation.compiler_channel.copy())
@@ -77,7 +78,11 @@ def declared_hosts(channel_url: String, validation: StageValidation) raises -> L
         urls.append(channel_url_of(validation.extra_channels[i]))
     var out = List[String]()
     for i in range(len(urls)):
-        var h = ChannelUrl(urls[i]).host.copy()
+        var u = ChannelUrl(urls[i])
+        if u.is_local():
+            # a file:/// channel is this machine's directory: no host to ask
+            continue
+        var h = u.host.copy()
         var seen = False
         for j in range(len(out)):
             if out[j] == h:

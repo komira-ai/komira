@@ -9,10 +9,11 @@
 #   artifacts.textproto  src/kci_artifact (test_release_artifacts_file)
 #   channels.textproto   src/kci_release_channel (test_release_channels_file),
 #                        src/kci_ci_check (test_repo_kci_yml)
-# The programs the machine file's validations run are in release/smoke, each a
-# mojo_test against the in-repository library. release/ci holds the commands
-# the per-change check runs (artifacts.textproto's `affected`,
-# `build_targets` and `derive_checks`).
+# The machine file's validations run each installed library's README examples
+# (src/<library>/README.md, shipped as share/doc/<name>/README.md): the same
+# examples are a welded test of the library's own build, so they cannot rot.
+# release/ci holds the commands the per-change check runs (artifacts.textproto's
+# `affected`, `build_targets` and `derive_checks`).
 # Changes need the release approver's review (.github/CODEOWNERS).
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 

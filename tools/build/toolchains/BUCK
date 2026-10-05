@@ -3,7 +3,7 @@ load("@komira//tools/build/platforms:table.bzl", "by_target_os", "pinned_kwargs"
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe")
-load(":pixi.bzl", "pixi_version_check")
+load(":pixi.bzl", "pixi_pin_record", "pixi_version_check")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
 # Each is a row pin of the platform table (tools/build/platforms/table.bzl):
@@ -40,6 +40,17 @@ pinned_file(**pinned_kwargs("darwin-arm64", "pixi", out = "pixi"))
 alias(
     name = "pixi",
     actual = select(by_target_os("pixi")),
+    visibility = ["PUBLIC"],
+)
+
+# The linux pin's URL and sha256 as a file: kci.yml's validate job downloads
+# that URL itself (it has no buck2) and keeps the bytes only at that sha256,
+# and src/kci_ci_check's test_repo_kci_yml holds the job's two values to this
+# record, so the job runs exactly the table's pin.
+pixi_pin_record(
+    name = "pixi_pin_linux_x86_64",
+    sha256 = pinned_kwargs("linux-x86_64", "pixi")["sha256"],
+    url = pinned_kwargs("linux-x86_64", "pixi")["url"],
     visibility = ["PUBLIC"],
 )
 
