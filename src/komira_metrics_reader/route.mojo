@@ -23,7 +23,7 @@
 # ── THE STATUS OF EVERY OTHER ANSWER ────────────────────────────────────────
 #   | condition                                        | answer |
 #   |--------------------------------------------------|--------|
-#   | a missing `metric`, a malformed or inverted bound, an unknown `agg`, a malformed number | 400 |
+#   | a missing `metric`, a malformed or inverted bound, an unknown `agg`, a malformed number, a parameter not UTF-8 once decoded | 400 |
 #   | the reader refuses the query (`MetricsReader.refusal`) | 400, its sentence |
 #   | the reader raises while reading                  | 500, naming it |
 #   | an answer                                        | 200    |
@@ -202,6 +202,17 @@ comptime _MAX_WINDOW_MS: Int64 = 9_223_372_036_854
 
 
 def _query_from(params: List[_Param], now_ns: Int64) -> _Built:
+    # Every decoded key and value is text from here on (a reader quotes it
+    # into a filter or a JSON body), so bytes that are not UTF-8 are refused
+    # here, naming the parameter, rather than passed down.
+    for i in range(len(params)):
+        if not _is_utf8(params[i].key) or not _is_utf8(params[i].value):
+            return _refused(
+                String("the query parameter '")
+                + params[i].key
+                + String("' is not UTF-8 once percent-decoded")
+            )
+
     var metric = _param(params, METRICS_METRIC_PARAM)
     if not metric or metric.value().byte_length() == 0:
         return _refused(
@@ -527,6 +538,21 @@ def _utf8_seq_len(b: Span[UInt8, _], i: Int) -> Int:
     return need + 1
 
 
+def _is_utf8(s: String) -> Bool:
+    """True iff every byte of `s` belongs to a well-formed UTF-8 sequence."""
+    var b = s.as_bytes()
+    var i = 0
+    while i < len(b):
+        if Int(b[i]) < 0x80:
+            i += 1
+            continue
+        var k = _utf8_seq_len(b, i)
+        if k == 0:
+            return False
+        i += k
+    return True
+
+
 def _json_response(var body: String, status: Int32) -> HttpResponse:
     var r = HttpResponse(status=status)
     r.headers[String("content-type")] = String("application/json")
@@ -609,8 +635,8 @@ def _decode(b: Span[UInt8, _], start: Int, end: Int) -> String:
             j += 1
     if len(out) == 0:
         return String("")
-    # A decoded byte sequence that is not UTF-8 is escaped on the way out
-    # (`_json_escape`), never trusted as text by anything below.
+    # Not yet checked: `_query_from` refuses a key or value that is not
+    # UTF-8 (`_is_utf8`) before anything reads it as text.
     return String(unsafe_from_utf8=out^)
 
 
