@@ -239,7 +239,7 @@ struct FusedEvalResult(Movable):
     `kind` reports which conjunct shape fired so the caller can bump the
     matching counter. `mask` is wrapped in Optional so the caller can
     extract it with `take_mask()` without violating the partial-move-out-
-    of-struct-field ban (the internal development notes hard ban #11).
+    of-struct-field rule (a field is never moved out of the middle of a struct).
     """
     var kind: UInt8
     var mask: Optional[BooleanArray]

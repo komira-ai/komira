@@ -19,7 +19,7 @@
 # / Float64 / Float32 / Utf8 plus multi-key (composite hash) builds;
 # these follow when columnar dispatch needs them.
 #
-# Per the internal development notes "Mojo Pointer Rules":
+# Per the repository pointer rules:
 #   - No UnsafePointer in public API.
 #   - DynamicJoinFilter is Movable only (BloomFilter inside is non-copyable
 #     because its data buffer is heap-allocated and cannot be cheaply

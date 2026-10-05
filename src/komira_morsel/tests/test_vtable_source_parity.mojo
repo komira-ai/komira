@@ -394,7 +394,7 @@ def _drain[
             break
         var mm = m.take()
         # Read THROUGH the morsel -- never `mm.batch^`, which is the banned
-        # partial-move-out-of-a-struct shape (the internal development notes Hard ban #11).
+        # partial-move-out-of-a-struct shape.
         var n = mm.batch.num_rows()
         var nc = mm.batch.num_columns()
         var c0 = mm.batch.column_as_primitive_int64(0)

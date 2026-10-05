@@ -93,7 +93,7 @@ trait MorselSourceImpl(Movable, Deinitable):
         either advisory (mutating `_caps` after the fact has no
         downstream effect — production migrates to ctor-time) or
         deliberately not overridden (the 3 banned-pointer-payload
-        setters per Decision 3a). The ENGINE callsite is responsible
+        setters). The ENGINE callsite is responsible
         for converting `LoweredSourceHooks` to `SourceCapabilityConfig`
         BEFORE constructing the source — see
         `lowered_hooks_to_source_caps` in source_hooks.mojo.

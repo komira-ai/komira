@@ -395,8 +395,7 @@ def apply_source_hooks[
         # (mutating `_caps` after the fact has no downstream effect for
         # these sources, since `next_morsel` already captured the
         # construction-time view) or wrong-shape (the 3 banned-pointer-
-        # payload setters are deliberately not overridden per Decision
-        # 3a / Hard ban #3). Borrow `hooks` to keep the parameter live
+        # payload setters are deliberately not overridden). Borrow `hooks` to keep the parameter live
         # for the no-op arm.
         _ = hooks.morsel_rows  # keepalive; setter-loop arm is dead.
         return

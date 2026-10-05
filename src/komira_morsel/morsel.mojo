@@ -106,7 +106,7 @@ struct MorselFmt[F: BatchFormat](Movable, Deinitable):
     BATCHFORMAT spike modeled the field as `var batch: Self.F`; the production
     carrier wraps it as `Optional[Self.F]` so the pipeline driver can lift the
     `F` batch out of the morsel via `Optional.take()` — the project-sanctioned
-    partial-move replacement (the internal development notes Hard ban #11), and the SAME shape the
+    partial-move replacement (a field is never moved out of the middle of a struct; `Optional.take()` is the sanctioned spelling), and the SAME shape the
     `ColumnNativeBatch._body: Optional[...]` foundation field uses for its
     `take_body`. A bare `self.batch^` on a struct with a custom `__init__`
     raises "field destroyed out of the middle of a value" on Mojo (the
@@ -149,7 +149,7 @@ struct MorselFmt[F: BatchFormat](Movable, Deinitable):
 
     def take_batch(var self) -> Self.F:
         """Consume the morsel and return its `F` batch via `Optional.take()`
-        (the internal development notes Hard ban #11 sanctioned partial-move replacement). The
+        (the sanctioned replacement for a partial move out of a struct). The
         Optional is left `None`; the POD Int fields drop normally. The pipeline
         driver uses this to lift the native batch out of the carrier."""
         return self.batch.take()
