@@ -10,6 +10,7 @@ mojo_library(
     test_srcs = [
         "tests/test_atomic_slab.mojo",
         "tests/test_dyn_value.mojo",
+        "tests/test_hyperloglog.mojo",
         "tests/test_owned_slab.mojo",
         "tests/test_slab.mojo",
     ],
