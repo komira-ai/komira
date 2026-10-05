@@ -36,6 +36,8 @@
 # `List[UInt64]`, `String` and `HyperLogLog`.
 # =============================================================================
 
+from std.math import log
+
 
 # -----------------------------------------------------------------------------
 # Compile-time constants
@@ -199,13 +201,30 @@ struct HyperLogLog(Movable, Copyable):
     `List[UInt8]` for safe ownership and cheap copy-construction.
     """
 
-    var registers: List[UInt8]
+    # Always exactly HLL_NUM_REGISTERS entries: created at that length and
+    # never resized, which is what makes the SIMD loop in `merge` in bounds.
+    # Read and write single registers through `register`/`set_register`.
+    var _registers: List[UInt8]
 
     def __init__(out self):
         """Initialize an empty sketch (all registers = 0)."""
-        self.registers = List[UInt8](capacity=HLL_NUM_REGISTERS)
+        self._registers = List[UInt8](capacity=HLL_NUM_REGISTERS)
         for _ in range(HLL_NUM_REGISTERS):
-            self.registers.append(UInt8(0))
+            self._registers.append(UInt8(0))
+
+    @always_inline
+    def register(self, idx: Int) -> UInt8:
+        """The value of register `idx`, 0 <= idx < HLL_NUM_REGISTERS."""
+        return self._registers[idx]
+
+    @always_inline
+    def set_register(mut self, idx: Int, value: UInt8):
+        """Set register `idx` to `value`, 0 <= idx < HLL_NUM_REGISTERS.
+
+        Overwrites rather than takes the maximum; `add_hash` and `merge`
+        are the ingest paths.
+        """
+        self._registers[idx] = value
 
     # -------------------------------------------------------------------------
     # Ingest helpers
@@ -225,8 +244,8 @@ struct HyperLogLog(Movable, Copyable):
         var tail_mask = (UInt64(1) << UInt64(HLL_HASH_REM_BITS)) - UInt64(1)
         var tail = hash & tail_mask
         var rho = _leading_zero_count_plus_one_in_tail(tail)
-        if UInt8(rho) > self.registers[idx]:
-            self.registers[idx] = UInt8(rho)
+        if UInt8(rho) > self._registers[idx]:
+            self._registers[idx] = UInt8(rho)
 
     def add_int64(mut self, value: Int64):
         """Convenience: hash an Int64 and add it."""
@@ -259,13 +278,19 @@ struct HyperLogLog(Movable, Copyable):
         iterations) rather than 4096 scalar compares.
         """
         comptime W: Int = 16
-        var s_ptr = self.registers.unsafe_ptr()
-        var o_ptr = other.registers.unsafe_ptr()
+        debug_assert(
+            len(self._registers) == HLL_NUM_REGISTERS
+            and len(other._registers) == HLL_NUM_REGISTERS,
+            "HyperLogLog.merge: a sketch does not hold HLL_NUM_REGISTERS registers",
+        )
+        var s_ptr = self._registers.unsafe_ptr()
+        var o_ptr = other._registers.unsafe_ptr()
         for i in range(0, HLL_NUM_REGISTERS, W):
-            # SAFETY: precondition: both sketches hold exactly
-            # HLL_NUM_REGISTERS (4096) registers, and nothing resizes
-            # `registers`. 4096 is divisible by W=16, so under that
-            # precondition every load and store is in bounds.
+            # SAFETY: both sketches hold exactly HLL_NUM_REGISTERS (4096)
+            # registers: `_registers` is created at that length and this
+            # module never resizes it (asserted above in debug builds).
+            # 4096 is divisible by W=16, so every load and store is in
+            # bounds.
             var s = (s_ptr + i).load[width=W]()
             var o = (o_ptr + i).load[width=W]()
             (s_ptr + i).store(max(s, o))
@@ -286,7 +311,7 @@ struct HyperLogLog(Movable, Copyable):
         var sum_inv = Float64(0.0)
         # E = a_m * m^2 / sum_i(2^-M_i)
         for i in range(m):
-            var r = self.registers[i]
+            var r = self._registers[i]
             if r == UInt8(0):
                 num_empty += 1
                 # 2^-0 = 1.0
@@ -342,5 +367,4 @@ def _pow2_neg(exp: Int) -> Float64:
 @always_inline
 def _ln(x: Float64) -> Float64:
     """Natural log for x > 0, via `std.math.log`."""
-    from std.math import log
     return log(x)
