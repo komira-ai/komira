@@ -219,6 +219,46 @@ def test_a_bad_argument_is_a_400_never_a_default() raises:
     assert_equal(d.refusal_count(), 0)
 
 
+def test_an_unknown_or_repeated_parameter_is_a_400_naming_it() raises:
+    # A misspelled bound must not silently become the default window, and a
+    # repeated parameter must not silently keep one of its values.
+    var d = ScriptedMetricsReader()
+    var queries: List[String] = [
+        "metric=m&sinse_ms=5",
+        "metric=m&lable.code=500",
+        "metric=m&bogus=1",
+        "metric=m&since_ms=1&since_ms=2",
+        "metric=m&metric=n",
+        "metric=m&label.k=a&label.k=b",
+        "metric=m&not_label.k=a&not_label.k=b",
+        "metric=m&not_label.=x",
+    ]
+    var names: List[String] = [
+        "sinse_ms",
+        "lable.code",
+        "bogus",
+        "since_ms",
+        "metric",
+        "label.k",
+        "not_label.k",
+        "not_label.",
+    ]
+    for i in range(len(queries)):
+        var query = queries[i].copy()
+        var name = names[i].copy()
+        var r = _run(d, query, AllowAll())
+        assert_equal(r.status, Int32(400), query + " -> " + _body(r))
+        assert_true(
+            String("'") + name + String("'") in _body(r),
+            query + " -> " + _body(r),
+        )
+    assert_equal(d.read_count(), 0)
+    assert_equal(d.refusal_count(), 0)
+    # A label and a not_label on the same key are two matchers, not a repeat.
+    _ = _ok(d, String("metric=m&label.k=a&not_label.k=b"))
+    assert_equal(len(d.last_query().matchers), 2)
+
+
 def test_limits_clamp() raises:
     var d = ScriptedMetricsReader()
     _ = _ok(d, String("metric=m&series_limit=0&point_limit=99999999999999999999"))
@@ -297,6 +337,7 @@ def main() raises:
     test_defaults_reach_the_reader()
     test_arguments_reach_the_reader()
     test_a_bad_argument_is_a_400_never_a_default()
+    test_an_unknown_or_repeated_parameter_is_a_400_naming_it()
     test_limits_clamp()
     test_reader_refusal_is_a_400_and_no_read()
     test_a_read_fault_is_a_500_naming_it()
