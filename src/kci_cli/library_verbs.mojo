@@ -17,7 +17,8 @@
 #   validate       -> kci_validate.run_install_smoke: a `SupervisorRunner`
 #                     for `docker`, anonymous HTTPS reads of the channel
 #                     (`HttpPkgTransport`, no credential), `UsleepSleeper`
-#                     for the index wait. The container runs as this
+#                     for the index wait, each poll a line on stderr
+#                     (`StderrIndexPollLog`). The container runs as this
 #                     process's uid:gid; the docker CLI gets this process's
 #                     PATH (platform-set; a default when unset) and nothing
 #                     else it holds.
@@ -49,7 +50,7 @@ from komira_secret_store import SecretStore, SecretValue
 from kci_api import OUTCOME_VALIDATION_FAILED, VALIDATION_VALIDATED, ResultValidation, ResultValidationCheck
 from kci_pkg_upload import HttpPkgTransport
 from kci_publish import UsleepSleeper
-from kci_validate import ContainerHost, ValidateRequest, run_install_smoke
+from kci_validate import ContainerHost, StderrIndexPollLog, ValidateRequest, run_install_smoke
 
 from kci_build import GIT_PROGRAM, BuildRequest, RunSpec, SupervisorRunner, run_build
 from kci_build import RunResult as ProcessResult
@@ -155,8 +156,9 @@ struct LibrarySteps(StageSteps, Movable):
         var runner = SupervisorRunner()
         var transport = HttpPkgTransport[_Conn](_mk_connector)
         var sleeper = UsleepSleeper()
+        var log = StderrIndexPollLog()
         try:
-            return run_install_smoke(runner, transport, sleeper, req, host)
+            return run_install_smoke(runner, transport, sleeper, log, req, host)
         except e:
             var row = ResultValidation(
                 req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(),

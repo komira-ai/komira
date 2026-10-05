@@ -56,8 +56,9 @@
 #                     under `release/` (no `..` segment)
 #   wait_for_index_seconds
 #                     how long to wait for the channel's index to LIST the
-#                     release's files (0, the default, waits not at all; at
-#                     most `VALIDATION_WAIT_MAX_SECONDS`)
+#                     release's files: 0 waits not at all; unset is
+#                     `VALIDATION_WAIT_DEFAULT_SECONDS`; at most
+#                     `VALIDATION_WAIT_MAX_SECONDS`
 #
 # SELECTION. `resolve_selection` turns `kci run --only ...` into the steps
 # and validations to run (file order, whatever the order on the command line)
@@ -96,6 +97,10 @@ comptime VALIDATION_PROGRAM_DIR: String = "release/"
 comptime VALIDATION_WAIT_MAX_SECONDS: Int = 3600
 """The longest `wait_for_index_seconds` a validation may declare."""
 
+comptime VALIDATION_WAIT_DEFAULT_SECONDS: Int = 1800
+"""`wait_for_index_seconds` when a validation does not set it. A registry
+can take a quarter of an hour to make a new subdir's first index."""
+
 comptime EXTRA_CHANNEL_CONDA_FORGE: String = "conda-forge"
 """The one bare channel name an `extra_channel` may be."""
 
@@ -129,7 +134,7 @@ struct StageValidation(Copyable, Movable):
         self.compiler_channel = String("")
         self.extra_channels = List[String]()
         self.program = String("")
-        self.wait_for_index_seconds = 0
+        self.wait_for_index_seconds = VALIDATION_WAIT_DEFAULT_SECONDS
         self.line = line
 
 
