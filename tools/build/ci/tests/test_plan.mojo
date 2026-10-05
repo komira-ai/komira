@@ -370,7 +370,7 @@ def test_coverage_is_what_no_unit_builds_or_depends_on() raises:
 
 def _units_text() -> String:
     return String(
-        "docs_unit\t//docs:doc_tree\nlib_a\t//lib/a:a\nlib_b\t//lib/b:b\napp\t//app:app\ntools_x\t//tools/x:y\n"
+        "docs_unit\t//docs:\nlib_a\t//lib/a/...\nlib_b\t//lib/b:\napp\t//app:app\ntools_x\t//tools/...\n"
     )
 
 

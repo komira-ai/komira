@@ -33,6 +33,28 @@ def test_a_unit_target_with_a_subtarget_or_the_cell_name_matches() raises:
     assert_equal(len(affected_units(u, _list("//src/x:x_conda"), "komira")), 1)
 
 
+def test_a_package_pattern_names_the_targets_it_matches() raises:
+    # the derived checks of the release template are patterns, not labels
+    var u = parse_units_file(
+        "pkg\t//src/x/...\nroot\t//:\nfn\ttests//functional/...\nlone\t//src/y:\nall_tests\ttests//...\n"
+    )
+    var got = affected_units(u, _list("//src/x/sub/deep:t"), "komira")
+    assert_equal(len(got), 1)
+    assert_equal(got[0], "pkg")  # the package and everything below it
+    assert_equal(len(affected_units(u, _list("//src/x:x"), "komira")), 1)
+    assert_equal(len(affected_units(u, _list("//src/xy:x"), "komira")), 0)  # a prefix of a name is not a package below it
+    assert_equal(affected_units(u, _list("//:docs"), "komira")[0], "root")
+    assert_equal(len(affected_units(u, _list("//src:docs"), "komira")), 0)  # `//:` is the root package only
+    assert_equal(affected_units(u, _list("//src/y:y"), "komira")[0], "lone")
+    assert_equal(len(affected_units(u, _list("//src/y/z:y"), "komira")), 0)  # `//src/y:` is one package
+    var f = affected_units(u, _list("tests//functional/a:t"), "komira")
+    assert_equal(len(f), 2)  # a pattern is per cell: the tests cell's, not the root's
+    assert_equal(f[0], "fn")
+    assert_equal(f[1], "all_tests")
+    assert_equal(len(affected_units(u, _list("//functional/a:t"), "komira")), 0)
+    assert_equal(len(affected_units(parse_units_file("everything\tkomira//...\n"), _list("//a/b:c"), "komira")), 1)
+
+
 def test_a_units_file_it_cannot_read_is_an_error() raises:
     var bad = List[String]()
     bad.append("enc only-one-field\n")
@@ -86,6 +108,7 @@ def test_json() raises:
 def main() raises:
     test_units_reached()
     test_a_unit_target_with_a_subtarget_or_the_cell_name_matches()
+    test_a_package_pattern_names_the_targets_it_matches()
     test_a_units_file_it_cannot_read_is_an_error()
     test_the_protocol_answer()
     test_text()
