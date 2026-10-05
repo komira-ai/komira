@@ -29,7 +29,7 @@ from kci_reconciler import (
     RETAIN_DELETE,
     VERB_CREATE,
     FAULT_UNSET,
-    FAULT_CUSTOMER,
+    FAULT_USER,
     fault_error,
     fault_domain_of_error,
     PERMANENT_FAULT_PREFIX,
@@ -86,7 +86,7 @@ def test_a_quoted_fault_does_not_inherit_the_mark() raises:
     assert_false(fault_is_in_flight(quoting_f))
     # A fault-domain token in front of a QUOTE does not open a door either: only
     # the mark DIRECTLY after the token counts.
-    var tagged_quote = String(fault_error(FAULT_CUSTOMER, quoting_p))
+    var tagged_quote = String(fault_error(FAULT_USER, quoting_p))
     assert_false(fault_is_permanent(tagged_quote))
 
 
@@ -106,7 +106,7 @@ def test_both_stamps_are_idempotent() raises:
     assert_equal(mark_permanent_fault(p), p)
     var f = mark_in_flight_fault(_MSG)
     assert_equal(mark_in_flight_fault(f), f)
-    var tagged = mark_permanent_fault(String(fault_error(FAULT_CUSTOMER, _MSG)))
+    var tagged = mark_permanent_fault(String(fault_error(FAULT_USER, _MSG)))
     assert_equal(mark_permanent_fault(tagged), tagged)
 
 
@@ -114,20 +114,20 @@ def test_the_mark_and_the_fault_domain_compose_in_one_order() raises:
     """Stamping before or after `fault_error` gives the SAME string, with the
     domain token first so `fault_domain_of_error` still reads it."""
     var mark_then_tag = String(
-        fault_error(FAULT_CUSTOMER, mark_permanent_fault(_MSG))
+        fault_error(FAULT_USER, mark_permanent_fault(_MSG))
     )
     var tag_then_mark = mark_permanent_fault(
-        String(fault_error(FAULT_CUSTOMER, _MSG))
+        String(fault_error(FAULT_USER, _MSG))
     )
     assert_equal(mark_then_tag, tag_then_mark)
     assert_equal(
         mark_then_tag,
-        String("[fault=customer] ") + PERMANENT_FAULT_PREFIX + _MSG,
+        String("[fault=user] ") + PERMANENT_FAULT_PREFIX + _MSG,
     )
-    assert_equal(fault_domain_of_error(tag_then_mark), FAULT_CUSTOMER)
+    assert_equal(fault_domain_of_error(tag_then_mark), FAULT_USER)
     assert_true(fault_is_permanent(tag_then_mark))
-    var f = mark_in_flight_fault(String(fault_error(FAULT_CUSTOMER, _MSG)))
-    assert_equal(fault_domain_of_error(f), FAULT_CUSTOMER)
+    var f = mark_in_flight_fault(String(fault_error(FAULT_USER, _MSG)))
+    assert_equal(fault_domain_of_error(f), FAULT_USER)
     assert_true(fault_is_in_flight(f))
 
 
@@ -154,7 +154,7 @@ def test_deploy_fault_message_is_the_raisers_words() raises:
     assert_equal(deploy_fault_message(mark_in_flight_fault(_MSG)), _MSG)
     assert_equal(
         deploy_fault_message(
-            mark_permanent_fault(String(fault_error(FAULT_CUSTOMER, _MSG)))
+            mark_permanent_fault(String(fault_error(FAULT_USER, _MSG)))
         ),
         _MSG,
     )
@@ -166,7 +166,7 @@ def test_deploy_fault_message_is_the_raisers_words() raises:
 # =============================================================================
 comptime _HOW_UNMARKED: Int = 0
 comptime _HOW_PERMANENT: Int = 1
-comptime _HOW_PERMANENT_CUSTOMER: Int = 2
+comptime _HOW_PERMANENT_USER: Int = 2
 comptime _HOW_IN_FLIGHT: Int = 3
 comptime _HOW_QUOTES_PERMANENT: Int = 4
 
@@ -201,8 +201,8 @@ struct _RaisingNode(Resource, Movable, Deinitable):
     def create(mut self, creds: Creds) raises -> String:
         if self._how == _HOW_PERMANENT:
             raise Error(mark_permanent_fault(_MSG))
-        if self._how == _HOW_PERMANENT_CUSTOMER:
-            raise fault_error(FAULT_CUSTOMER, mark_permanent_fault(_MSG))
+        if self._how == _HOW_PERMANENT_USER:
+            raise fault_error(FAULT_USER, mark_permanent_fault(_MSG))
         if self._how == _HOW_IN_FLIGHT:
             raise Error(mark_in_flight_fault(_MSG))
         if self._how == _HOW_QUOTES_PERMANENT:
@@ -253,12 +253,12 @@ def test_B1_a_permanent_fault_stays_permanent_through_the_engine() raises:
 
 
 def test_B2_the_mark_and_a_stated_domain_both_survive() raises:
-    var surfaced = _apply_and_capture(_HOW_PERMANENT_CUSTOMER)
-    assert_equal(fault_domain_of_error(surfaced), FAULT_CUSTOMER)
+    var surfaced = _apply_and_capture(_HOW_PERMANENT_USER)
+    assert_equal(fault_domain_of_error(surfaced), FAULT_USER)
     assert_true(fault_is_permanent(surfaced), surfaced)
     assert_equal(
         surfaced,
-        String("[fault=customer] ")
+        String("[fault=user] ")
         + PERMANENT_FAULT_PREFIX
         + String("apply node 'svc' verb=create failed: ")
         + _MSG,

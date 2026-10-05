@@ -297,7 +297,7 @@ def test_fields_become_keys_and_a_value_may_contain_equals() raises:
     var line = render_json_line(
         Int64(1790812800000),
         LEVEL_INFO,
-        String("komira_agent"),
+        String("komira_job_supervisor"),
         String("job abc finished"),
         _fields(
             String("phase=DONE"),
@@ -331,7 +331,7 @@ def test_a_field_may_not_shadow_the_layouts_own_keys() raises:
     var line = render_json_line(
         Int64(1790812800000),
         LEVEL_ERROR,
-        String("komira_agent"),
+        String("komira_job_supervisor"),
         String("boom"),
         _fields(
             String("severity=INFO"),
@@ -387,12 +387,12 @@ def test_text_layout_is_byte_identical_by_default() raises:
         render_line(
             Int64(1790812800000),
             LEVEL_INFO,
-            "komira_agent",
+            "komira_job_supervisor",
             String("job abc finished"),
             fields,
         ),
         String(
-            "2026-10-01T00:00:00.000Z INFO [komira_agent] job abc finished"
+            "2026-10-01T00:00:00.000Z INFO [komira_job_supervisor] job abc finished"
             " phase=DONE rows=42"
         ),
         "the P1 text line, byte for byte (test_log_p1.test_render_line_shape)",
@@ -528,7 +528,7 @@ def test_non_ascii_survives_byte_exact() raises:
     var line = render_json_line(
         Int64(1790812800000),
         LEVEL_INFO,
-        String("komira_agent"),
+        String("komira_job_supervisor"),
         utf8,
         _fields(String("who=") + utf8),
     )

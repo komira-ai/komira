@@ -1,6 +1,6 @@
 # =============================================================================
 # kci_validator_rows/live.mojo — ★ EMIT THE ROW WHEN IT COMPLETES, NOT WHEN THE
-#   RUN DOES. The one spelling every managed-app validator's `MatrixOutcome`
+#   RUN DOES. The one spelling every app validator's `MatrixOutcome`
 #   streams through.
 # =============================================================================
 #

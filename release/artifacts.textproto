@@ -40,13 +40,58 @@
 # Which farm buck2 builds on is the build job's machine configuration, written
 # by the farm-connect action (docs/ci.md), not this file's.
 #
-# TARGETS. Each artifact names the buck2 targets it stands for in the
-# per-change check (`kci run --affected-by`, the .proto's header): every
-# `//` label of its combined args (its build system's, then its own), with
-# the `[subtarget]` removed, which the welded test of this file holds. The
-# check also needs each build system's `affected` and `build_targets`
-# commands and the `checks` list; until the affected tool lands, this file
-# declares neither, and `--affected-by` refuses it naming what is missing.
+# THE PER-CHANGE CHECK (`kci run --stage pr --affected-by <base>`, the pr
+# stage of release/machine.textproto; the .proto's header). Its UNITS are the
+# artifacts below and the checks derived from the graph, and a unit passes only when it builds and
+# its tests pass: the check has one meaning, every unit green. Each artifact names
+# the buck2 targets it stands for (`targets`): every `//` label of its
+# combined args (its build system's, then its own), with the `[subtarget]`
+# removed, which the welded test of this file holds.
+#
+# THE UNITS ARE DERIVED FROM THE GRAPH. This file declares the artifacts
+# (and may declare explicit checks, `checks { name targets }`, to group
+# targets its own way). The rest of the units are DERIVED when the check
+# runs: the buck2 build system's `derive_checks` command
+# (release/ci/derive_checks.py) reads `//...` and `tests//functional/...`
+# from the live graph (`buck2 cquery`) and answers one check per path group
+# for every target no declared unit names or matches: one per library
+# package `//src/<p>/...` (named `<p>`: a change to one library builds that
+# library's units, not every library's), `repo_root` (`//:`) for the
+# repository's own lints, `bin`, `release`, `tests`, `third_party`,
+# `tools_<t>` for each `//tools/<t>/...` tree, and `functional_tests`
+# (`tests//functional/...`) for the tests cell's positive tests (built only,
+# as `./buck2 build tests//functional/...` builds them). A name an artifact
+# holds gets `_package`: the rest of komira_encoding's package (its library,
+# whose welded tests its conda package does not run) is the derived check
+# `komira_encoding_package`. A derived name is always one kci accepts,
+# `[a-z][a-z0-9_]*` (lower case, any other character `_`, `pkg_` before one
+# not starting with a letter). So every target of the graph is in some unit
+# by construction: a pull request that adds a package gets a check for it,
+# and one that deletes a package loses it, with no edit here.
+#
+# Naming a target that depends on another is not enough: buck2 builds only
+# the outputs a dependent consumes, so building a library's conda package
+# does not build the library itself or run its welded tests. The derivation
+# covers every target, not the roots.
+#
+# A declared target that matches nothing in the graph is reported by the
+# tool (UNMATCHED): for a CHECK it is a notice in the check's output (the
+# package it named is gone; the rest of the check still builds), for an
+# ARTIFACT it is a refusal (a release must build what an artifact names).
+# The tests cell's must-fail fixtures (`tests//negative`) are not units and
+# not in the graph the tool reads: the build system's self-tests
+# (tools/build/tests/run_tests.sh) build each one and assert its refusal.
+# `python3 release/ci/derive_checks.py --from release/artifacts.textproto`
+# prints the answer for a reader; `kci run --stage pr --affected-by <base>
+# --plan` prints the units a change would build.
+#
+# THE COMMANDS. `derive_checks` (release/ci/derive_checks.py) answers the
+# derived checks, above. `build_targets` (release/ci/build_targets.sh) builds
+# a unit's targets, then runs `buck2 test` over the ones in this cell, as
+# `./buck2 test //...` does. `affected` (release/ci/affected_widened.sh) is
+# the interim answer until the affected tool is wired: WIDENED, every unit,
+# which over-approximates and never misses one. Replacing it changes the two
+# `affected` blocks and nothing else.
 #
 # The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
@@ -63,6 +108,21 @@ build_systems {
   args: "komira.package_commit={source_commit}"
   args: "-c"
   args: "komira.package_timestamp_ms={timestamp_ms}"
+  affected {
+    executable: "sh"
+    args: "release/ci/affected_widened.sh"
+    args: "{changed_files}"
+    args: "{units_file}"
+  }
+  build_targets {
+    executable: "sh"
+    args: "release/ci/build_targets.sh"
+  }
+  derive_checks {
+    executable: "python3"
+    args: "release/ci/derive_checks.py"
+    args: "{units_file}"
+  }
 }
 
 build_systems {
@@ -71,6 +131,16 @@ build_systems {
   args: "run"
   args: "//tools/build/package:komira_pack"
   args: "--"
+  affected {
+    executable: "sh"
+    args: "release/ci/affected_widened.sh"
+    args: "{changed_files}"
+    args: "{units_file}"
+  }
+  build_targets {
+    executable: "sh"
+    args: "release/ci/build_targets.sh"
+  }
 }
 
 artifacts {

@@ -46,11 +46,15 @@
 #
 #   **the client controls `headers` too.**
 #
-# A caller who writes `x-komira-authorizer-subject: subject-victim` into their own
-# request has, absent a defence, just handed the handler an identity that no
-# authorizer vouched for. The defence is one rule, applied UNCONDITIONALLY:
+# The authorizer's answer is injected under a header-name PREFIX the CALLER
+# chooses (`AuthorizerHeaderPrefix`, a required argument with no default: the
+# namespace belongs to the application that reads it, not to this library).
+# With a prefix of `x-acme-authz-`, a caller who writes
+# `x-acme-authz-subject: subject-victim` into their own request has, absent a
+# defence, just handed the handler an identity that no authorizer vouched for.
+# The defence is one rule, applied UNCONDITIONALLY:
 #
-#   => EVERY client header whose name begins `x-komira-authorizer-` is DROPPED
+#   => EVERY client header whose name begins with the prefix is DROPPED
 #      before anything is injected — including when there is NO authorizer on
 #      the route, which is the case a "strip only what we overwrite" version
 #      misses.
@@ -107,11 +111,9 @@ from komira_encoding import base64_decode, base64_encode
 # changing it: the value is asserted, not defaulted.
 comptime APIGW_PAYLOAD_VERSION: String = "2.0"
 
-# ⛔ THE RESERVED HEADER NAMESPACE. Anything under it in a CLIENT request is
-# destroyed on entry (§3). Keep it long and vendor-scoped: a short prefix like
-# `x-auth-` would collide with headers real clients legitimately send, and the
-# strip would then be silently eating caller data.
-comptime AUTHORIZER_HEADER_PREFIX: String = "x-komira-authorizer-"
+# ⛔ THE RESERVED HEADER NAMESPACE is caller-chosen: see
+# `AuthorizerHeaderPrefix` below. Anything under it in a CLIENT request is
+# destroyed on entry (§3).
 
 # Where a 2.0 event carries a Lambda REQUEST authorizer's `context` map.
 # ⚠ NOT `requestContext.authorizer` itself — that object holds the authorizer
@@ -121,11 +123,195 @@ comptime _AUTHORIZER_LAMBDA_KEY: String = "lambda"
 
 
 # =============================================================================
+# The caller-chosen header namespace for the authorizer's context (§3).
+# =============================================================================
+struct AuthorizerHeaderPrefix(Copyable, Movable, Deinitable):
+    """The header-name prefix under which `requestContext.authorizer.lambda`
+    reaches the handler, and under which every CLIENT header is destroyed on
+    entry (§3). A context member `subjectid` becomes the header
+    `<prefix>subjectid`.
+
+    ⛔ THERE IS NO DEFAULT. The prefix is a contract between the authorizer, the
+    gateway and the handler that reads the headers, and only the application
+    owning all three can name it. A library default would be a namespace that
+    means nothing to the reader of a request log.
+
+    CHOOSE A LONG, APPLICATION-SCOPED PREFIX: a short one such as `x-auth-`
+    collides with headers real clients legitimately send, and the strip would
+    then silently eat caller data. That is a judgement this type cannot make;
+    the checks below are the ones it can.
+
+    THE CONSTRUCTOR REFUSES, naming the rule, a prefix that:
+      * is empty, or contains no ASCII letter or digit (`-` alone would reserve
+        every header that starts with a dash and name nothing);
+      * contains CR or LF (a header-injection vector, refused by name);
+      * contains any byte that is not an RFC 9110 `tchar` (space, `:`, `/`,
+        non-ASCII, ...): such a prefix could never be a field name;
+      * contains an UPPER-CASE letter. Client header names are ASCII-lowercased
+        BEFORE the prefix is compared, so an upper-case prefix would match no
+        client header and the strip would silently do nothing;
+      * does not END with `-`. The context key is appended to it, so the
+        separator belongs to the prefix; requiring it makes `x-app-authz-`
+        the one spelling and rules out `x-app-authzsubjectid`;
+      * is a prefix of a header API Gateway v2 itself adds to every request
+        (`x-forwarded-for`, `x-forwarded-proto`, `x-forwarded-port`,
+        `x-amzn-trace-id`): `x-`, `x-forwarded-` or `x-amzn-` would strip the
+        gateway's own headers on every request. That is mechanical, not a
+        judgement, so it is refused here.
+
+    WHAT IT ACCEPTS that may still be a poor choice: a prefix shared with a
+    family clients send, such as `content-` or `x-auth-`. Those pass, and the
+    strip would drop the matching client headers."""
+
+    var _value: String
+
+    def __init__(out self, prefix: String) raises:
+        _validate_authorizer_header_prefix(prefix)
+        self._value = prefix.copy()
+
+    def value(self) -> String:
+        """The validated prefix, exactly as given."""
+        return self._value.copy()
+
+
+def _validate_authorizer_header_prefix(prefix: String) raises:
+    var bs = prefix.as_bytes()
+    var n = len(bs)
+    if n == 0:
+        raise Error(
+            String(
+                "apigw: refused an EMPTY authorizer header prefix. An empty"
+                " prefix would reserve EVERY header name, so the strip would"
+                " drop the whole client request's headers."
+            )
+        )
+    var has_alnum = False
+    for i in range(n):
+        var b = bs[i]
+        if b == UInt8(0x0D) or b == UInt8(0x0A):
+            raise Error(
+                String(
+                    "apigw: refused an authorizer header prefix containing CR"
+                    " or LF (byte offset "
+                )
+                + String(i)
+                + String(
+                    "). A field name may never contain a line break; one here"
+                    " is a header-injection vector."
+                )
+            )
+        if b >= UInt8(0x41) and b <= UInt8(0x5A):
+            raise Error(
+                String("apigw: refused authorizer header prefix '")
+                + prefix
+                + String(
+                    "': it contains an UPPER-CASE letter. Client header names"
+                    " are ASCII-lowercased before the prefix is compared, so"
+                    " this prefix would match nothing and the strip of forged"
+                    " headers would silently do nothing. Pass it lower-cased."
+                )
+            )
+        if not _is_tchar(b):
+            raise Error(
+                String("apigw: refused authorizer header prefix '")
+                + prefix
+                + String("': byte offset ")
+                + String(i)
+                + String(
+                    " is not an RFC 9110 token character, so no header name"
+                    " could carry this prefix."
+                )
+            )
+        if (b >= UInt8(0x61) and b <= UInt8(0x7A)) or (
+            b >= UInt8(0x30) and b <= UInt8(0x39)
+        ):
+            has_alnum = True
+    if not has_alnum:
+        raise Error(
+            String("apigw: refused authorizer header prefix '")
+            + prefix
+            + String(
+                "': it contains no letter or digit, so it names no namespace."
+            )
+        )
+    if bs[n - 1] != UInt8(0x2D):
+        raise Error(
+            String("apigw: refused authorizer header prefix '")
+            + prefix
+            + String(
+                "': it must END with '-'. The context key is appended to it,"
+                " so the separator belongs to the prefix."
+            )
+        )
+    var gateway_headers: List[String] = [
+        String("x-forwarded-for"),
+        String("x-forwarded-proto"),
+        String("x-forwarded-port"),
+        String("x-amzn-trace-id"),
+    ]
+    for i in range(len(gateway_headers)):
+        if _starts_with(gateway_headers[i], prefix):
+            raise Error(
+                String("apigw: refused authorizer header prefix '")
+                + prefix
+                + String("': API Gateway adds the header '")
+                + gateway_headers[i]
+                + String(
+                    "' to every request, and this prefix would strip it."
+                )
+            )
+
+
+def _is_tchar(b: UInt8) -> Bool:
+    """RFC 9110 §5.6.2 `tchar`: ALPHA / DIGIT / one of !#$%&'*+-.^_`|~"""
+    if (b >= UInt8(0x61) and b <= UInt8(0x7A)) or (
+        b >= UInt8(0x41) and b <= UInt8(0x5A)
+    ):
+        return True
+    if b >= UInt8(0x30) and b <= UInt8(0x39):
+        return True
+    return (
+        b == UInt8(0x21)  # !
+        or b == UInt8(0x23)  # #
+        or b == UInt8(0x24)  # $
+        or b == UInt8(0x25)  # %
+        or b == UInt8(0x26)  # &
+        or b == UInt8(0x27)  # '
+        or b == UInt8(0x2A)  # *
+        or b == UInt8(0x2B)  # +
+        or b == UInt8(0x2D)  # -
+        or b == UInt8(0x2E)  # .
+        or b == UInt8(0x5E)  # ^
+        or b == UInt8(0x5F)  # _
+        or b == UInt8(0x60)  # `
+        or b == UInt8(0x7C)  # |
+        or b == UInt8(0x7E)  # ~
+    )
+
+
+def _is_token(s: String) -> Bool:
+    """True iff `s` is a non-empty RFC 9110 `token` (every byte a `tchar`)."""
+    var bs = s.as_bytes()
+    if len(bs) == 0:
+        return False
+    for i in range(len(bs)):
+        if not _is_tchar(bs[i]):
+            return False
+    return True
+
+
+# =============================================================================
 # §1 — inbound: the API Gateway v2.0 proxy event -> HttpRequest.
 # =============================================================================
-def api_gateway_v2_event_to_request(event_json: String) raises -> HttpRequest:
+def api_gateway_v2_event_to_request(
+    event_json: String, authorizer_header_prefix: AuthorizerHeaderPrefix
+) raises -> HttpRequest:
     """Convert one API Gateway payload-format-2.0 proxy event into the
     `HttpRequest` the shipped `RequestDispatcher` already takes.
+
+    `authorizer_header_prefix` is the caller-chosen namespace for the
+    authorizer's context (§3): client headers under it are dropped, and the
+    context is injected under it.
 
     RAISES — never returns a degraded request — when the event is not 2.0, when
     `requestContext.http` is missing, or when a declared base64 body does not
@@ -138,10 +324,10 @@ def api_gateway_v2_event_to_request(event_json: String) raises -> HttpRequest:
       `rawPath`                       -> `req.path`
       `rawQueryString`                -> `req.query_string` (no leading `?`)
       `headers`                       -> `req.headers`, keys ASCII-lowercased,
-                                         reserved prefix DROPPED first (§3)
+                                         caller's prefix DROPPED first (§3)
       `cookies` (array)               -> a single `cookie` header, `"; "`-joined
       `body` + `isBase64Encoded`      -> `req.body` (§4)
-      `requestContext.authorizer.lambda` -> `x-komira-authorizer-*` headers (§3)
+      `requestContext.authorizer.lambda` -> `<prefix><key>` headers (§3)
     """
     var event = parse_json_value(event_json)
     if not event.is_object():
@@ -154,6 +340,7 @@ def api_gateway_v2_event_to_request(event_json: String) raises -> HttpRequest:
         )
     _require_v2(event)
 
+    var prefix = authorizer_header_prefix.value()
     var req = HttpRequest()
 
     # --- method: 2.0 puts it under requestContext.http, NOT at the top level.
@@ -192,7 +379,7 @@ def api_gateway_v2_event_to_request(event_json: String) raises -> HttpRequest:
             for i in range(hdrs.num_members()):
                 var raw_name = hdrs.key_at(i)
                 var name = _ascii_lower(raw_name)
-                if _starts_with(name, String(AUTHORIZER_HEADER_PREFIX)):
+                if _starts_with(name, prefix):
                     # §3 — a client may not spell an authorizer's answer.
                     continue
                 var v = hdrs.value_at(i)
@@ -217,7 +404,7 @@ def api_gateway_v2_event_to_request(event_json: String) raises -> HttpRequest:
                 req.headers[String("cookie")] = joined^
 
     # --- the authorizer's context (§3), injected LAST so it always wins.
-    _inject_authorizer_context(rc, req.headers)
+    _inject_authorizer_context(rc, prefix, req.headers)
 
     # --- body (§4).
     req.body = _decode_body(event)
@@ -303,10 +490,15 @@ def _require_v2(event: JsonValue) raises:
 
 
 def _inject_authorizer_context(
-    rc: JsonValue, mut headers: Dict[String, String]
+    rc: JsonValue, prefix: String, mut headers: Dict[String, String]
 ) raises:
     """Copy `requestContext.authorizer.lambda`'s STRING members into `headers`
-    under the reserved prefix (§3).
+    under `prefix`, the caller's `AuthorizerHeaderPrefix` (§3).
+
+    ⚠ ONLY TOKEN KEYS. The prefix is validated, but the key is the other half
+    of the header name: a member named `a b`, `a:b` or one holding CR LF would
+    yield a name no header can carry, so a key that is empty or not an RFC 9110
+    token is skipped, the same way a non-string value is.
 
     ⚠ ONLY STRING MEMBERS. A Lambda authorizer's `context` is documented to carry
     strings; API Gateway stringifies numbers and booleans and REJECTS nested
@@ -328,7 +520,10 @@ def _inject_authorizer_context(
         var v = ctx.value_at(i)
         if v.kind_tag() != 3:  # JSON_STRING
             continue
-        var key = String(AUTHORIZER_HEADER_PREFIX) + _ascii_lower(ctx.key_at(i))
+        var raw_key = ctx.key_at(i)
+        if not _is_token(raw_key):
+            continue
+        var key = prefix + _ascii_lower(raw_key)
         headers[key^] = v.as_string()
 
 

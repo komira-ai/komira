@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Must FAIL (test 38): see README.md. It has tests, so its conda package can
+# be made and installs the README; a relative link in a README that ships is
+# refused. tests//functional/readme_examples/unshipped is the same library
+# with `conda = False`, and builds.
+mojo_library(
+    name = "relative_link",
+    srcs = [
+        "__init__.mojo",
+        "greet.mojo",
+    ],
+    test_srcs = ["tests/test_relative_link.mojo"],
+)

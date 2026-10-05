@@ -493,27 +493,27 @@ red.
 `VALIDATED`, so a reader checking the cheap thing still gets the right answer."""
 
 comptime AUDIENCE_OPERATOR_INTERNAL: String = "operator-internal"
-"""★★ WHO MAY READ THIS RECORD, STATED IN THE RECORD. Customers will need
+"""★★ WHO MAY READ THIS RECORD, STATED IN THE RECORD. App owners will want
 validation records, and this record does NOT yet serve them.
 
 TWO reasons this document is INTERNAL until something changes:
 
-  1. ⛔ THE LOCATION IS FLEET-WIDE, NOT TENANT-SCOPED. An environment's bootstrap
+  1. ⛔ THE LOCATION IS SHARED BY EVERY APP IN THE ENVIRONMENT. An environment's bootstrap
      bucket holds `service/`, `staged-content/` and `staged-image/` — every app
      in the env, in one bucket, behind one ACL. Putting `validation/` beside them
-     means a reader with bucket read gets EVERY tenant's records. That is correct
-     for an operator and disqualifying for a customer, and NO KEY LAYOUT FIXES
-     IT: the bucket is the grant boundary, so a per-tenant prefix under a shared
+     means a reader with bucket read gets EVERY app's records. That is correct
+     for the operator and disqualifying for an app owner, and NO KEY LAYOUT FIXES
+     IT: the bucket is the grant boundary, so a per-app prefix under a shared
      bucket buys separation of naming and none of access.
   2. ⛔ `detail` IS NOT REDACTED FOR AN EXTERNAL READER. It carries the deploy
      tool's own diagnostic blocks — which can name the operator's project ids,
      runtime service-account emails and cloud CLI commands against the
      operator's projects — plus remediation prose addressed to the operator.
 
-⇒ THE FIELD IS A GATE ON A FUTURE CHANGE, NOT DECORATION. A customer-readable
-surface has to (a) land in a per-tenant location and (b) carry a REDACTED
+⇒ THE FIELD IS A GATE ON A FUTURE CHANGE, NOT DECORATION. A surface an app owner
+can read has to (a) land in a per-app location and (b) carry a REDACTED
 projection of `detail` — and whoever builds it must flip this value deliberately.
-A record that silently became customer-visible while still saying
+A record that silently became readable beyond the operator while still saying
 `operator-internal` is a disclosure, and this field is what makes that a diff."""
 
 comptime STEP_RECORD_WRITTEN: String = "WRITTEN"

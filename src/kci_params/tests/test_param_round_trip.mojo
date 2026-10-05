@@ -67,8 +67,8 @@ def _decls() -> List[AppParamDecl]:
     )
     d.append(
         AppParamDecl(
-            String("tenant"), PARAM_OPTIONAL, PARAM_KIND_LITERAL,
-            String(""), String("An optional tenant name."),
+            String("label"), PARAM_OPTIONAL, PARAM_KIND_LITERAL,
+            String(""), String("An optional display label."),
         )
     )
     return d^
@@ -117,7 +117,7 @@ def test_declared_render_is_one_token_per_parameter_in_declaration_order() raise
     assert_equal(argv[3], String("--signing-key=") + _SECRET)
     # An unsupplied optional with no default is omitted, not rendered empty.
     for i in range(len(argv)):
-        assert_false(argv[i].startswith("--tenant"))
+        assert_false(argv[i].startswith("--label"))
 
 
 def test_declared_render_parses_back_to_the_same_values() raises:
@@ -129,7 +129,7 @@ def test_declared_render_parses_back_to_the_same_values() raises:
     assert_equal(bound.get(String("store-url")), String("s3://example-bucket/app"))
     assert_equal(bound.get(String("signing-key")), String(_SECRET))
     # Absent, not empty: an unsupplied optional with no default is not bound.
-    assert_false(bound.has(String("tenant")))
+    assert_false(bound.has(String("label")))
     assert_equal(bound.count(), 4)
 
 
@@ -137,15 +137,15 @@ def test_a_supplied_optional_overrides_its_default_end_to_end() raises:
     var decls = _decls()
     var values = _values()
     values.append(literal_param(String("max-batch"), String("5000")))
-    values.append(literal_param(String("tenant"), String("acme")))
+    values.append(literal_param(String("label"), String("acme")))
     var argv = render_app_params(String(_APP), decls, values)
     var bound = parse_app_params(String(_APP), decls, _with_program(argv))
     assert_equal(bound.get(String("max-batch")), String("5000"))
-    assert_equal(bound.get(String("tenant")), String("acme"))
+    assert_equal(bound.get(String("label")), String("acme"))
 
 
 def test_the_map_render_parses_back_against_the_declaration() raises:
-    """The control plane renders from the stored map alone, with no
+    """The deployment store renders from the stored map alone, with no
     declaration; the app still parses it against its own."""
     var argv = render_app_param_argv(_values())
     assert_equal(len(argv), 3)
@@ -162,12 +162,12 @@ def test_a_value_holding_equals_or_a_leading_dash_round_trips() raises:
     """One `--name=value` token splits at the FIRST `=`, so a value may hold
     `=` or begin with `-`."""
     var values = _values()
-    values.append(literal_param(String("tenant"), String("k=v=w")))
+    values.append(literal_param(String("label"), String("k=v=w")))
     values.append(literal_param(String("max-batch"), String("-5")))
     var decls = _decls()
     var argv = render_app_params(String(_APP), decls, values)
     var bound = parse_app_params(String(_APP), decls, _with_program(argv))
-    assert_equal(bound.get(String("tenant")), String("k=v=w"))
+    assert_equal(bound.get(String("label")), String("k=v=w"))
     assert_equal(bound.get(String("max-batch")), String("-5"))
 
 
@@ -340,16 +340,16 @@ def test_the_map_render_refuses_secret_material_in_a_secret_row() raises:
 
 def test_an_empty_value_is_refused_at_every_end() raises:
     var values = _values()
-    values.append(literal_param(String("tenant"), String("")))
+    values.append(literal_param(String("label"), String("")))
     var msg = String("")
     try:
         _ = render_app_params(String(_APP), _decls(), values)
     except e:
         msg = String(e)
-    _assert_contains(msg, String("EMPTY value for 'tenant'"))
+    _assert_contains(msg, String("EMPTY value for 'label'"))
 
     var empty_map = List[AppParamValue]()
-    empty_map.append(literal_param(String("tenant"), String("")))
+    empty_map.append(literal_param(String("label"), String("")))
     var msg2 = String("")
     try:
         _ = render_app_param_argv(empty_map)
@@ -358,13 +358,13 @@ def test_an_empty_value_is_refused_at_every_end() raises:
     _assert_contains(msg2, String("EMPTY transported value"))
 
     var tokens = render_app_params(String(_APP), _decls(), _values())
-    tokens.append(String("--tenant="))
+    tokens.append(String("--label="))
     var msg3 = String("")
     try:
         _ = parse_app_params(String(_APP), _decls(), _with_program(tokens))
     except e:
         msg3 = String(e)
-    _assert_contains(msg3, String("'tenant' was passed with an EMPTY value"))
+    _assert_contains(msg3, String("'label' was passed with an EMPTY value"))
 
 
 def main() raises:
