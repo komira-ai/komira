@@ -29,7 +29,7 @@
 #       under concurrent admits and releases.
 #
 #   (4) CONCURRENT LOAD IS SERIALIZED — N workers request_load the SAME model;
-#       the model loads EXACTLY ONCE (one resident instance), no double spawn.
+#       the backend's launch() runs EXACTLY ONCE (launch_count_of == 1).
 #
 # WHY REAL THREADS: every assertion below is about what N threads do to ONE
 # shared SM; run serially, all of them would pass while proving nothing. The
@@ -40,9 +40,9 @@
 # same shape as a server's pthread workers. It adds no package dependency.
 #
 # The SM is shared by ADDRESS (it is Movable, not Copyable, so it cannot be
-# captured by value): each test keeps the SM, the counters and one `_ForkArg`
-# holding typed pointers to them in its own frame, hands the arg's address to
-# every thread, and reads nothing until every thread is joined.
+# captured by value): each test keeps one `_Shared` local holding the SM and
+# the counters by value, hands its address to every thread as the pthread
+# `void*`, and reads nothing until every thread is joined.
 # =============================================================================
 
 from komira_atomic_alias import AtomicI64
@@ -126,6 +126,9 @@ def _serving_sm_with_cap(cap: Int) raises -> _Sm:
 # serial loop.
 # =============================================================================
 
+# The pthread ABI's `void*`. The untracked origin appears only here: on the
+# argument handed to pthread_create, on the pointer each entry function gets
+# back, and on the NULLs passed to pthread_create / pthread_join.
 comptime _VoidPtr = UnsafePointer[NoneType, MutUntrackedOrigin]
 
 # How long a QUEUED worker spins for a free slot before it gives up.
@@ -134,8 +137,7 @@ comptime _MAX_QUEUED_SPINS: Int = 2_000_000
 
 @always_inline
 def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
-    """A NULL typed pointer with a concrete origin (UnsafePointer has no null
-    constructor).
+    """A NULL typed pointer (UnsafePointer has no null constructor).
 
     # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the bare
     # pointer; `None` is the all-zero (NULL) bit pattern. FFI NULL args only.
@@ -144,36 +146,45 @@ def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     return UnsafePointer(to=none).bitcast[UnsafePointer[T, o]]()[]
 
 
-@always_inline
-def _untracked[T: AnyType](mut value: T) -> UnsafePointer[T, MutUntrackedOrigin]:
-    """The address of a value of the calling test's frame, for the threads.
+struct _Shared:
+    """Everything one fork-join shares, held BY VALUE in a local of the test:
+    the state machine under test and the counters the workers bump. No
+    pointer fields. The test reads `sm` and the counters after the join, so
+    the local is alive for as long as any worker can reach it.
 
-    # SAFETY: every caller passes a local of the test function, which joins all
-    # threads before it returns, so the value outlives every thread that
-    # dereferences this pointer.
-    """
-    return UnsafePointer(to=value).unsafe_origin_cast[MutUntrackedOrigin]()
-
-
-@fieldwise_init
-struct _ForkArg(Copyable, Movable, Deinitable):
-    """The pthread arg, shared BY EVERY worker in one fork-join.
-
-    SAFETY: each test builds ONE of these in its own frame, hands its address
-    to all N threads, and JOINS every thread before it reads a result or
-    returns, so the arg and the values it points at outlive every reader. The
-    workers only READ the arg. They share the SM deliberately (that is what is
-    under test) and every mutation of it goes through the SM's own mutex; the
-    counters are atomics.
+    Every worker mutates `sm` through its own mutex (that sharing is what is
+    under test) and the counters are atomics. Not Movable (it holds atomics):
+    it stays where the test built it.
     """
 
-    var sm: UnsafePointer[_Sm, MutUntrackedOrigin]
-    var admitted: UnsafePointer[AtomicI64, MutUntrackedOrigin]
-    var queued: UnsafePointer[AtomicI64, MutUntrackedOrigin]
-    var rejected: UnsafePointer[AtomicI64, MutUntrackedOrigin]
+    var sm: _Sm
+    var admitted: AtomicI64
+    var queued: AtomicI64
+    var rejected: AtomicI64
     # Queued waits that ran out of spins (the worker then stops its loop).
-    var gave_up: UnsafePointer[AtomicI64, MutUntrackedOrigin]
+    var gave_up: AtomicI64
     var cycles: Int  # admit->release cycles per worker (1 == single shot)
+
+    def __init__(out self, var sm: _Sm, cycles: Int):
+        self.sm = sm^
+        self.admitted = AtomicI64(0)
+        self.queued = AtomicI64(0)
+        self.rejected = AtomicI64(0)
+        self.gave_up = AtomicI64(0)
+        self.cycles = cycles
+
+
+def _void_arg(mut shared: _Shared) -> _VoidPtr:
+    """The address of `shared` as the pthread `void*` argument.
+
+    # SAFETY: `shared` is a local of the calling test, which joins every thread
+    # before it returns and reads `shared` after the join, so it outlives every
+    # thread that dereferences this pointer. The cast to the untracked origin
+    # is the pthread ABI boundary and nothing else.
+    """
+    return UnsafePointer(to=shared).bitcast[NoneType]().unsafe_origin_cast[
+        MutUntrackedOrigin
+    ]()
 
 
 # WHY THE FORK-JOIN IS NOT ONE GENERIC HELPER. The obvious shape,
@@ -231,22 +242,18 @@ def _join_all(
 # =============================================================================
 def _entry_admit_release(arg: _VoidPtr) -> _VoidPtr:
     """pthread start_routine for (1) and (3)."""
-    # SAFETY: FFI-BOUNDARY. `arg` is the address of the test frame's
-    # `_ForkArg`, which outlives every thread (see `_ForkArg`).
-    ref a = arg.bitcast[_ForkArg]()[]
-    ref sm = a.sm[]
-    ref adm = a.admitted[]
-    ref q = a.queued[]
-    ref rej = a.rejected[]
+    # SAFETY: FFI-BOUNDARY. `arg` is the address of the test's `_Shared`
+    # local, which outlives every thread (see `_void_arg`).
+    ref a = arg.bitcast[_Shared]()[]
     try:
         for _c in range(a.cycles):
-            var d = sm.admit(String("m"))
+            var d = a.sm.admit(String("m"))
             if d == ADMIT_ADMITTED:
-                _ = adm.fetch_add(1)
+                _ = a.admitted.fetch_add(1)
                 # ... (the "forward" would happen here, OUTSIDE the lock) ...
-                sm.release(String("m"))
+                a.sm.release(String("m"))
             elif d == ADMIT_QUEUED:
-                _ = q.fetch_add(1)
+                _ = a.queued.fetch_add(1)
                 # BLOCK-AND-WAIT (the passthrough's QUEUED handler): spin until a
                 # slot frees + this queued waiter PULLS it in (try_promote_if_
                 # under_cap), then run + release. The spin is bounded: with a
@@ -257,18 +264,18 @@ def _entry_admit_release(arg: _VoidPtr) -> _VoidPtr:
                 var claimed = False
                 var spins = 0
                 while spins < _MAX_QUEUED_SPINS:
-                    if sm.try_promote_if_under_cap(String("m")):
+                    if a.sm.try_promote_if_under_cap(String("m")):
                         claimed = True
                         break
                     spins += 1
                 if claimed:
-                    sm.release(String("m"))
+                    a.sm.release(String("m"))
                 else:
-                    sm.release_queued(String("m"))
-                    _ = a.gave_up[].fetch_add(1)
+                    a.sm.release_queued(String("m"))
+                    _ = a.gave_up.fetch_add(1)
                     break
             else:
-                _ = rej.fetch_add(1)
+                _ = a.rejected.fetch_add(1)
     except e:
         # A pthread entry cannot propagate an exception across the ABI. Print it;
         # the post-barrier assertions are what fail the test.
@@ -283,26 +290,8 @@ def test_concurrent_admit_release_balances_to_zero() raises:
     # traffic to stress the lock, not mostly-rejects).
     var cap = 4
 
-    var sm = _serving_sm_with_cap(cap)
-
-    # Count, atomically, how many slots each worker is responsible for releasing
-    # (every ADMITTED + every promoted QUEUED). The final in-flight count is
-    # asserted == 0 directly off the SM, which is the real proof; these atomics
-    # cross-check the bookkeeping.
-    var admitted_total = AtomicI64(0)
-    var queued_total = AtomicI64(0)
-    var rejected_total = AtomicI64(0)
-    var gave_up_total = AtomicI64(0)
-
-    var fork_arg = _ForkArg(
-        sm=_untracked(sm),
-        admitted=_untracked(admitted_total),
-        queued=_untracked(queued_total),
-        rejected=_untracked(rejected_total),
-        gave_up=_untracked(gave_up_total),
-        cycles=cycles_per_worker,
-    )
-    var arg = _untracked(fork_arg).bitcast[NoneType]()
+    var shared = _Shared(_serving_sm_with_cap(cap), cycles_per_worker)
+    var arg = _void_arg(shared)
     var tids = _new_tids(n_workers)
     var started = 0
     var rc = Int32(0)
@@ -317,39 +306,36 @@ def test_concurrent_admit_release_balances_to_zero() raises:
             break
         started += 1
     _join_all(tids, started, n_workers, rc)
-    _ = fork_arg^
 
     assert_equal(
-        gave_up_total.load(), Int64(0),
+        shared.gave_up.load(), Int64(0),
         "no queued worker ran out of spins waiting for a free slot",
     )
     # The decisive assertion: after every admit was paired with its release, the
     # shared SM's in-flight + queued counts are EXACTLY 0 (no lost update).
     assert_equal(
-        sm.inflight_of(String("m")), 0,
+        shared.sm.inflight_of(String("m")), 0,
         "in-flight returns to exactly 0 after all concurrent releases",
     )
     assert_equal(
-        sm.queued_of(String("m")), 0,
+        shared.sm.queued_of(String("m")), 0,
         "queued returns to exactly 0 after all promotions/releases",
     )
 
     # Cross-check: every attempt was classified exactly once.
     var total_attempts = Int64(n_workers * cycles_per_worker)
     var classified = (
-        admitted_total.load() + queued_total.load() + rejected_total.load()
+        shared.admitted.load() + shared.queued.load() + shared.rejected.load()
     )
     assert_equal(
         classified, total_attempts,
         "every admit attempt is classified exactly once (no double-count race)",
     )
-    # We expect a healthy mix of admits (the lock did not serialize everything to
-    # a single worker — there WAS real concurrency contending the cap).
     assert_true(
-        admitted_total.load() > 0, "at least some requests were admitted"
+        shared.admitted.load() > 0, "at least some requests were admitted"
     )
 
-    sm.shutdown_all()
+    shared.sm.shutdown_all()
 
 
 # =============================================================================
@@ -363,16 +349,15 @@ def _entry_admit_hold(arg: _VoidPtr) -> _VoidPtr:
     release (holds its slot to the barrier) so the SM accumulates in-flight +
     queued to its bound."""
     # SAFETY: FFI-BOUNDARY — see `_entry_admit_release`.
-    ref a = arg.bitcast[_ForkArg]()[]
-    ref sm = a.sm[]
+    ref a = arg.bitcast[_Shared]()[]
     try:
-        var d = sm.admit(String("m"))
+        var d = a.sm.admit(String("m"))
         if d == ADMIT_ADMITTED:
-            _ = a.admitted[].fetch_add(1)
+            _ = a.admitted.fetch_add(1)
         elif d == ADMIT_QUEUED:
-            _ = a.queued[].fetch_add(1)
+            _ = a.queued.fetch_add(1)
         else:
-            _ = a.rejected[].fetch_add(1)
+            _ = a.rejected.fetch_add(1)
     except e:
         print("WARN _entry_admit_hold raised: ", String(e))
     return _null_ptr[NoneType, MutUntrackedOrigin]()
@@ -381,23 +366,10 @@ def _entry_admit_hold(arg: _VoidPtr) -> _VoidPtr:
 def test_concurrent_cap_is_hard_bound() raises:
     var n_workers = 16
     var cap = 2
-    var sm = _serving_sm_with_cap(cap)
-    var queue_cap = sm.queue_capacity_of(String("m"))
+    var shared = _Shared(_serving_sm_with_cap(cap), 1)
+    var queue_cap = shared.sm.queue_capacity_of(String("m"))
 
-    var admitted_total = AtomicI64(0)
-    var queued_total = AtomicI64(0)
-    var rejected_total = AtomicI64(0)
-    var gave_up_total = AtomicI64(0)
-
-    var fork_arg = _ForkArg(
-        sm=_untracked(sm),
-        admitted=_untracked(admitted_total),
-        queued=_untracked(queued_total),
-        rejected=_untracked(rejected_total),
-        gave_up=_untracked(gave_up_total),
-        cycles=1,
-    )
-    var arg = _untracked(fork_arg).bitcast[NoneType]()
+    var arg = _void_arg(shared)
     var tids = _new_tids(n_workers)
     var started = 0
     var rc = Int32(0)
@@ -412,34 +384,29 @@ def test_concurrent_cap_is_hard_bound() raises:
             break
         started += 1
     _join_all(tids, started, n_workers, rc)
-    _ = fork_arg^
 
-    # The in-flight count never exceeded the cap (the atomic cap-check held the
-    # bound globally across all threads).
     assert_equal(
-        Int64(sm.inflight_of(String("m"))), admitted_total.load(),
+        Int64(shared.sm.inflight_of(String("m"))), shared.admitted.load(),
         "the SM in-flight count equals the number of ADMITTED slots",
     )
     assert_true(
-        sm.inflight_of(String("m")) <= cap,
+        shared.sm.inflight_of(String("m")) <= cap,
         "in-flight never exceeded the cap under the concurrent race",
     )
     assert_true(
-        sm.queued_of(String("m")) <= queue_cap,
+        shared.sm.queued_of(String("m")) <= queue_cap,
         "queued never exceeded the bounded queue depth",
     )
-    # Every worker was classified exactly once; admits capped at `cap`, the rest
-    # queued up to queue_cap, the remainder rejected.
     var classified = (
-        admitted_total.load() + queued_total.load() + rejected_total.load()
+        shared.admitted.load() + shared.queued.load() + shared.rejected.load()
     )
     assert_equal(classified, Int64(n_workers), "all attempts classified once")
     assert_equal(
-        admitted_total.load(), Int64(cap),
+        shared.admitted.load(), Int64(cap),
         "exactly `cap` requests were admitted in-flight (the hard bound)",
     )
 
-    sm.shutdown_all()
+    shared.sm.shutdown_all()
 
 
 # =============================================================================
@@ -452,22 +419,9 @@ def test_concurrent_cap_is_hard_bound() raises:
 # =============================================================================
 def test_concurrent_pull_promotion_balances_to_zero() raises:
     var n_workers = 8
-    var sm = _serving_sm_with_cap(1)
+    var shared = _Shared(_serving_sm_with_cap(1), 2_000)
 
-    var admitted_total = AtomicI64(0)
-    var queued_total = AtomicI64(0)
-    var rejected_total = AtomicI64(0)
-    var gave_up_total = AtomicI64(0)
-
-    var fork_arg = _ForkArg(
-        sm=_untracked(sm),
-        admitted=_untracked(admitted_total),
-        queued=_untracked(queued_total),
-        rejected=_untracked(rejected_total),
-        gave_up=_untracked(gave_up_total),
-        cycles=2_000,
-    )
-    var arg = _untracked(fork_arg).bitcast[NoneType]()
+    var arg = _void_arg(shared)
     var tids = _new_tids(n_workers)
     var started = 0
     var rc = Int32(0)
@@ -482,36 +436,33 @@ def test_concurrent_pull_promotion_balances_to_zero() raises:
             break
         started += 1
     _join_all(tids, started, n_workers, rc)
-    _ = fork_arg^
 
     assert_equal(
-        gave_up_total.load(), Int64(0),
+        shared.gave_up.load(), Int64(0),
         "no queued worker ran out of spins waiting for a free slot",
     )
-    assert_equal(sm.inflight_of(String("m")), 0, "in-flight returns to 0")
-    assert_equal(sm.queued_of(String("m")), 0, "queued returns to 0")
+    assert_equal(shared.sm.inflight_of(String("m")), 0, "in-flight returns to 0")
+    assert_equal(shared.sm.queued_of(String("m")), 0, "queued returns to 0")
     assert_equal(
-        admitted_total.load() + queued_total.load() + rejected_total.load(),
+        shared.admitted.load() + shared.queued.load() + shared.rejected.load(),
         Int64(n_workers * 2_000),
         "every attempt classified once",
     )
-    sm.shutdown_all()
+    shared.sm.shutdown_all()
 
 
 # =============================================================================
 # (4) CONCURRENT LOAD IS SERIALIZED — N workers request_load the SAME model
-#     concurrently. The SM mutex serializes the whole load decision, so the model
-#     ends SERVING with EXACTLY ONE resident instance (the losing threads observe
-#     it already SERVING under the lock and just re-arm the TTL; they do NOT
-#     spawn a second child or corrupt the parallel-list bookkeeping).
+#     concurrently. The SM mutex serializes the whole load decision, so the
+#     backend's launch() runs EXACTLY ONCE (the losing threads observe the
+#     model already SERVING under the lock and just re-arm the TTL).
 # =============================================================================
 def _entry_request_load(arg: _VoidPtr) -> _VoidPtr:
     """pthread start_routine for (4)."""
     # SAFETY: FFI-BOUNDARY — see `_entry_admit_release`.
-    ref a = arg.bitcast[_ForkArg]()[]
-    ref s = a.sm[]
+    ref a = arg.bitcast[_Shared]()[]
     try:
-        _ = s.request_load(String("m"))
+        _ = a.sm.request_load(String("m"))
     except e:
         # Deliberately swallowed: the losers of the load race are expected to
         # be uninteresting; the assertions are on the SM's post-barrier state.
@@ -525,18 +476,9 @@ def test_concurrent_request_load_serialized() raises:
     _ = sm.register_with_cap(
         String("m"), StubBackend(String("http://127.0.0.1:8081")), _gib(6), 4,
     )
-    # This test counts nothing; the counters only fill the arg.
-    var unused = AtomicI64(0)
+    var shared = _Shared(sm^, 1)
 
-    var fork_arg = _ForkArg(
-        sm=_untracked(sm),
-        admitted=_untracked(unused),
-        queued=_untracked(unused),
-        rejected=_untracked(unused),
-        gave_up=_untracked(unused),
-        cycles=1,
-    )
-    var arg = _untracked(fork_arg).bitcast[NoneType]()
+    var arg = _void_arg(shared)
     var tids = _new_tids(n_workers)
     var started = 0
     var rc = Int32(0)
@@ -551,19 +493,15 @@ def test_concurrent_request_load_serialized() raises:
             break
         started += 1
     _join_all(tids, started, n_workers, rc)
-    _ = fork_arg^
-    _ = unused.load()
 
-    # The model is SERVING with exactly ONE resident instance after N concurrent
-    # request_load calls.
     assert_equal(
-        sm.state_of(String("m")), 2, "model is SERVING after concurrent load",
+        shared.sm.state_of(String("m")), 2, "model is SERVING after concurrent load",
     )
     assert_equal(
-        sm.resident_count(), 1,
-        "exactly one resident instance (no double-spawn under the race)",
+        shared.sm.launch_count_of(String("m")), 1,
+        "the backend was launched exactly once under the race",
     )
-    sm.shutdown_all()
+    shared.sm.shutdown_all()
 
 
 def main() raises:
