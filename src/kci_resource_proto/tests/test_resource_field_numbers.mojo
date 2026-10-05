@@ -24,9 +24,11 @@
 # them from the generated code would agree with it by construction.
 #
 # ALSO PINNED: the two v1 `Resource.body` arms (10 service, 11 job) by number
-# AND by which field each fills; the HELD numbers (body 12 to 18 for the later
-# types, 90 for the escape hatch, `Resource` 3, 5 and 6, `Value` 4, `Image` 4,
-# `Service` 13, `Job` 8) decode as unknown today, so nothing else has taken
+# AND by which field each fills; the HELD numbers (body 12 to 36 for the later
+# neutral primitives, 80 for a composite instance, 90 for the escape hatch,
+# 100, 300 and 500 for the first number of each cloud's provider-primitive
+# range, `Resource` 3, 5 and 6, `Value` 4, `Image` 4, `Service` 13 and 50 to
+# 52, `Job` 8 and 50 to 52) decode as unknown today, so nothing else has taken
 # them; the retired field 4 is ignored; and every enum's ordinals in both
 # directions, held values undeclared.
 #
@@ -564,15 +566,20 @@ def test_resource_body_arms_are_10_and_11() raises:
 
 
 def test_held_body_numbers_are_undeclared() raises:
-    """12 to 18 are held for the later types (worker, table, bucket, queue,
-    secret, site, domain) and 90 for the escape hatch. Today each decodes as
-    an unknown field: no arm set, dropped on re-encode. When a type lands at
-    its held number this test changes with it; anything else taking one of
-    these numbers is a mistake."""
+    """Held, not declared: 12 to 36 for the later neutral primitives, 80 for
+    a composite instance, 90 for the escape hatch, and 100, 300 and 500, the
+    first number of each cloud's provider-primitive range (100-299, 300-499,
+    500-699). Today each decodes as an unknown field: no arm set, dropped on
+    re-encode. When a type lands at its held number this test changes with
+    it; anything else taking one of these numbers is a mistake."""
     var held = List[Int]()
-    for n in range(12, 19):
+    for n in range(12, 37):
         held.append(n)
+    held.append(80)
     held.append(90)
+    held.append(100)
+    held.append(300)
+    held.append(500)
     var head = List[UInt8]()
     _str(head, 1, "r")
     for k in range(len(held)):
@@ -609,8 +616,9 @@ def test_fields_3_and_4_are_not_declared() raises:
 
 def test_reserved_now_built_later_numbers_are_undeclared() raises:
     """The numbers held for shapes that land later as additions: `Resource` 5
-    (cloud_settings) and 6 (physical_name), `Image` 4 (artifact_ref), and the
-    `artifact_ref` arm of a later `source` on `Service` 13 and `Job` 8. Each
+    (cloud_settings) and 6 (physical_name), `Image` 4 (artifact_ref), the
+    `artifact_ref` arm of a later `source` on `Service` 13 and `Job` 8, and
+    the per-cloud extensions 50, 51 and 52 of `Service` and `Job`. Each
     decodes as unknown today: dropped on re-encode."""
     var rhead = List[UInt8]()
     _str(rhead, 1, "r")
@@ -636,12 +644,28 @@ def test_reserved_now_built_later_numbers_are_undeclared() raises:
     var sb = shead.copy()
     _empty(sb, 13)
     _same(encode_proto(decode_proto[Service](sb.copy())), shead, "Service 13")
+    for n in range(50, 53):
+        var sx = shead.copy()
+        _empty(sx, n)
+        _same(
+            encode_proto(decode_proto[Service](sx.copy())),
+            shead,
+            String("Service ") + String(n) + " is held",
+        )
 
     var jhead = List[UInt8]()
     _str(jhead, 2, "report")
     var jb = jhead.copy()
     _empty(jb, 8)
     _same(encode_proto(decode_proto[Job](jb.copy())), jhead, "Job 8")
+    for n in range(50, 53):
+        var jx = jhead.copy()
+        _empty(jx, n)
+        _same(
+            encode_proto(decode_proto[Job](jx.copy())),
+            jhead,
+            String("Job ") + String(n) + " is held",
+        )
     print("  test_reserved_now_built_later_numbers_are_undeclared: PASS")
 
 
