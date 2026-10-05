@@ -21,7 +21,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # wire with every field number pinned as bytes, and render argvs exactly,
 # including from `example.textproto`, staged as test data. One more reads the
 # repository's own release/artifacts.textproto through the same reader, so a
-# release file kci would refuse fails this library's build.
+# release file kci would refuse fails this library's build, holds its
+# declared checks to buck2 target patterns, no package in two checks, and
+# its buck2 build system to deriving the rest of the checks from the graph.
 mojo_library(
     name = "kci_artifact",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -37,6 +39,9 @@ mojo_library(
         # the per-change check: targets, checks, the two commands, the units,
         # both argvs and the affected tool's answer grammar
         "tests/test_artifact_units.mojo",
+        # the derived checks: the derive_checks command, its answer grammar,
+        # the checks joining the file under its rules
+        "tests/test_artifact_derive.mojo",
         "tests/test_artifact_validate.mojo",
         "tests/test_release_artifacts_file.mojo",
     ],

@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The one shared positional row-accounting model every managed-app validator
+# The one shared positional row-accounting model every app validator
 # uses, and its falsifier.
 #
 # A validator whose verdict is `passed_count() == total() and total() > 0`,

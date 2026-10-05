@@ -10,6 +10,7 @@ def _open_devnull() -> Int32:
     """Open /dev/null read-only via fopen+fileno, return raw fd."""
     var path = String("/dev/null")
     var mode = String("r")
+    # SAFETY: `path` and `mode` own their NUL-terminated buffers past the call.
     var fp = external_call["fopen", Int64](
         path.as_c_string_slice().unsafe_ptr(),
         mode.as_c_string_slice().unsafe_ptr(),

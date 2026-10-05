@@ -1,9 +1,13 @@
 # Conda packages of the Mojo libraries
 
-A Mojo library published as a conda package (a `.conda`) installs one file,
-`lib/mojo/<name>.mojoc`, into the prefix. The Mojo compiler's default import
+A Mojo library published as a conda package (a `.conda`) installs
+`lib/mojo/<name>.mojoc` into the prefix, and, when the library has a README.md,
+`share/doc/<name>/README.md`. The Mojo compiler's default import
 path is that prefix's `lib/mojo`, where `std.mojoc` already sits, so a program
 that imports the library compiles with no `-I` flag and no activation script.
+The README is the library's documentation and its examples, the same bytes the
+library's welded `[tests][readme]` runs, so what a user reads is inside what
+they installed.
 Nothing here uploads anything: the build produces files; publishing is a
 separate, gated step that belongs to the release tool (kci).
 
@@ -86,8 +90,9 @@ compact JSON): `format` (`kci.conda_metadata`), `schema_version`, `kind` (`libra
 `metapackage`), `name`, `version`, `subdir`, `build` (the build string),
 `build_number`, `file_name`, `size`, `depends`, `timestamp_ms`,
 `source_commit`, `stamped`, `label`, and for a library `import_name`,
-`mojo_pin`, `payload_path`, `payload_sha256`; for a metapackage `members`
-(name, version, build, sha256 each). The manifest's `version` is the compiler
+`mojo_pin`, `payload_path`, `payload_sha256`, `doc_files` (path and sha256
+of each documentation file the package installs, `[]` when none); for a
+metapackage `members` (name, version, build, sha256 each). The manifest's `version` is the compiler
 version; the build number, build string and source commit are metadata (kci's
 manifest has no key for them).
 `tools/build/package/manifest_probe` runs kci's parser and writer over a
@@ -95,6 +100,22 @@ manifest: the build gate `//tools/build/package/manifest_probe:conda_manifest_kc
 runs it over one real package on every `buck2 build //...`, and
 `tools/build/tests/functional/conda_set.sh` runs it over every manifest the
 build emits.
+
+### The README in the package
+
+`komira_pack conda --doc-file README.md=<the library's README.md>` places the
+file at `share/doc/<name>/README.md`: a file of the pkg tar (mode 0644), one
+`info/paths.json` row, and one `doc_files` row of `metadata.json`. It is not an
+`info/` file: those are not installed into the environment. conda.bzl passes
+the library's README (the one `mojo_library` declares by its existing) to the
+packer and to its check, and `conda-check` holds the package to exactly the
+`.mojoc` and the declared doc files, byte-equal, so a README missing, placed
+elsewhere or changed by one byte is refused. The build gate
+`//tools/build/package/manifest_probe:conda_ships_readme` checks
+komira_encoding's package against the README read from the library rather than
+from the package rule, so a package rule that stopped passing it is red. A
+README that ships refuses relative links (`readme_examples generate --links
+refuse`): the installed copy has no neighbours. A metapackage ships no doc.
 
 ### A library that cannot be packaged
 

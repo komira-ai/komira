@@ -11,7 +11,7 @@
 # SharedInMemoryConditionalStore / SharedInMemorySlowCasStore (for park
 # testing). NO consumer code is involved. The WRITE side now drives the
 # PARKABLE, MODE-CORRECT BatchAppender seam (exact-slot create-CAS at auth_head+1
-# the pgstore OCC mode), NOT a blocking MetadataStore.append, so the spine
+# the table-store OCC mode), NOT a blocking MetadataStore.append, so the spine
 # PARKS the write + the 412-loop is LIVE around the real create-CAS.
 #
 # Tests:
@@ -276,7 +276,7 @@ struct IdCodec(BatchCodec, Movable, Deinitable):
 # =============================================================================
 # SEAM 5 conformer — the in-mem EXACT-SLOT parkable appender (BatchAppender).
 # =============================================================================
-# The exact-slot create-CAS at auth_head+1 (the pgstore OCC mode), driven over
+# The exact-slot create-CAS at auth_head+1 (the table-store OCC mode), driven over
 # the REAL CasManifestStore via the in-tree parkable AsyncManifestAppendOp. At
 # `append_start` it reads the WAL's AUTHORITATIVE head (read_head_authoritative —
 # the chunk count + next offset) to derive the EXACT candidate slot

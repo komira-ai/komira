@@ -3,7 +3,7 @@
 #   ALLOW-LIST, and rendered BOUNDED.
 # =============================================================================
 #
-# THE WIRE SHAPE, from the pipeline manager's run-log handler (and forwarded
+# THE WIRE SHAPE, from the run server's run-log handler (and forwarded
 # VERBATIM by any proxy in front of `/pipelines/runs/{runId}/logs?after=&limit=`):
 #
 #     {"run_id":"<uuid>",
@@ -84,7 +84,7 @@ starts appearing in an operator's terminal on its own."""
 # =============================================================================
 comptime RUN_LOG_STREAM_STAGE_RECORDS: Int = 0
 """A pipeline RUN's stage-record stream (`/pipelines/runs/{r}/logs`). Records
-are written by the pipeline manager, `next_cursor` is a real `?after=` cursor,
+are written by the run server, `next_cursor` is a real `?after=` cursor,
 and "nothing wrote a stage record" IS the diagnosis when it is empty."""
 
 comptime RUN_LOG_STREAM_CONTAINER_STDOUT: Int = 1
