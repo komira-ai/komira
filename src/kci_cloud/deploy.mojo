@@ -15,9 +15,14 @@
 # them to the lowering contract on every run (not only in tests): each
 # resource lowers to at least one node, every node id is `<resource
 # id>/<role>`, every node's owner is the resource it came from, and no id
-# repeats. `lowering_json` renders a lowering for golden tests. Only then
-# does `realize_graph` turn the data into engine nodes, and it checks that
-# each realized node kept its id, owner and wanted.
+# repeats. It then RESOLVES what is kci's to decide, not the cloud's: a
+# dependency or input the adapter wrote as another resource's bare id lands
+# on that resource's primary node (`<id>/<primary role>`, catalog.mojo), and
+# every node takes its resource's retention (`Resource.retention`, else the
+# type's versioned default). `lowering_json` renders a lowering for golden
+# tests. Only then does `realize_graph` turn the data into engine nodes, and
+# it checks that each realized node kept its id, owner, wanted and
+# retention.
 #
 # THE CLOSED WORLD. A type's lowering emits its whole fixed set of roles, the
 # ones the file turned off with `wanted` False. A role that is not fixed (one
@@ -26,6 +31,15 @@
 # file but no longer lowered is added as a turned-off node, so it is removed;
 # one owned by a resource the file no longer names is LEFTOVER, reported and
 # never deleted here.
+#
+# RETENTION ON THAT PATH. An object `list_owned` reports as RETAINED (its
+# `kci_retain=keep` label) is never turned into a node to remove: it is LEFT
+# BEHIND, reported beside the leftover, and nothing deletes it. That is the
+# only thing that can say "keep" once the file stops lowering the node (a
+# KEEP bucket whose id is re-used by another type, say): the lowering no
+# longer holds it, so the engine would otherwise see a plain turned-off node
+# and delete it. A KEEP node still in the file is skipped by the engine's
+# destroy (its realized retention).
 #
 # THE ROLE LABEL BUDGET. After lowering and before anything else, every
 # node's role must fit the 63-byte label value (`role_budget_findings`); one
@@ -43,6 +57,8 @@ from kci_reconciler import (
     Creds,
     InputRef,
     REFUSED_TOKEN,
+    RETAIN_DELETE,
+    RETAIN_KEEP,
     ResourceGraph,
     StateStore,
     UndeletableSkip,
@@ -53,6 +69,12 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import CellContext, CloudAdapter, LoweredNode, Setting
+from kci_cloud.catalog import (
+    Catalog,
+    RETENTION_KEEP,
+    effective_retention,
+    primary_node,
+)
 from kci_cloud.clouds import Clouds
 from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
 
@@ -76,13 +98,31 @@ def refuse_unless_valid[
         raise Error(refusal_text(cloud.cloud_id(), findings))
 
 
+def engine_retention(retention: Int) -> Int:
+    """A catalog retention (`RETENTION_*`) as the engine's RETAIN_* code:
+    KEEP is RETAIN_KEEP; DELETE and "takes none" are RETAIN_DELETE."""
+    if retention == RETENTION_KEEP:
+        return RETAIN_KEEP
+    return RETAIN_DELETE
+
+
+def _resolve(catalog: Catalog, resources: List[Resource], producer: String) raises -> String:
+    """A bare resource id -> that resource's primary node; a node id is kept."""
+    if producer.find("/") >= 0:
+        return producer.copy()
+    return primary_node(catalog, resources, producer)
+
+
 def lower_data[
     S: CloudAdapter
 ](cloud: S, resources: List[Resource]) raises -> List[LoweredNode]:
-    """Lower every resource to data and check the lowering contract."""
+    """Lower every resource to data, check the lowering contract, then
+    resolve references to resources and set each node's retention."""
+    var catalog = Catalog.v1()
     var out = List[LoweredNode]()
     for i in range(len(resources)):
         ref r = resources[i]
+        var retention = engine_retention(effective_retention(catalog, r))
         var nodes = cloud.lower(r)
         if len(nodes) == 0:
             raise Error(
@@ -118,7 +158,13 @@ def lower_data[
                         + node.id
                         + String("\" twice")
                     )
-            out.append(node.copy())
+            var low = node.copy()
+            for k in range(len(low.depends_on)):
+                low.depends_on[k] = _resolve(catalog, resources, low.depends_on[k])
+            for k in range(len(low.inputs)):
+                low.inputs[k].producer = _resolve(catalog, resources, low.inputs[k].producer)
+            low.retention = retention
+            out.append(low^)
     return out^
 
 
@@ -136,13 +182,25 @@ def realize_graph[
     S: CloudAdapter
 ](mut cloud: S, nodes: List[LoweredNode]) raises -> ResourceGraph:
     """The engine graph for `nodes`; each realized node must keep its id,
-    owner and wanted."""
+    owner, wanted and retention."""
     var graph = ResourceGraph()
     for i in range(len(nodes)):
         ref want = nodes[i]
         var node = cloud.realize(want)
         var lid = node.logical_id()
         var own = node.owner()
+        if node.retention() != want.retention:
+            raise Error(
+                String("cloud \"")
+                + cloud.cloud_id().text()
+                + String("\" realized node \"")
+                + want.id
+                + String("\" with retention ")
+                + String(node.retention())
+                + String(", not ")
+                + String(want.retention)
+                + String("; realize must keep the retention kci set")
+            )
         if lid != want.id or own != want.owner or node.wanted() != want.wanted:
             raise Error(
                 String("cloud \"")
@@ -161,14 +219,18 @@ def realize_graph[
 
 struct Removals(Movable):
     """What `list_owned` says beyond the lowering: roles of resources still in
-    the file that the file turned off (`roles`, to remove), and nodes of
-    resources the file no longer names (`leftover`, reported only)."""
+    the file that the file turned off (`roles`, to remove), RETAINED objects
+    of resources still in the file that the file no longer lowers
+    (`left_behind`, reported only), and nodes of resources the file no
+    longer names (`leftover`, reported only)."""
 
     var roles: List[LoweredNode]
+    var left_behind: List[String]
     var leftover: List[String]
 
     def __init__(out self):
         self.roles = List[LoweredNode]()
+        self.left_behind = List[String]()
         self.leftover = List[String]()
 
 
@@ -209,7 +271,16 @@ def removals[
             if resources[k].id == res:
                 in_file = True
                 break
-        if in_file:
+        if in_file and owned[i].retained:
+            # Kept by retention: reported, never a node to remove.
+            var seen = False
+            for k in range(len(out.left_behind)):
+                if out.left_behind[k] == nid:
+                    seen = True
+                    break
+            if not seen:
+                out.left_behind.append(nid^)
+        elif in_file:
             var dup = False
             for k in range(len(out.roles)):
                 if out.roles[k].id == nid:
@@ -240,6 +311,7 @@ def _graph_for[
     resources: List[Resource],
     creds: Creds,
     mut leftover: List[String],
+    mut left_behind: List[String],
 ) raises -> ResourceGraph:
     """Lowering + the roles `list_owned` says to remove, realized. A role
     over the label budget refuses the graph here: after lowering (data),
@@ -252,6 +324,7 @@ def _graph_for[
     for i in range(len(rem.roles)):
         nodes.append(rem.roles[i].copy())
     leftover = rem.leftover.copy()
+    left_behind = rem.left_behind.copy()
     return realize_graph(cloud, nodes)
 
 
@@ -277,7 +350,8 @@ def plan_resources[
     nothing and writes nothing to the store."""
     refuse_unless_valid(clouds, cloud, ctx, resources)
     var leftover = List[String]()
-    var graph = _graph_for(cloud, ctx, resources, creds, leftover)
+    var left_behind = List[String]()
+    var graph = _graph_for(cloud, ctx, resources, creds, leftover, left_behind)
     return plan_graph_owned(graph, creds, ctx.scope, store)
 
 
@@ -297,6 +371,9 @@ struct ApplyOutcome(Movable, Deinitable):
                      run; the failing node is the first. Empty on success.
       * `leftover` — nodes of resources the file no longer names that the
                      cloud says this cell owns; reported, never deleted here.
+      * `left_behind` — RETAINED objects (`kci_retain=keep`) of resources
+                     still in the file that the file no longer lowers;
+                     reported, never deleted.
 
     A caller that only got a bool (or only the error) could not tell "nothing
     happened" from "half the graph is live": that is the PARTIAL outcome a
@@ -308,6 +385,7 @@ struct ApplyOutcome(Movable, Deinitable):
     var pending: List[String]
     var error: Optional[String]
     var leftover: List[String]
+    var left_behind: List[String]
 
     def __init__(
         out self,
@@ -316,12 +394,14 @@ struct ApplyOutcome(Movable, Deinitable):
         var pending: List[String],
         var error: Optional[String],
         var leftover: List[String] = List[String](),
+        var left_behind: List[String] = List[String](),
     ):
         self.applied = applied^
         self.landed = landed^
         self.pending = pending^
         self.error = error^
         self.leftover = leftover^
+        self.left_behind = left_behind^
 
     def ok(self) -> Bool:
         return not self.error
@@ -355,7 +435,8 @@ def apply_resources[
     a refusal instead of a bare failure."""
     refuse_unless_valid(clouds, cloud, ctx, resources)
     var leftover = List[String]()
-    var graph = _graph_for(cloud, ctx, resources, creds, leftover)
+    var left_behind = List[String]()
+    var graph = _graph_for(cloud, ctx, resources, creds, leftover, left_behind)
     var landed = List[AppliedNode]()
     var pending = List[String]()
     var applied = List[AppliedNode]()
@@ -365,8 +446,10 @@ def apply_resources[
     except e:
         error = String(e)
     if error:
-        return ApplyOutcome(List[AppliedNode](), landed^, pending^, error^, leftover^)
-    return ApplyOutcome(applied^, landed^, pending^, None, leftover^)
+        return ApplyOutcome(
+            List[AppliedNode](), landed^, pending^, error^, leftover^, left_behind^
+        )
+    return ApplyOutcome(applied^, landed^, pending^, None, leftover^, left_behind^)
 
 
 def destroy_resources[
@@ -380,13 +463,15 @@ def destroy_resources[
     mut store: St,
 ) raises -> List[UndeletableSkip]:
     """Configure, validate, lower, `destroy_graph_owned` (reverse order,
-    retention honoured, nothing foreign deleted). The roles a resource in the
-    file turned off are torn down with it. A graph this cloud cannot host
+    retention honoured: a KEEP node is skipped, nothing foreign deleted). The
+    roles a resource in the file turned off are torn down with it; a retained
+    object the file no longer lowers is not. A graph this cloud cannot host
     cannot have been applied by it, so it is refused here too rather than
     half-lowered."""
     refuse_unless_valid(clouds, cloud, ctx, resources)
     var leftover = List[String]()
-    var graph = _graph_for(cloud, ctx, resources, creds, leftover)
+    var left_behind = List[String]()
+    var graph = _graph_for(cloud, ctx, resources, creds, leftover, left_behind)
     return destroy_graph_owned(graph, creds, ctx.scope, store)
 
 

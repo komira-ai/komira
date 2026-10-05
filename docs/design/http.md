@@ -2,7 +2,7 @@
 
 ## What is it for, and what is out of scope?
 
-The HTTP layer is four packages. `komira_http_core` (`src/komira_http_core`) holds the codecs, the TLS layer and the stream seam that the server and the client share. `komira_http_client` and `komira_http_server` are the HTTP/1.1 and HTTP/2 client and server; each depends on the core and neither on the other. `komira_http_status_hook` is the one piece that needs both. Neither the server nor the client starts a thread: each is driven by a `Reactor` from `komira_async` on the calling thread. A **reactor** waits on many sockets at once and reports each ready one as a completion.
+The HTTP layer is three packages. `komira_http_core` (`src/komira_http_core`) holds the codecs, the TLS layer and the stream seam that the server and the client share. `komira_http_client` and `komira_http_server` are the HTTP/1.1 and HTTP/2 client and server; each depends on the core and neither on the other. Neither the server nor the client starts a thread: each is driven by a `Reactor` from `komira_async` on the calling thread. A **reactor** waits on many sockets at once and reports each ready one as a completion.
 
 The design idea is **one event loop per server, and I/O as explicit state**. A handler receives the server's own reactor, so its I/O runs on the loop that serves HTTP. Only the suspendable and erased serve methods let a handler that waits on a database or an outbound call park while the loop serves other connections. In the plain and chained methods, the dispatcher returns its response synchronously.
 
@@ -269,7 +269,7 @@ Entry points:
 
 ## How is it tested?
 
-Each package welds its own tests: `komira_http_core` 36, `komira_http_client` 105, `komira_http_server` 24 and `komira_http_status_hook` 1, 166 in all. Each runs as a build action, so a library cannot build while one of its tests fails. Run: `./buck2 build //src/komira_http_core:komira_http_core //src/komira_http_client:komira_http_client //src/komira_http_server:komira_http_server //src/komira_http_status_hook:komira_http_status_hook`.
+Each package welds its own tests: `komira_http_core` 36, `komira_http_client` 105 and `komira_http_server` 25, 166 in all. Each runs as a build action, so a library cannot build while one of its tests fails. Run: `./buck2 build //src/komira_http_core:komira_http_core //src/komira_http_client:komira_http_client //src/komira_http_server:komira_http_server`.
 
 - TLS tests link the vendored s2n-tls and AWS-LC archives and read the certificates in `src/komira_http_core/tests/fixtures/`.
 - `ScriptedStream` and `ScriptedConnector` feed byte scripts to the client, and `ScriptedTransport` records calls through the `HttpTransport` seam, so most client tests open no socket.

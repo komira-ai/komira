@@ -99,6 +99,7 @@ from kci_cloud import (
     FINDING_LIMIT,
     FIELD_SERVICE,
     FIELD_JOB,
+    FIELD_BUCKET,
     apply_resources,
     body_field,
     describe,
@@ -152,6 +153,7 @@ struct _Node(EngineResource, Movable, Deinitable):
     var _id: String
     var _owner: String
     var _fail_create: Bool
+    var _retention: Int
 
     def __init__(
         out self,
@@ -159,11 +161,13 @@ struct _Node(EngineResource, Movable, Deinitable):
         id: String,
         owner: String,
         fail_create: Bool = False,
+        retention: Int = RETAIN_DELETE,
     ):
         self._log = log.copy()
         self._id = id
         self._owner = owner
         self._fail_create = fail_create
+        self._retention = retention
 
     def logical_id(mut self) -> String:
         return self._id.copy()
@@ -172,7 +176,7 @@ struct _Node(EngineResource, Movable, Deinitable):
         return List[String]()
 
     def retention(mut self) -> Int:
-        return RETAIN_DELETE
+        return self._retention
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
         var i = self._log[].find(self._id)
@@ -220,8 +224,9 @@ struct _Node(EngineResource, Movable, Deinitable):
 
 
 struct _Stub(CloudAdapter, Movable):
-    """Hosts `service` (and `job` when `full`); refuses port 1 as a limit;
-    lowers each resource to `<id>/run` and, for a service, `<id>/edge`;
+    """Hosts `service` (and `job` and `bucket` when `full`); refuses port 1
+    as a limit; lowers each resource to `<id>/run` (a bucket to
+    `<id>/bucket`) and, for a service, `<id>/edge`;
     with `extra_role` set, also `<id>/<extra_role>` for every resource.
     Takes one setting, `public_mechanism` (`edge` or `none`, default
     `edge`), and trusts the principal `deployer` only."""
@@ -261,12 +266,14 @@ struct _Stub(CloudAdapter, Movable):
         l.append(FIELD_SERVICE)
         if self._full:
             l.append(FIELD_JOB)
+            l.append(FIELD_BUCKET)
         return l^
 
     def absences(self) -> List[Absence]:
         var l = List[Absence]()
         if not self._full:
             l.append(Absence(FIELD_JOB, NOT_YET, String("no runner for jobs")))
+            l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -327,8 +334,9 @@ struct _Stub(CloudAdapter, Movable):
         var out = List[LoweredNode]()
         var run = List[Setting]()
         run.append(Setting(String("type"), String(r._oneof0_case)))
+        var role = String("bucket") if r._oneof0_case == 3 else String("run")
         out.append(
-            LoweredNode(r.id + String("/run"), owner, String("run"), List[String](), List[InputRef](), run^)
+            LoweredNode(r.id + String("/") + role, owner, role, List[String](), List[InputRef](), run^)
         )
         if r._oneof0_case == 1:
             var edge = List[Setting]()
@@ -343,7 +351,13 @@ struct _Stub(CloudAdapter, Movable):
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         self.log[].realized.append(node.id)
         return ErasedResource.erase(
-            _Node(self.log, node.id, node.owner, fail_create=node.id == self._fail_create)
+            _Node(
+                self.log,
+                node.id,
+                node.owner,
+                fail_create=node.id == self._fail_create,
+                retention=node.retention,
+            )
         )
 
     def bootstrap_resources(self, machine: String, cell: String) -> List[BootstrapItem]:
@@ -366,7 +380,7 @@ struct _Stub(CloudAdapter, Movable):
             l.append(
                 OwnedRecord(
                     String("stub"), id.copy(), String("stub"), String("none"),
-                    String(""), String(RUN_UNKNOWN), True, id.copy(),
+                    String(""), String(RUN_UNKNOWN), True, id.copy(), False,
                 )
             )
         return l^
@@ -701,9 +715,9 @@ def test_lowering_is_data_and_golden() raises:
     var got = lowering_json(lower_data(full, _list(_good())))
     var want = (
         String("[\n")
-        + String('  {"id":"api/run","owner":"api","kind":"run","wanted":true,"depends_on":[],"inputs":[],"desired":{"type":"1"}},\n')
-        + String('  {"id":"api/edge","owner":"api","kind":"edge","wanted":true,"depends_on":[],"inputs":[],"desired":{"mechanism":"edge"}},\n')
-        + String('  {"id":"batch/run","owner":"batch","kind":"run","wanted":true,"depends_on":[],"inputs":[],"desired":{"type":"2"}}\n')
+        + String('  {"id":"api/run","owner":"api","kind":"run","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{"type":"1"}},\n')
+        + String('  {"id":"api/edge","owner":"api","kind":"edge","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{"mechanism":"edge"}},\n')
+        + String('  {"id":"batch/run","owner":"batch","kind":"run","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{"type":"2"}}\n')
         + String("]")
     )
     assert_equal(got, want)
