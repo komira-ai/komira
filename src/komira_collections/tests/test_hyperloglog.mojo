@@ -15,6 +15,11 @@
 #        register at 1 is 5909; one register empty and the rest at 3 is
 #        23597; every register at the maximum 53, or an estimate above
 #        Int.MAX, saturates at Int.MAX; a register set above 53 counts as 53
+#    4a. tau(0) = tau(1) = 0, and tau at six dyadic points against
+#        reference values computed independently to 60 digits (relative
+#        tolerance 1e-14)
+#    4b. tau's functional equation tau(s^2) = (s(1 - s) + tau(s)) / 2 and
+#        tau > 0 on x = i / 1024
 #     5. the hashes: FNV-1a-64 of "a" is the published 0xaf63dc4c8601ec8c,
 #        and string, bytes and integer hashing agree on it; the hash of
 #        UInt64 0 is the reference SplitMix64 output for state 0, so a
@@ -29,7 +34,8 @@
 #   Accuracy across the small-range hand-over:
 #    10. n = 5,000 .. 20,000 step 1,000 over 64 independent hash streams:
 #        |mean relative error| <= 0.75% and rms <= 2.0% at every n
-#   Accuracy at the top of the range (registers at 53, the tau term):
+#   Estimator consistency under the Poisson register model (registers at
+#   53, the tau term; a secondary, end-to-end guard behind 4a and 4b):
 #    10a. n = 8e18 over 1024 register histograms drawn from the register
 #        distribution: |mean relative error| <= 0.25% and rms <= 2.0%
 #   Determinism:
@@ -44,6 +50,7 @@ from komira_collections.hyperloglog import (
     HLL_PRECISION,
     HLL_NUM_REGISTERS,
     HLL_HASH_REM_BITS,
+    HLL_MAX_REGISTER,
     hll_hash_int64,
     hll_hash_uint64,
     hll_hash_float64,
@@ -265,7 +272,7 @@ def test_tau_functional_equation() raises:
 
 
 # -----------------------------------------------------------------------------
-# Accuracy at the top of the range
+# Estimator consistency under the Poisson register model
 # -----------------------------------------------------------------------------
 
 # Register histograms are drawn directly from the register distribution
@@ -279,11 +286,20 @@ def test_tau_functional_equation() raises:
 # range only the tau term covers. The uniforms come from the splitmix64
 # hash of a counter, so the test is deterministic.
 #
+# This checks the estimator against its own model, not real-world accuracy
+# at n = 8e18: the 64-bit hash is a bijection, so hashing n distinct values
+# near 2^64 samples hashes without replacement, and a register reaches 53
+# with probability n / 2^64 = 0.434 rather than the model's 0.352.
+#
 # Over 1024 sketches the mean relative error has a sampling spread of
 # about 1.6% / sqrt(1024) = 0.05%. With these draws the estimator gives a
 # mean of -0.02% (rms 1.64%). Broken taus measured on the same draws:
 # tau = 0 gives +7.06%; each series term weighted 2^-(k-1) instead of
 # 2^-k gives +0.42%; the series added instead of subtracted gives -0.90%.
+# The 2^-(k-1) case clears the 0.25% bound by only about 3.3 standard
+# errors, so a change to the hash or to libm could hide it here; the
+# reference-value and functional-equation tests (4a, 4b) are the primary
+# tau guards and catch all three by wide margins.
 comptime TOP_SKETCHES: Int = 1024
 comptime TOP_N: Float64 = 8.0e18
 comptime TOP_MEAN_BOUND: Float64 = 0.0025
@@ -297,7 +313,7 @@ def _top_register(lam: Float64, draw: UInt64) -> UInt8:
     if lam <= t:
         return UInt8(0)
     var k = Int(ceil(log2(lam / t)))
-    return UInt8(max(0, min(k, HLL_HASH_REM_BITS + 1)))
+    return UInt8(max(0, min(k, HLL_MAX_REGISTER)))
 
 
 def test_accuracy_with_registers_at_maximum() raises:
@@ -312,7 +328,7 @@ def test_accuracy_with_registers_at_maximum() raises:
                 (UInt64(s) << UInt64(32)) | UInt64(i)
             )
             var r = _top_register(lam, draw)
-            if r == UInt8(HLL_HASH_REM_BITS + 1):
+            if r == UInt8(HLL_MAX_REGISTER):
                 at_max += 1
             hll.set_register(i, r)
         var err = Float64(hll.estimate()) / TOP_N - 1.0
