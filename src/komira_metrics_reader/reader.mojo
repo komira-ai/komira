@@ -52,7 +52,8 @@ trait MetricsReader(Movable, Deinitable):
     `read(q)` answers `q`. It is called only with a query `refusal` accepted.
     It must honour `q.series_limit` and `q.point_limit`, set
     `MetricsPage.truncated` when it stops at either or at a page limit of its
-    own, and return each series' samples oldest first. It raises for a fault
+    own, keep each series' NEWEST samples when the point limit cuts it, and
+    return each series' samples oldest first. It raises for a fault
     (the provider answered an error, the store is unreachable, a response did
     not parse); it never returns an empty page in place of a fault."""
 
