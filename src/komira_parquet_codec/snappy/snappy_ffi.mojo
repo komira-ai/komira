@@ -23,11 +23,15 @@
 #
 # # API
 #
-#   fn snappy_decompress(compressed: Span[UInt8], dst: Span[mut UInt8]) -> Int
-#   fn snappy_compress(src: Span[UInt8], dst: Span[mut UInt8]) -> Int
-#   fn snappy_uncompressed_length(compressed: Span[UInt8]) -> Int
-#   fn snappy_max_compressed_length(input_len: Int) -> Int
-#   fn set_snappy_decoder(SnappyDecoder) / snappy_decoder() -> SnappyDecoder
+# `dst` is a Span with a mutable origin, `compressed` and `src` Spans; the
+# full signatures are on the functions.
+#
+#   snappy_decompress(compressed, dst) raises -> Int
+#   snappy_compress(src, dst) raises -> Int
+#   snappy_uncompressed_length(compressed) raises -> Int
+#   snappy_max_compressed_length(input_len: Int) -> Int
+#   set_snappy_decoder(decoder: SnappyDecoder) raises
+#   snappy_decoder() raises -> SnappyDecoder
 #
 # # Encapsulation
 #
@@ -44,8 +48,8 @@ from std.memory import alloc, OwnedPointer
 from komira_buffer.byte_view import ByteView
 
 from .decompress import (
-    snappy_decompress_mojo,
-    snappy_uncompressed_length_mojo,
+    _snappy_decompress_mojo,
+    _snappy_uncompressed_length_mojo,
 )
 
 
@@ -160,19 +164,18 @@ def snappy_uncompressed_length(compressed: Span[UInt8, _]) raises -> Int:
     the length from the page header's uncompressed_page_size instead.
 
     SAFETY: the callee reads the leading varint preamble bytes from
-    `compressed` and writes a single Int64 (size_t-width) into `size_buf`.
-    Both buffers are owned here or by the caller for the synchronous call;
+    `compressed` and writes a single Int64 (size_t-width) into `size`, a
+    stack local. Both are owned here or by the caller for the synchronous call;
     the callee retains no pointer past the call.
     """
     var input_len = len(compressed)
     if input_len == 0:
         raise Error("snappy: empty input")
     if _snappy_use_mojo():
-        return snappy_uncompressed_length_mojo(
+        return _snappy_uncompressed_length_mojo(
             ByteView(compressed.unsafe_ptr(), input_len)
         )
-    var size_buf = alloc[Int64](1)
-    size_buf[0] = Int64(0)
+    var size: Int64 = 0
     var status = external_call[
         "snappy_uncompressed_length",
         Int32,
@@ -184,10 +187,9 @@ def snappy_uncompressed_length(compressed: Span[UInt8, _]) raises -> Int:
         .unsafe_mut_cast[True]()
         .unsafe_origin_cast[MutUntrackedOrigin](),
         UInt64(input_len),
-        size_buf.unsafe_origin_cast[MutUntrackedOrigin](),
+        UnsafePointer(to=size).unsafe_origin_cast[MutUntrackedOrigin](),
     )
-    var length = Int(size_buf[0])
-    size_buf.free()
+    var length = Int(size)
     if Int(status) != Int(_SNAPPY_OK):
         raise Error(
             "snappy_uncompressed_length failed (status="
@@ -214,7 +216,7 @@ def snappy_decompress[
                                         size_t* uncompressed_length);
 
     SAFETY: the callee reads exactly `len(compressed)` bytes from
-    `compressed` and writes up to the value stored in `size_buf` (`len(dst)`)
+    `compressed` and writes up to the value stored in `size` (`len(dst)`)
     to `dst`. Both Spans keep their buffers alive for the synchronous call;
     the callee retains no pointer past it. Origins are cast to an untracked
     origin ONLY at the `external_call` site.
@@ -224,12 +226,11 @@ def snappy_decompress[
     if input_len == 0:
         raise Error("snappy: empty input")
     if _snappy_use_mojo():
-        return snappy_decompress_mojo(
+        return _snappy_decompress_mojo(
             ByteView(compressed.unsafe_ptr(), input_len),
             ByteView(dst.unsafe_ptr(), output_cap),
         )
-    var size_buf = alloc[Int64](1)
-    size_buf[0] = Int64(output_cap)
+    var size: Int64 = Int64(output_cap)
     var status = external_call[
         "snappy_uncompress",
         Int32,
@@ -243,10 +244,9 @@ def snappy_decompress[
         .unsafe_origin_cast[MutUntrackedOrigin](),
         UInt64(input_len),
         dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
-        size_buf.unsafe_origin_cast[MutUntrackedOrigin](),
+        UnsafePointer(to=size).unsafe_origin_cast[MutUntrackedOrigin](),
     )
-    var written = Int(size_buf[0])
-    size_buf.free()
+    var written = Int(size)
     if Int(status) != Int(_SNAPPY_OK):
         raise Error(
             "snappy_uncompress failed (status=" + String(Int(status))
@@ -274,8 +274,7 @@ def snappy_compress[
     """
     var input_len = len(src)
     var output_cap = len(dst)
-    var size_buf = alloc[Int64](1)
-    size_buf[0] = Int64(output_cap)
+    var size: Int64 = Int64(output_cap)
     var status = external_call[
         "snappy_compress",
         Int32,
@@ -289,10 +288,9 @@ def snappy_compress[
         .unsafe_origin_cast[MutUntrackedOrigin](),
         UInt64(input_len),
         dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
-        size_buf.unsafe_origin_cast[MutUntrackedOrigin](),
+        UnsafePointer(to=size).unsafe_origin_cast[MutUntrackedOrigin](),
     )
-    var written = Int(size_buf[0])
-    size_buf.free()
+    var written = Int(size)
     if Int(status) != Int(_SNAPPY_OK):
         raise Error(
             "snappy_compress failed (status=" + String(Int(status))

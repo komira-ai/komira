@@ -9,9 +9,9 @@
 # Reference: google/snappy snappy-stubs-internal.h
 # (Varint::Parse32WithLimit); format_description.txt section 1.
 #
-# Encapsulation: the public surface takes `ByteView[_]` (not raw wildcard
-# pointers). This module never crosses a pointer boundary — all reads route
-# through ByteView's bounds-checked `read_u8_at`.
+# Encapsulation: package-private; the signature takes `ByteView[_]` (not raw
+# wildcard pointers). This module never crosses a pointer boundary — all
+# reads route through ByteView's bounds-checked `read_u8_at`.
 # =============================================================================
 
 from komira_buffer.byte_view import ByteView
@@ -22,7 +22,7 @@ comptime varint_max_len: Int = 5
 
 
 @always_inline
-def varint_decode32(
+def _varint_decode32(
     data: ByteView[_],
 ) raises -> Tuple[UInt32, Int]:
     """Decode a Snappy varint from `data[0..data.len())`.

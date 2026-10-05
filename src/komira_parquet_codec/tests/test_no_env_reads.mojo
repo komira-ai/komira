@@ -7,7 +7,8 @@
 #     name does not start with a single underscore): pointers are taken from
 #     Spans inside the bodies only,
 #   * rebuilds an address from an integer,
-#   * names the engine this package was split out of.
+#   * imports a komira package that is not one of the library's deps, or
+#     names komira_core, komira_obs or komira_serde.
 # It also checks that the files it read are every staged one, subdirectories
 # included, so a new module that the scan does not read fails it.
 from std.os import listdir
@@ -140,16 +141,63 @@ def test_no_address_from_an_integer() raises:
         )
 
 
-def test_no_internal_engine_name() raises:
-    # Spelled in two halves so this file does not hold the word either.
-    var word = String("tho") + "rium"
+def _import_root(line: String) -> String:
+    """The top-level package a `from X...` / `import X...` line names, or ""
+    for any other line (and for a relative import)."""
+    var s = String(line.lstrip())
+    var rest = String("")
+    if s.startswith("from "):
+        rest = String(s[byte=5:])
+    elif s.startswith("import "):
+        rest = String(s[byte=7:])
+    else:
+        return ""
+    var end = rest.byte_length()
+    var stops: List[String] = [".", " ", ",", "("]
+    for k in range(len(stops)):
+        var at = rest.find(stops[k])
+        if at >= 0 and at < end:
+            end = at
+    return String(rest[byte=0:end])
+
+
+def test_imports_only_its_deps() raises:
+    # The package imports only the deps its BUCK file lists. An import outside
+    # them would not build, but adding the dep would make it build; this list
+    # makes a new dep a change to the test too, and komira_core, komira_obs
+    # and komira_serde are refused outright.
+    var allowed: List[String] = [
+        "komira_buffer",
+        "komira_lz4",
+        "komira_parquet_api",
+        "komira_parquet_codec",
+        "komira_zlib",
+    ]
+    var banned: List[String] = ["komira_core", "komira_obs", "komira_serde"]
     var files = materialize[_FILES]()
+    var seen = 0
     for i in range(len(files)):
-        assert_equal(
-            _count(_read(files[i]).lower(), word),
-            0,
-            files[i] + " names the engine the package was split out of",
-        )
+        var text = _read(files[i])
+        for j in range(len(banned)):
+            assert_equal(
+                _count(text, banned[j]),
+                0,
+                files[i] + " names " + banned[j],
+            )
+        var lines = text.split("\n")
+        for k in range(len(lines)):
+            var root = _import_root(String(lines[k]))
+            if not root.startswith("komira"):
+                continue
+            seen += 1
+            var ok = False
+            for j in range(len(allowed)):
+                if root == allowed[j]:
+                    ok = True
+            assert_true(ok, files[i] + " imports " + root + ", not a dep")
+    # Not vacuous: compression.mojo and the snappy modules import komira_zlib,
+    # komira_lz4, komira_parquet_api and komira_buffer.
+    assert_true(seen >= 4, "found only " + String(seen) + " komira imports")
 
 
 def test_the_scan_saw_the_package() raises:
@@ -174,6 +222,6 @@ def main() raises:
     test_no_environment_read()
     test_no_raw_pointer_in_a_public_signature()
     test_no_address_from_an_integer()
-    test_no_internal_engine_name()
+    test_imports_only_its_deps()
     test_the_scan_saw_the_package()
     print("OK")

@@ -23,8 +23,10 @@
 #
 # # Encapsulation
 #
-# The public + all helper signatures take `ByteView[_]` / `ByteView[mut=True, _]`
-# plus `Int` byte indices — NO `UnsafePointer` and NO wildcard origins escape
+# Every function here is package-private: `snappy_ffi.mojo` builds the
+# ByteViews from the caller's Spans and calls the two entries. The
+# signatures take `ByteView[_]` / `ByteView[mut=True, _]` plus `Int` byte
+# indices — NO `UnsafePointer` and NO wildcard origins escape
 # this module. All pointer arithmetic is confined inside ByteView's
 # `@always_inline` accessors (bounds-checked via `debug_assert`, elided under
 # `-O` so the release codegen is a bare unaligned load/store).
@@ -39,7 +41,7 @@ from .format import (
     kSlopBytes,
     kMaximumTagLength,
 )
-from .varint import varint_decode32
+from .varint import _varint_decode32
 
 
 # =============================================================================
@@ -143,9 +145,9 @@ def _incremental_copy(
 
 
 @always_inline
-def snappy_uncompressed_length_mojo(compressed: ByteView[_]) raises -> Int:
+def _snappy_uncompressed_length_mojo(compressed: ByteView[_]) raises -> Int:
     """Read the uncompressed length from a Snappy preamble (pure Mojo)."""
-    var parsed = varint_decode32(compressed)
+    var parsed = _varint_decode32(compressed)
     return Int(parsed[0])
 
 
@@ -160,7 +162,7 @@ def snappy_uncompressed_length_mojo(compressed: ByteView[_]) raises -> Int:
 # instead of raising — it constructs ZERO Error Strings, so none of the String
 # machinery lands in its body. The single `raise` is deferred to the `@no_inline`
 # cold mapper `_raise_decode_error`, reached ONLY from the thin
-# `snappy_decompress_mojo` boundary wrapper on a non-OK status (never on valid
+# `_snappy_decompress_mojo` boundary wrapper on a non-OK status (never on valid
 # input). This is the C++ decoder's shape: a status-returning tag loop + a one-shot
 # error raise at the RawUncompress boundary.
 # =============================================================================
@@ -198,7 +200,7 @@ def _varint_decode32_status(data: ByteView[_]) -> Tuple[UInt32, Int, Int]:
     """Non-raising varint (LEB128) decode for the hot decode core. Returns
     `(value, bytes_consumed, status)`; on a malformed varint `status` is
     `_DEC_BAD_PREAMBLE` (or `_DEC_EMPTY_INPUT` for empty) and `(value, consumed)`
-    are unspecified. Mirrors `varint_decode32` but returns a status code instead
+    are unspecified. Mirrors `_varint_decode32` but returns a status code instead
     of constructing an Error String, keeping the String machinery out of the hot
     function."""
     var data_len = data.len()
@@ -227,7 +229,7 @@ def _varint_decode32_status(data: ByteView[_]) -> Tuple[UInt32, Int, Int]:
 # =============================================================================
 
 
-def snappy_decompress_mojo(
+def _snappy_decompress_mojo(
     compressed: ByteView[_],
     dst: ByteView[mut=True, _],
 ) raises -> Int:
@@ -260,7 +262,7 @@ def _snappy_decode_core(
     `_DecodeResult` status instead of raising, so the function body carries ZERO
     inlined `raise Error(...)` machinery: no String ctor, no StackTrace, no
     atomic refcount drops. ALL error reporting is deferred to the `@no_inline`
-    `_raise_decode_error` at the `snappy_decompress_mojo` boundary.
+    `_raise_decode_error` at the `_snappy_decompress_mojo` boundary.
     """
     var compressed_len = compressed.len()
     var dst_cap = dst.len()

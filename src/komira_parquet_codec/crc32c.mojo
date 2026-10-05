@@ -42,11 +42,13 @@ def crc32c(data: Span[UInt8, _]) -> UInt32:
 
     This is NOT the Parquet page checksum, which is the standard CRC-32.
     """
-    # PERF-CRITICAL: `comptime for` evaluates `_crc32c_table_entry` at
-    # compile time; at run time the table is a stack fill of 256 constants.
+    # Each entry is a `comptime` value, evaluated by the compiler: at run
+    # time the table is a stack fill of 256 constants, with no call to
+    # `_crc32c_table_entry`.
     var table = Array[UInt32, 256](uninitialized=True)
     comptime for i in range(256):
-        table[i] = _crc32c_table_entry(i)
+        comptime entry = _crc32c_table_entry(i)
+        table[i] = entry
 
     var crc = UInt32(0xFFFFFFFF)
     var length = len(data)

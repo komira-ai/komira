@@ -1,13 +1,24 @@
 # =============================================================================
-# Parquet page compression: codec dispatch over snappy, zstd, lz4, zlib, brotli
+# Parquet page compression: the codec dispatch
 # =============================================================================
 #
-# Each codec is reached through a per-codec FFI shim: snappy through the
-# statically linked snappy C API (snappy/snappy_ffi.mojo), zstd, LZ4 frame and
-# brotli through libraries opened at run time (zstd/zstd_ffi.mojo,
-# lz4_frame/lz4_ffi.mojo, brotli/brotli_ffi.mojo), and LZ4 raw block and zlib
-# through the Span entries of the komira_lz4 and komira_zlib packages. Each
-# shim keeps its own process-lifetime library handle.
+# Codecs:
+#   - UNCOMPRESSED: a copy.
+#   - SNAPPY:       the statically linked snappy C API, or the Mojo decoder
+#                   (snappy/snappy_ffi.mojo).
+#   - ZSTD:         libzstd (zstd/zstd_ffi.mojo).
+#   - LZ4_RAW:      a liblz4 raw block (codec id 7), through komira_lz4; read
+#                   and write.
+#   - LZ4:          the DEPRECATED codec id 5, READ ONLY, by framing
+#                   detection across its three in-the-wild layouts. A distinct
+#                   codec from LZ4_RAW; never written.
+#   - GZIP:         libz through komira_zlib (window_bits=15+32: a gzip or a
+#                   zlib wrapper).
+#   - BROTLI:       the statically linked Brotli decoder
+#                   (brotli/brotli_ffi.mojo); read only.
+# The LZ4 frame codec (lz4_frame/lz4_ffi.mojo) is also reachable directly,
+# for `.lz4` text files. Every library but snappy and Brotli is opened by
+# name at run time, and each such shim keeps its own process-lifetime handle.
 #
 # Contract:
 #   - Every entry takes its input as a `Span[UInt8]` and writes into a
@@ -17,20 +28,6 @@
 #     pointers are taken from the Spans inside each shim, for one synchronous
 #     FFI call.
 #   - The C libraries never retain a pointer across a call.
-# =============================================================================
-# Compression / Decompression — Parquet page-level codec dispatch
-# =============================================================================
-#
-# Supports:
-#   - UNCOMPRESSED: passthrough memcpy
-#   - SNAPPY:       the snappy C API (snappy_ffi.mojo)
-#   - ZSTD:         libzstd (zstd_ffi.mojo)
-#   - LZ4_RAW:      liblz4 raw block (codec id 7) — read + write
-#   - LZ4:          liblz4, the DEPRECATED codec id 5 — READ ONLY, with
-#                   framing detection across its three in-the-wild layouts.
-#                   Distinct codec from LZ4_RAW; never written.
-#   - GZIP:         libz (window_bits=15+32: a gzip or a zlib wrapper)
-#   - BROTLI:       libbrotlidec — read only.
 # =============================================================================
 
 from std.memory import unsafe_memcpy
@@ -111,7 +108,7 @@ def decompress[
       - LZ4_RAW: liblz4 raw block
       - LZ4:     liblz4, by framing detection (see `_decompress_lz4_deprecated`)
       - GZIP:    libz (a gzip or a zlib wrapper)
-      - BROTLI:  libbrotlidec
+      - BROTLI:  the Brotli decoder (statically linked)
 
     Args:
         codec: The Parquet compression codec.
@@ -146,8 +143,8 @@ def decompress[
     elif codec == CompressionCodec.GZIP:
         return zlib_inflate_into(output, input, ZLIB_WINDOW_BITS_AUTO)
     elif codec == CompressionCodec.BROTLI:
-        # One-shot decode via libbrotlidec; `len(output)` is the in/out
-        # decoded-size capacity.
+        # One-shot decode via BrotliDecoderDecompress; `len(output)` is the
+        # in/out decoded-size capacity.
         return _brotli_decompress_into(output, input)
     elif codec == CompressionCodec.LZO:
         # LZO decompression is not implemented: a legacy codec, rarely seen.

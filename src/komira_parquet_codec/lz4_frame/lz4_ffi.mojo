@@ -12,9 +12,12 @@
 #
 # # API (package-private: `compression.mojo` is the caller)
 #
-#   fn _lz4_frame_decompress_into(dst: Span[mut UInt8], src: Span[UInt8]) -> Int
-#   fn _lz4_frame_compress_into(dst: Span[mut UInt8], src: Span[UInt8]) -> Int
-#   fn _lz4_frame_compress_bound(src_size: Int) -> Int
+# `dst` is a Span with a mutable origin, `src` a Span; the full signatures
+# are on the functions.
+#
+#   _lz4_frame_decompress_into(dst, src) raises -> Int
+#   _lz4_frame_compress_into(dst, src) raises -> Int
+#   _lz4_frame_compress_bound(src_size: Int) raises -> Int
 #
 # # OwnedDLHandle singleton
 #
