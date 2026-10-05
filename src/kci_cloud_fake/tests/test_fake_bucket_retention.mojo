@@ -5,7 +5,7 @@
 # The bucket primitive and retention, on the fake clouds.
 #
 # 1. THE KIT WITH A BUCKET ON EVERY SHAPE: the kci_cloud conformance kit (all
-#    eleven steps) passes on the generic, aws, gcp and azure shapes, each under
+#    eleven steps) passes on the generic, aws, gcp, azure and onprem shapes, each under
 #    a random id, on a graph with a bucket (retention DELETE, so the kit's
 #    destroy may remove it), a service that uses it READ_WRITE and reads its
 #    NAME, and a public service; the tampered node is the bucket.
@@ -13,8 +13,9 @@
 #    its default filled in (expiry `never`, versioning `false`, tier
 #    `STANDARD`) and the retention kci set; per shape, the provider kind
 #    (`AWS::S3::Bucket`, `storage.googleapis.com/Bucket`,
-#    `Microsoft.Storage/storageAccounts/blobServices/containers`). A grant on
-#    a bucket depends on `<id>/bucket`.
+#    `Microsoft.Storage/storageAccounts/blobServices/containers`,
+#    `minio/Bucket`: an S3-API bucket on the cell's MinIO). A grant on a
+#    bucket depends on `<id>/bucket`.
 # 3. VALUES FLOW FROM A BUCKET: a service reading a bucket's NAME and ADDRESS
 #    is created over the bucket's real values.
 # 4. KEEP IS STAMPED AND DESTROY SKIPS IT: a bucket with no retention written
@@ -94,6 +95,7 @@ def _shapes() -> List[ProviderShape]:
     l.append(ProviderShape.aws())
     l.append(ProviderShape.gcp())
     l.append(ProviderShape.azure())
+    l.append(ProviderShape.onprem())
     return l^
 
 
@@ -135,7 +137,9 @@ def test_the_kit_with_a_bucket_on_every_shape() raises:
     ids.append(String("p-6a02c9"))
     ids.append(String("p-d71f35"))
     ids.append(String("p-38be7a"))
+    ids.append(String("p-c09d52"))
     var shapes = _shapes()
+    assert_equal(len(shapes), len(ids), "one random id per shape")
     for s in range(len(shapes)):
         var cloud = FakeCloud(ids[s], shape=shapes[s].copy())
         var reg = _reg(FakeCloud(ids[s], shape=shapes[s].copy()))
@@ -180,7 +184,9 @@ def test_golden_bucket_lowering_per_shape() raises:
     kinds.append(String("AWS::S3::Bucket"))
     kinds.append(String("storage.googleapis.com/Bucket"))
     kinds.append(String("Microsoft.Storage/storageAccounts/blobServices/containers"))
+    kinds.append(String("minio/Bucket"))
     var shapes = _shapes()
+    assert_equal(len(shapes), len(kinds), "one bucket kind per shape")
     for s in range(len(shapes)):
         var cloud = FakeCloud(String("p-2c"), shape=shapes[s].copy())
         var got = lowering_json(lower_data(cloud, _list(_golden_graph())))
