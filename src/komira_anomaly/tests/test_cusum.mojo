@@ -182,8 +182,8 @@ def test_chart_catches_a_sustained_upward_drift() raises:
 
 def test_chart_reports_direction_for_a_downward_drift() raises:
     """An improvement is still a change. The direction is what tells a reader
-    which it was, and a detector that only reported 'changed' would file the
-    same card for a 20% win and a 20% regression."""
+    which it was, and a detector that only reported 'changed' would raise the
+    same alert for a 20% win and a 20% regression."""
     var v = _reference(CUSUM_MIN_REFERENCE)
     for _i in range(8):
         v.append(97.0)
@@ -213,7 +213,7 @@ def test_chart_stays_quiet_on_a_stable_series() raises:
 
 
 def test_chart_retains_the_first_crossing_not_the_last() raises:
-    """A card must cite where the evidence first became sufficient. The chart
+    """An alert must cite where the evidence first became sufficient. The chart
     keeps accumulating after that so the peaks stay informative, but the index
     must not slide forward with it."""
     var v = _reference(CUSUM_MIN_REFERENCE)

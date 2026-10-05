@@ -315,7 +315,7 @@ def test_the_incremental_chart_matches_the_batch_chart_to_the_bit() raises:
     assert_equal(
         b.chart_signal_index,
         batch.signal_index,
-        "and the same index — a card cites this number",
+        "and the same index — an alert cites this number",
     )
     assert_equal(b.chart_direction, batch.direction, "same direction")
 

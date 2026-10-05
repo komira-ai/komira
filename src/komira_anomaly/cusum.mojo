@@ -45,7 +45,7 @@
 # ── ⭐ AND IT DECLINES ON A SHORT REFERENCE, WHICH WAS MEASURED, NOT ASSUMED ─
 #
 # `CUSUM_MIN_REFERENCE` is 20, and the number that put it there is this: on the
-# 82 real cells of a recorded benchmark campaign — ten sweeps of ONE binary,
+# 82 real cells of a recorded benchmark run — ten sweeps of ONE binary,
 # so a known zero — a chart parameterised from a 10-POINT reference fires on
 # 13 OF 82. That is a 16% false-alarm rate on data in which nothing changed,
 # against a budget of at most one firing per corpus run.
@@ -66,7 +66,7 @@
 # ── ⛔ THE FALSE-ALARM RATE AT A SUFFICIENT REFERENCE LENGTH: MEASURED, AND
 # ── THE ARM FAILS IT
 #
-# The same campaign recorded per-LAUNCH records — one
+# The same run recorded per-LAUNCH records — one
 # JSON row per launch, keyed `"i": 0..n-1`, so the measurement ORDER is
 # preserved — of one query relaunched 30 to 100 times against ONE binary. Six
 # such series, 320 points, every one longer than the reference. On them:

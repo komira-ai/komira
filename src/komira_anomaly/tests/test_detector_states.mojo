@@ -22,7 +22,7 @@
 #
 #   ⚠ THE ONE ASSERTION MOST WORTH READING is `test_anomaly_is_latched...`. It
 #   would be easy to write a detector that refits every time and quietly
-#   returns to NORMAL when the evidence weakens, and every card it filed would
+#   returns to NORMAL when the evidence weakens, and every alert it raised would
 #   then have a subject that no longer exists.
 # =============================================================================
 
@@ -197,11 +197,11 @@ def test_normal_to_anomaly_carries_the_full_evidence() raises:
 
 
 def test_anomaly_is_latched_and_does_not_self_clear() raises:
-    """⭐ THE PROPERTY THAT MAKES A CARD WORTH FILING.
+    """⭐ THE PROPERTY THAT MAKES AN ALERT WORTH RAISING.
 
     Re-evaluating must not quietly walk back to NORMAL, and the retained
-    verdict must keep naming the SAME change point — a card whose subject
-    drifts between readings cannot be closed.
+    verdict must keep naming the SAME change point — an alert whose subject
+    drifts between readings cannot be resolved.
 
     ── ⛔ WHY THIS TEST LOOKS THE WAY IT DOES: THE VERSION BEFORE IT DID NOT
     ── TEST THE LATCH AT ALL.
@@ -271,7 +271,7 @@ def test_anomaly_is_latched_and_does_not_self_clear() raises:
     assert_equal(
         again.relative_shift,
         first.relative_shift,
-        "nor the magnitude the card would quote",
+        "nor the magnitude the alert would quote",
     )
     assert_equal(again.n_points, 30, "only the point count is refreshed")
 
@@ -357,9 +357,9 @@ def test_acknowledge_then_enough_new_points_reaches_normal() raises:
 
 
 def test_dismiss_returns_to_normal_and_suppresses_a_repeat() raises:
-    """⭐ WITHOUT THE SUPPRESSION THIS IS AN INFINITE CARD LOOP. The next
-    evaluation re-finds the identical change point and re-files the identical
-    card, forever."""
+    """⭐ WITHOUT THE SUPPRESSION THIS IS AN INFINITE ALERT LOOP. The next
+    evaluation re-finds the identical change point and re-raises the identical
+    alert, forever."""
     var config = DetectorConfig()
     var det = SeriesDetector(String("k"), config)
     var series = _stepped(String("k"), 12, 8, Float64(1.25))

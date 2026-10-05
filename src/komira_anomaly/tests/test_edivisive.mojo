@@ -232,7 +232,7 @@ def test_a_series_with_no_change_yields_weak_evidence() raises:
 
 
 def test_relative_shift_reports_direction_and_magnitude() raises:
-    """The p-value says how sure; `relative_shift` says how big. A card needs
+    """The p-value says how sure; `relative_shift` says how big. An alert needs
     both — on a long series a 0.5% move can be arbitrarily significant."""
     var up: List[Float64] = [
         10.0, 10.0, 10.0, 10.0, 10.0, 11.0, 11.0, 11.0, 11.0, 11.0

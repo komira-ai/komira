@@ -16,20 +16,19 @@
 #   * `key` is an OPAQUE `String`. This package never parses it, never splits
 #     it, and attaches no meaning to its parts.
 #
-# ⛔ WHY IT MUST STAY THIS POOR. Two other systems are being designed RIGHT NOW
-# and each owns something this package must not invent:
+# ⛔ WHY IT MUST STAY THIS POOR. Two other systems each own something this
+# package must not invent:
 #
 #   * the METRICS SYSTEM owns the measurement data model (the point type and
 #     its attribute set). This package must not grow a second one — two data
-#     models for one measurement is the mis-delivery primitive
-#     `komira_mail_addr`'s header names, applied to numbers.
+#     models for one measurement let one value be read under two meanings.
 #   * the AT-REST FORMAT owns how a series is stored and queried. Nothing here
 #     names a file format, a table, a bucket, a catalog or a query engine.
 #
 # So the seam below is stated in terms that NEITHER of them can falsify: an
 # Int64, a Float64 and a String. A producer built on any data model and any
 # storage format can conform it, which is the property that lets the detector
-# be written, tested and validated BEFORE either exists.
+# be written, tested and validated independently of both.
 #
 # ⚠ THE X AXIS IS NOT ASSUMED TO BE UNIFORM. Sweeps are irregular; commits are
 # irregular. Nothing here divides by an interval or assumes equal spacing. The
@@ -161,7 +160,7 @@ trait SeriesSource(Movable, Deinitable):
     point type, no attribute set, no table, no format, no catalog, no engine. A
     metrics-backed implementation, a bench-artifact-backed one and an in-memory
     fake are all the same shape to the detector, so the detector can be
-    validated against the third while the first is still being designed.
+    validated against the third without depending on the first.
 
     ⚠ THE KEY IS THE PRODUCER'S TO COMPOSE, AND THIS PACKAGE WILL NEVER PARSE
     IT. A series key means 'everything that, if it changed, would start a new

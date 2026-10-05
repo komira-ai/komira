@@ -3,8 +3,7 @@
 #   ⭐ THE SEAM, PROVED IMPLEMENTABLE.
 #
 # `SeriesSource` is the entire contract between this detector and whatever
-# eventually produces the data — the metrics system being designed in parallel,
-# a reader over recorded bench artifacts, or a fake. A trait that NOTHING
+# eventually produces the data — a metrics system, a reader over recorded bench artifacts, or a fake. A trait that NOTHING
 # conforms to is documentation, not an interface: it can be subtly
 # unimplementable (a signature that cannot be satisfied, a lifetime that cannot
 # be produced) and nobody finds out until the day someone tries.
@@ -117,7 +116,7 @@ def test_the_seam_conforms_and_drives_the_real_detector() raises:
 
 def test_each_verdict_keeps_its_own_series_identity() raises:
     """A sweep that mixed up which verdict belonged to which series would be
-    worse than no sweep — every card would name the wrong subject."""
+    worse than no sweep — every alert would name the wrong subject."""
     var src = InMemorySource()
     src.add(String("a/stable"), _stable(14))
     src.add(String("b/regressed"), _stepped(12, 8, Float64(1.30)))

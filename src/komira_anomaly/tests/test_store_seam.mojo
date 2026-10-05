@@ -7,7 +7,7 @@
 #   Running bounds are accumulated in memory. If the accumulation and the
 #   durable record can disagree, then after any restart the detector's idea of
 #   normal is a thing no stored data supports, and nobody can ever reconstruct
-#   why a card was filed. Everything else here is in service of that.
+#   why an alert was raised. Everything else here is in service of that.
 #
 #   THREE CONFORMERS, not one. A trait proved implementable by a single type
 #   is a trait proved implementable by that type. `InMemoryPointStore` ships in
@@ -178,8 +178,8 @@ def test_replay_rebuilds_the_same_state_as_the_live_path() raises:
     One monitor is fed live through `observe_and_store`; a second, fresh one is
     rebuilt from the store alone. Their accumulated bounds must agree TO THE
     BIT and their verdicts must render identically. Anything less means a
-    restarted detector holds a different idea of normal from the one that filed
-    the last card, and no reader can tell.
+    restarted detector holds a different idea of normal from the one that raised
+    the last alert, and no reader can tell.
     """
     var store = InMemoryPointStore()
     var cfg = OnlineConfig(DetectorConfig(), 64, 4, Float64(5.0), 25)

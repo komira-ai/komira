@@ -77,7 +77,9 @@ from komira_anomaly import (
     SeriesDetector,
     estimate_scale,
     median_of,
+    fit_change_point,
     run_cusum,
+    seed_for_key,
 )
 
 
@@ -99,21 +101,31 @@ def _contains(haystack: String, needle: String) -> Bool:
 
 struct LaunchSeries(Copyable, Movable, Deinitable):
     var key: String
+    var seed: UInt64
     var values: List[Float64]
 
-    def __init__(out self, key: String, var values: List[Float64]):
+    def __init__(
+        out self, key: String, seed: UInt64, var values: List[Float64]
+    ):
         self.key = key
+        self.seed = seed
         self.values = values^
 
 
-def _lcell(mut out: List[LaunchSeries], key: String, var values: List[Float64]):
-    out.append(LaunchSeries(key, values^))
+def _lcell(
+    mut out: List[LaunchSeries],
+    key: String,
+    seed: UInt64,
+    var values: List[Float64],
+):
+    out.append(LaunchSeries(key, seed, values^))
 
 
 def real_launch_series() -> List[LaunchSeries]:
     """Six real order-preserving known-zero series. See the file header."""
     var out = List[LaunchSeries]()
-    _lcell(out, String("launch/thor_q04_base_n100"), [
+    # Each permutation-test seed is a fixed constant, not derived from the key.
+    _lcell(out, String("launch/engine_q04_base_n100"), UInt64(0x5C7FCA1CAB49BB7F), [
     18.164, 15.459, 15.337, 15.542, 15.315, 15.654, 15.305, 15.478,
     15.357, 15.408, 18.231, 15.444, 15.505, 18.222, 18.182, 15.601,
     15.481, 18.044, 15.319, 18.384, 15.762, 18.534, 18.294, 15.495,
@@ -128,7 +140,7 @@ def real_launch_series() -> List[LaunchSeries]:
     15.592, 15.512, 15.357, 15.73, 15.506, 15.426, 15.434, 18.121,
     15.491,
     ])
-    _lcell(out, String("launch/duck_q04_base_n100"), [
+    _lcell(out, String("launch/duck_q04_base_n100"), UInt64(0x51ADFCE8834A1597), [
     12.0481, 11.6997, 11.5977, 11.6261, 11.6534, 11.7912, 11.6625,
     11.5963, 11.7316, 11.6047, 11.7635, 11.726, 11.6276, 11.7246,
     11.6472, 11.6437, 11.6865, 11.7824, 11.6604, 11.798, 11.7217,
@@ -144,26 +156,26 @@ def real_launch_series() -> List[LaunchSeries]:
     11.6699, 11.8121, 11.697, 11.7564, 11.7018, 11.6781, 11.6608,
     11.7267, 11.6878, 11.8643, 11.7066, 11.7775, 11.6676,
     ])
-    _lcell(out, String("launch/thor_cb10_base_n30"), [
+    _lcell(out, String("launch/engine_cb10_base_n30"), UInt64(0x7132ED5EE6E9CA93), [
     493.234, 478.473, 496.47, 490.518, 492.579, 486.229, 492.107,
     489.333, 490.424, 488.91, 485.983, 485.431, 504.416, 482.846,
     487.777, 483.868, 485.665, 483.383, 492.24, 491.459, 487.884,
     483.606, 487.943, 487.087, 487.159, 500.575, 487.978, 501.054,
     480.533, 488.334,
     ])
-    _lcell(out, String("launch/thor_q04_c4base_n30"), [
+    _lcell(out, String("launch/engine_q04_c4base_n30"), UInt64(0x42EE7E78B0BC23DB), [
     18.049, 18.252, 18.204, 15.513, 15.428, 15.367, 15.592, 15.602,
     18.079, 15.334, 18.014, 15.419, 15.292, 18.198, 15.492, 18.019,
     15.68, 18.234, 17.844, 15.519, 15.437, 15.304, 15.355, 15.335,
     15.412, 15.528, 18.048, 17.865, 15.764, 18.087,
     ])
-    _lcell(out, String("launch/thor_q04_node0_n30"), [
+    _lcell(out, String("launch/engine_q04_node0_n30"), UInt64(0x96AACCEC9ECE8953), [
     20.041, 21.185, 21.682, 22.878, 21.062, 21.59, 21.312, 19.846,
     20.099, 21.501, 22.007, 19.717, 19.841, 20.741, 20.817, 21.042,
     21.56, 21.669, 21.512, 21.736, 19.885, 21.179, 20.727, 20.007, 21.06,
     19.931, 21.711, 20.872, 21.338, 20.903,
     ])
-    _lcell(out, String("launch/thor_q04_node1_n30"), [
+    _lcell(out, String("launch/engine_q04_node1_n30"), UInt64(0xEB8DFAD4BE090AB1), [
     20.893, 19.967, 20.759, 21.211, 19.824, 21.054, 21.81, 19.891,
     20.725, 20.022, 20.034, 19.993, 21.648, 20.675, 19.881, 20.009,
     20.05, 21.014, 21.542, 20.627, 20.486, 21.02, 21.122, 20.827, 21.281,
@@ -286,6 +298,36 @@ def test_the_changepoint_arm_is_quiet_on_the_same_six() raises:
         + String(":")
         + names,
     )
+
+    # ── THE SAME ARM UNDER THE FIXED SEEDS. The detector derives its seed from
+    # the key; this loop runs the identical fit under each series' fixed seed
+    # constant, so the measurement does not depend on how a key is spelled.
+    var pinned_fired = 0
+    for i in range(len(s)):
+        var fit = fit_change_point(
+            s[i].values, config.min_segment, config.permutations, s[i].seed
+        )
+        if fit.is_fitted() and fit.p_value < config.significance:
+            pinned_fired += 1
+    assert_equal(
+        pinned_fired,
+        0,
+        String("under the fixed seeds the change-point arm also fires on NONE")
+        + String(" of the six. Got ")
+        + String(pinned_fired),
+    )
+
+
+def test_the_fixed_seed_constants_are_fnv_1a_of_a_key() raises:
+    """The fixed seeds were produced by the same FNV-1a as `seed_for_key`.
+    The one series whose key is unchanged checks the method."""
+    var s = real_launch_series()
+    var checked = 0
+    for i in range(len(s)):
+        if s[i].key == String("launch/duck_q04_base_n100"):
+            assert_equal(s[i].seed, seed_for_key(s[i].key), "same FNV-1a")
+            checked += 1
+    assert_equal(checked, 1, "the unchanged key is in the fixture")
 
 
 def test_an_advisory_chart_finding_is_reported_and_does_not_set_anomaly() raises:
@@ -500,8 +542,8 @@ def test_two_of_the_three_chart_firings_are_bimodality_not_drift() raises:
     for i in range(len(s)):
         var v = s[i].values.copy()
         if (
-            s[i].key != String("launch/thor_q04_base_n100")
-            and s[i].key != String("launch/thor_q04_c4base_n30")
+            s[i].key != String("launch/engine_q04_base_n100")
+            and s[i].key != String("launch/engine_q04_c4base_n30")
         ):
             continue
         checked += 1

@@ -449,7 +449,7 @@ struct AnomalyMonitor(Movable, Deinitable):
         return self._dets[at].rejected
 
     def bounds_of(mut self, key: String) raises -> BoundSignal:
-        """The bound this series WOULD apply to a point posted right now.
+        """The bound this series WOULD apply to the next point posted.
 
         Reports the accumulation without disturbing it: the returned signal is
         never `breached` (no point was judged) and its `lower`/`upper` are the
