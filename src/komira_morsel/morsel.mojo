@@ -309,7 +309,7 @@ struct Morsel(Movable):
         (filter survivors, projected columns, joined output). Body is a plain
         field-assign — `self.batch = batch^` drops the old RecordBatch and
         moves the new one in, destructor-safe on every path. This is NOT a
-        Hard-ban #11 partial move (that bans moving a field OUT of the middle
+        partial move (the banned shape moves a field OUT of the middle
         of a struct; assigning INTO a field is fine — same idiom as
         `attach_bypass_ref`'s `self.raw_chunks = ref_handle^` and
         `MorselArray.set_morsel`). It deliberately does NOT reimplement the
