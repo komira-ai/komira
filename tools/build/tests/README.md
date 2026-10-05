@@ -630,8 +630,9 @@ tools/build/tests/run_tests.sh --host-check-only
 CloudWatch Logs model as check actions ([`defs.bzl`](functional/aws_codegen/defs.bzl)).
 The GetLogEvents module, pure and client, a restJson1 client of a tiny model,
 a restXml module of a tiny S3-shaped model (pure, with the `s3`
-customization), and the layout probe of each, must equal their goldens under
-`golden/` byte for byte. The generator must refuse, naming the reason and
+customization), an awsQuery module of a tiny model (pure and client), an
+ec2Query module of a tiny model (pure), and the layout probe of each, must
+equal their goldens under `golden/` byte for byte. The generator must refuse, naming the reason and
 writing no file: an empty or missing `--operations`, an operation the model
 lacks, a protocol it does not implement (smithy-rpc-v2-cbor), a restXml
 model that reaches a union, an XML attribute or a map in the body (each by
@@ -642,13 +643,23 @@ missing `--model-sha256`, one that is not 64 lowercase hex digits (upper case,
 or one digit short), one that is not the model's, a zero-byte model, and
 `--probe-import` without `--probe-out`.
 
-Each client module (`logs_client`, `tiny_rest_json_client`) must also contain
-each `must_contain` string, matched as whole lines against the GENERATED module
-with leading spaces dropped, so a string may span lines: the constructor's
-`http_config: HttpClientConfig,` (no default), its
+Each client module (`logs_client`, `tiny_rest_json_client`, `query_client`)
+must also contain each `must_contain` string, matched as whole lines against
+the GENERATED module with leading spaces dropped, so a string may span lines:
+the constructor's `http_config: HttpClientConfig,` (no default), its
 `self._http_config = http_config.copy()`, and the send call passing that field.
 This holds even if someone re-copies the golden over a regression. An empty
 `must_contain` string is refused at analysis.
+
+The tiny awsQuery and ec2Query modules are also built in the komira cell
+([`proto-codegen/aws_query`](../proto-codegen/aws_query/BUCK)), against the
+real runtime: a `gen_check` holds each to exactly its generated files and the
+lines that name its protocol and mode, and a `tests_check` to exactly its two
+welded tests (the layout probe and its caller test), for the pure awsQuery
+module (`tiny_query_pure_scoped`, `tiny_query_pure_tests`), the client-mode
+one (`tiny_query_client_scoped`, `tiny_query_client_tests`) and the pure
+ec2Query one (`tiny_ec2_pure_scoped`, `tiny_ec2_pure_tests`), as for the
+restJson1 and restXml modules.
 
 Four negatives in [`negative/aws_codegen`](negative/aws_codegen/BUCK) must fail
 their builds: a golden that differs from the generated module (`golden_differs`),

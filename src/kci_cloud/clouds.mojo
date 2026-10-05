@@ -69,7 +69,7 @@ def describe[S: CloudAdapter](s: S) -> CloudEntry:
     return CloudEntry(s.cloud_id(), s.complete(), s.implemented(), s.absences())
 
 
-def declaration_problems(catalog: Catalog, entry: CloudEntry) -> List[String]:
+def artifact_problems(catalog: Catalog, entry: CloudEntry) -> List[String]:
     """Every way `entry`'s coverage declaration breaks the rules. Empty means
     legal. A type of the catalog must be implemented or declared absent,
     exactly once; an absence must be of the kind its portability allows; a
@@ -197,7 +197,7 @@ struct Clouds(Movable, Deinitable):
                 + entry.id.text()
                 + String("\" is built in twice")
             )
-        var problems = declaration_problems(self.catalog, entry)
+        var problems = artifact_problems(self.catalog, entry)
         if len(problems) > 0:
             var msg = String("clouds: illegal coverage declaration:")
             for i in range(len(problems)):

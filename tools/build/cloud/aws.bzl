@@ -83,10 +83,11 @@ protocol is restXml.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
 generated code imports its runtime (komira_aws_core; komira_json for a JSON
-protocol, komira_xml for restXml; and in client mode komira_http_core,
-komira_http_client and komira_retry), which the caller names as `komira//`
-labels, or as stubs in a test. They are the library's `deps`, so they take
-what `mojo_library.deps` takes; `<name>_gen` sees only their count.
+protocol, komira_xml for restXml, awsQuery and ec2Query; and in client mode
+komira_http_core, komira_http_client and komira_retry), which the caller
+names as `komira//` labels, or as stubs in a test. They are the library's
+`deps`, so they take what `mojo_library.deps` takes; `<name>_gen` sees only
+their count.
 
 Every refusal of the rule happens at analysis, in `<name>_gen`, so a BUCK
 file with one wrong mojo_aws_client still loads.
@@ -163,7 +164,7 @@ def _aws_client_gen_impl(ctx):
             fail("{}: `operations` names `{}` twice".format(ctx.label, op))
         seen[op] = True
     if ctx.attrs.runtime_dep_count == 0:
-        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core; komira_json for a JSON protocol, komira_xml for restXml; and in client mode komira_http_core, komira_http_client and komira_retry); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
+        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core; komira_json for a JSON protocol, komira_xml for restXml, awsQuery and ec2Query; and in client mode komira_http_core, komira_http_client and komira_retry); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if ctx.attrs.overrides and not ctx.attrs.hand_srcs:
         fail("{}: `overrides` is set and `hand_srcs` is empty: the manifest names hand-written owners, and they are its `hand_srcs`".format(ctx.label))
     if ctx.attrs.hand_srcs and not ctx.attrs.overrides:
