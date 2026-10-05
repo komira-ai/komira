@@ -39,7 +39,7 @@
 
 from std.ffi import external_call, c_int
 from std.io import FileHandle
-from std.memory import UnsafePointer, alloc
+from std.memory import UnsafePointer
 from std.sys.info import CompilationTarget
 
 from komira_supervisor.supervisor import Supervisor, ChildSpec
@@ -207,41 +207,31 @@ def _sysctl_u64(var name: String) -> Int:
     /proc/meminfo).
 
     SAFETY:
-      (a) `val_buf` / `len_buf` are heap-allocated via `alloc[UInt8]` and freed
-          before return; pointers stay valid for the full sysctl call.
-      (b) The result is read little-endian byte-by-byte from `val_buf` (no
-          aliasing cast, no arm64 alignment trap).
-      (c) `name.as_c_string_slice()` guarantees a trailing NUL in the referenced
+      (a) `val` / `val_len` are locals of this frame; the pointers to them carry
+          their concrete origins and are used only for the duration of the
+          sysctl call.
+      (b) `name.as_c_string_slice()` guarantees a trailing NUL in the referenced
           bytes; the pointer is valid until `name` drops at end-of-frame (after
           the call returns).
-      (d) The only untracked-origin pointer is the NULL `newp` argument
-          (with newlen=0, "do not write") of the sysctl ABI, bounded to this
-          call.
+      (c) `newp` is NULL with newlen=0 ("do not write"); its origin is a
+          dummy local, so it does not alias `val`.
     """
-    var val_buf = alloc[UInt8](8)
-    var len_buf = alloc[UInt8](8)
-    for i in range(8):
-        val_buf[i] = 0
-    len_buf[0] = 8
-    for i in range(1, 8):
-        len_buf[i] = 0
-
+    var val: UInt64 = 0
+    var val_len: UInt64 = 8
     var result: Int = 0
     comptime if CompilationTarget.is_macos():
         var name_ptr = name.as_c_string_slice().unsafe_ptr()
-        var null_ptr = _null_ptr[UInt8, MutUntrackedOrigin]()
+        var no_new: UInt8 = 0
+        var null_ptr = _null_ptr[UInt8, origin_of(no_new)]()
         var ret = external_call["sysctlbyname", c_int](
-            name_ptr, val_buf, len_buf, null_ptr, UInt64(0)
+            name_ptr, UnsafePointer(to=val), UnsafePointer(to=val_len), null_ptr,
+            UInt64(0),
         )
         if ret == 0:
-            var acc: UInt64 = 0
-            for i in range(8):
-                acc = acc | (UInt64(val_buf[i]) << (UInt64(i) * 8))
-            result = Int(acc)
+            result = Int(val)
     else:
         result = 0
-    val_buf.free()
-    len_buf.free()
+    _ = val_len
     return result
 
 
