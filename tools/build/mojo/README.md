@@ -106,6 +106,11 @@ fence reader, so the link check and the examples agree on what is code).
   README's examples do not count as the tests a conda package needs.
 - The tool's own package, `tools/build/readme_examples`, may hold no README:
   the tool would depend on itself.
+- **A README that ships** (the library has a conda package the build can
+  make, which installs it at `share/doc/<conda name>/README.md`; see
+  [Conda packages](../../../packaging/conda/README.md#the-readme-in-the-package))
+  refuses a relative link outside code, naming `README.md:<line>`: the
+  installed copy has no neighbours. Link an absolute URL or an `#anchor`.
 
 Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
 a README that uses every form, and requires a raising example, a compile
