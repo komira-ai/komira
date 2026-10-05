@@ -221,7 +221,7 @@ def test_a_healthy_sink_counts_nothing() raises:
 # through `emit_fallback_line` never reaches a drain, so its (fmt, module) is
 # never looked up in the dictionary — registering it was pure cost AND pure
 # hazard, and it put EVERY unbound thread in the process (HTTP handlers, the
-# agent heartbeat, CLI tools) into the set of racers for no benefit at all.
+# job supervisor heartbeat, CLI tools) into the set of racers for no benefit at all.
 #
 # What is pinned below is exactly that: the unbound path does not touch the
 # dictionary. The residual — synchronising the dictionary for the bound

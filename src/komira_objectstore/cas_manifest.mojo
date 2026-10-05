@@ -755,7 +755,7 @@ def _jittered_sleep_us(upper_us: Int64, salt: UInt64) raises:
     # `time.sleep` → `nanosleep`: an AOT binary that links komira_async (whose
     # reactor declares its OWN `external_call["nanosleep", ...]`) hits a
     # "conflicting nanosleep signature" legalization failure. Same fix as
-    # komira_agent._sleep_secs / komira_supervisor._sleep_ms.
+    # komira_job_supervisor._sleep_secs / komira_supervisor._sleep_ms.
     _ = external_call["usleep", Int32](UInt32(draw_us))
 
 
@@ -809,7 +809,7 @@ trait MetadataStore(Movable, Deinitable):
 
         Writer-lease-epoch fence: `writer_lease_epoch` /
         `current_lease_epoch` default to 0 (the fence is a NO-OP for callers
-        that do not track partition leases — search's split metastore, pgstore,
+        that do not track partition leases — search's split metastore, the table store,
         an older broker). When supplied, a `writer_lease_epoch <
         current_lease_epoch` RAISES the classified `lease_fenced` error BEFORE
         any chunk create-CAS (a stale displaced owner never takes an offset).
@@ -1028,7 +1028,7 @@ def catalog_key(prefix: String) raises -> Path:
     """The `<prefix>/_CATALOG` sidecar object key. A SINGLE mutable, etag-CAS-
     versioned sidecar (same shape as `_HEAD` / `_LOG_START`) holding an OPAQUE
     consumer blob. The CAS-manifest substrate carries NEITHER the blob's
-    meaning NOR its encoding — pgstore uses it for the durable table catalog
+    meaning NOR its encoding — the table store uses it for the durable table catalog
    , and the body is whatever the consumer encodes. This
     keeps the manifest mechanism domain-free (the blob is the consumer's
     business, above this trait), exactly like the opaque chunk body."""
@@ -1102,7 +1102,7 @@ struct CatalogSidecar(Movable, Deinitable):
     yet — a never-written catalog). The etag is the CAS token the next
     `cas_catalog_sidecar` advance feeds back (empty when absent → the first
     write is an If-None-Match create). The blob is an OPAQUE `List[UInt8]` —
-    the CAS substrate never interprets it (pgstore's catalog codec does).
+    the CAS substrate never interprets it (the SQL layer's catalog codec does).
 
     Field layout:
       var present: Bool       — True iff the `_CATALOG` object exists.
@@ -1595,7 +1595,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # heartbeat); `current_lease_epoch` is the live generation the caller read
         # AUTHORITATIVELY at flush. Both default to 0 (the fence is a NO-OP for a
         # caller that does not supply leases — e.g. search's split metastore, the
-        # pgstore path, or an older broker). The fence (a stale displaced writer
+        # table-store path, or an older broker). The fence (a stale displaced writer
         # whose generation is below the live one is rejected BEFORE any chunk
         # create-CAS) is applied inside `_append_inner`, before the retry loop.
         # CAS-GATE NARROWED: the
@@ -1633,7 +1633,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             body, record_count, writer_lease_epoch, current_lease_epoch
         )
 
-    # ---- OCC-coupled single-slot append (pgstore correctness slice) ----
+    # ---- OCC-coupled single-slot append (table-store correctness slice) ----
 
     def try_append_at_seq(
         mut self,
@@ -1650,8 +1650,8 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         `None` on a 412 (someone else owns the slot — the caller MUST re-read
         the AUTHORITATIVE head and re-run its conflict check before retrying).
 
-        WHY THIS EXISTS (the pgstore OCC/create-CAS coupling — serverless-pg
-        slice). The hot `append` path targets `cached_head+1`
+        WHY THIS EXISTS (the table-store OCC/create-CAS coupling). The hot
+        `append` path targets `cached_head+1`
         and ESCALATES past it on contention, so the slot it ultimately wins can
         be MORE THAN ONE past any head a caller validated against. For the
         OCC first-committer-wins check that is a SILENT isolation hole: a
@@ -1682,7 +1682,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             )
         # Writer-lease-epoch fence. Reject a stale
         # displaced writer BEFORE the single-slot create-CAS. The callers
-        # (pgstore table_store; and the adaptive-index-sharding
+        # (komira_table_store's table_store; and the adaptive-index-sharding
         # `IndexShardControl.try_bump_target` epoch-fenced count bump)
         # do NOT supply leases, so the defaults (0,0) make this a
         # harmless no-op for them; the fence is here for surface uniformity with
@@ -1714,7 +1714,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # Flush-op reduction: the OCC path commits a chunk WITHOUT going
         # through the hot `_append_inner` local-cache update, so any warm local
         # cache on THIS instance is now stale w.r.t. an OCC win. Invalidate it so
-        # a subsequent `append` re-reads the true tail (this path is the pgstore
+        # a subsequent `append` re-reads the true tail (this path is the table-store
         # OCC caller, which does not interleave with `append` on one instance in
         # practice; the invalidate keeps the two surfaces coherent regardless).
         # The OCC path still performs its own durable advance (default
@@ -1769,7 +1769,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         """Finalize a poll-shaped create-CAS WIN: the same best-effort monotone
         `_HEAD` advance + local-cache invalidate the sync `try_append_at_seq`
         does on its win (so a subsequent cached `read_head` tracks the tail). A
-        lost advance is recoverable by LIST; pgstore correctness reads always go
+        lost advance is recoverable by LIST; table-store correctness reads always go
         authoritative. The op passes the slot + base + the won chunk etag."""
         self._try_advance_head(
             candidate_seq,
@@ -3234,7 +3234,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         `CatalogSidecar.absent()` (present=False, empty blob/etag) when the
         object does not exist (a never-written catalog) — the next
         `cas_catalog_sidecar` then CREATEs it via If-None-Match. The blob is
-        the OPAQUE consumer payload (pgstore's serialized TableCatalog); the
+        the OPAQUE consumer payload (the table store's serialized TableCatalog); the
         CAS substrate round-trips it verbatim. READ verb -> SHARED (read)
         lock; exception-safe unlock (no `finally` in 1.0.0b1)."""
         _cas_gate_rdlock()

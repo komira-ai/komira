@@ -1,0 +1,100 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# google/brotli 1.1.0, MIT (LICENSE in the archive). Nothing of it is
+# committed here: the archive is fetched at build time, checked against its
+# sha256, and the files below extracted from it.
+pinned_file(
+    name = "brotli-1.1.0.tar.gz",
+    url = "https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz",
+    sha256 = "e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff",
+)
+
+_COMMON = [
+    "constants",
+    "context",
+    "dictionary",
+    "platform",
+    "shared_dictionary",
+    "transform",
+]
+
+_DEC = [
+    "bit_reader",
+    "decode",
+    "huffman",
+    "state",
+]
+
+_PRIVATE_HEADERS = [
+    "c/common/constants.h",
+    "c/common/context.h",
+    "c/common/dictionary.h",
+    "c/common/platform.h",
+    "c/common/shared_dictionary_internal.h",
+    "c/common/transform.h",
+    "c/common/version.h",
+    "c/dec/bit_reader.h",
+    "c/dec/huffman.h",
+    "c/dec/prefix.h",
+    "c/dec/state.h",
+]
+
+_PUBLIC_HEADERS = [
+    "decode.h",
+    "port.h",
+    "shared_dictionary.h",
+    "types.h",
+]
+
+_SRCS = ["c/common/{}.c".format(s) for s in _COMMON] + ["c/dec/{}.c".format(s) for s in _DEC]
+
+archive_files(
+    name = "src",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":brotli-1.1.0.tar.gz",
+    one_tree = True,
+    files = ["LICENSE"] + _SRCS + _PRIVATE_HEADERS +
+            ["c/include/brotli/{}".format(h) for h in _PUBLIC_HEADERS],
+    strip_prefix = "brotli-1.1.0",
+)
+
+# The Brotli decoder (libbrotlidec and the libbrotlicommon it needs), static,
+# with its C API <brotli/decode.h>. The sources include each other by their
+# path from the including source ("../common/constants.h"), found at their
+# real paths in :src (one_tree, raw_headers).
+cxx_library(
+    name = "brotlidec",
+    srcs = [":src[{}]".format(s) for s in _SRCS],
+    raw_headers = [":src[{}]".format(h) for h in _PRIVATE_HEADERS],
+    compiler_flags = [
+        "-O2",
+        "-DNDEBUG",
+    ],
+    exported_headers = {
+        "brotli/" + h: ":src[c/include/brotli/{}]".format(h)
+        for h in _PUBLIC_HEADERS
+    },
+    header_namespace = "",
+    visibility = ["PUBLIC"],
+)
+
+# Test data of //src/komira_parquet_codec (tests/test_compression_brotli.mojo):
+# the release's decoder test vectors, each a Brotli stream next to the text
+# it decodes to.
+archive_files(
+    name = "testdata",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":brotli-1.1.0.tar.gz",
+    one_tree = True,
+    files = [
+        "LICENSE",
+        "tests/testdata/empty",
+        "tests/testdata/empty.compressed",
+        "tests/testdata/ukkonooa",
+        "tests/testdata/ukkonooa.compressed",
+    ],
+    strip_prefix = "brotli-1.1.0",
+    visibility = ["PUBLIC"],
+)

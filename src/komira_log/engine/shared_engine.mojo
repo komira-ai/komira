@@ -50,7 +50,7 @@
 # reads its `worker_id` from TLS, and pushes the binary record into
 # `engine.ring(wid)`. A non-worker thread (TLS unset → WORKER_ID_UNSET) routes
 # to the synchronous-direct fallback (`emit_fallback_line`) so a log from the
-# agent heartbeat / an HTTP handler / a CLI tool with no runtime never crashes
+# job supervisor heartbeat / an HTTP handler / a CLI tool with no runtime never crashes
 # and is never silently dropped on an undrained ring.
 #
 # # Encapsulation
@@ -855,7 +855,7 @@ struct SharedEngine(Movable):
           * `drain_worker` -- a fully decoded record whose sink write raised.
             The ring did its job; the disk did not.
           * `emit_fallback_line` -- an unbound-thread log (an HTTP handler, the
-            agent heartbeat, a CLI tool, a log-mirroring thread). This is the
+            job supervisor heartbeat, a CLI tool, a log-mirroring thread). This is the
             path every log from a thread with no worker_id takes.
           * `escalate_line` -- an ERROR or WARN the ring already rejected once.
             A non-zero count here means the never-drop guarantee did not hold,
@@ -1289,7 +1289,7 @@ struct SharedEngine(Movable):
         the single append fd.
 
         ⚠ THIS IS THE PATH EVERY UNBOUND-THREAD LOG TAKES — an HTTP handler,
-        the agent heartbeat, a CLI tool with no runtime, and a log-mirroring
+        the job supervisor heartbeat, a CLI tool with no runtime, and a log-mirroring
         thread's own write. A transient sink error is still swallowed (the
         logger must never wedge its caller) but it is now COUNTED:
         `sink_dropped_line_count`. Uncounted, it would be the widest silent-loss
