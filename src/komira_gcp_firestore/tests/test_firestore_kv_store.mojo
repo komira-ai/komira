@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # THE FALSIFIERS over a ScriptedFirestore (canned HTTP answers per call, ZERO
-# sockets, ZERO network) — proving a managed app can use Firestore as a document
+# sockets, ZERO network) — proving a caller can use Firestore as a document
 # store through the minimal DocumentStore seam:
 #
 #   (1) get/put/delete/query ROUND-TRIP: put an FsValue field-map, get it back
@@ -12,7 +12,7 @@
 #       dropped field / a wrong verb / a mis-built request.
 #   (2) get on a MISSING document (a `missing` result) returns None — the KV
 #       absent case, NOT an error. FALSIFIER: if it propagated as an error, a
-#       managed app could not distinguish "no such key" from "failure".
+#       caller could not distinguish "no such key" from "failure".
 #   (3) delete of an ABSENT key is IDEMPOTENT (a no-op, not an error) — the
 #       KV-delete contract. FALSIFIER: if a re-delete raised, a
 #       delete-after-delete would spuriously fail.
@@ -199,7 +199,7 @@ def test_query_returns_key_and_fields() raises:
 
 # =============================================================================
 # The seam is generic: a helper that takes ANY DocumentStore proves the trait is
-# usable through the abstraction (a managed app codes against DocumentStore).
+# usable through the abstraction (a caller codes against DocumentStore).
 # =============================================================================
 def _put_through_seam[S: DocumentStore](
     mut store: S, collection: String, key: String, fields: FsValue

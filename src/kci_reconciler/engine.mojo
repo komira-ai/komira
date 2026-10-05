@@ -464,7 +464,7 @@ def _node_fault_domain(
     """WHOSE FAULT this node's `verb` failure is — the engine's resolution of the
     two carriers, in precedence order (`kci_reconciler.fault_domain`).
 
-      1. THE RAISE SITE, if it stated one (`fault_error(FAULT_CUSTOMER, ...)`
+      1. THE RAISE SITE, if it stated one (`fault_error(FAULT_USER, ...)`
          leaves our canonical token on the front of `inner`). A site that knew
          about THIS failure outranks a claim about the verb in general.
       2. THE CONFORMER'S PER-VERB DECLARATION (`Resource.fault_domain(verb)`).
@@ -512,7 +512,7 @@ def _node_verb_error(
 
     ⛔ IF THE INNER MESSAGE ALREADY CARRIES A TOKEN, IT IS STRIPPED FIRST — one
     token per error, at the front, always. Two tokens (`[fault=ours] apply node
-    ... failed: [fault=customer] ...`) would make `fault_domain_of_error` answer
+    ... failed: [fault=user] ...`) would make `fault_domain_of_error` answer
     with the OUTER one, which is right, while leaving a second one mid-message
     for a human to misread. `_node_fault_domain` has already read the inner one
     and given it precedence, so nothing is lost.
@@ -839,7 +839,7 @@ def _apply_impl[
             verb = VERB_UPDATE if adopted else VERB_NOOP
             # The no-op re-apply STILL surfaces the served URL — off the live read
             # we already did (no extra RPC). So a no-op
-            # customer-env re-apply records `served_endpoint` without a post-apply
+            # user-env re-apply records `served_endpoint` without a post-apply
             # poll (which returns NOT_FOUND/CONVERGING on that path).
             served_endpoint = live.endpoint
         elif live.phase == RES_ABSENT:
@@ -1032,14 +1032,14 @@ def rollback_create[
         `mark_reaped(logical_id)`.
 
     ⛔ WHY THE VERB_NOOP SKIP IS SEPARATE FROM already_confirmed, AND WHY OMITTING
-    IT DESTROYS CUSTOMER DATA. `already_confirmed` is a fact about OUR INTENT
+    IT DESTROYS USER DATA. `already_confirmed` is a fact about OUR INTENT
     LEDGER — "a prior apply of ours confirmed this key" — NOT about who created the
     resource. On the FIRST apply against a PRE-EXISTING cloud resource there is no
     prior intent, so `record_or_adopt_intent` writes a fresh PROVISIONING row and
     the ticket reports already_confirmed=False, while the live read reports MATCHED
     and §3 ADOPTS with verb=VERB_NOOP. Skipping only already_confirmed would
     therefore issue `delete(physical_id)` against a resource this deploy never
-    created — a customer's pre-existing bucket / table / secret, destroyed
+    created — a user's pre-existing bucket / table / secret, destroyed
     because an unrelated node failed later in the same apply. Adoption is the
     ORDINARY `MATCHED` arm of `apply_graph`, not a rare path, so this would reach
     every adopted resource.

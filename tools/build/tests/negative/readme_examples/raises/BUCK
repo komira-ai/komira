@@ -1,0 +1,10 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Must FAIL (test 38): see README.md.
+mojo_library(
+    name = "raises",
+    srcs = [
+        "__init__.mojo",
+        "greet.mojo",
+    ],
+)

@@ -5,7 +5,7 @@
 # P1's sink: format-on-the-caller → ONE `write(2)` of the whole rendered line
 # to fd 2 (stderr). Two correctness requirements:
 #
-#   1. THREAD SAFETY. P1 is called synchronously from ANY thread (the agent's
+#   1. THREAD SAFETY. P1 is called synchronously from ANY thread (the job supervisor's
 #      heartbeat loop, a service's reconciler, a worker). Two threads
 #      writing concurrently must not INTERLEAVE bytes within a line. We guard
 #      the write with a process-static atomic spin-lock so each rendered line

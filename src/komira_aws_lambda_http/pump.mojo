@@ -147,6 +147,7 @@ from komira_http_core.codec.types import HttpRequest, HttpResponse
 from komira_http_server.dispatch import RequestDispatcher
 
 from .apigw_v2 import (
+    AuthorizerHeaderPrefix,
     api_gateway_v2_event_to_request,
     response_to_api_gateway_v2,
 )
@@ -251,9 +252,14 @@ def run_api_gateway_pump[
     mut dispatcher: D,
     mut reactor: Reactor[RT.Sink],
     mut flush: F,
+    authorizer_header_prefix: AuthorizerHeaderPrefix,
     max_invocations: Int,
 ) raises -> Int:
     """Pump Lambda invocations through `dispatcher`, returning the count handled.
+
+    `authorizer_header_prefix` is handed to `api_gateway_v2_event_to_request`
+    unchanged: the header namespace the authorizer's context arrives under, and
+    under which client-supplied headers are destroyed (`apigw_v2.mojo` §3).
 
     `max_invocations < 0` runs forever (the deployed shape — Lambda freezes the
     process between invocations and tears it down when the sandbox retires). A
@@ -293,7 +299,9 @@ def run_api_gateway_pump[
         var convert_err = String("")
         var response = HttpResponse(status=Int32(500))
         try:
-            var req = api_gateway_v2_event_to_request(event)
+            var req = api_gateway_v2_event_to_request(
+                event, authorizer_header_prefix
+            )
             try:
                 response = dispatcher.dispatch[RT](reactor, req^)
             except de:
@@ -342,10 +350,13 @@ def run_api_gateway_and_tick_pump[
     mut dispatcher: D,
     mut reactor: Reactor[RT.Sink],
     mut flush: F,
+    authorizer_header_prefix: AuthorizerHeaderPrefix,
     max_invocations: Int,
 ) raises -> Int:
     """The SIBLING of `run_api_gateway_pump` that also serves EventBridge
     Scheduler ticks. Returns the count of invocations handled.
+    `authorizer_header_prefix` is as for `run_api_gateway_pump`; only the API
+    Gateway arm uses it, because a tick carries no headers.
 
     ⛔ IT CLASSIFIES BEFORE IT CONVERTS, AND THAT IS THE WHOLE DIFFERENCE.
     `classify_lambda_event` reads ONE field — `version`, present => an API
@@ -399,7 +410,9 @@ def run_api_gateway_and_tick_pump[
             if kind == LAMBDA_EVENT_KIND_SCHEDULED_TICK:
                 req = eventbridge_tick_event_to_request(event)
             else:
-                req = api_gateway_v2_event_to_request(event)
+                req = api_gateway_v2_event_to_request(
+                    event, authorizer_header_prefix
+                )
             try:
                 response = dispatcher.dispatch[RT](reactor, req^)
             except de:

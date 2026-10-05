@@ -2623,7 +2623,7 @@ def extract_trailers_for_stream(
 
 
 # the per-park BOUNDED wait. This is the
-# load-bearing constant that closes the pgstore-on-GCS multi-chunk open HANG.
+# load-bearing constant that closes the table-store-on-GCS multi-chunk open HANG.
 # A single park MUST NOT block indefinitely on the reactor — see
 # `transport.stream_park.park_on_pending` for the full root-cause narrative.
 #

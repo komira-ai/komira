@@ -14,7 +14,7 @@
 #                site key). P1 substitutes args into it synchronously; P2
 #                binary-encodes `[site-id, ts, args]` against the same literal.
 #   - `module` : a comptime `StringLiteral` module/target tag (e.g.
-#                "komira_agent") for per-module `EnvFilter` filtering. Defaults
+#                "komira_job_supervisor") for per-module `EnvFilter` filtering. Defaults
 #                to "komira" so a tagless call still works.
 #   - `*args`  : a variadic `*LogArg` pack — typed structured fields. Positional
 #                args fill `fmt`'s `{}`; trailing `Field("k", v)` args render
@@ -263,7 +263,7 @@ def _emit[
             # `wid` read. The non-worker arm below renders on the caller and
             # writes a finished String, so it never reaches a drain and its
             # (fmt, module) is never looked up. Registering there would put
-            # every unbound thread in the process (HTTP handlers, the agent
+            # every unbound thread in the process (HTTP handlers, the job supervisor
             # heartbeat, CLI tools) into an unsynchronised `List.append` on the
             # shared SiteDictionary, for an entry nothing would ever read. Only a record that will be
             # DECODED needs its site registered.

@@ -7,9 +7,23 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # No `deps`, on purpose: this is a foundational FFI leaf. Whatever is added
 # here lands in the build closure of every zlib consumer, including ones that
-# must not depend on the query engine. It welds no test of its own.
+# must not depend on the query engine.
+#
+# The welded test, test_zlib_into: the Span API. Its known-answer vector is the
+# zlib 1.3.1 release tarball, a gzip stream, pinned by sha256 in
+# //third_party/zlib and staged at golden/, with three of its members extracted
+# by busybox tar staged at golden/zlib/; plus round trips under each framing,
+# the empty stream, the too-small destination, corrupt and truncated streams,
+# and skipping a stream to the next.
 mojo_library(
     name = "komira_zlib",
-    srcs = glob(["**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_data = {
+        "tests/test_zlib_into.mojo": {
+            "golden/zlib": "//third_party/zlib:files",
+            "golden/zlib-1.3.1.tar.gz": "//third_party/zlib:zlib-1.3.1.tar.gz",
+        },
+    },
+    test_srcs = ["tests/test_zlib_into.mojo"],
     visibility = ["PUBLIC"],
 )

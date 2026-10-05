@@ -21,11 +21,17 @@
 # 3 PAYLOAD. For each library: the sha256 the script recorded of its
 # installed payload (`out/payload.<name>`) equals metadata.json's
 # `payload_sha256`.
-# 4 PROGRAM. `out/smoke.exit` says 0 and `out/smoke.out` holds the line
+# 4 PROGRAM. `out/<record>.exit` says 0 and `out/<record>.out` holds the line
 # `<stem> validation: N of M checks passed` with N == M > 0 (the program
 # states its own number of checks, so a run that stopped early or checked
 # nothing is not a pass). <stem> is the program's file name without `.mojo`
-# and a leading `smoke_`.
+# and a leading `smoke_`. <record> is `smoke` for the container's program,
+# and `readme_<import name>` for each README program of an ENV validation.
+# A failing row quotes the program's `FAILED` lines (`<readme>:<line>:
+# FAILED: ...` for a README example).
+#
+# The ENV runner writes the same records the container script wrote
+# (env.mojo), so these checks read both environments.
 #
 # Each finding is one row in the words of the shell reference this ports
 # (tools/build/package/validate_published.sh, checks 2 to 4); a phase that
@@ -51,6 +57,10 @@ comptime CHECK_PAYLOAD: String = "payload"
 comptime CHECK_PROGRAM: String = "program"
 comptime COUNT_INFIX: String = " validation: "
 comptime COUNT_SUFFIX: String = " checks passed"
+comptime SMOKE_RECORD: String = "smoke"
+"""The record stem of the container's program run: out/smoke.{exit,out,err}."""
+comptime README_FAILED_INFIX: String = ": FAILED: "
+"""What a README program prints for a failed example: `<readme>:<line>: FAILED: <error>`."""
 
 
 def read_or_empty(path: String) -> String:
@@ -344,27 +354,31 @@ def _parse_count(line: String, prefix: String) -> Tuple[Int, Int]:
         return (-1, -1)
 
 
-def check_program(out_dir: String, program: String, mut checks: List[ResultValidationCheck]) -> Bool:
-    """Check 4 (file header): one row."""
+def check_program(
+    out_dir: String, program: String, mut checks: List[ResultValidationCheck], record: String = String(SMOKE_RECORD)
+) -> Bool:
+    """Check 4 (file header): one row. `record` names the files the run left
+    in `out_dir`: `<record>.exit`, `<record>.out`, `<record>.err`."""
     var stem = program_stem(program)
     var prefix = stem + String(COUNT_INFIX)
     var expected = String("mojo run exits 0 and prints '") + prefix + String("N of N checks passed', N > 0")
-    var code = String(read_or_empty(join_path(out_dir, String("smoke.exit"))).strip())
-    var out = _lines(read_or_empty(join_path(out_dir, String("smoke.out"))))
+    var code = String(read_or_empty(join_path(out_dir, record + String(".exit"))).strip())
+    var out = _lines(read_or_empty(join_path(out_dir, record + String(".out"))))
     if code != String("0"):
         var said = String("")
         var shown = 0
         for i in range(len(out)):
-            if shown < 5 and (out[i].startswith(String("FAILED")) or out[i].startswith(prefix)):
+            var failed = out[i].startswith(String("FAILED")) or out[i].find(String(README_FAILED_INFIX)) > 0
+            if shown < 5 and (failed or out[i].startswith(prefix)):
                 said += out[i] + String(";")
                 shown += 1
         var why = String("mojo run failed: ")
         if code.byte_length() == 0:
-            why = String("the container recorded no exit status of mojo run: ")
+            why = String("no exit status of mojo run was recorded: ")
         checks.append(
             _row(
                 String(CHECK_PROGRAM), expected^,
-                String("program: ") + why + said + String(" ") + tail_lines(read_or_empty(join_path(out_dir, String("smoke.err"))), 2),
+                String("program: ") + why + said + String(" ") + tail_lines(read_or_empty(join_path(out_dir, record + String(".err"))), 2),
                 False,
             )
         )

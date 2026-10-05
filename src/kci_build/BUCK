@@ -75,6 +75,9 @@ mojo_library(
         # --affected-by: the change, the affected commands (golden argv, the
         # files they get), exactly the reached units, widening, every stop
         "tests/test_affected_flow.mojo",
+        # the derived checks: the derive_checks command first, its checks joining
+        # the units, a notice for a check target matching nothing, the refusals
+        "tests/test_derived_checks_flow.mojo",
         # SupervisorRunner over /bin/sh: output files, exit codes, the timeout,
         # an explicit child environment and inheritance
         "tests/test_supervisor_runner.mojo",

@@ -160,6 +160,9 @@ SHIPPED_OPT_LEVEL = "3"
 def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
+    Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
+    `struct(actions = ..., label = ...)` (see _readme_test).
+
     With `shared`, emits a shared library instead: DT_SONAME is the output's
     file name and its one run path is `$ORIGIN/../..`, the bundle's lib/
     seen from lib/glibc-hwcaps/<level>/.
@@ -428,6 +431,23 @@ def _library_impl(ctx):
         test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
         markers.append(marker)
 
+    # Whether the conda package is gated by a test: the test_srcs only. A
+    # README's examples are not counted, since analysis cannot tell whether
+    # it holds any (see _readme_gate).
+    has_tests = len(markers) > 0
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests)
+
+    # A README that ships (the library has a conda package the build can make,
+    # which installs it at share/doc/<conda name>/README.md) refuses relative
+    # links: the installed copy has no neighbours.
+    ships = conda_name != None and conda_refusal == None
+    readme_marker = _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships)
+    if readme_marker != None:
+        if "readme" in test_subtargets:
+            fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
+        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]])]
+        markers.append(readme_marker[0])
+
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
@@ -443,7 +463,6 @@ def _library_impl(ctx):
     else:
         public = ungated
 
-    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, len(markers) > 0)
     return [
         DefaultInfo(
             default_output = public,
@@ -469,8 +488,118 @@ def _library_impl(ctx):
             },
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
+            readme = ctx.attrs.readme,
         ),
     ]
+
+# ---- README examples ----------------------------------------------------------
+#
+# A library whose package holds a README.md runs the README's ```mojo
+# examples as one more welded test, `[tests][readme]`: the docs cannot rot.
+# The macro passes the README (declaring is gating: a README is declared by
+# existing) and the tool, //tools/build/readme_examples:tool, whose
+# `generate` writes `readme_<import name>.mojo` and the number of examples.
+# The convention (what an example is, hidden lines, the refusals) is in that
+# package and in README.md here.
+#
+# Whether a README holds an example is in its bytes, which analysis cannot
+# read, so a dynamic action reads the count: with one or more examples it
+# compiles the program against the UNGATED package and runs it through
+# gate_runner.sh exactly as a `test_srcs` entry; with none it compiles and
+# runs nothing, and the marker records that no example exists (never a
+# PASS line). A refused README (an info string such as `mojo skip`, a stray
+# hidden-lines comment) fails `generate`, naming README.md:<line>.
+
+def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
+    """(marker, generated program) of the README's examples, or None
+    without a README. `ships`: the library's conda package installs the
+    README, so a relative link in it is refused."""
+    readme = ctx.attrs.readme
+    if readme == None:
+        if ctx.attrs.readme_tool != None:
+            fail("{}: readme_tool is set and readme is not".format(ctx.label))
+        return None
+    if ctx.attrs.readme_tool == None:
+        fail("{}: readme is set and readme_tool is not; the mojo_library macro sets both".format(ctx.label))
+    display = _join(ctx.label.package, readme.short_path)
+    program = ctx.actions.declare_output("tests/readme/readme_{}.mojo".format(import_name))
+    count = ctx.actions.declare_output("tests/readme/examples")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs.readme_tool[RunInfo],
+            "generate",
+            "--readme",
+            readme,
+            "--display",
+            display,
+            "--package",
+            import_name,
+            "--links",
+            "refuse" if ships else "allow",
+            "--out",
+            program.as_output(),
+            "--count",
+            count.as_output(),
+        ),
+        category = "mojo_readme_generate",
+    )
+    marker = ctx.actions.declare_output("tests/readme.passed")
+    ctx.actions.dynamic_output_new(_readme_test(
+        label = ctx.label,
+        gate_label = "{}:{}".format(ctx.label.raw_target(), readme.short_path),
+        count = count,
+        program = program,
+        marker = marker.as_output(),
+        tc = tc,
+        closure = ungated_tset,
+        opt_level = ctx.attrs.test_optimization_level,
+        link_tail = _link_tail(c_link),
+        env_args = env_args,
+    ))
+    return marker, program
+
+def _readme_test_impl(actions, label, gate_label, count, program, marker, tc, closure, opt_level, link_tail, env_args):
+    n = int(count.read_string().strip())
+    if n == 0:
+        actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
+        return []
+    shim = struct(actions = actions, label = label)
+    stem = program.basename[:-len(".mojo")]
+    exe = _build_executable(shim, tc, "tests/readme/bin/" + stem, [program], program, [closure], opt_level, "mojo_build_test", "readme", None, link_extra = link_tail)
+    root, staged = _test_root(shim, "tests/readme/root", exe, {})
+    actions.run(
+        cmd_args(
+            tc.busybox,
+            "sh",
+            tc.gate_runner,
+            tc.busybox,
+            tc.compiler,
+            gate_label,
+            staged,
+            marker,
+            env_args,
+            hidden = root,
+        ),
+        category = "mojo_gated_test",
+        identifier = "readme",
+    )
+    return []
+
+_readme_test = dynamic_actions(
+    impl = _readme_test_impl,
+    attrs = {
+        "closure": dynattrs.value(typing.Any),
+        "count": dynattrs.artifact_value(),
+        "env_args": dynattrs.value(list[str]),
+        "gate_label": dynattrs.value(str),
+        "label": dynattrs.value(Label),
+        "link_tail": dynattrs.value(typing.Any),
+        "marker": dynattrs.output(),
+        "opt_level": dynattrs.value(str),
+        "program": dynattrs.value(Artifact),
+        "tc": dynattrs.value(typing.Any),
+    },
+)
 
 _TOOLCHAIN_ATTR = {
     "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
@@ -501,6 +630,11 @@ mojo_library_rule = rule(
         "test_data": attrs.dict(attrs.string(), attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source())), default = {}),
         # Environment for every gated test of this library.
         "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
+        # The package's README.md and the tool that runs its examples; the
+        # macro sets both (see _readme_gate). No default tool: the tool is
+        # itself built from a mojo_library, so a default would be a cycle.
+        "readme": attrs.option(attrs.source(), default = None),
+        "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
     } | _TOOLCHAIN_ATTR,
 )
 
@@ -819,6 +953,9 @@ mojo_shared_lib_rule = rule(
     } | _TOOLCHAIN_ATTR,
 )
 
+_README_TOOL_PACKAGE = "tools/build/readme_examples"
+_README_TOOL = "komira//" + _README_TOOL_PACKAGE + ":tool"
+
 def _mojo_library(**kwargs):
     # Refused by name, so a stale BUCK file says why rather than buck2's
     # generic "unexpected parameter".
@@ -828,6 +965,15 @@ def _mojo_library(**kwargs):
     # out with `conda = False`. Nothing is published by that: the release tool's
     # artifact declarations say which packages are (tools/build/package/conda.bzl).
     summary = kwargs.pop("conda_summary", None)
+    for attr in ("readme", "readme_tool"):
+        if attr in kwargs:
+            fail("{}: `{}` is set by mojo_library from the package's README.md; do not pass it".format(kwargs.get("name", "mojo_library"), attr))
+    readme = glob(["README.md"])
+    if readme:
+        if package_name() == _README_TOOL_PACKAGE:
+            fail("{}: {} may hold no README.md: every library with a README runs {} on it, so the tool would depend on itself".format(kwargs.get("name", "mojo_library"), _README_TOOL_PACKAGE, _README_TOOL))
+        kwargs["readme"] = readme[0]
+        kwargs["readme_tool"] = _README_TOOL
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):
         name = kwargs["name"]

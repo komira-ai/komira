@@ -97,7 +97,7 @@ def test_envfilter_per_module() raises:
         f.effective_level("komira_http"), LEVEL_WARN, "komira_http = WARN"
     )
     assert_equal(
-        f.effective_level("komira_agent"),
+        f.effective_level("komira_job_supervisor"),
         LEVEL_INFO,
         "unmatched module = global INFO",
     )
@@ -108,30 +108,30 @@ def test_envfilter_longest_prefix() raises:
     # A general module rule + a more-specific dotted override coexist; the
     # longest matching prefix wins.
     var f = EnvFilter(
-        String("warn,komira_agent=info,komira_agent.heartbeat=debug")
+        String("warn,komira_job_supervisor=info,komira_job_supervisor.heartbeat=debug")
     )
     assert_equal(f.global_level, LEVEL_WARN, "global = WARN")
     assert_equal(
-        f.effective_level("komira_agent"),
+        f.effective_level("komira_job_supervisor"),
         LEVEL_INFO,
-        "komira_agent -> INFO (its own rule)",
+        "komira_job_supervisor -> INFO (its own rule)",
     )
     assert_equal(
-        f.effective_level("komira_agent.heartbeat"),
+        f.effective_level("komira_job_supervisor.heartbeat"),
         LEVEL_DEBUG,
-        "heartbeat -> DEBUG (longer prefix wins over komira_agent=info)",
+        "heartbeat -> DEBUG (longer prefix wins over komira_job_supervisor=info)",
     )
     assert_equal(
-        f.effective_level("komira_agent.upload"),
+        f.effective_level("komira_job_supervisor.upload"),
         LEVEL_INFO,
-        "komira_agent.upload -> INFO (parent prefix, no own rule)",
+        "komira_job_supervisor.upload -> INFO (parent prefix, no own rule)",
     )
     # A module that merely SHARES a prefix substring (not a dotted boundary)
-    # must NOT match: komira_agentx is not under komira_agent.
+    # must NOT match: komira_job_supervisorx is not under komira_job_supervisor.
     assert_equal(
-        f.effective_level("komira_agentx"),
+        f.effective_level("komira_job_supervisorx"),
         LEVEL_WARN,
-        "komira_agentx -> global WARN (not a dotted-prefix match)",
+        "komira_job_supervisorx -> global WARN (not a dotted-prefix match)",
     )
     print("  test_envfilter_longest_prefix PASS")
 
@@ -248,14 +248,14 @@ def test_render_line_shape() raises:
     var line = render_line(
         Int64(1790812800000),
         LEVEL_INFO,
-        "komira_agent",
+        "komira_job_supervisor",
         String("job abc finished"),
         fields,
     )
     assert_equal(
         line,
         String(
-            "2026-10-01T00:00:00.000Z INFO [komira_agent] job abc finished"
+            "2026-10-01T00:00:00.000Z INFO [komira_job_supervisor] job abc finished"
             " phase=DONE rows=42"
         ),
         "full rendered line shape",

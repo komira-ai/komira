@@ -1,0 +1,94 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Parquet page compression: the codec dispatch a page reader and writer call
+# (UNCOMPRESSED, SNAPPY, GZIP, ZSTD, LZ4_RAW, the deprecated LZ4, BROTLI), the
+# snappy codec (the snappy C API, statically linked, and a Mojo decoder), the
+# LZ4 frame codec and a CRC-32C helper. Every public entry takes Spans.
+#
+# snappy and the Brotli decoder are linked from //third_party/snappy and
+# //third_party/brotli. LZ4 raw block and zlib come from komira_lz4 and
+# komira_zlib, which open liblz4 and libz at run time; zstd and the LZ4 frame
+# API are likewise opened by name at first use (libzstd.so.1, liblz4.so.1), so
+# they are not linked.
+#
+# The welded tests:
+# - test_compression_gzip, test_compression_zstd_lz4: the dispatch, codec by
+#   codec: round trips, a known gzip stream and a known zstd frame, too-small
+#   outputs, refusals.
+# - test_compression_brotli: google/brotli's decoder test vectors
+#   (//third_party/brotli:testdata, out of the pinned brotli archive, staged
+#   at brotli/).
+# - test_compression_lz4_framings: LZ4 frames and the three layouts of the
+#   deprecated LZ4 codec, from the reference liblz4's golden frame
+#   (//third_party/pierrec-lz4, pinned by sha256, staged at golden/).
+# - test_snappy_corpus: google/snappy's correctness corpus and its three
+#   corrupt blobs (//third_party/snappy:testdata, out of the pinned snappy
+#   archive, staged at corpus/), through both snappy decoders.
+# - test_snappy_mojo_oracle, test_snappy_short_offset: the Mojo snappy decoder
+#   against the C library's, and hand-built short-offset blobs.
+# - test_snappy_exact_dst: both snappy decoders into a destination with less
+#   than kSlopBytes of room past the decoded length, sentinel-guarded, and a
+#   blob declaring more than the destination holds; hand-built blobs that
+#   put each of the Mojo decoder's four single 16-byte stores at every
+#   distance from the end of an exact-size destination.
+# - test_snappy_fuzz: a seeded differential fuzz of both snappy decoders
+#   (structured tag streams, random bytes, every prefix and single-byte
+#   corruptions of a valid stream), sentinel-guarded on both sides of the
+#   destination and with the input surrounded by two different fills.
+# - test_codecs_adversarial: every codec through the dispatch with
+#   truncations, single-byte corruptions, short and empty destinations and
+#   hostile size fields, sentinel-guarded on both sides of the destination.
+# - test_crc32c: published CRC-32C check values.
+# - test_no_env_reads: the package's sources read no environment, import no
+#   komira package outside the deps below, hold no raw pointer in a public
+#   signature and rebuild no address from an integer. It is staged every
+#   source `srcs` compiles, subdirectories included, so a module the scan does
+#   not read fails it.
+_SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
+
+mojo_library(
+    name = "komira_parquet_codec",
+    srcs = _SRCS,
+    deps = [
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_zlib:komira_zlib",
+        "//third_party/brotli:brotlidec",
+        "//third_party/snappy:snappy",
+    ],
+    test_data = {
+        "tests/test_codecs_adversarial.mojo": {
+            "brotli": "//third_party/brotli:testdata",
+        },
+        "tests/test_compression_brotli.mojo": {
+            "brotli": "//third_party/brotli:testdata",
+        },
+        "tests/test_compression_lz4_framings.mojo": {
+            "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
+            "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
+        },
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in _SRCS
+        },
+        "tests/test_snappy_corpus.mojo": {
+            "corpus": "//third_party/snappy:testdata",
+        },
+    },
+    test_srcs = [
+        "tests/test_codecs_adversarial.mojo",
+        "tests/test_compression_brotli.mojo",
+        "tests/test_compression_gzip.mojo",
+        "tests/test_compression_lz4_framings.mojo",
+        "tests/test_compression_zstd_lz4.mojo",
+        "tests/test_crc32c.mojo",
+        "tests/test_no_env_reads.mojo",
+        "tests/test_snappy_corpus.mojo",
+        "tests/test_snappy_exact_dst.mojo",
+        "tests/test_snappy_fuzz.mojo",
+        "tests/test_snappy_mojo_oracle.mojo",
+        "tests/test_snappy_short_offset.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

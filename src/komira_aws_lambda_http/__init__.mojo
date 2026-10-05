@@ -17,8 +17,10 @@ or a caller's request from a scheduled backstop.
               `HttpRequest` / `HttpResponse` the dispatcher already takes. The
               version is PINNED and ASSERTED (a 1.0 event is refused, not
               coerced), `isBase64Encoded` is honoured in BOTH directions, and
-              every client-supplied `x-komira-authorizer-*` header is destroyed
-              on entry so an authorizer's answer cannot be forged by the caller.
+              the authorizer's context reaches the handler as headers under a
+              CALLER-CHOSEN prefix (`AuthorizerHeaderPrefix`, required, no
+              default), and every client-supplied header under that prefix is
+              destroyed on entry so an authorizer's answer cannot be forged.
 
   `pump`      the invoke loop, parametric over `LambdaInvocationTransport` and
               `LambdaPostResponseFlush` so it can be driven with no cloud.
@@ -67,7 +69,7 @@ here would invert that edge.
 
 from .apigw_v2 import (
     APIGW_PAYLOAD_VERSION,
-    AUTHORIZER_HEADER_PREFIX,
+    AuthorizerHeaderPrefix,
     api_gateway_v2_event_to_request,
     response_to_api_gateway_v2,
 )

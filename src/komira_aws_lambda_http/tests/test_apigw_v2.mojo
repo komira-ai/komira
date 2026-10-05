@@ -41,7 +41,7 @@ from komira_encoding import base64_decode, base64_encode
 
 from komira_aws_lambda_http.apigw_v2 import (
     APIGW_PAYLOAD_VERSION,
-    AUTHORIZER_HEADER_PREFIX,
+    AuthorizerHeaderPrefix,
     api_gateway_v2_event_to_request,
     response_to_api_gateway_v2,
 )
@@ -50,6 +50,17 @@ from komira_aws_lambda_http.apigw_v2 import (
 # =============================================================================
 # Fixtures.
 # =============================================================================
+
+# The caller-chosen authorizer header namespace every fixture in this file uses.
+# Deliberately an application name, not the library's: the converter must carry
+# no namespace of its own (see
+# `test_the_prefix_is_the_callers_and_only_the_callers`).
+comptime _PREFIX: String = "x-example-authz-"
+
+
+def _prefix() raises -> AuthorizerHeaderPrefix:
+    return AuthorizerHeaderPrefix(String(_PREFIX))
+
 
 def _binary_probe() -> List[UInt8]:
     """Bytes that are NOT valid UTF-8 — the only kind that falsifies a base64
@@ -136,7 +147,7 @@ def test_method_comes_from_request_context_http_not_the_top_level() raises:
     FALSIFIES: a converter reading 1.0's top-level `httpMethod`. The base event
     has NO `httpMethod` key at all, so such a converter yields
     `HTTP_METHOD_UNKNOWN` and the dispatcher answers 405 to a POST."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_equal(req.method.code, HTTP_METHOD_POST)
     assert_false(req.method.code == HTTP_METHOD_UNKNOWN)
     assert_false(req.method.code == HTTP_METHOD_GET)
@@ -144,7 +155,7 @@ def test_method_comes_from_request_context_http_not_the_top_level() raises:
 
 def test_raw_path_becomes_the_request_path() raises:
     """`rawPath` -> `req.path`, verbatim."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_equal(req.path, String("/api/v1/items"))
 
 
@@ -159,7 +170,7 @@ def test_a_repeated_query_key_survives_whole() raises:
     Also asserts NO leading `?` — `HttpRequest.query_string`'s documented
     contract, and already `rawQueryString`'s, so any trimming here would be a
     net change."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_equal(req.query_string, String("tag=a&tag=b&dry_run=1"))
     assert_false(req.query_string.startswith(String("?")))
 
@@ -172,7 +183,7 @@ def test_a_multi_value_header_arrives_comma_joined_and_unsplit() raises:
     arrive as `text/html` alone and content negotiation would silently change.
     Asserting the joined value, not merely that the key exists, is what detects
     that."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_equal(
         _header(req.headers, String("accept")),
         String("text/html, application/json"),
@@ -184,7 +195,7 @@ def test_header_names_are_ascii_lowercased() raises:
     canonical keys, so `X-Request-Id` must be reachable as `x-request-id` and
     the original spelling must NOT also be present (two entries for one header
     is how a lookup silently misses)."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_equal(_header(req.headers, String("x-request-id")), String("req-77"))
     assert_true(String("content-type") in req.headers)
     assert_false(String("X-Request-Id") in req.headers)
@@ -198,7 +209,7 @@ def test_the_cookies_array_folds_into_one_cookie_header() raises:
 
     FALSIFIES: dropping `cookies` (the session vanishes and the user is silently
     logged out behind the gateway only), and joining with the wrong separator."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_equal(
         _header(req.headers, String("cookie")),
         String("session=abc; theme=dark"),
@@ -207,7 +218,7 @@ def test_the_cookies_array_folds_into_one_cookie_header() raises:
 
 def test_a_text_body_arrives_as_its_own_bytes() raises:
     """`isBase64Encoded: false` -> the body string's bytes, unchanged."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_equal(_bytes_to_ascii(req.body), String('{"to": "a@example.com"}'))
 
 
@@ -229,7 +240,7 @@ def test_a_base64_binary_body_is_decoded_inbound() raises:
         + base64_encode(probe)
         + String('", "isBase64Encoded": true}')
     )
-    var req = api_gateway_v2_event_to_request(event)
+    var req = api_gateway_v2_event_to_request(event, _prefix())
     assert_true(_bytes_equal(req.body, probe))
     assert_equal(len(req.body), 6)
 
@@ -251,7 +262,7 @@ def test_base64_text_with_the_flag_false_is_NOT_decoded() raises:
         + encoded
         + String('", "isBase64Encoded": false}')
     )
-    var req = api_gateway_v2_event_to_request(event)
+    var req = api_gateway_v2_event_to_request(event, _prefix())
     assert_equal(_bytes_to_ascii(req.body), encoded)
     assert_false(_bytes_equal(req.body, probe))
 
@@ -263,7 +274,7 @@ def test_an_absent_body_is_empty_not_a_refusal() raises:
         '{"version": "2.0", "rawPath": "/health", "rawQueryString": "",'
         '"requestContext": {"http": {"method": "GET"}}}'
     )
-    var req = api_gateway_v2_event_to_request(event)
+    var req = api_gateway_v2_event_to_request(event, _prefix())
     assert_equal(len(req.body), 0)
     assert_equal(req.method.code, HTTP_METHOD_GET)
 
@@ -274,18 +285,19 @@ def test_an_absent_body_is_empty_not_a_refusal() raises:
 
 def test_the_authorizer_context_reaches_the_request_as_reserved_headers() raises:
     """`requestContext.authorizer.lambda`'s STRING members become
-    `x-komira-authorizer-<key>` headers, key ASCII-lowercased.
+    `<prefix><key>` headers (here `x-example-authz-<key>`), key
+    ASCII-lowercased.
 
     `dispatch(reactor, req)` has no third argument, so `req.headers` is the only
     channel an authorizer's answer has. This is the assertion that the channel
     carries."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_equal(
-        _header(req.headers, String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")),
+        _header(req.headers, String(_PREFIX) + String("subjectid")),
         String("subject-real"),
     )
     assert_equal(
-        _header(req.headers, String(AUTHORIZER_HEADER_PREFIX) + String("plan")),
+        _header(req.headers, String(_PREFIX) + String("plan")),
         String("enterprise"),
     )
 
@@ -297,9 +309,9 @@ def test_a_non_string_authorizer_member_is_skipped_not_stringified() raises:
     means something other than a Lambda authorizer assembled the object.
     Inventing `"12"` for it would hand the handler a value no authorizer
     wrote."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
     assert_false(
-        (String(AUTHORIZER_HEADER_PREFIX) + String("seatcount")) in req.headers
+        (String(_PREFIX) + String("seatcount")) in req.headers
     )
 
 
@@ -313,20 +325,20 @@ def test_a_forged_authorizer_header_never_reaches_the_dispatcher() raises:
     `subject-victim` in the handler's hands on every unauthenticated route.
 
     FAILS ON A "strip only what we overwrite" CONVERTER: `req.headers` would
-    contain `x-komira-authorizer-subjectid: subject-victim`."""
+    contain `x-example-authz-subjectid: subject-victim`."""
     var event = String(
         '{"version": "2.0", "rawPath": "/public", "rawQueryString": "",'
-        '"headers": {"x-komira-authorizer-subjectid": "subject-victim",'
-        '"X-Komira-Authorizer-Plan": "enterprise",'
+        '"headers": {"x-example-authz-subjectid": "subject-victim",'
+        '"X-Example-Authz-Plan": "enterprise",'
         '"x-request-id": "req-9"},'
         '"requestContext": {"http": {"method": "GET"}}}'
     )
-    var req = api_gateway_v2_event_to_request(event)
+    var req = api_gateway_v2_event_to_request(event, _prefix())
     assert_false(
-        (String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")) in req.headers
+        (String(_PREFIX) + String("subjectid")) in req.headers
     )
     assert_false(
-        (String(AUTHORIZER_HEADER_PREFIX) + String("plan")) in req.headers
+        (String(_PREFIX) + String("plan")) in req.headers
     )
     # ⚠ NON-EMPTY ARM: the strip must be SURGICAL. A converter that dropped all
     # headers would satisfy the two assertions above vacuously.
@@ -343,15 +355,47 @@ def test_the_authorizer_wins_over_a_client_header_of_the_same_name() raises:
     test."""
     var event = String(
         '{"version": "2.0", "rawPath": "/private", "rawQueryString": "",'
-        '"headers": {"x-komira-authorizer-subjectid": "subject-victim"},'
+        '"headers": {"x-example-authz-subjectid": "subject-victim"},'
         '"requestContext": {"http": {"method": "GET"},'
         '"authorizer": {"lambda": {"subjectId": "subject-real"}}}}'
     )
-    var req = api_gateway_v2_event_to_request(event)
+    var req = api_gateway_v2_event_to_request(event, _prefix())
     assert_equal(
-        _header(req.headers, String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")),
+        _header(req.headers, String(_PREFIX) + String("subjectid")),
         String("subject-real"),
     )
+
+
+def test_a_context_key_that_is_not_a_header_token_is_skipped() raises:
+    """A context member whose KEY is not an RFC 9110 token (a space, a colon,
+    CR LF) or is empty is skipped, like a non-string value. The prefix is
+    validated, so the key is the only half of the injected name left to check.
+
+    FALSIFIES a converter that appends the key unchecked: it would inject
+    `x-example-authz-a b`, `x-example-authz-a:b` and a name carrying CR LF,
+    none of which a header can carry. The `subjectId` member is the non-empty
+    arm: a converter that skipped every key would fail on it."""
+    var event = String(
+        '{"version": "2.0", "rawPath": "/private", "rawQueryString": "",'
+        '"requestContext": {"http": {"method": "GET"},'
+        '"authorizer": {"lambda": {'
+        '"subjectId": "subject-real",'
+        '"a b": "space",'
+        '"a:b": "colon",'
+        '"a\\r\\nb": "crlf",'
+        '"": "empty"'
+        '}}}}'
+    )
+    var req = api_gateway_v2_event_to_request(event, _prefix())
+    assert_equal(
+        _header(req.headers, String(_PREFIX) + String("subjectid")),
+        String("subject-real"),
+    )
+    assert_false((String(_PREFIX) + String("a b")) in req.headers)
+    assert_false((String(_PREFIX) + String("a:b")) in req.headers)
+    assert_false((String(_PREFIX) + String("a\r\nb")) in req.headers)
+    assert_false(String(_PREFIX) in req.headers)
+    assert_equal(len(req.headers), 1)
 
 
 def test_a_jwt_authorizer_kind_is_not_read_as_a_context_entry() raises:
@@ -363,9 +407,200 @@ def test_a_jwt_authorizer_kind_is_not_read_as_a_context_entry() raises:
         '"requestContext": {"http": {"method": "GET"},'
         '"authorizer": {"jwt": {"claims": {"sub": "u1"}}}}}'
     )
-    var req = api_gateway_v2_event_to_request(event)
-    assert_false((String(AUTHORIZER_HEADER_PREFIX) + String("jwt")) in req.headers)
+    var req = api_gateway_v2_event_to_request(event, _prefix())
+    assert_false((String(_PREFIX) + String("jwt")) in req.headers)
     assert_equal(len(req.headers), 0)
+
+
+def test_the_prefix_is_the_callers_and_only_the_callers() raises:
+    """The SAME event converted under two prefixes. Under `x-other-authz-` the
+    context arrives under `x-other-authz-`, a client header under
+    `x-example-authz-` is an ordinary header and passes through, and a client
+    header under `x-other-authz-` is the forgery and is dropped.
+
+    FALSIFIES a converter that keeps a namespace of its own: one that still
+    strips or injects under a fixed prefix fails the pass-through arm or the
+    injection arm, whichever prefix it hard-codes."""
+    var event = String(
+        '{"version": "2.0", "rawPath": "/private", "rawQueryString": "",'
+        '"headers": {"x-example-authz-subjectid": "subject-ordinary",'
+        '"x-other-authz-plan": "enterprise"},'
+        '"requestContext": {"http": {"method": "GET"},'
+        '"authorizer": {"lambda": {"subjectId": "subject-real"}}}}'
+    )
+    var other = AuthorizerHeaderPrefix(String("x-other-authz-"))
+    var req = api_gateway_v2_event_to_request(event, other)
+    assert_equal(
+        _header(req.headers, String("x-other-authz-subjectid")),
+        String("subject-real"),
+    )
+    assert_false(String("x-other-authz-plan") in req.headers)
+    assert_equal(
+        _header(req.headers, String("x-example-authz-subjectid")),
+        String("subject-ordinary"),
+    )
+    assert_equal(len(req.headers), 2)
+
+    # And under the file's own prefix the roles swap.
+    var req2 = api_gateway_v2_event_to_request(event, _prefix())
+    assert_equal(
+        _header(req2.headers, String(_PREFIX) + String("subjectid")),
+        String("subject-real"),
+    )
+    assert_equal(
+        _header(req2.headers, String("x-other-authz-plan")),
+        String("enterprise"),
+    )
+    assert_equal(len(req2.headers), 2)
+
+
+def test_a_valid_prefix_is_kept_exactly_as_given() raises:
+    """FALSIFIES a constructor that normalizes what it accepts (folding,
+    trimming, or appending a separator): the value comes back byte for
+    byte."""
+    assert_equal(_prefix().value(), String(_PREFIX))
+    assert_equal(
+        AuthorizerHeaderPrefix(String("authz-")).value(), String("authz-")
+    )
+    assert_equal(
+        AuthorizerHeaderPrefix(String("x-app_1.authz-")).value(),
+        String("x-app_1.authz-"),
+    )
+
+
+def _prefix_must_be_refused(
+    prefix: String, mention: String, because: String
+) raises:
+    """The constructor must RAISE, and the message must name the rule
+    (`mention`), so a refusal for the wrong reason does not count."""
+    var raised = False
+    try:
+        var p = AuthorizerHeaderPrefix(prefix)
+        _ = p.value()
+    except e:
+        raised = True
+        if String(e).find(mention) < 0:
+            raise Error(
+                String("prefix refused for the wrong reason (")
+                + because
+                + String("): ")
+                + String(e)
+            )
+    if not raised:
+        raise Error(String("expected the prefix to be REFUSED: ") + because)
+
+
+def test_refuses_an_empty_prefix() raises:
+    """FALSIFIES a constructor that accepts `""`, which reserves every header
+    name and makes the strip drop the whole client request's headers."""
+    _prefix_must_be_refused(String(""), String("EMPTY"), String("empty"))
+
+
+def test_refuses_a_prefix_containing_cr_or_lf() raises:
+    """A line break in a field name is a header-injection vector; each of CR,
+    LF and CRLF is refused BY NAME, not merely as a non-token byte."""
+    _prefix_must_be_refused(
+        String("x-app-\rauthz-"), String("CR or LF"), String("CR")
+    )
+    _prefix_must_be_refused(
+        String("x-app-\nauthz-"), String("CR or LF"), String("LF")
+    )
+    _prefix_must_be_refused(
+        String("x-app-authz-\r\n"), String("CR or LF"), String("trailing CRLF")
+    )
+
+
+def test_refuses_an_upper_case_prefix() raises:
+    """Client header names are lower-cased before the compare, so an upper-case
+    prefix would strip nothing. Refused rather than silently folded."""
+    _prefix_must_be_refused(
+        String("X-App-Authz-"), String("UPPER-CASE"), String("upper case")
+    )
+
+
+def test_refuses_a_prefix_that_is_not_a_header_token() raises:
+    """FALSIFIES a constructor that accepts `x app-`, `x-app:`, `x/app-` or a
+    non-ASCII byte: no header name could ever carry such a prefix."""
+    _prefix_must_be_refused(
+        String("x app-"), String("token character"), String("space")
+    )
+    _prefix_must_be_refused(
+        String("x-app:"), String("token character"), String("colon")
+    )
+    _prefix_must_be_refused(
+        String("x/app-"), String("token character"), String("slash")
+    )
+    _prefix_must_be_refused(
+        String("x-") + chr(0xE9) + String("-"),
+        String("token character"),
+        String("non-ASCII"),
+    )
+
+
+def test_refuses_a_prefix_not_ending_in_a_dash() raises:
+    """FALSIFIES a constructor that accepts `x-app-authz` and yields the header
+    `x-app-authzsubjectid`."""
+    _prefix_must_be_refused(
+        String("x-app-authz"), String("END with '-'"), String("no dash")
+    )
+    _prefix_must_be_refused(
+        String("x-app-authz_"), String("END with '-'"), String("underscore")
+    )
+
+
+def test_refuses_a_prefix_naming_nothing() raises:
+    """FALSIFIES a constructor that accepts `-` or `--`, which reserve every
+    header starting with a dash and name no namespace."""
+    _prefix_must_be_refused(
+        String("-"), String("no letter or digit"), String("a lone dash")
+    )
+    _prefix_must_be_refused(
+        String("--"), String("no letter or digit"), String("dashes only")
+    )
+
+
+def test_refuses_a_prefix_of_a_header_the_gateway_adds() raises:
+    """API Gateway v2 adds `x-forwarded-for`, `x-forwarded-proto`,
+    `x-forwarded-port` and `x-amzn-trace-id` to every request. A prefix that
+    starts any of them would strip it on every request.
+
+    FALSIFIES a constructor that accepts `x-`, `x-forwarded-`, `x-amzn-` or
+    `x-amzn-trace-`; the message must name the header that would be lost."""
+    _prefix_must_be_refused(
+        String("x-"), String("'x-forwarded-for'"), String("x-")
+    )
+    _prefix_must_be_refused(
+        String("x-forwarded-"),
+        String("'x-forwarded-for'"),
+        String("x-forwarded-"),
+    )
+    _prefix_must_be_refused(
+        String("x-amzn-"), String("'x-amzn-trace-id'"), String("x-amzn-")
+    )
+    _prefix_must_be_refused(
+        String("x-amzn-trace-"),
+        String("'x-amzn-trace-id'"),
+        String("x-amzn-trace-"),
+    )
+
+
+def test_a_short_prefix_shared_with_client_headers_is_accepted() raises:
+    """The stated LIMIT of the type: a prefix that only collides with headers
+    CLIENTS send (`content-`, `x-auth-`, `x-amz-`) is accepted, because whether
+    those headers matter is the application's judgement, not the library's.
+
+    Pinned so the limit is a checked fact, not only a docstring: if the type
+    starts refusing these, this test says the contract changed. `x-amz-` is
+    here because it is NOT a prefix of `x-amzn-trace-id`."""
+    assert_equal(
+        AuthorizerHeaderPrefix(String("content-")).value(), String("content-")
+    )
+    assert_equal(
+        AuthorizerHeaderPrefix(String("x-auth-")).value(), String("x-auth-")
+    )
+    assert_equal(
+        AuthorizerHeaderPrefix(String("x-amz-")).value(), String("x-amz-")
+    )
 
 
 # =============================================================================
@@ -375,7 +610,7 @@ def test_a_jwt_authorizer_kind_is_not_read_as_a_context_entry() raises:
 def _must_raise(event: String, because: String) raises:
     var raised = False
     try:
-        var req = api_gateway_v2_event_to_request(event)
+        var req = api_gateway_v2_event_to_request(event, _prefix())
         _ = req.path
     except e:
         raised = True
@@ -502,7 +737,7 @@ def test_an_escaped_surrogate_pair_body_arrives_as_one_4_byte_character() raises
     turns the pair into two 3-byte sequences (ED A0 BD ED B8 80) — ill-formed
     UTF-8 handed to the handler as the client's text."""
     var req = api_gateway_v2_event_to_request(
-        _event_with_body(String("\\ud83d\\ude00"), False)
+        _event_with_body(String("\\ud83d\\ude00"), False), _prefix()
     )
     var want = List[UInt8]()
     want.append(UInt8(0xF0))
@@ -528,7 +763,7 @@ def test_refuses_a_non_canonical_base64_body() raises:
     the "undecodable base64 body" refusal. The canonical form is decoded
     first, so the refusal is about the trailing bits and not the byte."""
     var req = api_gateway_v2_event_to_request(
-        _event_with_body(String("QQ=="), True)
+        _event_with_body(String("QQ=="), True), _prefix()
     )
     assert_equal(_bytes_to_ascii(req.body), String("A"))
     _must_raise(
@@ -642,7 +877,7 @@ def test_a_dropping_converter_is_not_accepted() raises:
 
     FAILS ON: an empty `HttpRequest()`; a converter that returns 500 instead of
     converting; one that keeps only the path."""
-    var req = api_gateway_v2_event_to_request(_base_event_json())
+    var req = api_gateway_v2_event_to_request(_base_event_json(), _prefix())
 
     assert_false(req.method.code == HTTP_METHOD_UNKNOWN)   # method present
     assert_true(req.path.byte_length() > 0)                 # path present
@@ -678,7 +913,7 @@ def test_a_dropping_converter_is_not_accepted() raises:
 # together the test would still be true, which is exactly the property wanted.
 #
 # ⚠ THE ONE DIFFERENCE, STATED RATHER THAN ENGINEERED AROUND: the parity fixture
-# carries NO `requestContext.authorizer`. The injected `x-komira-authorizer-*`
+# carries NO `requestContext.authorizer`. The injected `<prefix>*`
 # headers have no wire counterpart BY CONSTRUCTION — §3 of `apigw_v2.mojo`
 # destroys any client attempt at them — so an event with an authorizer block is
 # deliberately NOT the same request, and comparing one would be asserting the
@@ -775,7 +1010,9 @@ def test_the_converted_request_equals_what_the_h1_parser_produces() raises:
             + String(")")
         )
 
-    var converted = api_gateway_v2_event_to_request(_parity_event_json())
+    var converted = api_gateway_v2_event_to_request(
+        _parity_event_json(), _prefix()
+    )
 
     assert_equal(converted.method.code, parsed.request.method.code)
     assert_equal(converted.path, parsed.request.path)
@@ -897,7 +1134,18 @@ def main() raises:
     test_a_non_string_authorizer_member_is_skipped_not_stringified()
     test_a_forged_authorizer_header_never_reaches_the_dispatcher()
     test_the_authorizer_wins_over_a_client_header_of_the_same_name()
+    test_a_context_key_that_is_not_a_header_token_is_skipped()
     test_a_jwt_authorizer_kind_is_not_read_as_a_context_entry()
+    test_the_prefix_is_the_callers_and_only_the_callers()
+    test_a_valid_prefix_is_kept_exactly_as_given()
+    test_refuses_an_empty_prefix()
+    test_refuses_a_prefix_containing_cr_or_lf()
+    test_refuses_an_upper_case_prefix()
+    test_refuses_a_prefix_that_is_not_a_header_token()
+    test_refuses_a_prefix_not_ending_in_a_dash()
+    test_refuses_a_prefix_naming_nothing()
+    test_refuses_a_prefix_of_a_header_the_gateway_adds()
+    test_a_short_prefix_shared_with_client_headers_is_accepted()
 
     test_refuses_a_1_0_event()
     test_refuses_a_REQUEST_AUTHORIZER_event()

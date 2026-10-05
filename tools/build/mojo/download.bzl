@@ -18,6 +18,9 @@ def _pinned_file_impl(ctx):
         sha256 = ctx.attrs.sha256,
         is_executable = ctx.attrs.executable,
     )
+    if ctx.attrs.executable:
+        # An executable pin runs as itself (`$(exe ...)`, `buck2 run`).
+        return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out))]
     return [DefaultInfo(default_output = out)]
 
 pinned_file_rule = rule(

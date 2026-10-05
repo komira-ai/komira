@@ -23,7 +23,7 @@
 # The one thing allowed in front of a mark is our own fault-domain token
 # (`fault_domain.fault_error`), so the two carriers compose in ONE order:
 #
-#     [fault=customer] PermanentDeployFault: <message>
+#     [fault=user] PermanentDeployFault: <message>
 #
 # Stamping in either order yields that shape, so `fault_domain_of_error` keeps
 # reading the domain off the front. Both stamps are idempotent. When a fault is
