@@ -17,10 +17,15 @@
 #                         `DEFAULT_MACHINE_FILE`)
 #   * recorder.mojo       `CliRecorder`: the result document, written
 #                         temp-and-rename to `--result-file`
-#   * dispatch.mojo       `StageSteps` (the steps and the reads around them),
-#                         `run_stage_with`, `kci_main_with`,
-#                         `run_summary_markdown`, `evidence_line_of`,
-#                         `workflow_path_of`
+#   * seam.mojo           `StageSteps` (the steps and the reads around
+#                         them), `StepEnd`
+#   * dispatch.mojo       `run_stage_with`, `kci_main_with`,
+#                         `evidence_line_of`
+#   * start_checks.mojo   under GitHub Actions, at start-up: the workflow,
+#                         the ref (main only; break-glass with a reason)
+#                         and the set hash; `workflow_path_of`
+#   * summary.mojo        `run_summary_markdown`, `promotion_line`,
+#                         `break_glass_line`, `append_summary`
 #   * library_verbs.mojo  `LibrarySteps` (kci_build, kci_publish), the
 #                         composed secret store, `kci_main`
 #
@@ -45,21 +50,26 @@ from kci_cli.args import (
     selectors_of,
 )
 from kci_cli.recorder import TMP_SUFFIX, CliRecorder, write_whole_file
-from kci_cli.dispatch import (
+from kci_cli.seam import StageSteps, StepEnd
+from kci_cli.start_checks import (
     GITHUB_ACTIONS,
+    GITHUB_ACTOR,
+    GITHUB_EVENT_NAME,
+    GITHUB_REF,
     GITHUB_REPOSITORY,
+    GITHUB_SHA,
     GITHUB_WORKFLOW_REF,
     GITHUB_WORKFLOW_SHA,
+    MAIN_TRACKING_REF,
     NOT_UNDER_GITHUB_ACTIONS,
-    StageSteps,
-    StepEnd,
-    append_summary,
+    workflow_path_of,
+)
+from kci_cli.dispatch import (
     evidence_line_of,
     kci_main_with,
     recorder_for,
     run_stage_with,
-    run_summary_markdown,
     validation_failure_message,
-    workflow_path_of,
 )
-from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, kci_main
+from kci_cli.summary import append_summary, break_glass_line, carried_markdown, promotion_line, run_summary_markdown
+from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, git_first_parent, git_history, git_is_ancestor, kci_main

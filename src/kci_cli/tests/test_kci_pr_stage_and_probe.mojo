@@ -31,6 +31,12 @@ comptime _BASE: String = "0123456789abcdef0123456789abcdef01234567"
 comptime _SHA: String = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
 
 
+comptime _R19: String = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ env.REVISION }}\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          else\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n          fi\n"
+"""R21: the first two steps of every release job (auto_promotion.mojo)."""
+comptime _R19_MAIN: String = "      - name: only a push to main reaches this job\n        run: |\n          [ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n            { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
+"""R21: the third step of a main-only job."""
+
+
 struct Fake(StageSteps, Movable):
     """Every step SUCCEEDED; a PUBLISH step records `probe` as its
     credential probe. Platform variables from `env`, the committed workflow
@@ -85,6 +91,15 @@ struct Fake(StageSteps, Movable):
         self.calls.append(String("git show ") + commit + String(":") + path)
         return self.workflow.copy()
 
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        # a pull request's check reads no ref history (the ref check is a
+        # PUSH stage's)
+        self.calls.append(String("is-ancestor ") + commit + String(" ") + of)
+        return True
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        raise Error(String("no release is read here"))
+
 
 def _root(tag: String) raises -> String:
     var base = _read_env("TEST_TMPDIR")
@@ -116,7 +131,7 @@ def _pr_machine(dir: String) raises -> String:
     write_whole_file(
         m,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
+        + String("stage { name: \"build\" break_glass: true step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
         + String("stage { name: \"pr\" trigger: PULL_REQUEST farm_connected: true")
         + String(" step { name: \"check\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n"),
     )
@@ -127,10 +142,19 @@ def _pr_workflow(machine: String) -> String:
     """ONE workflow: the release stage `build` (kept off pull requests) and
     the pull request's check `pr`."""
     return (
-        String("name: kci\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      revision:\n")
-        + String("        type: string\n  pull_request:\npermissions: {}\njobs:\n")
-        + String("  build:\n    if: github.event_name != 'pull_request'\n    environment: build\n    steps:\n")
+        String("name: kci\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n")
+        + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n")
+        + String("      reason:\n        type: string\n        required: true\n")
+        + String("      dry_run:\n        type: boolean\n        default: false\n")
+        + String("  pull_request:\npermissions: {}\n")
+        + String("concurrency:\n  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)")
+        + String(" || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n")
+        + String("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n")
+        + String("env:\n  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n")
+        + String("jobs:\n")
+        + String("  build:\n    if: github.event_name != 'pull_request'\n    environment: build\n    steps:\n") + String(_R19)
         + String("      - run: kci run --machine ") + machine + String(" --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
+        + String("      - name: the prod line\n        if: always()\n        run: echo prod line\n")
         + String("  pr:\n    if: github.event.pull_request.head.repo.full_name == github.repository\n")
         + String("    runs-on: ubuntu-24.04\n")
         + String("    permissions:\n      contents: read\n      id-token: write\n    steps:\n")

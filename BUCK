@@ -38,9 +38,14 @@ action_pins(
     srcs = WORKFLOWS + ACTIONS,
 )
 
+# Every push-triggered workflow but the release workflow: kci.yml is held to
+# the opposite on purpose. Its runs of main share ONE concurrency group, so a
+# newer push replaces the PENDING release and the newest revision is promoted
+# (continuous auto-promotion; a running release is never cancelled). Rule R16
+# of src/kci_ci_check holds that group byte for byte instead (welded test).
 push_verdicts(
     name = "push_verdicts",
-    srcs = WORKFLOWS,
+    srcs = [w for w in WORKFLOWS if w != ".github/workflows/kci.yml"],
 )
 
 no_endpoint(
