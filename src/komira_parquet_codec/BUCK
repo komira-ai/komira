@@ -28,7 +28,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   against the C library's, and hand-built short-offset blobs.
 # - test_snappy_exact_dst: both snappy decoders into a destination with less
 #   than kSlopBytes of room past the decoded length, sentinel-guarded, and a
-#   blob declaring more than the destination holds.
+#   blob declaring more than the destination holds; hand-built blobs that
+#   put each of the Mojo decoder's four single 16-byte stores at every
+#   distance from the end of an exact-size destination.
+# - test_snappy_fuzz: a seeded differential fuzz of both snappy decoders
+#   (structured tag streams, random bytes, every prefix and single-byte
+#   corruptions of a valid stream), sentinel-guarded on both sides of the
+#   destination and with the input surrounded by two different fills.
 # - test_codecs_adversarial: every codec through the dispatch with
 #   truncations, single-byte corruptions, short and empty destinations and
 #   hostile size fields, sentinel-guarded on both sides of the destination.
@@ -80,6 +86,7 @@ mojo_library(
         "tests/test_no_env_reads.mojo",
         "tests/test_snappy_corpus.mojo",
         "tests/test_snappy_exact_dst.mojo",
+        "tests/test_snappy_fuzz.mojo",
         "tests/test_snappy_mojo_oracle.mojo",
         "tests/test_snappy_short_offset.mojo",
     ],
