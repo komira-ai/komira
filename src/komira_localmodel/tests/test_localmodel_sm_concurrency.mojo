@@ -40,12 +40,14 @@
 # same shape as a server's pthread workers. It adds no package dependency.
 #
 # The SM is shared by ADDRESS (it is Movable, not Copyable, so it cannot be
-# captured by value).
+# captured by value): each test keeps the SM, the counters and one `_ForkArg`
+# holding typed pointers to them in its own frame, hands the arg's address to
+# every thread, and reads nothing until every thread is joined.
 # =============================================================================
 
 from komira_atomic_alias import AtomicI64
 from std.ffi import external_call
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from std.memory import UnsafePointer
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_localmodel import (
@@ -126,6 +128,9 @@ def _serving_sm_with_cap(cap: Int) raises -> _Sm:
 
 comptime _VoidPtr = UnsafePointer[NoneType, MutUntrackedOrigin]
 
+# How long a QUEUED worker spins for a free slot before it gives up.
+comptime _MAX_QUEUED_SPINS: Int = 2_000_000
+
 
 @always_inline
 def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
@@ -139,48 +144,36 @@ def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     return UnsafePointer(to=none).bitcast[UnsafePointer[T, o]]()[]
 
 
+@always_inline
+def _untracked[T: AnyType](mut value: T) -> UnsafePointer[T, MutUntrackedOrigin]:
+    """The address of a value of the calling test's frame, for the threads.
+
+    # SAFETY: every caller passes a local of the test function, which joins all
+    # threads before it returns, so the value outlives every thread that
+    # dereferences this pointer.
+    """
+    return UnsafePointer(to=value).unsafe_origin_cast[MutUntrackedOrigin]()
+
+
 @fieldwise_init
 struct _ForkArg(Copyable, Movable, Deinitable):
-    """The heap-boxed pthread arg, shared BY EVERY worker in one fork-join.
+    """The pthread arg, shared BY EVERY worker in one fork-join.
 
-    All five fields are PODs: four addresses plus a loop count.
-
-    SAFETY: each test allocates ONE of these, hands the SAME pointer to all
-    N threads, and JOINS every thread before freeing it, so the arg strictly
-    outlives every reader. The workers only ever READ it. The four addresses
-    point at locals of the calling test frame, which likewise outlives the join
-    barrier. Threads share the SM deliberately — that is what is under test —
-    and every mutation of it goes through the SM's own mutex.
+    SAFETY: each test builds ONE of these in its own frame, hands its address
+    to all N threads, and JOINS every thread before it reads a result or
+    returns, so the arg and the values it points at outlive every reader. The
+    workers only READ the arg. They share the SM deliberately (that is what is
+    under test) and every mutation of it goes through the SM's own mutex; the
+    counters are atomics.
     """
 
-    var sm_addr: Int  # Int-laundered OwnedPointer[_Sm]*
-    var adm_addr: Int  # Int-laundered Atomic[int64]* (admitted), 0 if unused
-    var q_addr: Int  # Int-laundered Atomic[int64]* (queued),    0 if unused
-    var rej_addr: Int  # Int-laundered Atomic[int64]* (rejected), 0 if unused
+    var sm: UnsafePointer[_Sm, MutUntrackedOrigin]
+    var admitted: UnsafePointer[AtomicI64, MutUntrackedOrigin]
+    var queued: UnsafePointer[AtomicI64, MutUntrackedOrigin]
+    var rejected: UnsafePointer[AtomicI64, MutUntrackedOrigin]
+    # Queued waits that ran out of spins (the worker then stops its loop).
+    var gave_up: UnsafePointer[AtomicI64, MutUntrackedOrigin]
     var cycles: Int  # admit->release cycles per worker (1 == single shot)
-
-
-@always_inline
-def _sm_of(arg: _ForkArg) -> UnsafePointer[OwnedPointer[_Sm], MutUntrackedOrigin]:
-    """Recover the shared SM box from the arg. ONE FFI-boundary recovery site."""
-    # SAFETY: FFI-BOUNDARY. `sm_addr` was produced by `Int(UnsafePointer(to=...))`
-    # on an `OwnedPointer[_Sm]` owned by the calling test frame, which outlives
-    # the join barrier (see `_ForkArg`).
-    return UnsafePointer[OwnedPointer[_Sm], MutUntrackedOrigin](
-        unsafe_from_address=arg.sm_addr,
-    )
-
-
-@always_inline
-def _atomic_of(
-    addr: Int,
-) -> UnsafePointer[AtomicI64, MutUntrackedOrigin]:
-    """Recover one of the counter atomics. ONE FFI-boundary recovery site."""
-    # SAFETY: FFI-BOUNDARY. Same argument as `_sm_of`; `addr` is non-zero by
-    # construction at every call site below.
-    return UnsafePointer[AtomicI64, MutUntrackedOrigin](
-        unsafe_from_address=addr,
-    )
 
 
 # WHY THE FORK-JOIN IS NOT ONE GENERIC HELPER. The obvious shape,
@@ -190,8 +183,8 @@ def _atomic_of(
 # bind to a closure trait"). Routing it through a type parameter fails too
 # (the comptime value is not 'ImplicitlyCopyable'). A thin entry passes to
 # `external_call` only as a DIRECT reference, as komira_async's
-# `pthread_worker.launch_worker_pthread` does. So the three-line create loop is
-# inlined per test and everything around it is shared below.
+# `pthread_worker.launch_worker_pthread` does. So the create loop is inlined
+# per test and everything around it is shared below.
 
 
 def _new_tids(n: Int) -> List[Int64]:
@@ -202,22 +195,13 @@ def _new_tids(n: Int) -> List[Int64]:
     return tids^
 
 
-def _box_arg(var arg: _ForkArg) -> UnsafePointer[_ForkArg, MutUntrackedOrigin]:
-    """Heap-box the shared pthread arg. Freed by `_join_all` after the barrier."""
-    var box = alloc[_ForkArg](1)
-    UnsafePointer(to=box[]).unsafe_write(arg^)
-    return box.unsafe_origin_cast[MutUntrackedOrigin]()
-
-
 def _join_all(
     tids: List[Int64],
     started: Int,
     n_workers: Int,
     create_rc: Int32,
-    var box: UnsafePointer[_ForkArg, MutUntrackedOrigin],
 ) raises:
-    """The BARRIER. Joins every thread that actually started, then frees the
-    shared arg — in that order, so no live thread can outlive the arg it reads.
+    """The BARRIER. Joins every thread that actually started.
 
     Raises if any `pthread_create` failed, so a thread that never started can
     never be silently mistaken for a thread that did no work. That is the one
@@ -227,7 +211,6 @@ def _join_all(
         _ = external_call["pthread_join", Int32](
             tids[i], _null_ptr[UInt8, MutUntrackedOrigin]()
         )
-    box.free()
     if create_rc != Int32(0):
         raise Error(
             "pthread_create failed (rc="
@@ -247,14 +230,14 @@ def _join_all(
 #     final accounting is exact (no lost +=/-= under the race).
 # =============================================================================
 def _entry_admit_release(arg: _VoidPtr) -> _VoidPtr:
-    """pthread start_routine for (1)."""
-    # SAFETY: FFI-BOUNDARY. `arg` is the `_ForkArg` box `_box_arg` allocated;
-    # it outlives every thread (freed only after the join barrier).
+    """pthread start_routine for (1) and (3)."""
+    # SAFETY: FFI-BOUNDARY. `arg` is the address of the test frame's
+    # `_ForkArg`, which outlives every thread (see `_ForkArg`).
     ref a = arg.bitcast[_ForkArg]()[]
-    ref sm = _sm_of(a)[][]
-    ref adm = _atomic_of(a.adm_addr)[]
-    ref q = _atomic_of(a.q_addr)[]
-    ref rej = _atomic_of(a.rej_addr)[]
+    ref sm = a.sm[]
+    ref adm = a.admitted[]
+    ref q = a.queued[]
+    ref rej = a.rejected[]
     try:
         for _c in range(a.cycles):
             var d = sm.admit(String("m"))
@@ -266,11 +249,14 @@ def _entry_admit_release(arg: _VoidPtr) -> _VoidPtr:
                 _ = q.fetch_add(1)
                 # BLOCK-AND-WAIT (the passthrough's QUEUED handler): spin until a
                 # slot frees + this queued waiter PULLS it in (try_promote_if_
-                # under_cap), then run + release. Bounded spin so a wedged test
-                # cannot hang; under the live workers the slot frees quickly.
+                # under_cap), then run + release. The spin is bounded: with a
+                # correct SM a slot frees within a few scheduler quanta, while
+                # a counter that lost an update can hold the cap full forever,
+                # so running out of spins is counted (and asserted 0) and the
+                # worker stops, rather than the test hanging.
                 var claimed = False
                 var spins = 0
-                while spins < 50_000_000:
+                while spins < _MAX_QUEUED_SPINS:
                     if sm.try_promote_if_under_cap(String("m")):
                         claimed = True
                         break
@@ -278,8 +264,9 @@ def _entry_admit_release(arg: _VoidPtr) -> _VoidPtr:
                 if claimed:
                     sm.release(String("m"))
                 else:
-                    # Safety valve (never expected): drop the queued slot.
                     sm.release_queued(String("m"))
+                    _ = a.gave_up[].fetch_add(1)
+                    break
             else:
                 _ = rej.fetch_add(1)
     except e:
@@ -291,12 +278,12 @@ def _entry_admit_release(arg: _VoidPtr) -> _VoidPtr:
 
 def test_concurrent_admit_release_balances_to_zero() raises:
     var n_workers = 8
-    var cycles_per_worker = 200
+    var cycles_per_worker = 20_000
     # A cap big enough that most admits succeed (we WANT high admit/release
     # traffic to stress the lock, not mostly-rejects).
     var cap = 4
 
-    var sm_box = OwnedPointer[_Sm](_serving_sm_with_cap(cap))
+    var sm = _serving_sm_with_cap(cap)
 
     # Count, atomically, how many slots each worker is responsible for releasing
     # (every ADMITTED + every promoted QUEUED). The final in-flight count is
@@ -305,42 +292,45 @@ def test_concurrent_admit_release_balances_to_zero() raises:
     var admitted_total = AtomicI64(0)
     var queued_total = AtomicI64(0)
     var rejected_total = AtomicI64(0)
+    var gave_up_total = AtomicI64(0)
 
-    var _tids = _new_tids(n_workers)
-    var _box = _box_arg(
-        _ForkArg(
-            sm_addr=Int(UnsafePointer(to=sm_box)),
-            adm_addr=Int(UnsafePointer(to=admitted_total)),
-            q_addr=Int(UnsafePointer(to=queued_total)),
-            rej_addr=Int(UnsafePointer(to=rejected_total)),
-            cycles=cycles_per_worker,
-        )
+    var fork_arg = _ForkArg(
+        sm=_untracked(sm),
+        admitted=_untracked(admitted_total),
+        queued=_untracked(queued_total),
+        rejected=_untracked(rejected_total),
+        gave_up=_untracked(gave_up_total),
+        cycles=cycles_per_worker,
     )
-    var _box_void = _box.bitcast[NoneType]().unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]()
-    var _started = 0
-    var _rc = Int32(0)
-    for _i in range(n_workers):
-        _rc = external_call["pthread_create", Int32](
-            UnsafePointer(to=_tids[_i]).bitcast[UInt8](),  # pthread_t*
+    var arg = _untracked(fork_arg).bitcast[NoneType]()
+    var tids = _new_tids(n_workers)
+    var started = 0
+    var rc = Int32(0)
+    for i in range(n_workers):
+        rc = external_call["pthread_create", Int32](
+            UnsafePointer(to=tids[i]).bitcast[UInt8](),  # pthread_t*
             _null_ptr[UInt8, MutUntrackedOrigin](),  # attr = NULL
             _entry_admit_release,  # start_routine (DIRECT thin-fn reference)
-            _box_void,  # arg (shared by all N)
+            arg,  # arg (shared by all N)
         )
-        if _rc != Int32(0):
+        if rc != Int32(0):
             break
-        _started += 1
-    _join_all(_tids, _started, n_workers, _rc, _box)
+        started += 1
+    _join_all(tids, started, n_workers, rc)
+    _ = fork_arg^
 
+    assert_equal(
+        gave_up_total.load(), Int64(0),
+        "no queued worker ran out of spins waiting for a free slot",
+    )
     # The decisive assertion: after every admit was paired with its release, the
     # shared SM's in-flight + queued counts are EXACTLY 0 (no lost update).
     assert_equal(
-        sm_box[].inflight_of(String("m")), 0,
+        sm.inflight_of(String("m")), 0,
         "in-flight returns to exactly 0 after all concurrent releases",
     )
     assert_equal(
-        sm_box[].queued_of(String("m")), 0,
+        sm.queued_of(String("m")), 0,
         "queued returns to exactly 0 after all promotions/releases",
     )
 
@@ -359,16 +349,14 @@ def test_concurrent_admit_release_balances_to_zero() raises:
         admitted_total.load() > 0, "at least some requests were admitted"
     )
 
-    sm_box[].shutdown_all()
-    _ = sm_box^
+    sm.shutdown_all()
 
 
 # =============================================================================
 # (2) CAP IS A HARD GLOBAL BOUND — workers admit WITHOUT releasing until the
-#     barrier; the peak in-flight + queued can never exceed cap + queue_capacity
-#     no matter how many threads race (the atomic cap-check + bump). After the
-#     barrier the SM holds exactly min(total_attempts, cap+queue) slots, and the
-#     count of ADMITTED never exceeds cap.
+#     barrier; in-flight + queued can never exceed cap + queue_capacity no
+#     matter how many threads race (the atomic cap-check + bump). After the
+#     barrier the count of ADMITTED is exactly cap.
 # =============================================================================
 def _entry_admit_hold(arg: _VoidPtr) -> _VoidPtr:
     """pthread start_routine for (2). Each worker fires ONE admit and does NOT
@@ -376,15 +364,15 @@ def _entry_admit_hold(arg: _VoidPtr) -> _VoidPtr:
     queued to its bound."""
     # SAFETY: FFI-BOUNDARY — see `_entry_admit_release`.
     ref a = arg.bitcast[_ForkArg]()[]
-    ref sm = _sm_of(a)[][]
+    ref sm = a.sm[]
     try:
         var d = sm.admit(String("m"))
         if d == ADMIT_ADMITTED:
-            _ = _atomic_of(a.adm_addr)[].fetch_add(1)
+            _ = a.admitted[].fetch_add(1)
         elif d == ADMIT_QUEUED:
-            _ = _atomic_of(a.q_addr)[].fetch_add(1)
+            _ = a.queued[].fetch_add(1)
         else:
-            _ = _atomic_of(a.rej_addr)[].fetch_add(1)
+            _ = a.rejected[].fetch_add(1)
     except e:
         print("WARN _entry_admit_hold raised: ", String(e))
     return _null_ptr[NoneType, MutUntrackedOrigin]()
@@ -393,52 +381,51 @@ def _entry_admit_hold(arg: _VoidPtr) -> _VoidPtr:
 def test_concurrent_cap_is_hard_bound() raises:
     var n_workers = 16
     var cap = 2
-    var sm_box = OwnedPointer[_Sm](_serving_sm_with_cap(cap))
-    var queue_cap = sm_box[].queue_capacity_of(String("m"))
+    var sm = _serving_sm_with_cap(cap)
+    var queue_cap = sm.queue_capacity_of(String("m"))
 
     var admitted_total = AtomicI64(0)
     var queued_total = AtomicI64(0)
     var rejected_total = AtomicI64(0)
+    var gave_up_total = AtomicI64(0)
 
-    var _tids = _new_tids(n_workers)
-    var _box = _box_arg(
-        _ForkArg(
-            sm_addr=Int(UnsafePointer(to=sm_box)),
-            adm_addr=Int(UnsafePointer(to=admitted_total)),
-            q_addr=Int(UnsafePointer(to=queued_total)),
-            rej_addr=Int(UnsafePointer(to=rejected_total)),
-            cycles=1,
-        )
+    var fork_arg = _ForkArg(
+        sm=_untracked(sm),
+        admitted=_untracked(admitted_total),
+        queued=_untracked(queued_total),
+        rejected=_untracked(rejected_total),
+        gave_up=_untracked(gave_up_total),
+        cycles=1,
     )
-    var _box_void = _box.bitcast[NoneType]().unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]()
-    var _started = 0
-    var _rc = Int32(0)
-    for _i in range(n_workers):
-        _rc = external_call["pthread_create", Int32](
-            UnsafePointer(to=_tids[_i]).bitcast[UInt8](),  # pthread_t*
+    var arg = _untracked(fork_arg).bitcast[NoneType]()
+    var tids = _new_tids(n_workers)
+    var started = 0
+    var rc = Int32(0)
+    for i in range(n_workers):
+        rc = external_call["pthread_create", Int32](
+            UnsafePointer(to=tids[i]).bitcast[UInt8](),  # pthread_t*
             _null_ptr[UInt8, MutUntrackedOrigin](),  # attr = NULL
             _entry_admit_hold,  # start_routine (DIRECT thin-fn reference)
-            _box_void,  # arg (shared by all N)
+            arg,  # arg (shared by all N)
         )
-        if _rc != Int32(0):
+        if rc != Int32(0):
             break
-        _started += 1
-    _join_all(_tids, _started, n_workers, _rc, _box)
+        started += 1
+    _join_all(tids, started, n_workers, rc)
+    _ = fork_arg^
 
     # The in-flight count never exceeded the cap (the atomic cap-check held the
     # bound globally across all threads).
     assert_equal(
-        Int64(sm_box[].inflight_of(String("m"))), admitted_total.load(),
+        Int64(sm.inflight_of(String("m"))), admitted_total.load(),
         "the SM in-flight count equals the number of ADMITTED slots",
     )
     assert_true(
-        sm_box[].inflight_of(String("m")) <= cap,
+        sm.inflight_of(String("m")) <= cap,
         "in-flight never exceeded the cap under the concurrent race",
     )
     assert_true(
-        sm_box[].queued_of(String("m")) <= queue_cap,
+        sm.queued_of(String("m")) <= queue_cap,
         "queued never exceeded the bounded queue depth",
     )
     # Every worker was classified exactly once; admits capped at `cap`, the rest
@@ -452,25 +439,77 @@ def test_concurrent_cap_is_hard_bound() raises:
         "exactly `cap` requests were admitted in-flight (the hard bound)",
     )
 
-    sm_box[].shutdown_all()
-    _ = sm_box^
+    sm.shutdown_all()
+
+
+# =============================================================================
+# (3) PULL PROMOTION UNDER CONTENTION — with a cap of 1 and 8 workers, most
+#     admits QUEUE and then spin on try_promote_if_under_cap, so the
+#     queued -> in-flight move races against concurrent admits and releases.
+#     Every queued worker claims a slot and releases it, and both counters
+#     return to exactly 0 (a lost update in the promotion path leaves one of
+#     them non-zero).
+# =============================================================================
+def test_concurrent_pull_promotion_balances_to_zero() raises:
+    var n_workers = 8
+    var sm = _serving_sm_with_cap(1)
+
+    var admitted_total = AtomicI64(0)
+    var queued_total = AtomicI64(0)
+    var rejected_total = AtomicI64(0)
+    var gave_up_total = AtomicI64(0)
+
+    var fork_arg = _ForkArg(
+        sm=_untracked(sm),
+        admitted=_untracked(admitted_total),
+        queued=_untracked(queued_total),
+        rejected=_untracked(rejected_total),
+        gave_up=_untracked(gave_up_total),
+        cycles=2_000,
+    )
+    var arg = _untracked(fork_arg).bitcast[NoneType]()
+    var tids = _new_tids(n_workers)
+    var started = 0
+    var rc = Int32(0)
+    for i in range(n_workers):
+        rc = external_call["pthread_create", Int32](
+            UnsafePointer(to=tids[i]).bitcast[UInt8](),  # pthread_t*
+            _null_ptr[UInt8, MutUntrackedOrigin](),  # attr = NULL
+            _entry_admit_release,  # start_routine (DIRECT thin-fn reference)
+            arg,  # arg (shared by all N)
+        )
+        if rc != Int32(0):
+            break
+        started += 1
+    _join_all(tids, started, n_workers, rc)
+    _ = fork_arg^
+
+    assert_equal(
+        gave_up_total.load(), Int64(0),
+        "no queued worker ran out of spins waiting for a free slot",
+    )
+    assert_equal(sm.inflight_of(String("m")), 0, "in-flight returns to 0")
+    assert_equal(sm.queued_of(String("m")), 0, "queued returns to 0")
+    assert_equal(
+        admitted_total.load() + queued_total.load() + rejected_total.load(),
+        Int64(n_workers * 2_000),
+        "every attempt classified once",
+    )
+    sm.shutdown_all()
 
 
 # =============================================================================
 # (4) CONCURRENT LOAD IS SERIALIZED — N workers request_load the SAME model
 #     concurrently. The SM mutex serializes the whole load decision, so the model
-#     ends SERVING with EXACTLY ONE resident instance (the loser threads observe
-#     it already SERVING under the lock + just re-arm the TTL — they do NOT
-#     double-spawn a second child or corrupt the parallel-list bookkeeping). This
-#     is the "exactly one worker spawns the one engine child" contract that makes
-#     sharing ONE SM across N workers correct (vs per-worker SMs each spawning a
-#     duplicate child).
+#     ends SERVING with EXACTLY ONE resident instance (the losing threads observe
+#     it already SERVING under the lock and just re-arm the TTL; they do NOT
+#     spawn a second child or corrupt the parallel-list bookkeeping).
 # =============================================================================
 def _entry_request_load(arg: _VoidPtr) -> _VoidPtr:
     """pthread start_routine for (4)."""
     # SAFETY: FFI-BOUNDARY — see `_entry_admit_release`.
     ref a = arg.bitcast[_ForkArg]()[]
-    ref s = _sm_of(a)[][]
+    ref s = a.sm[]
     try:
         _ = s.request_load(String("m"))
     except e:
@@ -486,48 +525,45 @@ def test_concurrent_request_load_serialized() raises:
     _ = sm.register_with_cap(
         String("m"), StubBackend(String("http://127.0.0.1:8081")), _gib(6), 4,
     )
-    var sm_box = OwnedPointer[_Sm](sm^)
+    # This test counts nothing; the counters only fill the arg.
+    var unused = AtomicI64(0)
 
-    var _tids = _new_tids(n_workers)
-    var _box = _box_arg(
-        _ForkArg(
-            sm_addr=Int(UnsafePointer(to=sm_box)),
-            adm_addr=0,
-            q_addr=0,
-            rej_addr=0,
-            cycles=1,
-        )
+    var fork_arg = _ForkArg(
+        sm=_untracked(sm),
+        admitted=_untracked(unused),
+        queued=_untracked(unused),
+        rejected=_untracked(unused),
+        gave_up=_untracked(unused),
+        cycles=1,
     )
-    var _box_void = _box.bitcast[NoneType]().unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]()
-    var _started = 0
-    var _rc = Int32(0)
-    for _i in range(n_workers):
-        _rc = external_call["pthread_create", Int32](
-            UnsafePointer(to=_tids[_i]).bitcast[UInt8](),  # pthread_t*
+    var arg = _untracked(fork_arg).bitcast[NoneType]()
+    var tids = _new_tids(n_workers)
+    var started = 0
+    var rc = Int32(0)
+    for i in range(n_workers):
+        rc = external_call["pthread_create", Int32](
+            UnsafePointer(to=tids[i]).bitcast[UInt8](),  # pthread_t*
             _null_ptr[UInt8, MutUntrackedOrigin](),  # attr = NULL
             _entry_request_load,  # start_routine (DIRECT thin-fn reference)
-            _box_void,  # arg (shared by all N)
+            arg,  # arg (shared by all N)
         )
-        if _rc != Int32(0):
+        if rc != Int32(0):
             break
-        _started += 1
-    _join_all(_tids, _started, n_workers, _rc, _box)
+        started += 1
+    _join_all(tids, started, n_workers, rc)
+    _ = fork_arg^
+    _ = unused.load()
 
     # The model is SERVING with exactly ONE resident instance after N concurrent
-    # request_load calls (the SM mutex serializes the load; all but the first
-    # observe it already SERVING under the lock and just re-arm — no double-load,
-    # no corrupted bookkeeping).
+    # request_load calls.
     assert_equal(
-        sm_box[].state_of(String("m")), 2, "model is SERVING after concurrent load",
+        sm.state_of(String("m")), 2, "model is SERVING after concurrent load",
     )
     assert_equal(
-        sm_box[].resident_count(), 1,
+        sm.resident_count(), 1,
         "exactly one resident instance (no double-spawn under the race)",
     )
-    sm_box[].shutdown_all()
-    _ = sm_box^
+    sm.shutdown_all()
 
 
 def main() raises:
