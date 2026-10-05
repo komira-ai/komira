@@ -13,11 +13,13 @@
 #        server <tmp>/data --address 127.0.0.1:<p> --console-address 127.0.0.1:<q>
 #               --certs-dir <tmp>/certs
 #      and a child environment of exactly MINIO_ROOT_USER_FILE,
-#      MINIO_ROOT_PASSWORD_FILE (both PATHS) and MINIO_BROWSER=off. The
+#      MINIO_ROOT_PASSWORD_FILE (both PATHS), MINIO_BROWSER=off and HOME. The
 #      credential is never in an environment block or argv. Both addresses
 #      are loopback: MinIO's defaults listen on every interface, which on a
-#      developer machine is the LAN. `--certs-dir` keeps the server out of
-#      the developer's home directory (the child has no HOME). Ports are drawn
+#      developer machine is the LAN. HOME is `<tmp>` and `--certs-dir` is
+#      `<tmp>/certs`, so the server stays out of the developer's home
+#      directory. HOME is required: a server with none, that cannot look up
+#      its user either, exits 1 at start ("Unable to get mcConfigDir"). Ports are drawn
 #      from the entropy source in [20000, 60000); an early exit (a port
 #      already taken, typically) is retried with fresh ports up to 3 times.
 #      The child is started with `die_with_parent`, so a killed test does not
@@ -114,6 +116,7 @@ def _minio_spec(minio_path: String, tmp: String, port: Int, console_port: Int) -
     env.append(EnvEntry("MINIO_ROOT_USER_FILE", tmp + "/root_user"))
     env.append(EnvEntry("MINIO_ROOT_PASSWORD_FILE", tmp + "/root_password"))
     env.append(EnvEntry("MINIO_BROWSER", "off"))
+    env.append(EnvEntry("HOME", tmp))
     return ProcessSpec(argv^, env^, tmp, True)
 
 

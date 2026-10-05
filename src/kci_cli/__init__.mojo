@@ -19,7 +19,8 @@
 #                         temp-and-rename to `--result-file`
 #   * dispatch.mojo       `StageSteps` (the steps and the reads around them),
 #                         `run_stage_with`, `kci_main_with`,
-#                         `run_summary_markdown`, `workflow_path_of`
+#                         `run_summary_markdown`, `evidence_line_of`,
+#                         `workflow_path_of`
 #   * library_verbs.mojo  `LibrarySteps` (kci_build, kci_publish), the
 #                         composed secret store, `kci_main`
 #
@@ -53,6 +54,7 @@ from kci_cli.dispatch import (
     StageSteps,
     StepEnd,
     append_summary,
+    evidence_line_of,
     kci_main_with,
     recorder_for,
     run_stage_with,

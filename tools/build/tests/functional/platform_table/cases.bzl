@@ -3,6 +3,7 @@
 load(
     "@komira//tools/build/platforms:table.bzl",
     "PLATFORMS",
+    "by_target_os",
     "constraints",
     "host_refusal",
     "host_row",
@@ -10,6 +11,7 @@ load(
     "pending",
     "pin",
     "registered_names",
+    "release_version",
     "reserved_names",
     "table_refusals",
 )
@@ -80,6 +82,13 @@ _TABLE_CASES = [
     ("a zig digest that is not 64 hex digits", _edit("darwin-arm64", field = "zig_exe_sha256", value = "abc"), "row darwin-arm64: `zig_exe_sha256` is not 64 lowercase hex digits"),
     ("an applet list that is not sorted", _edit("darwin-arm64", field = "applets", value = ["sh", "cat"]), "row darwin-arm64: `applets` must be a non-empty sorted list"),
     ("a pending applet list in a registered row", _edit("darwin-arm64", field = "applets", value = pending("later")), "row darwin-arm64: `applets` is pending, but the row is registered"),
+    ("the pixi pin missing from the macOS row", _edit("darwin-arm64", drop_role = "pixi"), "row darwin-arm64: missing pin `pixi`"),
+    ("the pixi pin missing from the linux row", _edit("linux-x86_64", drop_role = "pixi"), "row linux-x86_64: missing pin `pixi`"),
+    ("a registered row with a pending pixi", _edit("darwin-arm64", role = "pixi", pin_value = pending("later")), "row darwin-arm64: pin `pixi` is pending, but the row is registered"),
+    ("a pixi pin that is not executable", _edit("linux-x86_64", role = "pixi", pin_value = pin("pixi", "https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-x86_64-unknown-linux-musl", _GOOD_SHA)), "row linux-x86_64: pin `pixi` is an executable, but is not pinned with `executable = True`"),
+    ("a pixi pin whose url names no release", _edit("darwin-arm64", role = "pixi", pin_value = pin("pixi", "https://example.com/pixi", _GOOD_SHA, executable = True)), "row darwin-arm64: pin `pixi`: url names no release"),
+    ("pixi pinned at two releases", _edit("darwin-arm64", role = "pixi", pin_value = pin("pixi", "https://github.com/prefix-dev/pixi/releases/download/v0.66.0/pixi-aarch64-apple-darwin", _GOOD_SHA, executable = True)), "pin `pixi` names more than one release: 0.66.0 in darwin-arm64; 0.67.2 in linux-x86_64"),
+    ("a busybox pin that is not executable", _edit("linux-x86_64", role = "busybox", pin_value = pin("busybox", "https://example.com/busybox", _GOOD_SHA)), "row linux-x86_64: pin `busybox` is an executable"),
     ("a row named for another platform", _edit("linux-arm64", field = "cpu", value = "x86_64"), "row linux-arm64: named for neither its os nor its cpu"),
 ]
 
@@ -111,6 +120,18 @@ def platform_table_cases():
         fail("platform table: registered rows are {}, expected linux-x86_64 then darwin-arm64 (the first match of an action that states no os is linux)".format(registered_names()))
     if reserved_names() != ["linux-arm64"]:
         fail("platform table: reserved rows are {}, expected linux-arm64".format(reserved_names()))
+
+    # //tools/build/toolchains:pixi selects by the target platform's os: each
+    # registered row's own pixi, all one release.
+    want_pixi = {
+        "prelude//os/constraints:linux": ":pixi-0.67.2-x86_64-unknown-linux-musl",
+        "prelude//os/constraints:macos": ":pixi-0.67.2-aarch64-apple-darwin",
+    }
+    if by_target_os("pixi") != want_pixi:
+        fail("platform table: pixi by target os is {}, expected {}".format(by_target_os("pixi"), want_pixi))
+    for n in registered_names():
+        if release_version(n, "pixi") != "0.67.2":
+            fail("platform table: row {} pins pixi {}, expected 0.67.2".format(n, release_version(n, "pixi")))
 
     # The linux-x86_64 platform's constraints key its configuration hash
     # (test 18 of run_tests.sh pins that hash): any change here re-keys every

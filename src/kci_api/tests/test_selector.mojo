@@ -143,5 +143,23 @@ def test_affected_by_evidence_line() raises:
     assert_equal(refused, String("a SELECTIVE run names its --only or its --affected-by"))
 
 
+def test_the_probe_note_is_next_to_the_outcome() raises:
+    var none = List[String]()
+    var note = String("credential probe NOT RUN (not under GitHub Actions)")
+    assert_equal(
+        run_evidence_line(String(SCOPE_FULL), String("gamma"), none, String("SUCCEEDED"), String(""), note),
+        String("kci: FULL run of stage gamma: SUCCEEDED, credential probe NOT RUN (not under GitHub Actions)"),
+    )
+    var one = List[String]()
+    one.append(String("step:publish"))
+    assert_equal(
+        run_evidence_line(String(SCOPE_SELECTIVE), String("gamma"), one, String("SUCCEEDED"), String(""), note),
+        String(
+            "kci: SELECTIVE run of stage gamma (step:publish): SUCCEEDED, credential probe NOT RUN"
+            " (not under GitHub Actions) -- not a full run"
+        ),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

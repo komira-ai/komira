@@ -21,6 +21,7 @@ from kci_release_set.conda_metadata import (
     KIND_LIBRARY,
     KIND_METAPACKAGE,
     CondaMetadata,
+    DocFile,
     MetaMember,
     parse_conda_metadata,
     read_conda_metadata,
