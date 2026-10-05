@@ -58,16 +58,25 @@ mojo_library(
         "tests/test_ci_pull_request.mojo",
         # the repository's own kci.yml held to its own release/machine.textproto
         "tests/test_repo_kci_yml.mojo",
+        # R15-R20 and R4's allow-list: mutations of the repository's own kci.yml
+        # and machine file, each ending in its rule's finding
+        "tests/test_ci_auto_promotion.mojo",
     ],
     # The repository's own release workflow, machine file and channels file
     # (the root BUCK and release/BUCK), the pixi pin its validate job
     # downloads (the platform table's, written by //tools/build/toolchains),
     # and the validation targets' record (release/validations/BUCK).
     test_data = {
+        "tests/test_ci_auto_promotion.mojo": {
+            "channels.textproto": "//release:channels.textproto",
+            "kci.yml": "//:kci.yml",
+            "machine.textproto": "//release:machine.textproto",
+        },
         "tests/test_repo_kci_yml.mojo": {
             "channels.textproto": "//release:channels.textproto",
             "kci.yml": "//:kci.yml",
             "machine.textproto": "//release:machine.textproto",
+            "release_version.sh": "//tools/build/package:release_version.sh",
             "pixi_pin.txt": "//tools/build/toolchains:pixi_pin_linux_x86_64",
             "validations.txt": "//release/validations:names",
         },

@@ -21,7 +21,10 @@
 #      coordinate (KCI-E-CHANNEL); for a channel that publishes with OIDC
 #      trusted publishing, the stage's GitHub environment must be the one the
 #      channel's push identity names (KCI-E-STAGE-ENVIRONMENT: prefix.dev's
-#      trusted publisher binds one environment); the credential is declared,
+#      trusted publisher binds one environment); on a BREAK-GLASS run
+#      (`req.break_glass`) the one its `break_glass_push_identity` names, and
+#      a channel without one refuses the run (KCI-E-STAGE-ENVIRONMENT); the
+#      credential is declared,
 #      and a PRIVATE OIDC-only channel is not dry-run (KCI-E-CREDENTIAL);
 #   3. `recorder.begin` gets the RUNNING record BEFORE the first effect (the
 #      first secret, token or channel request). A recorder that cannot
@@ -110,6 +113,7 @@ from kci_release_channel import (
     ARTIFACT_TYPE_CONDA,
     ChannelCredential,
     Channel,
+    break_glass_push_identity_environment,
     find_channel,
     parse_channels_file,
     push_identity_environment,
@@ -261,12 +265,22 @@ def _step0(req: PublishRequest) -> _Step0:
         var repository = channel.repository_for(String(ARTIFACT_TYPE_CONDA))
         credential = repository.credential.copy()
         environment = push_identity_environment(repository)
+        if req.break_glass:
+            environment = break_glass_push_identity_environment(repository)
         targets = resolve_targets(channel, loaded.members)
         _ = repo_host(targets[0].coordinate.repo)
     except e:
         return _Step0(String(ERROR_CHANNEL), String(e))
     var is_oidc = Bool(credential) and credential.value().is_oidc_trusted_publishing()
     var stage_env = req.github_environment()
+    if is_oidc and req.break_glass and environment.byte_length() == 0:
+        return _Step0(
+            String(ERROR_STAGE_ENVIRONMENT),
+            String("this is a BREAK-GLASS run of stage '") + req.stage + String("', and channel '") + channel.name
+            + String("' publishes with OIDC trusted publishing but names no break_glass_push_identity: a")
+            + String(" break-glass run publishes only from an environment of its own (the stage's")
+            + String(" break_glass_environment), which the channel trusts as a second publisher"),
+        )
     if is_oidc and environment != stage_env:
         var named = String("names no environment") if environment.byte_length() == 0 else (
             String("names environment '") + environment + String("'")
@@ -377,6 +391,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
 ) -> PublishReport:
     var opts = run_opts.copy()
     opts.concurrency = req.concurrency
+    opts.never_backward = req.never_backward
     var step0 = _step0(req)
     if not step0.prepared:
         return step0.refusal.copy()
@@ -419,7 +434,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
                 var auth = token.authorization(SURFACE_PREFIX_DEV, host)
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth^)
             var nobody = AnonymousCredential()
-            return run_publish(p.targets, registry, nobody, True, opts, sleeper, base.copy())
+            return run_publish(p.targets, registry, nobody, True, opts, sleeper, base.copy(), req.revision_history)
         if is_oidc:
             var oidc = _oidc_credential(oidc_t^, actions^, host, req.github_environment())
             if public:
@@ -428,7 +443,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
                 var auth = oidc.authorization(SURFACE_PREFIX_DEV, host)
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
                 registry.credential().arm(auth^)
-            return run_publish(p.targets, registry, oidc, False, opts, sleeper, base.copy())
+            return run_publish(p.targets, registry, oidc, False, opts, sleeper, base.copy(), req.revision_history)
         var token = StaticTokenCredential.token_secret(
             SURFACE_PREFIX_DEV, host.copy(), store, p.credential.value().secret_name
         )
@@ -438,7 +453,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
             var auth = token.authorization(SURFACE_PREFIX_DEV, host)
             registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
             registry.credential().arm(auth^)
-        return run_publish(p.targets, registry, token, False, opts, sleeper, base.copy())
+        return run_publish(p.targets, registry, token, False, opts, sleeper, base.copy(), req.revision_history)
     except e:
         base.stop(
             String(REASON_FAILED),

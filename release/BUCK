@@ -13,7 +13,8 @@
 # (src/<library>/README.md, shipped as share/doc/<name>/README.md): the same
 # examples are a welded test of the library's own build, so they cannot rot.
 # release/ci holds the commands the per-change check runs (artifacts.textproto's
-# `affected`, `build_targets` and `derive_checks`).
+# `build_targets` and `derive_checks`); its `affected` is the binary
+# //tools/build/ci:affected.
 # Changes need the release approver's review (.github/CODEOWNERS).
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 
