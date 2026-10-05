@@ -143,10 +143,10 @@ struct MinUtf8Acc(Accumulator):
 
     # --- Accumulator trait conformance (Phase Acc-trait) ----------------------
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
@@ -255,10 +255,10 @@ struct MaxUtf8Acc(Accumulator):
 
     # --- Accumulator trait conformance (Phase Acc-trait) ----------------------
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:

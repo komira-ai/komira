@@ -13,6 +13,20 @@ from komira_op_agg_state.columnar_acc_typed import (
 from komira_op_agg_state.columnar_acc_agg import CountDistinctAcc
 
 
+def _gid_span(
+    p: UnsafePointer[Int, MutUntrackedOrigin], n: Int
+) -> Span[Int, MutUntrackedOrigin]:
+    """The group-id buffer as the trait takes it: a span over `n` Ints."""
+    return Span[Int, MutUntrackedOrigin](unsafe_ptr=p, length=n)
+
+
+def _byte_span(
+    p: UnsafePointer[UInt8, MutUntrackedOrigin], n_bytes: Int
+) -> Span[UInt8, MutUntrackedOrigin]:
+    """The value column's data buffer as the trait takes it: a span of bytes."""
+    return Span[UInt8, MutUntrackedOrigin](unsafe_ptr=p, length=n_bytes)
+
+
 def _make_gids(values: List[Int]) -> UnsafePointer[Int, MutUntrackedOrigin]:
     var buf = alloc[Int](len(values))
     for i in range(len(values)):
@@ -52,7 +66,7 @@ def test_sum_i64_trait() raises:
     vl.append(Int64(40))
     vl.append(Int64(50))
     var col_data = _make_int64_data(vl)
-    acc.update_batch(gids, col_data, 0, 5)
+    acc.update_batch(_gid_span(gids, 5), _byte_span(col_data, 5 * 8), 0, 5)
     gids.free()
     col_data.free()
     if acc.state[0] != Int64(50) or acc.state[1] != Int64(70) or acc.state[2] != Int64(30):
@@ -73,7 +87,7 @@ def test_count_i64_trait() raises:
     vl.append(Int64(99))
     vl.append(Int64(99))
     var col_data = _make_int64_data(vl)
-    acc.update_batch(gids, col_data, 0, 3)
+    acc.update_batch(_gid_span(gids, 3), _byte_span(col_data, 3 * 8), 0, 3)
     gids.free()
     col_data.free()
     if acc.state[0] != Int64(2) or acc.state[1] != Int64(1):
@@ -94,7 +108,7 @@ def test_min_i64_trait() raises:
     vl.append(Int64(10))
     vl.append(Int64(50))
     var col_data = _make_int64_data(vl)
-    acc.update_batch(gids, col_data, 0, 3)
+    acc.update_batch(_gid_span(gids, 3), _byte_span(col_data, 3 * 8), 0, 3)
     gids.free()
     col_data.free()
     if acc.state[0] != Int64(10) or acc.state[1] != Int64(50):
@@ -115,7 +129,7 @@ def test_max_i64_trait() raises:
     vl.append(Int64(30))
     vl.append(Int64(5))
     var col_data = _make_int64_data(vl)
-    acc.update_batch(gids, col_data, 0, 3)
+    acc.update_batch(_gid_span(gids, 3), _byte_span(col_data, 3 * 8), 0, 3)
     gids.free()
     col_data.free()
     if acc.state[0] != Int64(30) or acc.state[1] != Int64(5):
@@ -136,7 +150,7 @@ def test_sum_f64_kahan_trait() raises:
     vl.append(Float64(2.5))
     vl.append(Float64(3.0))
     var col_data = _make_float64_data(vl)
-    acc.update_batch(gids, col_data, 0, 3)
+    acc.update_batch(_gid_span(gids, 3), _byte_span(col_data, 3 * 8), 0, 3)
     gids.free()
     col_data.free()
     var diff = acc.sum[0] - Float64(7.0)
@@ -162,7 +176,7 @@ def test_count_distinct_trait() raises:
     vl.append(Int64(30))
     vl.append(Int64(30))
     var col_data = _make_int64_data(vl)
-    acc.update_batch(gids, col_data, 0, 5)
+    acc.update_batch(_gid_span(gids, 5), _byte_span(col_data, 5 * 8), 0, 5)
     gids.free()
     col_data.free()
     var result = acc.finalize()

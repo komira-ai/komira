@@ -23,8 +23,8 @@
 # ---------------------------------------------------------------------------
 # THE MULTI-INPUT-COLUMN GAP (design note for P1.d — see closure memo)
 # ---------------------------------------------------------------------------
-# The `Accumulator` trait's `update_batch(gids_ptr, col_data_ptr, col_offset,
-# n)` passes exactly ONE column pointer — it was designed for the engine's
+# The `Accumulator` trait's `update_batch(gids, col_data, col_offset,
+# n)` passes exactly ONE column span — it was designed for the engine's
 # single-column SUM/COUNT/MIN/MAX accumulators. A multi-input UDF agg (e.g.
 # `weighted_avg(value, weight)` reads two columns) cannot be driven through
 # that single-column entrypoint. So `AggFnAcc[F]` conforms to `Accumulator`
@@ -311,13 +311,26 @@ struct AggFnAcc[F: AggFn](Accumulator):
     # Handles the 1-input-column UDF agg only; a >1-input agg raises (use
     # update_record_batch). See the file header's "multi-input-column gap" note.
     # -------------------------------------------------------------------------
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
+        # SAFETY: the pointers are formed from the borrowed spans and live only for
+        # this call; the untracked origin and the nominal mutable cast keep the body's
+        # pointer type unchanged (the kernels only read both buffers).
+        var gids_ptr = (
+            gids.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        var col_data_ptr = (
+            col_data.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
         comptime N_IN = Self.F.InputSchema.num_cols()
         comptime if N_IN != 1:
             comptime assert False, ( "AggFnAcc.update_batch: this single-column entrypoint supports" " a 1-input UDF agg only; a multi-input agg must be driven via" " update_record_batch (P1.d wires the accumulator_set call)" )

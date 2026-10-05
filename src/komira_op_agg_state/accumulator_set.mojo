@@ -58,15 +58,18 @@ from .dyn_accumulator import DynAccumulator, MAX_ACC_SIZE, _cast_acc
 # =============================================================================
 
 # The type-erased kernel entry. PRIVATE to this file: it is the one fn-ptr
-# shape of the SoA hot path, and the only place that names the raw element
-# pointers the `Accumulator.update_batch` trait method takes. fn-ptr types
-# cannot carry origin parameters, so the pointer origins are the untracked
-# one; the public `call` below builds them from borrowed `Span`s inside its own
-# body, and nothing public mentions this alias.
+# shape of the SoA hot path, and the only place that names raw element
+# pointers. fn-ptr types cannot carry origin parameters, so the pointer origins
+# are the untracked one; the public `call` below builds them from borrowed
+# `Span`s inside its own body, the thunk turns them back into spans for the
+# `Accumulator.update_batch` trait method (which takes spans), and nothing
+# public mentions this alias. The Ints are the value column's byte length, the
+# element offset and the row count.
 comptime _SoaKernelFn = def(
     mut DynValue[MAX_ACC_SIZE],
     UnsafePointer[Int, MutUntrackedOrigin],
     UnsafePointer[UInt8, MutUntrackedOrigin],
+    Int,
     Int,
     Int,
 ) raises thin -> None
@@ -124,9 +127,9 @@ struct MonomorphicKernel(Movable, Copyable):
         # SAFETY: the pointers are formed from spans the caller keeps borrowed
         # for this whole call (`og`/`oc` are tracked on the parameters); the
         # untracked origin exists only because the fn-ptr signature cannot
-        # name them, and `update_batch` must not stash either pointer (trait
-        # contract). The mutable cast is nominal: the trait takes a mutable
-        # pointer type but the SoA kernels only read the gid and data buffers.
+        # name them, and `update_batch` must not stash either span (trait
+        # contract). The mutable cast is nominal: the SoA kernels only read the
+        # gid and data buffers.
         var gids_ptr = (
             gids.unsafe_ptr()
             .unsafe_mut_cast[True]()
@@ -137,13 +140,14 @@ struct MonomorphicKernel(Movable, Copyable):
             .unsafe_mut_cast[True]()
             .unsafe_origin_cast[MutUntrackedOrigin]()
         )
-        self._fn(acc._value, gids_ptr, col_ptr, col_offset, n)
+        self._fn(acc._value, gids_ptr, col_ptr, len(col_data), col_offset, n)
 
 
 def _unwired_kernel_thunk(
     mut box: DynValue[MAX_ACC_SIZE],
     gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
     col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+    col_len: Int,
     col_offset: Int,
     n: Int,
 ) raises -> None:
@@ -154,6 +158,7 @@ def _kernel_thunk[T: Accumulator](
     mut box: DynValue[MAX_ACC_SIZE],
     gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
     col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+    col_len: Int,
     col_offset: Int,
     n: Int,
 ) raises -> None:
@@ -162,15 +167,19 @@ def _kernel_thunk[T: Accumulator](
     PERF-CRITICAL: Instantiated once per concrete type T. T.update_batch
     is a direct call with the full body visible to the Mojo compiler.
 
-    The thunk hands the trait method the element pointers directly; no
+    The thunk hands the trait method spans over the element buffers; no
     Column is built (avoids the Mojo JIT bug with Movable types in fn-ptrs).
     """
     # SAFETY: `box` holds a live T (see _cast_acc) and is borrowed `mut` for
     # this call. `gids_ptr` is valid for n Int group ids and `col_data_ptr`
-    # for the column's buffer; both are borrowed by MonomorphicKernel.call
-    # for the duration of this call and are not stashed.
+    # for `col_len` bytes; both are borrowed by MonomorphicKernel.call for the
+    # duration of this call, and the spans built here are not stashed.
     var ptr = _cast_acc[T](box)
-    ptr[].update_batch(gids_ptr, col_data_ptr, col_offset, n)
+    var gids = Span[Int, MutUntrackedOrigin](unsafe_ptr=gids_ptr, length=n)
+    var col_data = Span[UInt8, MutUntrackedOrigin](
+        unsafe_ptr=col_data_ptr, length=col_len
+    )
+    ptr[].update_batch(gids, col_data, col_offset, n)
 
 
 # =============================================================================

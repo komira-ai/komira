@@ -267,14 +267,27 @@ struct PercentileAcc(Accumulator):
 
     # --- Accumulator trait conformance (Phase Acc-trait) ----------------------
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
         """Trait-conforming: extract Float64 ptr from Column[HeapRegion], delegate."""
+        # SAFETY: the pointers are formed from the borrowed spans and live only for
+        # this call; the untracked origin and the nominal mutable cast keep the body's
+        # pointer type unchanged (the kernels only read both buffers).
+        var gids_ptr = (
+            gids.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        var col_data_ptr = (
+            col_data.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
         var data_ptr = col_data_ptr.bitcast[Float64]()
         var off = col_offset
         for i in range(n):
@@ -419,14 +432,27 @@ struct CountDistinctAcc(Accumulator):
 
     # --- Accumulator trait conformance (Phase Acc-trait) ----------------------
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
         """Trait-conforming: extract Int64 ptr from Column[HeapRegion], delegate."""
+        # SAFETY: the pointers are formed from the borrowed spans and live only for
+        # this call; the untracked origin and the nominal mutable cast keep the body's
+        # pointer type unchanged (the kernels only read both buffers).
+        var gids_ptr = (
+            gids.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        var col_data_ptr = (
+            col_data.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
         var data_ptr = col_data_ptr.bitcast[Int64]()
         var off = col_offset
         for i in range(n):

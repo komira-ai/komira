@@ -39,11 +39,9 @@
 # This file follows the same pointer / origin discipline as its sibling
 # columnar_acc_typed.mojo: typed `update_batch` takes parametric Origin,
 # no MutExternalOrigin fields, no UnsafePointer arithmetic outside the
-# tight inner loops. The trait-conforming `update_batch` overloads (Phase
-# 1B Stage 2A) DO take wildcard MutExternalOrigin pointers -- this is the
-# explicit pointer-rule exception documented in accumulator_trait.mojo header
-# (Mojo JIT bug corrupts Movable types passed through fn-ptrs;
-# raw Int + ptr is the only viable signature shape today).
+# tight inner loops. The trait-conforming `update_batch` overloads take
+# borrowed `Span`s (a raw pointer never appears in a signature); each body
+# forms its typed pointer from them locally.
 # =============================================================================
 
 from std.sys import simd_width_of
@@ -183,10 +181,10 @@ struct CountStarAcc(Accumulator):
 
     # --- Accumulator trait conformance (Phase 1B Stage 2A) -------------------
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
@@ -195,6 +193,14 @@ struct CountStarAcc(Accumulator):
         v0.3 reference: CountStarColumnarAcc::update_batch unconditionally
         increments per row regardless of column data or nullability.
         """
+        # SAFETY: the pointers are formed from the borrowed spans and live only for
+        # this call; the untracked origin and the nominal mutable cast keep the body's
+        # pointer type unchanged (the kernels only read both buffers).
+        var gids_ptr = (
+            gids.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
         for i in range(n):
             var g = gids_ptr[i]
             if g >= len(self.state):
@@ -320,14 +326,27 @@ struct MinF64Acc(Accumulator):
 
     # --- Accumulator trait conformance (Phase 1B Stage 2A) -------------------
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
         """Trait-conforming update_batch: bitcast col bytes to Float64."""
+        # SAFETY: the pointers are formed from the borrowed spans and live only for
+        # this call; the untracked origin and the nominal mutable cast keep the body's
+        # pointer type unchanged (the kernels only read both buffers).
+        var gids_ptr = (
+            gids.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        var col_data_ptr = (
+            col_data.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
         var data_ptr = col_data_ptr.bitcast[Float64]()
         var off = col_offset
         for i in range(n):
@@ -460,14 +479,27 @@ struct MaxF64Acc(Accumulator):
 
     # --- Accumulator trait conformance (Phase 1B Stage 2A) -------------------
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
         """Trait-conforming update_batch: bitcast col bytes to Float64."""
+        # SAFETY: the pointers are formed from the borrowed spans and live only for
+        # this call; the untracked origin and the nominal mutable cast keep the body's
+        # pointer type unchanged (the kernels only read both buffers).
+        var gids_ptr = (
+            gids.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        var col_data_ptr = (
+            col_data.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
         var data_ptr = col_data_ptr.bitcast[Float64]()
         var off = col_offset
         for i in range(n):
@@ -609,14 +641,27 @@ struct AvgAcc(Accumulator):
 
     # --- Accumulator trait conformance (Phase 1B Stage 2A) -------------------
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
         """Trait-conforming update_batch: per-row Kahan sum + count++."""
+        # SAFETY: the pointers are formed from the borrowed spans and live only for
+        # this call; the untracked origin and the nominal mutable cast keep the body's
+        # pointer type unchanged (the kernels only read both buffers).
+        var gids_ptr = (
+            gids.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        var col_data_ptr = (
+            col_data.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
         var data_ptr = col_data_ptr.bitcast[Float64]()
         var off = col_offset
         for i in range(n):

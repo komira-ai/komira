@@ -5,7 +5,7 @@
 # Verifies that CountStarAcc / MinF64Acc / MaxF64Acc / AvgAcc each conform to
 # the Accumulator trait (`accumulator_trait.mojo`) by:
 #
-#   1. update_batch(gids_ptr, col_data_ptr, col_offset, n)  -- HOT PATH overload
+#   1. update_batch(gids, col_data, col_offset, n)  -- HOT PATH overload
 #   2. finalize_to_column()                                 -- arrow Column out
 #   3. flush_partial_to_column()                            -- abandon-cycle
 #   4. ensure_capacity(n_groups)                            -- monotonic grow
@@ -20,10 +20,9 @@
 #     callers must consult num_groups + finalize Optional path for null).
 #   - AvgAcc: sum/count per group; flush_partial returns 0.0 sentinel for unseen.
 #
-# Mojo trait method `update_batch(gids_ptr, col_data_ptr, col_offset, n)`
-# takes raw UnsafePointer[Int, MutExternalOrigin] / UnsafePointer[UInt8,
-# MutExternalOrigin] (see accumulator_trait.mojo header for the JIT-bug
-# rationale). Tests construct these via List.unsafe_ptr().bitcast.
+# Mojo trait method `update_batch(gids, col_data, col_offset, n)` takes
+# borrowed Span[Int] / Span[UInt8] (see accumulator_trait.mojo header). Tests
+# build these over a List's buffer.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -46,26 +45,32 @@ from komira_op_agg_state.columnar_acc_typed_extra import (
 
 def _gids_to_int_ptr(
     mut gids: List[Int],
-) -> UnsafePointer[Int, MutUntrackedOrigin]:
-    """List[Int].unsafe_ptr() under the untracked origin the trait names.
+) -> Span[Int, MutUntrackedOrigin]:
+    """List[Int] as the span the trait takes, under the untracked origin.
 
     The trait uses Int (8-byte) per ADR S1 -- not UInt32 -- because Mojo
     Mojo has a JIT bug round-tripping 4-byte Scalar through Int. List[Int]
     is the canonical input shape from the production hot path.
     """
-    return gids.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+    return Span[Int, MutUntrackedOrigin](
+        unsafe_ptr=gids.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
+        length=len(gids),
+    )
 
 
 def _f64_vals_to_byte_ptr(
     mut vals: List[Float64],
-) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    """List[Float64].unsafe_ptr() byte-bitcast under the untracked origin.
+) -> Span[UInt8, MutUntrackedOrigin]:
+    """List[Float64] as the byte span the trait takes (untracked origin).
 
     The trait takes the column data as UInt8 + offset; concrete impls
     bitcast back to Float64 internally.
     """
-    return (
-        vals.unsafe_ptr().bitcast[UInt8]().unsafe_origin_cast[MutUntrackedOrigin]()
+    return Span[UInt8, MutUntrackedOrigin](
+        unsafe_ptr=vals.unsafe_ptr()
+        .bitcast[UInt8]()
+        .unsafe_origin_cast[MutUntrackedOrigin](),
+        length=len(vals) * 8,
     )
 
 

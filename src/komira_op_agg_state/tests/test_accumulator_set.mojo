@@ -111,16 +111,7 @@ def test_kernel_matches_direct() raises:
     direct_acc.ensure_capacity(2)
     var gd = _ints(0, 1, 0)
     var dd = _i64s(10, 20, 30)
-    direct_acc.update_batch(
-        gd.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
-        _bytes(dd).unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
-        0,
-        3,
-    )
-    # The pointers above are untracked (the trait's shape), so keep the
-    # buffers alive past the call by hand.
-    _ = gd
-    _ = dd
+    direct_acc.update_batch(Span(gd), _bytes(dd), 0, 3)
 
     var acc_set = AccumulatorSet()
     acc_set.add[SumI64Acc](SumI64Acc(), value_col_index=0, output_field_index=0, acc_kind=UInt8(0))
@@ -189,14 +180,14 @@ struct _TokenAcc(Accumulator):
         self.token = token
         self.total = 0
 
-    def update_batch(
+    def update_batch[og: Origin, oc: Origin](
         mut self,
-        gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
-        col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
-        var data = col_data_ptr.bitcast[Int64]()
+        var data = col_data.unsafe_ptr().bitcast[Int64]()
         for i in range(n):
             self.total += Int(data[col_offset + i])
 
