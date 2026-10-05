@@ -33,7 +33,7 @@ from kci_reconciler import (
     RETAIN_KEEP,
     CONVERGE_IN_PLACE,
     VERB_UPDATE,
-    FAULT_CUSTOMER,
+    FAULT_USER,
 )
 
 comptime _SRC = "src/kci_reconciler/erased_resource.mojo"
@@ -87,7 +87,7 @@ struct _Probe(Resource, Movable, Deinitable):
         return CONVERGE_IN_PLACE
 
     def fault_domain(mut self, verb: String) raises -> Int:
-        return FAULT_CUSTOMER
+        return FAULT_USER
 
     def owner(mut self) -> String:
         return String("probe-owner")
@@ -118,7 +118,7 @@ def test_erase_is_a_complete_way_in() raises:
     assert_equal(act.verb, VERB_UPDATE)
     assert_equal(act.reason, String("phys-t1"))
     assert_equal(e.converge_mode(live), CONVERGE_IN_PLACE)
-    assert_equal(e.fault_domain(String("create")), FAULT_CUSTOMER)
+    assert_equal(e.fault_domain(String("create")), FAULT_USER)
     assert_equal(e.owner(), String("probe-owner"))
     assert_equal(
         e.read_presence(Creds.none()).physical_id, String("presence")

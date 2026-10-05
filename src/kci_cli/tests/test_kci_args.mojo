@@ -198,6 +198,33 @@ def test_run_identity_grammar() raises:
     _refused(_run("--context", "a=1", "--context", "a=2"), String("--context a is given twice"))
 
 
+def test_pixi_flags_values() raises:
+    var c = parse_kci_args(
+        _run("--pixi", "/t/pixi", "--pixi-sha256", "807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f")
+    )
+    assert_equal(c.pixi, String("/t/pixi"))
+    assert_equal(c.pixi_sha256, String("807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f"))
+    _refused(_run("--pixi", "pixi"), String("--pixi 'pixi' is not an absolute path"))
+    _refused(_run("--pixi-sha256", "ABC"), String("--pixi-sha256 'ABC' is not 64 lowercase hex characters"))
+    # an empty sha (an unset variable in the job) is a usage error before any pixi runs
+    _refused(_run("--pixi-sha256", ""), String("--pixi-sha256 is EMPTY"))
+    _refused(_run("--pixi-sha256="), String("--pixi-sha256 is EMPTY"))
+    _refused(
+        _run("--pixi-sha256", "807EABF195B13D6393B832ECCCF93BF59BF784425674A60C7B50B1B84A58367F"),
+        String("is not 64 lowercase hex characters"),
+    )
+
+
+def test_channel_is_a_plain_absolute_file_location() raises:
+    var c = parse_kci_args(_run("--channel", "file:///home/u/channel"))
+    assert_equal(c.channel, String("file:///home/u/channel"))
+    _refused(_run("--channel", "https://prefix.dev/komira-ai/gamma"), String("it is not a file:/// location"))
+    _refused(_run("--channel", "gamma"), String("--channel 'gamma' is not file:///<absolute directory>, a local channel"))
+    for bad in ["file:///", "file://host/c", "file:///a/../c", "file:///a/./c", "file:///a//c", "/home/u/channel"]:
+        _refused(_run("--channel", bad), String("--channel '") + String(bad) + String("' is not file:///<absolute directory>"))
+    _refused(_run("--channel", "file:///a", "--channel", "file:///b"), String("--channel is given twice"))
+
+
 def test_find_result_file() raises:
     assert_equal(find_result_file(_args("build", "--result-file", "/r.json")), String("/r.json"))
     assert_equal(find_result_file(_args("run", "--result-file=/q.json", "--bogus")), String("/q.json"))

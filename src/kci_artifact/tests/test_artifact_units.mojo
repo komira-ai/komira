@@ -225,7 +225,7 @@ def test_build_system_command_field_numbers_are_pinned() raises:
     # build_targets = 5 (0x2a, 6 bytes)
     var b = BuildSystem(
         String("b"), String("e"), _one(String("x")),
-        Command(String("f"), _one(String("y"))), Command(String("g"), _one(String("z"))),
+        Command(String("f"), _one(String("y"))), Command(String("g"), _one(String("z"))), None,
     )
     _expect_bytes(
         encode_proto[BuildSystem](b),

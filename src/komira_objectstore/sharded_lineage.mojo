@@ -5,7 +5,7 @@
 #
 # The broker/search `ShardedLineage` machinery, POLICY-AGNOSTIC: the heap
 # partition router (route/route_range/hash_shard_to_id) sits ABOVE this kernel
-# as pgstore caller policy. The kernel is shared by the index axis (replica
+# as table-store caller policy. The kernel is shared by the index axis (replica
 # policy) and the heap axis (partition policy) — a shared substrate with split
 # policy.
 #
@@ -50,7 +50,7 @@
 # DEPENDENCY DIRECTION (cycle-free).
 # ---------------------------------------------------------------------------
 # `komira_objectstore`'s deps never
-# reach back into komira_search_s3 / komira_pgsql / komira_pgstore* /
+# reach back into komira_search_s3 / komira_pgsql / komira_table_store and its adapters /
 # komira_broker. This module imports ONLY peers within `komira_objectstore`
 # (`sublineage_shard_keys`, `sublineage_base_fold`, `cas_manifest`, `store`,
 # `path`, `types`). So the kernel sits at the BOTTOM of the graph; every consumer

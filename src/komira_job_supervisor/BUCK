@@ -1,0 +1,117 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# A generic job supervisor: it runs one job binary (local, or fetched from an
+# object store and SHA-256 verified, chmod 0o755) through komira_supervisor
+# with both output pipes drained without blocking, reports the job's state
+# as komira.job_report.v1 JobHeartbeat messages (protobuf binary; the wire is
+# its own package, komira_job_report_proto) through an operator-supplied
+# HeartbeatReporter, stops the job on a CANCEL reply (SIGTERM -> grace ->
+# SIGKILL), streams stdout to an object store in
+# chunks while the job runs, and on exit classifies the result, reports it
+# and writes logs.txt (and crash_report.json on failure).
+#
+# Configuration is command-line flags (JobSupervisorConfig.from_args). The
+# embedding binary supplies the heartbeat reporter (HttpHeartbeatReporter
+# ships, with NoHeartbeatAuth; a credential scheme is the embedding binary's
+# own HeartbeatAuth conformer) and the object stores (any komira_objectstore
+# ConditionalWriteStore; s3_store.mojo builds S3 / S3-compatible ones).
+#
+# The welded tests are hermetic: no network beyond 127.0.0.1, no object
+# service, no cloud. They spawn real children
+# (test_job_supervisor_chatty_child), parse and refuse flags
+# (test_job_supervisor_config_flags), put the auth headers on the serialized
+# request and fail closed (test_heartbeat_auth_seam), refuse a credential on a
+# plaintext heartbeat against a loopback listener
+# (test_heartbeat_no_credential_in_clear), project each heartbeat onto the
+# wire messages (test_heartbeat_proto_roundtrip), run the whole loop over HTTP
+# against a 127.0.0.1 responder whose CANCEL reply stops the job and whose
+# unknown directive does not (test_heartbeat_send_cancel), and run the binary
+# fetch, the
+# terminal writes, the live stream and the S3 store's verbs over an in-memory
+# store and a scripted connector (test_job_supervisor_object_store).
+mojo_library(
+    name = "komira_job_supervisor",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_job_report_proto:komira_job_report_proto",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_log:komira_log",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore_s3:komira_objectstore_s3",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_supervisor:komira_supervisor",
+        "//src/komira_test_bucket:komira_test_bucket",
+        "//src/komira_test_minio:komira_test_minio",
+        "//src/komira_test_run_id:komira_test_run_id",
+        "//src/komira_test_verdict:komira_test_verdict",
+    ],
+    test_srcs = [
+        "tests/test_job_supervisor_chatty_child.mojo",
+        "tests/test_job_supervisor_config_flags.mojo",
+        "tests/test_job_supervisor_object_store.mojo",
+        "tests/test_heartbeat_auth_seam.mojo",
+        "tests/test_heartbeat_no_credential_in_clear.mojo",
+        "tests/test_heartbeat_proto_roundtrip.mojo",
+        "tests/test_heartbeat_send_cancel.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The MinIO end-to-end tests: the supervisor against a real S3-compatible server,
+# an embedded MinIO the test starts on 127.0.0.1 from a pinned binary
+# (komira_test_bucket / komira_test_minio). test_job_supervisor_s3_e2e fetches,
+# verifies, runs a job binary and writes logs.txt and crash_report.json;
+# test_job_supervisor_stream_logs_e2e streams a running job's stdout in chunks.
+#
+# OPT-IN, so they are binaries and not welded tests or mojo_test targets: a
+# test is given its store by flags, and the build gives a test no flags and
+# no MinIO binary, so under `./buck2 build` or `./buck2 test` each would end
+# with SKIP (exit 77), which both read as a failure. `./buck2 build //...`
+# compiles them; a run is
+#
+#     ./buck2 run //src/komira_job_supervisor:test_job_supervisor_s3_e2e -- \
+#         --test-minio-binary=<path to the pinned MinIO server>
+#
+# With no flag a run SKIPS (exit 77, with the reason), never passes; with a
+# --test-s3-* flag it is CANNOT_TELL (exit 3). A run's objects live under its
+# own prefix and `close()` deletes them, lists again to prove the prefix
+# empty and stops the server; a verdict that is not CLEAN fails the run. The
+# server is started through setpriv (PR_SET_PDEATHSIG), so it dies with the
+# test: Linux only (tests/e2e/job_supervisor_minio_e2e.mojo).
+_E2E_DEPS = [
+    ":komira_job_supervisor",
+    "//src/komira_aws_core:komira_aws_core",
+    "//src/komira_libc:komira_libc",
+    "//src/komira_crypto:komira_crypto",
+    "//src/komira_http_client:komira_http_client",
+    "//src/komira_http_core:komira_http_core",
+    "//src/komira_objectstore:komira_objectstore",
+    "//src/komira_objectstore_s3:komira_objectstore_s3",
+    "//src/komira_supervisor:komira_supervisor",
+    "//src/komira_test_bucket:komira_test_bucket",
+    "//src/komira_test_minio:komira_test_minio",
+    "//src/komira_test_run_id:komira_test_run_id",
+    "//src/komira_test_verdict:komira_test_verdict",
+]
+
+[
+    mojo_binary(
+        name = name,
+        srcs = [
+            "tests/e2e/job_supervisor_minio_e2e.mojo",
+            "tests/e2e/{}.mojo".format(name),
+        ],
+        main = "tests/e2e/{}.mojo".format(name),
+        deps = _E2E_DEPS,
+    )
+    for name in [
+        "test_job_supervisor_s3_e2e",
+        "test_job_supervisor_stream_logs_e2e",
+    ]
+]

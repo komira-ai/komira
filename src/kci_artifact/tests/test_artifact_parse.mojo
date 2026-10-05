@@ -122,7 +122,7 @@ def _bytes(*xs: Int) -> List[UInt8]:
 
 
 def _bs() -> BuildSystem:
-    return BuildSystem(String("b"), String("e"), _one(String("x")), None, None)
+    return BuildSystem(String("b"), String("e"), _one(String("x")), None, None, None)
 
 
 def _art() -> Artifact:
@@ -178,14 +178,14 @@ def test_parse_refusals() raises:
         _refusal(f.replace(String("  args: \"build\"\n"), String("  args: \"build\"\n  kind: \"x\"\n"))),
         String(
             "artifacts.textproto: line 5: unknown field 'kind' in build system 'buck2'"
-            " (expected name, executable, args, affected, build_targets)"
+            " (expected name, executable, args, affected, build_targets, derive_checks)"
         ),
     )
     assert_equal(
         _refusal(String("build_systems {\n  label: \"x\"\n}\n")),
         String(
             "artifacts.textproto: line 2: unknown field 'label' in build system #1"
-            " (expected name, executable, args, affected, build_targets)"
+            " (expected name, executable, args, affected, build_targets, derive_checks)"
         ),
     )
     assert_equal(
@@ -279,7 +279,7 @@ def test_schema_version_refusals() raises:
         _refusal(_file().replace(String("  executable: \"buck2\"\n"), String("  executable: \"buck2\"\n  schema_version: 1\n"))),
         String(
             "artifacts.textproto: line 4: unknown field 'schema_version' in build system 'buck2'"
-            " (expected name, executable, args, affected, build_targets)"
+            " (expected name, executable, args, affected, build_targets, derive_checks)"
         ),
     )
 
