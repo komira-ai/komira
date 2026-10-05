@@ -1,41 +1,32 @@
 # Continuous integration
 
-A pull request from a branch of this repository runs the check `kci / pr`, the
-`pr` job of [`.github/workflows/kci.yml`](#kciyml-the-release): the units the
-change reaches, built and tested on the farm. The job `build` of
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (the check
-`ci / build`) runs on it too, and is redundant with `kci / pr`. Both are
-GitHub-hosted runners that reach the build farm over a tailnet. Each runner is
+A pull request from a branch of this repository runs ONE check: `kci / pr`,
+the `pr` job of [`.github/workflows/kci.yml`](#kciyml-the-release), on a
+GitHub-hosted runner that reaches the build farm over a tailnet. The runner is
 a thin buck2 client: it checks the repository out and asks the farm to build
-it. Nothing is compiled on the runner.
+the units the change reaches ([the units](#the-per-change-checks-units)).
+Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | the farm build (`ci / build`) and the release path (`kci.yml`) |
-| pull request from a branch of this repository | `kci / pr`, and the farm build `ci / build` |
+| push to `main` | the release path of `kci.yml` |
+| pull request from a branch of this repository | `kci / pr` |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
-| manual (`workflow_dispatch`) | the farm build, on the chosen ref |
+| manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
 
 There is no separate static or lint job, and no other pull request check. The
 only scheduled run is the
 [build-system self-tests](#build-system-self-tests), which is not the gate.
+`ci.yml` and its check `ci / build` no longer exist. The whole-repository
+`//...` build they ran on every push to `main` is not run by any workflow now;
+a pull request's check covers the units the change reaches, and every target of
+the graph is in some unit, so a change to any target is built by its unit.
 
-**The plan, not yet done:** once `kci / pr` has run green on a few pull
-requests and is a required check, `ci.yml` is deleted and `kci / pr` is the
-only pull request check; the push-to-`main` farm build then moves into
-`kci.yml`. Until then `ci.yml` stays, and `ci / build` is the check that runs
-the whole-repository `//...` build and the standalone tests.
+## What the check builds
 
-## What the job runs
-
-```sh
-./buck2 build //...
-./buck2 test //...
-./buck2 build --keep-going tests//functional/...
-```
-
-The build is the gate: building a release target runs the tests welded to it
-and to its dependencies, so the job points at build targets and nothing else.
+The build is the gate: building a target runs the tests welded to it and to its
+dependencies, so the check points at build targets and nothing else. What a
+build of the whole repository covers, and so what the units add up to:
 
 1. **`./buck2 build //...`** builds every target of the komira cell on the
    farm. That is more than compiling:
@@ -63,18 +54,17 @@ and to its dependencies, so the job points at build targets and nothing else.
 3. **`./buck2 build --keep-going tests//functional/...`** builds every
    positive target of the `tests` cell, which `//...` does not reach (it is a
    cell of its own so that `//...` holds no target that fails by design). A
-   target there that does not build fails the job; the targets that must fail
+   target there that does not build fails its unit; the targets that must fail
    are `tests//negative`, built as `expect_red`s by the
    [self-tests](#build-system-self-tests) and not by this one. Every target of `tests//functional` is meant to build, so nothing
    there is excluded: a probe or fixture that is expected to fail belongs in
    `tests//negative`.
 A contributor runs the same three commands on any client. A green local
-`./buck2 build //... && ./buck2 test //...` is what the first two steps of CI
-prove, dead Markdown links included (`//:docs`).
+`./buck2 build //... && ./buck2 test //...` is the whole-repository form of
+what the units of `kci / pr` prove, dead Markdown links included (`//:docs`).
 
-Publishing is not part of this job. It is a separate workflow,
-[kci.yml](#kciyml-the-release), whose only job on a pull request is the
-per-change check `pr` (`kci / pr`); its release jobs never run for one.
+Publishing is not part of the check. Its release jobs, in the same workflow
+[kci.yml](#kciyml-the-release), never run for a pull request.
 
 ## The runner
 
@@ -149,13 +139,13 @@ tailnet and has no farm address. Remote execution also runs the commands a
 build describes, so running a stranger's build would be running its code on the
 farm's workers. Therefore:
 
-- The `build` job is **skipped** for a fork's pull request:
-  `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository`.
-  `kci / pr` does not run for it either, so a fork's pull request has no check at all; the
+- The `pr` job of `kci.yml` is **skipped** for a fork's pull request:
+  `if: github.event.pull_request.head.repo.full_name == github.repository`.
+  No other job runs for it, so a fork's pull request has no check at all; the
   repository's only merger reads the change and runs the farm build from a
   branch of this repository.
 - ⚠ A skipped job counts as passed for a required status check. Do not rely on
-  the `build` check alone to merge a fork's change: read it, push it to a branch
+  the `kci / pr` check alone to merge a fork's change: read it, push it to a branch
   of this repository, and merge that run's green farm build.
 - **Reading the change is the review.** Read the whole change, `.github/`,
   `tools/` and every `BUCK` and `.bzl` file included, before pushing it to a
@@ -194,10 +184,10 @@ build does not: where actions ran, cache identity across checkouts,
 analysis-time refusals, a `buck2 run` from a fresh clone, targets that must
 fail by design (the `tests` cell), and the `./buck2` bootstrap. It is one shell
 script of numbered cases, takes well over an hour, and is **not the gate**: the
-gate is the three build commands above. It runs in its own workflow,
+gate is `kci / pr`. It runs in its own workflow,
 [`build_system_selftests.yml`](../.github/workflows/build_system_selftests.yml),
 on a nightly schedule and on demand, never on a push or a pull request, with
-the same farm connection and the same job permissions as `ci`. Two runs never
+the same farm connection and the same job permissions as `kci / pr`. Two runs never
 overlap. It needs a Linux x86_64 client and refuses any other (exit 2).
 
 Run it by hand on a branch of this repository:
@@ -509,7 +499,7 @@ is a row of `src/kci_ci_check/tests/test_workflow_subset.mojo`.
 [`.github/workflows/merge_from_live.yml`](../.github/workflows/merge_from_live.yml)
 is the planned weekly pull request bumping every pin (buck2, the toolchain
 downloads, third-party archives) to its live release, merged only if its own
-`ci` run is green. It is a stub: its script,
+`kci / pr` run is green. It is a stub: its script,
 [`.github/ci/merge_from_live.sh`](../.github/ci/merge_from_live.sh), states the
 design and exits 1, and the workflow has no schedule until the script opens
 pull requests.
