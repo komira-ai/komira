@@ -495,7 +495,7 @@ def _check_permissions_form(doc: WorkflowDoc, owner: Int, whose: String, mut fin
     `permissions:` that is a scalar is a plain `read-all` (any other scalar,
     `write-all` above all, a quoted or block scalar, grants permissions no
     map names); a permissions map has no `id-token` key in another case and
-    no two keys that differ only in case."""
+    no two keys that differ only in case; a `permissions:` is never a list."""
     var owner_keys = doc.keys(owner)
     for k in range(len(owner_keys)):
         if _in_another_case(owner_keys[k], String("permissions")):
@@ -518,6 +518,11 @@ def _check_permissions_form(doc: WorkflowDoc, owner: Int, whose: String, mut fin
                         _at(doc, perms) + whose + String("R4: permissions keys '") + keys[k] + String("' and '")
                         + keys[j] + String("' differ only in case")
                     )
+    if perms >= 0 and doc.kind(perms) == NODE_LIST:
+        findings.append(
+            _at(doc, perms) + whose + String("R4: `permissions:` is a list; use an explicit permissions map, or `read-all` or `{}`")
+        )
+        return
     if perms < 0 or doc.kind(perms) != NODE_SCALAR or doc.is_plain(perms, String("read-all")):
         return
     findings.append(

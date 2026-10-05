@@ -23,10 +23,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # job), and every `kci run` reading the machine file being checked (the
 # default, or its `--machine`).
 #
-# The workflow is read by a RESTRICTED reader of the YAML subset it uses;
-# anything else (anchors, aliases, tags, flow mappings, tabs, a second document)
-# is "cannot tell", never a pass. actionlint (//:workflow_lint) stays the YAML
-# validity gate.
+# The workflow is read by a FAIL-CLOSED reader of a strict YAML subset
+# (workflow_reader.mojo's header; docs/ci.md, "The workflow subset kci
+# reads"); any line outside it is "cannot tell", never a pass. actionlint
+# (//:workflow_lint) stays the YAML validity gate.
 #
 # Deps: kci_release_machine (the stages), kci_release_channel (which channels
 # publish by OIDC) and kci_api (the default machine file). Pure: it
@@ -40,8 +40,11 @@ mojo_library(
         "//src/kci_release_machine:kci_release_machine",
     ],
     test_srcs = [
-        # what the restricted reader reads, and each construct it cannot tell
+        # what the fail-closed reader reads, and each construct it cannot tell
         "tests/test_workflow_reader.mojo",
+        # the subset as a table: every spelling found to read one way to kci
+        # and another to GitHub ends in cannot tell or in the rule's finding
+        "tests/test_workflow_subset.mojo",
         # a fixture that agrees, one mutation per rule R1-R12, the id-token
         # stages, the start-up entry point
         "tests/test_ci_rules.mojo",
