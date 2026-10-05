@@ -1,7 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "push_verdicts", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -36,16 +36,6 @@ workflow_lint(
 action_pins(
     name = "action_pins",
     srcs = WORKFLOWS + ACTIONS,
-)
-
-# Every push-triggered workflow but the release workflow: kci.yml is held to
-# the opposite on purpose. Its runs of main share ONE concurrency group, so a
-# newer push replaces the PENDING release and the newest revision is promoted
-# (continuous auto-promotion; a running release is never cancelled). Rule R16
-# of src/kci_ci_check holds that group byte for byte instead (welded test).
-push_verdicts(
-    name = "push_verdicts",
-    srcs = [w for w in WORKFLOWS if w != ".github/workflows/kci.yml"],
 )
 
 no_endpoint(

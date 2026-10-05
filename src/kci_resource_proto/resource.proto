@@ -47,6 +47,20 @@
 //     primitives (R2) of four clouds, one range each.
 //   * Fields 50, 51, 52 and 53 of every primitive message: its per-cloud
 //     extension messages, one per cloud.
+// THE HELD NUMBERS, MACHINE-READABLE. The lines below are what the welded
+// test `test_held_numbers_are_unused` reads: no field of the named message may
+// use a held number, and no message may reuse a `reserved` number. A held
+// number leaves this list in the same change that declares it.
+// held-numbers: Resource 5 6 12 15-19 21-24 26-36 80 90 100-299 300-499 500-699 700-899
+// held-numbers: Value 4
+// held-numbers: Image 4
+// held-numbers: Uses 3
+// held-numbers: Service 13 50-53
+// held-numbers: Job 8 50-53
+// held-numbers: Table 4 50-53
+// held-numbers: Bucket 50-53
+// held-numbers: ServiceAccount 50-53
+// held-numbers: Grant 50-53
 // The list of clouds is data (a cloud is a value checked against the
 // built-in clouds); the four ranges and the four extension numbers are held
 // for the four built-in clouds, never named by a type here.
