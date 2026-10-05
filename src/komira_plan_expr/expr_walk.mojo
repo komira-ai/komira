@@ -56,7 +56,7 @@ from komira_arrow.arrow_types import ArrowType
 # presentation of that rule would make this whole walk `raises`, and the walk
 # MUST be non-raising — see `walk_expr_field`'s docstring. The rule itself is
 # stated once, in `decimal_arith.mojo`.
-from komira_scalar_arith.decimal_arith import (
+from komira_scalar_arithmetic.decimal_arith import (
     decimal_add_result_ps,
     decimal_mul_result_ps_checked,
 )

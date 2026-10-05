@@ -19,7 +19,7 @@
 
 from std.math import floor, ceil
 
-from komira_scalar_arith.decimal_arith import (
+from komira_scalar_arithmetic.decimal_arith import (
     I128,
     I256,
     pow10_i128,

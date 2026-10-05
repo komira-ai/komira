@@ -12,7 +12,7 @@
 
 from std.testing import assert_equal
 
-from komira_agg_contract.agg_strategy import (
+from komira_agg_api.agg_strategy import (
     select_strategy,
     AGG_HINT_ADAPTIVE,
     AGG_HINT_FORCE_THREAD_LOCAL,

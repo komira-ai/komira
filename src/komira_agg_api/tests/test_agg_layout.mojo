@@ -12,7 +12,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_agg_contract.agg_layout import (
+from komira_agg_api.agg_layout import (
     ACC_SUM_F64,
     ACC_COUNT_STAR,
     ACC_SUM_COUNT_F64,

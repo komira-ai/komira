@@ -12,7 +12,7 @@
 from std.testing import assert_equal
 
 from komira_arrow.arrow_types import ArrowType
-from komira_agg_contract.agg_strategy import (
+from komira_agg_api.agg_strategy import (
     select_optimal_strategy_type_only,
     AggStrategy,
     AGG_STRATEGY_UNGROUPED,

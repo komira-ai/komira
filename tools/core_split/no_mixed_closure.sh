@@ -62,6 +62,8 @@ fi
 derived=""
 for pkg in $(awk -F'\t' '/^#/ { next } !h { h = 1; next } $4 == "copy" { print $5 }' "$MAP" | sort -u); do
     [ "$pkg" = komira_libc ] && continue
+    # a package renamed after its copy commit: the map keeps the old name (renames.tsv)
+    pkg=$(awk -F'\t' -v p="$pkg" '$1 == p { print $2; f = 1 } END { if (!f) print p }' tools/core_split/renames.tsv)
     [ -f "src/$pkg/BUCK" ] && derived="$derived //src/$pkg:$pkg"
 done
 

@@ -9,7 +9,7 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_compression:komira_compression",
-        "//src/komira_concurrency:komira_concurrency",
+        "//src/komira_async_api:komira_async_api",
         "//src/komira_counters:komira_counters",
         "//src/komira_libc:komira_libc",
     ],

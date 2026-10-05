@@ -25,7 +25,7 @@ from std.memory import alloc, UnsafePointer, OwnedPointer
 from std.testing import assert_true
 from std.time import perf_counter_ns, sleep
 
-from komira_concurrency.spawn_drop import spawn_drop
+from komira_async_api.spawn_drop import spawn_drop
 
 
 # -----------------------------------------------------------------------------

@@ -58,11 +58,11 @@
 from std.collections import List
 from std.memory import UnsafePointer
 
-from komira_concurrency.fork_join_shared import fork_join_shared
-from komira_concurrency.parallel_dispatch import NoDispatch, ParallelDispatch
-from komira_concurrency.sched_sites import SITE_JOIN_CHUNK_PRICE
-from komira_concurrency.shared_chunk_work import SharedChunkWork
-from komira_concurrency.token import CancellationToken
+from komira_async_api.fork_join_shared import fork_join_shared
+from komira_async_api.parallel_dispatch import NoDispatch, ParallelDispatch
+from komira_async_api.sched_sites import SITE_JOIN_CHUNK_PRICE
+from komira_async_api.shared_chunk_work import SharedChunkWork
+from komira_async_api.token import CancellationToken
 
 from komira_arrow.schema import RecordBatch
 from komira_arrow.column import Column

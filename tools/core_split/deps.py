@@ -9,6 +9,7 @@ CALL=re.compile(r'external_call\[\s*"([A-Za-z0-9_]+)"')
 def mask(t):
     t=re.sub(r'"""(.*?)"""',lambda m:re.sub(r'[^\n]',' ',m.group(0)),t,flags=re.S)
     return re.sub(r'#[^\n]*','',t)
+RENAMED=dict(tuple(l.rstrip('\n').split('\t')) for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)),'renames.tsv')) if l.strip() and not l.startswith('#'))
 def load_symbols(path):
     """-> ({symbol: owner package}, [(prefix, third-party label)])."""
     own={}; third=[]
@@ -17,7 +18,7 @@ def load_symbols(path):
         a,b=l.rstrip('\n').split('\t')
         if a=='symbol': continue
         if a.endswith('*'): third.append((a[:-1],b))
-        else: own[a]=b
+        else: own[a]=RENAMED.get(b,b)
     return own,third
 def first_party(tree,*maps):
     src=os.path.join(tree,'src')

@@ -10,7 +10,7 @@ Validates:
 
 from std.testing import assert_equal, assert_true
 
-from komira_agg_contract.agg_strategy import (
+from komira_agg_api.agg_strategy import (
     STRATEGY_S1_RADIX,
     STRATEGY_S1_MINIMAP,
     STRATEGY_S1_PARTITIONED,

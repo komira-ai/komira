@@ -29,8 +29,10 @@ import os,re,sys,subprocess,tempfile,argparse,shutil,collections
 HERE=os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0,HERE)
 import split as S
 import deps as D
-# package renames decided after the copies were made; applied by --renames, honoured once the directory has moved
-RENAMES=[('komira_scalar_arith','komira_scalar_arithmetic'),('komira_concurrency','komira_async_api'),('komira_agg_contract','komira_agg_api')]
+# package renames decided after the copies were made (renames.tsv); applied by --renames, honoured once the directory has moved
+def load_renames():
+    return [tuple(l.rstrip('\n').split('\t')) for l in open(os.path.join(HERE,'renames.tsv')) if l.strip() and not l.startswith('#')]
+RENAMES=load_renames()
 ALWAYS_EXCLUDE=('src/komira_core/','src/komira_core_ffi/','tools/core_split/','.github/workflows/core_split.yml','.git/','buck-out/')
 TEXT_EXT=('.mojo','.md','.bzl','.sh','.py','.tsv','.txt','.toml','.yml','.yaml','.textproto')
 CORE=re.compile(r'(?<![A-Za-z0-9_])komira_core(?:_ffi)?(?![A-Za-z0-9_])')
@@ -142,6 +144,7 @@ def add_test_srcs(text,tests):
     return text[:m.start()]+'%stest_srcs = [\n%s\n%s]'%(ind,'\n'.join(lines),ind)+text[m.end():]
 # ---- main -----------------------------------------------------------------------------------------------------
 def run(a):
+    if a.renames_only: a.renames=True
     tree=os.path.abspath(a.tree); croot,cleanup=frozen_root(a)
     rows=S.load_map(os.path.join(HERE,'split_map.tsv')) if not a.map else S.load_map(a.map)
     rw=S.Rewriter(croot,rows,external=True)
@@ -158,7 +161,7 @@ def run(a):
     created={}
     inner=S.Rewriter(croot,rows,external=False)
     for r in rows:
-        if r['disposition']!='moves-with-consumer' or r['kind'] not in('src','test'): continue
+        if a.renames_only or r['disposition']!='moves-with-consumer' or r['kind'] not in('src','test'): continue
         np=r['new_path']
         if os.path.exists(os.path.join(tree,np)) or not os.path.exists(os.path.join(croot,'komira_core',r['file'])): continue
         if a.only and not under(np,a.only): continue
@@ -169,9 +172,9 @@ def run(a):
         if not f.endswith(TEXT_EXT) and os.path.basename(f) not in('BUCK','BUCK.v2'): continue
         t=read(os.path.join(tree,f))
         if t is None: continue
-        if not (CORE.search(t) or any(r.search(t) for r,_ in rename_re)): continue
+        if not ((CORE.search(t) and not a.renames_only) or any(r.search(t) for r,_ in rename_re)): continue
         if os.path.basename(f) in('BUCK','BUCK.v2'): continue
-        u=rw.rewrite(f,t) if f.endswith('.mojo') else rw.textual(t)
+        u=t if a.renames_only else (rw.rewrite(f,t) if f.endswith('.mojo') else rw.textual(t))
         u=rn(u)
         if u!=t: new[f]=u; stats['files_'+('mojo' if f.endswith('.mojo') else 'text')]+=1
     # created files may belong to a package whose BUCK needs the tests
@@ -181,8 +184,9 @@ def run(a):
         t=read(os.path.join(tree,f))
         if t is None: continue
         u=t
-        if CORE.search(t) or any(r.search(t) for r,_ in rename_re):
-            u,n=fix_buck(tree,f,t,texts,known,own,third,rename_map); notes+=n; u=rn(u)
+        if (CORE.search(t) and not a.renames_only) or any(r.search(t) for r,_ in rename_re):
+            if not a.renames_only: u,n=fix_buck(tree,f,t,texts,known,own,third,rename_map); notes+=n
+            u=rn(u)
         pk=os.path.dirname(f)
         added=[np[len(pk)+1:] for np in created if np.startswith(pk+'/tests/') and np.endswith('.mojo') and os.path.dirname(os.path.dirname(np))==pk]
         if added: u=add_test_srcs(u,added)
@@ -193,7 +197,7 @@ def run(a):
         if st=='todo': moves.append((os.path.join('src',o),os.path.join('src',n)))
     # report
     left=[]; unresolved=dict(rw.unresolved)
-    for f in files:
+    for f in ([] if a.renames_only else files):
         t=new.get(f) if f in new else read(os.path.join(tree,f))
         if t is None: continue
         for i,l in enumerate(t.split('\n')):
@@ -221,6 +225,6 @@ def run(a):
 def main():
     ap=argparse.ArgumentParser(description=__doc__.split('\n')[0]); ap.add_argument('--tree',default='.'); ap.add_argument('--core-root'); ap.add_argument('--core-rev')
     ap.add_argument('--map'); ap.add_argument('--only',action='append',default=[]); ap.add_argument('--exclude',action='append',default=[])
-    ap.add_argument('--dry-run',action='store_true'); ap.add_argument('--report'); ap.add_argument('--strict',action='store_true'); ap.add_argument('--renames',action='store_true')
+    ap.add_argument('--dry-run',action='store_true'); ap.add_argument('--report'); ap.add_argument('--strict',action='store_true'); ap.add_argument('--renames',action='store_true'); ap.add_argument('--renames-only',action='store_true',help='do the renames and nothing else (implies --renames)')
     return run(ap.parse_args())
 if __name__=='__main__': sys.exit(main())

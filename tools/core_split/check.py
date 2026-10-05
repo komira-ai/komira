@@ -45,6 +45,8 @@ def deps_check(a):
     komira_ symbol of the C shim has an owner in c_symbols.tsv and no row names a symbol the shim lacks."""
     import deps as D
     here=os.path.dirname(os.path.abspath(__file__)); desc=[l.split('\t')[0] for l in open(os.path.join(here,'packages.tsv')) if l.strip() and not l.startswith('#') and not l.startswith('package\t')]
+    ren=dict(tuple(l.rstrip('\n').split('\t')) for l in open(os.path.join(here,'renames.tsv')) if l.strip() and not l.startswith('#'))
+    desc=[ren.get(x,x) for x in desc]   # a package renamed after its copy commit is checked under its new name
     maps=[S.load_map(a.map)] if a.map else []; known=D.first_party(a.tree,*maps)|set(desc); bad=[]; n=0
     for pkg in ([a.pkg] if a.pkg else desc):
         b=os.path.join(a.tree,'src',pkg,'BUCK')

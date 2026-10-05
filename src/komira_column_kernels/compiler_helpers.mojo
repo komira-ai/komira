@@ -54,15 +54,15 @@ from komira_simd.fast_copy import fast_copy_bytes
 # The three gather waves dispatch on the engine runtime via the shared-payload
 # fork-join driver; the stdlib `parallelize` pool is not reachable from the
 # gather.
-from komira_concurrency.fork_join_shared import fork_join_shared
-from komira_concurrency.parallel_dispatch import NoDispatch, ParallelDispatch
-from komira_concurrency.sched_sites import (
+from komira_async_api.fork_join_shared import fork_join_shared
+from komira_async_api.parallel_dispatch import NoDispatch, ParallelDispatch
+from komira_async_api.sched_sites import (
     SITE_GATHER_FIXEDWIDTH,
     SITE_GATHER_STR_LEN,
     SITE_GATHER_STR_SCATTER,
 )
-from komira_concurrency.shared_chunk_work import SharedChunkWork
-from komira_concurrency.token import CancellationToken
+from komira_async_api.shared_chunk_work import SharedChunkWork
+from komira_async_api.token import CancellationToken
 
 from komira_arrow.schema import RecordBatch, RecordBatchBuilder, Schema, SchemaBuilder, Field
 from komira_arrow.table import Table

@@ -4,7 +4,7 @@
 #
 # This is a CLEAN LEAF — it has ZERO imports — and it lives in `komira_core`
 # because the shared-payload fork-join DRIVER lives in
-# `komira_concurrency/fork_join_shared.mojo`, so that
+# `komira_async_api/fork_join_shared.mojo`, so that
 # `komira_column_kernels/compiler_helpers.mojo.gather_batch` — the stage-4 gather of
 # every ORDER BY — can dispatch onto the engine's own runtime without core
 # taking an up-edge to `komira_async`.

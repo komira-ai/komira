@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_concurrency.token — CancellationToken + Cancellable
+# komira_async_api.token — CancellationToken + Cancellable
 # =============================================================================
 # A CLEAN LEAF — it imports only `std.memory` + `std.atomic` — so it
 # belongs in `komira_core`: the arrow IPC dispatch entries need

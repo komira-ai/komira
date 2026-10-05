@@ -9,11 +9,11 @@ mojo_library(
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
-        "//src/komira_concurrency:komira_concurrency",
+        "//src/komira_async_api:komira_async_api",
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_plan_expr:komira_plan_expr",
-        "//src/komira_scalar_arith:komira_scalar_arith",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_simd:komira_simd",
     ],
     test_srcs = [

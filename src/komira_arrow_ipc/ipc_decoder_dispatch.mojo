@@ -39,8 +39,8 @@ from komira_arrow_ipc.ipc_body_compression import (
     decompress_record_batch_frame,
     decompress_record_batch_frame_with_dispatcher,
 )
-from komira_concurrency.token import CancellationToken
-from komira_concurrency.parallel_dispatch import (
+from komira_async_api.token import CancellationToken
+from komira_async_api.parallel_dispatch import (
     ParallelDispatch,
     NoDispatch,
 )

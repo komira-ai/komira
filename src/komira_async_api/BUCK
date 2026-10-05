@@ -15,7 +15,7 @@ cxx_library(
 
 # Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter.
 mojo_library(
-    name = "komira_concurrency",
+    name = "komira_async_api",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_concurrency_pool_depth",

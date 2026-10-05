@@ -9,7 +9,7 @@
 # number, so signed comparison is the correct answer.
 # =============================================================================
 
-from komira_scalar_arith.decimal_arith import I128, pow10_i256
+from komira_scalar_arithmetic.decimal_arith import I128, pow10_i256
 
 comptime DEC_CMP_LT: UInt8 = 0
 comptime DEC_CMP_LE: UInt8 = 1

@@ -4,7 +4,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_scalar_arith.decimal256_arith import (
+from komira_scalar_arithmetic.decimal256_arith import (
     I256,
     decimal256_add_i256,
     decimal256_sub_i256,

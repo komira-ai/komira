@@ -32,10 +32,10 @@
 from std.ffi import external_call
 from std.memory import UnsafePointer
 
-from komira_concurrency.token import CancellationToken
-from komira_concurrency.parallel_dispatch import ParallelDispatch
-from komira_concurrency.shared_chunk_work import SharedChunkWork
-from komira_concurrency.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.token import CancellationToken
+from komira_async_api.parallel_dispatch import ParallelDispatch
+from komira_async_api.shared_chunk_work import SharedChunkWork
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 
 @always_inline

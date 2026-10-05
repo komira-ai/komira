@@ -50,7 +50,7 @@ from komira_arrow.offset_overflow import (
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_buffer.heap_region import HeapRegion
 from komira_arrow.bitmap import Bitmap, gather_bits_aligned_buffer
-from komira_concurrency.parallel_dispatch import NoDispatch, ParallelDispatch
+from komira_async_api.parallel_dispatch import NoDispatch, ParallelDispatch
 from komira_column_kernels.compiler_helpers import (
     element_size,
     has_right_suffix,

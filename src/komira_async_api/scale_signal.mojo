@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_concurrency/scale_signal.mojo
+# komira_async_api/scale_signal.mojo
 #   The `ScaleSignal` TRAIT DECLARATION — and nothing else.
 # =============================================================================
 #

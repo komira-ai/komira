@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_concurrency.parallel_dispatch — ParallelDispatch trait
+# komira_async_api.parallel_dispatch — ParallelDispatch trait
 # =============================================================================
 # The arrow IPC body compress/decompress + decoder-dispatch entries in
 # `komira_core/arrow/` dispatch parallel per-buffer work, but the concrete
@@ -30,8 +30,8 @@
 # METHOD.
 # =============================================================================
 
-from komira_concurrency.token import CancellationToken
-from komira_concurrency.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.token import CancellationToken
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 
 trait ParallelDispatch(Movable, Deinitable):

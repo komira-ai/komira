@@ -2,7 +2,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The aggregation accumulator contract: Accumulator trait, plan-time AggLayout, strategy selection, typed column pointers, COUNT(DISTINCT) key.
 mojo_library(
-    name = "komira_agg_contract",
+    name = "komira_agg_api",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
