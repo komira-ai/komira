@@ -75,6 +75,8 @@ from .plan import (
     new_names,
     plan_from_state,
     previous_build_number,
+    RevisionHistory,
+    backward_files,
     resolve_targets,
     superseding_files,
 )

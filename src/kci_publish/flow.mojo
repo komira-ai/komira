@@ -434,7 +434,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
                 var auth = token.authorization(SURFACE_PREFIX_DEV, host)
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth^)
             var nobody = AnonymousCredential()
-            return run_publish(p.targets, registry, nobody, True, opts, sleeper, base.copy())
+            return run_publish(p.targets, registry, nobody, True, opts, sleeper, base.copy(), req.revision_history)
         if is_oidc:
             var oidc = _oidc_credential(oidc_t^, actions^, host, req.github_environment())
             if public:
@@ -443,7 +443,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
                 var auth = oidc.authorization(SURFACE_PREFIX_DEV, host)
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
                 registry.credential().arm(auth^)
-            return run_publish(p.targets, registry, oidc, False, opts, sleeper, base.copy())
+            return run_publish(p.targets, registry, oidc, False, opts, sleeper, base.copy(), req.revision_history)
         var token = StaticTokenCredential.token_secret(
             SURFACE_PREFIX_DEV, host.copy(), store, p.credential.value().secret_name
         )
@@ -453,7 +453,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
             var auth = token.authorization(SURFACE_PREFIX_DEV, host)
             registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
             registry.credential().arm(auth^)
-        return run_publish(p.targets, registry, token, False, opts, sleeper, base.copy())
+        return run_publish(p.targets, registry, token, False, opts, sleeper, base.copy(), req.revision_history)
     except e:
         base.stop(
             String(REASON_FAILED),

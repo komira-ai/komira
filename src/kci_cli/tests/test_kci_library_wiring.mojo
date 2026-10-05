@@ -22,7 +22,10 @@
 #   checkout raises, exit 0 is True, 1 False, anything else raises (asked
 #   of the full refname `refs/remotes/origin/main`, which no tag answers);
 #   `git_first_parent` over a scripted git and `carried_markdown` (what a
-#   main-only publish carries); and
+#   main-only publish carries); `git_history` over a scripted git (what a
+#   never-backward publish holds the channel's newest build against: a
+#   shallow checkout or a line that is not a commit id raises, never a
+#   short history); and
 #   `release_set_hash` is the set the example release's members recompute
 #   to, and raises on a release directory that is refused.
 # =============================================================================
@@ -42,6 +45,7 @@ from kci_cli import (
     SecretStoreChoice,
     carried_markdown,
     git_first_parent,
+    git_history,
     git_is_ancestor,
     kci_main_with,
     recorder_for,
@@ -278,6 +282,48 @@ def test_git_first_parent_and_what_a_release_carries() raises:
     except e:
         why = String(e)
     assert_true(why.find(String("not a full commit id")) >= 0, why)
+
+
+def test_git_history_over_a_scripted_git() raises:
+    var d = _root(String("history"))
+    var rev = String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678")
+    var c1 = String("1111111111111111111111111111111111111111")
+    var g = ScriptedRunner()
+    g.expect(_shallow(String("false\n")))
+    g.expect(ScriptedStep(_argv("rev-list", rev), stdout_text=rev + String("\n") + c1 + String("\n")))
+    var h = git_history(g, d, rev)
+    assert_equal(len(h), 2)
+    assert_equal(h[0], rev)
+    assert_equal(h[1], c1)
+    assert_equal(g.remaining(), 0)
+    # a shallow checkout lists part of the history: raised, rev-list never asked
+    var shallow = ScriptedRunner()
+    shallow.expect(_shallow(String("true\n")))
+    var why = String("<answered>")
+    try:
+        _ = git_history(shallow, d, rev)
+    except e:
+        why = String(e)
+    assert_true(why.find(String("shallow")) >= 0, why)
+    # git that does not print commit ids, or exits 1: raised
+    var bad = ScriptedRunner()
+    bad.expect(_shallow(String("false\n")))
+    bad.expect(ScriptedStep(_argv("rev-list", rev), stdout_text=String("main\n")))
+    var why2 = String("<answered>")
+    try:
+        _ = git_history(bad, d, rev)
+    except e:
+        why2 = String(e)
+    assert_true(why2.find(String("not a full commit id")) >= 0, why2)
+    var one = ScriptedRunner()
+    one.expect(_shallow(String("false\n")))
+    one.expect(ScriptedStep(_argv("rev-list", rev), exit_code=Int32(1)))
+    var why3 = String("<answered>")
+    try:
+        _ = git_history(one, d, rev)
+    except e:
+        why3 = String(e)
+    assert_true(why3.find(String("exited 1")) >= 0, why3)
 
 
 def test_the_real_release_set_hash() raises:

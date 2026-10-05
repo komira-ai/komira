@@ -72,4 +72,4 @@ from kci_cli.dispatch import (
     validation_failure_message,
 )
 from kci_cli.summary import append_summary, break_glass_line, carried_markdown, promotion_line, run_summary_markdown
-from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, git_first_parent, git_is_ancestor, kci_main
+from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, git_first_parent, git_history, git_is_ancestor, kci_main

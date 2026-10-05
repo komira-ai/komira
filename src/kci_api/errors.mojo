@@ -97,7 +97,7 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_VALIDATION), String("a validation of what a step produced failed")))
     t.append(ErrorRow(String(ERROR_AFFECTED), String("a build system's affected command failed or answered outside its grammar (never a widening)")))
     t.append(ErrorRow(String(ERROR_AFFECTED_VACUOUS), String("a --affected-by change is empty, or reaches no declared unit")))
-    t.append(ErrorRow(String(ERROR_SUPERSEDED), String("the channel already lists a higher build number of this version: a stage that never goes backward refuses")))
+    t.append(ErrorRow(String(ERROR_SUPERSEDED), String("the channel already lists a higher build number (any name or version), an equal one of another build, or a newest build this revision does not descend from: a stage that never goes backward refuses")))
     t.append(ErrorRow(String(ERROR_NOT_ON_MAIN), String("a stage that runs only on main was run off main, or for a commit not on main's history")))
     t.append(ErrorRow(String(ERROR_BREAK_GLASS_REASON), String("a break-glass run off main has no usable reason, or its revision is not on the run's ref")))
     return t^

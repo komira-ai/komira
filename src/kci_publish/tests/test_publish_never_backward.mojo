@@ -10,14 +10,30 @@
 #       upload request at all (a dry run says the same);
 #   (2) the same channel without the rule (a break-glass stage: gamma)
 #       publishes;
-#   (3) an EQUAL build number of another commit and a LOWER one do not
-#       supersede; a HIGHER one of ANOTHER version (a version bump) or of
-#       a name this release does not carry does (3b);
+#   (3) a LOWER build number does not supersede, nor does an EQUAL one with
+#       the release's own build string (another name of the same commit);
+#       a HIGHER one of ANOTHER version (a version bump) or of a name this
+#       release does not carry does (3b), and so does an EQUAL number with
+#       ANOTHER build string (3c: two builds of one number cannot be
+#       ordered by a consumer);
 #   (4) a re-run whose files are all present (equal N) is NOOP, exit 0, even
 #       when a higher build is listed: nothing would be written;
 #   (5) what a never-backward publish CARRIES: its build number and the
 #       highest LOWER build the channel lists, of any name and version (-1
-#       for none), so kci_cli can name the commits in between.
+#       for none), so kci_cli can name the commits in between;
+#   (6) the commit the channel's NEWEST build names (`h<8 hex>` of its
+#       highest build number, any name and version) must be on the history
+#       of the release revision (`RevisionHistory`, kci_cli's
+#       `git rev-list <revision>`): a lower-numbered release that does
+#       descend from it publishes, one that does not is REFUSED,
+#       KCI-E-SUPERSEDED, with no upload (a dry run too); a newest build
+#       whose build string names no commit is refused the same way. Build
+#       numbers alone cannot say it: they count first-parent commits, and a
+#       merge whose FIRST parent is a branch gives main's new tip a LOWER
+#       number than an older tip it contains;
+#   (7) a history that was not read (empty) when the channel lists a
+#       numbered build cannot tell: INDETERMINATE, exit 5, no upload, the
+#       reason it was not read in the lines.
 #
 # Hermetic: ScriptedChannel; NoWaitSleeper; no network.
 # =============================================================================
@@ -28,18 +44,21 @@ from std.os import makedirs
 from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_true
 
-from kci_api import EXIT_OK, EXIT_REFUSED, RETRY_NEEDS_HUMAN, default_retry
+from kci_api import EXIT_CANNOT_TELL, EXIT_OK, EXIT_REFUSED, RETRY_NEEDS_HUMAN, default_retry
 from kci_pkg_upload import SURFACE_PREFIX_DEV, RegistrySet, ScriptedCredential
 from kci_publish import (
     NoWaitSleeper,
     REASON_ALREADY_PUBLISHED,
+    REASON_CANNOT_TELL,
     REASON_PUBLISHED,
     REASON_REFUSED,
     PublishCredential,
     PublishReport,
     PublishTarget,
+    RevisionHistory,
     RunOptions,
     ScriptedChannel,
+    backward_files,
     previous_build_number,
     run_publish,
     superseding_files,
@@ -87,18 +106,49 @@ def _registry(var ch: ScriptedChannel) -> RegistrySet[ScriptedChannel, PublishCr
     return RegistrySet[ScriptedChannel, PublishCredential](ch^, c^)
 
 
-def _run(
+def _id(prefix: String) -> String:
+    """A full commit id starting with the 8 hex `prefix`."""
+    return prefix + String("00000000000000000000000000000000")
+
+
+def _history() -> List[String]:
+    """The release revision's history every commit the fixtures' channels
+    name is on (h00000000, h89abcdef, h11111111), newest first, as `git
+    rev-list` prints it."""
+    var h = List[String]()
+    h.append(_id(String("01234567")))
+    h.append(_id(String("89abcdef")))
+    h.append(_id(String("11111111")))
+    h.append(_id(String("00000000")))
+    return h^
+
+
+def _run_with(
     targets: List[PublishTarget],
     mut reg: RegistrySet[ScriptedChannel, PublishCredential],
     never_backward: Bool,
-    plan: Bool = False,
+    plan: Bool,
+    history: List[String],
+    unread: String,
 ) -> PublishReport:
     var src = ScriptedCredential()
     src.serve(SURFACE_PREFIX_DEV, String("Bearer pfx-test-token"))
     var sl = NoWaitSleeper()
     var opts = RunOptions(2, 0, 2, 0, 0, 1, 0, concurrency=4)
     opts.never_backward = never_backward
-    return run_publish(targets, reg, src, plan, opts, sl, PublishReport())
+    var h = RevisionHistory()
+    h.commits = history.copy()
+    h.unread = unread.copy()
+    return run_publish(targets, reg, src, plan, opts, sl, PublishReport(), h)
+
+
+def _run(
+    targets: List[PublishTarget],
+    mut reg: RegistrySet[ScriptedChannel, PublishCredential],
+    never_backward: Bool,
+    plan: Bool = False,
+) -> PublishReport:
+    return _run_with(targets, reg, never_backward, plan, _history(), String(""))
 
 
 def _uploads(reg: RegistrySet[ScriptedChannel, PublishCredential], t: List[PublishTarget]) -> Int:
@@ -138,10 +188,9 @@ def test_without_the_rule_it_publishes() raises:
 def test_what_does_not_supersede() raises:
     var t = _targets(String("not"))
     for listed in [
-        "komira_alpha-1.0.0-h89abcdef_3.conda",  # equal N, another commit
         "komira_alpha-1.0.0-h89abcdef_2.conda",  # lower N
         "komira_alpha-1.0.1-h89abcdef_2.conda",  # another version, lower N
-        "komira_gamma-1.0.0-h89abcdef_3.conda",  # another name, equal N
+        "komira_gamma-1.0.0-h01234567_3.conda",  # another name, equal N, the release's own build string
         "komira_alpha-1.0.0-h89abcdef_x9.conda",  # no build number after `_`
     ]:
         var reg = _registry(_channel(String(listed)))
@@ -175,13 +224,17 @@ def test_a_later_build_of_any_name_or_version_supersedes() raises:
         assert_equal(rep.exit_code(), EXIT_REFUSED, all)
         assert_true(rep.has_line_containing(String(listed)), all)
         assert_equal(_uploads(reg, t), 0, all)
-    # the pure reading names each later file once, whatever the targets
+    # the pure reading names each later file once, whatever the targets,
+    # and an equal number of another build string (3c); the release's own
+    # build string at an equal number is not named
     var listed = List[String]()
     listed.append(String("noarch/komira-2.0.0-h89abcdef_7.conda"))
     listed.append(String("linux-64/komira_beta-1.0.0-h89abcdef_3.conda"))
+    listed.append(String("linux-64/komira_beta-1.0.0-h01234567_3.conda"))
     var hits = superseding_files(t, listed)
-    assert_equal(len(hits), 1)
+    assert_equal(len(hits), 2)
     assert_true(hits[0].find(String("noarch/komira-2.0.0-h89abcdef_7.conda (build number 7)")) >= 0, hits[0])
+    assert_true(hits[1].find(String("linux-64/komira_beta-1.0.0-h89abcdef_3.conda (build h89abcdef_3)")) >= 0, hits[1])
 
 
 def test_an_equal_rerun_is_noop_even_when_superseded() raises:
@@ -227,7 +280,90 @@ def test_what_a_release_carries() raises:
     assert_equal(previous_build_number(t, listed), 1)
 
 
+def test_an_equal_number_of_another_build_supersedes() raises:
+    # (3c) the release is h01234567_3: an equal number naming another commit
+    var t = _targets(String("equal"))
+    for listed in [
+        "komira_alpha-1.0.0-h89abcdef_3.conda",  # same name and version
+        "komira_gamma-1.0.0-h89abcdef_3.conda",  # another name
+    ]:
+        var reg = _registry(_channel(String(listed)))
+        var rep = _run(t, reg, True)
+        var all = String(listed) + String(": ") + String("\n").join(rep.lines)
+        assert_equal(rep.error_id, String("KCI-E-SUPERSEDED"), all)
+        assert_equal(rep.exit_code(), EXIT_REFUSED, all)
+        assert_true(rep.has_line_containing(String(listed)), all)
+        assert_equal(_uploads(reg, t), 0, all)
+
+
+def test_the_newest_build_must_be_on_the_revisions_history() raises:
+    # (6) build 2 names hfedcba9: lower than ours (3), and not on the
+    # history: main moved past it through a merge whose first parent is a
+    # branch, and this revision is an older tip that merge contains
+    var t = _targets(String("history"))
+    var off = String("komira_alpha-1.0.0-hfedcba98_2.conda")
+    var reg = _registry(_channel(off))
+    var rep = _run(t, reg, True)
+    var all = String("\n").join(rep.lines)
+    assert_equal(rep.error_id, String("KCI-E-SUPERSEDED"), all)
+    assert_equal(rep.exit_code(), EXIT_REFUSED, all)
+    assert_true(rep.has_line_containing(String("linux-64/") + off), all)
+    assert_true(rep.has_line_containing(String("not on the history")), all)
+    assert_equal(_uploads(reg, t), 0, all)
+    var reg_plan = _registry(_channel(off))
+    var plan = _run(t, reg_plan, True, True)
+    assert_equal(plan.error_id, String("KCI-E-SUPERSEDED"), String("\n").join(plan.lines))
+    assert_equal(_uploads(reg_plan, t), 0)
+    # the same channel, the revision descending from that build: published
+    var h = _history()
+    h.append(_id(String("fedcba98")))
+    var reg_on = _registry(_channel(off))
+    var on = _run_with(t, reg_on, True, False, h, String(""))
+    assert_equal(on.reason, String(REASON_PUBLISHED), String("\n").join(on.lines))
+    # only the NEWEST build is asked: an older one off the history (build 1
+    # here, below the newest, 2, which is on it) does not refuse
+    var ch = _channel(String("komira_alpha-1.0.0-h89abcdef_2.conda"))
+    ch.put(String("linux-64"), String("komira_beta-1.0.0-hfedcba98_1.conda"), _bytes(String("old b")))
+    var reg_old = _registry(ch^)
+    var old = _run(t, reg_old, True)
+    assert_equal(old.reason, String(REASON_PUBLISHED), String("\n").join(old.lines))
+    # a newest build whose build string names no commit: refused
+    var listed = List[String]()
+    listed.append(String("linux-64/komira_alpha-1.0.0-x0_2.conda"))
+    var none = backward_files(t, listed, _history())
+    assert_equal(len(none), 1)
+    assert_true(none[0].find(String("names no commit")) >= 0, none[0])
+    # the pure reading: one line per newest file off the history; none when
+    # the channel lists no numbered build
+    listed = List[String]()
+    listed.append(String("linux-64/komira_alpha-1.0.0-hfedcba98_2.conda"))
+    listed.append(String("noarch/komira-1.0.0-hfedcba98_2.conda"))
+    listed.append(String("linux-64/komira_alpha-1.0.0-h89abcdef_1.conda"))
+    assert_equal(len(backward_files(t, listed, _history())), 2)
+    assert_equal(len(backward_files(t, listed, h)), 0)
+    assert_equal(len(backward_files(t, List[String](), List[String]())), 0)
+
+
+def test_an_unread_history_cannot_tell() raises:
+    # (7) git could not list the revision's history: never a pass
+    var t = _targets(String("unread"))
+    var reg = _registry(_channel(String("komira_alpha-1.0.0-h89abcdef_2.conda")))
+    var rep = _run_with(t, reg, True, False, List[String](), String("RUNNER_TEMP is not set"))
+    var all = String("\n").join(rep.lines)
+    assert_equal(rep.reason, String(REASON_CANNOT_TELL), all)
+    assert_equal(rep.exit_code(), EXIT_CANNOT_TELL, all)
+    assert_true(rep.has_line_containing(String("RUNNER_TEMP is not set")), all)
+    assert_equal(_uploads(reg, t), 0, all)
+    # without the rule the history is not asked for
+    var reg2 = _registry(_channel(String("komira_alpha-1.0.0-h89abcdef_2.conda")))
+    var rep2 = _run_with(t, reg2, False, False, List[String](), String("RUNNER_TEMP is not set"))
+    assert_equal(rep2.reason, String(REASON_PUBLISHED), String("\n").join(rep2.lines))
+
+
 def main() raises:
+    test_an_equal_number_of_another_build_supersedes()
+    test_the_newest_build_must_be_on_the_revisions_history()
+    test_an_unread_history_cannot_tell()
     test_what_a_release_carries()
     test_a_later_build_of_any_name_or_version_supersedes()
     test_a_higher_build_number_supersedes()

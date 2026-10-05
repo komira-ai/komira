@@ -55,6 +55,7 @@
 
 from kci_api import RunIdentity, release_platform_dir
 
+from .plan import RevisionHistory
 from .workers import DEFAULT_CONCURRENCY
 
 
@@ -75,6 +76,7 @@ struct PublishRequest(Copyable, Movable):
     var release_version_file: String
     var concurrency: Int
     var never_backward: Bool
+    var revision_history: RevisionHistory
     var break_glass: Bool
     var plan: Bool
     var run: RunIdentity
@@ -92,6 +94,7 @@ struct PublishRequest(Copyable, Movable):
         self.release_version_file = String("")
         self.concurrency = DEFAULT_CONCURRENCY
         self.never_backward = False
+        self.revision_history = RevisionHistory()
         self.break_glass = False
         self.plan = False
         self.run = run^

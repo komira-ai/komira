@@ -43,6 +43,13 @@
 #                     tell), then `git merge-base --is-ancestor`: exit 0
 #                     True, 1 False, anything else raises; the same
 #                     RUNNER_TEMP rule.
+#   publish's history -> for a never-backward publish, `git rev-list
+#                     <revision>` (`git_history`, after the same shallow
+#                     check as is_ancestor) is handed to kci_publish
+#                     (`RevisionHistory`): the channel's newest build must
+#                     be on it. Git that cannot answer, or no RUNNER_TEMP,
+#                     leaves it unread, and kci_publish then cannot tell
+#                     (exit 5) whenever the channel lists a numbered build.
 #   publish's carried commits -> for a never-backward publish, `git rev-list
 #                     --first-parent --reverse <revision>` (`git_first_parent`)
 #                     feeds summary.mojo's `carried_markdown`; git that
@@ -95,6 +102,7 @@ from kci_api import RunResult as KciRunResult
 from kci_publish import (
     NewNamesReport,
     PublishRequest,
+    RevisionHistory,
     load_release,
     lookahead_new_names_https,
     new_names_markdown,
@@ -227,6 +235,35 @@ def git_first_parent[R: ProcessRunner](mut runner: R, tmp: String, revision: Str
     return out^
 
 
+def git_history[R: ProcessRunner](mut runner: R, tmp: String, revision: String) raises -> List[String]:
+    """`git rev-list <revision>`: every commit on `revision`'s history,
+    newest first. A shallow checkout (or not a repository) raises: it lists
+    part of the history, which would read as "not on it". Raises when git
+    exits non-zero or a line is not a full commit id."""
+    var shallow_argv = List[String]()
+    shallow_argv.append(String("rev-parse"))
+    shallow_argv.append(String("--is-shallow-repository"))
+    var shallow = _git(runner, tmp, shallow_argv^)
+    if shallow[0] != 0 or String(shallow[1].strip()) != String("false"):
+        raise Error(String("the checkout is shallow (or not a git repository): its history cannot tell"))
+    var argv = List[String]()
+    argv.append(String("rev-list"))
+    argv.append(revision.copy())
+    var r = _git(runner, tmp, argv^)
+    if r[0] != 0:
+        raise Error(String("`git rev-list ") + revision + String("` exited ") + String(r[0]))
+    var out = List[String]()
+    var lines = r[1].split(String("\n"))
+    for i in range(len(lines)):
+        var line = String(String(lines[i]).strip())
+        if line.byte_length() == 0:
+            continue
+        if not is_full_commit_id(line):
+            raise Error(String("`git rev-list` printed '") + line + String("', not a full commit id"))
+        out.append(line^)
+    return out^
+
+
 def _failed_row(req: ValidateRequest, why: String) -> ResultValidation:
     """A validation that raised: VALIDATION_FAILED with the reason."""
     var row = ResultValidation(
@@ -255,7 +292,10 @@ struct LibrarySteps(StageSteps, Movable):
         mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
     ) -> StepEnd:
         var composed = ComposedSecretStore(store)
-        var r = publish_release_with_store(req, result, recorder, composed)
+        var held = req.copy()
+        if req.never_backward:
+            held.revision_history = self._history(req.revision_id)
+        var r = publish_release_with_store(held, result, recorder, composed)
         var end = StepEnd(r.outcome(), r.error_id.copy(), String(""))
         end.lines = r.lines.copy()
         end.retry = r.retry()
@@ -264,6 +304,23 @@ struct LibrarySteps(StageSteps, Movable):
         if req.never_backward and r.build_number >= 0:
             end.summary += self._carried(req, r.previous_build, r.build_number)
         return end^
+
+    def _history(mut self, revision: String) -> RevisionHistory:
+        """What a never-backward publish holds the channel's newest build
+        against: `git_history` of the revision, or why it was not read
+        (kci_publish then cannot tell, exit 5, when the channel lists a
+        numbered build)."""
+        var h = RevisionHistory()
+        var tmp = self.platform_env(String("RUNNER_TEMP"))
+        if tmp.byte_length() == 0:
+            h.unread = String("RUNNER_TEMP is not set, so there is nowhere to put git's output")
+            return h^
+        var runner = SupervisorRunner()
+        try:
+            h.commits = git_history(runner, tmp, revision)
+        except e:
+            h.unread = String(e)
+        return h^
 
     def _carried(mut self, req: PublishRequest, previous: Int, ours: Int) -> String:
         if previous < 0:
