@@ -220,6 +220,7 @@ struct _RecordingDispatcher(RequestDispatcher, Movable, Deinitable):
     var seen_path: String
     var seen_query: String
     var seen_header_count: Int
+    var seen_headers: Dict[String, String]
     var seen_body_len: Int
     var dispatch_count: Int
 
@@ -228,6 +229,7 @@ struct _RecordingDispatcher(RequestDispatcher, Movable, Deinitable):
         self.seen_path = String("")
         self.seen_query = String("")
         self.seen_header_count = 0
+        self.seen_headers = Dict[String, String]()
         self.seen_body_len = 0
         self.dispatch_count = 0
 
@@ -242,8 +244,9 @@ struct _RecordingDispatcher(RequestDispatcher, Movable, Deinitable):
         self.seen_query = req.query_string.copy()
         self.seen_body_len = len(req.body)
         var n = 0
+        self.seen_headers = Dict[String, String]()
         for kv in req.headers.items():
-            _ = kv
+            self.seen_headers[String(kv.key)] = String(kv.value)
             n += 1
         self.seen_header_count = n
 
@@ -724,6 +727,55 @@ def test_an_apigw_event_still_reaches_the_dispatcher_through_the_same_pump() rai
     assert_equal(transport.error_count, 0)
 
 
+def test_the_apigw_arm_uses_the_prefix_it_is_given() raises:
+    """The API Gateway arm of the classifying pump, driven under
+    `x-other-authz-`, a prefix no other fixture here uses. The dispatcher must
+    see the context under `x-other-authz-`, the client's
+    `x-example-authz-subjectid` as an ordinary header, and no forged
+    `x-other-authz-plan`.
+
+    FALSIFIES a classifying pump that ignores its `authorizer_header_prefix`
+    argument and builds its own: every other call here passes
+    `x-example-authz-`, so only a second prefix tells the two apart."""
+    var transport = _one_event_transport(
+        String(
+            '{"version": "2.0", "rawPath": "/api/v1/items",'
+            '"rawQueryString": "",'
+            '"headers": {"x-example-authz-subjectid": "subject-victim",'
+            '"x-other-authz-plan": "forged"},'
+            '"requestContext": {"http": {"method": "GET"},'
+            '"authorizer": {"lambda": {"subjectId": "subject-real"}}},'
+            '"isBase64Encoded": false}'
+        )
+    )
+    var dispatcher = _RecordingDispatcher()
+    var flusher = _CountingFlush()
+    var rt = _Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+
+    var handled = run_api_gateway_and_tick_pump[
+        _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
+    ](
+        transport,
+        dispatcher,
+        reactor,
+        flusher,
+        AuthorizerHeaderPrefix(String("x-other-authz-")),
+        1,
+    )
+
+    assert_equal(handled, 1)
+    assert_equal(dispatcher.dispatch_count, 1)
+    var injected = String("x-other-authz-subjectid")
+    assert_true(injected in dispatcher.seen_headers)
+    assert_equal(dispatcher.seen_headers[injected], String("subject-real"))
+    var ordinary = String("x-example-authz-subjectid")
+    assert_true(ordinary in dispatcher.seen_headers)
+    assert_equal(dispatcher.seen_headers[ordinary], String("subject-victim"))
+    assert_false(String("x-other-authz-plan") in dispatcher.seen_headers)
+    assert_equal(dispatcher.seen_header_count, 2)
+
+
 def test_a_truncated_2_0_event_is_an_ERROR_and_NOT_a_tick_for_the_root() raises:
     """⛔⛔ THE TEST THE DISCRIMINATION RULE EXISTS FOR — the one a "try apigw,
     fall back to tick" pump fails.
@@ -946,6 +998,7 @@ def main() raises:
 
     test_a_tick_reaches_the_dispatcher_as_POST_on_its_own_route()
     test_an_apigw_event_still_reaches_the_dispatcher_through_the_same_pump()
+    test_the_apigw_arm_uses_the_prefix_it_is_given()
     test_a_truncated_2_0_event_is_an_ERROR_and_NOT_a_tick_for_the_root()
     test_a_1_0_event_reports_the_APIGW_refusal_and_not_the_TICK_one()
     test_an_unconvertible_payload_reaches_the_ERROR_channel_not_a_500()

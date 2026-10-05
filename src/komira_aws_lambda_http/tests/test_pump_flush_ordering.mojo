@@ -714,6 +714,54 @@ def test_the_authorizer_identity_reaches_the_dispatcher_and_the_forgery_does_not
     assert_false(dispatcher.seen_headers[key] == String("subject-victim"))
 
 
+def test_the_pump_uses_the_prefix_it_is_given() raises:
+    """The same event shape driven through the pump under `x-other-authz-`, a
+    prefix no fixture in this file is written for. The dispatcher must see the
+    context under `x-other-authz-`, the client's `x-example-authz-subjectid`
+    as an ordinary header, and no forged `x-other-authz-plan`.
+
+    FALSIFIES a pump that ignores its `authorizer_header_prefix` argument and
+    builds its own: every other pump test passes `x-example-authz-`, so only a
+    second prefix tells the two apart."""
+    var events = List[String]()
+    events.append(
+        String(
+            '{"version": "2.0", "rawPath": "/api/v1/items",'
+            '"rawQueryString": "",'
+            '"headers": {"x-example-authz-subjectid": "subject-victim",'
+            '"x-other-authz-plan": "forged"},'
+            '"requestContext": {"http": {"method": "GET"},'
+            '"authorizer": {"lambda": {"subjectId": "subject-real"}}},'
+            '"isBase64Encoded": false}'
+        )
+    )
+    var transport = _ScriptedTransport(events^)
+    var dispatcher = _RecordingDispatcher()
+    var flusher = _CountingFlush()
+    var rt = _Rt.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+
+    _ = run_api_gateway_pump[
+        _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
+    ](
+        transport,
+        dispatcher,
+        reactor,
+        flusher,
+        AuthorizerHeaderPrefix(String("x-other-authz-")),
+        1,
+    )
+
+    assert_equal(dispatcher.dispatch_count, 1)
+    var injected = String("x-other-authz-subjectid")
+    assert_true(injected in dispatcher.seen_headers)
+    assert_equal(dispatcher.seen_headers[injected], String("subject-real"))
+    var ordinary = String("x-example-authz-subjectid")
+    assert_true(ordinary in dispatcher.seen_headers)
+    assert_equal(dispatcher.seen_headers[ordinary], String("subject-victim"))
+    assert_false(String("x-other-authz-plan") in dispatcher.seen_headers)
+
+
 # =============================================================================
 # §5 — the runtime conformer + the init-error announcement.
 # =============================================================================
@@ -770,6 +818,7 @@ def main() raises:
 
     test_the_dispatcher_receives_the_converted_fields()
     test_the_authorizer_identity_reaches_the_dispatcher_and_the_forgery_does_not()
+    test_the_pump_uses_the_prefix_it_is_given()
 
     test_the_runtime_is_one_inline_worker_and_its_own_model()
     test_a_nonzero_worker_index_raises_rather_than_being_clamped()
