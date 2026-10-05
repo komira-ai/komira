@@ -471,16 +471,16 @@ def _identity_env(kind_block: String, identity: String) raises -> String:
 def test_push_identity_environment() raises:
     var oidc = String("    credential { kind: OIDC_TRUSTED_PUBLISHING }\n")
     var token = String("    credential { kind: API_TOKEN secret_name: \"T\" }\n")
-    # the two release channels' trusted publishers: environments gamma and prod
-    assert_equal(_identity_env(oidc, String("repo:komira-ai/komira:environment:gamma")), String("gamma"))
-    assert_equal(_identity_env(oidc, String("repo:komira-ai/komira:environment:prod")), String("prod"))
+    # the two release channels' trusted publishers: environments staging and stable
+    assert_equal(_identity_env(oidc, String("repo:example-org/example-repo:environment:staging")), String("staging"))
+    assert_equal(_identity_env(oidc, String("repo:example-org/example-repo:environment:stable")), String("stable"))
     assert_equal(_identity_env(oidc, String("repo:o/r:environment:build-2")), String("build-2"))
     # no environment, an empty one, or a further claim after it: none
     assert_equal(_identity_env(oidc, String("repo:o/r:ref:refs/heads/main")), String(""))
     assert_equal(_identity_env(oidc, String("repo:o/r:environment:")), String(""))
-    assert_equal(_identity_env(oidc, String("repo:o/r:environment:prod:x")), String(""))
+    assert_equal(_identity_env(oidc, String("repo:o/r:environment:stable:x")), String(""))
     # an API token's push identity is a principal, not a token subject
-    assert_equal(_identity_env(token, String("repo:o/r:environment:prod")), String(""))
+    assert_equal(_identity_env(token, String("repo:o/r:environment:stable")), String(""))
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
