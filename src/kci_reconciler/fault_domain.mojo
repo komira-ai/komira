@@ -13,7 +13,7 @@
 #
 #   * default OURS  -> an unclassified fault lands in our queue. We look at it,
 #                      and either fix it or classify it. The cost is noise.
-#   * default THEIRS-> an unclassified fault is filed as the customer's problem
+#   * default THEIRS-> an unclassified fault is filed as the user's problem
 #                      and we never hear about it. The cost is our own bugs,
 #                      silently attributed to somebody who cannot fix them.
 #
@@ -22,9 +22,9 @@
 #   * a JSON-envelope mismatch between a validator and the app (our two
 #     components disagreeing);
 #   * an h2 client livelock that surfaces as `HttpError[TIMEOUT]` on an IAM call
-#     — an error whose text names a customer-side API and a timeout;
+#     — an error whose text names a user-side API and a timeout;
 #   * a leftover-secret refusal that names a remedy NO code path performs.
-# Pattern-matching any of those would file them as customer or provider
+# Pattern-matching any of those would file them as user or provider
 # faults. So the default is OURS, and `is_our_responsibility` is
 # written so that adding a NEW domain constant tomorrow does not silently move
 # anything out of our queue (see its body — it enumerates what is NOT ours).
@@ -41,7 +41,7 @@
 # ⇒ NOTHING IN THIS FILE MATCHES A PROVIDER'S WORDS. There are exactly two ways
 # a domain is assigned, both of them a DECLARATION by code that knows:
 #
-#   (1) THE RAISE SITE STATES IT — `raise fault_error(FAULT_CUSTOMER, "...")`.
+#   (1) THE RAISE SITE STATES IT — `raise fault_error(FAULT_USER, "...")`.
 #       This stamps a canonical token WE author onto the front of the message,
 #       and `fault_domain_of_error` reads that token back. A typed sentinel in
 #       the only channel a Mojo `Error` has (a String), read by a predicate —
@@ -51,7 +51,7 @@
 #       A conformer knows what a failure of ITS OWN verb means: a
 #       `setIamPolicy` that our deploy identity is not allowed to make is OURS
 #       (our bootstrap should have granted it); an API-enable refused by the
-#       customer's org policy is THEIRS. The signature deliberately does NOT
+#       user's org policy is THEIRS. The signature deliberately does NOT
 #       receive the error text, so classifying on prose is not merely
 #       discouraged there — it is structurally unavailable.
 #
@@ -92,8 +92,8 @@ means nobody looked. They are treated identically by
 `is_our_responsibility` and must be counted separately by any operator surface,
 because the ratio of the two IS the coverage of this scheme."""
 
-comptime FAULT_CUSTOMER: Int = 2
-"""THE CUSTOMER'S ENVIRONMENT — they fix it. A revoked grant, an org policy that
+comptime FAULT_USER: Int = 2
+"""THE USER'S ENVIRONMENT — they fix it. A revoked grant, an org policy that
 forbids the resource, an exhausted quota in THEIR project, a container image of
 theirs that does not start for a reason of theirs. Assigning this is a claim
 that we could not have prevented it, and it removes the error from our queue —
@@ -124,11 +124,11 @@ def is_our_responsibility(domain: Int) -> Bool:
     this list — which is the same fail-safe direction as `FAULT_UNSET` itself,
     applied to the evolution of the enum rather than to one error.
 
-    So: NOT ours iff it is explicitly the customer's or explicitly the
+    So: NOT ours iff it is explicitly the user's or explicitly the
     provider's. Everything else — `FAULT_UNSET`, `FAULT_OURS`, and any value
     this build has never heard of (a row written by a newer binary) — is ours.
     """
-    if domain == FAULT_CUSTOMER:
+    if domain == FAULT_USER:
         return False
     if domain == FAULT_PROVIDER:
         return False
@@ -155,7 +155,7 @@ def fault_domain_is_classified(domain: Int) -> Bool:
 # =============================================================================
 comptime FAULT_WORD_UNSET: String = "unset"
 comptime FAULT_WORD_OURS: String = "ours"
-comptime FAULT_WORD_CUSTOMER: String = "customer"
+comptime FAULT_WORD_USER: String = "user"
 comptime FAULT_WORD_PROVIDER: String = "provider"
 
 
@@ -167,8 +167,8 @@ def fault_domain_word(domain: Int) -> String:
     consumer has a case for."""
     if domain == FAULT_OURS:
         return FAULT_WORD_OURS
-    if domain == FAULT_CUSTOMER:
-        return FAULT_WORD_CUSTOMER
+    if domain == FAULT_USER:
+        return FAULT_WORD_USER
     if domain == FAULT_PROVIDER:
         return FAULT_WORD_PROVIDER
     return FAULT_WORD_UNSET
@@ -182,8 +182,8 @@ def fault_domain_of_word(word: String) -> Int:
     reading, and it is visible there."""
     if word == FAULT_WORD_OURS:
         return FAULT_OURS
-    if word == FAULT_WORD_CUSTOMER:
-        return FAULT_CUSTOMER
+    if word == FAULT_WORD_USER:
+        return FAULT_USER
     if word == FAULT_WORD_PROVIDER:
         return FAULT_PROVIDER
     return FAULT_UNSET
@@ -212,7 +212,7 @@ def _has_prefix(s: String, prefix: String) -> Bool:
 
 
 def fault_tag(domain: Int) -> String:
-    """The canonical token for `domain` — `[fault=customer] `, and so on.
+    """The canonical token for `domain` — `[fault=user] `, and so on.
 
     ⚠ `FAULT_UNSET` EMITS A TOKEN (`[fault=unset] `), AND IT IS A NOTE TO A
     HUMAN, NOT A SIGNAL TO THE READER. `fault_domain_of_error` cannot tell an
@@ -226,7 +226,7 @@ def fault_tag(domain: Int) -> String:
 
 
 def fault_error(domain: Int, message: String) -> Error:
-    """THE RAISE-SITE HELPER: `raise fault_error(FAULT_CUSTOMER, "...")`.
+    """THE RAISE-SITE HELPER: `raise fault_error(FAULT_USER, "...")`.
 
     Stamps the canonical token on the front of `message` so the domain survives
     the `raise` — the only channel a Mojo `Error` offers. The message is
@@ -237,7 +237,7 @@ def fault_error(domain: Int, message: String) -> Error:
     ⚠ THE TOKEN IS PART OF THE MESSAGE, so a caller that surfaces `String(e)`
     to a human shows it. That is deliberate — an operator reading a deploy
     failure should see whose fault it was without a second lookup — but a caller
-    rendering into a customer-facing field should call `fault_message_of_error`
+    rendering into a user-facing field should call `fault_message_of_error`
     to strip it."""
     return Error(fault_tag(domain) + message)
 
@@ -251,7 +251,7 @@ def fault_domain_of_error(err: String) -> Int:
     never looks at the backend's words, never at a status code embedded in
     them, and never anywhere but the very front of the string — so a provider
     rewording a message, or a message that happens to contain the word
-    `customer`, cannot move an attribution. If you find yourself wanting to
+    `user`, cannot move an attribution. If you find yourself wanting to
     extend this function to look at the body, the correct change is to classify
     at the raise site instead."""
     if not _has_prefix(err, FAULT_TAG_OPEN):
@@ -275,7 +275,7 @@ def fault_domain_of_error(err: String) -> Int:
 
 
 def fault_message_of_error(err: String) -> String:
-    """`err` with our token removed — the customer-facing rendering. An error
+    """`err` with our token removed — the user-facing rendering. An error
     with no token is returned BYTE-IDENTICAL, so every existing caller and every
     existing fixture is unchanged by this file existing."""
     if not _has_prefix(err, FAULT_TAG_OPEN):

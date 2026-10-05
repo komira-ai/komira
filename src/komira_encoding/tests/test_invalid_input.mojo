@@ -62,6 +62,7 @@ def test_bad_character() raises:
     _expect(URL_NOPAD, "Zm9vY+", "InvalidCharacter", 5)
     _expect(B32, "MY0=====", "InvalidCharacter", 2)  # 0, 1, 8, 9 are not base32
     _expect(B32, "MZXW1YQ", "InvalidCharacter", 4)
+    _expect(B32, "MZXW6YT!", "InvalidCharacter", 7)
     _expect(HEX, "zz", "InvalidCharacter", 0)
     _expect(HEX, "0g", "InvalidCharacter", 1)
     # The FIRST bad byte is reported, not the last.
@@ -79,6 +80,7 @@ def test_whitespace_is_rejected() raises:
     _expect(B32, "MZXW 6YTB", "InvalidCharacter", 4)
     _expect(B32, "MZXW6YTB\r\n", "InvalidCharacter", 8)
     _expect(HEX, "ab cd", "InvalidCharacter", 2)
+    _expect(B64, "Zm9v YmFy", "InvalidCharacter", 4)
 
 
 def test_misplaced_equals_is_a_bad_character() raises:
@@ -90,6 +92,7 @@ def test_misplaced_equals_is_a_bad_character() raises:
 def test_bad_padding() raises:
     _expect(B64, "Zg", "InvalidPadding", 2)  # standard requires padding
     _expect(B64, "Zm9vYmE", "InvalidPadding", 7)
+    _expect(B64, "Zm9vYg", "InvalidPadding", 6)
     _expect(B64, "Zg=", "InvalidPadding", 2)  # incomplete
     _expect(URL, "Zg=", "InvalidPadding", 2)
     _expect(B64, "Zm8==", "InvalidPadding", 3)

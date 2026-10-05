@@ -13,6 +13,7 @@ from sha256-pinned downloads, using the rules in
 | `:zig_linux_x86_64.tar.xz` | zig 0.12.0: the C link driver for `mojo build`, and the compiler for `conda_unpack` | ziglang.org |
 | `:mojo_compiler_1.0.0_linux-64.conda` | the Mojo compiler package, 1.0.0, linux-64 | conda.modular.com |
 | `:libstdcxx_15.3.0_linux-64.conda`, `:libgcc_15.3.0_linux-64.conda` | the C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`) the compiler and built binaries link against; one matched pair from conda-forge | conda.anaconda.org |
+| `:pixi` | pixi 0.67.2, the raw static executable of the target platform's row (`pixi-0.67.2-x86_64-unknown-linux-musl` or `pixi-0.67.2-aarch64-apple-darwin`), never unpacked; `:pixi_version` runs the linux one and fails unless it prints `pixi 0.67.2` ([`pixi.bzl`](pixi.bzl)) | github.com/prefix-dev/pixi |
 
 The buck2 binary, and with it the bundled prelude, is pinned separately by
 [`tools/buck2`](../../buck2) ([DEVELOPMENT.md](../../../DEVELOPMENT.md#1-get-buck2)).

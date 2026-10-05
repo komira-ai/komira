@@ -144,23 +144,34 @@ def require_scope(word: String) raises:
 
 
 def run_evidence_line(
-    scope: String, stage: String, only: List[String], outcome: String, affected_by: String = String("")
+    scope: String,
+    stage: String,
+    only: List[String],
+    outcome: String,
+    affected_by: String = String(""),
+    note: String = String(""),
 ) raises -> String:
     """The one final stderr line of `kci run`. Prefix-safe: a grep for
     `kci: FULL run` never matches a selective run. `affected_by` is
-    `--affected-by`'s base commit, "" when not given.
+    `--affected-by`'s base commit, "" when not given. `note` ("" for none)
+    is said right after the outcome, so it cannot be read without it (the
+    credential probe that did not run, `CREDENTIAL_PROBE_NOT_RUN_NOTE`).
 
       kci: FULL run of stage S: <OUTCOME>
+      kci: FULL run of stage S: <OUTCOME>, <note>
       kci: SELECTIVE run of stage S (step:a step:b): <OUTCOME> -- not a full run
       kci: SELECTIVE run of stage S (affected-by <base>): <OUTCOME> -- not a full run
     """
     require_scope(scope)
+    var said = outcome.copy()
+    if note.byte_length() > 0:
+        said += String(", ") + note
     if scope == SCOPE_FULL:
         if len(only) > 0:
             raise Error(String("a FULL run has no --only"))
         if affected_by.byte_length() > 0:
             raise Error(String("a FULL run has no --affected-by"))
-        return String("kci: FULL run of stage ") + stage + String(": ") + outcome
+        return String("kci: FULL run of stage ") + stage + String(": ") + said
     if len(only) == 0 and affected_by.byte_length() == 0:
         raise Error(String("a SELECTIVE run names its --only or its --affected-by"))
     var sel = String("")
@@ -174,5 +185,5 @@ def run_evidence_line(
         sel += String("affected-by ") + affected_by
     return (
         String("kci: SELECTIVE run of stage ") + stage + String(" (") + sel + String("): ")
-        + outcome + String(" -- not a full run")
+        + said + String(" -- not a full run")
     )

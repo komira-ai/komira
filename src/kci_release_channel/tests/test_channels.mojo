@@ -59,22 +59,22 @@ channel: {
 # trusted publisher bound to one GitHub environment.
 comptime _RELEASE = """
 channel {
-  name: "gamma"
+  name: "staging"
   visibility: PUBLIC
   repository {
     artifact_type: CONDA
-    location: "https://prefix.dev/komira-ai/gamma"
-    push_identity: "repo:komira-ai/komira:environment:gamma"
+    location: "https://prefix.dev/example-org/staging"
+    push_identity: "repo:example-org/example-repo:environment:staging"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
 }
 channel {
-  name: "prod"
+  name: "stable"
   visibility: PUBLIC
   repository {
     artifact_type: CONDA
-    location: "https://prefix.dev/komira-ai/prod"
-    push_identity: "repo:komira-ai/komira:environment:prod"
+    location: "https://prefix.dev/example-org/stable"
+    push_identity: "repo:example-org/example-repo:environment:stable"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
 }
@@ -232,19 +232,19 @@ def test_the_gamma_and_prod_channels() raises:
     var channels = _parse(String(_RELEASE))
     assert_equal(len(channels), 2)
     var names = channel_names(channels)
-    assert_equal(names[0], String("gamma"))
-    assert_equal(names[1], String("prod"))
-    var g = find_channel(channels, String("gamma"))
+    assert_equal(names[0], String("staging"))
+    assert_equal(names[1], String("stable"))
+    var g = find_channel(channels, String("staging"))
     assert_true(g.is_public())
     var gr = g.repository_for(String(ARTIFACT_TYPE_CONDA))
-    assert_equal(gr.location, String("https://prefix.dev/komira-ai/gamma"))
-    assert_equal(gr.push_identity, String("repo:komira-ai/komira:environment:gamma"))
+    assert_equal(gr.location, String("https://prefix.dev/example-org/staging"))
+    assert_equal(gr.push_identity, String("repo:example-org/example-repo:environment:staging"))
     assert_true(gr.declared_credential().is_oidc_trusted_publishing())
-    var p = find_channel(channels, String("prod"))
+    var p = find_channel(channels, String("stable"))
     assert_true(p.is_public())
     var pr = p.repository_for(String(ARTIFACT_TYPE_CONDA))
-    assert_equal(pr.location, String("https://prefix.dev/komira-ai/prod"))
-    assert_equal(pr.push_identity, String("repo:komira-ai/komira:environment:prod"))
+    assert_equal(pr.location, String("https://prefix.dev/example-org/stable"))
+    assert_equal(pr.push_identity, String("repo:example-org/example-repo:environment:stable"))
     assert_true(pr.declared_credential().is_oidc_trusted_publishing())
 
 
