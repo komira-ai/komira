@@ -116,7 +116,7 @@ def _pr_machine(dir: String) raises -> String:
     write_whole_file(
         m,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
+        + String("stage { name: \"build\" break_glass: true step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
         + String("stage { name: \"pr\" trigger: PULL_REQUEST farm_connected: true")
         + String(" step { name: \"check\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n"),
     )
@@ -127,10 +127,18 @@ def _pr_workflow(machine: String) -> String:
     """ONE workflow: the release stage `build` (kept off pull requests) and
     the pull request's check `pr`."""
     return (
-        String("name: kci\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      revision:\n")
-        + String("        type: string\n  pull_request:\npermissions: {}\njobs:\n")
+        String("name: kci\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n")
+        + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n")
+        + String("      reason:\n        type: string\n        required: true\n")
+        + String("      dry_run:\n        type: boolean\n        default: false\n")
+        + String("  pull_request:\npermissions: {}\n")
+        + String("concurrency:\n  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)")
+        + String(" || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n")
+        + String("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n")
+        + String("jobs:\n")
         + String("  build:\n    if: github.event_name != 'pull_request'\n    environment: build\n    steps:\n")
         + String("      - run: kci run --machine ") + machine + String(" --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
+        + String("      - name: the prod line\n        if: always()\n        run: echo prod line\n")
         + String("  pr:\n    if: github.event.pull_request.head.repo.full_name == github.repository\n")
         + String("    runs-on: ubuntu-24.04\n")
         + String("    permissions:\n      contents: read\n      id-token: write\n    steps:\n")

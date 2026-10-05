@@ -7,7 +7,7 @@
 #   workflow_reader.mojo  `read_workflow`: a FAIL-CLOSED reader of a strict
 #                         YAML subset (its header); anything else is
 #                         "cannot tell", never a pass
-#   rules.mojo            `check_workflow`: every disagreement (R1 to R12);
+#   rules.mojo            `check_workflow`: every disagreement (R1 to R18);
 #                         `check_running_workflow`: the start-up check `kci
 #                         run` makes; `id_token_stages`: which stages publish
 #                         by OIDC; `kci_run_calls`
@@ -18,6 +18,13 @@
 #                         release-only (`excludes_pull_request`);
 #                         `condition_expression`: the expression GitHub
 #                         evaluates for a job's `if:`
+#   auto_promotion.mojo   R13 to R18: continuous auto-promotion (main-only
+#                         stages, one concurrency group, the push filter,
+#                         the manual run's inputs, the set hash handed on,
+#                         the prod line) and R4's permission allow-list;
+#                         `documentation_filter_findings`: the push filter
+#                         held to release_version.sh
+#   kci_run_calls.mojo    `kci_run_calls`: every `kci run` of a script
 #
 # The machine file owns the release machine; the workflow is written by hand and
 # checked against it. This package reads text it is given: it opens no file.
@@ -43,14 +50,21 @@ from kci_ci_check.pull_request import (
     condition_expression,
     excludes_pull_request,
 )
+from kci_ci_check.auto_promotion import (
+    CONCURRENCY_CANCEL,
+    CONCURRENCY_GROUP,
+    MAIN_REF_TERM,
+    PROD_LINE_STEP,
+    documentation_filter_findings,
+    documentation_paths,
+)
+from kci_ci_check.kci_run_calls import KciRunCall, kci_run_calls
 from kci_ci_check.rules import (
     FARM_CONNECT_ACTION,
     ChannelsFile,
-    KciRunCall,
     channels_paths,
     check_running_workflow,
     check_workflow,
     check_workflow_doc,
     id_token_stages,
-    kci_run_calls,
 )

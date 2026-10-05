@@ -503,8 +503,8 @@ def _release_machine(dir: String, validation: Bool = False) raises -> String:
     write_whole_file(
         m,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
-        + String("stage { name: \"gamma\" environment: \"gamma\" after: \"build\" step { name: \"publish\" kind: PUBLISH")
+        + String("stage { name: \"build\" break_glass: true step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
+        + String("stage { name: \"gamma\" environment: \"gamma\" after: \"build\" break_glass: true step { name: \"publish\" kind: PUBLISH")
         + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"gamma\"")
         + v + String(" } }\n")
         + String("stage { name: \"prod\" environment: \"prod\" after: \"gamma\" step { name: \"publish\" kind: PUBLISH")
@@ -514,16 +514,31 @@ def _release_machine(dir: String, validation: Bool = False) raises -> String:
 
 
 def _workflow(machine: String) -> String:
-    """A workflow that agrees with `_release_machine` (R1-R12)."""
+    """A workflow that agrees with `_release_machine` without a validation
+    (R1-R18): build and gamma break-glass, prod main only."""
     var run = String("kci run --machine ") + machine + String(" --summary-file \"$GITHUB_STEP_SUMMARY\" --stage ")
+    var hash = String(" --release-set-hash \"$RELEASE_SET_HASH\"")
+    var line = String("      - name: the prod line\n        if: always()\n        run: echo prod line\n")
     return (
-        String("name: kci\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n")
-        + String("      revision:\n        type: string\npermissions: {}\njobs:\n")
-        + String("  build:\n    environment: build\n    steps:\n      - run: ") + run + String("build\n")
+        String("name: kci\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n")
+        + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n")
+        + String("      reason:\n        type: string\n        required: true\n")
+        + String("      dry_run:\n        type: boolean\n        default: false\n")
+        + String("permissions: {}\n")
+        + String("concurrency:\n  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)")
+        + String(" || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n")
+        + String("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n")
+        + String("jobs:\n")
+        + String("  build:\n    environment: build\n    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
+        + String("    steps:\n      - run: ") + run + String("build\n") + line
         + String("  gamma:\n    needs: build\n    environment: gamma\n    permissions:\n      id-token: write\n")
-        + String("    steps:\n      - run: ") + run + String("gamma\n")
-        + String("  prod:\n    needs: gamma\n    environment: prod\n    permissions:\n      id-token: write\n")
-        + String("    steps:\n      - run: ") + run + String("prod\n")
+        + String("    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
+        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n")
+        + String("    steps:\n      - run: ") + run + String("gamma") + hash + String("\n") + line
+        + String("  prod:\n    needs: gamma\n    if: github.ref == 'refs/heads/main'\n    environment: prod\n")
+        + String("    permissions:\n      id-token: write\n")
+        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.gamma.outputs.set_hash }}\n")
+        + String("    steps:\n      - run: ") + run + String("prod") + hash + String("\n") + line
     )
 
 

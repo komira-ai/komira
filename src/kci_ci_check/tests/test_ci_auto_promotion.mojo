@@ -1,0 +1,200 @@
+# =============================================================================
+# src/kci_ci_check/tests/test_ci_auto_promotion.mojo -- continuous
+#   auto-promotion (auto_promotion.mojo, R13 to R18 and R4's allow-list),
+#   held by a table of mutations of the repository's OWN kci.yml and
+#   release/machine.textproto: the canonical pair agrees, and every row that
+#   breaks a rule must end in that rule's finding (or the reader's "cannot
+#   tell", or the machine file's refusal). A row that reads green fails the
+#   test by its label, and every failing row is listed, not just the first.
+# =============================================================================
+#
+# The files are staged as test data (BUCK): `kci.yml`, `machine.textproto`
+# and `channels.textproto`.
+# =============================================================================
+
+from std.pathlib import Path
+from std.testing import TestSuite
+
+from kci_ci_check import ChannelsFile, check_running_workflow
+from kci_release_machine import parse_machine_file
+
+comptime _CLEAN: Int = 0
+comptime _FINDING: Int = 1
+comptime _CANNOT: Int = 2
+comptime _REFUSED: Int = 3
+
+comptime _GROUP_LINE: String = (
+    "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
+    " || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n"
+)
+comptime _CANCEL_LINE: String = "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
+comptime _PROD_IF: String = "    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'\n"
+comptime _GAMMA_IF: String = (
+    "    # a break_glass stage: a manual run of a branch publishes here (R13)\n"
+    "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
+)
+comptime _PATHS_IGNORE: String = "    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n"
+comptime _PROD_HASH_ENV: String = "      RELEASE_SET_HASH: ${{ needs.validate.outputs.validated_set_hash }}\n"
+comptime _GAMMA_KCI_HASH: String = (
+    "            --release-set-hash \"$RELEASE_SET_HASH\" \\\n"
+    "            --secret-store none --result-file \"$RUNNER_TEMP/kci-result-gamma.json\""
+)
+comptime _PROD_KCI_HASH: String = (
+    "            --release-set-hash \"$RELEASE_SET_HASH\" \\\n"
+    "            --secret-store none --result-file \"$RUNNER_TEMP/kci-result-prod.json\""
+)
+comptime _PROD_REASON: String = (
+    "--context reason=\"$REASON\"; fi\n          \"$RUNNER_TEMP/kci/kci\" run --stage prod \\\n"
+)
+comptime _VALIDATE_PROD_LINE: String = (
+    "      # needs a permission no job holds): NEXT says so.\n      - name: the prod line\n        if: always()\n"
+)
+comptime _GAMMA_PERMS: String = "    environment: gamma\n    permissions:\n      contents: read\n      id-token: write\n"
+comptime _VALIDATE_OUTPUTS: String = (
+    "    outputs:\n"
+    "      # the set this job installed and validated, from its own kci result\n"
+    "      # (never the value it was given): what prod publishes (R17)\n"
+    "      validated_set_hash: ${{ steps.validated.outputs.set_hash }}\n"
+)
+comptime _PROD_HEAD: String = "  prod:\n    # after the stage gamma: its publish AND its validation\n"
+comptime _M_PROD: String = "  name: \"prod\"\n  environment: \"prod\"\n  after: \"gamma\"\n"
+comptime _M_GAMMA_BG: String = "  after: \"build\"\n  break_glass: true\n"
+comptime _M_BUILD_BG: String = "  farm_connected: true\n  break_glass: true\n"
+
+
+struct _Row(Copyable, Movable):
+    """One mutation: of the workflow (`machine` False) or of the machine
+    file, `old` replaced by `new` (`old` must occur exactly once), and what
+    the check must end in."""
+
+    var label: String
+    var machine: Bool
+    var old: String
+    var new: String
+    var expect: Int
+    var needle: String
+
+    def __init__(out self, var label: String, machine: Bool, var old: String, var new: String, expect: Int, var needle: String):
+        self.label = label^
+        self.machine = machine
+        self.old = old^
+        self.new = new^
+        self.expect = expect
+        self.needle = needle^
+
+
+def _wf(label: String, old: String, new: String, expect: Int, needle: String) -> _Row:
+    return _Row(label.copy(), False, old.copy(), new.copy(), expect, needle.copy())
+
+
+def _m(label: String, old: String, new: String, expect: Int, needle: String) -> _Row:
+    return _Row(label.copy(), True, old.copy(), new.copy(), expect, needle.copy())
+
+
+def _rows() -> List[_Row]:
+    var r = List[_Row]()
+    r.append(_wf(String("1 canonical"), String(""), String(""), _CLEAN, String("")))
+    # ---- R13 main-only stages ----------------------------------------------------------------
+    r.append(_wf(String("2 prod without the main conjunct"), String(_PROD_IF), String("    if: github.event_name != 'pull_request'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on main")))
+    r.append(_wf(String("3 prod on github.ref_name"), String(_PROD_IF), String("    if: github.event_name != 'pull_request' && github.ref_name == 'main'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on main")))
+    r.append(_wf(String("4 the main conjunct on gamma (break_glass)"), String(_GAMMA_IF), String(_GAMMA_IF).replace(String("== 'true'\n"), String("== 'true' && github.ref == 'refs/heads/main'\n")), _FINDING, String("job 'gamma': R13: stage 'gamma' is break_glass")))
+    r.append(_m(String("5 machine: prod break_glass"), String(_M_PROD), String(_M_PROD) + String("  break_glass: true\n"), _FINDING, String("job 'prod': R13: stage 'prod' is break_glass")))
+    r.append(_m(String("5b machine: gamma not break_glass"), String(_M_GAMMA_BG), String("  after: \"build\"\n"), _FINDING, String("job 'validate': R13: stage 'gamma' runs only on main")))
+    r.append(_m(String("5c machine: build not break_glass, gamma is"), String(_M_BUILD_BG), String("  farm_connected: true\n"), _REFUSED, String("stage 'gamma' is break_glass and runs after 'build', which is not")))
+    r.append(_wf(String("18 prod `always() &&`"), String(_PROD_IF), String("    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on main")))
+    # ---- R14 concurrency ------------------------------------------------------------------------
+    r.append(_wf(String("6 main's per-revision group"), String(_GROUP_LINE), String("  group: kci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || inputs.revision || github.sha }}\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
+    r.append(_wf(String("7 cancel-in-progress: true"), String(_CANCEL_LINE), String("  cancel-in-progress: true\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
+    r.append(_wf(String("7b cancel-in-progress: false"), String(_CANCEL_LINE), String("  cancel-in-progress: false\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
+    r.append(_wf(String("8 concurrency: kci (a scalar)"), String("concurrency:\n  # R14, byte for byte (file header, ONE RELEASE AT A TIME).\n") + String(_GROUP_LINE) + String(_CANCEL_LINE), String("concurrency: kci\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
+    r.append(_wf(String("8b no concurrency"), String("concurrency:\n  # R14, byte for byte (file header, ONE RELEASE AT A TIME).\n") + String(_GROUP_LINE) + String(_CANCEL_LINE), String(""), _FINDING, String("R14: the workflow-level `concurrency:`")))
+    r.append(_wf(String("8c a job-level concurrency on prod"), String(_PROD_HEAD), String(_PROD_HEAD) + String("    concurrency: prod\n"), _FINDING, String("job 'prod': R14: a job has no `concurrency:` of its own")))
+    r.append(_wf(String("8d a third concurrency key"), String(_CANCEL_LINE), String(_CANCEL_LINE) + String("  queue: max\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
+    # ---- R15 the push filter ---------------------------------------------------------------------
+    r.append(_wf(String("9 #288's push (no paths-ignore)"), String(_PATHS_IGNORE), String(""), _FINDING, String("R15: the push trigger is exactly")))
+    r.append(_wf(String("10 paths-ignore + 'src/**'"), String(_PATHS_IGNORE), String(_PATHS_IGNORE) + String("      - 'src/**'\n"), _FINDING, String("R15: the push trigger is exactly")))
+    r.append(_wf(String("10b paths instead"), String(_PATHS_IGNORE), String(_PATHS_IGNORE).replace(String("paths-ignore"), String("paths")), _FINDING, String("R15: the push trigger is exactly")))
+    r.append(_wf(String("10c reordered"), String(_PATHS_IGNORE), String("    paths-ignore:\n      - '**.md'\n      - 'docs/**'\n"), _FINDING, String("R15: the push trigger is exactly")))
+    r.append(_wf(String("10d a flow list"), String(_PATHS_IGNORE), String("    paths-ignore: [docs]\n"), _FINDING, String("R15: the push trigger is exactly")))
+    r.append(_wf(String("10e a flow list with a glob"), String(_PATHS_IGNORE), String("    paths-ignore: [docs/**]\n"), _CANNOT, String("a flow list item other than plain")))
+    r.append(_wf(String("10f plain docs/**"), String("      - 'docs/**'\n"), String("      - docs/**\n"), _FINDING, String("R15: the push trigger is exactly")))
+    r.append(_wf(String("10g tags beside branches"), String(_PATHS_IGNORE), String(_PATHS_IGNORE) + String("    tags: [v1]\n"), _FINDING, String("R15: the push trigger is exactly")))
+    r.append(_wf(String("10h paths-ignore under pull_request"), String("  pull_request:\n    branches: [main]\n"), String("  pull_request:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n"), _FINDING, String("R15: `pull_request` has `paths-ignore`")))
+    # ---- R16 inputs and no expression in a script ------------------------------------------------
+    r.append(_wf(String("12 reason not required"), String("        required: true\n"), String("        required: false\n"), _FINDING, String("`reason` is `required: true`")))
+    r.append(_wf(String("12b dry_run default true"), String("        type: boolean\n        default: false\n"), String("        type: boolean\n        default: true\n"), _FINDING, String("`dry_run` is `default: false`")))
+    r.append(_wf(String("12c reason with a default"), String("        required: true\n"), String("        required: true\n        default: \"x\"\n"), _FINDING, String("`reason` has no `default`")))
+    r.append(_wf(String("12d an extra input"), String("        default: false\n\npermissions: {}\n"), String("        default: false\n      publish_prod:\n        type: boolean\n        default: false\n\npermissions: {}\n"), _FINDING, String("are exactly revision, reason and dry_run; it has 'publish_prod'")))
+    r.append(_wf(String("13 inputs.reason in a run:"), String(_PROD_REASON), String(_PROD_REASON).replace(String("\"$REASON\""), String("\"${{ inputs.reason }}\"")), _FINDING, String("job 'prod': R16: a `run:` script holds `${{ inputs.reason }}`")))
+    r.append(_wf(String("13b github.event.inputs.reason in a run:"), String(_PROD_REASON), String(_PROD_REASON).replace(String("\"$REASON\""), String("\"${{ github.event.inputs.reason }}\"")), _FINDING, String("R16: a `run:` script holds `${{ github.event.inputs.reason }}`")))
+    r.append(_wf(String("13c the event payload in a run:"), String(_PROD_REASON), String(_PROD_REASON).replace(String("\"$REASON\""), String("\"${{ toJSON(github.event) }}\"")), _FINDING, String("R16: a `run:` script holds")))
+    # ---- R17 the set hash ------------------------------------------------------------------------
+    r.append(_wf(String("14 prod's hash from build"), String(_PROD_HASH_ENV), String("      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n"), _FINDING, String("job 'prod': R17: its `env:` sets RELEASE_SET_HASH to exactly `${{ needs.validate.outputs.validated_set_hash }}`")))
+    r.append(_wf(String("14b prod's hash from gamma"), String(_PROD_HASH_ENV), String("      RELEASE_SET_HASH: ${{ needs.gamma.outputs.set_hash }}\n"), _FINDING, String("job 'prod': R17: its `env:` sets RELEASE_SET_HASH")))
+    r.append(_wf(String("15 gamma's kci run without --release-set-hash"), String(_GAMMA_KCI_HASH), String("            --secret-store none --result-file \"$RUNNER_TEMP/kci-result-gamma.json\""), _FINDING, String("job 'gamma': R17: its `kci run` passes no `--release-set-hash")))
+    r.append(_wf(String("15b a literal set hash"), String(_PROD_KCI_HASH), String(_PROD_KCI_HASH).replace(String("\"$RELEASE_SET_HASH\""), String("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")), _FINDING, String("job 'prod': R17: `--release-set-hash 0123")))
+    r.append(_wf(String("15c validate declares no validated_set_hash"), String(_VALIDATE_OUTPUTS), String(""), _FINDING, String("job 'validate': R17: a later job takes the release set's hash")))
+    # ---- R18 the prod line ------------------------------------------------------------------------
+    r.append(_wf(String("16 validate's last step renamed"), String(_VALIDATE_PROD_LINE), String(_VALIDATE_PROD_LINE).replace(String("name: the prod line"), String("name: summary")), _FINDING, String("job 'validate': R18")))
+    r.append(_wf(String("16b validate's prod line not always()"), String(_VALIDATE_PROD_LINE), String(_VALIDATE_PROD_LINE).replace(String("if: always()"), String("if: success()")), _FINDING, String("job 'validate': R18")))
+    # ---- R4 the permission allow-list ----------------------------------------------------------------
+    r.append(_wf(String("17 actions: read on gamma"), String(_GAMMA_PERMS), String(_GAMMA_PERMS) + String("      actions: read\n"), _FINDING, String("job 'gamma': R4: permissions grant `actions: read`")))
+    r.append(_wf(String("17b contents: write on prod"), String("    environment: prod\n    permissions:\n      contents: read\n"), String("    environment: prod\n    permissions:\n      contents: write\n"), _FINDING, String("job 'prod': R4: permissions grant `contents: write`")))
+    return r^
+
+
+def _mutated(text: String, old: String, new: String) raises -> String:
+    if old.byte_length() == 0:
+        return text.copy()
+    var at = text.find(old)
+    if at < 0 or text.find(old, at + 1) >= 0:
+        raise Error(String("the fixture does not hold exactly one '") + old + String("'"))
+    return text.replace(old, new)
+
+
+def _outcome(row: _Row) raises -> String:
+    """"" when the row ends as it expects, else what happened."""
+    var wf = Path(String("kci.yml")).read_text()
+    var machine = Path(String("machine.textproto")).read_text()
+    if row.machine:
+        machine = _mutated(machine, row.old, row.new)
+    else:
+        wf = _mutated(wf, row.old, row.new)
+    var files = List[ChannelsFile]()
+    files.append(ChannelsFile(String("release/channels.textproto"), Path(String("channels.textproto")).read_text()))
+    var f: List[String]
+    try:
+        var g = parse_machine_file(machine, String("release/machine.textproto"))
+        f = check_running_workflow(g, files, wf, String("release/machine.textproto"))
+    except e:
+        var m = String(e)
+        if row.expect == _CANNOT and m.startswith(String("cannot tell: ")) and m.find(row.needle) >= 0:
+            return String("")
+        if row.expect == _REFUSED and m.find(row.needle) >= 0:
+            return String("")
+        return String("raised: ") + m
+    var all = String("")
+    for i in range(len(f)):
+        if row.expect == _FINDING and f[i].find(row.needle) >= 0:
+            return String("")
+        all += f[i] + String(" | ")
+    if row.expect == _CLEAN and len(f) == 0:
+        return String("")
+    return String("read, findings: [") + all + String("]")
+
+
+def test_every_row_ends_as_it_expects() raises:
+    var rows = _rows()
+    var failed = String("")
+    var red = 0
+    for i in range(len(rows)):
+        var got = _outcome(rows[i])
+        if got.byte_length() > 0:
+            red += 1
+            failed += String("\n  ROW '") + rows[i].label + String("': want ") + rows[i].needle + String("; ") + got
+    if failed.byte_length() > 0:
+        raise Error(String(red) + String(" of ") + String(len(rows)) + String(" rows did not end as expected:") + failed)
+
+
+def main() raises:
+    TestSuite.discover_tests[__functions_in_module()]().run()

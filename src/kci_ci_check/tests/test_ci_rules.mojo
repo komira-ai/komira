@@ -13,30 +13,51 @@ from kci_release_machine import parse_machine_file
 
 comptime _MACHINE: String = (
     "schema_version: 1\n"
-    "stage { name: \"build\" farm_connected: true\n"
+    "stage { name: \"build\" farm_connected: true break_glass: true\n"
     "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
     "}\n"
-    "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\"\n"
+    "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\" break_glass: true\n"
     "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\" }\n"
     "}\n"
-    "stage { name: \"publish-prod\" environment: \"prod\" after: \"publish-gamma\"\n"
+    "stage { name: \"publish-prod\" environment: \"prod\" after: \"publish-gamma\" break_glass: true\n"
     "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"prod\" }\n"
     "}\n"
 )
 
-comptime _WF: String = (
-    "name: kci\n"
+comptime _ON: String = (
     "on:\n"
     "  push:\n"
     "    branches: [main]\n"
+    "    paths-ignore:\n"
+    "      - 'docs/**'\n"
+    "      - '**.md'\n"
     "  workflow_dispatch:\n"
     "    inputs:\n"
     "      revision:\n"
     "        type: string\n"
     "        default: \"\"\n"
-    "permissions: {}\n"
+    "      reason:\n"
+    "        type: string\n"
+    "        required: true\n"
+    "      dry_run:\n"
+    "        type: boolean\n"
+    "        default: false\n"
+)
+
+comptime _PROD_LINE: String = "      - name: the prod line\n        if: always()\n        run: echo prod line\n"
+
+# Every stage is break_glass here, so no job carries R13's main conjunct
+# (test_ci_auto_promotion holds R13 on the repository's own files).
+comptime _WF: String = (
+    "name: kci\n"
+    + _ON
+    + "permissions: {}\n"
+    "concurrency:\n"
+    "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
+    " || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n"
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
     "jobs:\n"
     "  build:\n"
     "    runs-on: ubuntu-24.04\n"
@@ -44,6 +65,8 @@ comptime _WF: String = (
     "    permissions:\n"
     "      contents: read\n"
     "      id-token: write\n"
+    "    outputs:\n"
+    "      set_hash: ${{ steps.kci.outputs.set_hash }}\n"
     "    steps:\n"
     "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
     "      - name: farm\n"
@@ -55,28 +78,37 @@ comptime _WF: String = (
     "          \"$RUNNER_TEMP/kci/kci\" run --stage build \\\n"
     "            --summary-file \"$GITHUB_STEP_SUMMARY\" \\\n"
     "            --run-id \"gh-$GITHUB_RUN_ID\"\n"
-    "  publish-gamma:\n"
+    + _PROD_LINE
+    + "  publish-gamma:\n"
     "    needs: build\n"
     "    runs-on: ubuntu-24.04\n"
     "    environment: gamma\n"
     "    permissions:\n"
     "      contents: read\n"
     "      id-token: write\n"
+    "    outputs:\n"
+    "      set_hash: ${{ steps.kci.outputs.set_hash }}\n"
+    "    env:\n"
+    "      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n"
     "    steps:\n"
     "      - name: kci\n"
     "        run: |\n"
-    "          \"$RUNNER_TEMP/kci/kci\" run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-    "  publish-prod:\n"
+    "          \"$RUNNER_TEMP/kci/kci\" run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
+    + _PROD_LINE
+    + "  publish-prod:\n"
     "    needs: publish-gamma\n"
     "    runs-on: ubuntu-24.04\n"
     "    environment: prod\n"
     "    permissions:\n"
     "      contents: read\n"
     "      id-token: write\n"
+    "    env:\n"
+    "      RELEASE_SET_HASH: ${{ needs.publish-gamma.outputs.set_hash }}\n"
     "    steps:\n"
     "      - name: kci\n"
     "        run: |\n"
-    "          \"$RUNNER_TEMP/kci/kci\" run --stage publish-prod --plan --summary-file=\"$GITHUB_STEP_SUMMARY\"\n"
+    "          \"$RUNNER_TEMP/kci/kci\" run --stage publish-prod --plan --summary-file=\"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
+    + _PROD_LINE
 )
 
 
@@ -189,7 +221,7 @@ def test_r5_one_kci_run_of_its_own_stage() raises:
     _reports(_mutated(String("run --stage publish-prod --plan"), String("run --stage \"$STAGE\" --plan")), String("R5: `kci run --stage $STAGE` in job 'publish-prod'"))
     _reports(_mutated(String("\"$RUNNER_TEMP/kci/kci\" run --stage publish-prod --plan"), String("echo --plan")), String("R5: invokes `kci run` 0 times"))
     _reports(
-        _mutated(String("run --stage publish-prod --plan --summary-file=\"$GITHUB_STEP_SUMMARY\"\n"), String("run --stage publish-prod --plan --summary-file=\"$GITHUB_STEP_SUMMARY\"\n          kci run --stage publish-prod --summary-file x\n")),
+        _mutated(String("run --stage publish-prod --plan --summary-file=\"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"), String("run --stage publish-prod --plan --summary-file=\"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n          kci run --stage publish-prod --summary-file x\n")),
         String("R5: invokes `kci run` 2 times"),
     )
 
@@ -226,7 +258,7 @@ def test_r6_triggers_are_an_allow_list() raises:
     # the list form of `on:`
     _reports(
         _mutated(
-            String("on:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n        default: \"\"\n"),
+            String(_ON),
             String("on: [push, workflow_dispatch, merge_group]\n"),
         ),
         String("R6: trigger 'merge_group': a workflow's triggers are push, workflow_dispatch and pull_request only"),
@@ -260,8 +292,8 @@ def test_r11_farm_connect_exactly_on_farm_connected_stages() raises:
     )
     _reports(
         _mutated(
-            String("    environment: prod\n    permissions:\n      contents: read\n      id-token: write\n    steps:\n"),
-            String("    environment: prod\n    permissions:\n      contents: read\n      id-token: write\n    steps:\n      - uses: ./.github/actions/farm-connect\n"),
+            String("      RELEASE_SET_HASH: ${{ needs.publish-gamma.outputs.set_hash }}\n    steps:\n"),
+            String("      RELEASE_SET_HASH: ${{ needs.publish-gamma.outputs.set_hash }}\n    steps:\n      - uses: ./.github/actions/farm-connect\n"),
         ),
         String("job 'publish-prod': R11: uses ./.github/actions/farm-connect, but stage 'publish-prod' is not farm-connected"),
     )
@@ -269,7 +301,7 @@ def test_r11_farm_connect_exactly_on_farm_connected_stages() raises:
 
 def test_r12_every_kci_run_writes_the_summary() raises:
     _reports(
-        _mutated(String(" --summary-file=\"$GITHUB_STEP_SUMMARY\"\n"), String("\n")),
+        _mutated(String(" --summary-file=\"$GITHUB_STEP_SUMMARY\" "), String(" ")),
         String("job 'publish-prod': R12: `kci run` passes no --summary-file"),
     )
     _reports(

@@ -14,10 +14,10 @@ from kci_release_machine import parse_machine_file
 
 comptime _MACHINE: String = (
     "schema_version: 1\n"
-    "stage { name: \"build\"\n"
+    "stage { name: \"build\" break_glass: true\n"
     "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
     "}\n"
-    "stage { name: \"gamma\" after: \"build\"\n"
+    "stage { name: \"gamma\" after: \"build\" break_glass: true\n"
     "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\"\n"
     "    validation { name: \"install\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\" program: \"release/s.mojo\"\n"
@@ -30,37 +30,66 @@ comptime _MACHINE: String = (
     "}\n"
 )
 
+comptime _PROD_LINE: String = "      - name: the prod line\n        if: always()\n        run: echo prod line\n"
+
+# build and gamma are break_glass (no main conjunct, R13); the set hash goes
+# build -> gamma and validate (R17); every release job ends with the prod
+# line (R18).
 comptime _WF: String = (
     "name: kci\n"
     "on:\n"
     "  push:\n"
     "    branches: [main]\n"
+    "    paths-ignore:\n"
+    "      - 'docs/**'\n"
+    "      - '**.md'\n"
     "  workflow_dispatch:\n"
     "    inputs:\n"
     "      revision:\n"
     "        type: string\n"
+    "      reason:\n"
+    "        type: string\n"
+    "        required: true\n"
+    "      dry_run:\n"
+    "        type: boolean\n"
+    "        default: false\n"
     "permissions: {}\n"
+    "concurrency:\n"
+    "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
+    " || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n"
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
     "jobs:\n"
     "  build:\n"
     "    environment: build\n"
+    "    outputs:\n"
+    "      set_hash: ${{ steps.kci.outputs.set_hash }}\n"
     "    steps:\n"
     "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-    "  gamma:\n"
+    + _PROD_LINE
+    + "  gamma:\n"
     "    needs: build\n"
     "    environment: gamma\n"
     "    permissions:\n"
     "      contents: read\n"
     "      id-token: write\n"
+    "    env:\n"
+    "      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n"
     "    steps:\n"
-    "      - run: kci run --stage gamma --only step:publish --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-    "  validate:\n"
+    "      - run: kci run --stage gamma --only step:publish --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
+    + _PROD_LINE
+    + "  validate:\n"
     "    needs: [build, gamma]\n"
+    "    env:\n"
+    "      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n"
+    "    outputs:\n"
+    "      validated_set_hash: ${{ steps.kci.outputs.set_hash }}\n"
     "    permissions:\n"
     "      contents: read\n"
     "    steps:\n"
     "      - run: |\n"
     "          kci run --stage gamma --only validation:install --only=validation:read-back \\\n"
-    "            --scratch-dir \"$RUNNER_TEMP/v\" --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
+    "            --scratch-dir \"$RUNNER_TEMP/v\" --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
+    + _PROD_LINE
 )
 
 
@@ -179,9 +208,14 @@ def test_a_later_stage_needs_every_job_of_a_split_stage() raises:
     var g = parse_machine_file(three, String("machine file"))
     var tokens = _token_stages()
     tokens.append(String("prod"))
+    # prod is not break_glass: main only (R13); it publishes the set validate
+    # validated (R17)
     var prod = (
-        String("  prod:\n    needs: [gamma, validate]\n    environment: prod\n    permissions:\n      id-token: write\n")
-        + String("    steps:\n      - run: kci run --stage prod --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
+        String("  prod:\n    needs: [gamma, validate]\n    if: github.ref == 'refs/heads/main'\n    environment: prod\n")
+        + String("    permissions:\n      id-token: write\n")
+        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.validate.outputs.validated_set_hash }}\n")
+        + String("    steps:\n      - run: kci run --stage prod --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n")
+        + String(_PROD_LINE)
     )
     var ok = check_workflow(String(_WF) + prod, g, tokens, String("release/machine.textproto"))
     assert_equal(len(ok), 0, _all(ok))

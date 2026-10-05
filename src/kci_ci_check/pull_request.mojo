@@ -25,7 +25,8 @@
 #   * the PULL_REQUEST stage's job has its own `permissions:` mapping
 #     (`check_pull_request_job`), and no stored secret reaches it
 #     (`check_no_secret`, over the job and the workflow-level `env:`);
-#   * a push runs the release jobs only on `main` (`check_push_branches`):
+#   * a push runs the release jobs only on `main` (auto_promotion.mojo's
+#     `check_push_filter`, R15, which took over this clause):
 #     `github.event_name != 'pull_request'` holds for a push to a pull
 #     request's head branch;
 #   * both conditions are read by `condition_expression`: an `if:` holding
@@ -61,8 +62,8 @@ comptime PULL_REQUEST_EVENT: String = "pull_request"
 """The event name a release job's condition keeps out (R6)."""
 
 comptime RELEASE_BRANCH: String = "main"
-"""The one branch a `push` trigger names (R6): `on.push` is exactly
-`branches: [main]`."""
+"""The one branch a `push` trigger names (R15, which took over R6's push
+clause)."""
 
 comptime GITHUB_TOKEN_SECRET: String = "secrets.GITHUB_TOKEN"
 """The one name of the `secrets` context a pull request's job may hold
@@ -232,6 +233,16 @@ def _conjunction_terms(condition: String, mut terms: List[String]) -> Bool:
         return False
     terms.append(String(c[byte = start : n]))
     return True
+
+
+def top_level_terms(doc: WorkflowDoc, node: Int, mut terms: List[String]) -> Bool:
+    """The terms of the job-level `if:` at `node` when it is a top-level
+    conjunction (`condition_expression`, then `_conjunction_terms`); False
+    otherwise (and `terms` unspecified)."""
+    var expression = String("")
+    if not condition_expression(doc, node, expression):
+        return False
+    return _conjunction_terms(expression, terms)
 
 
 def excludes_pull_request(condition: String) -> Bool:
@@ -444,22 +455,3 @@ def check_no_secret(doc: WorkflowDoc, node: Int, key: String, whose: String, mut
                 )
                 continue
         check_no_secret(doc, items[i], at_key, whose, findings)
-
-
-def check_push_branches(doc: WorkflowDoc, on: Int, mut findings: List[String]):
-    """R6: `on.push` is exactly `branches: [main]`: one key, `branches`, a
-    list of one plain item, the release branch."""
-    var push = doc.child(on, String("push"))
-    var ok = False
-    if push >= 0 and doc.kind(push) == NODE_MAP:
-        var keys = doc.keys(push)
-        var branches = doc.child(push, String("branches"))
-        if len(keys) == 1 and branches >= 0 and doc.kind(branches) == NODE_LIST:
-            var items = doc.items(branches)
-            ok = len(items) == 1 and doc.is_plain(items[0], String(RELEASE_BRANCH))
-    if not ok:
-        findings.append(
-            _at(doc, on) + String("R6: the push trigger is exactly `branches: [") + String(RELEASE_BRANCH)
-            + String("]`: a push with no branch filter, another pattern, `branches-ignore`, `tags` or a path")
-            + String(" filter runs the release jobs on a push to any branch, a pull request's head branch included")
-        )

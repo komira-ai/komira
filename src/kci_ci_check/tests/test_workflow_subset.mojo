@@ -14,10 +14,10 @@ from kci_release_machine import parse_machine_file
 
 comptime _MACHINE: String = (
     "schema_version: 1\n"
-    "stage { name: \"build\" farm_connected: true\n"
+    "stage { name: \"build\" farm_connected: true break_glass: true\n"
     "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
     "}\n"
-    "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\"\n"
+    "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\" break_glass: true\n"
     "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\" }\n"
     "}\n"
@@ -33,29 +33,52 @@ comptime _PR_WF: String = (
     "on:\n"
     "  push:\n"
     "    branches: [main]\n"
+    "    paths-ignore:\n"
+    "      - 'docs/**'\n"
+    "      - '**.md'\n"
     "  workflow_dispatch:\n"
     "    inputs:\n"
     "      revision:\n"
     "        type: string\n"
+    "      reason:\n"
+    "        type: string\n"
+    "        required: true\n"
+    "      dry_run:\n"
+    "        type: boolean\n"
+    "        default: false\n"
     "  pull_request:\n"
     "permissions: {}\n"
+    "concurrency:\n"
+    "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
+    " || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n"
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
     "jobs:\n"
     "  build:\n"
     "    if: github.event_name != 'pull_request'\n"
+    "    outputs:\n"
+    "      set_hash: ${{ steps.kci.outputs.set_hash }}\n"
     "    environment: build\n"
     "    permissions:\n"
     "      id-token: write\n"
     "    steps:\n"
     "      - uses: ./.github/actions/farm-connect\n"
     "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
+    "      - name: the prod line\n"
+    "        if: always()\n"
+    "        run: echo prod line\n"
     "  publish-gamma:\n"
     "    needs: build\n"
     "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
+    "    env:\n"
+    "      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n"
     "    environment: gamma\n"
     "    permissions:\n"
     "      id-token: write\n"
     "    steps:\n"
-    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
+    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
+    "      - name: the prod line\n"
+    "        if: always()\n"
+    "        run: echo prod line\n"
     "  pr:\n"
     "    if: github.event.pull_request.head.repo.full_name == github.repository\n"
     "    runs-on: ubuntu-24.04\n"
@@ -93,7 +116,7 @@ comptime _BUILD_IF: String = "    if: github.event_name != 'pull_request'\n"
 comptime _GAMMA_IF: String = "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
 comptime _R4_SCALAR: String = "R4: `permissions: "
 comptime _R4_TOP_TOKEN: String = "R4: `id-token: write` at the workflow level reaches every job"
-comptime _R6_PUSH: String = "R6: the push trigger is exactly `branches: [main]`"
+comptime _R6_PUSH: String = "R15: the push trigger is exactly `branches: [main]`"
 comptime _R6_OWN_PERMS: String = "so the job has its own `permissions:` mapping"
 comptime _R6_PERMS_FORM: String = "so its `permissions` is a mapping"
 comptime _R6_GRANT: String = "so its permissions hold only `contents: read`"
@@ -343,7 +366,7 @@ def _rows() raises -> List[_Row]:
     r.append(_Row(String("permissions: write-all, job"), _swap(String(_JOB_PERMS), String("    permissions: write-all\n")), _FINDING, String(_R4_SCALAR)))
     r.append(_Row(String("id-token: 'read' is a grant"), _top_perms(String("\n  id-token: 'read'")), _FINDING, String(_R4_TOP_TOKEN)))
 
-    # ---- the push trigger: the release branch only (R6) -----------------------
+    # ---- the push trigger: the release branch only (R15, which took over R6's push clause)
     r.append(_Row(String("push: no branch filter"), _push(String("  push:\n")), _FINDING, String(_R6_PUSH)))
     r.append(_Row(String("push: branches '**'"), _push(String("  push:\n    branches:\n      - '**'\n")), _FINDING, String(_R6_PUSH)))
     r.append(_Row(String("push: a branch pattern"), _push(String("  push:\n    branches:\n      - main*\n")), _FINDING, String(_R6_PUSH)))
@@ -358,7 +381,10 @@ def _rows() raises -> List[_Row]:
         _Row(
             String("on: a list of events"),
             _rel_swap(
-                String("on:\n") + String(_PUSH_MAIN) + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n  pull_request:\n"),
+                String("on:\n") + String(_PUSH_MAIN)
+                + String("    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n  workflow_dispatch:\n    inputs:\n")
+                + String("      revision:\n        type: string\n      reason:\n        type: string\n        required: true\n")
+                + String("      dry_run:\n        type: boolean\n        default: false\n  pull_request:\n"),
                 String("on: [push, workflow_dispatch, pull_request]\n"),
             ),
             _FINDING,

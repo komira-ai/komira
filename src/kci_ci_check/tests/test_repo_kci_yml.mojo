@@ -12,12 +12,15 @@
 #   machine file) must be kci's default machine file, because no `kci` line of
 #   the workflow passes --machine. The workflow names no removed input or verb
 #   (`ci check`, a claim, an expected set hash) and no channel but the machine
-#   file's.
+#   file's. Continuous auto-promotion: build and gamma are break_glass, prod
+#   is not; the push trigger's documentation filter is the documentation
+#   release_version.sh does not count (R15).
 # =============================================================================
 #
 # The files are staged as test data (BUCK): `kci.yml` (the root BUCK exports
-# it), `machine.textproto` and `channels.textproto` (release/BUCK), and the
-# program gamma's validation runs (release/smoke/BUCK).
+# it), `machine.textproto` and `channels.textproto` (release/BUCK), the
+# program gamma's validation runs (release/smoke/BUCK) and release_version.sh
+# (tools/build/package/BUCK).
 # =============================================================================
 
 from std.pathlib import Path
@@ -29,6 +32,7 @@ from kci_ci_check import (
     ChannelsFile,
     channels_paths,
     check_running_workflow,
+    documentation_filter_findings,
     id_token_stages,
     kci_run_calls,
     read_workflow,
@@ -67,6 +71,12 @@ def test_the_release_machine() raises:
     assert_true(pr.steps[0].is_build())
     assert_equal(pr.steps[0].platform, String("linux-x86_64"))
     assert_equal(pr.steps[0].artifacts, String("release/artifacts.textproto"))
+    # continuous auto-promotion: a branch's manual run reaches build and
+    # gamma (break-glass), never prod; the pr stage is no release stage
+    assert_true(g.stage(String("build")).break_glass)
+    assert_true(g.stage(String("gamma")).break_glass)
+    assert_false(g.stage(String("prod")).break_glass)
+    assert_false(pr.break_glass)
     var b = g.stage(String("build"))
     assert_equal(b.environment, String("build"))
     assert_true(b.farm_connected)
@@ -182,9 +192,40 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     assert_equal(prod_needs[1], String("validate"))
 
 
+def test_the_documentation_filter_is_release_version_shs() raises:
+    var doc = read_workflow(Path(String("kci.yml")).read_text())
+    var f = documentation_filter_findings(Path(String("release_version.sh")).read_text(), doc)
+    if len(f) > 0:
+        raise Error(String("\n").join(f))
+    # a documentation exclusion the trigger does not share is red
+    var more = Path(String("release_version.sh")).read_text().replace(
+        String("':(exclude).github'"), String("':(exclude).github' ':(exclude)README'")
+    )
+    var red = documentation_filter_findings(more, doc)
+    assert_equal(len(red), 1, String("\n").join(red))
+    assert_true(red[0].find(String("does not count 'README'")) >= 0, red[0])
+
+
+def test_kci_yml_hands_the_set_hash_on() raises:
+    # build hands its set hash to gamma and validate; validate hands what it
+    # validated to prod (R17), read from each job's own kci result
+    var doc = read_workflow(Path(String("kci.yml")).read_text())
+    var jobs = doc.child(0, String("jobs"))
+    var b = doc.child(doc.child(doc.child(jobs, String("build")), String("outputs")), String("set_hash"))
+    assert_equal(doc.text(b), String("${{ steps.set_hash.outputs.set_hash }}"))
+    var v = doc.child(doc.child(doc.child(jobs, String("validate")), String("outputs")), String("validated_set_hash"))
+    assert_equal(doc.text(v), String("${{ steps.validated.outputs.set_hash }}"))
+    for job in [String("gamma"), String("validate"), String("prod")]:
+        var e = doc.child(doc.child(doc.child(jobs, job), String("env")), String("RELEASE_SET_HASH"))
+        var want = String("${{ needs.validate.outputs.validated_set_hash }}") if job == String("prod") else String(
+            "${{ needs.build.outputs.set_hash }}"
+        )
+        assert_equal(doc.text(e), want, job)
+
+
 def test_kci_yml_names_no_removed_input_and_no_other_channel() raises:
     var text = Path(String("kci.yml")).read_text()
-    for gone in [String("ci check"), String("claim"), String("expect_set_hash"), String("approved_names"), String("rehearsal")]:
+    for gone in [String("ci check"), String("claim"), String("expect_set_hash"), String("approved_names"), String("rehearsal"), String("publish_prod")]:
         assert_true(text.find(gone) < 0, String("kci.yml still names '") + gone + String("'"))
     # every prefix.dev channel path kci.yml names is one the machine file publishes to
     var g = _graph()

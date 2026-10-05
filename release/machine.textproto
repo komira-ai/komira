@@ -28,9 +28,12 @@
 #          step:publish`) and `validate` (`--only validation:install`, no
 #          environment, no identity token), and prod waits for both.
 #   prod   publishes the SAME release set (never rebuilt) to the channel
-#          `prod` (prefix.dev komira-ai/prod), in the GitHub environment `prod`,
-#          whose required reviewer approves the job. The gamma job's summary
-#          lists the names new to prod (NEW NAMES) before that approval.
+#          `prod` (prefix.dev komira-ai/prod), in the GitHub environment
+#          `prod`, after gamma's publish and validation, on every push to main
+#          (continuous auto-promotion). It is the one stage that is not
+#          break_glass: it runs only on main, for a commit on main's history,
+#          and never publishes a build number lower than its channel holds.
+#          The gamma job's summary lists the names new to prod (NEW NAMES).
 #   pr     the per-change check of a pull request (trigger PULL_REQUEST):
 #          `kci run --stage pr --affected-by <the pull request's base commit>`
 #          builds, with each build system's `build_targets` command, exactly
@@ -42,6 +45,12 @@
 #          environment, no publishing step; FARM-CONNECTED, like build, so its
 #          identity token is the farm connection's only. It runs after no
 #          stage and no stage runs after it.
+#
+# BREAK-GLASS: build and gamma are `break_glass: true`, so a manual run of a
+# branch other than main (with a required reason) builds and publishes that
+# branch to gamma, and stops there; prod is not, so no run off main reaches it.
+# The break-glass stages are a prefix of the chain (the machine file refuses
+# a break_glass stage after one that is not).
 #
 # A stage's `environment` is the GitHub environment its job runs in, and the
 # one its channel's trusted publisher names (push_identity
@@ -60,6 +69,7 @@ schema_version: 1
 stage {
   name: "build"
   farm_connected: true
+  break_glass: true
   step {
     name: "build"
     kind: BUILD
@@ -72,6 +82,7 @@ stage {
   name: "gamma"
   environment: "gamma"
   after: "build"
+  break_glass: true
   step {
     name: "publish"
     kind: PUBLISH
