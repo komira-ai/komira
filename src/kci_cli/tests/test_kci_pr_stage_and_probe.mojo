@@ -31,10 +31,10 @@ comptime _BASE: String = "0123456789abcdef0123456789abcdef01234567"
 comptime _SHA: String = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
 
 
-comptime _R19: String = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ env.REVISION }}\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n          else\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          fi\n"
-"""R19: the first two steps of every release job (auto_promotion.mojo)."""
+comptime _R19: String = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ env.REVISION }}\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          else\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n          fi\n"
+"""R21: the first two steps of every release job (auto_promotion.mojo)."""
 comptime _R19_MAIN: String = "      - name: only a push to main reaches this job\n        run: |\n          [ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n            { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
-"""R19: the third step of a main-only job."""
+"""R21: the third step of a main-only job."""
 
 
 struct Fake(StageSteps, Movable):
@@ -150,6 +150,7 @@ def _pr_workflow(machine: String) -> String:
         + String("concurrency:\n  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)")
         + String(" || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n")
         + String("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n")
+        + String("env:\n  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n")
         + String("jobs:\n")
         + String("  build:\n    if: github.event_name != 'pull_request'\n    environment: build\n    steps:\n") + String(_R19)
         + String("      - run: kci run --machine ") + machine + String(" --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n")

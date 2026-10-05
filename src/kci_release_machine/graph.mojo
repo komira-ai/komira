@@ -30,7 +30,7 @@
 # run of a branch (BREAK-GLASS: kci.yml's workflow_dispatch from another ref,
 # with a required reason) runs it. A stage without it runs only for a commit
 # on main's history, on a run of `main` (kci_cli's start-up ref check, and
-# kci_ci_check R13 on its job's `if:`). The break-glass stages are a PREFIX
+# kci_ci_check R15 on its job's `if:`). The break-glass stages are a PREFIX
 # of the release chain: a break_glass stage's `after` is break_glass too, so
 # a run off main stops at the first stage without it and never reaches a
 # later one. A PULL_REQUEST stage is never break_glass (it is no release

@@ -243,7 +243,7 @@ kci result) goes to `gamma` and `validate` as `--release-set-hash`; the
 from the value it was given) goes to `prod`. kci recomputes the unpacked
 release's set and refuses another (exit 3, `KCI-E-SET-HASH`) before anything
 is read from a channel, so `prod` publishes exactly the set `gamma` published
-and `validate` installed (rule R17 holds the wiring).
+and `validate` installed (rule R19 holds the wiring).
 
 ### Continuous auto-promotion
 
@@ -252,7 +252,7 @@ with no manual step. `prod` starts only when `gamma` and `validate` both
 succeeded in the same run (no job-level `if:` names `always()`, so GitHub's
 implicit `success()` holds). A push that touches only documentation
 (`docs/**`, `**.md`) starts no run: `release_version.sh` does not count those
-files either, so the build number would not move (rule R15 holds the two
+files either, so the build number would not move (rule R17 holds the two
 lists equal). A push that changes nothing a package carries (a `.github`-only
 push) rebuilds the same bytes under the same name and build number, and each
 channel answers NOOP (exit 0).
@@ -260,7 +260,7 @@ channel answers NOOP (exit 0).
 - **Only a push to `main` reaches `prod`.** A manual run of `main` is
   break-glass like any other manual run and stops at `gamma`. The `prod`
   job's `if:` carries `github.event_name == 'push' && github.ref ==
-  'refs/heads/main'` (rule R13). ⚠ GitHub compares strings IGNORING CASE, so
+  'refs/heads/main'` (rule R15). ⚠ GitHub compares strings IGNORING CASE, so
   that `if:` also passes for a branch named `MAIN`: it is defence in depth,
   not the lock. The locks are, in order: the `prod` environment's
   deployment branches (`main` only); a repository ruleset that refuses
@@ -268,7 +268,7 @@ channel answers NOOP (exit 0).
   (see [GitHub settings](#github-settings-the-release-relies-on)); and the
   `prod` job's third step, `only a push to main reaches this job`, which
   compares `GITHUB_EVENT_NAME` and `GITHUB_REF` byte for byte in shell (rule
-  R19). At start-up under GitHub Actions kci refuses the same (exit 3,
+  R21). At start-up under GitHub Actions kci refuses the same (exit 3,
   `KCI-E-NOT-ON-MAIN`): a run that is not a push to `refs/heads/main`, a ref
   that is `main` in another case (for every stage), a revision that is not
   the pushed commit (`GITHUB_SHA`), and one that is not on
@@ -278,15 +278,27 @@ channel answers NOOP (exit 0).
   clone, no `refs/remotes/origin/main`) is exit 5, never a pass.
 - **The revision is checked by the workflow, before anything built from
   it.** Every release job starts with `actions/checkout` at `REVISION` and
-  then the step `the revision this run releases` (rule R19, byte for byte):
-  `REVISION` is a full commit id; on a push it is `GITHUB_SHA`; on a manual
-  run it is on the history of `GITHUB_SHA` (the commit the run started on).
-  On a run of `main` this file is `main`'s own, so a manual run of `main`
-  whose `revision` input names an unmerged commit is refused there, before
-  the farm-connect action, `./buck2` or `kci` (all of which are that
-  revision's own code, and could leave any in-kci check out) run.
+  then the step `the revision this run releases` (rule R21, byte for byte):
+  `REVISION` is a full commit id, and on every run that can publish (a push,
+  and every manual run that is not a dry run) it IS `GITHUB_SHA`, the commit
+  the run started on. Only a manual DRY run may name another `revision`, on
+  `GITHUB_SHA`'s history. On a run of `main` this file is `main`'s own, so a
+  manual run of `main` whose `revision` input names an unmerged commit is
+  refused there, before the farm-connect action, `./buck2` or `kci` (all of
+  which are that revision's own code, and could leave any in-kci check out)
+  run; kci refuses the same at start-up (`KCI-E-BREAK-GLASS-REASON`). No
+  release job, and no step of one, has `continue-on-error:` (R21): a failed
+  check, publish or validation never reads as a success.
+- **A push is never a dry run.** `DRY_RUN` is set once, in the workflow's
+  `env:`, to `${{ github.event_name == 'workflow_dispatch' &&
+  inputs.dry_run }}`, and no job or step sets its own; `--plan` appears in
+  a release job only as `if [ "$DRY_RUN" = true ]; then set -- --plan; fi`
+  (rule R22). So `validate` validates FOR REAL on every push: a `validate`
+  that ran `--plan` on a push (the earlier `github.event_name !=
+  'workflow_dispatch' || inputs.dry_run`) would let `prod` publish what
+  nothing installed.
 - **Queued runs: one release at a time, newest push wins.** A PUSH to `main`
-  is in the concurrency group `kci-release-main` (rule R14 holds the group
+  is in the concurrency group `kci-release-main` (rule R16 holds the group
   text byte for byte). A running release is never cancelled. GitHub keeps at
   most one PENDING run per group: a newer queued run cancels the pending one
   and takes its place (when it is QUEUED, before it runs anything), so the
@@ -319,14 +331,19 @@ channel answers NOOP (exit 0).
     mostly-documentation merge that also touches code can be skipped. The
     next push that does start a release carries it, and its `carried to
     prod` list names the commit; until then nothing says it waits.
-- **Never backward.** `prod` refuses to publish a build number lower than one
-  `komira-ai/prod` already lists for the same version (exit 3,
-  `KCI-E-SUPERSEDED`, read anonymously from the channel's listing): only a
-  late re-run of an old run reaches it, since the group serialises live
-  runs. An equal build number is NOOP. Rolling back is a revert on `main`,
-  released forward as the next build number.
+- **Never backward.** `prod` refuses to publish a build number lower than ANY
+  build `komira-ai/prod` already lists, of any name and any version (exit 3,
+  `KCI-E-SUPERSEDED`, read anonymously from the channel's listing). The rule:
+  `prod` is only ever published from a push to `main`, and the build number
+  counts `main`'s first-parent history, so a release is allowed only when
+  its revision descends from (or is) the newest commit `prod` holds. That
+  holds across a version bump (a new compiler version re-versions every
+  package) and for a name `prod` never listed. Only a late re-run of an old
+  run reaches it, since the group serialises live runs. An equal build
+  number is NOOP. Rolling back is a revert on `main`, released forward as
+  the next build number.
 - **The prod line.** Every release job ends with the step `the prod line`
-  (`if: always()`, rule R18), which writes one plain line to the job summary
+  (`if: always()`, rule R20), which writes one plain line to the job summary
   and to the log: `prod: SKIPPED (<job> <status>: exit <n>)` when that job
   did not succeed, `prod: SKIPPED (nothing to release)`, `prod: SKIPPED
   (break-glass: a workflow_dispatch of <ref> reaches gamma only)`, or, from
@@ -372,9 +389,11 @@ channel trusts `gamma-breakglass` as a second trusted publisher
 publishes a break-glass run only from it (`KCI-E-STAGE-ENVIRONMENT`
 otherwise). The input `reason` is required; it reaches kci only through each
 job's `env:` (`--context reason=...`), never inside a `run:` script (rule
-R16), and kci refuses a break-glass run without one, or with one over 200
-bytes (exit 3, `KCI-E-BREAK-GLASS-REASON`), or whose revision is not on the
-history of the commit the run started on. Every job's summary of such a run
+R18; nor in a step's or job's `name:` or a `with: script:`), and kci refuses
+a break-glass run without one, with one that is only whitespace, or with
+one over 200 bytes once trimmed (exit 3, `KCI-E-BREAK-GLASS-REASON`). A
+break-glass run that can publish releases the commit it started on: a
+`revision` input is for a dry run only, on the history of that commit. Every job's summary of such a run
 starts `BREAK-GLASS: <ref> <revision> by <actor>: <reason>`.
 
 **What is the lock, and what is not.** A pull request's run uses the
@@ -402,7 +421,11 @@ either until `main`'s next number.
 ### GitHub settings the release relies on
 
 None of these is in the repository; each is a setting an administrator
-makes, and the release is only as safe as they are.
+makes, and the release is only as safe as they are. ⚠ The `gamma`,
+`gamma-breakglass`, second-publisher and ruleset rows are NOT set yet: until
+they are, a branch's own `kci.yml` can still publish to gamma, and every
+break-glass publish is refused by prefix.dev (no trusted publisher for
+`gamma-breakglass`).
 
 | setting | value | what it locks |
 |---|---|---|
@@ -466,7 +489,7 @@ makes, and the release is only as safe as they are.
   quoted value is refused, so a pull request's code never reaches a runner
   that keeps state between jobs.
   The push trigger is exactly `branches: [main]` with the documentation
-  `paths-ignore` (rule R15): with no branch filter, another pattern,
+  `paths-ignore` (rule R17): with no branch filter, another pattern,
   `branches-ignore` or `tags`, a push to a pull request's head branch would
   run the release jobs, and `github.event_name != 'pull_request'` holds for
   a push. The `pr` job has

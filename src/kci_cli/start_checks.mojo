@@ -266,6 +266,16 @@ def check_ref_at_start[S: StageSteps](
             )
         return StartVerdict()
     break_glass = True
+    # a break-glass run that can publish releases the commit it started on:
+    # only a dry run may name another revision (kci.yml's revision step
+    # holds the same before anything built from the revision runs)
+    if not cmd.plan and cmd.revision_id != sha:
+        return _refuse(
+            String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REASON),
+            String("BREAK-GLASS on ") + ref_value + String(": a run that can publish releases the commit it started on (")
+            + String(GITHUB_SHA) + String(" ") + sha + String("), and this run's revision is ") + cmd.revision_id
+            + String("; another revision is for a dry run (--plan) only, so nothing is run"),
+        )
     var on_history: Bool
     try:
         on_history = steps.is_ancestor(cmd.revision_id, sha)
@@ -282,13 +292,15 @@ def check_ref_at_start[S: StageSteps](
             + String(" is not on the history of the commit the run was started on (") + sha
             + String("), so nothing is run"),
         )
-    var reason = _context_value(cmd, String(REASON_CONTEXT_KEY))
+    # trimmed: a reason of spaces says nothing
+    var reason = String(_context_value(cmd, String(REASON_CONTEXT_KEY)).strip())
     if reason.byte_length() == 0 or reason.byte_length() > BREAK_GLASS_REASON_MAX_BYTES:
         return _refuse(
             String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REASON),
             String("BREAK-GLASS on ") + ref_value + String(" (a ") + event + String(", not a push to main) needs --context ")
             + String(REASON_CONTEXT_KEY) + String("=<why>, 1 to ") + String(BREAK_GLASS_REASON_MAX_BYTES)
-            + String(" bytes on one line; it has ") + String(reason.byte_length()) + String(" bytes, so nothing is run"),
+            + String(" bytes on one line once leading and trailing whitespace is trimmed; it has ")
+            + String(reason.byte_length()) + String(" bytes, so nothing is run"),
         )
     banner = break_glass_line(ref_value, cmd.revision_id, steps.platform_env(String(GITHUB_ACTOR)), reason)
     _say(String("kci: ") + banner)

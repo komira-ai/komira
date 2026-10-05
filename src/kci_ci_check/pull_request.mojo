@@ -26,7 +26,7 @@
 #     (`check_pull_request_job`), and no stored secret reaches it
 #     (`check_no_secret`, over the job and the workflow-level `env:`);
 #   * a push runs the release jobs only on `main` (auto_promotion.mojo's
-#     `check_push_filter`, R15, which took over this clause):
+#     `check_push_filter`, R17, which took over this clause):
 #     `github.event_name != 'pull_request'` holds for a push to a pull
 #     request's head branch;
 #   * both conditions are read by `condition_expression`: an `if:` holding
@@ -62,7 +62,7 @@ comptime PULL_REQUEST_EVENT: String = "pull_request"
 """The event name a release job's condition keeps out (R6)."""
 
 comptime RELEASE_BRANCH: String = "main"
-"""The one branch a `push` trigger names (R15, which took over R6's push
+"""The one branch a `push` trigger names (R17, which took over R6's push
 clause)."""
 
 comptime GITHUB_TOKEN_SECRET: String = "secrets.GITHUB_TOKEN"

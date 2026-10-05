@@ -52,6 +52,8 @@ comptime _PR_WF: String = (
     "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
     " || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
     "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
+    "env:\n"
+    "  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n"
     "jobs:\n"
     "  build:\n"
     "    if: github.event_name != 'pull_request'\n"
@@ -70,12 +72,12 @@ comptime _PR_WF: String = (
     "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
     "          esac\n"
     "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
-    "          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n"
-    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
-    "              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n"
-    "          else\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n"
     "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
     "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          else\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n"
     "          fi\n"
     "      - uses: ./.github/actions/farm-connect\n"
     "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
@@ -100,14 +102,14 @@ comptime _PR_WF: String = (
     "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
     "          esac\n"
     "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
-    "          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n"
-    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
-    "              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n"
-    "          else\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n"
     "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
     "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          else\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n"
     "          fi\n"
-    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
+    "      - run: kci run --stage publish-gamma --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
     "      - name: the prod line\n"
     "        if: always()\n"
     "        run: echo prod line\n"
@@ -148,7 +150,7 @@ comptime _BUILD_IF: String = "    if: github.event_name != 'pull_request'\n"
 comptime _GAMMA_IF: String = "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
 comptime _R4_SCALAR: String = "R4: `permissions: "
 comptime _R4_TOP_TOKEN: String = "R4: `id-token: write` at the workflow level reaches every job"
-comptime _R6_PUSH: String = "R15: the push trigger is exactly `branches: [main]`"
+comptime _R6_PUSH: String = "R17: the push trigger is exactly `branches: [main]`"
 comptime _R6_OWN_PERMS: String = "so the job has its own `permissions:` mapping"
 comptime _R6_PERMS_FORM: String = "so its `permissions` is a mapping"
 comptime _R6_GRANT: String = "so its permissions hold only `contents: read`"
@@ -398,7 +400,7 @@ def _rows() raises -> List[_Row]:
     r.append(_Row(String("permissions: write-all, job"), _swap(String(_JOB_PERMS), String("    permissions: write-all\n")), _FINDING, String(_R4_SCALAR)))
     r.append(_Row(String("id-token: 'read' is a grant"), _top_perms(String("\n  id-token: 'read'")), _FINDING, String(_R4_TOP_TOKEN)))
 
-    # ---- the push trigger: the release branch only (R15, which took over R6's push clause)
+    # ---- the push trigger: the release branch only (R17, which took over R6's push clause)
     r.append(_Row(String("push: no branch filter"), _push(String("  push:\n")), _FINDING, String(_R6_PUSH)))
     r.append(_Row(String("push: branches '**'"), _push(String("  push:\n    branches:\n      - '**'\n")), _FINDING, String(_R6_PUSH)))
     r.append(_Row(String("push: a branch pattern"), _push(String("  push:\n    branches:\n      - main*\n")), _FINDING, String(_R6_PUSH)))
@@ -473,7 +475,7 @@ def _rows() raises -> List[_Row]:
     r.append(
         _Row(
             String("workflow env: secrets.X"),
-            _swap(String(_TOP_PERMS), String(_TOP_PERMS) + String("env:\n  PREFIX_DEV_API_KEY: ${{ secrets.PREFIX_DEV_API_KEY }}\n")),
+            _swap(String("env:\n  DRY_RUN"), String("env:\n  PREFIX_DEV_API_KEY: ${{ secrets.PREFIX_DEV_API_KEY }}\n  DRY_RUN")),
             _FINDING,
             String(_R6_SECRET),
         )
@@ -481,7 +483,7 @@ def _rows() raises -> List[_Row]:
     r.append(
         _Row(
             String("workflow Env: secrets.X"),
-            _swap(String(_TOP_PERMS), String(_TOP_PERMS) + String("Env:\n  PREFIX_DEV_API_KEY: ${{ secrets.PREFIX_DEV_API_KEY }}\n")),
+            _swap(String("env:\n  DRY_RUN"), String("Env:\n  PREFIX_DEV_API_KEY: ${{ secrets.PREFIX_DEV_API_KEY }}\n  DRY_RUN")),
             _FINDING,
             String(_R6_SECRET),
         )

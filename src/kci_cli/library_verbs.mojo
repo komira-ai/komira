@@ -201,6 +201,8 @@ def git_is_ancestor[R: ProcessRunner](mut runner: R, tmp: String, commit: String
     if r[0] == 1:
         return False
     raise Error(String("`git merge-base --is-ancestor` exited ") + String(r[0]) + String(", which is no answer"))
+
+
 def git_first_parent[R: ProcessRunner](mut runner: R, tmp: String, revision: String) raises -> List[String]:
     """`git rev-list --first-parent --reverse <revision>`: main's first-parent
     commits up to `revision`, oldest first. Raises when git exits non-zero

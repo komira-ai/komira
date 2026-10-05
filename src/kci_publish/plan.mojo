@@ -32,19 +32,25 @@
 #   before approving, and a dry run shows the same report.
 #
 # `superseding_files(targets, listed_files)` -- NEVER BACKWARD: every file
-#   the channel lists (`<subdir>/<file>`, step 1's listings) that is a build
-#   of a target's name and version, in the target's subdir, whose build
-#   number (the digits after the build string's last `_`, `h<8 hex>_<N>`)
-#   is HIGHER than the target's. `run.mojo` refuses a run that would upload
-#   when the stage never goes backward and this is not empty
+#   the channel lists (`<subdir>/<file>`, step 1's listings), of ANY name and
+#   ANY version, whose build number (the digits after the build string's
+#   last `_`, `h<8 hex>_<N>`; the build string is the file name's last
+#   `-`-separated part) is HIGHER than the release's. The rule this holds:
+#   a never-backward channel (prod) is only ever published from a push to
+#   main, and N counts main's first-parent history, so a release whose N is
+#   lower than ANY build the channel holds does not descend from what the
+#   channel has. Across a version bump (a new compiler version re-versions
+#   every package) and for a name the channel never listed, the release is
+#   refused the same way. `run.mojo` refuses a run that would upload when
+#   the stage never goes backward and this is not empty
 #   (KCI-E-SUPERSEDED). An equal number is not higher (a re-run of the same
 #   number publishes the same bytes, or NOOP); a build string without a
 #   number after its last `_` is not read as one.
 #
 # `previous_build_number(targets, listed_files)` -- what a never-backward
-#   publish CARRIES: the highest build number the channel lists for a
-#   target's name and version (in its subdir) that is LOWER than the
-#   target's, over every target; -1 when it lists none. kci_cli reports the
+#   publish CARRIES: the highest build number the channel lists, of any
+#   name and version, that is LOWER than the release's; -1 when it lists
+#   none. kci_cli reports the
 #   commits between that build and this one (they rode in this release: the
 #   runs that would have published them were replaced or skipped).
 #
@@ -422,27 +428,48 @@ def _build_of(file_name: String, distribution: String, version: String) -> Strin
     return build^
 
 
+def _listed_build_number(listed: String) -> Int:
+    """The build number of a listed `<subdir>/<name>-<version>-<build>.conda`
+    (or `.tar.bz2`), whatever its name and version; -1 when it has none."""
+    var at = listed.rfind(String("/"))
+    var name = String(listed[byte = at + 1 :]) if at >= 0 else listed.copy()
+    var stem: String
+    if name.endswith(String(".conda")):
+        stem = String(name[byte = 0 : name.byte_length() - String(".conda").byte_length()])
+    elif name.endswith(String(".tar.bz2")):
+        stem = String(name[byte = 0 : name.byte_length() - String(".tar.bz2").byte_length()])
+    else:
+        return -1
+    var dash = stem.rfind(String("-"))
+    if dash < 0:
+        return -1
+    return _build_number(String(stem[byte = dash + 1 :]))
+
+
+def _release_build_number(targets: List[PublishTarget]) -> Int:
+    """The release's build number: its targets', the first that has one."""
+    for i in range(len(targets)):
+        var n = build_number_of(targets[i])
+        if n >= 0:
+            return n
+    return -1
+
+
 def superseding_files(targets: List[PublishTarget], listed_files: List[String]) -> List[String]:
     """The file header's NEVER BACKWARD reading: one line per listed file
-    that supersedes a target, naming both."""
+    that supersedes the release, naming both."""
     var out = List[String]()
-    for i in range(len(targets)):
-        ref c = targets[i].coordinate
-        var ours = _build_number(_build_of(c.file_name, c.distribution, c.version))
-        if ours < 0:
-            continue
-        var prefix = c.subdir + String("/")
-        for k in range(len(listed_files)):
-            ref f = listed_files[k]
-            if not f.startswith(prefix):
-                continue
-            var name = String(f[byte = prefix.byte_length() :])
-            var theirs = _build_number(_build_of(name, c.distribution, c.version))
-            if theirs > ours:
-                out.append(
-                    String("SUPERSEDED ") + targets[i].where() + String(" (build number ") + String(ours)
-                    + String(") by ") + f + String(" (build number ") + String(theirs) + String(")")
-                )
+    var ours = _release_build_number(targets)
+    if ours < 0:
+        return out^
+    for k in range(len(listed_files)):
+        ref f = listed_files[k]
+        var theirs = _listed_build_number(f)
+        if theirs > ours:
+            out.append(
+                String("SUPERSEDED ") + targets[0].where() + String(" (build number ") + String(ours)
+                + String(") by ") + f + String(" (build number ") + String(theirs) + String(")")
+            )
     return out^
 
 
@@ -456,17 +483,11 @@ def build_number_of(target: PublishTarget) -> Int:
 def previous_build_number(targets: List[PublishTarget], listed_files: List[String]) -> Int:
     """The file header's `previous_build_number`."""
     var best = -1
-    for i in range(len(targets)):
-        ref c = targets[i].coordinate
-        var ours = build_number_of(targets[i])
-        if ours < 0:
-            continue
-        var prefix = c.subdir + String("/")
-        for k in range(len(listed_files)):
-            ref f = listed_files[k]
-            if not f.startswith(prefix):
-                continue
-            var theirs = _build_number(_build_of(String(f[byte = prefix.byte_length() :]), c.distribution, c.version))
-            if theirs >= 0 and theirs < ours and theirs > best:
-                best = theirs
+    var ours = _release_build_number(targets)
+    if ours < 0:
+        return -1
+    for k in range(len(listed_files)):
+        var theirs = _listed_build_number(listed_files[k])
+        if theirs >= 0 and theirs < ours and theirs > best:
+            best = theirs
     return best

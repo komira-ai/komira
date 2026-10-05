@@ -120,7 +120,7 @@
 #           case, as GitHub reads it; only `secrets.GITHUB_TOKEN`, written
 #           so, is the job's own token), and no key of that job is
 #           `secrets` (`secrets: inherit`);
-#         * a `push` trigger runs on the release branch only: R15 (it took
+#         * a `push` trigger runs on the release branch only: R17 (it took
 #           over this clause, adding the documentation `paths-ignore`). A
 #           push with no branch filter, another pattern, `branches-ignore`
 #           or `tags` runs the release jobs on a push to any branch, a pull
@@ -164,14 +164,16 @@
 #   R14 no `kci run` passes `--channel`: a local channel is a developer's
 #       pre-publish mode, and a workflow validates only what a stage published
 #       (kci also refuses the flag at run time under GitHub Actions)
-#   R13 to R19: continuous auto-promotion (auto_promotion.mojo's header):
-#       main-only stages carry `github.ref == 'refs/heads/main'` (R13), one
-#       canonical concurrency group (R14), the push filter with its
-#       documentation `paths-ignore` (R15, which took over R6's push
+#   R13 is not used here (it was a manual prod gate, withdrawn).
+#   R15 to R22: continuous auto-promotion (auto_promotion.mojo's header):
+#       main-only stages carry `github.ref == 'refs/heads/main'` (R15), one
+#       canonical concurrency group (R16), the push filter with its
+#       documentation `paths-ignore` (R17, which took over R6's push
 #       clause), the manual run's inputs and no expression in a script
-#       (R16), the release set's hash handed from job to job (R17), and
-#       every release job's last step `the prod line` (R18), the revision
-#       checked by the workflow's own first steps (R19); and R4's
+#       (R18), the release set's hash handed from job to job (R19), and
+#       every release job's last step `the prod line` (R20), the revision
+#       checked by the workflow's own first steps (R21), a push never a
+#       dry run (R22); and R4's
 #       allow-list: a release job's permissions map grants `contents: read`
 #       and `id-token` only.
 #
@@ -883,7 +885,7 @@ def check_workflow_doc(
             _check_part_job(doc, job_ids[parts[k]], job_nodes[parts[k]], st, g, machine_path, pr_trigger, findings)
         if split:
             _check_split(doc, st, job_ids[found], job_nodes[found], job_ids, job_nodes, parts, findings)
-    # R13 to R19, and R4's allow-list (auto_promotion.mojo)
+    # R15 to R22, and R4's allow-list (auto_promotion.mojo)
     check_auto_promotion(doc, g, job_ids, job_nodes, part_stage, findings)
     # R8
     _collect_uses(doc, root, findings)

@@ -55,7 +55,8 @@
 #      history (a full refname: a tag named `origin/main` does not answer),
 #      else REFUSED (KCI-E-NOT-ON-MAIN, exit 3). A break_glass stage on a
 #      release run is held the same way; on a break-glass run its revision is
-#      on `GITHUB_SHA`'s history and `--context reason=` is given, non-empty
+#      `GITHUB_SHA` itself unless the run is `--plan` (then on `GITHUB_SHA`'s
+#      history), and `--context reason=` is given, non-empty once trimmed
 #      and at most 200 bytes, else REFUSED (KCI-E-BREAK-GLASS-REASON), and
 #      each PUBLISH step runs as break-glass (kci_publish: the stage's
 #      `break_glass_environment` and the channel's

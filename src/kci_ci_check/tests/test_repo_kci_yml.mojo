@@ -311,7 +311,7 @@ def test_the_documentation_filter_is_release_version_shs() raises:
 
 def test_kci_yml_hands_the_set_hash_on() raises:
     # build hands its set hash to gamma and validate; validate hands what it
-    # validated to prod (R17), read from each job's own kci result
+    # validated to prod (R19), read from each job's own kci result
     var doc = read_workflow(Path(String("kci.yml")).read_text())
     var jobs = doc.child(0, String("jobs"))
     var b = doc.child(doc.child(doc.child(jobs, String("build")), String("outputs")), String("set_hash"))

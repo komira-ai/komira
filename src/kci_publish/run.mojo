@@ -10,8 +10,8 @@
 #      names new to the channel go into the report whatever the verdict
 #      (unless step 1 could not tell). NEVER BACKWARD: when the stage never
 #      goes backward (`RunOptions.never_backward`) and the run would upload,
-#      a listed build of a member's name and version with a HIGHER build
-#      number (`plan.mojo` `superseding_files`) stops it REFUSED,
+#      a listed build of ANY name and version with a HIGHER build number
+#      (`plan.mojo` `superseding_files`) stops it REFUSED,
 #      KCI-E-SUPERSEDED, with NO write request (a dry run too);
 #   --plan stops here too, printing what steps 2 to 4 would do: no write
 #      request, and `source` is never asked for a write value (a dry run's
@@ -188,7 +188,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         var later = superseding_files(targets, channel_read.listed_files)
         if len(later) > 0:
             later.append(
-                String("REFUSED -- the channel already lists a higher build number of this version, and this")
+                String("REFUSED -- the channel already lists a higher build number (of any name or version), and this")
                 + String(" stage never goes backward: publish the newer release, or fix forward")
             )
             r.stop(String(REASON_REFUSED), String(ERROR_SUPERSEDED), String("\n").join(later))

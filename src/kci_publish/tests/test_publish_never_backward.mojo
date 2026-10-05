@@ -1,8 +1,8 @@
 # =============================================================================
 # src/kci_publish/tests/test_publish_never_backward.mojo -- a stage that
 #   never goes backward (kci_cli sets it for a stage without break_glass:
-#   prod) refuses to publish a release whose build number is LOWER than a
-#   build of the same name and version its channel already lists.
+#   prod) refuses to publish a release whose build number is LOWER than any
+#   build its channel already lists, of any name and any version.
 # =============================================================================
 #
 #   (1) the channel lists a member at the same version with a HIGHER build
@@ -10,13 +10,14 @@
 #       upload request at all (a dry run says the same);
 #   (2) the same channel without the rule (a break-glass stage: gamma)
 #       publishes;
-#   (3) an EQUAL build number of another commit, a LOWER one, and a higher
-#       one of ANOTHER version or another name do not supersede;
+#   (3) an EQUAL build number of another commit and a LOWER one do not
+#       supersede; a HIGHER one of ANOTHER version (a version bump) or of
+#       a name this release does not carry does (3b);
 #   (4) a re-run whose files are all present (equal N) is NOOP, exit 0, even
 #       when a higher build is listed: nothing would be written;
 #   (5) what a never-backward publish CARRIES: its build number and the
-#       highest LOWER build of a member's name and version the channel lists
-#       (-1 for none), so kci_cli can name the commits in between.
+#       highest LOWER build the channel lists, of any name and version (-1
+#       for none), so kci_cli can name the commits in between.
 #
 # Hermetic: ScriptedChannel; NoWaitSleeper; no network.
 # =============================================================================
@@ -139,8 +140,8 @@ def test_what_does_not_supersede() raises:
     for listed in [
         "komira_alpha-1.0.0-h89abcdef_3.conda",  # equal N, another commit
         "komira_alpha-1.0.0-h89abcdef_2.conda",  # lower N
-        "komira_alpha-1.0.1-h89abcdef_9.conda",  # another version
-        "komira_gamma-1.0.0-h89abcdef_9.conda",  # another name
+        "komira_alpha-1.0.1-h89abcdef_2.conda",  # another version, lower N
+        "komira_gamma-1.0.0-h89abcdef_3.conda",  # another name, equal N
         "komira_alpha-1.0.0-h89abcdef_x9.conda",  # no build number after `_`
     ]:
         var reg = _registry(_channel(String(listed)))
@@ -153,6 +154,34 @@ def test_what_does_not_supersede() raises:
     var hits = superseding_files(t, listed)
     assert_equal(len(hits), 1)
     assert_true(hits[0].find(String("komira_alpha-1.0.0-h89abcdef_4.conda")) >= 0, hits[0])
+
+
+def test_a_later_build_of_any_name_or_version_supersedes() raises:
+    # (3b) never backward across a version bump, and for a name this
+    # release does not carry (a name prod never listed for it): a higher N
+    # anywhere in the channel means this revision does not descend from what
+    # the channel has
+    var t = _targets(String("anyname"))
+    for listed in [
+        "komira_alpha-1.0.1-h89abcdef_9.conda",  # a later version
+        "komira_alpha-0.9.0-h89abcdef_9.conda",  # an earlier version
+        "komira_gamma-1.0.0-h89abcdef_9.conda",  # another name
+        "komira_gamma-2.0.0-h89abcdef_9.tar.bz2",  # another name and format
+    ]:
+        var reg = _registry(_channel(String(listed)))
+        var rep = _run(t, reg, True)
+        var all = String(listed) + String(": ") + String("\n").join(rep.lines)
+        assert_equal(rep.error_id, String("KCI-E-SUPERSEDED"), all)
+        assert_equal(rep.exit_code(), EXIT_REFUSED, all)
+        assert_true(rep.has_line_containing(String(listed)), all)
+        assert_equal(_uploads(reg, t), 0, all)
+    # the pure reading names each later file once, whatever the targets
+    var listed = List[String]()
+    listed.append(String("noarch/komira-2.0.0-h89abcdef_7.conda"))
+    listed.append(String("linux-64/komira_beta-1.0.0-h89abcdef_3.conda"))
+    var hits = superseding_files(t, listed)
+    assert_equal(len(hits), 1)
+    assert_true(hits[0].find(String("noarch/komira-2.0.0-h89abcdef_7.conda (build number 7)")) >= 0, hits[0])
 
 
 def test_an_equal_rerun_is_noop_even_when_superseded() raises:
@@ -177,10 +206,14 @@ def test_what_a_release_carries() raises:
     assert_equal(rep.reason, String(REASON_PUBLISHED), String("\n").join(rep.lines))
     assert_equal(rep.build_number, 3)
     assert_equal(rep.previous_build, 2)
-    # nothing of this version listed (another version's build 9 is not it): -1
-    var reg2 = _registry(_channel(String("komira_alpha-1.0.1-h89abcdef_9.conda")))
-    var rep2 = _run(t, reg2, True)
+    # another version's and another name's lower builds count: the highest
+    # lower build in the channel (the base channel's 0.9.0 build 1 alone: 1)
+    var reg2 = _registry(_channel(String("komira_beta-2.0.0-h89abcdef_9.conda")))
+    var rep2 = _run(t, reg2, False)
     assert_equal(rep2.previous_build, -1)
+    var reg2b = _registry(_channel(String("komira_beta-2.0.0-h89abcdef_2.conda")))
+    var rep2b = _run(t, reg2b, True)
+    assert_equal(rep2b.previous_build, 2, String("\n").join(rep2b.lines))
     # without the rule nothing is read for it
     var reg3 = _registry(_channel(String("komira_alpha-1.0.0-h89abcdef_2.conda")))
     var rep3 = _run(t, reg3, False)
@@ -196,6 +229,7 @@ def test_what_a_release_carries() raises:
 
 def main() raises:
     test_what_a_release_carries()
+    test_a_later_build_of_any_name_or_version_supersedes()
     test_a_higher_build_number_supersedes()
     test_without_the_rule_it_publishes()
     test_what_does_not_supersede()

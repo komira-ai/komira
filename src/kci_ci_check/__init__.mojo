@@ -19,11 +19,12 @@
 #                         release-only (`excludes_pull_request`);
 #                         `condition_expression`: the expression GitHub
 #                         evaluates for a job's `if:`
-#   auto_promotion.mojo   R13 to R19: continuous auto-promotion (main-only
+#   auto_promotion.mojo   R15 to R22: continuous auto-promotion (main-only
 #                         stages, one concurrency group, the push filter,
 #                         the manual run's inputs, the set hash handed on,
 #                         the prod line, the revision checked by the
-#                         workflow) and R4's permission allow-list;
+#                         workflow, a push never a dry run) and R4's
+#                         permission allow-list;
 #                         `documentation_filter_findings`: the push filter
 #                         held to release_version.sh
 #   kci_run_calls.mojo    `kci_run_calls`: every `kci run` of a script
