@@ -6,7 +6,7 @@
 #
 # The primitive (komira_objectstore/compact_window.mojo) is tested
 # STANDALONE here via two in-mem stub CompactionSource conformers + a clone-
-# shared in-mem conditional store. NO consumer code (comms / pgstore) is
+# shared in-mem conditional store. NO consumer code (comms / table store) is
 # involved — those adoptions are SEPARATE later slices.
 #
 # The two stub conformers:
