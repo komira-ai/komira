@@ -4,10 +4,14 @@
 # before any call, what GetMetricData cannot answer (a raw read, group_by, a
 # negated matcher, a matcher on a fixed dimension or one repeated, a step that
 # is not a CloudWatch period); it maps a query to one MetricStat (statistic,
-# period, window, dimensions); it pages on NextToken, stops at the point limit
-# and at its page limit and says `truncated`; `rate` divides by the period; a
-# final PartialData is `truncated`; a Forbidden result and a non-2xx answer
-# raise with the call's error.
+# period, dimensions) over the periods whose END falls in the window, each
+# sample stamped with its period's end; it reads newest first and returns
+# oldest first; it pages on NextToken with the first request otherwise
+# unchanged, stops at the point limit (keeping the newest samples) and at its
+# page limit and says `truncated`; `rate` divides by the period; a period the
+# service answers outside the window is dropped; a window holding no whole
+# second makes no call; a final PartialData is `truncated`; a Forbidden
+# result and a non-2xx answer raise with the call's error.
 #
 # Two transports. A scripted `AwsHttpTransport` replays responses and records
 # each signed request, so paging is asserted without sockets. And
@@ -160,6 +164,9 @@ def test_refusals_before_any_call() raises:
     var p = ArcPointer[_Script](_Script())
     var r = ErasedMetricsReader.erase(_reader(p))
     assert_equal(r.refusal(_query(MetricsAggregation.mean())), String(""))
+    assert_equal(
+        r.refusal(_query(MetricsAggregation.mean(), Int64(20_000))), String("")
+    )
     assert_true("not stored points" in r.refusal(_query(MetricsAggregation.raw())))
     assert_true("is not a CloudWatch period" in r.refusal(
         _query(MetricsAggregation.sum(), Int64(90_000))
@@ -190,8 +197,9 @@ def test_refusals_before_any_call() raises:
 
 def test_one_page_maps_the_query() raises:
     var p = ArcPointer[_Script](_Script())
+    # Newest first, each stamped with its period's START.
     p[].answers.append(
-        _ok(_page([_T0, _T0 + 60], [1.5, 2.5], String("Complete"), String("")))
+        _ok(_page([_T0, _T0 - 60], [2.5, 1.5], String("Complete"), String("")))
     )
     var r = ErasedMetricsReader.erase(_reader(p))
     var q = _query(MetricsAggregation.mean())
@@ -199,9 +207,12 @@ def test_one_page_maps_the_query() raises:
     var page = r.read(q)
     assert_equal(len(p[].sent), 1)
     var body = p[].sent[0].body_text()
+    # The window [_T0, _T0 + 3599.999...] holds the periods ENDING at
+    # _T0 .. _T0 + 3599, which START at _T0 - 60 .. _T0 + 3539.
     assert_true(
-        body.startswith('{"StartTime":1789120800,"EndTime":1789124400,'), body
+        body.startswith('{"StartTime":1789120740,"EndTime":1789124340,'), body
     )
+    assert_true('"ScanBy":"TimestampDescending"' in body, body)
     assert_true(
         '"Dimensions":[{"Name":"ClusterName","Value":"prod"},{"Name":"ServiceName",'
         '"Value":"api"},{"Name":"TaskId","Value":"t-1"}]},"Period":60,"Stat":"Average"}'
@@ -217,34 +228,62 @@ def test_one_page_maps_the_query() raises:
     assert_equal(s.label(String("ClusterName")).value(), String("prod"))
     assert_equal(s.label(String("TaskId")).value(), String("t-1"))
     assert_equal(len(s.samples), 2)
+    # Oldest first, each at its period's END.
     assert_equal(s.samples[0].time_ns, _T0 * _NS)
+    assert_equal(s.samples[0].value, 1.5)
+    assert_equal(s.samples[1].time_ns, (_T0 + 60) * _NS)
     assert_equal(s.samples[1].value, 2.5)
 
 
 def test_pages_on_next_token_and_rate_divides() raises:
     var p = ArcPointer[_Script](_Script())
     p[].answers.append(_ok(_page([_T0], [120.0], String("PartialData"), String("t2"))))
-    p[].answers.append(_ok(_page([_T0 + 60], [60.0], String("Complete"), String(""))))
+    p[].answers.append(_ok(_page([_T0 - 60], [60.0], String("Complete"), String(""))))
     var r = ErasedMetricsReader.erase(_reader(p))
     var page = r.read(_query(MetricsAggregation.rate()))
     assert_equal(len(p[].sent), 2)
+    var first = p[].sent[0].body_text()
     var second = p[].sent[1].body_text()
     assert_true('"Stat":"Sum"' in second, second)
-    assert_true(second.endswith('"MaxDatapoints":1439,"NextToken":"t2"}'), second)
+    # The continued page is the first request plus its token, nothing else.
+    assert_true(first.endswith('"MaxDatapoints":1440}'), first)
+    assert_equal(
+        second,
+        String(first[byte = 0 : first.byte_length() - 1])
+        + String(',"NextToken":"t2"}'),
+    )
     assert_false(page.truncated)
     assert_equal(page.sources_scanned, 2)
-    assert_equal(page.series[0].samples[0].value, 2.0)
-    assert_equal(page.series[0].samples[1].value, 1.0)
+    assert_equal(page.series[0].samples[0].time_ns, _T0 * _NS)
+    assert_equal(page.series[0].samples[0].value, 1.0)
+    assert_equal(page.series[0].samples[1].time_ns, (_T0 + 60) * _NS)
+    assert_equal(page.series[0].samples[1].value, 2.0)
 
 
 def test_point_limit_and_page_limit_truncate() raises:
     var p = ArcPointer[_Script](_Script())
-    p[].answers.append(_ok(_page([_T0, _T0 + 60], [1.0, 2.0], String("PartialData"), String("t2"))))
+    p[].answers.append(
+        _ok(
+            _page(
+                [_T0 + 120, _T0 + 60, _T0],
+                [3.0, 2.0, 1.0],
+                String("PartialData"),
+                String("t2"),
+            )
+        )
+    )
     var r = ErasedMetricsReader.erase(_reader(p))
     var page = r.read(_query(MetricsAggregation.sum(), Int64(60_000), 2))
     assert_equal(len(p[].sent), 1)
+    assert_true('"MaxDatapoints":2}' in p[].sent[0].body_text())
     assert_true(page.truncated)
     assert_equal(page.sample_count(), 2)
+    # The NEWEST two, oldest first.
+    ref cut = page.series[0].samples
+    assert_equal(cut[0].time_ns, (_T0 + 120) * _NS)
+    assert_equal(cut[0].value, 2.0)
+    assert_equal(cut[1].time_ns, (_T0 + 180) * _NS)
+    assert_equal(cut[1].value, 3.0)
 
     var p2 = ArcPointer[_Script](_Script())
     p2[].answers.append(_ok(_page([_T0], [1.0], String("PartialData"), String("t2"))))
@@ -259,6 +298,40 @@ def test_point_limit_and_page_limit_truncate() raises:
     var r3 = _reader(p3)
     var page3 = r3.read(_query(MetricsAggregation.sum()))
     assert_true(page3.truncated)
+
+
+def test_periods_outside_the_window_are_dropped() raises:
+    var p = ArcPointer[_Script](_Script())
+    # Ends at _T0 + 3600 (after the window), _T0 + 60, and _T0 - 60 (before
+    # it: CloudWatch rounds StartTime down).
+    p[].answers.append(
+        _ok(
+            _page(
+                [_T0 + 3540, _T0, _T0 - 120],
+                [9.0, 1.0, 9.0],
+                String("Complete"),
+                String(""),
+            )
+        )
+    )
+    var r = _reader(p)
+    var page = r.read(_query(MetricsAggregation.sum()))
+    assert_equal(page.sample_count(), 1)
+    assert_equal(page.series[0].samples[0].time_ns, (_T0 + 60) * _NS)
+    assert_equal(page.series[0].samples[0].value, 1.0)
+
+
+def test_a_window_without_a_whole_second_makes_no_call() raises:
+    var p = ArcPointer[_Script](_Script())
+    var r = _reader(p)
+    var q = _query(MetricsAggregation.sum())
+    q.start_ns = _T0 * _NS + 100
+    q.end_ns = _T0 * _NS + 900
+    var page = r.read(q)
+    assert_equal(len(page.series), 0)
+    assert_false(page.truncated)
+    assert_equal(page.sources_scanned, 0)
+    assert_equal(len(p[].sent), 0)
 
 
 def test_no_points_is_an_empty_complete_page() raises:
@@ -334,11 +407,11 @@ def test_the_request_on_the_wire() raises:
         assert_true(lower.find(want) >= 0, String(want) + " is not in " + wire)
     assert_true(
         wire.endswith(
-            '{"StartTime":1789120800,"EndTime":1789124400,"MetricDataQueries":'
+            '{"StartTime":1789120740,"EndTime":1789124340,"MetricDataQueries":'
             '[{"Id":"m1","MetricStat":{"Metric":{"Namespace":"AWS/ECS",'
             '"MetricName":"CPUUtilization","Dimensions":[]},"Period":60,'
             '"Stat":"SampleCount"},"ReturnData":true}],"ScanBy":'
-            '"TimestampAscending","MaxDatapoints":1440}'
+            '"TimestampDescending","MaxDatapoints":1440}'
         ),
         wire,
     )
@@ -349,6 +422,8 @@ def main() raises:
     test_one_page_maps_the_query()
     test_pages_on_next_token_and_rate_divides()
     test_point_limit_and_page_limit_truncate()
+    test_periods_outside_the_window_are_dropped()
+    test_a_window_without_a_whole_second_makes_no_call()
     test_no_points_is_an_empty_complete_page()
     test_faults_raise()
     test_the_request_on_the_wire()

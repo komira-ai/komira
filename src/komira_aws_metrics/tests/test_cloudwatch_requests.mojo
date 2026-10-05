@@ -2,7 +2,7 @@
 #
 # The expected bodies are written here from the CloudWatch API reference for
 # GetMetricData (awsJson 1.0): one MetricDataQuery with a MetricStat, epoch
-# seconds for StartTime and EndTime, ScanBy stated ascending, MaxDatapoints,
+# seconds for StartTime and EndTime, ScanBy stated newest first, MaxDatapoints,
 # and NextToken only on a continued read. A dimension value holding a quote
 # is escaped, not spliced. An ECS service ARN gives ClusterName and
 # ServiceName, and the cluster-less ARN form is refused.
@@ -41,7 +41,7 @@ def test_first_page_body() raises:
             '[{"Id":"m1","MetricStat":{"Metric":{"Namespace":"AWS/ECS",'
             '"MetricName":"CPUUtilization","Dimensions":[{"Name":"ClusterName",'
             '"Value":"prod"},{"Name":"ServiceName","Value":"api"}]},"Period":60,'
-            '"Stat":"Average"},"ReturnData":true}],"ScanBy":"TimestampAscending",'
+            '"Stat":"Average"},"ReturnData":true}],"ScanBy":"TimestampDescending",'
             '"MaxDatapoints":1440}'
         ),
     )
@@ -97,9 +97,9 @@ def test_builder_refusals() raises:
 
 
 def test_periods() raises:
-    for p in [1, 5, 10, 30, 60, 120, 3600, 86400]:
+    for p in [1, 5, 10, 20, 30, 60, 120, 3600, 86400]:
         assert_true(cloudwatch_period_ok(p), String(p))
-    for p in [0, -60, 2, 15, 45, 61, 90]:
+    for p in [0, -60, 2, 15, 25, 40, 45, 61, 90]:
         assert_false(cloudwatch_period_ok(p), String(p))
 
 

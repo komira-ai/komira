@@ -19,8 +19,14 @@
 #   | sum, mean, min, max, count | Stat Sum, Average, Minimum, Maximum, SampleCount |
 #   | rate                    | Stat Sum, each value divided by the period     |
 #   | step_ms                 | Period, in whole seconds                       |
-#   | [start_ns, end_ns]      | StartTime = start seconds, EndTime = end seconds + 1 |
-#   | point_limit             | MaxDatapoints, and the paging stops there      |
+#   | [start_ns, end_ns]      | the periods whose END is in the window:        |
+#   |                         | StartTime = ceil(start s) - period,            |
+#   |                         | EndTime = floor(end s) - period + 1 (exclusive) |
+#   | point_limit             | MaxDatapoints (the same on every page), and    |
+#   |                         | the paging stops there                         |
+#
+# A sample's time is the END of its period (the seam's contract): CloudWatch
+# stamps a point with its period's start, so the reader adds the period.
 #
 # AND WHAT IT REFUSES, before any call (`refusal`): `raw` (CloudWatch keeps
 # statistics per period, not points), `group_by` (one MetricStat is one
@@ -31,8 +37,10 @@
 #
 # Paging follows `NextToken` up to `max_pages` calls; stopping with a token
 # left, or at the point limit, or on a final `PartialData`, sets `truncated`.
-# The scan is ascending, so at the point limit the series keeps its OLDEST
-# points.
+# The scan is newest first, so at the point limit the series keeps its
+# NEWEST points, as the seam requires; they are reversed into oldest first
+# before they are returned. A continued page resends the first request with
+# its `NextToken` and nothing else changed, as botocore's paginators do.
 # A result whose `StatusCode` is `Forbidden` or `InternalError` raises.
 #
 # The transport, the signing clock and the credential source are type
@@ -82,6 +90,18 @@ from komira_aws_metrics.get_metric_data import (
 )
 
 
+comptime _NS_PER_S: Int64 = 1_000_000_000
+
+
+def _ceil_div(a: Int64, b: Int64) -> Int64:
+    """`a / b` rounded up, for `b > 0`, without overflowing near the top of
+    Int64."""
+    var q = a // b
+    if q * b < a:
+        q += Int64(1)
+    return q
+
+
 comptime CLOUDWATCH_DEFAULT_MAX_PAGES: Int = 10
 """The most GetMetricData calls one read makes. Each call returns up to
 `MaxDatapoints` points, so this bounds a read's cost before the point limit
@@ -90,7 +110,14 @@ does."""
 
 def cloudwatch_endpoint(region: String) raises -> AwsEndpoint:
     """`https://monitoring.<region>.<partition dns suffix>`, the regional
-    CloudWatch endpoint. Raises for an empty or malformed region."""
+    CloudWatch endpoint. Raises for an empty or malformed region.
+
+    Built by komira_aws_core's generic `aws_service_endpoint`, not by the
+    service's endpoint ruleset; test_cloudwatch_model checks it against
+    every regional and dual-stack case of botocore's CloudWatch endpoint
+    tests. ⚠ No FIPS endpoint is offered: in aws-us-gov the ruleset's FIPS
+    host is the plain `monitoring.` one, and the generic helper's FIPS form
+    (`monitoring-fips.`) is wrong there."""
     return aws_service_endpoint(
         String(CLOUDWATCH_SIGNING_NAME), region, False, False
     )
@@ -179,7 +206,7 @@ struct CloudWatchMetricsReader[
                 + String(q.step_ms)
                 + String(
                     " ms is not a CloudWatch period: use 1000, 5000, 10000,"
-                    " 30000 or a multiple of 60000"
+                    " 20000, 30000 or a multiple of 60000"
                 )
             )
         for i in range(len(q.matchers)):
@@ -225,11 +252,27 @@ struct CloudWatchMetricsReader[
             period_s,
             cloudwatch_stat(q),
         )
-        var start_s = q.start_ns // Int64(1_000_000_000)
-        var end_s = q.end_ns // Int64(1_000_000_000) + Int64(1)
+        # The whole seconds of the inclusive window: a sample's time (its
+        # period's end) is a whole second.
+        var first_s = _ceil_div(q.start_ns, _NS_PER_S)
+        var last_s = q.end_ns // _NS_PER_S
         var limit = q.point_limit
         if limit < 1:
             limit = 1
+        if first_s > last_s:
+            return MetricsPage()
+        # CloudWatch matches StartTime (inclusive) and EndTime (exclusive)
+        # against each period's START, so the window moves back one period.
+        var period = Int64(period_s)
+        var start_s = first_s - period
+        if start_s < Int64(0):
+            start_s = Int64(0)
+        var end_s = last_s - period + Int64(1)
+        if end_s <= start_s:
+            return MetricsPage()
+        var max_datapoints = limit
+        if max_datapoints > GET_METRIC_DATA_MAX_DATAPOINTS:
+            max_datapoints = GET_METRIC_DATA_MAX_DATAPOINTS
         var series = MetricsSeriesData.named(q.metric)
         for i in range(len(dims)):
             series.labels.append(
@@ -240,12 +283,11 @@ struct CloudWatchMetricsReader[
         var calls = 0
         var truncated = False
         var last_status = String("")
+        # Newest first, as CloudWatch answers; reversed after the last page.
+        var newest_first = List[MetricsSample]()
         while True:
-            var want = limit - len(series.samples)
-            if want > GET_METRIC_DATA_MAX_DATAPOINTS:
-                want = GET_METRIC_DATA_MAX_DATAPOINTS
             var body = build_get_metric_data_body(
-                stat, start_s, end_s, want, token
+                stat, start_s, end_s, max_datapoints, token
             )
             var res = self._send(body)
             calls += 1
@@ -266,25 +308,33 @@ struct CloudWatchMetricsReader[
                     )
                 last_status = result.status_code.copy()
                 for k in range(len(result.timestamps)):
-                    if len(series.samples) >= limit:
+                    var end_of_period = result.timestamps[k] + period
+                    # CloudWatch rounds StartTime down (to the minute, or
+                    # further for old data), so a period ending before the
+                    # window can come back; it is not the caller's.
+                    if end_of_period < first_s or end_of_period > last_s:
+                        continue
+                    if len(newest_first) >= limit:
                         truncated = True
                         break
                     var v = result.values[k]
                     if rate:
                         v = v / Float64(period_s)
-                    series.samples.append(
-                        MetricsSample(
-                            result.timestamps[k] * Int64(1_000_000_000), v
-                        )
+                    newest_first.append(
+                        MetricsSample(end_of_period * _NS_PER_S, v)
                     )
             token = page.next_token.copy()
             if token.byte_length() == 0:
                 break
-            if len(series.samples) >= limit or calls >= self._max_pages:
+            if len(newest_first) >= limit or calls >= self._max_pages:
                 truncated = True
                 break
         if last_status == "PartialData" and token.byte_length() == 0:
             truncated = True
+        var k = len(newest_first)
+        while k > 0:
+            k -= 1
+            series.samples.append(newest_first[k])
         var out = List[MetricsSeriesData]()
         if len(series.samples) > 0:
             out.append(series^)
@@ -293,9 +343,11 @@ struct CloudWatchMetricsReader[
     def _send(mut self, body: String) raises -> HttpResult:
         var extra = List[Header]()
         extra.append(Header(String("X-Amz-Target"), String(GET_METRIC_DATA_TARGET)))
-        # CloudWatch is awsQueryCompatible: in query mode its errors name
-        # the legacy query code in `x-amzn-query-error`, as botocore reports
-        # them.
+        # The model declares `awsQueryCompatible` (test_cloudwatch_model
+        # checks it), and botocore's JSON serializer then sends this header
+        # (`_handle_query_compatible_trait` in botocore/serialize.py): in
+        # query mode the service names the legacy query error code in
+        # `x-amzn-query-error`, which komira_aws_core reads first.
         extra.append(Header(String("x-amzn-query-mode"), String("true")))
         var bytes = List[UInt8]()
         bytes.extend(Span(body.as_bytes()))

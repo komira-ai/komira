@@ -13,14 +13,14 @@
 #      "Metric":{"Namespace":"AWS/ECS","MetricName":"CPUUtilization",
 #                "Dimensions":[{"Name":"ClusterName","Value":"c"}, ...]},
 #      "Period":60,"Stat":"Average"},"ReturnData":true}],
-#    "ScanBy":"TimestampAscending","MaxDatapoints":1440}
+#    "ScanBy":"TimestampDescending","MaxDatapoints":1440}
 #   -> {"MetricDataResults":[{"Id":"m1","Label":"CPUUtilization",
 #        "Timestamps":[1789120800,...],"Values":[42.0,...],
 #        "StatusCode":"Complete"}],"NextToken":"..."}
 #
 # ── WHY THIS IS HAND-WRITTEN AND NOT GENERATED ──────────────────────────────
-# The pinned botocore model of CloudWatch (`cloudwatch`, api 2010-08-01)
-# declares `protocol: smithy-rpc-v2-cbor`, and the AWS generator selects a
+# The CloudWatch model in the pinned botocore archive
+# (//third_party/botocore:cloudwatch, api 2010-08-01) declares `protocol: smithy-rpc-v2-cbor`, and the AWS generator selects a
 # service's declared protocol and refuses `smithy-rpc-v2-cbor` by name
 # (`tools/build/proto-codegen/src/emit_aws/proto.rs`, `select_protocol`). The
 # model also lists `json` and `query` in `protocols`; a generator that chose
@@ -33,11 +33,19 @@
 #      SignatureDoesNotMatch, an error that points at the credential.
 #   2. `Timestamps` and `Values` are PARALLEL arrays. A length mismatch is a
 #      malformed response, refused here rather than zipped short.
-#   3. `ScanBy` defaults to newest first. It is stated ascending, which is
-#      the order a `MetricsSeriesData` promises.
-#   4. `StatusCode: PartialData` inside an HTTP 200 means more data is
+#   3. A timestamp is the START of its period: a 5-second period queried at
+#      15:07:17 for the last five minutes answers points "timestamped
+#      between 15:02:15 and 15:07:15" (the model's StartTime documentation).
+#      The reader turns it into the period's end, the seam's sample time.
+#   4. `ScanBy` is stated newest first (also the service's default), so a
+#      read cut at its point limit keeps the newest points, as the seam
+#      requires; the reader reverses them into oldest first.
+#   5. `StatusCode: PartialData` inside an HTTP 200 means more data is
 #      available (with a `NextToken`) or the answer was cut. It is reported
 #      on the parsed result, never dropped.
+#
+# The constants below are checked against the pinned model by the welded
+# test_cloudwatch_model, so a botocore bump that changes one fails the build.
 #
 # The body is written with komira_json, so a dimension value holding a quote
 # or a control byte is escaped rather than breaking the document.
@@ -50,7 +58,8 @@ from komira_json import JsonValue, parse_json_value
 
 
 comptime CLOUDWATCH_SIGNING_NAME: String = "monitoring"
-"""The SigV4 service name and endpoint prefix of CloudWatch metrics."""
+"""The SigV4 service name and endpoint prefix of CloudWatch metrics (the
+model's `endpointPrefix`; it declares no separate `signingName`)."""
 
 comptime GET_METRIC_DATA_TARGET: String = (
     "GraniteServiceVersion20100801.GetMetricData"
@@ -61,11 +70,11 @@ operation name."""
 comptime CLOUDWATCH_JSON_CONTENT_TYPE: String = "application/x-amz-json-1.0"
 
 comptime GET_METRIC_DATA_MAX_DATAPOINTS: Int = 100_800
-"""The most datapoints one GetMetricData call returns, per the API
-reference."""
+"""The most datapoints one GetMetricData call returns, and its default
+(the model's `MaxDatapoints` documentation)."""
 
 comptime CLOUDWATCH_MAX_DIMENSIONS: Int = 30
-"""The most dimensions a metric carries, per the API reference."""
+"""The most dimensions a metric carries (the model's `Dimensions` max)."""
 
 comptime _QUERY_ID: String = "m1"
 
@@ -94,9 +103,16 @@ struct CloudWatchMetricStat(Copyable, Movable):
 
 
 def cloudwatch_period_ok(period_s: Int) -> Bool:
-    """True for a period GetMetricData accepts: 1, 5, 10 or 30 seconds (for
-    high-resolution metrics) or a positive multiple of 60."""
-    if period_s == 1 or period_s == 5 or period_s == 10 or period_s == 30:
+    """True for a period GetMetricData accepts: 1, 5, 10, 20 or 30 seconds
+    (for high-resolution metrics) or a positive multiple of 60 (the model's
+    `MetricStat.Period` documentation)."""
+    if (
+        period_s == 1
+        or period_s == 5
+        or period_s == 10
+        or period_s == 20
+        or period_s == 30
+    ):
         return True
     return period_s >= 60 and period_s % 60 == 0
 
@@ -138,8 +154,8 @@ def build_get_metric_data_body(
     next_token: String,
 ) raises -> String:
     """The GetMetricData JSON body for one `MetricStat` over
-    `[start_s, end_s)` (epoch seconds), ascending, at most `max_datapoints`
-    points, continuing from `next_token` when it is not "".
+    `[start_s, end_s)` (epoch seconds, matched against each period's start
+    timestamp), newest first, at most `max_datapoints` points per page, continuing from `next_token` when it is not "".
 
     Refuses, rather than sends, a request the service would answer with a
     validation error or, worse, with the wrong numbers: an empty namespace,
@@ -164,7 +180,7 @@ def build_get_metric_data_body(
         raise Error(
             String("GetMetricData: a period of ")
             + String(stat.period_s)
-            + String(" s; the period is 1, 5, 10, 30 or a multiple of 60")
+            + String(" s; the period is 1, 5, 10, 20, 30 or a multiple of 60")
         )
     if start_s >= end_s:
         raise Error(
@@ -209,7 +225,7 @@ def build_get_metric_data_body(
     body.set_member(String("StartTime"), JsonValue.from_i64(start_s))
     body.set_member(String("EndTime"), JsonValue.from_i64(end_s))
     body.set_member(String("MetricDataQueries"), queries^)
-    body.set_member(String("ScanBy"), JsonValue.from_string(String("TimestampAscending")))
+    body.set_member(String("ScanBy"), JsonValue.from_string(String("TimestampDescending")))
     body.set_member(String("MaxDatapoints"), JsonValue.from_i64(Int64(max_datapoints)))
     if next_token.byte_length() > 0:
         body.set_member(String("NextToken"), JsonValue.from_string(next_token.copy()))
