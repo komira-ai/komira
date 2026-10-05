@@ -21,6 +21,7 @@ from kci_release_machine.graph import (
     EXTRA_CHANNEL_CONDA_FORGE,
     NAME_MAX_BYTES,
     VALIDATION_PROGRAM_DIR,
+    VALIDATION_WAIT_DEFAULT_SECONDS,
     VALIDATION_WAIT_MAX_SECONDS,
     ReleaseMachine,
     Stage,

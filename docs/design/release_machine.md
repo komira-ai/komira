@@ -156,6 +156,15 @@ The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this
 file by `kci run` itself at start-up under GitHub Actions and by a welded test
 ([docs/ci.md](../ci.md#kciyml-the-release)).
 
+A second validation kind, `CONDA_INSTALL_ENV`, runs on the machine that runs
+kci, with no container. It takes the same fields as `CONDA_INSTALL_SMOKE`
+except `image` and `program`: what it runs is each installed library's README
+examples (`share/doc/<name>/README.md`, whose bytes the release pins). `kci
+run` then takes `--pixi` and `--pixi-sha256`, the pinned pixi and its sha256.
+Its one result that is not a pass or a failure: when no declared host answers
+at all (no network), the validation is `INDETERMINATE`, exit 5, never a pass,
+and its row carries a `skip_reason`.
+
 ## Where is the code?
 
 | path | holds |
