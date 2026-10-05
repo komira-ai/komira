@@ -435,7 +435,13 @@ def _library_impl(ctx):
     # README's examples are not counted, since analysis cannot tell whether
     # it holds any (see _readme_gate).
     has_tests = len(markers) > 0
-    readme_marker = _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args)
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests)
+
+    # A README that ships (the library has a conda package the build can make,
+    # which installs it at share/doc/<conda name>/README.md) refuses relative
+    # links: the installed copy has no neighbours.
+    ships = conda_name != None and conda_refusal == None
+    readme_marker = _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships)
     if readme_marker != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
@@ -457,7 +463,6 @@ def _library_impl(ctx):
     else:
         public = ungated
 
-    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests)
     return [
         DefaultInfo(
             default_output = public,
@@ -483,6 +488,7 @@ def _library_impl(ctx):
             },
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
+            readme = ctx.attrs.readme,
         ),
     ]
 
@@ -504,9 +510,10 @@ def _library_impl(ctx):
 # PASS line). A refused README (an info string such as `mojo skip`, a stray
 # hidden-lines comment) fails `generate`, naming README.md:<line>.
 
-def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args):
+def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
     """(marker, generated program) of the README's examples, or None
-    without a README."""
+    without a README. `ships`: the library's conda package installs the
+    README, so a relative link in it is refused."""
     readme = ctx.attrs.readme
     if readme == None:
         if ctx.attrs.readme_tool != None:
@@ -527,10 +534,8 @@ def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args):
             display,
             "--package",
             import_name,
-            # Nothing ships a README yet; the package that ships one refuses
-            # relative links (the installed copy has no neighbours).
             "--links",
-            "allow",
+            "refuse" if ships else "allow",
             "--out",
             program.as_output(),
             "--count",
