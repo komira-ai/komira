@@ -13,6 +13,7 @@
 #   a visible edit of this file.
 # =============================================================================
 
+from std.os import setenv
 from std.testing import TestSuite, assert_equal, assert_true
 
 from readme_examples.examples import extract_examples
@@ -39,6 +40,21 @@ def _join(xs: List[String]) -> String:
 
 
 def test_child_environment_is_golden() raises:
+    # this process holds what a CI job holds; none of it may reach the list
+    for kv in [
+        ("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "held-by-the-job"),
+        ("ACTIONS_ID_TOKEN_REQUEST_URL", "https://token.example.invalid/"),
+        ("ACTIONS_RUNTIME_TOKEN", "held-by-the-job"),
+        ("GITHUB_TOKEN", "held-by-the-job"),
+        ("CONDA_OVERRIDE_GLIBC", "2.99"),
+        ("CONDA_PREFIX", "/parent/conda"),
+        ("PIXI_HOME", "/parent/pixi_home"),
+        ("PIXI_CACHE_DIR", "/parent/pixi_cache"),
+        ("RATTLER_AUTH_FILE", "/parent/auth.json"),
+        ("SSL_CERT_FILE", "/parent/cert.pem"),
+        ("HTTPS_PROXY", "http://proxy.example.invalid:3128"),
+    ]:
+        _ = setenv(String(kv[0]), String(kv[1]), True)
     var got = env_child_env(String("/scratch/install-env/bin"), String("/scratch/install-env/work"))
     var want = List[String]()
     for e in [

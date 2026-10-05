@@ -48,7 +48,6 @@ from kci_validate import (
     EnvHost,
     RecordingIndexPollLog,
     ValidateRequest,
-    env_child_env,
     install_env_argv,
     readme_program_of,
     run_install_env,
@@ -313,9 +312,35 @@ def _order(row: ResultValidation) -> String:
 # ---- the pass ------------------------------------------------------------------
 
 
+def _pollute_parent_env():
+    """Set what a CI job's process holds: tokens, conda/pixi/rattler config,
+    TLS and proxy settings. A child environment holding any of them leaked."""
+    for kv in [
+        ("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "held-by-the-job"),
+        ("ACTIONS_ID_TOKEN_REQUEST_URL", "https://token.example.invalid/"),
+        ("ACTIONS_RUNTIME_TOKEN", "held-by-the-job"),
+        ("GITHUB_TOKEN", "held-by-the-job"),
+        ("CONDA_OVERRIDE_GLIBC", "2.99"),
+        ("CONDA_PREFIX", "/parent/conda"),
+        ("PIXI_HOME", "/parent/pixi_home"),
+        ("PIXI_CACHE_DIR", "/parent/pixi_cache"),
+        ("RATTLER_AUTH_FILE", "/parent/auth.json"),
+        ("SSL_CERT_FILE", "/parent/cert.pem"),
+        ("HTTPS_PROXY", "http://proxy.example.invalid:3128"),
+    ]:
+        _ = setenv(String(kv[0]), String(kv[1]), True)
+
+
+def _join_env(xs: List[String]) -> String:
+    var s = String("")
+    for i in range(len(xs)):
+        s += String("[") + xs[i] + String("]")
+    return s^
+
+
 def test_pass() raises:
-    _ = setenv(String("ACTIONS_ID_TOKEN_REQUEST_TOKEN"), String("held-by-the-job"), True)
-    _ = setenv(String("CONDA_OVERRIDE_GLIBC"), String("2.99"), True)
+    # this process holds what a CI job holds; none of it may reach a child
+    _pollute_parent_env()
     var fx = Fixture(String("pass"))
     var runner = ScriptedRunner()
     _expect_install(runner, fx, Install(fx))
@@ -350,10 +375,16 @@ def test_pass() raises:
         assert_equal(runner.calls[c].cwd, fx.work())
         assert_true(Bool(runner.calls[c].env))
         ref got = runner.calls[c].env.value()
-        var want = env_child_env(fx.dir() + String("/bin"), fx.work())
-        assert_equal(len(got), len(want))
-        for k in range(len(want)):
-            assert_equal(got[k], want[k])
+        # a LITERAL list: env_child_env runs in this polluted process, so
+        # comparing against it would carry a leak onto both sides
+        var want = List[String]()
+        want.append(String("PATH=") + fx.dir() + String("/bin:/usr/bin:/bin"))
+        want.append(String("HOME=") + fx.work() + String("/home"))
+        want.append(String("PIXI_HOME=") + fx.work() + String("/pixi_home"))
+        want.append(String("PIXI_CACHE_DIR=") + fx.work() + String("/cache"))
+        want.append(String("TMPDIR=") + fx.work() + String("/tmp"))
+        want.append(String("LANG=C.UTF-8"))
+        assert_equal(_join_env(got), _join_env(want))
     # what kci wrote: the manifest pins the build, the auth file, the program
     var toml = open(fx.work() + String("/pixi.toml"), "r").read()
     assert_true(toml.find(String("komira_alpha = { version = \"==1.0.0\", build = \"") + fx.release.build()) >= 0, toml)
