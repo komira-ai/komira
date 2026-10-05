@@ -74,8 +74,14 @@
 #              buck-out path.
 #   uncached   two builds in two fresh daemons with --no-remote-cache, one isolation
 #              directory, give the same sha256 (skipped with --no-uncached).
+#   index      komira_pack conda-index writes a local channel from the package
+#              directory: linux-64/repodata.json byte-equal to the package's own
+#              info/index.json plus its sha256 and size as jq builds it, the
+#              file beside it, an empty noarch index, nothing else; it refuses
+#              no --package-manifest, a non-empty directory, a package given twice and
+#              a manifest whose sha256 is not the file's, writing nothing.
 #   install    a pixi project whose channel is the built file served from a
-#              file:// directory (its repodata.json is written here) installs it
+#              file:// directory (written by komira_pack conda-index) installs it
 #              with the pinned compiler, and `mojo run` of a program importing
 #              the library, with no -I, prints the right bytes, and the env
 #              holds share/doc/komira_encoding/README.md byte-equal to the
@@ -402,6 +408,47 @@ if [ -n "$problems" ]; then fail "packer:$problems (see $W)"; else
     pass "packer: komira_pack gives byte-identical packages from one payload (and the rule's), changes only the package for a changed payload; conda-check accepts it and refuses a different payload, name, subdir or dependency list, a corrupt zip, a manifest that is not the contract (extra key, missing key, no or another metadata, other order, wrong sha256, wrong type, wrong file, no newline), a metadata file that disagrees, a stray file, and an unstamped release; a release needs its source commit and a positive commit time"
 fi
 
+# ---- index ----------------------------------------------------------------
+# komira_pack conda-index: a local channel from package directories, the same
+# repodata.json a hand-built index has (the package's own info/index.json plus
+# the file's sha256 and size, built here with unzip, zstd, tar and jq), the
+# file copied beside it, an empty noarch index; and its refusals.
+problems=""
+I="$W/index"
+"$PACK" conda-index --out-dir "$I" --package-manifest "$MANIFEST" > "$W/index.log" 2>&1 || problems="$problems conda-index-failed"
+if [ -z "$problems" ]; then
+    unzip -p "$CONDA" 'info-*' | zstd -dc | tar -xO -f - info/index.json > "$W/index_of_pkg.json"
+    jq -S -c -n --slurpfile i "$W/index_of_pkg.json" --arg s "$file_sha" --arg f "$F0" --argjson z "$(stat -L -c %s "$CONDA")" \
+        '{info: {subdir: "linux-64"}, packages: {}, "packages.conda": {($f): ($i[0] + {sha256: $s, size: $z})}, removed: [], repodata_version: 1}' > "$W/repodata_jq.json"
+    [ "$(cat "$I/linux-64/repodata.json")" = "$(cat "$W/repodata_jq.json")" ] || problems="$problems repodata-differs-from-jq:[$(cat "$I/linux-64/repodata.json")]"
+    [ "$(tail -c 1 "$I/linux-64/repodata.json" | od -An -c | tr -d ' ')" = '\n' ] || problems="$problems repodata-no-newline"
+    [ "$(cat "$I/noarch/repodata.json")" = '{"info":{"subdir":"noarch"},"packages":{},"packages.conda":{},"removed":[],"repodata_version":1}' ] || problems="$problems noarch:[$(cat "$I/noarch/repodata.json")]"
+    cmp -s "$I/linux-64/$F0" "$CONDA" || problems="$problems file-not-copied"
+    [ "$(cd "$I" && find . -type f | sort | tr '\n' ' ')" = "./linux-64/$F0 ./linux-64/repodata.json ./noarch/repodata.json " ] || problems="$problems files:[$(cd "$I" && find . -type f | sort | tr '\n' ' ')]"
+    grep -q 'linux-64/repodata.json lists 1 package(s)' "$W/index.log" || problems="$problems log-line"
+fi
+# refusals: each writes nothing new and names its reason
+idx() { # name, required text, komira_pack conda-index args...
+    local name=$1 text=$2
+    shift 2
+    if "$PACK" conda-index "$@" > "$W/idx_$name.log" 2>&1; then
+        problems="$problems $name-accepted"
+    elif ! grep -qF -- "$text" "$W/idx_$name.log"; then
+        problems="$problems $name-text:[$(cat "$W/idx_$name.log")]"
+    fi
+}
+idx no-manifest 'needs at least one --package-manifest' --out-dir "$W/idx_none"
+idx not-empty 'is not empty' --out-dir "$I" --package-manifest "$MANIFEST"
+idx twice 'is given twice' --out-dir "$W/idx_twice" --package-manifest "$MANIFEST" --package-manifest "$MANIFEST"
+mkdir -p "$W/idx_badsha"
+cp "$CONDA" "$METADATA" "$W/idx_badsha/"
+sed "s/$file_sha/$(printf '%s' "$file_sha" | tr '0-9a-f' '1-9a-f0')/" "$MANIFEST" > "$W/idx_badsha/manifest.json"
+idx bad-sha 'the sha256 of the file the manifest names' --out-dir "$W/idx_badsha_out" --package-manifest "$W/idx_badsha/manifest.json"
+[ -e "$W/idx_none" ] || [ -e "$W/idx_twice" ] || [ -e "$W/idx_badsha_out" ] && problems="$problems a-refusal-wrote-a-directory"
+if [ -n "$problems" ]; then fail "index:$problems (see $W)"; else
+    pass "index: komira_pack conda-index writes the local channel $I: linux-64/repodata.json byte-equal to the package's own info/index.json plus its sha256 and size (as jq builds it), the file beside it byte for byte, an empty noarch index, and nothing else; it refuses no --package-manifest, a directory that is not empty, the same package twice and a manifest whose sha256 is not the file's, writing nothing"
+fi
+
 # ---- pin --------------------------------------------------------------------
 # The version of every package IS the pinned compiler's version, and so is the
 # compiler requirement. It is stated once (the platform table's pin, which names it
@@ -599,14 +646,11 @@ fi
 
 # ---- install ----------------------------------------------------------------
 if [ "$install" = 1 ] && command -v pixi > /dev/null && curl -fsSL -o /dev/null -I https://conda.modular.com/max/linux-64/repodata.json 2> /dev/null; then
+    problems=""
+    # The channel is the one komira_pack conda-index wrote (section index).
     C="$W/channel"
-    mkdir -p "$C/linux-64" "$C/noarch" "$W/with" "$W/without"
-    cp "$CONDA" "$C/linux-64/$F0"
-    # The index: each package's info/index.json, plus the file's sha256 and size.
-    unzip -p "$CONDA" 'info-*' | zstd -dc | tar -xO -f - info/index.json > "$W/index.json"
-    jq -n --slurpfile i "$W/index.json" --arg s "$file_sha" --arg f "$F0" --argjson z "$(stat -L -c %s "$CONDA")" \
-        '{info: {subdir: "linux-64"}, packages: {}, "packages.conda": {($f): ($i[0] + {sha256: $s, size: $z})}, removed: [], repodata_version: 1}' > "$C/linux-64/repodata.json"
-    jq -n '{info: {subdir: "noarch"}, packages: {}, "packages.conda": {}, removed: [], repodata_version: 1}' > "$C/noarch/repodata.json"
+    mkdir -p "$W/with" "$W/without"
+    "$PACK" conda-index --out-dir "$C" --package-manifest "$MANIFEST" > "$W/channel.log" 2>&1 || problems="$problems channel-not-indexed"
     cat > "$W/hello.mojo" << 'EOF'
 from komira_encoding import base64_encode, hex_encode
 
@@ -628,7 +672,6 @@ EOF
         cp "$W/hello.mojo" "$W/$variant/hello.mojo"
     done
     export PIXI_CACHE_DIR="$W/pixi_cache" PIXI_HOME="$W/pixi_home"
-    problems=""
     pixi install --manifest-path "$W/with/pixi.toml" > "$W/install_with.log" 2>&1 || problems="$problems install-failed"
     if [ -z "$problems" ]; then
         [ -f "$W/with/.pixi/envs/default/lib/mojo/komira_encoding.mojoc" ] || problems="$problems payload-not-installed-at-lib/mojo"
