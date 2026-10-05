@@ -26,6 +26,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   archive, staged at corpus/), through both snappy decoders.
 # - test_snappy_mojo_oracle, test_snappy_short_offset: the Mojo snappy decoder
 #   against the C library's, and hand-built short-offset blobs.
+# - test_snappy_exact_dst: both snappy decoders into a destination with less
+#   than kSlopBytes of room past the decoded length, sentinel-guarded, and a
+#   blob declaring more than the destination holds.
+# - test_codecs_adversarial: every codec through the dispatch with
+#   truncations, single-byte corruptions, short and empty destinations and
+#   hostile size fields, sentinel-guarded on both sides of the destination.
 # - test_crc32c: published CRC-32C check values.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below, hold no raw pointer in a public
@@ -46,6 +52,9 @@ mojo_library(
         "//third_party/snappy:snappy",
     ],
     test_data = {
+        "tests/test_codecs_adversarial.mojo": {
+            "brotli": "//third_party/brotli:testdata",
+        },
         "tests/test_compression_brotli.mojo": {
             "brotli": "//third_party/brotli:testdata",
         },
@@ -62,6 +71,7 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_codecs_adversarial.mojo",
         "tests/test_compression_brotli.mojo",
         "tests/test_compression_gzip.mojo",
         "tests/test_compression_lz4_framings.mojo",
@@ -69,6 +79,7 @@ mojo_library(
         "tests/test_crc32c.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_snappy_corpus.mojo",
+        "tests/test_snappy_exact_dst.mojo",
         "tests/test_snappy_mojo_oracle.mojo",
         "tests/test_snappy_short_offset.mojo",
     ],
