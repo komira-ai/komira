@@ -39,9 +39,10 @@
 #                wrote; then readback.mojo's check
 #   4  program   `pixi run --as-is mojo run <w>/readme_<import>.mojo` (cwd
 #                <w>) for each README; its exit in out/readme_<import>.exit,
-#                its stdout in .out, and its stderr in .err with each
-#                `readme_<import>.mojo:<L>` rewritten to the README line;
-#                then readback.mojo's count check
+#                its stdout in .out and its stderr in .err, each with every
+#                `readme_<import>.mojo:<L>` naming a copied line rewritten to
+#                the README line (an assertion reports its place on stdout, a
+#                compile error on stderr); then readback.mojo's count check
 #
 # FAIL CLOSED: every failure is VALIDATION_FAILED with a named row, apart
 # from no network (above). Under `--plan` nothing runs and the row says
@@ -419,10 +420,10 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper](
     for i in range(len(programs)):
         ref p = programs[i]
         var record = _record_of(p.file)
+        var raw_out = join_path(out_dir, record + String(".stdout"))
         var raw_err = join_path(out_dir, record + String(".stderr"))
         var run = RunSpec(
-            pixi.copy(), run_program_argv(work, p.file), work.copy(), ENV_RUN_TIMEOUT_S,
-            join_path(out_dir, record + String(".out")), raw_err.copy(),
+            pixi.copy(), run_program_argv(work, p.file), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
         )
         run.set_env(env.copy())
         var started = True
@@ -433,6 +434,12 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper](
             started = False
             _write(join_path(out_dir, record + String(".err")), String("not started: ") + String(e) + String("\n"))
         if started:
+            # an assertion reports `At <w>/readme_<import>.mojo:L:C` on stdout,
+            # a compile error on stderr: both name the README line
+            _write(
+                join_path(out_dir, record + String(".out")),
+                map_report(read_or_empty(raw_out), p.text, p.package, p.display),
+            )
             _write(
                 join_path(out_dir, record + String(".err")),
                 map_report(read_or_empty(raw_err), p.text, p.package, p.display),

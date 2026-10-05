@@ -659,17 +659,26 @@ def test_n3_a_failing_example_names_the_readme_line() raises:
     var fx = Fixture(String("n3"))
     var runner = ScriptedRunner()
     _expect_install(runner, fx, Install(fx))
-    # the second example (README line 12) fails; the compiler's note names
-    # the generated program's line, which kci maps back to the README
+    # the second example (fence on README line 12) fails; the assertion
+    # names the generated program's line (README line 13), which kci maps
+    # back to the README, as a real `mojo run` prints it
+    var p = readme_program_of(String(README), String("komira_alpha"), String("src/komira_alpha/README.md"))
+    var at = _program_line_of(p.text, 13)
+    assert_true(at > 0, p.text)
     var said = (
-        String("src/komira_alpha/README.md:12: FAILED: AssertionError: 5 is not equal to 4\n")
+        String("src/komira_alpha/README.md:12: FAILED: At ") + fx.work() + String("/readme_komira_alpha.mojo:")
+        + String(at) + String(":17: AssertionError: `left == right` comparison failed\n")
         + String("readme_komira_alpha validation: 1 of 2 checks passed\n")
     )
     _expect_run(runner, fx, said, String("played\n"), Int32(1))
     var t = _good_channel(fx)
     var sl = NoWaitSleeper()
     var row = _run(runner, t, sl, fx)
-    _assert_fails_with(row, String("program: mojo run failed: src/komira_alpha/README.md:12: FAILED: AssertionError"))
+    _assert_fails_with(
+        row,
+        String("program: mojo run failed: src/komira_alpha/README.md:12: FAILED: At src/komira_alpha/README.md:13:17:")
+        + String(" AssertionError"),
+    )
     _assert_fails_with(row, String("readme_komira_alpha validation: 1 of 2 checks passed;"))
     _assert_fails_with(
         row,
