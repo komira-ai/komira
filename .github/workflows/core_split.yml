@@ -120,6 +120,13 @@ jobs:
           done
           exit "$status"
 
+      # The two rewriters seed each statement they must handle (and, for repoint.py,
+      # that a second run changes nothing and that an unresolved import is red).
+      - name: split_selftest, repoint_selftest
+        run: |
+          python3 tools/core_split/split_selftest.py
+          python3 tools/core_split/repoint_selftest.py
+
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
