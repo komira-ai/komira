@@ -180,9 +180,10 @@ mojo_gcp_client(
     deps = _RUNTIME,
 )
 
-# "method `WatchItems` is server-streaming": a streaming method listed in a
-# "rest" client's `methods` is refused by name at generation, never skipped
-# into a client that lacks a method its target lists.
+# "method `WatchItems` is bidirectional-streaming": a method that streams its
+# requests, listed in a "rest" client's `methods`, is refused by name at
+# generation, never skipped into a client that lacks a method its target
+# lists.
 mojo_gcp_client(
     name = "rest_streaming_method",
     bundle_only = [

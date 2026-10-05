@@ -53,8 +53,10 @@ token source (komira_gcp_core) supplies each request's bearer token. Under
 non-2xx response through `gcp_status_error`; it starts at the service's
 `(google.api.default_host)`, and a client of a service that declares none
 refuses every call, before any dial, until `set_rest_host` names a host. A
-streaming method has no REST form: any streaming method a "rest" target
-keeps is refused by name at generation (so a `methods` entry naming one is
+server-streaming method returns a `List` of its responses (over REST the
+whole stream is one HTTP response, a JSON array). A client-streaming or
+bidirectional method has no REST form: any such method a "rest" target keeps
+is refused by name at generation (so a `methods` entry naming one is
 refused, and a plugin run with no `methods` filter over a service holding one
 fails rather than skipping it). Under "grpc" it calls
 komira_grpc's `GrpcClient` with classic gRPC, sets

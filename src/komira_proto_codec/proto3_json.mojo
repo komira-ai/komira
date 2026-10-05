@@ -54,6 +54,7 @@ from komira_json import (
     parse_json_value,
     parse_int64_text,
     JSON_STRING,
+    write_json_null,
     write_json_string,
     write_i64_dec,
     write_u64_dec,
@@ -63,6 +64,7 @@ from komira_json import (
 from .wire_format import (
     FieldKey,
     ProtoEnum,
+    ProtoNullValueEnum,
     Serializable,
     Proto3JsonWkt,
     WireDecoder,
@@ -311,7 +313,11 @@ struct JsonEncoder(WireEncoder):
         En: ProtoEnum
     ](mut self, field_no: Int, json_name: StringSlice, v: En) raises:
         self._begin_field(json_name)
-        write_json_string(self.buf, v.json_name())
+        comptime if conforms_to(En, ProtoNullValueEnum):
+            # google.protobuf.NullValue: JSON `null`, not a name.
+            write_json_null(self.buf)
+        else:
+            write_json_string(self.buf, v.json_name())
         self._end_field()
 
     # -- the embedded-message field (cross-trait recursion) ---------------
@@ -457,9 +463,13 @@ struct JsonEncoder(WireEncoder):
     def write_enum_element[
         En: ProtoEnum
     ](mut self, field_no: Int, v: En) raises:
-        # A repeated enum element renders as its bare NAME string element.
+        # A repeated enum element renders as its bare NAME string element
+        # (`null` for google.protobuf.NullValue).
         self._list_sep()
-        write_json_string(self.buf, v.json_name())
+        comptime if conforms_to(En, ProtoNullValueEnum):
+            write_json_null(self.buf)
+        else:
+            write_json_string(self.buf, v.json_name())
 
     def write_message_element[
         M: Serializable
@@ -602,6 +612,10 @@ struct JsonDecoder(WireDecoder):
     """The JSON path of the OBJECT this cursor decodes — `$` at the document
     root, `$.nodes[2]` for a nested message. A refusal appends the offending
     key, so the reader gets a locator and not just a name."""
+    var _keep_null: List[String]
+    """The keys whose `null` `next_field()` yields rather than skips
+    (`keep_null_fields`); empty for every message without a
+    `google.protobuf.NullValue` field."""
 
     def __init__(out self, var value: JsonValue):
         """A cursor over `value`, REFUSING unknown keys / enum names.
@@ -611,6 +625,7 @@ struct JsonDecoder(WireDecoder):
         self._idx = -1
         self._unknown = UnknownFields.refuse()
         self._path = String("$")
+        self._keep_null = List[String]()
 
     def __init__(
         out self,
@@ -625,11 +640,13 @@ struct JsonDecoder(WireDecoder):
         self._idx = -1
         self._unknown = unknown
         self._path = path^
+        self._keep_null = List[String]()
 
     def copy(self) -> Self:
         """Deep clone — `WireDecoder` requires `Copyable`."""
         var out = Self(self.value.copy(), self._unknown, self._path.copy())
         out._idx = self._idx
+        out._keep_null = self._keep_null.copy()
         return out^
 
     @staticmethod
@@ -674,14 +691,28 @@ struct JsonDecoder(WireDecoder):
             return String("")
         return String(" (line ") + String(line) + String(")")
 
+    def keep_null_fields(mut self, spellings: StringSlice):
+        for part in String(spellings).split("|"):
+            self._keep_null.append(String(part))
+
+    def _null_is_a_value(self, key: String) -> Bool:
+        for i in range(len(self._keep_null)):
+            if self._keep_null[i] == key:
+                return True
+        return False
+
     def next_field(mut self) raises -> FieldKey:
         if not self.value.is_object():
             raise Error("JsonError: decode source is not a JSON object")
         # Advance past keys whose value is JSON null (proto3 treats a null
-        # field as absent — skip it so the generated body keeps the default).
+        # field as absent — skip it so the generated body keeps the default),
+        # except a `google.protobuf.NullValue` field's, whose `null` is its
+        # value (`keep_null_fields`).
         self._idx += 1
         while self._idx < len(self.value.obj_keys):
-            if not self.value.children[self._idx].is_null():
+            if not self.value.children[self._idx].is_null() or self._null_is_a_value(
+                self.value.obj_keys[self._idx]
+            ):
                 return FieldKey(
                     0, self.value.obj_keys[self._idx], False
                 )
@@ -748,6 +779,11 @@ struct JsonDecoder(WireDecoder):
         # emit) maps via `from_json_name`; the integer form (a number, the
         # robustness case the spec permits) maps via `from_number`.
         var v = self._cur()
+        comptime if conforms_to(En, ProtoNullValueEnum):
+            # google.protobuf.NullValue reads `null` as its one value; a name
+            # or number is read as for any enum below.
+            if v.is_null():
+                return En.from_number(0)
         if v.kind == JSON_STRING:
             var text = v.as_string()
             # A NUMERIC string is the integer form, not a name — the spec's

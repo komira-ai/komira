@@ -81,7 +81,7 @@ expect_red gcp_client_absence_check 'which must be absent' tests//negative/mojo_
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/mojo_gcp_client:tests_check_can_fail
 expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/mojo_gcp_client:unknown_protocol
 expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/mojo_gcp_client:rest_reaches_plugin
-expect_red gcp_client_rest_streaming_method 'method `WatchItems` is server-streaming' tests//negative/mojo_gcp_client:rest_streaming_method
+expect_red gcp_client_rest_streaming_method 'method `WatchItems` is bidirectional-streaming' tests//negative/mojo_gcp_client:rest_streaming_method
 expect_red gcp_client_module_names_stray 'which this target does not generate' tests//negative/mojo_gcp_client:module_names_stray
 expect_red gcp_client_module_names_not_a_module 'is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_not_a_module
 expect_red gcp_client_module_names_keyword 'gives `example/shop/v1/item.proto` the module `import`, which is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_keyword
