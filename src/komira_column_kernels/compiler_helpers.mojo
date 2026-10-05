@@ -88,7 +88,7 @@ from komira_arrow.offset_overflow import (
     check_int32_offsets,
     should_promote_offsets,
 )
-from komira_counters.gather_width_counter import (
+from komira_column_kernels.gather_width_counter import (
     gather_note_narrow_typed,
     gather_note_width_fallback,
 )

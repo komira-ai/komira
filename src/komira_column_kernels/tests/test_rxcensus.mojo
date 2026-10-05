@@ -4,7 +4,7 @@
 
 from std.testing import TestSuite, assert_equal
 
-from komira_counters.rxcensus import (
+from komira_column_kernels.rxcensus import (
     RXC_ARM_CALLS,
     RXC_DICTMAT_BYTES,
     RXC_N_SLOTS,

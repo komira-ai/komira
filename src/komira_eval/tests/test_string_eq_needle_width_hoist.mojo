@@ -61,7 +61,7 @@ from std.testing import TestSuite, assert_equal, assert_true, assert_false
 from komira_arrow.string_array import StringArray
 from komira_arrow.large_string_array import LargeStringArray
 from komira_arrow.boolean_array import BooleanArray
-from komira_counters.string_eq_arm_counter import (
+from komira_column_kernels.string_eq_arm_counter import (
     reset_string_eq_ladder_call_count,
     string_eq_ladder_call_count,
 )

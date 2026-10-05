@@ -4,7 +4,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_counters.gather_width_counter import (
+from komira_column_kernels.gather_width_counter import (
     gather_narrow_fallback_colrows,
     gather_narrow_typed_colrows,
     gather_note_narrow_typed,
