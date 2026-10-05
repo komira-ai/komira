@@ -451,6 +451,19 @@ so the release files list no package:
   artifact names. A derive tool that fails or answers outside its grammar is
   "cannot tell" (`KCI-E-AFFECTED`), never a pass.
 
+**Which units a change reaches:** each build system's `affected` command,
+`buck2 run //tools/build/ci:affected` ([`tools/build/ci`](../tools/build/ci)),
+maps the change's files to the targets that own them (a `BUCK` file to its
+package, a `.bzl` file to every package that loads it, a deleted file to the
+package that held it at the base commit), takes their reverse dependencies, and
+answers the units whose targets (labels, or the package patterns of the derived
+checks) are among them. A file it cannot map, and a change to `.buckconfig`,
+the toolchains, `tools/build`, `prelude` or `third_party`
+([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit. A
+non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
+(`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
+history, so the base commit is there.
+
 To see the units a change would build, with nothing built:
 
 ```sh
