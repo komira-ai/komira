@@ -28,7 +28,7 @@
 # types, 90 for the escape hatch, `Resource` 3, 5 and 6, `Value` 4, `Image` 4,
 # `Service` 13, `Job` 8) decode as unknown today, so nothing else has taken
 # them; the retired field 4 is ignored; and every enum's ordinals in both
-# directions, held values undeclared.
+# directions, held values undeclared, an undeclared name the zero value.
 #
 # THE FIELDS ADDED AFTER THE FIRST DRAFT, each pinned the same two ways:
 # `Image.platform` 3 (an OCI-style string), `SecretRef` 1 name, 2 store and
@@ -847,6 +847,25 @@ def test_enum_ordinals() raises:
         _enum_row(Portability(n).json_name(), port[n], n, "Portability")
         assert_equal(Portability.from_json_name(port[n]).value, n)
     assert_equal(Portability(3).json_name(), "3", "Portability has three values")
+
+    # A name nobody declared resolves to the zero value (the proto3
+    # unknown-enum contract), never to a declared ordinal: a stored name from
+    # a later schema must not read as a value this one holds.
+    assert_equal(
+        Output.from_json_name("OUTPUT_NOT_A_VALUE").value,
+        Output.OUTPUT_UNSET,
+        "an undeclared Output name is OUTPUT_UNSET",
+    )
+    assert_equal(
+        Access.from_json_name("ACCESS_NOT_A_VALUE").value,
+        Access.ACCESS_UNSET,
+        "an undeclared Access name is ACCESS_UNSET",
+    )
+    assert_equal(
+        Portability.from_json_name("PORTABILITY_NOT_A_VALUE").value,
+        Portability.PORTABILITY_UNSET,
+        "an undeclared Portability name is PORTABILITY_UNSET",
+    )
 
     print("  test_enum_ordinals: PASS")
 

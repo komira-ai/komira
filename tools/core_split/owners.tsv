@@ -8,10 +8,8 @@ kci_bundle	origin/lib/kci_bundle
 kci_bundle_proto	origin/lib/komira_rpc_bundle
 kci_deploy	origin/lib/komira_deploy
 kci_deploy_compose	origin/lib/komira_deploy_compose
-kci_deploy_model_proto	origin/lib/deploy_model_rpc
 kci_edge	origin/lib/komira_edge
 kci_environment_proto	origin/lib/environment_rpc
-kci_manifest_proto	origin/lib/full_manifest_rpc
 kci_provider_proto	origin/lib/provider_rpc
 kci_reconciler	origin/lib/komira_iac
 kci_revision	origin/lib/komira_ci_revision
