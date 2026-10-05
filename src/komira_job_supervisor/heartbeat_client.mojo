@@ -9,19 +9,21 @@
 # heartbeat to a `HeartbeatReporter`, a trait the embedding binary chooses a
 # conformer of. The reply may ask the supervisor to cancel the job.
 #
-# THE WIRE is the generated `komira.supervisor.v1` messages
-# (komira_supervisor_proto): the request body is a `SupervisorHeartbeat` and
-# the reply a `HeartbeatResponse`, both protobuf binary through
-# komira_proto_codec. The message's `job_id` and `pod_name` fields carry the
-# supervisor's `--job-name` and `--instance-name` values verbatim; both are
-# opaque strings to the supervisor.
+# THE WIRE is the generated `komira.job_report.v1` messages
+# (komira_job_report_proto): the request body is a `JobHeartbeat` and the
+# reply a `JobHeartbeatReply`, both protobuf binary through
+# komira_proto_codec. The message's `job_id` and `instance_name` fields carry
+# the supervisor's `--job-name` and `--instance-name` values verbatim; both
+# are opaque strings to the supervisor. The reply's directive is CONTINUE or
+# CANCEL; only an explicit CANCEL stops the job (an empty reply is CONTINUE,
+# and so is a directive number this build has no name for).
 #
 # THE SHIPPED REPORTER is `HttpHeartbeatReporter[A]`: one HTTP POST per beat to
 # the operator's `--heartbeat-url` (http:// or https://, the latter verified
 # against the system public-CA trust store), `Content-Type:
 # application/protobuf`, plus whatever headers the `HeartbeatAuth` conformer
 # `A` produces (heartbeat_auth.mojo; the shipped one is `NoHeartbeatAuth`).
-# A 2xx reply is decoded as a `HeartbeatResponse` for its `cancel` bit.
+# A 2xx reply is decoded as a `JobHeartbeatReply` for its directive.
 #
 # A HEARTBEAT IS BEST-EFFORT: `report` never raises. A failure comes back as
 # `HeartbeatOutcome(ok=False)` and the run loop carries on; losing a beat must
@@ -58,10 +60,11 @@ from komira_proto_codec import encode_proto, decode_proto
 
 # The generated wire messages, aliased so the supervisor's own value structs
 # below do not collide with them.
-from komira_supervisor_proto.supervisor import (
-    SupervisorHeartbeat as PbSupervisorHeartbeat,
-    HeartbeatResponse as PbHeartbeatResponse,
-    FailureReport as PbFailureReport,
+from komira_job_report_proto.job_report import (
+    JobDirective as PbJobDirective,
+    JobFailure as PbJobFailure,
+    JobHeartbeat as PbJobHeartbeat,
+    JobHeartbeatReply as PbJobHeartbeatReply,
     JobPhase as PbJobPhase,
 )
 
@@ -176,59 +179,58 @@ def _phase_to_proto(phase: JobSupervisorPhase) -> PbJobPhase:
     return PbJobPhase(PbJobPhase.JOB_PHASE_RUNNING)
 
 
-def _failure_to_proto(f: FailureReport) -> PbFailureReport:
-    """The supervisor does not set the message's `reason` field."""
+def _failure_to_proto(f: FailureReport) -> PbJobFailure:
     var tail = List[String]()
     for ref l in f.stderr_tail:
         tail.append(l)
     var pm = Optional[String]()
     if f.panic_message:
         pm = Optional[String](f.panic_message.value())
-    var lro = Optional[UInt64]()
-    if f.last_record_offset:
-        lro = Optional[UInt64](UInt64(Int(f.last_record_offset.value())))
-    return PbFailureReport(f.exit_code, f.signal, tail^, pm^, None, lro^)
+    return PbJobFailure(f.exit_code, f.signal, tail^, pm^)
 
 
-def _to_proto(hb: SupervisorHeartbeat) -> PbSupervisorHeartbeat:
+def _to_proto(hb: SupervisorHeartbeat) -> PbJobHeartbeat:
     var progress = Optional[UInt32]()
     if hb.progress:
         progress = Optional[UInt32](UInt32(Int(hb.progress.value())))
     var message = Optional[String]()
     if hb.message:
         message = Optional[String](hb.message.value())
-    var failure = Optional[PbFailureReport]()
+    var failure = Optional[PbJobFailure]()
     if hb.failure:
-        failure = Optional[PbFailureReport](
-            _failure_to_proto(hb.failure.value())
-        )
-    return PbSupervisorHeartbeat(
+        failure = Optional[PbJobFailure](_failure_to_proto(hb.failure.value()))
+    return PbJobHeartbeat(
         String(hb.job_name),  # job_id
         _phase_to_proto(hb.phase),  # phase
-        String(hb.instance_name),  # pod_name
+        String(hb.instance_name),  # instance_name
         progress^,  # progress
         message^,  # message
         failure^,  # failure
-        # The message's partition-ownership fields (#7-#11) are not a job
-        # supervisor's to report; they stay absent.
-        None,  # node_id
-        None,  # load
-        List[UInt32](),  # owned_partitions
-        None,  # advertised_host
-        None,  # advertised_port
     )
 
 
 def encode_heartbeat(hb: SupervisorHeartbeat) raises -> List[UInt8]:
-    """The heartbeat as protobuf-binary `SupervisorHeartbeat` bytes."""
-    return encode_proto[PbSupervisorHeartbeat](_to_proto(hb))
+    """The heartbeat as protobuf-binary `JobHeartbeat` bytes."""
+    return encode_proto[PbJobHeartbeat](_to_proto(hb))
 
 
 def decode_cancel(var body: List[UInt8]) raises -> Bool:
-    """The `cancel` bit of a protobuf-binary `HeartbeatResponse`. An empty
-    body is all-defaults: cancel=false."""
-    var resp = decode_proto[PbHeartbeatResponse](body^)
-    return resp.cancel
+    """True iff a protobuf-binary `JobHeartbeatReply` says CANCEL.
+
+    Only the CANCEL number stops the job. An empty body is all defaults
+    (CONTINUE), and a directive number this build has no name for is read as
+    CONTINUE too, with a warning: stopping a job is not undone, so it is never
+    inferred from a value the supervisor does not understand."""
+    var reply = decode_proto[PbJobHeartbeatReply](body^)
+    var d = reply.directive.value
+    if d == PbJobDirective.JOB_DIRECTIVE_CANCEL:
+        return True
+    if d != PbJobDirective.JOB_DIRECTIVE_CONTINUE:
+        log.warn[
+            "job supervisor: heartbeat reply directive {} is unknown; continuing",
+            "komira_job_supervisor.heartbeat",
+        ](ArgStr(String(d)))
+    return False
 
 
 # =============================================================================
@@ -283,7 +285,7 @@ def send_heartbeat[
         var req = build_heartbeat_request(url, body^, auth_headers)
         var cr = client.send_buffered[RT, BytesBody](req^, reactor)
         var status = Int(cr.status)
-        # Only a 2xx carries a HeartbeatResponse; anything else is an error
+        # Only a 2xx carries a JobHeartbeatReply; anything else is an error
         # envelope and is not decoded.
         var ok = status >= 200 and status < 300
         var cancel = False

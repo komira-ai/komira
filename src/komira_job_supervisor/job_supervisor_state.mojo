@@ -9,8 +9,7 @@
 #                        COMPLETED / FAILED / CANCELLED), mapped onto the wire
 #                        `JobPhase` enum by heartbeat_client.mojo.
 #   FailureReport      : the forensics on a FAILED heartbeat (exit_code /
-#                        signal / stderr_tail / panic_message /
-#                        last_record_offset).
+#                        signal / stderr_tail / panic_message).
 #   JobSupervisorState : phase + progress + message + Optional[FailureReport] +
 #                        cancel_requested.
 #
@@ -23,8 +22,8 @@
 # =============================================================================
 struct JobSupervisorPhase(Copyable, Movable, ImplicitlyCopyable):
     """A phase the supervisor reports: RUNNING (periodic liveness) or one of
-    the three terminals (COMPLETED / FAILED / CANCELLED). The wire enum has
-    other values; a supervisor never reports them.
+    the three terminals (COMPLETED / FAILED / CANCELLED). The wire enum's
+    zero value, UNSPECIFIED, is never reported.
 
     Stored as a small Int tag; `wire_str()` is the SCREAMING_SNAKE name."""
 
@@ -84,7 +83,7 @@ struct JobSupervisorPhase(Copyable, Movable, ImplicitlyCopyable):
 # =============================================================================
 struct FailureReport(Movable):
     """The failure forensics attached to a FAILED heartbeat (mirrors the
-    supervisor.proto `FailureReport` message + analyze_exit ->
+    job_report.proto `JobFailure` message + analyze_exit ->
     FailureReport build). All fields are optional EXCEPT the stderr ring, which
     is always present (possibly empty).
 
@@ -95,15 +94,12 @@ struct FailureReport(Movable):
       stderr_tail       — the last N lines of the child's stderr (the ring),
                           for failure diagnosis.
       panic_message     — the extracted panic line when stderr contains
-                          "panic" / "panicked" (Some) else None.
-      last_record_offset — reserved for a job's last-processed offset (the
-                          supervisor itself leaves it None)."""
+                          "panic" / "panicked" (Some) else None."""
 
     var exit_code: Optional[Int32]
     var signal: Optional[Int32]
     var stderr_tail: List[String]
     var panic_message: Optional[String]
-    var last_record_offset: Optional[Int64]
 
     def __init__(
         out self,
@@ -111,13 +107,11 @@ struct FailureReport(Movable):
         signal: Optional[Int32],
         var stderr_tail: List[String],
         var panic_message: Optional[String],
-        last_record_offset: Optional[Int64],
     ):
         self.exit_code = exit_code
         self.signal = signal
         self.stderr_tail = stderr_tail^
         self.panic_message = panic_message^
-        self.last_record_offset = last_record_offset
 
     def copy(self) -> FailureReport:
         """Deep copy (the JSON builder reads this without consuming the loop's
@@ -128,9 +122,7 @@ struct FailureReport(Movable):
         var pm = Optional[String]()
         if self.panic_message:
             pm = Optional[String](self.panic_message.value())
-        return FailureReport(
-            self.exit_code, self.signal, tail^, pm^, self.last_record_offset
-        )
+        return FailureReport(self.exit_code, self.signal, tail^, pm^)
 
 
 # =============================================================================

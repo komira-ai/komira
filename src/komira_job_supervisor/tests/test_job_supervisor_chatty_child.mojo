@@ -14,7 +14,7 @@
 # can finish its writes + exit. A FINAL drain-to-EOF after exit captures the
 # tail.
 #
-# WHY THIS IS A DEFAULT (non-cluster) TEST: it only spawns a LOCAL shell child
+# WHY THIS IS A DEFAULT (hermetic) TEST: it only spawns a LOCAL shell child
 # (`/bin/sh -c 'for ...; echo ...'`) and drives the job supervisor's lifecycle stepping
 # methods directly: no heartbeat endpoint, no network, no object store. It is a welded test of
 # //src/komira_job_supervisor:komira_job_supervisor.

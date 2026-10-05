@@ -177,9 +177,7 @@ def test_terminal_writes_land_under_the_prefix() raises:
     )
     var tail = List[String]()
     tail.append(String('bad "quote"'))
-    var fr = FailureReport(
-        Optional[Int32](Int32(3)), None, tail^, None, None
-    )
+    var fr = FailureReport(Optional[Int32](Int32(3)), None, tail^, None)
     assert_true(upload_crash_report(cfg, store, fr), "crash report written")
     var cr = _text(store.get(Path.parse(String("logs/run-1/crash_report.json"))))
     assert_true(cr.find(String('"job_name":"j"')) >= 0, cr)

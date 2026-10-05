@@ -38,7 +38,7 @@
 # store builds find the embedded server's credential: AWS_SHARED_CREDENTIALS_FILE
 # names its credentials file, AWS_CONFIG_FILE an empty file, and every
 # variable that would win over the file is removed. The supervisor is the
-# code under test, so its credential takes the path any deployment's takes.
+# code under test, so its credential takes the path any other caller's takes.
 # `supervisor_store()` is that store (s3_store.mojo's `make_s3_store`), and
 # `SilentReporter` stands in for a heartbeat endpoint: these tests drive the
 # supervisor's steps and send no heartbeat.

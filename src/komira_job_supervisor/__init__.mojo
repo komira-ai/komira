@@ -17,9 +17,8 @@ WHAT THE EMBEDDING BINARY SUPPLIES:
     `ConditionalWriteStore`. `s3_store` builds S3 / S3-compatible ones from
     flags (`S3StoreFlags`, `run_job_supervisor_on_s3`).
 
-The heartbeat wire is the generated `komira.supervisor.v1`
-`SupervisorHeartbeat` / `HeartbeatResponse` messages (komira_supervisor_proto)
-in protobuf binary.
+The heartbeat wire is the generated `komira.job_report.v1` `JobHeartbeat` /
+`JobHeartbeatReply` messages (komira_job_report_proto) in protobuf binary.
 
 PUBLIC SURFACE:
   JobSupervisorConfig, scan_flags, FlagValues, job_supervisor_flag_names

@@ -43,7 +43,7 @@
 # embedding binary's choice; its own flags are passed through `from_args`'s
 # `other_flags` so they are not refused as unknown.
 #
-# Owned String / POD fields only; no pointer type.
+# Owned String and plain-value fields only; no pointer type.
 # =============================================================================
 
 from komira_job_supervisor.heartbeat_client import parse_heartbeat_url

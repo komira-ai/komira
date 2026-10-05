@@ -455,7 +455,7 @@ struct JobSupervisor[
             tail.append(l)
         var panic = _detect_panic(self.stderr_ring)
         self.state.failure = Optional[FailureReport](
-            FailureReport(exit_code, signal, tail^, panic^, Optional[Int64]())
+            FailureReport(exit_code, signal, tail^, panic^)
         )
 
     def finalize_heartbeat(mut self) -> HeartbeatOutcome:

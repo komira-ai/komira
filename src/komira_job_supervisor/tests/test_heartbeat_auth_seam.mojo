@@ -12,7 +12,7 @@
 # Also: a heartbeat URL carrying userinfo is refused (a URL is a command-line
 # value, and argv is readable by every user on the host), and the wire
 # projection puts --job-name / --instance-name into the message's job_id /
-# pod_name fields and reads the reply's cancel bit.
+# instance_name fields and reads the reply's directive.
 #
 # EVERY ARM HAS A CONTROL.
 # =============================================================================
@@ -21,9 +21,10 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_http_client.header_map import HeaderEntry
 from komira_proto_codec import decode_proto, encode_proto
-from komira_supervisor_proto.supervisor import (
-    HeartbeatResponse as PbHeartbeatResponse,
-    SupervisorHeartbeat as PbSupervisorHeartbeat,
+from komira_job_report_proto.job_report import (
+    JobDirective as PbJobDirective,
+    JobHeartbeat as PbJobHeartbeat,
+    JobHeartbeatReply as PbJobHeartbeatReply,
     JobPhase as PbJobPhase,
 )
 
@@ -174,19 +175,32 @@ def test_a_url_with_userinfo_is_refused() raises:
 
 
 def test_the_wire_projection() raises:
-    var back = decode_proto[PbSupervisorHeartbeat](encode_heartbeat(_beat()))
+    var back = decode_proto[PbJobHeartbeat](encode_heartbeat(_beat()))
     assert_equal(back.job_id, String("nightly-report"), "--job-name -> job_id")
-    assert_equal(back.pod_name, String("worker-7"), "--instance-name -> pod_name")
+    assert_equal(
+        back.instance_name, String("worker-7"), "--instance-name -> instance_name"
+    )
     assert_equal(back.phase.value, PbJobPhase.JOB_PHASE_RUNNING, "phase")
     assert_equal(back.progress.value(), UInt32(40), "progress")
     assert_equal(back.message.value(), String("halfway"), "message")
-    assert_false(Bool(back.node_id), "no partition-ownership fields")
-    assert_equal(len(back.owned_partitions), 0, "no owned partitions")
+    assert_false(Bool(back.failure), "no failure on a RUNNING beat")
 
-    var yes = PbHeartbeatResponse(True, List[UInt32](), None, None, List[Int64]())
-    assert_true(decode_cancel(encode_proto[PbHeartbeatResponse](yes)), "cancel")
-    # CONTROL: an empty reply is all-defaults, cancel=false.
+    var yes = PbJobHeartbeatReply(PbJobDirective(PbJobDirective.JOB_DIRECTIVE_CANCEL))
+    assert_true(decode_cancel(encode_proto[PbJobHeartbeatReply](yes)), "CANCEL")
+    # CONTROL: CONTINUE, an empty reply (all defaults) and an unknown
+    # directive number are not a cancel.
+    var go = PbJobHeartbeatReply(
+        PbJobDirective(PbJobDirective.JOB_DIRECTIVE_CONTINUE)
+    )
+    assert_false(
+        decode_cancel(encode_proto[PbJobHeartbeatReply](go)), "CONTROL: CONTINUE"
+    )
     assert_false(decode_cancel(List[UInt8]()), "CONTROL: empty reply, no cancel")
+    var unknown = PbJobHeartbeatReply(PbJobDirective(7))
+    assert_false(
+        decode_cancel(encode_proto[PbJobHeartbeatReply](unknown)),
+        "an unknown directive is not a cancel",
+    )
     print("  test_the_wire_projection: PASS")
 
 
