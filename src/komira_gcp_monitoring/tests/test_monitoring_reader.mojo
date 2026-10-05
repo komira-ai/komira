@@ -8,8 +8,9 @@
 # seconds); it maps a query to one GET (filter, interval one nanosecond
 # before the inclusive start, aligner, reducer, group-by fields, page size)
 # with a bearer token; it follows nextPageToken and merges a series
-# continued on the next page, oldest first; it keeps resource labels only
-# when the query names them; the series limit, the point limit (keeping the
+# continued on the next page, oldest first, keyed on the series' whole wire
+# identity, so two series apart only in a label the query did not name stay
+# two; it keeps resource labels only when the query names them; the series limit, the point limit (keeping the
 # newest), the page limit and executionErrors set `truncated`; and a non-2xx
 # answer raises through komira_gcp_core's `gcp_status_error`, the body never
 # quoted.
@@ -248,6 +249,63 @@ def test_pages_merge_and_resource_labels() raises:
     assert_true("&pageToken=p2 HTTP/1.1\r\n" in wire, wire)
 
 
+def _revision(rev: String, labels_first: Bool, var points: List[String]) -> String:
+    """A request_count series of revision `rev`, its resource labels in one
+    wire order or the other."""
+    var ps = String("")
+    for i in range(len(points)):
+        if i > 0:
+            ps += ","
+        ps += points[i]
+    var labels = String('"zone":"z","revision_name":"') + rev + '"'
+    if not labels_first:
+        labels = String('"revision_name":"') + rev + '","zone":"z"'
+    return (
+        String('{"metric":{"type":"run.googleapis.com/request_count","labels":'
+        '{"response_code":"200"}},"resource":{"type":"cloud_run_revision",'
+        '"labels":{')
+        + labels
+        + '}},"valueType":"INT64","points":['
+        + ps
+        + "]}"
+    )
+
+
+def test_series_apart_in_an_unnamed_label_are_not_merged() raises:
+    # Two revisions of one service, the query naming no resource label: two
+    # series, each with its own points, and a revision continued on the next
+    # page (its labels in another order) is merged into its own series only.
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var first = (
+        String('{"timeSeries":[')
+        + _revision(String("api-001"), True, [_point(String("2026-09-12T10:02:00Z"), String("5"))])
+        + ","
+        + _revision(String("api-002"), True, [_point(String("2026-09-12T10:02:00Z"), String("7"))])
+        + '],"nextPageToken":"p2"}'
+    )
+    var second = (
+        String('{"timeSeries":[')
+        + _revision(String("api-001"), False, [_point(String("2026-09-12T10:01:00Z"), String("4"))])
+        + "]}"
+    )
+    var answers = List[String]()
+    answers.append(_ok(first))
+    answers.append(_ok(second))
+    var r = ErasedMetricsReader.erase(_reader(capture, answers^))
+    var page = r.read(_query(MetricsAggregation.raw()))
+    assert_equal(len(page.series), 2)
+    ref a = page.series[0]
+    ref b = page.series[1]
+    assert_false(Bool(a.label(String("resource.revision_name"))))
+    assert_equal(len(a.samples), 2)
+    assert_equal(a.samples[0].time_ns, _T + _MIN)
+    assert_equal(a.samples[0].value, 4.0)
+    assert_equal(a.samples[1].time_ns, _T + 2 * _MIN)
+    assert_equal(a.samples[1].value, 5.0)
+    assert_equal(len(b.samples), 1)
+    assert_equal(b.samples[0].value, 7.0)
+
+
 def test_limits_truncate() raises:
     # Series limit: the second series is cut.
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
@@ -333,6 +391,7 @@ def main() raises:
     test_refusals_before_any_call()
     test_the_request_on_the_wire()
     test_pages_merge_and_resource_labels()
+    test_series_apart_in_an_unnamed_label_are_not_merged()
     test_limits_truncate()
     test_an_error_answer_raises_without_the_body()
     print("OK")

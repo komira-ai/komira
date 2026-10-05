@@ -45,6 +45,16 @@
 #      nanosecond before the query's inclusive start.
 #   5. `executionErrors` in a 200 means the returned data may be incomplete;
 #      it is counted on the parsed page.
+#   6. A series is told apart by its metric type, ALL its metric and
+#      resource labels and its resource type, not by the labels a reader
+#      returns. Merging pages on fewer folds different workloads into one
+#      series of duplicate timestamps.
+#
+# The host, the path, the page-size ceiling, the minimum alignment period,
+# the point order, the interval and the aligner and reducer names are
+# checked against the pinned protos by the welded test_monitoring_protos.
+# ⚠ Not yet checked against the live API: the `groupByFields` spelling
+# (`group_by_field`).
 #
 # Encapsulation: value types only. No pointer. Reads no environment.
 # =============================================================================
@@ -55,7 +65,8 @@ from komira_metrics_reader import MetricsLabel, MetricsMatcher, MetricsSample
 
 
 comptime MONITORING_DEFAULT_HOST: String = "monitoring.googleapis.com"
-"""The `google.api.default_host` of `MetricService` in the pinned protos."""
+"""The `google.api.default_host` of `MetricService` in the pinned protos
+(//tools/vendor/googleapis:monitoring_v3)."""
 
 comptime LIST_TIME_SERIES_RPC: String = "ListTimeSeries"
 
@@ -264,7 +275,13 @@ def filter_label_selector(key: String) raises -> String:
 
 def group_by_field(key: String) raises -> String:
     """The `aggregation.groupByFields` spelling of a label:
-    `metric.label.<k>`, or `resource.label.<k>` for `resource.<k>`."""
+    `metric.label.<k>`, or `resource.label.<k>` for `resource.<k>`.
+
+    Singular `label.`, unlike the filter's `labels.`: the pinned protos
+    (`Aggregation.group_by_fields`) give no syntax, and this is the form
+    Cloud Monitoring's alerting-policy JSON samples use
+    (`"groupByFields": ["project", "resource.label.module_id",
+    "resource.label.version_id"]`). Not yet checked against the live API."""
     var why = label_key_refusal(key)
     if why.byte_length() > 0:
         raise Error(why)
@@ -331,11 +348,14 @@ def ns_of_rfc3339(text: String) raises -> Int64:
 @fieldwise_init
 struct MonitoringSeries(Copyable, Movable):
     """One `TimeSeries`: its metric type, its metric and resource labels,
-    its value type, and its points OLDEST FIRST (reversed from the wire)."""
+    its resource type, its value type, and its points OLDEST FIRST (reversed
+    from the wire). The metric type, every label and the resource type
+    together are the series' identity."""
 
     var metric_type: String
     var metric_labels: List[MetricsLabel]
     var resource_labels: List[MetricsLabel]
+    var resource_type: String
     var value_type: String
     var points: List[MetricsSample]
 
@@ -421,10 +441,13 @@ def _parse_series(s: JsonValue, index: Int) raises -> MonitoringSeries:
             metric_type = m.get(String("type")).as_string()
         metric_labels = _labels_of(m, String("metric"))
     var resource_labels = List[MetricsLabel]()
+    var resource_type = String("")
     if s.has(String("resource")):
         var r = s.get(String("resource"))
         if not r.is_object():
             raise Error("ListTimeSeries: resource is not an object")
+        if r.has(String("type")):
+            resource_type = r.get(String("type")).as_string()
         resource_labels = _labels_of(r, String("resource"))
     var value_type = String("")
     if s.has(String("valueType")):
@@ -439,7 +462,12 @@ def _parse_series(s: JsonValue, index: Int) raises -> MonitoringSeries:
         for k in range(n):
             points.append(_parse_point(ps.element_at(n - 1 - k), metric_type))
     return MonitoringSeries(
-        metric_type^, metric_labels^, resource_labels^, value_type^, points^
+        metric_type^,
+        metric_labels^,
+        resource_labels^,
+        resource_type^,
+        value_type^,
+        points^,
     )
 
 

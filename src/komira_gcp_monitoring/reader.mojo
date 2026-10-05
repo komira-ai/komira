@@ -31,7 +31,10 @@
 # A SERIES' LABELS: its metric labels, and the resource labels the query
 # named (in a matcher or `group_by`), as `resource.<k>`. The other resource
 # labels (project id, location, revision) describe where the series was
-# recorded; they stay out unless asked for.
+# recorded; they stay out unless asked for. They still tell series apart:
+# pages are merged on the whole wire identity (metric type, every label,
+# resource type), so two revisions of one service are two series even when
+# their returned labels are equal. Name the label to see which is which.
 #
 # Paging follows `nextPageToken` up to `max_pages` calls. A series continued
 # on a later page is merged into one. Stopping with a token left, cutting at
@@ -242,8 +245,10 @@ struct CloudMonitoringMetricsReader[C: Connector, T: GcpTokenSource](
             if page.execution_errors > 0:
                 truncated = True
             for i in range(len(page.series)):
+                # The merge key is the series' whole wire identity; the
+                # labels returned are fewer (`_series_of`).
+                var key = _wire_identity(page.series[i])
                 var s = _series_of(page.series[i], keep_resource)
-                var key = _identity(s)
                 var at = -1
                 for k in range(len(keys)):
                     if keys[k] == key:
@@ -332,16 +337,41 @@ def _series_of(s: MonitoringSeries, keep_resource: List[String]) -> MetricsSerie
     return out^
 
 
-def _identity(s: MetricsSeriesData) -> String:
-    """A key equal for two parts of one series: the metric and its labels,
-    each length-prefixed so no label text can forge another's."""
-    var k = String(s.metric.byte_length()) + ":" + s.metric
-    for i in range(len(s.labels)):
-        k += String("|") + String(s.labels[i].key.byte_length()) + ":"
-        k += s.labels[i].key
-        k += String("=") + String(s.labels[i].value.byte_length()) + ":"
-        k += s.labels[i].value
+def _field(s: String) -> String:
+    """`s` length-prefixed, so no label text can forge another's."""
+    return String(s.byte_length()) + String(":") + s
+
+
+def _labels_key(labels: List[MetricsLabel]) -> String:
+    """`labels` sorted by key and length-prefixed, so the same labels in
+    another wire order give the same key."""
+    var order = List[Int]()
+    for i in range(len(labels)):
+        var at = len(order)
+        while at > 0 and labels[order[at - 1]].key > labels[i].key:
+            at -= 1
+        order.insert(at, i)
+    var k = String(len(labels))
+    for i in range(len(order)):
+        k += String("|") + _field(labels[order[i]].key)
+        k += String("=") + _field(labels[order[i]].value)
     return k^
+
+
+def _wire_identity(s: MonitoringSeries) -> String:
+    """A key equal for two parts of ONE series: its metric type, every
+    metric label, its resource type and every resource label. Two series
+    that differ only in a label the query did not name (a revision, an
+    instance) are different series and get different keys."""
+    return (
+        _field(s.metric_type)
+        + String("#")
+        + _labels_key(s.metric_labels)
+        + String("#")
+        + _field(s.resource_type)
+        + String("#")
+        + _labels_key(s.resource_labels)
+    )
 
 
 def _merge(a: List[MetricsSample], b: List[MetricsSample]) -> List[MetricsSample]:
