@@ -270,7 +270,7 @@ jobs:
           farm-address: ${{ vars.FARM_ADDRESS }}
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
-      # The same guard as ci.yml, over the file farm-connect wrote: without the
+      # A guard on the file farm-connect wrote: without the
       # linux property set the build would run on this runner.
       - name: the buckconfig names the farm
         run: |
