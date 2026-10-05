@@ -1,11 +1,10 @@
 # =============================================================================
 # komira_gcp_firestore/document_store.mojo — the minimal document/KV seam +
-#   the Firestore-backed conformer (M1).
+#   the Firestore-backed conformer.
 # =============================================================================
 #
-# WHAT THIS IS + WHY A NEW SEAM (DESIGN-ESCALATION). The gap analysis established
-# that a NoSQL document store does NOT fit the SQL `komira_db.Database` trait —
-# that trait's surface is `execute/query(sql: String, params: List[DbValue])` +
+# WHAT THIS IS + WHY A NEW SEAM. A NoSQL document store does NOT fit the SQL
+# `komira_db.Database` trait — that trait's surface is `execute/query(sql: String, params: List[DbValue])` +
 # `placeholder(i)` + `now_expr()`, i.e. it is fundamentally a SQL-string executor
 # with per-dialect placeholder rendering. Firestore has no SQL, no placeholders,
 # no rows-and-columns — it is a collection/document/field key-value store. Forcing
@@ -13,8 +12,7 @@
 # dialect over documents, or (b) leaving 8 of the trait's 11 methods unimplemented
 # (a lie about conformance). Both are worse than a right-sized seam.
 #
-# A grep of `komira_db` (and the whole tree) found NO existing KV / document /
-# key-value store trait to conform to. So this is a genuine design call: define the
+# `komira_db` has no KV / document store trait to conform to, so this defines the
 # MINIMAL document/KV seam a caller needs to use Firestore (or any document
 # store) as its storage, matching HOW pgstore/sqlite conform to the SQL path (a
 # narrow trait + a concrete conformer), but shaped for documents, not rows.
@@ -34,8 +32,7 @@
 # shared cross-package seam is a larger decision to make once a SECOND document
 # backend (e.g. Cosmos) needs it. Lifting the trait to `komira_db` when that
 # happens is a mechanical move (the trait names no Firestore type — only FsValue,
-# which is already the shared CDC value type). The seam's shape and placement are
-# recorded here so that move can be reviewed when it comes.
+# which is already the shared CDC value type).
 #
 # ENCAPSULATION. ZERO UnsafePointer in any signature; ZERO wildcard
 # origins; ZERO unsafe_from_address. `def`-based, Mojo 1.0.0b2.
