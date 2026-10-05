@@ -132,7 +132,7 @@ def test_example_file_renders_the_stamped_library_then_the_metapackage() raises:
             "--summary",
             "Every komira library of one release.",
             "--home",
-            "https://github.com/komira-ai/komira",
+            "https://example.org/project",
             "--extra-file",
             "info/licenses/LICENSE=LICENSE",
             "--label",
@@ -233,7 +233,7 @@ def test_render_refusals() raises:
     # An unknown placeholder in a value that never went through the
     # validator is refused, not passed through.
     var systems2 = List[BuildSystem]()
-    systems2.append(BuildSystem(String("t"), String("t"), List[String](), None, None))
+    systems2.append(BuildSystem(String("t"), String("t"), List[String](), None, None, None))
     var artifacts2 = List[Artifact]()
     artifacts2.append(Artifact(String("a"), String("t"), _argv("{out_dir}", "{nope}"), List[String]()))
     var raw2 = Artifacts(systems2^, artifacts2^, Int32(1), List[Check]())

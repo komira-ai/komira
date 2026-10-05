@@ -10,8 +10,12 @@
 #   channels.textproto   src/kci_release_channel (test_release_channels_file),
 #                        src/kci_ci_check (test_repo_kci_yml)
 # The programs the machine file's validations run are in release/smoke, each a
-# mojo_test against the in-repository library.
+# mojo_test against the in-repository library. release/ci holds the commands
+# the per-change check runs (artifacts.textproto's `affected`,
+# `build_targets` and `derive_checks`).
 # Changes need the release approver's review (.github/CODEOWNERS).
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
 export_file(
     name = "artifacts.textproto",
     visibility = ["//src/kci_artifact:"],
@@ -25,4 +29,9 @@ export_file(
 export_file(
     name = "machine.textproto",
     visibility = ["//src/kci_ci_check:"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["ci/*.sh"]),
 )

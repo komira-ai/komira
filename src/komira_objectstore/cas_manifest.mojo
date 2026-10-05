@@ -755,7 +755,7 @@ def _jittered_sleep_us(upper_us: Int64, salt: UInt64) raises:
     # `time.sleep` → `nanosleep`: an AOT binary that links komira_async (whose
     # reactor declares its OWN `external_call["nanosleep", ...]`) hits a
     # "conflicting nanosleep signature" legalization failure. Same fix as
-    # komira_agent._sleep_secs / komira_supervisor._sleep_ms.
+    # komira_job_supervisor._sleep_secs / komira_supervisor._sleep_ms.
     _ = external_call["usleep", Int32](UInt32(draw_us))
 
 

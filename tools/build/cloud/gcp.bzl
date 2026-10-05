@@ -33,6 +33,16 @@ required. `messages_only = True` emits no service. The items are joined
 with protoc-gen-mojo's list separator `+`, the options with `,`; an item
 holding either, `=` or whitespace is refused here rather than mis-split.
 
+`omit_fields` names fields (`pkg.Message.field`) left out of their
+message: a field whose type the runtime cannot represent and no caller
+reads, such as Service Usage's `Service.config` (its `ServiceConfig` reaches
+`google.protobuf.Api`, which komira_wkt does not provide, and
+`map<string, int64>` fields, which komira_proto_codec does not decode). The
+message is generated without it, so a response's value for it is skipped
+like any unknown key, a request never sends it, and the closure no longer
+reaches its type. A name that is not a field of a generated message is
+refused at generation, including a field of a message the scope prunes.
+
 Protocol. `protocol` is the wire protocol of the generated service code,
 passed to protoc-gen-mojo as `default_protocol`. It is "rest" (JSON over
 HTTP, the default) or "grpc"; any other value is refused naming the
@@ -43,8 +53,10 @@ token source (komira_gcp_core) supplies each request's bearer token. Under
 non-2xx response through `gcp_status_error`; it starts at the service's
 `(google.api.default_host)`, and a client of a service that declares none
 refuses every call, before any dial, until `set_rest_host` names a host. A
-streaming method has no REST form: any streaming method a "rest" target
-keeps is refused by name at generation (so a `methods` entry naming one is
+server-streaming method returns a `List` of its responses (over REST the
+whole stream is one HTTP response, a JSON array). A client-streaming or
+bidirectional method has no REST form: any such method a "rest" target keeps
+is refused by name at generation (so a `methods` entry naming one is
 refused, and a plugin run with no `methods` filter over a service holding one
 fails rather than skipping it). Under "grpc" it calls
 komira_grpc's `GrpcClient` with classic gRPC, sets
@@ -65,6 +77,16 @@ closure). Both `bundle_proto_deps` and `bundle_only` must be stated: with
 `bundle_proto_deps = True`, `bundle_only` is required and non-empty
 (bundling a whole googleapis closure would generate files the scope leaves
 empty, which the plugin refuses); with `False`, it must be empty.
+
+Module names. Each generated `.proto` is the module `<stem>`, its basename
+without `.proto`. Where that cannot be the module, `module_names` names one
+(import path -> module, passed to the plugin as `module_names`): a basename
+that is not a Mojo module name (`google/cloud/run/v2/k8s.min.proto`, or a
+Mojo keyword such as `import`), or two bundled files with one basename
+(`google/rpc/status.proto` beside `google/cloud/run/v2/status.proto`), which
+the flat package cannot hold apart. A generated file whose stem is not a module name and is not renamed is
+refused, and so is a `module_names` entry for a file the target does not
+generate; two files generating one module are refused as before.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
 generated code imports its runtime (komira_proto_codec, komira_wkt, and with
@@ -116,6 +138,39 @@ def _check_items(ctx, attr, items):
             fail("{}: `{}` names `{}` twice".format(ctx.label, attr, item))
         seen[item] = True
 
+_MODULE_NAME = "^[A-Za-z_][A-Za-z0-9_]*$"
+
+# Mojo keywords: an identifier no import can name. The plugin refuses the
+# same list (proto-codegen's mojo_names.rs `KEYWORDS`); this one reports it
+# at analysis, against the target's own attribute.
+_MOJO_KEYWORDS = [
+    "alias", "and", "as", "async", "await", "break", "comptime", "continue",
+    "def", "del", "elif", "else", "except", "False", "fieldwise_init",
+    "finally", "fn", "for", "from", "global", "if", "import", "in", "is",
+    "lambda", "mut", "None", "nonlocal", "not", "or", "out", "owned", "pass",
+    "raise", "raises", "read", "ref", "return", "self", "struct", "trait",
+    "True", "try", "var", "while", "with", "yield",
+    "imm", "deinit",
+]
+
+def _is_module_name(m):
+    return regex_match(_MODULE_NAME, m) and m not in _MOJO_KEYWORDS
+
+def _check_module_names(ctx, generate, module_names):
+    for p, m in module_names.items():
+        if p not in generate:
+            fail("{}: `module_names` names `{}`, which this target does not generate".format(ctx.label, p))
+        if not _is_module_name(m) or m in ["__init__", _LAYOUT_PROBE[:-len(".mojo")]]:
+            fail("{}: `module_names` gives `{}` the module `{}`, which is not a Mojo module name the generated package can hold".format(ctx.label, p, m))
+        if _LIST_SEPARATOR in p or "," in p or ":" in p:
+            fail("{}: `module_names` path `{}` holds `{}`, `,` or `:`, which the plugin option cannot carry".format(ctx.label, p, _LIST_SEPARATOR))
+    for p in generate:
+        if p in module_names:
+            continue
+        stem = p.rsplit("/", 1)[-1][:-len(".proto")]
+        if not _is_module_name(stem):
+            fail("{}: `{}` would be generated as module `{}`, which is not a Mojo module name: give it one in `module_names`".format(ctx.label, p, stem))
+
 def _gcp_client_gen_impl(ctx):
     ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
     import_name = ctx.attrs.import_name
@@ -132,6 +187,7 @@ def _gcp_client_gen_impl(ctx):
         fail("{}: `protocol` `{}` is not one of {}".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _PROTOCOLS])))
     _check_items(ctx, "roots", ctx.attrs.roots)
     _check_items(ctx, "methods", ctx.attrs.methods)
+    _check_items(ctx, "omit_fields", ctx.attrs.omit_fields)
     if ctx.attrs.bundle_proto_deps and not ctx.attrs.bundle_only:
         fail("{}: `bundle_proto_deps = True` with an empty `bundle_only`. List the files of the proto_deps closure the scope reaches; the whole closure is never bundled".format(ctx.label))
     if not ctx.attrs.bundle_proto_deps and ctx.attrs.bundle_only:
@@ -139,9 +195,11 @@ def _gcp_client_gen_impl(ctx):
 
     tree, own_paths = stage_proto_srcs(ctx)
     trees, dep_paths = proto_closure(ctx, tree, own_paths)
-    generate, names = select_generated(ctx, own_paths, dep_paths)
+    module_names = ctx.attrs.module_names
+    generate, names = select_generated(ctx, own_paths, dep_paths, module_names)
     if not generate:
         fail("{}: nothing to generate: `protos` and `bundle_only` are both empty".format(ctx.label))
+    _check_module_names(ctx, generate, module_names)
     if _LAYOUT_PROBE in names:
         fail("{}: a .proto generates `{}`, the layout probe's name".format(ctx.label, _LAYOUT_PROBE))
 
@@ -156,6 +214,10 @@ def _gcp_client_gen_impl(ctx):
         opt.append("roots=" + _LIST_SEPARATOR.join(ctx.attrs.roots))
     if ctx.attrs.methods:
         opt.append("methods=" + _LIST_SEPARATOR.join(ctx.attrs.methods))
+    if module_names:
+        opt.append("module_names=" + _LIST_SEPARATOR.join(["{}:{}".format(p, m) for p, m in sorted(module_names.items())]))
+    if ctx.attrs.omit_fields:
+        opt.append("omit_fields=" + _LIST_SEPARATOR.join(ctx.attrs.omit_fields))
     expected = names + [_LAYOUT_PROBE]
     gen_dir = generate_proto_dir(ctx, ptc.plugin, "mojo", ",".join(opt), trees, generate, expected, import_name)
 
@@ -178,6 +240,9 @@ _gcp_client_gen = rule(
         "import_prefix": attrs.string(default = ""),
         "messages_only": attrs.bool(default = False),
         "methods": attrs.list(attrs.string(), default = []),
+        # Import path -> the module that file is generated as (module docstring).
+        "module_names": attrs.dict(attrs.string(), attrs.string(), default = {}),
+        "omit_fields": attrs.list(attrs.string(), default = []),
         "proto_deps": attrs.list(attrs.dep(providers = [ProtoSrcsInfo]), default = []),
         # `protos` as written, so an entry the macro cannot derive a file
         # name from is refused here (`srcs` is the same list, resolved).
@@ -205,9 +270,11 @@ def _gcp_client(
         bundle_only,
         roots = [],
         methods = [],
+        omit_fields = [],
         messages_only = False,
         proto_deps = [],
         import_prefix = "",
+        module_names = {},
         protocol = "rest",
         test_srcs = [],
         visibility = None,
@@ -224,6 +291,8 @@ def _gcp_client(
         import_prefix = import_prefix,
         messages_only = messages_only,
         methods = methods,
+        module_names = module_names,
+        omit_fields = omit_fields,
         proto_deps = proto_deps,
         proto_paths = protos,
         protocol = protocol,
@@ -236,8 +305,15 @@ def _gcp_client(
     # refuses a missing, empty or extra file), so they can be named here. An
     # entry that is not a `.proto` path is left out rather than turned into a
     # sub-target name: `<name>_gen` refuses it, and that refusal is what the
-    # build reports.
-    stems = [_stem(p) for p in protos + bundle_only if p.endswith(".proto") and ":" not in p]
+    # build reports. A file named in `module_names` is that module, keyed by
+    # its import path (an own `.proto`'s is its path under `import_prefix`).
+    prefix = import_prefix.strip("/")
+    own = [(prefix + "/" + p) if prefix else p for p in protos]
+    stems = [
+        module_names.get(ip, _stem(p))
+        for p, ip in zip(protos + bundle_only, own + bundle_only)
+        if p.endswith(".proto") and ":" not in p
+    ]
     srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}.mojo]".format(gen, s) for s in stems]
     mojo_library(
         name = name,

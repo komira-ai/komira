@@ -23,6 +23,9 @@
 #   affected.mojo  the per-change check: the units (artifacts, then checks),
 #                  `{units_file}`, the affected and build_targets argvs, and
 #                  the grammar of an affected command's answer (pure)
+#   derive.mojo    the checks a build system derives from its graph at run
+#                  time: its argv, the grammar of its answer, adding them
+#                  under the file's rules (pure)
 #
 # The build rules, in full in placeholders.mojo and the .proto: kci creates an EMPTY
 # directory per artifact, in artifacts-file order, runs the rendered
@@ -86,4 +89,15 @@ from kci_artifact.affected import (
     unit_names_of,
     units_file_text,
     units_of,
+)
+from kci_artifact.derive import (
+    DERIVE_CHECK,
+    DERIVE_UNMATCHED,
+    DERIVE_VERDICT,
+    DeriveAnswer,
+    add_derived_checks,
+    declared_units_file_text,
+    parse_derive_answer,
+    render_derive_argv,
+    unmatched_artifacts,
 )

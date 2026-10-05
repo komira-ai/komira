@@ -31,7 +31,7 @@ and its limits. A family's doc lands together with the libraries it describes.
 | execution and operators | pipelines and morsel dispatch, aggregation, joins, sort, top-N and window: coming with the engine libraries |
 | plan and optimizer | logical plans and expressions, physical planning, the plan wire format, the query optimizer: coming with `komira_compiler` and `komira_optimizer` |
 | SDK and SQL | the plan-carrier surface, UDFs, the Python package, the SQL front ends: coming with `komira_sdk` |
-| runtime | the async runtime, the job agent and supervisor: coming with `komira_async` and `komira_agent` |
+| runtime | the async runtime, the job supervisor and its job report wire: coming with `komira_async`, `komira_job_supervisor` and `komira_job_report_proto` |
 | observability | logging and telemetry: coming with `komira_log` |
 | agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |
 | cloud | AWS clients, cloud credentials, infrastructure providers, secrets and service registry, deploy marks: coming with the cloud SDK libraries |

@@ -1,11 +1,11 @@
 # =============================================================================
-# kci_params/app_params.mojo — ★ A MANAGED APP DECLARES ITS PARAMETERS,
-#   AND THE CONTROL PLANE LEARNS ONLY THAT PARAMETERS EXIST.
+# kci_params/app_params.mojo — ★ AN APP DECLARES ITS PARAMETERS,
+#   AND THE DEPLOYMENT STORE LEARNS ONLY THAT PARAMETERS EXIST.
 #
 #   Design requirements:
-#     * a managed app is an INSTANCE of a deploy pattern, not a fork; it takes
+#     * an app is an INSTANCE of a deploy pattern, not a fork; it takes
 #       generic parameters, and the deploy path plumbs them in through the
-#       kci libraries. The control plane knows only about generic
+#       kci libraries. The deployment store knows only about generic
 #       parameters, never anything specific to one app;
 #     * parameters are passed as COMMAND-LINE ARGUMENTS, not as environment
 #       variables;
@@ -14,9 +14,9 @@
 # =============================================================================
 #
 # ── WHAT GOES WRONG WITHOUT IT ───────────────────────────────────────────────
-# A managed app configured through hand-authored environment variables is a
+# An app configured through hand-authored environment variables is a
 # FORK: it needs a set of variables that no artifact declares, that nothing
-# checks, and whose meaning the control plane has to know. Configuration then
+# checks, and whose meaning the deployment store has to know. Configuration then
 # goes inert in both directions: variables read by code that no deploy artifact
 # declares, and variables declared by deploy artifacts that no code reads.
 # Nothing reports either.
@@ -87,22 +87,17 @@
 #   operator has to remember and becomes a thing the declaration cannot express.
 #   NO LEAK is enforced by construction instead of by inspection.
 #
-# ── WHAT THE CONTROL PLANE MAY KNOW ──────────────────────────────────────────
+# ── WHAT THE DEPLOYMENT STORE MAY KNOW ──────────────────────────────────────────
 # THAT parameters exist, their names as OPAQUE strings, their kind ordinal, and
 # their value-or-reference as an opaque string. Nothing IN THIS MODULE names any
 # specific parameter of any specific app.
-#
-# "The control plane does not know what a managed app is" is a property of the
-# control plane's BINARIES, not of a leaf value type, so it is not this module's to
-# measure: it has to be checked against the control plane's own source, where it
-# lives.
 #
 # ── ENCAPSULATION ────────────────────────────────────────────────────────────
 # ZERO deps. Pure value types (flat `String`/`Int`) + string helpers: no I/O, no
 # process state, no cloud, no DB, no FFI. ZERO UnsafePointer crosses any boundary;
 # no wildcard origin. That is deliberate and load-bearing — this leaf is consumed by
 # THREE sides that must not depend on each other: the DEPLOY renderer (kci),
-# the APP's startup parser (a serving binary), and the CONTROL PLANE's opaque store.
+# the APP's startup parser (a serving binary), and the DEPLOYMENT STORE's opaque store.
 # A shared mechanism with a dep closure would not be adoptable by all three, and two
 # copies of a parameter contract is the fork this whole mechanism exists to end.
 # Mojo 1.0.0b2 (def-only).
@@ -202,11 +197,11 @@ def param_kind_is_reference(kind: Int) -> Bool:
 
 
 struct AppParamDecl(Copyable, Movable, Deinitable):
-    """One parameter a managed app DECLARES it takes.
+    """One parameter an app DECLARES it takes.
 
     The declaration is authored ONCE, next to the app, and is the single input to
     BOTH ends of the wire: the deploy renders argv from it and the app parses argv
-    against it. That is what makes a managed app an INSTANCE rather than a fork —
+    against it. That is what makes an app an INSTANCE rather than a fork —
     the deploy path holds no per-app knowledge, only this record."""
 
     var name: String
@@ -226,7 +221,7 @@ struct AppParamDecl(Copyable, Movable, Deinitable):
     required parameter — see `_reject_default_on_required`."""
 
     var doc: String
-    """What this parameter MEANS, in the app's own words. The control plane never
+    """What this parameter MEANS, in the app's own words. The deployment store never
     reads it; it exists so a refusal can quote it and so the declaration is the
     documentation instead of a README that drifts (a variable set by nothing BUT
     a README is set by nothing)."""
@@ -262,7 +257,7 @@ struct AppParamDecl(Copyable, Movable, Deinitable):
 
 def _is_kebab_byte(b: UInt8) -> Bool:
     """`a`-`z`, `0`-`9`, `-`. Deliberately NARROW: a parameter name is also a
-    column value in the control plane's opaque store and a token in a rendered
+    column value in the deployment store's opaque map and a token in a rendered
     command line, and every widening of this set is a place where the two
     representations can disagree."""
     if b >= UInt8(97) and b <= UInt8(122):
@@ -313,7 +308,7 @@ def validate_param_name(name: String) raises:
                 + String(
                     "' contains a byte outside lowercase-kebab ([a-z0-9-]). A"
                     " parameter name is BOTH an argv token and an opaque key in"
-                    " the control plane's store; a byte that means something to"
+                    " the deployment store; a byte that means something to"
                     " one of those and not the other is how the two"
                     " representations drift"
                 )
@@ -460,7 +455,7 @@ def find_param_decl(
 #
 # ⚠ AND THERE IS NO SECOND REFERENCE CONCEPT HERE. The RESIDENCY of a reference —
 # a secret ref must be EXTERNAL (it points into a separate project that holds
-# the secret), an image ref must be LOCAL (a customer account
+# the secret), an image ref must be LOCAL (a target account
 # can only pull from its own registry) — is decided by the deploy renderer's
 # typed references, which carry those rules and their tests. This module carries
 # the KIND; that one carries the RESIDENCY. A third concept is exactly what the
@@ -533,7 +528,7 @@ def render_app_params(
     decls: List[AppParamDecl],
     values: List[AppParamValue],
 ) raises -> List[String]:
-    """Render the argv a deployed managed app receives, or REFUSE naming what is
+    """Render the argv a deployed app receives, or REFUSE naming what is
     wrong and which app it is wrong for.
 
     `app` is used ONLY in refusal text. Nothing about the rendering depends on
@@ -732,7 +727,7 @@ def parse_app_params(
     decls: List[AppParamDecl],
     argv: List[String],
 ) raises -> AppParamBinding:
-    """Parse a managed app's declared parameters out of `argv` (INCLUDING argv[0],
+    """Parse an app's declared parameters out of `argv` (INCLUDING argv[0],
     the program name), at startup, at ONE site.
 
     Refuses, loudly and before the process serves anything:
@@ -744,7 +739,7 @@ def parse_app_params(
         the bundle never supplied.
 
     ⚠ TOLERATES UNRECOGNISED NON-FLAG TOKENS AND FOREIGN FLAGS? NO. Unknown flags
-    are REFUSED. A managed app whose parameters are declared has no other flags to
+    are REFUSED. An app whose parameters are declared has no other flags to
     take, and silently ignoring one means a deploy can misspell a parameter and see
     a healthy revision — which is the entire class of defect this replaces."""
     validate_param_decls(decls)
@@ -762,7 +757,7 @@ def parse_app_params(
                 + String(": unexpected argument '")
                 + a
                 + String(
-                    "' — a managed app takes DECLARED parameters as flags, not"
+                    "' — an app takes DECLARED parameters as flags, not"
                     " positionals"
                 )
             )
@@ -847,18 +842,18 @@ def parse_app_params(
 
 
 # =============================================================================
-# §8 — THE OPAQUE PROJECTION — what the CONTROL PLANE is allowed to hold.
+# §8 — THE OPAQUE PROJECTION — what the DEPLOYMENT STORE is allowed to hold.
 #
-# The CP stores a MAP: `(name, kind, value)` rows. It never names a parameter, and
+# The store holds a MAP: `(name, kind, value)` rows. It never names a parameter, and
 # it has no arm, enum, column or route per parameter. These two functions are the
-# whole of its vocabulary, and they are here rather than in the CP so that the CP
+# whole of its vocabulary, and they are here rather than in the store so that the store
 # side has no per-app code at all.
 # =============================================================================
 
 
 def param_map_names(values: List[AppParamValue]) -> List[String]:
     """The parameter NAMES a deployment carries, as opaque strings. Ordered as
-    supplied — the CP imposes no ordering because it knows no significance."""
+    supplied — the store imposes no ordering because it knows no significance."""
     var out = List[String]()
     for i in range(len(values)):
         out.append(values[i].name.copy())
@@ -866,9 +861,9 @@ def param_map_names(values: List[AppParamValue]) -> List[String]:
 
 
 def param_map_is_storable(values: List[AppParamValue]) raises:
-    """Refuse a parameter MAP the control plane must not persist.
+    """Refuse a parameter MAP the deployment store must not persist.
 
-    ★ THE ONE RULE THE CP CAN ENFORCE WITHOUT KNOWING WHAT ANY PARAMETER MEANS: a
+    ★ THE ONE RULE THE STORE CAN ENFORCE WITHOUT KNOWING WHAT ANY PARAMETER MEANS: a
     SECRET_REFERENCE row must hold a REFERENCE, and the only thing a generic store
     can check about that is that it is not obviously a value. A Secret Manager
     resource name always begins `projects/`; a raw seed does not. This is a
@@ -889,16 +884,16 @@ def param_map_is_storable(values: List[AppParamValue]) raises:
                 + String(
                     "' — it is declared SECRET_REFERENCE but its value is not a"
                     " resource name (a Secret Manager reference begins"
-                    " 'projects/'). The control plane stores REFERENCES to"
+                    " 'projects/'). The deployment store holds REFERENCES to"
                     " secrets and never secret material"
                 )
             )
 
 
 # =============================================================================
-# §9 — THE TRANSPORT — how a parameter map crosses the control plane.
+# §9 — THE TRANSPORT — how a parameter map crosses the deployment store.
 #
-# ⚠ READ THIS BEFORE ADDING A CHECK HERE. The control plane is a PIPE for
+# ⚠ READ THIS BEFORE ADDING A CHECK HERE. The deployment store is a PIPE for
 # parameters, and it is a pipe ON PURPOSE. It cannot enforce NO GAP, because
 # knowing that a parameter is REQUIRED is knowing something about what that
 # parameter MEANS — which is precisely what the design forbids it to know.
@@ -908,23 +903,23 @@ def param_map_is_storable(values: List[AppParamValue]) raises:
 #     before a revision is ever created,
 #   * the APP's startup parser (`parse_app_params`) refuses one again before the
 #     process serves anything.
-# A value the bundle never supplied and a value the control plane dropped in
+# A value the bundle never supplied and a value the deployment store dropped in
 # transit are different bugs with the same symptom, and the second end is what
 # makes the pipe safe to be dumb.
 #
-# The CP's one enforceable rule is `param_map_is_storable` (§8): a row it was told
+# The store's one enforceable rule is `param_map_is_storable` (§8): a row it was told
 # is a SECRET_REFERENCE must look like a resource name. That check needs no
 # knowledge of any specific parameter.
 #
 # THE WIRE FORMAT is a PREFIXED key in the pipeline job's generic `config`
 # string→string map — deliberately, so no schema change is needed anywhere in the
-# pipeline and the control plane's code names the PREFIX (generic) and never a
+# pipeline and the deployment store's code names the PREFIX (generic) and never a
 # parameter.
 # =============================================================================
 
 comptime APP_PARAM_CONFIG_PREFIX: String = "APP_PARAM:"
-"""The job `config` key prefix a managed-app parameter travels under. The control
-plane matches on THIS and nothing else — it is the entire vocabulary the CP has
+"""The job `config` key prefix an app parameter travels under. The deployment
+store matches on THIS and nothing else — it is the entire vocabulary the store has
 for parameters."""
 
 
@@ -953,7 +948,7 @@ def app_param_name_from_config_key(key: String) raises -> String:
 def encode_app_param_config_value(kind: Int, value: String) raises -> String:
     """`<kind ordinal>|<value>`.
 
-    THE KIND TRAVELS WITH THE VALUE, and it has to: the control plane cannot ask
+    THE KIND TRAVELS WITH THE VALUE, and it has to: the deployment store cannot ask
     the app what kind a parameter is without learning what the parameter is. `|` is
     the separator because a Secret Manager resource name, a URL and a bucket name
     can all contain `:` and `/` but none may contain `|`."""
@@ -1064,7 +1059,7 @@ def collect_app_params_from_config(
 def render_app_param_argv(values: List[AppParamValue]) raises -> List[String]:
     """Render argv from a parameter MAP ALONE — no declaration.
 
-    ⚠ THIS IS THE CONTROL PLANE'S RENDER, AND IT IS DECLARATION-FREE BY DESIGN. It
+    ⚠ THIS IS THE DEPLOYMENT STORE'S RENDER, AND IT IS DECLARATION-FREE BY DESIGN. It
     cannot check NO GAP (see §9's header) and does not pretend to. What it DOES
     check is the one thing a generic orchestrator can: that a row claiming to be a
     SECRET_REFERENCE carries a reference and not secret material.
