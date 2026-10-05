@@ -1,0 +1,174 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# Compute Engine v1: a REST/JSON client generated at build time from the
+# googleapis proto //tools/vendor/googleapis:compute_v1 extracts from its
+# pinned archive (nothing of it is copied here). Each `<Service>Client`
+# sends through komira_http_client's `HttpClient` over the komira_http_core
+# `Connector` it is given, takes each request's bearer token from a
+# komira_gcp_core `GcpTokenSource`, and raises a non-2xx answer through
+# komira_gcp_core's `gcp_status_error`. It reads no environment.
+#
+# compute.proto declares the whole API (2,087 messages and every service);
+# `methods` restricts the generated code to the methods below and the
+# messages and enums they reach, 227 structs in all. Each method is listed
+# with the use it serves:
+#
+#   Instances.Insert, Get, Delete       place, read back and remove a job VM
+#   ZoneOperations.Get, Wait            follow that VM's zonal operation
+#   Regions.Get                         read a region's quotas (the quota
+#                                       check before a placement) and zones
+#   Networks.Get, Insert, Delete        the VPC network of a deployment
+#   Subnetworks.Get, Insert, Delete     its regional subnetworks
+#   Firewalls.Get, Insert, Patch,       its firewall rules
+#     Delete
+#   GlobalAddresses.Get, Insert         the external IP of an HTTPS load
+#                                       balancer
+#   SslCertificates.Get, Insert         its managed certificate
+#   RegionNetworkEndpointGroups.Get,    the serverless NEG in front of a
+#     Insert                            Cloud Run service
+#   BackendBuckets.Get, Insert          a bucket backend (static content)
+#   BackendServices.Get, Insert, Patch  the NEG's backend service
+#   UrlMaps.Get, Insert, Patch,         the routing between backends, and a
+#     InvalidateCache                   CDN cache purge
+#   TargetHttpProxies.Get, Insert       the HTTP (redirect) proxy
+#   TargetHttpsProxies.Get, Insert      the HTTPS proxy
+#   GlobalForwardingRules.Get, Insert   the rules binding address to proxy
+#   RegionOperations.Wait,              follow the regional and global
+#     GlobalOperations.Wait             operations of the writes above
+#
+# Not generated: every other method, the listings and aggregated listings
+# among them, and RegionNetworkEndpointGroups.InsertBeta, which is not a v1
+# method (the beta API's NEG insert is a different service; a caller that
+# needs a beta-only field cannot reach it through this client).
+# RegionOperations.Get and GlobalOperations.Get are not generated either:
+# regional and global operations are followed with Wait. Nor are the
+# load-balancer teardown deletes (GlobalAddresses, SslCertificates,
+# RegionNetworkEndpointGroups, BackendBuckets, BackendServices, UrlMaps,
+# TargetHttpProxies, TargetHttpsProxies and GlobalForwardingRules Delete):
+# the set above builds and repoints a load balancer, and reaping one is
+# not yet a use this client serves.
+#
+# The operation is Compute Engine's own `Operation`
+# (google.cloud.compute.v1.Operation), not google.longrunning's: its state
+# is the `status` enum (PENDING, RUNNING, DONE), and a failure is
+# `error.errors` inside an operation that is DONE (with
+# `httpErrorStatusCode`), so DONE alone is not success.
+#
+# `requestId`: every insert, patch, delete and invalidateCache takes an
+# optional `requestId`, which makes a retried write idempotent on the
+# server. The generated client sends it only when the caller sets it in the
+# request; nothing fills one in (a Google Cloud generator here has no
+# counterpart of botocore's idempotency-token fill). A caller that retries
+# a write sets one UUID per logical write.
+#
+# A Patch is a JSON merge patch on the server. komira_proto_codec's encoder
+# omits an empty list or map and an unset optional field, so a Patch sends
+# only the fields the caller set and the server keeps the rest. A Patch
+# therefore cannot clear a list.
+#
+# Compute v1 answers an error with its older envelope (`error.errors[]`,
+# no `error.status`), so the canonical code is the HTTP status's: a 409 for
+# a resource that already exists is ABORTED, not ALREADY_EXISTS. The raised
+# text carries the first `errors[].reason` (`reason alreadyExists`), which
+# tells that 409 from any other.
+#
+# `bundle_only` is compute.proto alone: every message the methods reach is
+# declared there (extended_operations.proto contributes only options).
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Compute Engine v1 REST reference (no upstream test body is
+# copied), each sending through the generated client over komira_http_core's
+# ScriptedConnector pointed at `localhost` (no socket, no name lookup):
+# test_compute_instances (the VM, zonal operation, region and
+# operation-wait methods, and requestId sent only when set),
+# test_compute_network (networks, subnetworks and firewalls, with the exact
+# body of a sparse firewall patch), test_compute_load_balancing (each
+# load-balancing method, with the exact body of a sparse backend-service
+# patch), test_compute_operation (compute's Operation:
+# status names, a DONE operation with an error, no google.longrunning
+# state), test_compute_errors (the older error envelope mapped from the
+# HTTP status with its reason, the body never quoted),
+# test_compute_default_host (every client starts at
+# compute.googleapis.com; `set_rest_host` replaces it) and
+# test_no_env_reads (no generated file reads the environment; exactly the
+# 39 methods above are generated). Each request's bearer header is checked
+# in test_compute_instances; that the token source is asked once per
+# request and that no token means no dial is generator code shared by every
+# REST client, tested in komira_gcp_logging's test_logging_token_hook.
+#
+# No test here talks to the service.
+
+mojo_gcp_client(
+    name = "komira_gcp_compute",
+    bundle_only = [
+        "google/cloud/compute/v1/compute.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = [
+        "Instances.Insert",
+        "Instances.Get",
+        "Instances.Delete",
+        "ZoneOperations.Get",
+        "ZoneOperations.Wait",
+        "RegionOperations.Wait",
+        "GlobalOperations.Wait",
+        "Regions.Get",
+        "Networks.Get",
+        "Networks.Insert",
+        "Networks.Delete",
+        "Subnetworks.Get",
+        "Subnetworks.Insert",
+        "Subnetworks.Delete",
+        "Firewalls.Get",
+        "Firewalls.Insert",
+        "Firewalls.Patch",
+        "Firewalls.Delete",
+        "GlobalAddresses.Get",
+        "GlobalAddresses.Insert",
+        "SslCertificates.Get",
+        "SslCertificates.Insert",
+        "BackendBuckets.Get",
+        "BackendBuckets.Insert",
+        "RegionNetworkEndpointGroups.Get",
+        "RegionNetworkEndpointGroups.Insert",
+        "BackendServices.Get",
+        "BackendServices.Insert",
+        "BackendServices.Patch",
+        "UrlMaps.Get",
+        "UrlMaps.Insert",
+        "UrlMaps.Patch",
+        "UrlMaps.InvalidateCache",
+        "TargetHttpProxies.Get",
+        "TargetHttpProxies.Insert",
+        "TargetHttpsProxies.Get",
+        "TargetHttpsProxies.Insert",
+        "GlobalForwardingRules.Get",
+        "GlobalForwardingRules.Insert",
+    ],
+    proto_deps = ["//tools/vendor/googleapis:compute_v1"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        # The whole generated package, so the scan covers every file the
+        # generator writes with no second list of them to drift.
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_compute_gen"},
+    },
+    test_srcs = [
+        "tests/test_compute_default_host.mojo",
+        "tests/test_compute_errors.mojo",
+        "tests/test_compute_instances.mojo",
+        "tests/test_compute_load_balancing.mojo",
+        "tests/test_compute_network.mojo",
+        "tests/test_compute_operation.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)
