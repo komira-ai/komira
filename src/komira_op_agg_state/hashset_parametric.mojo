@@ -53,7 +53,7 @@
 # allocation). Copying a hash set is rare — the substrate is moved into
 # `RuntimeBreakerState` once at lazy-init.
 #
-# # Encapsulation invariants (the internal development notes hard bans)
+# # Encapsulation invariants
 #
 #   - NO UnsafePointer in any public method signature.
 #   - NO wildcard origins.
@@ -62,7 +62,7 @@
 #   - `List[Scalar[Ki]]` is gap6-safe (POD numeric storage; no Movable
 #     struct with heap-owning inner fields).
 #
-# # File-size cap (the internal development notes "File-size cap relaxed for Mojo")
+# # File-size cap
 #
 # 8 structs × ~70 LOC body + helpers = ~700 LOC. Well below the 5K LOC
 # iterative-rebuild knee.

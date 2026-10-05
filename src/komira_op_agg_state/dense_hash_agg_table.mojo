@@ -30,7 +30,7 @@
 #     power-of-2 + mask, geometric doubling, rehash directory-only off the
 #     dense cached_hash side array.
 #
-# Encapsulation invariants (the internal development notes hard ban #1, #3, #7, #8, #11):
+# Encapsulation invariants:
 #   - Storage = `List[UInt64]` / `List[Int64]` POD (RFC §7.1) — NOT
 #     MmapAlignedBuffer (wildcard-origin gap6 hazard). gap6-clean by construction.
 #   - NO `UnsafePointer` in any public method signature; no wildcard origins.

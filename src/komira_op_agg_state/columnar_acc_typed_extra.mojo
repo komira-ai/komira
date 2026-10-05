@@ -4,7 +4,7 @@
 #
 # Sibling to `columnar_acc_typed.mojo` (which holds Sum/Count/Min/Max int64 +
 # Kahan f64). Adding here keeps both files under the 1000-LOC Mojo JIT
-# threshold (the internal development notes hard ban #10). The architectural split:
+# threshold. The architectural split:
 #
 #   columnar_acc_typed.mojo        : Sum/Count/Min/Max int64 + SumF64Kahan
 #   columnar_acc_typed_extra.mojo  : CountStar / MinF64 / MaxF64 / Avg

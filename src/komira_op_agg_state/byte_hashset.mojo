@@ -30,11 +30,11 @@
 # # Public API — Span-based
 #
 # `insert_serialized` / `contains_serialized` accept `Span[UInt8, ...]`
-# (NOT `UnsafePointer[UInt8]`) per the internal development notes hard ban #1 (no UnsafePointer
-# in public sig). The Span carries the origin; ByteHashSet borrow-checks
+# (NOT `UnsafePointer[UInt8]`) because no UnsafePointer
+# appears in a public signature. The Span carries the origin; ByteHashSet borrow-checks
 # the input through Span.
 #
-# # Encapsulation invariants (the internal development notes hard bans)
+# # Encapsulation invariants
 #
 #   - NO UnsafePointer in any public method signature.
 #   - NO wildcard origins.

@@ -33,7 +33,7 @@
 # `List[UInt8]` / `List[UInt32]` / `List[UInt64]` storage is POD-only with
 # no wildcard origins and no heap-owning Movable inner fields.
 #
-# # Encapsulation invariants (the internal development notes hard bans)
+# # Encapsulation invariants
 #
 #   - NO `UnsafePointer` in any public method signature. Probe accepts
 #     `Span[UInt8, ImmO]`; the internal `memcmp` is gated with `# SAFETY:`.
@@ -54,8 +54,7 @@
 #   - No wildcard origins.
 #   - The agg-state side array (`List[AggOp.StateTy]`) is the same shape as
 #     `HashAggTableF64.slabs` — POD per RFC §7.3 for all v0.4 GA states.
-#   - Drain extraction via `Optional.take()` is partial-move-clean
-#     (the internal development notes hard ban #11; mojo-mcp `owned_state_destructure.mojo`).
+#   - Drain extraction via `Optional.take()` is partial-move-clean.
 # All three preconditions for the gap6 trap (Movable struct in byte-slab +
 # wildcard origin + heap-owning inner field) are ABSENT by construction.
 # =============================================================================

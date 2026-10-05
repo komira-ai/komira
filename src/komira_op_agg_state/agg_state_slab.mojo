@@ -19,7 +19,7 @@
 #      composite keys. Mirrors H2O spike's KeyHashFnv / KeyEqStringInt64
 #      shape; consumed by CompositeHashTable stage primitive.
 #
-# Encapsulation invariants (the internal development notes hard ban #1, #3):
+# Encapsulation invariants:
 #   - NO `UnsafePointer` in any public method signature.
 #   - NO wildcard origins.
 #   - All conformers are field-less marker structs (Q6/H2O spike pattern)

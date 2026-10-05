@@ -52,7 +52,7 @@
 #    reason the row form exists: the names comptime cannot read off a `def`'s
 #    parameter list, it CAN read off a struct's fields.
 #
-# ── Encapsulation invariants (the internal development notes hard bans) ──────────────────────────
+# ── Encapsulation invariants ──────────────────────────
 #   - NO `UnsafePointer` in any signature. The one offset read lives inside
 #     `komira_eval.row_builder._read_row_field`, over the caller's own local.
 #   - NO wildcard origins — `bo: Origin[mut=False]` threads end to end.

@@ -46,7 +46,7 @@
 # u64; therefore distinct u64 outputs. (`('A', 'B') vs ('AB', '')` example:
 # len0=1 ≠ len0=2 → byte 7 differs → distinct packed u64.)
 #
-# # Encapsulation invariants (the internal development notes §1, §3)
+# # Encapsulation invariants
 #
 # - Public API: `pack_2_byte_spans_u64[ImmO, ImmO']` + `pack_3_byte_spans_u64`
 #   accept `Span[UInt8, ImmO]` (no UnsafePointer crossing) and return

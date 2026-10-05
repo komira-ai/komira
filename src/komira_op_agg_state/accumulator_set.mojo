@@ -527,7 +527,7 @@ def count_star_aos_thunk[
 # The public face of a row thunk, `AosRowThunk.call`, takes the entry as a
 # mutable `Span[UInt8]` over the entry's bytes. The first version took an
 # `Int` and rebuilt the pointer from it, which "severs lifetime tracking
-# entirely" (the internal development notes Mojo Pointer Rules); the second
+# entirely"; the second
 # took an untracked-origin pointer in a public signature, which is the same
 # hole one step removed. A span carries its origin, so the compiler anchors
 # the thunk's write to the aggregator's `_entries` buffer, closing the UAF

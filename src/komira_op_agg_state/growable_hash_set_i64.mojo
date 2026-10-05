@@ -52,7 +52,7 @@
 # uses `List[Int64]` fields and lives at `runtime_breaker_state.mojo:556`
 # without incident.
 #
-# # Encapsulation invariants (the internal development notes hard bans #1, #3, #11)
+# # Encapsulation invariants
 #
 #   - NO `UnsafePointer` in any public method signature.
 #   - NO wildcard origins.

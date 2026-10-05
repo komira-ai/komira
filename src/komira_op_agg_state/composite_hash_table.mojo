@@ -43,7 +43,7 @@
 # `.append()` on the hot path; per-row insertion writes into pre-allocated
 # slots indexed by the hash.
 #
-# Encapsulation invariants (the internal development notes hard ban #1, #3, #11):
+# Encapsulation invariants:
 #   - NO `UnsafePointer` in any public method signature.
 #   - NO wildcard origins.
 #   - Parallel SoA Lists (gap6-safe per H2O spike §6 comment lines 400-403).

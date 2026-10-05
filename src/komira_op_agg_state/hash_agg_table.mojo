@@ -30,7 +30,7 @@
 # state list in lockstep and scatter-updates state[group_id]. This is the
 # typed-state, trampoline-free shape (RFC §5.2 — NO byte-erased fn-ptr).
 #
-# Encapsulation invariants (the internal development notes hard ban #1, #3, #7, #8, #11):
+# Encapsulation invariants:
 #   - NO `UnsafePointer` in any public method signature.
 #   - NO wildcard origins.
 #   - `List[POD]` storage (RFC §7.1 — NOT MmapAlignedBuffer; gap6-safe).

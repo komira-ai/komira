@@ -334,8 +334,7 @@ struct DynAccumulator(Movable):
 
         CLUSTER-Z: previously returned a wildcard-origin
         (MutExternalOrigin) pointer by delegating to a `DynValue._as_ptr`
-        that round-tripped the storage address through `Int(...)` (hard-ban
-        #4 + hard-ban #3). The raw-address round-trip and wildcard are now
+        that round-tripped the storage address through `Int(...)`. The raw-address round-trip and wildcard are now
         gone — `_as_ptr` returns a `self`-origin-tied pointer and that origin
         propagates through here.
 
