@@ -249,7 +249,7 @@ value, and the release's `release_produced_by` names the one build run.
   (`GITHUB_ACTIONS=true`), before it runs anything, `kci run` reads the
   workflow file it runs under as it was committed (`GITHUB_WORKFLOW_REF`'s
   path at `GITHUB_WORKFLOW_SHA`, through `git show`) and holds it to the
-  machine file and every channels file it names (rules R1-R12 of
+  machine file and every channels file it names (rules R1-R12 and R14 of
   `src/kci_ci_check/rules.mojo`: a job per stage named for it, each job's
   environment its stage's, `needs` the jobs that run the stage's `after`,
   `id-token: write` only where a stage publishes by trusted publishing or is
@@ -354,8 +354,20 @@ value, and the release's `release_produced_by` names the one build run.
   from it instead of the step's channel (only the compiler and extra
   channels are asked over the network). `--channel` is refused unless the
   run selects only CONDA_INSTALL_ENV validations (no BUILD or PUBLISH step),
-  and under GitHub Actions: a workflow validates only what was published.
-  The result row records the location (`channel_url`).
+  and under GitHub Actions: a workflow validates only what was published
+  (rule R14 refuses a `kci run --channel` in the workflow itself). The
+  result row records the location (`channel_url`).
+- **Each validation is a target.** `./buck2 run
+  //release/validations:<name> -- --release-dir <R> --revision-id <C>
+  [--channel file:///<dir>]` runs `kci run --stage <stage> --only
+  validation:<name>` with kci and the pinned pixi of your platform's row,
+  from the repository's root whatever directory it starts in
+  ([release/validations/defs.bzl](../release/validations/defs.bzl)): no
+  `--scratch-dir` means a fresh directory under the system temp directory.
+  The targets are the machine file's validations, both ways
+  (`kci_release_machine`'s welded test), and the `validate` job's `kci run`
+  passes what they pass (`test_repo_kci_yml`), so a developer and the
+  workflow run the same thing.
 - **The channels.** prefix.dev channels `komira-ai/gamma` and
   `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),
   both public. Uploads go to `https://prefix.dev/api/v1/upload/komira-ai/<channel>`

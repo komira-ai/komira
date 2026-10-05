@@ -38,7 +38,7 @@ mojo_library(
     test_srcs = [
         # what the restricted reader reads, and each construct it cannot tell
         "tests/test_workflow_reader.mojo",
-        # a fixture that agrees, one mutation per rule R1-R12, the id-token
+        # a fixture that agrees, one mutation per rule R1-R12 and R14, the id-token
         # stages, the start-up entry point
         "tests/test_ci_rules.mojo",
         # one stage split over jobs whose --only parts run all of it once
@@ -48,14 +48,16 @@ mojo_library(
         "tests/test_repo_kci_yml.mojo",
     ],
     # The repository's own release workflow, machine file and channels file
-    # (the root BUCK and release/BUCK), and the pixi pin its validate job
-    # downloads (the platform table's, written by //tools/build/toolchains).
+    # (the root BUCK and release/BUCK), the pixi pin its validate job
+    # downloads (the platform table's, written by //tools/build/toolchains),
+    # and the validation targets' record (release/validations/BUCK).
     test_data = {
         "tests/test_repo_kci_yml.mojo": {
             "channels.textproto": "//release:channels.textproto",
             "kci.yml": "//:kci.yml",
             "machine.textproto": "//release:machine.textproto",
             "pixi_pin.txt": "//tools/build/toolchains:pixi_pin_linux_x86_64",
+            "validations.txt": "//release/validations:names",
         },
     },
     visibility = ["PUBLIC"],

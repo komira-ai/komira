@@ -38,6 +38,9 @@
 #          step:publish`) and `validate` (`--only validation:<name>` for each
 #          of the two, no environment, no identity token), and prod waits
 #          for both.
+#          Each validation is also a target a developer runs, before or
+#          after publishing: `./buck2 run //release/validations:<name>`
+#          (release/validations/BUCK, held equal to the validations here).
 #   prod   publishes the SAME release set (never rebuilt) to the channel
 #          `prod` (prefix.dev komira-ai/prod), in the GitHub environment `prod`,
 #          whose required reviewer approves the job. The gamma job's summary
