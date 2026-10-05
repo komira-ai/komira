@@ -61,7 +61,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 | [`komira_resources`](../src/komira_resources/) | the files a program reads at run time: `read_resource` and `resource_path`. |
 | [`komira_snapshotter`](../src/komira_snapshotter/) | the provider-agnostic change-stream seam: one trait every change-stream provider conforms to, so a snapshotter's apply, write, commit and checkpoint half is written once. It holds no provider client code. |
 | [`komira_retry`](../src/komira_retry/) | generic retry: when to retry and how long to wait, never which failures. A pure `RetryPolicy`, a `RetryLoop` over injected clock, sleeper and random-source seams, and an optional retry budget; classifying a failure belongs to the client library that knows the protocol. |
-| [`komira_inference_backend`](../src/komira_inference_backend/) | the local-inference engine seam: an `InferenceBackend` trait that launches, probes and tears down an OpenAI-`/v1` server, a connect-to-running backend, and backends that spawn `mlx_lm.server`, `llama-server` or `mlx-openai-server` as a supervised child, wait until it answers and stop it. It reads no environment. |
+| [`komira_inference_backend`](../src/komira_inference_backend/) | the local-inference engine seam: an `InferenceBackend` trait that launches, probes and tears down an OpenAI-`/v1` server, a connect-to-running backend, and backends that spawn `mlx_lm.server`, `llama-server` or `mlx-openai-server` as a child process, wait until it answers (each probe with a deadline; a child that exits fails the launch at once) and stop it. It reads no environment. |
 
 ### Cloud
 
@@ -200,7 +200,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 | SDK and SQL: the plan-carrier surface, UDFs, the Python package, the SQL front ends | komira_sdk |
 | runtime: the async runtime, the job supervisor and its job report wire | komira_async, komira_job_supervisor, komira_job_report_proto |
 | observability: logging and telemetry | komira_log |
-| agents: MCP and local models | komira_mcp_server, komira_localmodel |
+| agents: MCP and local models | komira_mcp_server, komira_localmodel (the engine seam beneath local models, `komira_inference_backend`, is in `src/`) |
 | cloud: the generated AWS and Google Cloud service clients, infrastructure providers, the service registry | the cloud SDK libraries (their cores, `komira_aws_core` and `komira_gcp_core`, and the generated `komira_aws_s3`, `komira_aws_apigatewayv2`, `komira_aws_dynamodb`, `komira_aws_dynamodbstreams`, `komira_aws_ec2`, `komira_aws_ecr`, `komira_aws_ecs`, `komira_aws_iam`, `komira_aws_lambda`, `komira_aws_logs`, `komira_aws_route53`, `komira_aws_scheduler`, `komira_aws_secretsmanager`, `komira_aws_sesv2`, `komira_aws_sns`, `komira_aws_sqs`, `komira_gcp_apigateway`, `komira_gcp_artifactregistry`, `komira_gcp_cloudresourcemanager`, `komira_gcp_compute`, `komira_gcp_iam`, `komira_gcp_logging`, `komira_gcp_serviceusage` and `komira_gcp_storage`, are in `src/`) |
 | CI and deploy: the bundle model, apply, validate and rollout, the command line itself | kci (its `kci_*` libraries above are in `src/`) |
 | message broker: connection handling and request dispatch | komira_kafka_server (its wire codec is in `src/`) |

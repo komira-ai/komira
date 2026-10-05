@@ -33,7 +33,7 @@ and its limits. A family's doc lands together with the libraries it describes.
 | SDK and SQL | the plan-carrier surface, UDFs, the Python package, the SQL front ends: coming with `komira_sdk` |
 | runtime | the async runtime, the job supervisor and its job report wire: coming with `komira_async`, `komira_job_supervisor` and `komira_job_report_proto` |
 | observability | logging and telemetry: coming with `komira_log` |
-| agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |
+| agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel`; the local-inference engine seam, `komira_inference_backend`, is in `src/` |
 | cloud | AWS clients, cloud credentials, infrastructure providers, secrets and service registry, deploy marks: coming with the cloud SDK libraries |
 | CI and deploy | the bundle model, apply, validate and rollout, the `kci` command line: coming with `kci` |
 | packaging | the shared-library ABI, the release train: coming with `komira_so` and the packaging rules |

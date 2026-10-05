@@ -1,34 +1,40 @@
 # =============================================================================
 # komira_inference_backend/spawning_backend.mojo
 #   The spawning InferenceBackend conformers: a backend that SPAWNS its
-#   OpenAI-`/v1` server as a supervised child process (komira_supervisor),
-#   probes it live (GET /v1/models over the HTTP client), and tears it down by
-#   stopping the child. Three engines:
+#   OpenAI-`/v1` server as a child process (komira_supervisor), probes it live
+#   over the HTTP client, and tears it down by stopping the child. Three
+#   engines:
 #     * SpawningMlxBackend       — macOS chat (mlx_lm.server).
 #     * SpawningLlamaCppBackend  — Linux chat (llama-server).
 #     * SpawningMlxEmbedBackend  — macOS embeddings (mlx-openai-server).
 # =============================================================================
 #
-# Its dependencies are komira_async, the HTTP client, komira_supervisor and its
-# sibling `inference_backend`. It spawns `mlx_lm.server` / `llama-server` /
-# `mlx-openai-server` as a supervised child and probes the OpenAI surface.
+# Its dependencies are komira_async, the HTTP client, komira_clock,
+# komira_supervisor and its sibling `inference_backend`.
 #
 # All three implement the `InferenceBackend` trait (inference_backend.mojo).
-# The comptime-OS default in `inference_backend` selects MLX on macOS and the
-# llama.cpp-compatible URL elsewhere; a caller's configuration overrides it at
-# run time.
 #
 # WHAT DIFFERS from the connect-to-running MlxBackend (inference_backend.mojo):
-#   * launch()   — SPAWNS the engine binary as a supervised child via
-#                  `Supervisor.spawn(ChildSpec{path, argv, env})`, then BLOCKS
-#                  (bounded retries) until a real GET /v1/models probe says the
-#                  endpoint is serving. If the endpoint is ALREADY healthy (an
-#                  externally-managed server, or a prior launch), it REUSES it
-#                  without spawning. Returns the OpenAI base URL.
-#   * health()   — a REAL GET /v1/models liveness probe (`HttpClient[C]` on a
-#                  per-call BlockingRuntime), not an optimism flag.
-#   * teardown() — STOPS the supervised child (SIGTERM -> grace -> SIGKILL,
-#                  exactly-once) via `Supervisor.terminate` and reaps it.
+#   * launch()   — if the endpoint is ALREADY serving (an externally-managed
+#                  server, or this backend's own earlier launch) it is REUSED
+#                  without spawning. Otherwise any child left by an earlier
+#                  launch is stopped, the engine binary is spawned, and launch()
+#                  BLOCKS until a live probe says the endpoint is serving, the
+#                  child exits (raised at once, with its exit status), or the
+#                  launch budget runs out. Returns the OpenAI base URL.
+#   * health()   — a REAL liveness probe (`HttpClient[C]` on a per-call
+#                  BlockingRuntime, bounded by PROBE_TIMEOUT_MS), not an
+#                  optimism flag.
+#   * teardown() — STOPS a child this backend spawned (SIGTERM -> grace ->
+#                  SIGKILL) and reaps it. A reused server is never stopped.
+#
+# THE CHILD'S STDIO AND ENVIRONMENT. The engine is spawned with
+# komira_supervisor's `spawn_detached`: it inherits the caller's fds 0/1/2 and
+# environment. An inference server logs for as long as it runs (model load, a
+# line per request), so capture pipes that nobody drains would fill and freeze
+# it; inheriting stdio means its logs go where the caller's own go. A caller
+# whose stdout carries a protocol should point its stdout elsewhere before
+# launching.
 #
 # The wire is the OpenAI `/v1` one, so the base URL these backends return is
 # what any OpenAI-compatible client POSTs to. To target an externally-managed
@@ -42,14 +48,16 @@
 #
 # The surface is owned Strings and values: no UnsafePointer in any public
 # signature and no wildcard origin. The Connector factory is a `thin` fn-pointer
-# field (a code pointer, no heap). The supervised child is owned through
-# komira_supervisor's value-typed `Supervisor`, which encapsulates the pid.
+# field (a code pointer, no heap). The child is owned through komira_supervisor's
+# value-typed `DetachedChild`, which encapsulates the pid and its signals.
 # =============================================================================
 
 from std.ffi import external_call
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
+
+from komira_clock import now_ns
 
 from komira_http_client.body import EmptyBody, BytesBody
 from komira_http_client.client import HttpClient, build_request_with_body
@@ -58,24 +66,30 @@ from komira_http_client.url import Url
 from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST, HttpMethod
 from komira_http_core.transport.io_stream import Connector
 
-from komira_supervisor import ChildSpec, Supervisor
+from komira_supervisor import ChildSpec, DetachedChild, DetachedExit, spawn_detached
 
 from .inference_backend import InferenceBackend
 
 
 # -----------------------------------------------------------------------------
 # Readiness-wait tuning. After spawning the engine, launch() polls the live
-# GET /v1/models probe until it succeeds (loading a model can take seconds for
-# a 7B-class model). These are the bounded defaults.
+# probe until it succeeds (loading a model can take seconds for a 7B-class
+# model). These are the bounded defaults.
 #   * HEALTH_POLL_INTERVAL_MS — pause between readiness probes.
-#   * DEFAULT_LAUNCH_TIMEOUT_MS — overall readiness budget (a 7B 4-bit model
-#     loads in a few seconds on Apple Silicon; 120s is a safe upper bound that
-#     also covers a cold disk read or a larger model).
+#   * DEFAULT_LAUNCH_TIMEOUT_MS — overall readiness budget, measured on the
+#     monotonic clock from the spawn (a 7B 4-bit model loads in a few seconds
+#     on Apple Silicon; 120s is a safe upper bound that also covers a cold disk
+#     read or a larger model). `set_launch_timeout_ms` overrides it.
 #   * TEARDOWN_GRACE_MS — SIGTERM grace before SIGKILL on teardown.
+#   * PROBE_TIMEOUT_MS — the deadline of one probe request, connect to last
+#     body byte. A server that accepts and then stalls is "not serving" after
+#     this long, so health() stays short and a launch overshoots its budget by
+#     at most one probe.
 # -----------------------------------------------------------------------------
 comptime HEALTH_POLL_INTERVAL_MS: Int = 500
 comptime DEFAULT_LAUNCH_TIMEOUT_MS: Int = 120000
 comptime TEARDOWN_GRACE_MS: Int = 5000
+comptime PROBE_TIMEOUT_MS: Int = 2000
 
 # -----------------------------------------------------------------------------
 # Engine-parallelism default. The number of concurrent requests an engine is
@@ -116,16 +130,27 @@ def _base_url_for(host: String, port: UInt16) -> String:
     return out^
 
 
+def _sleep_ms(ms: Int):
+    """Pause `ms` milliseconds. `usleep`, not the stdlib sleep: the stdlib
+    declares `nanosleep` with a signature that conflicts with komira_async's
+    own declaration when both are linked into one binary."""
+    if ms <= 0:
+        return
+    _ = external_call["usleep", Int32](UInt32(ms * 1000))
+
+
 # -----------------------------------------------------------------------------
 # probe_v1_models[C: Connector] — the liveness probe. GET /v1/models over a
-# fresh `HttpClient[C]` on a per-call `BlockingRuntime[NoopSink]`. Returns True
-# iff the endpoint answered with a 2xx. ANY transport / connect error is
-# swallowed and reported as False (an unreachable / not-yet-up server is "not
-# healthy", not an exception: health() is a non-raising boolean per the trait).
+# fresh `HttpClient[C]` on a per-call `BlockingRuntime[NoopSink]`, bounded by
+# PROBE_TIMEOUT_MS. Returns True iff the endpoint answered with a 2xx. ANY
+# transport / connect / deadline error is swallowed and reported as False (an
+# unreachable, stalled or not-yet-up server is "not healthy", not an exception:
+# health() is a non-raising boolean per the trait).
 #
 # `/v1/models` is the OpenAI model-list endpoint the common local-LLM servers
 # (mlx_lm.server, llama-server, Ollama, LM Studio) serve; a 2xx there is the
-# signal that the OpenAI surface is up.
+# signal that the OpenAI surface is up. It says nothing about WHICH model is
+# loaded: the body is not read.
 # -----------------------------------------------------------------------------
 def probe_v1_models[
     C: Connector
@@ -142,7 +167,9 @@ def probe_v1_models[
             EmptyBody.new(),
         )
         var connector = mk_connector()
-        var client = HttpClient[C].with_defaults(connector^)
+        var client = HttpClient[C].with_request_timeout_us(
+            connector^, PROBE_TIMEOUT_MS * 1000
+        )
         var rt = BlockingRuntime[NoopSink].new(
             NoopSink(_placeholder=UInt8(0))
         )
@@ -170,9 +197,10 @@ def probe_v1_models[
 # `served_model` MUST equal the server's `--served-model-name`:
 # mlx-openai-server 404s any other `model` value. A 404 model_not_found is NOT
 # a healthy-server signal (the model is not loaded under that name), so only a
-# 2xx counts as healthy. ANY transport / connect error is swallowed -> False
-# (an unreachable / not-yet-up server is "not healthy", never an exception:
-# health() is a non-raising boolean per the trait).
+# 2xx counts as healthy. ANY transport / connect / deadline error is swallowed
+# -> False (an unreachable / not-yet-up server is "not healthy", never an
+# exception: health() is a non-raising boolean per the trait). Bounded by
+# PROBE_TIMEOUT_MS.
 # -----------------------------------------------------------------------------
 def probe_v1_embeddings[
     C: Connector
@@ -205,7 +233,9 @@ def probe_v1_embeddings[
             BytesBody.from_bytes(body_bytes^),
         )
         var connector = mk_connector()
-        var client = HttpClient[C].with_defaults(connector^)
+        var client = HttpClient[C].with_request_timeout_us(
+            connector^, PROBE_TIMEOUT_MS * 1000
+        )
         var rt = BlockingRuntime[NoopSink].new(
             NoopSink(_placeholder=UInt8(0))
         )
@@ -221,13 +251,30 @@ def probe_v1_embeddings[
         return False
 
 
+def _probe[
+    C: Connector
+](
+    mk_connector: def () thin -> C,
+    host: String,
+    port: UInt16,
+    embeddings: Bool,
+    served_model: String,
+) -> Bool:
+    """The probe a backend is served by: POST /v1/embeddings for the embeddings
+    engine, GET /v1/models for the chat engines."""
+    if embeddings:
+        return probe_v1_embeddings[C](mk_connector, host, port, served_model)
+    return probe_v1_models[C](mk_connector, host, port)
+
+
+
 # =============================================================================
 # ChildSpec assembly — pure factory functions (the unit-test seam).
 #
 # These build the engine `ChildSpec` (path + argv + env) from a host/port/model
 # WITHOUT spawning, so a unit test can assert the exact argv a real spawn would
 # use, isolated from the engine itself. launch() calls these, then hands the
-# spec to `Supervisor.spawn`.
+# spec to `spawn_detached`.
 # =============================================================================
 
 
@@ -249,7 +296,7 @@ def build_mlx_embed_child_spec(
     embeddings` + `--model-path` (not `--model`) + `--served-model-name`, and
     serves the OpenAI `/v1/embeddings` wire. `--served-model-name` is the value
     a client must send in the request `model` field (the server 404s any other).
-    argv[0] is defaulted to `binary_path` by `Supervisor.spawn`.
+    argv[0] is defaulted to `binary_path` by the spawn.
 
     No engine-parallelism flag: `mlx-openai-server`'s `--decode-concurrency` /
     `--prompt-concurrency` apply to `--model-type lm`/multimodal ONLY, not to
@@ -285,7 +332,7 @@ def build_mlx_child_spec(
 
     Runs `<binary_path> --model <model> --host <host> --port <port>`. The
     `mlx_lm.server` console-script entrypoint takes exactly these flags.
-    argv[0] is defaulted to `binary_path` by `Supervisor.spawn`.
+    argv[0] is defaulted to `binary_path` by the spawn.
 
     `num_parallel` is accepted for symmetry with the other engines, but
     **mlx_lm.server has NO native concurrency / continuous-batching CLI flag**
@@ -354,15 +401,157 @@ def build_llamacpp_child_spec(
 
 
 # =============================================================================
+# The engine process: spawn, stop, and the shared launch body.
+# =============================================================================
+
+
+def _spawn_engine(spec: ChildSpec, who: String) raises -> DetachedChild:
+    """Spawn `spec` with inherited stdio (see the header): an inference server
+    logs for its whole life, and a capture pipe nobody drains would freeze it.
+    The environment is the spec's when it carries one, else the caller's.
+    Raises naming the binary when the spawn itself fails."""
+    var env = spec.env.copy() if spec.has_env else List[String]()
+    var pid = spawn_detached(spec.path, spec.argv, env)
+    if pid <= Int32(0):
+        raise Error(
+            who
+            + ": spawn failed (rc="
+            + String(Int(pid))
+            + ") for "
+            + spec.path
+        )
+    return DetachedChild(pid)
+
+
+def _describe_exit(st: DetachedExit) -> String:
+    """`exited with code N` / `was killed by signal N` / `could not be waited
+    on`, for a child that is no longer running."""
+    if st.exited:
+        return String("exited with code ") + String(Int(st.exit_code))
+    if st.signaled:
+        return String("was killed by signal ") + String(Int(st.signal))
+    return String("could not be waited on")
+
+
+def _stop_engine(child: DetachedChild, grace_ms: Int):
+    """SIGTERM, wait up to `grace_ms` for the child to exit, then SIGKILL, and
+    reap it. A child that has already been reaped is left alone, so its pid
+    (which the kernel may have reused) is never signalled."""
+    if not child.poll_exit().running:
+        return
+    _ = child.term()
+    var waited = 0
+    while waited < grace_ms:
+        if not child.poll_exit().running:
+            return
+        _sleep_ms(10)
+        waited += 10
+    _ = child.kill()
+    # SIGKILL cannot be caught, so the reap follows promptly; the bound only
+    # keeps a child stuck in the kernel from hanging teardown.
+    for _ in range(500):
+        if not child.poll_exit().running:
+            return
+        _sleep_ms(10)
+
+
+# =============================================================================
+# _launch_impl — the SHARED launch body of all three backends; only the
+# ChildSpec and the probe differ. Mutates the backend's `spawned` / `child`
+# fields in place (passed by `mut`). The flow:
+#   1. If the endpoint is ALREADY serving, REUSE it (no spawn): this backend's
+#      own child from an earlier launch, or an externally-managed server. Reuse
+#      checks that SOMETHING serves the probe at host:port, not which model it
+#      has loaded; mlx_lm.server and llama-server share the default port 8080,
+#      so a caller running both must give them different ports.
+#   2. Else stop any child an earlier launch left (it is not serving, and it
+#      may still hold the port), then spawn the engine. A failed spawn raises.
+#   3. Poll until the probe succeeds (return the base URL), the child exits
+#      (raise at once with its exit status), or `launch_timeout_ms` has passed
+#      on the monotonic clock since the spawn (stop the child, raise).
+# =============================================================================
+def _launch_impl[
+    C: Connector
+](
+    mk_connector: def () thin -> C,
+    spec: ChildSpec,
+    host: String,
+    port: UInt16,
+    embeddings: Bool,
+    served_model: String,
+    launch_timeout_ms: Int,
+    who: String,
+    mut spawned: Bool,
+    mut child: DetachedChild,
+) raises -> String:
+    var base = _base_url_for(host, port)
+
+    # (1) Reuse an endpoint that is already serving.
+    if _probe[C](mk_connector, host, port, embeddings, served_model):
+        return base^
+
+    # (2) A child of ours that is not serving is stopped before a new spawn,
+    # so it cannot keep the port or outlive the backend unreferenced.
+    if spawned:
+        _stop_engine(child, TEARDOWN_GRACE_MS)
+        spawned = False
+    child = _spawn_engine(spec, who)
+    spawned = True
+
+    # (3) Wait for readiness, bounded on the monotonic clock.
+    var start = now_ns()
+    var budget_ns = UInt64(launch_timeout_ms) * UInt64(1_000_000)
+    while True:
+        if _probe[C](mk_connector, host, port, embeddings, served_model):
+            return base^
+        var st = child.poll_exit()
+        if not st.running:
+            spawned = False
+            raise Error(
+                who
+                + ": engine "
+                + spec.path
+                + " "
+                + _describe_exit(st)
+                + " before serving at "
+                + base
+            )
+        if now_ns() - start >= budget_ns:
+            break
+        _sleep_ms(HEALTH_POLL_INTERVAL_MS)
+
+    # Never came up within the budget: stop the child and fail loudly.
+    _stop_engine(child, TEARDOWN_GRACE_MS)
+    spawned = False
+    raise Error(
+        who
+        + ": engine did not become healthy at "
+        + base
+        + " within "
+        + String(launch_timeout_ms)
+        + "ms (model load failed, wrong binary or flags, or for the"
+        " embeddings engine a served-model-name mismatch)"
+    )
+
+
+def _teardown_impl(mut spawned: Bool, child: DetachedChild):
+    """Stop and reap a child this backend spawned; a no-op otherwise (a reused
+    server is never stopped)."""
+    if spawned:
+        _stop_engine(child, TEARDOWN_GRACE_MS)
+        spawned = False
+
+
+# =============================================================================
 # SpawningMlxBackend[C: Connector] — the macOS chat engine.
 # =============================================================================
 struct SpawningMlxBackend[C: Connector](InferenceBackend, Movable):
     """Spawning MLX backend (mlx_lm.server) — the macOS chat engine.
 
     `launch()` spawns `mlx_lm.server --model <path> --host <host> --port <p>`
-    as a supervised child (unless an endpoint is already healthy at the target,
-    in which case it reuses it), then blocks until a live GET /v1/models probe
-    succeeds. `health()` is the real probe. `teardown()` stops the child.
+    (unless an endpoint is already serving at the target, in which case it
+    reuses it), then blocks until a live GET /v1/models probe succeeds.
+    `health()` is the real probe. `teardown()` stops the child.
 
     Construction:
       * SpawningMlxBackend[C](mk_connector, binary_path, model) — defaults
@@ -387,9 +576,8 @@ struct SpawningMlxBackend[C: Connector](InferenceBackend, Movable):
     # Only a backend-spawned child is torn down (we never kill someone else's
     # externally-managed server).
     var _spawned: Bool
-    # The supervised child (valid only when `_spawned`). Value-typed; owns the
-    # pid behind a safe surface.
-    var _child: Supervisor
+    # The spawned child (meaningful only while `_spawned`).
+    var _child: DetachedChild
 
     def __init__(
         out self,
@@ -407,7 +595,7 @@ struct SpawningMlxBackend[C: Connector](InferenceBackend, Movable):
         self._launch_timeout_ms = DEFAULT_LAUNCH_TIMEOUT_MS
         self._num_parallel = DEFAULT_NUM_PARALLEL
         self._spawned = False
-        self._child = Supervisor()
+        self._child = DetachedChild(Int32(-1))
 
     def __init__(
         out self,
@@ -418,7 +606,8 @@ struct SpawningMlxBackend[C: Connector](InferenceBackend, Movable):
         port: UInt16,
         num_parallel: Int = DEFAULT_NUM_PARALLEL,
     ):
-        """Explicit host + port (+ optional engine num_parallel)."""
+        """Explicit host + port (+ optional engine num_parallel, which
+        mlx_lm.server ignores; see build_mlx_child_spec)."""
         self._mk_connector = mk_connector
         self._binary_path = binary_path
         self._model = model
@@ -427,7 +616,12 @@ struct SpawningMlxBackend[C: Connector](InferenceBackend, Movable):
         self._launch_timeout_ms = DEFAULT_LAUNCH_TIMEOUT_MS
         self._num_parallel = num_parallel
         self._spawned = False
-        self._child = Supervisor()
+        self._child = DetachedChild(Int32(-1))
+
+    def set_launch_timeout_ms(mut self, ms: Int):
+        """The readiness budget of the next launch() (default
+        DEFAULT_LAUNCH_TIMEOUT_MS)."""
+        self._launch_timeout_ms = ms
 
     def child_spec(self) -> ChildSpec:
         """The `ChildSpec` `launch()` would spawn (the unit-test seam)."""
@@ -440,22 +634,18 @@ struct SpawningMlxBackend[C: Connector](InferenceBackend, Movable):
         )
 
     def launch(mut self) raises -> String:
-        """Spawn mlx_lm.server (unless already healthy), wait for readiness,
-        return the base URL. Reuses an already-healthy endpoint without
-        spawning (idempotent / connect-to-running-friendly)."""
-        var spec = build_mlx_child_spec(
-            self._binary_path,
-            self._model,
-            self._host,
-            self._port,
-            self._num_parallel,
-        )
+        """Reuse an endpoint already serving at the target, or spawn
+        mlx_lm.server and wait for it; return the base URL."""
+        var spec = self.child_spec()
         return _launch_impl[Self.C](
             self._mk_connector,
-            spec^,
+            spec,
             self._host,
             self._port,
+            False,
+            String(""),
             self._launch_timeout_ms,
+            String("SpawningMlxBackend.launch"),
             self._spawned,
             self._child,
         )
@@ -465,20 +655,17 @@ struct SpawningMlxBackend[C: Connector](InferenceBackend, Movable):
         return probe_v1_models[Self.C](self._mk_connector, self._host, self._port)
 
     def teardown(mut self):
-        """Stop the supervised child (SIGTERM -> grace -> SIGKILL) + reap.
+        """Stop the spawned child (SIGTERM -> grace -> SIGKILL) + reap.
         No-op when this backend did not spawn (external server)."""
-        if self._spawned:
-            _ = self._child.terminate(TEARDOWN_GRACE_MS)
-            self._child.close()
-            self._spawned = False
+        _teardown_impl(self._spawned, self._child)
 
     def base_url(self) -> String:
         return _base_url_for(self._host, self._port)
 
     def num_parallel(self) -> Int:
-        """The engine max-concurrent this backend was configured with. For
-        mlx_lm.server this is informational only (no native concurrency flag is
-        emitted)."""
+        """The num_parallel this backend was configured with. mlx_lm.server
+        IGNORES it: no concurrency flag is passed, the engine serializes
+        decode, and the caller's own admission limit is the only bound."""
         return self._num_parallel
 
 
@@ -490,8 +677,8 @@ struct SpawningLlamaCppBackend[C: Connector](InferenceBackend, Movable):
 
     Same shape as SpawningMlxBackend: `launch()` spawns
     `llama-server --model <path> --host <host> --port <p> --n-gpu-layers 99`
-    supervised (unless already healthy), waits for the GET /v1/models probe;
-    `health()` probes; `teardown()` stops the child.
+    (unless an endpoint is already serving), waits for the GET /v1/models
+    probe; `health()` probes; `teardown()` stops the child.
 
     Construction:
       * SpawningLlamaCppBackend[C](mk_connector, binary_path, model) — defaults
@@ -512,7 +699,7 @@ struct SpawningLlamaCppBackend[C: Connector](InferenceBackend, Movable):
     # slots). See build_llamacpp_child_spec.
     var _num_parallel: Int
     var _spawned: Bool
-    var _child: Supervisor
+    var _child: DetachedChild
 
     def __init__(
         out self,
@@ -530,7 +717,7 @@ struct SpawningLlamaCppBackend[C: Connector](InferenceBackend, Movable):
         self._launch_timeout_ms = DEFAULT_LAUNCH_TIMEOUT_MS
         self._num_parallel = DEFAULT_NUM_PARALLEL
         self._spawned = False
-        self._child = Supervisor()
+        self._child = DetachedChild(Int32(-1))
 
     def __init__(
         out self,
@@ -550,7 +737,12 @@ struct SpawningLlamaCppBackend[C: Connector](InferenceBackend, Movable):
         self._launch_timeout_ms = DEFAULT_LAUNCH_TIMEOUT_MS
         self._num_parallel = num_parallel
         self._spawned = False
-        self._child = Supervisor()
+        self._child = DetachedChild(Int32(-1))
+
+    def set_launch_timeout_ms(mut self, ms: Int):
+        """The readiness budget of the next launch() (default
+        DEFAULT_LAUNCH_TIMEOUT_MS)."""
+        self._launch_timeout_ms = ms
 
     def child_spec(self) -> ChildSpec:
         """The `ChildSpec` `launch()` would spawn (the unit-test seam)."""
@@ -563,21 +755,18 @@ struct SpawningLlamaCppBackend[C: Connector](InferenceBackend, Movable):
         )
 
     def launch(mut self) raises -> String:
-        """Spawn llama-server (unless already healthy), wait for readiness,
-        return the base URL."""
-        var spec = build_llamacpp_child_spec(
-            self._binary_path,
-            self._model,
-            self._host,
-            self._port,
-            self._num_parallel,
-        )
+        """Reuse an endpoint already serving at the target, or spawn
+        llama-server and wait for it; return the base URL."""
+        var spec = self.child_spec()
         return _launch_impl[Self.C](
             self._mk_connector,
-            spec^,
+            spec,
             self._host,
             self._port,
+            False,
+            String(""),
             self._launch_timeout_ms,
+            String("SpawningLlamaCppBackend.launch"),
             self._spawned,
             self._child,
         )
@@ -587,11 +776,9 @@ struct SpawningLlamaCppBackend[C: Connector](InferenceBackend, Movable):
         return probe_v1_models[Self.C](self._mk_connector, self._host, self._port)
 
     def teardown(mut self):
-        """Stop the supervised child (SIGTERM -> grace -> SIGKILL) + reap."""
-        if self._spawned:
-            _ = self._child.terminate(TEARDOWN_GRACE_MS)
-            self._child.close()
-            self._spawned = False
+        """Stop the spawned child (SIGTERM -> grace -> SIGKILL) + reap.
+        No-op when this backend did not spawn (external server)."""
+        _teardown_impl(self._spawned, self._child)
 
     def base_url(self) -> String:
         return _base_url_for(self._host, self._port)
@@ -604,72 +791,6 @@ struct SpawningLlamaCppBackend[C: Connector](InferenceBackend, Movable):
 
 
 # =============================================================================
-# _launch_impl — the SHARED launch body (both chat backends use the identical
-# spawn-or-reuse + readiness-wait logic; only the ChildSpec differs).
-#
-# Mutates `out_spawned` / the borrowed `child` in place (passed by `mut` from
-# the backend's own fields). The flow:
-#   1. If the endpoint is ALREADY healthy, REUSE it (no spawn). This is the
-#      idempotent path: a second launch() (or an externally-managed server)
-#      just returns the base URL.
-#   2. Else spawn the engine via `Supervisor.spawn(spec)`. A non-positive pid
-#      is a spawn failure (-errno) -> raise.
-#   3. Poll the live GET /v1/models probe until it succeeds or the launch
-#      timeout elapses. If it never comes up, the child is stopped and the
-#      launch raises (a dead engine is not silently returned).
-# =============================================================================
-def _launch_impl[
-    C: Connector
-](
-    mk_connector: def () thin -> C,
-    var spec: ChildSpec,
-    host: String,
-    port: UInt16,
-    launch_timeout_ms: Int,
-    mut out_spawned: Bool,
-    mut child: Supervisor,
-) raises -> String:
-    var base = _base_url_for(host, port)
-
-    # (1) Reuse an already-healthy endpoint (idempotent / external server).
-    if probe_v1_models[C](mk_connector, host, port):
-        return base^
-
-    # (2) Spawn the engine as a supervised child.
-    var pid = child.spawn(spec)
-    if pid <= Int32(0):
-        raise Error(
-            "InferenceBackend.launch: spawn failed (rc="
-            + String(Int(pid))
-            + ") for "
-            + spec.path
-        )
-    out_spawned = True
-
-    # (3) Wait for readiness (bounded). Poll the live probe.
-    var waited = 0
-    while waited < launch_timeout_ms:
-        if probe_v1_models[C](mk_connector, host, port):
-            return base^
-        _ = external_call["usleep", Int32](
-            UInt32(HEALTH_POLL_INTERVAL_MS * 1000)
-        )
-        waited += HEALTH_POLL_INTERVAL_MS
-
-    # Never came up within the budget — stop the dead child + fail loudly.
-    _ = child.terminate(TEARDOWN_GRACE_MS)
-    child.close()
-    out_spawned = False
-    raise Error(
-        "InferenceBackend.launch: engine did not become healthy at "
-        + base
-        + " within "
-        + String(launch_timeout_ms)
-        + "ms (model load failed or wrong binary/flags)"
-    )
-
-
-# =============================================================================
 # SpawningMlxEmbedBackend[C: Connector] — the macOS EMBEDDINGS engine.
 #
 # Same InferenceBackend shape as the chat backends (launch / health / teardown /
@@ -678,11 +799,11 @@ def _launch_impl[
 # readiness signal), NOT GET /v1/models. The base URL it returns is what an
 # embeddings client POSTs to (`<base_url>/v1/embeddings`).
 #
-# Spawn-or-reuse: if an embeddings server is ALREADY healthy at the target (an
-# externally-managed mlx-openai-server, Ollama, which serves /v1/embeddings
-# natively, or a prior launch), launch() REUSES it without spawning, so it never
-# double-spawns. teardown() only stops a child THIS backend spawned (it never
-# kills an external server).
+# Spawn-or-reuse: if an embeddings server already answers for `served_model`
+# at the target (an externally-managed mlx-openai-server, Ollama, which serves
+# /v1/embeddings natively, or a prior launch), launch() REUSES it without
+# spawning, so it never double-spawns. teardown() only stops a child THIS
+# backend spawned (it never kills an external server).
 # =============================================================================
 struct SpawningMlxEmbedBackend[C: Connector](InferenceBackend, Movable):
     """Spawning MLX embeddings backend (`mlx-openai-server --model-type
@@ -690,10 +811,9 @@ struct SpawningMlxEmbedBackend[C: Connector](InferenceBackend, Movable):
 
     `launch()` spawns `mlx-openai-server launch --model-type embeddings
     --model-path <path> --served-model-name <name> --host <host> --port <p>`
-    as a supervised child (unless an embeddings endpoint is already healthy at
-    the target, in which case it reuses it), then blocks until a live
-    POST /v1/embeddings probe succeeds. `health()` is the real POST probe.
-    `teardown()` stops the child.
+    (unless an embeddings endpoint is already serving at the target, in which
+    case it reuses it), then blocks until a live POST /v1/embeddings probe
+    succeeds. `health()` is the real POST probe. `teardown()` stops the child.
 
     Construction:
       * SpawningMlxEmbedBackend[C](mk_connector, binary_path, model_path,
@@ -717,7 +837,7 @@ struct SpawningMlxEmbedBackend[C: Connector](InferenceBackend, Movable):
     # admission limit is the bound.
     var _num_parallel: Int
     var _spawned: Bool
-    var _child: Supervisor
+    var _child: DetachedChild
 
     def __init__(
         out self,
@@ -736,7 +856,7 @@ struct SpawningMlxEmbedBackend[C: Connector](InferenceBackend, Movable):
         self._launch_timeout_ms = DEFAULT_LAUNCH_TIMEOUT_MS
         self._num_parallel = DEFAULT_NUM_PARALLEL
         self._spawned = False
-        self._child = Supervisor()
+        self._child = DetachedChild(Int32(-1))
 
     def __init__(
         out self,
@@ -748,7 +868,8 @@ struct SpawningMlxEmbedBackend[C: Connector](InferenceBackend, Movable):
         port: UInt16,
         num_parallel: Int = DEFAULT_NUM_PARALLEL,
     ):
-        """Explicit host + port (+ optional engine num_parallel)."""
+        """Explicit host + port (+ optional engine num_parallel, which the
+        embeddings server ignores; see build_mlx_embed_child_spec)."""
         self._mk_connector = mk_connector
         self._binary_path = binary_path
         self._model_path = model_path
@@ -758,7 +879,12 @@ struct SpawningMlxEmbedBackend[C: Connector](InferenceBackend, Movable):
         self._launch_timeout_ms = DEFAULT_LAUNCH_TIMEOUT_MS
         self._num_parallel = num_parallel
         self._spawned = False
-        self._child = Supervisor()
+        self._child = DetachedChild(Int32(-1))
+
+    def set_launch_timeout_ms(mut self, ms: Int):
+        """The readiness budget of the next launch() (default
+        DEFAULT_LAUNCH_TIMEOUT_MS)."""
+        self._launch_timeout_ms = ms
 
     def child_spec(self) -> ChildSpec:
         """The `ChildSpec` `launch()` would spawn (the unit-test seam)."""
@@ -771,61 +897,22 @@ struct SpawningMlxEmbedBackend[C: Connector](InferenceBackend, Movable):
         )
 
     def launch(mut self) raises -> String:
-        """Spawn mlx-openai-server embeddings (unless already healthy), wait for
-        readiness via the POST /v1/embeddings probe, return the base URL. Reuses
-        an already-healthy endpoint without spawning (an external Ollama or any
-        /v1/embeddings server)."""
-        var base = _base_url_for(self._host, self._port)
-
-        # (1) Reuse an already-healthy embeddings endpoint (idempotent /
-        # external server).
-        if probe_v1_embeddings[Self.C](
-            self._mk_connector, self._host, self._port, self._served_model
-        ):
-            return base^
-
-        # (2) Spawn the embeddings engine as a supervised child.
-        var spec = build_mlx_embed_child_spec(
-            self._binary_path,
-            self._model_path,
-            self._served_model,
+        """Reuse an embeddings endpoint already serving `served_model` at the
+        target (an external Ollama or any /v1/embeddings server), or spawn
+        mlx-openai-server and wait for its POST /v1/embeddings probe; return the
+        base URL."""
+        var spec = self.child_spec()
+        return _launch_impl[Self.C](
+            self._mk_connector,
+            spec,
             self._host,
             self._port,
-        )
-        var pid = self._child.spawn(spec)
-        if pid <= Int32(0):
-            raise Error(
-                "SpawningMlxEmbedBackend.launch: spawn failed (rc="
-                + String(Int(pid))
-                + ") for "
-                + self._binary_path
-            )
-        self._spawned = True
-
-        # (3) Wait for readiness (bounded). Poll the live POST probe.
-        var waited = 0
-        while waited < self._launch_timeout_ms:
-            if probe_v1_embeddings[Self.C](
-                self._mk_connector, self._host, self._port, self._served_model
-            ):
-                return base^
-            _ = external_call["usleep", Int32](
-                UInt32(HEALTH_POLL_INTERVAL_MS * 1000)
-            )
-            waited += HEALTH_POLL_INTERVAL_MS
-
-        # Never came up within the budget — stop the dead child + fail loudly.
-        _ = self._child.terminate(TEARDOWN_GRACE_MS)
-        self._child.close()
-        self._spawned = False
-        raise Error(
-            "SpawningMlxEmbedBackend.launch: embeddings engine did not become"
-            " healthy at "
-            + base
-            + " within "
-            + String(self._launch_timeout_ms)
-            + "ms (model load failed, wrong binary/flags, or served-model-name"
-            " mismatch)"
+            True,
+            self._served_model,
+            self._launch_timeout_ms,
+            String("SpawningMlxEmbedBackend.launch"),
+            self._spawned,
+            self._child,
         )
 
     def health(self) -> Bool:
@@ -835,18 +922,15 @@ struct SpawningMlxEmbedBackend[C: Connector](InferenceBackend, Movable):
         )
 
     def teardown(mut self):
-        """Stop the supervised child (SIGTERM -> grace -> SIGKILL) + reap.
+        """Stop the spawned child (SIGTERM -> grace -> SIGKILL) + reap.
         No-op when this backend did not spawn (external server)."""
-        if self._spawned:
-            _ = self._child.terminate(TEARDOWN_GRACE_MS)
-            self._child.close()
-            self._spawned = False
+        _teardown_impl(self._spawned, self._child)
 
     def base_url(self) -> String:
         return _base_url_for(self._host, self._port)
 
     def num_parallel(self) -> Int:
-        """The engine max-concurrent this backend was configured with. For the
-        embeddings engine this is informational only (no concurrency flag is
-        emitted)."""
+        """The num_parallel this backend was configured with. The embeddings
+        server IGNORES it: it has no concurrency flag, so none is passed, and
+        the caller's own admission limit is the only bound."""
         return self._num_parallel
