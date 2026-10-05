@@ -30,7 +30,8 @@
 #   No UnsafePointer in ANY of these signatures; the FFI raw pointers are
 #   confined to the `_lz4_*_ffi` entries + the output-buffer alloc/free inside
 #   the safe wrappers. Nothing crosses a module boundary except Span/List/Int.
-# INTERNAL FFI (private to this module):
+# INTERNAL FFI (underscore-prefixed: private to this module by convention; the
+# compiler does not enforce it):
 #   * `_lz4_compress_ffi` / `_lz4_decompress_ffi` take raw pointers with
 #     caller-chosen origins (NOT wildcards), cast to an untracked origin ONLY
 #     at the handle.call site; `_lz4_compress_bound_ffi`. Only the safe
@@ -98,8 +99,9 @@ def _default_lz4_codec_handle() raises -> UnsafePointer[
 
 # -----------------------------------------------------------------------------
 # Raw-pointer FFI wrappers — caller-chosen origins, cast at the call site only.
-# Private: callers in other modules use the SAFE Span/List API below, which
-# takes these pointers from its Spans locally.
+# Underscore-prefixed, so private by convention (the compiler does not enforce
+# it): callers in other modules use the SAFE Span/List API below, which takes
+# these pointers from its Spans locally.
 # -----------------------------------------------------------------------------
 
 
@@ -123,8 +125,7 @@ def _lz4_decompress_ffi[
     `dst_capacity` bytes to `dst`. Both buffers are caller-owned for the
     synchronous call; liblz4 retains no pointer past the call. The handle is a
     process-lifetime singleton. Origins are cast to an untracked origin ONLY at
-    the call site. The raw pointers reach only a page-codec dispatch and this
-    file's safe wrappers.
+    the call site. The raw pointers reach only this file's safe wrappers.
     """
     var handle_ptr = _default_lz4_codec_handle()
     var result = handle_ptr[].call["LZ4_decompress_safe", Int32](
@@ -313,9 +314,12 @@ def lz4_decompress(
 # are concrete, so the buffers are alive for the whole call.
 # =============================================================================
 
-# LZ4_MAX_INPUT_SIZE (lz4.h): the largest source either direction accepts.
+# LZ4_MAX_INPUT_SIZE (lz4.h): the largest source `LZ4_compress_default`
+# accepts. It bounds the compression input only: a valid block of an
+# incompressible maximum-size input is up to `LZ4_compressBound(0x7E000000)`
+# bytes, which is larger, and `LZ4_decompress_safe` takes any `int` size.
 comptime _LZ4_MAX_INPUT_SIZE: Int = 0x7E000000
-# liblz4 takes its capacities as C `int`.
+# liblz4 takes its sizes and capacities as C `int`.
 comptime _C_INT_MAX: Int = 2147483647
 
 
@@ -338,11 +342,10 @@ def lz4_decompress_into[
             "lz4_decompress_into: empty source (the shortest LZ4 block is the"
             " one-byte empty block 0x00)"
         )
-    if n > _LZ4_MAX_INPUT_SIZE:
+    if n > _C_INT_MAX:
         raise Error(
             "lz4_decompress_into: source of " + String(n)
-            + " bytes exceeds LZ4_MAX_INPUT_SIZE (" + String(_LZ4_MAX_INPUT_SIZE)
-            + ")"
+            + " bytes exceeds liblz4's C int size (" + String(_C_INT_MAX) + ")"
         )
     # Passing a smaller capacity than the buffer holds is always safe.
     var cap = min(len(dst), _C_INT_MAX)
@@ -355,18 +358,22 @@ def lz4_decompress_into[
             # SAFETY: `scratch` and `src` are both alive across this
             # synchronous call (local stack / the Span's concrete origin);
             # liblz4 writes at most 0 bytes and reads exactly `n` from `src`.
-            written = _lz4_decompress_ffi(scratch.unsafe_ptr(), 0, src.unsafe_ptr(), n)
+            written = _lz4_decompress_ffi(
+                scratch.unsafe_ptr(), 0, src.unsafe_ptr(), n
+            )
         else:
             # SAFETY: `dst` holds `len(dst) >= cap` writable bytes and `src`
             # holds `n` readable bytes, both kept alive by their Span origins
             # for this synchronous call; liblz4 writes at most `cap` bytes into
             # `dst`, reads at most `n` from `src`, and keeps neither pointer.
-            written = _lz4_decompress_ffi(dst.unsafe_ptr(), cap, src.unsafe_ptr(), n)
+            written = _lz4_decompress_ffi(
+                dst.unsafe_ptr(), cap, src.unsafe_ptr(), n
+            )
     except e:
-        raise Error(
-            "lz4_decompress_into: block is corrupt or decodes to more than "
-            + String(len(dst)) + " bytes: " + String(e)
-        )
+        # `_lz4_decompress_ffi` names the failing C call and its result; a
+        # negative `LZ4_decompress_safe` result means a corrupt block or one
+        # that decodes to more than `cap` bytes.
+        raise Error("lz4_decompress_into: " + String(e))
     if written > cap:
         raise Error(
             "lz4_decompress_into: liblz4 reported " + String(written)
@@ -388,8 +395,8 @@ def lz4_compress_into[
     if n > _LZ4_MAX_INPUT_SIZE:
         raise Error(
             "lz4_compress_into: source of " + String(n)
-            + " bytes exceeds LZ4_MAX_INPUT_SIZE (" + String(_LZ4_MAX_INPUT_SIZE)
-            + ")"
+            + " bytes exceeds LZ4_MAX_INPUT_SIZE ("
+            + String(_LZ4_MAX_INPUT_SIZE) + ")"
         )
     var need = lz4_compress_bound(n)
     if len(dst) < need:
