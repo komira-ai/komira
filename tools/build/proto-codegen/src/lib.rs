@@ -79,6 +79,10 @@ pub struct PluginParameters {
     /// Refused with `default_protocol=connect`; REST clients are Google Cloud
     /// clients either way.
     pub gcp: bool,
+    /// `module_names=<path>:<stem>+...`: the module each named generated
+    /// `.proto` is written as, in place of its basename's stem
+    /// ([`lower::ModuleNames`]).
+    pub module_names: lower::ModuleNames,
 }
 
 impl Default for PluginParameters {
@@ -90,6 +94,7 @@ impl Default for PluginParameters {
             scope: lower::Scope::default(),
             layout_probe: false,
             gcp: false,
+            module_names: lower::ModuleNames::new(),
         }
     }
 }
@@ -133,11 +138,12 @@ impl PluginParameters {
                 "omit_fields" => p.scope.omit_fields = parse_list(k, v)?,
                 "layout_probe" => p.layout_probe = parse_bool(k, v)?,
                 "gcp" => p.gcp = parse_bool(k, v)?,
+                "module_names" => p.module_names = parse_module_names(k, v)?,
                 other => {
                     return Err(format!(
                         "unknown option `{other}` — expected one of: default_wire, \
                          default_protocol, package_prefix, roots, methods, \
-                         messages_only, omit_fields, layout_probe, gcp"
+                         messages_only, omit_fields, layout_probe, gcp, module_names"
                     ))
                 }
             }
@@ -156,6 +162,9 @@ impl PluginParameters {
         if self.gcp {
             return Err(format!("{plugin} does not implement gcp"));
         }
+        if !self.module_names.is_empty() {
+            return Err(format!("{plugin} does not implement module_names"));
+        }
         Ok(())
     }
 }
@@ -171,6 +180,76 @@ fn parse_list(key: &str, value: &str) -> Result<Vec<String>, String> {
         ));
     }
     Ok(items)
+}
+
+/// Parse `module_names`: `+`-separated `<proto path>:<module stem>` items,
+/// each path named once. The stems are checked against the generated files
+/// in [`check_module_names`].
+fn parse_module_names(key: &str, value: &str) -> Result<lower::ModuleNames, String> {
+    let mut names = lower::ModuleNames::new();
+    for item in parse_list(key, value)? {
+        let (path, stem) = item.split_once(':').ok_or_else(|| {
+            format!("option `{key}` item `{item}` is not `<proto path>:<module stem>`")
+        })?;
+        if path.is_empty() || stem.is_empty() {
+            return Err(format!("option `{key}` item `{item}` has an empty path or stem"));
+        }
+        if names.insert(path.to_string(), stem.to_string()).is_some() {
+            return Err(format!("option `{key}` names `{path}` twice"));
+        }
+    }
+    Ok(names)
+}
+
+/// Hold the generated files' modules to what a Mojo package can import: each
+/// a Mojo identifier and not a keyword, none the package's own `__init__` or the layout
+/// probe, no two the same (the package is flat), and every `module_names`
+/// entry a file that is generated (a misspelt path renames nothing).
+fn check_module_names(
+    file_to_generate: &[String],
+    names: &lower::ModuleNames,
+) -> Result<(), String> {
+    for path in names.keys() {
+        if !file_to_generate.contains(path) {
+            return Err(format!(
+                "option `module_names` names `{path}`, which is not a file to generate"
+            ));
+        }
+    }
+    let mut seen: std::collections::BTreeMap<String, &str> = std::collections::BTreeMap::new();
+    for path in file_to_generate {
+        let stem = lower::module_stem(path, names);
+        let ident = stem
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !ident {
+            return Err(format!(
+                "`{path}` would be generated as module `{stem}`, which is not a Mojo \
+                 module name: name one in `module_names`"
+            ));
+        }
+        if mojo_names::KEYWORDS.contains(&stem.as_str()) {
+            return Err(format!(
+                "`{path}` would be generated as module `{stem}`, a Mojo keyword, \
+                 which no import can name: name one in `module_names`"
+            ));
+        }
+        if stem == "__init__" || format!("{stem}.mojo") == emit::LAYOUT_PROBE_FILE {
+            return Err(format!(
+                "`{path}` would be generated as module `{stem}`, a name the generated \
+                 package keeps for itself"
+            ));
+        }
+        if let Some(other) = seen.insert(stem.clone(), path) {
+            return Err(format!(
+                "`{other}` and `{path}` would both be generated as module `{stem}` (the \
+                 generated package is flat): name one in `module_names`"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn parse_bool(key: &str, value: &str) -> Result<bool, String> {
@@ -200,6 +279,7 @@ fn generate_scoped(
                 .to_string(),
         );
     }
+    check_module_names(&request.file_to_generate, &params.module_names)?;
     let mut model = lower::lower_scoped(
         &request.proto_file,
         &request.file_to_generate,
@@ -207,6 +287,7 @@ fn generate_scoped(
         http_rules,
         routing_rules,
         &params.scope,
+        &params.module_names,
     )?;
     for file in &mut model.files {
         for svc in &mut file.services {
@@ -225,9 +306,9 @@ fn generate_scoped(
             }
         }
     }
-    let mut files = emit::emit_model_with_options(&model, mode, params.gcp);
+    let mut files = emit::emit_model_with_names(&model, mode, params.gcp, &params.module_names);
     if params.layout_probe {
-        files.push(emit::emit_layout_probe(&model));
+        files.push(emit::emit_layout_probe_with_names(&model, &params.module_names));
     }
     Ok(files)
 }
@@ -399,5 +480,75 @@ fn build_response(
         Err(e) => plugin::CodeGeneratorResponse::with_error(format!(
             "protoc-gen-mojo: {e}"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn module_names_parse_into_path_to_stem() {
+        let p = PluginParameters::parse(
+            "package_prefix=x,module_names=a/k8s.min.proto:k8s_min+b/status.proto:run_status",
+        )
+        .unwrap();
+        assert_eq!(p.module_names.get("a/k8s.min.proto").map(String::as_str), Some("k8s_min"));
+        assert_eq!(p.module_names.get("b/status.proto").map(String::as_str), Some("run_status"));
+        assert_eq!(lower::module_stem("b/status.proto", &p.module_names), "run_status");
+        assert_eq!(lower::module_stem("c/status.proto", &p.module_names), "status");
+    }
+
+    #[test]
+    fn module_names_refuse_malformed_items() {
+        for (opt, want) in [
+            ("module_names=a.proto", "is not `<proto path>:<module stem>`"),
+            ("module_names=a.proto:", "has an empty path or stem"),
+            ("module_names=:x", "has an empty path or stem"),
+            ("module_names=a.proto:x+a.proto:y", "names `a.proto` twice"),
+        ] {
+            let err = PluginParameters::parse(opt).unwrap_err();
+            assert!(err.contains(want), "{opt}: {err}");
+        }
+    }
+
+    #[test]
+    fn generated_modules_must_be_distinct_mojo_names() {
+        let files: Vec<String> = ["g/rpc/status.proto", "g/run/status.proto", "g/run/k8s.min.proto"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut names = lower::ModuleNames::new();
+        // Unnamed, k8s.min is not a module name.
+        names.insert("g/run/status.proto".into(), "run_status".into());
+        let err = check_module_names(&files, &names).unwrap_err();
+        assert!(err.contains("module `k8s.min`, which is not a Mojo module name"), "{err}");
+        // Named, the two status files still collide until one is renamed.
+        let mut clash = lower::ModuleNames::new();
+        clash.insert("g/run/k8s.min.proto".into(), "k8s_min".into());
+        let err = check_module_names(&files, &clash).unwrap_err();
+        assert!(
+            err.contains("`g/rpc/status.proto` and `g/run/status.proto` would both be generated as module `status`"),
+            "{err}"
+        );
+        names.insert("g/run/k8s.min.proto".into(), "k8s_min".into());
+        check_module_names(&files, &names).unwrap();
+        // A rename onto a name the package keeps, or of a file not generated.
+        let mut bad = names.clone();
+        bad.insert("g/rpc/status.proto".into(), "_layout_probe".into());
+        assert!(check_module_names(&files, &bad).unwrap_err().contains("keeps for itself"));
+        // A keyword is an identifier no import can name, renamed or not.
+        let mut kw = names.clone();
+        kw.insert("g/rpc/status.proto".into(), "import".into());
+        assert!(check_module_names(&files, &kw).unwrap_err().contains("module `import`, a Mojo keyword"));
+        let kw_file: Vec<String> = vec!["g/struct.proto".into()];
+        assert!(check_module_names(&kw_file, &lower::ModuleNames::new())
+            .unwrap_err()
+            .contains("module `struct`, a Mojo keyword"));
+        let mut stray = names.clone();
+        stray.insert("g/other.proto".into(), "other".into());
+        assert!(check_module_names(&files, &stray)
+            .unwrap_err()
+            .contains("names `g/other.proto`, which is not a file to generate"));
     }
 }

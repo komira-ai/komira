@@ -592,6 +592,13 @@ trait WireDecoder(Copyable, Movable):
     ) raises:
         ...
 
+    # `map<string, int64>` (Secret Manager's `Secret.version_aliases`). The
+    # proto3-JSON value is the int64's decimal text, quoted or bare.
+    def read_into_string_i64_map(
+        mut self, mut out: Dict[String, Int64]
+    ) raises:
+        ...
+
     def read_into_i64_string_map(
         mut self, mut out: Dict[Int64, String]
     ) raises:

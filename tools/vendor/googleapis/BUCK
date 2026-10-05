@@ -248,6 +248,91 @@ _SERVICEUSAGE_V1_CLOSURE = _SERVICEUSAGE_V1_ROOTS + [
     "google/rpc/status.proto",
 ]
 
+# Cloud Run Admin v2 (services, revisions, jobs, executions and their
+# long-running operations, for the generated komira_gcp_run): the roots and
+# their import closure, google/protobuf/* excepted. :run_v2 refuses this list
+# unless it is exactly that closure, so a bump that changes the imports fails
+# the build until the list follows.
+_RUN_V2_ROOTS = [
+    "google/cloud/run/v2/execution.proto",
+    "google/cloud/run/v2/job.proto",
+    "google/cloud/run/v2/revision.proto",
+    "google/cloud/run/v2/service.proto",
+]
+
+_RUN_V2_CLOSURE = _RUN_V2_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/api/routing.proto",
+    "google/cloud/run/v2/condition.proto",
+    "google/cloud/run/v2/execution_template.proto",
+    "google/cloud/run/v2/k8s.min.proto",
+    "google/cloud/run/v2/revision_template.proto",
+    "google/cloud/run/v2/status.proto",
+    "google/cloud/run/v2/task_template.proto",
+    "google/cloud/run/v2/traffic_target.proto",
+    "google/cloud/run/v2/vendor_settings.proto",
+    "google/iam/v1/iam_policy.proto",
+    "google/iam/v1/options.proto",
+    "google/iam/v1/policy.proto",
+    "google/longrunning/operations.proto",
+    "google/rpc/status.proto",
+    "google/type/expr.proto",
+]
+
+# Cloud Run Admin v2's service configuration. Its `http.rules` bind the
+# google.longrunning.Operations mixin to Run's own paths
+# (`/v2/{name=projects/*/locations/*/operations/*}`), which no .proto
+# states; komira_gcp_run's tests hold its operations client to them.
+_RUN_V2_SERVICE_CONFIG = ["google/cloud/run/v2/run_v2.yaml"]
+
+# Cloud Scheduler v1 (jobs, for the generated komira_gcp_cloudscheduler): the
+# root and its import closure, google/protobuf/* excepted. :cloudscheduler_v1
+# refuses this list unless it is exactly that closure.
+_CLOUDSCHEDULER_V1_ROOTS = [
+    "google/cloud/scheduler/v1/cloudscheduler.proto",
+]
+
+_CLOUDSCHEDULER_V1_CLOSURE = _CLOUDSCHEDULER_V1_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/cloud/scheduler/v1/job.proto",
+    "google/cloud/scheduler/v1/target.proto",
+    "google/rpc/status.proto",
+]
+
+# Secret Manager v1 (secrets and versions, for the generated
+# komira_gcp_secretmanager): the root and its import closure,
+# google/protobuf/* excepted. :secretmanager_v1 refuses this list unless it
+# is exactly that closure.
+_SECRETMANAGER_V1_ROOTS = [
+    "google/cloud/secretmanager/v1/service.proto",
+]
+
+_SECRETMANAGER_V1_CLOSURE = _SECRETMANAGER_V1_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/cloud/secretmanager/v1/resources.proto",
+    "google/iam/v1/iam_policy.proto",
+    "google/iam/v1/options.proto",
+    "google/iam/v1/policy.proto",
+    "google/iam/v1/resource_policy_member.proto",
+    "google/rpc/status.proto",
+    "google/type/expr.proto",
+]
+
 # Every client's closure; a new client appends its list here, and :googleapis
 # extracts the union.
 _ALL_CLOSURES = (
@@ -260,7 +345,11 @@ _ALL_CLOSURES = (
     _API_HTTP_CLOSURE +
     _IAM_ADMIN_V1_CLOSURE +
     _RESOURCEMANAGER_V3_CLOSURE +
-    _SERVICEUSAGE_V1_CLOSURE
+    _SERVICEUSAGE_V1_CLOSURE +
+    _RUN_V2_CLOSURE +
+    _RUN_V2_SERVICE_CONFIG +
+    _CLOUDSCHEDULER_V1_CLOSURE +
+    _SECRETMANAGER_V1_CLOSURE
 )
 
 # The files out of the archive, each a sub-target named by its path:
@@ -364,6 +453,33 @@ proto_check(
     name = "serviceusage_v1",
     roots = _SERVICEUSAGE_V1_ROOTS,
     srcs = [":googleapis[{}]".format(f) for f in sorted(_SERVICEUSAGE_V1_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The Cloud Run Admin v2 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "run_v2",
+    roots = _RUN_V2_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_RUN_V2_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The Cloud Scheduler v1 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "cloudscheduler_v1",
+    roots = _CLOUDSCHEDULER_V1_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_CLOUDSCHEDULER_V1_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The Secret Manager v1 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "secretmanager_v1",
+    roots = _SECRETMANAGER_V1_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_SECRETMANAGER_V1_CLOSURE)],
     strip_prefix = "files",
     visibility = ["PUBLIC"],
 )

@@ -157,10 +157,11 @@ fn emit_operation(w: &mut YamlWriter, model: &IrModel, op: &Operation<'_>) {
             let leaf_names: Vec<String> = msg.fields.iter().map(|f| f.name.clone()).collect();
             // A `{field=pattern}` variable has no OpenAPI spelling (the path
             // key is the template text, so its parameter name would not
-            // match): such a template keeps the whole-body projection.
+            // match): such a template keeps the whole-body projection, and so
+            // does a dotted `{a.b}` variable, which names no request field.
             PathTemplate::parse(&rule.path_template)
                 .ok()
-                .filter(|t| !t.has_patterns())
+                .filter(|t| !t.has_patterns() && !t.has_nested_vars())
                 .and_then(|t| partition_fields(&leaf_names, &t, &rule.body).ok())
         })
     });

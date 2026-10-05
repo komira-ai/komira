@@ -483,6 +483,9 @@ fn query_items(
             .iter()
             .find(|x| &x.name == f)
             .expect("partition field came from the message");
+        if fld.oneof_index.is_some() {
+            return Err(oneof_url_field(m, f));
+        }
         if let Some(leaf) = scalar_leaf(fld.json_name.clone(), format!("req.{f}"), fld) {
             items.push(QueryItem::Leaf(leaf));
             continue;
@@ -624,17 +627,36 @@ fn emit_rest_method(
         std::collections::BTreeSet::new();
     let mut enum_fields: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
+    // Each path variable's field, a dotted one resolved through the message
+    // fields it names: the leaf is what is checked and rendered, and the
+    // fields before it are the messages that must be present.
+    let mut nested: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     for f in part.path_fields.iter() {
-        let fld = req_msg
-            .fields
-            .iter()
-            .find(|x| &x.name == f)
-            .expect("partition field came from the message");
+        let (via, fld) = resolve_path_field(idx, m, req_msg, f)?;
+        if !via.is_empty() {
+            nested.insert(f.clone(), via);
+        }
         // A path variable is one value, so a repeated one has no expansion.
         if matches!(fld.label, Label::Repeated) {
             return Err(format!(
                 "REST method `{}`: path variable `{}` is a `repeated` field; a \
                  path variable takes one value",
+                m.name, f
+            ));
+        }
+        // A oneof arm is held in its oneof's storage, not as `req.<field>`,
+        // so the URL has no expression to read it through.
+        if fld.oneof_index.is_some() {
+            return Err(oneof_url_field(m, f));
+        }
+        // A path variable is read as `req.<field>` itself: a proto3
+        // `optional` one is an `Optional`, with no value to put in the path
+        // when unset.
+        if fld.label == Label::Optional && is_scalar(&fld.ty) {
+            return Err(format!(
+                "REST method `{}`: path variable `{}` is a proto3 `optional` \
+                 field; a path variable takes a value the request always has",
                 m.name, f
             ));
         }
@@ -717,6 +739,23 @@ fn emit_rest_method(
     // No host, no request: refused before the token source is asked and
     // before anything is dialled.
     w.line(&format!("self._rest_require_host(String(\"{method_name}\"))"));
+
+    // A dotted path variable reads through message fields; an unset one
+    // leaves the path without its resource name, so the call is refused
+    // before the token source is asked.
+    for (var, via) in &nested {
+        for depth in 1..=via.len() {
+            let guard = access_expr(&via[..depth]);
+            let unset = via[..depth].join(".");
+            w.line(&format!("if not {guard}:"));
+            w.indent();
+            w.line(&format!(
+                "raise Error(String(\"{method_name}: the request's `{unset}` is unset, \
+                 and the path is built from `{var}`\"))"
+            ));
+            w.dedent();
+        }
+    }
 
     // -- path substitution ---------------------------------------------------
     if bindings.len() == 1 {
@@ -940,7 +979,8 @@ fn emit_path_segments(w: &mut Writer, template: &PathTemplate, url_fields: &UrlF
                 ));
             }
             PathSegment::Var(var) => {
-                let value = url_fields.render(&format!("req.{}", var.field), &var.field);
+                let parts: Vec<&str> = var.field.split('.').collect();
+                let value = url_fields.render(&access_expr(&parts), &var.field);
                 w.line("path += String(\"/\")");
                 match &var.pattern {
                     // `{field}` / `{field=*}`: one segment, `/` included in
@@ -1009,6 +1049,85 @@ impl UrlFields<'_> {
 /// would not compile.
 fn enum_url_str(expr: &str) -> String {
     format!("{expr}.json_name()")
+}
+
+/// The refusal of a URL field (path or query) that is an arm of a oneof.
+fn oneof_url_field(m: &IrMethod, f: &str) -> String {
+    format!(
+        "REST method `{}`: field `{f}` is used in the path/query but is an arm \
+         of a oneof, which no URL field reads",
+        m.name
+    )
+}
+
+/// The Mojo expression reading the request field at `path`: `req.name`, or
+/// through each singular message field before the last (each an
+/// `Optional`, checked present first), `req.service.value().name`.
+fn access_expr<S: AsRef<str>>(path: &[S]) -> String {
+    let parts: Vec<&str> = path.iter().map(|s| s.as_ref()).collect();
+    format!("req.{}", parts.join(".value()."))
+}
+
+/// Resolve the path variable `var` of method `m` against its request
+/// `req_msg`: the message fields a dotted variable reads through (empty for
+/// a plain one) and its leaf field. Each field before the leaf must be a
+/// singular, non-oneof message field, held in its own `Optional` (not a
+/// recursion box), declared in the generated files.
+fn resolve_path_field<'a>(
+    idx: MessageIndex<'a>,
+    m: &IrMethod,
+    req_msg: &'a IrMessage,
+    var: &str,
+) -> Result<(Vec<String>, &'a IrField), String> {
+    let parts: Vec<&str> = var.split('.').collect();
+    let mut msg = req_msg;
+    let mut via: Vec<String> = Vec::new();
+    for (i, part) in parts.iter().enumerate() {
+        let fld = msg.fields.iter().find(|f| f.name == *part).ok_or_else(|| {
+            format!(
+                "REST method `{}`: path variable `{var}` names `{part}`, which is \
+                 not a field of `{}`",
+                m.name, msg.fq_name
+            )
+        })?;
+        if i + 1 == parts.len() {
+            return Ok((via, fld));
+        }
+        let next = match (&fld.ty, fld.label, fld.oneof_index) {
+            (IrType::Message(t), Label::Single | Label::Optional, None) => t,
+            _ => {
+                return Err(format!(
+                    "REST method `{}`: path variable `{var}` reads through `{part}`, \
+                     which is not a singular message field outside a oneof",
+                    m.name
+                ))
+            }
+        };
+        let owner = std::iter::once(idx.file)
+            .chain(idx.peers.iter())
+            .find(|f| f.messages.iter().any(|x| x.fq_name == msg.fq_name));
+        if let Some(owner) = owner {
+            if crate::lower::recursion_breaking_edges(owner)
+                .contains(&(msg.mojo_name.clone(), fld.name.clone()))
+            {
+                return Err(format!(
+                    "REST method `{}`: path variable `{var}` reads through `{part}`, \
+                     a field that closes a message cycle (it is boxed, not an \
+                     Optional)",
+                    m.name
+                ));
+            }
+        }
+        msg = idx.get(&next.fq_name).ok_or_else(|| {
+            format!(
+                "REST method `{}`: path variable `{var}` reads through `{}`, which \
+                 is not declared in the generated files",
+                m.name, next.fq_name
+            )
+        })?;
+        via.push(part.to_string());
+    }
+    unreachable!("a path variable has at least one component")
 }
 
 fn emit_query_build(w: &mut Writer, items: &[QueryItem]) {
@@ -1114,6 +1233,16 @@ fn emit_body_build(
             // every other value keeps the codec's exact rendering.
             let mut names = Vec::new();
             for f in &part.path_fields {
+                // The members are dropped by their top-level name; a dotted
+                // path field is a member of a body message, which this does
+                // not reach.
+                if f.contains('.') {
+                    return Err(format!(
+                        "REST body `*` with the dotted path variable `{f}`: a \
+                         whole-request body leaves out the fields its path binds, \
+                         and a field of a body message cannot be left out"
+                    ));
+                }
                 let fld = req_msg
                     .fields
                     .iter()
@@ -2912,5 +3041,175 @@ mod tests {
         let file = file_with(vec![req], svc);
         let mojo = crate::emit::Emitter::with_protocol(&file, crate::ProtocolMode::Rest).emit();
         assert!(!mojo.contains("komira_encoding"), "{mojo}");
+    }
+
+    fn message(name: &str, fields: Vec<IrField>) -> IrMessage {
+        IrMessage {
+            name: name.into(),
+            mojo_name: name.into(),
+            fq_name: format!(".tiny.rest.v1.{name}"),
+            is_map_entry: false,
+            fields,
+            oneofs: vec![],
+        }
+    }
+
+    fn method(name: &str, input: &str, output: &str, rule: (&str, &str, &str)) -> IrMethod {
+        IrMethod {
+            name: name.into(),
+            input: TypeRef { fq_name: input.into(), mojo_name: input.rsplit('.').next().unwrap().into() },
+            output: TypeRef { fq_name: output.into(), mojo_name: output.rsplit('.').next().unwrap().into() },
+            client_streaming: false,
+            server_streaming: false,
+            idempotent: false,
+            http_rule: Some(IrHttpRule {
+                verb: rule.0.into(),
+                path_template: rule.1.into(),
+                body: rule.2.into(),
+                additional_bindings: vec![],
+            }),
+            routing_rule: None,
+        }
+    }
+
+    fn svc_of(methods: Vec<IrMethod>) -> IrService {
+        IrService { name: "Jobs".into(), default_host: None, methods }
+    }
+
+    /// `UpdateJobRequest { Job job; FieldMask update_mask; bool validate_only }`
+    /// with `Job { string name; string description }`, PATCHed at
+    /// `/v1/{job.name=projects/*/jobs/*}` with `body: "job"`.
+    fn update_job(body: &str) -> Result<RestServiceEmit, String> {
+        let mut mask = msg_field("update_mask", ".google.protobuf.FieldMask", "FieldMask");
+        mask.json_name = "updateMask".into();
+        let mut validate = scalar_field("validate_only", ScalarKind::Bool);
+        validate.json_name = "validateOnly".into();
+        let req = message(
+            "UpdateJobRequest",
+            vec![msg_field("job", ".tiny.rest.v1.Job", "Job"), mask, validate],
+        );
+        let job = message(
+            "Job",
+            vec![
+                scalar_field("name", ScalarKind::String),
+                scalar_field("description", ScalarKind::String),
+            ],
+        );
+        let svc = svc_of(vec![method(
+            "UpdateJob",
+            ".tiny.rest.v1.UpdateJobRequest",
+            ".tiny.rest.v1.Job",
+            ("patch", "/v1/{job.name=projects/*/jobs/*}", body),
+        )]);
+        let file = file_with(vec![req, job], svc.clone());
+        emit_rest_service(&file, &svc)
+    }
+
+    #[test]
+    fn dotted_path_var_reads_the_body_message_after_a_presence_check() {
+        let e = update_job("job").unwrap();
+        let s = &e.source;
+        let guard = s
+            .find("if not req.job:\n")
+            .unwrap_or_else(|| panic!("no presence check:\n{s}"));
+        assert!(s.contains(
+            "raise Error(String(\"update_job: the request's `job` is unset, and the path is built from `job.name`\"))"
+        ), "{s}");
+        let fill = s
+            .find("path += _rest_path_var(_rest_to_str(req.job.value().name), String(\"projects/*/jobs/*\"), String(\"job.name\"))")
+            .unwrap_or_else(|| panic!("no path fill:\n{s}"));
+        assert!(guard < fill, "the check comes before the path is built");
+        // The token source is asked only after the check.
+        assert!(guard < s.find("self._token_source.access_token()").unwrap());
+        assert!(s.contains("body_text = encode_json(req.job.value())"), "{s}");
+    }
+
+    #[test]
+    fn field_mask_query_param_is_its_json_string_when_set() {
+        let e = update_job("job").unwrap();
+        let s = &e.source;
+        assert!(s.contains("if req.update_mask:\n"), "{s}");
+        assert!(s.contains(
+            "query += String(\"updateMask=\") + _rest_pct_encode(req.update_mask.value().to_proto3_json())"
+        ), "{s}");
+        assert!(s.contains("query += String(\"validateOnly=\") + _rest_pct_encode(_rest_bool_str(req.validate_only))"), "{s}");
+        assert!(!s.contains("query += String(\"job="), "{s}");
+    }
+
+    #[test]
+    fn dotted_path_var_outside_the_body_is_refused() {
+        let err = update_job("").unwrap_err();
+        assert!(err.contains("which is not the request body"), "{err}");
+    }
+
+    #[test]
+    fn dotted_path_var_through_a_scalar_or_a_missing_field_is_refused() {
+        let req = message(
+            "R",
+            vec![scalar_field("name", ScalarKind::String), msg_field("job", ".tiny.rest.v1.Job", "Job")],
+        );
+        let job = message("Job", vec![scalar_field("name", ScalarKind::String)]);
+        for (path, want) in [
+            ("/v1/{name.x}", "which is not a singular message field"),
+            ("/v1/{job.missing}", "names `missing`, which is not a field of `.tiny.rest.v1.Job`"),
+        ] {
+            let svc = svc_of(vec![method("M", ".tiny.rest.v1.R", ".tiny.rest.v1.R", ("post", path, "*"))]);
+            let file = file_with(vec![req.clone(), job.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{path}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_path_leaf_must_be_a_plain_scalar_outside_a_oneof() {
+        // The leaf of a dotted variable is held to what a plain one is: a
+        // scalar the request always has, read as `req.<...>.<leaf>`.
+        let mut opt_name = scalar_field("opt_name", ScalarKind::String);
+        opt_name.label = Label::Optional;
+        let mut arm = scalar_field("arm", ScalarKind::String);
+        arm.oneof_index = Some(0);
+        let job = message(
+            "Job",
+            vec![
+                opt_name.clone(),
+                arm.clone(),
+                msg_field("spec", ".tiny.rest.v1.Job", "Job"),
+            ],
+        );
+        let req = message(
+            "R",
+            vec![msg_field("job", ".tiny.rest.v1.Job", "Job"), opt_name, arm],
+        );
+        for (path, want) in [
+            ("/v1/{job.opt_name}", "path variable `job.opt_name` is a proto3 `optional` field"),
+            ("/v1/{job.arm}", "field `job.arm` is used in the path/query but is an arm of a oneof"),
+            ("/v1/{job.spec}", "field `job.spec` is used in the path/query but is not a scalar"),
+            ("/v1/{opt_name}", "path variable `opt_name` is a proto3 `optional` field"),
+            ("/v1/{arm}", "field `arm` is used in the path/query but is an arm of a oneof"),
+        ] {
+            let svc = svc_of(vec![method("M", ".tiny.rest.v1.R", ".tiny.rest.v1.R", ("post", path, "*"))]);
+            let file = file_with(vec![req.clone(), job.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{path}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_field_mask_in_a_oneof_stays_out_of_the_query() {
+        let mut mask = msg_field("update_mask", ".google.protobuf.FieldMask", "FieldMask");
+        mask.oneof_index = Some(0);
+        let req = message("ListReq", vec![mask]);
+        let svc = svc_of(vec![method("List", ".tiny.rest.v1.ListReq", ".tiny.rest.v1.ListReq", ("get", "/v1/things", ""))]);
+        let file = file_with(vec![req], svc.clone());
+        let err = emit_rest_service(&file, &svc).unwrap_err();
+        assert!(err.contains("field `update_mask` is used in the path/query but is an arm of a oneof"), "{err}");
+    }
+
+    #[test]
+    fn a_dotted_path_var_in_a_whole_body_is_refused() {
+        // `body: "*"` leaves out the fields the path binds, which a field of
+        // a body message is not.
+        let err = update_job("*").unwrap_err();
+        assert!(err.contains("REST body `*` with the dotted path variable `job.name`"), "{err}");
     }
 }

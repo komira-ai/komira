@@ -25,13 +25,18 @@ file at the pinned commit.
 | `:compute_v1` | the Compute Engine v1 protos (root `google/cloud/compute/v1/compute.proto`, the REST compute API), checked the same way |
 | `:artifactregistry_v1` | the Artifact Registry v1 protos (root `google/devtools/artifactregistry/v1/service.proto`), checked the same way |
 | `:apigateway_v1` | the API Gateway v1 protos (root `google/cloud/apigateway/v1/apigateway_service.proto`), checked the same way |
+| `:run_v2` | the Cloud Run Admin v2 protos (roots `google/cloud/run/v2/{execution,job,revision,service}.proto`), checked the same way |
+| `:cloudscheduler_v1` | the Cloud Scheduler v1 protos (root `google/cloud/scheduler/v1/cloudscheduler.proto`), checked the same way |
+| `:secretmanager_v1` | the Secret Manager v1 protos (root `google/cloud/secretmanager/v1/service.proto`), checked the same way |
+| `:googleapis[google/cloud/run/v2/run_v2.yaml]` | the Cloud Run Admin v2 service configuration, whose `http.rules` bind the long-running operations mixin to Run's paths (no `.proto` states them) |
 
 ## Using the protos
 
 Depend on the closure target for your API (`:logging_v2`, `:storage_v2`,
 `:firestore_v1`, `:iam_admin_v1`, `:resourcemanager_v3`, `:serviceusage_v1`,
-`:compute_v1`, `:artifactregistry_v1`, `:apigateway_v1`). Its
-`ProtoSrcsInfo` is the checked tree, so a `mojo_proto_library` names it in
+`:compute_v1`, `:artifactregistry_v1`, `:apigateway_v1`, `:run_v2`,
+`:cloudscheduler_v1`, `:secretmanager_v1`). Its `ProtoSrcsInfo` is the checked
+tree, so a `mojo_proto_library` names it in
 `proto_deps`; `:<target>[tree]` is that tree as a directory (the files at
 their import paths), and the default output is protoc's descriptor set for the
 roots (`--include_imports`).
@@ -59,7 +64,11 @@ build on its own.
    drop from) that closure's list (`_LOGGING_V2_CLOSURE`,
    `_STORAGE_V2_CLOSURE`, `_FIRESTORE_V1_CLOSURE`, `_IAM_ADMIN_V1_CLOSURE`,
    `_RESOURCEMANAGER_V3_CLOSURE`, `_SERVICEUSAGE_V1_CLOSURE`, `_COMPUTE_V1_CLOSURE`,
-   `_ARTIFACTREGISTRY_V1_CLOSURE`, `_APIGATEWAY_V1_CLOSURE`).
+   `_ARTIFACTREGISTRY_V1_CLOSURE`, `_APIGATEWAY_V1_CLOSURE`, `_RUN_V2_CLOSURE`,
+   `_CLOUDSCHEDULER_V1_CLOSURE`, `_SECRETMANAGER_V1_CLOSURE`). Then build the
+   generated clients (`//src/komira_gcp_*:`): komira_gcp_run's
+   test_run_operations_mixin fails if run_v2.yaml moved the operations paths
+   its client was generated with.
 
 ## Adding a client
 

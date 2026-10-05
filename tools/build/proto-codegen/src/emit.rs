@@ -116,9 +116,10 @@ pub struct Emitter<'a> {
     /// status through [`GCP_GRPC_STATUS_ERROR`]. REST clients are Google
     /// Cloud clients either way.
     gcp: bool,
-    /// The other files of the model, where a REST method finds a request (or
-    /// a query parameter's message) declared in an imported `.proto`. Empty
-    /// unless [`Emitter::with_peers`] sets it.
+    /// The other files of the model, where a REST method finds a request,
+    /// a query parameter's message, or a message a dotted path variable
+    /// reads through (`{service.name}` reads `Service`), declared in another
+    /// `.proto`. Empty unless [`Emitter::with_peers`] sets it.
     peers: &'a [IrFile],
 }
 
@@ -1913,11 +1914,23 @@ pub fn emit_model_with_options(
     protocol: ProtocolMode,
     gcp: bool,
 ) -> Vec<(String, String)> {
+    emit_model_with_names(model, protocol, gcp, &crate::lower::ModuleNames::new())
+}
+
+/// [`emit_model_with_options`], writing each file named in `names` as that
+/// module ([`crate::lower::ModuleNames`]) and every other as its stem.
+pub fn emit_model_with_names(
+    model: &IrModel,
+    protocol: ProtocolMode,
+    gcp: bool,
+    names: &crate::lower::ModuleNames,
+) -> Vec<(String, String)> {
     model
         .files
         .iter()
         .map(|file| {
-            let mojo_path = proto_to_mojo_path(&file.proto_path);
+            let mojo_path =
+                format!("{}.mojo", crate::lower::module_stem(&file.proto_path, names));
             let source = Emitter::with_options(file, protocol, gcp)
                 .with_peers(&model.files)
                 .emit();
@@ -1940,11 +1953,20 @@ pub const LAYOUT_PROBE_FILE: &str = "_layout_probe.mojo";
 /// prints the sizes. A generator that accepts a `.proto` does not prove the
 /// emitted code lays out; compiling and running this does.
 pub fn emit_layout_probe(model: &IrModel) -> (String, String) {
+    emit_layout_probe_with_names(model, &crate::lower::ModuleNames::new())
+}
+
+/// [`emit_layout_probe`] of a model whose files `names` writes as other
+/// modules ([`emit_model_with_names`]).
+pub fn emit_layout_probe_with_names(
+    model: &IrModel,
+    names: &crate::lower::ModuleNames,
+) -> (String, String) {
     let mut imports = String::new();
     let mut body = String::new();
     for file in &model.files {
-        let stem = proto_to_mojo_path(&file.proto_path);
-        let stem = stem.strip_suffix(".mojo").unwrap_or(&stem);
+        let stem = crate::lower::module_stem(&file.proto_path, names);
+        let stem = stem.as_str();
         imports.push_str(&format!("from {} import {stem}\n", file.mojo_package));
         let names = file
             .enums

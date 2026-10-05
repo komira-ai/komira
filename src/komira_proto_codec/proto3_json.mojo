@@ -992,6 +992,14 @@ struct JsonDecoder(WireDecoder):
         for i in range(len(obj.obj_keys)):
             out[obj.obj_keys[i]] = Int32(obj.children[i].as_int64())
 
+    def read_into_string_i64_map(
+        mut self, mut out: Dict[String, Int64]
+    ) raises:
+        var obj = self._cur_object()
+        for i in range(len(obj.obj_keys)):
+            # An int64 value is its decimal text, a JSON string or number.
+            out[obj.obj_keys[i]] = obj.children[i].as_int64()
+
     def read_into_i64_string_map(
         mut self, mut out: Dict[Int64, String]
     ) raises:
