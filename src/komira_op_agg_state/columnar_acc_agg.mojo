@@ -48,7 +48,7 @@
 from komira_core.arrow import ArrowType, Column
 from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.collections.slab import Slab
-from komira_core.accumulator_trait import Accumulator
+from komira_op_agg_state.accumulator_trait import Accumulator
 from komira_core.io.heap_region import HeapRegion
 
 

@@ -48,7 +48,7 @@
 from komira_core.arrow import Column
 from komira_core.collections.slab import Slab
 
-from komira_core.accumulator_trait import Accumulator
+from komira_op_agg_state.accumulator_trait import Accumulator
 from komira_core.collections.dyn_value import DynValue
 from .dyn_accumulator import DynAccumulator, MAX_ACC_SIZE, _cast_acc
 

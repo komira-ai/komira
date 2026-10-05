@@ -75,7 +75,7 @@ from std.sys import size_of
 from komira_core.arrow import Column
 from komira_core.collections.dyn_value import DynValue
 
-from komira_core.accumulator_trait import Accumulator
+from komira_op_agg_state.accumulator_trait import Accumulator
 from komira_core.io.heap_region import HeapRegion
 
 
