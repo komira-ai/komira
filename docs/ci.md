@@ -305,9 +305,10 @@ channel answers NOOP (exit 0).
   newest push wins and queued pushes coalesce. That is safe because `main`
   only moves forward: the newer push carries the older one's changes, and
   `prod`'s summary lists them (`carried to prod`: every first-parent commit
-  of `main` after the channel's previous build of this version, so a run
-  that was replaced, or never started, is reported by the run that released
-  its commit). A run replaced while pending also shows as **cancelled** in
+  of `main` after the channel's previous build, which is the highest build
+  number `komira-ai/prod` lists below this release's, of ANY name and
+  version, so a run that was replaced, or never started, is reported by the
+  run that released its commit). A run replaced while pending also shows as **cancelled** in
   the Actions list, with no summary. No manual run is in that group, so none
   can replace a pending release, whatever revision it names: a dry run is in
   `kci-plan-<run id>` (it writes nothing), any other manual run in
@@ -331,17 +332,29 @@ channel answers NOOP (exit 0).
     mostly-documentation merge that also touches code can be skipped. The
     next push that does start a release carries it, and its `carried to
     prod` list names the commit; until then nothing says it waits.
-- **Never backward.** `prod` refuses to publish a build number lower than ANY
-  build `komira-ai/prod` already lists, of any name and any version (exit 3,
-  `KCI-E-SUPERSEDED`, read anonymously from the channel's listing). The rule:
-  `prod` is only ever published from a push to `main`, and the build number
-  counts `main`'s first-parent history, so a release is allowed only when
-  its revision descends from (or is) the newest commit `prod` holds. That
-  holds across a version bump (a new compiler version re-versions every
-  package) and for a name `prod` never listed. Only a late re-run of an old
-  run reaches it, since the group serialises live runs. An equal build
-  number is NOOP. Rolling back is a revert on `main`, released forward as
-  the next build number.
+- **Never backward.** `prod` publishes a release only when its revision
+  descends from what `prod` already holds. Two refusals, both exit 3,
+  `KCI-E-SUPERSEDED`, read anonymously from the channel's listing, before
+  any upload (a dry run too):
+  - **By number.** A build number lower than ANY build `komira-ai/prod`
+    lists, of any name and any version, or an EQUAL number with another
+    build string (`h<8 hex>` of another commit: a consumer cannot order two
+    builds of one number). That holds across a version bump (a new compiler
+    version re-versions every package) and for a name `prod` never listed.
+  - **By history.** The commit that the channel's NEWEST build names (the
+    `h<8 hex>` of its highest build number) must be on the release
+    revision's history (`git rev-list <revision>`). Numbers alone cannot say
+    it: the build number counts FIRST-PARENT commits, so when `main` moves
+    to a merge whose first parent is a branch, the new tip can carry a LOWER
+    number than an older tip it contains; a late re-run of that older tip
+    would then be "higher" than what `prod` holds, and would publish it,
+    taking the branch's changes back out. A history git cannot list (a
+    shallow clone, no `RUNNER_TEMP`) is exit 5, never a pass.
+
+  Only a late re-run of an old run reaches either, since the group
+  serialises live runs. A re-run of the same release is NOOP (or finishes a
+  partial publish). Rolling back
+  is a revert on `main`, released forward as the next build number.
 - **The prod line.** Every release job ends with the step `the prod line`
   (`if: always()`, rule R20), which writes one plain line to the job summary
   and to the log: `prod: SKIPPED (<job> <status>: exit <n>)` when that job
@@ -427,14 +440,47 @@ they are, a branch's own `kci.yml` can still publish to gamma, and every
 break-glass publish is refused by prefix.dev (no trusted publisher for
 `gamma-breakglass`).
 
+⚠ **GitHub creates an environment the first time a job names it, with NO
+protection rules** (GitHub's documentation, "Managing environments for
+deployment": the newly created environment "will not have any protection
+rules"). So `gamma-breakglass` may already exist when you get to it: any
+manual run after this file is on `main`, or any push to a branch whose own
+`kci.yml` names it, creates it with no reviewer. Its existing is NOT the
+setting. Open it and confirm the Required reviewers rule is on it. **Do not
+add the prefix.dev publisher for `gamma-breakglass` until that environment
+shows a required reviewer**: with the publisher and no reviewer, every
+break-glass run publishes to gamma unapproved.
+
+⚠ **A recorded reason is guaranteed only for a run of an unmodified
+`kci.yml`.** `gamma-breakglass` deploys from any branch, and GitHub matches
+the branch rule against the run's ref. So a same-repository pull request, or
+a push to a branch whose own `kci.yml` names `environment:
+gamma-breakglass`, reaches the gamma publisher with no `reason` input and no
+kci reason check (that check is in the branch's own kci). The reviewer's
+approval is the only gate there. **The reviewer must refuse any
+`gamma-breakglass` job whose run is not a `workflow_dispatch` of `kci.yml`,
+or whose summary lacks the line `BREAK-GLASS: <ref> <revision> by <actor>:
+<reason>`.** Turn on **Prevent self-review** for `gamma-breakglass` so that
+the approval comes from a second person.
+
+The ruleset row stays open until it is VERIFIED. GitHub's ruleset
+documentation does not say whether its pattern matching is case-sensitive.
+If it is not, "except the branch `main`" also excepts `MAIN`, and the rule
+blocks nothing. Until a check passes, `prod`'s case-variant exposure stays
+OPEN: the `prod` job's `if:` compares ignoring case, a branch's own
+`kci.yml` can drop the shell check, and whether `prod`'s branch rule `main`
+matches `MAIN` is undocumented. The check: after creating the ruleset, try
+to create a branch named `MAIN` (for example `git push origin
+HEAD:refs/heads/MAIN`); it must be refused.
+
 | setting | value | what it locks |
 |---|---|---|
 | environment `prod`, deployment branches | Selected: `main` | only `main` publishes to prod (already set) |
 | environment `gamma`, deployment branches | Selected: `main` | only `main` publishes to gamma without break-glass |
-| environment `gamma-breakglass` | any branch, **required reviewer** | every break-glass publish waits for a recorded approval |
-| prefix.dev `komira-ai/gamma`, trusted publishers | `komira-ai/komira`, `kci.yml`, environment `gamma`, AND a second one for environment `gamma-breakglass` | a break-glass run can publish to gamma at all (without it, every break-glass publish is refused by prefix.dev) |
+| environment `gamma-breakglass` (FIRST: before the next row) | any branch, **required reviewer**, **Prevent self-review**. It may already exist, auto-created by GitHub with no protection: confirm the reviewer rule is on it | every break-glass publish waits for a recorded approval by a second person (for a run of an unmodified `kci.yml` the reason is recorded too; for any other run, the reviewer refuses it) |
+| prefix.dev `komira-ai/gamma`, trusted publishers (ONLY AFTER `gamma-breakglass` shows a required reviewer) | `komira-ai/komira`, `kci.yml`, environment `gamma`, AND a second one for environment `gamma-breakglass` | a break-glass run can publish to gamma at all (without it, every break-glass publish is refused by prefix.dev) |
 | prefix.dev `komira-ai/prod`, trusted publisher | `komira-ai/komira`, `kci.yml`, environment `prod` only | (already set) |
-| repository ruleset | block creating and updating branches and tags matching `[Mm][Aa][Ii][Nn]` except the branch `main`, and the tag `main` | no ref that is `main` in another case exists, so GitHub's case-insensitive `if:` and concurrency comparisons cannot be fooled by one (whether the environment branch rule `main` matches `MAIN` is undocumented) |
+| repository ruleset, then VERIFIED | block creating and updating branches and tags matching `[Mm][Aa][Ii][Nn]` except the branch `main`, and the tag `main`. Then try to create the branch `MAIN`: it must be refused | no ref that is `main` in another case exists, so GitHub's case-insensitive `if:` and concurrency comparisons cannot be fooled by one (whether the environment branch rule `main` matches `MAIN` is undocumented). Until the check passes, prod's case-variant exposure is OPEN |
 
 - **One command.** kci has exactly one command, `kci run --stage S`. There is
   no `kci build`, `kci publish` or `kci ci check`. `kci run` also takes
