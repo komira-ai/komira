@@ -9,42 +9,39 @@
 # # Approach: `external_call` against a statically linked library
 #
 # No dlopen: Mojo's `external_call["symbol", ReturnT, ArgTs...](args)` declares
-# a link-time symbol reference, and the build links the snappy library into
-# every binary that depends on this package, so no libsnappy is needed at run
-# time.
+# a link-time symbol reference, and the build links the snappy library
+# (//third_party/snappy) into every binary that depends on this package, so no
+# libsnappy is needed at run time.
 #
 # # Two decoders
 #
 # The C decoder is the default. The Mojo decoder (`decompress.mojo`) decodes
-# the same format with the same public signature; the dispatch below selects
-# it when the flag is set. Compression always uses the C library.
+# the same format behind the same public signature; `set_snappy_decoder`
+# selects it for the whole process. Compression always uses the C library.
+# The selection is an explicit call, never read from the environment: a
+# program that wants it configurable maps its own flag to the setter.
 #
 # # API
 #
-#   fn snappy_decompress(compressed: ByteView[_], dst: ByteView[mut=True, _])
-#                       raises -> Int
-#   fn snappy_compress(src: ByteView[_], dst: ByteView[mut=True, _])
-#                     raises -> Int
-#   fn snappy_uncompressed_length(compressed: ByteView[_]) raises -> Int
+#   fn snappy_decompress(compressed: Span[UInt8], dst: Span[mut UInt8]) -> Int
+#   fn snappy_compress(src: Span[UInt8], dst: Span[mut UInt8]) -> Int
+#   fn snappy_uncompressed_length(compressed: Span[UInt8]) -> Int
 #   fn snappy_max_compressed_length(input_len: Int) -> Int
+#   fn set_snappy_decoder(SnappyDecoder) / snappy_decoder() -> SnappyDecoder
 #
 # # Encapsulation
 #
-# Public API:
-#   * `snappy_*` entries accept ByteView[_] / ByteView[mut=True, _] with
-#     caller-chosen origins — NOT wildcards.
-# Internal FFI:
-#   * Every `external_call` site casts the caller's buffer pointers to an
-#     untracked origin ONLY at the call site itself. No wildcard escapes this
-#     file.
-#   * Every `external_call` site carries a `# SAFETY:` comment.
+# No public signature holds a raw pointer: the entries take Spans with
+# caller-chosen origins. The pointers are taken from the Spans inside each
+# entry and cast to an untracked origin ONLY at the `external_call` site;
+# every `external_call` site carries a `# SAFETY:` comment.
 # =============================================================================
 
+from std.atomic import Atomic
 from std.ffi import external_call, _Global
 from std.memory import alloc, OwnedPointer
 
 from komira_buffer.byte_view import ByteView
-from komira_core_ffi.posix import _env_is_set
 
 from .decompress import (
     snappy_decompress_mojo,
@@ -60,48 +57,87 @@ comptime _SNAPPY_OK: Int32 = 0
 
 
 # -----------------------------------------------------------------------------
-# KOMIRA_SNAPPY_MOJO dispatch flag — MEMOIZED once per process.
-#
-# Reading the environment on every `snappy_decompress` /
-# `snappy_uncompressed_length` call would cost a `String` heap alloc + libc
-# `getenv` per Parquet page on the default path. The read is memoized into a
-# process-global `_Global` slot (no env var per call, no `unsafe_from_address`)
-# so the per-page hot path is a single predictable load + branch.
+# Decoder selection — one process-global atomic byte.
 # -----------------------------------------------------------------------------
 
 
-def _init_snappy_flag() -> OwnedPointer[Bool]:
-    """`_Global` init_fn: read KOMIRA_SNAPPY_MOJO EXACTLY once per process.
+struct SnappyDecoder(ImplicitlyCopyable, Copyable, Equatable, Writable):
+    """Which decoder `snappy_decompress` uses.
 
-    `alloc` + raw store + `OwnedPointer(unsafe_from_raw_pointer=)`.
-    `_env_is_set` is non-raising, so the read is unconditional.
+    `C_LIBRARY` (the default) is the snappy C library's decoder; `MOJO` is
+    the Mojo decoder in `decompress.mojo`, which decodes the same format.
     """
-    var raw = alloc[Bool](1)
-    raw[0] = _env_is_set("KOMIRA_SNAPPY_MOJO")
-    return OwnedPointer[Bool](unsafe_from_raw_pointer=raw)
+
+    var value: UInt8
+
+    comptime C_LIBRARY = SnappyDecoder(0)
+    comptime MOJO = SnappyDecoder(1)
+
+    def __init__(out self, value: UInt8):
+        self.value = value
+
+    @always_inline
+    def __eq__(self, other: SnappyDecoder) -> Bool:
+        return self.value == other.value
+
+    @always_inline
+    def __ne__(self, other: SnappyDecoder) -> Bool:
+        return self.value != other.value
+
+    def write_to[W: Writer](self, mut writer: W):
+        if self == SnappyDecoder.C_LIBRARY:
+            writer.write("C_LIBRARY")
+        elif self == SnappyDecoder.MOJO:
+            writer.write("MOJO")
+        else:
+            writer.write("SnappyDecoder(", String(Int(self.value)), ")")
 
 
-comptime _SNAPPY_MOJO_FLAG = _Global[
-    "komira_parquet_codec_snappy_decoder", _init_snappy_flag
+comptime _DecoderSlot = Atomic[DType.uint8]
+
+
+def _init_snappy_decoder_slot() -> OwnedPointer[_DecoderSlot]:
+    """`_Global` init_fn: the selection starts at `C_LIBRARY` (non-raising)."""
+    var raw = alloc[_DecoderSlot](1)
+    raw.unsafe_bitcast[Scalar[DType.uint8]]().unsafe_write(
+        SnappyDecoder.C_LIBRARY.value
+    )
+    return OwnedPointer[_DecoderSlot](unsafe_from_raw_pointer=raw)
+
+
+comptime _SNAPPY_DECODER = _Global[
+    "komira_parquet_codec_snappy_decoder", _init_snappy_decoder_slot
 ]
+
+
+def set_snappy_decoder(decoder: SnappyDecoder) raises:
+    """Select the decoder every later `snappy_decompress` and
+    `snappy_uncompressed_length` call in this process uses.
+
+    `raises` only to propagate the stdlib `_Global.get_or_create_ptr`
+    signature; it never raises at run time.
+    """
+    # SAFETY: `get_or_create_ptr` targets KGEN-runtime-managed process-lifetime
+    # static storage; `MutUntrackedOrigin` is the stdlib `_Global` API's own
+    # return type, confined to this module.
+    _SNAPPY_DECODER.get_or_create_ptr()[][].store(decoder.value)
+
+
+def snappy_decoder() raises -> SnappyDecoder:
+    """The decoder `snappy_decompress` uses (`C_LIBRARY` until
+    `set_snappy_decoder` selects another)."""
+    # SAFETY: see `set_snappy_decoder`.
+    return SnappyDecoder(_SNAPPY_DECODER.get_or_create_ptr()[][].load())
 
 
 @always_inline
 def _snappy_use_mojo() raises -> Bool:
-    """Process-memoized KOMIRA_SNAPPY_MOJO dispatch flag (init-once via
-    `_Global`). One predictable load on the per-page hot path — NOT a String
-    alloc + `getenv` per call.
-
-    SAFETY: `get_or_create_ptr` targets KGEN-runtime-managed process-lifetime
-    static storage; `MutUntrackedOrigin` is the stdlib `_Global` API's own
-    return type, confined to this helper. The outer deref yields the
-    process-global `OwnedPointer`; the inner deref the `Bool`.
-    """
-    return _SNAPPY_MOJO_FLAG.get_or_create_ptr()[][]
+    """One atomic byte load on the per-page path."""
+    return snappy_decoder() == SnappyDecoder.MOJO
 
 
 # -----------------------------------------------------------------------------
-# Public FFI wrappers.
+# Public entries.
 # -----------------------------------------------------------------------------
 
 
@@ -115,34 +151,28 @@ def snappy_max_compressed_length(input_len: Int) -> Int:
     return 32 + input_len + input_len // 6
 
 
-def snappy_uncompressed_length(compressed: ByteView[_]) raises -> Int:
-    """Read the uncompressed length from a Snappy preamble via the snappy
-    C API.
+def snappy_uncompressed_length(compressed: Span[UInt8, _]) raises -> Int:
+    """Read the uncompressed length from a Snappy preamble.
 
-    Delegates to `snappy_uncompressed_length` (snappy-c.h, over
-    `snappy::GetUncompressedLength`) rather than parsing the varint preamble
-    ourselves — the library's implementation is authoritative and handles
-    all edge cases.
+    With the C decoder selected this delegates to `snappy_uncompressed_length`
+    (snappy-c.h, over `snappy::GetUncompressedLength`); with the Mojo decoder,
+    to its own varint parse. Not on the hot path — page decoders usually take
+    the length from the page header's uncompressed_page_size instead.
 
     SAFETY: the callee reads the leading varint preamble bytes from
     `compressed` and writes a single Int64 (size_t-width) into `size_buf`.
-    Both buffers are caller-owned for the synchronous call; the callee
-    retains no pointer past the call.
+    Both buffers are owned here or by the caller for the synchronous call;
+    the callee retains no pointer past the call.
     """
-    # Mojo varint preamble parse when the Mojo decoder is selected (keeps that
-    # decoder free of any C dependency). Not on the hot path — callers
-    # usually take the length from the Parquet page header's
-    # uncompressed_page_size instead. Default (flag unset) = the C path
-    # below. The flag is memoized (one predictable load, not a getenv per
-    # call).
-    if _snappy_use_mojo():
-        return snappy_uncompressed_length_mojo(compressed)
-    var input_len = compressed.len()
+    var input_len = len(compressed)
     if input_len == 0:
         raise Error("snappy: empty input")
+    if _snappy_use_mojo():
+        return snappy_uncompressed_length_mojo(
+            ByteView(compressed.unsafe_ptr(), input_len)
+        )
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(0)
-    var src_ptr = compressed.into_span().unsafe_ptr()
     var status = external_call[
         "snappy_uncompressed_length",
         Int32,
@@ -150,7 +180,9 @@ def snappy_uncompressed_length(compressed: ByteView[_]) raises -> Int:
         UInt64,
         UnsafePointer[Int64, MutUntrackedOrigin],
     ](
-        src_ptr.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
+        compressed.unsafe_ptr()
+        .unsafe_mut_cast[True]()
+        .unsafe_origin_cast[MutUntrackedOrigin](),
         UInt64(input_len),
         size_buf.unsafe_origin_cast[MutUntrackedOrigin](),
     )
@@ -164,12 +196,16 @@ def snappy_uncompressed_length(compressed: ByteView[_]) raises -> Int:
     return length
 
 
-def snappy_decompress(
-    compressed: ByteView[_],
-    dst: ByteView[mut=True, _],
-) raises -> Int:
-    """Decompress a raw/unframed Snappy blob into `dst` via the snappy C API
-    (or the Mojo decoder, when selected).
+def snappy_decompress[
+    dori: MutOrigin
+](compressed: Span[UInt8, _], dst: Span[UInt8, dori]) raises -> Int:
+    """Decompress a raw/unframed Snappy blob into `dst`; return the bytes
+    written. `len(dst)` is the capacity: a blob that decodes to more is
+    refused, as is a malformed one.
+
+    The Mojo decoder, when selected, uses the room past the decoded length
+    for its 16-byte fast paths: a caller that sizes `dst` at the decoded
+    length + `kSlopBytes` gets them up to the end.
 
     snappy-c.h API:
         snappy_status snappy_uncompress(const char* compressed,
@@ -177,29 +213,23 @@ def snappy_decompress(
                                         char* uncompressed,
                                         size_t* uncompressed_length);
 
-    Returns number of bytes written. Raises on malformed input or short dst.
-
-    SAFETY: the callee reads exactly `compressed.len()` bytes from
-    `compressed` and writes up to the value stored in `size_buf` to `dst`.
-    Both buffers are caller-owned for the synchronous call; the callee
-    retains no pointer past the call. Origins are cast to an untracked
+    SAFETY: the callee reads exactly `len(compressed)` bytes from
+    `compressed` and writes up to the value stored in `size_buf` (`len(dst)`)
+    to `dst`. Both Spans keep their buffers alive for the synchronous call;
+    the callee retains no pointer past it. Origins are cast to an untracked
     origin ONLY at the `external_call` site.
     """
-    # When the Mojo decoder is selected, route to it (`decompress.mojo`)
-    # instead of the C call: SAME public ByteView signature, SAME caller; only
-    # the codec body changes. Default (flag unset) = the C decoder below. The
-    # flag is memoized once per process (one predictable load on the hot
-    # per-page path, not a getenv).
-    if _snappy_use_mojo():
-        return snappy_decompress_mojo(compressed, dst)
-    var input_len = compressed.len()
-    var output_cap = dst.len()
+    var input_len = len(compressed)
+    var output_cap = len(dst)
     if input_len == 0:
         raise Error("snappy: empty input")
+    if _snappy_use_mojo():
+        return snappy_decompress_mojo(
+            ByteView(compressed.unsafe_ptr(), input_len),
+            ByteView(dst.unsafe_ptr(), output_cap),
+        )
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(output_cap)
-    var src_ptr = compressed.into_span().unsafe_ptr()
-    var dst_ptr = dst.into_span().unsafe_ptr()
     var status = external_call[
         "snappy_uncompress",
         Int32,
@@ -208,9 +238,11 @@ def snappy_decompress(
         UnsafePointer[UInt8, MutUntrackedOrigin],
         UnsafePointer[Int64, MutUntrackedOrigin],
     ](
-        src_ptr.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
+        compressed.unsafe_ptr()
+        .unsafe_mut_cast[True]()
+        .unsafe_origin_cast[MutUntrackedOrigin](),
         UInt64(input_len),
-        dst_ptr.unsafe_origin_cast[MutUntrackedOrigin](),
+        dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
         size_buf.unsafe_origin_cast[MutUntrackedOrigin](),
     )
     var written = Int(size_buf[0])
@@ -224,28 +256,26 @@ def snappy_decompress(
     return written
 
 
-def snappy_compress(
-    src: ByteView[_],
-    dst: ByteView[mut=True, _],
-) raises -> Int:
-    """Compress `src` into `dst` via the snappy C API's
-    `snappy_compress`.
+def snappy_compress[
+    dori: MutOrigin
+](src: Span[UInt8, _], dst: Span[UInt8, dori]) raises -> Int:
+    """Compress `src` into `dst` via the snappy C API's `snappy_compress`;
+    return the bytes written. `dst` must hold at least
+    `snappy_max_compressed_length(len(src))` bytes (the library refuses a
+    smaller one).
 
     snappy-c.h API:
         snappy_status snappy_compress(const char* input, size_t input_length,
                                       char* compressed, size_t* compressed_length);
 
-    Returns number of bytes written.
-
-    SAFETY: identical contract to snappy_decompress — buffers are
-    caller-owned, the callee retains no pointer past the call.
+    SAFETY: identical contract to snappy_decompress — the Spans keep both
+    buffers alive for the synchronous call, and the callee retains no
+    pointer past it.
     """
-    var input_len = src.len()
-    var output_cap = dst.len()
+    var input_len = len(src)
+    var output_cap = len(dst)
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(output_cap)
-    var src_ptr = src.into_span().unsafe_ptr()
-    var dst_ptr = dst.into_span().unsafe_ptr()
     var status = external_call[
         "snappy_compress",
         Int32,
@@ -254,9 +284,11 @@ def snappy_compress(
         UnsafePointer[UInt8, MutUntrackedOrigin],
         UnsafePointer[Int64, MutUntrackedOrigin],
     ](
-        src_ptr.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
+        src.unsafe_ptr()
+        .unsafe_mut_cast[True]()
+        .unsafe_origin_cast[MutUntrackedOrigin](),
         UInt64(input_len),
-        dst_ptr.unsafe_origin_cast[MutUntrackedOrigin](),
+        dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
         size_buf.unsafe_origin_cast[MutUntrackedOrigin](),
     )
     var written = Int(size_buf[0])

@@ -10,11 +10,11 @@
 # liblz4 is opened by name (`liblz4.so.1` / `liblz4.dylib`) at first use and
 # kept in a process-lifetime handle, so nothing is linked.
 #
-# # API
+# # API (package-private: `compression.mojo` is the caller)
 #
-#   fn lz4_frame_decompress_ffi(dst, dst_capacity, src, src_size) raises -> Int
-#   fn lz4_frame_compress_ffi(dst, dst_capacity, src, src_size) raises -> Int
-#   fn lz4_frame_compress_bound_ffi(src_size) raises -> Int
+#   fn _lz4_frame_decompress_into(dst: Span[mut UInt8], src: Span[UInt8]) -> Int
+#   fn _lz4_frame_compress_into(dst: Span[mut UInt8], src: Span[UInt8]) -> Int
+#   fn _lz4_frame_compress_bound(src_size: Int) -> Int
 #
 # # OwnedDLHandle singleton
 #
@@ -23,20 +23,18 @@
 #
 # # Encapsulation
 #
-# Public API:
-#   * `lz4_frame_*_ffi` entries accept UnsafePointer with CALLER-CHOSEN origins
-#     (Origin / MutOrigin generic params), NOT wildcards.
-# Internal FFI:
+#   * No signature holds a raw pointer: the entries take Spans, and the
+#     pointers taken from them are cast to an untracked origin ONLY at the
+#     `handle.call[...]` sites.
+#   * The decompression context is a typed pointer local created and freed
+#     inside one call; no address is ever rebuilt from an integer.
 #   * The handle singleton is a stdlib `_Global` slot; `get_or_create_ptr()`
 #     returns `MutUntrackedOrigin` into process-lifetime static storage (no env
-#     var, no `unsafe_from_address`).
-#   * Public entries cast caller pointers to an untracked origin ONLY at the
-#     `handle.call[...]` site.
+#     var, no address rebuilt from an integer).
 #   * Every `handle.call` site carries a `# SAFETY:` comment.
 # =============================================================================
 
 from std.ffi import OwnedDLHandle, _Global
-from std.memory import alloc, UnsafePointer
 from std.os import abort
 from std.sys.info import CompilationTarget
 
@@ -81,7 +79,7 @@ def _init_lz4_ffi_handle() -> OwnedDLHandle:
     """`_Global` init_fn: dlopen liblz4 exactly once per process (KGEN-serialized).
 
     SAFETY: `_Global`'s init_fn must be non-raising. The OwnedDLHandle ctor
-    raises only when the pinned dylib is unresolvable (a fatal provisioning
+    raises only when the library cannot be loaded (a fatal provisioning
     error), so we `abort`: without the library no LZ4 frame can be read.
     """
     try:
@@ -103,7 +101,7 @@ def _default_lz4_ffi_handle() raises -> UnsafePointer[
 
     SAFETY: FFI boundary. Targets KGEN-runtime-managed static storage
     (process-lifetime); `MutUntrackedOrigin` is the stdlib `_Global` API's own
-    return type, confined to this FFI helper. No env var, no `unsafe_from_address`.
+    return type, confined to this FFI helper. No env var, no address rebuilt from an integer.
     """
     return _LZ4_FFI_GLOBAL.get_or_create_ptr()
 
@@ -134,45 +132,48 @@ def _default_lz4_ffi_handle() raises -> UnsafePointer[
 comptime _LZ4F_VERSION: Int32 = 100
 
 
-def lz4_frame_decompress_ffi[
-    sori: Origin, dori: MutOrigin
-](
-    dst: UnsafePointer[UInt8, dori],
-    dst_capacity: Int,
-    src: UnsafePointer[UInt8, sori],
-    src_size: Int,
-) raises -> Int:
+def _lz4_frame_decompress_into[
+    dori: MutOrigin
+](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
     """LZ4 FRAME decompression via liblz4's `LZ4F_decompress`.
 
-    Decodes a complete in-memory LZ4-frame (`src[0:src_size]`) into `dst`
-    (capacity `dst_capacity`). Drives `LZ4F_decompress` in a loop until the
-    whole frame is consumed; the function returns 0 (a hint of 0) once the
-    frame is fully decoded. Returns the number of decompressed bytes written.
+    Decodes a complete in-memory LZ4 frame (`src`) into `dst` (capacity
+    `len(dst)`). Drives `LZ4F_decompress` in a loop until the whole frame is
+    consumed; liblz4 returns a hint of 0 once the frame is fully decoded.
+    Returns the number of decompressed bytes written.
 
     Raises with the literal "LZ4F dst buffer too small" marker substring when
-    the input is consumed but the output buffer filled before the frame ended
-    (the caller's grow-and-retry loop matches on that substring); raises a
-    distinct error on any `LZ4F_isError`-flagged failure.
+    the output buffer filled before the frame ended (a caller's grow-and-retry
+    loop matches on that substring); raises a distinct error on any
+    `LZ4F_isError`-flagged failure.
 
-    SAFETY: liblz4's frame decoder reads only `src[0:src_size]` and writes
-    only `dst[0:dst_capacity]` across the synchronous call sequence; it
-    retains no pointer past each `LZ4F_decompress` call. The decompression
-    context is created and freed within this function (no leak). The two
-    `size_t` in/out counters live on the stack as InlineArray slots whose
-    addresses we hand to liblz4 only for the duration of each call. Origins
-    are cast to an untracked origin ONLY at the `handle.call[...]` sites.
+    SAFETY: liblz4's frame decoder reads only `src` and writes only `dst`
+    across the synchronous call sequence; it retains no pointer past each
+    `LZ4F_decompress` call. The decompression context is created and freed
+    within this function (no leak). The context handle and the two `size_t`
+    in/out counters are stack locals whose addresses are handed to liblz4
+    only for the duration of each call. Origins are cast to an untracked
+    origin ONLY at the `handle.call[...]` sites.
     """
+    var src_size = len(src)
+    var dst_capacity = len(dst)
+    var src_ptr = src.unsafe_ptr()
+    var dst_ptr = dst.unsafe_ptr()
     var handle_ptr = _default_lz4_ffi_handle()
 
-    # Create the decompression context (dctx is an opaque pointer liblz4
-    # allocates; we own freeing it).
-    var dctx_slot = Array[UInt64, 1](fill=UInt64(0))
-    var dctx_slot_ptr = dctx_slot.unsafe_ptr()
-    # SAFETY: `dctx_slot_ptr` addresses a 1-element stack InlineArray; liblz4
-    # writes the allocated dctx pointer into it and does not retain the
-    # address. Cast to an untracked origin at the FFI call only.
+    # The decompression context: an opaque LZ4F_dctx* that liblz4 allocates
+    # and this function frees. It is held as a typed pointer local and never
+    # dereferenced on the Mojo side; liblz4 writes it through the address of
+    # this local.
+    var dctx = _lz4_null_byte()
+    # SAFETY: `UnsafePointer(to=dctx)` addresses the stack local above (a
+    # concrete origin); liblz4 writes the allocated context pointer into it
+    # and does not retain the address. Cast to an untracked origin at the FFI
+    # call only.
     var create_rc = handle_ptr[].call["LZ4F_createDecompressionContext", UInt64](
-        dctx_slot_ptr.bitcast[UInt8]().unsafe_origin_cast[MutUntrackedOrigin](),
+        UnsafePointer(to=dctx)
+        .bitcast[UInt8]()
+        .unsafe_origin_cast[MutUntrackedOrigin](),
         UInt32(Int(_LZ4F_VERSION)),
     )
     var is_err_create = handle_ptr[].call["LZ4F_isError", UInt32](create_rc)
@@ -181,16 +182,8 @@ def lz4_frame_decompress_ffi[
             "LZ4F_createDecompressionContext failed (code="
             + String(Int(create_rc)) + ")"
         )
-    var dctx = dctx_slot[0]
-    if dctx == UInt64(0):
+    if dctx == _lz4_null_byte():
         raise Error("LZ4F_createDecompressionContext returned null dctx")
-    # TODO(safety): `dctx` is a C-owned LZ4F_dctx* opaque handle (liblz4 owns
-    # its heap), created here and freed on teardown below within this SAME
-    # synchronous scope. It is stored as UInt64 and rematerialized via
-    # `unsafe_from_address=Int(dctx)` at the decompress + free call sites. The
-    # clean fix: read the dctx slot as a typed
-    # `UnsafePointer[UInt8, <concrete>]` and thread it through decompress/free
-    # instead of round-tripping through Int.
 
     var total_out = 0
     var src_pos = 0
@@ -206,17 +199,15 @@ def lz4_frame_decompress_ffi[
         var src_sz = Array[UInt64, 1](fill=UInt64(src_size - src_pos))
         var dst_sz_ptr = dst_sz.unsafe_ptr()
         var src_sz_ptr = src_sz.unsafe_ptr()
-        # SAFETY: all four buffers (dctx handle, dst slice, src slice, the two
-        # size counters) are caller-/stack-owned for the duration of this
-        # synchronous call; liblz4 retains none of them. Origins cast to
-        # an untracked origin only here.
+        # SAFETY: the context handle, the dst and src windows (inside the
+        # Spans, which keep their buffers alive) and the two stack size
+        # counters all outlive this synchronous call; liblz4 retains none of
+        # them. Origins cast to an untracked origin only here.
         var hint = handle_ptr[].call["LZ4F_decompress", UInt64](
-            UnsafePointer[UInt8, MutUntrackedOrigin](
-                unsafe_from_address=Int(dctx)
-            ),
-            (dst + total_out).unsafe_origin_cast[MutUntrackedOrigin](),
+            dctx,
+            (dst_ptr + total_out).unsafe_origin_cast[MutUntrackedOrigin](),
             dst_sz_ptr.bitcast[UInt8]().unsafe_origin_cast[MutUntrackedOrigin](),
-            (src + src_pos).unsafe_mut_cast[True]().unsafe_origin_cast[
+            (src_ptr + src_pos).unsafe_mut_cast[True]().unsafe_origin_cast[
                 MutUntrackedOrigin
             ](),
             src_sz_ptr.bitcast[UInt8]().unsafe_origin_cast[MutUntrackedOrigin](),
@@ -240,13 +231,12 @@ def lz4_frame_decompress_ffi[
             raised_msg = "LZ4F dst buffer too small"
             break
 
-    # SAFETY (FFI): `dctx` is the LZ4F_dctx handle
-    # returned by LZ4F_createDecompressionContext above; we own it and free
-    # it exactly once here on teardown. liblz4 owns the dctx's heap; the
-    # address is rematerialized for the free call (no Mojo-side lifetime is
-    # tracked through it) and is never dereferenced after this call.
+    # SAFETY (FFI): `dctx` is the LZ4F_dctx handle returned by
+    # LZ4F_createDecompressionContext above; we own it and free it exactly
+    # once here on teardown. liblz4 owns the context's heap, and the pointer
+    # is never used after this call.
     var _free_rc = handle_ptr[].call["LZ4F_freeDecompressionContext", UInt64](
-        UnsafePointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(dctx))
+        dctx
     )
 
     if failed:
@@ -254,7 +244,7 @@ def lz4_frame_decompress_ffi[
     return total_out
 
 
-def lz4_frame_compress_bound_ffi(src_size: Int) raises -> Int:
+def _lz4_frame_compress_bound(src_size: Int) raises -> Int:
     """Max LZ4-frame compressed size via liblz4 `LZ4F_compressFrameBound`.
 
     lz4frame.h API:
@@ -263,10 +253,9 @@ def lz4_frame_compress_bound_ffi(src_size: Int) raises -> Int:
     We pass NULL prefs (defaults).
     """
     var handle_ptr = _default_lz4_ffi_handle()
-    # SAFETY (FFI): NULL prefs requests the
-    # default/worst-case frame bound. This is a pure stateless size query —
-    # liblz4 does not dereference or retain the NULL pointer, so no lifetime
-    # or origin is involved.
+    # SAFETY (FFI): NULL prefs requests the default/worst-case frame bound.
+    # This is a pure stateless size query — liblz4 does not dereference or
+    # retain the NULL pointer, so no lifetime or origin is involved.
     return Int(
         handle_ptr[].call["LZ4F_compressFrameBound", UInt64](
             UInt64(src_size),
@@ -275,30 +264,27 @@ def lz4_frame_compress_bound_ffi(src_size: Int) raises -> Int:
     )
 
 
-def lz4_frame_compress_ffi[
-    sori: Origin, dori: MutOrigin
-](
-    dst: UnsafePointer[UInt8, dori],
-    dst_capacity: Int,
-    src: UnsafePointer[UInt8, sori],
-    src_size: Int,
-) raises -> Int:
+def _lz4_frame_compress_into[
+    dori: MutOrigin
+](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
     """LZ4 FRAME compression (one-shot) via liblz4 `LZ4F_compressFrame`.
 
     Produces a complete interoperable LZ4 frame (the format Kafka's `lz4`
-    producer emits). `dst_capacity` must be >= `lz4_frame_compress_bound_ffi`.
+    producer emits). `len(dst)` must be >= `_lz4_frame_compress_bound`.
     Returns the frame byte count.
 
-    SAFETY: stateless one-shot; liblz4 reads only `src[0:src_size]`, writes
-    only `dst[0:dst_capacity]`, retains nothing past the call. Origins cast to
-    an untracked origin only at the call site.
+    SAFETY: stateless one-shot; liblz4 reads only `src`, writes only `dst`,
+    and retains nothing past the call; the Spans keep both buffers alive.
+    Origins cast to an untracked origin only at the call site.
     """
     var handle_ptr = _default_lz4_ffi_handle()
     var result = handle_ptr[].call["LZ4F_compressFrame", UInt64](
-        dst.unsafe_origin_cast[MutUntrackedOrigin](),
-        UInt64(dst_capacity),
-        src.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
-        UInt64(src_size),
+        dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
+        UInt64(len(dst)),
+        src.unsafe_ptr()
+        .unsafe_mut_cast[True]()
+        .unsafe_origin_cast[MutUntrackedOrigin](),
+        UInt64(len(src)),
         _lz4_null_byte(),  # NULL prefs (defaults)
     )
     var is_err = handle_ptr[].call["LZ4F_isError", UInt32](result)

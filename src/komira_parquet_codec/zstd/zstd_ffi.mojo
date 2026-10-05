@@ -11,27 +11,14 @@
 # and kept in a process-lifetime handle, so the system's libzstd is used and
 # nothing is linked.
 #
-# # API
+# # API (package-private: `compression.mojo` is the caller)
 #
-# Stateless single-call FFI — no opaque context handle, no per-call alloc
-# (libzstd takes raw byte buffers).
+# Stateless single-call FFI — no opaque context handle, no per-call alloc.
 #
-#   fn zstd_decompress_ffi(
-#       dst: UnsafePointer[UInt8, dori],
-#       dst_capacity: Int,
-#       src: UnsafePointer[UInt8, sori],
-#       src_size: Int,
-#   ) raises -> Int
-#
-#   fn zstd_compress_ffi(
-#       dst: UnsafePointer[UInt8, dori],
-#       dst_capacity: Int,
-#       src: UnsafePointer[UInt8, sori],
-#       src_size: Int,
-#       compression_level: Int32,
-#   ) raises -> Int
-#
-#   fn zstd_compress_bound_ffi(src_size: Int) raises -> Int
+#   fn _zstd_decompress_into(dst: Span[mut UInt8], src: Span[UInt8]) -> Int
+#   fn _zstd_compress_into(dst: Span[mut UInt8], src: Span[UInt8],
+#                          compression_level: Int32) -> Int
+#   fn _zstd_compress_bound(src_size: Int) -> Int
 #
 # # OwnedDLHandle singleton
 #
@@ -42,22 +29,17 @@
 #
 # # Encapsulation
 #
-# Public API:
-#   * `zstd_decompress_ffi` / `zstd_compress_ffi` / `zstd_compress_bound_ffi`
-#     accept UnsafePointer with CALLER-CHOSEN origins (Origin / MutOrigin
-#     generic params), NOT wildcards.
-# Internal FFI:
+#   * No signature holds a raw pointer: the entries take Spans, and the
+#     pointers are taken from them for the one synchronous call and cast to an
+#     untracked origin ONLY at the `handle.call[...]` site.
 #   * The handle singleton is a stdlib `_Global` slot; `get_or_create_ptr()`
 #     returns `MutUntrackedOrigin` into process-lifetime static storage (no env
-#     var, no `unsafe_from_address`).
-#   * Caller pointers are cast to an untracked origin ONLY at the
-#     `handle.call[...]` site.
+#     var, no address rebuilt from an integer).
 #   * Every `handle.call` site carries a `# SAFETY:` comment.
 # =============================================================================
 
 from std.ffi import OwnedDLHandle, _Global
 
-from std.memory import alloc
 from std.os import abort
 from std.sys.info import CompilationTarget
 
@@ -85,7 +67,7 @@ def _init_zstd_ffi_handle() -> OwnedDLHandle:
     """`_Global` init_fn: dlopen libzstd exactly once per process (KGEN-serialized).
 
     SAFETY: `_Global`'s init_fn must be non-raising. The OwnedDLHandle ctor
-    raises only when the pinned dylib is unresolvable (a fatal provisioning
+    raises only when the library cannot be loaded (a fatal provisioning
     error), so we `abort`: without the library no zstd page can be read.
     """
     try:
@@ -107,40 +89,40 @@ def _default_zstd_ffi_handle() raises -> UnsafePointer[
 
     SAFETY: FFI boundary. Targets KGEN-runtime-managed static storage
     (process-lifetime); `MutUntrackedOrigin` is the stdlib `_Global` API's own
-    return type, confined to this FFI helper. No env var, no `unsafe_from_address`.
+    return type, confined to this FFI helper. No env var, no address rebuilt from an integer.
     """
     return _ZSTD_FFI_GLOBAL.get_or_create_ptr()
 
 
+
+
 # -----------------------------------------------------------------------------
-# Public FFI wrappers — the (dst, dst_capacity, src, src_size) shape the
-# codec dispatch in compression.mojo calls.
+# Entries — the codec dispatch in compression.mojo calls these.
 # -----------------------------------------------------------------------------
 
 
-def zstd_decompress_ffi[
-    sori: Origin, dori: MutOrigin
-](
-    dst: UnsafePointer[UInt8, dori],
-    dst_capacity: Int,
-    src: UnsafePointer[UInt8, sori],
-    src_size: Int,
-) raises -> Int:
-    """Decompress one or more concatenated zstd frames via libzstd's
-    `ZSTD_decompress`. Returns total bytes written to dst.
+def _zstd_decompress_into[
+    dori: MutOrigin
+](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
+    """Decompress one or more concatenated zstd frames in `src` into `dst`
+    via libzstd's `ZSTD_decompress`; return the bytes written. `len(dst)` is
+    the capacity: frames that decode to more are refused.
 
-    SAFETY: libzstd's ZSTD_decompress reads exactly `src_size` bytes from
-    `src` and writes up to `dst_capacity` bytes to `dst`. Both buffers
-    are caller-owned for the duration of this synchronous call; libzstd
-    retains no pointer past the call. The handle is a process-lifetime
-    singleton (never freed). Origins are cast to an untracked origin ONLY
-    at the call site.
+    SAFETY: libzstd's ZSTD_decompress reads exactly `len(src)` bytes from
+    `src` and writes up to `len(dst)` bytes to `dst`. Both Spans keep their
+    buffers alive for this synchronous call; libzstd retains no pointer past
+    it. The handle is a process-lifetime singleton (never freed). Origins are
+    cast to an untracked origin ONLY at the call site.
     """
+    var src_size = len(src)
+    var dst_capacity = len(dst)
     var handle_ptr = _default_zstd_ffi_handle()
     var result = handle_ptr[].call["ZSTD_decompress", Int](
-        dst.unsafe_origin_cast[MutUntrackedOrigin](),
+        dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
         dst_capacity,
-        src.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
+        src.unsafe_ptr()
+        .unsafe_mut_cast[True]()
+        .unsafe_origin_cast[MutUntrackedOrigin](),
         src_size,
     )
     var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
@@ -153,26 +135,30 @@ def zstd_decompress_ffi[
     return result
 
 
-def zstd_compress_ffi[
-    sori: Origin, dori: MutOrigin
+def _zstd_compress_into[
+    dori: MutOrigin
 ](
-    dst: UnsafePointer[UInt8, dori],
-    dst_capacity: Int,
-    src: UnsafePointer[UInt8, sori],
-    src_size: Int,
+    dst: Span[UInt8, dori],
+    src: Span[UInt8, _],
     compression_level: Int32,
 ) raises -> Int:
-    """Compress src into dst via libzstd's `ZSTD_compress` at `compression_level`.
-    Returns bytes written.
+    """Compress `src` into `dst` via libzstd's `ZSTD_compress` at
+    `compression_level`; return the bytes written. `dst` should hold
+    `_zstd_compress_bound(len(src))` bytes; libzstd refuses a destination too
+    small for the frame it produces.
 
-    SAFETY: identical contract to zstd_decompress_ffi — buffers are
-    caller-owned, libzstd retains no pointer past the call.
+    SAFETY: identical contract to `_zstd_decompress_into` — the Spans keep
+    both buffers alive, and libzstd retains no pointer past the call.
     """
+    var src_size = len(src)
+    var dst_capacity = len(dst)
     var handle_ptr = _default_zstd_ffi_handle()
     var result = handle_ptr[].call["ZSTD_compress", Int](
-        dst.unsafe_origin_cast[MutUntrackedOrigin](),
+        dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
         dst_capacity,
-        src.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
+        src.unsafe_ptr()
+        .unsafe_mut_cast[True]()
+        .unsafe_origin_cast[MutUntrackedOrigin](),
         src_size,
         compression_level,
     )
@@ -186,13 +172,11 @@ def zstd_compress_ffi[
     return result
 
 
-def zstd_compress_bound_ffi(src_size: Int) raises -> Int:
+def _zstd_compress_bound(src_size: Int) raises -> Int:
     """ZSTD_compressBound(srcSize) — maximum possible compressed size.
 
     Stateless, pure arithmetic on the C side; equivalent to the
     `ZSTD_COMPRESSBOUND` macro in zstd.h (srcSize + (srcSize >> 8) + 512).
-    The FFI shape is preserved for parity with the C library's bound
-    contract (vs computing the macro in-Mojo).
     """
     var handle_ptr = _default_zstd_ffi_handle()
     return handle_ptr[].call["ZSTD_compressBound", Int](src_size)

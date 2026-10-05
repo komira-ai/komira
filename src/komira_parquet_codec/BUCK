@@ -3,15 +3,51 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Parquet page compression: the codec dispatch a page reader and writer call
 # (UNCOMPRESSED, SNAPPY, GZIP, ZSTD, LZ4_RAW, the deprecated LZ4, BROTLI), the
 # snappy codec (the snappy C API, statically linked, and a Mojo decoder), the
-# LZ4 frame codec and a CRC-32C helper.
+# LZ4 frame codec and a CRC-32C helper. Every public entry takes Spans.
 #
 # snappy is linked from //third_party/snappy. LZ4 raw block and zlib come from
 # komira_lz4 and komira_zlib, which open liblz4 and libz at run time; zstd,
 # the LZ4 frame API and brotli are likewise opened by name at first use
 # (libzstd.so.1, liblz4.so.1, libbrotlidec.so.1), so they are not linked.
+#
+# The welded tests:
+# - test_compression_gzip, test_compression_zstd_lz4: the dispatch, codec by
+#   codec: round trips, a known gzip stream, too-small outputs, refusals.
+# - test_compression_lz4_framings: LZ4 frames and the three layouts of the
+#   deprecated LZ4 codec, from the reference liblz4's golden frame
+#   (//third_party/pierrec-lz4, pinned by sha256, staged at golden/).
+# - test_snappy_corpus: google/snappy's correctness corpus and its three
+#   corrupt blobs (//third_party/snappy:testdata, out of the pinned snappy
+#   archive, staged at corpus/), through both snappy decoders.
+# - test_snappy_mojo_oracle, test_snappy_short_offset: the Mojo snappy decoder
+#   against the C library's, and hand-built short-offset blobs.
+# - test_crc32c: published CRC-32C check values.
+# - test_no_env_reads: the package's sources read no environment, hold no raw
+#   pointer in a public signature and rebuild no address from an integer. It is
+#   staged every source `srcs` compiles, subdirectories included, so a module
+#   the scan does not read fails it.
+_SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
+
+_CORPUS = [
+    "alice29.txt",
+    "asyoulik.txt",
+    "baddata1.snappy",
+    "baddata2.snappy",
+    "baddata3.snappy",
+    "fireworks.jpeg",
+    "geo.protodata",
+    "html",
+    "html_x_4",
+    "kppkn.gtb",
+    "lcet10.txt",
+    "paper-100k.pdf",
+    "plrabn12.txt",
+    "urls.10K",
+]
+
 mojo_library(
     name = "komira_parquet_codec",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    srcs = _SRCS,
     deps = [
         "//src/komira_buffer:komira_buffer",
         "//src/komira_lz4:komira_lz4",
@@ -19,12 +55,29 @@ mojo_library(
         "//src/komira_zlib:komira_zlib",
         "//third_party/snappy:snappy",
     ],
+    test_data = {
+        "tests/test_compression_lz4_framings.mojo": {
+            "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
+            "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
+        },
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in _SRCS
+        },
+        "tests/test_snappy_corpus.mojo": {
+            "corpus/" + f: "//third_party/snappy:testdata[{}]".format(f)
+            for f in _CORPUS
+        },
+    },
     test_srcs = [
         "tests/test_compression_gzip.mojo",
+        "tests/test_compression_lz4_framings.mojo",
         "tests/test_compression_zstd_lz4.mojo",
+        "tests/test_crc32c.mojo",
+        "tests/test_no_env_reads.mojo",
+        "tests/test_snappy_corpus.mojo",
         "tests/test_snappy_mojo_oracle.mojo",
         "tests/test_snappy_short_offset.mojo",
-        "tests/test_snappy_vendor_classic_goldens.mojo",
     ],
     visibility = ["PUBLIC"],
 )

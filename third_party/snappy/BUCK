@@ -37,6 +37,33 @@ archive_files(
     templates = {"snappy-stubs-public.h": "snappy-stubs-public.h.in"},
 )
 
+# Test data of //src/komira_parquet_codec: the snappy correctness corpus
+# (the files snappy_unittest compresses and decompresses) and the three
+# corrupt blobs a decoder must refuse, out of the same pinned archive.
+archive_files(
+    name = "testdata",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":snappy-1.2.2.tar.gz",
+    files = [
+        "alice29.txt",
+        "asyoulik.txt",
+        "baddata1.snappy",
+        "baddata2.snappy",
+        "baddata3.snappy",
+        "fireworks.jpeg",
+        "geo.protodata",
+        "html",
+        "html_x_4",
+        "kppkn.gtb",
+        "lcet10.txt",
+        "paper-100k.pdf",
+        "plrabn12.txt",
+        "urls.10K",
+    ],
+    strip_prefix = "snappy-1.2.2/testdata",
+    visibility = ["PUBLIC"],
+)
+
 # The library and its C API (snappy-c.h). C++, so it carries zig's libc++
 # (komira//tools/build/toolchains:libcxx) into every link that includes it.
 # config.h, copied into buck-out so that the compiles including it have one

@@ -2,37 +2,34 @@
 # Snappy Mojo decoder — oracle test against the C library
 # =============================================================================
 #
-# Proves the Mojo decoder (`snappy_decompress_mojo`) produces BYTE-IDENTICAL
-# output to the snappy C library's decoder on blobs the C library compressed,
-# across a matrix that hits every Snappy tag edge case: long literals (>60 →
-# multi-byte length field), overlapping copies (offset < length, RLE), long
-# offsets (copy-2 up to 65535, copy-4 beyond), max-length-64 copies, and
-# block-boundary (65536) crossings — plus an incompressible (all-literal)
-# stream.
+# Proves the Mojo decoder (selected with `set_snappy_decoder`) produces
+# BYTE-IDENTICAL output to the snappy C library's decoder on blobs the C
+# library compressed, across a matrix that hits every Snappy tag edge case:
+# long literals (>60 → multi-byte length field), overlapping copies
+# (offset < length, RLE), long offsets (copy-2 up to 65535, copy-4 beyond),
+# max-length-64 copies, and block-boundary (65536) crossings — plus an
+# incompressible (all-literal) stream.
 #
-# Oracle model: the snappy C library (reached via the `snappy_compress` /
-# `snappy_decompress` FFI seam) is the reference. For each input `x`:
+# Oracle model: the snappy C library is the reference. For each input `x`:
 #   c        = snappy_compress(x)              [C library]
-#   out_ref  = snappy_decompress(c)            [C library, flag OFF]
-#   out_mojo = snappy_decompress_mojo(c)       [the Mojo decoder]
+#   out_ref  = snappy_decompress(c)            [C_LIBRARY decoder]
+#   out_mojo = snappy_decompress(c)            [MOJO decoder]
 # and we assert  out_ref == out_mojo == x. We run the Mojo decoder BOTH with a
 # +kSlopBytes dst (fast SIMD-overshoot paths engage — the page decoder's
 # shape) AND with an exact-sized dst (scalar fallback paths engage), so both
 # code paths are covered.
 # =============================================================================
 
-from std.memory import alloc
-
-from komira_buffer.byte_view import ByteView
 from komira_parquet_codec.snappy import (
+    SnappyDecoder,
+    kSlopBytes,
+    set_snappy_decoder,
     snappy_compress,
+    snappy_decoder,
     snappy_decompress,
     snappy_max_compressed_length,
+    snappy_uncompressed_length,
 )
-from komira_parquet_codec.snappy.decompress import snappy_decompress_mojo
-
-
-comptime _SLOP: Int = 64
 
 
 def _expect_eq(got: Int, want: Int, msg: String) raises:
@@ -42,53 +39,43 @@ def _expect_eq(got: Int, want: Int, msg: String) raises:
         )
 
 
+def _filled(n: Int, b: UInt8) -> List[UInt8]:
+    var out = List[UInt8](capacity=n)
+    for _ in range(n):
+        out.append(b)
+    return out^
+
+
 # -----------------------------------------------------------------------------
 # C-library compress of `data` → List[UInt8] compressed blob.
 # -----------------------------------------------------------------------------
 def _compress_lib(data: List[UInt8]) raises -> List[UInt8]:
-    var n = len(data)
-    var src = alloc[UInt8](n + 1)
-    for i in range(n):
-        src[i] = data[i]
-    var cap = snappy_max_compressed_length(n)
-    var cbuf = alloc[UInt8](cap + 1)
-    var written = snappy_compress(
-        ByteView[MutUntrackedOrigin](src, n),
-        ByteView[MutUntrackedOrigin](cbuf, cap),
-    )
-    var out = List[UInt8]()
+    var cbuf = _filled(snappy_max_compressed_length(len(data)), 0)
+    var written = snappy_compress(Span(data), Span(cbuf))
+    var out = List[UInt8](capacity=written)
     for i in range(written):
         out.append(cbuf[i])
-    src.free()
-    cbuf.free()
     return out^
 
 
 # -----------------------------------------------------------------------------
 # Decode `comp` (expecting `expected_n` decoded bytes) with either the C
-# path or the Mojo path, with or without +64 dst slop. Returns the bytes.
+# decoder or the Mojo decoder, with or without +kSlopBytes dst slop. Returns
+# the bytes. Puts the default decoder back before returning.
 # -----------------------------------------------------------------------------
 def _decode(
     comp: List[UInt8], expected_n: Int, use_mojo: Bool, slop: Bool
 ) raises -> List[UInt8]:
-    var cn = len(comp)
-    var cbuf = alloc[UInt8](cn + 1)
-    for i in range(cn):
-        cbuf[i] = comp[i]
-    var dcap = expected_n + _SLOP if slop else expected_n
-    var dbuf = alloc[UInt8](dcap + 1)
-    var cview = ByteView[MutUntrackedOrigin](cbuf, cn)
-    var dview = ByteView[MutUntrackedOrigin](dbuf, dcap)
-    var written: Int
-    if use_mojo:
-        written = snappy_decompress_mojo(cview, dview)
-    else:
-        written = snappy_decompress(cview, dview)
-    var out = List[UInt8]()
+    var dcap = expected_n + kSlopBytes if slop else expected_n
+    var dbuf = _filled(dcap, 0)
+    set_snappy_decoder(SnappyDecoder.MOJO if use_mojo else SnappyDecoder.C_LIBRARY)
+    var written = snappy_decompress(Span(comp), Span(dbuf))
+    var declared = snappy_uncompressed_length(Span(comp))
+    set_snappy_decoder(SnappyDecoder.C_LIBRARY)
+    _expect_eq(declared, expected_n, "declared uncompressed length")
+    var out = List[UInt8](capacity=written)
     for i in range(written):
         out.append(dbuf[i])
-    cbuf.free()
-    dbuf.free()
     return out^
 
 
@@ -104,15 +91,15 @@ def _check(name: String, data: List[UInt8]) raises:
     var out_mojo = _decode(comp, n, use_mojo=True, slop=True)
     var out_mojo_noslop = _decode(comp, n, use_mojo=True, slop=False)
 
-    _expect_eq(len(out_ref), n, name + ": static-C length")
+    _expect_eq(len(out_ref), n, name + ": C length")
     _expect_eq(len(out_mojo), n, name + ": mojo(slop) length")
     _expect_eq(len(out_mojo_noslop), n, name + ": mojo(noslop) length")
 
     for i in range(n):
-        # mojo(slop) == static-C == original ; mojo(noslop) == original
+        # mojo(slop) == C == original ; mojo(noslop) == original
         _expect_eq(
             Int(out_mojo[i]), Int(out_ref[i]),
-            name + ": mojo(slop) vs static-C byte " + String(i),
+            name + ": mojo(slop) vs C byte " + String(i),
         )
         _expect_eq(
             Int(out_mojo[i]), Int(data[i]),
@@ -154,7 +141,9 @@ def _const(n: Int, b: UInt8) -> List[UInt8]:
 
 
 def main() raises:
-    print("=== snappy pure-Mojo decoder — static-C classic oracle matrix ===")
+    print("=== snappy Mojo decoder — C library oracle matrix ===")
+    if snappy_decoder() != SnappyDecoder.C_LIBRARY:
+        raise Error("FAIL: the default decoder is not the C library's")
 
     # --- tiny / boundary sizes ---
     _check("empty", List[UInt8]())

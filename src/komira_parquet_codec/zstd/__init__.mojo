@@ -1,17 +1,9 @@
 # =============================================================================
-# zstd — FFI shim facade for libzstd
+# zstd — FFI shim for libzstd (package-private)
 # =============================================================================
 #
-# Public symbols (the surface `compression.mojo` uses):
-#   * `zstd_decompress_ffi(dst, dst_cap, src, src_size) -> Int`
-#   * `zstd_compress_ffi(dst, dst_cap, src, src_size, level) -> Int`
-#   * `zstd_compress_bound_ffi(src_size) -> Int`
-#
-# See `zstd_ffi.mojo` for the FFI implementation.
+# `zstd_ffi.mojo` holds the entries `compression.mojo` calls
+# (`_zstd_decompress_into`, `_zstd_compress_into`, `_zstd_compress_bound`);
+# nothing is re-exported, because the package's zstd surface is
+# `compress` / `decompress` with `CompressionCodec.ZSTD`.
 # =============================================================================
-
-from .zstd_ffi import (
-    zstd_decompress_ffi,
-    zstd_compress_ffi,
-    zstd_compress_bound_ffi,
-)
