@@ -31,6 +31,16 @@
 #   file's; the approver of the publishing stage reads the NEW NAMES report
 #   before approving, and a dry run shows the same report.
 #
+# `superseding_files(targets, listed_files)` -- NEVER BACKWARD: every file
+#   the channel lists (`<subdir>/<file>`, step 1's listings) that is a build
+#   of a target's name and version, in the target's subdir, whose build
+#   number (the digits after the build string's last `_`, `h<8 hex>_<N>`)
+#   is HIGHER than the target's. `run.mojo` refuses a run that would upload
+#   when the stage never goes backward and this is not empty
+#   (KCI-E-SUPERSEDED). An equal number is not higher (a re-run of the same
+#   number publishes the same bytes, or NOOP); a build string without a
+#   number after its last `_` is not read as one.
+#
 # `approved_names_for(targets)` -- the uploader's last gate
 #   (`kci_pkg_upload.ApprovedNames`): every name of the declared set, so an
 #   undeclared name cannot be uploaded even by a bug above this layer. Never
@@ -368,3 +378,62 @@ def approved_names_for(targets: List[PublishTarget]) raises -> ApprovedNames:
             added.append(n.copy())
             names.approve(n^)
     return names^
+
+
+def _build_number(build: String) -> Int:
+    """The digits after the last `_` of a build string (`h<8 hex>_<N>`), or
+    -1 when there are none (or they are not all digits)."""
+    var at = build.rfind(String("_"))
+    if at < 0:
+        return -1
+    var b = build.as_bytes()
+    if at + 1 >= len(b) or len(b) - at - 1 > 9:
+        return -1
+    var n = 0
+    for i in range(at + 1, len(b)):
+        var c = Int(b[i])
+        if c < 48 or c > 57:
+            return -1
+        n = n * 10 + (c - 48)
+    return n
+
+
+def _build_of(file_name: String, distribution: String, version: String) -> String:
+    """The build string of `file_name` when it is
+    `<distribution>-<version>-<build>.conda` with no `-` in the build; else
+    ""."""
+    var head = distribution + String("-") + version + String("-")
+    var tail = String(".conda")
+    if not file_name.startswith(head) or not file_name.endswith(tail):
+        return String("")
+    var n = file_name.byte_length()
+    if n <= head.byte_length() + tail.byte_length():
+        return String("")
+    var build = String(file_name[byte = head.byte_length() : n - tail.byte_length()])
+    if build.find(String("-")) >= 0:
+        return String("")
+    return build^
+
+
+def superseding_files(targets: List[PublishTarget], listed_files: List[String]) -> List[String]:
+    """The file header's NEVER BACKWARD reading: one line per listed file
+    that supersedes a target, naming both."""
+    var out = List[String]()
+    for i in range(len(targets)):
+        ref c = targets[i].coordinate
+        var ours = _build_number(_build_of(c.file_name, c.distribution, c.version))
+        if ours < 0:
+            continue
+        var prefix = c.subdir + String("/")
+        for k in range(len(listed_files)):
+            ref f = listed_files[k]
+            if not f.startswith(prefix):
+                continue
+            var name = String(f[byte = prefix.byte_length() :])
+            var theirs = _build_number(_build_of(name, c.distribution, c.version))
+            if theirs > ours:
+                out.append(
+                    String("SUPERSEDED ") + targets[i].where() + String(" (build number ") + String(ours)
+                    + String(") by ") + f + String(" (build number ") + String(theirs) + String(")")
+                )
+    return out^

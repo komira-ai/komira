@@ -377,6 +377,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
 ) -> PublishReport:
     var opts = run_opts.copy()
     opts.concurrency = req.concurrency
+    opts.never_backward = req.never_backward
     var step0 = _step0(req)
     if not step0.prepared:
         return step0.refusal.copy()

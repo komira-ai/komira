@@ -74,6 +74,7 @@ from .plan import (
     new_names,
     plan_from_state,
     resolve_targets,
+    superseding_files,
 )
 from .channel_state import read_channel, read_file_state
 from .upload import PublishCredential, RunOptions, upload_members

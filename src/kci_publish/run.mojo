@@ -8,7 +8,11 @@
 #      listed subdir's names; `plan_from_state` decides: STOP_DIFFERENT_BYTES,
 #      CANNOT_TELL or ALREADY_PUBLISHED stop here with NO write request. The
 #      names new to the channel go into the report whatever the verdict
-#      (unless step 1 could not tell);
+#      (unless step 1 could not tell). NEVER BACKWARD: when the stage never
+#      goes backward (`RunOptions.never_backward`) and the run would upload,
+#      a listed build of a member's name and version with a HIGHER build
+#      number (`plan.mojo` `superseding_files`) stops it REFUSED,
+#      KCI-E-SUPERSEDED, with NO write request (a dry run too);
 #   --plan stops here too, printing what steps 2 to 4 would do: no write
 #      request, and `source` is never asked for a write value (a dry run's
 #      credential probe is the flow's, before this);
@@ -55,8 +59,9 @@ from .plan import (
     approved_names_for,
     plan_from_state,
     state_name,
+    superseding_files,
 )
-from kci_api import ERROR_CREDENTIAL
+from kci_api import ERROR_CREDENTIAL, ERROR_SUPERSEDED
 
 from .report import (
     REASON_ALREADY_PUBLISHED,
@@ -65,6 +70,7 @@ from .report import (
     REASON_PARTIAL,
     REASON_PUBLISHED,
     REASON_READ_BACK_MISMATCH,
+    REASON_REFUSED,
     REASON_STOP_DIFFERENT_BYTES,
     FileRow,
     PublishReport,
@@ -176,6 +182,15 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     if verdict != VERDICT_PROCEED:
         r.end(_reason_of_verdict(verdict))
         return r^
+    if opts.never_backward:
+        var later = superseding_files(targets, channel_read.listed_files)
+        if len(later) > 0:
+            later.append(
+                String("REFUSED -- the channel already lists a higher build number of this version, and this")
+                + String(" stage never goes backward: publish the newer release, or fix forward")
+            )
+            r.stop(String(REASON_REFUSED), String(ERROR_SUPERSEDED), String("\n").join(later))
+            return r^
     var to_upload = 0
     for i in range(len(targets)):
         var word = String("WOULD UPLOAD ") if channel_read.states[i].kind == STATE_ABSENT else String("PRESENT ")
