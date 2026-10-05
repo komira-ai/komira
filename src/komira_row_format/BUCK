@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The packed-row representation the engine's sinks and spill write through:
 # row blocks and their directory, row sort, the `RowOutput` / `RowSink`
 # contract, Arrow row conversion, xxh3 hashing, and the `cell_source` row
-# walker. It depends on komira_core and, for the float ordering model, komira_udf.
+# walker. It depends on the core packages and, for the float ordering model, komira_udf.
 mojo_library(
     name = "komira_row_format",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

@@ -8,7 +8,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # It depends on komira_async for `ops.waker_sink` (the completion-sink trait
 # the traits are parameterised over); `test_local_fs_write_at` also drives the
 # executor. It takes its buffer, Arrow, collections and POSIX-wrapper types
-# from komira_core. komira_runtime_paths is declared because several tests take
+# from the core packages. komira_runtime_paths is declared because several tests take
 # their scratch directory from `test_tmpdir()`.
 
 # The directory-walk C shim: platform-fragile `dirent` / `stat` layouts kept

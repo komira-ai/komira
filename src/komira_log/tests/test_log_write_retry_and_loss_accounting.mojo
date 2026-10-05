@@ -94,7 +94,7 @@ struct _FullPipe(Deinitable):
         self.w = fds[1]
         fds.unsafe_free()
         # `komira_fcntl_set_nonblock` is the fixed-arity C wrapper
-        # `komira_core` links. A bare variadic `fcntl` is
+        # the core packages links. A bare variadic `fcntl` is
         # register/stack-ABI-fragile on Apple ARM64.
         _ = external_call["komira_fcntl_set_nonblock", Int32](self.w)
         self.ok = True

@@ -1,15 +1,15 @@
 # =============================================================================
-# broker_scan_binding — a PLAN SOURCE, defined OUTSIDE `komira_core`.
+# broker_scan_binding — a PLAN SOURCE, defined OUTSIDE the core packages.
 # =============================================================================
 #
-# A broker source is a plan source even though it lives outside komira_core.
+# A broker source is a plan source even though it lives outside the core packages.
 #
 # ---------------------------------------------------------------------------
 # WHY THIS FILE EXISTS
 # ---------------------------------------------------------------------------
 #
 # A broker source cannot be an arm of the closed `SourceVariant` union in
-# komira_core: that would force `komira_core -> komira_broker ->
+# the core packages: that would force `the core packages -> komira_broker ->
 # {objectstore, ...}`, inverting the build DAG. And `MessageBrokerConsumer` is
 # Movable-only (see consumer_source), so it cannot be the Copyable value a
 # plan carries. The clean resolution is a Copyable backend HANDLE (a cheap
@@ -17,7 +17,7 @@
 # constructed at execute time).
 #
 # That handle is `ScanBinding`, and this file builds one. `komira_broker`
-# depends on `komira_core`; `komira_core` does not and never needs to depend
+# depends on the core packages; the core packages does not and never needs to depend
 # on `komira_broker`. The DAG is not inverted, and the plan can be rooted at a
 # broker scan.
 #

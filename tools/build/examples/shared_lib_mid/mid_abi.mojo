@@ -1,4 +1,4 @@
-"""A mid-size closure re-exported through one @export file: komira_core
+"""A mid-size closure re-exported through one @export file: the core packages
 (Arrow batch builder, snappy C lib), komira_json, komira_encoding,
 komira_crypto (aws-lc), komira_protobuf and komira_gcp_core."""
 

@@ -1,9 +1,9 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Stateless compute kernels over komira_core: cast, temporal extract, match,
+# Stateless compute kernels over the core packages: cast, temporal extract, match,
 # hash, Kleene three-valued logic, selection-vector and SIMD chunk kernels,
 # the join-key envelope, kernel templates, the RuntimeExpr AST and the
-# expression interpreter. Depends on komira_core, komira_hash and komira_udf.
+# expression interpreter. Depends on the core packages, komira_hash and komira_udf.
 mojo_library(
     name = "komira_kernels",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

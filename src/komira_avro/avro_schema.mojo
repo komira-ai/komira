@@ -11,7 +11,7 @@
 #      (`AvroSchema.parsing_canonical_form`).
 #   3. Computes the CRC-64-AVRO ("Rabin") 64-bit fingerprint of the PCF
 #      (`AvroSchema.fingerprint`).
-#   4. Maps Avro primitive + logical types to the komira_core ArrowType lattice
+#   4. Maps Avro primitive + logical types to the core packages ArrowType lattice
 #      (`avro_type_to_arrow`).
 #   5. REJECTS recursive (cyclic) schemas on detect, via a name visit-stack
 #      (as arrow-rs and DuckDB do; RECURSIVE_SCHEMA_NOT_SUPPORTED).

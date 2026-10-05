@@ -1278,7 +1278,7 @@ def empty_batch_like_schema(schema: Schema) raises -> RecordBatch:
 #
 # All three dispatch through `runtime_traits/fork_join_shared.fork_join_shared`
 # — the SAME shared-payload driver the sort PHASES use — parameterized on
-# `D: ParallelDispatch` so `komira_core` never names a concrete dispatcher.
+# `D: ParallelDispatch` so the core packages never names a concrete dispatcher.
 # Each wave carries its own sched-trace SITE_* id so it lands in a NAMED
 # SCHED_SITE row rather than the anonymous `SITE_GENERIC_FORK_JOIN` bucket.
 #
@@ -2259,7 +2259,7 @@ def gather_batch_dispatch[
     `D` is the caller's concrete dispatcher, so the `run_with_state` calls
     DEVIRTUALIZE per instantiation. An engine-side caller holding a
     `SharedForkJoinHandle` passes `handle.ptr` straight through — that is how a core kernel gets the pool without
-    `komira_core` naming `LocalDispatcher` (which lives up in
+    the core packages naming `LocalDispatcher` (which lives up in
     `komira_async`).
     """
     var count = len(indices)
@@ -3027,7 +3027,7 @@ def float64_to_int64(arr: PrimitiveArray[DType.float64]) raises -> PrimitiveArra
     spelling and it is `komira_column_kernels.cast_null.eval_cast_float_to_int`.
 
     ⚠ The EXPR_CAST arm in `compiler_eval_column` uses the rounding kernel,
-    not this. This cannot simply DELEGATE to that kernel: `komira_core/eval/*` already
+    not this. This cannot simply DELEGATE to that kernel: `the core packages*` already
     imports THIS module (`numeric_unary` takes `clone_array_validity` from it), so
     an import the other way is a cycle. If you need a float->integer conversion,
     take the one in `cast_null`; if you genuinely need truncation, say so at the
@@ -3249,7 +3249,7 @@ def element_size(arrow_type: ArrowType) raises -> Int:
         a layout that has no `width`; the fix is at the caller, not here.
     """
     # ONE DEFINITION, TREE-WIDE. The ladder itself lives in the LEAF module
-    # `arrow/arrow_types.mojo` so the copies inside `komira_core/arrow/`
+    # `arrow/arrow_types.mojo` so the copies inside the core packages
     # can share it too (an `arrow/* -> helpers/*` import closes a
     # package-init cycle). This name is kept because call sites in several
     # packages import `element_size` from here.

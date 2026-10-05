@@ -18,7 +18,7 @@
 # decode_record_batch_message — the SAME validity-buffer emit pyarrow reads).
 #
 # It deliberately uses the LOW-LEVEL writer-bytes entry points (komira_orc +
-# komira_core only), not the SDK.
+# the core packages only), not the SDK.
 # =============================================================================
 
 from std.testing import TestSuite, assert_true, assert_equal

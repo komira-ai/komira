@@ -13,7 +13,7 @@
 # The State / Task / driver live in
 # `komira_async_api.fork_join_shared`, genericized over
 # `D: ParallelDispatch`, because `gather_batch` (stage 4 of every `ORDER BY`)
-# is in `komira_core`, which `komira_async` depends on, so it cannot import
+# is in the core packages, which `komira_async` depends on, so it cannot import
 # them from here. There is exactly ONE shared-payload fork-join driver; this
 # file binds it to `D = LocalDispatcher[NoopSink]` and keeps every public
 # signature below unchanged.

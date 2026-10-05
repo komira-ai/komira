@@ -12,7 +12,7 @@ Terms used below:
 - A **connector** dials a connection and returns a **stream**, a non-blocking byte stream conforming to `IoStream`.
 - A **serve round** handles one reactor event on one connection.
 
-The library depends on `komira_async`, `komira_core`, `komira_obs`, `komira_uuid`, the vendored s2n-tls (`third_party/s2n-tls`) and `komira_runtime_paths`.
+The library depends on `komira_async`, `komira_collections`, `komira_libc`, `komira_obs`, `komira_uuid`, the vendored s2n-tls (`third_party/s2n-tls`) and `komira_runtime_paths`.
 
 Out of scope:
 

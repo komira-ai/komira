@@ -35,7 +35,7 @@
 #   * Hot loops are @always_inline and walk a resolved contiguous byte Span.
 #     The normalized term is built from folded bytes via
 #     String(StringSlice(unsafe_from_utf8=Span(buf))) — the same idiom
-#     komira_core's StringColumnView uses.
+#     the core packages' StringColumnView uses.
 #
 # -----------------------------------------------------------------------------
 # BYTE-SOURCE DECISION for analyze_text_column

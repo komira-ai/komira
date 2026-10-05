@@ -16,7 +16,7 @@
 #     InvertedIndexBuilder.add_text_column) + appends each
 #     row's _source cell. flush_segment runs the flush sequence and
 #     returns the OWNED split bytes.
-#   * SearchSink — the DataFrame write operator. Conforms komira_core's Sink
+#   * SearchSink — the DataFrame write operator. Conforms the core packages' Sink
 #     (init_sink / accept_batch / finish; inherit default accept_row_blocks;
 #     is_text_output_sink -> False). Move-only (it owns an IndexCore with a
 #     Slab; copying it would mean two writers to one split = corruption).
@@ -370,7 +370,7 @@ struct IndexCore(Movable, Deinitable):
 
 struct SearchSink(Sink, Movable):
     """Write destination that builds ONE immutable search split from its feeding
-    DataFrame. Conforms komira_core's Sink (the DataFrame terminal-sink trait, NOT
+    DataFrame. Conforms the core packages' Sink (the DataFrame terminal-sink trait, NOT
     MorselSinkImpl). Move-only: owns an IndexCore (which owns the
     InvertedIndexBuilder/Slab + the doc-store builder).
 

@@ -6,7 +6,7 @@
 # an S3 descriptor maps to FsHandle.FS_S3; a GCS descriptor raises "no GCS arm
 # in this build" and an Azure one "no Azure arm in this build", each naming
 # the bucket; any other scheme code raises "unknown file system scheme";
-# fs_arm_tag_for_scheme resolves a komira_core descriptor (the wire codec's
+# fs_arm_tag_for_scheme resolves a core-package descriptor (the wire codec's
 # type) the same way.
 from std.testing import assert_equal, assert_raises
 

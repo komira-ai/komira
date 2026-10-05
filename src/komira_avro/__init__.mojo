@@ -21,7 +21,7 @@ Modules:
     OCF writer.
 
 Dependency direction (cycle-free, like komira_csv / komira_json):
-  komira_avro -> komira_core (ArrowType lattice; byte_class SIMD)
+  komira_avro -> the core packages (ArrowType lattice; byte_class SIMD)
   NOT komira_avro -> komira_parquet / komira_compiler / komira_sdk
   (those packages consume komira_avro).
 """

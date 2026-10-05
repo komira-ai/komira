@@ -11,7 +11,7 @@
 #   2. Produces a canonical-form string for the schema (round-trip equality
 #      testing; mirrors Hive's `TypeDescription.toString()` notation
 #      e.g. `struct<a:int,b:string>`).
-#   3. Maps each ORC type to the komira_core ArrowType lattice.
+#   3. Maps each ORC type to the core packages ArrowType lattice.
 #
 # ORC's schema tree is structurally finite (a flat list with forward-only
 # index links per the protobuf encoding), so no recursion check is needed IN

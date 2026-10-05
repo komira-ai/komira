@@ -68,7 +68,7 @@
 # reserved `write` FFI declaration ("existing function with conflicting
 # signature") once a link unit's closure also pulls std.os's declaration in.
 # It legalizes fine in a SMALL closure, which is why it is not safe in
-# `komira_core`, upstream of nearly every binary. `komira_write_bytes` is a
+# the core packages, upstream of nearly every binary. `komira_write_bytes` is a
 # C shim symbol linked into every binary and test.
 #
 # # Encapsulation

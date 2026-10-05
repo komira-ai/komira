@@ -2,7 +2,7 @@
 # THE IDENTITY-COVERAGE GATE — one mechanical rule for a four-instance class.
 # =============================================================================
 #
-# The scan-identity audit lives in komira_core (`source/scan_identity_audit`);
+# The scan-identity audit lives in the core packages (`source/scan_identity_audit`);
 # this file runs it over every registered scan kind, including the broker
 # kind this package contributes.
 #
@@ -498,7 +498,7 @@ def test_golden_rendered_plan_text_arrow() raises:
 
 
 def test_golden_rendered_plan_text_broker() raises:
-    """The same pin for a kind `komira_core` has never heard of. `type=BINDING`
+    """The same pin for a kind the core packages has never heard of. `type=BINDING`
     means "consult `kind_id`"; the reverse-DNS name and the sorted param map are
     what make EXPLAIN readable for it."""
     var expected = String('Scan(path="orders", type=BINDING')

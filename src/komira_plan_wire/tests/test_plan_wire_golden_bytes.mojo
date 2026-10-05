@@ -870,7 +870,7 @@ def _corpus_aggregate() raises -> LogicalPlan:
 # itself — kind name, params, identity, gate, policy and the LIVE token.
 #
 # ⚠ BUILT HERE, NOT BY THE KINDS' OWN CONSTRUCTORS, AND THAT IS A LAYERING
-# CHOICE. `komira_plan_wire` sits directly above `komira_core`; importing
+# CHOICE. `komira_plan_wire` sits directly above the core packages; importing
 # `komira_broker` / `komira_search_runtime` into its welded test would put both
 # kinds' closures under the codec's gate. So each case restates, from core
 # primitives alone, exactly what the kind's SHIPPING constructor returns for

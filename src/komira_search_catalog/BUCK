@@ -12,7 +12,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # drives the publish race between independent writers (a staged collision and
 # real OS threads), one the per-writer sharded layout: first-attempt appends,
 # the cross-shard merge, generation, reads of unsharded indexes, and merged
-# splits hiding their inputs across shards. Those two import komira_core for
+# splits hiding their inputs across shards. Those two import the core packages for
 # its slab collection. The third covers the retire and reap end of a split's
 # life: a store error that only names "404" is raised, not taken for a
 # reaped chunk, the generation never goes down while chunks and drained

@@ -1,6 +1,6 @@
 // The plan wire's enumerated tag vocabulary. It mirrors the engine's
-// `comptime` tag declarations in komira_core (each enum below names the
-// file it is derived from) and komira_core's
+// `comptime` tag declarations in the core packages (each enum below names the
+// file it is derived from) and the core packages'
 // `plan/plan_wire_vocabulary.mojo`, which holds the same wire numbers.
 // There is no generator in this repository: a tag added to the engine must
 // be added here by hand, with the same wire number as in

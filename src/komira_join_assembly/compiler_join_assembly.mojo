@@ -272,7 +272,7 @@ def assemble_join_result_projected_dispatch[
     `D` is the caller's concrete dispatcher, so the `run_with_state` calls DEVIRTUALIZE per instantiation.
     An engine-side caller holding a `SharedForkJoinHandle` passes `handle.ptr`
     straight through — that is how a core kernel gets the pool without
-    `komira_core` naming `LocalDispatcher` (which lives up in
+    the core packages naming `LocalDispatcher` (which lives up in
     `komira_async`).
 
     Args:

@@ -44,7 +44,7 @@
 
 
 # =============================================================================
-# Numeric byte-span SIMD primitives — RE-EXPORTED from komira_core.parsers
+# Numeric byte-span SIMD primitives — RE-EXPORTED from the core packages
 # =============================================================================
 #
 # The integer + float
@@ -79,7 +79,7 @@ from komira_csv.byte_span_numeric import (
 # The date/time SIMD primitives (cell_is_iso_date_shaped and friends)
 # reference a single-byte digit check inline; we re-declare the helper
 # here as a private module-local rather than importing the private
-# `_is_ascii_digit_byte` from komira_core.parsers (Mojo's private-name
+# `_is_ascii_digit_byte` from the core packages (Mojo's private-name
 # convention is leading-underscore; cross-module imports of private
 # names are discouraged).
 

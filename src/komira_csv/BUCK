@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # SIMD structural scanner (byte-class masks and carry-less-multiply quote
 # regions), quote-safe chunk splitting, typed cell parsers and column
 # builders, schema sampling and type inference, the parallel reader on the
-# komira_async dispatcher, and the CSV sink. It depends on komira_core
+# komira_async dispatcher, and the CSV sink. It depends on the core packages
 # (Arrow types, record batches, SIMD byte classes), komira_row_format (the row
 # format the sink drains) and komira_async (the dispatcher, cancellation
 # and the local filesystem). komira_runtime_paths is declared because two

@@ -87,11 +87,11 @@ from komira_udf.purity import Purity
 #
 # `MultiColumnSink` is declared in `komira_arrow.multi_column_builder`
 # (next to `MultiColumnBuilder`) and re-imported here. It MUST live in
-# `komira_core` rather than `komira_udf`: the production builder
-# `MultiColumnBuilder[*Bs]` lives in `komira_core`, and a struct can only
+# the core packages rather than `komira_udf`: the production builder
+# `MultiColumnBuilder[*Bs]` lives in the core packages, and a struct can only
 # declare conformance to a trait that is importable at its own layer —
-# `komira_core` cannot import from `komira_udf` (the layering runs
-# `komira_udf` -> `komira_core`, never the reverse). `MultiColumnSink` is a
+# the core packages cannot import from `komira_udf` (the layering runs
+# `komira_udf` -> the core packages, never the reverse). `MultiColumnSink` is a
 # builder-surface trait; it belongs with the builder.
 #
 # `MultiColumnSink` exposes the one method a `RowTransform.write_one` body

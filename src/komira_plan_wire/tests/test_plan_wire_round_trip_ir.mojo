@@ -16,7 +16,7 @@
 #
 #   2. IT COSTS SECONDS. Executing a plan comptime-instantiates the engine's
 #      whole row dispatch tree. Nothing here touches the engine, the SDK, or
-#      parquet: the imports are `komira_core` and the codec. So any
+#      parquet: the imports are the core packages and the codec. So any
 #      falsification of the codec runs here.
 #
 # A THREE-LEG TEST THAT NOBODY CAN AFFORD TO RUN IS NOT A STRONGER GATE THAN A

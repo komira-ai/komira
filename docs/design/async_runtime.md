@@ -10,9 +10,9 @@
 
 The design idea is **share-nothing per worker, and suspension as data**. No scheduler moves a task between workers, and a computation that must wait is a value naming the operation it waits on. Load is balanced by moving data, never a task with state.
 
-Terms: a **segment** is a `Segment` (a `komira_core` trait) whose `execute(state, worker_id, task_id)` does one unit of work, and a **task id** is an integer in `[0, n)`. A **shard** is one worker's share of one dispatch. A **morsel** is a chunk of input handed to one task. The **I/O lane** is an optional second set of workers that dispatch does not target.
+Terms: a **segment** is a `Segment` (a `komira_async_api` trait) whose `execute(state, worker_id, task_id)` does one unit of work, and a **task id** is an integer in `[0, n)`. A **shard** is one worker's share of one dispatch. A **morsel** is a chunk of input handed to one task. The **I/O lane** is an optional second set of workers that dispatch does not target.
 
-Out of scope: object-store file systems, HTTP framing, and what a segment computes. Those live in the libraries that sit on top of this one. `Segment`, `KeepAlive`, `CancellationToken` and the CPU lists live in `komira_core` (`src/komira_core/runtime_traits/`, `src/komira_async_api/token.mojo`, `src/komira_host/cpu_topology.mojo`) so that lower libraries can name them without depending on the runtime.
+Out of scope: object-store file systems, HTTP framing, and what a segment computes. Those live in the libraries that sit on top of this one. `Segment`, `KeepAlive`, `CancellationToken` and the CPU lists live in `komira_async_api` and `komira_host` (`src/komira_async_api/worker_pool_traits.mojo`, `src/komira_async_api/token.mojo`, `src/komira_host/cpu_topology.mojo`) so that lower libraries can name them without depending on the runtime.
 
 ## How does it work?
 
@@ -63,7 +63,7 @@ Each shard carries its dispatch's generation and refuses to run once the dispatc
 
 `_OnPoolDispatchGuard` raises a process-wide depth counter for the length of each dispatch. `fork_join_shared` (`src/komira_async_api/fork_join_shared.mojo`) reads it through `fork_join_pool_depth()`: while a dispatch is live, a wave runs its chunks inline on the calling thread instead of calling `run_with_state`. The counter is per process, not per dispatcher, so a wave on one runtime also runs inline while another runtime dispatches. `_on_pool_dispatch_active` (`src/komira_column_kernels/compiler_helpers.mojo`) reads the same counter.
 
-Shapes built on it: `for_each_morsel` (one task per morsel, or a `MorselPool` when morsels outnumber workers), `parallel_fork_join`, `parallel_steal`, `parallel_multiphase` and `parallel_fork_join_shared`. The last forwards to `fork_join_shared` in `komira_core`.
+Shapes built on it: `for_each_morsel` (one task per morsel, or a `MorselPool` when morsels outnumber workers), `parallel_fork_join`, `parallel_steal`, `parallel_multiphase` and `parallel_fork_join_shared`. The last forwards to `fork_join_shared` in `komira_async_api`.
 
 ### How do I spawn a task and get its result?
 
@@ -186,7 +186,7 @@ The cost is an indirect call and a heap allocation per entry, which a shard pays
 
 ## Where is the code?
 
-The library is the `komira_async` target in `src/komira_async/BUCK`: every `.mojo` file under `src/komira_async/` except `src/komira_async/tests/`, plus the C shim `src/komira_async/reactor/_posix_shim.c`, built as the `:komira_async_posix` `cxx_library` that the library depends on. Its other four dependencies are `komira_core`, `komira_atomic_alias`, `komira_log` and `komira_runtime_paths` (tests take their scratch directory from it); the worker loop's idle hook is how a higher layer drains the per-core log ring. Start with these files:
+The library is the `komira_async` target in `src/komira_async/BUCK`: every `.mojo` file under `src/komira_async/` except `src/komira_async/tests/`, plus the C shim `src/komira_async/reactor/_posix_shim.c`, built as the `:komira_async_posix` `cxx_library` that the library depends on. Its other dependencies are the first-party packages it imports (`src/komira_async/BUCK` lists them): `komira_async_api` and the other core packages, `komira_atomic_alias`, `komira_log` and `komira_runtime_paths` (tests take their scratch directory from it); the worker loop's idle hook is how a higher layer drains the per-core log ring. Start with these files:
 
 | File | Holds |
 |---|---|

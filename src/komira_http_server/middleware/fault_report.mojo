@@ -397,7 +397,7 @@ def emit_line_to_fd(fd: Int32, line: String) -> LineWrite:
     JSON envelope carrying it did not, and an operator who has the id from the
     HTTP response can still find the fault.
 
-    ⛔ IT DOES NOT RAISE, and it does not retry the SOS. `komira_core/io/
+    ⛔ IT DOES NOT RAISE, and it does not retry the SOS. `the core packages
     fd_write_all.mojo` rules that a logger gives up rather than wedges the
     process; a diagnostic about a failed diagnostic must be even less
     insistent than the thing it describes."""

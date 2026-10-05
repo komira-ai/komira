@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The execution-time half of a scan kind: the `ScanSourceResolver` trait (plan
 # the splits, open a reader per split), the type-erased resolver and reader
 # facades, the per-context resolver set keyed by kind id, and `drain_scan`, the
-# bounded read over any conformer. It sits on komira_core's scan substrate
+# bounded read over any conformer. It sits on the core packages' scan substrate
 # (bindings, params, kind descriptors, the tier-1 `ScanResolver`) and nothing
 # else, so a package that implements a kind does not depend on the engine that
 # executes it.

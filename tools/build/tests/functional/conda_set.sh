@@ -11,7 +11,7 @@
 #   enumerate  tools/build/package/list_conda_targets.sh prints a package target for every library
 #              of //src with no declaration anywhere; every one of them builds (a refusal is a
 #              value, not a build failure), and the libraries that cannot be packaged say why
-#              (komira_core: native code). The rest are the set the later checks use.
+#              (the core packages: native code). The rest are the set the later checks use.
 #   contract   the manifest of every package of the set, and of the metapackage, is read by
 #              kci's own parser (src/kci_artifact_manifest, run as the probe
 #              //tools/build/package/manifest_probe:parse_manifest) and rendered again by kci's

@@ -88,7 +88,7 @@ from komira_udf.float_quotient_order import (
 # cell names another row's bytes.
 #
 # ⚠ THE CONSTANT IS DUPLICATED ON PURPOSE, NOT SHARED. `komira_row_format` deps only
-# `komira_core`; importing the operators' copy would put
+# the core packages; importing the operators' copy would put
 # the engine tower underneath the row format and invert the dependency. Two
 # declarations of one number is the lesser defect, and both name the other.
 #
@@ -4763,7 +4763,7 @@ struct RowHashAggTable(Movable, Deinitable):
     # OWN private byte storage (`rows._fixed_storage`) + the row stride /
     # agg-registration invariants. The engine spill-state (`RowHashAggSpillState`
     # in `komira_engine_operators.runtime.row_hash_agg_spill`) deals only
-    # in `SharedAlignedBuffer` bytes (a `komira_core` type) + the THSPILL2
+    # in `SharedAlignedBuffer` bytes (a core-package type) + the THSPILL2
     # codec — no `RowBlock` internals cross the module boundary.
     # ----------------------------------------------------------------------
 

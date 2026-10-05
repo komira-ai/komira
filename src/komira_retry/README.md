@@ -86,8 +86,8 @@ send takes and by each wait the loop asked for, and then reads
 ## Clock
 
 `SystemClock` reads `std.time.perf_counter_ns`, and it stays on `std.time`:
-komira_retry depends on nothing beyond the Mojo standard library, komira_core
-included. If a shared monotonic clock is ever extracted, it becomes its own
+komira_retry depends on nothing beyond the Mojo standard library, and on no
+first-party package. If a shared monotonic clock is ever extracted, it becomes its own
 small library, conforms to `MonotonicClock` there, and callers inject it into
 `RetryLoop`. Nothing in this package changes and nothing here imports it.
 

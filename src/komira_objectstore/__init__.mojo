@@ -17,11 +17,11 @@ The network-free core:
 The real S3/GCS/Azure backends live in their own per-cloud packages.
 
 Per placement:
-  * The abstract `CredentialProvider` trait lives in `komira_core/traits/`
+  * The abstract `CredentialProvider` trait lives in the core packages
     (NOT in this package) — runtime-free, vendor-neutral, so it sits
     below the per-cloud `_core` packages that conform to it.
   * `ByteBuf` (= `ByteBuffer`) and `ByteBufMut` (= `ByteView[mut=True]`)
-    are existing `komira_core/collections/` types — consumed, not
+    are existing the core packages types — consumed, not
     redefined.
 """
 

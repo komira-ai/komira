@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
 
-# The largest closure on main today: komira_core (the engine core, snappy C
+# The largest closure on main today: the core packages (the engine core, snappy C
 # library), json, encoding, crypto (aws-lc), protobuf, gcp_core, re-exported
 # through one @export file.
 mojo_shared_lib(

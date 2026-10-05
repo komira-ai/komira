@@ -80,7 +80,7 @@ def _file_size_bytes(path: String) raises -> Int:
     """Return the byte length of the file at `path` by SEEK_END.
 
     Local helper so this module does not depend on `komira_parquet`'s
-    writer helpers; the dep direction stays `komira_jsonl -> komira_core`.
+    writer helpers; the dep direction stays `komira_jsonl -> the core packages`.
     """
     var f = FileHandle(path, "r")
     _ = f.seek(0, 2)  # SEEK_END

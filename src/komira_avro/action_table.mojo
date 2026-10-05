@@ -10,7 +10,7 @@
 #
 # Architecture:
 #   - `FieldAction` is a runtime tagged-union (explicit Int8 tag + Optional
-#     payload-per-arm), matching `komira_core`'s logical-plan
+#     payload-per-arm), matching the core packages' logical-plan
 #     tagged-union precedent. NO byte-erased fn-ptr dispatch (no
 #     trampolines). Identity resolution emits only the `ReadField` arm; full
 #     resolution adds the 6 resolution arms (SynthesizeDefault / ReadAndPromote /

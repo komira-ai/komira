@@ -45,7 +45,7 @@ from komira_plan_expr.expr import Expr
 # LAYERING CUT: `komira_scan_planning` does not name
 # `komira_morsel.HashAggDecodedRG`. The trait's fused-hash-agg return type is
 # now an associated type bounded by `HashAggDecodedLike` below, whose method
-# signatures name only `komira_core` / `komira_collections` types. See that
+# signatures name only the core packages / `komira_collections` types. See that
 # trait's docstring for why.
 from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
@@ -100,7 +100,7 @@ trait HashAggDecodedLike(Movable, Deinitable):
     `komira_parquet` legitimately depends on BOTH sides and rebuilds the
     `HashAggDecodedRG` from these pieces at the one call site that needs it.
 
-    Every method below returns a `komira_core` / `komira_collections` /
+    Every method below returns a core-package / `komira_collections` /
     stdlib type, which is what keeps this trait declarable here at all.
 
     Method-extraction contract: each `take_*` consumes its inner `Optional`.

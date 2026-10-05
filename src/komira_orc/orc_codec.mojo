@@ -4,9 +4,9 @@
 # =============================================================================
 #
 # FFI-BOUNDARY: ORC compression codecs (libzstd, libz, liblz4 via dlopen;
-# snappy statically linked through komira_core). The FFI pointers in this
+# snappy statically linked through the core packages). The FFI pointers in this
 # package are confined to the dlopen-handle slots and the per-codec helpers
-# below, the same shape as komira_core's Arrow compression codecs.
+# below, the same shape as the core packages' Arrow compression codecs.
 #
 # ORC compression framing: when the file codec is not
 # NONE, every stream is broken into chunks. Each chunk is prefixed with a
@@ -65,7 +65,7 @@ from .footer import (
 
 
 # =============================================================================
-# FFI buffer-coercion helpers (the same shape as komira_core's Arrow
+# FFI buffer-coercion helpers (the same shape as the core packages' Arrow
 # compression codecs).
 # =============================================================================
 #
@@ -448,7 +448,7 @@ def _snappy_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
     var out = List[UInt8](capacity=max(out_cap, 1))
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(out_cap)
-    # FFI-BOUNDARY: snappy is statically linked (komira_core's deps).
+    # FFI-BOUNDARY: snappy is statically linked (the core packages' deps).
     var status = external_call["snappy_compress", Int32](
         _span_ptr(src),
         Int64(in_len),
@@ -722,7 +722,7 @@ def _snappy_decompress_chunk(
         in_buf[i] = chunk[i]
 
     # SAFETY: 1-element scratch slot for snappy_uncompressed_length's out arg.
-    # FFI-BOUNDARY: snappy is statically linked (komira_core's deps).
+    # FFI-BOUNDARY: snappy is statically linked (the core packages' deps).
     var ulen_buf = alloc[Int64](1)
     ulen_buf[0] = Int64(0)
     var ul_status = external_call["snappy_uncompressed_length", Int32](
@@ -850,7 +850,7 @@ def _lzo_decompress_chunk(
 #
 # Per-OS soname; the first call per process pays the dlopen, subsequent calls
 # reuse the handle from its `_Global` slot. Snappy is not here: it is
-# statically linked (komira_core links //third_party/snappy) and called
+# statically linked (the core packages links //third_party/snappy) and called
 # through `external_call`.
 
 comptime _LIBZSTD: StaticString = (

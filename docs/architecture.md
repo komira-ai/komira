@@ -25,7 +25,25 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 
 | module | what it is |
 |---|---|
-| [`komira_core`](../src/komira_core/) | the Arrow-native core types the rest is built on: the columnar primitives (Column, Buffer, RecordBatch and the Arrow value types), the SIMD helpers operators vectorize over, and the shared plan IR (LogicalPlan, Expr, ScalarValue, AggExpr). Its [README](../src/komira_core/README.md) lists what lives in each subpackage. |
+| [`komira_simd`](../src/komira_simd/) | SIMD byte-class, mask, copy, gather and bit-unpack primitives. |
+| [`komira_collections`](../src/komira_collections/) | The typed slab, a type-erased inline value, a variadic pack: generic containers with no dependencies. |
+| [`komira_async_api`](../src/komira_async_api/) | Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter. |
+| [`komira_counters`](../src/komira_counters/) | Process-global census and falsifier counters plus the build-gated runtime introspection probe. |
+| [`komira_compression`](../src/komira_compression/) | Byte-stream codec trait and the eight codec implementations. |
+| [`komira_host`](../src/komira_host/) | What the host looks like: cgroup-aware CPU topology, memory and hugepage probes, worker placement. |
+| [`komira_scalar_arithmetic`](../src/komira_scalar_arithmetic/) | Scalar 128 and 256-bit decimal arithmetic, casts, comparison and the overflow predicate. |
+| [`komira_buffer`](../src/komira_buffer/) | Aligned, shared and memory-mapped byte buffers and the region trait that columns sit on. |
+| [`komira_arrow`](../src/komira_arrow/) | Arrow-compatible columnar types: arrays of every kind, Column, Schema, RecordBatch, Table, bitmap, builders, typed views, selection vectors. |
+| [`komira_dynamic_filter`](../src/komira_dynamic_filter/) | Bloom, range, IN-list and constant filters and the selectivity tracker. |
+| [`komira_arrow_ipc`](../src/komira_arrow_ipc/) | Arrow IPC framing, encoders and decoders, the C data and stream interfaces, tensor columns, file chunk reads. |
+| [`komira_plan_expr`](../src/komira_plan_expr/) | The expression language of a plan (Expr, AggExpr, ScalarValue, ColExpr builder, UDF payloads, ExprId/ExprPool) and the comptime schema descriptor. |
+| [`komira_exec_types`](../src/komira_exec_types/) | The result and error types that cross the operator / scheduler / caller boundary: EngineError, ExecResult, ProcessResult, QueryContext, the byte-budget parser, the PartitionBy output contract. |
+| [`komira_column_kernels`](../src/komira_column_kernels/) | Vectorized compute over Arrow columns: arithmetic, comparison, casts, string, regexp, dictionary, union, decimal, case mapping, and the batch helpers that import them. |
+| [`komira_plan_stats`](../src/komira_plan_stats/) | Plan-time statistics: the StatsProvider trait, ColumnStats and TableStats, the physical-type tag, the exact/inexact/absent precision lattice, per-source statistics; the HyperLogLog cardinality sketch is added after the copy. |
+| [`komira_scan_source`](../src/komira_scan_source/) | What a scan is: SourceLike, ScanBinding identity, scan params, per-format source descriptors, pushdown gate, Sink trait, in-memory registry. |
+| [`komira_plan_ir`](../src/komira_plan_ir/) | LogicalPlan and PhysicalPlan trees, their variants, schema propagation, display, the scan-binding bind pass and audits. |
+| [`komira_agg_api`](../src/komira_agg_api/) | The aggregation accumulator contract: Accumulator trait, plan-time AggLayout, strategy selection, typed column pointers, COUNT(DISTINCT) key. |
+| [`komira_join_assembly`](../src/komira_join_assembly/) | Join result assembly: gather-index planning, chunked parallel gather, join-key common-subexpression. |
 | [`komira_libc`](../src/komira_libc/) | the canonical libc / POSIX FFI declarations: one declaration per C symbol, so two packages in one link unit never declare the same symbol with conflicting signatures. |
 | [`komira_atomic_alias`](../src/komira_atomic_alias/) | the one place the repository spells `Atomic[...]`; it imports only `std.atomic`, so any package may depend on it. |
 | [`komira_rowcell`](../src/komira_rowcell/) | the typed table-cell value model: one `RowCell` struct, its six scalar type tags, typed constructors and value equality. A leaf that imports only the Mojo standard library. |

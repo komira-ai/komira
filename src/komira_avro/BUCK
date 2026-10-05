@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Canonical Form and fingerprint, the Avro <-> Arrow type lattice (including
 # the arrow.* logical-type round-trip), OCF header and block decode, the block
 # codecs, the serial and block-parallel readers with full schema resolution,
-# and the OCF writer. Snappy comes statically linked through komira_core;
+# and the OCF writer. Snappy comes statically linked through the core packages;
 # deflate, zstandard, bzip2 and xz are opened from the system libraries at
 # first use. komira_runtime_paths is declared because a test takes its scratch
 # directory from `test_tmpdir()`.

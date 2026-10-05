@@ -989,7 +989,7 @@ struct _DispatchShard[
 # =============================================================================
 #
 # Increments a process-global atomic depth counter
-# (`komira_on_pool_enter`/`komira_on_pool_exit` in komira_core) on
+# (`komira_on_pool_enter`/`komira_on_pool_exit` in the core packages) on
 # construction and decrements it on destruction. Constructed as a local at the
 # top of `run_with_state` so the WHOLE dispatch window (enqueue + worker drain +
 # wake-word barrier) is bracketed; the RAII destructor fires on EVERY exit path
