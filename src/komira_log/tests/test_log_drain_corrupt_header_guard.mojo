@@ -112,8 +112,8 @@ def _decode_both(rec: LogEventRecord, mut ring: LogRecordRing) raises -> String:
 def test_inline_len_beyond_the_inline_array_does_not_abort() raises:
     """CASE 1 — `arg_inline_len` names more bytes than `arg_blob` HAS.
 
-    The 6-run reproduction saw 49 against a 48-byte array. Before the guard this
-    is `drain.mojo`'s inline copy indexing `arg_blob[48]`:
+    For example a header naming 49 bytes against a 48-byte array. Without the
+    guard this is `drain.mojo`'s inline copy indexing `arg_blob[48]`:
     'index 48 is out of bounds, valid range is 0 to 47' — process dead."""
     var ring = LogRecordRing(capacity=8, overflow_policy=OVERFLOW_BLOCK)
     var rec = _base_record()
@@ -152,7 +152,7 @@ def test_inline_len_beyond_the_inline_array_does_not_abort() raises:
 def test_overflow_flag_against_an_empty_arena_does_not_abort() raises:
     """CASE 2 — the overflow flag set on a ring whose arena is EMPTY.
 
-    The other message the 6-run reproduction printed. Before the guard this is
+    Without the guard this is
     `record_ring.arena_slice` indexing `_arena[0]` on a zero-length list:
     'index 0 is out of bounds, valid range is 0 to -1' — process dead."""
     var ring = LogRecordRing(capacity=8, overflow_policy=OVERFLOW_BLOCK)
