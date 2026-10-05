@@ -21,6 +21,7 @@ from kci_api import (
     ERROR_SELECTOR_NO_MATCH,
     ERROR_USAGE,
     MemoryRecorder,
+    OUTCOME_INDETERMINATE,
     OUTCOME_NOOP,
     OUTCOME_PARTIAL,
     OUTCOME_REFUSED,
@@ -39,6 +40,8 @@ from kci_api import (
     SCOPE_SELECTIVE,
     STEP_KIND_BUILD,
     STEP_KIND_PUBLISH,
+    VALIDATION_ENVIRONMENT_ENV,
+    VALIDATION_KIND_CONDA_INSTALL_ENV,
     VALIDATION_KIND_CONDA_INSTALL_SMOKE,
     VALIDATION_NOT_REACHED,
     VALIDATION_VALIDATED,
@@ -416,12 +419,12 @@ def test_validations_round_trip() raises:
     var t = render_result(r.finish_record(String(OUTCOME_SUCCEEDED), 9))
     assert_true(
         t.find(
-            String('"validations":[{"checks":[{"check":"sha256 komira_encoding","expected":"') + String(_H)
+            String('"validations":[{"channel_url":"","checks":[{"check":"sha256 komira_encoding","expected":"') + String(_H)
             + String('","got":"') + String(_H) + String('","ok":true},')
         ) >= 0,
         t,
     )
-    assert_true(t.find(String('"effect":"VALIDATED","kind":"CONDA_INSTALL_SMOKE","name":"install-smoke","outcome":"SUCCEEDED","step":"publish"}]')) >= 0, t)
+    assert_true(t.find(String('"effect":"VALIDATED","environment":"","kind":"CONDA_INSTALL_SMOKE","name":"install-smoke","outcome":"SUCCEEDED","pixi_sha256":"","skip_reason":"","step":"publish"}]')) >= 0, t)
     var p = parse_result(t, String("r.json"))
     assert_equal(render_result(p), t)
     assert_equal(len(p.validations), 1)
@@ -439,17 +442,114 @@ def test_validations_round_trip() raises:
     assert_equal(render_result(parse_result(render_result(ff), String("r.json"))), render_result(ff))
 
 
+def _env_row(var outcome: String) -> ResultValidation:
+    var v = ResultValidation(
+        String("install-env"), String("publish"), String(VALIDATION_KIND_CONDA_INSTALL_ENV), String(VALIDATION_VALIDATED), outcome^
+    )
+    v.environment = String(VALIDATION_ENVIRONMENT_ENV)
+    v.pixi_sha256 = String(_H)
+    v.channel_url = String("https://conda.example.invalid/example/gamma")
+    return v^
+
+
+def test_env_row_keys_round_trip() raises:
+    var r = _gamma_publish(False)
+    var v = _env_row(String(OUTCOME_SUCCEEDED))
+    v.checks.append(_check_row(True))
+    r.validations.append(v^)
+    var t = render_result(r.finish_record(String(OUTCOME_SUCCEEDED), 9))
+    assert_true(t.find(String('"channel_url":"https://conda.example.invalid/example/gamma","checks":[')) >= 0, t)
+    assert_true(
+        t.find(
+            String('"effect":"VALIDATED","environment":"ENV","kind":"CONDA_INSTALL_ENV","name":"install-env",')
+            + String('"outcome":"SUCCEEDED","pixi_sha256":"') + String(_H) + String('","skip_reason":"","step":"publish"}')
+        ) >= 0,
+        t,
+    )
+    var p = parse_result(t, String("r.json"))
+    assert_equal(p.validations[0].environment, String("ENV"))
+    assert_equal(p.validations[0].pixi_sha256, String(_H))
+    assert_equal(p.validations[0].channel_url, String("https://conda.example.invalid/example/gamma"))
+    assert_equal(render_result(p), t)
+    assert_equal(len(p.ignored_keys), 0)
+
+
+def test_a_document_written_before_the_env_keys_still_reads() raises:
+    # the four keys were added inside major 1: a record without them reads
+    # them as "" and is not refused
+    var r = _gamma_publish(False)
+    var v = _smoke(String(VALIDATION_VALIDATED), String(OUTCOME_SUCCEEDED))
+    v.checks.append(_check_row(True))
+    r.validations.append(v^)
+    var t = render_result(r.finish_record(String(OUTCOME_SUCCEEDED), 9))
+    var old = (
+        t.replace(String('"channel_url":"",'), String(""))
+        .replace(String('"environment":"",'), String(""))
+        .replace(String('"pixi_sha256":"",'), String(""))
+        .replace(String('"skip_reason":"",'), String(""))
+    )
+    assert_true(old.find(String("skip_reason")) < 0, old)
+    var p = parse_result(old, String("old.json"))
+    assert_equal(p.validations[0].skip_reason, String(""))
+    assert_equal(p.validations[0].environment, String(""))
+    assert_equal(len(p.ignored_keys), 0)
+
+
+def test_a_skipped_validation_is_indeterminate_exit_5_never_a_pass() raises:
+    var r = _gamma_publish(False)
+    var v = _env_row(String(OUTCOME_INDETERMINATE))
+    v.skip_reason = String("no network: none of the declared hosts answered")
+    v.checks.append(_check_row(False))
+    r.validations.append(v^)
+    r.set_error(String("KCI-E-VALIDATION"), String("validation 'install-env' could not run: no network"))
+    var f = r.finish_record(String(OUTCOME_INDETERMINATE), 9)
+    assert_equal(f.exit_code, 5)
+    var t = render_result(f)
+    assert_true(t.find(String('"skip_reason":"no network: none of the declared hosts answered"')) >= 0, t)
+    assert_equal(render_result(parse_result(t, String("r.json"))), t)
+    # a skip_reason on any other outcome is refused: a skip never reads as a
+    # pass nor as a failure
+    var s = _gamma_publish(False)
+    var sv = _env_row(String(OUTCOME_SUCCEEDED))
+    sv.skip_reason = String("no network")
+    sv.checks.append(_check_row(True))
+    s.validations.append(sv^)
+    assert_true(_render_refusal(s).find(String("a skip_reason belongs to a validation that ran and is INDETERMINATE")) >= 0)
+    var forged = t.replace(String('"outcome":"INDETERMINATE","pixi_sha256"'), String('"outcome":"VALIDATION_FAILED","pixi_sha256"'))
+    assert_true(_refusal(forged).find(String("a skip_reason belongs to a validation that ran and is INDETERMINATE")) >= 0)
+
+
+def test_env_row_values_are_checked() raises:
+    var e = _gamma_publish(False)
+    var ev = _env_row(String(OUTCOME_SUCCEEDED))
+    ev.environment = String("VM")
+    ev.checks.append(_check_row(True))
+    e.validations.append(ev^)
+    assert_true(_render_refusal(e).find(String("environment 'VM' is not ENV or CONTAINER")) >= 0)
+    var h = _gamma_publish(False)
+    var hv = _env_row(String(OUTCOME_SUCCEEDED))
+    hv.pixi_sha256 = String("ABC")
+    hv.checks.append(_check_row(True))
+    h.validations.append(hv^)
+    assert_true(_render_refusal(h).find(String("pixi_sha256 'ABC' is not 64 lowercase hex characters")) >= 0)
+    var n = _gamma_publish(False)
+    var nv = _env_row(String(""))
+    nv.effect = String(VALIDATION_NOT_REACHED)
+    n.validations.append(nv^)
+    assert_true(_render_refusal(n).find(String("did not run has no environment and no pixi_sha256")) >= 0)
+
+
 def test_a_plan_validation_never_reads_as_a_pass() raises:
     var r = _gamma_publish(True)
     r.validations.append(_smoke(String(VALIDATION_WOULD_VALIDATE), String("")))
     var t = render_result(r.finish_record(String(OUTCOME_SUCCEEDED), 9))
     assert_true(t.find(String('"effect":"WOULD_VALIDATE"')) >= 0)
-    assert_true(t.find(String('"outcome":"","step":"publish"')) >= 0)
+    assert_true(t.find(String('"outcome":"","pixi_sha256":"","skip_reason":"","step":"publish"')) >= 0)
     # WOULD_VALIDATE with an outcome is refused, by the renderer and the parser
     var o = _gamma_publish(True)
     o.validations.append(_smoke(String(VALIDATION_WOULD_VALIDATE), String(OUTCOME_SUCCEEDED)))
     assert_true(_render_refusal(o).find(String("did not run (WOULD_VALIDATE) has no outcome")) >= 0)
-    var forged = t.replace(String('"outcome":"","step":"publish"'), String('"outcome":"SUCCEEDED","step":"publish"'))
+    var forged = t.replace(String('"outcome":"","pixi_sha256"'), String('"outcome":"SUCCEEDED","pixi_sha256"'))
     assert_true(_refusal(forged).find(String("did not run (WOULD_VALIDATE) has no outcome")) >= 0)
     # nor checks
     var c = _gamma_publish(True)

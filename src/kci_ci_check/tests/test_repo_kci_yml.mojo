@@ -108,7 +108,7 @@ def test_the_release_machine() raises:
             assert_equal(v.compiler_channel, String("https://conda.modular.com/max"))
             assert_equal(v.program, String("release/smoke/smoke_komira_encoding.mojo"))
             assert_true(v.image.startswith(String("ghcr.io/prefix-dev/pixi:")), v.image)
-            assert_equal(v.wait_for_index_seconds, 600)
+            assert_equal(v.wait_for_index_seconds, 1800)
             # the program the validation names is there, and states its count
             var program = Path(String("smoke_komira_encoding.mojo")).read_text()
             assert_true(program.find(String("\"komira_encoding validation: \"")) >= 0, String("the smoke program prints no count line"))

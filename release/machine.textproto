@@ -104,8 +104,9 @@ stage {
       extra_channel: "conda-forge"
       program: "release/smoke/smoke_komira_encoding.mojo"
       # Only the ABSENCE of a file in the channel's index is waited for (the
-      # registry indexes an upload shortly after it lands); then it fails.
-      wait_for_index_seconds: 600
+      # registry indexes an upload after it lands; a subdir's FIRST index
+      # can take a quarter of an hour); then it fails. Each poll is logged.
+      wait_for_index_seconds: 1800
     }
   }
 }

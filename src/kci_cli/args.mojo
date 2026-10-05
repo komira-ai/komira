@@ -10,6 +10,7 @@
 #           [--release-version <file>] [--concurrency <n>]
 #           [--secret-store <none|env>] [--scratch-dir <dir>]
 #           [--release-set-hash <64 hex>]
+#           [--pixi <file> --pixi-sha256 <hex>]
 #   kci --help
 #
 # kci has exactly ONE command: `kci run --stage S` runs every step of stage S
@@ -60,9 +61,16 @@
 #   a selected PUBLISH step  needs --release-version; --concurrency,
 #                            --secret-store optional
 #   a selected validation    needs --scratch-dir, an ABSOLUTE path (the
-#                            container mounts a directory under it)
+#                            container mounts a directory under it; an ENV
+#                            validation refuses one inside the checkout)
+#   a selected CONDA_INSTALL_ENV validation
+#                            needs --pixi, the ABSOLUTE path of the pinned
+#                            pixi it installs with, and --pixi-sha256, its
+#                            pin (64 lowercase hex): the validation runs
+#                            pixi only when the bytes have that sha256
 #   no selected step of that kind   its flags are refused (and
-#                            --scratch-dir when no validation is selected)
+#                            --scratch-dir when no validation is selected,
+#                            --pixi and --pixi-sha256 when no ENV one is)
 #
 # Only the SELECTED steps and validations count (every one, without
 # `--only`; `--only step:<s>` selects no validation). Which names
@@ -88,6 +96,7 @@ from kci_api import (
     DEFAULT_MACHINE_FILE,
     STEP_KIND_BUILD,
     STEP_KIND_PUBLISH,
+    VALIDATION_KIND_CONDA_INSTALL_ENV,
     ContextEntry,
     RunIdentity,
     Selector,
@@ -110,6 +119,7 @@ comptime KCI_USAGE: String = (
     "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
     "          --scratch-dir <dir>                                          (a selected validation)\n"
     "          [--release-set-hash <64 hex>]                  (a selected PUBLISH step or validation)\n"
+    "          --pixi <file> --pixi-sha256 <hex>                  (a selected CONDA_INSTALL_ENV validation)\n"
     "  kci --help\n"
     "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
     "--machine defaults to release/machine.textproto.\n"
@@ -171,6 +181,8 @@ struct KciCommand(Copyable, Movable):
     var concurrency: Int
     var store: SecretStoreChoice
     var scratch_dir: String
+    var pixi: String
+    var pixi_sha256: String
     var only: List[String]
     var affected_by: String
     var release_set_hash: String
@@ -195,6 +207,8 @@ struct KciCommand(Copyable, Movable):
         self.concurrency = 0
         self.store = SecretStoreChoice.NONE
         self.scratch_dir = String("")
+        self.pixi = String("")
+        self.pixi_sha256 = String("")
         self.only = List[String]()
         self.affected_by = String("")
         self.release_set_hash = String("")
@@ -247,6 +261,25 @@ def validation_flags() -> List[String]:
     var l = List[String]()
     l.append(String("--scratch-dir"))
     return l^
+
+
+def env_validation_flags() -> List[String]:
+    """The flags of a CONDA_INSTALL_ENV validation (file header)."""
+    var l = List[String]()
+    l.append(String("--pixi"))
+    l.append(String("--pixi-sha256"))
+    return l^
+
+
+def _is_sha256_hex(s: String) -> Bool:
+    var b = s.as_bytes()
+    if len(b) != 64:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
+            return False
+    return True
 
 
 def _member(xs: List[String], x: String) -> Bool:
@@ -352,6 +385,14 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         if not value.startswith(String("/")):
             raise usage_error(String("--scratch-dir '") + value + String("' is not an absolute path (a container mounts a directory under it)"))
         cmd.scratch_dir = value.copy()
+    elif flag == String("--pixi"):
+        if not value.startswith(String("/")):
+            raise usage_error(String("--pixi '") + value + String("' is not an absolute path"))
+        cmd.pixi = value.copy()
+    elif flag == String("--pixi-sha256"):
+        if not _is_sha256_hex(value):
+            raise usage_error(String("--pixi-sha256 '") + value + String("' is not 64 lowercase hex characters"))
+        cmd.pixi_sha256 = value.copy()
 
 
 def _find_value(args: List[String], flag: String) -> String:
@@ -405,6 +446,7 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
     allowed.extend(build_flags())
     allowed.extend(publish_flags())
     allowed.extend(validation_flags())
+    allowed.extend(env_validation_flags())
     var i = start
     while i < len(args):
         var a = args[i]
@@ -532,3 +574,30 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
             raise usage_error(vwhich + String(" selects a validation: kci run needs --scratch-dir"))
     elif cmd.given(String("--scratch-dir")):
         raise usage_error(String("--scratch-dir is a validation's flag, and ") + vwhich + String(" selects no validation"))
+    var env_name = _selected_env_validation(stage, sel)
+    var ef = env_validation_flags()
+    if env_name.byte_length() > 0:
+        for i in range(len(ef)):
+            if not cmd.given(ef[i]):
+                raise usage_error(
+                    vwhich + String(" selects the CONDA_INSTALL_ENV validation '") + env_name
+                    + String("': kci run needs ") + ef[i]
+                )
+    else:
+        for i in range(len(ef)):
+            if cmd.given(ef[i]):
+                raise usage_error(
+                    ef[i] + String(" is a CONDA_INSTALL_ENV validation's flag, and ") + vwhich
+                    + String(" selects none")
+                )
+
+
+def _selected_env_validation(stage: Stage, sel: Selection) -> String:
+    """The first selected CONDA_INSTALL_ENV validation's name, "" for none."""
+    for n in range(len(sel.validations)):
+        for k in range(len(stage.steps)):
+            for m in range(len(stage.steps[k].validations)):
+                ref v = stage.steps[k].validations[m]
+                if v.name == sel.validations[n] and v.kind == VALIDATION_KIND_CONDA_INSTALL_ENV:
+                    return v.name.copy()
+    return String("")

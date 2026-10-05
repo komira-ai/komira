@@ -23,6 +23,7 @@ from kci_release_machine.graph import (
     STAGE_TRIGGER_PULL_REQUEST,
     STAGE_TRIGGER_PUSH,
     VALIDATION_PROGRAM_DIR,
+    VALIDATION_WAIT_DEFAULT_SECONDS,
     VALIDATION_WAIT_MAX_SECONDS,
     ReleaseMachine,
     Stage,

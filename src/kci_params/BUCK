@@ -1,8 +1,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Generic managed-app parameter declarations: a managed app declares the
+# Generic app parameter declarations: an app declares the
 # parameters it takes, the deploy renders them onto argv, the app parses them
-# at one site at startup, and the control plane stores the map opaquely. Zero
+# at one site at startup, and the deployment store stores the map opaquely. Zero
 # deps by design: three sides that must not depend on each other consume it.
 #
 # The welded test hands what the renderers emit to the parser unchanged and

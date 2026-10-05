@@ -76,9 +76,12 @@
 #      (kci_validate), each adding its `validations[]` row and printing each
 #      of its checks. The run stops at the first step that does not end
 #      SUCCEEDED or NOOP and at the first validation that does not end
-#      SUCCEEDED (VALIDATION_FAILED, KCI-E-VALIDATION, exit 7); a selected
-#      validation after that point gets a NOT_REACHED row. Under `--plan` a
-#      validation runs nothing and its row is WOULD_VALIDATE;
+#      SUCCEEDED (VALIDATION_FAILED, KCI-E-VALIDATION, exit 7; a
+#      CONDA_INSTALL_ENV validation that found no network at all is
+#      INDETERMINATE with a skip_reason, exit 5, never a pass, its reason the
+#      run's error message); a selected validation after that point gets a
+#      NOT_REACHED row. Under `--plan` a validation runs nothing and its row
+#      is WOULD_VALIDATE;
 #   7. NEW NAMES AHEAD: when the run ended SUCCEEDED or NOOP, every PUBLISH
 #      step of each stage whose `after` is S is read through `steps.lookahead`
 #      (anonymous reads of that stage's channel, kci_publish
@@ -100,8 +103,8 @@
 #      BREAK-GLASS line first, and a main-only stage's publish ends with its
 #      `promoted to <stage>: ...` line, `promotion_line`): the
 #      outcome and exit number, the scope, the revision and set hash, the
-#      workflow check, the steps, the validations with each failed check's
-#      finding, and each NEW NAMES block (this stage's
+#      workflow check, the steps, the validations with each failed row's
+#      finding and each check's first passing row, and each NEW NAMES block (this stage's
 #      PUBLISH steps, then the stages after it). A file that cannot be
 #      written is said on stderr; the exit number stands;
 #  10. the LAST stderr line is the run's evidence (kci_api
@@ -386,6 +389,8 @@ def _validate_request(cmd: KciCommand, stage: Stage, step: StageStep, v: StageVa
     req.scratch_dir = cmd.scratch_dir.copy()
     req.repo_root = String(".")
     req.plan = cmd.plan
+    req.pixi = cmd.pixi.copy()
+    req.pixi_sha256 = cmd.pixi_sha256.copy()
     return req^
 
 
@@ -399,6 +404,11 @@ def _selected(sel: Selection, name: String) -> Bool:
 def validation_failure_message(row: ResultValidation) -> String:
     """The run's error message for a failed validation: its name and each
     failed check's finding."""
+    if row.skip_reason.byte_length() > 0:
+        return (
+            String("validation '") + row.name + String("' of step '") + row.step + String("' could not run (")
+            + row.outcome + String(", never a pass): ") + row.skip_reason
+        )
     var s = String("validation '") + row.name + String("' of step '") + row.step + String("' failed:")
     for i in range(len(row.checks)):
         if not row.checks[i].ok:

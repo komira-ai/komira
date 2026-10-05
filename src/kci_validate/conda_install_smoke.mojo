@@ -44,7 +44,8 @@
 # real, ScriptedRunner in the welded tests, which plays the container by
 # writing what it would leave in the mount); kci_pkg_upload's `PkgTransport`
 # reads the channel (ScriptedPkgTransport in the tests); komira_retry's
-# `Sleeper` waits. Nothing here names a channel, a package or an
+# `Sleeper` waits; an `IndexPollLog` says each poll of the index
+# (StderrIndexPollLog in the CLI, RecordingIndexPollLog in the tests). Nothing here names a channel, a package or an
 # organisation.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
@@ -59,6 +60,7 @@ from kci_build.runner import ProcessRunner, RunSpec
 from kci_api import (
     OUTCOME_SUCCEEDED,
     OUTCOME_VALIDATION_FAILED,
+    VALIDATION_ENVIRONMENT_CONTAINER,
     VALIDATION_KIND_CONDA_INSTALL_SMOKE,
     VALIDATION_VALIDATED,
     VALIDATION_WOULD_VALIDATE,
@@ -67,7 +69,7 @@ from kci_api import (
 )
 from kci_pkg_upload import PkgTransport
 
-from .channel_index import check_channel
+from .channel_index import IndexPollLog, check_channel
 from .container import (
     MANIFEST_NAME,
     PROGRAM_COPY,
@@ -128,10 +130,11 @@ def _fresh_dir(dir: String) -> String:
         return String(e)
 
 
-def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper](
-    mut runner: R, mut transport: T, mut sleeper: S, req: ValidateRequest, host: ContainerHost
+def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollLog](
+    mut runner: R, mut transport: T, mut sleeper: S, mut log: L, req: ValidateRequest, host: ContainerHost
 ) raises -> ResultValidation:
-    """One CONDA_INSTALL_SMOKE validation (file header). RAISES only on a
+    """One CONDA_INSTALL_SMOKE validation (file header); each poll of the
+    channel's index is a line on `log`. RAISES only on a
     caller's error (another kind); everything about the release, the
     channel, the container and the program is a failed check."""
     ref v = req.validation
@@ -147,6 +150,7 @@ def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper](
     var row = ResultValidation(
         v.name.copy(), req.step_name.copy(), v.kind.copy(), String(VALIDATION_VALIDATED), String("")
     )
+    row.environment = String(VALIDATION_ENVIRONMENT_CONTAINER)
     var checks = List[ResultValidationCheck]()
 
     # 0. the release, the channel's location, the pins
@@ -158,6 +162,7 @@ def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper](
         pins = install_pins(rel.loaded, v.installs)
         mojo_pin = mojo_pin_of(rel.loaded)
         channel_url = rel.channel_url.copy()
+        row.channel_url = channel_url.copy()
     except e:
         checks.append(
             ResultValidationCheck(
@@ -183,7 +188,7 @@ def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper](
     )
 
     # 1. the channel, anonymously, from this machine
-    if not check_channel(transport, sleeper, channel_url, pins, v.wait_for_index_seconds, checks):
+    if not check_channel(transport, sleeper, log, channel_url, pins, v.wait_for_index_seconds, checks):
         return _finish(row^, checks^)
 
     # the scratch directory, the manifest, the program's copy

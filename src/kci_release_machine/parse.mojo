@@ -33,7 +33,7 @@
 #         compiler_channel: "https://conda.modular.com/max"
 #         extra_channel: "conda-forge"
 #         program: "release/smoke/smoke_komira_encoding.mojo"
-#         wait_for_index_seconds: 600
+#         wait_for_index_seconds: 1800
 #       }
 #     }
 #   }

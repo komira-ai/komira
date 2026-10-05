@@ -1,0 +1,12 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The README's examples are a welded test, `[tests][readme]` (test 38):
+# hidden lines, a hoisted declaration, a triple-quoted string, an indented
+# example and a ~~~ fence that quotes ``` all run. The target must build.
+mojo_library(
+    name = "ok",
+    srcs = [
+        "__init__.mojo",
+        "greet.mojo",
+    ],
+)

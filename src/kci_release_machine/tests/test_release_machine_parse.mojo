@@ -373,8 +373,9 @@ def test_validation_reads_back_alone() raises:
     ref v = g.stages[0].steps[0].validations[0]
     assert_equal(v.name, String("v"))
     assert_equal(len(v.extra_channels), 0)
-    # an unset wait is no wait
-    assert_equal(v.wait_for_index_seconds, 0)
+    # an unset wait is the default: 30 minutes (a registry can take a
+    # quarter of an hour to make a subdir's first index)
+    assert_equal(v.wait_for_index_seconds, 1800)
     assert_equal(v.line, 11)
 
 
@@ -401,11 +402,11 @@ def test_validation_fields() raises:
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" install: \"a\" program: \"release/s.mojo\""))),
-        String("validation 'v' of step 'publish' of stage 'p' has no kind (CONDA_INSTALL_SMOKE)"),
+        String("validation 'v' of step 'publish' of stage 'p' has no kind (CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV)"),
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" kind: PYTEST install: \"a\" program: \"release/s.mojo\""))),
-        String("validation kind 'PYTEST' is not CONDA_INSTALL_SMOKE"),
+        String("validation kind 'PYTEST' is not CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV"),
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" kind: CONDA_INSTALL_SMOKE program: \"release/s.mojo\""))),
@@ -431,6 +432,47 @@ def test_validation_fields() raises:
     _assert_refused(
         _with_validation(String(_V_OK) + String(" program: \"release/t.mojo\"")),
         String("field 'program' is set twice in validation 'v'"),
+    )
+
+
+comptime _V_ENV: String = (
+    "name: \"v\" kind: CONDA_INSTALL_ENV install: \"komira_encoding\""
+    " compiler_channel: \"https://conda.modular.com/max\" extra_channel: \"conda-forge\" wait_for_index_seconds: 1800"
+)
+"""A CONDA_INSTALL_ENV validation: no image, no program."""
+
+
+def test_env_validation_reads_back() raises:
+    var g = parse_machine_file(_with_validation(String(_V_ENV)), String(_SRC))
+    ref v = g.stages[0].steps[0].validations[0]
+    assert_equal(v.kind, String("CONDA_INSTALL_ENV"))
+    assert_equal(v.image, String(""))
+    assert_equal(v.program, String(""))
+    assert_equal(len(v.installs), 1)
+    assert_equal(v.wait_for_index_seconds, 1800)
+
+
+def test_env_validation_runs_no_container_and_names_no_program() raises:
+    # an ENV validation runs on this machine: an image is refused, digest or
+    # not (any image is the container kind's field)
+    _assert_refused(
+        _with_validation(String(_V_ENV) + String(" image: \"") + String(_IMAGE) + String("\"")),
+        String("line 11: validation 'v' of step 'publish' of stage 'p' has image '") + String(_IMAGE)
+        + String("'; a CONDA_INSTALL_ENV validation runs on this machine with no container"),
+    )
+    # what it runs is each installed library's README, so a program is refused
+    _assert_refused(
+        _with_validation(String(_V_ENV) + String(" program: \"release/smoke.mojo\"")),
+        String("has program 'release/smoke.mojo'; a CONDA_INSTALL_ENV validation runs each installed library's README"),
+    )
+    # the rest of the rules are the container kind's
+    _assert_refused(
+        _with_validation(String("name: \"v\" kind: CONDA_INSTALL_ENV compiler_channel: \"https://conda.modular.com/max\"")),
+        String("has no install (a package to install)"),
+    )
+    _assert_refused(
+        _with_validation(String("name: \"v\" kind: CONDA_INSTALL_ENV install: \"komira_encoding\"")),
+        String("has no compiler_channel"),
     )
 
 
@@ -480,6 +522,9 @@ def test_validation_compiler_channel() raises:
 def test_validation_wait_for_index_seconds() raises:
     var g = parse_machine_file(_with_validation(String(_V_OK) + String(" wait_for_index_seconds: 3600")), String(_SRC))
     assert_equal(g.stages[0].steps[0].validations[0].wait_for_index_seconds, 3600)
+    # 0 stays allowed and means no wait: the default applies only when unset
+    var g0 = parse_machine_file(_with_validation(String(_V_OK) + String(" wait_for_index_seconds: 0")), String(_SRC))
+    assert_equal(g0.stages[0].steps[0].validations[0].wait_for_index_seconds, 0)
     _assert_refused(
         _with_validation(String(_V_OK) + String(" wait_for_index_seconds: 3601")),
         String("has wait_for_index_seconds 3601; it is 0 to 3600"),

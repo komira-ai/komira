@@ -24,6 +24,7 @@ from kci_api import (
     ERROR_BUILD_FAILED,
     ERROR_PUBLISH_DIFFERENT_BYTES,
     OUTCOME_FAILED,
+    OUTCOME_INDETERMINATE,
     OUTCOME_NOOP,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
@@ -64,6 +65,8 @@ struct FakeSteps(StageSteps, Movable):
     var order: List[String]
     var validated: List[String]
     var validation_fails: Bool
+    var validation_skips: Bool
+    var pixis: List[String]
     var bases: List[String]
 
     def __init__(out self):
@@ -80,6 +83,8 @@ struct FakeSteps(StageSteps, Movable):
         self.order = List[String]()
         self.validated = List[String]()
         self.validation_fails = False
+        self.validation_skips = False
+        self.pixis = List[String]()
         self.bases = List[String]()
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
@@ -90,6 +95,7 @@ struct FakeSteps(StageSteps, Movable):
             + req.platform + String(" ") + req.revision_id + String(" scratch=") + req.scratch_dir
             + String(" plan=") + String(req.plan)
         )
+        self.pixis.append(req.validation.name + String(" pixi=") + req.pixi + String(" sha=") + req.pixi_sha256)
         if req.plan:
             return ResultValidation(
                 req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(),
@@ -99,6 +105,17 @@ struct FakeSteps(StageSteps, Movable):
             req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(),
             String(VALIDATION_VALIDATED), String(OUTCOME_SUCCEEDED),
         )
+        if self.validation_skips:
+            row.outcome = String(OUTCOME_INDETERMINATE)
+            row.environment = String("ENV")
+            row.skip_reason = String("no network: none of the declared hosts answered (prefix.dev did not answer)")
+            row.checks.append(
+                ResultValidationCheck(
+                    String("network"), String("every declared host answers"),
+                    String("network: no declared host answered: prefix.dev did not answer (dns error)"), False,
+                )
+            )
+            return row^
         if self.validation_fails:
             row.outcome = String(OUTCOME_VALIDATION_FAILED)
             row.checks.append(
@@ -108,6 +125,12 @@ struct FakeSteps(StageSteps, Movable):
                 )
             )
         else:
+            row.checks.append(
+                ResultValidationCheck(
+                    String("channel"), String("GET answers 200"), String("channel: answered 200; waited 60 of 1800 s over 5 polls"), True
+                )
+            )
+            row.checks.append(ResultValidationCheck(String("channel"), String("listed"), String("a second channel row"), True))
             row.checks.append(
                 ResultValidationCheck(String("program"), String("N of N"), String("program: ran 61 checks, all passed"), True)
             )
@@ -498,9 +521,10 @@ comptime _CHANNELS: String = (
 )
 
 
-def _release_machine(dir: String, validation: Bool = False) raises -> String:
+def _release_machine(dir: String, validation: Bool = False, env_validation: Bool = False) raises -> String:
     """build -> gamma (environment gamma) -> prod (environment prod), the
-    channels file beside it; `validation` declares one on gamma's step."""
+    channels file beside it; `validation` declares one on gamma's step,
+    `env_validation` one of kind CONDA_INSTALL_ENV (`install-env`)."""
     var c = dir + String("/c.textproto")
     write_whole_file(c, String(_CHANNELS))
     var v = String("")
@@ -509,6 +533,11 @@ def _release_machine(dir: String, validation: Bool = False) raises -> String:
             " validation { name: \"install\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\""
             " image: \"registry.example.invalid/pixi:1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\""
             " compiler_channel: \"https://conda.modular.com/max\" program: \"release/smoke/smoke.mojo\" }"
+        )
+    if env_validation:
+        v += String(
+            " validation { name: \"install-env\" kind: CONDA_INSTALL_ENV install: \"komira_encoding\""
+            " compiler_channel: \"https://conda.modular.com/max\" extra_channel: \"conda-forge\" }"
         )
     var m = dir + String("/machine.textproto")
     write_whole_file(
@@ -749,6 +778,27 @@ def test_only_validation_checks_what_is_published() raises:
     assert_equal(kci_main_with(_gamma(m, "--only", "validation:install", "--scratch-dir", "/s"), steps, rec2), 2)
 
 
+def test_a_passed_validation_summary_states_each_check() raises:
+    # The summary names what a passing validation found, not only what a
+    # failing one did: each check's first row (the channel's says how long
+    # the index was waited for, and over how many polls).
+    var d = _root(String("valpass"))
+    var m = _release_machine(d, True)
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var summary = d + String("/summary.md")
+    assert_equal(
+        kci_main_with(_run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--summary-file", summary), steps, rec),
+        0,
+    )
+    var text = Path(summary).read_text()
+    assert_true(text.find(String("| install | publish | SUCCEEDED |")) >= 0, text)
+    assert_true(text.find(String("| | | ok: `channel: answered 200; waited 60 of 1800 s over 5 polls` |")) >= 0, text)
+    assert_true(text.find(String("| | | ok: `program: ran 61 checks, all passed` |")) >= 0, text)
+    # a second row of a check already shown is not repeated
+    assert_equal(text.find(String("a second channel row")), -1, text)
+
+
 def test_a_failed_validation_is_exit_7_and_names_its_finding() raises:
     var d = _root(String("valfail"))
     var m = _release_machine(d, True)
@@ -770,6 +820,80 @@ def test_a_failed_validation_is_exit_7_and_names_its_finding() raises:
     var text = Path(summary).read_text()
     assert_true(text.find(String("| install | publish | VALIDATION_FAILED |")) >= 0, text)
     assert_true(text.find(String("answered 401")) >= 0, text)
+
+
+comptime _PIXI_SHA: String = "807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f"
+
+
+def test_an_env_validation_needs_the_pinned_pixi() raises:
+    var m = _release_machine(_root(String("envflags")), False, True)
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    # without --pixi: a usage error naming the flag, nothing run
+    assert_equal(
+        kci_main_with(_run(m, String("gamma"), "--only", "validation:install-env", "--scratch-dir", "/s"), steps, rec),
+        2,
+    )
+    assert_true(_last(rec).error.message.find(String("selects the CONDA_INSTALL_ENV validation 'install-env': kci run needs --pixi")) >= 0, _last(rec).error.message)
+    assert_equal(len(steps.validated), 0)
+    # with both, the request carries them
+    var ok = FakeSteps()
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(
+        kci_main_with(
+            _run(m, String("gamma"), "--only", "validation:install-env", "--scratch-dir", "/s", "--pixi", "/t/pixi", "--pixi-sha256", String(_PIXI_SHA)),
+            ok, rec2,
+        ),
+        0,
+    )
+    assert_equal(len(ok.pixis), 1)
+    assert_equal(ok.pixis[0], String("install-env pixi=/t/pixi sha=") + String(_PIXI_SHA))
+
+
+def test_pixi_flags_are_refused_where_no_env_validation_runs() raises:
+    var m = _release_machine(_root(String("envrefused")), True, True)
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(
+        kci_main_with(
+            _run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--pixi", "/t/pixi", "--pixi-sha256", String(_PIXI_SHA)),
+            steps, rec,
+        ),
+        2,
+    )
+    assert_true(_last(rec).error.message.find(String("--pixi is a CONDA_INSTALL_ENV validation's flag")) >= 0, _last(rec).error.message)
+    assert_equal(len(steps.validated), 0)
+
+
+def test_no_network_is_exit_5_never_a_pass() raises:
+    var d = _root(String("envskip"))
+    var m = _release_machine(d, False, True)
+    var steps = FakeSteps()
+    steps.validation_skips = True
+    var rec = CliRecorder.memory(String(""))
+    var summary = d + String("/summary.md")
+    assert_equal(
+        kci_main_with(
+            _run(
+                m, String("gamma"), "--only", "validation:install-env", "--scratch-dir", "/s", "--pixi", "/t/pixi",
+                "--pixi-sha256", String(_PIXI_SHA), "--summary-file", summary,
+            ),
+            steps, rec,
+        ),
+        5,
+    )
+    var r = _last(rec)
+    assert_equal(r.outcome, String(OUTCOME_INDETERMINATE))
+    assert_equal(r.validations[0].outcome, String(OUTCOME_INDETERMINATE))
+    assert_true(r.validations[0].skip_reason.startswith(String("no network")))
+    assert_true(
+        r.error.message.find(String("validation 'install-env' of step 'publish' could not run (INDETERMINATE, never a pass): no network")) >= 0,
+        r.error.message,
+    )
+    # a run that could not tell reads no later stage's names
+    assert_equal(len(steps.reads), 0)
+    var text = Path(summary).read_text()
+    assert_true(text.find(String("| install-env | publish | INDETERMINATE |")) >= 0, text)
 
 
 def test_a_failed_step_leaves_its_validation_not_reached() raises:

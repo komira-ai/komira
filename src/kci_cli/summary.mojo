@@ -5,7 +5,8 @@
 #
 #   run_summary_markdown  the outcome and exit number, the scope, the
 #                         revision and set hash, the workflow check, the
-#                         steps, the validations, the NEW NAMES blocks
+#                         steps, the validations (each failed row, each
+#                         check's first passing row), the NEW NAMES blocks
 #   promotion_line        the one plain line a run of a main-only stage that
 #                         publishes says about its channel (`promoted to
 #                         <stage>: ...`, `nothing new`, `PLAN ONLY`), "" for
@@ -106,9 +107,23 @@ def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead:
             ref v = result.validations[i]
             var o = v.outcome.copy() if v.outcome.byte_length() > 0 else v.effect.copy()
             s += String("| ") + v.name + String(" | ") + v.step + String(" | ") + o + String(" |\n")
+            # every failed row; and each check's first row when it passed
+            # (what was found, e.g. how long the channel's index was waited
+            # for), so a pass states its findings too
+            var shown = List[String]()
             for k in range(len(v.checks)):
-                if not v.checks[k].ok:
-                    s += String("| | | `") + v.checks[k].got + String("` |\n")
+                ref c = v.checks[k]
+                if not c.ok:
+                    s += String("| | | `") + c.got + String("` |\n")
+                    shown.append(c.check.copy())
+                    continue
+                var seen = False
+                for j in range(len(shown)):
+                    if shown[j] == c.check:
+                        seen = True
+                if not seen:
+                    s += String("| | | ok: `") + c.got + String("` |\n")
+                    shown.append(c.check.copy())
     s += String("\n")
     for i in range(len(step_blocks)):
         s += step_blocks[i]
