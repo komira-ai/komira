@@ -30,6 +30,15 @@
 #                         channel to publish to
 #   release_version_file  release_version.sh's stdout for the release commit
 #   concurrency           how many members upload at once, 1..16
+#   never_backward        the stage never publishes a lower build number
+#                         than its channel lists for the same name and
+#                         version (run.mojo; kci_cli sets it for a stage
+#                         without `break_glass`)
+#   break_glass           the run is BREAK-GLASS (kci_cli: any run but a
+#                         push to main): an OIDC channel's
+#                         `break_glass_push_identity` is the trusted
+#                         publisher, and `environment` is the stage's
+#                         `break_glass_environment` (flow.mojo)
 #   plan                  `kci run --plan`: no write to the channel; under
 #                         CI, an OIDC channel's token is exchanged and
 #                         discarded (flow.mojo)
@@ -46,6 +55,7 @@
 
 from kci_api import RunIdentity, release_platform_dir
 
+from .plan import RevisionHistory
 from .workers import DEFAULT_CONCURRENCY
 
 
@@ -65,6 +75,9 @@ struct PublishRequest(Copyable, Movable):
     var channel: String
     var release_version_file: String
     var concurrency: Int
+    var never_backward: Bool
+    var revision_history: RevisionHistory
+    var break_glass: Bool
     var plan: Bool
     var run: RunIdentity
 
@@ -80,6 +93,9 @@ struct PublishRequest(Copyable, Movable):
         self.channel = String("")
         self.release_version_file = String("")
         self.concurrency = DEFAULT_CONCURRENCY
+        self.never_backward = False
+        self.revision_history = RevisionHistory()
+        self.break_glass = False
         self.plan = False
         self.run = run^
 

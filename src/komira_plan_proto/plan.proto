@@ -498,8 +498,8 @@ message WireColRef {
 // that executes ordinals needs no format change — the refusal is a statement
 // about what THIS build runs, which is why it lives in the value gate and not
 // in the codec's shape ledger. The other untrusted boundary in this repo
-// (`komira_ivp`) reached the same decision first: its six-tag Expr allow-list
-// omits EXPR_COL_IDX.
+// (`komira_viewport`) reached the same decision first: its six-tag Expr
+// allow-list omits EXPR_COL_IDX.
 message WireColIdx {
   int64 index = 1;
 }

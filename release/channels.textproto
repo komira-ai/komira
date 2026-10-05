@@ -13,7 +13,8 @@
 #
 # The credential is TRUSTED PUBLISHING (OIDC): each channel trusts the GitHub
 # repository komira-ai/komira, the workflow file kci.yml and ONE GitHub
-# environment (gamma, prod). The publish job mints the job's ID token
+# environment (gamma, prod); gamma also trusts the break-glass environment
+# gamma-breakglass (`break_glass_push_identity`). The publish job mints the job's ID token
 # (audience prefix.dev) and exchanges it at prefix.dev's mint endpoint for a
 # short-lived upload token, so no secret exists anywhere, and the channel
 # names none. `push_identity` is the subject claim of that token: the only
@@ -38,6 +39,10 @@ channel {
     artifact_type: CONDA
     location: "https://prefix.dev/komira-ai/gamma"
     push_identity: "repo:komira-ai/komira:environment:gamma"
+    # a break-glass run (any manual run) publishes from the environment
+    # gamma-breakglass (required reviewer; machine file
+    # `break_glass_environment`): a second trusted publisher of this channel
+    break_glass_push_identity: "repo:komira-ai/komira:environment:gamma-breakglass"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
 }

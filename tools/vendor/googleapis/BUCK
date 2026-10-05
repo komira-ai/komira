@@ -333,6 +333,31 @@ _SECRETMANAGER_V1_CLOSURE = _SECRETMANAGER_V1_ROOTS + [
     "google/type/expr.proto",
 ]
 
+# Cloud Monitoring v3 MetricService (ListTimeSeries, read by the hand-written
+# komira_gcp_monitoring, whose test_monitoring_protos checks its constants
+# against these files): the root and its import closure, google/protobuf/*
+# excepted. :monitoring_v3 refuses this list unless it is exactly that
+# closure.
+_MONITORING_V3_ROOTS = [
+    "google/monitoring/v3/metric_service.proto",
+]
+
+_MONITORING_V3_CLOSURE = _MONITORING_V3_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/distribution.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/label.proto",
+    "google/api/launch_stage.proto",
+    "google/api/metric.proto",
+    "google/api/monitored_resource.proto",
+    "google/api/resource.proto",
+    "google/monitoring/v3/common.proto",
+    "google/monitoring/v3/metric.proto",
+    "google/rpc/status.proto",
+]
+
 # Every client's closure; a new client appends its list here, and :googleapis
 # extracts the union.
 _ALL_CLOSURES = (
@@ -349,7 +374,8 @@ _ALL_CLOSURES = (
     _RUN_V2_CLOSURE +
     _RUN_V2_SERVICE_CONFIG +
     _CLOUDSCHEDULER_V1_CLOSURE +
-    _SECRETMANAGER_V1_CLOSURE
+    _SECRETMANAGER_V1_CLOSURE +
+    _MONITORING_V3_CLOSURE
 )
 
 # The files out of the archive, each a sub-target named by its path:
@@ -480,6 +506,15 @@ proto_check(
     name = "secretmanager_v1",
     roots = _SECRETMANAGER_V1_ROOTS,
     srcs = [":googleapis[{}]".format(f) for f in sorted(_SECRETMANAGER_V1_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The Cloud Monitoring v3 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "monitoring_v3",
+    roots = _MONITORING_V3_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_MONITORING_V3_CLOSURE)],
     strip_prefix = "files",
     visibility = ["PUBLIC"],
 )

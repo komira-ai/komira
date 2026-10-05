@@ -35,12 +35,12 @@ komira_grpc	origin/lib/komira_grpc
 komira_http_client	origin/lib/komira_http
 komira_http_core	origin/lib/komira_http
 komira_http_server	origin/lib/komira_http
-komira_http_status_hook	origin/lib/komira_http
 komira_jsonl	origin/lib/komira_jsonl
 komira_jwks	origin/lib/komira_jwks
 komira_k8s	origin/lib/komira_k8s
 komira_log	origin/lib/komira_log
 komira_log_query	origin/lib/komira_log_query
+komira_metrics_reader	origin/lib/komira_metrics_reader
 komira_objectstore	origin/lib/komira_objectstore
 komira_obs	origin/lib/komira_obs
 komira_oci	origin/lib/komira_oci
