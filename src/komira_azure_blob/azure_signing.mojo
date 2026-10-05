@@ -580,6 +580,20 @@ struct StaticSharedKeyProvider(
 # with a body is re-serialized with content length 0, so writes are not
 # signed by this layer.
 #
+# Hard-coded empty slots: the layer signs Content-Encoding, Content-Language,
+# Content-Length, Content-MD5, Content-Type, Date, If-Modified-Since,
+# If-Match, If-None-Match and If-Unmodified-Since as EMPTY, whatever the
+# request carries; only VERB, Range, the x-ms-* headers and the resource
+# come from the request. That is correct for every request this package
+# makes: AzureStore's HEAD, range GET and List Blobs carry no body (at the
+# x-ms-version it sends, Shared Key signs a zero Content-Length as empty) and
+# set none of those headers (only x-ms-version, x-ms-date and Range), and
+# Date is empty because x-ms-date is always stamped. A caller must not
+# route through this layer a request that has a body or sets any of those
+# headers (a conditional If-Match read, a PUT with Content-Type): Azure
+# would compute a different string-to-sign and refuse it with 403, and the
+# body would go out under a content length of 0.
+#
 # No UnsafePointer in any signature, no wildcard origin, no
 # unsafe_from_address, no take_pointee.
 
@@ -602,6 +616,12 @@ struct SharedKeySigningLayer[Inner: HttpService, P: AzureSharedKeyProvider](
          StringToSign from verb / path / query / Range / x-ms-* headers on
          req, compute the Authorization header, inject it, re-serialize
          request_bytes, and delegate.
+
+    Content-Encoding, Content-Language, Content-Length, Content-MD5,
+    Content-Type, Date and the four If-* conditionals are signed EMPTY,
+    whatever `req` carries: right for the body-less HEAD / range GET / List
+    Blobs requests AzureStore makes, wrong (a 403) for a request with a body
+    or any of those headers, which must not be sent through this layer.
 
     Diagnostic field `_last_authorization` exposes the Authorization
     header value from the most recent call (empty for anonymous)."""

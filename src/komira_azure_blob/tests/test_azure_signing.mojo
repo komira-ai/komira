@@ -4,8 +4,8 @@
 # (Python's hmac over the same string-to-sign, in the comment below), and the
 # canonicalization steps each against the documented algorithm: x-ms-*
 # headers lowercased, sorted, merged and trimmed; the canonicalized resource
-# with its query parameters lowercased, grouped and sorted; and the 13-field
-# string-to-sign.
+# with its query parameters lowercased (mixed-case names included), grouped
+# and sorted; and the 13-field string-to-sign.
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_azure_core import AzureSharedKey
@@ -17,7 +17,7 @@ from komira_azure_blob import (
     canonicalize_resource,
 )
 from komira_azure_blob.azure import AzureConfig, build_azure_blob_url
-from komira_azure_blob.azure_signing import Header
+from komira_azure_blob.azure_signing import Header, query_params_from
 
 
 # -----------------------------------------------------------------------------
@@ -140,6 +140,39 @@ def test_canonicalize_resource_with_duplicate_query_keys() raises:
         String("acct"), String("/p"), qparams
     )
     assert_equal(got, String("/acct/p\nk:a,b"))
+
+
+def test_canonicalize_resource_lowercases_mixed_case_query_names() raises:
+    """Microsoft's Shared Key spec (the canonicalized resource of the
+    current format): convert every query parameter NAME to lowercase, sort by that lowercased name,
+    and on a name that repeats, list its values sorted and comma-separated.
+    VALUES keep their case. A query written `Comp=list&RESTYPE=container`
+    therefore canonicalizes exactly as `comp=list&restype=container` does,
+    a name that differs only in case is the same parameter, and the sort is
+    on the lowercased name (`Zeta` after `alpha`, where a byte-wise sort of
+    the names as written would put it first)."""
+    var got = canonicalize_resource(
+        String("mystoraccount"),
+        String("/container"),
+        query_params_from(String("Comp=list&RESTYPE=container")),
+    )
+    assert_equal(
+        got,
+        String("/mystoraccount/container\ncomp:list\nrestype:container"),
+    )
+    var lower = canonicalize_resource(
+        String("mystoraccount"),
+        String("/container"),
+        query_params_from(String("comp=list&restype=container")),
+    )
+    assert_equal(got, lower)
+
+    var mixed = canonicalize_resource(
+        String("acct"),
+        String("/p"),
+        query_params_from(String("Zeta=Up&alpha=x&Prefix=b&PREFIX=A")),
+    )
+    assert_equal(mixed, String("/acct/p\nalpha:x\nprefix:A,b\nzeta:Up"))
 
 
 # -----------------------------------------------------------------------------
@@ -314,6 +347,7 @@ def main() raises:
     test_canonicalize_resource_no_query()
     test_canonicalize_resource_with_query()
     test_canonicalize_resource_with_duplicate_query_keys()
+    test_canonicalize_resource_lowercases_mixed_case_query_names()
     test_string_to_sign_get_blob()
     test_azure_shared_key_sign_e2e_golden()
     test_azure_shared_key_sign_signature_stable()
