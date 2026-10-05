@@ -25,7 +25,8 @@
 #   * the `ZLIB_WINDOW_BITS_*` framing selectors and `ZLIB_LEVEL_DEFAULT`
 #   (Span in, caller-owned Span out; a too-small `dst` is refused). No public
 #   signature holds a raw pointer: the pointer-taking `_zlib_*_ffi` entries
-#   they wrap are private to `zlib_ffi.mojo`.
+#   they wrap are underscore-prefixed and not re-exported here (private to
+#   `zlib_ffi.mojo` by convention; the compiler does not enforce it).
 #
 # `window_bits` selects framing:
 #     15 (max)       : zlib wrapper (RFC 1950 — Adler-32 trailer)

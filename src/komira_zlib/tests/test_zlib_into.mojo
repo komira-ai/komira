@@ -111,7 +111,9 @@ def _tar_member(tar: List[UInt8], name: String) raises -> List[UInt8]:
     raise Error("no member " + name + " in the tarball")
 
 
-def _round_trip(data: List[UInt8], deflate_bits: Int32, inflate_bits: Int32) raises:
+def _round_trip(
+    data: List[UInt8], deflate_bits: Int32, inflate_bits: Int32
+) raises:
     var packed = _filled(zlib_compress_bound(len(data), deflate_bits), 0)
     var plen = zlib_deflate_into(
         Span(packed), Span(data), ZLIB_LEVEL_DEFAULT, deflate_bits
@@ -132,7 +134,12 @@ def _varied(n: Int) -> List[UInt8]:
 
 def _raises_containing[
     o: MutOrigin
-](dst: Span[UInt8, o], src: Span[UInt8, _], window_bits: Int32, needle: String) raises:
+](
+    dst: Span[UInt8, o],
+    src: Span[UInt8, _],
+    window_bits: Int32,
+    needle: String,
+) raises:
     var raised = False
     try:
         _ = zlib_inflate_into(dst, src, window_bits)
@@ -221,7 +228,9 @@ def test_empty_source_is_an_empty_stream() raises:
 def test_empty_source_does_not_inflate() raises:
     var empty = List[UInt8]()
     var out = _filled(8, 0)
-    _raises_containing(Span(out), Span(empty), ZLIB_WINDOW_BITS_AUTO, "empty source")
+    _raises_containing(
+        Span(out), Span(empty), ZLIB_WINDOW_BITS_AUTO, "empty source"
+    )
 
 
 # --- too-small destination ----------------------------------------------------
@@ -231,6 +240,22 @@ def test_inflate_refuses_a_destination_one_byte_short() raises:
     var gz = _read(_TARBALL)
     var tar = _filled(_isize(gz) - 1, 0)
     _raises_containing(Span(tar), Span(gz), ZLIB_WINDOW_BITS_AUTO, "more than")
+
+
+def test_raw_inflate_refuses_a_destination_one_byte_short() raises:
+    """Raw deflate has no trailer, so libz can take in the last input bytes
+    before the output fills; the refusal must still name the destination."""
+    var data = _read(_MEMBER_DIR + "README")
+    var packed = _filled(
+        zlib_compress_bound(len(data), ZLIB_WINDOW_BITS_RAW), 0
+    )
+    var plen = zlib_deflate_into(
+        Span(packed), Span(data), ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_RAW
+    )
+    var out = _filled(len(data) - 1, 0)
+    _raises_containing(
+        Span(out), Span(packed)[0:plen], ZLIB_WINDOW_BITS_RAW, "more than"
+    )
 
 
 def test_inflate_refuses_an_empty_destination() raises:
@@ -277,7 +302,9 @@ def test_gzip_crc_mismatch_is_refused() raises:
 def test_zlib_adler_mismatch_is_refused() raises:
     """The zlib trailer is the Adler-32 of the data, its last 4 bytes."""
     var data = _varied(4096)
-    var packed = _filled(zlib_compress_bound(len(data), ZLIB_WINDOW_BITS_ZLIB), 0)
+    var packed = _filled(
+        zlib_compress_bound(len(data), ZLIB_WINDOW_BITS_ZLIB), 0
+    )
     var plen = zlib_deflate_into(
         Span(packed), Span(data), ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_ZLIB
     )
@@ -303,6 +330,44 @@ def test_truncated_stream_is_refused() raises:
     )
 
 
+def test_gzip_missing_its_isize_is_refused() raises:
+    """The deflate data and the CRC-32 are whole and the output is exactly
+    full; only the 4-byte ISIZE is missing. A caller checking the count
+    written against the expected size cannot see this."""
+    var gz = _read(_TARBALL)
+    var tar = _filled(_isize(gz), 0)
+    _raises_containing(
+        Span(tar), Span(gz)[0 : len(gz) - 4], ZLIB_WINDOW_BITS_AUTO, "truncated"
+    )
+
+
+def test_gzip_missing_its_whole_trailer_is_refused() raises:
+    """The deflate data is whole and the output is exactly full; the 8-byte
+    trailer (CRC-32, ISIZE) is missing."""
+    var gz = _read(_TARBALL)
+    var tar = _filled(_isize(gz), 0)
+    _raises_containing(
+        Span(tar), Span(gz)[0 : len(gz) - 8], ZLIB_WINDOW_BITS_AUTO, "truncated"
+    )
+
+
+def test_zlib_missing_its_adler_is_refused() raises:
+    """The deflate data is whole and the output is exactly full; the 4-byte
+    Adler-32 trailer is missing."""
+    var data = _varied(4096)
+    var packed = _filled(
+        zlib_compress_bound(len(data), ZLIB_WINDOW_BITS_ZLIB), 0
+    )
+    var plen = zlib_deflate_into(
+        Span(packed), Span(data), ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_ZLIB
+    )
+    var out = _filled(len(data), 0)
+    for bits in [ZLIB_WINDOW_BITS_ZLIB, ZLIB_WINDOW_BITS_AUTO]:
+        _raises_containing(
+            Span(out), Span(packed)[0 : plen - 4], bits, "truncated"
+        )
+
+
 # --- skipping streams ---------------------------------------------------------
 
 
@@ -316,7 +381,10 @@ def test_skip_stream_finds_the_next_stream() raises:
         Span(packed), Span(first), ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_ZLIB
     )
     var b = zlib_deflate_into(
-        Span(packed)[a:], Span(second), ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_ZLIB
+        Span(packed)[a:],
+        Span(second),
+        ZLIB_LEVEL_DEFAULT,
+        ZLIB_WINDOW_BITS_ZLIB,
     )
     var both = Span(packed)[0 : a + b]
     assert_equal(zlib_skip_stream(both), a)

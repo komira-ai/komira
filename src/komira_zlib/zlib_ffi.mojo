@@ -24,28 +24,25 @@
 #
 # # API
 #
-# Stateful three-call FFI — libz's deflate API requires explicit
-# `deflateInit2_` (with version+sizeof handshake) → `deflate(Z_FINISH)` →
-# `deflateEnd` lifecycle. This wrapper hides the lifecycle inside a single
-# function that allocates a 112-byte z_stream scratch buffer, sets the
-# four I/O fields at known offsets, drives the three libz calls, reads
-# total_out, and returns.
+# Span in, caller-owned Span out, bytes written back:
 #
-#   fn _zlib_deflate_ffi(
-#       dst: UnsafePointer[UInt8, dori],
-#       dst_capacity: Int,
-#       src: UnsafePointer[UInt8, sori],
-#       src_size: Int,
-#       level: Int32,         # 1..9 (0 = stored blocks via Z_STORED_STRATEGY)
-#       window_bits: Int32,   # -15 = raw deflate / 15 = zlib / 31 = gzip
-#   ) raises -> Int
+#   def zlib_deflate_into(dst, src, level: Int32, window_bits: Int32) -> Int
+#   def zlib_inflate_into(dst, src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int
+#   def zlib_compress_bound(src_len: Int, window_bits: Int32) -> Int
+#   def zlib_skip_stream(src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int
 #
-#   fn _zlib_compress_bound_ffi(src_size: Int, window_bits: Int32) raises -> Int
+# libz's API is stateful: `deflateInit2_` (with a version + sizeof handshake)
+# → `deflate(Z_FINISH)` → `deflateEnd`, and the same shape for inflate. Each
+# entry hides that lifecycle in one call: it allocates a 112-byte z_stream
+# scratch buffer, sets the four I/O fields at known offsets, drives the libz
+# calls, reads the totals, and frees the stream.
 #
-# The `window_bits` parameter selects framing per libz convention:
-#   * windowBits = 15 (max)        : zlib wrapper (RFC 1950 — Adler-32 trailer)
-#   * windowBits = -15 (negative)  : raw deflate (RFC 1951 — no header/trailer)
-#   * windowBits = 15 + 16 = 31    : gzip wrapper (RFC 1952 — CRC-32 trailer)
+# `window_bits` selects the framing per libz convention (the
+# `ZLIB_WINDOW_BITS_*` constants below):
+#   * 15 (max)        : zlib wrapper (RFC 1950 — Adler-32 trailer)
+#   * -15 (negative)  : raw deflate (RFC 1951 — no header/trailer)
+#   * 15 + 16 = 31    : gzip wrapper (RFC 1952 — CRC-32 trailer)
+#   * 15 + 32 = 47    : inflate only — zlib or gzip, whichever the stream has
 #
 # # OwnedDLHandle singleton (process-lifetime, ~220us first-call cost)
 #
@@ -58,7 +55,8 @@
 # Public API: the Span entries at the bottom of the file (`zlib_inflate_into`,
 # `zlib_deflate_into`, `zlib_compress_bound`, `zlib_skip_stream`). No public
 # signature holds a raw pointer.
-# Internal FFI (private to this module):
+# Internal FFI (underscore-prefixed: private to this module by convention; the
+# compiler does not enforce it):
 #   * The `_zlib_*_ffi` entries take UnsafePointer with CALLER-CHOSEN origins
 #     (Origin / MutOrigin generic params), NOT wildcards; only the Span
 #     entries call them, with pointers taken from their Spans.
@@ -476,50 +474,8 @@ def _zlib_inflate_once[
     return _InflateOutcome(rc, written, unread, unwritten)
 
 
-def _zlib_inflate_ffi[
-    sori: Origin, dori: MutOrigin
-](
-    dst: UnsafePointer[UInt8, dori],
-    dst_capacity: Int,
-    src: UnsafePointer[UInt8, sori],
-    src_size: Int,
-    window_bits: Int32 = _WBITS_AUTO,
-) raises -> Int:
-    """One-shot inflate via libz's `inflateInit2_` / `inflate(Z_NO_FLUSH)` /
-    `inflateEnd`. Returns total bytes written to dst.
-
-    `window_bits` defaults to `15 + 32` which gives libz auto-detection
-    of gzip / zlib / raw-deflate framing — load-bearing for Parquet
-    interop where parquet-mr, DuckDB, pyarrow, and Spark all disagree on
-    which framing they emit for the "GZIP" codec id.
-
-    Explicit values:
-        15 (max)       : zlib wrapper only (RFC 1950 — Adler-32 trailer)
-       -15 (negative)  : raw deflate only (RFC 1951 — no header/trailer)
-       15 + 16 = 31    : gzip wrapper only (RFC 1952 — CRC-32 trailer)
-       15 + 32 = 47    : zlib + gzip auto-detect (default; what callers want)
-
-    SAFETY: see `_zlib_inflate_once`, which makes the libz calls.
-    """
-    var outcome = _zlib_inflate_once(
-        dst, dst_capacity, src, src_size, window_bits
-    )
-    var rc = outcome.rc
-
-    # inflate may return Z_OK (more input needed) OR Z_STREAM_END (done).
-    # For one-shot Parquet pages we expect Z_STREAM_END; Z_OK with non-zero
-    # written is also acceptable (caller passed enough data) but every
-    # other rc is an error.
-    if Int(rc) != Int(_Z_OK) and Int(rc) != Int(_Z_STREAM_END):
-        raise Error(
-            "libz inflate failed (rc=" + String(Int(rc))
-            + ", input_len=" + String(src_size)
-            + ", output_cap=" + String(dst_capacity)
-            + ", window_bits=" + String(Int(window_bits)) + ")"
-        )
-    return outcome.written
-
-
+# -----------------------------------------------------------------------------
+# _zlib_skip_stream_ffi — how many INPUT bytes does one deflate stream occupy?
 # -----------------------------------------------------------------------------
 
 
@@ -542,7 +498,7 @@ def _zlib_skip_stream_ffi[
     ★ MEMORY IS BOUNDED AND INDEPENDENT OF THE DECOMPRESSED SIZE. Output goes
     into a fixed `_SKIP_SCRATCH_BYTES` scratch buffer that is re-pointed on every
     iteration, so skipping a 1 GiB blob entry costs 64 KiB resident, not 1 GiB.
-    `_zlib_inflate_ffi` cannot serve this role: it is one-shot and needs a `dst`
+    `_zlib_inflate_once` cannot serve this role: it is one-shot and needs a `dst`
     at least as large as the decompressed payload, which on a push path is the
     exact resident-memory cost the scan exists to avoid.
 
@@ -552,7 +508,7 @@ def _zlib_skip_stream_ffi[
     SAFETY: `src` is caller-owned for the synchronous call; `scratch` is a local
     allocation freed before every return path. libz retains no pointer past
     `inflateEnd`. Origins are cast to an untracked origin only at the call site —
-    the same pattern as `_zlib_inflate_ffi` above.
+    the same pattern as `_zlib_inflate_once` above.
     """
     var handle_ptr = _default_zlib_ffi_handle()
     var version = handle_ptr[].call[
@@ -646,7 +602,10 @@ comptime ZLIB_WINDOW_BITS_ZLIB: Int32 = 15
 comptime ZLIB_WINDOW_BITS_RAW: Int32 = -15
 # gzip wrapper (RFC 1952, CRC-32 trailer).
 comptime ZLIB_WINDOW_BITS_GZIP: Int32 = 15 + 16
-# Inflate only: accept a zlib or a gzip wrapper, whichever the stream has.
+# Inflate only: accept a zlib or a gzip wrapper, whichever the stream has. The
+# default of `zlib_inflate_into`, and load-bearing for Parquet interop: writers
+# (parquet-mr, DuckDB, pyarrow, Spark) disagree on which framing they emit for
+# the GZIP codec id.
 comptime ZLIB_WINDOW_BITS_AUTO: Int32 = _WBITS_AUTO
 # libz's default compression level.
 comptime ZLIB_LEVEL_DEFAULT: Int32 = 6
@@ -768,6 +727,17 @@ def zlib_inflate_into[
             raise Error(
                 "zlib_inflate_into: the stream decodes to more than the "
                 + String(len(dst)) + "-byte destination"
+            )
+        # Output full AND input used up: libz may have pulled the last input
+        # bytes into its bit buffer before the output filled (raw deflate has
+        # no trailer to leave unread), or the source may end right where the
+        # output did (a missing trailer). Both stop libz in the same state.
+        if outcome.unwritten == 0:
+            raise Error(
+                "zlib_inflate_into: the output filled the " + String(len(dst))
+                + "-byte destination before the stream ended (it decodes to"
+                " more than that, or the " + String(n)
+                + "-byte source is truncated)"
             )
         raise Error(
             "zlib_inflate_into: truncated stream (the " + String(n)
