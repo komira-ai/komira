@@ -23,12 +23,13 @@
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 #
-# ALSO PINNED: the two v1 `Resource.body` arms (10 service, 11 job) by number
-# AND by which field each fills; the HELD numbers (body 12 to 36 for the later
-# neutral primitives, 80 for a composite instance, 90 for the escape hatch,
-# 100, 300 and 500 for the first number of each cloud's provider-primitive
-# range, `Resource` 3, 5 and 6, `Value` 4, `Image` 4, `Service` 13 and 50 to
-# 52, `Job` 8 and 50 to 52) decode as unknown today, so nothing else has taken
+# ALSO PINNED: the three v1 `Resource.body` arms (10 service, 11 job,
+# 14 bucket) by number AND by which field each fills; the HELD numbers (body
+# 12, 13 and 15 to 36 for the later neutral primitives, 80 for a composite
+# instance, 90 for the escape hatch, 100, 300 and 500 for the first number of
+# each cloud's provider-primitive range, `Resource` 5 and 6, `Value` 4,
+# `Image` 4, `Service` 13 and 50 to 52, `Job` 8 and 50 to 52, `Bucket` 50 to
+# 52) decode as unknown today, so nothing else has taken
 # them; the retired field 4 is ignored; and every enum's ordinals in both
 # directions, held values undeclared.
 #
@@ -44,6 +45,13 @@
 # `ActionOutput { action, name }`) and `Portability.CLOUD_BOUND = 2` (was
 # `PLATFORM_BOUND`). PRESENCE: `Scale.min`, `Job.max_retries`,
 # `SecretRef.store` and `SecretRef.version` tell "not written" from zero.
+#
+# THE BUCKET AND RETENTION: `Resource.retention` 3 (was held), the `bucket`
+# arm 14, `Bucket` 1 object_expiry_days (presence), 2 versioning and 3 tier;
+# `Retention` DELETE 1 and KEEP 2; `StorageTier` STANDARD 1, INFREQUENT 2 and
+# ARCHIVE 3; `Output` ADDRESS 3 and NAME 4; `Access` READ 2, WRITE 3 and
+# READ_WRITE 4. Each by wire bytes and by name, and restated in
+# `test_added_numbers_are_kept`.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -51,6 +59,7 @@ from std.testing import assert_equal, assert_true
 from komira_proto_codec import decode_proto, encode_proto
 from kci_resource_proto.resource import (
     Access,
+    Bucket,
     Image,
     Job,
     Output,
@@ -58,10 +67,12 @@ from kci_resource_proto.resource import (
     Ref,
     Resource,
     ResourceList,
+    Retention,
     Scale,
     SecretRef,
     Service,
     StepOutput,
+    StorageTier,
     Uses,
     Value,
 )
@@ -521,6 +532,20 @@ def test_added_numbers_are_kept() raises:
     _msg(job, 6, _entry("MODE", _literal("full")))
     _msg(job, 7, _entry("API_TOKEN", _secret("api_token")))
     _same(encode_proto(decode_proto[Job](job.copy())), job, "Job 6 and 7")
+
+    # The bucket and retention: Resource 3 and 14, Bucket 1 to 3.
+    var bkt = List[UInt8]()
+    _uint(bkt, 1, 30)
+    _uint(bkt, 2, 1)
+    _uint(bkt, 3, 3)
+    _same(encode_proto(decode_proto[Bucket](bkt.copy())), bkt, "Bucket 1 to 3")
+    var res = List[UInt8]()
+    _str(res, 1, "store")
+    _uint(res, 3, 2)
+    _msg(res, 14, bkt)
+    _same(
+        encode_proto(decode_proto[Resource](res.copy())), res, "Resource 3 and 14"
+    )
     print("  test_added_numbers_are_kept: PASS")
 
 
@@ -533,10 +558,12 @@ def _arm_of(r: Resource) -> String:
         return "service"
     if r.job:
         return "job"
+    if r.bucket:
+        return "bucket"
     return ""
 
 
-def test_resource_body_arms_are_10_and_11() raises:
+def test_resource_body_arms_are_10_11_and_14() raises:
     """Each v1 body arm, by number AND by the field it fills.
 
     The arm numbers are the adapter registry's key (one adapter per arm), so a
@@ -545,8 +572,13 @@ def test_resource_body_arms_are_10_and_11() raises:
     var names = List[String]()
     names.append("service")
     names.append("job")
+    names.append("bucket")
+    var fields = List[Int]()
+    fields.append(10)
+    fields.append(11)
+    fields.append(14)
     for i in range(len(names)):
-        var field = 10 + i
+        var field = fields[i]
         var b = List[UInt8]()
         _str(b, 1, "r")
         _empty(b, field)
@@ -562,11 +594,12 @@ def test_resource_body_arms_are_10_and_11() raises:
             b,
             String("Resource.body field ") + String(field),
         )
-    print("  test_resource_body_arms_are_10_and_11: PASS")
+    print("  test_resource_body_arms_are_10_11_and_14: PASS")
 
 
 def test_held_body_numbers_are_undeclared() raises:
-    """Held, not declared: 12 to 36 for the later neutral primitives, 80 for
+    """Held, not declared: 12, 13 and 15 to 36 for the later neutral
+    primitives (14 is the bucket), 80 for
     a composite instance, 90 for the escape hatch, and 100, 300 and 500, the
     first number of each cloud's provider-primitive range (100-299, 300-499,
     500-699). Today each decodes as an unknown field: no arm set, dropped on
@@ -574,7 +607,8 @@ def test_held_body_numbers_are_undeclared() raises:
     it; anything else taking one of these numbers is a mistake."""
     var held = List[Int]()
     for n in range(12, 37):
-        held.append(n)
+        if n != 14:
+            held.append(n)
     held.append(80)
     held.append(90)
     held.append(100)
@@ -599,19 +633,33 @@ def test_held_body_numbers_are_undeclared() raises:
     print("  test_held_body_numbers_are_undeclared: PASS")
 
 
-def test_fields_3_and_4_are_not_declared() raises:
-    """3 is held for retention (data-bearing types only); 4 (a retired stage
-    filter) is reserved. Both decode as unknown: skipped, dropped on
-    re-encode."""
+def test_field_3_is_retention_and_4_is_retired() raises:
+    """3 is `retention` (a `Retention` enum value); 4 (a retired stage filter)
+    is reserved and decodes as unknown: skipped, dropped on re-encode."""
     var head = List[UInt8]()
     _str(head, 1, "r")
     var b = head.copy()
-    _uint(b, 3, 1)
-    _uint(b, 4, 1)
+    _uint(b, 3, UInt64(Retention.KEEP))
     var r = decode_proto[Resource](b.copy())
+    assert_equal(r.retention.value, Retention.KEEP, "Resource field 3 is `retention`")
     assert_equal(_arm_of(r), "")
-    _same(encode_proto(r), head, "fields 3 and 4 are unknown")
-    print("  test_fields_3_and_4_are_not_declared: PASS")
+    _same(encode_proto(r), b, "Resource.retention")
+
+    var d = head.copy()
+    _uint(d, 3, UInt64(Retention.DELETE))
+    assert_equal(
+        decode_proto[Resource](d.copy()).retention.value,
+        Retention.DELETE,
+        "DELETE is 1",
+    )
+
+    var unset = decode_proto[Resource](head.copy())
+    assert_equal(unset.retention.value, Retention.RETENTION_UNSET, "absent = unset")
+
+    var retired = head.copy()
+    _uint(retired, 4, 1)
+    _same(encode_proto(decode_proto[Resource](retired.copy())), head, "field 4 is unknown")
+    print("  test_field_3_is_retention_and_4_is_retired: PASS")
 
 
 def test_reserved_now_built_later_numbers_are_undeclared() raises:
@@ -669,6 +717,18 @@ def test_reserved_now_built_later_numbers_are_undeclared() raises:
             encode_proto(decode_proto[Job](jx.copy())),
             jhead,
             String("Job ") + String(n) + " is held",
+        )
+
+    var bhead = List[UInt8]()
+    _uint(bhead, 2, 1)
+    for n in range(50, 53):
+        var bx = bhead.copy()
+        # A NON-EMPTY payload (see `Service` above).
+        _str(bx, n, "x")
+        _same(
+            encode_proto(decode_proto[Bucket](bx.copy())),
+            bhead,
+            String("Bucket ") + String(n) + " is held",
         )
     print("  test_reserved_now_built_later_numbers_are_undeclared: PASS")
 
@@ -833,6 +893,73 @@ def test_job() raises:
     print("  test_job: PASS")
 
 
+# ---- data: bucket -----------------------------------------------------------------
+
+
+def test_bucket() raises:
+    """Bucket: 1 object_expiry_days (presence), 2 versioning, 3 tier; as the
+    `bucket` arm 14 of a Resource with retention 3."""
+    var b = List[UInt8]()
+    _uint(b, 1, 30)
+    _uint(b, 2, 1)
+    _uint(b, 3, UInt64(StorageTier.ARCHIVE))
+    var k = decode_proto[Bucket](b.copy())
+    assert_equal(Int(k.object_expiry_days.value()), 30, "field 1 is `object_expiry_days`")
+    assert_true(k.versioning, "field 2 is `versioning`")
+    assert_equal(k.tier.value, StorageTier.ARCHIVE, "field 3 is `tier`")
+    _same(encode_proto(k), b, "Bucket")
+
+    # Presence: an explicit 0 is a value (refused at validate, never here);
+    # an unwritten expiry is absent (never expire).
+    var zero = List[UInt8]()
+    _uint(zero, 1, 0)
+    var kz = decode_proto[Bucket](zero.copy())
+    assert_true(Bool(kz.object_expiry_days), "an explicit expiry of 0 is present")
+    assert_equal(Int(kz.object_expiry_days.value()), 0)
+    var none = decode_proto[Bucket](List[UInt8]())
+    assert_true(not Bool(none.object_expiry_days), "an unwritten expiry is absent")
+    assert_equal(none.tier.value, StorageTier.STORAGE_TIER_UNSET)
+
+    var r = List[UInt8]()
+    _str(r, 1, "store")
+    _uint(r, 3, UInt64(Retention.DELETE))
+    _msg(r, 14, b)
+    var rr = decode_proto[Resource](r.copy())
+    assert_equal(_arm_of(rr), "bucket", "body 14 is `bucket`")
+    assert_equal(rr._oneof0_case, 3, "the bucket is the third arm")
+    assert_equal(rr.retention.value, Retention.DELETE)
+    assert_equal(Int(rr.bucket.value().object_expiry_days.value()), 30)
+    _same(encode_proto(rr), r, "Resource with a bucket")
+    print("  test_bucket: PASS")
+
+
+def test_new_ref_outputs_and_accesses() raises:
+    """A Ref to a bucket's NAME and ADDRESS, and a Uses line with each of
+    READ, WRITE and READ_WRITE, by wire bytes."""
+    var n = _ref_out("store", Output.NAME)
+    var rn = decode_proto[Ref](n.copy())
+    assert_equal(rn.standard.value().value, Output.NAME, "NAME is 4")
+    _same(encode_proto(rn), n, "Ref NAME")
+    var a = _ref_out("store", Output.ADDRESS)
+    var ra = decode_proto[Ref](a.copy())
+    assert_equal(ra.standard.value().value, Output.ADDRESS, "ADDRESS is 3")
+    _same(encode_proto(ra), a, "Ref ADDRESS")
+
+    var verbs = List[Int]()
+    verbs.append(Access.READ)
+    verbs.append(Access.WRITE)
+    verbs.append(Access.READ_WRITE)
+    for i in range(len(verbs)):
+        var u = List[UInt8]()
+        _msg(u, 1, _ref("store"))
+        _uint(u, 2, UInt64(verbs[i]))
+        var d = decode_proto[Uses](u.copy())
+        assert_equal(d.access.value, verbs[i])
+        assert_equal(d.access.value, i + 2, "READ, WRITE, READ_WRITE are 2, 3, 4")
+        _same(encode_proto(d), u, String("Uses access ") + String(verbs[i]))
+    print("  test_new_ref_outputs_and_accesses: PASS")
+
+
 # ---- enums ---------------------------------------------------------------------
 
 
@@ -846,26 +973,50 @@ def _enum_row(got_name: String, want_name: String, n: Int, what: String) raises:
 
 def test_enum_ordinals() raises:
     """Every enum value by number AND by name: the number is what is stored.
-    The held values (Output 3 to 5; Access 2 to 6) render as bare numbers,
+    The held values (Output 5; Access 5 to 9) render as bare numbers,
     i.e. nothing has taken them."""
     var outputs = List[String]()
     outputs.append("OUTPUT_UNSET")
     outputs.append("URL")
     outputs.append("HOST")
+    outputs.append("ADDRESS")
+    outputs.append("NAME")
     for n in range(len(outputs)):
         _enum_row(Output(n).json_name(), outputs[n], n, "Output")
         assert_equal(Output.from_json_name(outputs[n]).value, n)
-    for n in range(3, 6):
-        assert_equal(Output(n).json_name(), String(n), "Output value held")
+    assert_equal(Output(5).json_name(), "5", "Output 5 (REVISION) is held")
 
     var access = List[String]()
     access.append("ACCESS_UNSET")
     access.append("CALL")
+    access.append("READ")
+    access.append("WRITE")
+    access.append("READ_WRITE")
     for n in range(len(access)):
         _enum_row(Access(n).json_name(), access[n], n, "Access")
         assert_equal(Access.from_json_name(access[n]).value, n)
-    for n in range(2, 7):
+    # 5 SEND, 6 RECEIVE, 7 ACT_AS, 8 DESCRIBE, 9 MANAGE: held.
+    for n in range(5, 10):
         assert_equal(Access(n).json_name(), String(n), "Access value held")
+
+    var retention = List[String]()
+    retention.append("RETENTION_UNSET")
+    retention.append("DELETE")
+    retention.append("KEEP")
+    for n in range(len(retention)):
+        _enum_row(Retention(n).json_name(), retention[n], n, "Retention")
+        assert_equal(Retention.from_json_name(retention[n]).value, n)
+    assert_equal(Retention(3).json_name(), "3", "Retention has three values")
+
+    var tiers = List[String]()
+    tiers.append("STORAGE_TIER_UNSET")
+    tiers.append("STANDARD")
+    tiers.append("INFREQUENT")
+    tiers.append("ARCHIVE")
+    for n in range(len(tiers)):
+        _enum_row(StorageTier(n).json_name(), tiers[n], n, "StorageTier")
+        assert_equal(StorageTier.from_json_name(tiers[n]).value, n)
+    assert_equal(StorageTier(4).json_name(), "4", "StorageTier has four values")
 
     var port = List[String]()
     port.append("PORTABILITY_UNSET")
@@ -888,13 +1039,15 @@ def main() raises:
     test_image_platform()
     test_secret_ref()
     test_added_numbers_are_kept()
-    test_resource_body_arms_are_10_and_11()
+    test_resource_body_arms_are_10_11_and_14()
     test_held_body_numbers_are_undeclared()
-    test_fields_3_and_4_are_not_declared()
+    test_field_3_is_retention_and_4_is_retired()
     test_reserved_now_built_later_numbers_are_undeclared()
     test_resource_header_fields()
     test_service()
     test_scale_min_has_presence()
     test_job()
+    test_bucket()
+    test_new_ref_outputs_and_accesses()
     test_enum_ordinals()
     print("ALL kci.resource.v1 FIELD-NUMBER TESTS PASSED")

@@ -9,7 +9,8 @@ built into kci, so the list of clouds is closed and nothing here is a plugin
 interface. This package names no cloud:
 
   * catalog.mojo     — the catalog's types as data (arm number, portability,
-                       exposed outputs, accepted access).
+                       exposed outputs, accepted access, retention default,
+                       primary role).
   * cloud_id.mojo    — the opaque `CloudId` (equality and printing only).
   * adapter.mojo     — the `CloudAdapter` trait every built-in cloud
                        implements (an internal module boundary, not frozen):
@@ -19,7 +20,8 @@ interface. This package names no cloud:
                        bootstrap resources, the label rule, `list_owned`,
                        `whoami`, `trust_render` / `trust_check`; typed
                        absences (ABSENT_BY_DESIGN / NOT_YET) and `Finding`.
-  * labels.mojo      — the standard label rule (encode, decode, check).
+  * labels.mojo      — the standard label rule (encode, decode, check), and
+                       the `kci_retain=keep` label of a kept object.
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
                        `resolve` (with a typo suggestion), and the rule that
                        every cloud declares every catalog type.
@@ -49,13 +51,27 @@ from kci_cloud.catalog import (
     CLOUD_BOUND,
     FIELD_SERVICE,
     FIELD_JOB,
+    FIELD_BUCKET,
     OUTPUT_URL,
     OUTPUT_HOST,
+    OUTPUT_ADDRESS,
+    OUTPUT_NAME,
     ACCESS_CALL,
+    ACCESS_READ,
+    ACCESS_WRITE,
+    ACCESS_READ_WRITE,
+    RETENTION_NONE,
+    RETENTION_DELETE,
+    RETENTION_KEEP,
+    ROLE_RUN,
+    ROLE_BUCKET,
     BodyArm,
     body_arms,
     body_field,
+    effective_retention,
     portability_word,
+    primary_node,
+    retention_word,
 )
 from kci_cloud.adapter import (
     CloudAdapter,
@@ -69,6 +85,7 @@ from kci_cloud.adapter import (
     OwnedRecord,
     Principal,
     LoweredNode,
+    retention_name,
     RUN_UNKNOWN,
     ABSENT_BY_DESIGN,
     NOT_YET,
@@ -80,6 +97,10 @@ from kci_cloud.adapter import (
 )
 from kci_cloud.labels import (
     LABEL_VALUE_MAX,
+    LABEL_RETAIN,
+    RETAIN_KEEP_VALUE,
+    retain_labels,
+    retained_by,
     encoded_label_bytes,
     encode_label_value,
     decode_label_value,
@@ -107,6 +128,7 @@ from kci_cloud.validate import (
 from kci_cloud.deploy import (
     ApplyOutcome,
     Removals,
+    engine_retention,
     refuse_unless_valid,
     lower_data,
     lowering_json,

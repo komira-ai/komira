@@ -26,12 +26,20 @@
 # lowered node against `LABEL_VALUE_MAX` before anything is realized, so a
 # role over the budget refuses the graph instead of failing at create time.
 #
+# RETENTION IS ONE MORE LABEL, OUTSIDE THE IDENTITY. An object of a node whose
+# retention is KEEP is created with `kci_retain=keep` (`retain_labels`), and
+# keeps it while the node is KEEP. It is not part of the stamp: the six
+# identity labels decide whose an object is, this one decides whether kci
+# may delete it once the file stops lowering it. `list_owned` reads it back
+# (`retained_by`), so a kept object stays kept even when nothing in the file
+# says so any more.
+#
 # A cloud object that cannot carry labels (a scheduler job, an IAM binding)
 # carries the identity as the first line of its description instead
 # (`OwnerStamp.identity()`); that is the adapter's own business.
 # =============================================================================
 
-from kci_reconciler import Label, OwnerStamp
+from kci_reconciler import Label, OwnerStamp, RETAIN_KEEP
 
 comptime LABEL_VALUE_MAX = 63
 """The longest label value the standard rule writes."""
@@ -44,6 +52,29 @@ def _legal_value_byte(c: Int) -> Bool:
         or c == ord("_")
         or c == ord("-")
     )
+
+
+comptime LABEL_RETAIN = "kci_retain"
+"""The retention label's key: not part of the ownership identity."""
+comptime RETAIN_KEEP_VALUE = "keep"
+"""The retention label's one value."""
+
+
+def retain_labels(retention: Int) -> List[Label]:
+    """The retention label of a node with engine retention `retention`:
+    `kci_retain=keep` for RETAIN_KEEP, nothing otherwise."""
+    var out = List[Label]()
+    if retention == RETAIN_KEEP:
+        out.append(Label(String(LABEL_RETAIN), String(RETAIN_KEEP_VALUE)))
+    return out^
+
+
+def retained_by(labels: List[Label]) -> Bool:
+    """True iff `labels` carry `kci_retain=keep`."""
+    for i in range(len(labels)):
+        if labels[i].key == LABEL_RETAIN and labels[i].value == RETAIN_KEEP_VALUE:
+            return True
+    return False
 
 
 comptime SEGMENT_SEPARATOR = "_"
