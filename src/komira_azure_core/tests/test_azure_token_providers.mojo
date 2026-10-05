@@ -287,15 +287,30 @@ def _sp_refused(
     port: UInt16,
     contains: String,
 ) raises:
-    """Constructing the provider, or refreshing it, raises `contains`; the
-    service is never called."""
-    var svc = CapturingService(200, String(_SP_OK))
+    """Constructing the provider raises `contains`; and a valid provider
+    whose fields are then set to these values raises `contains` at refresh,
+    with the service never called. Each checkpoint is asserted alone."""
     with assert_raises(contains=contains):
-        var p = ServicePrincipalProvider.with_login_endpoint(
+        _ = ServicePrincipalProvider.with_login_endpoint(
             tenant, String("c"), String("s"), scheme, host, port
         )
+    var p = ServicePrincipalProvider.with_login_endpoint(
+        String("t"),
+        String("c"),
+        String("s"),
+        String("https"),
+        String("login.microsoftonline.com"),
+        UInt16(0),
+    )
+    p.tenant_id = tenant
+    p.login_scheme = scheme
+    p.login_host = host
+    p.login_port = port
+    var svc = CapturingService(200, String(_SP_OK))
+    with assert_raises(contains=contains):
         _refresh_sp(p, svc)
     assert_equal(svc.calls, 0, host)
+    assert_false(p.has_credential())
 
 
 def test_login_scheme_must_be_https() raises:
@@ -372,13 +387,13 @@ def test_endpoint_rechecked_before_dialing() raises:
 def test_valid_endpoints_and_tenants() raises:
     # A GUID tenant on the default endpoint.
     var guid = ServicePrincipalProvider.make(
-        String("72f988bf-86f1-41af-91ab-2d7cd011db47"), String("c"), String("s")
+        String("00000000-0000-4000-8000-000000000000"), String("c"), String("s")
     )
     var svc = CapturingService(200, String(_SP_OK))
     _refresh_sp(guid, svc)
     assert_equal(
         svc.url,
-        "https://login.microsoftonline.com/72f988bf-86f1-41af-91ab-2d7cd011db47"
+        "https://login.microsoftonline.com/00000000-0000-4000-8000-000000000000"
         "/oauth2/v2.0/token",
     )
     assert_equal(guid.credential().token, "sp-token")
@@ -400,8 +415,12 @@ def test_valid_endpoints_and_tenants() raises:
     )
     # Plain http is kept for a loopback host only (an emulator, a test).
     var lo = ServicePrincipalProvider.with_login_endpoint(
-        String("t"), String("c"), String("s"),
-        String("http"), String("localhost"), UInt16(18081),
+        String("t"),
+        String("c"),
+        String("s"),
+        String("http"),
+        String("localhost"),
+        UInt16(18081),
     )
     var svc3 = CapturingService(200, String(_SP_OK))
     _refresh_sp(lo, svc3)
@@ -415,8 +434,12 @@ def test_valid_endpoints_and_tenants() raises:
 
 def _sp_local() raises -> ServicePrincipalProvider:
     return ServicePrincipalProvider.with_login_endpoint(
-        String("t"), String("c"), String("s"),
-        String("http"), String("127.0.0.1"), UInt16(18081),
+        String("t"),
+        String("c"),
+        String("s"),
+        String("http"),
+        String("127.0.0.1"),
+        UInt16(18081),
     )
 
 

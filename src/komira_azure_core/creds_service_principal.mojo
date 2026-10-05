@@ -256,7 +256,7 @@ struct ServicePrincipalProvider(Movable, Deinitable):
 
 
 # -----------------------------------------------------------------------------
-# Internal helpers — form encoding + body read
+# Internal helpers — form encoding
 # -----------------------------------------------------------------------------
 
 
@@ -294,7 +294,6 @@ def _percent_encode_form_value(s: String) -> String:
             out += _hex_upper(Int(c) & 0xF)
         i += 1
     return out^
-
 
 
 # -----------------------------------------------------------------------------
