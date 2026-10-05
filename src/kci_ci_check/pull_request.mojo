@@ -12,7 +12,8 @@
 #     (`check_pull_request_job`). A pull request from a fork then runs
 #     nothing, and a push or a manual run (no pull request) skips the job;
 #   * every other job is RELEASE-ONLY (`check_release_only`): its job-level
-#     `if:` is a conjunction one of whose terms keeps a pull request out
+#     `if:` is a TOP-LEVEL conjunction (no grouping, negation, call, `||` or
+#     partial `${{ }}`) one of whose terms keeps a pull request out
 #     (`excludes_pull_request`).
 #
 # Pure functions over owned values; no pointer, no file I/O.
@@ -50,14 +51,6 @@ def is_expression(text: String, expression: String) -> Bool:
         return False
     var inner = String(String(t[byte = 3 : t.byte_length() - 2]).strip())
     return inner == expression
-
-
-def _unwrapped(text: String) -> String:
-    """A job condition without its optional `${{ }}`."""
-    var t = String(text.strip())
-    if t.startswith(String("${{")) and t.endswith(String("}}")) and t.byte_length() >= 5:
-        return String(String(t[byte = 3 : t.byte_length() - 2]).strip())
-    return t^
 
 
 comptime EVENT_NAME: String = "github.event_name"
@@ -99,18 +92,90 @@ def _keeps_pull_request_out(term: String) -> Bool:
     return lit == String("push") or lit == String("workflow_dispatch")
 
 
-def excludes_pull_request(condition: String) -> Bool:
-    """A job condition that a pull request never satisfies (R6): bare or
-    inside `${{ }}`, terms joined by `&&` only (no `||`), and one term is
-    exactly `github.event_name != 'pull_request'`, `github.event_name ==
-    'push'` or `github.event_name == 'workflow_dispatch'`. Anything else is
-    not read as release-only."""
-    var c = _unwrapped(condition)
-    if c.find(String("||")) >= 0:
+def _is_name_byte(c: UInt8) -> Bool:
+    return (
+        (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+        or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+        or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+        or c == UInt8(ord("_"))
+        or c == UInt8(ord("."))
+        or c == UInt8(ord("-"))
+    )
+
+
+def _is_space_byte(c: UInt8) -> Bool:
+    return c == UInt8(ord(" ")) or c == UInt8(ord("\t")) or c == UInt8(ord("\n")) or c == UInt8(ord("\r"))
+
+
+def _conjunction_terms(condition: String, mut terms: List[String]) -> Bool:
+    """The terms of `condition` when it is a TOP-LEVEL conjunction: bare, or
+    inside ONE outer `${{ }}`; then, outside single-quoted literals (`''`
+    escapes a quote), only names and numbers ([A-Za-z0-9_.-]), whitespace,
+    and the operators `&&`, `==`, `!=`, `<`, `<=`, `>`, `>=`. No `(`, `)`,
+    `!` (a negation), `||`, `[`, `]`, `*` or `,`, so no grouping, negation,
+    call, index or object filter can hold a term, and every `&&` is at the
+    top level. No other `${{` or `}}` anywhere, a literal included: a
+    partial `${{ }}` makes GitHub read the whole `if:` as a format() string,
+    which is always truthy. False (and `terms` unspecified) otherwise."""
+    var c = String(condition.strip())
+    if c.startswith(String("${{")) and c.endswith(String("}}")) and c.byte_length() >= 5:
+        c = String(String(c[byte = 3 : c.byte_length() - 2]).strip())
+    if c.find(String("${{")) >= 0 or c.find(String("}}")) >= 0:
         return False
-    var terms = c.split(String("&&"))
+    var b = c.as_bytes()
+    var n = len(b)
+    var quote = UInt8(ord("'"))
+    var start = 0
+    var i = 0
+    while i < n:
+        var ch = b[i]
+        if ch == quote:
+            i += 1
+            while True:
+                if i >= n:
+                    return False  # an unterminated literal
+                if b[i] == quote:
+                    if i + 1 < n and b[i + 1] == quote:
+                        i += 2
+                        continue
+                    break
+                i += 1
+            i += 1
+            continue
+        if _is_name_byte(ch) or _is_space_byte(ch):
+            i += 1
+            continue
+        var next = b[i + 1] if i + 1 < n else UInt8(0)
+        if ch == UInt8(ord("&")) and next == UInt8(ord("&")):
+            terms.append(String(c[byte = start : i]))
+            i += 2
+            start = i
+            continue
+        if next == UInt8(ord("=")) and (
+            ch == UInt8(ord("=")) or ch == UInt8(ord("!")) or ch == UInt8(ord("<")) or ch == UInt8(ord(">"))
+        ):
+            i += 2
+            continue
+        if ch == UInt8(ord("<")) or ch == UInt8(ord(">")):
+            i += 1
+            continue
+        return False
+    terms.append(String(c[byte = start : n]))
+    return True
+
+
+def excludes_pull_request(condition: String) -> Bool:
+    """A job condition that a pull request never satisfies (R6): a
+    top-level conjunction (`_conjunction_terms`: bare or inside one outer
+    `${{ }}`, terms joined by `&&` only, no grouping, negation, call or
+    `||`), one of whose terms is exactly `github.event_name !=
+    'pull_request'`, `github.event_name == 'push'` or `github.event_name ==
+    'workflow_dispatch'`. Anything else is not read as release-only."""
+    var terms = List[String]()
+    if not _conjunction_terms(condition, terms):
+        return False
     for i in range(len(terms)):
-        if _keeps_pull_request_out(String(terms[i])):
+        if _keeps_pull_request_out(terms[i]):
             return True
     return False
 
@@ -125,7 +190,8 @@ def check_release_only(doc: WorkflowDoc, job_id: String, job: Int, stage: String
     findings.append(
         _at(doc, job) + String("job '") + job_id + String("': R6: runs stage '") + stage
         + String("', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a")
-        + String(" pull request out (a term `github.event_name != 'pull_request'`, joined by `&&`): only the")
+        + String(" pull request out (a top-level conjunction, `&&` only and no grouping, negation, call or partial `${{ }}`,")
+        + String(" with a term `github.event_name != 'pull_request'`): only the")
         + String(" PULL_REQUEST stage's job runs a pull request's code")
     )
 

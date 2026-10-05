@@ -57,8 +57,11 @@
 #           kci_release_machine), and R1 asks a job for that stage too;
 #         * when it is, every job but the PULL_REQUEST stage's is
 #           RELEASE-ONLY: a PUSH stage's job, and a part job of one, carries
-#           a job-level `if:` that is a conjunction (`&&`, no `||`; bare or
-#           inside `${{ }}`) with a term that is exactly
+#           a job-level `if:` that is a TOP-LEVEL conjunction (bare or
+#           inside one outer `${{ }}`; outside single-quoted literals only
+#           names, numbers and `&&` `==` `!=` `<` `<=` `>` `>=`, so no
+#           grouping, negation, call, index or `||`; no other `${{` or `}}`,
+#           a literal included) with a term that is exactly
 #           `github.event_name != 'pull_request'`, `github.event_name ==
 #           'push'` or `github.event_name == 'workflow_dispatch'` (a
 #           single-quoted [a-z_]+ literal, nothing after it; GitHub compares

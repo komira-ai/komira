@@ -285,6 +285,66 @@ def test_a_release_job_condition_with_an_operator_in_the_literal_is_refused() ra
     _reports(_wf(old, String("github.event_name == 'release' && needs")), want)
 
 
+# The probes: each holds the exact event term between two `&&`, and each is
+# TRUE on a pull request in GitHub. Only a top-level conjunction is read.
+def _probes() -> List[String]:
+    var p = List[String]()
+    p.append(String("!(true && github.event_name != 'pull_request' && true)"))
+    p.append(String("toJSON(true && github.event_name != 'pull_request' && true)"))
+    p.append(String("format('{0}', true && github.event_name != 'pull_request' && true)"))
+    p.append(String("(needs.build.outputs.release == 'true' && github.event_name != 'pull_request' && true) == false"))
+    p.append(String("contains('ab', 'c') == (true && github.event_name != 'pull_request' && true)"))
+    p.append(String("${{ !(true && github.event_name != 'pull_request' && true) }}"))
+    # a partial `${{ }}` makes the whole `if:` a format() string, always truthy
+    p.append(String("github.event_name != 'pull_request' && ${{ true }}"))
+    p.append(String("github.event_name != 'pull_request' && '${{ github.sha }}' != ''"))
+    return p^
+
+
+def test_only_a_top_level_conjunction_is_read() raises:
+    var probes = _probes()
+    for i in range(len(probes)):
+        if excludes_pull_request(probes[i]):
+            raise Error(String("read as release-only: ") + probes[i])
+    # no grouping, negation, call, index or object filter anywhere
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' && (true)")))
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' && !false")))
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' && always()")))
+    assert_false(excludes_pull_request(String("github[true && github.event_name != 'pull_request' && true] == null")))
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' && github.*.x")))
+    # one outer `${{ }}` at most, and no other `${{` or `}}`, even in a literal
+    assert_false(excludes_pull_request(String("${{ github.event_name != 'pull_request' }} && ${{ true }}")))
+    assert_false(excludes_pull_request(String("${{ github.event_name != 'pull_request' && '}}' == 'x' }}")))
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' && '${{' == 'x'")))
+    # an opening `${{` with no closing `}}` is no wrapper
+    assert_false(excludes_pull_request(String("${{ github.event_name != 'pull_request' && truexx")))
+    # an unterminated literal
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' && 'x")))
+    # `&&` and parentheses inside a literal are literal text
+    assert_true(excludes_pull_request(String("needs.a.outputs.b == 'x && (y)' && github.event_name != 'pull_request'")))
+    assert_true(excludes_pull_request(String("needs.a.outputs.b == 'it''s' && github.event_name == 'push'")))
+    assert_true(excludes_pull_request(String("${{ github.event_name != 'pull_request' && needs.a.outputs.n >= 2 }}")))
+
+
+def test_a_release_job_condition_that_is_not_a_top_level_conjunction_is_refused() raises:
+    var want = String("runs stage 'publish-gamma', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a pull request out")
+    var old = String("    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n")
+    var probes = _probes()
+    for i in range(len(probes)):
+        # double-quoted: a plain scalar starting with `!` is a YAML tag (no probe
+        # holds a `"` or a backslash)
+        _reports(_wf(old, String("    if: \"") + probes[i] + String("\"\n")), want)
+    # every release job behind the negated conjunction: each is reported
+    var neg = String("    if: (true && github.event_name != 'pull_request' && needs.build.outputs.release == 'true') == false\n")
+    var wf = _wf(old, neg)
+    var build_old = String("    if: github.event_name != 'pull_request'\n")
+    if wf.find(build_old) < 0:
+        raise Error(String("fixture has no build condition"))
+    wf = wf.replace(build_old, neg)
+    _reports(wf, want)
+    _reports(wf, String("job 'build': R6: runs stage 'build', a release stage"))
+
+
 def test_a_pull_request_stage_runs_whole_in_its_own_job() raises:
     var wf = String(_WF) + String(
         "  pr-part:\n    if: github.event.pull_request.head.repo.full_name == github.repository\n"

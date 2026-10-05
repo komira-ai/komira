@@ -269,7 +269,9 @@ value, and the release's `release_produced_by` names the one build run.
 - **Triggers:** a push to `main` and a manual run (`workflow_dispatch`)
   release; a pull request to `main` runs the job `pr` and nothing else.
   Every release job's `if:` keeps a pull request out
-  (`github.event_name != 'pull_request'`, or prod's manual-run condition), so
+  (a top-level `&&` conjunction with the term
+  `github.event_name != 'pull_request'`, or prod's manual-run condition;
+  grouping, negation, a call or a partial `${{ }}` is refused), so
   no environment, publishing token or release job is reached from a pull
   request's code. The `pr` job's condition
   (`github.event.pull_request.head.repo.full_name == github.repository`)
