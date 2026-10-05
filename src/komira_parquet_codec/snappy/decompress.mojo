@@ -238,8 +238,10 @@ def _snappy_decompress_mojo(
     PERF-CRITICAL slop requirement: the 16-byte-store fast paths run only
     when `dst.len() >= uncompressed_length + kSlopBytes` (64), as a page
     decoder sizes it. With less room every overshooting path is off
-    (`has_slop` false) and each tag stores exactly the bytes it produces, so
-    nothing is written past `dst.len()` — correct, just slower.
+    (`has_slop` false) and nothing is written past `dst.len()` — correct,
+    just slower. Bytes of `dst` between the decoded length and `dst.len()`
+    may still change: the offset-2 pattern copy in `_apply_copy` writes
+    8-byte chunks bounded by `dst.len()`, not by the decoded length.
 
     Thin boundary wrapper: the hot decode runs in
     `_snappy_decode_core`, which returns a status (ZERO inlined error-String
