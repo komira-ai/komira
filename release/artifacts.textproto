@@ -46,16 +46,18 @@
 # its tests pass: the check has one meaning, every unit green. Each artifact names
 # the buck2 targets it stands for (`targets`): every `//` label of its
 # combined args (its build system's, then its own), with the `[subtarget]`
-# removed, which the welded test of this file holds. Building a target builds
-# its dependency closure, and a library's welded tests run inside its build.
+# removed, which the welded test of this file holds.
 #
-# COVERAGE. Every target of `//...` and `tests//functional/...` is in the
-# closure of some unit: release/unit_census.txt lists the targets that make
-# that so (every target nothing else depends on, and every test target), the
-# welded test of this file refuses a census target that no unit names, and
+# COVERAGE. Every target of `//...` and `tests//functional/...` (what
+# `./buck2 build //...` and `./buck2 build tests//functional/...` build) is
+# named by some unit: release/unit_census.txt lists them all, the welded test
+# of this file refuses a census target that no unit names, and
 # release/ci/unit_census.py --check (run by the pr job) refuses a census that
-# is not the graph's. A new target goes into the check its path maps to
-# (`unit_census.py --check` names it), or a new check of that name.
+# is not the graph's. Naming a target that depends on another is not enough:
+# buck2 builds only the outputs a dependent consumes, so building a library's
+# conda package does not build the library itself or run its welded tests.
+# A new target goes into the check its path maps to (`unit_census.py --check`
+# names it), or a new check of that name.
 #
 # THE CHECKS are grouped by path: one check per library package
 # `//src/<p>` (named `<p>`: a change to one library builds that library's
@@ -63,8 +65,11 @@
 # `bin`, `release`, `tests`, `third_party`, `tools_<t>` for each `//tools/<t>`
 # tree, and `functional_tests` for the tests cell's positive tests (built
 # only, as `./buck2 build tests//functional/...` builds them). A target an
-# artifact names is in no check. The tests cell's must-fail fixtures
-# (`tests//negative`) are not units and not in the universe: the build
+# artifact names is in no check; the rest of a published artifact's package
+# (komira_encoding's library, whose welded tests its conda package does not
+# run) is in the check `<p>_package` (artifacts and checks are one name
+# space), so a change there builds both. The tests
+# cell's must-fail fixtures (`tests//negative`) are not units and not in the universe: the build
 # system's self-tests (tools/build/tests/run_tests.sh) build each one and
 # assert its refusal. A negative case the per-change check runs is an
 # ordinary passing test (a tests-cell test whose body builds the fixture and
@@ -159,8 +164,11 @@ artifacts {
 checks {
   name: "repo_root"
   build_system: "buck2"
+  targets: "//:LICENSE"
   targets: "//:action_pins"
+  targets: "//:doc_tree"
   targets: "//:docs"
+  targets: "//:kci.yml"
   targets: "//:no_endpoint"
   targets: "//:push_verdicts"
   targets: "//:retired_names"
@@ -168,254 +176,1367 @@ checks {
   targets: "//:tests_lints"
   targets: "//:workflow_lint"
 }
-checks { name: "bin" build_system: "buck2" targets: "//bin/kci:kci" }
+checks {
+  name: "bin"
+  build_system: "buck2"
+  targets: "//bin/kci:doc_tree"
+  targets: "//bin/kci:kci"
+  targets: "//bin/kci:main.mojo"
+}
 checks {
   name: "release"
   build_system: "buck2"
+  targets: "//release/smoke:doc_tree"
   targets: "//release/smoke:smoke_komira_encoding"
+  targets: "//release/smoke:smoke_komira_encoding.mojo"
+  targets: "//release:artifacts.textproto"
+  targets: "//release:channels.textproto"
+  targets: "//release:doc_tree"
+  targets: "//release:machine.textproto"
   targets: "//release:shell_lint"
+  targets: "//release:unit_census.txt"
 }
-checks { name: "kci_api" build_system: "buck2" targets: "//src/kci_api:kci_api_conda" }
-checks { name: "kci_artifact" build_system: "buck2" targets: "//src/kci_artifact:kci_artifact_conda" }
-checks { name: "kci_artifact_manifest" build_system: "buck2" targets: "//src/kci_artifact_manifest:kci_artifact_manifest_conda" }
-checks { name: "kci_build" build_system: "buck2" targets: "//src/kci_build:kci_build_lib_conda" }
-checks { name: "kci_ci_check" build_system: "buck2" targets: "//src/kci_ci_check:kci_ci_check_conda" }
-checks { name: "kci_cli" build_system: "buck2" targets: "//src/kci_cli:kci_cli_conda" }
-checks { name: "kci_cloud" build_system: "buck2" targets: "//src/kci_cloud:kci_cloud_conda" }
-checks { name: "kci_cloud_fake" build_system: "buck2" targets: "//src/kci_cloud_fake:kci_cloud_fake_conda" }
-checks { name: "kci_deploy_model_proto" build_system: "buck2" targets: "//src/kci_deploy_model_proto:kci_deploy_model_proto" }
-checks { name: "kci_logs" build_system: "buck2" targets: "//src/kci_logs:kci_logs_conda" }
+checks {
+  name: "kci_api"
+  build_system: "buck2"
+  targets: "//src/kci_api:doc_tree"
+  targets: "//src/kci_api:kci_api"
+  targets: "//src/kci_api:kci_api_conda"
+}
+checks {
+  name: "kci_artifact"
+  build_system: "buck2"
+  targets: "//src/kci_artifact:doc_tree"
+  targets: "//src/kci_artifact:example.textproto"
+  targets: "//src/kci_artifact:kci_artifact"
+  targets: "//src/kci_artifact:kci_artifact_conda"
+}
+checks {
+  name: "kci_artifact_manifest"
+  build_system: "buck2"
+  targets: "//src/kci_artifact_manifest:doc_tree"
+  targets: "//src/kci_artifact_manifest:kci_artifact_manifest"
+  targets: "//src/kci_artifact_manifest:kci_artifact_manifest_conda"
+}
+checks {
+  name: "kci_build"
+  build_system: "buck2"
+  targets: "//src/kci_build:doc_tree"
+  targets: "//src/kci_build:kci_build_lib"
+  targets: "//src/kci_build:kci_build_lib_conda"
+}
+checks {
+  name: "kci_ci_check"
+  build_system: "buck2"
+  targets: "//src/kci_ci_check:doc_tree"
+  targets: "//src/kci_ci_check:kci_ci_check"
+  targets: "//src/kci_ci_check:kci_ci_check_conda"
+}
+checks {
+  name: "kci_cli"
+  build_system: "buck2"
+  targets: "//src/kci_cli:args.mojo"
+  targets: "//src/kci_cli:dispatch.mojo"
+  targets: "//src/kci_cli:doc_tree"
+  targets: "//src/kci_cli:kci_cli"
+  targets: "//src/kci_cli:kci_cli_conda"
+  targets: "//src/kci_cli:library_verbs.mojo"
+  targets: "//src/kci_cli:recorder.mojo"
+}
+checks {
+  name: "kci_cloud"
+  build_system: "buck2"
+  targets: "//src/kci_cloud:doc_tree"
+  targets: "//src/kci_cloud:kci_cloud"
+  targets: "//src/kci_cloud:kci_cloud_conda"
+}
+checks {
+  name: "kci_cloud_fake"
+  build_system: "buck2"
+  targets: "//src/kci_cloud_fake:doc_tree"
+  targets: "//src/kci_cloud_fake:kci_cloud_fake"
+  targets: "//src/kci_cloud_fake:kci_cloud_fake_conda"
+}
+checks {
+  name: "kci_deploy_model_proto"
+  build_system: "buck2"
+  targets: "//src/kci_deploy_model_proto:doc_tree"
+  targets: "//src/kci_deploy_model_proto:kci_deploy_model_proto"
+}
+checks {
+  name: "kci_logs"
+  build_system: "buck2"
+  targets: "//src/kci_logs:doc_tree"
+  targets: "//src/kci_logs:kci_logs"
+  targets: "//src/kci_logs:kci_logs_conda"
+}
 checks {
   name: "kci_manifest_proto"
   build_system: "buck2"
+  targets: "//src/kci_manifest_proto:doc_tree"
+  targets: "//src/kci_manifest_proto:kci_manifest_proto"
   targets: "//src/kci_manifest_proto:test_resource_kind_ordinals"
   targets: "//src/kci_manifest_proto:test_web_frontend_content_store"
 }
-checks { name: "kci_params" build_system: "buck2" targets: "//src/kci_params:kci_params_conda" }
-checks { name: "kci_pkg_upload" build_system: "buck2" targets: "//src/kci_pkg_upload:kci_pkg_upload_conda" }
-checks { name: "kci_publish" build_system: "buck2" targets: "//src/kci_publish:kci_publish_lib_conda" }
-checks { name: "kci_publish_oci" build_system: "buck2" targets: "//src/kci_publish_oci:kci_publish_oci_conda" }
-checks { name: "kci_reconciler" build_system: "buck2" targets: "//src/kci_reconciler:kci_reconciler_conda" }
-checks { name: "kci_release_channel" build_system: "buck2" targets: "//src/kci_release_channel:kci_release_channel_conda" }
-checks { name: "kci_release_machine" build_system: "buck2" targets: "//src/kci_release_machine:kci_release_machine_conda" }
-checks { name: "kci_release_set" build_system: "buck2" targets: "//src/kci_release_set:kci_release_set_conda" }
-checks { name: "kci_resource_proto" build_system: "buck2" targets: "//src/kci_resource_proto:kci_resource_proto_conda" }
-checks { name: "kci_secret_writer" build_system: "buck2" targets: "//src/kci_secret_writer:kci_secret_writer_conda" }
-checks { name: "kci_validate" build_system: "buck2" targets: "//src/kci_validate:kci_validate_conda" }
-checks { name: "kci_validator_report" build_system: "buck2" targets: "//src/kci_validator_report:kci_validator_report_conda" }
-checks { name: "kci_validator_rows" build_system: "buck2" targets: "//src/kci_validator_rows:kci_validator_rows_conda" }
-checks { name: "komira_agg" build_system: "buck2" targets: "//src/komira_agg:komira_agg_conda" }
-checks { name: "komira_agg_contract" build_system: "buck2" targets: "//src/komira_agg_contract:komira_agg_contract_conda" }
-checks { name: "komira_arrow" build_system: "buck2" targets: "//src/komira_arrow:komira_arrow_conda" }
+checks {
+  name: "kci_params"
+  build_system: "buck2"
+  targets: "//src/kci_params:doc_tree"
+  targets: "//src/kci_params:kci_params"
+  targets: "//src/kci_params:kci_params_conda"
+}
+checks {
+  name: "kci_pkg_upload"
+  build_system: "buck2"
+  targets: "//src/kci_pkg_upload:doc_tree"
+  targets: "//src/kci_pkg_upload:kci_pkg_upload"
+  targets: "//src/kci_pkg_upload:kci_pkg_upload_conda"
+}
+checks {
+  name: "kci_publish"
+  build_system: "buck2"
+  targets: "//src/kci_publish:doc_tree"
+  targets: "//src/kci_publish:kci_publish_lib"
+  targets: "//src/kci_publish:kci_publish_lib_conda"
+}
+checks {
+  name: "kci_publish_oci"
+  build_system: "buck2"
+  targets: "//src/kci_publish_oci:doc_tree"
+  targets: "//src/kci_publish_oci:kci_publish_oci"
+  targets: "//src/kci_publish_oci:kci_publish_oci_conda"
+}
+checks {
+  name: "kci_reconciler"
+  build_system: "buck2"
+  targets: "//src/kci_reconciler:doc_tree"
+  targets: "//src/kci_reconciler:kci_reconciler"
+  targets: "//src/kci_reconciler:kci_reconciler_conda"
+}
+checks {
+  name: "kci_release_channel"
+  build_system: "buck2"
+  targets: "//src/kci_release_channel:doc_tree"
+  targets: "//src/kci_release_channel:kci_release_channel"
+  targets: "//src/kci_release_channel:kci_release_channel_conda"
+}
+checks {
+  name: "kci_release_machine"
+  build_system: "buck2"
+  targets: "//src/kci_release_machine:doc_tree"
+  targets: "//src/kci_release_machine:kci_release_machine"
+  targets: "//src/kci_release_machine:kci_release_machine_conda"
+}
+checks {
+  name: "kci_release_set"
+  build_system: "buck2"
+  targets: "//src/kci_release_set:doc_tree"
+  targets: "//src/kci_release_set:kci_release_set"
+  targets: "//src/kci_release_set:kci_release_set_conda"
+}
+checks {
+  name: "kci_resource_proto"
+  build_system: "buck2"
+  targets: "//src/kci_resource_proto:doc_tree"
+  targets: "//src/kci_resource_proto:kci_resource_proto"
+  targets: "//src/kci_resource_proto:kci_resource_proto_conda"
+  targets: "//src/kci_resource_proto:kci_resource_proto_gen"
+}
+checks {
+  name: "kci_secret_writer"
+  build_system: "buck2"
+  targets: "//src/kci_secret_writer:doc_tree"
+  targets: "//src/kci_secret_writer:kci_secret_writer"
+  targets: "//src/kci_secret_writer:kci_secret_writer_conda"
+}
+checks {
+  name: "kci_validate"
+  build_system: "buck2"
+  targets: "//src/kci_validate:doc_tree"
+  targets: "//src/kci_validate:kci_validate"
+  targets: "//src/kci_validate:kci_validate_conda"
+}
+checks {
+  name: "kci_validator_report"
+  build_system: "buck2"
+  targets: "//src/kci_validator_report:doc_tree"
+  targets: "//src/kci_validator_report:kci_validator_report"
+  targets: "//src/kci_validator_report:kci_validator_report_conda"
+}
+checks {
+  name: "kci_validator_rows"
+  build_system: "buck2"
+  targets: "//src/kci_validator_rows:doc_tree"
+  targets: "//src/kci_validator_rows:kci_validator_rows"
+  targets: "//src/kci_validator_rows:kci_validator_rows_conda"
+}
+checks {
+  name: "komira_agg"
+  build_system: "buck2"
+  targets: "//src/komira_agg:doc_tree"
+  targets: "//src/komira_agg:komira_agg"
+  targets: "//src/komira_agg:komira_agg_conda"
+}
+checks {
+  name: "komira_agg_contract"
+  build_system: "buck2"
+  targets: "//src/komira_agg_contract:doc_tree"
+  targets: "//src/komira_agg_contract:komira_agg_contract"
+  targets: "//src/komira_agg_contract:komira_agg_contract_conda"
+}
+checks {
+  name: "komira_arrow"
+  build_system: "buck2"
+  targets: "//src/komira_arrow:doc_tree"
+  targets: "//src/komira_arrow:komira_arrow"
+  targets: "//src/komira_arrow:komira_arrow_conda"
+}
 checks {
   name: "komira_arrow_ipc"
   build_system: "buck2"
+  targets: "//src/komira_arrow_ipc:doc_tree"
+  targets: "//src/komira_arrow_ipc:komira_arrow_ipc"
   targets: "//src/komira_arrow_ipc:komira_arrow_ipc_conda"
   targets: "//src/komira_arrow_ipc:large_writes_check"
 }
-checks { name: "komira_async" build_system: "buck2" targets: "//src/komira_async:komira_async_conda" }
-checks { name: "komira_atomic_alias" build_system: "buck2" targets: "//src/komira_atomic_alias:komira_atomic_alias_conda" }
-checks { name: "komira_authz_api" build_system: "buck2" targets: "//src/komira_authz_api:komira_authz_api_conda" }
-checks { name: "komira_avro" build_system: "buck2" targets: "//src/komira_avro:komira_avro_conda" }
-checks { name: "komira_aws_core" build_system: "buck2" targets: "//src/komira_aws_core:komira_aws_core_conda" }
-checks { name: "komira_aws_dynamodb" build_system: "buck2" targets: "//src/komira_aws_dynamodb:komira_aws_dynamodb_conda" }
-checks { name: "komira_aws_dynamodbstreams" build_system: "buck2" targets: "//src/komira_aws_dynamodbstreams:komira_aws_dynamodbstreams_conda" }
-checks { name: "komira_aws_ecr" build_system: "buck2" targets: "//src/komira_aws_ecr:komira_aws_ecr_conda" }
-checks { name: "komira_aws_ecs" build_system: "buck2" targets: "//src/komira_aws_ecs:komira_aws_ecs_conda" }
-checks { name: "komira_aws_logs" build_system: "buck2" targets: "//src/komira_aws_logs:komira_aws_logs_conda" }
-checks { name: "komira_aws_s3" build_system: "buck2" targets: "//src/komira_aws_s3:komira_aws_s3_conda" }
-checks { name: "komira_aws_secretsmanager" build_system: "buck2" targets: "//src/komira_aws_secretsmanager:komira_aws_secretsmanager_conda" }
-checks { name: "komira_aws_sqs" build_system: "buck2" targets: "//src/komira_aws_sqs:komira_aws_sqs_conda" }
-checks { name: "komira_broker" build_system: "buck2" targets: "//src/komira_broker:komira_broker_conda" }
-checks { name: "komira_broker_coordinator" build_system: "buck2" targets: "//src/komira_broker_coordinator:komira_broker_coordinator_conda" }
-checks { name: "komira_buffer" build_system: "buck2" targets: "//src/komira_buffer:komira_buffer_conda" }
-checks { name: "komira_clock" build_system: "buck2" targets: "//src/komira_clock:komira_clock_conda" }
-checks { name: "komira_collections" build_system: "buck2" targets: "//src/komira_collections:komira_collections_conda" }
-checks { name: "komira_column_kernels" build_system: "buck2" targets: "//src/komira_column_kernels:komira_column_kernels_conda" }
-checks { name: "komira_compression" build_system: "buck2" targets: "//src/komira_compression:komira_compression_conda" }
-checks { name: "komira_concurrency" build_system: "buck2" targets: "//src/komira_concurrency:komira_concurrency_conda" }
-checks { name: "komira_connect" build_system: "buck2" targets: "//src/komira_connect:komira_connect_conda" }
+checks {
+  name: "komira_async"
+  build_system: "buck2"
+  targets: "//src/komira_async:doc_tree"
+  targets: "//src/komira_async:komira_async"
+  targets: "//src/komira_async:komira_async_conda"
+  targets: "//src/komira_async:komira_async_posix"
+  targets: "//src/komira_async:posix_shim_files"
+}
+checks {
+  name: "komira_atomic_alias"
+  build_system: "buck2"
+  targets: "//src/komira_atomic_alias:doc_tree"
+  targets: "//src/komira_atomic_alias:komira_atomic_alias"
+  targets: "//src/komira_atomic_alias:komira_atomic_alias_conda"
+}
+checks {
+  name: "komira_authz_api"
+  build_system: "buck2"
+  targets: "//src/komira_authz_api:doc_tree"
+  targets: "//src/komira_authz_api:komira_authz_api"
+  targets: "//src/komira_authz_api:komira_authz_api_conda"
+}
+checks {
+  name: "komira_avro"
+  build_system: "buck2"
+  targets: "//src/komira_avro:doc_tree"
+  targets: "//src/komira_avro:komira_avro"
+  targets: "//src/komira_avro:komira_avro_conda"
+}
+checks {
+  name: "komira_aws_core"
+  build_system: "buck2"
+  targets: "//src/komira_aws_core:doc_tree"
+  targets: "//src/komira_aws_core:komira_aws_core"
+  targets: "//src/komira_aws_core:komira_aws_core_conda"
+}
+checks {
+  name: "komira_aws_dynamodb"
+  build_system: "buck2"
+  targets: "//src/komira_aws_dynamodb:doc_tree"
+  targets: "//src/komira_aws_dynamodb:komira_aws_dynamodb"
+  targets: "//src/komira_aws_dynamodb:komira_aws_dynamodb_conda"
+  targets: "//src/komira_aws_dynamodb:komira_aws_dynamodb_gen"
+}
+checks {
+  name: "komira_aws_dynamodbstreams"
+  build_system: "buck2"
+  targets: "//src/komira_aws_dynamodbstreams:doc_tree"
+  targets: "//src/komira_aws_dynamodbstreams:komira_aws_dynamodbstreams"
+  targets: "//src/komira_aws_dynamodbstreams:komira_aws_dynamodbstreams_conda"
+  targets: "//src/komira_aws_dynamodbstreams:komira_aws_dynamodbstreams_gen"
+}
+checks {
+  name: "komira_aws_ecr"
+  build_system: "buck2"
+  targets: "//src/komira_aws_ecr:doc_tree"
+  targets: "//src/komira_aws_ecr:komira_aws_ecr"
+  targets: "//src/komira_aws_ecr:komira_aws_ecr_conda"
+  targets: "//src/komira_aws_ecr:komira_aws_ecr_gen"
+}
+checks {
+  name: "komira_aws_ecs"
+  build_system: "buck2"
+  targets: "//src/komira_aws_ecs:doc_tree"
+  targets: "//src/komira_aws_ecs:komira_aws_ecs"
+  targets: "//src/komira_aws_ecs:komira_aws_ecs_conda"
+  targets: "//src/komira_aws_ecs:komira_aws_ecs_gen"
+}
+checks {
+  name: "komira_aws_logs"
+  build_system: "buck2"
+  targets: "//src/komira_aws_logs:doc_tree"
+  targets: "//src/komira_aws_logs:komira_aws_logs"
+  targets: "//src/komira_aws_logs:komira_aws_logs_conda"
+  targets: "//src/komira_aws_logs:komira_aws_logs_gen"
+}
+checks {
+  name: "komira_aws_s3"
+  build_system: "buck2"
+  targets: "//src/komira_aws_s3:doc_tree"
+  targets: "//src/komira_aws_s3:komira_aws_s3"
+  targets: "//src/komira_aws_s3:komira_aws_s3_conda"
+  targets: "//src/komira_aws_s3:komira_aws_s3_gen"
+}
+checks {
+  name: "komira_aws_secretsmanager"
+  build_system: "buck2"
+  targets: "//src/komira_aws_secretsmanager:doc_tree"
+  targets: "//src/komira_aws_secretsmanager:komira_aws_secretsmanager"
+  targets: "//src/komira_aws_secretsmanager:komira_aws_secretsmanager_conda"
+  targets: "//src/komira_aws_secretsmanager:komira_aws_secretsmanager_gen"
+}
+checks {
+  name: "komira_aws_sqs"
+  build_system: "buck2"
+  targets: "//src/komira_aws_sqs:doc_tree"
+  targets: "//src/komira_aws_sqs:komira_aws_sqs"
+  targets: "//src/komira_aws_sqs:komira_aws_sqs_conda"
+  targets: "//src/komira_aws_sqs:komira_aws_sqs_gen"
+}
+checks {
+  name: "komira_broker"
+  build_system: "buck2"
+  targets: "//src/komira_broker:doc_tree"
+  targets: "//src/komira_broker:komira_broker"
+  targets: "//src/komira_broker:komira_broker_conda"
+}
+checks {
+  name: "komira_broker_coordinator"
+  build_system: "buck2"
+  targets: "//src/komira_broker_coordinator:doc_tree"
+  targets: "//src/komira_broker_coordinator:komira_broker_coordinator"
+  targets: "//src/komira_broker_coordinator:komira_broker_coordinator_conda"
+}
+checks {
+  name: "komira_buffer"
+  build_system: "buck2"
+  targets: "//src/komira_buffer:doc_tree"
+  targets: "//src/komira_buffer:komira_buffer"
+  targets: "//src/komira_buffer:komira_buffer_conda"
+}
+checks {
+  name: "komira_clock"
+  build_system: "buck2"
+  targets: "//src/komira_clock:doc_tree"
+  targets: "//src/komira_clock:komira_clock"
+  targets: "//src/komira_clock:komira_clock_conda"
+}
+checks {
+  name: "komira_collections"
+  build_system: "buck2"
+  targets: "//src/komira_collections:doc_tree"
+  targets: "//src/komira_collections:komira_collections"
+  targets: "//src/komira_collections:komira_collections_conda"
+}
+checks {
+  name: "komira_column_kernels"
+  build_system: "buck2"
+  targets: "//src/komira_column_kernels:doc_tree"
+  targets: "//src/komira_column_kernels:komira_column_kernels"
+  targets: "//src/komira_column_kernels:komira_column_kernels_conda"
+}
+checks {
+  name: "komira_compression"
+  build_system: "buck2"
+  targets: "//src/komira_compression:doc_tree"
+  targets: "//src/komira_compression:komira_compression"
+  targets: "//src/komira_compression:komira_compression_conda"
+}
+checks {
+  name: "komira_concurrency"
+  build_system: "buck2"
+  targets: "//src/komira_concurrency:doc_tree"
+  targets: "//src/komira_concurrency:komira_concurrency"
+  targets: "//src/komira_concurrency:komira_concurrency_conda"
+  targets: "//src/komira_concurrency:komira_concurrency_pool_depth"
+  targets: "//src/komira_concurrency:pool_depth_files"
+}
+checks {
+  name: "komira_connect"
+  build_system: "buck2"
+  targets: "//src/komira_connect:doc_tree"
+  targets: "//src/komira_connect:komira_connect"
+  targets: "//src/komira_connect:komira_connect_conda"
+}
 checks {
   name: "komira_core"
   build_system: "buck2"
+  targets: "//src/komira_core:doc_tree"
+  targets: "//src/komira_core:komira_core"
   targets: "//src/komira_core:komira_core_conda"
+  targets: "//src/komira_core:komira_core_posix"
   targets: "//src/komira_core:large_writes_check"
+  targets: "//src/komira_core:posix_files"
 }
-checks { name: "komira_core_ffi" build_system: "buck2" targets: "//src/komira_core_ffi:komira_core_ffi_conda" }
-checks { name: "komira_counters" build_system: "buck2" targets: "//src/komira_counters:komira_counters_conda" }
-checks { name: "komira_crypto" build_system: "buck2" targets: "//src/komira_crypto:komira_crypto_conda" }
-checks { name: "komira_csv" build_system: "buck2" targets: "//src/komira_csv:komira_csv_conda" }
-checks { name: "komira_datetime" build_system: "buck2" targets: "//src/komira_datetime:komira_datetime_conda" }
-checks { name: "komira_db" build_system: "buck2" targets: "//src/komira_db:komira_db_conda" }
-checks { name: "komira_db_postgres" build_system: "buck2" targets: "//src/komira_db_postgres:komira_db_postgres_conda" }
-checks { name: "komira_db_sqlite" build_system: "buck2" targets: "//src/komira_db_sqlite:komira_db_sqlite_conda" }
-checks { name: "komira_dynamic_filter" build_system: "buck2" targets: "//src/komira_dynamic_filter:komira_dynamic_filter_conda" }
-checks { name: "komira_eval" build_system: "buck2" targets: "//src/komira_eval:komira_eval_conda" }
-checks { name: "komira_exec_types" build_system: "buck2" targets: "//src/komira_exec_types:komira_exec_types_conda" }
-checks { name: "komira_expr" build_system: "buck2" targets: "//src/komira_expr:komira_expr_conda" }
-checks { name: "komira_fork_join" build_system: "buck2" targets: "//src/komira_fork_join:komira_fork_join_conda" }
-checks { name: "komira_fs" build_system: "buck2" targets: "//src/komira_fs:komira_fs_conda" }
-checks { name: "komira_fs_registry" build_system: "buck2" targets: "//src/komira_fs_registry:komira_fs_registry_conda" }
-checks { name: "komira_gcp_core" build_system: "buck2" targets: "//src/komira_gcp_core:komira_gcp_core_conda" }
-checks { name: "komira_gcp_logging" build_system: "buck2" targets: "//src/komira_gcp_logging:komira_gcp_logging_conda" }
-checks { name: "komira_gcp_storage" build_system: "buck2" targets: "//src/komira_gcp_storage:komira_gcp_storage_conda" }
-checks { name: "komira_grpc" build_system: "buck2" targets: "//src/komira_grpc:komira_grpc_conda" }
-checks { name: "komira_host" build_system: "buck2" targets: "//src/komira_host:komira_host_conda" }
-checks { name: "komira_http_client" build_system: "buck2" targets: "//src/komira_http_client:komira_http_client_conda" }
-checks { name: "komira_http_core" build_system: "buck2" targets: "//src/komira_http_core:komira_http_core_conda" }
-checks { name: "komira_http_server" build_system: "buck2" targets: "//src/komira_http_server:komira_http_server_conda" }
-checks { name: "komira_http_status_hook" build_system: "buck2" targets: "//src/komira_http_status_hook:komira_http_status_hook_conda" }
-checks { name: "komira_iceberg_rest" build_system: "buck2" targets: "//src/komira_iceberg_rest:komira_iceberg_rest_conda" }
-checks { name: "komira_join_assembly" build_system: "buck2" targets: "//src/komira_join_assembly:komira_join_assembly_conda" }
-checks { name: "komira_json" build_system: "buck2" targets: "//src/komira_json:komira_json_conda" }
-checks { name: "komira_jsonl" build_system: "buck2" targets: "//src/komira_jsonl:komira_jsonl_conda" }
-checks { name: "komira_jwks" build_system: "buck2" targets: "//src/komira_jwks:komira_jwks_conda" }
-checks { name: "komira_kafka_server" build_system: "buck2" targets: "//src/komira_kafka_server:komira_kafka_server_conda" }
-checks { name: "komira_kernels" build_system: "buck2" targets: "//src/komira_kernels:komira_kernels_conda" }
-checks { name: "komira_libc" build_system: "buck2" targets: "//src/komira_libc:komira_libc_conda" }
-checks { name: "komira_log" build_system: "buck2" targets: "//src/komira_log:komira_log_conda" }
-checks { name: "komira_log_query" build_system: "buck2" targets: "//src/komira_log_query:komira_log_query_conda" }
-checks { name: "komira_lz4" build_system: "buck2" targets: "//src/komira_lz4:komira_lz4_conda" }
-checks { name: "komira_metrics" build_system: "buck2" targets: "//src/komira_metrics:komira_metrics_conda" }
-checks { name: "komira_name_registry" build_system: "buck2" targets: "//src/komira_name_registry:komira_name_registry_conda" }
-checks { name: "komira_net" build_system: "buck2" targets: "//src/komira_net:komira_net_conda" }
-checks { name: "komira_objectstore" build_system: "buck2" targets: "//src/komira_objectstore:komira_objectstore_conda" }
-checks { name: "komira_objectstore_gcs" build_system: "buck2" targets: "//src/komira_objectstore_gcs:komira_objectstore_gcs_conda" }
-checks { name: "komira_objectstore_s3" build_system: "buck2" targets: "//src/komira_objectstore_s3:komira_objectstore_s3_conda" }
-checks { name: "komira_oci" build_system: "buck2" targets: "//src/komira_oci:komira_oci_conda" }
-checks { name: "komira_orc" build_system: "buck2" targets: "//src/komira_orc:komira_orc_conda" }
-checks { name: "komira_parquet_api" build_system: "buck2" targets: "//src/komira_parquet_api:komira_parquet_api_conda" }
-checks { name: "komira_plan_expr" build_system: "buck2" targets: "//src/komira_plan_expr:komira_plan_expr_conda" }
-checks { name: "komira_plan_ir" build_system: "buck2" targets: "//src/komira_plan_ir:komira_plan_ir_conda" }
-checks { name: "komira_plan_stats" build_system: "buck2" targets: "//src/komira_plan_stats:komira_plan_stats_conda" }
-checks { name: "komira_plan_wire" build_system: "buck2" targets: "//src/komira_plan_wire:komira_plan_wire_conda" }
-checks { name: "komira_pplan_wire" build_system: "buck2" targets: "//src/komira_pplan_wire:komira_pplan_wire_conda" }
+checks {
+  name: "komira_core_ffi"
+  build_system: "buck2"
+  targets: "//src/komira_core_ffi:doc_tree"
+  targets: "//src/komira_core_ffi:komira_core_ffi"
+  targets: "//src/komira_core_ffi:komira_core_ffi_conda"
+}
+checks {
+  name: "komira_counters"
+  build_system: "buck2"
+  targets: "//src/komira_counters:doc_tree"
+  targets: "//src/komira_counters:komira_counters"
+  targets: "//src/komira_counters:komira_counters_conda"
+}
+checks {
+  name: "komira_crypto"
+  build_system: "buck2"
+  targets: "//src/komira_crypto:doc_tree"
+  targets: "//src/komira_crypto:komira_crypto"
+  targets: "//src/komira_crypto:komira_crypto_conda"
+}
+checks {
+  name: "komira_csv"
+  build_system: "buck2"
+  targets: "//src/komira_csv:doc_tree"
+  targets: "//src/komira_csv:komira_csv"
+  targets: "//src/komira_csv:komira_csv_conda"
+}
+checks {
+  name: "komira_datetime"
+  build_system: "buck2"
+  targets: "//src/komira_datetime:doc_tree"
+  targets: "//src/komira_datetime:komira_datetime"
+  targets: "//src/komira_datetime:komira_datetime_conda"
+}
+checks {
+  name: "komira_db"
+  build_system: "buck2"
+  targets: "//src/komira_db:doc_tree"
+  targets: "//src/komira_db:komira_db"
+  targets: "//src/komira_db:komira_db_conda"
+}
+checks {
+  name: "komira_db_postgres"
+  build_system: "buck2"
+  targets: "//src/komira_db_postgres:doc_tree"
+  targets: "//src/komira_db_postgres:komira_db_postgres"
+  targets: "//src/komira_db_postgres:komira_db_postgres_conda"
+}
+checks {
+  name: "komira_db_sqlite"
+  build_system: "buck2"
+  targets: "//src/komira_db_sqlite:doc_tree"
+  targets: "//src/komira_db_sqlite:komira_db_sqlite"
+  targets: "//src/komira_db_sqlite:komira_db_sqlite_conda"
+  targets: "//src/komira_db_sqlite:sqlite3"
+}
+checks {
+  name: "komira_dynamic_filter"
+  build_system: "buck2"
+  targets: "//src/komira_dynamic_filter:doc_tree"
+  targets: "//src/komira_dynamic_filter:komira_dynamic_filter"
+  targets: "//src/komira_dynamic_filter:komira_dynamic_filter_conda"
+}
+checks {
+  name: "komira_eval"
+  build_system: "buck2"
+  targets: "//src/komira_eval:doc_tree"
+  targets: "//src/komira_eval:komira_eval"
+  targets: "//src/komira_eval:komira_eval_conda"
+}
+checks {
+  name: "komira_exec_types"
+  build_system: "buck2"
+  targets: "//src/komira_exec_types:doc_tree"
+  targets: "//src/komira_exec_types:komira_exec_types"
+  targets: "//src/komira_exec_types:komira_exec_types_conda"
+}
+checks {
+  name: "komira_expr"
+  build_system: "buck2"
+  targets: "//src/komira_expr:doc_tree"
+  targets: "//src/komira_expr:komira_expr"
+  targets: "//src/komira_expr:komira_expr_conda"
+}
+checks {
+  name: "komira_fork_join"
+  build_system: "buck2"
+  targets: "//src/komira_fork_join:doc_tree"
+  targets: "//src/komira_fork_join:komira_fork_join"
+  targets: "//src/komira_fork_join:komira_fork_join_conda"
+}
+checks {
+  name: "komira_fs"
+  build_system: "buck2"
+  targets: "//src/komira_fs:doc_tree"
+  targets: "//src/komira_fs:komira_fs"
+  targets: "//src/komira_fs:komira_fs_conda"
+  targets: "//src/komira_fs:komira_fs_posix"
+}
+checks {
+  name: "komira_fs_registry"
+  build_system: "buck2"
+  targets: "//src/komira_fs_registry:doc_tree"
+  targets: "//src/komira_fs_registry:komira_fs_registry"
+  targets: "//src/komira_fs_registry:komira_fs_registry_conda"
+}
+checks {
+  name: "komira_gcp_core"
+  build_system: "buck2"
+  targets: "//src/komira_gcp_core:doc_tree"
+  targets: "//src/komira_gcp_core:komira_gcp_core"
+  targets: "//src/komira_gcp_core:komira_gcp_core_conda"
+}
+checks {
+  name: "komira_gcp_logging"
+  build_system: "buck2"
+  targets: "//src/komira_gcp_logging:doc_tree"
+  targets: "//src/komira_gcp_logging:komira_gcp_logging"
+  targets: "//src/komira_gcp_logging:komira_gcp_logging_conda"
+  targets: "//src/komira_gcp_logging:komira_gcp_logging_gen"
+}
+checks {
+  name: "komira_gcp_storage"
+  build_system: "buck2"
+  targets: "//src/komira_gcp_storage:doc_tree"
+  targets: "//src/komira_gcp_storage:komira_gcp_storage"
+  targets: "//src/komira_gcp_storage:komira_gcp_storage_conda"
+  targets: "//src/komira_gcp_storage:komira_gcp_storage_gen"
+}
+checks {
+  name: "komira_grpc"
+  build_system: "buck2"
+  targets: "//src/komira_grpc:doc_tree"
+  targets: "//src/komira_grpc:komira_grpc"
+  targets: "//src/komira_grpc:komira_grpc_conda"
+}
+checks {
+  name: "komira_host"
+  build_system: "buck2"
+  targets: "//src/komira_host:doc_tree"
+  targets: "//src/komira_host:komira_host"
+  targets: "//src/komira_host:komira_host_conda"
+}
+checks {
+  name: "komira_http_client"
+  build_system: "buck2"
+  targets: "//src/komira_http_client:deps_lint"
+  targets: "//src/komira_http_client:doc_tree"
+  targets: "//src/komira_http_client:komira_http_client"
+  targets: "//src/komira_http_client:komira_http_client_conda"
+}
+checks {
+  name: "komira_http_core"
+  build_system: "buck2"
+  targets: "//src/komira_http_core:deps_lint"
+  targets: "//src/komira_http_core:doc_tree"
+  targets: "//src/komira_http_core:komira_http_core"
+  targets: "//src/komira_http_core:komira_http_core_conda"
+  targets: "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem"
+  targets: "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem"
+  targets: "//src/komira_http_core:tests/fixtures/tls/root_ca.pem"
+}
+checks {
+  name: "komira_http_server"
+  build_system: "buck2"
+  targets: "//src/komira_http_server:deps_lint"
+  targets: "//src/komira_http_server:doc_tree"
+  targets: "//src/komira_http_server:komira_http_server"
+  targets: "//src/komira_http_server:komira_http_server_conda"
+  targets: "//src/komira_http_server:middleware/metrics.mojo"
+}
+checks {
+  name: "komira_http_status_hook"
+  build_system: "buck2"
+  targets: "//src/komira_http_status_hook:deps_lint"
+  targets: "//src/komira_http_status_hook:doc_tree"
+  targets: "//src/komira_http_status_hook:komira_http_status_hook"
+  targets: "//src/komira_http_status_hook:komira_http_status_hook_conda"
+}
+checks {
+  name: "komira_iceberg_rest"
+  build_system: "buck2"
+  targets: "//src/komira_iceberg_rest:doc_tree"
+  targets: "//src/komira_iceberg_rest:komira_iceberg_rest"
+  targets: "//src/komira_iceberg_rest:komira_iceberg_rest_conda"
+}
+checks {
+  name: "komira_join_assembly"
+  build_system: "buck2"
+  targets: "//src/komira_join_assembly:doc_tree"
+  targets: "//src/komira_join_assembly:komira_join_assembly"
+  targets: "//src/komira_join_assembly:komira_join_assembly_conda"
+}
+checks {
+  name: "komira_json"
+  build_system: "buck2"
+  targets: "//src/komira_json:doc_tree"
+  targets: "//src/komira_json:komira_json"
+  targets: "//src/komira_json:komira_json_conda"
+}
+checks {
+  name: "komira_jsonl"
+  build_system: "buck2"
+  targets: "//src/komira_jsonl:doc_tree"
+  targets: "//src/komira_jsonl:komira_jsonl"
+  targets: "//src/komira_jsonl:komira_jsonl_conda"
+}
+checks {
+  name: "komira_jwks"
+  build_system: "buck2"
+  targets: "//src/komira_jwks:doc_tree"
+  targets: "//src/komira_jwks:komira_jwks"
+  targets: "//src/komira_jwks:komira_jwks_conda"
+}
+checks {
+  name: "komira_kafka_server"
+  build_system: "buck2"
+  targets: "//src/komira_kafka_server:doc_tree"
+  targets: "//src/komira_kafka_server:komira_kafka_server"
+  targets: "//src/komira_kafka_server:komira_kafka_server_conda"
+}
+checks {
+  name: "komira_kernels"
+  build_system: "buck2"
+  targets: "//src/komira_kernels:doc_tree"
+  targets: "//src/komira_kernels:komira_kernels"
+  targets: "//src/komira_kernels:komira_kernels_conda"
+}
+checks {
+  name: "komira_libc"
+  build_system: "buck2"
+  targets: "//src/komira_libc:doc_tree"
+  targets: "//src/komira_libc:komira_libc"
+  targets: "//src/komira_libc:komira_libc_conda"
+  targets: "//src/komira_libc:komira_libc_posix"
+  targets: "//src/komira_libc:posix_files"
+}
+checks {
+  name: "komira_log"
+  build_system: "buck2"
+  targets: "//src/komira_log:doc_tree"
+  targets: "//src/komira_log:komira_log"
+  targets: "//src/komira_log:komira_log_conda"
+  targets: "//src/komira_log:komira_log_holder"
+  targets: "//src/komira_log:log_holder_files"
+}
+checks {
+  name: "komira_log_query"
+  build_system: "buck2"
+  targets: "//src/komira_log_query:doc_tree"
+  targets: "//src/komira_log_query:komira_log_query"
+  targets: "//src/komira_log_query:komira_log_query_conda"
+}
+checks {
+  name: "komira_lz4"
+  build_system: "buck2"
+  targets: "//src/komira_lz4:doc_tree"
+  targets: "//src/komira_lz4:komira_lz4"
+  targets: "//src/komira_lz4:komira_lz4_conda"
+}
+checks {
+  name: "komira_metrics"
+  build_system: "buck2"
+  targets: "//src/komira_metrics:doc_tree"
+  targets: "//src/komira_metrics:ea_flag_files"
+  targets: "//src/komira_metrics:komira_metrics"
+  targets: "//src/komira_metrics:komira_metrics_conda"
+  targets: "//src/komira_metrics:komira_metrics_ea_flag"
+}
+checks {
+  name: "komira_name_registry"
+  build_system: "buck2"
+  targets: "//src/komira_name_registry:doc_tree"
+  targets: "//src/komira_name_registry:komira_name_registry"
+  targets: "//src/komira_name_registry:komira_name_registry_conda"
+}
+checks {
+  name: "komira_net"
+  build_system: "buck2"
+  targets: "//src/komira_net:doc_tree"
+  targets: "//src/komira_net:komira_net"
+  targets: "//src/komira_net:komira_net_conda"
+}
+checks {
+  name: "komira_objectstore"
+  build_system: "buck2"
+  targets: "//src/komira_objectstore:doc_tree"
+  targets: "//src/komira_objectstore:komira_objectstore"
+  targets: "//src/komira_objectstore:komira_objectstore_conda"
+}
+checks {
+  name: "komira_objectstore_gcs"
+  build_system: "buck2"
+  targets: "//src/komira_objectstore_gcs:doc_tree"
+  targets: "//src/komira_objectstore_gcs:komira_objectstore_gcs"
+  targets: "//src/komira_objectstore_gcs:komira_objectstore_gcs_conda"
+}
+checks {
+  name: "komira_objectstore_s3"
+  build_system: "buck2"
+  targets: "//src/komira_objectstore_s3:doc_tree"
+  targets: "//src/komira_objectstore_s3:komira_objectstore_s3"
+  targets: "//src/komira_objectstore_s3:komira_objectstore_s3_conda"
+}
+checks {
+  name: "komira_oci"
+  build_system: "buck2"
+  targets: "//src/komira_oci:doc_tree"
+  targets: "//src/komira_oci:komira_oci"
+  targets: "//src/komira_oci:komira_oci_conda"
+}
+checks {
+  name: "komira_orc"
+  build_system: "buck2"
+  targets: "//src/komira_orc:doc_tree"
+  targets: "//src/komira_orc:komira_orc"
+  targets: "//src/komira_orc:komira_orc_conda"
+}
+checks {
+  name: "komira_parquet_api"
+  build_system: "buck2"
+  targets: "//src/komira_parquet_api:doc_tree"
+  targets: "//src/komira_parquet_api:komira_parquet_api"
+  targets: "//src/komira_parquet_api:komira_parquet_api_conda"
+}
+checks {
+  name: "komira_plan_expr"
+  build_system: "buck2"
+  targets: "//src/komira_plan_expr:doc_tree"
+  targets: "//src/komira_plan_expr:komira_plan_expr"
+  targets: "//src/komira_plan_expr:komira_plan_expr_conda"
+}
+checks {
+  name: "komira_plan_ir"
+  build_system: "buck2"
+  targets: "//src/komira_plan_ir:doc_tree"
+  targets: "//src/komira_plan_ir:komira_plan_ir"
+  targets: "//src/komira_plan_ir:komira_plan_ir_conda"
+}
+checks {
+  name: "komira_plan_stats"
+  build_system: "buck2"
+  targets: "//src/komira_plan_stats:doc_tree"
+  targets: "//src/komira_plan_stats:komira_plan_stats"
+  targets: "//src/komira_plan_stats:komira_plan_stats_conda"
+}
+checks {
+  name: "komira_plan_wire"
+  build_system: "buck2"
+  targets: "//src/komira_plan_wire:doc_tree"
+  targets: "//src/komira_plan_wire:komira_plan_wire"
+  targets: "//src/komira_plan_wire:komira_plan_wire_conda"
+  targets: "//src/komira_plan_wire:tests/fixtures/golden/index_pinned.hex"
+  targets: "//src/komira_plan_wire:tests/fixtures/golden/topic_live.hex"
+}
+checks {
+  name: "komira_pplan_wire"
+  build_system: "buck2"
+  targets: "//src/komira_pplan_wire:doc_tree"
+  targets: "//src/komira_pplan_wire:komira_pplan_wire"
+  targets: "//src/komira_pplan_wire:komira_pplan_wire_conda"
+}
 checks {
   name: "komira_proto_codec"
   build_system: "buck2"
+  targets: "//src/komira_proto_codec:copy_hazard_proto"
+  targets: "//src/komira_proto_codec:doc_tree"
+  targets: "//src/komira_proto_codec:komira_proto_codec"
   targets: "//src/komira_proto_codec:komira_proto_codec_conda"
   targets: "//src/komira_proto_codec:test_copy_hazard"
 }
-checks { name: "komira_protobuf" build_system: "buck2" targets: "//src/komira_protobuf:komira_protobuf_conda" }
-checks { name: "komira_resources" build_system: "buck2" targets: "//src/komira_resources:komira_resources_conda" }
-checks { name: "komira_retry" build_system: "buck2" targets: "//src/komira_retry:komira_retry_conda" }
-checks { name: "komira_row_format" build_system: "buck2" targets: "//src/komira_row_format:komira_row_format_conda" }
-checks { name: "komira_rowcell" build_system: "buck2" targets: "//src/komira_rowcell:komira_rowcell_conda" }
-checks { name: "komira_scalar_arith" build_system: "buck2" targets: "//src/komira_scalar_arith:komira_scalar_arith_conda" }
-checks { name: "komira_scan_planning" build_system: "buck2" targets: "//src/komira_scan_planning:komira_scan_planning_conda" }
-checks { name: "komira_scan_resolver" build_system: "buck2" targets: "//src/komira_scan_resolver:komira_scan_resolver_conda" }
-checks { name: "komira_scan_source" build_system: "buck2" targets: "//src/komira_scan_source:komira_scan_source_conda" }
-checks { name: "komira_search" build_system: "buck2" targets: "//src/komira_search:komira_search_conda" }
-checks { name: "komira_search_catalog" build_system: "buck2" targets: "//src/komira_search_catalog:komira_search_catalog_conda" }
-checks { name: "komira_search_scan" build_system: "buck2" targets: "//src/komira_search_scan:komira_search_scan_conda" }
-checks { name: "komira_secret_env" build_system: "buck2" targets: "//src/komira_secret_env:komira_secret_env_conda" }
-checks { name: "komira_secret_registry" build_system: "buck2" targets: "//src/komira_secret_registry:komira_secret_registry_conda" }
-checks { name: "komira_secret_store" build_system: "buck2" targets: "//src/komira_secret_store:komira_secret_store_conda" }
-checks { name: "komira_service_registry" build_system: "buck2" targets: "//src/komira_service_registry:komira_service_registry_conda" }
-checks { name: "komira_shuffle" build_system: "buck2" targets: "//src/komira_shuffle:komira_shuffle_conda" }
-checks { name: "komira_simd" build_system: "buck2" targets: "//src/komira_simd:komira_simd_conda" }
-checks { name: "komira_snapshotter" build_system: "buck2" targets: "//src/komira_snapshotter:komira_snapshotter_conda" }
+checks {
+  name: "komira_protobuf"
+  build_system: "buck2"
+  targets: "//src/komira_protobuf:doc_tree"
+  targets: "//src/komira_protobuf:komira_protobuf"
+  targets: "//src/komira_protobuf:komira_protobuf_conda"
+}
+checks {
+  name: "komira_resources"
+  build_system: "buck2"
+  targets: "//src/komira_resources:doc_tree"
+  targets: "//src/komira_resources:komira_resources"
+  targets: "//src/komira_resources:komira_resources_conda"
+  targets: "//src/komira_resources:resources_probe"
+}
+checks {
+  name: "komira_retry"
+  build_system: "buck2"
+  targets: "//src/komira_retry:doc_tree"
+  targets: "//src/komira_retry:komira_retry"
+  targets: "//src/komira_retry:komira_retry_conda"
+}
+checks {
+  name: "komira_row_format"
+  build_system: "buck2"
+  targets: "//src/komira_row_format:doc_tree"
+  targets: "//src/komira_row_format:komira_row_format"
+  targets: "//src/komira_row_format:komira_row_format_conda"
+}
+checks {
+  name: "komira_rowcell"
+  build_system: "buck2"
+  targets: "//src/komira_rowcell:doc_tree"
+  targets: "//src/komira_rowcell:komira_rowcell"
+  targets: "//src/komira_rowcell:komira_rowcell_conda"
+}
+checks {
+  name: "komira_scalar_arith"
+  build_system: "buck2"
+  targets: "//src/komira_scalar_arith:doc_tree"
+  targets: "//src/komira_scalar_arith:komira_scalar_arith"
+  targets: "//src/komira_scalar_arith:komira_scalar_arith_conda"
+}
+checks {
+  name: "komira_scan_planning"
+  build_system: "buck2"
+  targets: "//src/komira_scan_planning:doc_tree"
+  targets: "//src/komira_scan_planning:komira_scan_planning"
+  targets: "//src/komira_scan_planning:komira_scan_planning_conda"
+}
+checks {
+  name: "komira_scan_resolver"
+  build_system: "buck2"
+  targets: "//src/komira_scan_resolver:doc_tree"
+  targets: "//src/komira_scan_resolver:komira_scan_resolver"
+  targets: "//src/komira_scan_resolver:komira_scan_resolver_conda"
+}
+checks {
+  name: "komira_scan_source"
+  build_system: "buck2"
+  targets: "//src/komira_scan_source:doc_tree"
+  targets: "//src/komira_scan_source:inmem_id_files"
+  targets: "//src/komira_scan_source:komira_scan_source"
+  targets: "//src/komira_scan_source:komira_scan_source_conda"
+  targets: "//src/komira_scan_source:komira_scan_source_inmem_id"
+}
+checks {
+  name: "komira_search"
+  build_system: "buck2"
+  targets: "//src/komira_search:doc_tree"
+  targets: "//src/komira_search:komira_search"
+  targets: "//src/komira_search:komira_search_conda"
+}
+checks {
+  name: "komira_search_catalog"
+  build_system: "buck2"
+  targets: "//src/komira_search_catalog:doc_tree"
+  targets: "//src/komira_search_catalog:komira_search_catalog"
+  targets: "//src/komira_search_catalog:komira_search_catalog_conda"
+}
+checks {
+  name: "komira_search_scan"
+  build_system: "buck2"
+  targets: "//src/komira_search_scan:doc_tree"
+  targets: "//src/komira_search_scan:komira_search_scan"
+  targets: "//src/komira_search_scan:komira_search_scan_conda"
+}
+checks {
+  name: "komira_secret_env"
+  build_system: "buck2"
+  targets: "//src/komira_secret_env:doc_tree"
+  targets: "//src/komira_secret_env:komira_secret_env"
+  targets: "//src/komira_secret_env:komira_secret_env_conda"
+}
+checks {
+  name: "komira_secret_registry"
+  build_system: "buck2"
+  targets: "//src/komira_secret_registry:doc_tree"
+  targets: "//src/komira_secret_registry:komira_secret_registry"
+  targets: "//src/komira_secret_registry:komira_secret_registry_conda"
+}
+checks {
+  name: "komira_secret_store"
+  build_system: "buck2"
+  targets: "//src/komira_secret_store:doc_tree"
+  targets: "//src/komira_secret_store:komira_secret_store"
+  targets: "//src/komira_secret_store:komira_secret_store_conda"
+}
+checks {
+  name: "komira_service_registry"
+  build_system: "buck2"
+  targets: "//src/komira_service_registry:doc_tree"
+  targets: "//src/komira_service_registry:komira_service_registry"
+  targets: "//src/komira_service_registry:komira_service_registry_conda"
+}
+checks {
+  name: "komira_shuffle"
+  build_system: "buck2"
+  targets: "//src/komira_shuffle:doc_tree"
+  targets: "//src/komira_shuffle:komira_shuffle"
+  targets: "//src/komira_shuffle:komira_shuffle_conda"
+}
+checks {
+  name: "komira_simd"
+  build_system: "buck2"
+  targets: "//src/komira_simd:doc_tree"
+  targets: "//src/komira_simd:komira_simd"
+  targets: "//src/komira_simd:komira_simd_conda"
+}
+checks {
+  name: "komira_snapshotter"
+  build_system: "buck2"
+  targets: "//src/komira_snapshotter:doc_tree"
+  targets: "//src/komira_snapshotter:komira_snapshotter"
+  targets: "//src/komira_snapshotter:komira_snapshotter_conda"
+}
 checks {
   name: "komira_spsc_ring"
   build_system: "buck2"
+  targets: "//src/komira_spsc_ring:doc_tree"
+  targets: "//src/komira_spsc_ring:komira_spsc_ring"
   targets: "//src/komira_spsc_ring:komira_spsc_ring_conda"
   targets: "//src/komira_spsc_ring:spsc_ring_bench"
 }
-checks { name: "komira_supervisor" build_system: "buck2" targets: "//src/komira_supervisor:komira_supervisor_conda" }
-checks { name: "komira_test_bucket" build_system: "buck2" targets: "//src/komira_test_bucket:komira_test_bucket_conda" }
-checks { name: "komira_test_minio" build_system: "buck2" targets: "//src/komira_test_minio:komira_test_minio_conda" }
-checks { name: "komira_test_run_id" build_system: "buck2" targets: "//src/komira_test_run_id:komira_test_run_id_conda" }
-checks { name: "komira_test_verdict" build_system: "buck2" targets: "//src/komira_test_verdict:komira_test_verdict_conda" }
-checks { name: "komira_textproto" build_system: "buck2" targets: "//src/komira_textproto:komira_textproto_conda" }
-checks { name: "komira_trace" build_system: "buck2" targets: "//src/komira_trace:komira_trace_conda" }
-checks { name: "komira_udf" build_system: "buck2" targets: "//src/komira_udf:komira_udf_conda" }
-checks { name: "komira_uuid" build_system: "buck2" targets: "//src/komira_uuid:komira_uuid_conda" }
-checks { name: "komira_validation_run" build_system: "buck2" targets: "//src/komira_validation_run:komira_validation_run_conda" }
-checks { name: "komira_wkt" build_system: "buck2" targets: "//src/komira_wkt:komira_wkt_conda" }
-checks { name: "komira_xml" build_system: "buck2" targets: "//src/komira_xml:komira_xml_conda" }
-checks { name: "komira_zlib" build_system: "buck2" targets: "//src/komira_zlib:komira_zlib_conda" }
-checks { name: "tests" build_system: "buck2" targets: "//tests/scan_binding_links:test_scan_binding_links" }
+checks {
+  name: "komira_supervisor"
+  build_system: "buck2"
+  targets: "//src/komira_supervisor:doc_tree"
+  targets: "//src/komira_supervisor:komira_supervisor"
+  targets: "//src/komira_supervisor:komira_supervisor_conda"
+  targets: "//src/komira_supervisor:komira_supervisor_proc"
+  targets: "//src/komira_supervisor:proc_shim_files"
+}
+checks {
+  name: "komira_test_bucket"
+  build_system: "buck2"
+  targets: "//src/komira_test_bucket:doc_tree"
+  targets: "//src/komira_test_bucket:komira_test_bucket"
+  targets: "//src/komira_test_bucket:komira_test_bucket_conda"
+}
+checks {
+  name: "komira_test_minio"
+  build_system: "buck2"
+  targets: "//src/komira_test_minio:doc_tree"
+  targets: "//src/komira_test_minio:komira_test_minio"
+  targets: "//src/komira_test_minio:komira_test_minio_conda"
+}
+checks {
+  name: "komira_test_run_id"
+  build_system: "buck2"
+  targets: "//src/komira_test_run_id:doc_tree"
+  targets: "//src/komira_test_run_id:komira_test_run_id"
+  targets: "//src/komira_test_run_id:komira_test_run_id_conda"
+}
+checks {
+  name: "komira_test_verdict"
+  build_system: "buck2"
+  targets: "//src/komira_test_verdict:doc_tree"
+  targets: "//src/komira_test_verdict:komira_test_verdict"
+  targets: "//src/komira_test_verdict:komira_test_verdict_conda"
+}
+checks {
+  name: "komira_textproto"
+  build_system: "buck2"
+  targets: "//src/komira_textproto:doc_tree"
+  targets: "//src/komira_textproto:komira_textproto"
+  targets: "//src/komira_textproto:komira_textproto_conda"
+}
+checks {
+  name: "komira_trace"
+  build_system: "buck2"
+  targets: "//src/komira_trace:doc_tree"
+  targets: "//src/komira_trace:komira_trace"
+  targets: "//src/komira_trace:komira_trace_conda"
+}
+checks {
+  name: "komira_udf"
+  build_system: "buck2"
+  targets: "//src/komira_udf:doc_tree"
+  targets: "//src/komira_udf:komira_udf"
+  targets: "//src/komira_udf:komira_udf_conda"
+}
+checks {
+  name: "komira_uuid"
+  build_system: "buck2"
+  targets: "//src/komira_uuid:doc_tree"
+  targets: "//src/komira_uuid:komira_uuid"
+  targets: "//src/komira_uuid:komira_uuid_conda"
+}
+checks {
+  name: "komira_validation_run"
+  build_system: "buck2"
+  targets: "//src/komira_validation_run:doc_tree"
+  targets: "//src/komira_validation_run:komira_validation_run"
+  targets: "//src/komira_validation_run:komira_validation_run_conda"
+}
+checks {
+  name: "komira_wkt"
+  build_system: "buck2"
+  targets: "//src/komira_wkt:doc_tree"
+  targets: "//src/komira_wkt:komira_wkt"
+  targets: "//src/komira_wkt:komira_wkt_conda"
+}
+checks {
+  name: "komira_xml"
+  build_system: "buck2"
+  targets: "//src/komira_xml:doc_tree"
+  targets: "//src/komira_xml:komira_xml"
+  targets: "//src/komira_xml:komira_xml_conda"
+}
+checks {
+  name: "komira_zlib"
+  build_system: "buck2"
+  targets: "//src/komira_zlib:doc_tree"
+  targets: "//src/komira_zlib:komira_zlib"
+  targets: "//src/komira_zlib:komira_zlib_conda"
+}
+checks {
+  name: "tests"
+  build_system: "buck2"
+  targets: "//tests/scan_binding_links:doc_tree"
+  targets: "//tests/scan_binding_links:test_scan_binding_links"
+}
 checks {
   name: "third_party"
   build_system: "buck2"
+  targets: "//third_party/aws-lc:aws-lc-1.39.0.tar.gz"
+  targets: "//third_party/aws-lc:builtins"
+  targets: "//third_party/aws-lc:crypto"
+  targets: "//third_party/aws-lc:doc_tree"
+  targets: "//third_party/aws-lc:src"
   targets: "//third_party/aws-lc:srcs_drift"
+  targets: "//third_party/aws-lc:srcs_gen"
+  targets: "//third_party/aws_c_auth:aws-c-auth-c4bc791ac6985eedb503e882cd450cc5b344c2f2.tar.gz"
+  targets: "//third_party/aws_c_auth:doc_tree"
+  targets: "//third_party/aws_c_auth:files"
+  targets: "//third_party/botocore:botocore-1.43.70.tar.gz"
+  targets: "//third_party/botocore:doc_tree"
+  targets: "//third_party/botocore:dynamodb"
+  targets: "//third_party/botocore:dynamodbstreams"
+  targets: "//third_party/botocore:ecr"
+  targets: "//third_party/botocore:ecs"
+  targets: "//third_party/botocore:endpoint_rules"
+  targets: "//third_party/botocore:files"
+  targets: "//third_party/botocore:logs"
+  targets: "//third_party/botocore:protocol_tests"
+  targets: "//third_party/botocore:retries"
+  targets: "//third_party/botocore:s3"
+  targets: "//third_party/botocore:secretsmanager"
+  targets: "//third_party/botocore:sqs"
+  targets: "//third_party/googleapis_conformance_tests:conformance-tests.tar.gz"
+  targets: "//third_party/googleapis_conformance_tests:doc_tree"
+  targets: "//third_party/googleapis_conformance_tests:files"
+  targets: "//third_party/parquet-format:doc_tree"
+  targets: "//third_party/parquet-format:files"
+  targets: "//third_party/parquet-format:parquet-format-2.14.0.tar.gz"
+  targets: "//third_party/rust:anyhow"
+  targets: "//third_party/rust:anyhow.crate"
+  targets: "//third_party/rust:anyhow.src"
+  targets: "//third_party/rust:bytes"
+  targets: "//third_party/rust:bytes.crate"
+  targets: "//third_party/rust:bytes.src"
+  targets: "//third_party/rust:doc_tree"
+  targets: "//third_party/rust:either"
+  targets: "//third_party/rust:either.crate"
+  targets: "//third_party/rust:either.src"
+  targets: "//third_party/rust:itertools"
+  targets: "//third_party/rust:itertools.crate"
+  targets: "//third_party/rust:itertools.src"
+  targets: "//third_party/rust:proc-macro2"
+  targets: "//third_party/rust:proc-macro2.crate"
+  targets: "//third_party/rust:proc-macro2.src"
+  targets: "//third_party/rust:prost"
+  targets: "//third_party/rust:prost-derive"
+  targets: "//third_party/rust:prost-derive.crate"
+  targets: "//third_party/rust:prost-derive.src"
+  targets: "//third_party/rust:prost-types"
+  targets: "//third_party/rust:prost-types.crate"
+  targets: "//third_party/rust:prost-types.src"
+  targets: "//third_party/rust:prost.crate"
+  targets: "//third_party/rust:prost.src"
+  targets: "//third_party/rust:quote"
+  targets: "//third_party/rust:quote.crate"
+  targets: "//third_party/rust:quote.src"
+  targets: "//third_party/rust:syn"
+  targets: "//third_party/rust:syn.crate"
+  targets: "//third_party/rust:syn.src"
+  targets: "//third_party/rust:unicode-ident"
+  targets: "//third_party/rust:unicode-ident.crate"
+  targets: "//third_party/rust:unicode-ident.src"
+  targets: "//third_party/s2n-tls:doc_tree"
+  targets: "//third_party/s2n-tls:s2n"
+  targets: "//third_party/s2n-tls:s2n-tls-1.5.6.tar.gz"
+  targets: "//third_party/s2n-tls:src"
   targets: "//third_party/s2n-tls:srcs_drift"
+  targets: "//third_party/s2n-tls:srcs_gen"
+  targets: "//third_party/snappy:config"
+  targets: "//third_party/snappy:doc_tree"
+  targets: "//third_party/snappy:snappy"
+  targets: "//third_party/snappy:snappy-1.2.2.tar.gz"
+  targets: "//third_party/snappy:src"
 }
 checks {
   name: "tools_build"
   build_system: "buck2"
+  targets: "//tools/build/examples/aws_lc:doc_tree"
   targets: "//tools/build/examples/aws_lc:test_aws_lc"
+  targets: "//tools/build/examples/cshim:add"
+  targets: "//tools/build/examples/cshim:add_files"
+  targets: "//tools/build/examples/cshim:cadd"
   targets: "//tools/build/examples/cshim:cadd_conda"
   targets: "//tools/build/examples/cshim:cadd_user"
+  targets: "//tools/build/examples/cshim:doc_tree"
   targets: "//tools/build/examples/cshim:test_add_direct"
+  targets: "//tools/build/examples/libgate_ok:doc_tree"
+  targets: "//tools/build/examples/libgate_ok:libgate_ok"
   targets: "//tools/build/examples/libgate_ok:libgate_ok_conda"
+  targets: "//tools/build/examples/rust:doc_tree"
   targets: "//tools/build/examples/rust:prost_roundtrip"
+  targets: "//tools/build/examples/s2n_tls:c_srcs"
+  targets: "//tools/build/examples/s2n_tls:doc_tree"
+  targets: "//tools/build/examples/s2n_tls:handshake"
   targets: "//tools/build/examples/s2n_tls:test_s2n_handshake"
+  targets: "//tools/build/examples/shared_lib:c_files"
+  targets: "//tools/build/examples/shared_lib:doc_tree"
+  targets: "//tools/build/examples/shared_lib:forced"
   targets: "//tools/build/examples/shared_lib:plain"
   targets: "//tools/build/examples/shared_lib:plain_exact"
   targets: "//tools/build/examples/shared_lib:spike"
   targets: "//tools/build/examples/shared_lib:spike_exact"
+  targets: "//tools/build/examples/shared_lib_mid:doc_tree"
   targets: "//tools/build/examples/shared_lib_mid:mid"
+  targets: "//tools/build/examples/snappy:doc_tree"
   targets: "//tools/build/examples/snappy:test_snappy"
+  targets: "//tools/build/examples:doc_tree"
+  targets: "//tools/build/examples:hello"
+  targets: "//tools/build/examples:hello_bundle"
   targets: "//tools/build/examples:hello_image"
   targets: "//tools/build/examples:hello_pkg_user"
   targets: "//tools/build/examples:hello_tarball"
+  targets: "//tools/build/examples:hellopkg"
   targets: "//tools/build/examples:hellopkg_conda"
   targets: "//tools/build/examples:test_hellopkg"
+  targets: "//tools/build/inspect:buildtools"
   targets: "//tools/build/inspect:buildtools_conda"
+  targets: "//tools/build/inspect:doc_tree"
+  targets: "//tools/build/inspect:inspect"
+  targets: "//tools/build/lint:actionlint"
+  targets: "//tools/build/lint:actionlint_1.7.12_linux_amd64.tar.gz"
+  targets: "//tools/build/lint:doc_tree"
+  targets: "//tools/build/lint:lint.sh"
   targets: "//tools/build/lint:retired_names.sh"
+  targets: "//tools/build/lint:shell_lint"
+  targets: "//tools/build/lint:shellcheck"
+  targets: "//tools/build/lint:shellcheck-v0.11.0.linux.x86_64.tar.xz"
   targets: "//tools/build/mojo/darwin:busybox.sh"
   targets: "//tools/build/mojo/darwin:cc"
+  targets: "//tools/build/mojo/darwin:doc_tree"
   targets: "//tools/build/mojo/darwin:dyld_prelude.sh"
   targets: "//tools/build/mojo/darwin:host_identity.sh"
   targets: "//tools/build/mojo/darwin:mojo_wrapper.sh"
   targets: "//tools/build/mojo/darwin:shell_lint"
+  targets: "//tools/build/mojo/runtime_paths:doc_tree"
+  targets: "//tools/build/mojo/runtime_paths:komira_runtime_paths"
   targets: "//tools/build/mojo/runtime_paths:komira_runtime_paths_conda"
+  targets: "//tools/build/mojo:conda_unpack.zig"
+  targets: "//tools/build/mojo:doc_tree"
   targets: "//tools/build/mojo:gate_runner.sh"
   targets: "//tools/build/mojo:launch.sh"
   targets: "//tools/build/mojo:mojo_wrapper.sh"
+  targets: "//tools/build/mojo:run_check.sh"
+  targets: "//tools/build/mojo:shell_lint"
+  targets: "//tools/build/mojo:zig_cc_launcher.zig"
+  targets: "//tools/build/package/launcher:doc_tree"
+  targets: "//tools/build/package/launcher:sources"
   targets: "//tools/build/package/manifest_probe:conda_manifest_kci"
+  targets: "//tools/build/package/manifest_probe:doc_tree"
+  targets: "//tools/build/package/manifest_probe:parse_manifest"
+  targets: "//tools/build/package:doc_tree"
   targets: "//tools/build/package:is_linux_x86_64"
   targets: "//tools/build/package:level_test"
   targets: "//tools/build/package:shell_lint"
   targets: "//tools/build/platforms/default:default"
+  targets: "//tools/build/platforms/default:doc_tree"
   targets: "//tools/build/platforms:darwin-arm64"
+  targets: "//tools/build/platforms:doc_tree"
   targets: "//tools/build/platforms:host"
+  targets: "//tools/build/platforms:linux-x86_64"
+  targets: "//tools/build/proto-codegen/aws_endpoint_rules:doc_tree"
+  targets: "//tools/build/proto-codegen/aws_endpoint_rules:endpoint_bindings"
   targets: "//tools/build/proto-codegen/aws_endpoint_rules:endpoint_bindings_conda"
+  targets: "//tools/build/proto-codegen/aws_endpoint_rules:endpoint_bindings_gen"
+  targets: "//tools/build/proto-codegen/aws_query:doc_tree"
+  targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2"
   targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2_conda"
+  targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2_gen"
+  targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_query"
+  targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client"
   targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client_conda"
+  targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client_gen"
   targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_conda"
+  targets: "//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_gen"
+  targets: "//tools/build/proto-codegen/aws_query:tiny_ec2.json"
+  targets: "//tools/build/proto-codegen/aws_query:tiny_query.json"
+  targets: "//tools/build/proto-codegen/aws_rest_json:doc_tree"
+  targets: "//tools/build/proto-codegen/aws_rest_json:komira_aws_tiny_rest"
   targets: "//tools/build/proto-codegen/aws_rest_json:komira_aws_tiny_rest_conda"
+  targets: "//tools/build/proto-codegen/aws_rest_json:komira_aws_tiny_rest_gen"
+  targets: "//tools/build/proto-codegen/aws_rest_json:tiny_rest_json.json"
+  targets: "//tools/build/proto-codegen/aws_rest_xml:doc_tree"
+  targets: "//tools/build/proto-codegen/aws_rest_xml:komira_aws_tiny_xml"
   targets: "//tools/build/proto-codegen/aws_rest_xml:komira_aws_tiny_xml_conda"
+  targets: "//tools/build/proto-codegen/aws_rest_xml:komira_aws_tiny_xml_gen"
+  targets: "//tools/build/proto-codegen/aws_rest_xml:tiny_rest_xml.json"
+  targets: "//tools/build/proto-codegen/gcp_grpc:doc_tree"
+  targets: "//tools/build/proto-codegen/gcp_grpc:komira_gcp_tiny_grpc"
   targets: "//tools/build/proto-codegen/gcp_grpc:komira_gcp_tiny_grpc_conda"
+  targets: "//tools/build/proto-codegen/gcp_grpc:komira_gcp_tiny_grpc_gen"
+  targets: "//tools/build/proto-codegen/gcp_rest:doc_tree"
+  targets: "//tools/build/proto-codegen/gcp_rest:komira_gcp_nohost_rest"
   targets: "//tools/build/proto-codegen/gcp_rest:komira_gcp_nohost_rest_conda"
+  targets: "//tools/build/proto-codegen/gcp_rest:komira_gcp_nohost_rest_gen"
+  targets: "//tools/build/proto-codegen:aws-client-gen"
+  targets: "//tools/build/proto-codegen:aws-conformance-gen"
   targets: "//tools/build/proto-codegen:aws-model-check"
+  targets: "//tools/build/proto-codegen:aws_conformance_driver"
+  targets: "//tools/build/proto-codegen:aws_conformance_driver_src"
   targets: "//tools/build/proto-codegen:aws_conformance_test"
+  targets: "//tools/build/proto-codegen:db_options"
+  targets: "//tools/build/proto-codegen:doc_tree"
+  targets: "//tools/build/proto-codegen:komira_proto_codegen"
   targets: "//tools/build/proto-codegen:komira_proto_codegen_unit"
+  targets: "//tools/build/proto-codegen:protoc-gen-mojo"
+  targets: "//tools/build/proto-codegen:protoc-gen-mojo-db"
+  targets: "//tools/build/proto-codegen:rest_xml_verdicts"
+  targets: "//tools/build/proto-codegen:xml-equiv-verdicts"
   targets: "//tools/build/proto-codegen:xml_equiv_verdicts_test"
+  targets: "//tools/build/rust:doc_tree"
+  targets: "//tools/build/rust:rustc_wrapper.sh"
+  targets: "//tools/build/rust:shell_lint"
+  targets: "//tools/build/rust:test_runner.sh"
+  targets: "//tools/build/third_party_srcs:aws-lc-mini.tar.gz"
   targets: "//tools/build/third_party_srcs:aws_lc_mini_drift"
+  targets: "//tools/build/third_party_srcs:aws_lc_mini_gen"
+  targets: "//tools/build/third_party_srcs:doc_tree"
+  targets: "//tools/build/third_party_srcs:gen"
+  targets: "//tools/build/third_party_srcs:s2n-mini.tar.gz"
   targets: "//tools/build/third_party_srcs:s2n_mini_drift"
+  targets: "//tools/build/third_party_srcs:s2n_mini_gen"
   targets: "//tools/build/third_party_srcs:shell_lint"
+  targets: "//tools/build/toolchains/darwin:doc_tree"
   targets: "//tools/build/toolchains/darwin:mojo_compiler_1.0.0_osx-arm64.conda"
+  targets: "//tools/build/toolchains/proto:doc_tree"
+  targets: "//tools/build/toolchains/proto:protoc"
+  targets: "//tools/build/toolchains/proto:protoc-29.1-linux-x86_64.zip"
+  targets: "//tools/build/toolchains/rust:doc_tree"
+  targets: "//tools/build/toolchains/rust:libzlib_1.3.1_linux-64.conda"
+  targets: "//tools/build/toolchains/rust:rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz"
+  targets: "//tools/build/toolchains/rust:rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz"
+  targets: "//tools/build/toolchains/rust:rustc_libs"
+  targets: "//tools/build/toolchains/rust:sysroot"
+  targets: "//tools/build/toolchains:busybox"
+  targets: "//tools/build/toolchains:conda_unpack"
+  targets: "//tools/build/toolchains:distroless_base"
+  targets: "//tools/build/toolchains:distroless_base_config"
+  targets: "//tools/build/toolchains:distroless_base_layer_0"
+  targets: "//tools/build/toolchains:distroless_base_layer_1"
+  targets: "//tools/build/toolchains:distroless_base_layer_10"
+  targets: "//tools/build/toolchains:distroless_base_layer_11"
+  targets: "//tools/build/toolchains:distroless_base_layer_12"
+  targets: "//tools/build/toolchains:distroless_base_layer_13"
+  targets: "//tools/build/toolchains:distroless_base_layer_2"
+  targets: "//tools/build/toolchains:distroless_base_layer_3"
+  targets: "//tools/build/toolchains:distroless_base_layer_4"
+  targets: "//tools/build/toolchains:distroless_base_layer_5"
+  targets: "//tools/build/toolchains:distroless_base_layer_6"
+  targets: "//tools/build/toolchains:distroless_base_layer_7"
+  targets: "//tools/build/toolchains:distroless_base_layer_8"
+  targets: "//tools/build/toolchains:distroless_base_layer_9"
+  targets: "//tools/build/toolchains:doc_tree"
+  targets: "//tools/build/toolchains:libcxx"
+  targets: "//tools/build/toolchains:libgcc_15.3.0_linux-64.conda"
+  targets: "//tools/build/toolchains:libstdcxx_15.3.0_linux-64.conda"
+  targets: "//tools/build/toolchains:mojo_compiler"
+  targets: "//tools/build/toolchains:mojo_compiler_1.0.0_linux-64.conda"
   targets: "//tools/build/toolchains:mojo_runtime"
+  targets: "//tools/build/toolchains:zig"
+  targets: "//tools/build/toolchains:zig_cc_launcher"
+  targets: "//tools/build/toolchains:zig_linux_x86_64.tar.xz"
 }
 checks {
   name: "tools_core_split"
   build_system: "buck2"
+  targets: "//tools/core_split/fixture:doc_tree"
   targets: "//tools/core_split/fixture:mixed"
+  targets: "//tools/core_split/fixture:new"
+  targets: "//tools/core_split/fixture:old"
   targets: "//tools/core_split/fixture:old_alone"
   targets: "//tools/core_split:core_frozen"
+  targets: "//tools/core_split:doc_tree"
   targets: "//tools/core_split:libc_frozen"
   targets: "//tools/core_split:libc_map_total"
   targets: "//tools/core_split:map_total"
   targets: "//tools/core_split:shell_lint"
 }
 checks {
+  name: "kci_artifact_proto"
+  build_system: "buck2"
+  targets: "//src/kci_artifact_proto:doc_tree"
+  targets: "//src/kci_artifact_proto:kci_artifact_proto"
+}
+checks {
+  name: "komira_broker_proto"
+  build_system: "buck2"
+  targets: "//src/komira_broker_proto:doc_tree"
+  targets: "//src/komira_broker_proto:komira_broker_proto"
+}
+checks {
+  name: "komira_encoding_package"
+  build_system: "buck2"
+  targets: "//src/komira_encoding:doc_tree"
+  targets: "//src/komira_encoding:komira_encoding"
+}
+checks {
+  name: "komira_hash"
+  build_system: "buck2"
+  targets: "//src/komira_hash:doc_tree"
+  targets: "//src/komira_hash:komira_hash"
+  targets: "//src/komira_hash:komira_hash_conda"
+}
+checks {
+  name: "komira_plan_proto"
+  build_system: "buck2"
+  targets: "//src/komira_plan_proto:doc_tree"
+  targets: "//src/komira_plan_proto:komira_plan_proto"
+}
+checks {
+  name: "komira_supervisor_proto"
+  build_system: "buck2"
+  targets: "//src/komira_supervisor_proto:doc_tree"
+  targets: "//src/komira_supervisor_proto:komira_supervisor_proto"
+}
+checks {
+  name: "tools_vendor"
+  build_system: "buck2"
+  targets: "//tools/vendor/googleapis:api_http"
+  targets: "//tools/vendor/googleapis:doc_tree"
+  targets: "//tools/vendor/googleapis:googleapis"
+  targets: "//tools/vendor/googleapis:googleapis.tar.gz"
+  targets: "//tools/vendor/googleapis:logging_v2"
+  targets: "//tools/vendor/googleapis:proto_check.sh"
+  targets: "//tools/vendor/googleapis:proto_check_accepts"
+  targets: "//tools/vendor/googleapis:proto_check_refuses_missing_import"
+  targets: "//tools/vendor/googleapis:proto_check_refuses_unused_file"
+  targets: "//tools/vendor/googleapis:proto_check_refuses_vendored_wkt"
+  targets: "//tools/vendor/googleapis:proto_check_selftest"
+  targets: "//tools/vendor/googleapis:shell_lint"
+  targets: "//tools/vendor/googleapis:storage_v2"
+}
+checks {
   name: "functional_tests"
   build_system: "buck2"
+  targets: "tests//functional/aws_client_mode:doc_tree"
+  targets: "tests//functional/aws_client_mode:komira_aws_logs_client"
   targets: "tests//functional/aws_client_mode:komira_aws_logs_client_conda"
+  targets: "tests//functional/aws_client_mode:komira_aws_logs_client_gen"
   targets: "tests//functional/aws_client_mode:komira_aws_logs_client_send_surface"
   targets: "tests//functional/aws_client_mode:komira_aws_logs_client_tests"
+  targets: "tests//functional/aws_codegen:aws_codegen.sh"
+  targets: "tests//functional/aws_codegen:doc_tree"
   targets: "tests//functional/aws_codegen:ec2_pure"
   targets: "tests//functional/aws_codegen:logs_client"
   targets: "tests//functional/aws_codegen:logs_client_golden"
@@ -441,6 +1562,7 @@ checks {
   targets: "tests//functional/aws_codegen:refuse_uppercase_sha256"
   targets: "tests//functional/aws_codegen:refuse_wrong_sha256"
   targets: "tests//functional/aws_codegen:restxml_pure"
+  targets: "tests//functional/aws_codegen:shell_lint"
   targets: "tests//functional/aws_codegen:tiny_ec2_pure_scoped"
   targets: "tests//functional/aws_codegen:tiny_ec2_pure_tests"
   targets: "tests//functional/aws_codegen:tiny_query_client_scoped"
@@ -452,29 +1574,58 @@ checks {
   targets: "tests//functional/aws_codegen:tiny_rest_json_pure_tests"
   targets: "tests//functional/aws_codegen:tiny_rest_xml_pure_scoped"
   targets: "tests//functional/aws_codegen:tiny_rest_xml_pure_tests"
+  targets: "tests//functional/bundle_parity:doc_tree"
   targets: "tests//functional/bundle_parity:parity"
+  targets: "tests//functional/bundle_parity:parity.sh"
+  targets: "tests//functional/bundle_parity:probe"
+  targets: "tests//functional/bundle_parity:probe_bundle"
+  targets: "tests//functional/bundle_parity:shell_lint"
   targets: "tests//functional/c_deps:c_linked"
+  targets: "tests//functional/c_deps:doc_tree"
+  targets: "tests//functional/darwin:doc_tree"
+  targets: "tests//functional/darwin:shell_lint"
+  targets: "tests//functional/doc_links:doc_tree"
   targets: "tests//functional/doc_links:ok"
+  targets: "tests//functional/formats:doc_tree"
+  targets: "tests//functional/formats:long_bundle"
   targets: "tests//functional/formats:long_image"
   targets: "tests//functional/formats:long_tarball"
+  targets: "tests//functional/location_path:doc_tree"
   targets: "tests//functional/location_path:main"
+  targets: "tests//functional/mojo_aws_client:doc_tree"
+  targets: "tests//functional/mojo_aws_client:komira_aws_core"
   targets: "tests//functional/mojo_aws_client:komira_aws_core_conda"
+  targets: "tests//functional/mojo_aws_client:komira_aws_logs"
   targets: "tests//functional/mojo_aws_client:komira_aws_logs_conda"
+  targets: "tests//functional/mojo_aws_client:komira_aws_logs_gen"
+  targets: "tests//functional/mojo_aws_client:komira_aws_logs_hand"
   targets: "tests//functional/mojo_aws_client:komira_aws_logs_hand_conda"
+  targets: "tests//functional/mojo_aws_client:komira_aws_logs_hand_gen"
   targets: "tests//functional/mojo_aws_client:komira_aws_logs_hand_scoped"
   targets: "tests//functional/mojo_aws_client:komira_aws_logs_hand_tests"
   targets: "tests//functional/mojo_aws_client:komira_aws_logs_scoped"
   targets: "tests//functional/mojo_aws_client:komira_aws_logs_tests"
+  targets: "tests//functional/mojo_aws_client:komira_http_client"
   targets: "tests//functional/mojo_aws_client:komira_http_client_conda"
+  targets: "tests//functional/mojo_aws_client:komira_http_core"
   targets: "tests//functional/mojo_aws_client:komira_http_core_conda"
+  targets: "tests//functional/mojo_aws_client:komira_json"
   targets: "tests//functional/mojo_aws_client:komira_json_conda"
+  targets: "tests//functional/mojo_aws_client:komira_retry"
   targets: "tests//functional/mojo_aws_client:komira_retry_conda"
+  targets: "tests//functional/mojo_gcp_client:doc_tree"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_nohost_rest_service"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_nohost_rest_tests"
+  targets: "tests//functional/mojo_gcp_client:komira_gcp_shop"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_conda"
+  targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_gen"
+  targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_grpc_messages"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_grpc_messages_conda"
+  targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_grpc_messages_gen"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_grpc_messages_scoped"
+  targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_roots"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_roots_conda"
+  targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_roots_gen"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_roots_scoped"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_roots_tests"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_shop_scoped"
@@ -482,22 +1633,94 @@ checks {
   targets: "tests//functional/mojo_gcp_client:komira_gcp_tiny_grpc_service"
   targets: "tests//functional/mojo_gcp_client:komira_gcp_tiny_grpc_tests"
   targets: "tests//functional/mojo_gcp_client:shop_api"
+  targets: "tests//functional/mojo_gcp_client:shop_deps"
   targets: "tests//functional/mojo_gcp_client:watch_api"
   targets: "tests//functional/opt_level:bin_o1"
+  targets: "tests//functional/opt_level:doc_tree"
+  targets: "tests//functional/opt_level:lib_o3"
   targets: "tests//functional/opt_level:lib_o3_conda"
   targets: "tests//functional/opt_level:test_o3"
+  targets: "tests//functional/platform_table:doc_tree"
+  targets: "tests//functional/platform_table:shell_lint"
+  targets: "tests//functional/proto:doc_tree"
+  targets: "tests//functional/proto:komira_db"
   targets: "tests//functional/proto:komira_db_conda"
+  targets: "tests//functional/proto:komira_proto_codec"
   targets: "tests//functional/proto:komira_proto_codec_conda"
+  targets: "tests//functional/proto:person_proto"
   targets: "tests//functional/proto:roster_proto"
+  targets: "tests//functional/proto:tasks_db"
+  targets: "tests//functional/proto:team_proto"
   targets: "tests//functional/proto:test_person"
   targets: "tests//functional/proto:test_tasks_db"
   targets: "tests//functional/proto:test_team"
   targets: "tests//functional/proto_codegen:all"
+  targets: "tests//functional/proto_codegen:doc_tree"
+  targets: "tests//functional/proto_codegen:everything"
+  targets: "tests//functional/proto_codegen:fq_method"
+  targets: "tests//functional/proto_codegen:fq_root"
+  targets: "tests//functional/proto_codegen:fq_root_is_exact"
+  targets: "tests//functional/proto_codegen:layout_probe"
+  targets: "tests//functional/proto_codegen:logging_rest"
+  targets: "tests//functional/proto_codegen:logging_rest_gcp"
+  targets: "tests//functional/proto_codegen:messages_only"
+  targets: "tests//functional/proto_codegen:nested_map_entry_pruned"
+  targets: "tests//functional/proto_codegen:one_method"
+  targets: "tests//functional/proto_codegen:one_method_messages_only"
+  targets: "tests//functional/proto_codegen:one_method_messages_only_false"
+  targets: "tests//functional/proto_codegen:refuse_ambiguous_method"
+  targets: "tests//functional/proto_codegen:refuse_ambiguous_root"
+  targets: "tests//functional/proto_codegen:refuse_bare_flag"
+  targets: "tests//functional/proto_codegen:refuse_comma_list"
+  targets: "tests//functional/proto_codegen:refuse_db_gcp"
+  targets: "tests//functional/proto_codegen:refuse_db_layout_probe"
+  targets: "tests//functional/proto_codegen:refuse_db_messages_only"
+  targets: "tests//functional/proto_codegen:refuse_db_methods"
+  targets: "tests//functional/proto_codegen:refuse_db_roots"
+  targets: "tests//functional/proto_codegen:refuse_dotted_suffix"
+  targets: "tests//functional/proto_codegen:refuse_empty_item"
+  targets: "tests//functional/proto_codegen:refuse_empty_token"
+  targets: "tests//functional/proto_codegen:refuse_empty_value"
+  targets: "tests//functional/proto_codegen:refuse_gcp_connect"
+  targets: "tests//functional/proto_codegen:refuse_non_boolean"
+  targets: "tests//functional/proto_codegen:refuse_partial_name"
+  targets: "tests//functional/proto_codegen:refuse_repeated_key"
+  targets: "tests//functional/proto_codegen:refuse_rest_bare_wildcard"
+  targets: "tests//functional/proto_codegen:refuse_rest_bytes_in_url"
+  targets: "tests//functional/proto_codegen:refuse_rest_captured_twice"
   targets: "tests//functional/proto_codegen:refuse_rest_default_host_with_port"
+  targets: "tests//functional/proto_codegen:refuse_rest_dotted_field"
+  targets: "tests//functional/proto_codegen:refuse_rest_double_star_not_last"
+  targets: "tests//functional/proto_codegen:refuse_rest_double_star_not_last_in_pattern"
+  targets: "tests//functional/proto_codegen:refuse_rest_empty_pattern_segment"
+  targets: "tests//functional/proto_codegen:refuse_rest_empty_verb"
+  targets: "tests//functional/proto_codegen:refuse_rest_nested_braces"
+  targets: "tests//functional/proto_codegen:refuse_rest_pattern_not_unreserved"
+  targets: "tests//functional/proto_codegen:refuse_rest_repeated_path_var"
   targets: "tests//functional/proto_codegen:refuse_rest_streaming_method_listed"
+  targets: "tests//functional/proto_codegen:refuse_rest_unannotated_kept_method"
+  targets: "tests//functional/proto_codegen:refuse_rest_unbalanced_brace"
+  targets: "tests//functional/proto_codegen:refuse_rest_unclosed_brace"
+  targets: "tests//functional/proto_codegen:refuse_rest_verb_with_slash"
+  targets: "tests//functional/proto_codegen:refuse_ungenerated_reach"
+  targets: "tests//functional/proto_codegen:refuse_unknown_key"
+  targets: "tests//functional/proto_codegen:refuse_unknown_method"
+  targets: "tests//functional/proto_codegen:refuse_unknown_root"
+  targets: "tests//functional/proto_codegen:refuse_unreached_file"
+  targets: "tests//functional/proto_codegen:rest_one_method_messages_only"
   targets: "tests//functional/proto_codegen:rest_unary_beside_streaming"
+  targets: "tests//functional/proto_codegen:rest_url"
   targets: "tests//functional/proto_codegen:rest_url_conda"
+  targets: "tests//functional/proto_codegen:rest_url_helpers_src"
+  targets: "tests//functional/proto_codegen:shapes_rest"
+  targets: "tests//functional/proto_codegen:tiny_grpc_gcp"
+  targets: "tests//functional/proto_codegen:tiny_grpc_gcp_golden"
+  targets: "tests//functional/proto_codegen:two_methods"
+  targets: "tests//functional/proto_codegen:two_roots"
+  targets: "tests//functional/proto_codegen:wkt_rest"
+  targets: "tests//functional/runtime_libs:doc_tree"
   targets: "tests//functional/runtime_libs:loader_trace"
+  targets: "tests//functional/s2n_probes:doc_tree"
   targets: "tests//functional/s2n_probes:probe_S2N_ATOMIC_SUPPORTED"
   targets: "tests//functional/s2n_probes:probe_S2N_CLOEXEC_SUPPORTED"
   targets: "tests//functional/s2n_probes:probe_S2N_CLOEXEC_XOPEN_SUPPORTED"
@@ -522,8 +1745,13 @@ checks {
   targets: "tests//functional/s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_X509_STORE_LIST"
   targets: "tests//functional/s2n_probes:probe_S2N_LINUX_SENDFILE"
   targets: "tests//functional/s2n_probes:probe_S2N_MADVISE_SUPPORTED"
+  targets: "tests//functional/test_data:declared"
   targets: "tests//functional/test_data:declared_conda"
+  targets: "tests//functional/test_data:doc_tree"
   targets: "tests//functional/test_data:mojo_test_data"
   targets: "tests//functional/test_data:runner_cases"
+  targets: "tests//functional/test_data:shell_lint"
   targets: "tests//functional/watchdog:cases"
+  targets: "tests//functional/watchdog:doc_tree"
+  targets: "tests//functional/watchdog:shell_lint"
 }

@@ -4,17 +4,18 @@
   python3 release/ci/unit_census.py --check   # exit 1 when it is not current
 
 The per-change check (`kci run --stage pr --affected-by <base>`) builds units
-of release/artifacts.textproto: artifacts and checks, each naming targets. A target that is in no unit's dependency closure would never
-be built by the check. The census is the set of targets whose closures cover
-everything: every ROOT of the universe (a target no other target of the
-universe depends on) and every test target (`buck2 test` runs it, so building
-it as a dependency is not enough).
+of release/artifacts.textproto: artifacts and checks, each naming targets. The
+census is EVERY target of the universe, each of which some unit must name.
+Naming a target that depends on it is not enough: buck2 builds only the
+outputs a dependent consumes, so a library's conda package does not build
+the library's own default output, and with it the library's welded tests
+(`buck2 build <lib>_conda` passes while `<lib>`'s tests fail). A unit that
+names the target builds what `./buck2 build //...` builds for it.
 
 The universe is `//...` and `tests//functional/...` (what `./buck2 build //...`
 and `./buck2 build tests//functional/...` build), configured for the default
 target platform, as `buck2 cquery` sees it: a target incompatible with that
-platform is not in it. The edges are every dependency `cquery deps(_, 1)`
-follows (exec and toolchain deps included), compared by unconfigured label.
+platform is not in it.
 
 The welded test src/kci_artifact/tests/test_release_artifacts_file.mojo
 holds release/artifacts.textproto to the census: every census target is a
@@ -35,15 +36,12 @@ UNIVERSE = ["//...", "tests//functional/..."]
 CENSUS = "release/unit_census.txt"
 HEADER = """\
 # The unit census (release/ci/unit_census.py, which says what it is): every
-# target of release/artifacts.textproto's universe that some unit must name.
+# target of release/artifacts.textproto's universe: some unit names each one.
 # Generated: run `python3 release/ci/unit_census.py --write` after a BUCK
 # change; `--check` (the pr job of .github/workflows/kci.yml) fails while this
 # file is not current, and the welded test of release/artifacts.textproto
 # fails while a target here is in no unit.
 """
-
-_EDGE = re.compile(r'^\s*"([^"]+)" -> "([^"]+)"')
-
 
 def _label(configured):
     """`komira//a:b (cfg)` -> `//a:b`; `tests//a:b (cfg)` -> `tests//a:b`."""
@@ -62,28 +60,31 @@ def _buck2(args):
 
 
 def census():
-    """The census, from the live graph: sorted labels."""
+    """The census, from the live graph: every target of the universe, sorted."""
     expr = " + ".join(UNIVERSE)
     universe = {_label(l) for l in _buck2(["cquery", expr]).splitlines() if l.strip()}
-    tests = {_label(l) for l in _buck2(["cquery", 'kind("test", %s)' % expr]).splitlines() if l.strip()}
-    depended = set()
-    for line in _buck2(["cquery", "deps(%s, 1)" % expr, "--output-format", "dot"]).splitlines():
-        m = _EDGE.match(line)
-        if m:
-            a, b = _label(m.group(1)), _label(m.group(2))
-            if a != b:
-                depended.add(b)
     if not universe:
         raise SystemExit("unit_census.py: the universe is empty; the census cannot be empty")
-    return sorted((universe - depended) | (tests & universe))
+    return sorted(universe)
 
 
-def check_name(label):
+ARTIFACTS = "release/artifacts.textproto"
+
+
+def artifact_names(path=ARTIFACTS):
+    """The artifacts' names: checks share their name space."""
+    if not os.path.exists(path):
+        return set()
+    return set(re.findall(r'(?m)^artifacts \{\s*name: "([^"]+)"', open(path).read()))
+
+
+def check_name(label, artifacts=frozenset()):
     """The check a target maps to (release/artifacts.textproto's grouping):
     `//src/<p>/...` -> `<p>` (one check per library package), the root
     package -> `repo_root`, `//tools/<t>/...` -> `tools_<t>`, any other
     `//<d>/...` -> `<d>`, the tests cell -> `functional_tests`; `-` and `.`
-    become `_`."""
+    become `_`. A name an artifact holds gets `_package` (the rest of that
+    artifact's package): artifacts and checks are one name space."""
     cell, _, rest = label.partition("//")
     if cell == "tests":
         return "functional_tests"
@@ -96,7 +97,10 @@ def check_name(label):
         name = "tools_" + parts[1]
     else:
         name = parts[0]
-    return re.sub(r"[.-]", "_", name)
+    name = re.sub(r"[.-]", "_", name)
+    if name in artifacts:
+        name += "_package"
+    return name
 
 
 def _read(path):
@@ -118,8 +122,9 @@ def main(argv):
     old = _read(CENSUS) if os.path.exists(CENSUS) else []
     added = sorted(set(now) - set(old))
     gone = sorted(set(old) - set(now))
+    arts = artifact_names()
     for lab in added:
-        print("NEW %s (its unit: the check %s)" % (lab, check_name(lab)))
+        print("NEW %s (its unit: the check %s)" % (lab, check_name(lab, arts)))
     for lab in gone:
         print("GONE %s" % lab)
     if added or gone:
