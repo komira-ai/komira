@@ -150,11 +150,20 @@ fields of a stage carry what the CI workflow must agree with:
 |---|---|
 | `stage.environment` | the GitHub environment the stage's job runs in (default: the stage's name). A trusted-publishing channel's push identity must name it, or kci refuses the publish. |
 | `stage.farm_connected` | the stage's job joins the build farm's tailnet (the `farm-connect` action), which needs the job's ID token. A farm-connected stage may not publish: the job that holds a tailnet node never holds a publishing token. |
-| `step.validation` | a check of what a PUBLISH step published, by kind (`CONDA_INSTALL_SMOKE`, in a container: `image` pinned by digest, `install` (repeated), `compiler_channel`, `extra_channel`, `program` under `release/`, `wait_for_index_seconds`; `CONDA_INSTALL_ENV`, on the machine that runs kci with no container: the same fields without `image` and `program`, since it runs each installed library's README examples, and `kci run` takes `--pixi` and `--pixi-sha256`). A FULL run runs it after its step; `--only validation:<name>` runs it alone against what is published; `--only step:<name>` runs the step without it. A failure is exit 7. The one case that is not a failure: a `CONDA_INSTALL_ENV` validation that finds no network at all (no declared host answers) is `INDETERMINATE`, exit 5, never a pass, with a `skip_reason`. |
+| `step.validation` | a check of what a PUBLISH step published, by kind (`CONDA_INSTALL_SMOKE`: `image` pinned by digest, `install` (repeated), `compiler_channel`, `extra_channel`, `program` under `release/`, `wait_for_index_seconds`). A FULL run runs it after its step; `--only validation:<name>` runs it alone against what is published; `--only step:<name>` runs the step without it. A failure is exit 7, never a skip. |
 
 The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this
 file by `kci run` itself at start-up under GitHub Actions and by a welded test
 ([docs/ci.md](../ci.md#kciyml-the-release)).
+
+A second validation kind, `CONDA_INSTALL_ENV`, runs on the machine that runs
+kci, with no container. It takes the same fields as `CONDA_INSTALL_SMOKE`
+except `image` and `program`: what it runs is each installed library's README
+examples (`share/doc/<name>/README.md`, whose bytes the release pins). `kci
+run` then takes `--pixi` and `--pixi-sha256`, the pinned pixi and its sha256.
+Its one result that is not a pass or a failure: when no declared host answers
+at all (no network), the validation is `INDETERMINATE`, exit 5, never a pass,
+and its row carries a `skip_reason`.
 
 ## Where is the code?
 
