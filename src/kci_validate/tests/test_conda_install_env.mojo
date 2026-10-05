@@ -17,7 +17,8 @@
 #   runs with RunSpec.cwd = the scratch work dir, the cleared environment
 #   and the pixi link; a scratch dir inside the checkout (also through a
 #   link) and a system-wide pixi config are refused; the pixi pin; the
-#   environment must be under the scratch dir; the README refusals (no
+#   environment must be under the scratch dir (absent, or reached
+#   through a linked .pixi/envs); the README refusals (no
 #   README, other bytes, no example, no library); --plan runs nothing.
 #
 # Hermetic: TEST_TMPDIR, kci_publish's ExampleRelease (komira_alpha with a
@@ -29,7 +30,7 @@ from std.os import getenv, makedirs, setenv, symlink
 from std.os.path import exists
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_build import ScriptedRunner, ScriptedStep
+from kci_build import ProcessRunner, RunResult, RunSpec, ScriptedRunner, ScriptedStep
 from kci_api import (
     OUTCOME_INDETERMINATE,
     OUTCOME_SUCCEEDED,
@@ -560,6 +561,56 @@ def test_an_environment_outside_the_work_dir_is_refused() raises:
     _assert_fails_with(row, String("install: the environment is not ") + fx.work() + String("/.pixi/envs/default itself"))
     assert_equal(runner.remaining(), 0)
 
+
+struct _EnvsLinkedAway(ProcessRunner):
+    """Plays a system `detached-environments`: after the scripted install,
+    `<w>/.pixi/envs` is a symlink to a directory outside `<w>`, as pixi
+    leaves it. Every run is otherwise the ScriptedRunner's.
+
+    Layout: owned values only. No pointer field."""
+
+    var inner: ScriptedRunner
+    var away: String
+    var linked: Bool
+
+    def __init__(out self, var inner: ScriptedRunner, var away: String):
+        self.inner = inner^
+        self.away = away^
+        self.linked = False
+
+    def run(mut self, spec: RunSpec) raises -> RunResult:
+        var r = self.inner.run(spec)
+        if not self.linked:
+            self.linked = True
+            makedirs(spec.cwd + String("/.pixi"), exist_ok=True)
+            symlink(self.away, spec.cwd + String("/.pixi/envs"))
+        return r^
+
+
+def test_an_environment_reached_through_a_linked_envs_dir_is_refused() raises:
+    # A complete, valid environment, but in a directory outside <w> that
+    # <w>/.pixi/envs links to: read-back would follow the link, so it is
+    # refused before anything is read.
+    var fx = Fixture(String("envlinked"))
+    var away = fx.root + String("/detached")
+    var i = Install(fx)
+    var step = ScriptedStep(install_env_argv(fx.work()), stderr_text=String("installed\n"))
+    for k in range(len(i.records)):
+        step.writes(away + String("/default/conda-meta/") + i.records[k], i.record_texts[k])
+    step.writes(away + String("/default/share/doc/komira_alpha/README.md"), i.readme.copy())
+    step.writes(away + String("/default/lib/mojo/komira_alpha.mojoc"), i.payload.copy())
+    var scripted = ScriptedRunner()
+    scripted.expect(step^)
+    _expect_run(scripted, fx)
+    var runner = _EnvsLinkedAway(scripted^, away.copy())
+    var t = _good_channel(fx)
+    var sl = NoWaitSleeper()
+    var log = RecordingIndexPollLog()
+    var row = run_install_env(runner, t, sl, log, fx.req, fx.host)
+    assert_true(runner.linked)
+    _assert_fails_with(row, String("install: the environment is not ") + fx.work() + String("/.pixi/envs/default itself"))
+    assert_equal(len(runner.inner.calls), 1)
+    assert_false(exists(fx.work() + String("/out/payload.komira_alpha")))
 
 def test_a_record_from_an_undeclared_channel() raises:
     var fx = Fixture(String("case7"))
