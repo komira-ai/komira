@@ -10,6 +10,10 @@ module runs against them unchanged.
     no public ingress); the offline proof that a graph a cloud cannot
     host is refused before anything is created.
 
+`FakeCloud` takes a provider shape (`ProviderShape`: generic by default;
+`aws`, `gcp` and `azure` are the shaped fakes), the per-cloud table of roles
+and provider kinds each catalog type lowers to.
+
 Both lower to data (the complete fixed set of roles of each type), realize
 one node type (`FakeNode`), deploy into a `FakeStore` (state, labels as
 written, a failed flag per node, unmodelled values and a call log), honour
@@ -25,3 +29,4 @@ create meet a second apply's object.
 from kci_cloud_fake.fake_store import FakeStore, FakeView
 from kci_cloud_fake.nodes import FakeNode, fake_host, fake_url, static_digest
 from kci_cloud_fake.clouds import FakeLimitedCloud, FakeCloud
+from kci_cloud_fake.shapes import ProviderShape, ShapeRow
