@@ -29,11 +29,14 @@
 #   Accuracy across the small-range hand-over:
 #    10. n = 5,000 .. 20,000 step 1,000 over 64 independent hash streams:
 #        |mean relative error| <= 0.75% and rms <= 2.0% at every n
+#   Accuracy at the top of the range (registers at 53, the tau term):
+#    10a. n = 8e18 over 1024 register histograms drawn from the register
+#        distribution: |mean relative error| <= 0.25% and rms <= 2.0%
 #   Determinism:
 #    11. the same input gives the same registers in two sketches
 # =============================================================================
 
-from std.math import sqrt
+from std.math import ceil, log, log2, sqrt
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_collections.hyperloglog import (
@@ -46,6 +49,7 @@ from komira_collections.hyperloglog import (
     hll_hash_float64,
     hll_hash_bytes,
     hll_hash_string,
+    _ertl_tau,
 )
 
 
@@ -200,6 +204,136 @@ def test_estimator_clamps_registers_above_maximum() raises:
     # C[0] = 4086, C[53] = 10: E = 10.012...
     assert_equal(at_max.estimate(), 10)
     assert_equal(above.estimate(), at_max.estimate())
+
+
+# -----------------------------------------------------------------------------
+# Ertl's tau
+# -----------------------------------------------------------------------------
+
+# tau(x) = (1 - x - S(x)) / 3, S(x) = sum_{k>=1} (1 - x^(2^-k))^2 * 2^-k.
+# The estimator evaluates S by repeated square roots. The reference values
+# below were evaluated independently at 60 significant decimal digits as
+# 1 - exp(ln(x) / 2^k) for k = 1 .. 199 (the terms shrink like 8^-k, so the
+# truncated tail is far below Float64 precision), then rounded to 17 digits.
+# Every x is a dyadic rational, so the Float64 argument is exact.
+comptime TAU_REL_TOL: Float64 = 1e-14
+
+
+def _assert_tau_close(x: Float64, expected: Float64) raises:
+    var got = _ertl_tau(x)
+    assert_true(
+        abs(got - expected) <= TAU_REL_TOL * expected,
+        "tau(" + String(x) + ") = " + String(got) + ", expected "
+        + String(expected),
+    )
+
+
+def test_tau_reference_values() raises:
+    assert_equal(_ertl_tau(0.0), 0.0)
+    assert_equal(_ertl_tau(1.0), 0.0)
+    _assert_tau_close(1.0 / 4096.0, 8.6479797214536392e-2)
+    _assert_tau_close(0.25, 1.9996474793204405e-1)
+    _assert_tau_close(0.5, 1.4992949586408809e-1)
+    _assert_tau_close(0.75, 7.9880941437337835e-2)
+    _assert_tau_close(15.0 / 16.0, 2.0640855849779395e-2)
+    # 1 - C[q+1] / m for a single register at q + 1.
+    _assert_tau_close(4095.0 / 4096.0, 8.1377369647284058e-5)
+
+
+def test_tau_functional_equation() raises:
+    # S(s^2) = (1 - s)^2 / 2 + S(s) / 2 (peel off the k = 1 term), which
+    # with the definition of tau gives, for 0 <= s <= 1,
+    #     tau(s^2) = (s * (1 - s) + tau(s)) / 2.
+    # Checked on x = i / 1024, s = sqrt(x); tau is also positive there.
+    # The worst Float64 residual is about 5e-14 relative, near x = 1 where
+    # tau is small.
+    var bad = 0
+    var first = String()
+    for i in range(1, 1024):
+        var x = Float64(i) / 1024.0
+        var s = sqrt(x)
+        var lhs = _ertl_tau(x)
+        var rhs = 0.5 * (s * (1.0 - s) + _ertl_tau(s))
+        if not (lhs > 0.0) or abs(lhs - rhs) > 1e-12 * rhs:
+            if bad == 0:
+                first = (
+                    "x=" + String(x) + " tau=" + String(lhs) + " rhs="
+                    + String(rhs)
+                )
+            bad += 1
+    assert_equal(bad, 0, "tau functional equation fails, first at " + first)
+
+
+# -----------------------------------------------------------------------------
+# Accuracy at the top of the range
+# -----------------------------------------------------------------------------
+
+# Register histograms are drawn directly from the register distribution
+# instead of hashing 8e18 values. Ertl's estimator is built for the
+# Poisson model: with lambda = n / m values per register,
+#     P(register <= k) = exp(-lambda * 2^-k)  for k = 0 .. q,
+#     P(register <= q + 1) = 1,
+# so a uniform u in (0, 1) maps to the smallest such k with
+# exp(-lambda * 2^-k) >= u, k = ceil(log2(lambda / -ln u)) clamped to
+# 0 .. q + 1. At n = 8e18 about 35% of registers sit at q + 1 = 53, the
+# range only the tau term covers. The uniforms come from the splitmix64
+# hash of a counter, so the test is deterministic.
+#
+# Over 1024 sketches the mean relative error has a sampling spread of
+# about 1.6% / sqrt(1024) = 0.05%. With these draws the estimator gives a
+# mean of -0.02% (rms 1.64%). Broken taus measured on the same draws:
+# tau = 0 gives +7.06%; each series term weighted 2^-(k-1) instead of
+# 2^-k gives +0.42%; the series added instead of subtracted gives -0.90%.
+comptime TOP_SKETCHES: Int = 1024
+comptime TOP_N: Float64 = 8.0e18
+comptime TOP_MEAN_BOUND: Float64 = 0.0025
+comptime TOP_RMS_BOUND: Float64 = 0.020
+
+
+def _top_register(lam: Float64, draw: UInt64) -> UInt8:
+    # 53 random bits, shifted off zero so -ln u is finite.
+    var u = (Float64(draw >> UInt64(11)) + 0.5) / 9007199254740992.0
+    var t = -log(u)
+    if lam <= t:
+        return UInt8(0)
+    var k = Int(ceil(log2(lam / t)))
+    return UInt8(max(0, min(k, HLL_HASH_REM_BITS + 1)))
+
+
+def test_accuracy_with_registers_at_maximum() raises:
+    var lam = TOP_N / Float64(HLL_NUM_REGISTERS)
+    var sum_err = 0.0
+    var sum_sq = 0.0
+    var at_max = 0
+    for s in range(TOP_SKETCHES):
+        var hll = HyperLogLog()
+        for i in range(HLL_NUM_REGISTERS):
+            var draw = hll_hash_uint64(
+                (UInt64(s) << UInt64(32)) | UInt64(i)
+            )
+            var r = _top_register(lam, draw)
+            if r == UInt8(HLL_HASH_REM_BITS + 1):
+                at_max += 1
+            hll.set_register(i, r)
+        var err = Float64(hll.estimate()) / TOP_N - 1.0
+        sum_err += err
+        sum_sq += err * err
+    var mean = sum_err / Float64(TOP_SKETCHES)
+    var rms = sqrt(sum_sq / Float64(TOP_SKETCHES))
+    # 1 - exp(-lambda * 2^-52) = 35.2% of registers at 53.
+    var frac_at_max = Float64(at_max) / Float64(
+        TOP_SKETCHES * HLL_NUM_REGISTERS
+    )
+    assert_true(
+        abs(frac_at_max - 0.352) < 0.01,
+        "fraction at 53: " + String(frac_at_max),
+    )
+    assert_true(
+        abs(mean) <= TOP_MEAN_BOUND and rms <= TOP_RMS_BOUND,
+        "n = 8e18: mean relative error " + String(mean * 100.0)
+        + "%, rms " + String(rms * 100.0)
+        + "% (bounds |mean| <= 0.25%, rms <= 2.0%)",
+    )
 
 
 def test_hash_known_answers() raises:
