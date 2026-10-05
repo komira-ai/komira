@@ -23,11 +23,9 @@
 #   * `zlib_compress_bound(src_len, window_bits) -> Int`
 #   * `zlib_skip_stream(src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int`
 #   * the `ZLIB_WINDOW_BITS_*` framing selectors and `ZLIB_LEVEL_DEFAULT`
-#   (Span in, caller-owned Span out; a too-small `dst` is refused), and the
-#   raw-pointer entries they wrap:
-#   * `zlib_inflate_ffi(dst, dst_cap, src, src_size, window_bits=15+32) -> Int`
-#   * `zlib_deflate_ffi(dst, dst_cap, src, src_size, level, window_bits) -> Int`
-#   * `zlib_compress_bound_ffi(src_size, window_bits) -> Int`
+#   (Span in, caller-owned Span out; a too-small `dst` is refused). No public
+#   signature holds a raw pointer: the pointer-taking `_zlib_*_ffi` entries
+#   they wrap are private to `zlib_ffi.mojo`.
 #
 # `window_bits` selects framing:
 #     15 (max)       : zlib wrapper (RFC 1950 — Adler-32 trailer)
@@ -49,7 +47,4 @@ from .zlib_ffi import (
     zlib_deflate_into,
     zlib_inflate_into,
     zlib_skip_stream,
-    zlib_inflate_ffi,
-    zlib_deflate_ffi,
-    zlib_compress_bound_ffi,
 )

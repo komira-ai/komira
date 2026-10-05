@@ -28,14 +28,13 @@
 #     `lz4_decompress_into(dst: Span[mut], src: Span) -> Int`: into a buffer
 #     the caller owns, bytes written back; a too-small `dst` is refused.
 #   No UnsafePointer in ANY of these signatures; the FFI raw pointers are
-#   confined to the `lz4_*_ffi` entries + the output-buffer alloc/free inside
+#   confined to the `_lz4_*_ffi` entries + the output-buffer alloc/free inside
 #   the safe wrappers. Nothing crosses a module boundary except Span/List/Int.
-# RAW-POINTER FFI API (the FFI-BOUNDARY surface a page-level codec dispatch
-# consumes, which itself operates on raw page buffers):
-#   * `lz4_compress_ffi`   / `lz4_decompress_ffi`  (caller-chosen origins,
-#     NOT wildcards; cast to an untracked origin ONLY at the handle.call site)
-#   * `lz4_compress_bound_ffi`
-# INTERNAL FFI (private):
+# INTERNAL FFI (private to this module):
+#   * `_lz4_compress_ffi` / `_lz4_decompress_ffi` take raw pointers with
+#     caller-chosen origins (NOT wildcards), cast to an untracked origin ONLY
+#     at the handle.call site; `_lz4_compress_bound_ffi`. Only the safe
+#     wrappers in this file call them.
 #   * The OwnedDLHandle singleton is a stdlib `_Global` runtime slot; its
 #     `get_or_create_ptr()` returns an untracked-origin pointer into
 #     process-lifetime static storage (NO env var, NO `unsafe_from_address`).
@@ -99,13 +98,12 @@ def _default_lz4_codec_handle() raises -> UnsafePointer[
 
 # -----------------------------------------------------------------------------
 # Raw-pointer FFI wrappers — caller-chosen origins, cast at the call site only.
-# These are the FFI-BOUNDARY surface for a page-level codec dispatch that
-# operates on raw page buffers. General callers use the SAFE Span/List API at
-# the bottom of the file.
+# Private: callers in other modules use the SAFE Span/List API below, which
+# takes these pointers from its Spans locally.
 # -----------------------------------------------------------------------------
 
 
-def lz4_decompress_ffi[
+def _lz4_decompress_ffi[
     sori: Origin, dori: MutOrigin
 ](
     dst: UnsafePointer[UInt8, dori],
@@ -144,7 +142,7 @@ def lz4_decompress_ffi[
     return Int(result)
 
 
-def lz4_compress_ffi[
+def _lz4_compress_ffi[
     sori: Origin, dori: MutOrigin
 ](
     dst: UnsafePointer[UInt8, dori],
@@ -160,7 +158,7 @@ def lz4_compress_ffi[
 
     Returns bytes written. liblz4 returns 0 on insufficient dstCapacity.
 
-    SAFETY: identical contract to `lz4_decompress_ffi`.
+    SAFETY: identical contract to `_lz4_decompress_ffi`.
     """
     var handle_ptr = _default_lz4_codec_handle()
     var result = handle_ptr[].call["LZ4_compress_default", Int32](
@@ -178,7 +176,7 @@ def lz4_compress_ffi[
     return Int(result)
 
 
-def lz4_compress_bound_ffi(src_size: Int) raises -> Int:
+def _lz4_compress_bound_ffi(src_size: Int) raises -> Int:
     """LZ4 maximum compressed size via liblz4's `LZ4_compressBound`.
 
     lz4.h API:
@@ -209,7 +207,7 @@ def lz4_compress_bound(input_len: Int) raises -> Int:
         )
     if input_len == 0:
         return 16  # LZ4_compressBound(0) == 16; keep the math local for 0.
-    return lz4_compress_bound_ffi(input_len)
+    return _lz4_compress_bound_ffi(input_len)
 
 
 def lz4_compress(input: Span[UInt8, _]) raises -> List[UInt8]:
@@ -230,14 +228,14 @@ def lz4_compress(input: Span[UInt8, _]) raises -> List[UInt8]:
     if n == 0:
         return List[UInt8]()
 
-    var cap = lz4_compress_bound_ffi(n)
+    var cap = _lz4_compress_bound_ffi(n)
     var out_buf = alloc[UInt8](cap)
     # SAFETY: `input.unsafe_ptr()` is borrowed for the synchronous FFI call only
     # (the Span's origin keeps the source alive across the call); `out_buf` is
     # this function's local heap scratch. liblz4 retains neither past the call.
     var written: Int
     try:
-        written = lz4_compress_ffi(out_buf, cap, input.unsafe_ptr(), n)
+        written = _lz4_compress_ffi(out_buf, cap, input.unsafe_ptr(), n)
     except e:
         out_buf.free()
         raise e^
@@ -284,7 +282,7 @@ def lz4_decompress(
     # only; `out_buf` is local heap scratch. liblz4 retains neither.
     var written: Int
     try:
-        written = lz4_decompress_ffi(
+        written = _lz4_decompress_ffi(
             out_buf, uncompressed_len, compressed.unsafe_ptr(), n
         )
     except e:
@@ -357,13 +355,13 @@ def lz4_decompress_into[
             # SAFETY: `scratch` and `src` are both alive across this
             # synchronous call (local stack / the Span's concrete origin);
             # liblz4 writes at most 0 bytes and reads exactly `n` from `src`.
-            written = lz4_decompress_ffi(scratch.unsafe_ptr(), 0, src.unsafe_ptr(), n)
+            written = _lz4_decompress_ffi(scratch.unsafe_ptr(), 0, src.unsafe_ptr(), n)
         else:
             # SAFETY: `dst` holds `len(dst) >= cap` writable bytes and `src`
             # holds `n` readable bytes, both kept alive by their Span origins
             # for this synchronous call; liblz4 writes at most `cap` bytes into
             # `dst`, reads at most `n` from `src`, and keeps neither pointer.
-            written = lz4_decompress_ffi(dst.unsafe_ptr(), cap, src.unsafe_ptr(), n)
+            written = _lz4_decompress_ffi(dst.unsafe_ptr(), cap, src.unsafe_ptr(), n)
     except e:
         raise Error(
             "lz4_decompress_into: block is corrupt or decodes to more than "
@@ -405,7 +403,7 @@ def lz4_compress_into[
     # readable bytes, both kept alive by their Span origins for this
     # synchronous call; liblz4 writes at most `cap` bytes, reads exactly `n`
     # (a null `src` is accepted when `n == 0`), and keeps neither pointer.
-    var written = lz4_compress_ffi(dst.unsafe_ptr(), cap, src.unsafe_ptr(), n)
+    var written = _lz4_compress_ffi(dst.unsafe_ptr(), cap, src.unsafe_ptr(), n)
     if written > cap:
         raise Error(
             "lz4_compress_into: liblz4 reported " + String(written)

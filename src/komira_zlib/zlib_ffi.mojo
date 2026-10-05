@@ -31,7 +31,7 @@
 # four I/O fields at known offsets, drives the three libz calls, reads
 # total_out, and returns.
 #
-#   fn zlib_deflate_ffi(
+#   fn _zlib_deflate_ffi(
 #       dst: UnsafePointer[UInt8, dori],
 #       dst_capacity: Int,
 #       src: UnsafePointer[UInt8, sori],
@@ -40,7 +40,7 @@
 #       window_bits: Int32,   # -15 = raw deflate / 15 = zlib / 31 = gzip
 #   ) raises -> Int
 #
-#   fn zlib_compress_bound_ffi(src_size: Int, window_bits: Int32) raises -> Int
+#   fn _zlib_compress_bound_ffi(src_size: Int, window_bits: Int32) raises -> Int
 #
 # The `window_bits` parameter selects framing per libz convention:
 #   * windowBits = 15 (max)        : zlib wrapper (RFC 1950 — Adler-32 trailer)
@@ -55,11 +55,13 @@
 #
 # # Encapsulation discipline
 #
-# Public API:
-#   * `zlib_deflate_ffi` accepts UnsafePointer with CALLER-CHOSEN origins
-#     (Origin / MutOrigin generic params), NOT wildcards, so callers can pass
-#     their own buffers without signature changes.
-# Internal FFI:
+# Public API: the Span entries at the bottom of the file (`zlib_inflate_into`,
+# `zlib_deflate_into`, `zlib_compress_bound`, `zlib_skip_stream`). No public
+# signature holds a raw pointer.
+# Internal FFI (private to this module):
+#   * The `_zlib_*_ffi` entries take UnsafePointer with CALLER-CHOSEN origins
+#     (Origin / MutOrigin generic params), NOT wildcards; only the Span
+#     entries call them, with pointers taken from their Spans.
 #   * The handle singleton is a stdlib `_Global` slot; `get_or_create_ptr()`
 #     returns `MutUntrackedOrigin` into process-lifetime static storage (no env
 #     var, no `unsafe_from_address`) — the documented FFI-BOUNDARY carve-out.
@@ -109,7 +111,7 @@ comptime _Z_DEFAULT_MEM_LEVEL: Int32 = 8  # libz default
 # listed in `_z_stream_set_in_out` and `_z_stream_total_in`.
 comptime _Z_STREAM_BYTES: Int = 112
 
-# `zlib_skip_stream_ffi` scratch: output is discarded, so this is a pure
+# `_zlib_skip_stream_ffi` scratch: output is discarded, so this is a pure
 # throughput/round-count tradeoff and NOT a correctness bound. 64 KiB keeps the
 # resident cost of skipping an arbitrarily large entry constant.
 comptime _SKIP_SCRATCH_BYTES: Int = 64 * 1024
@@ -251,11 +253,11 @@ def _z_stream_set_out(
 
 
 # -----------------------------------------------------------------------------
-# Public FFI wrappers — one-shot calls a codec can delegate to directly.
+# Private FFI wrappers — one-shot libz calls the Span entries delegate to.
 # -----------------------------------------------------------------------------
 
 
-def zlib_deflate_ffi[
+def _zlib_deflate_ffi[
     sori: Origin, dori: MutOrigin
 ](
     dst: UnsafePointer[UInt8, dori],
@@ -336,7 +338,7 @@ def zlib_deflate_ffi[
     return written
 
 
-def zlib_compress_bound_ffi(src_size: Int, window_bits: Int32) raises -> Int:
+def _zlib_compress_bound_ffi(src_size: Int, window_bits: Int32) raises -> Int:
     """Libz `deflateBound` — maximum possible compressed size after a
     `deflateInit2_(...)` with the given `window_bits`.
 
@@ -474,7 +476,7 @@ def _zlib_inflate_once[
     return _InflateOutcome(rc, written, unread, unwritten)
 
 
-def zlib_inflate_ffi[
+def _zlib_inflate_ffi[
     sori: Origin, dori: MutOrigin
 ](
     dst: UnsafePointer[UInt8, dori],
@@ -521,7 +523,7 @@ def zlib_inflate_ffi[
 # -----------------------------------------------------------------------------
 
 
-def zlib_skip_stream_ffi[
+def _zlib_skip_stream_ffi[
     sori: Origin
 ](
     src: UnsafePointer[UInt8, sori],
@@ -540,7 +542,7 @@ def zlib_skip_stream_ffi[
     ★ MEMORY IS BOUNDED AND INDEPENDENT OF THE DECOMPRESSED SIZE. Output goes
     into a fixed `_SKIP_SCRATCH_BYTES` scratch buffer that is re-pointed on every
     iteration, so skipping a 1 GiB blob entry costs 64 KiB resident, not 1 GiB.
-    `zlib_inflate_ffi` cannot serve this role: it is one-shot and needs a `dst`
+    `_zlib_inflate_ffi` cannot serve this role: it is one-shot and needs a `dst`
     at least as large as the decompressed payload, which on a push path is the
     exact resident-memory cost the scan exists to avoid.
 
@@ -550,7 +552,7 @@ def zlib_skip_stream_ffi[
     SAFETY: `src` is caller-owned for the synchronous call; `scratch` is a local
     allocation freed before every return path. libz retains no pointer past
     `inflateEnd`. Origins are cast to an untracked origin only at the call site —
-    the same pattern as `zlib_inflate_ffi` above.
+    the same pattern as `_zlib_inflate_ffi` above.
     """
     var handle_ptr = _default_zlib_ffi_handle()
     var version = handle_ptr[].call[
@@ -657,7 +659,7 @@ def zlib_compress_bound(src_len: Int, window_bits: Int32) raises -> Int:
     under `window_bits` framing (libz's `deflateBound`)."""
     if src_len < 0:
         raise Error("zlib_compress_bound: negative src_len " + String(src_len))
-    return zlib_compress_bound_ffi(src_len, window_bits)
+    return _zlib_compress_bound_ffi(src_len, window_bits)
 
 
 def zlib_deflate_into[
@@ -695,7 +697,7 @@ def zlib_deflate_into[
     # synchronous call; libz writes at most `cap` bytes, reads exactly `n`
     # (a null `next_in` is accepted when `avail_in == 0`), and keeps neither
     # pointer past `deflateEnd`.
-    var written = zlib_deflate_ffi(
+    var written = _zlib_deflate_ffi(
         dst.unsafe_ptr(), cap, src.unsafe_ptr(), n, level, window_bits
     )
     if written > cap:
@@ -796,7 +798,7 @@ def zlib_skip_stream(
     # SAFETY: `src` holds `n` readable bytes, kept alive by its Span origin for
     # this synchronous call; libz reads at most `n` and keeps no pointer past
     # `inflateEnd`.
-    var consumed = zlib_skip_stream_ffi(src.unsafe_ptr(), n, window_bits)
+    var consumed = _zlib_skip_stream_ffi(src.unsafe_ptr(), n, window_bits)
     if consumed > n:
         raise Error(
             "zlib_skip_stream: libz reported " + String(consumed)
