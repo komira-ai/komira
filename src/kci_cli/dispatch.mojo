@@ -49,7 +49,10 @@
 #      expressions and concurrency groups ignore case; kci does not), and a
 #      `GITHUB_REF` that is `refs/heads/main` in another case is REFUSED
 #      (KCI-E-NOT-ON-MAIN) for every stage. A RELEASE run is a `push` to
-#      `refs/heads/main`; any other run is BREAK-GLASS. A stage WITHOUT the
+#      `refs/heads/main`, and is never `--plan` (REFUSED,
+#      KCI-E-PLAN-ON-RELEASE, exit 3: kci on a push is built from main, so
+#      no workflow edit can make a release a dry run); any other run is
+#      BREAK-GLASS. A stage WITHOUT the
 #      machine file's `break_glass` runs only on a release run, whose
 #      revision is `GITHUB_SHA` itself and on `refs/remotes/origin/main`'s
 #      history (a full refname: a tag named `origin/main` does not answer),
@@ -68,9 +71,11 @@
 #      validation: with `--release-set-hash`, the release directory's set
 #      is recomputed (`steps.release_set_hash`) and another hash, or one
 #      that cannot be recomputed, is REFUSED (KCI-E-SET-HASH, exit 3); the
-#      result's `set_hash` is then the recomputed one (kci.yml hands the
-#      validate job's on to prod). Under GitHub Actions the flag is
-#      required (KCI-E-USAGE, exit 2);
+#      result's `set_hash` is then the recomputed one, but NOT on a `--plan`
+#      run, and, for a run that selects validations, only when every one of
+#      them VALIDATED and SUCCEEDED (checked at the run's end): kci.yml hands
+#      the validate job's on to prod, and prod refuses an empty one. Under
+#      GitHub Actions the flag is required (KCI-E-USAGE, exit 2);
 #   5. the RUNNING record (`recorder.begin`) BEFORE the first effect. A
 #      record that cannot be written stops the run FAILED
 #      (KCI-E-RESULT-FILE), nothing done;
@@ -235,6 +240,7 @@ from .start_checks import (
     check_ref_at_start,
     check_set_hash_at_start,
     check_workflow_at_start,
+    keep_set_hash_only_if_validated,
     workflow_path_of,
 )
 from .summary import append_summary, promotion_line, run_summary_markdown
@@ -651,6 +657,8 @@ def _run_stage[S: StageSteps](
                         _say(String("kci: ") + String(e))
                     stopped = True
             result.validations.append(row^)
+    # 4b, at the end: only a validated set is handed on
+    keep_set_hash_only_if_validated(sel, result)
     # 7. the stages after this one: their new names, before their approval
     if outcome == OUTCOME_SUCCEEDED or outcome == OUTCOME_NOOP:
         ahead = _lookahead(cmd, g, stage, steps, result)

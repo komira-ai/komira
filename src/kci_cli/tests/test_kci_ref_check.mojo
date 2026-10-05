@@ -29,7 +29,13 @@
 #   (5) the prod line: `promoted to prod: <names> <build>`, `nothing new`,
 #       `PLAN ONLY`, in the summary and on stderr; a break_glass stage says
 #       none;
-#   (6) not under GitHub Actions no ref is checked.
+#   (6) not under GitHub Actions no ref is checked;
+#   (1b) a push to main is never `--plan` (KCI-E-PLAN-ON-RELEASE, exit 3,
+#       nothing run), whatever the workflow made DRY_RUN; a manual dry run
+#       of main still is one;
+#   (3b) the result's set hash is handed on only by a run that is not
+#       `--plan` and whose every selected validation VALIDATED and
+#       SUCCEEDED (validate's is what prod publishes).
 # =============================================================================
 
 from std.ffi import external_call
@@ -46,9 +52,11 @@ from kci_api import (
     ARTIFACT_UPLOADED,
     OUTCOME_NOOP,
     OUTCOME_SUCCEEDED,
+    OUTCOME_VALIDATION_FAILED,
     ResultArtifact,
     ResultStep,
     ResultValidation,
+    ResultValidationCheck,
     parse_result,
 )
 from kci_api import RunResult as KciRunResult
@@ -90,6 +98,7 @@ struct Fake(StageSteps, Movable):
     var release_refused: Bool
     var publish_outcome: String
     var names: List[String]
+    var validation_outcome: String
 
     def __init__(out self):
         self.calls = List[String]()
@@ -108,6 +117,7 @@ struct Fake(StageSteps, Movable):
         self.names = List[String]()
         self.names.append(String("komira_encoding"))
         self.names.append(String("komira_all"))
+        self.validation_outcome = String(OUTCOME_SUCCEEDED)
 
     def set_env(mut self, name: String, value: String):
         for i in range(len(self.env_names)):
@@ -149,7 +159,17 @@ struct Fake(StageSteps, Movable):
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
         self.calls.append(String("validate ") + req.validation.name)
-        return ResultValidation(req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(), String("WOULD_VALIDATE"), String(""))
+        if req.plan:
+            return ResultValidation(
+                req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(), String("WOULD_VALIDATE"), String("")
+            )
+        var row = ResultValidation(
+            req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(), String("VALIDATED"),
+            self.validation_outcome.copy(),
+        )
+        var ok = self.validation_outcome == String(OUTCOME_SUCCEEDED)
+        row.checks.append(ResultValidationCheck(String("channel"), String("GET answers 200"), String("channel: answered"), ok))
+        return row^
 
     def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
         var r = NewNamesReport(req.stage.copy(), req.step_name.copy(), req.channel.copy())
@@ -200,10 +220,18 @@ comptime _CHANNELS: String = (
 )
 
 
-def _machine(dir: String) raises -> String:
-    """build and gamma break_glass, prod main only: the repository's shape."""
+def _machine(dir: String, validation: Bool = False) raises -> String:
+    """build and gamma break_glass, prod main only: the repository's shape;
+    `validation` declares the validation `install` on gamma's step."""
     var c = dir + String("/c.textproto")
     write_whole_file(c, String(_CHANNELS))
+    var v = String("")
+    if validation:
+        v = String(
+            " validation { name: \"install\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\""
+            " image: \"registry.example.invalid/pixi:1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\""
+            " compiler_channel: \"https://conda.modular.com/max\" program: \"release/smoke/smoke.mojo\" }"
+        )
     var m = dir + String("/machine.textproto")
     write_whole_file(
         m,
@@ -211,7 +239,7 @@ def _machine(dir: String) raises -> String:
         + String("stage { name: \"build\" break_glass: true step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
         + String("stage { name: \"gamma\" after: \"build\" break_glass: true break_glass_environment: \"gamma-breakglass\"")
         + String(" step { name: \"publish\" kind: PUBLISH")
-        + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"gamma\" } }\n")
+        + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"gamma\"") + v + String(" } }\n")
         + String("stage { name: \"prod\" after: \"gamma\" step { name: \"publish\" kind: PUBLISH")
         + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"prod\" } }\n"),
     )
@@ -589,6 +617,78 @@ def test_not_under_actions_no_ref_is_checked() raises:
     assert_equal(kci_main_with(_publish(m, String("prod")), f, rec), 0)
     assert_equal(len(f.asked), 0)
     assert_equal(len(f.calls), 1)
+
+
+# ---- (1b) a release run is never a dry run; (3b) only a validated set is handed on ---------------
+
+
+def test_a_push_to_main_is_never_a_dry_run() raises:
+    # kci on a push is built from main, so no workflow edit (a GITHUB_ENV
+    # write of DRY_RUN, a shell assignment) can make a release run --plan
+    var m = _machine(_root(String("noplan")))
+    for stage in ["prod", "gamma"]:
+        var f = Fake()
+        _actions(f, m, String("refs/heads/main"))
+        var rec = CliRecorder.memory(String(""))
+        assert_equal(kci_main_with(_publish(m, String(stage), "--release-set-hash", _H, "--plan"), f, rec), 3)
+        assert_equal(len(f.calls), 0)
+        assert_equal(len(f.asked), 0)
+        var r = _last(rec)
+        assert_equal(r.error.id, String("KCI-E-PLAN-ON-RELEASE"))
+        assert_true(r.error.message.find(String("a push to main is a release, never a dry run")) >= 0, r.error.message)
+        assert_equal(r.set_hash, String(""))
+    # a manual dry run of main is still a dry run (break-glass, gamma only)
+    var d = Fake()
+    _actions(d, m, String("refs/heads/main"), String("workflow_dispatch"))
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(
+        kci_main_with(_publish(m, String("gamma"), "--release-set-hash", _H, "--plan", "--context", "reason=check"), d, rec2), 0
+    )
+
+
+def _validate_only(m: String, *extra: String) -> List[String]:
+    var a = List[String]()
+    for s in ["run", "--machine"]:
+        a.append(String(s))
+    a.append(m.copy())
+    for s in ["--stage", "gamma", "--revision-id"]:
+        a.append(String(s))
+    a.append(String(_REV))
+    for s in ["--run-id", "gh-7", "--attempt", "1", "--release-dir", "/r", "--only", "validation:install"]:
+        a.append(String(s))
+    for s in ["--scratch-dir", "/s", "--release-set-hash"]:
+        a.append(String(s))
+    a.append(String(_H))
+    for s in extra:
+        a.append(String(s))
+    return a^
+
+
+def test_only_a_validated_run_hands_on_its_set_hash() raises:
+    # kci.yml hands validate's result `set_hash` on to prod: it is there only
+    # when every selected validation ran (not --plan) and SUCCEEDED
+    var m = _machine(_root(String("vhash")), True)
+    var ok = Fake()
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_validate_only(m), ok, rec), 0)
+    assert_equal(_last(rec).set_hash, String(_H))
+    # a dry run validates nothing: no set hash, so prod (given "") refuses
+    var plan = Fake()
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_validate_only(m, "--plan"), plan, rec2), 0)
+    assert_true(_last(rec2).plan)
+    assert_equal(_last(rec2).set_hash, String(""))
+    # a failed validation hands on nothing
+    var bad = Fake()
+    bad.validation_outcome = String(OUTCOME_VALIDATION_FAILED)
+    var rec3 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_validate_only(m, "--summary-file", _root(String("vhash")) + String("/s.md")), bad, rec3), 7)
+    assert_equal(_last(rec3).set_hash, String(""))
+    # a --plan publish recomputes and checks the set, and hands on nothing
+    var pp = Fake()
+    var rec4 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H, "--plan"), pp, rec4), 0)
+    assert_equal(_last(rec4).set_hash, String(""))
 
 
 def main() raises:

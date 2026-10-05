@@ -21,11 +21,14 @@ from kci_api import (
     ERROR_BREAK_GLASS_REASON,
     ERROR_CANNOT_TELL,
     ERROR_NOT_ON_MAIN,
+    ERROR_PLAN_ON_RELEASE,
     ERROR_SET_HASH,
     ERROR_USAGE,
     ERROR_WORKFLOW_MISMATCH,
     OUTCOME_INDETERMINATE,
     OUTCOME_REFUSED,
+    OUTCOME_SUCCEEDED,
+    VALIDATION_VALIDATED,
     WORKFLOW_PATH_PREFIX,
     is_full_commit_id,
     release_platform_dir,
@@ -243,6 +246,15 @@ def check_ref_at_start[S: StageSteps](
             + String(": a manual or break-glass run stops at the last break_glass stage, so nothing is run"),
         )
     if release:
+        # kci on a push is built from main, so nothing a workflow edit does
+        # (a GITHUB_ENV write of DRY_RUN, a shell assignment) can make a
+        # release a dry run whose set prod would then publish uninstalled
+        if cmd.plan:
+            return _refuse(
+                String(OUTCOME_REFUSED), String(ERROR_PLAN_ON_RELEASE),
+                where + String(": a push to main is a release, never a dry run, and this run is --plan (a dry run")
+                + String(" is a manual run that asks for one), so nothing is run"),
+            )
         if cmd.revision_id != sha:
             return _refuse(
                 String(OUTCOME_REFUSED), String(ERROR_NOT_ON_MAIN),
@@ -345,8 +357,26 @@ def check_set_hash_at_start[S: StageSteps](
             String("the release directory recomputes to set hash ") + got + String(", not ") + cmd.release_set_hash
             + String(" (the set this run was handed): these are not the bytes that were built and validated"),
         )
-    result.set_hash = got^
+    # a dry run hands on no set: nothing was published or installed
+    if not cmd.plan:
+        result.set_hash = got^
     return StartVerdict()
+
+
+def keep_set_hash_only_if_validated(sel: Selection, mut result: KciRunResult):
+    """File header, 4b, at the run's end: a run that selects validations
+    keeps its result's `set_hash` only when every selected validation ran
+    (VALIDATED, so not --plan) and SUCCEEDED; else it is "". kci.yml hands
+    validate's `set_hash` on to prod, and prod refuses an empty one."""
+    if len(sel.validations) == 0:
+        return
+    var passed = 0
+    for i in range(len(result.validations)):
+        ref v = result.validations[i]
+        if v.effect == String(VALIDATION_VALIDATED) and v.outcome == String(OUTCOME_SUCCEEDED):
+            passed += 1
+    if passed != len(sel.validations) or len(result.validations) != len(sel.validations):
+        result.set_hash = String("")
 
 
 def _say(line: String):
