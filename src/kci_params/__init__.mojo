@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_params — THE GENERIC MANAGED-APP PARAMETER MECHANISM.
+# kci_params — THE GENERIC APP PARAMETER MECHANISM.
 # =============================================================================
 #
 # One mechanism, THREE consumers that must not depend on each other:
@@ -7,7 +7,7 @@
 #     declaration + supplied values into the argv a revision runs with,
 #   * the APP parses that argv at ONE site at startup, against the SAME
 #     declaration,
-#   * the CONTROL PLANE persists the resulting map OPAQUELY — names and values as
+#   * the DEPLOYMENT STORE persists the resulting map OPAQUELY — names and values as
 #     strings, no arm, enum, column or route per parameter.
 #
 # ZERO deps, by design: a shared contract with a dependency closure is not
