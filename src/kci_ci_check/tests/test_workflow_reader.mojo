@@ -4,7 +4,7 @@
 #   tell" for instead of guessing.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_ci_check import NODE_LIST, NODE_MAP, NODE_SCALAR, read_workflow
 
@@ -85,6 +85,23 @@ def test_reads_the_subset() raises:
     assert_equal(len(psteps), 1)
     assert_equal(d.text(d.child(psteps[0], String("run"))), String("kci run --stage prod"))
     assert_equal(d.kind(d.child(psteps[0], String("run"))), NODE_SCALAR)
+
+
+def test_plain_is_only_the_plain_form() raises:
+    var d = read_workflow(
+        String("a: write\nb: 'write'\nc: \"write\"\nd: |-\n  write\ne: >\n  write\nf: [write, 'write']\n")
+    )
+    assert_true(d.is_plain(d.child(0, String("a")), String("write")))
+    assert_false(d.is_plain(d.child(0, String("a")), String("read")))
+    assert_false(d.is_plain(d.child(0, String("b")), String("write")))
+    assert_false(d.is_plain(d.child(0, String("c")), String("write")))
+    assert_false(d.is_plain(d.child(0, String("d")), String("write")))
+    assert_false(d.is_plain(d.child(0, String("e")), String("write")))
+    var f = d.items(d.child(0, String("f")))
+    assert_true(d.is_plain(f[0], String("write")))
+    assert_false(d.is_plain(f[1], String("write")))
+    assert_false(d.is_plain(d.child(0, String("f")), String("write")))
+    assert_false(d.is_plain(-1, String("write")))
 
 
 def _cannot(text: String, needle: String) raises:

@@ -31,10 +31,13 @@
 #       farm-connected (the farm connection exchanges the job's identity
 #       token for a network credential). Never in the workflow-level
 #       `permissions`, which reach every job. No other job carries it.
-#       A `permissions:` written as a scalar, at either level, is
+#       A `permissions:` written as a scalar, at either level, is a plain
 #       `read-all`: `write-all` grants `id-token: write` with no map entry
 #       naming it, so any other scalar is a disagreement (and counts as
-#       holding the token)
+#       holding the token). The token is read by allow-list: an `id-token`
+#       entry withholds it only as a plain `read` or `none`; any other value
+#       (quoted, a block scalar, a mapping, empty) counts as holding it.
+#       `id-token` is the only permission these rules read.
 #   R5  each job's steps invoke `kci run` exactly once; a job named after a
 #       stage passes `--stage` its own id written literally (a `--stage`
 #       naming another stage, or one that is a variable, is a
@@ -447,18 +450,23 @@ def _triggers(doc: WorkflowDoc, on: Int) -> List[String]:
 
 
 def _id_token_write(doc: WorkflowDoc, perms: Int) -> Bool:
-    """`perms` grants `id-token: write`: the map entry, or the scalar
-    `write-all`, which grants every permission."""
+    """`perms` grants `id-token: write`, read by allow-list: a scalar
+    `permissions:` other than a plain `read-all`, or an `id-token` entry
+    other than a plain `read` or `none` (a quoted or block scalar, a
+    mapping, an empty value: anything else counts as the grant)."""
     if perms >= 0 and doc.kind(perms) == NODE_SCALAR:
-        return doc.text(perms) == String("write-all")
+        return not doc.is_plain(perms, String("read-all"))
     var v = doc.child(perms, String("id-token"))
-    return v >= 0 and doc.kind(v) == NODE_SCALAR and doc.text(v) == String("write")
+    if v < 0:
+        return False
+    return not (doc.is_plain(v, String("read")) or doc.is_plain(v, String("none")))
 
 
 def _check_permissions_form(doc: WorkflowDoc, perms: Int, whose: String, mut findings: List[String]):
-    """R4: a `permissions:` that is a scalar is `read-all`; any other
-    scalar (`write-all` above all) grants permissions no map names."""
-    if perms < 0 or doc.kind(perms) != NODE_SCALAR or doc.text(perms) == String("read-all"):
+    """R4: a `permissions:` that is a scalar is a plain `read-all`; any
+    other scalar (`write-all` above all, a quoted or block scalar) grants
+    permissions no map names."""
+    if perms < 0 or doc.kind(perms) != NODE_SCALAR or doc.is_plain(perms, String("read-all")):
         return
     findings.append(
         _at(doc, perms) + whose + String("R4: `permissions: ") + doc.text(perms)

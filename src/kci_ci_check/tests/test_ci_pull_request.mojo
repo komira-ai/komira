@@ -317,6 +317,87 @@ def test_write_all_is_refused_on_a_release_job() raises:
     _reports_on(String(_MACHINE), wf, String("job 'publish-gamma': R4: `permissions: write-all` grants permissions no map names"))
 
 
+def _not_farm_connected() raises -> Tuple[String, String]:
+    """The pull request stage without the farm connection, and its workflow:
+    no condition, no farm connection, no identity token."""
+    var machine = String(_MACHINE).replace(String("trigger: PULL_REQUEST farm_connected: true"), String("trigger: PULL_REQUEST"))
+    var wf = _pr(String("    if: github.event.pull_request.head.repo.full_name == github.repository\n"), String(""))
+    wf = wf.replace(String("      - name: farm\n        uses: ./.github/actions/farm-connect\n        with:\n          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"), String(""))
+    wf = wf.replace(String("      id-token: write\n"), String(""))
+    return (machine^, wf^)
+
+
+def _block_styles() -> List[String]:
+    var s = List[String]()
+    s.append(String("|-"))
+    s.append(String(">"))
+    s.append(String(">-"))
+    return s^
+
+
+def test_an_id_token_block_scalar_is_a_grant_on_a_pull_request_job() raises:
+    # a block scalar's value is `write` once folded: it grants the token
+    var base = _not_farm_connected()
+    var styles = _block_styles()
+    for i in range(len(styles)):
+        var wf = base[1].replace(
+            String("      contents: read\n"), String("      contents: read\n      id-token: ") + styles[i] + String("\n        write\n")
+        )
+        _reports_on(base[0], wf, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+
+
+def test_an_id_token_block_scalar_is_a_grant_at_the_pull_request_workflow_level() raises:
+    var base = _not_farm_connected()
+    var styles = _block_styles()
+    for i in range(len(styles)):
+        var wf = base[1].replace(
+            String("permissions: {}\n"), String("permissions:\n  id-token: ") + styles[i] + String("\n    write\n")
+        )
+        _reports_on(base[0], wf, String("R4: `id-token: write` at the workflow level reaches every job"))
+
+
+def test_an_id_token_block_scalar_is_a_grant_in_the_release_workflow() raises:
+    # `build` without the farm connection needs no token
+    var machine = String(_MACHINE).replace(String("stage { name: \"build\" farm_connected: true"), String("stage { name: \"build\""))
+    var styles = _block_styles()
+    for i in range(len(styles)):
+        var job = _release(
+            String("    environment: build\n    permissions:\n      id-token: write\n    steps:\n      - uses: ./.github/actions/farm-connect\n"),
+            String("    environment: build\n    permissions:\n      id-token: ") + styles[i] + String("\n        write\n    steps:\n"),
+        )
+        _reports_on(machine, job, String("job 'build': R4: has `id-token: write`, but stage 'build' publishes to no OIDC channel"))
+        var top = _release(String("permissions: {}\n"), String("permissions:\n  id-token: ") + styles[i] + String("\n    write\n"))
+        _reports(top, String("R4: `id-token: write` at the workflow level reaches every job"))
+
+
+def test_only_a_plain_read_or_none_withholds_the_id_token() raises:
+    var base = _not_farm_connected()
+    # plain `read` and `none` grant nothing
+    _agrees(base[0], base[1].replace(String("      contents: read\n"), String("      contents: read\n      id-token: read\n")))
+    _agrees(base[0], base[1].replace(String("      contents: read\n"), String("      contents: read\n      id-token: none\n")))
+    # anything else is a grant: quoted, a block scalar of `read`, a mapping, empty
+    var others = List[String]()
+    others.append(String("'read'\n"))
+    others.append(String("\"none\"\n"))
+    others.append(String("|\n        read\n"))
+    others.append(String("{}\n"))
+    others.append(String("\n"))
+    for i in range(len(others)):
+        var wf = base[1].replace(String("      contents: read\n"), String("      contents: read\n      id-token: ") + others[i])
+        _reports_on(base[0], wf, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+
+
+def test_a_permissions_scalar_other_than_plain_read_all_is_refused() raises:
+    var others = List[String]()
+    others.append(String("'read-all'\n"))
+    others.append(String("|-\n  read-all\n"))
+    others.append(String(">-\n  write-all\n"))
+    for i in range(len(others)):
+        var wf = _pr(String("permissions: {}\n"), String("permissions: ") + others[i])
+        _reports(wf, String("workflow: R4: `permissions: "))
+        _reports(wf, String("R4: `id-token: write` at the workflow level reaches every job"))
+
+
 def test_read_all_and_an_empty_map_are_accepted() raises:
     _agrees(String(_MACHINE), _pr(String("permissions: {}\n"), String("permissions: read-all\n")))
 
