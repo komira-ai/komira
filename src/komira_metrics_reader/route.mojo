@@ -23,7 +23,7 @@
 # ── THE STATUS OF EVERY OTHER ANSWER ────────────────────────────────────────
 #   | condition                                        | answer |
 #   |--------------------------------------------------|--------|
-#   | a missing `metric`, a malformed or inverted bound, an unknown `agg`, a malformed number, a parameter not UTF-8 once decoded | 400 |
+#   | a missing `metric`, a malformed or inverted bound, an unknown `agg`, a malformed number, a parameter not UTF-8 once decoded, an unknown or repeated parameter | 400 |
 #   | the reader refuses the query (`MetricsReader.refusal`) | 400, its sentence |
 #   | the reader raises while reading                  | 500, naming it |
 #   | an answer                                        | 200    |
@@ -31,6 +31,12 @@
 # ⚠ A PRESENT BUT MALFORMED NUMBER IS A 400, NOT A DEFAULT. A window that
 # silently became the default hour answers a different question than the one
 # asked, and a metric answer, unlike a log line, never looks wrong.
+#
+# ⚠ SO IS AN UNKNOWN OR REPEATED PARAMETER. A key that is not one of §1's
+# names and not a `label.<k>` / `not_label.<k>` with a non-empty `<k>` is a
+# 400 naming it: a misspelled `since_ms` ignored would be the default window
+# by another road. A key given twice is a 400 naming it, rather than keeping
+# one of its values.
 #
 # Encapsulation: `HttpRequest` borrowed in, `HttpResponse` moved out. No
 # pointer. Never raises.
@@ -213,6 +219,40 @@ def _query_from(params: List[_Param], now_ns: Int64) -> _Built:
                 + String("' is not UTF-8 once percent-decoded")
             )
 
+    # Every key is one of the documented names or a `label.<k>` /
+    # `not_label.<k>` matcher, and appears once. Anything else is refused,
+    # naming it: an unknown key is most often a misspelled one, and ignoring
+    # it would answer the default it was meant to replace; a repeated key
+    # has no one value to keep.
+    for i in range(len(params)):
+        var k = params[i].key.copy()
+        if k.startswith(METRICS_LABEL_PREFIX) or k.startswith(
+            METRICS_NOT_LABEL_PREFIX
+        ):
+            var plen = METRICS_LABEL_PREFIX.byte_length()
+            if k.startswith(METRICS_NOT_LABEL_PREFIX):
+                plen = METRICS_NOT_LABEL_PREFIX.byte_length()
+            if k.byte_length() == plen:
+                return _refused(
+                    String("a label matcher '")
+                    + k
+                    + String("' names no label key")
+                )
+        elif not _is_known_param(k):
+            return _refused(
+                String("unknown query parameter '")
+                + k
+                + String("'. The parameters are ")
+                + _known_params_sentence()
+            )
+        for j in range(i):
+            if params[j].key == k:
+                return _refused(
+                    String("the query parameter '")
+                    + k
+                    + String("' is given more than once; give it once")
+                )
+
     var metric = _param(params, METRICS_METRIC_PARAM)
     if not metric or metric.value().byte_length() == 0:
         return _refused(
@@ -299,12 +339,6 @@ def _query_from(params: List[_Param], now_ns: Int64) -> _Built:
             negated = True
         else:
             continue
-        if label.byte_length() == 0:
-            return _refused(
-                String("a label matcher '")
-                + k
-                + String("' names no label key")
-            )
         matchers.append(
             MetricsMatcher(label^, params[i].value.copy(), negated)
         )
@@ -340,6 +374,34 @@ def _query_from(params: List[_Param], now_ns: Int64) -> _Built:
         ),
         String(""),
     )
+
+
+def _known_params() -> List[String]:
+    return [
+        METRICS_METRIC_PARAM,
+        METRICS_SINCE_PARAM,
+        METRICS_UNTIL_PARAM,
+        METRICS_STEP_PARAM,
+        METRICS_AGG_PARAM,
+        METRICS_GROUP_BY_PARAM,
+        METRICS_SERIES_LIMIT_PARAM,
+        METRICS_POINT_LIMIT_PARAM,
+    ]
+
+
+def _is_known_param(key: String) -> Bool:
+    return _contains(_known_params(), key)
+
+
+def _known_params_sentence() -> String:
+    var known = _known_params()
+    var out = String("")
+    for i in range(len(known)):
+        out += known[i]
+        out += String(", ")
+    out += METRICS_LABEL_PREFIX + String("<key> and ")
+    out += METRICS_NOT_LABEL_PREFIX + String("<key>")
+    return out^
 
 
 def _contains(xs: List[String], x: String) -> Bool:
