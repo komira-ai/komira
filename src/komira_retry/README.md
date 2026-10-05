@@ -64,17 +64,40 @@ somewhere else, even when the retry code uses it.
 
 ## Use
 
+A client's classifier reads its own failure (here an HTTP-like status) as a
+`Verdict`; the loop decides and sleeps between sends:
+
 ```mojo
-var loop = system_retry_loop(RetryPolicy(Backoff(), max_attempts=4))
+from komira_retry import Backoff, RetryClassifier, RetryPolicy, TokenBucket, Verdict, system_retry_loop
+from std.testing import assert_equal
+
+
+struct StatusClassifier(RetryClassifier):
+    comptime Outcome = Int
+
+    def __init__(out self):
+        pass
+
+    def classify(self, outcome: Int) -> Verdict:
+        if outcome == 503:
+            return Verdict.transient("503")
+        return Verdict.stop(String(outcome))
+
+
+var loop = system_retry_loop(RetryPolicy(Backoff(initial_ms=5, max_ms=50), max_attempts=4))
+var budget = TokenBucket()
+var sends = 0
 loop.start()
 while True:
-    # send ...
-    if ok:
+    sends += 1
+    var status = 503 if sends < 3 else 200  # the send: two 503s, then a success
+    if status == 200:
         loop.after_success(budget)
         break
-    var d = loop.after_outcome(classifier, outcome, budget)
+    var d = loop.after_outcome(StatusClassifier(), status, budget)
     if not d.retry:
         raise Error(d.reason)
+assert_equal(sends, 3)
 ```
 
 If a decision says to retry, `after_failure` / `after_outcome` has already

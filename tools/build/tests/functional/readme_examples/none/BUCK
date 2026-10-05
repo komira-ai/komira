@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A README with no ```mojo example (test 38): nothing is compiled or run for
+# it, and `[tests][readme]` holds `NO EXAMPLE ...`, never a PASS line.
+mojo_library(
+    name = "none",
+    srcs = [
+        "__init__.mojo",
+        "greet.mojo",
+    ],
+)
