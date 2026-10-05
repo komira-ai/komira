@@ -7,28 +7,39 @@
 #     double for everything above the cloud module.
 #   * `FakeLimitedCloud` ("fake-limited")   is DELIBERATELY PARTIAL: it does
 #     not host `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a
-#     catalog that marks `job` CLOUD_BOUND) nor `bucket` (NOT_YET), and it
-#     has no public ingress, so a
+#     catalog that marks `job` CLOUD_BOUND), `bucket`, `service_account` nor
+#     `grant` (NOT_YET), and it has no public ingress, so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
 #     in full, before anything is lowered or created.
 #
 # Both deploy into a `FakeStore` and lower, to DATA, with the COMPLETE fixed
 # set of roles of each type (the closed world). On the generic shape:
-#   service -> `<id>/run`, `<id>/public` (wanted iff `public {}`), and
-#              `<id>/uses/<target>` per `Uses` line
-#   job     -> `<id>/run`, `<id>/schedule` (wanted iff scheduled), and the
-#              same grants
+#   service -> `<id>/identity` (wanted iff no `run_as`), `<id>/run`,
+#              `<id>/public` (wanted iff `public {}`), and one grant per edge
+#   job     -> `<id>/identity`, `<id>/run`, `<id>/schedule` (wanted iff
+#              scheduled), and the same grants
 #   bucket  -> `<id>/bucket` (it holds no identity, so no grants)
-# A grant depends on its target, and a value reads its producer, by the
-# producer's resource id alone: kci resolves that to the resource's primary
-# node (`run`, or `bucket`), so this lowering never reads another resource.
+#   service account -> `<id>/identity` (it exposes NAME), and its grants
+#   grant   -> `<id>/grant`
+# The grants are kci's EDGES (`kci_cloud.grants`), handed to `lower` with
+# each target's type: a `uses` line, the implicit `cell LOGS WRITE` of an
+# identity the resource holds itself, or a grant resource. An edge lowers to
+# `<id>/<role>` (`u-<h>` or `grant`), depends on its principal's identity
+# node and on its target, and has the desired fields principal, target (or
+# cell) and access. A dependency or a value on another resource is written
+# as that resource's id alone: kci resolves it to the resource's primary
+# node (`run`, `bucket`, `identity`), so this lowering never reads another
+# resource. A service or a job with `run_as` turns its private identity off,
+# its run depends on the account, and its run has the field `run_as`.
 # `FakeCloud` built with a provider shape (`shapes.mojo`: `aws`, `gcp`,
 # `azure`, `onprem`) lowers to THAT shape's fixed roles and provider kinds
-# instead: a private `<id>/identity` the run depends on and the grants hang
-# off; on the azure shape a public ingress and a schedule folded into the run
-# node; on the onprem shape a service's `<id>/endpoint` (always wanted; the
-# public role depends on it) and a schedule folded into the run node.
+# instead: on the azure shape a public ingress and a schedule folded into the
+# run node; on the onprem shape a `<id>/vault` beside each identity, a
+# service's `<id>/endpoint` (always wanted; the public role depends on it), a
+# schedule folded into the run node, a grant's helper `r-<h>` (the
+# Kubernetes Role a RoleBinding binds) where its row names one, and a cell
+# edge folded into the identity as the field `cell.<NAME>`.
 # A run node's desired fields are EVERY field the catalog models, with the
 # catalog's default filled in where the author wrote none (kci owns every
 # modelled field: writing a default out is not a change, a console edit of
@@ -80,13 +91,20 @@ from kci_cloud import (
     RUN_UNKNOWN,
     Setting,
     FIELD_BUCKET,
+    FIELD_GRANT,
     FIELD_JOB,
     FIELD_SERVICE,
+    FIELD_SERVICE_ACCOUNT,
     FINDING_CELL,
     FINDING_LIMIT,
     NOT_YET,
     V1_IMAGE_PLATFORM,
+    EDGE_TARGET_CELL,
+    GrantEdge,
     body_field,
+    edges_of,
+    holds_own_identity,
+    run_as_of,
     decode_label_value,
     retained_by,
     standard_identity_of,
@@ -104,6 +122,8 @@ from kci_cloud_fake.shapes import (
     ROLE_PUBLIC,
     ROLE_RUN,
     ROLE_SCHEDULE,
+    ROLE_VAULT,
+    helper_role,
 )
 
 
@@ -234,20 +254,132 @@ def _lower_bucket(r: Resource, shape: ProviderShape) raises -> List[LoweredNode]
     return out^
 
 
-def _lower(r: Resource, mechanism: String, shape: ProviderShape) raises -> List[LoweredNode]:
+def _identity(r: Resource, field: Int, shape: ProviderShape, own: Bool) raises -> List[LoweredNode]:
+    """`<id>/identity` (wanted iff the resource holds its own identity) and,
+    where the shape has one, its `<id>/vault` helper. A service account's
+    identity exposes NAME (`account`, how the node behaves, not state)."""
+    var out = List[LoweredNode]()
+    var ident = r.id + String("/") + String(ROLE_IDENTITY)
+    var fields = List[Setting]()
+    if field == FIELD_SERVICE_ACCOUNT:
+        fields.append(Setting(String("account"), String("true")))
+    out.append(
+        LoweredNode(
+            ident.copy(),
+            r.id,
+            shape.kind_of(field, String(ROLE_IDENTITY)),
+            List[String](),
+            List[InputRef](),
+            fields^,
+            own,
+        )
+    )
+    if shape.has(field, String(ROLE_VAULT)):
+        var deps = List[String]()
+        deps.append(ident^)
+        out.append(
+            LoweredNode(
+                r.id + String("/") + String(ROLE_VAULT),
+                r.id,
+                shape.kind_of(field, String(ROLE_VAULT)),
+                deps^,
+                List[InputRef](),
+                List[Setting](),
+                own,
+            )
+        )
+    return out^
+
+
+def _edge_fields(e: GrantEdge, with_principal: Bool) -> List[Setting]:
+    var g = List[Setting]()
+    if with_principal:
+        g.append(Setting(String("principal"), e.principal.copy()))
+    if e.on_cell():
+        g.append(Setting(String("cell"), e.cell.copy()))
+    else:
+        g.append(Setting(String("target"), e.target.copy()))
+    g.append(Setting(String("access"), e.access.copy()))
+    return g^
+
+
+def _lower_edges(
+    r: Resource, edges: List[GrantEdge], shape: ProviderShape, mut out: List[LoweredNode]
+) raises:
+    """One grant per edge, by the shape's row for the target's type: the
+    binding (and its helper, where the row names one), or FOLDED into the
+    identity it is for when the shape has no row."""
+    for i in range(len(edges)):
+        ref e = edges[i]
+        var row = shape.grant_row(e.target_field)
+        if not row:
+            var ident = r.id + String("/") + String(ROLE_IDENTITY)
+            var at = -1
+            for k in range(len(out)):
+                if out[k].id == ident:
+                    at = k
+            if not e.on_cell() or e.principal != r.id or at < 0:
+                raise Error(
+                    String("fake: shape \"")
+                    + shape.name
+                    + String("\" folds this edge of \"")
+                    + r.id
+                    + String("\" into an identity it does not hold; validate refuses it")
+                )
+            out[at].desired.append(Setting(String("cell.") + e.cell, e.access.copy()))
+            continue
+        var deps = List[String]()
+        deps.append(e.principal_node())
+        if not e.on_cell():
+            # The target by its resource id: kci resolves its primary node.
+            deps.append(e.target.copy())
+        if row.value().helper.byte_length() > 0:
+            var hid = r.id + String("/") + helper_role(e.role)
+            var hdeps = List[String]()
+            if not e.on_cell():
+                hdeps.append(e.target.copy())
+            out.append(
+                LoweredNode(
+                    hid.copy(), r.id, row.value().helper.copy(), hdeps^, List[InputRef](), _edge_fields(e, False)
+                )
+            )
+            deps.append(hid^)
+        out.append(
+            LoweredNode(
+                r.id + String("/") + e.role,
+                r.id,
+                row.value().kind.copy(),
+                deps^,
+                List[InputRef](),
+                _edge_fields(e, True),
+            )
+        )
+
+
+def _lower(
+    r: Resource, edges: List[GrantEdge], mechanism: String, shape: ProviderShape
+) raises -> List[LoweredNode]:
     """The complete fixed set of roles of `r` on `shape`, as data."""
     var field = body_field(r)
     if field == FIELD_BUCKET:
         return _lower_bucket(r, shape)
     var out = List[LoweredNode]()
+    if field == FIELD_GRANT:
+        _lower_edges(r, edges, shape, out)
+        return out^
+    var own = holds_own_identity(r)
+    out.extend(_identity(r, field, shape, own))
+    if field == FIELD_SERVICE_ACCOUNT:
+        _lower_edges(r, edges, shape, out)
+        return out^
     var run = r.id + String("/run")
-    var principal = run.copy()
     var run_deps = List[String]()
-    if shape.has(field, String(ROLE_IDENTITY)):
-        var ident = r.id + String("/") + String(ROLE_IDENTITY)
-        out.append(LoweredNode(ident, r.id, shape.kind_of(field, String(ROLE_IDENTITY))))
-        run_deps.append(ident.copy())
-        principal = ident^
+    var account = run_as_of(r)
+    if own:
+        run_deps.append(r.id + String("/") + String(ROLE_IDENTITY))
+    else:
+        # The account by its resource id: kci resolves it to its identity.
+        run_deps.append(account.copy())
     var run_kind = shape.kind_of(field, String(ROLE_RUN))
     var fields = List[Setting]()
     var refs = List[InputRef]()
@@ -283,6 +415,8 @@ def _lower(r: Resource, mechanism: String, shape: ProviderShape) raises -> List[
             fields.append(
                 Setting(String("ingress"), mechanism.copy() if public else String("none"))
             )
+        if not own:
+            fields.append(Setting(String("run_as"), account.copy()))
         fields.append(Setting(String("serves"), String("true")))
         out.append(LoweredNode(run, r.id, run_kind, run_deps^, refs^, fields^))
         # What the public role fronts: the run, or the endpoint in front of it.
@@ -352,6 +486,8 @@ def _lower(r: Resource, mechanism: String, shape: ProviderShape) raises -> List[
             )
             for i in range(len(sch)):
                 fields.append(Setting(String("trigger.") + sch[i].key, sch[i].value.copy()))
+        if not own:
+            fields.append(Setting(String("run_as"), account.copy()))
         fields.append(Setting(String("serves"), String("false")))
         out.append(LoweredNode(run, r.id, run_kind, run_deps^, refs^, fields^))
         if has_schedule:
@@ -368,26 +504,40 @@ def _lower(r: Resource, mechanism: String, shape: ProviderShape) raises -> List[
                     scheduled,
                 )
             )
-    for u in range(len(r.uses)):
-        ref use = r.uses[u]
-        var target = use.target.value().resource.copy()
-        var g = List[Setting]()
-        g.append(Setting(String("access"), use.access.json_name()))
-        var deps = List[String]()
-        deps.append(principal.copy())
-        # The target by its resource id: kci resolves its primary node.
-        deps.append(target.copy())
+    _lower_edges(r, edges, shape, out)
+    return out^
+
+
+def _fold_limits(r: Resource, shape: ProviderShape, cloud: String, mut out: List[Finding]):
+    """On a shape that folds a cell edge into the identity it is for, a cell
+    edge whose identity is another resource's cannot be lowered."""
+    if shape.grant_row(EDGE_TARGET_CELL):
+        return
+    var edges: List[GrantEdge]
+    try:
+        edges = edges_of(r)
+    except:
+        return  # a graph finding
+    for i in range(len(edges)):
+        ref e = edges[i]
+        if not e.on_cell() or e.principal == r.id:
+            continue
+        var path = String("grant") if e.role == "grant" else String("uses[") + String(i) + String("]")
         out.append(
-            LoweredNode(
-                r.id + String("/uses/") + target,
+            Finding(
+                FINDING_LIMIT,
                 r.id,
-                shape.grant_kind.copy(),
-                deps^,
-                List[InputRef](),
-                g^,
+                path,
+                String("on cloud \"")
+                + cloud
+                + String("\" a grant to the cell's ")
+                + e.cell
+                + String(" is a setting of the identity it is for; write it on \"")
+                + e.principal
+                + String("\" itself"),
+                String(FAKE_CITATION),
             )
         )
-    return out^
 
 
 def _common_limits(r: Resource, mut out: List[Finding]):
@@ -521,7 +671,7 @@ def _setting_finding(key: String, why: String) -> Finding:
 struct FakeCloud(ConformanceTarget, Movable):
     """The complete fake cloud. `shape` is the provider shape it lowers to
     (`ProviderShape.generic()` by default: the fake's own roles); the shaped
-    fakes are this cloud built with `aws`, `gcp` or `azure`."""
+    fakes are this cloud built with `aws`, `gcp`, `azure` or `onprem`."""
 
     var _id: String
     var _mechanism: String
@@ -554,6 +704,8 @@ struct FakeCloud(ConformanceTarget, Movable):
         l.append(FIELD_SERVICE)
         l.append(FIELD_JOB)
         l.append(FIELD_BUCKET)
+        l.append(FIELD_SERVICE_ACCOUNT)
+        l.append(FIELD_GRANT)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -589,13 +741,14 @@ struct FakeCloud(ConformanceTarget, Movable):
     def check(self, r: Resource) -> List[Finding]:
         var out = List[Finding]()
         _common_limits(r, out)
+        _fold_limits(r, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
-        return _lower(r, self._mechanism, self._shape)
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+        return _lower(r, edges, self._mechanism, self._shape)
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))
@@ -677,8 +830,8 @@ struct FakeCloud(ConformanceTarget, Movable):
 
 
 struct FakeLimitedCloud(ConformanceTarget, Movable):
-    """The deliberately partial fake cloud: no `job`, no `bucket` (NOT_YET),
-    no public ingress.
+    """The deliberately partial fake cloud: no `job`, no `bucket`, no
+    `service_account`, no `grant` (NOT_YET), no public ingress.
 
     `job_absence` is how it declares the missing `job`: NOT_YET (the default,
     for the v1 catalog, where `job` is PORTABLE) or ABSENT_BY_DESIGN (for a
@@ -725,6 +878,10 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
                 Absence(FIELD_JOB, NOT_YET, String("fake-limited has no run-to-completion runner"))
             )
         l.append(Absence(FIELD_BUCKET, NOT_YET, String("fake-limited has no object store")))
+        l.append(
+            Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("fake-limited has no shared identities"))
+        )
+        l.append(Absence(FIELD_GRANT, NOT_YET, String("fake-limited has no standalone grants")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -763,8 +920,8 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
-        return _lower(r, String(""), ProviderShape.generic())
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+        return _lower(r, edges, String(""), ProviderShape.generic())
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))

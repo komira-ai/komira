@@ -6,17 +6,20 @@
 # catalog type to that shape's own fixed roles and provider kinds.
 #
 # 1. THE TABLE: every row names a catalog field the fake implements; every
-#    compute field (service, job) has a `run` row on every shape, and the
-#    bucket exactly one row, `bucket`, and no identity; every role name is
-#    at most 8 bytes (the role vocabulary's bound, which the label budget
-#    counts on); the generic shape is the fake's own roles.
+#    compute field (service, job) has an `identity` and a `run` row on every
+#    shape, a service account an `identity` row, the bucket exactly one row,
+#    `bucket`, and no identity; every role name is at most 8 bytes (the role
+#    vocabulary's bound, which the label budget counts on); every shape has
+#    a grant row for every type a grant may target (onprem folds a cell
+#    grant: no row); the generic shape is the fake's own roles.
 # 2. THE KIT ON EVERY SHAPE: the kci_cloud conformance kit (all eleven steps)
 #    passes on the aws, gcp, azure and onprem shapes, each registered under a random
 #    id, on the graph of test_fake_conformance (a public service, an internal
 #    service reading its URL and HOST, a scheduled job, two grants).
 # 3. A GOLDEN LOWERING PER SHAPE of one public service and one scheduled job
 #    with one `uses` line: per node, its role and provider kind, in order;
-#    the private identity the run depends on and the grant hangs off; on
+#    the private identity the run depends on and the grants hang off (the
+#    `uses` line, and each identity's implicit cell LOGS WRITE); on
 #    azure, the public ingress and the schedule folded into the run node; on
 #    onprem, the service's in-cluster endpoint the public ingress fronts, and
 #    the schedule folded into the job's CronJob.
@@ -27,6 +30,19 @@
 #    gcp, azure, onprem, in that order); a cloud name is looked up in it, and
 #    a name that is not a built-in cloud (a near-miss spelling, the generic
 #    fake's own shape) is refused naming the built-in list.
+# 6. IDENTITY PER SHAPE: a golden of a service account, a service that runs
+#    as it and reads a bucket, a job with its own identity, and a grant
+#    resource: per node its kind, wanted and dependencies. The grant kind
+#    follows the TARGET'S TYPE (on aws a CALL on a service is the function's
+#    resource policy; on onprem a Kubernetes target is a RoleBinding with
+#    its Role helper and a bucket is a MinIO policy); onprem adds the `vault`
+#    auth role beside each identity and folds a cell grant into it.
+# 7. RUN_AS TURNS THE PRIVATE IDENTITY OFF: moving a service onto an account
+#    deletes its private identity and its implicit LOGS grant and updates
+#    its run; nothing else changes.
+# 8. ONPREM REFUSES A CELL GRANT IT CANNOT FOLD (one written for another
+#    resource's identity) as a limit, before anything is created; aws lowers
+#    the same file.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -43,7 +59,13 @@ from kci_reconciler import (
     VERB_UPDATE,
 )
 from kci_cloud import (
+    EDGE_TARGET_CELL,
     FIELD_BUCKET,
+    FIELD_GRANT,
+    FIELD_JOB,
+    FIELD_SERVICE,
+    FIELD_SERVICE_ACCOUNT,
+    LoweredNode,
     ApplyOutcome,
     Catalog,
     CellContext,
@@ -56,7 +78,7 @@ from kci_cloud import (
 )
 from kci_resource_proto.resource import Resource, ResourceList
 
-from kci_cloud_fake import FakeCloud, ProviderShape, builtin_shapes, shape_named
+from kci_cloud_fake import FakeCloud, ProviderShape, builtin_shapes, helper_role, shape_named
 
 
 def _list(json: String) raises -> List[Resource]:
@@ -96,20 +118,40 @@ def test_the_shape_table() raises:
             assert_true(known, shape.name + ": row field " + String(row.field) + " is implemented")
             assert_true(row.role.byte_length() <= 8, shape.name + ": role " + row.role + " is over 8 bytes")
             assert_true(row.kind.byte_length() > 0, shape.name + ": role " + row.role + " has a kind")
-        for k in range(len(implemented)):
-            if implemented[k] == FIELD_BUCKET:
-                assert_equal(len(shape.roles_of(FIELD_BUCKET)), 1, shape.name + ": one bucket row")
-                assert_true(shape.has(FIELD_BUCKET, String("bucket")), shape.name + ": the bucket row")
-                continue
-            assert_true(
-                shape.has(implemented[k], String("run")),
-                shape.name + ": field " + String(implemented[k]) + " has a run row",
-            )
-        assert_true(shape.grant_kind.byte_length() > 0, shape.name + " has a grant kind")
+        for f in [FIELD_SERVICE, FIELD_JOB]:
+            assert_true(shape.has(f, String("identity")), shape.name + ": compute has an identity row")
+            assert_true(shape.has(f, String("run")), shape.name + ": compute has a run row")
+        assert_equal(len(shape.roles_of(FIELD_BUCKET)), 1, shape.name + ": one bucket row")
+        assert_true(shape.has(FIELD_BUCKET, String("bucket")), shape.name + ": the bucket row")
+        assert_true(shape.has(FIELD_SERVICE_ACCOUNT, String("identity")), shape.name + ": an account row")
+        assert_equal(len(shape.roles_of(FIELD_GRANT)), 0, shape.name + ": a grant's roles are its edge's")
+        # Every type a grant may target has a row (a service, a job, a
+        # bucket, a service account); a cell resource too, except where it
+        # folds (onprem).
+        for f in [FIELD_SERVICE, FIELD_JOB, FIELD_BUCKET, FIELD_SERVICE_ACCOUNT]:
+            assert_true(Bool(shape.grant_row(f)), shape.name + ": a grant row for field " + String(f))
+        assert_equal(
+            Bool(shape.grant_row(EDGE_TARGET_CELL)),
+            shape.name != "onprem",
+            shape.name + ": a cell grant has a row, or folds on onprem",
+        )
     var g = ProviderShape.generic()
-    assert_equal(len(g.rows), 5, "generic: service run, public; job run, schedule; bucket")
-    assert_true(not g.has(10, String("identity")), "generic has no identity role")
-    assert_equal(g.grant_kind, "grant")
+    assert_equal(len(g.rows), 8, "generic: identity, run, public; identity, run, schedule; bucket; identity")
+    assert_equal(g.grant_row(FIELD_BUCKET).value().kind, "grant")
+    # One grant row per target type on onprem, by the target's backing.
+    var o = ProviderShape.onprem()
+    for f in [FIELD_SERVICE, FIELD_JOB, FIELD_SERVICE_ACCOUNT]:
+        assert_equal(o.grant_row(f).value().kind, "rbac.authorization.k8s.io/v1/RoleBinding")
+        assert_equal(o.grant_row(f).value().helper, "rbac.authorization.k8s.io/v1/Role")
+    assert_equal(o.grant_row(FIELD_BUCKET).value().kind, "minio:policy")
+    assert_equal(o.grant_row(FIELD_BUCKET).value().helper, "", "a MinIO policy has no helper")
+    for f in [FIELD_SERVICE, FIELD_JOB, FIELD_SERVICE_ACCOUNT]:
+        assert_equal(o.kind_of(f, String("vault")), "vault:auth/kubernetes/role", "the vault helper")
+    var a = ProviderShape.aws()
+    assert_equal(a.grant_row(FIELD_SERVICE).value().kind, "AWS::Lambda::Permission")
+    assert_equal(a.grant_row(FIELD_BUCKET).value().kind, "AWS::IAM::RolePolicy")
+    assert_equal(helper_role(String("u-e4f3tk")), "r-e4f3tk")
+    assert_equal(helper_role(String("grant")), "rules")
     print("  test_the_shape_table: PASS")
 
 
@@ -117,8 +159,9 @@ def test_the_shape_table() raises:
 
 
 def _full(api_port: String, roles_on: Bool = True) -> String:
-    """The graph of test_fake_conformance. `roles_on` False makes api
-    internal and removes web's grant on api."""
+    """The graph of test_fake_conformance, plus identity: the job runs as a
+    service account, and a grant lets web DESCRIBE that account. `roles_on`
+    False makes api internal and removes web's grant on api."""
     var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
     var exposure = String('"public":{}')
     if not roles_on:
@@ -138,7 +181,10 @@ def _full(api_port: String, roles_on: Bool = True) -> String:
         + String(',"requestTimeout":"30s","scale":{"min":0,"max":3}},')
         + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},')
         + String('{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"maxRetries":1,')
-        + String('"schedule":{"cron":"0 3 * * *","timezone":"UTC"}}}')
+        + String('"schedule":{"cron":"0 3 * * *","timezone":"UTC"},"runAs":{"resource":"runner"}}},')
+        + String('{"id":"runner","serviceAccount":{}},')
+        + String('{"id":"see","grant":{"principal":{"resource":"web"},')
+        + String('"target":{"resource":"runner"},"access":"DESCRIBE"}}')
         + String("]}")
     )
 
@@ -187,33 +233,63 @@ comptime _JOB_FIELDS = (
 )
 
 
+def _node(
+    id: String, kind: String, deps: String, desired: String, wanted: Bool = True
+) -> String:
+    """One golden node: `deps` is the JSON array body, `desired` the JSON
+    object body."""
+    var owner = String(id[byte = 0 : id.find("/")])
+    return (
+        String('  {"id":"') + id + String('","owner":"') + owner + String('","kind":"') + kind
+        + String('","wanted":') + (String("true") if wanted else String("false"))
+        + String(',"retention":"delete","depends_on":[') + deps
+        + String('],"inputs":[],"desired":{') + desired + String("}}")
+    )
+
+
+def _nodes(lines: List[String]) -> String:
+    var s = String("[\n")
+    for i in range(len(lines)):
+        if i > 0:
+            s += String(",\n")
+        s += lines[i]
+    return s + String("\n]")
+
+
+comptime _API_LOGS = '"principal":"api","cell":"LOGS","access":"WRITE"'
+comptime _NIGHTLY_LOGS = '"principal":"nightly","cell":"LOGS","access":"WRITE"'
+comptime _CALL_API = '"principal":"nightly","target":"api","access":"CALL"'
+
+
 def _golden_with_roles(
-    identity: String, service: String, public: String, job: String, schedule: String, grant: String
+    identity: String, service: String, public: String, job: String, schedule: String,
+    call_grant: String, grant: String,
 ) -> String:
     """The lowering of `_golden_graph` on a shape with an identity, a public
-    role and a schedule role (aws, gcp), given each role's provider kind."""
-    return (
-        String("[\n")
-        + String('  {"id":"api/identity","owner":"api","kind":"') + identity
-        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
-        + String('  {"id":"api/run","owner":"api","kind":"') + service
-        + String('","wanted":true,"retention":"delete","depends_on":["api/identity"],"inputs":[],"desired":{')
-        + String(_SVC_FIELDS) + String(',"serves":"true"}},\n')
-        + String('  {"id":"api/public","owner":"api","kind":"') + public
-        + String('","wanted":true,"retention":"delete","depends_on":["api/run"],"inputs":[],"desired":{"mechanism":"invoker"}},\n')
-        + String('  {"id":"nightly/identity","owner":"nightly","kind":"') + identity
-        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
-        + String('  {"id":"nightly/run","owner":"nightly","kind":"') + job
-        + String('","wanted":true,"retention":"delete","depends_on":["nightly/identity"],"inputs":[],"desired":{')
-        + String(_JOB_FIELDS) + String(',"serves":"false"}},\n')
-        + String('  {"id":"nightly/schedule","owner":"nightly","kind":"') + schedule
-        + String('","wanted":true,"retention":"delete","depends_on":["nightly/run"],"inputs":[],')
-        + String('"desired":{"cron":"0 3 * * *","tz":"UTC"}},\n')
-        + String('  {"id":"nightly/uses/api","owner":"nightly","kind":"') + grant
-        + String('","wanted":true,"retention":"delete","depends_on":["nightly/identity","api/run"],"inputs":[],')
-        + String('"desired":{"access":"CALL"}}\n')
-        + String("]")
+    role and a schedule role (aws, gcp), given each role's provider kind:
+    `call_grant` for nightly's CALL on the api service, `grant` for the
+    implicit cell LOGS grants."""
+    var l = List[String]()
+    l.append(_node(String("api/identity"), identity, String(""), String("")))
+    l.append(
+        _node(String("api/run"), service, String('"api/identity"'), String(_SVC_FIELDS) + String(',"serves":"true"'))
     )
+    l.append(_node(String("api/public"), public, String('"api/run"'), String('"mechanism":"invoker"')))
+    l.append(_node(String("api/u-gktqg5"), grant, String('"api/identity"'), String(_API_LOGS)))
+    l.append(_node(String("nightly/identity"), identity, String(""), String("")))
+    l.append(
+        _node(
+            String("nightly/run"), job, String('"nightly/identity"'), String(_JOB_FIELDS) + String(',"serves":"false"')
+        )
+    )
+    l.append(
+        _node(String("nightly/schedule"), schedule, String('"nightly/run"'), String('"cron":"0 3 * * *","tz":"UTC"'))
+    )
+    l.append(
+        _node(String("nightly/u-e4f3tk"), call_grant, String('"nightly/identity","api/run"'), String(_CALL_API))
+    )
+    l.append(_node(String("nightly/u-g2ewtg"), grant, String('"nightly/identity"'), String(_NIGHTLY_LOGS)))
+    return _nodes(l)
 
 
 def _lowered(shape: ProviderShape) raises -> String:
@@ -230,6 +306,7 @@ def test_golden_lowering_aws() raises:
         String("AWS::Lambda::Url"),
         String("AWS::ECS::TaskDefinition"),
         String("AWS::Scheduler::Schedule"),
+        String("AWS::Lambda::Permission"),
         String("AWS::IAM::RolePolicy"),
     )
     assert_equal(_lowered(ProviderShape.aws()), want)
@@ -244,6 +321,7 @@ def test_golden_lowering_gcp() raises:
         String("run.googleapis.com/Job"),
         String("cloudscheduler.googleapis.com/Job"),
         String("setIamPolicy"),
+        String("setIamPolicy"),
     )
     assert_equal(_lowered(ProviderShape.gcp()), want)
     print("  test_golden_lowering_gcp: PASS")
@@ -251,54 +329,73 @@ def test_golden_lowering_gcp() raises:
 
 def test_golden_lowering_azure() raises:
     var ident = String("Microsoft.ManagedIdentity/userAssignedIdentities")
-    var want = (
-        String("[\n")
-        + String('  {"id":"api/identity","owner":"api","kind":"') + ident
-        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
-        + String('  {"id":"api/run","owner":"api","kind":"Microsoft.App/containerApps",')
-        + String('"wanted":true,"retention":"delete","depends_on":["api/identity"],"inputs":[],"desired":{')
-        + String(_SVC_FIELDS) + String(',"ingress":"invoker","serves":"true"}},\n')
-        + String('  {"id":"nightly/identity","owner":"nightly","kind":"') + ident
-        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
-        + String('  {"id":"nightly/run","owner":"nightly","kind":"Microsoft.App/jobs",')
-        + String('"wanted":true,"retention":"delete","depends_on":["nightly/identity"],"inputs":[],"desired":{')
-        + String(_JOB_FIELDS)
-        + String(',"trigger":"schedule","trigger.cron":"0 3 * * *","trigger.tz":"UTC","serves":"false"}},\n')
-        + String('  {"id":"nightly/uses/api","owner":"nightly","kind":"Microsoft.Authorization/roleAssignments",')
-        + String('"wanted":true,"retention":"delete","depends_on":["nightly/identity","api/run"],"inputs":[],')
-        + String('"desired":{"access":"CALL"}}\n')
-        + String("]")
+    var ra = String("Microsoft.Authorization/roleAssignments")
+    var l = List[String]()
+    l.append(_node(String("api/identity"), ident, String(""), String("")))
+    l.append(
+        _node(
+            String("api/run"), String("Microsoft.App/containerApps"), String('"api/identity"'),
+            String(_SVC_FIELDS) + String(',"ingress":"invoker","serves":"true"'),
+        )
     )
-    assert_equal(_lowered(ProviderShape.azure()), want)
+    l.append(_node(String("api/u-gktqg5"), ra, String('"api/identity"'), String(_API_LOGS)))
+    l.append(_node(String("nightly/identity"), ident, String(""), String("")))
+    l.append(
+        _node(
+            String("nightly/run"), String("Microsoft.App/jobs"), String('"nightly/identity"'),
+            String(_JOB_FIELDS)
+            + String(',"trigger":"schedule","trigger.cron":"0 3 * * *","trigger.tz":"UTC","serves":"false"'),
+        )
+    )
+    l.append(_node(String("nightly/u-e4f3tk"), ra, String('"nightly/identity","api/run"'), String(_CALL_API)))
+    l.append(_node(String("nightly/u-g2ewtg"), ra, String('"nightly/identity"'), String(_NIGHTLY_LOGS)))
+    assert_equal(_lowered(ProviderShape.azure()), _nodes(l))
     print("  test_golden_lowering_azure: PASS")
 
 
 def test_golden_lowering_onprem() raises:
-    var ident = String("v1/ServiceAccount")
-    var want = (
-        String("[\n")
-        + String('  {"id":"api/identity","owner":"api","kind":"') + ident
-        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
-        + String('  {"id":"api/run","owner":"api","kind":"apps/v1/Deployment",')
-        + String('"wanted":true,"retention":"delete","depends_on":["api/identity"],"inputs":[],"desired":{')
-        + String(_SVC_FIELDS) + String(',"serves":"true"}},\n')
-        + String('  {"id":"api/endpoint","owner":"api","kind":"v1/Service",')
-        + String('"wanted":true,"retention":"delete","depends_on":["api/run"],"inputs":[],"desired":{"port":"8080"}},\n')
-        + String('  {"id":"api/public","owner":"api","kind":"networking.k8s.io/v1/Ingress",')
-        + String('"wanted":true,"retention":"delete","depends_on":["api/endpoint"],"inputs":[],')
-        + String('"desired":{"mechanism":"invoker"}},\n')
-        + String('  {"id":"nightly/identity","owner":"nightly","kind":"') + ident
-        + String('","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{}},\n')
-        + String('  {"id":"nightly/run","owner":"nightly","kind":"batch/v1/CronJob",')
-        + String('"wanted":true,"retention":"delete","depends_on":["nightly/identity"],"inputs":[],"desired":{')
-        + String(_JOB_FIELDS)
-        + String(',"trigger":"schedule","trigger.cron":"0 3 * * *","trigger.tz":"UTC","serves":"false"}},\n')
-        + String('  {"id":"nightly/uses/api","owner":"nightly","kind":"rbac.authorization.k8s.io/v1/RoleBinding",')
-        + String('"wanted":true,"retention":"delete","depends_on":["nightly/identity","api/run"],"inputs":[],')
-        + String('"desired":{"access":"CALL"}}\n')
-        + String("]")
+    var sa = String("v1/ServiceAccount")
+    var vault = String("vault:auth/kubernetes/role")
+    var l = List[String]()
+    # The implicit cell LOGS grant folds into the identity it is for.
+    l.append(_node(String("api/identity"), sa, String(""), String('"cell.LOGS":"WRITE"')))
+    l.append(_node(String("api/vault"), vault, String('"api/identity"'), String("")))
+    l.append(
+        _node(
+            String("api/run"), String("apps/v1/Deployment"), String('"api/identity"'),
+            String(_SVC_FIELDS) + String(',"serves":"true"'),
+        )
     )
-    assert_equal(_lowered(ProviderShape.onprem()), want)
+    l.append(_node(String("api/endpoint"), String("v1/Service"), String('"api/run"'), String('"port":"8080"')))
+    l.append(
+        _node(
+            String("api/public"), String("networking.k8s.io/v1/Ingress"), String('"api/endpoint"'),
+            String('"mechanism":"invoker"'),
+        )
+    )
+    l.append(_node(String("nightly/identity"), sa, String(""), String('"cell.LOGS":"WRITE"')))
+    l.append(_node(String("nightly/vault"), vault, String('"nightly/identity"'), String("")))
+    l.append(
+        _node(
+            String("nightly/run"), String("batch/v1/CronJob"), String('"nightly/identity"'),
+            String(_JOB_FIELDS)
+            + String(',"trigger":"schedule","trigger.cron":"0 3 * * *","trigger.tz":"UTC","serves":"false"'),
+        )
+    )
+    # A Kubernetes target: the Role helper, then the RoleBinding that binds it.
+    l.append(
+        _node(
+            String("nightly/r-e4f3tk"), String("rbac.authorization.k8s.io/v1/Role"), String('"api/run"'),
+            String('"target":"api","access":"CALL"'),
+        )
+    )
+    l.append(
+        _node(
+            String("nightly/u-e4f3tk"), String("rbac.authorization.k8s.io/v1/RoleBinding"),
+            String('"nightly/identity","api/run","nightly/r-e4f3tk"'), String(_CALL_API),
+        )
+    )
+    assert_equal(_lowered(ProviderShape.onprem()), _nodes(l))
     print("  test_golden_lowering_onprem: PASS")
 
 
@@ -400,6 +497,221 @@ def test_onprem_endpoint_is_always_wanted() raises:
     print("  test_onprem_endpoint_is_always_wanted: PASS")
 
 
+# ---- 6. identity per shape -------------------------------------------------------------
+
+
+def _identity_graph() -> String:
+    return String(
+        '{"resource":['
+        '{"id":"runner","serviceAccount":{}},'
+        '{"id":"store","bucket":{}},'
+        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"runAs":{"resource":"runner"}},'
+        '"uses":[{"target":{"resource":"store"},"access":"READ"}]},'
+        '{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"onDemand":{}}},'
+        '{"id":"see","grant":{"principal":{"resource":"nightly"},'
+        '"target":{"resource":"runner"},"access":"DESCRIBE"}}'
+        "]}"
+    )
+
+
+def _summary(nodes: List[LoweredNode]) -> String:
+    """One line per node: id, kind, wanted (+ or -), dependencies, and the
+    folded cell fields of an identity."""
+    var s = String("")
+    for i in range(len(nodes)):
+        ref n = nodes[i]
+        s += n.id + String(" ") + n.kind + String(" ") + (String("+") if n.wanted else String("-"))
+        for k in range(len(n.depends_on)):
+            s += (String(" <") if k == 0 else String(",")) + n.depends_on[k]
+        var cell = n.field(String("cell.LOGS"))
+        if cell.byte_length() > 0:
+            s += String(" cell.LOGS=") + cell
+        s += String("\n")
+    return s^
+
+
+def _want_identity(
+    sa: String, run: String, public: String, job: String, schedule: String, grant: String,
+) -> String:
+    """The identity golden on aws, gcp (and generic): every node, `grant` the
+    kind of every grant here (none targets a service)."""
+    return (
+        String("runner/identity ") + sa + String(" +\n")
+        + String("runner/u-atqd3s ") + grant + String(" + <runner/identity\n")
+        + String("store/bucket BUCKET +\n")
+        + String("api/identity ") + sa + String(" -\n")
+        + String("api/run ") + run + String(" + <runner/identity\n")
+        + String("api/public ") + public + String(" - <api/run\n")
+        + String("api/u-2wfpfg ") + grant + String(" + <runner/identity,store/bucket\n")
+        + String("nightly/identity ") + sa + String(" +\n")
+        + String("nightly/run ") + job + String(" + <nightly/identity\n")
+        + String("nightly/schedule ") + schedule + String(" - <nightly/run\n")
+        + String("nightly/u-g2ewtg ") + grant + String(" + <nightly/identity\n")
+        + String("see/grant ") + grant + String(" + <nightly/identity,runner/identity\n")
+    )
+
+
+def _identity_lowered(shape: ProviderShape) raises -> String:
+    var cloud = FakeCloud(String("p-6d"), shape=shape.copy())
+    var got = _summary(lower_data(cloud, _list(_identity_graph())))
+    assert_equal(cloud.live_count(), 0, "lowering touched nothing")
+    return got^
+
+
+def test_identity_lowering_per_shape() raises:
+    var aws = _want_identity(
+        String("AWS::IAM::Role"), String("AWS::Lambda::Function"), String("AWS::Lambda::Url"),
+        String("AWS::ECS::TaskDefinition"), String("AWS::Scheduler::Schedule"), String("AWS::IAM::RolePolicy"),
+    ).replace("BUCKET", "AWS::S3::Bucket")
+    assert_equal(_identity_lowered(ProviderShape.aws()), aws, "aws")
+    var gcp = _want_identity(
+        String("iam.googleapis.com/ServiceAccount"), String("run.googleapis.com/Service"), String("setIamPolicy"),
+        String("run.googleapis.com/Job"), String("cloudscheduler.googleapis.com/Job"), String("setIamPolicy"),
+    ).replace("BUCKET", "storage.googleapis.com/Bucket")
+    assert_equal(_identity_lowered(ProviderShape.gcp()), gcp, "gcp")
+    var generic = _want_identity(
+        String("identity"), String("run"), String("public"), String("run"), String("schedule"), String("grant")
+    ).replace("BUCKET", "bucket")
+    assert_equal(_identity_lowered(ProviderShape.generic()), generic, "generic")
+
+    var mi = String("Microsoft.ManagedIdentity/userAssignedIdentities")
+    var ra = String("Microsoft.Authorization/roleAssignments")
+    var azure = (
+        String("runner/identity ") + mi + String(" +\n")
+        + String("runner/u-atqd3s ") + ra + String(" + <runner/identity\n")
+        + String("store/bucket Microsoft.Storage/storageAccounts/blobServices/containers +\n")
+        + String("api/identity ") + mi + String(" -\n")
+        + String("api/run Microsoft.App/containerApps + <runner/identity\n")
+        + String("api/u-2wfpfg ") + ra + String(" + <runner/identity,store/bucket\n")
+        + String("nightly/identity ") + mi + String(" +\n")
+        + String("nightly/run Microsoft.App/jobs + <nightly/identity\n")
+        + String("nightly/u-g2ewtg ") + ra + String(" + <nightly/identity\n")
+        + String("see/grant ") + ra + String(" + <nightly/identity,runner/identity\n")
+    )
+    assert_equal(_identity_lowered(ProviderShape.azure()), azure, "azure")
+
+    var sa = String("v1/ServiceAccount")
+    var vr = String("vault:auth/kubernetes/role")
+    var onprem = (
+        String("runner/identity ") + sa + String(" + cell.LOGS=WRITE\n")
+        + String("runner/vault ") + vr + String(" + <runner/identity\n")
+        + String("store/bucket minio/Bucket +\n")
+        + String("api/identity ") + sa + String(" -\n")
+        + String("api/vault ") + vr + String(" - <api/identity\n")
+        + String("api/run apps/v1/Deployment + <runner/identity\n")
+        + String("api/endpoint v1/Service + <api/run\n")
+        + String("api/public networking.k8s.io/v1/Ingress - <api/endpoint\n")
+        + String("api/u-2wfpfg minio:policy + <runner/identity,store/bucket\n")
+        + String("nightly/identity ") + sa + String(" + cell.LOGS=WRITE\n")
+        + String("nightly/vault ") + vr + String(" + <nightly/identity\n")
+        + String("nightly/run batch/v1/CronJob + <nightly/identity\n")
+        + String("see/rules rbac.authorization.k8s.io/v1/Role + <runner/identity\n")
+        + String("see/grant rbac.authorization.k8s.io/v1/RoleBinding +")
+        + String(" <nightly/identity,runner/identity,see/rules\n")
+    )
+    assert_equal(_identity_lowered(ProviderShape.onprem()), onprem, "onprem")
+    print("  test_identity_lowering_per_shape: PASS")
+
+
+def test_the_identity_graph_applies_and_settles_on_every_shape() raises:
+    var shapes = _shapes()
+    shapes.append(ProviderShape.generic())
+    for s in range(len(shapes)):
+        var reg = Clouds(Catalog.v1())
+        reg.add(describe(FakeCloud(String("p-6k"), shape=shapes[s].copy())))
+        var cloud = FakeCloud(String("p-6k"), shape=shapes[s].copy())
+        var store = InMemoryStateStore()
+        var applied = _done(
+            apply_resources(reg, cloud, _ctx(), _list(_identity_graph()), Creds.none(), store)
+        )
+        var again = _done(
+            apply_resources(reg, cloud, _ctx(), _list(_identity_graph()), Creds.none(), store)
+        )
+        for k in range(len(again)):
+            assert_equal(again[k].verb, VERB_NOOP, shapes[s].name + ": " + again[k].logical_id + " settled")
+        assert_true(len(applied) > 0)
+    print("  test_the_identity_graph_applies_and_settles_on_every_shape: PASS")
+
+
+# ---- 7. run_as turns the private identity off --------------------------------------------
+
+
+def test_run_as_turns_the_private_identity_off() raises:
+    var own = String(
+        '{"resource":[{"id":"runner","serviceAccount":{}},'
+        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{}}}]}'
+    )
+    var moved = String(
+        '{"resource":[{"id":"runner","serviceAccount":{}},'
+        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"runAs":{"resource":"runner"}}}]}'
+    )
+    var shapes = _shapes()
+    for s in range(len(shapes)):
+        var n = shapes[s].name
+        var reg = Clouds(Catalog.v1())
+        reg.add(describe(FakeCloud(String("p-7r"), shape=shapes[s].copy())))
+        var cloud = FakeCloud(String("p-7r"), shape=shapes[s].copy())
+        var store = InMemoryStateStore()
+        _ = _done(apply_resources(reg, cloud, _ctx(), _list(own), Creds.none(), store))
+        var live = cloud.live_count()
+        var off = _done(apply_resources(reg, cloud, _ctx(), _list(moved), Creds.none(), store))
+        assert_equal(_verbs(off, String("api/identity")), VERB_DELETE, n + ": the private identity is deleted")
+        assert_equal(_verbs(off, String("api/run")), VERB_UPDATE, n + ": the run now runs as the account")
+        assert_equal(_verbs(off, String("runner/identity")), VERB_NOOP, n + ": the account is unchanged")
+        var gone = 1  # the identity
+        if n == "onprem":
+            assert_equal(_verbs(off, String("api/vault")), VERB_DELETE, "onprem: its vault role goes with it")
+            gone += 1
+        else:
+            assert_equal(_verbs(off, String("api/u-gktqg5")), VERB_DELETE, n + ": its implicit LOGS grant goes")
+            gone += 1
+        assert_equal(cloud.live_count(), live - gone, n + ": nothing else is deleted")
+    print("  test_run_as_turns_the_private_identity_off: PASS")
+
+
+# ---- 8. onprem refuses a cell grant it cannot fold -------------------------------------
+
+
+def test_onprem_refuses_a_cell_grant_it_cannot_fold() raises:
+    var json = String(
+        '{"resource":[{"id":"runner","serviceAccount":{}},'
+        '{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"onDemand":{},"runAs":{"resource":"runner"}},'
+        '"uses":[{"cell":"METRICS","access":"WRITE"}]}]}'
+    )
+    var reg = Clouds(Catalog.v1())
+    reg.add(describe(FakeCloud(String("p-8o"), shape=ProviderShape.onprem())))
+    var cloud = FakeCloud(String("p-8o"), shape=ProviderShape.onprem())
+    var store = InMemoryStateStore()
+    var why = String("")
+    try:
+        _ = apply_resources(reg, cloud, _ctx(), _list(json), Creds.none(), store)
+    except e:
+        why = String(e)
+    assert_true(
+        why.find(
+            'resource "nightly" field uses[0]: on cloud "p-8o" a grant to the cell\'s METRICS is a'
+            + ' setting of the identity it is for; write it on "runner" itself'
+        )
+        >= 0,
+        why,
+    )
+    assert_equal(cloud.live_count(), 0, "nothing was created")
+    assert_equal(cloud.mutations(), 0, "no call was made")
+
+    # aws has a row for a cell grant: the same file lowers there.
+    var aws = FakeCloud(String("p-8a"), shape=ProviderShape.aws())
+    var nodes = lower_data(aws, _list(json))
+    var found = False
+    for i in range(len(nodes)):
+        if nodes[i].field(String("cell")) == "METRICS":
+            found = True
+            assert_equal(nodes[i].owner, "nightly", "the line's node is nightly's")
+            assert_equal(nodes[i].depends_on[0], "runner/identity", "it hangs off the account")
+            assert_equal(nodes[i].kind, "AWS::IAM::RolePolicy")
+    assert_true(found, "aws lowers the METRICS grant")
+    print("  test_onprem_refuses_a_cell_grant_it_cannot_fold: PASS")
+
+
 def main() raises:
     print("test_fake_provider_shapes")
     test_the_shape_table()
@@ -411,4 +723,8 @@ def main() raises:
     test_a_folded_role_turned_off_is_an_update()
     test_the_built_in_clouds_are_data()
     test_onprem_endpoint_is_always_wanted()
+    test_identity_lowering_per_shape()
+    test_the_identity_graph_applies_and_settles_on_every_shape()
+    test_run_as_turns_the_private_identity_off()
+    test_onprem_refuses_a_cell_grant_it_cannot_fold()
     print("ALL kci_cloud_fake PROVIDER SHAPE TESTS PASSED")

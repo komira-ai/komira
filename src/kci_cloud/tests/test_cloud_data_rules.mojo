@@ -52,6 +52,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource, ResourceList, Retention
 
 from kci_cloud import (
+    GrantEdge,
     CloudAdapter,
     Absence,
     ArtifactNeed,
@@ -220,7 +221,7 @@ struct _Data(CloudAdapter, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
         if r._oneof0_case == 3:
             out.append(LoweredNode(r.id + String("/bucket"), r.id, String("bucket")))

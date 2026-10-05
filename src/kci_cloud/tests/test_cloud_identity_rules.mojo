@@ -32,7 +32,10 @@ from kci_cloud import (
     Catalog,
     Finding,
     FINDING_GRAPH,
+    EDGE_TARGET_CELL,
+    EDGE_TARGET_UNKNOWN,
     GrantEdge,
+    edges_for,
     edges_of,
     graph_findings,
     grant_hash,
@@ -145,6 +148,13 @@ def test_the_edges_of_a_resource() raises:
     # see: a grant resource is one edge, role `grant`.
     assert_equal(_edges(l[4]), "grant nightly->runner DESCRIBE")
     assert_equal(principal_node(String("nightly")), "nightly/identity")
+    # edges_for adds the target's type: the catalog field, or the cell.
+    var nf = edges_for(l, l[3])
+    assert_equal(nf[0].target_field, 10, "api is a service")
+    assert_equal(nf[1].target_field, EDGE_TARGET_CELL)
+    assert_equal(nf[2].target_field, EDGE_TARGET_CELL)
+    assert_equal(edges_for(l, l[4])[0].target_field, 20, "runner is a service account")
+    assert_equal(edges_of(l[4])[0].target_field, EDGE_TARGET_UNKNOWN, "edges_of leaves it unset")
 
     # Writing the LOGS edge yourself replaces the implicit one.
     var own = _list(

@@ -77,6 +77,7 @@ from kci_cloud.catalog import (
     primary_node,
 )
 from kci_cloud.clouds import Clouds
+from kci_cloud.grants import edges_for
 from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
 
 
@@ -124,7 +125,7 @@ def lower_data[
     for i in range(len(resources)):
         ref r = resources[i]
         var retention = engine_retention(effective_retention(catalog, r))
-        var nodes = cloud.lower(r)
+        var nodes = cloud.lower(r, edges_for(resources, r))
         if len(nodes) == 0:
             raise Error(
                 String("cloud \"")

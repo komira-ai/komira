@@ -13,7 +13,7 @@
 #     GCP label values; AWS tag values accept a superset);
 #   * the one character a value must carry and may not is `/`: a role is the
 #     rest of a node id after its owner, so it holds one `/` per level of
-#     nesting (`uses/jobs`, `web/api/run`). It is written `_`, ONE byte, so
+#     nesting (`api/run`, `web/api/u-mz4k2q`). It is written `_`, ONE byte, so
 #     the 63-byte budget pays one byte per level. Decoding (`_` -> `/`) is
 #     exact because no segment may hold `_`: resource ids and component ids
 #     are `[a-z0-9-]`, and the role vocabulary uses `-` only. A value that

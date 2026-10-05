@@ -37,7 +37,11 @@
 #     dependency or input on ANOTHER resource is written as that resource's
 #     id alone; kci resolves it to the resource's primary node
 #     (catalog.mojo). `retention` is set by kci from the resource, never by
-#     the adapter. `realize` turns one lowered node into the engine node,
+#     the adapter. Grants are decided by kci too (grants.mojo): `lower` is
+#     handed the resource's edges, each with its role and its target's type,
+#     and lowers each one by the cloud's own grant kinds. A service, a job
+#     and a service account lower the role `<id>/identity` (turned off for a
+#     service or a job with `run_as`): a grant's principal is that node. `realize` turns one lowered node into the engine node,
 #     and must keep its id, owner, wanted and retention.
 #   * An object of a node whose retention is KEEP carries the non-identity
 #     label `kci_retain=keep` (labels.mojo), and `list_owned` reports it as
@@ -82,6 +86,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource
 
 from kci_cloud.cloud_id import CloudId
+from kci_cloud.grants import GrantEdge
 
 
 comptime ABSENT_BY_DESIGN: Int = 1
@@ -421,8 +426,10 @@ trait CloudAdapter(Movable):
         """The artifact type and platform `r` needs on this cloud."""
         ...
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
-        """`r`'s engine nodes, as data. Pure: no network, no clock."""
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+        """`r`'s engine nodes, as data, including one grant per edge of
+        `edges` (kci's, from `grants.edges_for`). Pure: no network, no
+        clock."""
         ...
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:

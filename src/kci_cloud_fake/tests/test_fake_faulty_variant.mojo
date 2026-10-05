@@ -93,7 +93,7 @@ def test_read_lag_never_creates_twice_and_converges() raises:
             break
         failures += 1
     assert_true(failures >= 1, "a read one step behind does fail a run part-way")
-    for id in ["web/run", "api/run", "api/public", "web/uses/api"]:
+    for id in ["web/identity", "web/run", "api/run", "api/public", "web/u-f2yyzc", "web/u-xyqh3c"]:
         assert_equal(fake.store[].creates_of(String(id)), 1, String(id) + " was created once")
     var o2 = apply_resources(reg, fake, _ctx(), graph, creds, store)
     assert_true(o2.ok())
@@ -106,7 +106,7 @@ def test_read_lag_never_creates_twice_and_converges() raises:
     var loud = False
     while fake.live_count() > 0 or tries == 0:
         tries += 1
-        assert_true(tries <= 6, "the teardown converges")
+        assert_true(tries <= 12, "the teardown converges")
         try:
             _ = destroy_resources(reg, fake, _ctx(), graph, creds, store)
         except e:
@@ -209,14 +209,19 @@ def test_bootstrap_whoami_and_list_owned() raises:
     var o = apply_resources(reg, fake, _ctx(), _list(_graph()), Creds.none(), store)
     assert_true(o.ok())
     var owned = fake.list_owned(Creds.none(), _ctx().scope)
-    assert_equal(len(owned), 4, "web/run, web/uses/api, api/run, api/public")
+    assert_equal(
+        len(owned),
+        8,
+        "web/identity, web/run, web/u-f2yyzc (CALL api), web/u-xyqh3c (cell LOGS),"
+        + " api/identity, api/run, api/public, api/u-gktqg5 (cell LOGS)",
+    )
     var saw_grant = False
     for k in range(len(owned)):
         assert_equal(owned[k].run_id, "run-1", "the run that made it")
         assert_true(owned[k].deletable_by_kci)
-        if owned[k].owner_node == "web/uses/api":
+        if owned[k].owner_node == "web/u-f2yyzc":
             saw_grant = True
-    assert_true(saw_grant, "a role with a slash is decoded exactly")
+    assert_true(saw_grant, "a grant's role is decoded exactly")
     var green = CellScope(String("shop"), String("green"))
     assert_equal(len(fake.list_owned(Creds.none(), green)), 0, "another cell owns nothing here")
     print("  test_bootstrap_whoami_and_list_owned: PASS")

@@ -39,8 +39,11 @@
 # writes one of them as a `grant` resource. A `grant` resource's edge has
 # the role `grant`.
 #
-# kci decides all of this, never a cloud adapter: an adapter lowers the
-# edges `edges_of` gives it, by its own table of grant kinds per target.
+# kci decides all of this, never a cloud adapter. `edges_for` adds what the
+# adapter cannot see from one resource, the TARGET'S TYPE (its catalog
+# field, or `EDGE_TARGET_CELL` for a cell resource), and kci hands those
+# edges to `CloudAdapter.lower`, which lowers each by its own table of grant
+# kinds per target type.
 # =============================================================================
 
 from komira_crypto import sha256_string
@@ -64,6 +67,11 @@ comptime GRANT_ROLE_PREFIX = "u-"
 comptime GRANT_HASH_CHARS: Int = 6
 comptime CELL_PATH_PREFIX = "cell/"
 """A cell resource's target path: `cell/<NAME>` (`cell/LOGS`)."""
+
+comptime EDGE_TARGET_CELL: Int = 0
+"""`GrantEdge.target_field` of an edge to a cell resource."""
+comptime EDGE_TARGET_UNKNOWN: Int = -1
+"""`GrantEdge.target_field` before `edges_for` resolved it."""
 
 comptime CELL_LOGS: Int = 1
 """`kci.resource.v1.LOGS`."""
@@ -172,8 +180,9 @@ def principal_node(owner: String) -> String:
 struct GrantEdge(Copyable, Movable, Deinitable):
     """One edge, as kci decided it: its role (`u-<h>` or `grant`), the
     identity owner that may act, the target resource id (empty for a cell
-    resource) or the cell resource's name, the verb, and whether it is the
-    implicit `cell LOGS WRITE` edge."""
+    resource) or the cell resource's name, the verb, whether it is the
+    implicit `cell LOGS WRITE` edge, and the target's type (its catalog
+    field; `EDGE_TARGET_CELL` for a cell resource; set by `edges_for`)."""
 
     var role: String
     var principal: String
@@ -181,6 +190,7 @@ struct GrantEdge(Copyable, Movable, Deinitable):
     var cell: String
     var access: String
     var implicit: Bool
+    var target_field: Int
 
     def __init__(
         out self,
@@ -190,6 +200,7 @@ struct GrantEdge(Copyable, Movable, Deinitable):
         cell: String,
         access: String,
         implicit: Bool = False,
+        target_field: Int = EDGE_TARGET_UNKNOWN,
     ):
         self.role = role
         self.principal = principal
@@ -197,6 +208,7 @@ struct GrantEdge(Copyable, Movable, Deinitable):
         self.cell = cell
         self.access = access
         self.implicit = implicit
+        self.target_field = target_field
 
     def __init__(out self, *, copy: Self):
         self.role = copy.role.copy()
@@ -205,6 +217,7 @@ struct GrantEdge(Copyable, Movable, Deinitable):
         self.cell = copy.cell.copy()
         self.access = copy.access.copy()
         self.implicit = copy.implicit
+        self.target_field = copy.target_field
 
     def on_cell(self) -> Bool:
         return self.cell.byte_length() > 0
@@ -274,4 +287,27 @@ def edges_of(r: Resource) raises -> List[GrantEdge]:
                 uses_role(owner, path), owner.copy(), String(""), String("LOGS"), String(ACCESS_WRITE), True
             )
         )
+    return out^
+
+
+def edges_for(resources: List[Resource], r: Resource) raises -> List[GrantEdge]:
+    """`edges_of(r)`, each with its target's type set: the catalog field of
+    the target resource in `resources`, or `EDGE_TARGET_CELL`. Raises for a
+    target that is not in `resources` (validate refuses it first)."""
+    var out = edges_of(r)
+    for i in range(len(out)):
+        if out[i].on_cell():
+            out[i].target_field = EDGE_TARGET_CELL
+            continue
+        var found = False
+        for k in range(len(resources)):
+            if resources[k].id == out[i].target:
+                out[i].target_field = body_field(resources[k])
+                found = True
+                break
+        if not found:
+            raise Error(
+                String("resource \"") + r.id + String("\": an edge to \"") + out[i].target
+                + String("\" names no resource of this list")
+            )
     return out^

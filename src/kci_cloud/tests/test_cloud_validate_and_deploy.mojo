@@ -69,6 +69,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    GrantEdge,
     CloudAdapter,
     Absence,
     ArtifactNeed,
@@ -333,7 +334,7 @@ struct _Stub(CloudAdapter, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
         if self._bad_owner:
             owner = String("someone-else")

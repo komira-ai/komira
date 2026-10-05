@@ -31,6 +31,7 @@ create meet a second apply's object.
 from kci_cloud_fake.fake_store import FakeStore, FakeView
 from kci_cloud_fake.nodes import (
     FakeNode,
+    fake_account_name,
     fake_bucket_address,
     fake_bucket_name,
     fake_host,
@@ -38,4 +39,12 @@ from kci_cloud_fake.nodes import (
     static_digest,
 )
 from kci_cloud_fake.clouds import FakeLimitedCloud, FakeCloud
-from kci_cloud_fake.shapes import ProviderShape, ShapeRow, builtin_shapes, shape_named
+from kci_cloud_fake.shapes import (
+    GrantRow,
+    ProviderShape,
+    ShapeRow,
+    TARGET_ANY,
+    builtin_shapes,
+    helper_role,
+    shape_named,
+)
