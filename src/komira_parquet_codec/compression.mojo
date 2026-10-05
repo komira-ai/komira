@@ -263,9 +263,10 @@ def _copy_uncompressed[
 # id 5:
 #
 #   (a) HADOOP block framing — parquet-mr / Hive / Spark, via Hadoop's
-#       `BlockCompressorStream` + `Lz4Codec`. An 8-byte big-endian prefix
+#       `BlockCompressorStream` + `Lz4Codec`. One 8-byte big-endian prefix
 #       (uncompressed length, then compressed length) ahead of an LZ4 raw
-#       block. This is the dominant on-disk form.
+#       block, repeated for each compressor buffer (256 KiB by default), so a
+#       larger page holds several. This is the dominant on-disk form.
 #   (b) LZ4 FRAME — Arrow C++ before 0.17 wrote a complete LZ4 frame
 #       (magic 0x184D2204) under id 5.
 #   (c) bare LZ4 raw block — some writers emitted exactly what id 7 later
@@ -274,9 +275,10 @@ def _copy_uncompressed[
 # Detection is by STRUCTURE, in decreasing order of evidence, and every arm
 # must SUCCEED-OR-REJECT rather than guess:
 #
-#   1. Hadoop: requires both length fields to be self-consistent with the
-#      buffer AND the decode to return EXACTLY the declared uncompressed
-#      length. Mirrors arrow-cpp `Lz4HadoopCodec::TryDecompressHadoop`.
+#   1. Hadoop: every prefixed block must have length fields consistent with
+#      the remaining buffer and decode to EXACTLY its declared uncompressed
+#      length, and the blocks must consume the whole input. Mirrors arrow-cpp
+#      `Lz4HadoopCodec::TryDecompressHadoop`.
 #   2. Frame: gated on the 4-byte frame magic, so it is a positive
 #      identification and not a guess. (arrow-cpp does not attempt this arm;
 #      we can, because the magic makes it unambiguous.)
@@ -479,30 +481,44 @@ def _decompress_lz4_deprecated[
     var input_len = len(input)
     var output_len = len(output)
     # --- Arm 1: Hadoop block framing (parquet-mr / Hive / Spark) -------------
+    # One `[BE u32 uncompressed][BE u32 compressed][raw block]` group per
+    # compressor buffer, so a page larger than the buffer holds several, back
+    # to back. Accepted only if every group decodes to exactly its declared
+    # length and the groups consume the whole input; anything else falls
+    # through rather than return a partially-filled page.
     if input_len >= _LZ4_HADOOP_PREFIX_LEN:
-        var declared_uncompressed = _read_be_u32(input, 0)
-        var declared_compressed = _read_be_u32(input, 4)
-        if (
-            declared_compressed > 0
-            and declared_uncompressed > 0
-            and declared_compressed <= input_len - _LZ4_HADOOP_PREFIX_LEN
-            and declared_uncompressed <= output_len
-        ):
+        var in_pos = 0
+        var out_pos = 0
+        var ok = True
+        while ok and input_len - in_pos >= _LZ4_HADOOP_PREFIX_LEN:
+            var declared_uncompressed = _read_be_u32(input, in_pos)
+            var declared_compressed = _read_be_u32(input, in_pos + 4)
+            var block_start = in_pos + _LZ4_HADOOP_PREFIX_LEN
+            if (
+                declared_compressed <= 0
+                or declared_uncompressed <= 0
+                or declared_compressed > input_len - block_start
+                or declared_uncompressed > output_len - out_pos
+            ):
+                ok = False
+                break
             try:
                 var written = lz4_decompress_into(
-                    output,
-                    input[
-                        _LZ4_HADOOP_PREFIX_LEN : _LZ4_HADOOP_PREFIX_LEN
-                        + declared_compressed
-                    ],
+                    output[out_pos : out_pos + declared_uncompressed],
+                    input[block_start : block_start + declared_compressed],
                 )
-                # EXACT match required. A short/long decode means the two
-                # length fields were coincidence, not framing — fall through
-                # rather than return a partially-filled page.
-                if written == declared_uncompressed:
-                    return written
+                # EXACT match required. A short decode means the length
+                # fields were coincidence, not framing.
+                if written != declared_uncompressed:
+                    ok = False
+                    break
             except:
-                pass
+                ok = False
+                break
+            in_pos = block_start + declared_compressed
+            out_pos += declared_uncompressed
+        if ok and in_pos == input_len:
+            return out_pos
 
     # --- Arm 2: LZ4 Frame (arrow-cpp < 0.17), gated on the frame magic -------
     if lz4_text_framing_of(input) == Lz4TextFraming.FRAME:
@@ -533,7 +549,9 @@ def decompress_lz4_frame[
 
     Distinct from LZ4_RAW (raw block / `LZ4_decompress_safe`): this decodes
     the interoperable LZ4 Frame Format (magic 0x184D2204), which is what
-    Kafka's `lz4` producer compression emits (KIP-57). `len(output)` is the
+    Kafka's `lz4` producer compression emits (KIP-57). Concatenated frames
+    decode in full, as `lz4 -d` decodes them; input that ends inside a frame,
+    or bytes after a frame that are not one, raise. `len(output)` is the
     output-buffer capacity; a caller that does not know the decoded size
     grows + retries on the "LZ4F dst buffer too small" error. Returns the
     decompressed byte count.

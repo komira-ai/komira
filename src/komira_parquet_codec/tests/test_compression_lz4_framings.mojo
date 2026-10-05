@@ -193,6 +193,43 @@ def test_frame_cut_inside_its_block_is_refused() raises:
     _refuses_truncated(len(frame) // 2)
 
 
+def _repeated(b: List[UInt8], times: Int) -> List[UInt8]:
+    var out = List[UInt8](capacity=len(b) * times)
+    for _ in range(times):
+        for i in range(len(b)):
+            out.append(b[i])
+    return out^
+
+
+def test_concatenated_frames_decode_in_full() raises:
+    # Two frames back to back, as `cat a.lz4 b.lz4` writes them; `lz4 -d`
+    # decodes both, and so must this.
+    var text = _read(_GOLDEN_TEXT)
+    var two = _repeated(_read(_GOLDEN_FRAME), 2)
+    var out = _filled(2 * len(text) + 64, 0)
+    var n = decompress_lz4_frame(Span(two), Span(out))
+    _assert_text(out, n, _repeated(text, 2))
+
+
+def test_frame_followed_by_a_junk_byte_is_refused() raises:
+    var text = _read(_GOLDEN_TEXT)
+    var frame = _read(_GOLDEN_FRAME)
+    frame.append(0x00)
+    var out = _filled(len(text) + 64, 0)
+    var raised = False
+    try:
+        _ = decompress_lz4_frame(Span(frame), Span(out))
+    except:
+        raised = True
+    assert_true(raised, "a byte after the frame is not a frame")
+    raised = False
+    try:
+        _ = decompress(CompressionCodec.LZ4, Span(frame), Span(out))
+    except:
+        raised = True
+    assert_true(raised, "codec id 5: a byte after the frame is not a frame")
+
+
 # --- codec id 5, the deprecated LZ4 -------------------------------------------
 
 
@@ -225,6 +262,40 @@ def test_deprecated_lz4_hadoop_arm() raises:
     var out = _filled(len(text), 0)
     var n = decompress(CompressionCodec.LZ4, Span(framed), Span(out))
     _assert_text(out, n, text)
+
+
+def _hadoop_block(text_len: Int, block: List[UInt8]) -> List[UInt8]:
+    var framed = List[UInt8]()
+    _append_be32(framed, text_len)
+    _append_be32(framed, len(block))
+    for i in range(len(block)):
+        framed.append(block[i])
+    return framed^
+
+
+def test_deprecated_lz4_hadoop_arm_reads_every_block() raises:
+    # Hadoop's BlockCompressorStream writes one prefixed block per buffer, so
+    # a page larger than the buffer holds several, back to back.
+    var text = _read(_GOLDEN_TEXT)
+    var two = _repeated(_hadoop_block(len(text), _golden_block()), 2)
+    var out = _filled(2 * len(text), 0)
+    var n = decompress(CompressionCodec.LZ4, Span(two), Span(out))
+    _assert_text(out, n, _repeated(text, 2))
+
+
+def test_deprecated_lz4_hadoop_arm_refuses_a_trailing_byte() raises:
+    # One prefixed block and a byte after it: not Hadoop framing (the input is
+    # not consumed), not a frame, and not a raw block either.
+    var text = _read(_GOLDEN_TEXT)
+    var framed = _hadoop_block(len(text), _golden_block())
+    framed.append(0x00)
+    var out = _filled(len(text), 0)
+    var raised = False
+    try:
+        _ = decompress(CompressionCodec.LZ4, Span(framed), Span(out))
+    except:
+        raised = True
+    assert_true(raised, "a Hadoop block followed by a stray byte must raise")
 
 
 def test_deprecated_lz4_reads_what_lz4_raw_writes() raises:

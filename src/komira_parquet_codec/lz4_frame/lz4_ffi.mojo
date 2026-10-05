@@ -137,10 +137,12 @@ def _lz4_frame_decompress_into[
 ](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
     """LZ4 FRAME decompression via liblz4's `LZ4F_decompress`.
 
-    Decodes one complete in-memory LZ4 frame (`src`) into `dst` (capacity
-    `len(dst)`). Drives `LZ4F_decompress` in a loop until the whole frame is
-    consumed; liblz4 returns a hint of 0 once the frame is fully decoded.
-    Returns the number of decompressed bytes written.
+    Decodes the in-memory LZ4 frames in `src`, one or more back to back,
+    into `dst` (capacity `len(dst)`). Drives `LZ4F_decompress` in a loop
+    until every input byte is consumed and the last frame is done; liblz4
+    returns a hint of 0 at the end of each frame. Returns the number of
+    decompressed bytes written. Input that ends inside a frame, or bytes
+    after a frame that are not one, raise.
 
     Raises with the literal "LZ4F dst buffer too small" marker substring when
     the output buffer filled before the frame ended (a caller's grow-and-retry
@@ -191,7 +193,8 @@ def _lz4_frame_decompress_into[
     var raised_msg = String("")
     var failed = False
 
-    # Drive the frame decoder until it reports the frame done (a hint of 0).
+    # Drive the frame decoder until it reports a frame done (a hint of 0)
+    # with no input left.
     # Each call tells us how many src bytes it ate and how many dst bytes it
     # produced. Once the input is used up, a call with no input left lets
     # liblz4 flush what it buffered; a call that then makes no progress
@@ -227,8 +230,13 @@ def _lz4_frame_decompress_into[
         total_out += produced
         src_pos += consumed
         if Int(hint) == 0:
-            # Frame fully decoded.
-            break
+            # A frame is fully decoded. If input remains, it must be another
+            # frame (concatenated or skippable, as `lz4 -d` accepts): liblz4
+            # has reset the context to read a new frame header, so keep
+            # going. Bytes that are not a frame fail in the next calls.
+            if src_pos >= src_size:
+                break
+            continue
         if consumed == 0 and produced == 0:
             # No progress and the frame is not done.
             failed = True
