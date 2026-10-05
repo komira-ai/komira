@@ -37,7 +37,10 @@
 #       holding the token). The token is read by allow-list: an `id-token`
 #       entry withholds it only as a plain `read` or `none`; any other value
 #       (quoted, a block scalar, a mapping, empty) counts as holding it.
-#       `id-token` is the only permission these rules read.
+#       Keys are read exactly: a `permissions` or `id-token` key written in
+#       another case, or two permissions keys that differ only in case, is
+#       a disagreement (an `id-token` key in another case counts as holding
+#       the token). `id-token` is the only permission these rules read.
 #   R5  each job's steps invoke `kci run` exactly once; a job named after a
 #       stage passes `--stage` its own id written literally (a `--stage`
 #       naming another stage, or one that is a variable, is a
@@ -449,23 +452,58 @@ def _triggers(doc: WorkflowDoc, on: Int) -> List[String]:
     return doc.scalar_or_list(on)
 
 
+def _in_another_case(key: String, name: String) -> Bool:
+    """`key` is `name` ignoring case, but not exactly `name`."""
+    return key != name and key.lower() == name.lower()
+
+
 def _id_token_write(doc: WorkflowDoc, perms: Int) -> Bool:
     """`perms` grants `id-token: write`, read by allow-list: a scalar
-    `permissions:` other than a plain `read-all`, or an `id-token` entry
-    other than a plain `read` or `none` (a quoted or block scalar, a
-    mapping, an empty value: anything else counts as the grant)."""
+    `permissions:` other than a plain `read-all`, an `id-token` key in
+    another case (`Id-Token`), or an `id-token` entry other than a plain
+    `read` or `none` (a quoted or block scalar, a mapping, an empty value:
+    anything else counts as the grant)."""
     if perms >= 0 and doc.kind(perms) == NODE_SCALAR:
         return not doc.is_plain(perms, String("read-all"))
+    var keys = doc.keys(perms)
+    for k in range(len(keys)):
+        if _in_another_case(keys[k], String("id-token")):
+            return True
     var v = doc.child(perms, String("id-token"))
     if v < 0:
         return False
     return not (doc.is_plain(v, String("read")) or doc.is_plain(v, String("none")))
 
 
-def _check_permissions_form(doc: WorkflowDoc, perms: Int, whose: String, mut findings: List[String]):
-    """R4: a `permissions:` that is a scalar is a plain `read-all`; any
-    other scalar (`write-all` above all, a quoted or block scalar) grants
-    permissions no map names."""
+def _check_permissions_form(doc: WorkflowDoc, owner: Int, whose: String, mut findings: List[String]):
+    """R4, the form of the `permissions:` of `owner` (the workflow or a
+    job): no key of `owner` is `permissions` in another case; a
+    `permissions:` that is a scalar is a plain `read-all` (any other scalar,
+    `write-all` above all, a quoted or block scalar, grants permissions no
+    map names); a permissions map has no `id-token` key in another case and
+    no two keys that differ only in case."""
+    var owner_keys = doc.keys(owner)
+    for k in range(len(owner_keys)):
+        if _in_another_case(owner_keys[k], String("permissions")):
+            findings.append(
+                _at(doc, doc.child(owner, owner_keys[k])) + whose + String("R4: key '") + owner_keys[k]
+                + String("' is `permissions` in another case; write it `permissions`")
+            )
+    var perms = doc.child(owner, String("permissions"))
+    if perms >= 0 and doc.kind(perms) == NODE_MAP:
+        var keys = doc.keys(perms)
+        for k in range(len(keys)):
+            if _in_another_case(keys[k], String("id-token")):
+                findings.append(
+                    _at(doc, perms) + whose + String("R4: permissions key '") + keys[k]
+                    + String("' is `id-token` in another case (it counts as holding the token); write it `id-token`")
+                )
+            for j in range(k + 1, len(keys)):
+                if keys[k].lower() == keys[j].lower():
+                    findings.append(
+                        _at(doc, perms) + whose + String("R4: permissions keys '") + keys[k] + String("' and '")
+                        + keys[j] + String("' differ only in case")
+                    )
     if perms < 0 or doc.kind(perms) != NODE_SCALAR or doc.is_plain(perms, String("read-all")):
         return
     findings.append(
@@ -921,14 +959,12 @@ def check_workflow_doc(
         if doc.child(inputs, String("revision")) < 0:
             findings.append(_at(doc, on) + String("R7: workflow_dispatch takes no input `revision` (the commit a manual run releases)"))
     # R4, workflow level, and the form of every `permissions:`
-    _check_permissions_form(doc, doc.child(root, String("permissions")), String("workflow: "), findings)
+    _check_permissions_form(doc, root, String("workflow: "), findings)
     var all_jobs = doc.child(root, String("jobs"))
     var all_ids = doc.keys(all_jobs)
     var all_nodes = doc.items(all_jobs)
     for i in range(len(all_ids)):
-        _check_permissions_form(
-            doc, doc.child(all_nodes[i], String("permissions")), String("job '") + all_ids[i] + String("': "), findings
-        )
+        _check_permissions_form(doc, all_nodes[i], String("job '") + all_ids[i] + String("': "), findings)
     if _id_token_write(doc, doc.child(root, String("permissions"))):
         findings.append(
             _at(doc, doc.child(root, String("permissions")))

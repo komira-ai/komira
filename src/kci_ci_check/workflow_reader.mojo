@@ -17,8 +17,9 @@
 #             `*x` or a tag `!x` where a value starts; a flow mapping other
 #             than `{}`; a nested flow list; a second document (`---` after
 #             content, or `...`); a key repeated in one mapping; a complex
-#             key `? `; a line indented in a way no open block can hold; a
-#             quoted scalar that is not closed on its line
+#             key `? `; a merge key `<<` (in any form); an escape (`\`) in a
+#             double-quoted key or value; a line indented in a way no open
+#             block can hold; a quoted scalar that is not closed on its line
 #
 # `actionlint` (the repository's workflow lint) stays the YAML-validity
 # gate; this reader only has to be right on what it accepts.
@@ -263,6 +264,10 @@ def _split_key(text: String, line: Int) raises -> Tuple[String, String, Bool]:
             j += 1
         if j + 1 < len(b) and Int(b[j + 1]) == 58 and (j + 2 == len(b) or Int(b[j + 2]) == 32):
             var key = String(text[byte = 1:j])
+            if q == 34 and key.find(String("\\")) >= 0:
+                # YAML decodes escapes in a double-quoted key as in a value:
+                # `"id\x2dtoken"` is `id-token`
+                raise _cannot(line, String("an escape in a double-quoted key"))
             var rest = String(String(text[byte = j + 2 :]).strip())
             return (key^, rest^, True)
         return (String(""), text.copy(), False)
@@ -395,6 +400,10 @@ struct _Reader(Movable):
         return idx
 
     def _put(mut self, m: Int, key: String, child: Int, line: Int) raises:
+        if key == String("<<"):
+            # a merge key folds another mapping's keys into this one; read
+            # as an ordinary key, the merged keys would never be seen
+            raise _cannot(line, String("a merge key '<<'"))
         for k in range(len(self.doc.nodes[m].keys)):
             if self.doc.nodes[m].keys[k] == key:
                 raise _cannot(line, String("key '") + key + String("' repeated in one mapping"))

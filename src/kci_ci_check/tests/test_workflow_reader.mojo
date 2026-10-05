@@ -131,6 +131,12 @@ def test_cannot_tell() raises:
     _cannot(String("  a: 1\n"), String("first line is indented"))
     _cannot(String("a: |2\n  x\n"), String("block scalar header"))
     _cannot(String(""), String("empty"))
+    # a double-quoted KEY decodes escapes as a value does: `"id\x2dtoken"` is `id-token`
+    _cannot(String("\"a\\x62\": 1\n"), String("escape in a double-quoted key"))
+    _cannot(String("l:\n  - \"a\\x62\": 1\n"), String("escape in a double-quoted key"))
+    # a merge key `<<` in any form (block, flow, alias), and in a list item's mapping
+    _cannot(String("a:\n  b: 1\n  <<:\n    c: 2\n"), String("merge key"))
+    _cannot(String("l:\n  - <<:\n      c: 2\n"), String("merge key"))
 
 
 def main() raises:

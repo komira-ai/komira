@@ -398,6 +398,84 @@ def test_a_permissions_scalar_other_than_plain_read_all_is_refused() raises:
         _reports(wf, String("R4: `id-token: write` at the workflow level reaches every job"))
 
 
+def _cannot_tell(machine: String, wf: String, needle: String) raises:
+    try:
+        var f = _check(machine, wf)
+        raise Error(String("read, expected cannot tell: ") + needle + String("; findings: ") + _all(f))
+    except e:
+        var m = String(e)
+        if not m.startswith(String("cannot tell: ")) or m.find(needle) < 0:
+            raise Error(String("expected 'cannot tell: ...") + needle + String("', got: ") + m)
+
+
+def _job_perms(wf: String, entry: String) -> String:
+    """`wf` (the not-farm-connected pull request workflow) with `entry` added
+    to job 'pr''s permissions."""
+    return wf.replace(String("      contents: read\n"), String("      contents: read\n      ") + entry + String("\n"))
+
+
+def _top_perms(wf: String, entry: String) -> String:
+    """`wf` with workflow-level permissions holding `entry`."""
+    return wf.replace(String("permissions: {}\n"), String("permissions:\n  ") + entry + String("\n"))
+
+
+def test_an_escape_in_a_double_quoted_permissions_key_is_cannot_tell() raises:
+    # `"id\x2dtoken": write` is `id-token: write` once the escape is decoded
+    var base = _not_farm_connected()
+    var keys = List[String]()
+    keys.append(String("\"id\\x2dtoken\": write"))
+    keys.append(String("\"id\\x2Dtoken\": write"))
+    keys.append(String("\"id\\u002dtoken\": write"))
+    for i in range(len(keys)):
+        _cannot_tell(base[0], _job_perms(base[1], keys[i]), String("an escape in a double-quoted key"))
+        _cannot_tell(base[0], _top_perms(base[1], keys[i]), String("an escape in a double-quoted key"))
+    # `"permi\x73sions": write-all` is `permissions: write-all`
+    var wa = String("\"permi\\x73sions\": write-all\n")
+    _cannot_tell(
+        base[0], base[1].replace(String("    permissions:\n      contents: read\n"), String("    ") + wa), String("an escape in a double-quoted key")
+    )
+    _cannot_tell(base[0], base[1].replace(String("permissions: {}\n"), wa), String("an escape in a double-quoted key"))
+
+
+def test_a_merge_key_in_permissions_is_cannot_tell() raises:
+    var base = _not_farm_connected()
+    var job = base[1].replace(String("      contents: read\n"), String("      contents: read\n      <<:\n        id-token: write\n"))
+    _cannot_tell(base[0], job, String("merge key"))
+    var top = base[1].replace(String("permissions: {}\n"), String("permissions:\n  contents: read\n  <<:\n    id-token: write\n"))
+    _cannot_tell(base[0], top, String("merge key"))
+
+
+def test_an_id_token_key_in_another_case_is_refused() raises:
+    var base = _not_farm_connected()
+    var keys = List[String]()
+    keys.append(String("Id-Token: write"))
+    keys.append(String("ID-TOKEN: write"))
+    keys.append(String("id-Token: read"))
+    for i in range(len(keys)):
+        var job = _job_perms(base[1], keys[i])
+        _reports_on(base[0], job, String("job 'pr': R4: permissions key '"))
+        _reports_on(base[0], job, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+        var top = _top_perms(base[1], keys[i])
+        _reports_on(base[0], top, String("workflow: R4: permissions key '"))
+        _reports_on(base[0], top, String("R4: `id-token: write` at the workflow level reaches every job"))
+
+
+def test_permissions_keys_that_differ_only_in_case_are_refused() raises:
+    var base = _not_farm_connected()
+    _reports_on(base[0], _job_perms(base[1], String("Contents: write")), String("job 'pr': R4: permissions keys 'contents' and 'Contents'"))
+    _reports_on(
+        base[0], _top_perms(base[1], String("contents: read\n  CONTENTS: write")), String("workflow: R4: permissions keys 'contents' and 'CONTENTS'")
+    )
+
+
+def test_a_permissions_key_in_another_case_is_refused() raises:
+    var base = _not_farm_connected()
+    var job = base[1].replace(String("    permissions:\n      contents: read\n"), String("    Permissions: write-all\n"))
+    _reports_on(base[0], job, String("job 'pr': R4: key 'Permissions' is `permissions` in another case"))
+    var top = base[1].replace(String("permissions: {}\n"), String("PERMISSIONS: write-all\n"))
+    _reports_on(base[0], top, String("workflow: R4: key 'PERMISSIONS' is `permissions` in another case"))
+
+
 def test_read_all_and_an_empty_map_are_accepted() raises:
     _agrees(String(_MACHINE), _pr(String("permissions: {}\n"), String("permissions: read-all\n")))
 
