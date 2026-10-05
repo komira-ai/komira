@@ -1,0 +1,184 @@
+# =============================================================================
+# src/kci_cli/summary.mojo -- the `--summary-file` block of a run (dispatch.mojo's
+#   header, 9), and the lines continuous auto-promotion adds to it.
+# =============================================================================
+#
+#   run_summary_markdown  the outcome and exit number, the scope, the
+#                         revision and set hash, the workflow check, the
+#                         steps, the validations, the NEW NAMES blocks
+#   promotion_line        the one plain line a run of a main-only stage that
+#                         publishes says about its channel (`promoted to
+#                         <stage>: ...`, `nothing new`, `PLAN ONLY`), "" for
+#                         any other run
+#   break_glass_line      `BREAK-GLASS: <ref> <revision> by <actor>:
+#                         <reason>`, the first line of every break-glass
+#                         run's summary
+#   append_summary        appends to the file, never truncates
+#
+# Pure functions over owned values (append_summary writes the one file it is
+# given); no pointer, no wildcard origin.
+# =============================================================================
+
+from kci_api import (
+    CREDENTIAL_PROBE_NOT_RUN_NOTE,
+    CREDENTIAL_PROBE_NOT_UNDER_CI,
+    OUTCOME_NOOP,
+    OUTCOME_SUCCEEDED,
+    SCOPE_SELECTIVE,
+    STEP_KIND_PUBLISH,
+    credential_probe_note,
+)
+from kci_api import RunResult as KciRunResult
+from kci_publish import NewNamesReport, new_names_markdown
+
+comptime _STDERR: FileDescriptor = FileDescriptor(2)
+
+
+def _say(line: String):
+    print(line, file=_STDERR)
+
+
+def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead: List[NewNamesReport]) -> String:
+    """The `--summary-file` block of a finished run (file header, 9)."""
+    var note = credential_probe_note(result.steps)
+    var s = String("## kci run --stage ") + result.stage + String(": ") + result.outcome
+    if note.byte_length() > 0:
+        s += String(", ") + note
+    s += String(" (exit ") + String(result.exit_code) + String(")\n\n")
+    if result.scope == SCOPE_SELECTIVE:
+        var only = String("")
+        for i in range(len(result.only)):
+            if i > 0:
+                only += String(" ")
+            only += result.only[i]
+        if result.has_affected_by:
+            only += String("affected-by ") + result.affected_base
+        s += String("SELECTIVE run (") + only + String("): not a full run.")
+    else:
+        s += String("FULL run.")
+    if result.plan:
+        s += String(" Dry run (--plan): nothing built, nothing written to a channel.")
+    s += String("\n\n")
+    s += String("- revision: `") + result.revision + String("`\n")
+    if result.set_hash.byte_length() > 0:
+        s += String("- set hash: `") + result.set_hash + String("`\n")
+    if result.channel.byte_length() > 0:
+        s += String("- channel: `") + result.channel + String("`\n")
+    if result.has_affected_by:
+        if result.affected_verdict.byte_length() == 0:
+            s += String("- affected: no answer\n")
+        else:
+            s += String("- affected: ") + result.affected_verdict
+            if result.affected_reason.byte_length() > 0:
+                s += String(" (") + result.affected_reason + String(")")
+            s += String(", ") + String(len(result.affected_units)) + String(" unit(s):")
+            for i in range(len(result.affected_units)):
+                s += String(" `") + result.affected_units[i] + String("`")
+            s += String("\n")
+    if result.workflow_checked:
+        s += (
+            String("- workflow: `") + result.workflow_path + String("` at `") + result.workflow_sha
+            + String("` agrees with the machine file\n")
+        )
+    else:
+        s += String("- workflow: not checked (") + result.workflow_reason + String(")\n")
+    if result.has_error:
+        var first = result.error.message.copy()
+        var nl = result.error.message.find(String("\n"))
+        if nl >= 0:
+            first = String(result.error.message[byte = 0:nl])
+        s += String("- error: `") + result.error.id + String("`: ") + first + String("\n")
+    if len(result.steps) > 0:
+        s += String("\n| step | kind | outcome |\n|---|---|---|\n")
+        for i in range(len(result.steps)):
+            ref st = result.steps[i]
+            var o = st.outcome.copy()
+            if not st.selected:
+                o = String("not selected")
+            elif o.byte_length() == 0:
+                o = String("not reached")
+            elif st.credential_probe == CREDENTIAL_PROBE_NOT_UNDER_CI:
+                o += String(", ") + String(CREDENTIAL_PROBE_NOT_RUN_NOTE)
+            s += String("| ") + st.name + String(" | ") + st.kind + String(" | ") + o + String(" |\n")
+    if len(result.validations) > 0:
+        s += String("\n| validation | step | outcome |\n|---|---|---|\n")
+        for i in range(len(result.validations)):
+            ref v = result.validations[i]
+            var o = v.outcome.copy() if v.outcome.byte_length() > 0 else v.effect.copy()
+            s += String("| ") + v.name + String(" | ") + v.step + String(" | ") + o + String(" |\n")
+            for k in range(len(v.checks)):
+                if not v.checks[k].ok:
+                    s += String("| | | `") + v.checks[k].got + String("` |\n")
+    s += String("\n")
+    for i in range(len(step_blocks)):
+        s += step_blocks[i]
+    for i in range(len(ahead)):
+        s += new_names_markdown(ahead[i])
+    return s^
+
+
+def append_summary(path: String, text: String):
+    """Append `text` to `path` ("" appends nothing). Never truncates; a file
+    that cannot be written is said on stderr."""
+    if path.byte_length() == 0:
+        return
+    try:
+        var f = open(path, "a")
+        f.write(text)
+        f.close()
+    except e:
+        _say(String("kci: the summary file '") + path + String("' could not be written: ") + String(e))
+
+
+def _build_of(file: String) -> String:
+    """The build string of a conda file name `<name>-<version>-<build>.conda`
+    ("" when it is not one)."""
+    var tail = String(".conda")
+    if not file.endswith(tail):
+        return String("")
+    var stem = String(file[byte = 0 : file.byte_length() - tail.byte_length()])
+    var at = stem.rfind(String("-"))
+    if at < 0:
+        return String("")
+    return String(stem[byte = at + 1 :])
+
+
+def promotion_line(result: KciRunResult, stage: String, main_only: Bool) -> String:
+    """The file header's `promotion_line`: for a run of a main-only stage
+    (`main_only`, the machine file's stage without `break_glass`) that ran a
+    PUBLISH step and ended SUCCEEDED or NOOP: `<stage>: PLAN ONLY (dry
+    run)` for a dry run; else `promoted to <stage>: <names> <build>` when
+    something was written, `promoted to <stage>: nothing new (<build>
+    already there)` when every file was there. "" for any other run (a
+    failure is the workflow's own line, which reads the job's status)."""
+    if not main_only:
+        return String("")
+    var published = False
+    for i in range(len(result.steps)):
+        if result.steps[i].selected and result.steps[i].kind == STEP_KIND_PUBLISH:
+            published = True
+    if not published or (result.outcome != OUTCOME_SUCCEEDED and result.outcome != OUTCOME_NOOP):
+        return String("")
+    if result.plan:
+        return stage + String(": PLAN ONLY (dry run)")
+    var names = List[String]()
+    var build = String("")
+    for i in range(len(result.artifacts)):
+        ref a = result.artifacts[i]
+        var seen = False
+        for k in range(len(names)):
+            if names[k] == a.name:
+                seen = True
+        if not seen and a.name.byte_length() > 0:
+            names.append(a.name.copy())
+        if build.byte_length() == 0:
+            build = a.build.copy() if a.build.byte_length() > 0 else _build_of(a.file)
+    if result.outcome == OUTCOME_NOOP:
+        return String("promoted to ") + stage + String(": nothing new (") + build + String(" already there)")
+    return String("promoted to ") + stage + String(": ") + String(" ").join(names) + String(" ") + build
+
+
+def break_glass_line(ref_value: String, revision: String, actor: String, reason: String) -> String:
+    """The first line of a break-glass run's summary (file header)."""
+    var short = String(revision[byte = 0 : 8]) if revision.byte_length() >= 8 else revision.copy()
+    return String("BREAK-GLASS: ") + ref_value + String(" ") + short + String(" by ") + actor + String(": ") + reason

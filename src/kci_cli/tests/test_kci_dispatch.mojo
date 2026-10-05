@@ -40,6 +40,7 @@ from kci_publish import NewNamesReport, PublishRequest
 from kci_validate import ValidateRequest
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+comptime _SET_HASH: String = "5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a"
 
 
 struct FakeSteps(StageSteps, Movable):
@@ -141,6 +142,16 @@ struct FakeSteps(StageSteps, Movable):
         if self.workflow_fails:
             raise Error(String("fatal: path does not exist"))
         return self.workflow.copy()
+
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        # every revision is on every history here (test_kci_ref_check holds
+        # the ref check)
+        self.reads.append(String("is-ancestor ") + commit + String(" ") + of)
+        return True
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        # the release every gamma run here is handed (`_gamma`)
+        return String(_SET_HASH)
 
     def _next(mut self, name: String, kind: String, platform: String, mut result: KciRunResult) -> StepEnd:
         var end = StepEnd(String(OUTCOME_SUCCEEDED), String(""), String(""))
@@ -547,13 +558,17 @@ def _under_actions(mut steps: FakeSteps, workflow: String):
     steps.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
     steps.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/kci.yml@refs/heads/main"))
     steps.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
+    # a run of main (the ref check, test_kci_ref_check)
+    steps.set_env(String("GITHUB_REF"), String("refs/heads/main"))
+    steps.set_env(String("GITHUB_SHA"), String(_SHA))
     steps.workflow = workflow.copy()
 
 
 def _gamma(m: String, *extra: String) -> List[String]:
     var a = _run(m, String("gamma"))
-    for s in ["--release-version", "rv"]:
+    for s in ["--release-version", "rv", "--release-set-hash"]:
         a.append(String(s))
+    a.append(String(_SET_HASH))
     for s in extra:
         a.append(String(s))
     return a^

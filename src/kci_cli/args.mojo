@@ -9,6 +9,7 @@
 #           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]
 #           [--release-version <file>] [--concurrency <n>]
 #           [--secret-store <none|env>] [--scratch-dir <dir>]
+#           [--release-set-hash <64 hex>]
 #   kci --help
 #
 # kci has exactly ONE command: `kci run --stage S` runs every step of stage S
@@ -65,8 +66,15 @@
 #
 # Only the SELECTED steps and validations count (every one, without
 # `--only`; `--only step:<s>` selects no validation). Which names
-# a release publishes is its artifacts file's: there is no per-run claim
-# and no expected set hash on the command line.
+# a release publishes is its artifacts file's: there is no per-run claim.
+#
+# `--release-set-hash <64 lowercase hex>` (a selected PUBLISH step or
+# validation): the set hash of the release the run was handed (kci.yml: the
+# build job's, or the validate job's for prod). kci recomputes the release
+# directory's set and refuses another (KCI-E-SET-HASH, exit 3) before any
+# effect; under GitHub Actions a run that publishes or validates without it
+# is a usage error (dispatch.mojo). It is refused with --affected-by and on a
+# stage whose selection publishes and validates nothing.
 #
 # Every refusal here is a usage error (kci_api's KCI-E-USAGE, exit 2;
 # a malformed `--only` is KCI-E-SELECTOR, also exit 2).
@@ -101,6 +109,7 @@ comptime KCI_USAGE: String = (
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
     "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
     "          --scratch-dir <dir>                                          (a selected validation)\n"
+    "          [--release-set-hash <64 hex>]                  (a selected PUBLISH step or validation)\n"
     "  kci --help\n"
     "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
     "--machine defaults to release/machine.textproto.\n"
@@ -164,6 +173,7 @@ struct KciCommand(Copyable, Movable):
     var scratch_dir: String
     var only: List[String]
     var affected_by: String
+    var release_set_hash: String
     var seen: List[String]
 
     def __init__(out self):
@@ -187,6 +197,7 @@ struct KciCommand(Copyable, Movable):
         self.scratch_dir = String("")
         self.only = List[String]()
         self.affected_by = String("")
+        self.release_set_hash = String("")
         self.seen = List[String]()
 
     def given(self, flag: String) -> Bool:
@@ -212,7 +223,7 @@ def _run_common_flags() -> List[String]:
     var l = List[String]()
     for f in [
         "--machine", "--stage", "--only", "--affected-by", "--plan", "--revision-id", "--run-id", "--attempt",
-        "--context", "--release-dir", "--result-file", "--summary-file",
+        "--context", "--release-dir", "--result-file", "--summary-file", "--release-set-hash",
     ]:
         l.append(String(f))
     return l^
@@ -297,6 +308,16 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         except e:
             raise usage_error(String(e))
         cmd.affected_by = value.copy()
+    elif flag == String("--release-set-hash"):
+        var b = value.as_bytes()
+        var ok = len(b) == 64
+        for i in range(len(b)):
+            var c = Int(b[i])
+            if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
+                ok = False
+        if not ok:
+            raise usage_error(String("--release-set-hash '") + value + String("' is not 64 lowercase hex characters"))
+        cmd.release_set_hash = value.copy()
     elif flag == String("--run-id"):
         cmd.run_id = value.copy()
     elif flag == String("--attempt"):
@@ -428,6 +449,10 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
             raise usage_error(
                 String("--release-dir is not used with --affected-by: the per-change check releases nothing")
             )
+        if cmd.given(String("--release-set-hash")):
+            raise usage_error(
+                String("--release-set-hash is not used with --affected-by: the per-change check releases nothing")
+            )
     elif not cmd.given(String("--release-dir")):
         raise usage_error(String("kci run needs --release-dir"))
     try:
@@ -494,6 +519,11 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
         for i in range(len(pf)):
             if cmd.given(pf[i]):
                 raise usage_error(pf[i] + String(" is a PUBLISH step's flag, and ") + which + holds_no + String(" PUBLISH step"))
+    if cmd.given(String("--release-set-hash")) and not has_publish and len(sel.validations) == 0:
+        raise usage_error(
+            String("--release-set-hash holds a PUBLISH step or a validation to the set it was handed, and ") + which
+            + holds_no + String(" PUBLISH step and no validation is selected")
+        )
     var vwhich = String("stage '") + stage.name + String("'")
     if len(cmd.only) > 0:
         vwhich = String("--only in stage '") + stage.name + String("'")

@@ -85,6 +85,15 @@ struct Fake(StageSteps, Movable):
         self.calls.append(String("git show ") + commit + String(":") + path)
         return self.workflow.copy()
 
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        # a pull request's check reads no ref history (the ref check is a
+        # PUSH stage's)
+        self.calls.append(String("is-ancestor ") + commit + String(" ") + of)
+        return True
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        raise Error(String("no release is read here"))
+
 
 def _root(tag: String) raises -> String:
     var base = _read_env("TEST_TMPDIR")

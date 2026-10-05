@@ -17,7 +17,11 @@
 #
 #   The reads around the steps: `platform_env` reads this process's
 #   environment (KCI_CLI_TEST_SECRET is set by `test_env`; an unset name is
-#   ""), and `committed_file` refuses, naming RUNNER_TEMP, outside a runner.
+#   ""), and `committed_file` and `is_ancestor` refuse, naming RUNNER_TEMP,
+#   outside a runner. `git_is_ancestor` over a scripted git: a shallow
+#   checkout raises, exit 0 is True, 1 False, anything else raises; and
+#   `release_set_hash` is the set the example release's members recompute
+#   to, and raises on a release directory that is refused.
 # =============================================================================
 
 from std.ffi import external_call
@@ -27,7 +31,16 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_libc.posix import _read_env
 
-from kci_cli import ComposedSecretStore, LibrarySteps, SecretStoreChoice, kci_main_with, recorder_for, write_whole_file
+from kci_build import ScriptedRunner, ScriptedStep
+from kci_cli import (
+    ComposedSecretStore,
+    LibrarySteps,
+    SecretStoreChoice,
+    git_is_ancestor,
+    kci_main_with,
+    recorder_for,
+    write_whole_file,
+)
 from kci_api import parse_result
 from kci_publish.release_fixture import (
     EXAMPLE_ENVIRONMENT,
@@ -163,6 +176,84 @@ def test_the_real_platform_env_and_committed_file() raises:
         var why = String("<read>")
         try:
             _ = steps.committed_file(String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"), String(".github/workflows/kci.yml"))
+        except e:
+            why = String(e)
+        assert_true(why.find(String("RUNNER_TEMP is not set")) >= 0, why)
+
+
+def _argv(*xs: String) -> List[String]:
+    var l = List[String]()
+    for x in xs:
+        l.append(String(x))
+    return l^
+
+
+def _shallow(answer: String) -> ScriptedStep:
+    return ScriptedStep(_argv("rev-parse", "--is-shallow-repository"), stdout_text=answer)
+
+
+def test_git_is_ancestor_over_a_scripted_git() raises:
+    var d = _root(String("ancestor"))
+    var rev = String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678")
+    for code in [0, 1]:
+        var g = ScriptedRunner()
+        g.expect(_shallow(String("false\n")))
+        g.expect(ScriptedStep(_argv("merge-base", "--is-ancestor", rev, "origin/main"), exit_code=Int32(code)))
+        assert_equal(git_is_ancestor(g, d, rev, String("origin/main")), code == 0)
+        assert_equal(g.remaining(), 0)
+    # a shallow checkout's history cannot tell: raised, merge-base never asked
+    var shallow = ScriptedRunner()
+    shallow.expect(_shallow(String("true\n")))
+    var why = String("<answered>")
+    try:
+        _ = git_is_ancestor(shallow, d, rev, String("origin/main"))
+    except e:
+        why = String(e)
+    assert_true(why.find(String("shallow")) >= 0, why)
+    # an unknown ref (exit 128) or a timeout: raised, never False
+    var unknown = ScriptedRunner()
+    unknown.expect(_shallow(String("false\n")))
+    unknown.expect(ScriptedStep(_argv("merge-base", "--is-ancestor", rev, "origin/main"), exit_code=Int32(128), stderr_text=String("fatal: Not a valid object name origin/main")))
+    var why2 = String("<answered>")
+    try:
+        _ = git_is_ancestor(unknown, d, rev, String("origin/main"))
+    except e:
+        why2 = String(e)
+    assert_true(why2.find(String("exit 128")) >= 0 and why2.find(String("Not a valid object name")) >= 0, why2)
+    var slow = ScriptedRunner()
+    slow.expect(_shallow(String("false\n")))
+    slow.expect(ScriptedStep(_argv("merge-base", "--is-ancestor", rev, "origin/main"), timed_out=True))
+    var why3 = String("<answered>")
+    try:
+        _ = git_is_ancestor(slow, d, rev, String("origin/main"))
+    except e:
+        why3 = String(e)
+    assert_true(why3.find(String("timed out")) >= 0, why3)
+
+
+def test_the_real_release_set_hash() raises:
+    var d = _root(String("sethash"))
+    var r = ExampleRelease()
+    var req = write_example_inputs(r, d, String("example-private"), True)
+    var steps = LibrarySteps()
+    var dir = req.platform_dir()
+    assert_equal(steps.release_set_hash(req.artifacts_file, dir), r.set_hash(dir))
+    # a member changed after the build: refused, never a hash
+    write_whole_file(dir + String("/release.json"), String("{}"))
+    var why = String("<recomputed>")
+    try:
+        _ = steps.release_set_hash(req.artifacts_file, dir)
+    except e:
+        why = String(e)
+    assert_true(why != String("<recomputed>"), why)
+
+
+def test_is_ancestor_outside_a_runner_refuses() raises:
+    if _read_env("RUNNER_TEMP").byte_length() == 0:
+        var steps = LibrarySteps()
+        var why = String("<read>")
+        try:
+            _ = steps.is_ancestor(String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"), String("origin/main"))
         except e:
             why = String(e)
         assert_true(why.find(String("RUNNER_TEMP is not set")) >= 0, why)

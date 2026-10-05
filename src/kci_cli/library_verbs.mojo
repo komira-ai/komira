@@ -29,6 +29,13 @@
 #                     in the directory kci runs in; its output goes to
 #                     `$RUNNER_TEMP` (platform-set: the check runs only under
 #                     GitHub Actions), a missing RUNNER_TEMP is a refusal.
+#   is_ancestor    -> `git rev-parse --is-shallow-repository` (anything but
+#                     `false` raises: a shallow clone's history cannot
+#                     tell), then `git merge-base --is-ancestor`: exit 0
+#                     True, 1 False, anything else raises; the same
+#                     RUNNER_TEMP rule.
+#   release_set_hash -> kci_publish.load_release over the artifacts file
+#                     (kci_artifact): the set the members recompute to.
 #
 # Nothing here parses a flag or reads a file: that is args.mojo and
 # dispatch.mojo, and the libraries.
@@ -51,12 +58,14 @@ from kci_pkg_upload import HttpPkgTransport
 from kci_publish import UsleepSleeper
 from kci_validate import ContainerHost, ValidateRequest, run_install_smoke
 
-from kci_build import GIT_PROGRAM, BuildRequest, RunSpec, SupervisorRunner, run_build
+from kci_artifact import read_artifacts
+from kci_build import GIT_PROGRAM, BuildRequest, ProcessRunner, RunSpec, SupervisorRunner, run_build
 from kci_build import RunResult as ProcessResult
 from kci_api import RunResult as KciRunResult
 from kci_publish import (
     NewNamesReport,
     PublishRequest,
+    load_release,
     lookahead_new_names_https,
     new_names_markdown,
     new_names_of,
@@ -64,7 +73,8 @@ from kci_publish import (
 )
 
 from .args import SecretStoreChoice
-from .dispatch import StageSteps, StepEnd, kci_main_with, recorder_for
+from .dispatch import kci_main_with, recorder_for
+from .seam import StageSteps, StepEnd
 from .recorder import CliRecorder
 
 
@@ -116,6 +126,44 @@ def _mk_connector(host: String) -> _Conn:
         return build_public_ca_tls_connector(host)
     except e:
         abort(String("validation: TLS connector for ") + host + String(": ") + String(e))
+
+
+def _git[R: ProcessRunner](mut runner: R, tmp: String, var argv: List[String]) raises -> Tuple[Int, String]:
+    """`git <argv>` in the directory kci runs in, its output under `tmp`:
+    its exit code (0 or 1) and stdout. Raises when it did not run to an exit
+    (a signal, the timeout) or exited with more than 1."""
+    var base = tmp + String("/kci-git-") + String(Int(external_call["getpid", Int32]()))
+    var spec = RunSpec(String(GIT_PROGRAM), argv^, String("."), 60, base + String(".stdout"), base + String(".stderr"))
+    var r: ProcessResult = runner.run(spec)
+    var text = Path(spec.stdout_path).read_text() if exists(spec.stdout_path) else String("")
+    for p in [spec.stdout_path.copy(), spec.stderr_path.copy()]:
+        if exists(p):
+            remove(p)
+    if r.signaled or r.timed_out or Int(r.exit_code) > 1:
+        var why = String("`") + spec.command_line() + String("` ") + r.describe()
+        if r.stderr_tail.byte_length() > 0:
+            why += String(": ") + String(r.stderr_tail.strip())
+        raise Error(why^)
+    return (Int(r.exit_code), text^)
+
+
+def git_is_ancestor[R: ProcessRunner](mut runner: R, tmp: String, commit: String, of: String) raises -> Bool:
+    """`is_ancestor` of the file header over `runner`: a checkout that is
+    shallow (or not a repository) raises; then `git merge-base --is-ancestor
+    <commit> <of>`: exit 0 True, 1 False, anything else raises."""
+    var shallow_argv = List[String]()
+    shallow_argv.append(String("rev-parse"))
+    shallow_argv.append(String("--is-shallow-repository"))
+    var shallow = _git(runner, tmp, shallow_argv^)
+    if shallow[0] != 0 or String(shallow[1].strip()) != String("false"):
+        raise Error(String("the checkout is shallow (or not a git repository): its history cannot tell"))
+    var argv = List[String]()
+    argv.append(String("merge-base"))
+    argv.append(String("--is-ancestor"))
+    argv.append(commit.copy())
+    argv.append(of.copy())
+    var r = _git(runner, tmp, argv^)
+    return r[0] == 0
 
 
 struct LibrarySteps(StageSteps, Movable):
@@ -181,6 +229,17 @@ struct LibrarySteps(StageSteps, Movable):
             return out^
         except:
             return String("")
+
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        var tmp = self.platform_env(String("RUNNER_TEMP"))
+        if tmp.byte_length() == 0:
+            raise Error(String("RUNNER_TEMP is not set, so there is nowhere to put git's output"))
+        var runner = SupervisorRunner()
+        return git_is_ancestor(runner, tmp, commit, of)
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        var arts = read_artifacts(artifacts_file)
+        return load_release(arts, platform_dir).set_hash()
 
     def committed_file(mut self, commit: String, path: String) raises -> String:
         var tmp = self.platform_env(String("RUNNER_TEMP"))

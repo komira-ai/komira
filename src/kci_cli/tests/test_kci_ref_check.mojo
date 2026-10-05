@@ -1,0 +1,475 @@
+# =============================================================================
+# src/kci_cli/tests/test_kci_ref_check.mojo -- continuous auto-promotion as
+#   `kci run` holds it at start-up under GitHub Actions (dispatch.mojo's
+#   header, 4a and 4b), over a recording fake of the seam:
+#
+#   (1) a stage without `break_glass` (prod) runs only on main: off main it
+#       is REFUSED KCI-E-NOT-ON-MAIN (exit 3) before any history is read; on
+#       main a revision not on origin/main's history is refused the same;
+#       history git cannot read (a shallow clone) is exit 5;
+#   (2) a break_glass stage (gamma) off main is BREAK-GLASS: its revision is
+#       held to the run's own commit (GITHUB_SHA), its reason is required
+#       (empty or over 200 bytes: KCI-E-BREAK-GLASS-REASON, exit 3; over one
+#       line: the command line's own refusal, exit 2), and its summary
+#       starts with the BREAK-GLASS line;
+#   (3) the set hash: a release that recomputes to another set is
+#       KCI-E-SET-HASH (exit 3), one that cannot be recomputed too; under
+#       GitHub Actions a publishing or validating run without the flag is a
+#       usage error (exit 2); the recomputed hash is the result's;
+#   (4) a stage without `break_glass` never goes backward (its PUBLISH
+#       request says so; kci_publish refuses KCI-E-SUPERSEDED), a
+#       break_glass one may;
+#   (5) the prod line: `promoted to prod: <names> <build>`, `nothing new`,
+#       `PLAN ONLY`, in the summary and on stderr; a break_glass stage says
+#       none;
+#   (6) not under GitHub Actions no ref is checked.
+# =============================================================================
+
+from std.ffi import external_call
+from std.os import makedirs
+from std.pathlib import Path
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
+
+from komira_libc.posix import _read_env
+
+from kci_build import BuildRequest
+from kci_cli import CliRecorder, SecretStoreChoice, StageSteps, StepEnd, kci_main_with, write_whole_file
+from kci_api import (
+    ARTIFACT_ALREADY_PRESENT,
+    ARTIFACT_UPLOADED,
+    OUTCOME_NOOP,
+    OUTCOME_SUCCEEDED,
+    ResultArtifact,
+    ResultStep,
+    ResultValidation,
+    parse_result,
+)
+from kci_api import RunResult as KciRunResult
+from kci_publish import NewNamesReport, PublishRequest
+from kci_validate import ValidateRequest
+
+comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+comptime _SHA: String = "0123456789abcdef0123456789abcdef01234567"
+comptime _HEAD: String = "fedcba9876543210fedcba9876543210fedcba98"
+comptime _H: String = "5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a"
+comptime _OTHER_H: String = "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"
+
+
+struct Fake(StageSteps, Movable):
+    """Every step SUCCEEDED (a publish `publish_outcome`, with one artifact
+    row per name in `names`). The platform variables from `env`, the
+    committed workflow from `workflow`; `is_ancestor` answers `ancestor`
+    (or raises with `history_unreadable`) and records each question; the
+    release recomputes to `set_hash` (or raises with `release_refused`).
+    Layout: owned values only. No pointer field."""
+
+    var calls: List[String]
+    var asked: List[String]
+    var never_backward: List[Bool]
+    var env_names: List[String]
+    var env_values: List[String]
+    var workflow: String
+    var ancestor: Bool
+    var history_unreadable: Bool
+    var set_hash: String
+    var release_refused: Bool
+    var publish_outcome: String
+    var names: List[String]
+
+    def __init__(out self):
+        self.calls = List[String]()
+        self.asked = List[String]()
+        self.never_backward = List[Bool]()
+        self.env_names = List[String]()
+        self.env_values = List[String]()
+        self.workflow = String("")
+        self.ancestor = True
+        self.history_unreadable = False
+        self.set_hash = String(_H)
+        self.release_refused = False
+        self.publish_outcome = String(OUTCOME_SUCCEEDED)
+        self.names = List[String]()
+        self.names.append(String("komira_encoding"))
+        self.names.append(String("komira_all"))
+
+    def set_env(mut self, name: String, value: String):
+        for i in range(len(self.env_names)):
+            if self.env_names[i] == name:
+                self.env_values[i] = value.copy()
+                return
+        self.env_names.append(name.copy())
+        self.env_values.append(value.copy())
+
+    def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
+        self.calls.append(String("build ") + req.step_name)
+        result.steps.append(ResultStep(req.step_name.copy(), String("BUILD"), req.platform.copy(), String(OUTCOME_SUCCEEDED)))
+        return StepEnd(String(OUTCOME_SUCCEEDED), String(""), String(""))
+
+    def publish(
+        mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
+    ) -> StepEnd:
+        self.calls.append(String("publish ") + req.stage)
+        self.never_backward.append(req.never_backward)
+        result.steps.append(ResultStep(req.step_name.copy(), String("PUBLISH"), req.platform.copy(), self.publish_outcome.copy()))
+        result.plan = req.plan
+        for i in range(len(self.names)):
+            var a = ResultArtifact()
+            a.effect = String(ARTIFACT_UPLOADED) if self.publish_outcome == String(OUTCOME_SUCCEEDED) else String(ARTIFACT_ALREADY_PRESENT)
+            a.artifact_type = String("CONDA")
+            a.file = self.names[i] + String("-1.0.0-h01234567_3.conda")
+            a.name = self.names[i].copy()
+            a.platform = String("linux-x86_64")
+            a.revision = req.revision_id.copy()
+            a.sha256 = String(_H)
+            a.state_before = String("absent")
+            a.state_after = String("present-same")
+            a.subdir = String("linux-64")
+            a.version = String("1.0.0")
+            result.artifacts.append(a^)
+        return StepEnd(self.publish_outcome.copy(), String(""), String(""))
+
+    def validate(mut self, req: ValidateRequest) -> ResultValidation:
+        self.calls.append(String("validate ") + req.validation.name)
+        return ResultValidation(req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(), String("WOULD_VALIDATE"), String(""))
+
+    def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
+        var r = NewNamesReport(req.stage.copy(), req.step_name.copy(), req.channel.copy())
+        r.read = True
+        return r^
+
+    def platform_env(mut self, name: String) -> String:
+        for i in range(len(self.env_names)):
+            if self.env_names[i] == name:
+                return self.env_values[i].copy()
+        return String("")
+
+    def committed_file(mut self, commit: String, path: String) raises -> String:
+        return self.workflow.copy()
+
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        self.asked.append(commit + String(" on ") + of)
+        if self.history_unreadable:
+            raise Error(String("the checkout is shallow (or not a git repository): its history cannot tell"))
+        return self.ancestor
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        if self.release_refused:
+            raise Error(String("PUBLISH step: the release directory is refused: no release.json"))
+        return self.set_hash.copy()
+
+
+def _root(tag: String) raises -> String:
+    var base = _read_env("TEST_TMPDIR")
+    if base.byte_length() == 0:
+        base = _read_env("TMPDIR")
+    if base.byte_length() == 0:
+        raise Error("neither TEST_TMPDIR nor TMPDIR is set")
+    var d = base + String("/kci_ref_") + tag + String("_") + String(Int(external_call["getpid", Int32]()))
+    makedirs(d, exist_ok=True)
+    return d^
+
+
+comptime _CHANNELS: String = (
+    "schema_version: 1\n"
+    "channel { name: \"gamma\" visibility: PUBLIC repository { artifact_type: CONDA"
+    " location: \"https://prefix.dev/komira-ai/gamma\" push_identity: \"repo:komira-ai/komira:environment:gamma\""
+    " credential { kind: OIDC_TRUSTED_PUBLISHING } } }\n"
+    "channel { name: \"prod\" visibility: PUBLIC repository { artifact_type: CONDA"
+    " location: \"https://prefix.dev/komira-ai/prod\" push_identity: \"repo:komira-ai/komira:environment:prod\""
+    " credential { kind: OIDC_TRUSTED_PUBLISHING } } }\n"
+)
+
+
+def _machine(dir: String) raises -> String:
+    """build and gamma break_glass, prod main only: the repository's shape."""
+    var c = dir + String("/c.textproto")
+    write_whole_file(c, String(_CHANNELS))
+    var m = dir + String("/machine.textproto")
+    write_whole_file(
+        m,
+        String("schema_version: 1\n")
+        + String("stage { name: \"build\" break_glass: true step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
+        + String("stage { name: \"gamma\" after: \"build\" break_glass: true step { name: \"publish\" kind: PUBLISH")
+        + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"gamma\" } }\n")
+        + String("stage { name: \"prod\" after: \"gamma\" step { name: \"publish\" kind: PUBLISH")
+        + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"prod\" } }\n"),
+    )
+    return m^
+
+
+def _workflow(machine: String) -> String:
+    """The workflow that agrees with `_machine` (R1-R18)."""
+    var run = String("kci run --machine ") + machine + String(" --summary-file \"$GITHUB_STEP_SUMMARY\" --stage ")
+    var hash = String(" --release-set-hash \"$RELEASE_SET_HASH\"")
+    var line = String("      - name: the prod line\n        if: always()\n        run: echo prod line\n")
+    return (
+        String("name: kci\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n")
+        + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n")
+        + String("      reason:\n        type: string\n        required: true\n")
+        + String("      dry_run:\n        type: boolean\n        default: false\n")
+        + String("permissions: {}\n")
+        + String("concurrency:\n  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)")
+        + String(" || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n")
+        + String("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n")
+        + String("jobs:\n")
+        + String("  build:\n    environment: build\n    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
+        + String("    steps:\n      - run: ") + run + String("build\n") + line
+        + String("  gamma:\n    needs: build\n    environment: gamma\n    permissions:\n      id-token: write\n")
+        + String("    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
+        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n")
+        + String("    steps:\n      - run: ") + run + String("gamma") + hash + String("\n") + line
+        + String("  prod:\n    needs: gamma\n    if: github.ref == 'refs/heads/main'\n    environment: prod\n")
+        + String("    permissions:\n      id-token: write\n")
+        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.gamma.outputs.set_hash }}\n")
+        + String("    steps:\n      - run: ") + run + String("prod") + hash + String("\n") + line
+    )
+
+
+def _actions(mut f: Fake, machine: String, ref_value: String):
+    f.set_env(String("GITHUB_ACTIONS"), String("true"))
+    f.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
+    f.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/kci.yml@") + ref_value)
+    f.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
+    f.set_env(String("GITHUB_REF"), ref_value)
+    f.set_env(String("GITHUB_SHA"), String(_HEAD))
+    f.set_env(String("GITHUB_ACTOR"), String("octocat"))
+    f.workflow = _workflow(machine)
+
+
+def _publish(m: String, stage: String, *extra: String) -> List[String]:
+    var a = List[String]()
+    for s in ["run", "--machine"]:
+        a.append(String(s))
+    a.append(m.copy())
+    for s in ["--stage"]:
+        a.append(String(s))
+    a.append(stage.copy())
+    a.append(String("--revision-id"))
+    a.append(String(_REV))
+    for s in ["--run-id", "gh-7", "--attempt", "1", "--release-dir", "/r"]:
+        a.append(String(s))
+    for s in ["--release-version", "rv"]:
+        a.append(String(s))
+    for s in extra:
+        a.append(String(s))
+    return a^
+
+
+def _last(rec: CliRecorder) raises -> KciRunResult:
+    return parse_result(rec.records[len(rec.records) - 1], String("record"))
+
+
+# ---- (1) main only -------------------------------------------------------------------
+
+
+def test_prod_off_main_is_not_on_main() raises:
+    var m = _machine(_root(String("offmain")))
+    var f = Fake()
+    _actions(f, m, String("refs/heads/feature"))
+    var rec = CliRecorder.memory(String(""))
+    var a = _publish(m, String("prod"), "--release-set-hash", _H, "--context", "reason=hotfix")
+    assert_equal(kci_main_with(a, f, rec), 3)
+    assert_equal(len(f.calls), 0)
+    assert_equal(len(f.asked), 0)
+    var r = _last(rec)
+    assert_equal(r.error.id, String("KCI-E-NOT-ON-MAIN"))
+    assert_true(r.error.message.find(String("stage 'prod' runs only on main")) >= 0, r.error.message)
+    assert_true(r.error.message.find(String("refs/heads/feature")) >= 0, r.error.message)
+
+
+def test_on_main_the_revision_is_on_mains_history() raises:
+    var m = _machine(_root(String("onmain")))
+    var f = Fake()
+    _actions(f, m, String("refs/heads/main"))
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H), f, rec), 0)
+    assert_equal(len(f.asked), 1)
+    assert_equal(f.asked[0], String(_REV) + String(" on origin/main"))
+    # not on main's history: refused, nothing published
+    var no = Fake()
+    _actions(no, m, String("refs/heads/main"))
+    no.ancestor = False
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H), no, rec2), 3)
+    assert_equal(len(no.calls), 0)
+    assert_equal(_last(rec2).error.id, String("KCI-E-NOT-ON-MAIN"))
+    assert_true(_last(rec2).error.message.find(String("is not on main's history")) >= 0, _last(rec2).error.message)
+    # a break_glass stage on main is held to main's history too
+    var bg = Fake()
+    _actions(bg, m, String("refs/heads/main"))
+    bg.ancestor = False
+    var rec3 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("gamma"), "--release-set-hash", _H), bg, rec3), 3)
+    assert_equal(_last(rec3).error.id, String("KCI-E-NOT-ON-MAIN"))
+
+
+def test_unreadable_history_is_cannot_tell() raises:
+    var m = _machine(_root(String("shallow")))
+    var f = Fake()
+    _actions(f, m, String("refs/heads/main"))
+    f.history_unreadable = True
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H), f, rec), 5)
+    assert_equal(len(f.calls), 0)
+    assert_equal(_last(rec).error.id, String("KCI-E-CANNOT-TELL"))
+    assert_true(_last(rec).error.message.find(String("shallow")) >= 0, _last(rec).error.message)
+    # GITHUB_REF unset: cannot tell either
+    var unset = Fake()
+    _actions(unset, m, String("refs/heads/main"))
+    unset.set_env(String("GITHUB_REF"), String(""))
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H), unset, rec2), 5)
+
+
+# ---- (2) break-glass ---------------------------------------------------------------------
+
+
+def test_break_glass_needs_a_reason() raises:
+    var m = _machine(_root(String("bgreason")))
+    var long = String("")
+    for _ in range(201):
+        long += String("x")
+    for reason in [String(""), long]:
+        var f = Fake()
+        _actions(f, m, String("refs/heads/hotfix"))
+        var rec = CliRecorder.memory(String(""))
+        var a = _publish(m, String("gamma"), "--release-set-hash", _H)
+        a.append(String("--context"))
+        a.append(String("reason=") + reason)
+        assert_equal(kci_main_with(a, f, rec), 3)
+        assert_equal(len(f.calls), 0)
+        assert_equal(_last(rec).error.id, String("KCI-E-BREAK-GLASS-REASON"))
+    # no reason at all
+    var none = Fake()
+    _actions(none, m, String("refs/heads/hotfix"))
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("gamma"), "--release-set-hash", _H), none, rec2), 3)
+    assert_equal(_last(rec2).error.id, String("KCI-E-BREAK-GLASS-REASON"))
+    # over one line: the command line's own grammar refuses it (exit 2)
+    var lines = Fake()
+    _actions(lines, m, String("refs/heads/hotfix"))
+    var rec3 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("gamma"), "--release-set-hash", _H, "--context", "reason=a\nb"), lines, rec3), 2)
+    assert_equal(len(lines.calls), 0)
+
+
+def test_break_glass_with_a_reason_publishes_to_gamma_and_says_so() raises:
+    var d = _root(String("bgok"))
+    var m = _machine(d)
+    var f = Fake()
+    _actions(f, m, String("refs/heads/hotfix"))
+    var rec = CliRecorder.memory(String(""))
+    var summary = d + String("/summary.md")
+    var a = _publish(m, String("gamma"), "--release-set-hash", _H, "--context", "reason=prod is down", "--summary-file")
+    a.append(summary.copy())
+    assert_equal(kci_main_with(a, f, rec), 0)
+    assert_equal(len(f.calls), 1)
+    assert_equal(f.calls[0], String("publish gamma"))
+    # the revision is held to the branch's own head, not to main
+    assert_equal(f.asked[0], String(_REV) + String(" on ") + String(_HEAD))
+    var text = Path(summary).read_text()
+    assert_true(text.startswith(String("### BREAK-GLASS: refs/heads/hotfix a1b2c3d4 by octocat: prod is down\n")), text)
+    # gamma is break_glass: it says nothing about promotion
+    assert_true(text.find(String("promoted to")) < 0, text)
+    # a revision that is not on the branch is refused
+    var off = Fake()
+    _actions(off, m, String("refs/heads/hotfix"))
+    off.ancestor = False
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("gamma"), "--release-set-hash", _H, "--context", "reason=x"), off, rec2), 3)
+    assert_equal(_last(rec2).error.id, String("KCI-E-BREAK-GLASS-REASON"))
+    assert_true(_last(rec2).error.message.find(String("is not on the history of the branch")) >= 0, _last(rec2).error.message)
+
+
+# ---- (3) the set hash ----------------------------------------------------------------------
+
+
+def test_the_set_hash_is_held() raises:
+    var m = _machine(_root(String("hash")))
+    # another set
+    var f = Fake()
+    _actions(f, m, String("refs/heads/main"))
+    f.set_hash = String(_OTHER_H)
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H), f, rec), 3)
+    assert_equal(len(f.calls), 0)
+    assert_equal(_last(rec).error.id, String("KCI-E-SET-HASH"))
+    assert_true(_last(rec).error.message.find(String("recomputes to set hash ") + String(_OTHER_H)) >= 0, _last(rec).error.message)
+    # a release directory that cannot be recomputed
+    var bad = Fake()
+    _actions(bad, m, String("refs/heads/main"))
+    bad.release_refused = True
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H), bad, rec2), 3)
+    assert_equal(_last(rec2).error.id, String("KCI-E-SET-HASH"))
+    # under GitHub Actions the flag is required
+    var missing = Fake()
+    _actions(missing, m, String("refs/heads/main"))
+    var rec3 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod")), missing, rec3), 2)
+    assert_equal(len(missing.calls), 0)
+    # the same set: the result carries the recomputed hash
+    var ok = Fake()
+    _actions(ok, m, String("refs/heads/main"))
+    var rec4 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", _H), ok, rec4), 0)
+    assert_equal(_last(rec4).set_hash, String(_H))
+    # not 64 hex: the command line refuses it; on a BUILD stage it holds nothing
+    var rec5 = CliRecorder.memory(String(""))
+    var f5 = Fake()
+    assert_equal(kci_main_with(_publish(m, String("prod"), "--release-set-hash", "abc"), f5, rec5), 2)
+
+
+# ---- (4) never backward, (5) the prod line, (6) not under Actions ---------------------------
+
+
+def test_only_a_main_only_stage_never_goes_backward() raises:
+    var m = _machine(_root(String("back")))
+    var f = Fake()
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("gamma")), f, rec), 0)
+    assert_equal(kci_main_with(_publish(m, String("prod")), f, rec), 0)
+    assert_equal(len(f.never_backward), 2)
+    assert_false(f.never_backward[0])
+    assert_true(f.never_backward[1])
+
+
+def test_the_prod_line() raises:
+    var d = _root(String("line"))
+    var m = _machine(d)
+    var cases = List[String]()
+    cases.append(String("published"))
+    cases.append(String("noop"))
+    cases.append(String("plan"))
+    for i in range(len(cases)):
+        var f = Fake()
+        var a = _publish(m, String("prod"), "--summary-file")
+        var summary = d + String("/s_") + cases[i] + String(".md")
+        a.append(summary.copy())
+        if cases[i] == String("noop"):
+            f.publish_outcome = String(OUTCOME_NOOP)
+        if cases[i] == String("plan"):
+            a.append(String("--plan"))
+        var rec = CliRecorder.memory(String(""))
+        assert_equal(kci_main_with(a, f, rec), 0)
+        var text = Path(summary).read_text()
+        var want = String("### promoted to prod: komira_encoding komira_all h01234567_3\n")
+        if cases[i] == String("noop"):
+            want = String("### promoted to prod: nothing new (h01234567_3 already there)\n")
+        if cases[i] == String("plan"):
+            want = String("### prod: PLAN ONLY (dry run)\n")
+        assert_true(text.find(want) >= 0, cases[i] + String(": ") + text)
+
+
+def test_not_under_actions_no_ref_is_checked() raises:
+    var m = _machine(_root(String("local")))
+    var f = Fake()
+    f.ancestor = False
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_publish(m, String("prod")), f, rec), 0)
+    assert_equal(len(f.asked), 0)
+    assert_equal(len(f.calls), 1)
+
+
+def main() raises:
+    TestSuite.discover_tests[__functions_in_module()]().run()

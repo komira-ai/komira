@@ -39,6 +39,26 @@
 #      INDETERMINATE (KCI-E-CANNOT-TELL, exit 5), never a pass. Not under
 #      GitHub Actions nothing is checked and the result says so
 #      (`workflow.checked` false, reason "not under GitHub Actions");
+#   4a. THE REF CHECK, under GitHub Actions, for a PUSH stage (continuous
+#      auto-promotion; the PULL_REQUEST stage is R6's): the platform-set
+#      `GITHUB_REF` and `GITHUB_SHA` are read (unset or malformed:
+#      INDETERMINATE, exit 5). A stage WITHOUT the machine file's
+#      `break_glass` runs only on main: `GITHUB_REF` is `refs/heads/main`
+#      and the revision is on `origin/main`'s history, else REFUSED
+#      (KCI-E-NOT-ON-MAIN, exit 3). A break_glass stage on main is held to
+#      `origin/main` the same way; off main (BREAK-GLASS) its revision is on
+#      `GITHUB_SHA`'s history and `--context reason=` is given, non-empty and
+#      at most 200 bytes, else REFUSED (KCI-E-BREAK-GLASS-REASON). History
+#      that git cannot read (a shallow clone, no `origin/main`) is
+#      INDETERMINATE, never a pass. A break-glass run's summary and stderr
+#      start `BREAK-GLASS: <ref> <revision> by <actor>: <reason>`;
+#   4b. THE SET HASH, for a run that selects a PUBLISH step or a
+#      validation: with `--release-set-hash`, the release directory's set
+#      is recomputed (`steps.release_set_hash`) and another hash, or one
+#      that cannot be recomputed, is REFUSED (KCI-E-SET-HASH, exit 3); the
+#      result's `set_hash` is then the recomputed one (kci.yml hands the
+#      validate job's on to prod). Under GitHub Actions the flag is
+#      required (KCI-E-USAGE, exit 2);
 #   5. the RUNNING record (`recorder.begin`) BEFORE the first effect. A
 #      record that cannot be written stops the run FAILED
 #      (KCI-E-RESULT-FILE), nothing done;
@@ -76,7 +96,9 @@
 #      the channel; the FINISHED record, then the exit number
 #      (kci_api's exit table), which is the return value;
 #   9. `--summary-file`: a markdown block APPENDED to that file on every exit
-#      path after the command line parsed (`run_summary_markdown`): the
+#      path after the command line parsed (summary.mojo; a break-glass run's
+#      BREAK-GLASS line first, and a main-only stage's publish ends with its
+#      `promoted to <stage>: ...` line, `promotion_line`): the
 #      outcome and exit number, the scope, the revision and set hash, the
 #      workflow check, the steps, the validations with each failed check's
 #      finding, and each NEW NAMES block (this stage's
@@ -134,6 +156,9 @@ from kci_api import (
     ERROR_USAGE,
     ERROR_VALIDATION,
     ERROR_WORKFLOW_MISMATCH,
+    ERROR_BREAK_GLASS_REASON,
+    ERROR_NOT_ON_MAIN,
+    ERROR_SET_HASH,
     EXIT_INTERNAL,
     EXIT_OK,
     OUTCOME_FAILED,
@@ -150,6 +175,7 @@ from kci_api import (
     ResultValidation,
     Selector,
     is_full_commit_id,
+    release_platform_dir,
     run_evidence_line,
     worst_outcome,
 )
@@ -180,85 +206,25 @@ from .args import (
     selectors_of,
 )
 from .recorder import CliRecorder
+from .seam import StageSteps, StepEnd
+from .start_checks import (
+    GITHUB_ACTIONS,
+    GITHUB_ACTOR,
+    GITHUB_REF,
+    GITHUB_REPOSITORY,
+    GITHUB_SHA,
+    GITHUB_WORKFLOW_REF,
+    GITHUB_WORKFLOW_SHA,
+    NOT_UNDER_GITHUB_ACTIONS,
+    StartVerdict,
+    check_ref_at_start,
+    check_set_hash_at_start,
+    check_workflow_at_start,
+    workflow_path_of,
+)
+from .summary import append_summary, promotion_line, run_summary_markdown
 
 comptime _STDERR: FileDescriptor = FileDescriptor(2)
-
-# The platform-set variables the workflow check reads (file header, 4): the
-# runner sets them, nothing else does (the mode-discriminator carve-out).
-comptime GITHUB_ACTIONS: String = "GITHUB_ACTIONS"
-comptime GITHUB_WORKFLOW_REF: String = "GITHUB_WORKFLOW_REF"
-comptime GITHUB_WORKFLOW_SHA: String = "GITHUB_WORKFLOW_SHA"
-comptime GITHUB_REPOSITORY: String = "GITHUB_REPOSITORY"
-comptime NOT_UNDER_GITHUB_ACTIONS: String = "not under GitHub Actions"
-
-
-struct StepEnd(Copyable, Movable):
-    """How one step ended: its outcome and first error id (kci_api),
-    the lines to print, retry advice stronger than the exit number's ("" for
-    the default), whether it changed something outside this machine, and
-    its markdown for the job summary ("" for none; a PUBLISH step's NEW
-    NAMES block).
-
-    Layout: owned values only. No pointer field."""
-
-    var outcome: String
-    var error_id: String
-    var message: String
-    var lines: List[String]
-    var retry: String
-    var changed_outside: Bool
-    var summary: String
-
-    def __init__(out self, var outcome: String, var error_id: String, var message: String):
-        self.outcome = outcome^
-        self.error_id = error_id^
-        self.message = message^
-        self.lines = List[String]()
-        self.retry = String("")
-        self.changed_outside = False
-        self.summary = String("")
-
-    def ok(self) -> Bool:
-        return self.outcome == OUTCOME_SUCCEEDED or self.outcome == OUTCOME_NOOP
-
-
-trait StageSteps:
-    """Everything a run does outside this process (file header). One method
-    per step kind: the step's request in, how it ended out; each adds its
-    own row, artifacts, new names and first error to `result`, and may call
-    `recorder.begin` again before its own first effect. Then the reads the
-    run makes around its steps: a later stage's NEW NAMES, a platform-set
-    variable, and the committed workflow file."""
-
-    def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
-        ...
-
-    def publish(
-        mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
-    ) -> StepEnd:
-        ...
-
-    def validate(mut self, req: ValidateRequest) -> ResultValidation:
-        """One validation of a step (file header, 6): its row, VALIDATED
-        with an outcome and its checks, or WOULD_VALIDATE under --plan.
-        Never raises: a validation that cannot run is a failed check."""
-        ...
-
-    def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
-        """The NEW NAMES of a later stage's PUBLISH step `req` (file header,
-        7): reads only, never raises; a channel not read says why."""
-        ...
-
-    def platform_env(mut self, name: String) -> String:
-        """A platform-set variable's value, "" when unset (file header, 4)."""
-        ...
-
-    def committed_file(mut self, commit: String, path: String) raises -> String:
-        """The text of `path` as committed at `commit` (`git show
-        <commit>:<path>` in the directory kci runs in). Raises when it
-        cannot be read."""
-        ...
-
 
 def _say(line: String):
     print(line, file=_STDERR)
@@ -398,6 +364,9 @@ def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep) raises -> P
     req.release_version_file = cmd.release_version.copy()
     if cmd.concurrency > 0:
         req.concurrency = cmd.concurrency
+    # a main-only stage never publishes a lower build number than its
+    # channel lists (kci_publish run.mojo, KCI-E-SUPERSEDED)
+    req.never_backward = not stage.break_glass
     req.plan = cmd.plan
     return req^
 
@@ -437,133 +406,6 @@ def validation_failure_message(row: ResultValidation) -> String:
     return s^
 
 
-def workflow_path_of(ref_value: String, repository: String) raises -> String:
-    """The workflow file's path in `GITHUB_WORKFLOW_REF`
-    (`<repository>/<path>@<ref>`). Raises unless it is a file under
-    .github/workflows/ of `repository`."""
-    var prefix = repository + String("/")
-    if repository.byte_length() == 0 or not ref_value.startswith(prefix):
-        raise Error(
-            String(GITHUB_WORKFLOW_REF) + String(" '") + ref_value + String("' does not start with ")
-            + String(GITHUB_REPOSITORY) + String(" '") + repository + String("/'")
-        )
-    var rest = String(ref_value[byte = prefix.byte_length() :])
-    var at = rest.find(String("@"))
-    if at <= 0:
-        raise Error(String(GITHUB_WORKFLOW_REF) + String(" '") + ref_value + String("' names no @<ref>"))
-    var path = String(rest[byte = 0:at])
-    if not path.startswith(String(WORKFLOW_PATH_PREFIX)) or path.find(String("..")) >= 0:
-        raise Error(
-            String(GITHUB_WORKFLOW_REF) + String(" '") + ref_value + String("': the path '") + path
-            + String("' is not a file under ") + String(WORKFLOW_PATH_PREFIX)
-        )
-    return path^
-
-
-struct _WorkflowVerdict(Copyable, Movable):
-    """The start-up workflow check's verdict (file header, 4): `outcome` ""
-    when the run may go on; else the outcome, error id and message to stop
-    with, and `findings` to print.
-
-    Layout: owned values only. No pointer field."""
-
-    var outcome: String
-    var error_id: String
-    var message: String
-    var findings: List[String]
-
-    def __init__(out self):
-        self.outcome = String("")
-        self.error_id = String("")
-        self.message = String("")
-        self.findings = List[String]()
-
-    @staticmethod
-    def cannot_tell(var message: String) -> _WorkflowVerdict:
-        var v = _WorkflowVerdict()
-        v.outcome = String(OUTCOME_INDETERMINATE)
-        v.error_id = String(ERROR_CANNOT_TELL)
-        v.message = String("the workflow check cannot tell, so nothing is run: ") + message
-        return v^
-
-
-def _check_workflow_at_start[S: StageSteps](
-    cmd: KciCommand, g: ReleaseMachine, mut steps: S, mut result: KciRunResult
-) -> _WorkflowVerdict:
-    """File header, 4. Records `workflow` in `result`."""
-    if steps.platform_env(String(GITHUB_ACTIONS)) != String("true"):
-        result.workflow_checked = False
-        result.workflow_reason = String(NOT_UNDER_GITHUB_ACTIONS)
-        return _WorkflowVerdict()
-    result.workflow_reason = String("")
-    var ref_value = steps.platform_env(String(GITHUB_WORKFLOW_REF))
-    var sha = steps.platform_env(String(GITHUB_WORKFLOW_SHA))
-    var repository = steps.platform_env(String(GITHUB_REPOSITORY))
-    var needed = List[String]()
-    needed.append(String(GITHUB_WORKFLOW_REF))
-    needed.append(String(GITHUB_WORKFLOW_SHA))
-    needed.append(String(GITHUB_REPOSITORY))
-    for i in range(len(needed)):
-        if steps.platform_env(needed[i]).byte_length() == 0:
-            result.workflow_reason = needed[i] + String(" is not set")
-            return _WorkflowVerdict.cannot_tell(
-                String(GITHUB_ACTIONS) + String(" is true and ") + needed[i] + String(" is not set")
-            )
-    if not is_full_commit_id(sha):
-        result.workflow_reason = String(GITHUB_WORKFLOW_SHA) + String(" is not a full commit id")
-        return _WorkflowVerdict.cannot_tell(
-            String(GITHUB_WORKFLOW_SHA) + String(" '") + sha + String("' is not a full commit id")
-        )
-    var path: String
-    try:
-        path = workflow_path_of(ref_value, repository)
-    except e:
-        result.workflow_reason = String(GITHUB_WORKFLOW_REF) + String(" names no workflow file")
-        return _WorkflowVerdict.cannot_tell(String(e))
-    result.workflow_path = path.copy()
-    result.workflow_sha = sha.copy()
-    var text: String
-    try:
-        text = steps.committed_file(sha, path)
-    except e:
-        result.workflow_reason = String("the workflow could not be read at its commit")
-        return _WorkflowVerdict.cannot_tell(
-            String("`git show ") + sha + String(":") + path + String("` failed: ") + String(e)
-        )
-    var files = List[ChannelsFile]()
-    var paths = channels_paths(g)
-    for i in range(len(paths)):
-        try:
-            files.append(ChannelsFile(paths[i].copy(), _read(paths[i])))
-        except e:
-            result.workflow_reason = String("a channels file could not be read")
-            return _WorkflowVerdict.cannot_tell(
-                String("the channels file '") + paths[i] + String("' cannot be read: ") + String(e)
-            )
-    var findings: List[String]
-    try:
-        findings = check_running_workflow(g, files, text, cmd.machine)
-    except e:
-        result.workflow_reason = String("the workflow could not be checked")
-        return _WorkflowVerdict.cannot_tell(path + String(" at ") + sha + String(": ") + String(e))
-    if len(findings) > 0:
-        result.workflow_reason = String("the workflow does not match the machine file")
-        var v = _WorkflowVerdict()
-        v.outcome = String(OUTCOME_REFUSED)
-        v.error_id = String(ERROR_WORKFLOW_MISMATCH)
-        v.message = (
-            path + String(" (at ") + sha + String(") disagrees with ") + cmd.machine + String(" in ")
-            + String(len(findings)) + String(" place(s), so nothing is run; the machine file owns the stages,")
-            + String(" edit both together:")
-        )
-        for i in range(len(findings)):
-            v.message += String("\n") + findings[i]
-        v.findings = findings^
-        return v^
-    result.workflow_checked = True
-    return _WorkflowVerdict()
-
-
 def _lookahead[S: StageSteps](
     cmd: KciCommand, g: ReleaseMachine, stage: Stage, mut steps: S, mut result: KciRunResult
 ) -> List[NewNamesReport]:
@@ -596,98 +438,6 @@ def _lookahead[S: StageSteps](
                     )
             out.append(r^)
     return out^
-
-
-def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead: List[NewNamesReport]) -> String:
-    """The `--summary-file` block of a finished run (file header, 9)."""
-    var note = credential_probe_note(result.steps)
-    var s = String("## kci run --stage ") + result.stage + String(": ") + result.outcome
-    if note.byte_length() > 0:
-        s += String(", ") + note
-    s += String(" (exit ") + String(result.exit_code) + String(")\n\n")
-    if result.scope == SCOPE_SELECTIVE:
-        var only = String("")
-        for i in range(len(result.only)):
-            if i > 0:
-                only += String(" ")
-            only += result.only[i]
-        if result.has_affected_by:
-            only += String("affected-by ") + result.affected_base
-        s += String("SELECTIVE run (") + only + String("): not a full run.")
-    else:
-        s += String("FULL run.")
-    if result.plan:
-        s += String(" Dry run (--plan): nothing built, nothing written to a channel.")
-    s += String("\n\n")
-    s += String("- revision: `") + result.revision + String("`\n")
-    if result.set_hash.byte_length() > 0:
-        s += String("- set hash: `") + result.set_hash + String("`\n")
-    if result.channel.byte_length() > 0:
-        s += String("- channel: `") + result.channel + String("`\n")
-    if result.has_affected_by:
-        if result.affected_verdict.byte_length() == 0:
-            s += String("- affected: no answer\n")
-        else:
-            s += String("- affected: ") + result.affected_verdict
-            if result.affected_reason.byte_length() > 0:
-                s += String(" (") + result.affected_reason + String(")")
-            s += String(", ") + String(len(result.affected_units)) + String(" unit(s):")
-            for i in range(len(result.affected_units)):
-                s += String(" `") + result.affected_units[i] + String("`")
-            s += String("\n")
-    if result.workflow_checked:
-        s += (
-            String("- workflow: `") + result.workflow_path + String("` at `") + result.workflow_sha
-            + String("` agrees with the machine file\n")
-        )
-    else:
-        s += String("- workflow: not checked (") + result.workflow_reason + String(")\n")
-    if result.has_error:
-        var first = result.error.message.copy()
-        var nl = result.error.message.find(String("\n"))
-        if nl >= 0:
-            first = String(result.error.message[byte = 0:nl])
-        s += String("- error: `") + result.error.id + String("`: ") + first + String("\n")
-    if len(result.steps) > 0:
-        s += String("\n| step | kind | outcome |\n|---|---|---|\n")
-        for i in range(len(result.steps)):
-            ref st = result.steps[i]
-            var o = st.outcome.copy()
-            if not st.selected:
-                o = String("not selected")
-            elif o.byte_length() == 0:
-                o = String("not reached")
-            elif st.credential_probe == CREDENTIAL_PROBE_NOT_UNDER_CI:
-                o += String(", ") + String(CREDENTIAL_PROBE_NOT_RUN_NOTE)
-            s += String("| ") + st.name + String(" | ") + st.kind + String(" | ") + o + String(" |\n")
-    if len(result.validations) > 0:
-        s += String("\n| validation | step | outcome |\n|---|---|---|\n")
-        for i in range(len(result.validations)):
-            ref v = result.validations[i]
-            var o = v.outcome.copy() if v.outcome.byte_length() > 0 else v.effect.copy()
-            s += String("| ") + v.name + String(" | ") + v.step + String(" | ") + o + String(" |\n")
-            for k in range(len(v.checks)):
-                if not v.checks[k].ok:
-                    s += String("| | | `") + v.checks[k].got + String("` |\n")
-    s += String("\n")
-    for i in range(len(step_blocks)):
-        s += step_blocks[i]
-    for i in range(len(ahead)):
-        s += new_names_markdown(ahead[i])
-    return s^
-
-
-def append_summary(path: String, text: String):
-    """Append `text` to `path` ("" appends nothing). Never truncates; a file
-    that cannot be written is said on stderr."""
-    if path.byte_length() == 0:
-        return
-    try:
-        var f = open(path, "a")
-        f.write(text)
-        f.close()
-    except e:
-        _say(String("kci: the summary file '") + path + String("' could not be written: ") + String(e))
 
 
 def _run_step[S: StageSteps](
@@ -729,8 +479,12 @@ def _run_stage[S: StageSteps](
     mut result: KciRunResult,
     mut step_blocks: List[String],
     mut ahead: List[NewNamesReport],
+    mut banner: String,
+    mut main_only: Bool,
 ) -> Int:
-    """File header, 0 to 8 and 10. Returns the exit number."""
+    """File header, 0 to 8 and 10. Returns the exit number. `banner` gets a
+    break-glass run's first line; `main_only` says the stage has no
+    `break_glass`."""
     try:
         result.set_run(cmd.run_identity())
     except e:
@@ -760,6 +514,7 @@ def _run_stage[S: StageSteps](
         stage = g.stage(cmd.stage)
     except e:
         return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_STAGE_UNKNOWN), String(e))
+    main_only = not stage.break_glass and not stage.is_pull_request()
     result.stage_step_kinds = stage.step_kinds()
     result.platform = stage.steps[0].platform.copy()
     var sel: Selection
@@ -775,9 +530,16 @@ def _run_stage[S: StageSteps](
     except e:
         return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
     # 4. the workflow this job runs under, held to the machine file
-    var verdict = _check_workflow_at_start(cmd, g, steps, result)
+    var verdict = check_workflow_at_start(cmd, g, steps, result)
     if verdict.outcome.byte_length() > 0:
         return _stop_run(result, recorder, verdict.outcome, verdict.error_id, verdict.message)
+    # 4a. the ref this run is on; 4b. the set it was handed
+    var ref_verdict = check_ref_at_start(cmd, stage, steps, banner)
+    if ref_verdict.outcome.byte_length() > 0:
+        return _stop_run(result, recorder, ref_verdict.outcome, ref_verdict.error_id, ref_verdict.message)
+    var hash_verdict = check_set_hash_at_start(cmd, stage, sel, steps, result)
+    if hash_verdict.outcome.byte_length() > 0:
+        return _stop_run(result, recorder, hash_verdict.outcome, hash_verdict.error_id, hash_verdict.message)
     for i in range(len(stage.steps)):
         var validated = False
         for m in range(len(stage.steps[i].validations)):
@@ -878,8 +640,18 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
     result.plan = cmd.plan
     var step_blocks = List[String]()
     var ahead = List[NewNamesReport]()
-    var rc = _run_stage(cmd, steps, recorder, result, step_blocks, ahead)
-    append_summary(cmd.summary_file, run_summary_markdown(result, step_blocks, ahead))
+    var banner = String("")
+    var main_only = False
+    var rc = _run_stage(cmd, steps, recorder, result, step_blocks, ahead, banner, main_only)
+    var text = String("")
+    if banner.byte_length() > 0:
+        text += String("### ") + banner + String("\n\n")
+    text += run_summary_markdown(result, step_blocks, ahead)
+    var line = promotion_line(result, cmd.stage, main_only)
+    if line.byte_length() > 0:
+        text += String("### ") + line + String("\n\n")
+        _say(line)
+    append_summary(cmd.summary_file, text)
     return rc
 
 

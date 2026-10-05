@@ -1,0 +1,320 @@
+# =============================================================================
+# src/kci_cli/start_checks.mojo -- what `kci run` checks under GitHub Actions
+#   before the RUNNING record (dispatch.mojo's header, 4, 4a and 4b): the
+#   workflow it runs under, the ref it runs on, and the release set it was
+#   handed.
+# =============================================================================
+#
+# Each check returns a `StartVerdict`: `outcome` "" when the run may go on,
+# else the outcome, error id and message the run stops with (nothing run).
+# Everything outside this process goes through the `StageSteps` seam
+# (seam.mojo).
+#
+# Encapsulation: owned values and a generic seam; no pointer, no wildcard
+# origin.
+# =============================================================================
+
+from std.pathlib import Path
+
+from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow
+from kci_api import (
+    ERROR_BREAK_GLASS_REASON,
+    ERROR_CANNOT_TELL,
+    ERROR_NOT_ON_MAIN,
+    ERROR_SET_HASH,
+    ERROR_USAGE,
+    ERROR_WORKFLOW_MISMATCH,
+    OUTCOME_INDETERMINATE,
+    OUTCOME_REFUSED,
+    WORKFLOW_PATH_PREFIX,
+    is_full_commit_id,
+    release_platform_dir,
+)
+from kci_api import RunResult as KciRunResult
+from kci_release_machine import ReleaseMachine, Selection, Stage
+
+from .args import KciCommand
+from .seam import StageSteps
+from .summary import break_glass_line
+
+comptime _STDERR: FileDescriptor = FileDescriptor(2)
+
+# The platform-set variables the workflow check reads (file header, 4): the
+# runner sets them, nothing else does (the mode-discriminator carve-out).
+comptime GITHUB_ACTIONS: String = "GITHUB_ACTIONS"
+comptime GITHUB_WORKFLOW_REF: String = "GITHUB_WORKFLOW_REF"
+comptime GITHUB_WORKFLOW_SHA: String = "GITHUB_WORKFLOW_SHA"
+comptime GITHUB_REPOSITORY: String = "GITHUB_REPOSITORY"
+comptime NOT_UNDER_GITHUB_ACTIONS: String = "not under GitHub Actions"
+# The ref check's platform-set variables (file header, 4a).
+comptime GITHUB_REF: String = "GITHUB_REF"
+comptime GITHUB_SHA: String = "GITHUB_SHA"
+comptime GITHUB_ACTOR: String = "GITHUB_ACTOR"
+comptime MAIN_REF: String = "refs/heads/main"
+comptime MAIN_TRACKING_REF: String = "origin/main"
+comptime REASON_CONTEXT_KEY: String = "reason"
+comptime BREAK_GLASS_REASON_MAX_BYTES: Int = 200
+
+
+def workflow_path_of(ref_value: String, repository: String) raises -> String:
+    """The workflow file's path in `GITHUB_WORKFLOW_REF`
+    (`<repository>/<path>@<ref>`). Raises unless it is a file under
+    .github/workflows/ of `repository`."""
+    var prefix = repository + String("/")
+    if repository.byte_length() == 0 or not ref_value.startswith(prefix):
+        raise Error(
+            String(GITHUB_WORKFLOW_REF) + String(" '") + ref_value + String("' does not start with ")
+            + String(GITHUB_REPOSITORY) + String(" '") + repository + String("/'")
+        )
+    var rest = String(ref_value[byte = prefix.byte_length() :])
+    var at = rest.find(String("@"))
+    if at <= 0:
+        raise Error(String(GITHUB_WORKFLOW_REF) + String(" '") + ref_value + String("' names no @<ref>"))
+    var path = String(rest[byte = 0:at])
+    if not path.startswith(String(WORKFLOW_PATH_PREFIX)) or path.find(String("..")) >= 0:
+        raise Error(
+            String(GITHUB_WORKFLOW_REF) + String(" '") + ref_value + String("': the path '") + path
+            + String("' is not a file under ") + String(WORKFLOW_PATH_PREFIX)
+        )
+    return path^
+
+
+struct StartVerdict(Copyable, Movable):
+    """A start-up check's verdict (dispatch.mojo's header, 4 to 4b): `outcome` ""
+    when the run may go on; else the outcome, error id and message to stop
+    with, and `findings` to print.
+
+    Layout: owned values only. No pointer field."""
+
+    var outcome: String
+    var error_id: String
+    var message: String
+    var findings: List[String]
+
+    def __init__(out self):
+        self.outcome = String("")
+        self.error_id = String("")
+        self.message = String("")
+        self.findings = List[String]()
+
+    @staticmethod
+    def cannot_tell(var message: String) -> StartVerdict:
+        var v = StartVerdict()
+        v.outcome = String(OUTCOME_INDETERMINATE)
+        v.error_id = String(ERROR_CANNOT_TELL)
+        v.message = String("the workflow check cannot tell, so nothing is run: ") + message
+        return v^
+
+
+def check_workflow_at_start[S: StageSteps](
+    cmd: KciCommand, g: ReleaseMachine, mut steps: S, mut result: KciRunResult
+) -> StartVerdict:
+    """File header, 4. Records `workflow` in `result`."""
+    if steps.platform_env(String(GITHUB_ACTIONS)) != String("true"):
+        result.workflow_checked = False
+        result.workflow_reason = String(NOT_UNDER_GITHUB_ACTIONS)
+        return StartVerdict()
+    result.workflow_reason = String("")
+    var ref_value = steps.platform_env(String(GITHUB_WORKFLOW_REF))
+    var sha = steps.platform_env(String(GITHUB_WORKFLOW_SHA))
+    var repository = steps.platform_env(String(GITHUB_REPOSITORY))
+    var needed = List[String]()
+    needed.append(String(GITHUB_WORKFLOW_REF))
+    needed.append(String(GITHUB_WORKFLOW_SHA))
+    needed.append(String(GITHUB_REPOSITORY))
+    for i in range(len(needed)):
+        if steps.platform_env(needed[i]).byte_length() == 0:
+            result.workflow_reason = needed[i] + String(" is not set")
+            return StartVerdict.cannot_tell(
+                String(GITHUB_ACTIONS) + String(" is true and ") + needed[i] + String(" is not set")
+            )
+    if not is_full_commit_id(sha):
+        result.workflow_reason = String(GITHUB_WORKFLOW_SHA) + String(" is not a full commit id")
+        return StartVerdict.cannot_tell(
+            String(GITHUB_WORKFLOW_SHA) + String(" '") + sha + String("' is not a full commit id")
+        )
+    var path: String
+    try:
+        path = workflow_path_of(ref_value, repository)
+    except e:
+        result.workflow_reason = String(GITHUB_WORKFLOW_REF) + String(" names no workflow file")
+        return StartVerdict.cannot_tell(String(e))
+    result.workflow_path = path.copy()
+    result.workflow_sha = sha.copy()
+    var text: String
+    try:
+        text = steps.committed_file(sha, path)
+    except e:
+        result.workflow_reason = String("the workflow could not be read at its commit")
+        return StartVerdict.cannot_tell(
+            String("`git show ") + sha + String(":") + path + String("` failed: ") + String(e)
+        )
+    var files = List[ChannelsFile]()
+    var paths = channels_paths(g)
+    for i in range(len(paths)):
+        try:
+            files.append(ChannelsFile(paths[i].copy(), _read(paths[i])))
+        except e:
+            result.workflow_reason = String("a channels file could not be read")
+            return StartVerdict.cannot_tell(
+                String("the channels file '") + paths[i] + String("' cannot be read: ") + String(e)
+            )
+    var findings: List[String]
+    try:
+        findings = check_running_workflow(g, files, text, cmd.machine)
+    except e:
+        result.workflow_reason = String("the workflow could not be checked")
+        return StartVerdict.cannot_tell(path + String(" at ") + sha + String(": ") + String(e))
+    if len(findings) > 0:
+        result.workflow_reason = String("the workflow does not match the machine file")
+        var v = StartVerdict()
+        v.outcome = String(OUTCOME_REFUSED)
+        v.error_id = String(ERROR_WORKFLOW_MISMATCH)
+        v.message = (
+            path + String(" (at ") + sha + String(") disagrees with ") + cmd.machine + String(" in ")
+            + String(len(findings)) + String(" place(s), so nothing is run; the machine file owns the stages,")
+            + String(" edit both together:")
+        )
+        for i in range(len(findings)):
+            v.message += String("\n") + findings[i]
+        v.findings = findings^
+        return v^
+    result.workflow_checked = True
+    return StartVerdict()
+
+
+def _context_value(cmd: KciCommand, key: String) -> String:
+    for i in range(len(cmd.context)):
+        if cmd.context[i].key == key:
+            return cmd.context[i].value.copy()
+    return String("")
+
+
+def _refuse(var outcome: String, var error_id: String, var message: String) -> StartVerdict:
+    var v = StartVerdict()
+    v.outcome = outcome^
+    v.error_id = error_id^
+    v.message = message^
+    return v^
+
+
+def check_ref_at_start[S: StageSteps](
+    cmd: KciCommand, stage: Stage, mut steps: S, mut banner: String
+) -> StartVerdict:
+    """File header, 4a. `banner` gets a break-glass run's first line."""
+    if steps.platform_env(String(GITHUB_ACTIONS)) != String("true") or stage.is_pull_request():
+        return StartVerdict()
+    var ref_value = steps.platform_env(String(GITHUB_REF))
+    var sha = steps.platform_env(String(GITHUB_SHA))
+    if ref_value.byte_length() == 0:
+        return _refuse(
+            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+            String(GITHUB_ACTIONS) + String(" is true and ") + String(GITHUB_REF)
+            + String(" is not set: which ref this run is on cannot be told, so nothing is run"),
+        )
+    if not is_full_commit_id(sha):
+        return _refuse(
+            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+            String(GITHUB_SHA) + String(" '") + sha + String("' is not a full commit id, so nothing is run"),
+        )
+    var on_main = ref_value == String(MAIN_REF)
+    var where = String("stage '") + stage.name + String("'")
+    if not stage.break_glass and not on_main:
+        return _refuse(
+            String(OUTCOME_REFUSED), String(ERROR_NOT_ON_MAIN),
+            where + String(" runs only on main (the machine file gives it no break_glass), and this run is on ")
+            + ref_value + String(": a break-glass run stops at the last break_glass stage, so nothing is run"),
+        )
+    var of = String(MAIN_TRACKING_REF) if on_main else sha.copy()
+    var on_history: Bool
+    try:
+        on_history = steps.is_ancestor(cmd.revision_id, of)
+    except e:
+        return _refuse(
+            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+            String("whether the revision ") + cmd.revision_id + String(" is on ") + of
+            + String("'s history cannot be told (") + String(e) + String("), so nothing is run"),
+        )
+    if not on_history:
+        if on_main:
+            return _refuse(
+                String(OUTCOME_REFUSED), String(ERROR_NOT_ON_MAIN),
+                String("the revision ") + cmd.revision_id + String(" is not on main's history (") + String(MAIN_TRACKING_REF)
+                + String("): a run of main releases a merged commit only, so nothing is run"),
+            )
+        return _refuse(
+            String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REASON),
+            String("BREAK-GLASS on ") + ref_value + String(": the revision ") + cmd.revision_id
+            + String(" is not on the history of the branch the run was started on (") + sha
+            + String("), so nothing is run"),
+        )
+    if on_main:
+        return StartVerdict()
+    var reason = _context_value(cmd, String(REASON_CONTEXT_KEY))
+    if reason.byte_length() == 0 or reason.byte_length() > BREAK_GLASS_REASON_MAX_BYTES:
+        return _refuse(
+            String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REASON),
+            String("BREAK-GLASS on ") + ref_value + String(" (") + where + String(" runs off main) needs --context ")
+            + String(REASON_CONTEXT_KEY) + String("=<why>, 1 to ") + String(BREAK_GLASS_REASON_MAX_BYTES)
+            + String(" bytes on one line; it has ") + String(reason.byte_length()) + String(" bytes, so nothing is run"),
+        )
+    banner = break_glass_line(ref_value, cmd.revision_id, steps.platform_env(String(GITHUB_ACTOR)), reason)
+    _say(String("kci: ") + banner)
+    return StartVerdict()
+
+
+def check_set_hash_at_start[S: StageSteps](
+    cmd: KciCommand, stage: Stage, sel: Selection, mut steps: S, mut result: KciRunResult
+) -> StartVerdict:
+    """File header, 4b."""
+    var at = -1
+    for i in range(len(stage.steps)):
+        var validated = False
+        for m in range(len(stage.steps[i].validations)):
+            if _selected(sel, stage.steps[i].validations[m].name):
+                validated = True
+        if at < 0 and stage.steps[i].is_publish() and (sel.steps[i] or validated):
+            at = i
+    if at < 0:
+        return StartVerdict()
+    if cmd.release_set_hash.byte_length() == 0:
+        if steps.platform_env(String(GITHUB_ACTIONS)) == String("true"):
+            return _refuse(
+                String(OUTCOME_REFUSED), String(ERROR_USAGE),
+                String("under GitHub Actions a run that publishes or validates is given --release-set-hash (the set")
+                + String(" the build made, or the one validate validated): kci holds the release to it"),
+            )
+        return StartVerdict()
+    ref step = stage.steps[at]
+    var got: String
+    try:
+        got = steps.release_set_hash(step.artifacts, release_platform_dir(cmd.release_dir, step.platform))
+    except e:
+        return _refuse(
+            String(OUTCOME_REFUSED), String(ERROR_SET_HASH),
+            String("the release directory's set hash cannot be recomputed, so it cannot be held to --release-set-hash ")
+            + cmd.release_set_hash + String(": ") + String(e),
+        )
+    if got != cmd.release_set_hash:
+        return _refuse(
+            String(OUTCOME_REFUSED), String(ERROR_SET_HASH),
+            String("the release directory recomputes to set hash ") + got + String(", not ") + cmd.release_set_hash
+            + String(" (the set this run was handed): these are not the bytes that were built and validated"),
+        )
+    result.set_hash = got^
+    return StartVerdict()
+
+
+def _say(line: String):
+    print(line, file=_STDERR)
+
+
+def _read(path: String) raises -> String:
+    return Path(path).read_text()
+
+
+def _selected(sel: Selection, name: String) -> Bool:
+    for i in range(len(sel.validations)):
+        if sel.validations[i] == name:
+            return True
+    return False
