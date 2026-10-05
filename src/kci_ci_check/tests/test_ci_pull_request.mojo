@@ -18,9 +18,11 @@ from kci_ci_check import (
     WorkflowNode,
     check_running_workflow,
     check_workflow,
+    check_workflow_doc,
     condition_expression,
     excludes_pull_request,
     kci_run_calls,
+    read_workflow,
 )
 from kci_release_machine import parse_machine_file
 
@@ -382,6 +384,12 @@ def test_a_release_job_condition_that_is_not_a_top_level_conjunction_is_refused(
     _reports(wf, String("job 'build': R6: runs stage 'build', a release stage"))
 
 
+comptime _BUILD_IF: String = "    if: github.event_name != 'pull_request'\n"
+comptime _GAMMA_IF: String = "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
+comptime _BUILD_EXPR: String = "${{ github.event_name != 'pull_request' }}"
+comptime _GAMMA_EXPR: String = "${{ github.event_name != 'pull_request' && needs.build.outputs.release == 'true' }}"
+
+
 def _format_strings(expr: String) -> List[String]:
     """`if:` values (written after `if:`, to the line's end) that hold
     `expr` and are not exactly it: block scalars, whitespace inside quotes
@@ -408,6 +416,72 @@ def _reports_each(old: String, values: List[String], needle: String) raises:
             _reports(_wf(old, String("    if: ") + values[i] + String("\n")), needle)
         except e:
             raise Error(String("`if: ") + values[i] + String("`: ") + String(e))
+
+
+def test_a_release_job_condition_github_reads_as_a_format_string_is_refused() raises:
+    _reports_each(
+        String(_BUILD_IF), _format_strings(String(_BUILD_EXPR)), String("job 'build': R6: runs stage 'build', a release stage")
+    )
+    _reports_each(
+        String(_GAMMA_IF),
+        _format_strings(String(_GAMMA_EXPR)),
+        String("job 'publish-gamma': R6: runs stage 'publish-gamma', a release stage"),
+    )
+    # the string reader alone: whitespace around one `${{ }}` is a format string
+    assert_false(excludes_pull_request(String(_BUILD_EXPR) + String(" ")))
+    assert_false(excludes_pull_request(String(" ") + String(_BUILD_EXPR)))
+    assert_false(excludes_pull_request(String(_BUILD_EXPR) + String("\t")))
+    assert_false(excludes_pull_request(String(_BUILD_EXPR) + String("\n")))
+
+
+def _block_if_findings(job: String, old: String, expr: String, block: Bool) raises -> List[String]:
+    """The findings on the workflow whose job `job` has `if: |` holding
+    `expr`, with that node's text set to exactly `expr` (as a reader that
+    drops the block's indentation would give it) and its block flag set to
+    `block`."""
+    var doc = read_workflow(_wf(old, String("    if: |\n      ") + expr + String("\n")))
+    var cond = doc.child(doc.child(doc.child(0, String("jobs")), String(job)), String("if"))
+    if cond < 0 or not doc.is_block(cond):
+        raise Error(String("no block `if:` on job ") + job)
+    doc.nodes[cond].text = expr.copy()
+    doc.nodes[cond].block = block
+    var g = parse_machine_file(String(_MACHINE), String("machine file"))
+    return check_workflow_doc(doc, g, _tokens(), String("release/machine.textproto"))
+
+
+def _has(f: List[String], needle: String) -> Bool:
+    for i in range(len(f)):
+        if f[i].find(needle) >= 0:
+            return True
+    return False
+
+
+def test_the_block_scalar_is_refused_by_its_style_not_its_indentation() raises:
+    # The block flag alone refuses each condition: with the text exactly
+    # `${{ <it> }}`, the same node read as a quoted scalar agrees.
+    var cases = List[Tuple[String, String, String, String]]()
+    cases.append((String("build"), String(_BUILD_IF), String(_BUILD_EXPR), String("job 'build': R6: runs stage 'build', a release stage")))
+    cases.append((String("publish-gamma"), String(_GAMMA_IF), String(_GAMMA_EXPR), String("job 'publish-gamma': R6: runs stage 'publish-gamma', a release stage")))
+    cases.append((String("pr"), String(_FORK_IF), String("${{ ") + String(_FORK) + String(" }}"), String("R6: stage 'pr' is a PULL_REQUEST stage, so the job carries `if: ")))
+    for i in range(len(cases)):
+        var job = cases[i][0]
+        assert_true(_has(_block_if_findings(job, cases[i][1], cases[i][2], True), cases[i][3]), job)
+        var quoted = _block_if_findings(job, cases[i][1], cases[i][2], False)
+        if len(quoted) != 0:
+            raise Error(job + String(": unexpected findings: ") + _all(quoted))
+
+
+def test_a_release_job_condition_that_is_exactly_one_expression_agrees() raises:
+    _agrees(String(_MACHINE), _wf(String(_BUILD_IF), String("    if: ") + String(_BUILD_EXPR) + String("\n")))
+    _agrees(String(_MACHINE), _wf(String(_GAMMA_IF), String("    if: \"") + String(_GAMMA_EXPR) + String("\"\n")))
+    # YAML trims a plain scalar: a tab after it is not part of the value
+    _agrees(String(_MACHINE), _wf(String(_BUILD_IF), String("    if: ") + String(_BUILD_EXPR) + String("\t\n")))
+    # a block scalar with no `${{` is the expression itself
+    _agrees(String(_MACHINE), _wf(String(_BUILD_IF), String("    if: |\n      github.event_name != 'pull_request'\n")))
+    _agrees(
+        String(_MACHINE),
+        _wf(String(_GAMMA_IF), String("    if: >-\n      github.event_name != 'pull_request' &&\n      needs.build.outputs.release == 'true'\n")),
+    )
 
 
 def test_a_pull_request_stage_runs_whole_in_its_own_job() raises:

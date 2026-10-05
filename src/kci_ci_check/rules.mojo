@@ -66,7 +66,8 @@
 #         * when it is, every job but the PULL_REQUEST stage's is
 #           RELEASE-ONLY: a PUSH stage's job, and a part job of one, carries
 #           a job-level `if:` that is a TOP-LEVEL conjunction (bare or
-#           inside one outer `${{ }}`; outside single-quoted literals only
+#           exactly one `${{ }}` with nothing around it, and no block
+#           scalar holding `${{`; outside single-quoted literals only
 #           names, numbers and `&&` `==` `!=` `<` `<=` `>` `>=`, so no
 #           grouping, negation, call, index or `||`; no other `${{` or `}}`,
 #           a literal included) with a term that is exactly

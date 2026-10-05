@@ -276,8 +276,11 @@ value, and the release's `release_produced_by` names the one build run.
   request's code. The `pr` job's condition
   (`github.event.pull_request.head.repo.full_name == github.repository`)
   keeps a fork's code off the farm: a fork's run gets no tailnet credential,
-  and a maintainer reads the change and pushes it to a branch here. Rule R6
-  of `src/kci_ci_check` holds all of it.
+  and a maintainer reads the change and pushes it to a branch here. Both
+  conditions are written bare or as exactly `${{ <condition> }}`: a block
+  scalar (`if: |`) holding `${{`, or whitespace inside quotes around it,
+  makes GitHub read the `if:` as a format string, which is always true.
+  Rule R6 of `src/kci_ci_check` holds all of it.
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
   the run started on). Every job checks it out, kci refuses a checkout whose

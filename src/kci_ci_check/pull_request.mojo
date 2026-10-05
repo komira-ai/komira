@@ -18,7 +18,7 @@
 #     keeps out a pull request only because the triggers are an allow-list
 #     (rules.mojo, R6: push, workflow_dispatch and pull_request): any other
 #     event that runs a pull request's code is refused as a trigger;
-#   * the fork condition is read by `condition_expression`: an `if:` holding
+#   * both conditions are read by `condition_expression`: an `if:` holding
 #     `${{` is exactly `${{ <expression> }}` (nothing before `${{` or after
 #     `}}`, not even whitespace inside quotes) and no block scalar holds it.
 #     GitHub reads any other `if:` holding `${{` as a format string, which
@@ -155,17 +155,17 @@ def _is_space_byte(c: UInt8) -> Bool:
 
 def _conjunction_terms(condition: String, mut terms: List[String]) -> Bool:
     """The terms of `condition` when it is a TOP-LEVEL conjunction: bare, or
-    inside ONE outer `${{ }}`; then, outside single-quoted literals (`''`
-    escapes a quote), only names and numbers ([A-Za-z0-9_.-]), whitespace,
-    and the operators `&&`, `==`, `!=`, `<`, `<=`, `>`, `>=`. No `(`, `)`,
-    `!` (a negation), `||`, `[`, `]`, `*` or `,`, so no grouping, negation,
-    call, index or object filter can hold a term, and every `&&` is at the
-    top level. No other `${{` or `}}` anywhere, a literal included: a
+    exactly ONE `${{ }}` with nothing around it (`_expression_of`); then,
+    outside single-quoted literals (`''` escapes a quote), only names and
+    numbers ([A-Za-z0-9_.-]), whitespace, and the operators `&&`, `==`,
+    `!=`, `<`, `<=`, `>`, `>=`. No `(`, `)`, `!` (a negation), `||`, `[`,
+    `]`, `*` or `,`, so no grouping, negation, call, index or object filter
+    can hold a term, and every `&&` is at the top level. No other `${{` or `}}` anywhere, a literal included: a
     partial `${{ }}` makes GitHub read the whole `if:` as a format() string,
     which is always truthy. False (and `terms` unspecified) otherwise."""
-    var c = String(condition.strip())
-    if c.startswith(String("${{")) and c.endswith(String("}}")) and c.byte_length() >= 5:
-        c = String(String(c[byte = 3 : c.byte_length() - 2]).strip())
+    var c = String("")
+    if not _expression_of(condition, c):
+        return False
     if c.find(String("${{")) >= 0 or c.find(String("}}")) >= 0:
         return False
     var b = c.as_bytes()
@@ -212,9 +212,9 @@ def _conjunction_terms(condition: String, mut terms: List[String]) -> Bool:
 
 def excludes_pull_request(condition: String) -> Bool:
     """A job condition that a pull request never satisfies (R6): a
-    top-level conjunction (`_conjunction_terms`: bare or inside one outer
-    `${{ }}`, terms joined by `&&` only, no grouping, negation, call or
-    `||`), one of whose terms is exactly `github.event_name !=
+    top-level conjunction (`_conjunction_terms`: bare or exactly one
+    `${{ }}` with nothing around it, terms joined by `&&` only, no
+    grouping, negation, call or `||`), one of whose terms is exactly `github.event_name !=
     'pull_request'`, `github.event_name == 'push'` or `github.event_name ==
     'workflow_dispatch'`. Anything else is not read as release-only."""
     var terms = List[String]()
@@ -231,12 +231,14 @@ def check_release_only(doc: WorkflowDoc, job_id: String, job: Int, stage: String
     triggered by `pull_request`: its job-level `if:` keeps a pull request
     out."""
     var cond = doc.child(job, String("if"))
-    if cond >= 0 and doc.kind(cond) == NODE_SCALAR and excludes_pull_request(doc.text(cond)):
+    var expression = String("")
+    if condition_expression(doc, cond, expression) and excludes_pull_request(expression):
         return
     findings.append(
         _at(doc, job) + String("job '") + job_id + String("': R6: runs stage '") + stage
         + String("', a release stage, and the workflow is triggered by pull_request, so the job's `if:` keeps a")
         + String(" pull request out (a top-level conjunction, `&&` only and no grouping, negation, call or partial `${{ }}`,")
+        + String(" bare or exactly one `${{ }}` with nothing around it and no block scalar holding `${{`,")
         + String(" with a term `github.event_name != 'pull_request'`): only the")
         + String(" PULL_REQUEST stage's job runs a pull request's code")
     )
