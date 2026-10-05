@@ -1,5 +1,5 @@
 # =============================================================================
-# ivp_expr_codec.mojo — IVP Expr tree wire serialization (the v1 allow-list).
+# viewport_expr_codec.mojo — viewport-protocol Expr tree wire serialization (the v1 allow-list).
 # =============================================================================
 #
 # Plans are in-process Mojo structs; this module is their versioned Expr
@@ -9,7 +9,7 @@
 #
 # THE ALLOW-LIST (the security spine). The full komira_core Expr surface has
 # ~23 variant tags (agg-fn, window-fn, correlated-subquery, regexp, UDF,
-# json_extract, struct/map projection, ...). IVP v1 serializes ONLY the SIX
+# json_extract, struct/map projection, ...). viewport protocol v1 serializes ONLY the SIX
 # grid-filter / sort / computed-column tags:
 #
 #   EXPR_COL_REF   — a column reference          (filter/sort/project leaf)
@@ -28,10 +28,10 @@
 # construction: the v1 allow-list contains no UDF-bearing tag.
 #
 # DEPTH GUARD. `decode_expr` carries a remaining-depth budget; a ticket whose
-# Expr tree nests past IVP_MAX_EXPR_DEPTH raises BEFORE unbounded recursion —
+# Expr tree nests past VIEWPORT_MAX_EXPR_DEPTH raises BEFORE unbounded recursion —
 # a remote client cannot blow the worker stack with a pathologically deep tree.
 #
-# Encapsulation: pure value logic over `Expr` + `IvpWriter`/`IvpReader`. No
+# Encapsulation: pure value logic over `Expr` + `ViewportWriter`/`ViewportReader`. No
 # UnsafePointer crosses the boundary. Mojo 1.0.0b2 (def-only).
 # =============================================================================
 
@@ -52,27 +52,27 @@ from komira_core.plan.expr import (
     COL_SIDE_NONE, COL_SIDE_LEFT, COL_SIDE_RIGHT,
 )
 
-from .ivp_bytes import IvpWriter, IvpReader
+from .viewport_bytes import ViewportWriter, ViewportReader
 
 
 # The Expr-tree nesting cap enforced on DECODE (untrusted input). 64 comfortably
 # covers any realistic hand-built grid predicate (a 64-deep AND chain is 64
 # ANDed clauses) while bounding recursion / stack use on a hostile ticket.
-comptime IVP_MAX_EXPR_DEPTH: Int = 64
+comptime VIEWPORT_MAX_EXPR_DEPTH: Int = 64
 
 
-# --- IVP scalar-literal wire tags (the ScalarValue discriminant on the wire) --
-comptime IVP_SCALAR_NULL: UInt8 = 0      # untyped NULL (ScalarValue() default)
-comptime IVP_SCALAR_BOOL: UInt8 = 1
-comptime IVP_SCALAR_INT64: UInt8 = 2
-comptime IVP_SCALAR_INT32: UInt8 = 3
-comptime IVP_SCALAR_FLOAT64: UInt8 = 4
-comptime IVP_SCALAR_FLOAT32: UInt8 = 5
-comptime IVP_SCALAR_STRING: UInt8 = 6
+# --- viewport-protocol scalar-literal wire tags (the ScalarValue discriminant on the wire) --
+comptime VIEWPORT_SCALAR_NULL: UInt8 = 0      # untyped NULL (ScalarValue() default)
+comptime VIEWPORT_SCALAR_BOOL: UInt8 = 1
+comptime VIEWPORT_SCALAR_INT64: UInt8 = 2
+comptime VIEWPORT_SCALAR_INT32: UInt8 = 3
+comptime VIEWPORT_SCALAR_FLOAT64: UInt8 = 4
+comptime VIEWPORT_SCALAR_FLOAT32: UInt8 = 5
+comptime VIEWPORT_SCALAR_STRING: UInt8 = 6
 
 
 def _is_allowed_binop(op: UInt8) -> Bool:
-    """The 14 binary op codes IVP v1 permits (arithmetic + compare + bool)."""
+    """The 14 binary op codes viewport protocol v1 permits (arithmetic + compare + bool)."""
     return (
         op == BIN_ADD or op == BIN_SUB or op == BIN_MUL or op == BIN_DIV
         or op == BIN_MOD or op == BIN_EQ or op == BIN_NE or op == BIN_LT
@@ -82,7 +82,7 @@ def _is_allowed_binop(op: UInt8) -> Bool:
 
 
 def _is_allowed_unop(op: UInt8) -> Bool:
-    """The 4 unary op codes IVP v1 permits."""
+    """The 4 unary op codes viewport protocol v1 permits."""
     return (
         op == UN_NOT or op == UN_NEGATE or op == UN_IS_NULL
         or op == UN_IS_NOT_NULL
@@ -90,7 +90,7 @@ def _is_allowed_unop(op: UInt8) -> Bool:
 
 
 def _is_allowed_strop(op: UInt8) -> Bool:
-    """The 4 string op codes IVP v1 permits."""
+    """The 4 string op codes viewport protocol v1 permits."""
     return (
         op == STR_CONTAINS or op == STR_STARTS_WITH or op == STR_ENDS_WITH
         or op == STR_LIKE
@@ -106,63 +106,63 @@ def _is_allowed_side(side: UInt8) -> Bool:
 # =============================================================================
 
 
-def encode_scalar(mut w: IvpWriter, sv: ScalarValue) raises:
-    """Encode a ScalarValue as one IVP scalar tag + its payload.
+def encode_scalar(mut w: ViewportWriter, sv: ScalarValue) raises:
+    """Encode a ScalarValue as one viewport-protocol scalar tag + its payload.
 
     Supports the DType-family literals (null / bool / int64 / int32 / float64 /
     float32 / string). DECIMAL128 / DATE32 / TIMESTAMP literals are reserved for
     v1.1 and RAISE here (a server never builds them; a client cannot post them)."""
     if sv.is_null():
-        w.write_u8(IVP_SCALAR_NULL)
+        w.write_u8(VIEWPORT_SCALAR_NULL)
         return
     if sv.is_bool():
-        w.write_u8(IVP_SCALAR_BOOL)
+        w.write_u8(VIEWPORT_SCALAR_BOOL)
         w.write_bool(sv.bool_val)
         return
     if sv.is_int():
         if sv.dtype == DType.int32:
-            w.write_u8(IVP_SCALAR_INT32)
+            w.write_u8(VIEWPORT_SCALAR_INT32)
         else:
-            w.write_u8(IVP_SCALAR_INT64)
+            w.write_u8(VIEWPORT_SCALAR_INT64)
         w.write_ivarint(sv.int_val)
         return
     if sv.is_float():
         if sv.dtype == DType.float32:
-            w.write_u8(IVP_SCALAR_FLOAT32)
+            w.write_u8(VIEWPORT_SCALAR_FLOAT32)
             w.write_f32(Float32(sv.float_val))
         else:
-            w.write_u8(IVP_SCALAR_FLOAT64)
+            w.write_u8(VIEWPORT_SCALAR_FLOAT64)
             w.write_f64(sv.float_val)
         return
     if sv.is_string():
-        w.write_u8(IVP_SCALAR_STRING)
+        w.write_u8(VIEWPORT_SCALAR_STRING)
         w.write_string(sv.string_val)
         return
     raise Error(
-        "ivp: literal scalar kind not supported in IVP v1 "
+        "viewport: literal scalar kind not supported in viewport protocol v1 "
         "(decimal128 / date32 / timestamp are reserved for v1.1)"
     )
 
 
-def decode_scalar(mut r: IvpReader) raises -> ScalarValue:
-    """Decode one IVP scalar tag + payload back into a ScalarValue. Raises on an
+def decode_scalar(mut r: ViewportReader) raises -> ScalarValue:
+    """Decode one viewport-protocol scalar tag + payload back into a ScalarValue. Raises on an
     unknown scalar tag (fail-closed)."""
     var tag = r.read_u8()
-    if tag == IVP_SCALAR_NULL:
+    if tag == VIEWPORT_SCALAR_NULL:
         return ScalarValue()
-    if tag == IVP_SCALAR_BOOL:
+    if tag == VIEWPORT_SCALAR_BOOL:
         return ScalarValue.from_bool(r.read_bool())
-    if tag == IVP_SCALAR_INT64:
+    if tag == VIEWPORT_SCALAR_INT64:
         return ScalarValue.from_int64(r.read_ivarint())
-    if tag == IVP_SCALAR_INT32:
+    if tag == VIEWPORT_SCALAR_INT32:
         return ScalarValue.from_int32(Int32(r.read_ivarint()))
-    if tag == IVP_SCALAR_FLOAT64:
+    if tag == VIEWPORT_SCALAR_FLOAT64:
         return ScalarValue.from_float(r.read_f64())
-    if tag == IVP_SCALAR_FLOAT32:
+    if tag == VIEWPORT_SCALAR_FLOAT32:
         return ScalarValue.from_float32(r.read_f32())
-    if tag == IVP_SCALAR_STRING:
+    if tag == VIEWPORT_SCALAR_STRING:
         return ScalarValue.from_string(r.read_string())
-    raise Error("ivp: unknown scalar tag " + String(Int(tag)))
+    raise Error("viewport: unknown scalar tag " + String(Int(tag)))
 
 
 # =============================================================================
@@ -170,7 +170,7 @@ def decode_scalar(mut r: IvpReader) raises -> ScalarValue:
 # =============================================================================
 
 
-def encode_expr(mut w: IvpWriter, e: Expr) raises:
+def encode_expr(mut w: ViewportWriter, e: Expr) raises:
     """Serialize an Expr subtree. RAISES on any tag outside the v1 allow-list —
     a server must never emit a tree it cannot round-trip (and this doubles as the
     encoder-side guard that the plan it built from a validated ticket stayed
@@ -203,29 +203,29 @@ def encode_expr(mut w: IvpWriter, e: Expr) raises:
         encode_expr(w, e.alias_child_ref())
         return
     raise Error(
-        "ivp: Expr tag "
+        "viewport: Expr tag "
         + String(Int(tag))
-        + " is not in the IVP v1 allow-list (agg-fn / window-fn / "
+        + " is not in the viewport protocol v1 allow-list (agg-fn / window-fn / "
         "correlated-subquery / regexp / UDF / cast / in-list / nested "
         "projections are rejected)"
     )
 
 
-def decode_expr(mut r: IvpReader) raises -> Expr:
+def decode_expr(mut r: ViewportReader) raises -> Expr:
     """Top-level Expr decode with the full depth budget."""
-    return _decode_expr_depth(r, IVP_MAX_EXPR_DEPTH)
+    return _decode_expr_depth(r, VIEWPORT_MAX_EXPR_DEPTH)
 
 
-def _decode_expr_depth(mut r: IvpReader, depth_left: Int) raises -> Expr:
+def _decode_expr_depth(mut r: ViewportReader, depth_left: Int) raises -> Expr:
     """Recursive Expr decode with a remaining-depth budget. RAISES on:
       * an Expr tag outside the v1 allow-list (hostile-ticket rejection),
       * a disallowed op code inside an allowed tag,
-      * exceeding IVP_MAX_EXPR_DEPTH (deep-tree stack-exhaustion defense),
-      * any malformed / truncated byte (via the strict IvpReader)."""
+      * exceeding VIEWPORT_MAX_EXPR_DEPTH (deep-tree stack-exhaustion defense),
+      * any malformed / truncated byte (via the strict ViewportReader)."""
     if depth_left <= 0:
         raise Error(
-            "ivp: Expr tree exceeds max depth "
-            + String(IVP_MAX_EXPR_DEPTH)
+            "viewport: Expr tree exceeds max depth "
+            + String(VIEWPORT_MAX_EXPR_DEPTH)
             + " (rejected)"
         )
     var tag = r.read_u8()
@@ -239,27 +239,27 @@ def _decode_expr_depth(mut r: IvpReader, depth_left: Int) raises -> Expr:
         if side == COL_SIDE_RIGHT:
             return Expr.right(name)
         if side != COL_SIDE_NONE:
-            raise Error("ivp: illegal col-ref side qualifier " + String(Int(side)))
+            raise Error("viewport: illegal col-ref side qualifier " + String(Int(side)))
         return Expr.col_ref(name)
     if tag == EXPR_LITERAL:
         return Expr.literal(decode_scalar(r))
     if tag == EXPR_BINARY_OP:
         var op = r.read_u8()
         if not _is_allowed_binop(op):
-            raise Error("ivp: disallowed binary op code " + String(Int(op)))
+            raise Error("viewport: disallowed binary op code " + String(Int(op)))
         var left = _decode_expr_depth(r, depth_left - 1)
         var right = _decode_expr_depth(r, depth_left - 1)
         return Expr.binary(op, left^, right^)
     if tag == EXPR_UNARY_OP:
         var op = r.read_u8()
         if not _is_allowed_unop(op):
-            raise Error("ivp: disallowed unary op code " + String(Int(op)))
+            raise Error("viewport: disallowed unary op code " + String(Int(op)))
         var child = _decode_expr_depth(r, depth_left - 1)
         return Expr.unary(op, child^)
     if tag == EXPR_STRING_OP:
         var op = r.read_u8()
         if not _is_allowed_strop(op):
-            raise Error("ivp: disallowed string op code " + String(Int(op)))
+            raise Error("viewport: disallowed string op code " + String(Int(op)))
         var child = _decode_expr_depth(r, depth_left - 1)
         var pattern = r.read_string()
         return Expr.string_op(op, child^, pattern)
@@ -268,9 +268,9 @@ def _decode_expr_depth(mut r: IvpReader, depth_left: Int) raises -> Expr:
         var child = _decode_expr_depth(r, depth_left - 1)
         return Expr.alias(child^, name)
     raise Error(
-        "ivp: Expr tag "
+        "viewport: Expr tag "
         + String(Int(tag))
-        + " is not in the IVP v1 allow-list — rejected (a ticket may carry "
+        + " is not in the viewport protocol v1 allow-list — rejected (a ticket may carry "
         "only col-ref / literal / binary-op / unary-op / string-op / alias "
         "nodes; agg-fn / window-fn / UDF / correlated-subquery / regexp are "
         "forbidden)"

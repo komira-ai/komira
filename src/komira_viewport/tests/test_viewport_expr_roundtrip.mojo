@@ -1,7 +1,7 @@
 # =============================================================================
 # Expr WIRE round-trip (identical plan hash).
 #
-# The falsifying gate: an Expr encoded to IVP wire bytes
+# The falsifying gate: an Expr encoded to viewport-protocol wire bytes
 # and decoded back reconstructs a STRUCTURALLY IDENTICAL tree —
 #     Expr -> encode_expr -> bytes -> decode_expr -> Expr'
 # with structural_hash(Expr) == structural_hash(Expr').
@@ -28,26 +28,26 @@ from komira_core.plan.expr import (
 )
 from komira_core.collections import Slab
 from komira_core.plan.scalar_value import ScalarValue
-from komira_ivp import (
-    IvpWriter,
-    IvpReader,
+from komira_viewport import (
+    ViewportWriter,
+    ViewportReader,
     encode_expr,
     decode_expr,
     SourceLocator,
     GridTicket,
-    IvpSortKey,
-    IvpComputedCol,
+    ViewportSortKey,
+    ViewportComputedCol,
     encode_grid_ticket,
     decode_grid_ticket,
-    IVP_SRC_PARQUET_FILE,
-    IVP_SRC_GLOB,
+    VIEWPORT_SRC_PARQUET_FILE,
+    VIEWPORT_SRC_GLOB,
     RowCount,
     encode_grid_response,
     decode_grid_response,
-    IVP_COUNT_EXACT,
-    IVP_COUNT_ESTIMATED,
-    IVP_PAYLOAD_ARROW_IPC,
-    IVP_PAYLOAD_JSON,
+    VIEWPORT_COUNT_EXACT,
+    VIEWPORT_COUNT_ESTIMATED,
+    VIEWPORT_PAYLOAD_ARROW_IPC,
+    VIEWPORT_PAYLOAD_JSON,
 )
 
 
@@ -76,10 +76,10 @@ def _fnv1a(s: String) -> UInt64:
 
 def _assert_expr_roundtrips(e: Expr) raises:
     """Encode → decode → assert identical text AND identical FNV-1a hash."""
-    var w = IvpWriter()
+    var w = ViewportWriter()
     encode_expr(w, e)
     var bytes = w.take_bytes()
-    var r = IvpReader(bytes^)
+    var r = ViewportReader(bytes^)
     var decoded = decode_expr(r)
     r.expect_end()  # the Expr consumed exactly its bytes.
 
@@ -202,18 +202,18 @@ def test_ticket_roundtrip_byte_stable() raises:
         BIN_GT, Expr.col_ref("l_quantity"), Expr.literal(ScalarValue.from_int64(30))
     )
 
-    var sort_keys = Slab[IvpSortKey]()
-    sort_keys.append(IvpSortKey(Expr.col_ref("l_orderkey"), False))
-    sort_keys.append(IvpSortKey(Expr.col_ref("l_quantity"), True))
+    var sort_keys = Slab[ViewportSortKey]()
+    sort_keys.append(ViewportSortKey(Expr.col_ref("l_orderkey"), False))
+    sort_keys.append(ViewportSortKey(Expr.col_ref("l_quantity"), True))
 
-    var computed = Slab[IvpComputedCol]()
+    var computed = Slab[ViewportComputedCol]()
     var prod = Expr.binary(
         BIN_MUL, Expr.col_ref("l_extendedprice"), Expr.col_ref("l_quantity")
     )
-    computed.append(IvpComputedCol(String("gross"), prod^))
+    computed.append(ViewportComputedCol(String("gross"), prod^))
 
     var t = GridTicket(
-        SourceLocator(IVP_SRC_GLOB, String("/data/lineitem/*.parquet")),
+        SourceLocator(VIEWPORT_SRC_GLOB, String("/data/lineitem/*.parquet")),
         proj^,
         Optional[Expr](filt^),
         sort_keys^,
@@ -233,7 +233,7 @@ def test_ticket_roundtrip_byte_stable() raises:
         assert_equal(bytes1[i], bytes2[i])
 
     # Structural round-trip of the decoded fields.
-    assert_equal(decoded.source.kind, IVP_SRC_GLOB)
+    assert_equal(decoded.source.kind, VIEWPORT_SRC_GLOB)
     assert_equal(decoded.source.locator, String("/data/lineitem/*.parquet"))
     assert_equal(len(decoded.projection), 2)
     assert_equal(decoded.offset, UInt64(1_000_000))
@@ -248,13 +248,13 @@ def test_ticket_roundtrip_byte_stable() raises:
 
 def test_minimal_window_ticket_roundtrip() raises:
     var t = GridTicket.minimal(
-        SourceLocator(IVP_SRC_PARQUET_FILE, String("/data/t.parquet")),
+        SourceLocator(VIEWPORT_SRC_PARQUET_FILE, String("/data/t.parquet")),
         UInt64(0),
         UInt64(100),
     )
     var bytes = encode_grid_ticket(t)
     var decoded = decode_grid_ticket(Span(bytes))
-    assert_equal(decoded.source.kind, IVP_SRC_PARQUET_FILE)
+    assert_equal(decoded.source.kind, VIEWPORT_SRC_PARQUET_FILE)
     assert_equal(decoded.offset, UInt64(0))
     assert_equal(decoded.limit, UInt64(100))
     assert_true(not Bool(decoded.filter))
@@ -273,14 +273,14 @@ def test_response_exact_count_roundtrip() raises:
     payload.append(UInt8(3))
     var bytes = encode_grid_response(
         UInt64(5), RowCount.exact(UInt64(6_000_000)),
-        IVP_PAYLOAD_ARROW_IPC, Span(payload),
+        VIEWPORT_PAYLOAD_ARROW_IPC, Span(payload),
     )
     var resp = decode_grid_response(Span(bytes))
     assert_equal(resp.view_version, UInt64(5))
-    assert_equal(resp.rowcount.kind, IVP_COUNT_EXACT)
+    assert_equal(resp.rowcount.kind, VIEWPORT_COUNT_EXACT)
     assert_equal(resp.rowcount.value, UInt64(6_000_000))
     assert_equal(resp.rowcount.error_bound, UInt64(0))
-    assert_equal(resp.payload_kind, IVP_PAYLOAD_ARROW_IPC)
+    assert_equal(resp.payload_kind, VIEWPORT_PAYLOAD_ARROW_IPC)
     assert_equal(len(resp.payload), 3)
     assert_equal(resp.payload[1], UInt8(2))
 
@@ -290,14 +290,14 @@ def test_response_estimated_count_roundtrip() raises:
     var bytes = encode_grid_response(
         UInt64(0),
         RowCount.estimated(UInt64(1_234_000), UInt64(50_000), String("refine-abc")),
-        IVP_PAYLOAD_JSON, Span(payload),
+        VIEWPORT_PAYLOAD_JSON, Span(payload),
     )
     var resp = decode_grid_response(Span(bytes))
-    assert_equal(resp.rowcount.kind, IVP_COUNT_ESTIMATED)
+    assert_equal(resp.rowcount.kind, VIEWPORT_COUNT_ESTIMATED)
     assert_equal(resp.rowcount.value, UInt64(1_234_000))
     assert_equal(resp.rowcount.error_bound, UInt64(50_000))
     assert_equal(resp.rowcount.refine_token, String("refine-abc"))
-    assert_equal(resp.payload_kind, IVP_PAYLOAD_JSON)
+    assert_equal(resp.payload_kind, VIEWPORT_PAYLOAD_JSON)
     assert_equal(len(resp.payload), 0)
 
 

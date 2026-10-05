@@ -1,12 +1,12 @@
 # =============================================================================
-# ivp_bytes.mojo — the IVP low-level self-describing byte cursor.
+# viewport_bytes.mojo — the viewport-protocol low-level self-describing byte cursor.
 # =============================================================================
 #
 # The primitive read/write cursor
-# every IVP wire message (ticket, Expr tree, response envelope) is built on.
+# every viewport-protocol wire message (ticket, Expr tree, response envelope) is built on.
 # The encoding is LEB128 varints + zigzag signed varints + little-endian fixed
 # floats + varint-length-prefixed byte strings — the same shape protobuf uses,
-# but WITHOUT field tags: an IVP message is a fixed positional record, so a
+# but WITHOUT field tags: a viewport-protocol message is a fixed positional record, so a
 # decoder walks the exact field order the encoder wrote.
 #
 # WHY NOT protobuf field-tagged encoding: a ticket is a REMOTE-CLIENT-POSTED,
@@ -27,18 +27,18 @@ from std.memory import bitcast
 from komira_protobuf import pb_write_varint, pb_read_varint
 
 
-# A hard cap on any single length-prefixed byte string in an IVP message. A
+# A hard cap on any single length-prefixed byte string in a viewport-protocol message. A
 # remote client cannot make the decoder allocate an arbitrarily large String
 # from a small ticket: a declared length past this cap raises immediately,
 # BEFORE any allocation. 16 MiB is generous for a column name / glob / literal
 # and far below anything that could exhaust a worker.
-comptime IVP_MAX_BYTESTRING_LEN: Int = 16 * 1024 * 1024
+comptime VIEWPORT_MAX_BYTESTRING_LEN: Int = 16 * 1024 * 1024
 
 
 def _is_valid_utf8(b: Span[UInt8, _]) -> Bool:
     """RFC 3629 UTF-8 well-formedness: 1-byte ASCII, 2/3/4-byte sequences with
     valid continuation bytes, rejecting overlong encodings, surrogates
-    (U+D800..U+DFFF), and > U+10FFFF. The choke point for every untrusted IVP
+    (U+D800..U+DFFF), and > U+10FFFF. The choke point for every untrusted viewport-protocol
     string (column name / locator / literal / alias)."""
     var n = len(b)
     var i = 0
@@ -83,8 +83,8 @@ def _is_valid_utf8(b: Span[UInt8, _]) -> Bool:
     return True
 
 
-struct IvpWriter(Movable):
-    """Append-only IVP byte accumulator. Backed by an owned `List[UInt8]`."""
+struct ViewportWriter(Movable):
+    """Append-only viewport-protocol byte accumulator. Backed by an owned `List[UInt8]`."""
 
     var buf: List[UInt8]
 
@@ -151,8 +151,8 @@ struct IvpWriter(Movable):
         return out^
 
 
-struct IvpReader(Movable):
-    """Strict positional cursor over IVP bytes.
+struct ViewportReader(Movable):
+    """Strict positional cursor over viewport-protocol bytes.
 
     Every read is bounds-checked and RAISES on any malformed / truncated /
     over-length input — the fail-closed contract the untrusted-ticket boundary
@@ -169,13 +169,13 @@ struct IvpReader(Movable):
         self.pos = 0
 
     @staticmethod
-    def from_span(data: Span[UInt8, _]) -> IvpReader:
+    def from_span(data: Span[UInt8, _]) -> ViewportReader:
         """Build a reader from a byte VIEW by copying it into an owned buffer
         (tickets are small; the ticket parse is not the hot data path)."""
         var buf = List[UInt8](capacity=len(data))
         for i in range(len(data)):
             buf.append(data[i])
-        return IvpReader(buf^)
+        return ViewportReader(buf^)
 
     @always_inline
     def remaining(self) -> Int:
@@ -187,7 +187,7 @@ struct IvpReader(Movable):
 
     def read_u8(mut self) raises -> UInt8:
         if self.pos >= len(self.backing):
-            raise Error("ivp: truncated — expected a byte at end of buffer")
+            raise Error("viewport: truncated — expected a byte at end of buffer")
         var b = self.backing[self.pos]
         self.pos = self.pos + 1
         return b
@@ -195,7 +195,7 @@ struct IvpReader(Movable):
     def read_bool(mut self) raises -> Bool:
         var b = self.read_u8()
         if b > UInt8(1):
-            raise Error("ivp: malformed bool byte " + String(Int(b)))
+            raise Error("viewport: malformed bool byte " + String(Int(b)))
         return b == UInt8(1)
 
     def read_uvarint(mut self) raises -> UInt64:
@@ -210,7 +210,7 @@ struct IvpReader(Movable):
 
     def read_f64(mut self) raises -> Float64:
         if self.remaining() < 8:
-            raise Error("ivp: truncated — expected 8 bytes for f64")
+            raise Error("viewport: truncated — expected 8 bytes for f64")
         var bits: UInt64 = 0
         var i = 0
         while i < 8:
@@ -221,7 +221,7 @@ struct IvpReader(Movable):
 
     def read_f32(mut self) raises -> Float32:
         if self.remaining() < 4:
-            raise Error("ivp: truncated — expected 4 bytes for f32")
+            raise Error("viewport: truncated — expected 4 bytes for f32")
         var bits: UInt32 = 0
         var i = 0
         while i < 4:
@@ -232,17 +232,17 @@ struct IvpReader(Movable):
 
     def read_string(mut self) raises -> String:
         var n64 = self.read_uvarint()
-        if n64 > UInt64(IVP_MAX_BYTESTRING_LEN):
+        if n64 > UInt64(VIEWPORT_MAX_BYTESTRING_LEN):
             raise Error(
-                "ivp: string length "
+                "viewport: string length "
                 + String(n64)
                 + " exceeds cap "
-                + String(IVP_MAX_BYTESTRING_LEN)
+                + String(VIEWPORT_MAX_BYTESTRING_LEN)
             )
         var n = Int(n64)
         if self.remaining() < n:
             raise Error(
-                "ivp: truncated — declared string length "
+                "viewport: truncated — declared string length "
                 + String(n)
                 + " runs past buffer end ("
                 + String(self.remaining())
@@ -254,12 +254,12 @@ struct IvpReader(Movable):
             out.append(self.backing[self.pos + i])
             i = i + 1
         self.pos = self.pos + n
-        # Fail closed on malformed UTF-8: an IVP string is a column name /
+        # Fail closed on malformed UTF-8: a viewport-protocol string is a column name /
         # locator / literal / alias — all UTF-8 by contract. `unsafe_from_utf8`
         # does NOT validate, so an untrusted ticket could smuggle invalid byte
         # sequences into a String; reject them here at the choke point.
         if not _is_valid_utf8(Span(out)):
-            raise Error("ivp: string field is not valid UTF-8 (rejected)")
+            raise Error("viewport: string field is not valid UTF-8 (rejected)")
         return String(unsafe_from_utf8=Span(out))
 
     def expect_end(mut self) raises:
@@ -267,7 +267,7 @@ struct IvpReader(Movable):
         bytes are a malformed message (a padding / smuggling vector)."""
         if not self.at_end():
             raise Error(
-                "ivp: "
+                "viewport: "
                 + String(self.remaining())
                 + " trailing bytes after message end"
             )

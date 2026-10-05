@@ -23,24 +23,24 @@ from std.testing import TestSuite, assert_raises, assert_true
 
 from komira_core.collections import Slab
 from komira_core.plan.expr import Expr
-from komira_ivp import (
-    IvpWriter,
+from komira_viewport import (
+    ViewportWriter,
     GridTicket,
     SourceLocator,
-    IvpSortKey,
-    IvpComputedCol,
+    ViewportSortKey,
+    ViewportComputedCol,
     encode_grid_ticket,
     decode_grid_ticket,
-    IvpTicketLimits,
+    ViewportTicketLimits,
     validate_ticket_bytes,
     validate_ticket,
     decode_and_validate_grid_ticket,
-    IVP_SRC_PARQUET_FILE,
-    IVP_VERSION_1,
+    VIEWPORT_SRC_PARQUET_FILE,
+    VIEWPORT_VERSION_1,
 )
 
 
-# Magic + framing constants (mirror ivp_ticket.mojo — a hostile client would
+# Magic + framing constants (mirror viewport_ticket.mojo — a hostile client would
 # know these, so the tests must too).
 comptime M0: UInt8 = 0x49
 comptime M1: UInt8 = 0x56
@@ -57,7 +57,7 @@ def _valid_minimal_bytes() raises -> List[UInt8]:
     from, so a mutation test proves the mutation (not a latent bug) is what
     triggers rejection."""
     var t = GridTicket.minimal(
-        SourceLocator(IVP_SRC_PARQUET_FILE, String("/data/t.parquet")),
+        SourceLocator(VIEWPORT_SRC_PARQUET_FILE, String("/data/t.parquet")),
         UInt64(0),
         UInt64(100),
     )
@@ -67,7 +67,7 @@ def _valid_minimal_bytes() raises -> List[UInt8]:
 def test_valid_base_decodes() raises:
     """Sanity: the base blob the mutations start from DOES decode+validate."""
     var bytes = _valid_minimal_bytes()
-    var limits = IvpTicketLimits.default()
+    var limits = ViewportTicketLimits.default()
     var t = decode_and_validate_grid_ticket(Span(bytes), limits)
     assert_true(t.limit == UInt64(100))
 
@@ -76,7 +76,7 @@ def test_valid_base_decodes() raises:
 
 
 def test_reject_oversize_ticket() raises:
-    var limits = IvpTicketLimits(max_ticket_bytes=32)
+    var limits = ViewportTicketLimits(max_ticket_bytes=32)
     var big = List[UInt8]()
     for _ in range(1024):
         big.append(UInt8(0))
@@ -85,7 +85,7 @@ def test_reject_oversize_ticket() raises:
 
 
 def test_reject_too_short_ticket() raises:
-    var limits = IvpTicketLimits.default()
+    var limits = ViewportTicketLimits.default()
     var tiny = List[UInt8]()
     tiny.append(M0)
     tiny.append(M1)
@@ -104,7 +104,7 @@ def test_reject_bad_magic() raises:
 
 
 def test_reject_unknown_version() raises:
-    var w = IvpWriter()
+    var w = ViewportWriter()
     w.write_u8(M0)
     w.write_u8(M1)
     w.write_u8(M2)
@@ -117,12 +117,12 @@ def test_reject_unknown_version() raises:
 
 
 def test_reject_wrong_facet() raises:
-    var w = IvpWriter()
+    var w = ViewportWriter()
     w.write_u8(M0)
     w.write_u8(M1)
     w.write_u8(M2)
     w.write_u8(M3)
-    w.write_uvarint(IVP_VERSION_1)
+    w.write_uvarint(VIEWPORT_VERSION_1)
     w.write_u8(UInt8(1))  # text facet — not served in v1
     var bytes = w.take_bytes()
     with assert_raises(contains="grid facet"):
@@ -130,12 +130,12 @@ def test_reject_wrong_facet() raises:
 
 
 def test_reject_unknown_source_kind() raises:
-    var w = IvpWriter()
+    var w = ViewportWriter()
     w.write_u8(M0)
     w.write_u8(M1)
     w.write_u8(M2)
     w.write_u8(M3)
-    w.write_uvarint(IVP_VERSION_1)
+    w.write_uvarint(VIEWPORT_VERSION_1)
     w.write_u8(FACET_GRID)
     w.write_u8(UInt8(99))  # bogus source kind
     var bytes = w.take_bytes()
@@ -166,14 +166,14 @@ def test_reject_invalid_utf8_string() raises:
     # A source locator whose bytes are NOT valid UTF-8 (a lone 0xFF) — read_string
     # validates UTF-8 at the choke point and rejects (an untrusted ticket cannot
     # smuggle malformed bytes into a String).
-    var w = IvpWriter()
+    var w = ViewportWriter()
     w.write_u8(M0)
     w.write_u8(M1)
     w.write_u8(M2)
     w.write_u8(M3)
-    w.write_uvarint(IVP_VERSION_1)
+    w.write_uvarint(VIEWPORT_VERSION_1)
     w.write_u8(FACET_GRID)
-    w.write_u8(IVP_SRC_PARQUET_FILE)
+    w.write_u8(VIEWPORT_SRC_PARQUET_FILE)
     # locator string: length 3, bytes [0x61, 0xFF, 0x62] — 0xFF is never a valid
     # UTF-8 byte.
     w.write_uvarint(UInt64(3))
@@ -186,14 +186,14 @@ def test_reject_invalid_utf8_string() raises:
 
 
 def test_reject_overcount_projection() raises:
-    var w = IvpWriter()
+    var w = ViewportWriter()
     w.write_u8(M0)
     w.write_u8(M1)
     w.write_u8(M2)
     w.write_u8(M3)
-    w.write_uvarint(IVP_VERSION_1)
+    w.write_uvarint(VIEWPORT_VERSION_1)
     w.write_u8(FACET_GRID)
-    w.write_u8(IVP_SRC_PARQUET_FILE)
+    w.write_u8(VIEWPORT_SRC_PARQUET_FILE)
     w.write_string(String("/data/t.parquet"))
     w.write_uvarint(UInt64(1_000_000_000))  # absurd projection count
     var bytes = w.take_bytes()
@@ -204,22 +204,22 @@ def test_reject_overcount_projection() raises:
 # --- Layer 2: Expr allow-list + op codes + depth -----------------------------
 
 
-def _ticket_prefix_with_filter(mut w: IvpWriter):
+def _ticket_prefix_with_filter(mut w: ViewportWriter):
     """Write a valid ticket header up to (and including) the has-filter=True
     flag, so the caller can append a hostile filter Expr and then the tail."""
     w.write_u8(M0)
     w.write_u8(M1)
     w.write_u8(M2)
     w.write_u8(M3)
-    w.write_uvarint(IVP_VERSION_1)
+    w.write_uvarint(VIEWPORT_VERSION_1)
     w.write_u8(FACET_GRID)
-    w.write_u8(IVP_SRC_PARQUET_FILE)
+    w.write_u8(VIEWPORT_SRC_PARQUET_FILE)
     w.write_string(String("/data/t.parquet"))
     w.write_uvarint(UInt64(0))   # projection count = 0
     w.write_bool(True)           # has_filter = True
 
 
-def _ticket_tail(mut w: IvpWriter):
+def _ticket_tail(mut w: ViewportWriter):
     """Write the ticket tail after the filter Expr: 0 sort keys, 0 computed,
     offset/limit/view_version."""
     w.write_uvarint(UInt64(0))   # sort keys
@@ -233,7 +233,7 @@ def test_reject_disallowed_expr_tag() raises:
     # A filter Expr whose FIRST tag byte is EXPR_AGG_FN (12) — a UDF-adjacent,
     # non-allow-listed node. The decoder must reject it (this is the core
     # "reject arbitrary Expr trees / UDF references" guarantee).
-    var w = IvpWriter()
+    var w = ViewportWriter()
     _ticket_prefix_with_filter(w)
     w.write_u8(EXPR_AGG_FN_TAG)  # hostile: agg-fn tag, not in the allow-list
     _ticket_tail(w)
@@ -245,7 +245,7 @@ def test_reject_disallowed_expr_tag() raises:
 def test_reject_disallowed_binop_code() raises:
     # A binary-op Expr with a bogus op code (200) — an allowed TAG but a
     # disallowed op must still be rejected.
-    var w = IvpWriter()
+    var w = ViewportWriter()
     _ticket_prefix_with_filter(w)
     w.write_u8(EXPR_BINARY_OP_TAG)
     w.write_u8(BOGUS_BINOP)
@@ -265,8 +265,8 @@ def test_reject_disallowed_binop_code() raises:
 
 def test_reject_overdeep_expr_tree() raises:
     # A pathologically deep NOT(NOT(NOT(...))) chain: 128 EXPR_UNARY_OP(NOT)
-    # tags before a leaf. Exceeds IVP_MAX_EXPR_DEPTH (64) -> reject.
-    var w = IvpWriter()
+    # tags before a leaf. Exceeds VIEWPORT_MAX_EXPR_DEPTH (64) -> reject.
+    var w = ViewportWriter()
     _ticket_prefix_with_filter(w)
     var depth = 128
     for _ in range(depth):
@@ -287,22 +287,22 @@ def test_reject_overdeep_expr_tree() raises:
 
 def test_reject_empty_locator() raises:
     var t = GridTicket.minimal(
-        SourceLocator(IVP_SRC_PARQUET_FILE, String("")),  # empty!
+        SourceLocator(VIEWPORT_SRC_PARQUET_FILE, String("")),  # empty!
         UInt64(0),
         UInt64(100),
     )
-    var limits = IvpTicketLimits.default()
+    var limits = ViewportTicketLimits.default()
     with assert_raises(contains="empty source locator"):
         validate_ticket(t, limits)
 
 
 def test_reject_window_over_cap() raises:
     var t = GridTicket.minimal(
-        SourceLocator(IVP_SRC_PARQUET_FILE, String("/data/t.parquet")),
+        SourceLocator(VIEWPORT_SRC_PARQUET_FILE, String("/data/t.parquet")),
         UInt64(0),
         UInt64(10_000_000),  # over the default 1M cap
     )
-    var limits = IvpTicketLimits.default()
+    var limits = ViewportTicketLimits.default()
     with assert_raises(contains="window limit"):
         validate_ticket(t, limits)
 
@@ -313,16 +313,16 @@ def test_reject_blank_projection_name() raises:
     proj.append(String(""))  # blank!
     var filt: Optional[Expr] = None
     var t = GridTicket(
-        SourceLocator(IVP_SRC_PARQUET_FILE, String("/data/t.parquet")),
+        SourceLocator(VIEWPORT_SRC_PARQUET_FILE, String("/data/t.parquet")),
         proj^,
         filt^,
-        Slab[IvpSortKey](),
-        Slab[IvpComputedCol](),
+        Slab[ViewportSortKey](),
+        Slab[ViewportComputedCol](),
         UInt64(0),
         UInt64(100),
         UInt64(0),
     )
-    var limits = IvpTicketLimits.default()
+    var limits = ViewportTicketLimits.default()
     with assert_raises(contains="blank projection"):
         validate_ticket(t, limits)
 
@@ -335,17 +335,17 @@ def _ticket_declaring(
     var proj = List[String]()
     for i in range(len(projection)):
         proj.append(projection[i].copy())
-    var computed = Slab[IvpComputedCol]()
+    var computed = Slab[ViewportComputedCol]()
     for i in range(len(computed_names)):
         computed.append(
-            IvpComputedCol(computed_names[i].copy(), Expr.col_ref("a"))
+            ViewportComputedCol(computed_names[i].copy(), Expr.col_ref("a"))
         )
     var filt: Optional[Expr] = None
     return GridTicket(
-        SourceLocator(IVP_SRC_PARQUET_FILE, String("/data/t.parquet")),
+        SourceLocator(VIEWPORT_SRC_PARQUET_FILE, String("/data/t.parquet")),
         proj^,
         filt^,
-        Slab[IvpSortKey](),
+        Slab[ViewportSortKey](),
         computed^,
         UInt64(0),
         UInt64(100),
@@ -363,7 +363,7 @@ def test_reject_duplicate_declared_output_name() raises:
     the same check. The fourth spelling — a computed name that collides with a
     SOURCE column — is invisible here (this layer never sees a schema) and is
     refused at serve time by the server's own unique-output-names check."""
-    var limits = IvpTicketLimits.default()
+    var limits = ViewportTicketLimits.default()
     var none = List[String]()
 
     # (1) The same name twice in the PROJECTION.
@@ -395,7 +395,7 @@ def test_reject_duplicate_declared_output_name() raises:
 def test_distinct_declared_output_names_are_admitted() raises:
     """THE CONTROL. A refusal that refuses everything satisfies every assertion
     above; these are the ticket shapes that MUST still be admitted."""
-    var limits = IvpTicketLimits.default()
+    var limits = ViewportTicketLimits.default()
     var none = List[String]()
 
     # Distinct projection + distinct computed names, and the near-miss of every
