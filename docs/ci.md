@@ -1,19 +1,30 @@
 # Continuous integration
 
-CI is one job, `build` in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml),
-on a GitHub-hosted runner that reaches the build farm over a tailnet. The
-runner is a thin buck2 client: it checks the repository out and asks the farm
-to build it. Nothing is compiled on the runner.
+A pull request from a branch of this repository runs the check `kci / pr`, the
+`pr` job of [`.github/workflows/kci.yml`](#kciyml-the-release): the units the
+change reaches, built and tested on the farm. The job `build` of
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (the check
+`ci / build`) runs on it too, and is redundant with `kci / pr`. Both are
+GitHub-hosted runners that reach the build farm over a tailnet. Each runner is
+a thin buck2 client: it checks the repository out and asks the farm to build
+it. Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | the farm build |
-| pull request from a branch of this repository | the farm build |
-| pull request from a fork | no farm build; the lints that need no farm ([below](#pull-requests-from-forks)) |
+| push to `main` | the farm build (`ci / build`) and the release path (`kci.yml`) |
+| pull request from a branch of this repository | `kci / pr`, and the farm build `ci / build` |
+| pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the farm build, on the chosen ref |
 
-There is no separate static or lint job. The only scheduled run is the
+There is no separate static or lint job, and no other pull request check. The
+only scheduled run is the
 [build-system self-tests](#build-system-self-tests), which is not the gate.
+
+**The plan, not yet done:** once `kci / pr` has run green on a few pull
+requests and is a required check, `ci.yml` is deleted and `kci / pr` is the
+only pull request check; the push-to-`main` farm build then moves into
+`kci.yml`. Until then `ci.yml` stays, and `ci / build` is the check that runs
+the whole-repository `//...` build and the standalone tests.
 
 ## What the job runs
 
@@ -63,7 +74,7 @@ prove, dead Markdown links included (`//:docs`).
 
 Publishing is not part of this job. It is a separate workflow,
 [kci.yml](#kciyml-the-release), whose only job on a pull request is the
-per-change check `pr`; its release jobs never run for one.
+per-change check `pr` (`kci / pr`); its release jobs never run for one.
 
 ## The runner
 
@@ -138,13 +149,11 @@ tailnet and has no farm address. Remote execution also runs the commands a
 build describes, so running a stranger's build would be running its code on the
 farm's workers. Therefore:
 
-- The `build` job (and `core_split`'s) is **skipped** for a fork's pull
-  request: `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository`.
-- The job **`fork-advisory`** runs instead, on a hosted runner with no tailnet,
-  no id-token and no variable: it builds the lints that need no farm
-  (`//:shell_lint //:workflow_lint //:action_pins //:push_verdicts //:no_endpoint`)
-  on the runner itself, and writes to the run's summary that no farm build ran.
-  It is not the farm verdict.
+- The `build` job is **skipped** for a fork's pull request:
+  `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository`.
+  `kci / pr` does not run for it either, so a fork's pull request has no check at all; the
+  repository's only merger reads the change and runs the farm build from a
+  branch of this repository.
 - ⚠ A skipped job counts as passed for a required status check. Do not rely on
   the `build` check alone to merge a fork's change: read it, push it to a branch
   of this repository, and merge that run's green farm build.
