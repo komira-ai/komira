@@ -93,6 +93,14 @@ comptime _BUILD_IF: String = "    if: github.event_name != 'pull_request'\n"
 comptime _GAMMA_IF: String = "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
 comptime _R4_SCALAR: String = "R4: `permissions: "
 comptime _R4_TOP_TOKEN: String = "R4: `id-token: write` at the workflow level reaches every job"
+comptime _R6_PUSH: String = "R6: the push trigger is exactly `branches: [main]`"
+comptime _R6_OWN_PERMS: String = "so the job has its own `permissions:` mapping"
+comptime _R6_PERMS_FORM: String = "so its `permissions` is a mapping"
+comptime _R6_GRANT: String = "so its permissions hold only `contents: read`"
+comptime _R6_SECRET: String = "names the `secrets` context"
+comptime _R6_SECRET_KEY: String = "passes stored secrets"
+comptime _PUSH_MAIN: String = "  push:\n    branches: [main]\n"
+comptime _KCI_STEP: String = "      - name: kci\n        run: |\n"
 
 
 struct _Row(Copyable, Movable):
@@ -113,6 +121,22 @@ def _swap(old: String, new: String) raises -> String:
     if s.find(old) < 0:
         raise Error(String("fixture has no '") + old + String("'"))
     return s.replace(old, new)
+
+
+def _rel_swap(old: String, new: String) raises -> String:
+    """The workflow (its release jobs and the pull request's job) with
+    `old` replaced by `new`."""
+    return _swap(old, new)
+
+
+def _push(value: String) raises -> String:
+    """The workflow with its push trigger written as `value`."""
+    return _rel_swap(String(_PUSH_MAIN), value)
+
+
+def _step_env(value: String) raises -> String:
+    """The workflow with the pr job's kci step given `env: K: <value>`."""
+    return _swap(String(_KCI_STEP), String("      - name: kci\n        env:\n          K: ") + value + String("\n        run: |\n"))
 
 
 def _fork_if(value: String) raises -> String:
@@ -319,6 +343,92 @@ def _rows() raises -> List[_Row]:
     r.append(_Row(String("permissions: write-all, job"), _swap(String(_JOB_PERMS), String("    permissions: write-all\n")), _FINDING, String(_R4_SCALAR)))
     r.append(_Row(String("id-token: 'read' is a grant"), _top_perms(String("\n  id-token: 'read'")), _FINDING, String(_R4_TOP_TOKEN)))
 
+    # ---- the push trigger: the release branch only (R6) -----------------------
+    r.append(_Row(String("push: no branch filter"), _push(String("  push:\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: branches '**'"), _push(String("  push:\n    branches:\n      - '**'\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: a branch pattern"), _push(String("  push:\n    branches:\n      - main*\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: branches-ignore"), _push(String("  push:\n    branches-ignore: [main]\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: a second branch"), _push(String("  push:\n    branches: [main, dev]\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: no branch"), _push(String("  push:\n    branches: []\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: tags beside branches"), _push(String(_PUSH_MAIN) + String("    tags: [v1]\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: paths beside branches"), _push(String(_PUSH_MAIN) + String("    paths: [src]\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: Branches in another case"), _push(String("  push:\n    Branches: [main]\n")), _FINDING, String(_R6_PUSH)))
+    r.append(_Row(String("push: branches a scalar"), _push(String("  push:\n    branches: main\n")), _FINDING, String(_R6_PUSH)))
+    r.append(
+        _Row(
+            String("on: a list of events"),
+            _rel_swap(
+                String("on:\n") + String(_PUSH_MAIN) + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n  pull_request:\n"),
+                String("on: [push, workflow_dispatch, pull_request]\n"),
+            ),
+            _FINDING,
+            String(_R6_PUSH),
+        )
+    )
+
+    # ---- the pr job's own permissions (R6) --------------------------------------
+    r.append(
+        _Row(
+            String("pr job: no permissions, workflow-level write"),
+            _swap(String(_JOB_PERMS), String("")).replace(String(_TOP_PERMS), String("permissions:\n  contents: write\n  packages: write\n")),
+            _FINDING,
+            String(_R6_OWN_PERMS),
+        )
+    )
+    r.append(
+        _Row(
+            String("pr job: no permissions anywhere"),
+            _swap(String(_JOB_PERMS), String("")).replace(String(_TOP_PERMS), String("")),
+            _FINDING,
+            String(_R6_OWN_PERMS),
+        )
+    )
+    r.append(_Row(String("pr job: contents: write"), _job_perms(String("      contents: write\n      id-token: write\n")), _FINDING, String(_R6_GRANT)))
+    r.append(_Row(String("pr job: packages: write"), _job_perms(String("      contents: read\n      packages: write\n      id-token: write\n")), _FINDING, String(_R6_GRANT)))
+    r.append(_Row(String("pr job: permissions: read-all"), _swap(String(_JOB_PERMS), String("    permissions: read-all\n")), _FINDING, String(_R6_PERMS_FORM)))
+
+    # ---- stored secrets (R6) -----------------------------------------------------
+    r.append(_Row(String("pr step env: secrets.X"), _step_env(String("${{ secrets.PREFIX_DEV_API_KEY }}")), _FINDING, String(_R6_SECRET)))
+    r.append(_Row(String("pr step env: SECRETS.X"), _step_env(String("${{ SECRETS.PREFIX_DEV_API_KEY }}")), _FINDING, String(_R6_SECRET)))
+    r.append(_Row(String("pr step env: secrets['X']"), _step_env(String("\"${{ secrets['PREFIX_DEV_API_KEY'] }}\"")), _FINDING, String(_R6_SECRET)))
+    r.append(_Row(String("pr step env: toJSON(secrets)"), _step_env(String("${{ toJSON(secrets) }}")), _FINDING, String(_R6_SECRET)))
+    r.append(_Row(String("pr step env: secrets.GITHUB_TOKEN_2"), _step_env(String("${{ secrets.GITHUB_TOKEN_2 }}")), _FINDING, String(_R6_SECRET)))
+    r.append(_Row(String("pr step env: secrets.github_token"), _step_env(String("${{ secrets.github_token }}")), _FINDING, String(_R6_SECRET)))
+    r.append(
+        _Row(
+            String("pr run: secrets.X"),
+            _swap(String(_KCI_STEP), String("      - name: leak\n        run: |\n          echo ${{ secrets.PREFIX_DEV_API_KEY }}\n") + String(_KCI_STEP)),
+            _FINDING,
+            String(_R6_SECRET),
+        )
+    )
+    r.append(
+        _Row(
+            String("pr with: secrets.X"),
+            _swap(String("          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"), String("          ts-client-id: ${{ secrets.TS_CLIENT_ID }}\n")),
+            _FINDING,
+            String(_R6_SECRET),
+        )
+    )
+    r.append(_Row(String("pr job: secrets: inherit"), _swap(String(_JOB_PERMS), String(_JOB_PERMS) + String("    secrets: inherit\n")), _FINDING, String(_R6_SECRET_KEY)))
+    r.append(_Row(String("pr job: Secrets: inherit"), _swap(String(_JOB_PERMS), String(_JOB_PERMS) + String("    Secrets: inherit\n")), _FINDING, String(_R6_SECRET_KEY)))
+    r.append(
+        _Row(
+            String("workflow env: secrets.X"),
+            _swap(String(_TOP_PERMS), String(_TOP_PERMS) + String("env:\n  PREFIX_DEV_API_KEY: ${{ secrets.PREFIX_DEV_API_KEY }}\n")),
+            _FINDING,
+            String(_R6_SECRET),
+        )
+    )
+    r.append(
+        _Row(
+            String("workflow Env: secrets.X"),
+            _swap(String(_TOP_PERMS), String(_TOP_PERMS) + String("Env:\n  PREFIX_DEV_API_KEY: ${{ secrets.PREFIX_DEV_API_KEY }}\n")),
+            _FINDING,
+            String(_R6_SECRET),
+        )
+    )
+
     # ---- documents, directives, bytes, list layout --------------------------------
     r.append(_Row(String("a directive"), String("%YAML 1.1\n---\n") + String(_PR_WF), _CANNOT, String("a directive")))
     r.append(_Row(String("a leading document marker"), String("---\n") + String(_PR_WF), _CANNOT, String("a document marker")))
@@ -366,6 +476,15 @@ def test_the_fixture_agrees() raises:
     var tokens = List[String]()
     tokens.append(String("publish-gamma"))
     var f = check_workflow(String(_PR_WF), g, tokens, String("release/machine.textproto"))
+    assert_equal(len(f), 0)
+
+
+def test_the_pr_job_may_hold_its_own_token() raises:
+    # `secrets.GITHUB_TOKEN` is the job's own token, bounded by its permissions
+    var g = parse_machine_file(String(_MACHINE), String("machine file"))
+    var tokens = List[String]()
+    tokens.append(String("publish-gamma"))
+    var f = check_workflow(_step_env(String("${{ secrets.GITHUB_TOKEN }}")), g, tokens, String("release/machine.textproto"))
     assert_equal(len(f), 0)
 
 

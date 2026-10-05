@@ -40,7 +40,8 @@
 #       Keys are read exactly: a `permissions` or `id-token` key written in
 #       another case, or two permissions keys that differ only in case, is
 #       a disagreement (an `id-token` key in another case counts as holding
-#       the token). `id-token` is the only permission these rules read.
+#       the token). Besides `id-token`, only a PULL_REQUEST stage's job's
+#       own permissions are read (R6).
 #   R5  each job's steps invoke `kci run` exactly once; a job named after a
 #       stage passes `--stage` its own id written literally (a `--stage`
 #       naming another stage, or one that is a variable, is a
@@ -88,7 +89,10 @@
 #           only when a maintainer pushes it to a branch of this
 #           repository), and a push or a manual run skips the job;
 #         * that job runs the whole stage in one job (no part job), in no
-#           environment (R2); its `permissions` hold `contents: read` and
+#           environment (R2); it has its own `permissions:` mapping (with
+#           no `permissions:` key it would get the workflow-level
+#           permissions or, with none there either, the repository's
+#           default token, which can write), holding `contents: read` and
 #           `id-token: write` only (R4 allows the identity token only when
 #           the stage is farm-connected: the farm connection exchanges it;
 #           a PULL_REQUEST stage never publishes); its one `kci run` (R5)
@@ -100,6 +104,18 @@
 #           What it runs is a BUILD step: the machine file refuses any other
 #           kind in such a stage, so nothing is published or deployed from a
 #           pull request;
+#         * no stored secret reaches a pull request's code: no scalar of the
+#           PULL_REQUEST stage's job, nor of the workflow-level `env:` (it
+#           reaches every job), names the `secrets` context (read ignoring
+#           case, as GitHub reads it; only `secrets.GITHUB_TOKEN`, written
+#           so, is the job's own token), and no key of that job is
+#           `secrets` (`secrets: inherit`);
+#         * a `push` trigger runs on the release branch only: `on.push` is
+#           exactly `branches: [main]` (one key, one plain item). A push
+#           with no branch filter, another pattern, `branches-ignore`,
+#           `tags` or a path filter runs the release jobs on a push to any
+#           branch, a pull request's head branch included, and
+#           `github.event_name != 'pull_request'` holds for a push;
 #         * a PUSH stage's `kci run` never carries `--affected-by`.
 #   R7  `workflow_dispatch` takes an input `revision` (the commit a manual
 #       run releases)
@@ -157,7 +173,7 @@ from kci_api import DEFAULT_MACHINE_FILE, Selector, parse_selector
 from kci_release_channel import Channel, find_channel, parse_channels_file
 from kci_release_machine import Selection, Stage, ReleaseMachine, joined_names, resolve_selection
 
-from .pull_request import check_pull_request_job, check_release_only
+from .pull_request import check_no_secret, check_pull_request_job, check_push_branches, check_release_only
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
 
 comptime FARM_CONNECT_ACTION: String = "./.github/actions/farm-connect"
@@ -532,6 +548,7 @@ def _check_permissions_form(doc: WorkflowDoc, owner: Int, whose: String, mut fin
     )
 
 
+
 def _job_calls(doc: WorkflowDoc, job: Int) -> List[KciRunCall]:
     """Every `kci run` in the `run:` steps of `job`."""
     var calls = List[KciRunCall]()
@@ -700,6 +717,7 @@ def _check_job(
             values.append(calls[i].affected_by.copy())
             given.append(calls[i].has_affected_by)
         check_pull_request_job(doc, job_id, job, values, given, findings)
+        check_no_secret(doc, job, job_id, String("job '") + job_id + String("': "), findings)
     else:
         if pr_trigger:
             check_release_only(doc, job_id, job, st.name, findings)
@@ -910,6 +928,14 @@ def check_workflow_doc(
                 _at(doc, on) + String("R6: trigger 'pull_request': the machine file declares no PULL_REQUEST stage,")
                 + String(" and a release stage never runs a pull request's code")
             )
+    if _member(triggers, String("push")):
+        check_push_branches(doc, on, findings)
+    if pr_trigger:
+        # the workflow-level `env:` reaches every job, the pull request's included (R6)
+        var root_keys = doc.keys(root)
+        for k in range(len(root_keys)):
+            if root_keys[k].lower() == String("env"):
+                check_no_secret(doc, doc.child(root, root_keys[k]), root_keys[k], String("workflow: "), findings)
     if len(pr_stages) > 0 and not pr_trigger:
         findings.append(
             _at(doc, on) + String("R6: the machine file declares the PULL_REQUEST stage '") + pr_stages[0]

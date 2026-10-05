@@ -280,6 +280,15 @@ value, and the release's `release_produced_by` names the one build run.
   conditions are written bare or as exactly `${{ <condition> }}`: a block
   scalar (`if: |`) holding `${{`, or whitespace inside quotes around it,
   makes GitHub read the `if:` as a format string, which is always true.
+  The push trigger is exactly `branches: [main]`: with no branch filter,
+  another pattern, `branches-ignore`, `tags` or a path filter, a push to a
+  pull request's head branch would run the release jobs, and
+  `github.event_name != 'pull_request'` holds for a push. The `pr` job has
+  its own `permissions:` (`contents: read`, `id-token: write` for the
+  tailnet only), so it never gets the workflow-level permissions or the
+  repository's default token, and no stored secret reaches it: no value of
+  that job, nor of the workflow-level `env:`, names the `secrets` context
+  other than `secrets.GITHUB_TOKEN`.
   Rule R6 of `src/kci_ci_check` holds all of it.
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
