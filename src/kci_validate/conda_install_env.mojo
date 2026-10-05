@@ -11,7 +11,13 @@
 # (env.mojo) and what program runs (readme_installed.mojo):
 #
 #   0  release   the release of the step's platform, built from
-#                --revision-id; a pin for every install name
+#                --revision-id; a pin for every install name, then for
+#                every member of a named metapackage (request.mojo
+#                `with_members`: read from the built metapackage's own
+#                depends, at release.json's version and build, equal to
+#                the set's libraries). pixi.toml names ONLY the install
+#                names, so the solver must bring each member through the
+#                metapackage; every later check covers EVERY pin
 #   -  network   every declared host asked once (network.mojo): NONE
 #                answered is no network, the one case that is not a FAIL:
 #                outcome INDETERMINATE (exit 5, never a pass) with
@@ -32,8 +38,8 @@
 #                against metadata.json `doc_files`, made into
 #                <w>/readme_<import>.mojo; refused when there is none, when
 #                the bytes differ, or when it holds no example. No library
-#                among the installs is refused too (a metapackage's members
-#                are not expanded here, so it would run nothing)
+#                among the pins is refused too (a README that runs nothing
+#                is not a pass)
 #   3  payload   kci hashes each library's installed payload itself and
 #                writes out/payload.<name>, the record the container script
 #                wrote; then readback.mojo's check
@@ -101,7 +107,7 @@ from .env import (
 from .network import CHECK_NETWORK, answered_count, declared_hosts, describe_answers, probe_hosts
 from .readback import CHECK_INSTALL, check_installed, check_payloads, check_program, install_exited_zero, read_or_empty
 from .readme_installed import ReadmeProgram, installed_readme
-from .request import InstallPin, ValidateRequest, install_pins, load_validated_release, mojo_pin_of
+from .request import InstallPin, ValidateRequest, install_pins, load_validated_release, mojo_pin_of, with_members
 
 comptime CHECK_HOST: String = "host"
 comptime CHECK_SCRATCH: String = "scratch"
@@ -184,12 +190,14 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
     var checks = List[ResultValidationCheck]()
 
     # 0. the release, the channel's location, the pins
+    var named: List[InstallPin]
     var pins: List[InstallPin]
     var mojo_pin: String
     var channel_url: String
     try:
         var rel = load_validated_release(req)
-        pins = install_pins(rel.loaded, v.installs)
+        named = install_pins(rel.loaded, v.installs)
+        pins = with_members(rel.loaded, named)
         mojo_pin = mojo_pin_of(rel.loaded)
         channel_url = rel.channel_url.copy()
     except e:
@@ -290,7 +298,7 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
                 makedirs(join_path(work, subs[i]), exist_ok=True)
             _write(
                 join_path(work, String(MANIFEST_NAME)),
-                install_manifest_text(v, channel_url, pins[0].subdir, pins, mojo_pin),
+                install_manifest_text(v, channel_url, named[0].subdir, named, mojo_pin),
             )
             _write(join_path(work, String(AUTH_FILE)), String(AUTH_FILE_TEXT))
         except e:

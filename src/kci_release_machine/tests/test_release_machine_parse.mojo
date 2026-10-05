@@ -360,7 +360,7 @@ def test_validation_fields() raises:
     _assert_refused(
         _with_validation(String(_V_OK) + String(" tool: pixi")),
         String("unknown field 'tool' in validation 'v' (expected name, kind, image, install, compiler_channel,")
-        + String(" extra_channel, program, wait_for_index_seconds)"),
+        + String(" extra_channel, program, smoke, wait_for_index_seconds)"),
     )
     _assert_refused(
         _with_validation(String(_V_OK) + String(" program: \"release/t.mojo\"")),
@@ -406,6 +406,30 @@ def test_env_validation_runs_no_container_and_names_no_program() raises:
     _assert_refused(
         _with_validation(String("name: \"v\" kind: CONDA_INSTALL_ENV install: \"komira_encoding\"")),
         String("has no compiler_channel"),
+    )
+
+
+def test_env_validation_smoke_is_the_readme() raises:
+    # omitted or written, the one word: each installed library's README
+    var g = parse_machine_file(_with_validation(String(_V_ENV) + String(" smoke: README")), String(_SRC))
+    assert_equal(g.stages[0].steps[0].validations[0].smoke, String("README"))
+    var g0 = parse_machine_file(_with_validation(String(_V_ENV)), String(_SRC))
+    assert_equal(g0.stages[0].steps[0].validations[0].smoke, String(""))
+    # a closed vocabulary: a typo cannot become a validation that runs nothing
+    for bad in [String("NONE"), String("readme"), String("skip")]:
+        _assert_refused(
+            _with_validation(String(_V_ENV) + String(" smoke: ") + bad),
+            String("has smoke '") + bad + String("'; the one word is README"),
+        )
+    # set twice
+    _assert_refused(
+        _with_validation(String(_V_ENV) + String(" smoke: README smoke: README")),
+        String("field 'smoke' is set twice"),
+    )
+    # the container kind runs its program
+    _assert_refused(
+        _with_validation(String(_V_OK) + String(" smoke: README")),
+        String("has smoke 'README'; a CONDA_INSTALL_SMOKE validation runs its program"),
     )
 
 

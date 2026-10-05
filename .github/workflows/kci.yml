@@ -15,8 +15,9 @@
 # `--summary-file`, reading the machine file being checked; no pull_request
 # trigger; a `revision` input; every action pinned. A job runs its whole
 # stage (a FULL run) unless the stage is SPLIT: gamma is, into `gamma` (its
-# step, `--only step:publish`) and `validate` (its validation, `--only
-# validation:install`), which together run all of it exactly once; a job
+# step, `--only step:publish`) and `validate` (its two validations, `--only
+# validation:install-komira-encoding --only validation:install-set`), which
+# together run all of it exactly once; a job
 # that runs only validations has no environment and no identity token and
 # needs the stage's own job. [The split is PENDING A RULING on rules R1 and
 # R9 of the workflow check, src/kci_ci_check.]
@@ -28,21 +29,26 @@
 #          release directory, the kci binary and the build's result file
 #          travel to the publish jobs as one workflow artifact named for the
 #          revision, so they publish the bytes `build` verified, never
-#          rebuilt. This job holds a tailnet node and no publishing token.
+#          rebuilt; the pinned pixi the validations install with travels in
+#          it too. This job holds a tailnet node and no publishing token.
 #   gamma  on a GitHub-hosted runner, in the GitHub environment `gamma`, with
 #          `id-token: write`: `kci run --stage gamma --only step:publish`
 #          publishes to prefix.dev komira-ai/gamma. Its job summary also lists
 #          the names new to komira-ai/prod (NEW NAMES): read it before
 #          approving prod.
 #   validate
-#          on a plain GitHub-hosted runner (docker is installed there), in no
-#          environment and with `contents: read` only: `kci run --stage gamma
-#          --only validation:install` installs what gamma published from the
-#          channel, anonymously, in the digest-pinned container the machine
-#          file names, and runs the smoke program. It holds no identity
-#          token, so it cannot publish; a failed validation is exit 7 and
-#          prod does not start. Re-running it re-validates without
-#          re-publishing.
+#          on a plain GitHub-hosted runner, in no environment and with
+#          `contents: read` only: `kci run --stage gamma --only
+#          validation:install-komira-encoding --only validation:install-set`
+#          installs what gamma published from the channel, anonymously, on
+#          the runner itself with the pinned pixi from the release tar (no
+#          container, no setup action: a scratch directory outside the
+#          checkout and an environment built from nothing), komira_encoding
+#          alone and then komira_all alone, and runs each installed
+#          library's README examples. It holds no identity token, so it
+#          cannot publish; a failed validation is exit 7, no network at all
+#          exit 5, and prod does not start. Re-running it re-validates
+#          without re-publishing.
 #   prod   the same as gamma, after gamma AND validate, in the GitHub
 #          environment `prod` (its required reviewer approves the job), to
 #          prefix.dev komira-ai/prod. Only a manual run reaches it, so a push
@@ -171,6 +177,18 @@ jobs:
       - name: build kci
         if: steps.machine.outputs.release == 'true'
         run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
+      # The pixi the validate job installs with: the platform table's raw
+      # executable for this runner's row, which buck2 downloads on this
+      # runner only when its bytes have the table's sha256 (no farm action),
+      # so the sha256 written beside it IS the pin. kci compares the bytes
+      # against it again before it runs them.
+      - name: the pinned pixi
+        if: steps.machine.outputs.release == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/pixi"
+          ./buck2 build //tools/build/toolchains:pixi --out "$RUNNER_TEMP/pixi/pixi"
+          chmod 0755 "$RUNNER_TEMP/pixi/pixi"
+          sha256sum "$RUNNER_TEMP/pixi/pixi" | cut -d ' ' -f 1 > "$RUNNER_TEMP/pixi/pixi.sha256"
       # The artifacts name the program `buck2`; the repository's is the
       # ./buck2 wrapper of this checkout.
       - name: buck2 on PATH
@@ -209,11 +227,11 @@ jobs:
           path: ${{ runner.temp }}/kci-result-build.json
           if-no-files-found: warn
           retention-days: 90
-      # One tar, so the binary keeps its mode across the artifact store. The
-      # build's result file travels with it.
+      # One tar, so the binaries keep their mode across the artifact store.
+      # The build's result file and the pinned pixi travel with it.
       - name: pack the release
         if: steps.machine.outputs.release == 'true'
-        run: tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/kci-release.tar" kci release kci-result-build.json
+        run: tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/kci-release.tar" kci release kci-result-build.json pixi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.machine.outputs.release == 'true'
         with:
@@ -296,7 +314,7 @@ jobs:
   validate:
     needs: [build, gamma]
     if: needs.build.outputs.release == 'true'
-    # docker is on the hosted image; no farm, no tailnet
+    # no farm, no tailnet, no container: the validations install on the runner
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     # No environment: no approval, and no environment secret to leak.
@@ -308,28 +326,32 @@ jobs:
       # (WOULD_VALIDATE), as gamma published nothing.
       DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
     steps:
-      # The machine file and the smoke program at the release revision; the
-      # full history kci's read of this workflow at its commit needs.
+      # The machine file at the release revision; the full history kci's
+      # read of this workflow at its commit needs. The README examples the
+      # validations run come from the INSTALLED packages, never from here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.REVISION }}
           fetch-depth: 0
           persist-credentials: false
-      # The SAME artifact gamma published: the pins are its release.json's.
+      # The SAME artifact gamma published: the pins are its release.json's,
+      # and the pinned pixi is the build job's.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: kci-release-${{ env.REVISION }}
           path: ${{ runner.temp }}/in
       - name: unpack the release
         run: tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/in/kci-release.tar"
-      # kci pulls the image itself (the digest is the machine file's), reads
-      # the channel anonymously and starts the container with nothing of this
-      # job's environment.
-      - name: kci run --stage gamma --only validation:install
+      # kci reads the channel anonymously and runs pixi with nothing of this
+      # job's environment, in a fresh scratch directory outside the checkout.
+      - name: kci run --stage gamma --only validation:install-komira-encoding --only validation:install-set
         run: |
           set --
           if [ "$DRY_RUN" = true ]; then set -- --plan; fi
-          "$RUNNER_TEMP/kci/kci" run --stage gamma --only validation:install \
+          pixi_sha256=$(cat "$RUNNER_TEMP/pixi/pixi.sha256")
+          "$RUNNER_TEMP/kci/kci" run --stage gamma \
+            --only validation:install-komira-encoding --only validation:install-set \
+            --pixi "$RUNNER_TEMP/pixi/pixi" --pixi-sha256 "$pixi_sha256" \
             --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
             --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \

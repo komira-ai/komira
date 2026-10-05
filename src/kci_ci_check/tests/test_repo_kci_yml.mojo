@@ -15,8 +15,8 @@
 # =============================================================================
 #
 # The files are staged as test data (BUCK): `kci.yml` (the root BUCK exports
-# it), `machine.textproto` and `channels.textproto` (release/BUCK), and the
-# program gamma's validation runs (release/smoke/BUCK).
+# it), `machine.textproto` and `channels.textproto` (release/BUCK). gamma's
+# validations run each installed library's README, so they name no program.
 # =============================================================================
 
 from std.pathlib import Path
@@ -73,22 +73,30 @@ def test_the_release_machine() raises:
         assert_equal(p.steps[0].artifacts, String("release/artifacts.textproto"))
         assert_equal(p.steps[0].channels, String("release/channels.textproto"))
         assert_equal(p.steps[0].channel, name)
-        # gamma's step carries the install validation; prod's none
+        # gamma's step carries the two ENV validations, each installing ONE
+        # name: the library alone, and the metapackage alone (kci expands it
+        # to every member); prod's none
         if name == String("gamma"):
-            assert_equal(len(p.steps[0].validations), 1)
-            ref v = p.steps[0].validations[0]
-            assert_equal(v.name, String("install"))
-            assert_equal(v.kind, String("CONDA_INSTALL_SMOKE"))
-            assert_equal(len(v.installs), 2)
-            assert_equal(v.installs[0], String("komira_encoding"))
-            assert_equal(v.installs[1], String("komira_all"))
-            assert_equal(v.compiler_channel, String("https://conda.modular.com/max"))
-            assert_equal(v.program, String("release/smoke/smoke_komira_encoding.mojo"))
-            assert_true(v.image.startswith(String("ghcr.io/prefix-dev/pixi:")), v.image)
-            assert_equal(v.wait_for_index_seconds, 1800)
-            # the program the validation names is there, and states its count
-            var program = Path(String("smoke_komira_encoding.mojo")).read_text()
-            assert_true(program.find(String("\"komira_encoding validation: \"")) >= 0, String("the smoke program prints no count line"))
+            assert_equal(len(p.steps[0].validations), 2)
+            var want_names = List[String]()
+            want_names.append(String("install-komira-encoding"))
+            want_names.append(String("install-set"))
+            var want_installs = List[String]()
+            want_installs.append(String("komira_encoding"))
+            want_installs.append(String("komira_all"))
+            for k in range(2):
+                ref v = p.steps[0].validations[k]
+                assert_equal(v.name, want_names[k])
+                assert_equal(v.kind, String("CONDA_INSTALL_ENV"))
+                assert_equal(len(v.installs), 1)
+                assert_equal(v.installs[0], want_installs[k])
+                assert_equal(v.compiler_channel, String("https://conda.modular.com/max"))
+                assert_equal(len(v.extra_channels), 1)
+                assert_equal(v.extra_channels[0], String("conda-forge"))
+                assert_equal(v.smoke, String("README"))
+                assert_equal(v.program, String(""))
+                assert_equal(v.image, String(""))
+                assert_equal(v.wait_for_index_seconds, 1800)
         else:
             assert_equal(len(p.steps[0].validations), 0)
         # The stage's environment IS the one the channel's trusted publisher
@@ -149,9 +157,10 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
                 assert_true(not calls[k].has_machine, String("a kci run in kci.yml passes --machine"))
                 assert_true(calls[k].has_summary_file, String("a kci run in kci.yml passes no --summary-file"))
     assert_equal(runs, 4)
-    assert_equal(len(only_seen), 2)
+    assert_equal(len(only_seen), 3)
     assert_equal(only_seen[0], String("gamma gamma step:publish"))
-    assert_equal(only_seen[1], String("validate gamma validation:install"))
+    assert_equal(only_seen[1], String("validate gamma validation:install-komira-encoding"))
+    assert_equal(only_seen[2], String("validate gamma validation:install-set"))
     # the build job, and only it, joins the tailnet
     assert_equal(farm, 1)
     # the validate job: no environment, no identity token, after the publish
@@ -163,6 +172,31 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     var needs = doc.scalar_or_list(doc.child(validate, String("needs")))
     assert_equal(len(needs), 2)
     assert_equal(needs[1], String("gamma"))
+    # the validate job installs with the pinned pixi from the release tar:
+    # the build job builds the table's pin and packs it beside kci, and the
+    # validate job's one `kci run` passes it and its sha256
+    var vrun = String("")
+    var vsteps = doc.items(doc.child(validate, String("steps")))
+    for i in range(len(vsteps)):
+        var r = doc.child(vsteps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR and len(kci_run_calls(doc.text(r))) > 0:
+            vrun = doc.text(r)
+    assert_true(vrun.find(String("--pixi \"$RUNNER_TEMP/pixi/pixi\"")) >= 0, String("the validate job passes no --pixi: ") + vrun)
+    assert_true(vrun.find(String("--pixi-sha256 \"$pixi_sha256\"")) >= 0, String("the validate job passes no --pixi-sha256: ") + vrun)
+    var build_runs = String("")
+    var bsteps = doc.items(doc.child(doc.child(jobs, String("build")), String("steps")))
+    for i in range(len(bsteps)):
+        var r = doc.child(bsteps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR:
+            build_runs += doc.text(r) + String("\n")
+    assert_true(
+        build_runs.find(String("./buck2 build //tools/build/toolchains:pixi --out \"$RUNNER_TEMP/pixi/pixi\"")) >= 0,
+        String("the build job does not build the pinned pixi"),
+    )
+    assert_true(
+        build_runs.find(String("kci release kci-result-build.json pixi\n")) >= 0,
+        String("the build job does not pack the pinned pixi into the release tar"),
+    )
     # prod waits for the validation
     var prod_needs = doc.scalar_or_list(doc.child(doc.child(jobs, String("prod")), String("needs")))
     assert_equal(len(prod_needs), 2)

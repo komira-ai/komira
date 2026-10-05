@@ -24,7 +24,8 @@
 #   readme_installed.mojo     an installed README as the program it runs,
 #                             byte-equal to the welded SOURCE-mode program
 #   request.mojo              `ValidateRequest`, `ContainerHost`; the release
-#                             and the pins, read the PUBLISH step's way
+#                             and the pins, read the PUBLISH step's way; a
+#                             metapackage's members from its own depends
 #   channel_index.mojo        check 1: the index lists and serves the bytes
 #                             the build made, with the wait for the index
 #   container.mojo            the scratch layout, pixi.toml, the script and
@@ -88,6 +89,8 @@ from kci_validate.request import (
     ValidateRequest,
     install_pins,
     load_validated_release,
+    metapackage_members,
     mojo_pin_of,
     readme_doc_path,
+    with_members,
 )

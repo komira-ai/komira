@@ -54,7 +54,6 @@ mojo_library(
             "channels.textproto": "//release:channels.textproto",
             "kci.yml": "//:kci.yml",
             "machine.textproto": "//release:machine.textproto",
-            "smoke_komira_encoding.mojo": "//release/smoke:smoke_komira_encoding.mojo",
         },
     },
     visibility = ["PUBLIC"],

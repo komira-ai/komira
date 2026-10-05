@@ -219,15 +219,16 @@ It is written by hand. The stages are owned by the release machine,
 `gamma`, then `prod`. The workflow runs one job per stage, named for its
 stage, running in the stage's GitHub environment and running exactly one
 `kci run --stage <its name>`, except that `gamma` is split over two jobs:
-`gamma` runs its step (`--only step:publish`) and `validate` its validation
-(`--only validation:install`). kci reads `release/machine.textproto` by
+`gamma` runs its step (`--only step:publish`) and `validate` its two
+validations (`--only validation:install-komira-encoding --only
+validation:install-set`). kci reads `release/machine.textproto` by
 convention (its one default path), so no line of the workflow names it.
 
 | job (stage) | runner | what it does |
 |---|---|---|
-| `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
+| `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary, the build's result file and the pinned pixi (`//tools/build/toolchains:pixi`, downloaded by its platform-table sha256, with that sha256 beside it) leave the job as one workflow artifact named `kci-release-<REVISION>`. |
 | `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
-| `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`, docker installed), no environment, `contents: read` only | `kci run --stage gamma --only validation:install`: what `gamma` published, installed from the channel the way a consumer gets it, in a digest-pinned container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
+| `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`), no environment, `contents: read` only | `kci run --stage gamma --only validation:install-komira-encoding --only validation:install-set --pixi <the pinned pixi> --pixi-sha256 <its pin>`: what `gamma` published, installed from the channel the way a consumer gets it, on the runner with no container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
 | `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
@@ -309,29 +310,40 @@ value, and the release's `release_produced_by` names the one build run.
   run is identified by `--run-id gh-<run id>`, `--attempt <run attempt>` and
   `--context` lines. The exit numbers are kci's one table: publishing a set
   the channel already holds, byte for byte, is exit 0.
-- **Validations.** A publish step can declare a validation (`validation {
-  kind: CONDA_INSTALL_SMOKE ... }`); gamma's is `install`. kci runs it after
-  the step in a FULL run, or alone with `--only validation:install` against
-  what is already published. In order, each failure exit 7
-  (`VALIDATION_FAILED`, a row per finding in the result and the job summary),
-  never a skip: (1) the pins: `release.json`'s version, build and sha256 of
-  `komira_encoding` and `komira_all`, `metadata.json`'s payload sha256 and
-  `mojo_pin`; (2) the channel, read from the runner ANONYMOUSLY: the index
-  lists each file with the build's sha256 and the channel serves those bytes
-  (only a file's absence, or a 404 index, is waited for, up to 600 s, then it
-  fails; a 401 or another sha256 fails at once); (3) `docker run` of
-  `ghcr.io/prefix-dev/pixi:0.67.2-bookworm-slim` pinned by digest, read-only,
-  no capabilities, as the runner's uid, with only `HOME`, `PIXI_HOME`,
-  `PIXI_CACHE_DIR` and `TMPDIR` set and one scratch mount: `pixi install` of
-  the pinned packages from the channel and `mojo-compiler ==<mojo_pin>` from
-  Modular's channel, then `mojo run` of
-  [release/smoke/smoke_komira_encoding.mojo](../release/smoke/smoke_komira_encoding.mojo);
-  (4) read back from the mount: every installed record has the release's
-  version, build and sha256 and comes from a declared channel, the
-  installed `.mojoc` is the build's, and the program printed
-  `komira_encoding validation: N of N checks passed`, N > 0. Under `--plan`
-  nothing runs (`WOULD_VALIDATE`). The same program is a `mojo_test` against
-  the in-repository library, so an API change fails `./buck2 test //...`
+- **Validations.** A publish step can declare validations (`validation {
+  kind: CONDA_INSTALL_ENV ... }`); gamma has two: `install-komira-encoding`
+  installs `komira_encoding` ALONE (its own requirements must suffice) and
+  `install-set` installs `komira_all` ALONE. kci runs them after the step in
+  a FULL run, or alone with `--only validation:<name>` against what is
+  already published. In order, each failure exit 7 (`VALIDATION_FAILED`, a
+  row per finding in the result and the job summary): (1) the pins:
+  `release.json`'s version, build and sha256 of each installed name and, for
+  the metapackage, of every member its own built requirements name (they
+  must be exactly the release's libraries, at the release's version and
+  build; none at all is refused), `metadata.json`'s payload sha256, README
+  sha256 and `mojo_pin`; (2) whether there is a network at all: every
+  declared host is asked once, anonymously; when NONE answers the run is
+  INDETERMINATE, exit 5, with a `skip_reason`, never a pass (any HTTP answer,
+  a 401 included, is a network, so the checks below run); (3) the channel,
+  read from the runner ANONYMOUSLY: the index lists each file with the
+  build's sha256 and the channel serves those bytes (only a file's absence,
+  or a 404 index, is waited for, up to `wait_for_index_seconds`, 1800 s here,
+  then it fails; a 401 or another sha256 fails at once); (4) on the runner,
+  with no container: the pinned pixi (`--pixi`, its bytes checked against
+  `--pixi-sha256`) in a fresh scratch directory outside the checkout, a
+  cleared environment, no system-wide pixi config, `pixi install` of the
+  NAMED packages only (so the solver must bring every member through the
+  metapackage) from the channel and `mojo-compiler ==<mojo_pin>` from
+  Modular's channel; (5) read back: every installed record has the release's
+  version, build and sha256 and comes from a declared channel, each
+  library's installed `.mojoc` is the build's, and each library's installed
+  `share/doc/<name>/README.md` has the sha256 its `metadata.json` records and
+  holds at least one ```mojo example; (6) each README's examples, made into
+  one program and run with `pixi run --as-is mojo run` from the scratch
+  directory, print `readme_<import> validation: N of N checks passed`,
+  N > 0, a failure naming the README line. Under `--plan` nothing runs
+  (`WOULD_VALIDATE`). The same examples are a welded test of each library's
+  own build (`[tests][readme]`), so an API change fails `./buck2 build //...`
   before it can fail a release.
 - **The channels.** prefix.dev channels `komira-ai/gamma` and
   `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),

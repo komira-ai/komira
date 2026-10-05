@@ -62,6 +62,12 @@
 #                     runs is each installed library's README
 #                     (share/doc/<name>/README.md), whose bytes the release
 #                     pins
+#   smoke             CONDA_INSTALL_ENV only, optional: what runs against
+#                     the install. `README` (the one word, and the default
+#                     when omitted): each installed library's README examples.
+#                     Any other word is refused (a closed vocabulary: a typo
+#                     cannot become a validation that runs nothing). Refused
+#                     on CONDA_INSTALL_SMOKE, which runs its `program`
 #   wait_for_index_seconds
 #                     how long to wait for the channel's index to LIST the
 #                     release's files: 0 waits not at all; unset is
@@ -103,6 +109,9 @@ from kci_api import (
 comptime VALIDATION_PROGRAM_DIR: String = "release/"
 """Where a validation's program lives: the release files' directory."""
 
+comptime VALIDATION_SMOKE_README: String = "README"
+"""The one `smoke` word: run each installed library's README examples."""
+
 comptime VALIDATION_WAIT_MAX_SECONDS: Int = 3600
 """The longest `wait_for_index_seconds` a validation may declare."""
 
@@ -132,6 +141,7 @@ struct StageValidation(Copyable, Movable):
     var compiler_channel: String
     var extra_channels: List[String]
     var program: String
+    var smoke: String
     var wait_for_index_seconds: Int
     var line: Int
 
@@ -143,6 +153,7 @@ struct StageValidation(Copyable, Movable):
         self.compiler_channel = String("")
         self.extra_channels = List[String]()
         self.program = String("")
+        self.smoke = String("")
         self.wait_for_index_seconds = VALIDATION_WAIT_DEFAULT_SECONDS
         self.line = line
 
@@ -402,7 +413,18 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
                 + String("'; a CONDA_INSTALL_ENV validation runs each installed library's README")
                 + String(" (share/doc/<name>/README.md), so it names no program")
             )
+        if v.smoke.byte_length() > 0 and v.smoke != VALIDATION_SMOKE_README:
+            raise Error(
+                _at(source, v.line) + where + String(" has smoke '") + v.smoke
+                + String("'; the one word is ") + String(VALIDATION_SMOKE_README)
+                + String(" (each installed library's README examples, the default)")
+            )
     else:
+        if v.smoke.byte_length() > 0:
+            raise Error(
+                _at(source, v.line) + where + String(" has smoke '") + v.smoke
+                + String("'; a CONDA_INSTALL_SMOKE validation runs its program (smoke belongs to CONDA_INSTALL_ENV)")
+            )
         if v.image.byte_length() == 0:
             raise Error(_at(source, v.line) + where + String(" has no image (the container image, pinned by digest)"))
         if not is_digest_pinned_image(v.image):
