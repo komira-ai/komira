@@ -94,29 +94,26 @@ def model_state_name(state: Int) -> StaticString:
 # its clients can show an ACTIONABLE message.
 # -----------------------------------------------------------------------------
 comptime FAIL_NONE: Int = 0
-comptime FAIL_LAUNCH_TIMEOUT: Int = 1   # spawned but never became healthy.
-comptime FAIL_LAUNCH_SPAWN: Int = 2     # the spawn itself failed (-errno).
-comptime FAIL_WONT_FIT: Int = 3         # RED fit even after eviction — refused.
+# The backend's launch() raised. The backend's own error message is kept in
+# ModelStatus.failure_detail, because only the backend knows whether the spawn
+# failed or the engine never became healthy.
+comptime FAIL_LAUNCH: Int = 1
+comptime FAIL_WONT_FIT: Int = 3         # larger than the whole budget — refused.
 
 
 def failure_reason_text(reason: Int) -> StaticString:
     if reason == FAIL_NONE:
         return ""
-    elif reason == FAIL_LAUNCH_TIMEOUT:
+    elif reason == FAIL_LAUNCH:
         return (
-            "engine spawned but never became healthy within the launch budget"
-            " (model load failed, wrong binary/flags, or spill-to-RAM / ctx-OOM"
-            " / missing GPU library)"
-        )
-    elif reason == FAIL_LAUNCH_SPAWN:
-        return (
-            "engine process failed to spawn (missing binary, bad path, or fork"
-            " limit)"
+            "the engine failed to launch (the spawn failed, or the engine never"
+            " became healthy: model load failed, wrong binary or flags,"
+            " spill-to-RAM, context OOM or a missing GPU library)"
         )
     elif reason == FAIL_WONT_FIT:
         return (
-            "model does not fit in the resident-RAM budget even after evicting"
-            " every other resident model (RED fit — would spill / OOM)"
+            "model is larger than the whole resident-memory budget, so it"
+            " cannot fit even with every other model unloaded"
         )
     return "unknown failure"
 
@@ -217,22 +214,18 @@ def admission_decision_name(decision: Int) -> StaticString:
 
 
 # -----------------------------------------------------------------------------
-# derive_concurrency_cap — the per-model concurrency cap DERIVED FROM the fit
-# budget. A model that barely fits cannot also absorb its requested concurrency
-# of extra KV-cache; one with generous headroom can. We scale the requested
-# `max_concurrent` down toward 1 when the headroom is tight, never up (the
-# conservative direction — fewer concurrent chats, never a spill). The fit was
-# already computed at `max_concurrent` (the concurrency-aware FitResolver), so a
-# GREEN/YELLOW fit means `max_concurrent` streams' KV was already reserved; a RED
-# fit (negative headroom) caps at 1 (the model is over budget even single-stream
-# — admission should not pretend it can serve N).
+# derive_concurrency_cap — the per-model concurrency cap from a fit that was
+# computed at `max_concurrent` streams (fit_concurrent). The decision is binary:
+# a fit with non-negative headroom already reserved KV for all
+# `max_concurrent` streams, so the cap is `max_concurrent`; a fit with negative
+# headroom (over budget at that concurrency) gets a cap of 1. There is no
+# scaling in between: to find the largest N that fits, call fit_concurrent at
+# decreasing N.
 # -----------------------------------------------------------------------------
 def derive_concurrency_cap(fit_headroom_bytes: Int, max_concurrent: Int) -> Int:
-    """The per-model admission cap derived from the fit headroom. Returns at most
-    `max_concurrent`, at least 1. A model with NEGATIVE headroom (over budget)
-    caps at 1 — it does not fit its requested concurrency, so admission must not
-    grant it (the fit already reserved N streams' KV; a negative headroom means
-    even that reserved estimate exceeds budget). PURE."""
+    """The per-model admission cap from a fit computed at `max_concurrent`
+    streams: `max_concurrent` (at least 1) when the headroom is non-negative,
+    1 when it is negative. PURE."""
     var requested = max_concurrent if max_concurrent > 0 else 1
     if fit_headroom_bytes < 0:
         return 1
@@ -286,6 +279,10 @@ struct ModelStatus(Copyable, Movable):
       * failure_reason  — FAIL_* (FAIL_NONE unless state == LM_FAILED).
       * last_request_ms — the clock value at the last /v1 request (the
                           keep_alive deadline anchor; 0 if never requested).
+      * failure_detail  — the backend's error message when the failure is
+                          FAIL_LAUNCH (empty otherwise).
+      * max_concurrent / inflight / queued — the admission snapshot, read
+                          under the same lock as the rest of the status.
     """
 
     var id: String
@@ -294,6 +291,10 @@ struct ModelStatus(Copyable, Movable):
     var base_url: String
     var failure_reason: Int
     var last_request_ms: Int
+    var failure_detail: String
+    var max_concurrent: Int
+    var inflight: Int
+    var queued: Int
 
     def __init__(
         out self,
@@ -310,6 +311,10 @@ struct ModelStatus(Copyable, Movable):
         self.base_url = base_url
         self.failure_reason = failure_reason
         self.last_request_ms = last_request_ms
+        self.failure_detail = String("")
+        self.max_concurrent = 0
+        self.inflight = 0
+        self.queued = 0
 
 
 # -----------------------------------------------------------------------------
@@ -333,17 +338,26 @@ struct ModelStatus(Copyable, Movable):
 # counter updates leak the cap past N, into the spill / KV-contamination range
 # admission control exists to avoid).
 #
-# So every request-path MUTATING SM verb (request_load / admit / release /
-# release_queued / note_request / tick_idle_unload / stop) brackets its body with
-# a process-global mutex (a static pthread_mutex_t behind pthread_once in
-# komira_async's reactor/_posix_shim.c, which every komira_async consumer
-# links). The mutex serializes
-# only the SHORT bookkeeping; the long blocking forward to the engine happens
-# OUTSIDE the SM (in the control-API between admit and release), so N workers
-# forward concurrently — the gate never holds across the engine round-trip.
+# So every public SM method that reads or writes the per-model bookkeeping
+# brackets its body with a process-global mutex (a static pthread_mutex_t
+# behind pthread_once in komira_async's reactor/_posix_shim.c, which every
+# komira_async consumer links). Internal `_..._locked` helpers assume the
+# caller holds it; the mutex is not recursive. The forward to the engine
+# happens OUTSIDE the SM (in the control API between admit and release), so N
+# workers forward concurrently.
+#
+# The one long hold: `request_load` keeps the lock through the backend's
+# launch() (a cold start, seconds) and through the teardown of any model it
+# evicts, so every other SM call in the process waits for that long. Loads are
+# rare; serializing them is what keeps a model from being launched twice.
 #
 # Single-threaded callers take an UNCONTENDED lock per call: negligible cost,
 # identical behavior.
+#
+# BUSY MODELS ARE NEVER UNLOADED BY POLICY. A model with an admitted or queued
+# request (inflight + queued > 0) is skipped by the idle sweep, never chosen as
+# an eviction victim, and refused by `stop`. The admission counters are never
+# reset by an unload, so every admit is balanced by exactly one release.
 # -----------------------------------------------------------------------------
 @always_inline
 def _sm_lock():
@@ -421,6 +435,10 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
     # while a chat model wants a short ~5-min idle-unload to free RAM. A
     # per-model TTL lets the SAME SM hold both.
     var _keep_alive_per_model: List[Int]
+    # How many times launch() was called per model (a reload counts again).
+    var _launches: List[Int]
+    # The launch() error message per model (empty unless FAIL_LAUNCH).
+    var _failure_detail: List[String]
 
     def __init__(
         out self,
@@ -453,6 +471,8 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
         self._default_max_concurrent = DEFAULT_MAX_CONCURRENT_PER_MODEL
         self._queue_depth_multiple = QUEUE_DEPTH_MULTIPLE
         self._keep_alive_per_model = List[Int]()
+        self._launches = List[Int]()
+        self._failure_detail = List[String]()
 
     def __init__(out self, var clock: Self.C, hw: HostMemoryProfile):
         """Defaults: budget = the host's gpu/RAM budget, keep_alive = 5 min,
@@ -476,6 +496,8 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
         self._default_max_concurrent = DEFAULT_MAX_CONCURRENT_PER_MODEL
         self._queue_depth_multiple = QUEUE_DEPTH_MULTIPLE
         self._keep_alive_per_model = List[Int]()
+        self._launches = List[Int]()
+        self._failure_detail = List[String]()
 
     # --- clock ---------------------------------------------------------------
 
@@ -490,7 +512,8 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
         deadline anchor uses this internally)."""
         return self._clock.now_ms()
 
-    # --- lookup --------------------------------------------------------------
+
+    # --- lookup (callers hold the SM mutex) ----------------------------------
 
     def _index_of(self, id: String) -> Int:
         for i in range(len(self._ids)):
@@ -498,52 +521,96 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
                 return i
         return -1
 
+    def _is_resident(self, idx: Int) -> Bool:
+        return (
+            self._states[idx] == LM_LOADING or self._states[idx] == LM_SERVING
+        )
+
+    def _is_busy(self, idx: Int) -> Bool:
+        """An admitted or queued request is outstanding against `idx`."""
+        return self._inflight[idx] + self._queued[idx] > 0
+
+    def _cap_of(self, idx: Int) -> Int:
+        var cap = self._max_concurrent[idx]
+        if cap <= 0:
+            cap = self._default_max_concurrent
+        return cap
+
+    def _resident_count_locked(self) -> Int:
+        var n = 0
+        for i in range(len(self._states)):
+            if self._is_resident(i):
+                n += 1
+        return n
+
+    def _resident_bytes_total_locked(self) -> Int:
+        var total = 0
+        for i in range(len(self._states)):
+            if self._is_resident(i):
+                total += self._resident[i]
+        return total
+
+    # --- lookup (public, each takes the SM mutex) -----------------------------
+
     def contains(self, id: String) -> Bool:
-        return self._index_of(id) >= 0
+        _sm_lock()
+        var r = self._index_of(id) >= 0
+        _sm_unlock()
+        return r
 
     def count(self) -> Int:
         """The number of registered models."""
-        return len(self._ids)
+        _sm_lock()
+        var n = len(self._ids)
+        _sm_unlock()
+        return n
 
     def state_of(self, id: String) -> Int:
         """The lifecycle state for `id` (-1 if absent)."""
+        _sm_lock()
         var idx = self._index_of(id)
-        if idx < 0:
-            return -1
-        return self._states[idx]
+        var st = -1 if idx < 0 else self._states[idx]
+        _sm_unlock()
+        return st
 
     def resident_count(self) -> Int:
         """The number of models currently resident (LOADING or SERVING — i.e.
         holding a launched child)."""
-        var n = 0
-        for i in range(len(self._states)):
-            if self._states[i] == LM_LOADING or self._states[i] == LM_SERVING:
-                n += 1
+        _sm_lock()
+        var n = self._resident_count_locked()
+        _sm_unlock()
         return n
 
     def resident_bytes_total(self) -> Int:
         """The summed resident estimate of every currently-resident model."""
-        var total = 0
-        for i in range(len(self._states)):
-            if self._states[i] == LM_LOADING or self._states[i] == LM_SERVING:
-                total += self._resident[i]
+        _sm_lock()
+        var total = self._resident_bytes_total_locked()
+        _sm_unlock()
         return total
+
+    def launch_count_of(self, id: String) -> Int:
+        """How many times the backend's launch() has been called for `id`
+        (0 if absent). A reload after an unload counts again."""
+        _sm_lock()
+        var idx = self._index_of(id)
+        var n = 0 if idx < 0 else self._launches[idx]
+        _sm_unlock()
+        return n
 
     def status_of(mut self, id: String) -> ModelStatus:
         """A snapshot of `id`'s state (the control-API status verb). A
-        sentinel (state -1, FAIL_NONE) when `id` is absent. SM-mutex-guarded
-        (mut self) — reads `_backends[idx].base_url()`, which a concurrent
-        teardown mutates."""
+        sentinel (state -1, FAIL_NONE) when `id` is absent. SM-mutex-guarded:
+        it reads `_backends[idx].base_url()`, which a concurrent teardown
+        mutates."""
         _sm_lock()
         var st = self._status_of_locked(id)
         _sm_unlock()
         return st^
 
     def _status_of_locked(self, id: String) -> ModelStatus:
-        """Unlocked inner body of `status_of` (caller holds the SM mutex). Reads
-        only (no mutation), so `self` not `mut self`. Split out so `all_status`
-        can snapshot every model under ONE lock acquisition (a consistent list
-        snapshot) without recursively re-locking."""
+        """Unlocked inner body of `status_of` (caller holds the SM mutex). Split
+        out so `all_status` can snapshot every model under ONE lock acquisition
+        (a consistent list snapshot) without recursively re-locking."""
         var idx = self._index_of(id)
         if idx < 0:
             return ModelStatus(
@@ -555,7 +622,7 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
             # (Slab[B].__getitem__ types to Slab's Deinitable bound).
             ref be: Self.B = self._backends[idx]
             burl = be.base_url()
-        return ModelStatus(
+        var st = ModelStatus(
             self._ids[idx],
             self._states[idx],
             self._resident[idx],
@@ -563,12 +630,16 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
             self._failure[idx],
             self._last_req[idx],
         )
+        st.failure_detail = self._failure_detail[idx]
+        st.max_concurrent = self._cap_of(idx)
+        st.inflight = self._inflight[idx]
+        st.queued = self._queued[idx]
+        return st^
 
     def all_status(mut self) -> List[ModelStatus]:
-        """A snapshot of every registered model (the control-API list verb).
-        SM-mutex-guarded (mut self) — the whole list is snapshotted under ONE
-        lock acquisition so it is internally consistent vs concurrent
-        admit/release/unload on the worker threads."""
+        """A snapshot of every registered model (the control-API list verb),
+        taken under ONE lock acquisition so it is internally consistent vs
+        concurrent admit/release/unload on the worker threads."""
         _sm_lock()
         var out = List[ModelStatus]()
         for i in range(len(self._ids)):
@@ -601,8 +672,7 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
     ) -> Bool:
         """`register` with an EXPLICIT per-model admission concurrency cap (the
         N derived from the fit budget via `derive_concurrency_cap`). A
-        `max_concurrent` <= 0 falls back to the SM default. The cap bounds the
-        in-flight requests admitted against this model. The per-model
+        `max_concurrent` <= 0 falls back to the SM default. The per-model
         keep_alive TTL is the SM default (0); use `register_full` for a per-model
         TTL."""
         return self.register_full(
@@ -622,8 +692,11 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
         falls back to the SM default cap; a `keep_alive_ms` <= 0 falls back to the
         SM-level keep_alive TTL. The per-model TTL lets the SAME SM host an
         always-resident embedder (a very long TTL) alongside a chat model (a
-        short ~5-min idle-unload)."""
+        short ~5-min idle-unload). SM-mutex-guarded: appending may move the
+        per-model lists another worker is reading."""
+        _sm_lock()
         if self._index_of(id) >= 0:
+            _sm_unlock()
             return False
         var cap = max_concurrent if max_concurrent > 0 else self._default_max_concurrent
         self._ids.append(id)
@@ -637,79 +710,93 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
         self._inflight.append(0)
         self._queued.append(0)
         self._keep_alive_per_model.append(keep_alive_ms)
+        self._launches.append(0)
+        self._failure_detail.append(String(""))
+        _sm_unlock()
         return True
 
     # --- the JIT-load + LRU-evict core ---------------------------------------
 
-    def _evict_lru_for(mut self, want_bytes: Int) raises:
-        """Make room for `want_bytes` of new resident: while adding it would
-        exceed the byte budget OR the max-resident count, tear down the LRU
-        resident model (smallest _load_order among resident). The LRU victim is
-        UNLOADED (SERVING/LOADING -> UNLOADING -> REGISTERED), its child
-        terminated (no orphan), so a subsequent request JIT-reloads it.
+    def _evict_lru_for(mut self, idx_new: Int) -> Bool:
+        """Make room for model `idx_new`: unload idle resident models, least
+        recently used first, until adding it fits the byte budget and the
+        max-resident count.
 
-        Stops if no resident model remains to evict (the caller then decides
-        whether the model fits at all — a single model larger than the whole
-        budget is FAIL_WONT_FIT, handled by request_load)."""
-        while True:
-            var resident_now = self.resident_count()
-            var bytes_now = self.resident_bytes_total()
-            var over_bytes = (bytes_now + want_bytes) > self._budget_bytes
-            var over_count = (resident_now + 1) > self._max_resident
-            if not over_bytes and not over_count:
-                return
-            # Find the LRU resident (smallest load_order among LOADING/SERVING).
-            var victim = -1
-            var victim_order = 0
-            for i in range(len(self._states)):
-                if self._states[i] == LM_SERVING or self._states[i] == LM_LOADING:
-                    if victim < 0 or self._load_order[i] < victim_order:
-                        victim = i
-                        victim_order = self._load_order[i]
-            if victim < 0:
-                # Nothing left to evict — the single new model is bigger than
-                # the budget. The caller (request_load) decides FAIL_WONT_FIT.
-                return
-            self._unload_index(victim)
+        Only IDLE models (no admitted or queued request) are candidates. The
+        victims are chosen before anything is torn down: if unloading every
+        idle candidate would still not make room, nothing is unloaded and
+        False is returned, so a load that cannot happen never costs a serving
+        model. Returns True when the new model fits (after any unloads)."""
+        var want_bytes = self._resident[idx_new]
+        var bytes_now = self._resident_bytes_total_locked()
+        var count_now = self._resident_count_locked()
+
+        # Idle residents, oldest load order first.
+        var candidates = List[Int]()
+        for i in range(len(self._states)):
+            if i != idx_new and self._is_resident(i) and not self._is_busy(i):
+                var pos = len(candidates)
+                for j in range(len(candidates)):
+                    if self._load_order[i] < self._load_order[candidates[j]]:
+                        pos = j
+                        break
+                candidates.insert(pos, i)
+
+        var victims = List[Int]()
+        var k = 0
+        while (
+            bytes_now + want_bytes > self._budget_bytes
+            or count_now + 1 > self._max_resident
+        ):
+            if k >= len(candidates):
+                return False
+            var v = candidates[k]
+            victims.append(v)
+            bytes_now -= self._resident[v]
+            count_now -= 1
+            k += 1
+
+        for i in range(len(victims)):
+            self._unload_index(victims[i])
+        return True
 
     def _unload_index(mut self, idx: Int):
         """Tear down the model at `idx` (UNLOADING -> teardown -> REGISTERED).
         The backend's teardown stops the child (SIGTERM -> grace -> SIGKILL,
-        reap) — no orphan. Idempotent on an already-non-resident slot. Clears the
-        admission counters (an unloaded model holds no in-flight / queued slots —
-        a reload starts fresh)."""
-        if self._states[idx] != LM_SERVING and self._states[idx] != LM_LOADING:
+        reap) — no orphan. Idempotent on an already-non-resident slot. The
+        admission counters are left alone: a request still holding a slot
+        releases it later, and that release must find its own count."""
+        if not self._is_resident(idx):
             return
         self._states[idx] = LM_UNLOADING
         ref be_td: Self.B = self._backends[idx]
         be_td.teardown()
         self._states[idx] = LM_REGISTERED
         self._load_order[idx] = 0
-        self._inflight[idx] = 0
-        self._queued[idx] = 0
 
     def request_load(mut self, id: String) raises -> Bool:
         """The JIT entry point: ensure `id` is SERVING, loading it on demand.
 
-        The first /v1 request for a REGISTERED model drives it
-        REGISTERED -> LOADING -> SERVING. If launching it would exceed the
-        resident-memory budget or the max-resident count, the LRU resident model is
-        torn down first (LM Studio-style evict). A launch that never becomes healthy
-        -> LM_FAILED + the actionable failure_reason (loud, never silent).
+        The first request for a REGISTERED model drives it
+        REGISTERED -> LOADING -> SERVING. A model larger than the whole budget
+        is refused (FAILED, FAIL_WONT_FIT) before anything else is touched. If
+        launching it would exceed the resident-memory budget or the
+        max-resident count, idle resident models are unloaded first, least
+        recently used first; if the idle ones are not enough (the others are
+        serving requests), nothing is unloaded and the load is refused for
+        now (False, the model stays REGISTERED, a later retry may succeed). A
+        launch that raises -> LM_FAILED, FAIL_LAUNCH and the backend's message.
 
-        Returns True iff `id` ends SERVING; False on absent-id or a FAILED
-        load. Re-arms the keep_alive deadline (stamps last_request) on success.
-        Idempotent: a request for an already-SERVING model just re-arms the TTL.
+        Returns True iff `id` ends SERVING; False on absent id, a FAILED model,
+        or a load refused because the resident models are busy. Re-arms the
+        keep_alive deadline on success. Idempotent: a request for an
+        already-SERVING model just re-arms the TTL.
 
-        CONCURRENCY: the whole load decision (idempotent-serving check, LRU evict,
-        launch, SERVING transition) runs under the process-global SM mutex — so
-        two workers JIT-loading the SAME model concurrently do NOT double-spawn or
-        double-evict (the loser observes the model already SERVING under the lock
-        and just re-arms the TTL). The launch() inside CAN block on the engine
-        readiness poll while holding the lock — that is acceptable: the first load
-        of a model is a rare cold-start, and serializing it is exactly the
-        "exactly one worker spawns the child" contract we want. Steady-state
-        request-path locking (admit/release) never holds across a forward.
+        CONCURRENCY: the whole load decision (idempotent-serving check, LRU
+        evict, launch, SERVING transition) runs under the process-global SM
+        mutex, so two workers loading the SAME model concurrently do not
+        double-launch (the loser observes the model already SERVING under the
+        lock). The lock is held through launch() — see the module notes.
         """
         _sm_lock()
         try:
@@ -740,34 +827,38 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
         if self._states[idx] == LM_FAILED:
             return False
 
-        # Make room (LRU evict) BEFORE launching the new child.
-        self._evict_lru_for(self._resident[idx])
-
-        # If even after eviction the model alone exceeds the budget, refuse it
-        # LOUDLY (FAIL_WONT_FIT) rather than launch a child that will spill/OOM.
+        # A model larger than the whole budget can never fit: refuse it LOUDLY
+        # before evicting anything on its behalf.
         if self._resident[idx] > self._budget_bytes:
             self._states[idx] = LM_FAILED
             self._failure[idx] = FAIL_WONT_FIT
             return False
 
+        # Make room from IDLE residents only; if they are not enough, refuse
+        # without unloading anything (the busy ones finish their requests).
+        if not self._evict_lru_for(idx):
+            return False
+
         # LOADING -> launch the backend (spawn-or-reuse + readiness wait).
         self._states[idx] = LM_LOADING
+        self._launches[idx] += 1
         try:
             ref be_launch: Self.B = self._backends[idx]
             var _url = be_launch.launch()
         except e:
-            # launch() raised — the engine never became healthy (or spawn
-            # failed). LOUD FAILED state with the actionable reason.
-            _ = e
+            # launch() raised: the spawn failed or the engine never became
+            # healthy. LOUD FAILED state, with the backend's own message.
             ref be_fail: Self.B = self._backends[idx]
             be_fail.teardown()
             self._states[idx] = LM_FAILED
-            self._failure[idx] = FAIL_LAUNCH_TIMEOUT
+            self._failure[idx] = FAIL_LAUNCH
+            self._failure_detail[idx] = String(e)
             return False
 
         # Launched + readiness-confirmed by launch(). SERVING.
         self._states[idx] = LM_SERVING
         self._failure[idx] = FAIL_NONE
+        self._failure_detail[idx] = String("")
         self._last_req[idx] = self._clock.now_ms()
         self._load_order[idx] = self._next_load_order
         self._next_load_order += 1
@@ -810,40 +901,49 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
 
     def max_concurrent_of(self, id: String) -> Int:
         """The per-model in-flight admission cap for `id` (0 if absent)."""
+        _sm_lock()
         var idx = self._index_of(id)
-        if idx < 0:
-            return 0
-        return self._max_concurrent[idx]
+        var n = 0 if idx < 0 else self._max_concurrent[idx]
+        _sm_unlock()
+        return n
 
     def inflight_of(self, id: String) -> Int:
         """The count of currently-admitted (in-flight) requests for `id`."""
+        _sm_lock()
         var idx = self._index_of(id)
-        if idx < 0:
-            return 0
-        return self._inflight[idx]
+        var n = 0 if idx < 0 else self._inflight[idx]
+        _sm_unlock()
+        return n
 
     def queued_of(self, id: String) -> Int:
         """The count of requests waiting (queued) for an in-flight slot on `id`."""
+        _sm_lock()
         var idx = self._index_of(id)
-        if idx < 0:
-            return 0
-        return self._queued[idx]
+        var n = 0 if idx < 0 else self._queued[idx]
+        _sm_unlock()
+        return n
 
     def queue_capacity_of(self, id: String) -> Int:
         """The bounded queue depth for `id` (`cap * queue_depth_multiple`) —
         requests beyond cap+queue are REJECTED (0 if absent)."""
+        _sm_lock()
         var idx = self._index_of(id)
-        if idx < 0:
-            return 0
-        return self._max_concurrent[idx] * self._queue_depth_multiple
+        var n = 0
+        if idx >= 0:
+            n = self._max_concurrent[idx] * self._queue_depth_multiple
+        _sm_unlock()
+        return n
 
     def set_max_concurrent(mut self, id: String, max_concurrent: Int) -> Bool:
         """Override the per-model admission cap for `id` (>= 1). Returns False if
         absent. Used to re-derive the cap after a re-fit."""
+        _sm_lock()
         var idx = self._index_of(id)
         if idx < 0:
+            _sm_unlock()
             return False
         self._max_concurrent[idx] = max_concurrent if max_concurrent > 0 else 1
+        _sm_unlock()
         return True
 
     def admit(mut self, id: String) -> Int:
@@ -855,28 +955,27 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
           * ADMIT_ADMITTED — under the cap: the in-flight count is bumped; the
             caller runs the request now and MUST call `release(id)` when done.
           * ADMIT_QUEUED   — at the cap but within the bounded queue: the queued
-            count is bumped; the caller waits for a slot (a later `release` +
-            `promote_one` admits it). The caller MUST call `release(id)` to
-            decrement the queue if it abandons the wait.
+            count is bumped; the caller waits, claiming a freed slot with
+            `try_promote_if_under_cap`, or calls `release_queued(id)` if it
+            gives up.
           * ADMIT_REJECTED — cap + queue full: NOTHING is bumped; the caller must
             reject the request LOUDLY (a 503) rather than admit it into a spill.
 
         Returns ADMIT_REJECTED for an absent id (nothing to admit against).
+        Admission does not depend on the lifecycle state: a caller may admit
+        first and load second, so the model it loads is busy (and so not
+        unloaded) for as long as it holds the slot.
 
         CONCURRENCY: SM-mutex-guarded so the cap check + the in-flight bump are
         ATOMIC across N workers — without the lock, two workers could both read
-        `inflight < cap` and both bump, leaking the cap past N (the spill /
-        mlx-lm#965 KV-contamination band). The lock makes the cap a true global
-        bound on TOTAL in-flight requests against the one shared loaded model.
+        `inflight < cap` and both bump, leaking the cap past N.
         """
         _sm_lock()
         var idx = self._index_of(id)
         if idx < 0:
             _sm_unlock()
             return ADMIT_REJECTED
-        var cap = self._max_concurrent[idx]
-        if cap <= 0:
-            cap = self._default_max_concurrent
+        var cap = self._cap_of(idx)
         if self._inflight[idx] < cap:
             self._inflight[idx] += 1
             _sm_unlock()
@@ -899,13 +998,9 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
 
         NOTE (pull promotion): `release` does NOT auto-promote a queued
         waiter into the freed slot — promotion is PULL-based (a queued worker
-        spins on `try_promote_if_under_cap` and claims the freed slot itself). So
-        the freed in-flight slot is simply decremented here; the next queued
-        worker's spin observes `inflight < cap` and converts its own queued slot
-        to in-flight. This keeps in-flight a TRUE hard bound (== cap) under N
-        concurrent workers. A push promotion here, combined with a queued worker
-        that then runs its request, would count that request twice and let
-        in-flight drift past the cap."""
+        spins on `try_promote_if_under_cap` and claims the freed slot itself).
+        This keeps in-flight a TRUE hard bound (== cap) under N concurrent
+        workers."""
         _sm_lock()
         var idx = self._index_of(id)
         if idx < 0:
@@ -921,14 +1016,7 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
         ONE queued slot to an in-flight slot and return True (the caller — the
         queued worker — now holds an in-flight slot and proceeds to forward).
         Returns False if the cap is still full (the caller keeps spinning) or
-        there is no queued waiter / absent id.
-
-        This is the BLOCK-AND-WAIT admission semantic (a queued request WAITS
-        for a real slot, turning OOM under load into bounded latency under
-        load): a QUEUED worker spins on this until it claims a slot (or times
-        out and calls release_queued + 503). It makes in-flight a TRUE hard cap:
-        a queued slot only becomes in-flight when a real slot is free, never
-        unconditionally. SM-mutex-guarded so the
+        there is no queued waiter / absent id. SM-mutex-guarded so the
         cap-check + the queued->inflight move is atomic vs concurrent
         admits/releases."""
         _sm_lock()
@@ -936,10 +1024,7 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
         if idx < 0:
             _sm_unlock()
             return False
-        var cap = self._max_concurrent[idx]
-        if cap <= 0:
-            cap = self._default_max_concurrent
-        if self._queued[idx] > 0 and self._inflight[idx] < cap:
+        if self._queued[idx] > 0 and self._inflight[idx] < self._cap_of(idx):
             self._queued[idx] -= 1
             self._inflight[idx] += 1
             _sm_unlock()
@@ -963,29 +1048,21 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
     # --- the keep_alive TTL tick ---------------------------------------------
 
     def tick_idle_unload(mut self) -> Int:
-        """The keep_alive sweep: idle-unload every SERVING model whose last
-        request is older than the keep_alive TTL (SERVING -> UNLOADING ->
-        REGISTERED, child terminated, no orphan). Returns the number unloaded.
+        """The keep_alive sweep: unload every SERVING model that has no
+        admitted or queued request and whose last request is older than its
+        keep_alive TTL (SERVING -> UNLOADING -> REGISTERED, child terminated).
+        Returns the number unloaded.
 
-        The server calls this periodically (ControlApiDispatcher exposes it as
-        `tick_idle_unload`). The clock is read through the SM's pluggable `now` seam so a
-        test drives it deterministically (virtual time, no sleep). The TTL is
-        PER-MODEL: a model with a per-model keep_alive (an always-resident
-        embedder's very long TTL, a chat model's short TTL) uses its own; one
-        registered without (0) uses the SM-level default.
-
-        CONCURRENCY: SM-mutex-guarded. A server typically drives this from ONE
-        worker, but it tears down children + flips states the
-        other workers read/write on the request path, so it must hold the lock
-        for the sweep. An in-flight request on a SERVING model bumps last_req
-        under the SAME lock (note_request/request_load), so the idle check sees a
-        consistent last_req — a model with an active request is never idle-swept
-        out from under it."""
+        A model with a request in flight is skipped however old its last
+        request is: a generation that runs longer than the TTL is not killed
+        mid-request. The TTL is PER-MODEL (0 means the SM-level default). The
+        clock is read through the SM's MonotonicClock, so a test drives it
+        deterministically. SM-mutex-guarded."""
         _sm_lock()
         var now = self._clock.now_ms()
         var unloaded = 0
         for i in range(len(self._states)):
-            if self._states[i] == LM_SERVING:
+            if self._states[i] == LM_SERVING and not self._is_busy(i):
                 var idle = now - self._last_req[i]
                 var ttl = self._keep_alive_per_model[i]
                 if ttl <= 0:
@@ -1001,33 +1078,39 @@ struct BackendSupervisor[B: LocalBackend, C: MonotonicClock](Movable):
     def stop(mut self, id: String) -> Bool:
         """Explicitly stop (unload) `id` (the control API's stop verb). SERVING/
         LOADING -> REGISTERED, child terminated. Returns True iff `id` was
-        resident (and is now unloaded). SM-mutex-guarded."""
+        resident and idle and is now unloaded; False when it is absent, not
+        resident, or busy (an admitted or queued request is outstanding — stop
+        it again once they finish). SM-mutex-guarded."""
         _sm_lock()
         var idx = self._index_of(id)
-        if idx < 0:
+        if idx < 0 or not self._is_resident(idx) or self._is_busy(idx):
             _sm_unlock()
             return False
-        if self._states[idx] == LM_SERVING or self._states[idx] == LM_LOADING:
-            self._unload_index(idx)
-            _sm_unlock()
-            return True
+        self._unload_index(idx)
         _sm_unlock()
-        return False
+        return True
 
     def clear_failure(mut self, id: String) -> Bool:
         """Clear a FAILED model back to REGISTERED so a subsequent request can
         retry the load (after the binary/flags/memory were fixed). Returns
-        True iff `id` was FAILED."""
+        True iff `id` was FAILED. SM-mutex-guarded."""
+        _sm_lock()
         var idx = self._index_of(id)
         if idx < 0 or self._states[idx] != LM_FAILED:
+            _sm_unlock()
             return False
         self._states[idx] = LM_REGISTERED
         self._failure[idx] = FAIL_NONE
+        self._failure_detail[idx] = String("")
+        _sm_unlock()
         return True
 
     def shutdown_all(mut self):
-        """Shutdown — tear down every resident model (no orphans). Each
-        SERVING/LOADING child is terminated + the slot flips to REGISTERED."""
+        """Shutdown — tear down every resident model (no orphans), busy or not.
+        Each SERVING/LOADING child is terminated + the slot flips to
+        REGISTERED. A request still holding a slot gets a transport error from
+        its engine and releases normally. SM-mutex-guarded."""
+        _sm_lock()
         for i in range(len(self._states)):
-            if self._states[i] == LM_SERVING or self._states[i] == LM_LOADING:
-                self._unload_index(i)
+            self._unload_index(i)
+        _sm_unlock()

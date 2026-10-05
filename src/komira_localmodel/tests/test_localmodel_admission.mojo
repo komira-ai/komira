@@ -19,13 +19,14 @@
 #       claims it with try_promote_if_under_cap (queued -> in-flight), so the
 #       cap holds while the backlog drains.
 #
-#   (4) UNLOAD RESETS — idle-unloading / evicting a model clears its in-flight +
-#       queued counters (a reload starts fresh; no leaked admission state).
+#   (4) BUSY MODELS STAY LOADED — a model with an admitted or queued request
+#       is not idle-unloaded, not chosen as an eviction victim (an idle model
+#       is chosen instead, or the load waits) and not stopped; the counters
+#       are never reset, so a late release cannot take a newer request's slot.
 #
-#   (5) DERIVE FROM FIT — derive_concurrency_cap caps at 1 when the fit headroom
-#       is negative (over budget), never raises the requested concurrency — so
-#       the admission cap agrees with the concurrency-aware fit (the same N
-#       that reserved the KV cache).
+#   (5) DERIVE FROM FIT — derive_concurrency_cap is the requested concurrency
+#       when the fit (computed at that concurrency) has non-negative headroom,
+#       and 1 when it is over budget.
 #
 #   (6) ABSENT ID — admit against an unknown id is REJECTED; release /
 #       release_queued on an absent id are no-ops.
@@ -253,41 +254,44 @@ def test_release_queued_drops_one_waiter() raises:
 
 
 # =============================================================================
-# (4) UNLOAD RESETS — idle-unload / evict clears the admission counters.
+# (4) BUSY MODELS STAY LOADED — a model with an admitted or queued request is
+#     not idle-unloaded, not evicted and not stopped, and its counters are
+#     never reset, so every admit is balanced by its own release.
 # =============================================================================
-def test_unload_resets_admission_counters() raises:
-    # keep_alive 5000 ms so a tick past it idle-unloads.
+def test_idle_sweep_skips_busy_model() raises:
+    # keep_alive 5000 ms; the request outlives it.
     var sm = _Sm(MockClock(0), _hw(), _gib(64), 5000, 4)
     _ = sm.register_with_cap(
         String("m"), StubBackend(String("http://127.0.0.1:8081"), False),
         _gib(6), 2,
     )
     _ = sm.request_load(String("m"))  # SERVING, last_req at now=0.
-
-    # Hold some in-flight + queued.
     assert_equal(sm.admit(String("m")), ADMIT_ADMITTED)
     assert_equal(sm.admit(String("m")), ADMIT_ADMITTED)
     assert_equal(sm.admit(String("m")), ADMIT_QUEUED)
-    assert_true(sm.inflight_of(String("m")) > 0)
-    assert_true(sm.queued_of(String("m")) > 0)
 
-    # Idle-unload past the TTL -> the model returns to REGISTERED + counters clear.
-    sm.clock_mut().advance_ms(6000)
+    # Far past the TTL with requests outstanding: nothing is unloaded.
+    sm.clock_mut().advance_ms(60_000)
+    assert_equal(sm.tick_idle_unload(), 0)
+    assert_equal(sm.state_of(String("m")), LM_SERVING)
+    assert_equal(sm.inflight_of(String("m")), 2)
+    assert_equal(sm.queued_of(String("m")), 1)
+
+    # Queued alone keeps it loaded too.
+    sm.release(String("m"))
+    sm.release(String("m"))
+    assert_equal(sm.tick_idle_unload(), 0)
+    assert_equal(sm.state_of(String("m")), LM_SERVING)
+
+    # Once the last waiter is gone the expired model is swept.
+    sm.release_queued(String("m"))
     assert_equal(sm.tick_idle_unload(), 1)
     assert_equal(sm.state_of(String("m")), LM_REGISTERED)
-    assert_equal(sm.inflight_of(String("m")), 0)
-    assert_equal(sm.queued_of(String("m")), 0)
-
-    # A reload starts fresh (admit succeeds from 0 in-flight again).
-    _ = sm.request_load(String("m"))
-    assert_equal(sm.state_of(String("m")), LM_SERVING)
-    assert_equal(sm.admit(String("m")), ADMIT_ADMITTED)
-    assert_equal(sm.inflight_of(String("m")), 1)
     sm.shutdown_all()
 
 
-def test_evict_resets_admission_counters() raises:
-    # max_resident = 1: loading B evicts A; A's admission counters must clear.
+def test_busy_model_is_not_evicted() raises:
+    # max_resident = 1: B cannot load while A is serving a request.
     var sm = _Sm(MockClock(0), _hw(), _gib(64), 60_000, 1)
     _ = sm.register_with_cap(
         String("a"), StubBackend(String("http://127.0.0.1:9001"), False),
@@ -297,22 +301,80 @@ def test_evict_resets_admission_counters() raises:
         String("b"), StubBackend(String("http://127.0.0.1:9002"), False),
         _gib(6), 4,
     )
-    sm.clock_mut().advance_ms(10)
     _ = sm.request_load(String("a"))
     assert_equal(sm.admit(String("a")), ADMIT_ADMITTED)
+
+    assert_false(
+        sm.request_load(String("b")), "a load that needs a busy victim waits"
+    )
+    assert_equal(sm.state_of(String("a")), LM_SERVING)
+    assert_equal(sm.state_of(String("b")), LM_REGISTERED)
+    assert_equal(sm.launch_count_of(String("b")), 0)
     assert_equal(sm.inflight_of(String("a")), 1)
 
-    # Load B -> evicts A (the LRU). A's counters reset to 0.
-    sm.clock_mut().advance_ms(10)
-    _ = sm.request_load(String("b"))
+    # A's request finishes; now B evicts the idle A.
+    sm.release(String("a"))
+    assert_true(sm.request_load(String("b")))
     assert_equal(sm.state_of(String("a")), LM_REGISTERED)
-    assert_equal(sm.inflight_of(String("a")), 0)
-    assert_equal(sm.queued_of(String("a")), 0)
+    assert_equal(sm.state_of(String("b")), LM_SERVING)
+    sm.shutdown_all()
+
+
+def test_eviction_prefers_idle_over_lru() raises:
+    # max_resident = 2: A (older, busy) and B (newer, idle) resident; loading
+    # C evicts B, the idle one, even though A is least recently used.
+    var sm = _Sm(MockClock(0), _hw(), _gib(64), 60_000, 2)
+    _ = sm.register(
+        String("a"), StubBackend(String("http://127.0.0.1:9011"), False), _gib(6)
+    )
+    _ = sm.register(
+        String("b"), StubBackend(String("http://127.0.0.1:9012"), False), _gib(6)
+    )
+    _ = sm.register(
+        String("c"), StubBackend(String("http://127.0.0.1:9013"), False), _gib(6)
+    )
+    _ = sm.request_load(String("a"))
+    _ = sm.request_load(String("b"))
+    assert_equal(sm.admit(String("a")), ADMIT_ADMITTED)
+    assert_true(sm.request_load(String("c")))
+    assert_equal(sm.state_of(String("a")), LM_SERVING)
+    assert_equal(sm.state_of(String("b")), LM_REGISTERED)
+    assert_equal(sm.state_of(String("c")), LM_SERVING)
+    sm.release(String("a"))
+    sm.shutdown_all()
+
+
+def test_stop_refuses_busy_model() raises:
+    var sm = _serving_sm_with_cap(2)
+    assert_equal(sm.admit(String("m")), ADMIT_ADMITTED)
+    assert_false(sm.stop(String("m")), "stop refuses a model serving a request")
+    assert_equal(sm.state_of(String("m")), LM_SERVING)
+    sm.release(String("m"))
+    assert_true(sm.stop(String("m")))
+    assert_equal(sm.state_of(String("m")), LM_REGISTERED)
+    sm.shutdown_all()
+
+
+def test_late_release_after_shutdown_balances() raises:
+    # shutdown_all unloads a busy model but leaves its counters, so the late
+    # release of the old request does not take a slot from a new one.
+    var sm = _serving_sm_with_cap(1)
+    assert_equal(sm.admit(String("m")), ADMIT_ADMITTED)
+    sm.shutdown_all()
+    assert_equal(sm.state_of(String("m")), LM_REGISTERED)
+    assert_equal(sm.inflight_of(String("m")), 1)
+    sm.release(String("m"))
+    assert_equal(sm.inflight_of(String("m")), 0)
+    _ = sm.request_load(String("m"))
+    assert_equal(sm.admit(String("m")), ADMIT_ADMITTED)
+    assert_equal(sm.admit(String("m")), ADMIT_QUEUED, "the cap of 1 still holds")
+    sm.release_queued(String("m"))
+    sm.release(String("m"))
     sm.shutdown_all()
 
 
 # =============================================================================
-# (5) DERIVE-FROM-FIT — the cap scales DOWN with tight headroom, never up.
+# (5) DERIVE-FROM-FIT — the requested cap, or 1 when the fit is over budget.
 # =============================================================================
 def test_derive_cap_from_fit_headroom() raises:
     # Positive headroom (the fit reserved N streams' KV and still fit) -> the cap

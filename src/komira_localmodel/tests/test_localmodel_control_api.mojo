@@ -45,10 +45,16 @@ from komira_localmodel import (
     SystemClock,
     ControlApiDispatcher,
     OpenAiForwarder,
+    ForwardedResponse,
     HostMemoryProfile,
     PLATFORM_MACOS,
     fit,
     ModelVariant,
+)
+from komira_localmodel.control_api import (
+    _top_level_string_field,
+    _json_escape,
+    _is_valid_utf8,
 )
 
 
@@ -96,16 +102,25 @@ struct StubForwarder(OpenAiForwarder, Movable, Deinitable):
 
     def forward(
         mut self, base_url: String, path: String, request_body: String
-    ) raises -> String:
+    ) raises -> ForwardedResponse:
         self.last_base_url = base_url
         self.last_path = path
         self.forward_count += 1
         _ = request_body
+        # The engine rejecting a request: its status and content type must
+        # reach the client unchanged.
+        if path == "/v1/completions":
+            var r = ForwardedResponse.json(429, String("data: rate limited\n\n"))
+            r.content_type = String("text/event-stream")
+            return r^
         # A canned OpenAI chat-completion response body.
-        return String(
-            '{"id":"chatcmpl-stub","object":"chat.completion",'
-            + '"choices":[{"index":0,"message":{"role":"assistant",'
-            + '"content":"stub-reply"}}]}'
+        return ForwardedResponse.json(
+            200,
+            String(
+                '{"id":"chatcmpl-stub","object":"chat.completion",'
+                + '"choices":[{"index":0,"message":{"role":"assistant",'
+                + '"content":"stub-reply"}}]}'
+            ),
         )
 
 
@@ -114,8 +129,8 @@ comptime _Dispatcher = ControlApiDispatcher[StubBackend, SystemClock, StubForwar
 
 
 def _hw() -> HostMemoryProfile:
-    # 16 GB unified Mac for the FIT rating: qwen-7b (~6.5 GiB resident) lands
-    # GREEN, the Llama-70B (~58.5 GiB resident) lands RED — so the list verb
+    # 16 GB unified Mac for the FIT rating: qwen-7b (~8.5 GiB resident) lands
+    # GREEN, the Llama-70B (~68.5 GiB resident) lands RED — so the list verb
     # renders BOTH a green AND a red, proving the fit rating surfaces. The SM's
     # EVICTION budget is a SEPARATE explicit 64 GiB (see _make_dispatcher), so
     # the lifecycle verbs are not perturbed by this small fit host (eviction is
@@ -347,7 +362,7 @@ def test_list_select_stop() raises:
         _bytes_contain(r_list, String('"state":"registered"')),
         "models start REGISTERED",
     )
-    # qwen-7b (6.5 GiB resident) is GREEN on the 16 GB fit host; the 70B is RED.
+    # qwen-7b (8.5 GiB resident) is GREEN on the 16 GB fit host; the 70B is RED.
     assert_true(_bytes_contain(r_list, String('"fit":"green"')), "qwen fit green")
     assert_true(_bytes_contain(r_list, String('"fit":"red"')), "llama fit red")
 
@@ -518,14 +533,129 @@ def test_error_paths() raises:
     _ = dispatcher^
 
 
+
+# =============================================================================
+# Test (h) — the passthrough keeps the engine's status and content type, and
+# finds the model only as a top-level member.
+# =============================================================================
+def test_v1_passthrough_upstream_status_and_model_key() raises:
+    var server = _make_server()
+    var dispatcher = _make_dispatcher()
+    var port = server.local_port()
+
+    # "model" appears first inside a message; the top-level member names the
+    # model to load.
+    var body = String(
+        '{"messages":[{"role":"user","content":"model"},'
+        + '{"model":"llama-70b"}],"model":"qwen-7b","stream":true}'
+    )
+    var resp = _round_trip(
+        server, dispatcher, port, String("POST"), String("/v1/completions"),
+        body,
+    )
+    assert_true(
+        _bytes_contain(resp, String("HTTP/1.1 429")),
+        "the engine's 429 reaches the client",
+    )
+    assert_true(
+        _bytes_contain(resp, String("text/event-stream")),
+        "the engine's content type reaches the client",
+    )
+    assert_true(_bytes_contain(resp, String("data: rate limited")))
+    assert_equal(
+        dispatcher.forwarder_ref().last_base_url,
+        String("http://127.0.0.1:8090"),
+        "the top-level model (qwen-7b) was loaded, not a nested one",
+    )
+    # The slot taken for the request was released.
+    assert_equal(dispatcher.sm_ref().inflight_of(String("qwen-7b")), 0)
+    _ = server^
+    _ = dispatcher^
+
+
+def test_top_level_string_field() raises:
+    assert_equal(
+        _top_level_string_field(String('{"model":"a"}'), String("model")),
+        String("a"),
+    )
+    assert_equal(
+        _top_level_string_field(
+            String('{"x":{"model":"nested"}, "model" : "top"}'), String("model")
+        ),
+        String("top"),
+    )
+    assert_equal(
+        _top_level_string_field(
+            String('{"content":"\\"model\\":\\"fake\\"","model":"m"}'),
+            String("model"),
+        ),
+        String("m"),
+    )
+    assert_equal(
+        _top_level_string_field(String('{"model":7}'), String("model")),
+        String(""),
+    )
+    assert_equal(
+        _top_level_string_field(String('[{"model":"a"}]'), String("model")),
+        String(""),
+    )
+    # Non-ASCII ids keep their bytes.
+    assert_equal(
+        _top_level_string_field(String('{"id":"modèle-ü"}'), String("id")),
+        String("modèle-ü"),
+    )
+
+
+def test_json_escape_and_utf8() raises:
+    assert_equal(
+        _json_escape(String('a"b\\c\nd') + chr(1) + String('é')),
+        String('a\\"b\\\\c\\nd\\u0001é'),
+    )
+    var bad = List[UInt8]()
+    bad.append(UInt8(0x7B))
+    bad.append(UInt8(0xC3))  # a lead byte with no continuation
+    assert_false(_is_valid_utf8(bad))
+    var good = List[UInt8]()
+    var gs = String('{"m":"é"}')
+    var gb = gs.as_bytes()
+    for i in range(len(gb)):
+        good.append(gb[i])
+    assert_true(_is_valid_utf8(good))
+
+
+def test_v1_passthrough_rejects_invalid_utf8() raises:
+    var server = _make_server()
+    var dispatcher = _make_dispatcher()
+    var port = server.local_port()
+    var client_fd = _create_blocking_client_socket()
+    _connect_blocking(client_fd, port)
+    _drive(server, dispatcher, 4, Int32(300_000))
+    var req = _build_request(
+        String("POST"), String("/v1/chat/completions"), String('{"model":"qwen-7b"x}')
+    )
+    # Replace the 'x' with a lone 0xFF byte (never valid UTF-8).
+    for i in range(len(req)):
+        if req[i] == UInt8(ord("x")):
+            req[i] = UInt8(0xFF)
+    _send_all(client_fd, req)
+    _drive(server, dispatcher, 8, Int32(50_000))
+    var resp = _recv_some(client_fd, 8192)
+    _close_socket(client_fd)
+    assert_true(
+        _bytes_contain(resp, String("HTTP/1.1 400")), "invalid UTF-8 -> 400"
+    )
+    assert_equal(dispatcher.forwarder_ref().forward_count, 0)
+    _ = server^
+    _ = dispatcher^
+
+
 def main() raises:
     test_list_select_stop()
     test_v1_passthrough()
     test_v1_models_list()
     test_error_paths()
-    print(
-        "PASS test_localmodel_control_api (list / status / select-load /"
-        " stop / v1-passthrough / v1-models / error-paths — all over a live"
-        " loopback-bound HttpServer + ControlApiDispatcher with a STUB backend"
-        " + STUB forwarder)"
-    )
+    test_v1_passthrough_upstream_status_and_model_key()
+    test_top_level_string_field()
+    test_json_escape_and_utf8()
+    test_v1_passthrough_rejects_invalid_utf8()
+    print("PASS test_localmodel_control_api")

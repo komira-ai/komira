@@ -92,8 +92,7 @@ from .backend_state_machine import (
     LM_UNLOADING,
     LM_FAILED,
     FAIL_NONE,
-    FAIL_LAUNCH_TIMEOUT,
-    FAIL_LAUNCH_SPAWN,
+    FAIL_LAUNCH,
     FAIL_WONT_FIT,
     ADMIT_ADMITTED,
     ADMIT_QUEUED,
@@ -106,6 +105,7 @@ from .backend_state_machine import (
 from .control_api import (
     ControlApiDispatcher,
     OpenAiForwarder,
+    ForwardedResponse,
     ROUTE_V1_MODELS,
     ROUTE_MODELS,
     ROUTE_STATUS,

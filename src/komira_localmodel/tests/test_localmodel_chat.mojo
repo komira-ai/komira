@@ -42,6 +42,7 @@ from komira_localmodel import (
     MonotonicClock,
     ControlApiDispatcher,
     OpenAiForwarder,
+    ForwardedResponse,
     HostMemoryProfile,
     PLATFORM_MACOS,
     fit,
@@ -101,20 +102,26 @@ struct StubForwarder(OpenAiForwarder, Movable, Deinitable):
 
     def forward(
         mut self, base_url: String, path: String, request_body: String
-    ) raises -> String:
+    ) raises -> ForwardedResponse:
         self.last_base_url = base_url
         self.last_path = path
         self.forward_count += 1
         _ = request_body
         if path == "/v1/chat/completions":
-            return String(
-                '{"object":"chat.completion","model":"qwen2.5-coder:7b",'
-                + '"choices":[{"index":0,"message":{"role":"assistant",'
-                + '"content":"hello"}}]}'
+            return ForwardedResponse.json(
+                200,
+                String(
+                    '{"object":"chat.completion","model":"qwen2.5-coder:7b",'
+                    + '"choices":[{"index":0,"message":{"role":"assistant",'
+                    + '"content":"hello"}}]}'
+                ),
             )
-        return String(
-            '{"object":"list","model":"bge-small-en-v1.5","data":['
-            + '{"object":"embedding","index":0,"embedding":[0.1,0.2]}]}'
+        return ForwardedResponse.json(
+            200,
+            String(
+                '{"object":"list","model":"bge-small-en-v1.5","data":['
+                + '{"object":"embedding","index":0,"embedding":[0.1,0.2]}]}'
+            ),
         )
 
 

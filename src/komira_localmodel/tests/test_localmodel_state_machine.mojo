@@ -21,7 +21,7 @@
 #       byte budget, re-requesting model A makes B the LRU victim.
 #
 #   (4) FAILED STATES NAME THEIR REASON — a backend whose launch() RAISES (never
-#       becomes healthy) drives the model to LM_FAILED with FAIL_LAUNCH_TIMEOUT
+#       becomes healthy) drives the model to LM_FAILED with FAIL_LAUNCH
 #       (teardown ran — no orphan), and a later request does NOT silently retry
 #       (it stays FAILED until clear_failure). A model larger than the whole
 #       budget is refused with FAIL_WONT_FIT without launching anything.
@@ -45,7 +45,7 @@ from komira_localmodel import (
     LM_REGISTERED,
     LM_SERVING,
     LM_FAILED,
-    FAIL_LAUNCH_TIMEOUT,
+    FAIL_LAUNCH,
     FAIL_WONT_FIT,
     FAIL_NONE,
 )
@@ -310,7 +310,7 @@ def test_failed_launch_surfaces_loud() raises:
     var st = sm.status_of(String("broken"))
     assert_equal(
         st.failure_reason,
-        FAIL_LAUNCH_TIMEOUT,
+        FAIL_LAUNCH,
         String("the failure reason is actionable (launch timeout)"),
     )
     assert_equal(
@@ -381,6 +381,53 @@ def test_registry_bookkeeping() raises:
     sm.shutdown_all()
     assert_equal(sm.resident_count(), 0)
     assert_equal(sm.state_of(String("one")), LM_REGISTERED)
+
+
+def test_wont_fit_does_not_evict_serving_models() raises:
+    # A 10 GiB budget with one 6 GiB model serving; a request for a 50 GiB
+    # model is refused before anything is unloaded on its behalf.
+    var sm = _Sm(MockClock(0), _hw(), _gib(10), 60_000, 1)
+    _ = sm.register(
+        String("small"),
+        StubBackend(String("http://127.0.0.1:9311"), False),
+        _gib(6),
+    )
+    _ = sm.register(
+        String("huge"),
+        StubBackend(String("http://127.0.0.1:9312"), False),
+        _gib(50),
+    )
+    assert_true(sm.request_load(String("small")))
+    assert_false(sm.request_load(String("huge")))
+    assert_equal(sm.status_of(String("huge")).failure_reason, FAIL_WONT_FIT)
+    assert_equal(
+        sm.state_of(String("small")),
+        LM_SERVING,
+        String("the serving model was not evicted for a load that cannot fit"),
+    )
+    assert_equal(sm.launch_count_of(String("small")), 1)
+    assert_equal(sm.launch_count_of(String("huge")), 0)
+    assert_equal(sm.resident_count(), 1)
+    sm.shutdown_all()
+
+
+def test_launch_failure_keeps_backend_message() raises:
+    var sm = _Sm(MockClock(0), _hw(), _gib(64), 60_000, 4)
+    _ = sm.register(
+        String("broken"),
+        StubBackend(String("http://127.0.0.1:9321"), True),
+        _gib(6),
+    )
+    assert_false(sm.request_load(String("broken")))
+    var st = sm.status_of(String("broken"))
+    assert_equal(st.failure_reason, FAIL_LAUNCH)
+    assert_true(
+        st.failure_detail.find(String("never became healthy")) >= 0,
+        String("the backend's own message is kept: ") + st.failure_detail,
+    )
+    assert_true(sm.clear_failure(String("broken")))
+    assert_equal(sm.status_of(String("broken")).failure_detail, String(""))
+    sm.shutdown_all()
 
 
 def main() raises:
