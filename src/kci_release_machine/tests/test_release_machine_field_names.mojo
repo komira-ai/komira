@@ -18,6 +18,7 @@ def test_the_field_names_are_the_golden_list() raises:
     want.append(String("stage.after"))
     want.append(String("stage.environment"))
     want.append(String("stage.farm_connected"))
+    want.append(String("stage.trigger"))
     want.append(String("stage.step"))
     want.append(String("step.name"))
     want.append(String("step.kind"))

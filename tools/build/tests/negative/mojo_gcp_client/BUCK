@@ -72,6 +72,35 @@ mojo_gcp_client(
     deps = _RUNTIME,
 )
 
+# "has no field `colour`": `omit_fields` names a field the message does not
+# have, which would otherwise leave out nothing and say it had.
+mojo_gcp_client(
+    name = "omit_unknown_field",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    omit_fields = ["example.shop.v1.Item.colour"],
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "which this scope does not generate": `omit_fields` names a real field of a
+# message the roots prune away (ItemTombstone is reached only through
+# DeleteItem), which would otherwise leave out nothing and say it had.
+mojo_gcp_client(
+    name = "omit_pruned_field",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    omit_fields = ["example.shop.v1.ItemTombstone.name"],
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
 # "which must be absent": the absence check of ../../functional/mojo_gcp_client
 # reds on a type the generated client does hold, so it can fail.
 gen_check(
@@ -151,9 +180,10 @@ mojo_gcp_client(
     deps = _RUNTIME,
 )
 
-# "method `WatchItems` is server-streaming": a streaming method listed in a
-# "rest" client's `methods` is refused by name at generation, never skipped
-# into a client that lacks a method its target lists.
+# "method `WatchItems` is bidirectional-streaming": a method that streams its
+# requests, listed in a "rest" client's `methods`, is refused by name at
+# generation, never skipped into a client that lacks a method its target
+# lists.
 mojo_gcp_client(
     name = "rest_streaming_method",
     bundle_only = [
@@ -164,5 +194,62 @@ mojo_gcp_client(
     methods = ["WatchService.WatchItems"],
     proto_deps = ["//functional/mojo_gcp_client:watch_api"],
     protos = [],
+    deps = _RUNTIME,
+)
+
+# "which this target does not generate": a `module_names` entry for a file
+# outside the generated set renames nothing, so a misspelt path is refused
+# rather than ignored.
+mojo_gcp_client(
+    name = "module_names_stray",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    module_names = {"example/shop/v1/audit.proto": "audit"},
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "is not a Mojo module name the generated package can hold": a module name
+# with a `.` would be imported as a package and a module.
+mojo_gcp_client(
+    name = "module_names_not_a_module",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    module_names = {"example/shop/v1/item.proto": "item.v1"},
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "is not a Mojo module name the generated package can hold": a keyword is an
+# identifier, and no import can name it.
+mojo_gcp_client(
+    name = "module_names_keyword",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    module_names = {"example/shop/v1/item.proto": "import"},
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "which is not a Mojo module name: give it one in `module_names`": a
+# generated file whose stem is not a module name, and that `module_names`
+# does not rename, is refused at analysis rather than written as a module no
+# import can name.
+mojo_gcp_client(
+    name = "module_names_unrenamed_stem",
+    bundle_only = [],
+    bundle_proto_deps = False,
+    messages_only = True,
+    protos = ["example/neg/v1/thing.min.proto"],
+    roots = ["Thing"],
     deps = _RUNTIME,
 )

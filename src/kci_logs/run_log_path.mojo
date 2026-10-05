@@ -24,7 +24,7 @@
 
 comptime DEFAULT_RUN_PATH_PREFIX: String = "/pipelines/runs/"
 """The run-status route prefix (`GET /pipelines/runs/<run_id>`). A run id appended
-to this is the pipeline manager's run-store read."""
+to this is the run server's run-store read."""
 
 
 comptime DEFAULT_RUN_LOG_PAGE_LIMIT: Int = 200

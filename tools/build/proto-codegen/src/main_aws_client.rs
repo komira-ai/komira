@@ -8,7 +8,7 @@
 //! aws-client-gen --model <service-2.json> --model-sha256 <hex>
 //!     --service <botocore id> --operations <Op>[,<Op>...]
 //!     --module <name> --out <file.mojo>
-//!     [--pure-only] [--emit-model-json] [--customization s3]
+//!     [--pure-only] [--emit-model-json] [--customization s3|route53]
 //!     [--overrides <manifest> [--hand-src <file.mojo>]...]
 //!     [--probe-out <_layout_probe.mojo> [--probe-import <dotted path>]]
 //!     [--endpoint-rules <endpoint-rule-set-1.json> --partitions <partitions.json>]
@@ -22,13 +22,17 @@
 //! `--customization s3` applies botocore's S3 response handling the model
 //! does not state (`emit_aws::S3_CUSTOMIZATION`); it is refused unless the
 //! model's serviceId is `S3` and its protocol is restXml.
+//!
+//! `--customization route53` applies botocore's Route 53 Id handling the
+//! model does not state (`emit_aws::ROUTE53_CUSTOMIZATION`); it is refused
+//! unless the model's serviceId is `Route 53` and its protocol is restXml.
 
 use std::path::PathBuf;
 
 use komira_proto_codegen::aws_in::lower_aws_service;
 use komira_proto_codegen::emit_aws::{
     emit_aws_module_with_endpoints, emit_layout_probe, AwsEmitOptions, AwsEndpointRules,
-    AwsProvenance, S3_CUSTOMIZATION,
+    AwsProvenance, ROUTE53_CUSTOMIZATION, S3_CUSTOMIZATION,
 };
 use komira_proto_codegen::json::parse;
 use komira_proto_codegen::overrides::AwsOverrides;
@@ -239,13 +243,16 @@ fn parse_args() -> Result<Args, String> {
             "--pure-only" => options.pure_only = true,
             "--customization" => {
                 let c = take(&mut i)?;
-                if c != S3_CUSTOMIZATION {
+                if c == S3_CUSTOMIZATION {
+                    options.s3 = true;
+                } else if c == ROUTE53_CUSTOMIZATION {
+                    options.route53 = true;
+                } else {
                     return Err(format!(
                         "--customization `{c}` is not one this generator has; the set is \
-                         `{S3_CUSTOMIZATION}`"
+                         `{S3_CUSTOMIZATION}`, `{ROUTE53_CUSTOMIZATION}`"
                     ));
                 }
-                options.s3 = true;
             }
             "--operations" => {
                 operations = Some(

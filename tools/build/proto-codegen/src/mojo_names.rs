@@ -3,8 +3,10 @@
 
 use std::collections::HashSet;
 
-const RESERVED: &[&str] = &[
-    // Mojo keywords.
+/// Mojo keywords: no identifier, a module name included, may be one.
+/// tools/build/cloud/gcp.bzl's `_MOJO_KEYWORDS` holds the same list for
+/// the `module_names` it checks before the plugin runs.
+pub const KEYWORDS: &[&str] = &[
     "alias", "and", "as", "async", "await", "break", "comptime", "continue",
     "def", "del", "elif", "else", "except", "False", "fieldwise_init",
     "finally", "fn", "for", "from", "global", "if", "import", "in", "is",
@@ -12,6 +14,11 @@ const RESERVED: &[&str] = &[
     "raise", "raises", "read", "ref", "return", "self", "struct", "trait",
     "True", "try", "var", "while", "with", "yield",
     "imm", "deinit",
+];
+
+/// Names a generated identifier is escaped away from: the keywords, and
+/// the names below.
+const RESERVED: &[&str] = &[
     // Builtin / runtime type names the generated module relies on.
     "Bool", "Int", "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16",
     "UInt32", "UInt64", "Float16", "Float32", "Float64", "String",
@@ -34,7 +41,7 @@ const RESERVED: &[&str] = &[
 /// Idempotent (an already-escaped `fn_` is left alone — it is not in the
 /// reserved set).
 fn escape_reserved(ident: &str) -> String {
-    if RESERVED.contains(&ident) {
+    if KEYWORDS.contains(&ident) || RESERVED.contains(&ident) {
         format!("{ident}_")
     } else {
         ident.to_string()

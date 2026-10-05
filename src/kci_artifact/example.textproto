@@ -101,7 +101,7 @@ artifacts {
   args: "--summary"
   args: "Every komira library of one release."
   args: "--home"
-  args: "https://github.com/komira-ai/komira"
+  args: "https://example.org/project"
   args: "--extra-file"
   args: "info/licenses/LICENSE=LICENSE"
   args: "--label"

@@ -1,7 +1,8 @@
 //! The REST client emitter: for `ProtocolMode::Rest`, one client method per
-//! unary method carrying a `(google.api.http)` annotation, on a client that
-//! starts at the service's `(google.api.default_host)` (or, with none, refuses
-//! to send until its caller names a host).
+//! unary or server-streaming method carrying a `(google.api.http)`
+//! annotation, on a client that starts at the service's
+//! `(google.api.default_host)` (or, with none, refuses to send until its
+//! caller names a host).
 
 use std::fmt::Write as _;
 
@@ -11,14 +12,15 @@ use crate::path_template::{
     percent_encode_simple, BodyDesignator, FieldPartition, PathSegment, PathTemplate, VarPattern,
 };
 
-const REST_PORT: &str = "0";
-
 /// The result of emitting one REST service.
 #[derive(Clone, Debug)]
 pub struct RestServiceEmit {
     /// The generated client-struct source (already indented; appended raw to
     /// the file buffer by the caller).
     pub source: String,
+    /// Whether the source calls `komira_encoding.base64_encode` (a `bytes`
+    /// query parameter), so the file must import it.
+    pub needs_base64: bool,
 }
 
 /// The hand-written GCP core the generated REST clients import from (its
@@ -40,6 +42,35 @@ pub const GCP_TOKEN_SOURCE: &str = "GcpTokenSource";
 /// count. It never copies any other body byte into the message: `error.message`
 /// and `error.details` can carry resource names and request data.
 pub const GCP_STATUS_ERROR: &str = "gcp_status_error";
+
+/// The server-stream reader of [`GCP_CORE`]. Its contract:
+/// `def gcp_rest_stream_items(verb: String, rpc: String, http_status: Int, body: List[UInt8]) raises -> List[String]`
+/// returns the elements of the JSON array a server-streaming method answers
+/// with over REST, each as its JSON text, in stream order; raises an element
+/// that is a `google.rpc.Status` envelope (a failure after the 200 was sent)
+/// through [`GCP_STATUS_ERROR`]; and refuses a body that is not a JSON array
+/// by its byte count, never its bytes.
+pub const GCP_REST_STREAM_ITEMS: &str = "gcp_rest_stream_items";
+
+/// Whether `m` is emitted as a REST server-streaming method: it streams its
+/// responses and not its requests. A client-streaming or bidi method has no
+/// REST mapping (one HTTP request carries one request message) and is
+/// refused by name (`emit_rest_service`).
+pub fn is_rest_server_stream(m: &IrMethod) -> bool {
+    m.server_streaming && !m.client_streaming
+}
+
+/// The import a REST-target file adds when one of its services has a
+/// server-streaming method ([`is_rest_server_stream`]), and only then: the
+/// other files' imports stay as they were.
+pub fn rest_stream_import(file: &IrFile) -> Option<String> {
+    let any = file
+        .services
+        .iter()
+        .flat_map(|s| s.methods.iter())
+        .any(|m| m.http_rule.is_some() && is_rest_server_stream(m));
+    any.then(|| format!("from {GCP_CORE} import {GCP_REST_STREAM_ITEMS}"))
+}
 
 /// The import block a REST-target file needs (replaces the gRPC import set in
 /// `emit.rs::emit_header` when `ProtocolMode::Rest`). One source line per
@@ -67,30 +98,52 @@ pub fn rest_imports() -> &'static [&'static str] {
 }
 
 /// Emit the REST client struct for `svc`, looking up request messages in
-/// `file`. Returns the generated source, or a hard error naming the service
-/// and method for: a streaming method (it has no REST form, and a kept
-/// method that silently generated nothing would be a client missing a
-/// method its target listed), an un-annotated method (the missing-annotation
-/// rule), or a `(google.api.default_host)` that is not a plain host name.
+/// `file` alone ([`emit_rest_service_in`] with no other files). Returns the
+/// generated source, or a hard error naming the service and method for: a
+/// client-streaming or bidi method (it has no REST form, and a kept method
+/// that silently generated nothing would be a client missing a method its
+/// target listed), an un-annotated method (the missing-annotation rule), a
+/// `(google.api.default_host)` that is not a plain host name, or a binding
+/// or query field with no REST form.
 pub fn emit_rest_service(
     file: &IrFile,
     svc: &IrService,
 ) -> Result<RestServiceEmit, String> {
+    emit_rest_service_in(file, &[], svc)
+}
+
+/// [`emit_rest_service`], with the request messages (and the messages of
+/// query parameters) looked up in `file` and then in `peers`, the other files
+/// of the model: a method may take a request declared in an imported
+/// `.proto`.
+pub fn emit_rest_service_in(
+    file: &IrFile,
+    peers: &[IrFile],
+    svc: &IrService,
+) -> Result<RestServiceEmit, String> {
+    let idx = MessageIndex { file, peers };
+    let mut needs_base64 = false;
     let mut w = Writer::new();
 
     // Refusals first, before any text: a service is emitted whole or not at
-    // all.
+    // all. A client-streaming or bidi method has no REST/JSON form (one HTTP
+    // request carries one request message), annotated or not; a target names
+    // every method it generates (`methods`), so one here was ASKED FOR, and
+    // skipping it would leave the client silently without it. A
+    // server-streaming method has one: its whole stream is one HTTP
+    // response, a JSON array (`is_rest_server_stream`).
     for m in &svc.methods {
-        if m.client_streaming || m.server_streaming {
-            let shape = match (m.client_streaming, m.server_streaming) {
-                (true, true) => "bidirectional-streaming",
-                (true, false) => "client-streaming",
-                _ => "server-streaming",
+        if m.client_streaming {
+            let shape = if m.server_streaming {
+                "bidirectional-streaming"
+            } else {
+                "client-streaming"
             };
             return Err(format!(
                 "service `{}` method `{}` is {shape}, and a `rest` target generates \
-                 unary methods only (a streaming method has no REST/JSON form): \
-                 drop it from `methods`, or generate it with `default_protocol=grpc`",
+                 unary and server-streaming methods only (one HTTP request carries \
+                 one request message, so it has no REST/JSON form): drop it from \
+                 `methods`, or generate it with `default_protocol=grpc`",
                 svc.name, m.name
             ));
         }
@@ -171,6 +224,18 @@ pub fn emit_rest_service(
         }
     }
     w.blank();
+    // The port and scheme, for an endpoint other than the service's own: an
+    // emulator speaks plaintext HTTP on a port of its own (the Firestore,
+    // Pub/Sub and Datastore emulators), which Google's client libraries dial
+    // when pointed at it. The defaults are the public endpoint's: https on
+    // the scheme's port.
+    w.line("var _rest_port: UInt16");
+    w.line("\"\"\"The port the request URLs name; 0, the default, is the scheme's.\"\"\"");
+    w.blank();
+    w.line("var _rest_plaintext: Bool");
+    w.line("\"\"\"Whether the request URLs are `http` rather than `https`. False");
+    w.line("    unless `set_rest_endpoint` says otherwise.\"\"\"");
+    w.blank();
     w.line("def __init__(out self, var client: HttpClient[Self.C], var token_source: Self.T):");
     w.indent();
     w.line("\"\"\"Construct with no default headers.\"\"\"");
@@ -178,6 +243,8 @@ pub fn emit_rest_service(
     w.line("self._token_source = token_source^");
     w.line("self._default_headers = HeaderMap()");
     w.line(&format!("self._rest_host = String(\"{initial_host}\")"));
+    w.line("self._rest_port = UInt16(0)");
+    w.line("self._rest_plaintext = False");
     w.dedent();
     w.blank();
     w.line("def __init__(");
@@ -192,6 +259,8 @@ pub fn emit_rest_service(
     w.line("self._token_source = token_source^");
     w.line("self._default_headers = default_headers^");
     w.line(&format!("self._rest_host = String(\"{initial_host}\")"));
+    w.line("self._rest_port = UInt16(0)");
+    w.line("self._rest_plaintext = False");
     w.dedent();
     w.blank();
     w.line("def set_rest_host(mut self, var host: String):");
@@ -201,6 +270,19 @@ pub fn emit_rest_service(
     w.line("    resolution and the injected `Host:` header. An empty host makes");
     w.line("    every method refuse to send.\"\"\"");
     w.line("self._rest_host = host^");
+    w.dedent();
+    w.blank();
+    w.line("def set_rest_endpoint(mut self, var host: String, port: UInt16, plaintext: Bool):");
+    w.indent();
+    w.line("\"\"\"Point the request URLs at an endpoint other than the service's");
+    w.line("    public one: `host`, `port` (0 for the scheme's own) and, with");
+    w.line("    `plaintext`, `http` instead of `https`, which is how an emulator");
+    w.line("    serves. The connector must match the scheme: the `HttpClient`");
+    w.line("    refuses an `http` URL over a TLS connector and an `https` one over");
+    w.line("    a plaintext connector. The bearer token is sent either way.\"\"\"");
+    w.line("self._rest_host = host^");
+    w.line("self._rest_port = port");
+    w.line("self._rest_plaintext = plaintext");
     w.dedent();
     w.blank();
     // The no-host refusal, called first in every method: before the token
@@ -254,12 +336,13 @@ pub fn emit_rest_service(
                 svc.name, m.name
             ));
         };
-        emit_rest_method(&mut w, file, m, rule)?;
+        needs_base64 |= emit_rest_method(&mut w, idx, m, rule)?;
     }
 
     w.dedent();
     Ok(RestServiceEmit {
         source: w.into_source(),
+        needs_base64,
     })
 }
 
@@ -304,50 +387,276 @@ fn rest_default_host(fq_service: &str, svc: &IrService) -> Result<Option<String>
     Ok(Some(host.to_string()))
 }
 
-/// Emit one annotated unary REST method.
-fn emit_rest_method(
-    w: &mut Writer,
-    file: &IrFile,
+/// Where a REST method looks a message type up: the file being emitted
+/// first, then the other files of the same model. A request declared in an
+/// imported `.proto` (`google.iam.v1.GetIamPolicyRequest`, which IAM and
+/// Resource Manager both take) and the message of a query parameter
+/// (`google.iam.v1.GetPolicyOptions`) are found there.
+#[derive(Clone, Copy)]
+struct MessageIndex<'a> {
+    file: &'a IrFile,
+    peers: &'a [IrFile],
+}
+
+impl<'a> MessageIndex<'a> {
+    fn get(&self, fq_name: &str) -> Option<&'a IrMessage> {
+        std::iter::once(self.file)
+            .chain(self.peers.iter())
+            .flat_map(|f| f.messages.iter())
+            .find(|msg| msg.fq_name == fq_name)
+    }
+}
+
+/// The one well-known type a query parameter carries as a single value: its
+/// proto3 JSON form is a plain string (`title,includedPermissions`), which
+/// `google/api/http.proto` sends as the parameter's value.
+const FIELD_MASK: &str = ".google.protobuf.FieldMask";
+
+/// How one query value is rendered.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LeafKind {
+    /// `true` / `false`, lowercase.
+    Bool,
+    /// Standard base64, as proto3 JSON writes `bytes`.
+    Bytes,
+    String,
+    /// Any other scalar.
+    OtherScalar,
+    Enum,
+    /// A `google.protobuf.FieldMask`: its JSON string.
+    FieldMask,
+}
+
+/// One query parameter: its key and where its value is read.
+struct QueryLeaf {
+    /// The key: the field's JSON name, or `parent.child` for a field of a
+    /// message-typed request field.
+    key: String,
+    /// The Mojo expression of the field: `req.page_size`, or
+    /// `_rest_options.requested_policy_version` inside its parent's guard.
+    access: String,
+    label: Label,
+    kind: LeafKind,
+}
+
+/// A query field of the request: a value, or a message whose fields are
+/// sent as `field.subField=` parameters when it is set.
+enum QueryItem {
+    Leaf(QueryLeaf),
+    Nested {
+        /// The request field holding the message (`options`).
+        field: String,
+        leaves: Vec<QueryLeaf>,
+    },
+}
+
+/// The leaf for a scalar or enum field, or `None` for a message or a map.
+fn scalar_leaf(key: String, access: String, fld: &IrField) -> Option<QueryLeaf> {
+    let kind = match &fld.ty {
+        IrType::Scalar(ScalarKind::Bool) => LeafKind::Bool,
+        IrType::Scalar(ScalarKind::Bytes) => LeafKind::Bytes,
+        IrType::Scalar(ScalarKind::String) => LeafKind::String,
+        IrType::Scalar(_) => LeafKind::OtherScalar,
+        IrType::Enum(_) => LeafKind::Enum,
+        _ => return None,
+    };
+    Some(QueryLeaf { key, access, label: fld.label, kind })
+}
+
+/// The query items of `fields`, as `google/api/http.proto` maps them: a
+/// scalar, enum or repeated scalar is one parameter (repeated: one per
+/// element); a non-repeated message whose own fields are all scalars is one
+/// parameter per field, keyed `field.subField`, sent only when the message
+/// is set; a `FieldMask` is one parameter, its JSON string. Anything else
+/// (a repeated message, a map, a message holding a message) has no query
+/// form and is refused by name.
+fn query_items(
     m: &IrMethod,
-    rule: &IrHttpRule,
-) -> Result<(), String> {
-    let method_name = rpc_method_name(&m.name);
-    let req_ty = &m.input.mojo_name;
-    let resp_ty = &m.output.mojo_name;
-
-    let req_msg = file
-        .messages
-        .iter()
-        .find(|msg| msg.fq_name == m.input.fq_name)
-        .ok_or_else(|| {
-            format!(
-                "REST method `{}`: request type `{}` not found in this file \
-                 (cross-file request types are unsupported in Phase 1)",
-                m.name, m.input.fq_name
-            )
-        })?;
-
-    let template = PathTemplate::parse(&rule.path_template)
-        .map_err(|e| format!("REST method `{}`: {e}", m.name))?;
-
-    let leaf_fields: Vec<String> =
-        req_msg.fields.iter().map(|f| f.name.clone()).collect();
-    let part = partition_or_err(m, &leaf_fields, &template, &rule.body)?;
-
-    let mut bool_fields: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
-    for f in part.path_fields.iter().chain(part.query_fields.iter()) {
+    idx: MessageIndex<'_>,
+    req_msg: &IrMessage,
+    fields: &[String],
+) -> Result<Vec<QueryItem>, String> {
+    let mut items = Vec::new();
+    for f in fields {
         let fld = req_msg
             .fields
             .iter()
             .find(|x| &x.name == f)
             .expect("partition field came from the message");
-        // A repeated scalar is a repeated query key (`?k=a&k=b`); a path
-        // variable is one value, so a repeated one has no expansion.
-        if matches!(fld.label, Label::Repeated) && part.path_fields.contains(f) {
+        if fld.oneof_index.is_some() {
+            return Err(oneof_url_field(m, f));
+        }
+        if let Some(leaf) = scalar_leaf(fld.json_name.clone(), format!("req.{f}"), fld) {
+            items.push(QueryItem::Leaf(leaf));
+            continue;
+        }
+        let tref = match &fld.ty {
+            IrType::Message(tref) => tref,
+            IrType::Map(..) => {
+                return Err(format!(
+                    "REST method `{}`: query field `{f}` is a map, which has no query form",
+                    m.name
+                ))
+            }
+            // Scalars and enums were taken above; a nested list is built
+            // only by the AWS front end, never for a proto field.
+            _ => {
+                return Err(format!(
+                    "REST method `{}`: query field `{f}` is a list of lists, which has no \
+                     query form",
+                    m.name
+                ))
+            }
+        };
+        if fld.label == Label::Repeated {
+            return Err(format!(
+                "REST method `{}`: query field `{f}` is a repeated message, which has no \
+                 query form",
+                m.name
+            ));
+        }
+        if tref.fq_name == FIELD_MASK {
+            items.push(QueryItem::Leaf(QueryLeaf {
+                key: fld.json_name.clone(),
+                access: format!("req.{f}"),
+                label: Label::Optional,
+                kind: LeafKind::FieldMask,
+            }));
+            continue;
+        }
+        // Any other well-known type is one parameter too, its JSON string
+        // (`2026-10-01T00:00:00Z`, `1.5s`), never `ts.seconds=&ts.nanos=`:
+        // sending its fields would be wrong even if its file were generated.
+        if tref.fq_name.starts_with(".google.protobuf.") {
+            return Err(format!(
+                "REST method `{}`: query field `{f}` is a `{}`, whose query form is its \
+                 JSON string, which is implemented only for `{FIELD_MASK}`",
+                m.name, tref.fq_name
+            ));
+        }
+        let sub = idx.get(&tref.fq_name).ok_or_else(|| {
+            format!(
+                "REST method `{}`: query field `{f}` is a `{}`, which is not declared in \
+                 the generated files, so its fields cannot be sent",
+                m.name, tref.fq_name
+            )
+        })?;
+        let mut leaves = Vec::new();
+        for sf in &sub.fields {
+            let key = format!("{}.{}", fld.json_name, sf.json_name);
+            let access = format!("_rest_{f}.{}", sf.name);
+            match scalar_leaf(key, access, sf) {
+                Some(leaf) if sf.oneof_index.is_none() => leaves.push(leaf),
+                _ => {
+                    return Err(format!(
+                        "REST method `{}`: query field `{f}` is a `{}` whose field `{}` is \
+                         not a plain scalar, so it has no query form",
+                        m.name, tref.fq_name, sf.name
+                    ))
+                }
+            }
+        }
+        items.push(QueryItem::Nested { field: f.clone(), leaves });
+    }
+    Ok(items)
+}
+
+/// Emit one annotated unary or server-streaming REST method. Returns
+/// whether its code calls
+/// `base64_encode` (a `bytes` query parameter), whose import the file then
+/// needs.
+fn emit_rest_method(
+    w: &mut Writer,
+    idx: MessageIndex<'_>,
+    m: &IrMethod,
+    rule: &IrHttpRule,
+) -> Result<bool, String> {
+    let method_name = rpc_method_name(&m.name);
+    let req_ty = &m.input.mojo_name;
+    let resp_ty = &m.output.mojo_name;
+
+    let req_msg = idx.get(&m.input.fq_name).ok_or_else(|| {
+        format!(
+            "REST method `{}`: request type `{}` is not declared in the generated files: \
+             add the .proto declaring it to the files to generate",
+            m.name, m.input.fq_name
+        )
+    })?;
+
+    let leaf_fields: Vec<String> =
+        req_msg.fields.iter().map(|f| f.name.clone()).collect();
+
+    // The rule and its additional bindings: one generated method sends the
+    // request to the first whose path variables its values match.
+    let mut bindings: Vec<(&IrHttpRule, PathTemplate)> = Vec::new();
+    let mut part: Option<FieldPartition> = None;
+    for b in std::iter::once(rule).chain(rule.additional_bindings.iter()) {
+        let template = PathTemplate::parse(&b.path_template)
+            .map_err(|e| format!("REST method `{}`: {e}", m.name))?;
+        let p = partition_or_err(m, &leaf_fields, &template, &b.body)?;
+        if let Some(first) = &part {
+            if b.verb != rule.verb || b.body != rule.body {
+                return Err(format!(
+                    "REST method `{}`: additional binding `{}` is `{}` with body {:?}, \
+                     but `{}` is `{}` with body {:?}: a generated method sends one verb \
+                     and one body form, so every binding must share them",
+                    m.name, b.path_template, b.verb, b.body, rule.path_template,
+                    rule.verb, rule.body
+                ));
+            }
+            let mut a = first.path_fields.clone();
+            let mut z = p.path_fields.clone();
+            a.sort();
+            z.sort();
+            if a != z {
+                return Err(format!(
+                    "REST method `{}`: additional binding `{}` binds the path fields \
+                     {z:?}, and `{}` binds {a:?}: every binding must bind the same \
+                     fields, so that the query is the same whichever one matches",
+                    m.name, b.path_template, rule.path_template
+                ));
+            }
+        } else {
+            part = Some(p);
+        }
+        bindings.push((b, template));
+    }
+    let part = part.expect("the rule itself is the first binding");
+
+    let mut bool_fields: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    let mut enum_fields: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    // Each path variable's field, a dotted one resolved through the message
+    // fields it names: the leaf is what is checked and rendered, and the
+    // fields before it are the messages that must be present.
+    let mut nested: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for f in part.path_fields.iter() {
+        let (via, fld) = resolve_path_field(idx, m, req_msg, f)?;
+        if !via.is_empty() {
+            nested.insert(f.clone(), via);
+        }
+        // A path variable is one value, so a repeated one has no expansion.
+        if matches!(fld.label, Label::Repeated) {
             return Err(format!(
                 "REST method `{}`: path variable `{}` is a `repeated` field; a \
                  path variable takes one value",
+                m.name, f
+            ));
+        }
+        // A oneof arm is held in its oneof's storage, not as `req.<field>`,
+        // so the URL has no expression to read it through.
+        if fld.oneof_index.is_some() {
+            return Err(oneof_url_field(m, f));
+        }
+        // A path variable is read as `req.<field>` itself: a proto3
+        // `optional` one is an `Optional`, with no value to put in the path
+        // when unset.
+        if fld.label == Label::Optional && is_scalar(&fld.ty) {
+            return Err(format!(
+                "REST method `{}`: path variable `{}` is a proto3 `optional` \
+                 field; a path variable takes a value the request always has",
                 m.name, f
             ));
         }
@@ -368,35 +677,107 @@ fn emit_rest_method(
         if matches!(&fld.ty, IrType::Scalar(ScalarKind::Bool)) {
             bool_fields.insert(f.clone());
         }
+        if matches!(&fld.ty, IrType::Enum(_)) {
+            enum_fields.insert(f.clone());
+        }
     }
+    let url_fields = UrlFields { bools: &bool_fields, enums: &enum_fields };
+    let items = query_items(m, idx, req_msg, &part.query_fields)?;
+    let needs_base64 = items.iter().any(|item| match item {
+        QueryItem::Leaf(l) => l.kind == LeafKind::Bytes,
+        QueryItem::Nested { leaves, .. } => leaves.iter().any(|l| l.kind == LeafKind::Bytes),
+    });
 
     let verb = rule.verb.as_str();
     let has_body = !matches!(part.body, BodyDesignator::None);
 
+    let streaming = is_rest_server_stream(m);
+    let ret_ty = if streaming {
+        format!("List[{resp_ty}]")
+    } else {
+        resp_ty.clone()
+    };
     w.line(&format!(
         "def {method_name}[RT: Runtime](mut self, req: {req_ty}, \
-         mut reactor: Reactor[RT.Sink]) raises -> {resp_ty}:"
+         mut reactor: Reactor[RT.Sink]) raises -> {ret_ty}:"
     ));
     w.indent();
-    w.line(&format!(
-        "\"\"\"{} `{}` — REST/JSON.\"\"\"",
-        verb.to_uppercase(),
-        rule.path_template
-    ));
+    let target = if bindings.len() == 1 {
+        format!("`{}`", rule.path_template)
+    } else {
+        bindings
+            .iter()
+            .map(|(b, _)| format!("`{}`", b.path_template))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if streaming {
+        // The whole stream is one HTTP response, a JSON array of responses
+        // (`GCP_REST_STREAM_ITEMS`), read to its end before this returns.
+        let which = if bindings.len() == 1 {
+            ""
+        } else {
+            ", to the first path the request's values match"
+        };
+        w.line(&format!(
+            "\"\"\"{} {target} — REST/JSON, server-streaming{which}: every response",
+            verb.to_uppercase(),
+        ));
+        w.line("    of the stream, in order, once the stream has ended.\"\"\"");
+    } else if bindings.len() == 1 {
+        w.line(&format!(
+            "\"\"\"{} `{}` — REST/JSON.\"\"\"",
+            verb.to_uppercase(),
+            rule.path_template
+        ));
+    } else {
+        w.line(&format!(
+            "\"\"\"{} {target} — REST/JSON, to the first path the request's values match.\"\"\"",
+            verb.to_uppercase(),
+        ));
+    }
     // No host, no request: refused before the token source is asked and
     // before anything is dialled.
     w.line(&format!("self._rest_require_host(String(\"{method_name}\"))"));
 
+    // A dotted path variable reads through message fields; an unset one
+    // leaves the path without its resource name, so the call is refused
+    // before the token source is asked.
+    for (var, via) in &nested {
+        for depth in 1..=via.len() {
+            let guard = access_expr(&via[..depth]);
+            let unset = via[..depth].join(".");
+            w.line(&format!("if not {guard}:"));
+            w.indent();
+            w.line(&format!(
+                "raise Error(String(\"{method_name}: the request's `{unset}` is unset, \
+                 and the path is built from `{var}`\"))"
+            ));
+            w.dedent();
+        }
+    }
+
     // -- path substitution ---------------------------------------------------
-    emit_path_build(w, &template, &bool_fields);
+    if bindings.len() == 1 {
+        w.line("var path = String(\"\")");
+        emit_path_segments(w, &bindings[0].1, &url_fields);
+    } else {
+        emit_path_alternatives(w, m, &bindings, &url_fields);
+    }
 
     // -- query params --------------------------------------------------------
-    emit_query_build(w, &part, &bool_fields, req_msg);
+    emit_query_build(w, &items);
 
-    w.line(&format!(
-        "var url = Url.https(self._rest_host.copy(), UInt16({REST_PORT}), path^)"
-    ));
-    if !part.query_fields.is_empty() {
+    w.line("var url: Url");
+    w.line("if self._rest_plaintext:");
+    w.indent();
+    w.line("url = Url.http(self._rest_host.copy(), self._rest_port, path^)");
+    w.dedent();
+    w.line("else:");
+    w.indent();
+    w.line("url = Url.https(self._rest_host.copy(), self._rest_port, path^)");
+    w.dedent();
+    if !items.is_empty() {
         w.line("url.query = query^");
     }
 
@@ -494,6 +875,26 @@ fn emit_rest_method(
     // -- response decode -----------------------------------------------------
     // Lenient: a field the server added after these protos were pinned is
     // skipped, not an error (the proto3 JSON forward-compatibility rule).
+    if streaming {
+        // Each element through the same lenient codec read as a unary
+        // response; an error element raises in the core, not here.
+        w.line(&format!(
+            "var _rest_items = {GCP_REST_STREAM_ITEMS}(String(\"{}\"), String(\"{}\"), status_int, resp_bytes)",
+            verb.to_uppercase(),
+            m.name
+        ));
+        w.line(&format!("var _rest_out = List[{resp_ty}]()"));
+        w.line("for _rest_item in _rest_items:");
+        w.indent();
+        w.line(&format!(
+            "_rest_out.append(decode_json_lenient[{resp_ty}](_rest_item))"
+        ));
+        w.dedent();
+        w.line("return _rest_out^");
+        w.dedent();
+        w.blank();
+        return Ok(needs_base64);
+    }
     w.line(
         "var resp_text = String(unsafe_from_utf8=Span(resp_bytes))",
     );
@@ -509,18 +910,66 @@ fn emit_rest_method(
     w.line(&format!("return decode_json_lenient[{resp_ty}](resp_text)"));
     w.dedent();
     w.blank();
-    Ok(())
+    Ok(needs_base64)
 }
 
-/// Emit the path-string build: `var path = String("") + "/" + seg + ...`, each
-/// variable filled from its request field, then the `:verb` suffix.
-fn emit_path_build(
+/// Emit the path of a method with additional bindings: each binding's path
+/// is tried in declaration order, and the first whose variables the
+/// request's values match is sent. A binding that does not match raises in
+/// `_rest_path_var` / `_rest_path_segment`, which is caught, and the next is
+/// tried; when none matches, the method raises naming every template (never
+/// a value). A built path is never empty (it starts with `/`), so an empty
+/// one means "not matched yet".
+fn emit_path_alternatives(
     w: &mut Writer,
-    template: &PathTemplate,
-    bool_fields: &std::collections::BTreeSet<String>,
+    m: &IrMethod,
+    bindings: &[(&IrHttpRule, PathTemplate)],
+    url_fields: &UrlFields,
 ) {
-    // Build the path incrementally so a variable's runtime value is encoded.
     w.line("var path = String(\"\")");
+    for (i, (_, template)) in bindings.iter().enumerate() {
+        if i > 0 {
+            w.line("if path.byte_length() == 0:");
+            w.indent();
+        }
+        // The bare `except` catches only a mismatch: the block is
+        // `emit_path_segments`' `path += ...` lines alone, where a String
+        // append and `_rest_to_str` / `_rest_bool_str` cannot raise, so the
+        // only raises are `_rest_path_var` / `_rest_path_segment` refusing
+        // this binding's value (the unit test
+        // `a_binding_fallback_catches_only_the_path_helpers` holds this).
+        w.line("# Only a path variable that does not match this binding raises here.");
+        w.line("try:");
+        w.indent();
+        emit_path_segments(w, template, url_fields);
+        w.dedent();
+        w.line("except:");
+        w.indent();
+        w.line("path = String(\"\")");
+        w.dedent();
+        if i > 0 {
+            w.dedent();
+        }
+    }
+    let paths: Vec<String> = bindings
+        .iter()
+        .map(|(b, _)| b.path_template.replace('\\', "\\\\").replace('"', "\\\""))
+        .collect();
+    w.line("if path.byte_length() == 0:");
+    w.indent();
+    w.line(&format!(
+        "raise Error(String(\"REST method {}: the request matches none of its paths: {}\"))",
+        m.name,
+        paths.join(", ")
+    ));
+    w.dedent();
+}
+
+/// Emit the `path += ...` lines of one template: each literal, each
+/// variable filled from its request field, then the `:verb` suffix. The
+/// caller declares `path`.
+fn emit_path_segments(w: &mut Writer, template: &PathTemplate, url_fields: &UrlFields) {
+    // Build the path incrementally so a variable's runtime value is encoded.
     for seg in &template.segments {
         match seg {
             PathSegment::Literal(lit) => {
@@ -530,7 +979,8 @@ fn emit_path_build(
                 ));
             }
             PathSegment::Var(var) => {
-                let value = field_to_str_expr(&var.field, bool_fields);
+                let parts: Vec<&str> = var.field.split('.').collect();
+                let value = url_fields.render(&access_expr(&parts), &var.field);
                 w.line("path += String(\"/\")");
                 match &var.pattern {
                     // `{field}` / `{field=*}`: one segment, `/` included in
@@ -568,90 +1018,201 @@ fn emit_path_build(
     }
 }
 
-/// The Mojo expression that stringifies `req.{field}` for URL path/query use.
-/// A proto `bool` field MUST render as proto3-JSON lowercase `true`/`false`
-/// (`_rest_bool_str`); Mojo's generic `String(Bool)` yields `True`/`False`,
-/// which is wrong on the wire. Every other scalar uses the generic
-/// `_rest_to_str`.
-fn field_to_str_expr(
-    field: &str,
-    bool_fields: &std::collections::BTreeSet<String>,
-) -> String {
-    if bool_fields.contains(field) {
-        format!("_rest_bool_str(req.{field})")
-    } else {
-        format!("_rest_to_str(req.{field})")
+/// The path variables of one method whose URL rendering is not the generic
+/// `_rest_to_str`: its `bool` fields and its enum fields.
+struct UrlFields<'a> {
+    bools: &'a std::collections::BTreeSet<String>,
+    enums: &'a std::collections::BTreeSet<String>,
+}
+
+impl UrlFields<'_> {
+    /// The Mojo expression that stringifies `expr`, a value of request field
+    /// `field`, for the path. A proto `bool` MUST render as proto3-JSON
+    /// lowercase `true`/`false` (`_rest_bool_str`); Mojo's generic
+    /// `String(Bool)` yields `True`/`False`, which is wrong on the wire. An
+    /// enum renders as its value's proto name ([`enum_url_str`]). Every
+    /// other scalar uses `_rest_to_str`.
+    fn render(&self, expr: &str, field: &str) -> String {
+        if self.bools.contains(field) {
+            format!("_rest_bool_str({expr})")
+        } else if self.enums.contains(field) {
+            enum_url_str(expr)
+        } else {
+            format!("_rest_to_str({expr})")
+        }
     }
 }
 
-fn emit_query_build(
-    w: &mut Writer,
-    part: &FieldPartition,
-    bool_fields: &std::collections::BTreeSet<String>,
-    req_msg: &IrMessage,
-) {
-    if part.query_fields.is_empty() {
+/// An enum value in the URL: its proto name (`json_name()`, the proto3 JSON
+/// form, which `google.api.http` reads in a path or query), never its
+/// number. The generated enum wrapper is not `Writable`, so `_rest_to_str`
+/// would not compile.
+fn enum_url_str(expr: &str) -> String {
+    format!("{expr}.json_name()")
+}
+
+/// The refusal of a URL field (path or query) that is an arm of a oneof.
+fn oneof_url_field(m: &IrMethod, f: &str) -> String {
+    format!(
+        "REST method `{}`: field `{f}` is used in the path/query but is an arm \
+         of a oneof, which no URL field reads",
+        m.name
+    )
+}
+
+/// The Mojo expression reading the request field at `path`: `req.name`, or
+/// through each singular message field before the last (each an
+/// `Optional`, checked present first), `req.service.value().name`.
+fn access_expr<S: AsRef<str>>(path: &[S]) -> String {
+    let parts: Vec<&str> = path.iter().map(|s| s.as_ref()).collect();
+    format!("req.{}", parts.join(".value()."))
+}
+
+/// Resolve the path variable `var` of method `m` against its request
+/// `req_msg`: the message fields a dotted variable reads through (empty for
+/// a plain one) and its leaf field. Each field before the leaf must be a
+/// singular, non-oneof message field, held in its own `Optional` (not a
+/// recursion box), declared in the generated files.
+fn resolve_path_field<'a>(
+    idx: MessageIndex<'a>,
+    m: &IrMethod,
+    req_msg: &'a IrMessage,
+    var: &str,
+) -> Result<(Vec<String>, &'a IrField), String> {
+    let parts: Vec<&str> = var.split('.').collect();
+    let mut msg = req_msg;
+    let mut via: Vec<String> = Vec::new();
+    for (i, part) in parts.iter().enumerate() {
+        let fld = msg.fields.iter().find(|f| f.name == *part).ok_or_else(|| {
+            format!(
+                "REST method `{}`: path variable `{var}` names `{part}`, which is \
+                 not a field of `{}`",
+                m.name, msg.fq_name
+            )
+        })?;
+        if i + 1 == parts.len() {
+            return Ok((via, fld));
+        }
+        let next = match (&fld.ty, fld.label, fld.oneof_index) {
+            (IrType::Message(t), Label::Single | Label::Optional, None) => t,
+            _ => {
+                return Err(format!(
+                    "REST method `{}`: path variable `{var}` reads through `{part}`, \
+                     which is not a singular message field outside a oneof",
+                    m.name
+                ))
+            }
+        };
+        let owner = std::iter::once(idx.file)
+            .chain(idx.peers.iter())
+            .find(|f| f.messages.iter().any(|x| x.fq_name == msg.fq_name));
+        if let Some(owner) = owner {
+            if crate::lower::recursion_breaking_edges(owner)
+                .contains(&(msg.mojo_name.clone(), fld.name.clone()))
+            {
+                return Err(format!(
+                    "REST method `{}`: path variable `{var}` reads through `{part}`, \
+                     a field that closes a message cycle (it is boxed, not an \
+                     Optional)",
+                    m.name
+                ));
+            }
+        }
+        msg = idx.get(&next.fq_name).ok_or_else(|| {
+            format!(
+                "REST method `{}`: path variable `{var}` reads through `{}`, which \
+                 is not declared in the generated files",
+                m.name, next.fq_name
+            )
+        })?;
+        via.push(part.to_string());
+    }
+    unreachable!("a path variable has at least one component")
+}
+
+fn emit_query_build(w: &mut Writer, items: &[QueryItem]) {
+    if items.is_empty() {
         return;
     }
     w.line("var query = String(\"\")");
-    for f in part.query_fields.iter() {
-        // The query KEY is the field's proto3-JSON `json_name` (lowerCamel),
-        // NOT the snake_case proto field name: `google.api.http` maps a query
-        // parameter to the field's JSON name, so the emitted key matches the
-        // live wire (`includeArchived`, `archivedOnly`, `orgId`, ...). The
-        // VALUE is still read from the Mojo struct field (`req.<field>`) — the
-        // struct field keeps the snake_case proto name. (When json_name equals
-        // the field name — the common single-word case — this is a no-op.)
-        let fld = req_msg.fields.iter().find(|x| &x.name == f);
-        let key = fld.map(|x| x.json_name.as_str()).unwrap_or(f.as_str());
-        let label = fld.map(|x| x.label).unwrap_or(Label::Single);
-        let stringify = |expr: &str| {
-            if bool_fields.contains(f) {
-                format!("_rest_bool_str({expr})")
-            } else {
-                format!("_rest_to_str({expr})")
+    for item in items {
+        match item {
+            QueryItem::Leaf(leaf) => emit_query_leaf(w, leaf),
+            // A message field: its fields are sent only when it is set. The
+            // binding is named for the field (an identifier), so it cannot
+            // collide with another item's.
+            QueryItem::Nested { field, leaves } => {
+                w.line(&format!("if req.{field}:"));
+                w.indent();
+                w.line(&format!("ref _rest_{field} = req.{field}.value()"));
+                for leaf in leaves {
+                    emit_query_leaf(w, leaf);
+                }
+                w.dedent();
             }
-        };
-        // An `Optional[T]` field reads through `.value()` INSIDE its presence
-        // check; a repeated one appends its key once per element, in order
-        // (`?resourceNames=a&resourceNames=b`); a plain field reads directly.
-        let (guard, value_expr) = match label {
-            Label::Optional => (Some(format!("if req.{f}:")), stringify(&format!("req.{f}.value()"))),
-            Label::Repeated => (Some(format!("for _rest_v in req.{f}:")), stringify("_rest_v")),
-            // An implicit-presence scalar at its default is omitted, as the
-            // proto3 JSON mapping omits it: no `pageToken=` on a first page.
-            // An enum renders whatever its value is.
-            Label::Single => {
-                let guard = match fld.map(|x| &x.ty) {
-                    Some(IrType::Scalar(ScalarKind::String)) => Some(format!("if req.{f}.byte_length() > 0:")),
-                    Some(IrType::Scalar(ScalarKind::Bool)) => Some(format!("if req.{f}:")),
-                    Some(IrType::Scalar(_)) => Some(format!("if req.{f} != 0:")),
-                    _ => None,
-                };
-                (guard, field_to_str_expr(f, bool_fields))
-            }
-        };
-        if let Some(g) = &guard {
-            w.line(g);
-            w.indent();
-        }
-        w.line("if query.byte_length() > 0:");
-        w.indent();
-        w.line("query += String(\"&\")");
-        w.dedent();
-        w.line(&format!(
-            "query += String(\"{}=\") + _rest_pct_encode({})",
-            percent_encode_simple(key),
-            value_expr
-        ));
-        if guard.is_some() {
-            w.dedent();
         }
     }
 }
 
-/// Emit the JSON-body build. For `body: "*"` the whole `req` serializes; for a
-/// named field the single field's message serializes. Both go through
+/// Emit one query parameter. The KEY is the field's proto3-JSON `json_name`
+/// (lowerCamel), NOT the snake_case proto field name: `google.api.http` maps
+/// a query parameter to the field's JSON name, so the emitted key matches the
+/// live wire (`includeArchived`, `pageToken`, ...); a field of a message
+/// field is `parent.child`. The VALUE is read from the Mojo struct field,
+/// which keeps the snake_case proto name.
+fn emit_query_leaf(w: &mut Writer, leaf: &QueryLeaf) {
+    let acc = &leaf.access;
+    let stringify = |expr: &str| match leaf.kind {
+        LeafKind::Bool => format!("_rest_bool_str({expr})"),
+        LeafKind::Bytes => format!("base64_encode(Span({expr}))"),
+        LeafKind::FieldMask => format!("{expr}.to_proto3_json()"),
+        LeafKind::Enum => enum_url_str(expr),
+        LeafKind::String | LeafKind::OtherScalar => format!("_rest_to_str({expr})"),
+    };
+    // An `Optional[T]` field reads through `.value()` INSIDE its presence
+    // check; a repeated one appends its key once per element, in order
+    // (`?resourceNames=a&resourceNames=b`); a plain field reads directly.
+    let (guard, value_expr) = match leaf.label {
+        Label::Optional => (Some(format!("if {acc}:")), stringify(&format!("{acc}.value()"))),
+        Label::Repeated => (Some(format!("for _rest_v in {acc}:")), stringify("_rest_v")),
+        // An implicit-presence scalar or enum at its default is omitted, as
+        // the proto3 JSON mapping omits it: no `pageToken=` on a first page,
+        // no `view=VIEW_UNSPECIFIED` when the caller set no view.
+        Label::Single => {
+            let guard = match leaf.kind {
+                LeafKind::String => Some(format!("if {acc}.byte_length() > 0:")),
+                LeafKind::Bool => Some(format!("if {acc}:")),
+                LeafKind::Bytes => Some(format!("if len({acc}) > 0:")),
+                LeafKind::OtherScalar => Some(format!("if {acc} != 0:")),
+                LeafKind::Enum => Some(format!("if {acc}.number() != 0:")),
+                LeafKind::FieldMask => None,
+            };
+            (guard, stringify(acc))
+        }
+    };
+    if let Some(g) = &guard {
+        w.line(g);
+        w.indent();
+    }
+    w.line("if query.byte_length() > 0:");
+    w.indent();
+    w.line("query += String(\"&\")");
+    w.dedent();
+    w.line(&format!(
+        "query += String(\"{}=\") + _rest_pct_encode({})",
+        percent_encode_simple(&leaf.key),
+        value_expr
+    ));
+    if guard.is_some() {
+        w.dedent();
+    }
+}
+
+/// Emit the JSON-body build. For `body: "*"` the whole `req` serializes, less
+/// the fields its path binds: `google/api/http.proto` defines that body as
+/// every field *not* bound by the path template, so a field the URL carries is
+/// left out of the body (`_rest_drop_members`). For a named field the single
+/// field's message serializes. Both go through
 /// `komira_proto_codec.codec.encode_json`, so a well-known type writes its
 /// canonical JSON value.
 fn emit_body_build(
@@ -664,8 +1225,41 @@ fn emit_body_build(
     // value, which only the codec's comptime branch does. For any other
     // message it is the same encode + `finish()`.
     match &part.body {
-        BodyDesignator::Whole => {
+        BodyDesignator::Whole if part.path_fields.is_empty() => {
             w.line("var body_text = encode_json(req)");
+        }
+        BodyDesignator::Whole => {
+            // The members are dropped from the encoded text by JSON name, so
+            // every other value keeps the codec's exact rendering.
+            let mut names = Vec::new();
+            for f in &part.path_fields {
+                // The members are dropped by their top-level name; a dotted
+                // path field is a member of a body message, which this does
+                // not reach.
+                if f.contains('.') {
+                    return Err(format!(
+                        "REST body `*` with the dotted path variable `{f}`: a \
+                         whole-request body leaves out the fields its path binds, \
+                         and a field of a body message cannot be left out"
+                    ));
+                }
+                let fld = req_msg
+                    .fields
+                    .iter()
+                    .find(|x| &x.name == f)
+                    .expect("partition field came from the message");
+                names.push(format!(
+                    "String(\"{}\")",
+                    fld.json_name.replace('\\', "\\\\").replace('"', "\\\"")
+                ));
+            }
+            w.line(&format!(
+                "var _rest_path_members: List[String] = [{}]",
+                names.join(", ")
+            ));
+            w.line(
+                "var body_text = _rest_drop_members(encode_json(req), _rest_path_members)",
+            );
         }
         BodyDesignator::Field(name) => {
             let fld = req_msg
@@ -833,6 +1427,79 @@ def _rest_path_var(value: String, pattern: String, field: String) raises -> Stri
             + String("` has an empty, `.` or `..` segment")
         )
     return out^
+
+
+def _rest_drop_members(json: String, names: List[String]) raises -> String:
+    """`json` without its top-level members whose key is in `names`: the
+    `body: "*"` of a method whose path binds fields, which
+    `google/api/http.proto` defines as every field the path does not bind.
+    `json` is an object as `encode_json` writes it, with no whitespace; each
+    kept member is copied byte for byte, so no value is rendered again. An
+    error never echoes the text."""
+    var b = json.as_bytes()
+    var n = len(b)
+    if n < 2 or b[0] != 0x7B or b[n - 1] != 0x7D:
+        raise Error(String("REST body is not a JSON object"))
+    var out = List[UInt8](capacity=n)
+    out.append(0x7B)  # '{'
+    var kept = 0
+    var i = 1
+    while i < n - 1:
+        var start = i
+        # The key: a JSON string, its escapes skipped.
+        if b[i] != 0x22:
+            raise Error(String("REST body member has no key"))
+        var k = i + 1
+        while k < n - 1 and b[k] != 0x22:
+            if b[k] == 0x5C:
+                k += 1
+            k += 1
+        if k + 1 >= n - 1 or b[k] != 0x22 or b[k + 1] != 0x3A:
+            raise Error(String("REST body member has no key"))
+        var drop = False
+        for name in names:
+            var nb = name.as_bytes()
+            if len(nb) == k - i - 1:
+                var same = True
+                var t = 0
+                while same and t < len(nb):
+                    same = nb[t] == b[i + 1 + t]
+                    t += 1
+                if same:
+                    drop = True
+        # The value: up to the `,` at this depth, or the closing `}`.
+        var depth = 0
+        var in_str = False
+        var j = k + 2
+        while j < n - 1:
+            var c = b[j]
+            if in_str:
+                if c == 0x5C:
+                    j += 1
+                elif c == 0x22:
+                    in_str = False
+            elif c == 0x22:
+                in_str = True
+            elif c == 0x7B or c == 0x5B:
+                depth += 1
+            elif c == 0x7D or c == 0x5D:
+                depth -= 1
+            elif c == 0x2C and depth == 0:
+                break
+            j += 1
+        if in_str or depth != 0 or j > n - 1:
+            raise Error(String("REST body member has an unterminated value"))
+        if not drop:
+            if kept > 0:
+                out.append(0x2C)  # ','
+            var x = start
+            while x < j:
+                out.append(b[x])
+                x += 1
+            kept += 1
+        i = j + 1
+    out.append(0x7D)  # '}'
+    return String(unsafe_from_utf8=Span(out))
 
 
 def _rest_hex_upper(nibble: UInt8) -> String:
@@ -1026,6 +1693,7 @@ mod tests {
                     verb: "get".into(),
                     path_template: "/v1/shelves/{shelf}".into(),
                     body: "".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1073,6 +1741,7 @@ mod tests {
                     verb: "get".into(),
                     path_template: "/v1/thing".into(),
                     body: "".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1092,13 +1761,17 @@ mod tests {
         );
     }
 
-    fn streaming_svc(client: bool, server: bool, annotated: bool) -> (IrFile, IrService) {
+    fn stream_method(
+        client_streaming: bool,
+        server_streaming: bool,
+        annotated: bool,
+    ) -> (IrFile, IrService) {
         let req = IrMessage {
             name: "Req".into(),
             mojo_name: "Req".into(),
             fq_name: ".tiny.rest.v1.Req".into(),
             is_map_entry: false,
-            fields: vec![],
+            fields: vec![scalar_field("parent", ScalarKind::String)],
             oneofs: vec![],
         };
         let ty = TypeRef { fq_name: ".tiny.rest.v1.Req".into(), mojo_name: "Req".into() };
@@ -1106,16 +1779,17 @@ mod tests {
             name: "Svc".into(),
             default_host: None,
             methods: vec![IrMethod {
-                name: "Stream".into(),
+                name: "RunQuery".into(),
                 input: ty.clone(),
                 output: ty,
-                client_streaming: client,
-                server_streaming: server,
+                client_streaming,
+                server_streaming,
                 idempotent: false,
                 http_rule: annotated.then(|| IrHttpRule {
-                    verb: "get".into(),
-                    path_template: "/v1/stream".into(),
-                    body: "".into(),
+                    verb: "post".into(),
+                    path_template: "/v1/{parent=projects/*}:runQuery".into(),
+                    body: "*".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1124,29 +1798,67 @@ mod tests {
     }
 
     #[test]
-    fn streaming_method_is_refused_by_name() {
-        for (client, server, shape) in [
-            (false, true, "server-streaming"),
-            (true, false, "client-streaming"),
-            (true, true, "bidirectional-streaming"),
-        ] {
-            let (file, svc) = streaming_svc(client, server, true);
-            let err = emit_rest_service(&file, &svc).unwrap_err();
-            assert!(
-                err.contains(&format!("service `Svc` method `Stream` is {shape}")),
-                "{err}"
-            );
-            assert!(err.contains("drop it from `methods`"), "{err}");
+    fn server_streaming_method_reads_the_array_through_the_core() {
+        let (file, svc) = stream_method(false, true, true);
+        let emit = emit_rest_service(&file, &svc).unwrap();
+        let src = &emit.source;
+        assert!(
+            src.contains("mut reactor: Reactor[RT.Sink]) raises -> List[Req]:"),
+            "{src}"
+        );
+        // The no-host refusal comes first, as for a unary method.
+        let guard = src.find("self._rest_require_host(String(\"run_query\"))").unwrap();
+        // The status line is checked first, as for a unary method.
+        let status = src.find("if status_int < 200 or status_int >= 300:").unwrap();
+        let items = src
+            .find("var _rest_items = gcp_rest_stream_items(String(\"POST\"), String(\"RunQuery\"), status_int, resp_bytes)")
+            .unwrap();
+        assert!(guard < status && status < items);
+        assert!(src.contains("_rest_out.append(decode_json_lenient[Req](_rest_item))"));
+        assert!(src.contains("return _rest_out^"));
+        // No unary decode of the whole body.
+        assert!(!src.contains("return decode_json_lenient[Req](resp_text)"));
+        assert_eq!(
+            rest_stream_import(&file).as_deref(),
+            Some("from komira_gcp_core import gcp_rest_stream_items")
+        );
+    }
+
+    #[test]
+    fn a_file_without_a_stream_method_imports_no_stream_reader() {
+        let (file, _) = stream_method(false, false, true);
+        assert_eq!(rest_stream_import(&file), None);
+    }
+
+    #[test]
+    fn client_streaming_and_bidi_methods_are_refused_by_name() {
+        // Annotated or not: the shape is the reason it has no REST form, and
+        // an annotation would not give it one.
+        for annotated in [true, false] {
+            for (server, shape) in [(false, "client-streaming"), (true, "bidirectional-streaming")] {
+                let (file, svc) = stream_method(true, server, annotated);
+                let err = emit_rest_service(&file, &svc).unwrap_err();
+                assert!(
+                    err.contains(&format!("service `Svc` method `RunQuery` is {shape}")),
+                    "{err}"
+                );
+                assert!(err.contains("drop it from `methods`"), "{err}");
+                assert!(err.contains("`default_protocol=grpc`"), "{err}");
+                assert_eq!(rest_stream_import(&file), None);
+            }
         }
     }
 
     #[test]
-    fn unannotated_streaming_method_is_refused_as_streaming() {
-        // The shape is the reason it has no REST form; an annotation would
-        // not give it one.
-        let (file, svc) = streaming_svc(false, true, false);
+    fn unannotated_server_streaming_method_is_refused_for_its_annotation() {
+        // A server-streaming method has a REST form, so what it lacks is the
+        // `(google.api.http)` rule, and that is what the refusal names.
+        let (file, svc) = stream_method(false, true, false);
         let err = emit_rest_service(&file, &svc).unwrap_err();
-        assert!(err.contains("method `Stream` is server-streaming"), "{err}");
+        assert!(
+            err.contains("method `RunQuery` has no `(google.api.http)` annotation"),
+            "{err}"
+        );
     }
 
     fn with_host(host: Option<&str>) -> Result<RestServiceEmit, String> {
@@ -1177,6 +1889,7 @@ mod tests {
                     verb: "post".into(),
                     path_template: "/v2/entries:list".into(),
                     body: "*".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1219,7 +1932,7 @@ mod tests {
         let body = &e.source[e.source.find("def m[RT: Runtime]").unwrap()..];
         let guard = body.find("self._rest_require_host(String(\"m\"))").unwrap();
         assert!(guard < body.find("access_token()").unwrap());
-        assert!(guard < body.find("var url = ").unwrap());
+        assert!(guard < body.find("var url").unwrap());
         assert!(guard < body.find("send_buffered").unwrap());
     }
 
@@ -1290,6 +2003,7 @@ mod tests {
                     verb: "post".into(),
                     path_template: "/v1/shelves/{shelf}/books".into(),
                     body: "book".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1352,13 +2066,22 @@ mod tests {
                     verb: "delete".into(),
                     path_template: "/v1/shelves/{shelf}/access".into(),
                     body: "*".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
         };
         let file = file_with(vec![req, out], svc.clone());
         let emit = emit_rest_service(&file, &svc).unwrap();
-        assert!(emit.source.contains("var body_text = encode_json(req)"));
+        // `shelf` is in the path, so it is not in the body: the body is
+        // every field the path does not bind (google/api/http.proto).
+        assert!(!emit.source.contains("var body_text = encode_json(req)\n"));
+        assert!(emit
+            .source
+            .contains("var _rest_path_members: List[String] = [String(\"shelf\")]"));
+        assert!(emit.source.contains(
+            "var body_text = _rest_drop_members(encode_json(req), _rest_path_members)"
+        ));
         assert!(emit.source.contains("BytesBody.from_str(body_text)"));
         assert!(emit.source.contains("HttpMethod.delete()"));
         assert!(emit.source.contains("Content-Type"));
@@ -1408,6 +2131,7 @@ mod tests {
                     verb: "get".into(),
                     path_template: "/v1/shelves/{shelf}".into(),
                     body: "".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1461,6 +2185,7 @@ mod tests {
                     verb: "get".into(),
                     path_template: "/v1/shelves/{shelf}".into(),
                     body: "".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1523,6 +2248,7 @@ mod tests {
                     verb: "get".into(),
                     path_template: "/v1/shelves/{shelf}".into(),
                     body: "".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1586,6 +2312,7 @@ mod tests {
                     verb: "get".into(),
                     path_template: "/v1/shelves/{shelf}".into(),
                     body: "".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1640,6 +2367,7 @@ mod tests {
                     verb: "delete".into(),
                     path_template: "/v1/shelves/{shelf}".into(),
                     body: "".into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1675,6 +2403,7 @@ mod tests {
                     verb: verb.into(),
                     path_template: path.into(),
                     body: body.into(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -1693,6 +2422,28 @@ mod tests {
         let e = one_method(vec![], "post", "/v2/entries:list", "*").unwrap();
         assert!(e.source.contains("path += String(\"/entries\")\n"), "{}", e.source);
         assert!(e.source.contains("path += String(\":list\")\n"), "{}", e.source);
+        // No field in the path: the whole request is the body.
+        assert!(e.source.contains("var body_text = encode_json(req)\n"), "{}", e.source);
+        assert!(!e.source.contains("_rest_path_members"), "{}", e.source);
+    }
+
+    #[test]
+    fn a_whole_body_leaves_out_every_path_field_by_its_json_name() {
+        let mut user = scalar_field("user_id", ScalarKind::String);
+        user.json_name = "userId".into();
+        let e = one_method(
+            vec![scalar_field("shelf", ScalarKind::String), user, scalar_field("note", ScalarKind::String)],
+            "post",
+            "/v1/shelves/{shelf}/users/{user_id}:grant",
+            "*",
+        )
+        .unwrap();
+        assert!(e.source.contains(
+            "var _rest_path_members: List[String] = [String(\"shelf\"), String(\"userId\")]\n"
+        ), "{}", e.source);
+        assert!(e.source.contains(
+            "var body_text = _rest_drop_members(encode_json(req), _rest_path_members)\n"
+        ), "{}", e.source);
     }
 
     #[test]
@@ -1721,6 +2472,118 @@ mod tests {
         ));
     }
 
+    /// A service whose one method takes `.tiny.rest.v1.GetReq`, declared in
+    /// `messages.proto` of the same package (not the service's file) and
+    /// referenced through that file's module, as the lowering names a
+    /// cross-file type.
+    fn split_service() -> (IrFile, IrFile, IrService) {
+        let req = msg_in(
+            "tiny.rest.v1",
+            "GetReq",
+            vec![scalar_field("name", ScalarKind::String), scalar_field("view", ScalarKind::String)],
+        );
+        let ty = TypeRef { fq_name: ".tiny.rest.v1.GetReq".into(), mojo_name: "messages.GetReq".into() };
+        let svc = IrService {
+            name: "Svc".into(),
+            default_host: None,
+            methods: vec![IrMethod {
+                name: "Get".into(),
+                input: ty.clone(),
+                output: ty,
+                client_streaming: false,
+                server_streaming: false,
+                idempotent: false,
+                http_rule: Some(rule("get", "/v1/{name=things/*}", "", &[])),
+                routing_rule: None,
+            }],
+        };
+        let service_file = file_with(vec![], svc.clone());
+        let mut messages_file = file_with(vec![req], svc.clone());
+        messages_file.proto_path = "messages.proto".into();
+        messages_file.services = vec![];
+        (service_file, messages_file, svc)
+    }
+
+    #[test]
+    fn a_request_declared_in_another_file_of_the_same_package_is_found() {
+        // The peers are every file of the model, the service's own among
+        // them, as `emit_model_with_options` passes them.
+        let (service_file, messages_file, svc) = split_service();
+        let peers = vec![service_file.clone(), messages_file];
+        let src = emit_rest_service_in(&service_file, &peers, &svc).unwrap().source;
+        assert!(src.contains("req: messages.GetReq,"), "{src}");
+        assert!(src.contains("_rest_path_var(_rest_to_str(req.name), String(\"things/*\"), String(\"name\"))"), "{src}");
+        assert!(src.contains("query += String(\"view=\") + _rest_pct_encode(_rest_to_str(req.view))"), "{src}");
+        // Without the declaring file, the request is refused by name.
+        let err = emit_rest_service_in(&service_file, std::slice::from_ref(&service_file), &svc).unwrap_err();
+        assert!(
+            err.contains("REST method `Get`: request type `.tiny.rest.v1.GetReq` is not declared in the generated files"),
+            "{err}"
+        );
+    }
+
+    fn enum_field(name: &str) -> IrField {
+        IrField {
+            name: name.to_string(),
+            ty: IrType::Enum(TypeRef {
+                fq_name: ".tiny.rest.v1.View".into(),
+                mojo_name: "View".into(),
+            }),
+            label: Label::Single,
+            proto_field_number: 2,
+            json_name: name.to_string(),
+            oneof_index: None,
+        }
+    }
+
+    #[test]
+    fn an_enum_in_the_url_renders_its_proto_name() {
+        // The enum wrapper is not `Writable`: `_rest_to_str(req.view)` would
+        // not compile. A plain, an optional and a repeated enum query field,
+        // and an enum path variable, all render through `json_name()`.
+        let mut optional = enum_field("mode");
+        optional.label = Label::Optional;
+        let fields = vec![
+            scalar_field("name", ScalarKind::String),
+            enum_field("view"),
+            optional,
+            repeated(enum_field("kinds")),
+            enum_field("tier"),
+        ];
+        let src = one_method(fields, "get", "/v1/{name=things/*}/tiers/{tier}", "").unwrap().source;
+        // A plain enum at its zero value stays out of the query; an optional
+        // one is sent whenever it is set, and a path variable always is.
+        assert!(src.contains("if req.view.number() != 0:"), "{src}");
+        assert!(!src.contains("if req.mode.number()"), "{src}");
+        assert!(!src.contains("if req.tier.number()"), "{src}");
+        assert!(src.contains("query += String(\"view=\") + _rest_pct_encode(req.view.json_name())"), "{src}");
+        assert!(src.contains("query += String(\"mode=\") + _rest_pct_encode(req.mode.value().json_name())"), "{src}");
+        assert!(src.contains("query += String(\"kinds=\") + _rest_pct_encode(_rest_v.json_name())"), "{src}");
+        assert!(src.contains("path += _rest_path_segment(req.tier.json_name(), String(\"tier\"))"), "{src}");
+        assert!(!src.contains("_rest_to_str(req.view)"), "{src}");
+    }
+
+    #[test]
+    fn an_enum_of_a_message_query_field_renders_its_proto_name() {
+        // A nested leaf goes through the same rendering as a top-level one.
+        let opts = msg_in("tiny.rest.v1", "Opts", vec![enum_field("view")]);
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![
+                scalar_field("name", ScalarKind::String),
+                msg_field("options", ".tiny.rest.v1.Opts", "Opts"),
+            ],
+        );
+        let svc = svc_over(&req, rule("get", "/v1/{name=things/*}", "", &[]));
+        let file = file_with(vec![req, opts], svc.clone());
+        let src = emit_rest_service(&file, &svc).unwrap().source;
+        assert!(src.contains("if _rest_options.view.number() != 0:"), "{src}");
+        assert!(src.contains(
+            "query += String(\"options.view=\") + _rest_pct_encode(_rest_options.view.json_name())"
+        ), "{src}");
+    }
+
     #[test]
     fn repeated_path_variable_is_refused() {
         let f = repeated(scalar_field("name", ScalarKind::String));
@@ -1747,6 +2610,26 @@ mod tests {
     }
 
     #[test]
+    fn an_endpoint_override_sets_host_port_and_scheme() {
+        let e = one_method(vec![], "post", "/v2/entries:list", "*").unwrap();
+        let src = &e.source;
+        assert!(src.contains(
+            "def set_rest_endpoint(mut self, var host: String, port: UInt16, plaintext: Bool):"
+        ));
+        // The public endpoint's defaults, in both constructors.
+        assert_eq!(src.matches("self._rest_port = UInt16(0)").count(), 2);
+        assert_eq!(src.matches("self._rest_plaintext = False").count(), 2);
+        let http = src
+            .find("url = Url.http(self._rest_host.copy(), self._rest_port, path^)")
+            .unwrap();
+        let https = src
+            .find("url = Url.https(self._rest_host.copy(), self._rest_port, path^)")
+            .unwrap();
+        let branch = src.find("if self._rest_plaintext:").unwrap();
+        assert!(branch < http && http < https, "{src}");
+    }
+
+    #[test]
     fn default_valued_implicit_scalars_stay_out_of_the_query() {
         let e = one_method(
             vec![
@@ -1765,8 +2648,8 @@ mod tests {
     }
 
     #[test]
-    fn bytes_field_in_the_url_is_refused() {
-        let err = one_method(vec![scalar_field("blob", ScalarKind::Bytes)], "get", "/v2/x", "")
+    fn bytes_field_in_the_path_is_refused() {
+        let err = one_method(vec![scalar_field("blob", ScalarKind::Bytes)], "get", "/v2/{blob}", "")
             .unwrap_err();
         assert!(err.contains("is `bytes`"), "{err}");
     }
@@ -1794,5 +2677,539 @@ mod tests {
         let e = one_method(vec![], "get", "/", "").unwrap();
         assert!(e.source.contains("var path = String(\"\")\n"), "{}", e.source);
         assert!(e.source.contains("path += String(\"/\")\n"), "{}", e.source);
+    }
+
+    /// A message `name` of package `pkg` with `fields`.
+    fn msg_in(pkg: &str, name: &str, fields: Vec<IrField>) -> IrMessage {
+        IrMessage {
+            name: name.into(),
+            mojo_name: name.into(),
+            fq_name: format!(".{pkg}.{name}"),
+            is_map_entry: false,
+            fields,
+            oneofs: vec![],
+        }
+    }
+
+    /// A service `Svc` with one method `M` taking `req` (by fq-name) under
+    /// `rule`.
+    fn svc_over(req: &IrMessage, rule: IrHttpRule) -> IrService {
+        let ty = TypeRef { fq_name: req.fq_name.clone(), mojo_name: req.mojo_name.clone() };
+        IrService {
+            name: "Svc".into(),
+            default_host: None,
+            methods: vec![IrMethod {
+                name: "M".into(),
+                input: ty.clone(),
+                output: ty,
+                client_streaming: false,
+                server_streaming: false,
+                idempotent: false,
+                http_rule: Some(rule),
+                routing_rule: None,
+            }],
+        }
+    }
+
+    fn rule(verb: &str, path: &str, body: &str, more: &[&str]) -> IrHttpRule {
+        IrHttpRule {
+            verb: verb.into(),
+            path_template: path.into(),
+            body: body.into(),
+            additional_bindings: more
+                .iter()
+                .map(|p| IrHttpRule {
+                    verb: verb.into(),
+                    path_template: (*p).into(),
+                    body: body.into(),
+                    additional_bindings: vec![],
+                })
+                .collect(),
+        }
+    }
+
+    /// A file of package `tiny.rest.v1` holding `svc` and no messages.
+    fn service_file(svc: IrService) -> IrFile {
+        file_with(vec![], svc)
+    }
+
+    #[test]
+    fn a_request_declared_in_another_file_is_found_among_the_peers() {
+        let req = msg_in(
+            "google.iam.v1",
+            "GetIamPolicyRequest",
+            vec![scalar_field("resource", ScalarKind::String)],
+        );
+        let svc = svc_over(&req, rule("post", "/v3/{resource=projects/*}:getIamPolicy", "*", &[]));
+        let file = service_file(svc.clone());
+        let peer = IrFile {
+            proto_path: "google/iam/v1/iam_policy.proto".into(),
+            proto_package: "google.iam.v1".into(),
+            mojo_package: "komira_rpc_storage".into(),
+            messages: vec![req],
+            enums: vec![],
+            services: vec![],
+            imports: vec![],
+        };
+        // Alone, the file does not declare it, and the error says what to add.
+        let err = emit_rest_service(&file, &svc).unwrap_err();
+        assert!(err.contains("is not declared in the generated files"), "{err}");
+        let peers = vec![peer];
+        let e = emit_rest_service_in(&file, &peers, &svc).unwrap();
+        assert!(e.source.contains(
+            "def m[RT: Runtime](mut self, req: GetIamPolicyRequest, mut reactor: Reactor[RT.Sink]) raises -> GetIamPolicyRequest:"
+        ), "{}", e.source);
+        assert!(e.source.contains(
+            "path += _rest_path_var(_rest_to_str(req.resource), String(\"projects/*\"), String(\"resource\"))"
+        ));
+        assert!(e.source.contains("path += String(\":getIamPolicy\")"));
+        assert!(!e.needs_base64);
+    }
+
+    #[test]
+    fn additional_bindings_are_tried_in_order_and_none_matching_raises() {
+        let req = msg_in("tiny.rest.v1", "Req", vec![scalar_field("name", ScalarKind::String)]);
+        let svc = svc_over(
+            &req,
+            rule("get", "/v1/{name=roles/*}", "", &["/v1/{name=organizations/*/roles/*}", "/v1/{name=projects/*/roles/*}"]),
+        );
+        let file = file_with(vec![req], svc.clone());
+        let e = emit_rest_service(&file, &svc).unwrap();
+        let src = &e.source;
+        assert!(src.contains(
+            "\"\"\"GET `/v1/{name=roles/*}`, `/v1/{name=organizations/*/roles/*}`, `/v1/{name=projects/*/roles/*}` — REST/JSON, to the first path the request's values match.\"\"\""
+        ), "{src}");
+        let first = src.find("String(\"roles/*\")").expect("first binding");
+        let second = src.find("String(\"organizations/*/roles/*\")").expect("second binding");
+        let third = src.find("String(\"projects/*/roles/*\")").expect("third binding");
+        assert!(first < second && second < third, "{src}");
+        // Each later binding runs only when the ones before it matched nothing,
+        // and a binding that raises leaves no partial path behind.
+        assert_eq!(src.matches("if path.byte_length() == 0:").count(), 3, "{src}");
+        assert_eq!(src.matches("except:\n").count(), 3, "{src}");
+        assert_eq!(src.matches("    path = String(\"\")\n").count(), 3, "{src}");
+        assert!(src.contains(
+            "raise Error(String(\"REST method M: the request matches none of its paths: /v1/{name=roles/*}, /v1/{name=organizations/*/roles/*}, /v1/{name=projects/*/roles/*}\"))"
+        ), "{src}");
+    }
+
+    #[test]
+    fn a_server_streaming_method_takes_bindings_and_a_whole_body_like_a_unary_one() {
+        // The two halves of the REST method emitter meet here: a
+        // server-streaming method (Firestore's RunQuery shape) whose rule has
+        // an additional binding and `body: "*"` gets the path alternatives
+        // and the whole body without its path-bound field, and still reads
+        // its response as the stream's JSON array.
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![scalar_field("parent", ScalarKind::String), scalar_field("q", ScalarKind::String)],
+        );
+        let mut svc = svc_over(
+            &req,
+            rule(
+                "post",
+                "/v1/{parent=projects/*/databases/*/documents}:runQuery",
+                "*",
+                &["/v1/{parent=projects/*/databases/*/documents/*/**}:runQuery"],
+            ),
+        );
+        svc.methods[0].server_streaming = true;
+        let file = file_with(vec![req], svc.clone());
+        let e = emit_rest_service(&file, &svc).unwrap();
+        let src = &e.source;
+        assert!(src.contains("mut reactor: Reactor[RT.Sink]) raises -> List[Req]:"), "{src}");
+        assert!(src.contains(
+            "\"\"\"POST `/v1/{parent=projects/*/databases/*/documents}:runQuery`, \
+             `/v1/{parent=projects/*/databases/*/documents/*/**}:runQuery` — REST/JSON, \
+             server-streaming, to the first path the request's values match: every response\n"
+        ), "{src}");
+        assert_eq!(src.matches("if path.byte_length() == 0:").count(), 2, "{src}");
+        assert!(src.contains(
+            "var body_text = _rest_drop_members(encode_json(req), _rest_path_members)\n"
+        ), "{src}");
+        let items = src
+            .find("var _rest_items = gcp_rest_stream_items(String(\"POST\"), String(\"M\"), status_int, resp_bytes)")
+            .unwrap();
+        assert!(src.find("_rest_drop_members(").unwrap() < items, "{src}");
+        assert!(!src.contains("return decode_json_lenient[Req](resp_text)"), "{src}");
+        assert!(!e.needs_base64);
+    }
+
+    #[test]
+    fn a_binding_fallback_catches_only_the_path_helpers() {
+        // The generated `except:` is bare, which is sound only while the
+        // `try:` block holds nothing that can raise but the two path helpers
+        // refusing a value: each line is a `path +=` of a literal, of
+        // `_rest_path_var(...)` or of `_rest_path_segment(...)`.
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![scalar_field("name", ScalarKind::String), scalar_field("flag", ScalarKind::Bool)],
+        );
+        let svc = svc_over(
+            &req,
+            rule("get", "/v1/{name=roles/*}/{flag}", "", &["/v1/{name=projects/*/roles/*}/{flag}:x"]),
+        );
+        let file = file_with(vec![req], svc.clone());
+        let src = emit_rest_service(&file, &svc).unwrap().source;
+        let lines: Vec<&str> = src.lines().collect();
+        let mut blocks = 0;
+        let mut i = 0;
+        while i < lines.len() {
+            if lines[i].trim() == "try:" {
+                blocks += 1;
+                let indent = lines[i].len() - lines[i].trim_start().len();
+                i += 1;
+                while lines[i].trim() != "except:" {
+                    let l = lines[i].trim();
+                    assert!(lines[i].len() - lines[i].trim_start().len() > indent, "{src}");
+                    let ok = l.starts_with("path += String(\"")
+                        || l.starts_with("path += _rest_path_var(")
+                        || l.starts_with("path += _rest_path_segment(");
+                    assert!(ok, "a line that may raise otherwise: {l}\n{src}");
+                    i += 1;
+                }
+            }
+            i += 1;
+        }
+        assert_eq!(blocks, 2, "{src}");
+        // The helpers are called on `_rest_to_str` / `_rest_bool_str`, neither
+        // of which raises.
+        let helpers = rest_helper_functions();
+        assert!(helpers.contains("def _rest_to_str[T: Writable](v: T) -> String:"));
+        assert!(helpers.contains("def _rest_bool_str(b: Bool) -> String:"));
+        assert!(src.contains("_rest_path_segment(_rest_bool_str(req.flag), String(\"flag\"))"), "{src}");
+    }
+
+    #[test]
+    fn a_binding_with_another_verb_body_or_variables_is_refused() {
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![scalar_field("name", ScalarKind::String), scalar_field("parent", ScalarKind::String)],
+        );
+        let mut verb = rule("get", "/v1/{name=a/*}", "", &[]);
+        verb.additional_bindings.push(IrHttpRule {
+            verb: "post".into(),
+            path_template: "/v1/{name=b/*}".into(),
+            body: "".into(),
+            additional_bindings: vec![],
+        });
+        let mut body = rule("post", "/v1/{name=a/*}", "*", &[]);
+        body.additional_bindings.push(IrHttpRule {
+            verb: "post".into(),
+            path_template: "/v1/{name=b/*}".into(),
+            body: "".into(),
+            additional_bindings: vec![],
+        });
+        let vars = rule("get", "/v1/{name=a/*}", "", &["/v1/{parent=b/*}"]);
+        for (r, want) in [(verb, "share them"), (body, "share them"), (vars, "bind the same")] {
+            let svc = svc_over(&req, r);
+            let file = file_with(vec![req.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_message_query_field_is_sent_as_its_fields_when_set() {
+        // IAM's GetIamPolicy: no body, so `options` rides the query as
+        // `options.requestedPolicyVersion`.
+        let mut version = scalar_field("requested_policy_version", ScalarKind::Int32);
+        version.json_name = "requestedPolicyVersion".into();
+        let opts = msg_in("google.iam.v1", "GetPolicyOptions", vec![version]);
+        let req = msg_in(
+            "google.iam.v1",
+            "GetIamPolicyRequest",
+            vec![
+                scalar_field("resource", ScalarKind::String),
+                msg_field("options", ".google.iam.v1.GetPolicyOptions", "GetPolicyOptions"),
+            ],
+        );
+        let svc = svc_over(
+            &req,
+            rule("post", "/v1/{resource=projects/*/serviceAccounts/*}:getIamPolicy", "", &[]),
+        );
+        let file = file_with(vec![req, opts], svc.clone());
+        let e = emit_rest_service(&file, &svc).unwrap();
+        assert!(e.source.contains(
+            "        if req.options:\n            ref _rest_options = req.options.value()\n            if _rest_options.requested_policy_version != 0:\n"
+        ), "{}", e.source);
+        assert!(e.source.contains(
+            "query += String(\"options.requestedPolicyVersion=\") + _rest_pct_encode(_rest_to_str(_rest_options.requested_policy_version))"
+        ));
+        assert!(e.source.contains("url.query = query^"));
+    }
+
+    #[test]
+    fn a_field_mask_query_field_is_its_json_string() {
+        let mut mask = msg_field("update_mask", ".google.protobuf.FieldMask", "FieldMask");
+        mask.json_name = "updateMask".into();
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![scalar_field("name", ScalarKind::String), mask, msg_field("role", ".tiny.rest.v1.Role", "Role")],
+        );
+        let role = msg_in("tiny.rest.v1", "Role", vec![scalar_field("title", ScalarKind::String)]);
+        let svc = svc_over(&req, rule("patch", "/v1/{name=projects/*/roles/*}", "role", &[]));
+        let file = file_with(vec![req, role], svc.clone());
+        let e = emit_rest_service(&file, &svc).unwrap();
+        assert!(e.source.contains("if req.update_mask:"), "{}", e.source);
+        assert!(e.source.contains(
+            "query += String(\"updateMask=\") + _rest_pct_encode(req.update_mask.value().to_proto3_json())"
+        ), "{}", e.source);
+    }
+
+    #[test]
+    fn a_bytes_query_field_is_base64_and_the_file_imports_the_encoder() {
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![scalar_field("name", ScalarKind::String), scalar_field("etag", ScalarKind::Bytes)],
+        );
+        let svc = svc_over(&req, rule("delete", "/v1/{name=projects/*/roles/*}", "", &[]));
+        let file = file_with(vec![req], svc.clone());
+        let e = emit_rest_service(&file, &svc).unwrap();
+        assert!(e.needs_base64);
+        assert!(e.source.contains("if len(req.etag) > 0:"), "{}", e.source);
+        assert!(e.source.contains(
+            "query += String(\"etag=\") + _rest_pct_encode(base64_encode(Span(req.etag)))"
+        ));
+        let mojo = crate::emit::Emitter::with_protocol(&file, crate::ProtocolMode::Rest).emit();
+        assert!(mojo.contains("\nfrom komira_encoding import base64_encode\n"), "{mojo}");
+    }
+
+    #[test]
+    fn a_map_or_a_well_known_type_query_field_is_refused_by_its_own_name() {
+        let map = IrField {
+            name: "labels".into(),
+            ty: IrType::Map(
+                Box::new(IrType::Scalar(ScalarKind::String)),
+                Box::new(IrType::Scalar(ScalarKind::String)),
+            ),
+            label: Label::Single,
+            proto_field_number: 1,
+            json_name: "labels".into(),
+            oneof_index: None,
+        };
+        let ts = msg_field("at", ".google.protobuf.Timestamp", "Timestamp");
+        // Declared among the generated files, the Timestamp is still refused:
+        // its fields are not its query form.
+        let ts_msg = msg_in(
+            "google.protobuf",
+            "Timestamp",
+            vec![scalar_field("seconds", ScalarKind::Int64), scalar_field("nanos", ScalarKind::Int32)],
+        );
+        let cases = [
+            (map, "query field `labels` is a map, which has no query form"),
+            (
+                ts,
+                "query field `at` is a `.google.protobuf.Timestamp`, whose query form is its \
+                 JSON string, which is implemented only for `.google.protobuf.FieldMask`",
+            ),
+        ];
+        for (fld, want) in cases {
+            let req = msg_in("tiny.rest.v1", "Req", vec![fld]);
+            let svc = svc_over(&req, rule("get", "/v1/x", "", &[]));
+            let file = file_with(vec![req, ts_msg.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_repeated_message_or_nested_message_query_field_is_refused() {
+        let inner = msg_in("tiny.rest.v1", "Inner", vec![scalar_field("v", ScalarKind::String)]);
+        let outer = msg_in("tiny.rest.v1", "Outer", vec![msg_field("inner", ".tiny.rest.v1.Inner", "Inner")]);
+        let mut many = msg_field("items", ".tiny.rest.v1.Inner", "Inner");
+        many.label = Label::Repeated;
+        let a = msg_in("tiny.rest.v1", "Req", vec![many]);
+        let b = msg_in("tiny.rest.v1", "Req", vec![msg_field("outer", ".tiny.rest.v1.Outer", "Outer")]);
+        for (req, want) in [(a, "repeated message"), (b, "not a plain scalar")] {
+            let svc = svc_over(&req, rule("get", "/v1/x", "", &[]));
+            let file = file_with(vec![req, inner.clone(), outer.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_file_with_no_bytes_query_does_not_import_the_encoder() {
+        let req = msg_in("tiny.rest.v1", "Req", vec![scalar_field("name", ScalarKind::String)]);
+        let svc = svc_over(&req, rule("get", "/v1/{name=projects/*}", "", &[]));
+        let file = file_with(vec![req], svc);
+        let mojo = crate::emit::Emitter::with_protocol(&file, crate::ProtocolMode::Rest).emit();
+        assert!(!mojo.contains("komira_encoding"), "{mojo}");
+    }
+
+    fn message(name: &str, fields: Vec<IrField>) -> IrMessage {
+        IrMessage {
+            name: name.into(),
+            mojo_name: name.into(),
+            fq_name: format!(".tiny.rest.v1.{name}"),
+            is_map_entry: false,
+            fields,
+            oneofs: vec![],
+        }
+    }
+
+    fn method(name: &str, input: &str, output: &str, rule: (&str, &str, &str)) -> IrMethod {
+        IrMethod {
+            name: name.into(),
+            input: TypeRef { fq_name: input.into(), mojo_name: input.rsplit('.').next().unwrap().into() },
+            output: TypeRef { fq_name: output.into(), mojo_name: output.rsplit('.').next().unwrap().into() },
+            client_streaming: false,
+            server_streaming: false,
+            idempotent: false,
+            http_rule: Some(IrHttpRule {
+                verb: rule.0.into(),
+                path_template: rule.1.into(),
+                body: rule.2.into(),
+                additional_bindings: vec![],
+            }),
+            routing_rule: None,
+        }
+    }
+
+    fn svc_of(methods: Vec<IrMethod>) -> IrService {
+        IrService { name: "Jobs".into(), default_host: None, methods }
+    }
+
+    /// `UpdateJobRequest { Job job; FieldMask update_mask; bool validate_only }`
+    /// with `Job { string name; string description }`, PATCHed at
+    /// `/v1/{job.name=projects/*/jobs/*}` with `body: "job"`.
+    fn update_job(body: &str) -> Result<RestServiceEmit, String> {
+        let mut mask = msg_field("update_mask", ".google.protobuf.FieldMask", "FieldMask");
+        mask.json_name = "updateMask".into();
+        let mut validate = scalar_field("validate_only", ScalarKind::Bool);
+        validate.json_name = "validateOnly".into();
+        let req = message(
+            "UpdateJobRequest",
+            vec![msg_field("job", ".tiny.rest.v1.Job", "Job"), mask, validate],
+        );
+        let job = message(
+            "Job",
+            vec![
+                scalar_field("name", ScalarKind::String),
+                scalar_field("description", ScalarKind::String),
+            ],
+        );
+        let svc = svc_of(vec![method(
+            "UpdateJob",
+            ".tiny.rest.v1.UpdateJobRequest",
+            ".tiny.rest.v1.Job",
+            ("patch", "/v1/{job.name=projects/*/jobs/*}", body),
+        )]);
+        let file = file_with(vec![req, job], svc.clone());
+        emit_rest_service(&file, &svc)
+    }
+
+    #[test]
+    fn dotted_path_var_reads_the_body_message_after_a_presence_check() {
+        let e = update_job("job").unwrap();
+        let s = &e.source;
+        let guard = s
+            .find("if not req.job:\n")
+            .unwrap_or_else(|| panic!("no presence check:\n{s}"));
+        assert!(s.contains(
+            "raise Error(String(\"update_job: the request's `job` is unset, and the path is built from `job.name`\"))"
+        ), "{s}");
+        let fill = s
+            .find("path += _rest_path_var(_rest_to_str(req.job.value().name), String(\"projects/*/jobs/*\"), String(\"job.name\"))")
+            .unwrap_or_else(|| panic!("no path fill:\n{s}"));
+        assert!(guard < fill, "the check comes before the path is built");
+        // The token source is asked only after the check.
+        assert!(guard < s.find("self._token_source.access_token()").unwrap());
+        assert!(s.contains("body_text = encode_json(req.job.value())"), "{s}");
+    }
+
+    #[test]
+    fn field_mask_query_param_is_its_json_string_when_set() {
+        let e = update_job("job").unwrap();
+        let s = &e.source;
+        assert!(s.contains("if req.update_mask:\n"), "{s}");
+        assert!(s.contains(
+            "query += String(\"updateMask=\") + _rest_pct_encode(req.update_mask.value().to_proto3_json())"
+        ), "{s}");
+        assert!(s.contains("query += String(\"validateOnly=\") + _rest_pct_encode(_rest_bool_str(req.validate_only))"), "{s}");
+        assert!(!s.contains("query += String(\"job="), "{s}");
+    }
+
+    #[test]
+    fn dotted_path_var_outside_the_body_is_refused() {
+        let err = update_job("").unwrap_err();
+        assert!(err.contains("which is not the request body"), "{err}");
+    }
+
+    #[test]
+    fn dotted_path_var_through_a_scalar_or_a_missing_field_is_refused() {
+        let req = message(
+            "R",
+            vec![scalar_field("name", ScalarKind::String), msg_field("job", ".tiny.rest.v1.Job", "Job")],
+        );
+        let job = message("Job", vec![scalar_field("name", ScalarKind::String)]);
+        for (path, want) in [
+            ("/v1/{name.x}", "which is not a singular message field"),
+            ("/v1/{job.missing}", "names `missing`, which is not a field of `.tiny.rest.v1.Job`"),
+        ] {
+            let svc = svc_of(vec![method("M", ".tiny.rest.v1.R", ".tiny.rest.v1.R", ("post", path, "*"))]);
+            let file = file_with(vec![req.clone(), job.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{path}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_path_leaf_must_be_a_plain_scalar_outside_a_oneof() {
+        // The leaf of a dotted variable is held to what a plain one is: a
+        // scalar the request always has, read as `req.<...>.<leaf>`.
+        let mut opt_name = scalar_field("opt_name", ScalarKind::String);
+        opt_name.label = Label::Optional;
+        let mut arm = scalar_field("arm", ScalarKind::String);
+        arm.oneof_index = Some(0);
+        let job = message(
+            "Job",
+            vec![
+                opt_name.clone(),
+                arm.clone(),
+                msg_field("spec", ".tiny.rest.v1.Job", "Job"),
+            ],
+        );
+        let req = message(
+            "R",
+            vec![msg_field("job", ".tiny.rest.v1.Job", "Job"), opt_name, arm],
+        );
+        for (path, want) in [
+            ("/v1/{job.opt_name}", "path variable `job.opt_name` is a proto3 `optional` field"),
+            ("/v1/{job.arm}", "field `job.arm` is used in the path/query but is an arm of a oneof"),
+            ("/v1/{job.spec}", "field `job.spec` is used in the path/query but is not a scalar"),
+            ("/v1/{opt_name}", "path variable `opt_name` is a proto3 `optional` field"),
+            ("/v1/{arm}", "field `arm` is used in the path/query but is an arm of a oneof"),
+        ] {
+            let svc = svc_of(vec![method("M", ".tiny.rest.v1.R", ".tiny.rest.v1.R", ("post", path, "*"))]);
+            let file = file_with(vec![req.clone(), job.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{path}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_field_mask_in_a_oneof_stays_out_of_the_query() {
+        let mut mask = msg_field("update_mask", ".google.protobuf.FieldMask", "FieldMask");
+        mask.oneof_index = Some(0);
+        let req = message("ListReq", vec![mask]);
+        let svc = svc_of(vec![method("List", ".tiny.rest.v1.ListReq", ".tiny.rest.v1.ListReq", ("get", "/v1/things", ""))]);
+        let file = file_with(vec![req], svc.clone());
+        let err = emit_rest_service(&file, &svc).unwrap_err();
+        assert!(err.contains("field `update_mask` is used in the path/query but is an arm of a oneof"), "{err}");
+    }
+
+    #[test]
+    fn a_dotted_path_var_in_a_whole_body_is_refused() {
+        // `body: "*"` leaves out the fields the path binds, which a field of
+        // a body message is not.
+        let err = update_job("*").unwrap_err();
+        assert!(err.contains("REST body `*` with the dotted path variable `job.name`"), "{err}");
     }
 }
