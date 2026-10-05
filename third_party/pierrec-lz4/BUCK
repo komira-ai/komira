@@ -1,11 +1,12 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 
-# Golden LZ4 files from github.com/pierrec/lz4 (BSD-3-Clause, LICENSE below),
-# at one pinned commit. Its testdata/README.txt: "The golden data files (*.lz4)
-# have been compressed with the original C implementation of lz4." Each file is
-# fetched at build time and checked against its sha256; nothing of it is
-# committed here. The archive of the whole repository is 40 MB, so the three
-# files are pinned one by one.
+# Golden LZ4 files from github.com/pierrec/lz4 v4.1.21 (commit 294e765...,
+# BSD-3-Clause, LICENSE below). Its testdata/README.txt: "The golden data
+# files (*.lz4) have been compressed with the original C implementation of
+# lz4." Each file is fetched at build time and checked against its sha256; nothing of it is
+# committed here. The v4.1.21 source archive is 40 MB, so instead of the
+# usual pinned archive + archive_files, the three files are pinned one by one
+# at the tag's commit.
 #
 # Test data of //src/komira_lz4 (tests/test_codec_into.mojo):
 #   gettysburg.txt      - plain text, 1548 bytes;

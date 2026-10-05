@@ -9,7 +9,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The welded tests:
 # - test_codec: the List API (`lz4_compress` / `lz4_decompress`) round trips.
 # - test_codec_into: the into-buffer API (`lz4_compress_into` /
-#   `lz4_decompress_into`): a known-answer block from //third_party/lz4-golden
+#   `lz4_decompress_into`): a known-answer block from //third_party/pierrec-lz4
 #   (pinned by sha256, staged at golden/), round trips, the empty block, the
 #   too-small destination and corrupt blocks.
 mojo_library(
@@ -17,8 +17,8 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_data = {
         "tests/test_codec_into.mojo": {
-            "golden/gettysburg.txt": "//third_party/lz4-golden:gettysburg.txt",
-            "golden/gettysburg.txt.lz4": "//third_party/lz4-golden:gettysburg.txt.lz4",
+            "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
+            "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
         },
     },
     test_srcs = [

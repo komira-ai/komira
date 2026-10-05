@@ -6,7 +6,7 @@
 #
 # The known-answer vector is golden/gettysburg.txt.lz4, an LZ4 frame the
 # reference C liblz4 wrote, with golden/gettysburg.txt its plain text; both are
-# pinned by sha256 in //third_party/lz4-golden and staged at golden/. A frame
+# pinned by sha256 in //third_party/pierrec-lz4 and staged at golden/. A frame
 # is a header, then blocks, each one a 4-byte little-endian size followed by an
 # LZ4 raw block (doc/lz4_Frame_format.md in the lz4 repository); this test
 # takes the one block out of the frame and decodes it as a raw block.
@@ -275,7 +275,9 @@ def test_offset_before_the_output_does_not_decode() raises:
         _ = lz4_decompress_into(Span(out), Span(block))
     except:
         raised = True
-    assert_true(raised, "a match before the start of the output must be refused")
+    assert_true(
+        raised, "a match before the start of the output must be refused"
+    )
 
 
 def main() raises:
