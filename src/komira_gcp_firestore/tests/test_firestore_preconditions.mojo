@@ -23,7 +23,7 @@
 #
 # THE MAPPING (asserted here on the request the generated client writes):
 #   POST /v1/projects/{p}/databases/{db}/documents:commit
-#   body {"database":..,"writes":[{..,"currentDocument":{"exists":false},
+#   body {"writes":[{..,"currentDocument":{"exists":false},
 #         "update":{"name":"<full doc path>","fields":{..}}}],..}
 #   -> 200 {"writeResults":[{"updateTime":".."}],"commitTime":".."}   (SUCCESS)
 #   -> 409 {"error":{"code":409,"status":"ALREADY_EXISTS",..}}        (create conflict)

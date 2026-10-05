@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package komira.test.refuse.repeated_message_in_query;
+
+import "google/api/annotations.proto";
+
+service S {
+  rpc M(Req) returns (Req) {
+    option (google.api.http) = { get: "/v1/things" };
+  }
+}
+
+// `items` is left to the query, where a repeated message has no form.
+message Req {
+  repeated Item items = 1;
+}
+
+message Item {
+  string id = 1;
+}

@@ -75,12 +75,16 @@ pub fn emit_openapi(model: &IrModel) -> String {
 /// One OpenAPI Operation to emit — a `(verb, service, method)` triple, plus the
 /// resolved http rule (`None` = the un-annotated Connect fallback). Several
 /// operations may share one `path_key` (different verbs), so the grouping keys
-/// on the path and holds these as the ordered verb children.
+/// on the path and holds these as the ordered verb children. A rule's
+/// `additional_bindings` are operations of their own, each at its own path:
+/// `binding` is 0 for the rule itself and `i` for its `i`th additional
+/// binding, which suffixes the `operationId` so that it stays unique.
 struct Operation<'a> {
     verb: String,
     svc: &'a IrService,
     method: &'a IrMethod,
     rule: Option<&'a IrHttpRule>,
+    binding: usize,
 }
 
 fn group_operations_by_path(model: &IrModel) -> Vec<(String, Vec<Operation<'_>>)> {
@@ -88,18 +92,32 @@ fn group_operations_by_path(model: &IrModel) -> Vec<(String, Vec<Operation<'_>>)
     for file in &model.files {
         for svc in &file.services {
             for method in &svc.methods {
-                let (path_key, verb, rule) = match &method.http_rule {
-                    Some(r) => (r.path_template.clone(), r.verb.clone(), Some(r)),
-                    None => (
+                let ops: Vec<(String, Operation<'_>)> = match &method.http_rule {
+                    Some(r) => std::iter::once(r)
+                        .chain(r.additional_bindings.iter())
+                        .enumerate()
+                        .map(|(binding, b)| {
+                            let verb = b.verb.clone();
+                            let op = Operation { verb, svc, method, rule: Some(b), binding };
+                            (b.path_template.clone(), op)
+                        })
+                        .collect(),
+                    None => vec![(
                         format!("/{}/{}", svc.name, method.name),
-                        "post".to_string(),
-                        None,
-                    ),
+                        Operation {
+                            verb: "post".to_string(),
+                            svc,
+                            method,
+                            rule: None,
+                            binding: 0,
+                        },
+                    )],
                 };
-                let op = Operation { verb, svc, method, rule };
-                match groups.iter_mut().find(|(k, _)| *k == path_key) {
-                    Some((_, ops)) => ops.push(op),
-                    None => groups.push((path_key, vec![op])),
+                for (path_key, op) in ops {
+                    match groups.iter_mut().find(|(k, _)| *k == path_key) {
+                        Some((_, ops)) => ops.push(op),
+                        None => groups.push((path_key, vec![op])),
+                    }
                 }
             }
         }
@@ -149,7 +167,11 @@ fn emit_operation(w: &mut YamlWriter, model: &IrModel, op: &Operation<'_>) {
 
     w.line(&format!("{}:", op.verb));
     w.indent();
-    w.line(&format!("operationId: {}_{}", svc.name, method.name));
+    if op.binding == 0 {
+        w.line(&format!("operationId: {}_{}", svc.name, method.name));
+    } else {
+        w.line(&format!("operationId: {}_{}_{}", svc.name, method.name, op.binding + 1));
+    }
     w.line(&format!(
         "summary: {} RPC ({}).",
         method.name,
@@ -557,6 +579,7 @@ mod tests {
                     verb: "get".into(),
                     path_template: path.into(),
                     body: String::new(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],
@@ -605,5 +628,28 @@ mod tests {
             assert!(!doc.contains("in: path"), "{path}: {doc}");
             assert!(doc.contains("requestBody:"), "{path}: {doc}");
         }
+    }
+
+    #[test]
+    fn each_additional_binding_is_an_operation_at_its_own_path() {
+        let mut m = model("/v1/{name}/things");
+        let rule = m.files[0].services[0].methods[0].http_rule.as_mut().unwrap();
+        for path in ["/v1/orgs/{name}/things", "/v1/projects/{name}/things"] {
+            rule.additional_bindings.push(IrHttpRule {
+                verb: "get".into(),
+                path_template: path.into(),
+                body: String::new(),
+                additional_bindings: vec![],
+            });
+        }
+        let doc = emit_openapi(&m);
+        let first = doc.find("/v1/{name}/things:").expect("the rule's path");
+        let second = doc.find("/v1/orgs/{name}/things:").expect("the first binding's path");
+        let third = doc.find("/v1/projects/{name}/things:").expect("the second binding's path");
+        assert!(first < second && second < third, "{doc}");
+        assert_eq!(doc.matches("operationId: S_M\n").count(), 1, "{doc}");
+        assert_eq!(doc.matches("operationId: S_M_2\n").count(), 1, "{doc}");
+        assert_eq!(doc.matches("operationId: S_M_3\n").count(), 1, "{doc}");
+        assert_eq!(doc.matches("in: path").count(), 3, "{doc}");
     }
 }

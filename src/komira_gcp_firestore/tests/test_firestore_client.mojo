@@ -289,7 +289,7 @@ def test_run_query_decodes_streamed_documents() raises:
     var body = script.call_body(0)
     assert_true(
         body.startswith(
-            '{"parent":"projects/example-project/databases/(default)/documents"'
+            '{"structuredQuery":{'
         ),
         body,
     )

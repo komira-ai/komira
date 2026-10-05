@@ -7,8 +7,10 @@
 # reference: `projects.databases.documents.commit` (POST
 # /v1/{database}/documents:commit), `batchGet` (POST
 # /v1/{database}/documents:batchGet) and `runQuery` (POST
-# /v1/{parent}:runQuery), each a JSON body whose keys are the fields' JSON
-# names. The database id `(default)` is one path segment of `{database}`,
+# /v1/{parent}:runQuery), each a JSON body (`body: "*"`) whose keys are the
+# JSON names of the request's fields that the path does not bind: the
+# `database` or `parent` the URL carries is not repeated in the body. The
+# database id `(default)` is one path segment of `{database}`,
 # and its parentheses are percent-encoded there (RFC 3986 sub-delims, which
 # the generated path expansion encodes); the service reads `%28default%29`
 # as `(default)`.
@@ -129,8 +131,7 @@ def test_commit_create_if_absent() raises:
     ref reactor = rt.reactor()
     _ = c.commit[_RT](req, reactor)
     var body = String(
-        '{"database":"projects/demo-project/databases/(default)",'
-        + '"writes":[{"updateTransforms":[],"currentDocument":{"exists":false},'
+        '{"writes":[{"updateTransforms":[],"currentDocument":{"exists":false},'
         + '"update":{"name":"projects/demo-project/databases/(default)/documents/items/a",'
         + '"fields":{"value":{"stringValue":"v"}}}}],"transaction":""}'
     )
@@ -159,8 +160,7 @@ def test_commit_update_time_precondition_and_delete() raises:
     ref reactor = rt.reactor()
     _ = c.commit[_RT](req, reactor)
     var body = String(
-        '{"database":"projects/demo-project/databases/(default)",'
-        + '"writes":[{"updateTransforms":[],'
+        '{"writes":[{"updateTransforms":[],'
         + '"currentDocument":{"updateTime":"2026-09-02T10:00:00.123456Z"},'
         + '"update":{"name":"projects/demo-project/databases/(default)/documents/items/a",'
         + '"fields":{"value":{"stringValue":"v"}}}},'
@@ -188,8 +188,7 @@ def test_batch_get_names_the_documents() raises:
     var got = c.batch_get_documents[_RT](req, reactor)
     assert_equal(len(got), 0)
     var body = String(
-        '{"database":"projects/demo-project/databases/(default)",'
-        + '"documents":["projects/demo-project/databases/(default)/documents/items/a",'
+        '{"documents":["projects/demo-project/databases/(default)/documents/items/a",'
         + '"projects/demo-project/databases/(default)/documents/items/b"]}'
     )
     assert_equal(
@@ -227,7 +226,7 @@ def test_run_query_posts_the_structured_query() raises:
     var body = String(unsafe_from_utf8=wire.as_bytes()[at + 4 :])
     assert_true(
         body.startswith(
-            '{"parent":"projects/demo-project/databases/(default)/documents",'
+            '{"structuredQuery":{'
         ),
         body,
     )

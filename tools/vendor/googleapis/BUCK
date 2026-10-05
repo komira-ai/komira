@@ -106,13 +106,86 @@ _API_HTTP_CLOSURE = _API_HTTP_ROOTS + [
     "google/api/http.proto",
 ]
 
+# IAM v1 (the service accounts, custom roles and service-account IAM
+# policies of the generated komira_gcp_iam): the root and its import
+# closure, google/protobuf/* excepted. :iam_admin_v1 refuses this list unless
+# it is exactly that closure.
+_IAM_ADMIN_V1_ROOTS = [
+    "google/iam/admin/v1/iam.proto",
+]
+
+_IAM_ADMIN_V1_CLOSURE = _IAM_ADMIN_V1_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/iam/v1/iam_policy.proto",
+    "google/iam/v1/options.proto",
+    "google/iam/v1/policy.proto",
+    "google/type/expr.proto",
+]
+
+# Resource Manager v3 Projects (project reads and project IAM policies, for
+# the generated komira_gcp_cloudresourcemanager): the root and its import
+# closure, google/protobuf/* excepted, checked as above.
+_RESOURCEMANAGER_V3_ROOTS = [
+    "google/cloud/resourcemanager/v3/projects.proto",
+]
+
+_RESOURCEMANAGER_V3_CLOSURE = _RESOURCEMANAGER_V3_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/iam/v1/iam_policy.proto",
+    "google/iam/v1/options.proto",
+    "google/iam/v1/policy.proto",
+    "google/longrunning/operations.proto",
+    "google/rpc/status.proto",
+    "google/type/expr.proto",
+]
+
+# Service Usage v1 (enabling and reading a project's services, for the
+# generated komira_gcp_serviceusage): the root and its import closure,
+# google/protobuf/* excepted, checked as above.
+_SERVICEUSAGE_V1_ROOTS = [
+    "google/api/serviceusage/v1/serviceusage.proto",
+]
+
+_SERVICEUSAGE_V1_CLOSURE = _SERVICEUSAGE_V1_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/auth.proto",
+    "google/api/client.proto",
+    "google/api/documentation.proto",
+    "google/api/endpoint.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/label.proto",
+    "google/api/launch_stage.proto",
+    "google/api/monitored_resource.proto",
+    "google/api/monitoring.proto",
+    "google/api/quota.proto",
+    "google/api/resource.proto",
+    "google/api/serviceusage/v1/resources.proto",
+    "google/api/usage.proto",
+    "google/longrunning/operations.proto",
+    "google/rpc/status.proto",
+]
+
 # Every client's closure; a new client appends its list here, and :googleapis
 # extracts the union.
 _ALL_CLOSURES = (
     _LOGGING_V2_CLOSURE +
     _STORAGE_V2_CLOSURE +
     _FIRESTORE_V1_CLOSURE +
-    _API_HTTP_CLOSURE
+    _API_HTTP_CLOSURE +
+    _IAM_ADMIN_V1_CLOSURE +
+    _RESOURCEMANAGER_V3_CLOSURE +
+    _SERVICEUSAGE_V1_CLOSURE
 )
 
 # The files out of the archive, each a sub-target named by its path:
@@ -163,6 +236,32 @@ proto_check(
     name = "api_http",
     roots = _API_HTTP_ROOTS,
     srcs = [":googleapis[{}]".format(f) for f in sorted(_API_HTTP_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The IAM v1, Resource Manager v3 and Service Usage v1 protos, for a
+# consumer, as :logging_v2 above.
+proto_check(
+    name = "iam_admin_v1",
+    roots = _IAM_ADMIN_V1_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_IAM_ADMIN_V1_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+proto_check(
+    name = "resourcemanager_v3",
+    roots = _RESOURCEMANAGER_V3_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_RESOURCEMANAGER_V3_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+proto_check(
+    name = "serviceusage_v1",
+    roots = _SERVICEUSAGE_V1_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_SERVICEUSAGE_V1_CLOSURE)],
     strip_prefix = "files",
     visibility = ["PUBLIC"],
 )
