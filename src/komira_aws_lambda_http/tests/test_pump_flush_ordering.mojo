@@ -98,7 +98,7 @@ from komira_http_core.codec.types import HTTP_METHOD_POST
 
 from komira_json import parse_json_value
 
-from komira_aws_lambda_http.apigw_v2 import AUTHORIZER_HEADER_PREFIX
+from komira_aws_lambda_http.apigw_v2 import AuthorizerHeaderPrefix
 from komira_aws_lambda_http.pump import (
     LambdaInvocationTransport,
     LambdaInvokeEvent,
@@ -110,6 +110,14 @@ from komira_aws_lambda_http.pump import (
 
 
 comptime _Rt = AwsLambdaRuntime[NoopSink]
+
+
+# The caller-chosen authorizer header namespace these fixtures use.
+comptime _PREFIX: String = "x-example-authz-"
+
+
+def _prefix() raises -> AuthorizerHeaderPrefix:
+    return AuthorizerHeaderPrefix(String(_PREFIX))
 
 
 # =============================================================================
@@ -288,7 +296,7 @@ def _send_event(rid_tag: String) -> String:
         '{"version": "2.0", "rawPath": "/api/v1/items",'
         '"rawQueryString": "tag=a&tag=b",'
         '"headers": {"Content-Type": "application/json",'
-        '"x-komira-authorizer-subjectid": "subject-victim",'
+        '"x-example-authz-subjectid": "subject-victim",'
         '"X-Request-Id": "'
     ) + rid_tag + String(
         '"},'
@@ -329,7 +337,7 @@ def test_the_drain_runs_once_per_invocation() raises:
 
     var handled = run_api_gateway_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(transport.post_count, 1)
@@ -371,7 +379,7 @@ def test_the_drain_has_NOT_run_when_the_result_post_fails() raises:
     try:
         _ = run_api_gateway_pump[
             _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-        ](transport, dispatcher, reactor, flusher, 1)
+        ](transport, dispatcher, reactor, flusher, _prefix(), 1)
     except e:
         raised = True
         _ = e
@@ -417,7 +425,7 @@ def test_the_drain_HAS_run_before_the_next_poll() raises:
     try:
         _ = run_api_gateway_pump[
             _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-        ](transport, dispatcher, reactor, flusher, 2)
+        ](transport, dispatcher, reactor, flusher, _prefix(), 2)
     except e:
         raised = True
         _ = e
@@ -467,7 +475,7 @@ def test_the_drain_has_NOT_run_when_the_ERROR_report_fails() raises:
     try:
         _ = run_api_gateway_pump[
             _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-        ](transport, dispatcher, reactor, flusher, 1)
+        ](transport, dispatcher, reactor, flusher, _prefix(), 1)
     except e:
         raised = True
         _ = e
@@ -516,7 +524,7 @@ def test_a_raising_drain_still_leaves_the_caller_ANSWERED() raises:
     try:
         _ = run_api_gateway_pump[
             _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-        ](transport, dispatcher, reactor, flusher, 1)
+        ](transport, dispatcher, reactor, flusher, _prefix(), 1)
     except e:
         raised = True
         _ = e
@@ -553,7 +561,7 @@ def test_the_drain_also_runs_on_the_error_channel() raises:
 
     var handled = run_api_gateway_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(transport.error_count, 1)
@@ -573,7 +581,7 @@ def test_the_no_drain_conformer_is_usable_and_does_nothing() raises:
 
     var handled = run_api_gateway_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, NoLambdaFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(transport.post_count, 1)
@@ -601,7 +609,7 @@ def test_an_unconvertible_event_never_reaches_the_dispatcher() raises:
 
     _ = run_api_gateway_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(transport.error_count, 1)
     assert_equal(transport.post_count, 0)
@@ -626,7 +634,7 @@ def test_a_dispatcher_raise_becomes_a_500_RESULT_not_an_error() raises:
 
     var handled = run_api_gateway_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(transport.post_count, 1)
@@ -659,7 +667,7 @@ def test_the_dispatcher_receives_the_converted_fields() raises:
 
     _ = run_api_gateway_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(dispatcher.dispatch_count, 1)
     assert_equal(dispatcher.seen_method, HTTP_METHOD_POST)
@@ -682,7 +690,7 @@ def test_the_authorizer_identity_reaches_the_dispatcher_and_the_forgery_does_not
     after the whole pump, not at the converter's return value.
 
     The scripted event carries BOTH a client-supplied
-    `x-komira-authorizer-subjectid: subject-victim` AND a real authorizer context
+    `x-example-authz-subjectid: subject-victim` AND a real authorizer context
     `{"subjectId": "subject-real"}`. The handler must act on `subject-real`.
 
     FAILS ON: injecting the authorizer context BEFORE copying client headers
@@ -698,9 +706,9 @@ def test_the_authorizer_identity_reaches_the_dispatcher_and_the_forgery_does_not
 
     _ = run_api_gateway_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
-    var key = String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")
+    var key = String(_PREFIX) + String("subjectid")
     assert_true(key in dispatcher.seen_headers)
     assert_equal(dispatcher.seen_headers[key], String("subject-real"))
     assert_false(dispatcher.seen_headers[key] == String("subject-victim"))

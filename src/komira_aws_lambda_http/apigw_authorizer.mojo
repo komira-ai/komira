@@ -41,8 +41,8 @@
 # `{"isAuthorized": true, "context": {...}}` is the SIMPLE response format. On
 # an ALLOW, API Gateway copies `context`'s members into
 # `requestContext.authorizer.lambda` of the PROXY event it then sends to the
-# backend — where `apigw_v2._inject_authorizer_context` turns each into an
-# `x-komira-authorizer-*` header the handler can read.
+# backend — where `apigw_v2._inject_authorizer_context` turns each into a
+# header under the caller's `AuthorizerHeaderPrefix` the handler can read.
 #
 # => A `context` MEMBER IS AN ASSERTION THE BACKEND WILL TRUST WITHOUT PROOF.
 # So the rule is not "what is useful" but:

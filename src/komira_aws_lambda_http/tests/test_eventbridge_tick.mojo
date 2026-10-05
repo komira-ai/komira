@@ -102,7 +102,7 @@ from komira_http_core.codec.types import (
 )
 
 from komira_aws_lambda_http.apigw_v2 import (
-    AUTHORIZER_HEADER_PREFIX,
+    AuthorizerHeaderPrefix,
     api_gateway_v2_event_to_request,
 )
 from komira_aws_lambda_http.eventbridge_tick import (
@@ -123,6 +123,14 @@ from komira_aws_lambda_http.pump import (
 
 
 comptime _Rt = AwsLambdaRuntime[NoopSink]
+
+
+# The caller-chosen authorizer header namespace these fixtures use.
+comptime _PREFIX: String = "x-example-authz-"
+
+
+def _prefix() raises -> AuthorizerHeaderPrefix:
+    return AuthorizerHeaderPrefix(String(_PREFIX))
 
 # ⛔ THE FIXTURE IS THE RENDERER'S OUTPUT, BYTE FOR BYTE. It is what the deploy
 # side's schedule renderer (not part of this package) emits for
@@ -403,7 +411,7 @@ def test_a_converted_tick_carries_NO_headers_AT_ALL() raises:
     """⛔ A SECURITY PROPERTY, NOT A SIMPLIFICATION (§5). `apigw_v2.mojo` §3
     spends its longest section on one hazard: the authorizer's answer reaches a
     handler through `req.headers` and the CLIENT controls `headers` too, so the
-    whole `x-komira-authorizer-` namespace is destroyed on entry there. The
+    whole caller-chosen authorizer namespace is destroyed on entry there. The
     request this converter builds has an EMPTY header dict and never adds one, so
     the reserved namespace is unreachable from a tick payload by construction.
 
@@ -417,7 +425,7 @@ def test_a_converted_tick_carries_NO_headers_AT_ALL() raises:
         _ = kv
         n += 1
     assert_equal(n, 0)
-    var reserved = String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")
+    var reserved = String(_PREFIX) + String("subjectid")
     assert_false(reserved in req.headers)
 
 
@@ -497,7 +505,7 @@ def test_refuses_a_tick_payload_that_tries_to_carry_headers() raises:
     _must_raise_tick(
         String(
             '{"httpMethod":"POST","path":"/internal/tick/reconcile",'
-            '"headers":{"x-komira-authorizer-subjectid":"subject-victim"}}'
+            '"headers":{"x-example-authz-subjectid":"subject-victim"}}'
         ),
         String("a tick payload carrying `headers`"),
     )
@@ -604,7 +612,9 @@ def test_the_tick_payload_is_REFUSED_by_the_apigw_converter() raises:
     leaves that test green and turns this one red."""
     var raised = False
     try:
-        var req = api_gateway_v2_event_to_request(String(_TICK_RECONCILE))
+        var req = api_gateway_v2_event_to_request(
+            String(_TICK_RECONCILE), _prefix()
+        )
         _ = req.path
     except e:
         raised = True
@@ -680,7 +690,7 @@ def test_a_tick_reaches_the_dispatcher_as_POST_on_its_own_route() raises:
 
     var handled = run_api_gateway_and_tick_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(dispatcher.dispatch_count, 1)
@@ -704,7 +714,7 @@ def test_an_apigw_event_still_reaches_the_dispatcher_through_the_same_pump() rai
 
     var handled = run_api_gateway_and_tick_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(dispatcher.dispatch_count, 1)
@@ -755,7 +765,7 @@ def test_a_truncated_2_0_event_is_an_ERROR_and_NOT_a_tick_for_the_root() raises:
 
     var handled = run_api_gateway_and_tick_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(dispatcher.dispatch_count, 0)
@@ -798,7 +808,7 @@ def test_a_1_0_event_reports_the_APIGW_refusal_and_not_the_TICK_one() raises:
 
     var handled = run_api_gateway_and_tick_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(dispatcher.dispatch_count, 0)
@@ -827,7 +837,7 @@ def test_an_unconvertible_payload_reaches_the_ERROR_channel_not_a_500() raises:
 
     var handled = run_api_gateway_and_tick_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(handled, 1)
     assert_equal(dispatcher.dispatch_count, 0)
@@ -862,7 +872,7 @@ def test_the_drain_runs_once_per_invocation() raises:
 
     _ = run_api_gateway_and_tick_pump[
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-    ](transport, dispatcher, reactor, flusher, 1)
+    ](transport, dispatcher, reactor, flusher, _prefix(), 1)
 
     assert_equal(transport.post_count, 1)
     assert_equal(flusher.flush_count, 1)
@@ -894,7 +904,7 @@ def test_the_drain_has_NOT_run_when_the_result_post_fails() raises:
     try:
         _ = run_api_gateway_and_tick_pump[
             _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
-        ](transport, dispatcher, reactor, flusher, 1)
+        ](transport, dispatcher, reactor, flusher, _prefix(), 1)
     except e:
         raised = True
         _ = e
