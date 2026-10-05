@@ -12,8 +12,9 @@
 # `after`; `id-token: write` only on a job whose stage publishes by trusted
 # publishing or is farm-connected; the farm-connect action exactly on the
 # farm-connected stage; each job runs exactly one `kci run` with
-# `--summary-file`, reading the machine file being checked; no pull_request
-# trigger; a `revision` input; every action pinned. A job runs its whole
+# `--summary-file`, reading the machine file being checked; a `pull_request`
+# trigger that only the pr stage's job answers (below); a `revision` input;
+# every action pinned. A job runs its whole
 # stage (a FULL run) unless the stage is SPLIT: gamma is, into `gamma` (its
 # step, `--only step:publish`) and `validate` (its validation, `--only
 # validation:install`), which together run all of it exactly once; a job
@@ -47,6 +48,18 @@
 #          environment `prod` (its required reviewer approves the job), to
 #          prefix.dev komira-ai/prod. Only a manual run reaches it, so a push
 #          to main never waits on the prod approval.
+#   pr     the check of a pull request (the check named `kci / pr`), on a
+#          GitHub-hosted runner joined to the build farm's tailnet, in NO
+#          environment, with `contents: read` and the `id-token: write` the
+#          farm connection exchanges, nothing else: it builds bin/kci from
+#          the pull request's merge commit and runs `kci run --stage pr
+#          --affected-by <the pull request's base commit>`, which builds the
+#          units the change reaches (the artifacts of
+#          release/artifacts.textproto and the checks derived from the build
+#          graph when it runs) and ships nothing. It runs only for a pull request from a branch of this
+#          repository: a fork's pull request runs nothing (a fork's run gets
+#          no tailnet credential; a maintainer reads the change and pushes it
+#          to a branch here). A push or a manual run skips it.
 #
 # Each channel trusts this repository, this file (kci.yml) and one environment
 # (trusted publishing): no secret is stored anywhere. The publish jobs stay
@@ -54,9 +67,12 @@
 # workflow the token names. Deploying, when there is one, is a stage and an
 # environment of its own.
 #
-# Triggers: a push to main and a manual run. NEVER pull_request: the build job
-# joins the tailnet, and the tailnet credential must not reach a pull
-# request's code.
+# Triggers: a push to main and a manual run release; a pull request runs the
+# pr job and NOTHING ELSE. Every release job's `if:` keeps a pull request out
+# (`github.event_name != 'pull_request'`, or prod's manual-run condition), so
+# no environment, publishing token or release job is reached from a pull
+# request's code; the pr job's own condition keeps a fork's out of the
+# tailnet. The welded test holds both (rule R6 of src/kci_ci_check).
 #
 # THE REVISION. Everything a run builds and publishes is the commit REVISION:
 # the pushed commit, or a manual run's input `revision` (a full commit id; empty
@@ -79,6 +95,8 @@ name: kci
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       revision:
@@ -93,10 +111,12 @@ on:
 permissions: {}
 
 concurrency:
-  # A group of its own per revision, so no run is cancelled or dropped for a
-  # newer one (the reason is in ci.yml). Two runs of one revision queue.
-  group: kci-${{ inputs.revision || github.sha }}
-  cancel-in-progress: false
+  # A release run: a group of its own per revision, so no run is cancelled or
+  # dropped for a newer one. Two runs of one revision queue. A pull request:
+  # one group per pull request, and a newer push to it cancels the older
+  # check.
+  group: kci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || inputs.revision || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # The release machine: its stages, and through them the artifacts, the
@@ -105,11 +125,14 @@ env:
   # only by the step that skips a revision without one. The welded test
   # test_repo_kci_yml holds it equal to kci's default.
   KCI_MACHINE: release/machine.textproto
-  # The commit this run releases (THE REVISION, above).
+  # The commit this run releases (THE REVISION, above); on a pull request, the
+  # merge commit the pr job checks.
   REVISION: ${{ inputs.revision || github.sha }}
 
 jobs:
   build:
+    # a release job: never on a pull request (R6)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     environment: build
     timeout-minutes: 120
@@ -227,7 +250,7 @@ jobs:
 
   gamma:
     needs: build
-    if: needs.build.outputs.release == 'true'
+    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: gamma
@@ -295,7 +318,7 @@ jobs:
 
   validate:
     needs: [build, gamma]
-    if: needs.build.outputs.release == 'true'
+    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'
     # docker is on the hosted image; no farm, no tailnet
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -409,3 +432,83 @@ jobs:
           path: ${{ runner.temp }}/kci-result-prod.json
           if-no-files-found: warn
           retention-days: 90
+
+  pr:
+    # A pull request from a branch of this repository, and nothing else: a
+    # fork's pull request runs nothing, and a push or a manual run (no pull
+    # request) skips this job (R6).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    # No environment: no approval, and no environment secret reaches a pull
+    # request's code.
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts (the stage is
+      # farm-connected; it publishes nothing)
+      id-token: write
+    steps:
+      # The merge commit, with the full history: kci reads the change from
+      # git (`<base>...<revision>`) and refuses a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+      - name: the buckconfig names the farm
+        run: |
+          for key in linux_x86_64_properties; do
+            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
+              { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
+          done
+      # kci as the build job builds it, from the pull request's code.
+      - name: build kci
+        run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
+      # The build systems name the program `buck2`; the repository's is the
+      # ./buck2 wrapper of this checkout.
+      - name: buck2 on PATH
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          printf '#!/bin/sh\nexec "%s/buck2" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/bin/buck2"
+          chmod +x "$RUNNER_TEMP/bin/buck2"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # kci first holds this workflow (as committed) to the machine file, then
+      # builds the units the change reaches: the artifacts of
+      # release/artifacts.textproto and the checks its buck2 build system
+      # derives from the live graph (release/ci/derive_checks.py), so every
+      # target of the graph is in some unit. The base is the pull request's
+      # base commit, a full commit id GitHub sets.
+      - name: kci run --stage pr
+        run: |
+          "$RUNNER_TEMP/kci/kci" run --stage pr --affected-by ${{ github.event.pull_request.base.sha }} \
+            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
+            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
+            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --work-dir "$GITHUB_WORKSPACE" --log-dir "$RUNNER_TEMP/kci-logs" \
+            --result-file "$RUNNER_TEMP/kci-result-pr.json" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+      - name: the build logs
+        if: failure()
+        run: |
+          for f in "$RUNNER_TEMP"/kci-logs/*; do
+            [ -f "$f" ] && { echo "== $f"; cat "$f"; }
+          done
+          true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: kci-result-pr-${{ env.REVISION }}
+          path: ${{ runner.temp }}/kci-result-pr.json
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true

@@ -26,14 +26,36 @@ comptime _MACHINE: String = (
     "}\n"
 )
 
-# The pull request workflow that agrees with _MACHINE.
+# The one workflow (the release jobs and the pull request's job) that
+# agrees with _MACHINE.
 comptime _PR_WF: String = (
-    "name: pr\n"
+    "name: kci\n"
     "on:\n"
-    "  pull_request:\n"
+    "  push:\n"
     "    branches: [main]\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      revision:\n"
+    "        type: string\n"
+    "  pull_request:\n"
     "permissions: {}\n"
     "jobs:\n"
+    "  build:\n"
+    "    if: github.event_name != 'pull_request'\n"
+    "    environment: build\n"
+    "    permissions:\n"
+    "      id-token: write\n"
+    "    steps:\n"
+    "      - uses: ./.github/actions/farm-connect\n"
+    "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
+    "  publish-gamma:\n"
+    "    needs: build\n"
+    "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
+    "    environment: gamma\n"
+    "    permissions:\n"
+    "      id-token: write\n"
+    "    steps:\n"
+    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
     "  pr:\n"
     "    if: github.event.pull_request.head.repo.full_name == github.repository\n"
     "    runs-on: ubuntu-24.04\n"
@@ -55,34 +77,6 @@ comptime _PR_WF: String = (
     "            --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
 )
 
-# A release workflow (no pull_request trigger) that agrees with _MACHINE.
-comptime _REL_WF: String = (
-    "name: kci\n"
-    "on:\n"
-    "  push:\n"
-    "    branches: [main]\n"
-    "  workflow_dispatch:\n"
-    "    inputs:\n"
-    "      revision:\n"
-    "        type: string\n"
-    "permissions: {}\n"
-    "jobs:\n"
-    "  build:\n"
-    "    environment: build\n"
-    "    permissions:\n"
-    "      id-token: write\n"
-    "    steps:\n"
-    "      - uses: ./.github/actions/farm-connect\n"
-    "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-    "  publish-gamma:\n"
-    "    needs: build\n"
-    "    environment: gamma\n"
-    "    permissions:\n"
-    "      id-token: write\n"
-    "    steps:\n"
-    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
-)
-
 comptime _FORK: String = "github.event.pull_request.head.repo.full_name == github.repository"
 comptime _FORK_IF: String = "    if: github.event.pull_request.head.repo.full_name == github.repository\n"
 comptime _JOB_PERMS: String = "    permissions:\n      contents: read\n      id-token: write\n"
@@ -93,7 +87,10 @@ comptime _TOP_PERMS: String = "permissions: {}\n"
 comptime _CANNOT: Int = 0
 comptime _FINDING: Int = 1
 
-comptime _R6_FORK: String = "and farm-connected, so the job carries `if:"
+comptime _R6_FORK: String = "R6: stage 'pr' is a PULL_REQUEST stage, so the job carries `if:"
+comptime _R6_BUILD: String = "job 'build': R6: runs stage 'build', a release stage"
+comptime _BUILD_IF: String = "    if: github.event_name != 'pull_request'\n"
+comptime _GAMMA_IF: String = "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
 comptime _R4_SCALAR: String = "R4: `permissions: "
 comptime _R4_TOP_TOKEN: String = "R4: `id-token: write` at the workflow level reaches every job"
 comptime _R6_PUSH: String = "R6: the push trigger is exactly `branches: [main]`"
@@ -127,15 +124,13 @@ def _swap(old: String, new: String) raises -> String:
 
 
 def _rel_swap(old: String, new: String) raises -> String:
-    """The release workflow with `old` replaced by `new`."""
-    var s = String(_REL_WF)
-    if s.find(old) < 0:
-        raise Error(String("release fixture has no '") + old + String("'"))
-    return s.replace(old, new)
+    """The workflow (its release jobs and the pull request's job) with
+    `old` replaced by `new`."""
+    return _swap(old, new)
 
 
 def _push(value: String) raises -> String:
-    """The release workflow with its push trigger written as `value`."""
+    """The workflow with its push trigger written as `value`."""
     return _rel_swap(String(_PUSH_MAIN), value)
 
 
@@ -174,6 +169,24 @@ def _rows() raises -> List[_Row]:
     r.append(_Row(String("if: tab inside quotes"), _fork_if(String("\"") + expr + String("\t\"")), _CANNOT, String("a TAB")))
     r.append(_Row(String("if: tab after a plain scalar"), _fork_if(expr + String("\t")), _CANNOT, String("a TAB")))
     r.append(_Row(String("if: a partial ${{"), _fork_if(String(_FORK) + String(" && ${{ true")), _FINDING, String(_R6_FORK)))
+
+    # a release job's condition, read the same way
+    var build = String("${{ github.event_name != 'pull_request' }}")
+    r.append(_Row(String("build if: text before ${{"), _swap(String(_BUILD_IF), String("    if: x") + build + String("\n")), _FINDING, String(_R6_BUILD)))
+    r.append(_Row(String("build if: space inside quotes"), _swap(String(_BUILD_IF), String("    if: \"") + build + String(" \"\n")), _FINDING, String(_R6_BUILD)))
+    r.append(_Row(String("build if: block |"), _swap(String(_BUILD_IF), String("    if: |\n      ") + build + String("\n")), _CANNOT, String("block scalar")))
+    r.append(_Row(String("build if: block >-"), _swap(String(_BUILD_IF), String("    if: >-\n      github.event_name != 'pull_request'\n")), _CANNOT, String("block scalar")))
+    r.append(
+        _Row(
+            String("gamma if: '' carried on"),
+            _swap(
+                String(_GAMMA_IF),
+                String("    if: 'github.event_name != ''pull_request'' && needs.build.outputs.release == ''true''\n    || ''a: b'''\n"),
+            ),
+            _CANNOT,
+            String("an escaped quote"),
+        )
+    )
 
     # ---- block scalars, every style and chomping ---------------------------
     var headers = List[String]()
@@ -344,7 +357,10 @@ def _rows() raises -> List[_Row]:
     r.append(
         _Row(
             String("on: a list of events"),
-            _rel_swap(String("on:\n") + String(_PUSH_MAIN) + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n"), String("on: [push, workflow_dispatch]\n")),
+            _rel_swap(
+                String("on:\n") + String(_PUSH_MAIN) + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n  pull_request:\n"),
+                String("on: [push, workflow_dispatch, pull_request]\n"),
+            ),
             _FINDING,
             String(_R6_PUSH),
         )
@@ -460,14 +476,6 @@ def test_the_fixture_agrees() raises:
     var tokens = List[String]()
     tokens.append(String("publish-gamma"))
     var f = check_workflow(String(_PR_WF), g, tokens, String("release/machine.textproto"))
-    assert_equal(len(f), 0)
-
-
-def test_the_release_fixture_agrees() raises:
-    var g = parse_machine_file(String(_MACHINE), String("machine file"))
-    var tokens = List[String]()
-    tokens.append(String("publish-gamma"))
-    var f = check_workflow(String(_REL_WF), g, tokens, String("release/machine.textproto"))
     assert_equal(len(f), 0)
 
 

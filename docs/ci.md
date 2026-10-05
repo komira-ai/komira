@@ -62,7 +62,8 @@ A contributor runs the same three commands on any client. A green local
 prove, dead Markdown links included (`//:docs`).
 
 Publishing is not part of this job. It is a separate workflow,
-[kci.yml](#kciyml-the-release), which never runs for a pull request.
+[kci.yml](#kciyml-the-release), whose only job on a pull request is the
+per-change check `pr`; its release jobs never run for one.
 
 ## The runner
 
@@ -216,7 +217,7 @@ can start a scratch daemon or clone and are still to be analysed.
 packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
 It is written by hand. The stages are owned by the release machine,
 [`release/machine.textproto`](../release/machine.textproto): `build`, then
-`gamma`, then `prod`. The workflow runs one job per stage, named for its
+`gamma`, then `prod`, and `pr`, the per-change check of a pull request. The workflow runs one job per stage, named for its
 stage, running in the stage's GitHub environment and running exactly one
 `kci run --stage <its name>`, except that `gamma` is split over two jobs:
 `gamma` runs its step (`--only step:publish`) and `validate` its validation
@@ -229,6 +230,7 @@ convention (its one default path), so no line of the workflow names it.
 | `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
 | `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`, docker installed), no environment, `contents: read` only | `kci run --stage gamma --only validation:install`: what `gamma` published, installed from the channel the way a consumer gets it, in a digest-pinned container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
 | `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
+| `pr` (the check `kci / pr`) | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), no environment, `contents: read` + `id-token: write` (for the tailnet only) | a pull request from a branch of this repository only (a fork's runs nothing): builds `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
 is published to each channel: it is never rebuilt. `build.set_hash`,
@@ -254,8 +256,9 @@ value, and the release's `release_produced_by` names the one build run.
   `id-token: write` only where a stage publishes by trusted publishing or is
   farm-connected, one `kci run` per job with `--summary-file`, `--only` only
   in a split stage whose jobs run all of it once (a validations-only job has
-  no environment, no identity token, and needs the stage's own job), no
-  `pull_request` trigger, a `revision` input, every `uses:` pinned,
+  no environment, no identity token, and needs the stage's own job), a
+  `pull_request` trigger only the PULL_REQUEST stage's job answers (rule R6),
+  a `revision` input, every `uses:` pinned,
   `farm-connect` exactly on farm-connected stages). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
   finding listed, nothing run); an unreadable workflow or channels file, or a
   missing variable, is exit 5 and never a pass. The same check is the welded
@@ -263,18 +266,35 @@ value, and the release's `release_produced_by` names the one build run.
   fails `./buck2 build //...`. Consequence: a revision whose machine file
   disagrees with the running `kci.yml` cannot be released by it (a manual run
   of an old revision is refused, exit 3).
-- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`).
-  Never `pull_request`: the `build` job joins the tailnet, and the tailnet
-  credential must not reach a pull request's code. The push trigger is
-  exactly `branches: [main]` (rule R6): with no branch filter, another
-  pattern, `branches-ignore`, `tags` or a path filter, a push to any branch,
-  a pull request's head branch included, would run the release jobs. A
-  pull request's own job (a PULL_REQUEST stage) has its own `permissions:`
-  (`contents: read`, and `id-token: write` only for the farm connection),
-  so it never gets the workflow-level permissions or the repository's
-  default token, and no stored secret reaches it: no value of that job, nor
-  of the `env:` of a workflow with a `pull_request` trigger, names the
-  `secrets` context other than `secrets.GITHUB_TOKEN`.
+- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`)
+  release; a pull request to `main` runs the job `pr` and nothing else.
+  Every release job's `if:` keeps a pull request out
+  (a top-level `&&` conjunction with the term
+  `github.event_name != 'pull_request'`, or prod's manual-run condition;
+  grouping, negation, a call or a partial `${{ }}` is refused), so
+  no environment, publishing token or release job is reached from a pull
+  request's code. The `pr` job's condition
+  (`github.event.pull_request.head.repo.full_name == github.repository`)
+  keeps a fork's code off the farm: a fork's run gets no tailnet credential,
+  and a maintainer reads the change and pushes it to a branch here. Both
+  conditions are written bare or as exactly `${{ <condition> }}`: a block
+  scalar (`if: |`) holding `${{`, or whitespace inside quotes around it,
+  makes GitHub read the `if:` as a format string, which is always true.
+  The `pr` job runs on `runs-on: ubuntu-24.04`, written as that plain
+  scalar: a fresh GitHub-hosted machine. A self-hosted label, a label list, a
+  runner group, an expression (`${{ vars.X }}`, a fork-conditional) or a
+  quoted value is refused, so a pull request's code never reaches a runner
+  that keeps state between jobs.
+  The push trigger is exactly `branches: [main]`: with no branch filter,
+  another pattern, `branches-ignore`, `tags` or a path filter, a push to a
+  pull request's head branch would run the release jobs, and
+  `github.event_name != 'pull_request'` holds for a push. The `pr` job has
+  its own `permissions:` (`contents: read`, `id-token: write` for the
+  tailnet only), so it never gets the workflow-level permissions or the
+  repository's default token, and no stored secret reaches it: no value of
+  that job, nor of the workflow-level `env:`, names the `secrets` context
+  other than `secrets.GITHUB_TOKEN`.
+  Rule R6 of `src/kci_ci_check` holds all of it.
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
   the run started on). Every job checks it out, kci refuses a checkout whose
@@ -367,6 +387,43 @@ value, and the release's `release_produced_by` names the one build run.
   (it travels in the workflow artifact). How kci itself reaches the runner is
   an open design question.
 
+### The per-change check's units
+
+`kci run --stage pr --affected-by <base>` builds UNITS, and a unit passes only
+when it builds and its tests pass. The units are derived when the check runs,
+so the release files list no package:
+
+- **Declared:** the artifacts of `release/artifacts.textproto` (and any
+  explicit `checks` it declares, to group targets its own way).
+- **Derived:** the buck2 build system's `derive_checks` command,
+  `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
+  from the live graph (`buck2 cquery`) and answers one check per path group
+  for every target no declared unit names or matches: `<p>` for each
+  library `//src/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
+  `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
+  for `tests//functional/...`; a name an artifact holds gets `_package`.
+  Every name is one kci accepts (`[a-z][a-z0-9_]*`) whatever the directory
+  is called: upper case becomes lower, any other character `_`, and a name
+  not starting with a letter gets `pkg_` (`//src/3d` is `pkg_3d`); groups
+  whose names meet are one check. kci adds them after the declared units,
+  under the file's own rules.
+- **Coverage by construction:** every target of the graph is in some unit. A
+  pull request that adds a package gets a check for it, and one that deletes
+  a package no longer derives one; neither edits a release file.
+- **A declared target that matches nothing:** for a check, a NOTICE line in
+  the result (the package it named is gone; the rest of the check builds);
+  for an artifact, a refusal (`KCI-E-ARTIFACT`): a release must build what an
+  artifact names. A derive tool that fails or answers outside its grammar is
+  "cannot tell" (`KCI-E-AFFECTED`), never a pass.
+
+To see the units a change would build, with nothing built:
+
+```sh
+kci run --stage pr --affected-by <base commit> --revision-id <HEAD> \
+  --work-dir "$PWD" --log-dir <dir> --result-file <file> --plan
+python3 release/ci/derive_checks.py --from release/artifacts.textproto  # the derived checks alone
+```
+
 ### The workflow subset kci reads
 
 kci holds a workflow to the machine file by reading it with its own reader
@@ -383,7 +440,7 @@ at, never a pass. A workflow kci checks is written inside it:
 - **Mappings:** by indentation, `key: value` or `key:`. A key is plain
   (`[A-Za-z0-9_.-]`), never quoted. Keys of one mapping differ ignoring case,
   and a key the check reads (`on`, `jobs`, `permissions`, `id-token`, `if`,
-  `needs`, `environment`, `steps`, `run`, `uses`, `with`, `fetch-depth`,
+  `needs`, `runs-on`, `environment`, `steps`, `run`, `uses`, `with`, `fetch-depth`,
   `inputs` and the trigger names) is written in lower case.
 - **Lists:** by indentation, `- value` or `- key: value`, one space after the
   dash.

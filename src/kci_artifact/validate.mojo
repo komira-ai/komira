@@ -29,6 +29,10 @@
 #     `build_targets` (kci could not build it), and a check with no targets;
 #   * a target (an artifact's or a check's) that is empty, holds whitespace
 #     or a placeholder, or is given twice in one unit;
+#   * a `derive_checks` command breaking the executable rules, holding an
+#     empty arg or a placeholder that is not an affected command's, or never
+#     naming `{units_file}`; a build system declaring it without both
+#     `affected` and `build_targets`;
 #   * an `affected` or `build_targets` command breaking the executable rules
 #     above, or holding an empty arg; an `affected` arg holding a placeholder
 #     that is not one of its four (`{changed_files}`, `{units_file}`,
@@ -206,6 +210,14 @@ def _check_build_system(source: String, arts: Artifacts, i: Int) raises:
         _check_affected(source, who, b.affected.value())
     if b.build_targets:
         _check_build_targets(source, who, b.build_targets.value())
+    if b.derive_checks:
+        _check_derive_checks(source, who, b.derive_checks.value())
+        if not b.affected or not b.build_targets:
+            _refuse(
+                source, who,
+                String("declares derive_checks but not both affected and build_targets: kci could not")
+                + String(" select or build the checks it derives"),
+            )
 
 
 def _check_artifact(source: String, arts: Artifacts, i: Int) raises:
@@ -300,6 +312,28 @@ def _check_affected(source: String, who: String, c: Command) raises:
     for p in [String(CHANGED_FILES_PLACEHOLDER), String(UNITS_FILE_PLACEHOLDER)]:
         if not _names(c.args, p):
             _refuse(source, me, String("never names '") + p + String("': the tool could not know what to answer"))
+
+
+def _check_derive_checks(source: String, who: String, c: Command) raises:
+    var me = String("the derive_checks command of ") + who
+    _check_executable(source, me, c.executable)
+    for i in range(len(c.args)):
+        if c.args[i].byte_length() == 0:
+            _refuse(source, me, String("arg #") + String(i + 1) + String(" is empty"))
+        var ph = placeholders_in(c.args[i])
+        for k in range(len(ph)):
+            if not is_affected_placeholder(ph[k]):
+                _refuse(
+                    source, me,
+                    String("arg '") + c.args[i] + String("' holds the placeholder '") + ph[k]
+                    + String("', which is not an affected command's"),
+                )
+    if not _names(c.args, String(UNITS_FILE_PLACEHOLDER)):
+        _refuse(
+            source, me,
+            String("never names '") + String(UNITS_FILE_PLACEHOLDER)
+            + String("': the tool could not know what the declared units already name"),
+        )
 
 
 def _check_build_targets(source: String, who: String, c: Command) raises:
