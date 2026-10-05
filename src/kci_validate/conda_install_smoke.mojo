@@ -143,6 +143,12 @@ def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPol
             String("validation '") + v.name + String("' is ") + v.kind + String(", not ")
             + String(VALIDATION_KIND_CONDA_INSTALL_SMOKE)
         )
+    if req.channel_override.byte_length() > 0:
+        # a local channel is a directory of this machine, not of the container
+        raise Error(
+            String("validation '") + v.name + String("' is ") + v.kind
+            + String(": --channel names a local channel, which only a CONDA_INSTALL_ENV validation reads")
+        )
     if req.plan:
         return ResultValidation(
             v.name.copy(), req.step_name.copy(), v.kind.copy(), String(VALIDATION_WOULD_VALIDATE), String("")

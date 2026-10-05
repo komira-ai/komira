@@ -57,6 +57,15 @@
 # The row records `environment` ENV, `channel_url` (the step's channel
 # location) and `pixi_sha256` (the bytes kci ran through bin/pixi).
 #
+# A LOCAL CHANNEL (`channel_override`, kci run --channel file:///<dir>):
+# the same checks, with that location in place of the step's everywhere:
+# check 1 reads its index and files (through file_channel.mojo's
+# `FileChannelTransport`), pixi.toml names it, every record's `url` must be
+# under it, and the row's `channel_url` records it. It has no host, so the
+# network check asks only the compiler and extra channels. This validates a
+# release BEFORE it is published, from the directory `komira_pack
+# conda-index` writes; which runs may name one is kci_cli's.
+#
 # The seams: kci_build's `ProcessRunner` starts pixi (ScriptedRunner in the
 # welded tests, which plays pixi by writing what it would leave in <w>);
 # kci_pkg_upload's `PkgTransport` asks the hosts and reads the channel;
@@ -87,7 +96,7 @@ from kci_api import (
 from kci_pkg_upload import PkgTransport
 from kci_release_set.member import file_sha256_hex
 
-from .channel_index import IndexPollLog, check_channel
+from .channel_index import ChannelUrl, IndexPollLog, check_channel
 from .container import MANIFEST_NAME, install_manifest_text, join_path, payload_record_name, work_subdirs
 from .env import (
     AUTH_FILE,
@@ -200,6 +209,16 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
         pins = with_members(rel.loaded, named)
         mojo_pin = mojo_pin_of(rel.loaded)
         channel_url = rel.channel_url.copy()
+        if req.channel_override.byte_length() > 0:
+            # the LOCAL channel of a validation-only run (the step's channel
+            # is still resolved above, so a step naming none is refused)
+            var local = ChannelUrl(req.channel_override)
+            if not local.is_local():
+                raise Error(
+                    String("--channel '") + req.channel_override
+                    + String("' is not a file:/// directory: only a local channel replaces the step's")
+                )
+            channel_url = local.url.copy()
     except e:
         checks.append(
             _row(

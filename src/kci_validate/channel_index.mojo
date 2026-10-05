@@ -12,7 +12,10 @@
 #   policy (prefix.dev answers 303 to a signed URL on another host).
 #
 # THE URL. The index is read at `<location>/<subdir>/repodata.json`, the
-# location exactly as the channels file declares it. For prefix.dev that is
+# location exactly as the channels file declares it, or the LOCAL channel
+# `file:///<dir>` a validation-only run names (kci run --channel): the same
+# reads, answered from that directory by `FileChannelTransport`
+# (file_channel.mojo), and the same rows. For prefix.dev that is
 # the web host (`https://prefix.dev/<org>/<channel>`); it answers the index
 # path the same way `repo.prefix.dev` does: 303 to a signed URL on its
 # package host once the subdir has an index, 404 before. The redirect target
@@ -88,6 +91,19 @@ comptime WAIT_POLL_SECONDS: Int = 15
 comptime CHECK_CHANNEL: String = "channel"
 """The check name of every row this file writes."""
 
+comptime FILE_CHANNEL_PREFIX: String = "file:///"
+"""How a LOCAL channel location starts: `file:///<absolute directory>`."""
+
+
+def has_dot_segment(path: String) -> Bool:
+    """True when a `/`-separated path holds a `.` or `..` segment."""
+    var parts = path.split(String("/"))
+    for i in range(len(parts)):
+        var seg = String(parts[i])
+        if seg == String(".") or seg == String(".."):
+            return True
+    return False
+
 comptime _STDERR: FileDescriptor = FileDescriptor(2)
 
 
@@ -126,8 +142,12 @@ struct RecordingIndexPollLog(IndexPollLog):
 
 
 struct ChannelUrl(Copyable, Movable):
-    """An https:// channel location, split: `host` and `path` (with its
-    leading `/`, no trailing one; "" for a bare host).
+    """A channel location, split: `host` and `path` (with its leading `/`,
+    no trailing one; "" for a bare host). An https:// URL, or a LOCAL
+    channel `file:///<absolute directory>` (kci run --channel, a
+    validation-only run): its `host` is "" (`is_local`), which only
+    file_channel.mojo's `FileChannelTransport` answers, and its path is
+    the directory. A file:// location holding a `..` segment is refused.
 
     Layout: owned Strings. No pointer field."""
 
@@ -135,10 +155,29 @@ struct ChannelUrl(Copyable, Movable):
     var host: String
     var path: String
 
+    def is_local(self) -> Bool:
+        """True for a `file:///` location (no host)."""
+        return self.host.byte_length() == 0
+
     def __init__(out self, url: String) raises:
+        var local = String(FILE_CHANNEL_PREFIX)
+        if url.startswith(local):
+            var p = String(url[byte = local.byte_length() - 1 :])
+            while p.byte_length() > 1 and p.endswith(String("/")):
+                var trimmed = String(p[byte = 0 : p.byte_length() - 1])
+                p = trimmed^
+            if p == String("/") or p.find(String("//")) >= 0 or has_dot_segment(p):
+                raise Error(
+                    String("channel location '") + url
+                    + String("' is not file:///<absolute directory> (no `.` or `..` segment, no empty one)")
+                )
+            self.url = String("file://") + p
+            self.host = String("")
+            self.path = p^
+            return
         var prefix = String("https://")
         if not url.startswith(prefix):
-            raise Error(String("channel location '") + url + String("' is not an https:// URL"))
+            raise Error(String("channel location '") + url + String("' is not an https:// or file:/// URL"))
         var rest = String(url[byte = prefix.byte_length() :])
         var slash = rest.find(String("/"))
         if slash == 0 or rest.byte_length() == 0:
@@ -398,7 +437,7 @@ def check_channel[T: PkgTransport, S: Sleeper, L: IndexPollLog](
     try:
         ch = ChannelUrl(channel_url)
     except e:
-        checks.append(_row(String("an https:// channel location"), String("channel: ") + String(e), False))
+        checks.append(_row(String("an https:// or file:/// channel location"), String("channel: ") + String(e), False))
         return False
     var subdirs = _subdirs(pins)
     var indexes = List[_Index]()

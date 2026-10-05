@@ -25,6 +25,11 @@
 #   member required at another build, a metapackage requiring no member,
 #   one that omits a library of the set, and a member without a README are
 #   each refused by name.
+#   A LOCAL channel (`file:///<dir>`, kci run --channel): its index and
+#   files read from the directory (only the declared hosts over the
+#   network), pixi.toml and every record's url on it, a record from the
+#   published channel refused, an empty directory a FAIL, only a plain
+#   absolute file:/// location accepted; the file transport's refusals.
 #
 # Hermetic: TEST_TMPDIR, kci_publish's ExampleRelease (komira_alpha with a
 # README in its doc_files, komira_beta, the metapackage komira), no pixi, no
@@ -45,12 +50,15 @@ from kci_api import (
     VALIDATION_WOULD_VALIDATE,
     ResultValidation,
 )
-from kci_pkg_upload import PkgResponse, ScriptedPkgTransport, content_identity_of
+from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_PUT
+
+from kci_pkg_upload import PkgRequest, PkgResponse, ScriptedPkgTransport, content_identity_of
 from kci_publish import NoWaitSleeper
 from kci_publish.release_fixture import ExampleRelease, write_example_inputs, write_text_file
 from kci_release_machine import StageValidation
 from kci_validate import (
     EnvHost,
+    FileChannelTransport,
     RecordingIndexPollLog,
     ValidateRequest,
     install_env_argv,
@@ -962,6 +970,158 @@ def test_the_payload_is_hashed_by_kci() raises:
     var sl = NoWaitSleeper()
     var row = _run(runner, t, sl, fx)
     _assert_fails_with(row, String("payload: the installed lib/mojo/komira_alpha.mojoc is missing or differs"))
+
+
+# ---- a LOCAL channel (kci run --channel file:///<dir>) -----------------------------
+
+
+def _local_channel(fx: Fixture, with_files: Bool = True) raises -> String:
+    """`<root>/channel`, laid out as `komira_pack conda-index` writes it:
+    linux-64/repodata.json listing the three files, and the files."""
+    var dir = fx.root + String("/channel")
+    makedirs(dir + String("/linux-64"), exist_ok=True)
+    makedirs(dir + String("/noarch"), exist_ok=True)
+    write_text_file(dir + String("/noarch/repodata.json"), String('{"packages":{},"packages.conda":{}}'))
+    if with_files:
+        write_text_file(dir + String("/linux-64/repodata.json"), _good_index(fx))
+        for name in [String("komira_alpha"), String("komira_beta"), String("komira")]:
+            write_text_file(dir + String("/linux-64/") + fx.file(name), _content(fx, name))
+    return dir^
+
+
+def _local_install(fx: Fixture, url: String) -> Install:
+    var i = Install(fx)
+    for k in range(3):
+        var name = String("komira_alpha") if k == 0 else (String("komira_beta") if k == 1 else String("komira"))
+        i.record_texts[k] = _record(fx, name, url)
+    return i^
+
+
+def test_a_local_channel_is_read_from_its_directory_and_installed_from() raises:
+    var fx = Fixture(String("local"))
+    var dir = _local_channel(fx)
+    var url = String("file://") + dir
+    # a trailing `/` is the same directory
+    fx.req.channel_override = url + String("/")
+    var runner = ScriptedRunner()
+    _expect_install(runner, fx, _local_install(fx, url))
+    _expect_run(runner, fx)
+    # only the declared HOSTS are asked over the network: the channel's
+    # index and file are read from the directory
+    var net = ScriptedPkgTransport()
+    _network_up(net)
+    var t = FileChannelTransport(net^)
+    var sl = NoWaitSleeper()
+    var log = RecordingIndexPollLog()
+    var row = run_install_env(runner, t, sl, log, fx.req, fx.host)
+    assert_equal(_failed(row), String(""))
+    assert_equal(row.outcome, String(OUTCOME_SUCCEEDED))
+    assert_equal(row.channel_url, url)
+    assert_equal(_order(row), String("release network channel host scratch pixi install readme payload program"))
+    assert_equal(t.inner.call_count(), 2)
+    assert_equal(t.inner.unconsumed(), 0)
+    assert_equal(t.inner.call(0).host, String("conda.example.invalid"))
+    assert_equal(t.inner.call(1).host, String("conda.anaconda.org"))
+    # check 1 read the directory's index, and the bytes it serves
+    assert_equal(log.lines[0], String("kci: channel index poll 1: ") + url + String("/linux-64/repodata.json answered 200, lists 1 of 1 pinned files; waited 0 of 0 s"))
+    var served = False
+    for i in range(len(row.checks)):
+        if row.checks[i].got.find(fx.file(String("komira_alpha")) + String(" is listed and served")) >= 0:
+            served = True
+    assert_true(served, _failed(row))
+    # pixi installs from the directory
+    var toml = open(fx.work() + String("/pixi.toml"), "r").read()
+    assert_true(toml.find(String("channel = \"") + url + String("\"")) >= 0, toml)
+    assert_true(toml.find(String(CHANNEL)) < 0, toml)
+
+
+def test_a_local_channel_record_from_the_published_channel_is_refused() raises:
+    # the local run must install what the directory holds, never the
+    # published channel's file of the same name
+    var fx = Fixture(String("local_pub"))
+    var dir = _local_channel(fx)
+    fx.req.channel_override = String("file://") + dir
+    var runner = ScriptedRunner()
+    _expect_install(runner, fx, Install(fx))
+    _expect_run(runner, fx)
+    var net = ScriptedPkgTransport()
+    _network_up(net)
+    var t = FileChannelTransport(net^)
+    var sl = NoWaitSleeper()
+    var log = RecordingIndexPollLog()
+    var row = run_install_env(runner, t, sl, log, fx.req, fx.host)
+    _assert_fails_with(
+        row,
+        String("install: komira_alpha came from '") + String(CHANNEL) + String("/linux-64/") + fx.file(String("komira_alpha"))
+        + String("', not from file://") + dir,
+    )
+
+
+def test_a_local_channel_without_the_index_fails_closed() raises:
+    var fx = Fixture(String("local_empty"))
+    var dir = _local_channel(fx, with_files=False)
+    fx.req.channel_override = String("file://") + dir
+    var runner = ScriptedRunner()
+    var net = ScriptedPkgTransport()
+    _network_up(net)
+    var t = FileChannelTransport(net^)
+    var sl = NoWaitSleeper()
+    var log = RecordingIndexPollLog()
+    var row = run_install_env(runner, t, sl, log, fx.req, fx.host)
+    _assert_fails_with(row, String("channel: file://") + dir + String("/linux-64/repodata.json answered 404 at poll 1"))
+    assert_equal(len(runner.calls), 0)
+
+
+def test_only_a_file_channel_replaces_the_steps() raises:
+    var fx = Fixture(String("local_https"))
+    fx.req.channel_override = String("https://conda.example.invalid/elsewhere")
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var sl = NoWaitSleeper()
+    var row = _run(runner, t, sl, fx)
+    _assert_fails_with(row, String("is not a file:/// directory: only a local channel replaces the step's"))
+    assert_equal(t.call_count(), 0)
+    var bads = [String("file:///"), String("file:///a/../b"), String("file:///a//b"), String("file://host/a")]
+    for k in range(len(bads)):
+        ref bad = bads[k]
+        var fb = Fixture(String("local_bad") + String(k))
+        fb.req.channel_override = bad.copy()
+        var r2 = ScriptedRunner()
+        var t2 = ScriptedPkgTransport()
+        var row2 = _run(r2, t2, sl, fb)
+        assert_equal(row2.outcome, String(OUTCOME_VALIDATION_FAILED), bad)
+        assert_equal(t2.call_count(), 0)
+
+
+def test_the_file_transport_reads_only_plain_absolute_paths() raises:
+    var fx = Fixture(String("local_transport"))
+    var dir = _local_channel(fx)
+    var net = ScriptedPkgTransport()
+    net.queue(_resp(204))
+    var t = FileChannelTransport(net^)
+    # a host goes over the network, untouched
+    assert_equal(t.exchange(PkgRequest(HTTP_METHOD_GET, String("conda.example.invalid"), String("/x"))).status, 204)
+    assert_equal(t.inner.call_count(), 1)
+    # no host: the file, or 404
+    var got = t.exchange(PkgRequest(HTTP_METHOD_GET, String(""), dir + String("/linux-64/repodata.json")))
+    assert_equal(got.status, 200)
+    assert_equal(len(got.body), _good_index(fx).byte_length())
+    assert_equal(t.exchange(PkgRequest(HTTP_METHOD_GET, String(""), dir + String("/linux-64/absent.conda"))).status, 404)
+    # never a directory, a relative path, a dot segment or another method
+    for path in [dir + String("/linux-64"), String("linux-64/repodata.json"), dir + String("/linux-64/../linux-64/repodata.json")]:
+        var raised = False
+        try:
+            _ = t.exchange(PkgRequest(HTTP_METHOD_GET, String(""), path.copy()))
+        except:
+            raised = True
+        assert_true(raised, path)
+    var put_raised = False
+    try:
+        _ = t.exchange(PkgRequest(HTTP_METHOD_PUT, String(""), dir + String("/linux-64/repodata.json")))
+    except:
+        put_raised = True
+    assert_true(put_raised)
+    assert_equal(t.inner.call_count(), 1)
 
 
 # ---- --plan ---------------------------------------------------------------------------------

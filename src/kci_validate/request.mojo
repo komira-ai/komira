@@ -8,8 +8,9 @@
 # directory, revision, scratch directory, the repository root: where a
 # CONDA_INSTALL_SMOKE program is read from, and what an ENV scratch directory
 # must not be inside; --plan; for CONDA_INSTALL_ENV, --pixi and
-# --pixi-sha256) and the validation itself (kci_release_machine's
-# `StageValidation`).
+# --pixi-sha256; `channel_override`, --channel: a LOCAL `file:///<dir>`
+# channel read and installed from instead of the step's, "" for the step's)
+# and the validation itself (kci_release_machine's `StageValidation`).
 #
 # `ContainerHost` is how this machine starts the container: the docker
 # program, the PATH the docker CLI gets, and the `uid:gid` the container runs
@@ -19,7 +20,9 @@
 # PUBLISH step's own rules: the artifacts file, the release directory of
 # the step's platform (`<release-dir>/<platform>`), release.json's revision
 # equal to --revision-id, every member verified (kci_publish
-# `load_release`). Then the channel's CONDA location from the channels file.
+# `load_release`). Then the channel's CONDA location from the channels file
+# (a CONDA_INSTALL_ENV validation given `channel_override` reads and
+# installs from that instead, conda_install_env.mojo).
 # Each refusal RAISES with the reason; the caller turns it into a failed
 # check, never a skip.
 #
@@ -78,6 +81,7 @@ struct ValidateRequest(Copyable, Movable):
     var plan: Bool
     var pixi: String
     var pixi_sha256: String
+    var channel_override: String
 
     def __init__(out self, var validation: StageValidation):
         self.stage = String("")
@@ -94,6 +98,7 @@ struct ValidateRequest(Copyable, Movable):
         self.plan = False
         self.pixi = String("")
         self.pixi_sha256 = String("")
+        self.channel_override = String("")
 
 
 struct ContainerHost(Copyable, Movable):
