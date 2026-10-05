@@ -26,6 +26,7 @@
 # test_spawning_backend.mojo.
 # =============================================================================
 
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, assert_false
 
 from komira_inference_backend.inference_backend import (
@@ -127,6 +128,13 @@ def test_mlx_child_spec_argv_is_unchanged() raises:
     assert_equal(spec.argv[5], String("8080"))
 
 
+def _assert_argv(got: List[String], want: List[String]) raises:
+    """The whole argv, in order: a reordered, dropped or doubled flag fails."""
+    assert_equal(len(got), len(want), "argv length")
+    for i in range(len(want)):
+        assert_equal(got[i], want[i], "argv[" + String(i) + "]")
+
+
 def test_llamacpp_child_spec_keeps_its_gpu_offload_flag() raises:
     """The llama.cpp spec's distinguishing addition over MLX is
     `--n-gpu-layers`, which offloads the model to the GPU when there is one."""
@@ -137,19 +145,26 @@ def test_llamacpp_child_spec_keeps_its_gpu_offload_flag() raises:
         UInt16(8080),
     )
     assert_equal(spec.path, String("/abs/llama-server"))
-    var saw_ngl = False
-    for i in range(len(spec.argv)):
-        if spec.argv[i] == String("--n-gpu-layers"):
-            saw_ngl = True
-    assert_true(saw_ngl, "the spec carries the GPU-offload flag")
-    assert_equal(spec.argv[0], String("--model"))
-    assert_equal(spec.argv[1], String("/models/model.gguf"))
+    _assert_argv(
+        spec.argv,
+        [
+            "--model",
+            "/models/model.gguf",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8080",
+            "--n-gpu-layers",
+            "99",
+        ],
+    )
 
 
 def test_mlx_embed_child_spec_is_the_separate_embeddings_engine() raises:
     """The EMBEDDINGS engine is a DIFFERENT package (`mlx-openai-server`) with a
     `launch` subcommand and `--model-path`, not `mlx_lm.server`'s `--model`.
-    Conflating the two is the mistake this assertion exists to catch."""
+    Conflating the two is the mistake this assertion exists to catch. It also
+    carries --served-model-name: the server 404s any other model value."""
     var spec = build_mlx_embed_child_spec(
         String("/abs/mlx-openai-server"),
         String("/models/bge-small"),
@@ -158,39 +173,46 @@ def test_mlx_embed_child_spec_is_the_separate_embeddings_engine() raises:
         UInt16(8081),
     )
     assert_equal(spec.path, String("/abs/mlx-openai-server"))
-    var saw_launch = False
-    var saw_model_path = False
-    var saw_served = False
-    for i in range(len(spec.argv)):
-        if spec.argv[i] == String("launch"):
-            saw_launch = True
-        if spec.argv[i] == String("--model-path"):
-            saw_model_path = True
-        if spec.argv[i] == String("--served-model-name"):
-            saw_served = True
-    assert_true(saw_launch, "the spec carries the `launch` subcommand")
-    assert_true(saw_model_path, "the spec carries --model-path (NOT --model)")
-    assert_true(
-        saw_served,
-        "the spec carries --served-model-name: the server 404s any other model value",
+    _assert_argv(
+        spec.argv,
+        [
+            "launch",
+            "--model-type",
+            "embeddings",
+            "--model-path",
+            "/models/bge-small",
+            "--served-model-name",
+            "bge-small",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8081",
+            "--no-log-file",
+            "--log-level",
+            "INFO",
+        ],
     )
+
 
 
 # =============================================================================
 # §3 — The comptime-OS default resolves.
 # =============================================================================
-def test_comptime_os_default_resolves_to_a_real_url() raises:
-    """`comptime if CompilationTarget.is_macos()` picks the default. Assert the
-    SELECTION, not one platform's answer."""
-    var url = default_backend_base_url()
-    assert_true(
-        url == MLX_DEFAULT_BASE_URL or url == LLAMACPP_DEFAULT_BASE_URL,
-        "the OS switch picks one of the two declared defaults",
-    )
+def test_comptime_os_default_resolves_to_this_platforms_url() raises:
+    """`comptime if CompilationTarget.is_macos()` picks the default: MLX on
+    macOS, the llama.cpp-compatible URL elsewhere. Assert the exact value for
+    the platform this test was built for. (Both defaults are port 8080 today,
+    so this pins the URL rather than distinguishing the arms.)"""
+    var want: String
+    comptime if CompilationTarget.is_macos():
+        want = MLX_DEFAULT_BASE_URL
+    else:
+        want = LLAMACPP_DEFAULT_BASE_URL
+    assert_equal(default_backend_base_url(), want)
+    assert_equal(default_backend_base_url(), String("http://127.0.0.1:8080"))
     var be = default_local_backend()
-    assert_equal(
-        be.base_url(), url, "the default backend targets the default URL"
-    )
+    assert_equal(be.base_url(), want, "the default backend targets the default URL")
+
 
 
 def test_the_three_port_defaults_are_distinguishable() raises:
@@ -210,6 +232,6 @@ def main() raises:
     test_mlx_child_spec_argv_is_unchanged()
     test_llamacpp_child_spec_keeps_its_gpu_offload_flag()
     test_mlx_embed_child_spec_is_the_separate_embeddings_engine()
-    test_comptime_os_default_resolves_to_a_real_url()
+    test_comptime_os_default_resolves_to_this_platforms_url()
     test_the_three_port_defaults_are_distinguishable()
     print("PASS test_inference_backend_port")
