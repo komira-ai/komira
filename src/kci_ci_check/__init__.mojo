@@ -12,7 +12,8 @@
 #                         PULL_REQUEST stages);
 #                         `check_running_workflow`: the start-up check `kci
 #                         run` makes; `id_token_stages`: which stages publish
-#                         by OIDC; `kci_run_calls`
+#                         by OIDC; `kci_run_calls`; `condition_expression`:
+#                         the expression GitHub evaluates for a job's `if:`
 #
 # The machine file owns the release machine; the workflow is written by hand and
 # checked against it. This package reads text it is given: it opens no file.
@@ -40,6 +41,7 @@ from kci_ci_check.rules import (
     check_running_workflow,
     check_workflow,
     check_workflow_doc,
+    condition_expression,
     id_token_stages,
     kci_run_calls,
 )

@@ -104,6 +104,20 @@ def test_plain_is_only_the_plain_form() raises:
     assert_false(d.is_plain(-1, String("write")))
 
 
+def test_block_is_only_the_block_form() raises:
+    var d = read_workflow(
+        String("a: write\nb: 'write'\nc: \"write\"\nd: |-\n  write\ne: >\n  write\nf: |+\n  write\n")
+    )
+    assert_false(d.is_block(d.child(0, String("a"))))
+    assert_false(d.is_block(d.child(0, String("b"))))
+    assert_false(d.is_block(d.child(0, String("c"))))
+    assert_true(d.is_block(d.child(0, String("d"))))
+    assert_true(d.is_block(d.child(0, String("e"))))
+    assert_true(d.is_block(d.child(0, String("f"))))
+    assert_false(d.is_block(0))
+    assert_false(d.is_block(-1))
+
+
 def _cannot(text: String, needle: String) raises:
     try:
         _ = read_workflow(text)

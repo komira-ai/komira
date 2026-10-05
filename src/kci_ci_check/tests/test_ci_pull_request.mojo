@@ -8,7 +8,16 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_ci_check import ChannelsFile, check_running_workflow, check_workflow, kci_run_calls
+from kci_ci_check import (
+    NODE_SCALAR,
+    ChannelsFile,
+    WorkflowDoc,
+    WorkflowNode,
+    check_running_workflow,
+    check_workflow,
+    condition_expression,
+    kci_run_calls,
+)
 from kci_release_machine import parse_machine_file
 
 
@@ -281,6 +290,99 @@ def test_a_farm_connected_pull_request_job_never_runs_a_fork() raises:
         _pr(String("    if: github.event.pull_request.head.repo.full_name == github.repository\n"), String("    if: always()\n")),
         String("and farm-connected, so the job carries `if:"),
     )
+
+
+comptime _FORK_IF: String = "    if: github.event.pull_request.head.repo.full_name == github.repository\n"
+comptime _FORK: String = "github.event.pull_request.head.repo.full_name == github.repository"
+
+
+def _fork_if(value: String) raises -> String:
+    """The pull request workflow with the fork condition's `if:` value
+    replaced by `value` (written after `if:`, to its line's end)."""
+    return _pr(String(_FORK_IF), String("    if: ") + value + String("\n"))
+
+
+def test_the_fork_condition_is_exactly_one_expression() raises:
+    # GitHub evaluates these as the fork condition itself
+    _agrees(String(_MACHINE), _fork_if(String("${{ ") + String(_FORK) + String(" }}")))
+    _agrees(String(_MACHINE), _fork_if(String("${{") + String(_FORK) + String("}}")))
+    _agrees(String(_MACHINE), _fork_if(String("\"${{ ") + String(_FORK) + String(" }}\"")))
+    _agrees(String(_MACHINE), _fork_if(String("'${{ ") + String(_FORK) + String(" }}'")))
+    # YAML trims a plain scalar: a tab after it is not part of the value
+    _agrees(String(_MACHINE), _fork_if(String("${{ ") + String(_FORK) + String(" }}\t")))
+    _agrees(String(_MACHINE), _fork_if(String("\" ") + String(_FORK) + String(" \"")))
+    # a block scalar with no `${{` is the expression itself
+    _agrees(String(_MACHINE), _fork_if(String("|-\n      ") + String(_FORK)))
+    _agrees(String(_MACHINE), _fork_if(String("|\n      ") + String(_FORK)))
+
+
+def test_a_fork_condition_github_reads_as_a_format_string_is_refused() raises:
+    # Each of these holds `${{` and is not exactly `${{ <it> }}`: GitHub
+    # reads it as a format string, always true, so a fork's pull request
+    # (or a push, or a manual run) runs the job.
+    var expr = String("${{ ") + String(_FORK) + String(" }}")
+    var values = List[String]()
+    values.append(String("|\n      ") + expr)
+    values.append(String(">\n      ") + expr)
+    values.append(String("|+\n      ") + expr)
+    values.append(String("|-\n      ") + expr)
+    values.append(String(">-\n      ") + expr)
+    values.append(String(">+\n      ") + expr)
+    values.append(String("\" ") + expr + String("\""))
+    values.append(String("\"") + expr + String(" \""))
+    values.append(String("' ") + expr + String("'"))
+    values.append(String("'") + expr + String(" '"))
+    values.append(String("\"") + expr + String("\t\""))
+    values.append(String("x") + expr)
+    values.append(expr + String(" && ${{ true }}"))
+    for i in range(len(values)):
+        try:
+            _reports(
+                _fork_if(values[i]),
+                String("R6: stage 'pr' is a PULL_REQUEST stage and farm-connected, so the job carries `if: ") + String(_FORK),
+            )
+        except e:
+            raise Error(String("`if: ") + values[i] + String("`: ") + String(e))
+
+
+def _expression(text: String, block: Bool) -> Tuple[Bool, String]:
+    var d = WorkflowDoc()
+    var n = d.add(WorkflowNode(NODE_SCALAR, text.copy(), 1, not block, block))
+    var e = String("")
+    var ok = condition_expression(d, n, e)
+    return (ok, e^)
+
+
+def test_condition_expression_refuses_every_block_scalar_holding_an_expression() raises:
+    # A block scalar's value is refused when it holds `${{`, even when its
+    # text (as a reader that drops the indentation would give it) is
+    # exactly `${{ <it> }}`; one with no `${{` is the expression itself.
+    var expr = String("${{ ") + String(_FORK) + String(" }}")
+    assert_false(_expression(expr, True)[0])
+    assert_false(_expression(String("x == '${{'"), True)[0])
+    var bare = _expression(String(_FORK), True)
+    assert_true(bare[0])
+    assert_equal(bare[1], String(_FORK))
+    var quoted = _expression(expr, False)
+    assert_true(quoted[0])
+    assert_equal(quoted[1], String(_FORK))
+    # exactly one `${{ }}`, nothing around it
+    assert_false(_expression(expr + String(" "), False)[0])
+    assert_false(_expression(String(" ") + expr, False)[0])
+    assert_false(_expression(expr + String("\n"), False)[0])
+    assert_false(_expression(String("${{ a }} && ${{ b }}"), False)[0])
+    assert_false(_expression(String("${{ a == '}}' }}"), False)[0])
+    assert_false(_expression(String("${{ a == '${{' }}"), False)[0])
+    assert_false(_expression(String("${{ a"), False)[0])
+    var spaced = _expression(String("  ") + String(_FORK) + String(" "), False)
+    assert_true(spaced[0])
+    assert_equal(spaced[1], String(_FORK))
+    # not a scalar
+    var d = WorkflowDoc()
+    var m = d.add(WorkflowNode(0, String(""), 1))
+    var e = String("")
+    assert_false(condition_expression(d, m, e))
+    assert_false(condition_expression(d, -1, e))
 
 
 def test_a_pull_request_stage_that_is_not_farm_connected() raises:

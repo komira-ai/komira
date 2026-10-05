@@ -79,8 +79,11 @@
 #           no publish or deploy step is reachable from a pull request;
 #         * FORK PULL REQUESTS: a farm-connected PULL_REQUEST stage's job
 #           carries the job-level condition `if: github.event.pull_request.
-#           head.repo.full_name == github.repository` (bare or inside
-#           `${{ }}`, nothing else), so a pull request from a fork never
+#           head.repo.full_name == github.repository` (bare, or exactly
+#           `${{ <it> }}` with nothing before `${{` or after `}}`, not even
+#           whitespace inside quotes, and never in a block scalar: GitHub
+#           reads any other `if:` holding `${{` as a format string, which is
+#           always true), so a pull request from a fork never
 #           runs its code on a job that joins the farm's network; a fork's
 #           change reaches the farm only when a maintainer pushes it to a
 #           branch of this repository. A job that is not farm-connected holds
@@ -716,6 +719,41 @@ def _is_expression(text: String, expression: String) -> Bool:
     return inner == expression
 
 
+def _expression_of(text: String, mut expression: String) -> Bool:
+    """The expression GitHub evaluates for a job-level `if:` whose value is
+    `text`, written as a plain or quoted scalar. With no `${{` in `text`,
+    GitHub reads the whole text as the expression (whitespace around it
+    aside). With one, `text` is exactly `${{ <expression> }}`: nothing
+    before `${{` or after `}}`, not even whitespace, and no other `${{` or
+    `}}` inside. Anything else is a format string, which GitHub reads as
+    always true: False (and `expression` unspecified)."""
+    if text.find(String("${{")) < 0:
+        expression = String(text.strip())
+        return True
+    var n = text.byte_length()
+    if n < 5 or not text.startswith(String("${{")) or not text.endswith(String("}}")):
+        return False
+    var inner = String(text[byte = 3 : n - 2])
+    if inner.find(String("${{")) >= 0 or inner.find(String("}}")) >= 0:
+        return False
+    expression = String(inner.strip())
+    return True
+
+
+def condition_expression(doc: WorkflowDoc, node: Int, mut expression: String) -> Bool:
+    """The expression a job-level `if:` (node `node`) has GitHub evaluate,
+    by `_expression_of`. A block scalar holding `${{` is refused whatever its
+    chomping: its value is not exactly `${{ <expression> }}` (`|` and `>`
+    keep a final newline) and so can be a format string. False when `node`
+    is not a scalar."""
+    if node < 0 or doc.kind(node) != NODE_SCALAR:
+        return False
+    var text = doc.text(node)
+    if doc.is_block(node) and text.find(String("${{")) >= 0:
+        return False
+    return _expression_of(text, expression)
+
+
 def _check_pull_request_job(
     doc: WorkflowDoc, job_id: String, job: Int, st: Stage, calls: List[KciRunCall], mut findings: List[String]
 ):
@@ -754,16 +792,13 @@ def _check_pull_request_job(
         )
     if st.farm_connected:
         var cond = doc.child(job, String("if"))
-        var ok = False
-        if cond >= 0 and doc.kind(cond) == NODE_SCALAR:
-            var text = doc.text(cond)
-            ok = String(text.strip()) == String(SAME_REPOSITORY_CONDITION) or _is_expression(
-                text, String(SAME_REPOSITORY_CONDITION)
-            )
+        var expression = String("")
+        var ok = condition_expression(doc, cond, expression) and expression == String(SAME_REPOSITORY_CONDITION)
         if not ok:
             findings.append(
                 where + String(" and farm-connected, so the job carries `if: ") + String(SAME_REPOSITORY_CONDITION)
-                + String("`: a pull request from a fork never runs its code on a job that joins the farm's network")
+                + String("`, bare or as exactly `${{ <it> }}` (nothing around it, no block scalar):")
+                + String(" a pull request from a fork never runs its code on a job that joins the farm's network")
             )
 
 
