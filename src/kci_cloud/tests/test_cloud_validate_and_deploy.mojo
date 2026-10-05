@@ -100,6 +100,8 @@ from kci_cloud import (
     FIELD_SERVICE,
     FIELD_JOB,
     FIELD_BUCKET,
+    FIELD_SERVICE_ACCOUNT,
+    FIELD_GRANT,
     apply_resources,
     body_field,
     describe,
@@ -267,6 +269,8 @@ struct _Stub(CloudAdapter, Movable):
         if self._full:
             l.append(FIELD_JOB)
             l.append(FIELD_BUCKET)
+            l.append(FIELD_SERVICE_ACCOUNT)
+            l.append(FIELD_GRANT)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -274,6 +278,8 @@ struct _Stub(CloudAdapter, Movable):
         if not self._full:
             l.append(Absence(FIELD_JOB, NOT_YET, String("no runner for jobs")))
             l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
+            l.append(Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("no identities")))
+            l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -473,13 +479,14 @@ def test_every_graph_finding_in_one_pass() raises:
         'api|uses[0]|ref to missing resource "ghost"',
         'api|uses[1]|service "web" does not accept access ACCESS_UNSET',
         "api|uses[2]|access is granted to a resource, not to one of its outputs",
+        'api|uses[2]|a second edge from the identity of "api" to web; the first is uses[1] of "api"',
         "batch|job.image|the image is a build output that was not resolved",
         "web|id|duplicate id",
         "a/b|id|an id is lowercase letters, digits and '-' only",
         "empty|body|resource 'empty' has no type",
     ]:
         assert_true(_has(t, String(want)), String("missing: ") + String(want) + "\n" + t)
-    assert_equal(len(f), 13, "exactly the findings above, each once:\n" + t)
+    assert_equal(len(f), 14, "exactly the findings above, each once:\n" + t)
     for i in range(len(f)):
         assert_equal(f[i].kind, FINDING_GRAPH)
     assert_equal(len(graph_findings(Catalog.v1(), _list(_good()))), 0, "a good graph is clean")

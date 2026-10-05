@@ -26,7 +26,8 @@
 #
 # THE CLOSED WORLD. A type's lowering emits its whole fixed set of roles, the
 # ones the file turned off with `wanted` False. A role that is not fixed (one
-# `uses/<target>` per line) is found through the cloud: `list_owned` names
+# grant edge `u-<h>` per `uses` line, grants.mojo) is found through the
+# cloud: `list_owned` names
 # every object of this machine and cell; one owned by a resource still in the
 # file but no longer lowered is added as a turned-off node, so it is removed;
 # one owned by a resource the file no longer names is LEFTOVER, reported and
@@ -477,7 +478,7 @@ def destroy_resources[
 
 def group_plan(actions: List[ChangeAction]) -> String:
     """A plan grouped under the authored resources, in first-seen order:
-    `api: create api/run, create api/uses/jobs`. A node with no owner is
+    `api: create api/run, create api/u-mz4k2q`. A node with no owner is
     grouped under `(no owner)`."""
     var owners = List[String]()
     for i in range(len(actions)):

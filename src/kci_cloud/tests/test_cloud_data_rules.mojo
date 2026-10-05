@@ -67,6 +67,8 @@ from kci_cloud import (
     RUN_UNKNOWN,
     Setting,
     FIELD_BUCKET,
+    FIELD_SERVICE_ACCOUNT,
+    FIELD_GRANT,
     FIELD_JOB,
     FIELD_SERVICE,
     FINDING_GRAPH,
@@ -199,6 +201,8 @@ struct _Data(CloudAdapter, Movable):
         l.append(FIELD_SERVICE)
         l.append(FIELD_JOB)
         l.append(FIELD_BUCKET)
+        l.append(FIELD_SERVICE_ACCOUNT)
+        l.append(FIELD_GRANT)
         return l^
 
     def absences(self) -> List[Absence]:

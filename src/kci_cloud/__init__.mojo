@@ -20,6 +20,10 @@ interface. This package names no cloud:
                        bootstrap resources, the label rule, `list_owned`,
                        `whoami`, `trust_render` / `trust_check`; typed
                        absences (ABSENT_BY_DESIGN / NOT_YET) and `Finding`.
+  * grants.mojo      — who a resource runs as (its identity owner), and
+                       every grant edge it lowers (`uses` lines, a grant
+                       resource, the implicit `cell LOGS WRITE`), each
+                       with its role `u-<h>` (or `grant`) decided by kci.
   * labels.mojo      — the standard label rule (encode, decode, check), and
                        the `kci_retain=keep` label of a kept object.
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
@@ -52,6 +56,8 @@ from kci_cloud.catalog import (
     FIELD_SERVICE,
     FIELD_JOB,
     FIELD_BUCKET,
+    FIELD_SERVICE_ACCOUNT,
+    FIELD_GRANT,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -60,11 +66,14 @@ from kci_cloud.catalog import (
     ACCESS_READ,
     ACCESS_WRITE,
     ACCESS_READ_WRITE,
+    ACCESS_DESCRIBE,
     RETENTION_NONE,
     RETENTION_DELETE,
     RETENTION_KEEP,
     ROLE_RUN,
     ROLE_BUCKET,
+    ROLE_IDENTITY,
+    ROLE_GRANT,
     BodyArm,
     body_arms,
     body_field,
@@ -72,6 +81,23 @@ from kci_cloud.catalog import (
     portability_word,
     primary_node,
     retention_word,
+)
+from kci_cloud.grants import (
+    CELL_ARTIFACTS,
+    CELL_LOGS,
+    CELL_METRICS,
+    CELL_PATH_PREFIX,
+    GRANT_ROLE_PREFIX,
+    GrantEdge,
+    cell_accepts,
+    cell_name,
+    edges_of,
+    grant_hash,
+    holds_own_identity,
+    identity_owner,
+    principal_node,
+    run_as_of,
+    uses_role,
 )
 from kci_cloud.adapter import (
     CloudAdapter,
@@ -116,6 +142,7 @@ from kci_cloud.clouds import (
 )
 from kci_cloud.validate import (
     graph_findings,
+    edge_findings,
     validate_for,
     refusal_text,
     id_problem,
