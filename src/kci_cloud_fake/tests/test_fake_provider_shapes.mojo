@@ -11,7 +11,9 @@
 #    `bucket`, and no identity; every role name is at most 8 bytes (the role
 #    vocabulary's bound, which the label budget counts on); every shape has
 #    a grant row for every type a grant may target (onprem folds a cell
-#    grant: no row); the generic shape is the fake's own roles.
+#    grant: no row); every shape that hosts a table has a `table` row (gcp
+#    also `ix` and `ttl`), and onprem hosts none and declares it NOT_YET
+#    (Q17); the generic shape is the fake's own roles.
 # 2. THE KIT ON EVERY SHAPE: the kci_cloud conformance kit (all eleven steps)
 #    passes on the aws, gcp, azure and onprem shapes, each registered under a random
 #    id, on the graph of test_fake_conformance (a public service, an internal
@@ -65,6 +67,7 @@ from kci_cloud import (
     FIELD_JOB,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_TABLE,
     LoweredNode,
     ApplyOutcome,
     Catalog,
@@ -136,7 +139,29 @@ def test_the_shape_table() raises:
             shape.name + ": a cell grant has a row, or folds on onprem",
         )
     var g = ProviderShape.generic()
-    assert_equal(len(g.rows), 8, "generic: identity, run, public; identity, run, schedule; bucket; identity")
+    assert_equal(
+        len(g.rows), 9, "generic: identity, run, public; identity, run, schedule; table; bucket; identity"
+    )
+    # The table: one `table` row where it is hosted (gcp adds its index and
+    # TTL objects), a grant row to it, and NOT_YET on onprem.
+    for s in range(len(all)):
+        ref shape = all[s]
+        if shape.name == "onprem":
+            assert_equal(len(shape.roles_of(FIELD_TABLE)), 0, "onprem: no table row")
+            assert_true(not shape.hosts(FIELD_TABLE), "onprem: a table is NOT_YET")
+            assert_equal(len(shape.not_yet), 1)
+            assert_true(shape.not_yet[0].reason.find("Q17") >= 0, shape.not_yet[0].reason)
+            continue
+        assert_true(shape.hosts(FIELD_TABLE), shape.name + ": hosts a table")
+        assert_true(shape.has(FIELD_TABLE, String("table")), shape.name + ": the table row")
+        assert_true(Bool(shape.grant_row(FIELD_TABLE)), shape.name + ": a grant row to a table")
+        var n = 3 if shape.name == "gcp" else 1
+        assert_equal(len(shape.roles_of(FIELD_TABLE)), n, shape.name + ": table rows")
+    assert_equal(
+        ProviderShape.azure().grant_row(FIELD_TABLE).value().kind,
+        "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments",
+        "azure: Cosmos data access is its own role assignment",
+    )
     assert_equal(g.grant_row(FIELD_BUCKET).value().kind, "grant")
     # One grant row per target type on onprem, by the target's backing.
     var o = ProviderShape.onprem()

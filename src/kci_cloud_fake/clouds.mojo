@@ -7,8 +7,9 @@
 #     double for everything above the cloud module.
 #   * `FakeLimitedCloud` ("fake-limited")   is DELIBERATELY PARTIAL: it does
 #     not host `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a
-#     catalog that marks `job` CLOUD_BOUND), `bucket`, `service_account` nor
-#     `grant` (NOT_YET), and it has no public ingress, so a
+#     catalog that marks `job` CLOUD_BOUND), `table`, `bucket`,
+#     `service_account` nor `grant` (NOT_YET), and it has no public ingress,
+#     so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
 #     in full, before anything is lowered or created.
@@ -19,6 +20,7 @@
 #              `<id>/public` (wanted iff `public {}`), and one grant per edge
 #   job     -> `<id>/identity`, `<id>/run`, `<id>/schedule` (wanted iff
 #              scheduled), and the same grants
+#   table   -> `<id>/table` (data.mojo; it holds no identity, so no grants)
 #   bucket  -> `<id>/bucket` (it holds no identity, so no grants)
 #   service account -> `<id>/identity` (it exposes NAME), and its grants
 #   grant   -> `<id>/grant`
@@ -39,12 +41,17 @@
 # service's `<id>/endpoint` (always wanted; the public role depends on it), a
 # schedule folded into the run node, a grant's helper `r-<h>` (the
 # Kubernetes Role a RoleBinding binds) where its row names one, and a cell
-# edge folded into the identity as the field `cell.<NAME>`.
+# edge folded into the identity as the field `cell.<NAME>`; on the gcp shape
+# a table's indexes and TTL policy as nodes of their own. A shape's NOT_YET
+# types (onprem: `table`) are the cloud's absences, and such a cloud is not
+# complete. `list_owned` reports a table object's stored key
+# (`OwnedRecord.key`), read back from the object.
 # A run node's desired fields are EVERY field the catalog models, with the
 # catalog's default filled in where the author wrote none (kci owns every
 # modelled field: writing a default out is not a change, a console edit of
 # one is drift). `env` and `secret_env` of a job included; a bucket's expiry
-# (`never` when unset), versioning and tier (`STANDARD` when unset).
+# (`never` when unset), versioning and tier (`STANDARD` when unset); a
+# table's key, indexes and TTL (`none` when unset).
 # Provenance is never a field, and neither is retention: kci sets it on the
 # lowered node, and the node carries it as the `kci_retain` label.
 #
@@ -95,14 +102,13 @@ from kci_cloud import (
     FIELD_JOB,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_TABLE,
     FINDING_CELL,
     FINDING_LIMIT,
     NOT_YET,
     V1_IMAGE_PLATFORM,
-    EDGE_TARGET_CELL,
     GrantEdge,
     body_field,
-    edges_of,
     holds_own_identity,
     run_as_of,
     decode_label_value,
@@ -112,8 +118,15 @@ from kci_cloud import (
 )
 from kci_resource_proto.resource import Image, Resource, SecretRef, Size, Value
 
+from kci_cloud_fake.data import lower_bucket, lower_table
 from kci_cloud_fake.fake_store import FakeStore
-from kci_cloud_fake.nodes import FakeNode
+from kci_cloud_fake.limits import (
+    FAKE_CITATION,
+    common_limits,
+    fold_limits,
+    index_limits,
+)
+from kci_cloud_fake.nodes import FakeNode, live_key
 from kci_cloud_fake.shapes import (
     ProviderShape,
     ROLE_BUCKET,
@@ -127,9 +140,6 @@ from kci_cloud_fake.shapes import (
 )
 
 
-comptime FAKE_CITATION = "kci_cloud_fake: reference limits"
-comptime JOB_TIMEOUT_MAX_SECONDS: Int = 86400
-comptime REQUEST_TIMEOUT_MAX_SECONDS: Int = 3600
 
 # The catalog's defaults, rendered (a default written out is not a change).
 comptime DEFAULT_PORT = "8080"
@@ -139,8 +149,6 @@ comptime DEFAULT_REQUEST_TIMEOUT = "60s0n"
 comptime DEFAULT_JOB_TIMEOUT = "600s0n"
 comptime DEFAULT_RETRIES = "0"
 comptime DEFAULT_TIMEZONE = "UTC"
-comptime DEFAULT_EXPIRY = "never"
-comptime DEFAULT_TIER = "STANDARD"
 
 
 def _image(img: Optional[Image]) -> String:
@@ -220,38 +228,6 @@ def _secret_env(kind: String, secrets: Dict[String, SecretRef], mut fields: List
 
 def _duration(seconds: Int, nanos: Int) -> String:
     return String(seconds) + String("s") + String(nanos) + String("n")
-
-
-def _lower_bucket(r: Resource, shape: ProviderShape) raises -> List[LoweredNode]:
-    """A bucket's one role, every modelled field with its default filled in.
-    `stores` is how the node behaves (it exposes NAME and ADDRESS), not
-    state."""
-    if len(r.uses) > 0:
-        raise Error(String("fake: bucket \"") + r.id + String("\" has uses lines; validate refuses them"))
-    ref b = r.bucket.value()
-    var fields = List[Setting]()
-    var expiry = String(DEFAULT_EXPIRY)
-    if b.object_expiry_days:
-        expiry = String(Int(b.object_expiry_days.value()))
-    fields.append(Setting(String("expiry_days"), expiry^))
-    fields.append(Setting(String("versioning"), String("true") if b.versioning else String("false")))
-    var tier = String(DEFAULT_TIER)
-    if b.tier.value != 0:
-        tier = b.tier.json_name()
-    fields.append(Setting(String("tier"), tier^))
-    fields.append(Setting(String("stores"), String("true")))
-    var out = List[LoweredNode]()
-    out.append(
-        LoweredNode(
-            r.id + String("/") + String(ROLE_BUCKET),
-            r.id,
-            shape.kind_of(FIELD_BUCKET, String(ROLE_BUCKET)),
-            List[String](),
-            List[InputRef](),
-            fields^,
-        )
-    )
-    return out^
 
 
 def _identity(r: Resource, field: Int, shape: ProviderShape, own: Bool) raises -> List[LoweredNode]:
@@ -362,7 +338,9 @@ def _lower(
     """The complete fixed set of roles of `r` on `shape`, as data."""
     var field = body_field(r)
     if field == FIELD_BUCKET:
-        return _lower_bucket(r, shape)
+        return lower_bucket(r, shape)
+    if field == FIELD_TABLE:
+        return lower_table(r, shape)
     var out = List[LoweredNode]()
     if field == FIELD_GRANT:
         _lower_edges(r, edges, shape, out)
@@ -508,83 +486,6 @@ def _lower(
     return out^
 
 
-def _fold_limits(r: Resource, shape: ProviderShape, cloud: String, mut out: List[Finding]):
-    """On a shape that folds a cell edge into the identity it is for, a cell
-    edge whose identity is another resource's cannot be lowered."""
-    if shape.grant_row(EDGE_TARGET_CELL):
-        return
-    var edges: List[GrantEdge]
-    try:
-        edges = edges_of(r)
-    except:
-        return  # a graph finding
-    for i in range(len(edges)):
-        ref e = edges[i]
-        if not e.on_cell() or e.principal == r.id:
-            continue
-        var path = String("grant") if e.role == "grant" else String("uses[") + String(i) + String("]")
-        out.append(
-            Finding(
-                FINDING_LIMIT,
-                r.id,
-                path,
-                String("on cloud \"")
-                + cloud
-                + String("\" a grant to the cell's ")
-                + e.cell
-                + String(" is a setting of the identity it is for; write it on \"")
-                + e.principal
-                + String("\" itself"),
-                String(FAKE_CITATION),
-            )
-        )
-
-
-def _common_limits(r: Resource, mut out: List[Finding]):
-    if r._oneof0_case == 1:
-        ref svc = r.service.value()
-        if Bool(svc.request_timeout) and Int(svc.request_timeout.value().seconds) > REQUEST_TIMEOUT_MAX_SECONDS:
-            out.append(
-                Finding(
-                    FINDING_LIMIT,
-                    r.id,
-                    String("service.request_timeout"),
-                    String("above this cloud's request limit of ")
-                    + String(REQUEST_TIMEOUT_MAX_SECONDS)
-                    + String("s"),
-                    String(FAKE_CITATION),
-                )
-            )
-        if (
-            Bool(svc.scale)
-            and Bool(svc.scale.value().min)
-            and svc.scale.value().max < svc.scale.value().min.value()
-        ):
-            out.append(
-                Finding(
-                    FINDING_LIMIT,
-                    r.id,
-                    String("service.scale"),
-                    String("max is below min"),
-                    String(FAKE_CITATION),
-                )
-            )
-    elif r._oneof0_case == 2:
-        ref job = r.job.value()
-        if Bool(job.timeout) and Int(job.timeout.value().seconds) > JOB_TIMEOUT_MAX_SECONDS:
-            out.append(
-                Finding(
-                    FINDING_LIMIT,
-                    r.id,
-                    String("job.timeout"),
-                    String("above this cloud's job limit of ")
-                    + String(JOB_TIMEOUT_MAX_SECONDS)
-                    + String("s"),
-                    String(FAKE_CITATION),
-                )
-            )
-
-
 def _label(labels: List[Label], key: String) -> String:
     for i in range(len(labels)):
         if labels[i].key == key:
@@ -622,6 +523,7 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) -> List[OwnedRecord]:
                 True,
                 node^,
                 retained_by(labels),
+                live_key(s.digests[i]),
             )
         )
     return out^
@@ -697,19 +599,24 @@ struct FakeCloud(ConformanceTarget, Movable):
         return CloudId(self._id)
 
     def complete(self) -> Bool:
-        return True
+        return len(self._shape.not_yet) == 0
 
     def implemented(self) -> List[Int]:
+        var all = List[Int]()
+        all.append(FIELD_SERVICE)
+        all.append(FIELD_JOB)
+        all.append(FIELD_TABLE)
+        all.append(FIELD_BUCKET)
+        all.append(FIELD_SERVICE_ACCOUNT)
+        all.append(FIELD_GRANT)
         var l = List[Int]()
-        l.append(FIELD_SERVICE)
-        l.append(FIELD_JOB)
-        l.append(FIELD_BUCKET)
-        l.append(FIELD_SERVICE_ACCOUNT)
-        l.append(FIELD_GRANT)
+        for i in range(len(all)):
+            if self._shape.hosts(all[i]):
+                l.append(all[i])
         return l^
 
     def absences(self) -> List[Absence]:
-        return List[Absence]()
+        return self._shape.not_yet.copy()
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
         var out = List[Finding]()
@@ -740,8 +647,9 @@ struct FakeCloud(ConformanceTarget, Movable):
 
     def check(self, r: Resource) -> List[Finding]:
         var out = List[Finding]()
-        _common_limits(r, out)
-        _fold_limits(r, self._shape, self._id, out)
+        common_limits(r, out)
+        fold_limits(r, self._shape, self._id, out)
+        index_limits(r, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
@@ -877,6 +785,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
             l.append(
                 Absence(FIELD_JOB, NOT_YET, String("fake-limited has no run-to-completion runner"))
             )
+        l.append(Absence(FIELD_TABLE, NOT_YET, String("fake-limited has no tables")))
         l.append(Absence(FIELD_BUCKET, NOT_YET, String("fake-limited has no object store")))
         l.append(
             Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("fake-limited has no shared identities"))
@@ -904,7 +813,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
 
     def check(self, r: Resource) -> List[Finding]:
         var out = List[Finding]()
-        _common_limits(r, out)
+        common_limits(r, out)
         if r._oneof0_case == 1 and r.service.value()._oneof0_case == 1:
             out.append(
                 Finding(

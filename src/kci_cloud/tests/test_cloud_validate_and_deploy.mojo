@@ -100,6 +100,7 @@ from kci_cloud import (
     FINDING_LIMIT,
     FIELD_SERVICE,
     FIELD_JOB,
+    FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
@@ -269,6 +270,7 @@ struct _Stub(CloudAdapter, Movable):
         l.append(FIELD_SERVICE)
         if self._full:
             l.append(FIELD_JOB)
+            l.append(FIELD_TABLE)
             l.append(FIELD_BUCKET)
             l.append(FIELD_SERVICE_ACCOUNT)
             l.append(FIELD_GRANT)
@@ -278,6 +280,7 @@ struct _Stub(CloudAdapter, Movable):
         var l = List[Absence]()
         if not self._full:
             l.append(Absence(FIELD_JOB, NOT_YET, String("no runner for jobs")))
+            l.append(Absence(FIELD_TABLE, NOT_YET, String("no tables")))
             l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
             l.append(Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("no identities")))
             l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
@@ -341,7 +344,7 @@ struct _Stub(CloudAdapter, Movable):
         var out = List[LoweredNode]()
         var run = List[Setting]()
         run.append(Setting(String("type"), String(r._oneof0_case)))
-        var role = String("bucket") if r._oneof0_case == 3 else String("run")
+        var role = String("bucket") if Bool(r.bucket) else String("run")
         out.append(
             LoweredNode(r.id + String("/") + role, owner, role, List[String](), List[InputRef](), run^)
         )
@@ -388,6 +391,7 @@ struct _Stub(CloudAdapter, Movable):
                 OwnedRecord(
                     String("stub"), id.copy(), String("stub"), String("none"),
                     String(""), String(RUN_UNKNOWN), True, id.copy(), False,
+                    String(""),
                 )
             )
         return l^

@@ -83,21 +83,29 @@ comptime CELL_ARTIFACTS: Int = 3
 comptime _BASE32 = "abcdefghijklmnopqrstuvwxyz234567"
 
 
-def grant_hash(principal: String, target: String) -> String:
-    """6 lowercase base32 characters of sha256(principal + "|" + target):
-    the first 30 bits of the digest, 5 bits per character, most significant
-    first."""
-    var d = sha256_string(principal + String("|") + target)
+def role_hash(text: String, chars: Int) -> String:
+    """`chars` (at most 6) lowercase base32 characters of sha256(text): the
+    first 5 * `chars` bits of the digest, 5 bits per character, most
+    significant first. The hashed part of every role kci derives from a
+    name (`u-<h>` here, a table index's `ix-<h>` in data.mojo)."""
+    var d = sha256_string(text)
     var bits: UInt64 = 0
     for i in range(4):
         bits = (bits << 8) | UInt64(Int(d[i]))
     var out = String("")
     var alphabet = String(_BASE32)
-    for k in range(GRANT_HASH_CHARS):
+    for k in range(chars):
         var shift = 32 - 5 * (k + 1)
         var v = Int((bits >> UInt64(shift)) & 31)
         out += String(alphabet[byte = v : v + 1])
     return out^
+
+
+def grant_hash(principal: String, target: String) -> String:
+    """6 lowercase base32 characters of sha256(principal + "|" + target):
+    the first 30 bits of the digest, 5 bits per character, most significant
+    first."""
+    return role_hash(principal + String("|") + target, GRANT_HASH_CHARS)
 
 
 def uses_role(principal: String, target: String) -> String:

@@ -42,6 +42,13 @@
 # and delete it. A KEEP node still in the file is skipped by the engine's
 # destroy (its realized retention).
 #
+# A TABLE'S KEY IS IMMUTABLE. The same `list_owned` read reports each table
+# object's stored key (`OwnedRecord.key`); a plan or an apply whose
+# `<id>/table` node asks for a different key is refused with the one refusal
+# text (`data.key_change_findings`, naming the old and the new key) before
+# anything is realized or created. A destroy is not refused: it removes what
+# the cloud holds, whatever key the file now writes.
+#
 # THE ROLE LABEL BUDGET. After lowering and before anything else, every
 # node's role must fit the 63-byte label value (`role_budget_findings`); one
 # that does not refuses the graph with the one refusal text. The owner of a
@@ -69,7 +76,7 @@ from kci_reconciler import (
 )
 from kci_resource_proto.resource import Resource
 
-from kci_cloud.adapter import CellContext, CloudAdapter, LoweredNode, Setting
+from kci_cloud.adapter import CellContext, CloudAdapter, Finding, LoweredNode, Setting
 from kci_cloud.catalog import (
     Catalog,
     RETENTION_KEEP,
@@ -77,6 +84,7 @@ from kci_cloud.catalog import (
     primary_node,
 )
 from kci_cloud.clouds import Clouds
+from kci_cloud.data import key_change_findings
 from kci_cloud.grants import edges_for
 from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
 
@@ -224,16 +232,20 @@ struct Removals(Movable):
     the file that the file turned off (`roles`, to remove), RETAINED objects
     of resources still in the file that the file no longer lowers
     (`left_behind`, reported only), and nodes of resources the file no
-    longer names (`leftover`, reported only)."""
+    longer names (`leftover`, reported only). And `key_changes`: a table
+    whose stored key differs from the one the file asks for (refused by plan
+    and apply)."""
 
     var roles: List[LoweredNode]
     var left_behind: List[String]
     var leftover: List[String]
+    var key_changes: List[Finding]
 
     def __init__(out self):
         self.roles = List[LoweredNode]()
         self.left_behind = List[String]()
         self.leftover = List[String]()
+        self.key_changes = List[Finding]()
 
 
 def owner_of_node(node_id: String) -> String:
@@ -258,6 +270,7 @@ def removals[
     """Compare what the cloud says this cell owns with the lowering."""
     var out = Removals()
     var owned = cloud.list_owned(creds, ctx.scope)
+    out.key_changes = key_change_findings(nodes, owned)
     for i in range(len(owned)):
         var nid = owned[i].owner_node.copy()
         var lowered = False
@@ -314,15 +327,20 @@ def _graph_for[
     creds: Creds,
     mut leftover: List[String],
     mut left_behind: List[String],
+    refuse_key_change: Bool = True,
 ) raises -> ResourceGraph:
     """Lowering + the roles `list_owned` says to remove, realized. A role
     over the label budget refuses the graph here: after lowering (data),
-    before `list_owned`, realize or any create."""
+    before `list_owned`, realize or any create. A changed table key refuses
+    it after `list_owned` and before realize (unless `refuse_key_change` is
+    False: a destroy)."""
     var nodes = lower_data(cloud, resources)
     var over = role_budget_findings(nodes)
     if len(over) > 0:
         raise Error(refusal_text(cloud.cloud_id(), over))
     var rem = removals(cloud, ctx, nodes, resources, creds)
+    if refuse_key_change and len(rem.key_changes) > 0:
+        raise Error(refusal_text(cloud.cloud_id(), rem.key_changes))
     for i in range(len(rem.roles)):
         nodes.append(rem.roles[i].copy())
     leftover = rem.leftover.copy()
@@ -473,7 +491,9 @@ def destroy_resources[
     refuse_unless_valid(clouds, cloud, ctx, resources)
     var leftover = List[String]()
     var left_behind = List[String]()
-    var graph = _graph_for(cloud, ctx, resources, creds, leftover, left_behind)
+    var graph = _graph_for(
+        cloud, ctx, resources, creds, leftover, left_behind, refuse_key_change=False
+    )
     return destroy_graph_owned(graph, creds, ctx.scope, store)
 
 

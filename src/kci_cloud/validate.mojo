@@ -17,9 +17,11 @@
 #      a secret reference with a name, and an image platform written as
 #      `<os>/<cpu>` (empty means `linux/amd64`). And the data rules:
 #      `retention` only on a type that takes one (a service or a job is
-#      deleted with its resource) and only DELETE or KEEP; a bucket's
-#      `object_expiry_days` never an explicit 0; no `uses` on a bucket (it
-#      runs as no identity, so it can be granted to, never grant).
+#      deleted with its resource) and only DELETE or KEEP; and the rules of
+#      the data types (data.mojo): no `uses` on a table or a bucket (it runs
+#      as no identity, so it can be granted to, never grant); a bucket's
+#      `object_expiry_days` never an explicit 0; a table's key, access paths
+#      and fields complete and typed, its index names unique.
 #      And the identity rules (grants.mojo): `run_as` names a
 #      `service_account`; no `uses` on a grant; a `uses` line or a grant
 #      names exactly one of a target and a cell resource, with a verb that
@@ -71,6 +73,7 @@ from kci_cloud.catalog import (
     FIELD_JOB,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_TABLE,
     RETENTION_DELETE,
     RETENTION_KEEP,
     RETENTION_NONE,
@@ -79,6 +82,7 @@ from kci_cloud.catalog import (
 )
 from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
+from kci_cloud.data import data_findings
 from kci_cloud.grants import (
     GrantEdge,
     cell_accepted,
@@ -706,34 +710,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                 )
         if field == FIELD_SERVICE or field == FIELD_JOB:
             _check_image(id, tname + String(".image"), r, out)
-        if field == FIELD_BUCKET:
-            ref bkt = r.bucket.value()
-            if Bool(bkt.object_expiry_days) and bkt.object_expiry_days.value() == 0:
-                out.append(
-                    Finding(
-                        FINDING_GRAPH,
-                        id,
-                        String("bucket.object_expiry_days"),
-                        String(
-                            "0 would expire every object at once; leave it unset"
-                            " to keep objects until they are deleted"
-                        ),
-                    )
-                )
-            if len(r.uses) > 0:
-                out.append(
-                    Finding(
-                        FINDING_GRAPH,
-                        id,
-                        String("uses"),
-                        String(
-                            "a bucket runs as no identity, so it cannot use another"
-                            " resource; write the uses line on the service or job"
-                            " that reads or writes it"
-                        ),
-                    )
-                )
-                continue
+        if field == FIELD_BUCKET or field == FIELD_TABLE:
+            out.extend(data_findings(field, r))
+            continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
             if len(r.uses) > 0:
