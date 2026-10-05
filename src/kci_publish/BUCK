@@ -62,6 +62,9 @@ mojo_library(
         # 2-4: once per attempt, settle, bounded retry, read-back barrier, metapackage last;
         # --concurrency 1 and 4 end in the same state; workers really run in parallel
         "tests/test_publish_run.mojo",
+        # 1: a stage that never goes backward refuses a lower build number than
+        # its channel lists for the same name and version (KCI-E-SUPERSEDED)
+        "tests/test_publish_never_backward.mojo",
         # 2: no request of any scenario says force
         "tests/test_publish_never_force.mojo",
         # 6: the result document's rows, new_names[], the probe, no secret, one outcome

@@ -30,10 +30,10 @@ from kci_release_machine import parse_machine_file
 
 comptime _MACHINE: String = (
     "schema_version: 1\n"
-    "stage { name: \"build\" farm_connected: true\n"
+    "stage { name: \"build\" farm_connected: true break_glass: true\n"
     "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
     "}\n"
-    "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\"\n"
+    "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\" break_glass: true\n"
     "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\" }\n"
     "}\n"
@@ -330,6 +330,23 @@ def test_pr_yml_holds_no_secret() raises:
     )
     _reports(_wf(String("permissions: {}\n"), String("permissions: {}\nenv:\n  T: ${{ secrets.T }}\n")), String("workflow: R6"))
     _reports(_wf(String("    runs-on: ubuntu-24.04\n"), String("    runs-on: ubuntu-24.04\n    secrets: inherit\n")), String("passes stored secrets"))
+
+
+def test_pr_yml_has_no_path_filter_and_no_script_injection() raises:
+    _reports(
+        _wf(String("    branches: [main]\n"), String("    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n")),
+        String("R17: `pull_request` has `paths-ignore`"),
+    )
+    _reports(
+        _wf(String("    branches: [main]\n"), String("    branches: [main]\n    paths: [src]\n")),
+        String("R17: `pull_request` has `paths`"),
+    )
+    # an expression expanded into a script is script injection (R18)
+    _reports(
+        _wf(String("            --summary-file"), String("            --context title=${{ github.event.pull_request.title }} --summary-file")),
+        String("R18"),
+    )
+    _reports(_wf(String("      - name: kci\n"), String("      - name: ${{ github.event.pull_request.title }}\n")), String("R18"))
 
 
 def test_pr_yml_uses_are_pinned() raises:

@@ -14,10 +14,10 @@ from kci_release_machine import parse_machine_file
 
 comptime _MACHINE: String = (
     "schema_version: 1\n"
-    "stage { name: \"build\" farm_connected: true\n"
+    "stage { name: \"build\" farm_connected: true break_glass: true\n"
     "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
     "}\n"
-    "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\"\n"
+    "stage { name: \"publish-gamma\" environment: \"gamma\" after: \"build\" break_glass: true\n"
     "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\" }\n"
     "}\n"
@@ -63,26 +63,83 @@ comptime _REL_WF: String = (
     "on:\n"
     "  push:\n"
     "    branches: [main]\n"
+    "    paths-ignore:\n"
+    "      - 'docs/**'\n"
+    "      - '**.md'\n"
     "  workflow_dispatch:\n"
     "    inputs:\n"
     "      revision:\n"
     "        type: string\n"
+    "      reason:\n"
+    "        type: string\n"
+    "        required: true\n"
+    "      dry_run:\n"
+    "        type: boolean\n"
+    "        default: false\n"
     "permissions: {}\n"
+    "concurrency:\n"
+    "  group: kci-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
+    "  cancel-in-progress: false\n"
+    "env:\n"
+    "  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n"
     "jobs:\n"
     "  build:\n"
+    "    outputs:\n"
+    "      set_hash: ${{ steps.kci.outputs.set_hash }}\n"
     "    environment: build\n"
     "    permissions:\n"
     "      id-token: write\n"
     "    steps:\n"
+    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+    "        with:\n"
+    "          ref: ${{ env.REVISION }}\n"
+    "      - name: the revision this run releases\n"
+    "        run: |\n"
+    "          case \"$REVISION\" in\n"
+    "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
+    "          esac\n"
+    "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n"
+    "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
+    "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          else\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n"
+    "          fi\n"
     "      - uses: ./.github/actions/farm-connect\n"
     "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
+    "      - name: the prod line\n"
+    "        if: always()\n"
+    "        run: echo prod line\n"
     "  publish-gamma:\n"
     "    needs: build\n"
+    "    if: needs.build.outputs.release == 'true'\n"
+    "    env:\n"
+    "      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n"
     "    environment: gamma\n"
     "    permissions:\n"
     "      id-token: write\n"
     "    steps:\n"
-    "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
+    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+    "        with:\n"
+    "          ref: ${{ env.REVISION }}\n"
+    "      - name: the revision this run releases\n"
+    "        run: |\n"
+    "          case \"$REVISION\" in\n"
+    "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
+    "          esac\n"
+    "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n"
+    "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
+    "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          else\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n"
+    "          fi\n"
+    "      - run: kci run --stage publish-gamma --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
+    "      - name: the prod line\n"
+    "        if: always()\n"
+    "        run: echo prod line\n"
 )
 
 comptime _FORK: String = "github.event.pull_request.head.repo.full_name == github.repository"
@@ -98,7 +155,7 @@ comptime _FINDING: Int = 1
 comptime _R6_FORK: String = "R6: stage 'pr' is a PULL_REQUEST stage, so the job carries `if:"
 comptime _R4_SCALAR: String = "R4: `permissions: "
 comptime _R4_TOP_TOKEN: String = "R4: `id-token: write` at the workflow level reaches every job"
-comptime _R6_PUSH: String = "R6: the push trigger is exactly `branches: [main]`"
+comptime _R6_PUSH: String = "R17: the push trigger is exactly `branches: [main]`"
 comptime _R6_OWN_PERMS: String = "so the job has its own `permissions:` mapping"
 comptime _R6_PERMS_FORM: String = "so its `permissions` is a mapping"
 comptime _R6_GRANT: String = "so its permissions hold only `contents: read`"
@@ -334,7 +391,7 @@ def _rows() raises -> List[_Row]:
     r.append(_Row(String("permissions: write-all, job"), _swap(String(_JOB_PERMS), String("    permissions: write-all\n")), _FINDING, String(_R4_SCALAR)))
     r.append(_Row(String("id-token: 'read' is a grant"), _top_perms(String("\n  id-token: 'read'")), _FINDING, String(_R4_TOP_TOKEN)))
 
-    # ---- the push trigger: the release branch only (R6) -----------------------
+    # ---- the push trigger: the release branch only (R17, which took over R6's push clause)
     r.append(_Row(String("push: no branch filter"), _push(String("  push:\n")), _FINDING, String(_R6_PUSH), release=True))
     r.append(_Row(String("push: branches '**'"), _push(String("  push:\n    branches:\n      - '**'\n")), _FINDING, String(_R6_PUSH), release=True))
     r.append(_Row(String("push: a branch pattern"), _push(String("  push:\n    branches:\n      - main*\n")), _FINDING, String(_R6_PUSH), release=True))
@@ -349,7 +406,10 @@ def _rows() raises -> List[_Row]:
         _Row(
             String("on: a list of events"),
             _rel_swap(
-                String("on:\n") + String(_PUSH_MAIN) + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n"),
+                String("on:\n") + String(_PUSH_MAIN)
+                + String("    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n  workflow_dispatch:\n    inputs:\n")
+                + String("      revision:\n        type: string\n      reason:\n        type: string\n        required: true\n")
+                + String("      dry_run:\n        type: boolean\n        default: false\n"),
                 String("on: [push, workflow_dispatch]\n"),
             ),
             _FINDING,

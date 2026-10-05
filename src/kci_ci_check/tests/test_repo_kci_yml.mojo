@@ -16,12 +16,17 @@
 #   (`ci check`, a claim, an expected set hash) and no channel but the machine
 #   file's. The validate job's `kci run` is the one each validation target
 #   (`./buck2 run //release/validations:<name>`) runs, but for paths and what
-#   a caller supplies.
+#   a caller supplies. Continuous auto-promotion: build and gamma are
+#   break_glass, prod is not; a break-glass publish to gamma goes through the
+#   environment gamma-breakglass, which the gamma channel trusts as its
+#   second publisher, and prod has none; the push trigger's documentation
+#   filter is the documentation release_version.sh does not count (R17).
 # =============================================================================
 #
 # The files are staged as test data (BUCK): `kci.yml` (the root BUCK exports
-# it), `machine.textproto` and `channels.textproto` (release/BUCK), and
-# `pixi_pin.txt`, the platform table's linux-x86_64 pixi pin
+# it), `machine.textproto` and `channels.textproto` (release/BUCK),
+# release_version.sh (tools/build/package/BUCK), `pixi_pin.txt`, the
+# platform table's linux-x86_64 pixi pin
 # (//tools/build/toolchains:pixi_pin_linux_x86_64), and `validations.txt`,
 # the validation targets' record (//release/validations:names, one line per
 # target: `<name> <stage> <kci> <argv...>`, paths and the platform's pixi
@@ -40,12 +45,18 @@ from kci_ci_check import (
     channels_paths,
     check_running_workflow,
     check_workflow,
+    documentation_filter_findings,
     id_token_stages,
     kci_run_calls,
     read_workflow,
 )
 from kci_api import DEFAULT_MACHINE_FILE
-from kci_release_channel import find_channel, parse_channels_file, push_identity_environment
+from kci_release_channel import (
+    break_glass_push_identity_environment,
+    find_channel,
+    parse_channels_file,
+    push_identity_environment,
+)
 from kci_release_machine import ReleaseMachine, parse_machine_file
 
 
@@ -146,6 +157,12 @@ def test_the_release_machine() raises:
     assert_true(pr.steps[0].is_build())
     assert_equal(pr.steps[0].platform, String("linux-x86_64"))
     assert_equal(pr.steps[0].artifacts, String("release/artifacts.textproto"))
+    # continuous auto-promotion: a branch's manual run reaches build and
+    # gamma (break-glass), never prod; the pr stage is no release stage
+    assert_true(g.stage(String("build")).break_glass)
+    assert_true(g.stage(String("gamma")).break_glass)
+    assert_false(g.stage(String("prod")).break_glass)
+    assert_false(pr.break_glass)
     var b = g.stage(String("build"))
     assert_equal(b.environment, String("build"))
     assert_true(b.farm_connected)
@@ -195,6 +212,13 @@ def test_the_release_machine() raises:
         # names: kci refuses a trusted publish from any other.
         var ch = find_channel(channels, p.steps[0].channel)
         assert_equal(push_identity_environment(ch.repositories[0]), p.environment)
+        # a break-glass publish: its own environment, the channel's second
+        # trusted publisher; prod has neither
+        assert_equal(break_glass_push_identity_environment(ch.repositories[0]), p.break_glass_environment)
+        if name == String("gamma"):
+            assert_equal(p.break_glass_environment, String("gamma-breakglass"))
+        else:
+            assert_equal(p.break_glass_environment, String(""))
         after = name.copy()
     var paths = channels_paths(g)
     assert_equal(len(paths), 1)
@@ -328,6 +352,37 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     assert_equal(prod_needs[1], String("validate"))
 
 
+def test_the_documentation_filter_is_release_version_shs() raises:
+    var doc = read_workflow(Path(String("kci.yml")).read_text())
+    var f = documentation_filter_findings(Path(String("release_version.sh")).read_text(), doc)
+    if len(f) > 0:
+        raise Error(String("\n").join(f))
+    # a documentation exclusion the trigger does not share is red
+    var more = Path(String("release_version.sh")).read_text().replace(
+        String("':(exclude).github'"), String("':(exclude).github' ':(exclude)README'")
+    )
+    var red = documentation_filter_findings(more, doc)
+    assert_equal(len(red), 1, String("\n").join(red))
+    assert_true(red[0].find(String("does not count 'README'")) >= 0, red[0])
+
+
+def test_kci_yml_hands_the_set_hash_on() raises:
+    # build hands its set hash to gamma and validate; validate hands what it
+    # validated to prod (R19), read from each job's own kci result
+    var doc = read_workflow(Path(String("kci.yml")).read_text())
+    var jobs = doc.child(0, String("jobs"))
+    var b = doc.child(doc.child(doc.child(jobs, String("build")), String("outputs")), String("set_hash"))
+    assert_equal(doc.text(b), String("${{ steps.set_hash.outputs.set_hash }}"))
+    var v = doc.child(doc.child(doc.child(jobs, String("validate")), String("outputs")), String("validated_set_hash"))
+    assert_equal(doc.text(v), String("${{ steps.validated.outputs.set_hash }}"))
+    for job in [String("gamma"), String("validate"), String("prod")]:
+        var e = doc.child(doc.child(doc.child(jobs, job), String("env")), String("RELEASE_SET_HASH"))
+        var want = String("${{ needs.validate.outputs.validated_set_hash }}") if job == String("prod") else String(
+            "${{ needs.build.outputs.set_hash }}"
+        )
+        assert_equal(doc.text(e), want, job)
+
+
 # A validate-job flag that no validation target passes is one a caller of the
 # target supplies (`./buck2 run ... -- <these>`, or its launcher's default:
 # --scratch-dir, --run-id, --attempt), or the CI run's own record.
@@ -335,7 +390,7 @@ def _supplied_flags() -> List[String]:
     var out = List[String]()
     for f in [
         "--release-dir", "--revision-id", "--scratch-dir", "--result-file", "--plan", "--run-id", "--attempt",
-        "--context", "--summary-file",
+        "--context", "--summary-file", "--release-set-hash",
     ]:
         out.append(String(f))
     return out^
@@ -457,7 +512,7 @@ def test_the_validate_job_runs_what_the_validation_targets_run() raises:
 
 def test_kci_yml_names_no_removed_input_and_no_other_channel() raises:
     var text = Path(String("kci.yml")).read_text()
-    for gone in [String("ci check"), String("claim"), String("expect_set_hash"), String("approved_names"), String("rehearsal")]:
+    for gone in [String("ci check"), String("claim"), String("expect_set_hash"), String("approved_names"), String("rehearsal"), String("publish_prod")]:
         assert_true(text.find(gone) < 0, String("kci.yml still names '") + gone + String("'"))
     # every prefix.dev channel path kci.yml names is one the machine file publishes to
     var g = _graph()

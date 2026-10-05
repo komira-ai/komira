@@ -31,6 +31,8 @@ comptime _BASE: String = "0123456789abcdef0123456789abcdef01234567"
 comptime _SHA: String = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
 
 
+
+
 struct Fake(StageSteps, Movable):
     """Every step SUCCEEDED; a PUBLISH step records `probe` as its
     credential probe. Platform variables from `env`, the committed workflow
@@ -85,6 +87,15 @@ struct Fake(StageSteps, Movable):
         self.calls.append(String("git show ") + commit + String(":") + path)
         return self.workflow.copy()
 
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        # a pull request's check reads no ref history (the ref check is a
+        # PUSH stage's)
+        self.calls.append(String("is-ancestor ") + commit + String(" ") + of)
+        return True
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        raise Error(String("no release is read here"))
+
 
 def _root(tag: String) raises -> String:
     var base = _read_env("TEST_TMPDIR")
@@ -116,7 +127,7 @@ def _pr_machine(dir: String) raises -> String:
     write_whole_file(
         m,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
+        + String("stage { name: \"build\" break_glass: true step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
         + String("stage { name: \"pr\" trigger: PULL_REQUEST farm_connected: true")
         + String(" step { name: \"check\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n"),
     )

@@ -36,6 +36,9 @@ def test_no_exit_number_outside_kci_api() raises:
         "kci_cli_dispatch.mojo",
         "kci_cli_library_verbs.mojo",
         "kci_cli_recorder.mojo",
+        "kci_cli_seam.mojo",
+        "kci_cli_start_checks.mojo",
+        "kci_cli_summary.mojo",
         "bin_kci_main.mojo",
     ]:
         all.extend(_offences(String(f)))

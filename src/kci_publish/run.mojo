@@ -8,7 +8,16 @@
 #      listed subdir's names; `plan_from_state` decides: STOP_DIFFERENT_BYTES,
 #      CANNOT_TELL or ALREADY_PUBLISHED stop here with NO write request. The
 #      names new to the channel go into the report whatever the verdict
-#      (unless step 1 could not tell);
+#      (unless step 1 could not tell). NEVER BACKWARD: when the stage never
+#      goes backward (`RunOptions.never_backward`) and the run would upload,
+#      a listed build of ANY name and version with a HIGHER build number,
+#      or an equal one of another build string (`plan.mojo`
+#      `superseding_files`), or a NEWEST listed build whose commit is not on
+#      the release revision's history (`history`, `plan.mojo`
+#      `backward_files`) stops it REFUSED, KCI-E-SUPERSEDED, with NO write
+#      request (a dry run too). When the channel lists a numbered build and
+#      `history` was not read (empty), it stops CANNOT_TELL (exit 5), never a
+#      pass;
 #   --plan stops here too, printing what steps 2 to 4 would do: no write
 #      request, and `source` is never asked for a write value (a dry run's
 #      credential probe is the flow's, before this);
@@ -55,8 +64,14 @@ from .plan import (
     approved_names_for,
     plan_from_state,
     state_name,
+    build_number_of,
+    previous_build_number,
+    RevisionHistory,
+    backward_files,
+    newest_listed_build_number,
+    superseding_files,
 )
-from kci_api import ERROR_CREDENTIAL
+from kci_api import ERROR_CREDENTIAL, ERROR_SUPERSEDED
 
 from .report import (
     REASON_ALREADY_PUBLISHED,
@@ -65,6 +80,7 @@ from .report import (
     REASON_PARTIAL,
     REASON_PUBLISHED,
     REASON_READ_BACK_MISMATCH,
+    REASON_REFUSED,
     REASON_STOP_DIFFERENT_BYTES,
     FileRow,
     PublishReport,
@@ -148,6 +164,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     opts: RunOptions,
     mut sleeper: W,
     var r: PublishReport,
+    history: RevisionHistory = RevisionHistory(),
 ) -> PublishReport:
     """Steps 1 to 6 (see the file header). `source` is asked ONCE for the
     write value, and only when the registry's credential is not armed yet
@@ -176,6 +193,30 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     if verdict != VERDICT_PROCEED:
         r.end(_reason_of_verdict(verdict))
         return r^
+    if opts.never_backward:
+        var later = superseding_files(targets, channel_read.listed_files)
+        var newest = newest_listed_build_number(channel_read.listed_files)
+        if len(later) == 0 and newest >= 0 and len(history.commits) == 0:
+            r.lines.append(
+                String("CANNOT TELL whether this release descends from the channel's newest build (build number ")
+                + String(newest) + String("): the release revision's history was not read (") + history.unread
+                + String("), and this stage never goes backward, so nothing is uploaded")
+            )
+            r.end(String(REASON_CANNOT_TELL))
+            return r^
+        later.extend(backward_files(targets, channel_read.listed_files, history.commits))
+        if len(later) > 0:
+            later.append(
+                String("REFUSED -- the channel already lists a higher (or an equal, other) build number of any name or")
+                + String(" version, or a build this revision does not descend from, and this stage never goes")
+                + String(" backward: publish the newer release, or fix forward")
+            )
+            r.stop(String(REASON_REFUSED), String(ERROR_SUPERSEDED), String("\n").join(later))
+            return r^
+        # what this release carries (plan.mojo `previous_build_number`)
+        if len(targets) > 0:
+            r.build_number = build_number_of(targets[0])
+        r.previous_build = previous_build_number(targets, channel_read.listed_files)
     var to_upload = 0
     for i in range(len(targets)):
         var word = String("WOULD UPLOAD ") if channel_read.states[i].kind == STATE_ABSENT else String("PRESENT ")

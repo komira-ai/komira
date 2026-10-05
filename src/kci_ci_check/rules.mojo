@@ -19,7 +19,14 @@
 #       RULING: before, the job ids were exactly the stage names.]
 #   R2  each job runs in its stage's GitHub environment, the stage's
 #       `environment` (by default its name): `environment: <env>`, or
-#       `environment: {name: <env>}` as a block
+#       `environment: {name: <env>}` as a block. A stage with a
+#       `break_glass_environment` (kci_release_machine) instead runs in
+#       exactly `${{ github.event_name == 'push' && '<env>' || '<break-glass
+#       env>' }}` (auto_promotion.mojo `break_glass_environment_expression`):
+#       a break-glass publish goes through an environment of its own (a
+#       required reviewer), never through the stage's own, which is locked
+#       to main. (A break_glass stage without one that publishes by OIDC is
+#       refused at run time on a break-glass run: kci_publish.)
 #   R3  each job's `needs` is exactly the jobs that run its stage's `after`
 #       (none for none): the job named after that stage, and, when that
 #       stage is split (R9), each of its part jobs too, so a later stage waits
@@ -62,7 +69,8 @@
 #           (a review or comment, a merge-queue candidate, a calling workflow's
 #           event, the code `workflow_run` follows);
 #         * it has no job for a PULL_REQUEST stage, and no part job of one;
-#         * `on.push` is exactly `branches: [main]` (one key, one plain item);
+#         * `on.push` is held by R17 (auto_promotion.mojo: `branches: [main]` and
+#           the documentation `paths-ignore`);
 #         * a PUSH stage's `kci run` never carries `--affected-by`.
 #       THE PULL REQUEST'S CHECK (pr.yml, `check_pull_request_workflow`):
 #         * `name: pr` and the one job `check`, so the required status check
@@ -90,6 +98,10 @@
 #           workflow-level `env:`, names the `secrets` context (read ignoring
 #           case; only `secrets.GITHUB_TOKEN`, written so, is the job's own
 #           token), and no key of the job is `secrets`;
+#         * R17 and R18 hold it too: `pull_request` has no path filter
+#           (`check_pull_request_paths`), and no `run:` script holds a `${{ }}`
+#           but the base commit, no step or job `name:` an expression
+#           (`check_no_expression_in_run`: script injection);
 #         * what it runs is a BUILD step (the machine file refuses any other
 #           kind in a PULL_REQUEST stage), and a `kci run` of another stage in
 #           it is refused by R5, so nothing is published from a pull request.
@@ -130,17 +142,20 @@
 #   R14 no `kci run` passes `--channel`: a local channel is a developer's
 #       pre-publish mode, and a workflow validates only what a stage published
 #       (kci also refuses the flag at run time under GitHub Actions)
+#   R13 is not used here (it was a manual prod gate, withdrawn).
+#   R15 to R22: continuous auto-promotion (auto_promotion.mojo's header):
+#       main-only stages carry `github.ref == 'refs/heads/main'` (R15), one
+#       canonical concurrency group (R16), the push filter with its
+#       documentation `paths-ignore` (R17, which took over R6's push
+#       clause), the manual run's inputs and no expression in a script
+#       (R18), the release set's hash handed from job to job (R19), and
+#       every release job's last step `the prod line` (R20), the revision
+#       checked by the workflow's own first steps (R21), a push never a
+#       dry run (R22); and R4's
+#       allow-list: a release job's permissions map grants `contents: read`
+#       and `id-token` only.
 #
-# How `kci run` is found (R5): each `run:` block is split into shell words
-# (a line ending in `\` continues; quotes around a word are dropped); an
-# invocation is a word in COMMAND position (the first word of a line, or
-# right after `;` `&&` `||` `|` `then` `do` `else` `exec` `!`, or after a
-# word ending in `;`) whose last `/`-separated part is `kci`, followed by
-# the word `run`. So `echo "... kci run ..."` is not one. Its arguments run
-# to the end of the line or the next `;` `&&` `||` `|`, and are kept as
-# written (unquoted); `--stage`, `--machine`, `--only`, `--summary-file` and
-# `--affected-by` take the next word, or `=<v>`. A GitHub expression
-# `${{ ... }}` is one word, whatever spaces it holds.
+# How `kci run` is found (R5): kci_run_calls.mojo.
 #
 # A workflow the restricted reader cannot read raises (`cannot tell:`,
 # workflow_reader.mojo): the caller reports INDETERMINATE, never a pass.
@@ -152,7 +167,15 @@ from kci_api import DEFAULT_MACHINE_FILE, Selector, parse_selector
 from kci_release_channel import Channel, find_channel, parse_channels_file
 from kci_release_machine import Selection, Stage, ReleaseMachine, joined_names, resolve_selection
 
-from .pull_request import check_no_secret, check_pull_request_job, check_push_branches, check_release_only
+from .auto_promotion import (
+    break_glass_environment_expression,
+    check_auto_promotion,
+    check_no_expression_in_run,
+    check_pull_request_paths,
+    check_push_filter,
+)
+from .kci_run_calls import KciRunCall, kci_run_calls
+from .pull_request import check_no_secret, check_pull_request_job, check_release_only
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
 
 comptime FARM_CONNECT_ACTION: String = "./.github/actions/farm-connect"
@@ -222,176 +245,6 @@ def id_token_stages(g: ReleaseMachine, files: List[ChannelsFile]) raises -> List
                 needs = True
         if needs:
             out.append(st.name.copy())
-    return out^
-
-
-# ---- shell words ---------------------------------------------------------------
-
-
-def _words(script: String) -> List[List[String]]:
-    """`script` as logical lines of words (file header, R5)."""
-    var out = List[List[String]]()
-    var parts = script.split(String("\n"))
-    var current = String("")
-    for i in range(len(parts)):
-        var line = String(String(parts[i]).strip())
-        if line.endswith(String("\\")):
-            current += String(line[byte = 0 : line.byte_length() - 1]) + String(" ")
-            continue
-        current += line
-        var words = List[String]()
-        var toks = current.split(String(" "))
-        var t = 0
-        while t < len(toks):
-            var w = String(toks[t])
-            t += 1
-            if w.byte_length() == 0:
-                continue
-            # `${{ ... }}` is one word, whatever spaces it holds
-            var expr_at = w.find(String("${{"))
-            if expr_at >= 0 and w.find(String("}}"), expr_at) < 0:
-                while t < len(toks):
-                    var more = String(toks[t])
-                    t += 1
-                    w += String(" ") + more
-                    if more.find(String("}}")) >= 0:
-                        break
-            if w.byte_length() >= 2 and (
-                (w.startswith(String("\"")) and w.endswith(String("\"")))
-                or (w.startswith(String("'")) and w.endswith(String("'")))
-            ):
-                var unquoted = String(w[byte = 1 : w.byte_length() - 1])
-                w = unquoted^
-            words.append(w^)
-        out.append(words^)
-        current = String("")
-    return out^
-
-
-def _is_kci(word: String) -> Bool:
-    var at = word.rfind(String("/"))
-    var base = word.copy()
-    if at >= 0:
-        base = String(word[byte = at + 1 :])
-    return base == String("kci")
-
-
-struct KciRunCall(Copyable, Movable):
-    """One `kci run` found in a job: the `--stage` value ("" when absent),
-    the `--machine` value (`has_machine` False when absent), whether it
-    carries any `--only` and each `--only` value as written (unquoted),
-    whether it passes `--summary-file` and `--channel`, the `--affected-by`
-    value (`has_affected_by` False when absent), and every argument after
-    `run` as written (unquoted).
-    Layout: owned Strings, Lists of Strings and Bools. No pointer field."""
-
-    var stage: String
-    var machine: String
-    var has_machine: Bool
-    var has_only: Bool
-    var only: List[String]
-    var has_summary_file: Bool
-    var affected_by: String
-    var has_affected_by: Bool
-    var has_channel: Bool
-    var args: List[String]
-
-    def __init__(out self, var stage: String):
-        self.stage = stage^
-        self.machine = String("")
-        self.has_machine = False
-        self.has_only = False
-        self.only = List[String]()
-        self.has_summary_file = False
-        self.affected_by = String("")
-        self.has_affected_by = False
-        self.has_channel = False
-        self.args = List[String]()
-
-
-def _command_position(w: List[String], j: Int) -> Bool:
-    if j == 0:
-        return True
-    var p = w[j - 1]
-    if p.endswith(String(";")):
-        return True
-    for sep in [";", "&&", "||", "|", "then", "do", "else", "exec", "!"]:
-        if p == String(sep):
-            return True
-    return False
-
-
-def kci_run_calls(script: String) -> List[KciRunCall]:
-    """Every `kci run` invocation in a `run:` script (file header, R5)."""
-    var out = List[KciRunCall]()
-    var lines = _words(script)
-    for i in range(len(lines)):
-        ref w = lines[i]
-        for j in range(len(w)):
-            if not _is_kci(w[j]) or j + 1 >= len(w) or w[j + 1] != String("run"):
-                continue
-            if not _command_position(w, j):
-                continue
-            var args = _call_args(w, j + 2)
-            var call = KciRunCall(String(""))
-            call.args = args.copy()
-            var seen_stage = False
-            var k = 0
-            while k < len(args):
-                var a = args[k].copy()
-                var value = String("")
-                var has_value = False
-                var flag = a.copy()
-                var eq = a.find(String("="))
-                if a.startswith(String("--")) and eq > 0:
-                    flag = String(a[byte=0:eq])
-                    value = String(a[byte = eq + 1 :])
-                    has_value = True
-                elif k + 1 < len(args):
-                    value = args[k + 1].copy()
-                    has_value = True
-                if flag == String("--stage") and has_value:
-                    if not seen_stage:
-                        call.stage = value.copy()
-                        seen_stage = True
-                elif flag == String("--machine") and has_value:
-                    call.machine = value.copy()
-                    call.has_machine = True
-                elif flag == String("--only"):
-                    call.has_only = True
-                    if has_value:
-                        call.only.append(value.copy())
-                elif flag == String("--summary-file") and has_value:
-                    call.has_summary_file = True
-                elif flag == String("--affected-by"):
-                    call.has_affected_by = True
-                    if has_value:
-                        call.affected_by = value.copy()
-                elif flag == String("--channel"):
-                    call.has_channel = True
-                k += 1
-            out.append(call^)
-    return out^
-
-
-def _call_args(w: List[String], start: Int) -> List[String]:
-    """The words of one invocation from `start`: up to the end of the line,
-    a separator word, or a word ending in `;` (kept, without the `;`)."""
-    var out = List[String]()
-    var k = start
-    while k < len(w):
-        var word = w[k].copy()
-        if word == String(";") or word == String("&&") or word == String("||") or word == String("|"):
-            break
-        var last = word.endswith(String(";"))
-        while word.endswith(String(";")):
-            var trimmed = String(word[byte = 0 : word.byte_length() - 1])
-            word = trimmed^
-        if word.byte_length() > 0:
-            out.append(word^)
-        if last:
-            break
-        k += 1
     return out^
 
 
@@ -618,6 +471,15 @@ def _check_job(
             findings.append(
                 where + String(": R2: stage '") + st.name + String("' is a PULL_REQUEST stage, so its job runs in no")
                 + String(" environment: no environment secret or approval reaches a pull request's code")
+            )
+    elif st.break_glass_environment.byte_length() > 0:
+        var want = break_glass_environment_expression(st.environment, st.break_glass_environment)
+        if env < 0 or doc.kind(env) != NODE_SCALAR or doc.is_block(env) or doc.text(env) != want:
+            findings.append(
+                where + String(": R2: stage '") + st.name + String("' has break_glass_environment '")
+                + st.break_glass_environment + String("', so the job runs in exactly `environment: ") + want
+                + String("` (a push in '") + st.environment + String("', every other run in '") + st.break_glass_environment
+                + String("')")
             )
     elif env_name != st.environment:
         if env_name.byte_length() == 0:
@@ -932,6 +794,9 @@ def check_pull_request_workflow(
             )
     if not _member(triggers, String("pull_request")):
         findings.append(_at(doc, on) + String("R6: pr.yml has no `pull_request` trigger"))
+    check_pull_request_paths(doc, on, findings)
+    # R18: no `${{ }}` in a script but the base commit, no expression in a name
+    check_no_expression_in_run(doc, findings)
     var pr_stages = List[String]()
     for i in range(len(g.stages)):
         if g.stages[i].is_pull_request():
@@ -1042,8 +907,7 @@ def check_workflow_doc(
                 + String(" event can run a pull request's code: a review or a comment on it, a merge-queue")
                 + String(" candidate, a calling workflow's event)")
             )
-    if _member(triggers, String("push")):
-        check_push_branches(doc, on, findings)
+    check_push_filter(doc, on, findings)
     if pr_trigger:
         # the workflow-level `env:` reaches every job, the pull request's included (R6)
         var root_keys = doc.keys(root)
@@ -1132,6 +996,8 @@ def check_workflow_doc(
             _check_part_job(doc, job_ids[parts[k]], job_nodes[parts[k]], st, g, machine_path, pr_trigger, findings)
         if split:
             _check_split(doc, st, job_ids[found], job_nodes[found], job_ids, job_nodes, parts, findings)
+    # R15 to R22, and R4's allow-list (auto_promotion.mojo)
+    check_auto_promotion(doc, g, job_ids, job_nodes, part_stage, findings)
     # R8
     _collect_uses(doc, root, findings)
     return findings^
