@@ -1,5 +1,5 @@
 # =============================================================================
-# ivp_validate.mojo — the UNTRUSTED-TICKET validation boundary.
+# viewport_validate.mojo — the UNTRUSTED-TICKET validation boundary.
 # =============================================================================
 #
 # UNTRUSTED-TICKET validation at the server boundary: schema-validate,
@@ -39,10 +39,10 @@ from komira_core.plan.expr import (
     EXPR_ALIAS,
 )
 
-from .ivp_ticket import GridTicket, decode_grid_ticket
+from .viewport_ticket import GridTicket, decode_grid_ticket
 
 
-struct IvpTicketLimits(Movable, Copyable):
+struct ViewportTicketLimits(Movable, Copyable):
     """The hostile-ticket budget a server enforces at its request boundary. All
     caps are policy — a deployment (desktop loopback vs remote) may tighten them,
     but the defaults are safe for both."""
@@ -92,29 +92,29 @@ def _count_expr_nodes(e: Expr) -> Int:
     return 1
 
 
-def validate_ticket_bytes(data: Span[UInt8, _], limits: IvpTicketLimits) raises:
+def validate_ticket_bytes(data: Span[UInt8, _], limits: ViewportTicketLimits) raises:
     """Layer 0: reject an over-large ticket blob before parsing anything."""
     if len(data) > limits.max_ticket_bytes:
         raise Error(
-            "ivp: ticket size " + String(len(data)) + " bytes exceeds cap "
+            "viewport: ticket size " + String(len(data)) + " bytes exceeds cap "
             + String(limits.max_ticket_bytes) + " bytes"
         )
     if len(data) < 6:
         # magic(4) + version(>=1) + facet(1) is the structural floor.
-        raise Error("ivp: ticket too short to be a valid IVP message")
+        raise Error("viewport: ticket too short to be a valid viewport-protocol message")
 
 
-def validate_ticket(t: GridTicket, limits: IvpTicketLimits) raises:
+def validate_ticket(t: GridTicket, limits: ViewportTicketLimits) raises:
     """Layer 3: semantic validation of an already-decoded ticket."""
     # Non-empty source locator.
     if t.source.locator.byte_length() == 0:
-        raise Error("ivp: empty source locator")
+        raise Error("viewport: empty source locator")
 
     # Window sanity: limit must be within the budget (offset is unbounded — a
     # deep offset is a scroll target, honored via the range primitive).
     if t.limit > limits.max_window_limit:
         raise Error(
-            "ivp: window limit " + String(t.limit) + " exceeds cap "
+            "viewport: window limit " + String(t.limit) + " exceeds cap "
             + String(limits.max_window_limit)
         )
 
@@ -128,19 +128,19 @@ def validate_ticket(t: GridTicket, limits: IvpTicketLimits) raises:
         total_nodes = total_nodes + _count_expr_nodes(t.computed[i].expr)
     if total_nodes > limits.max_total_expr_nodes:
         raise Error(
-            "ivp: total Expr node count " + String(total_nodes)
+            "viewport: total Expr node count " + String(total_nodes)
             + " exceeds cap " + String(limits.max_total_expr_nodes)
         )
 
     # Projection names must be non-blank.
     for i in range(len(t.projection)):
         if t.projection[i].byte_length() == 0:
-            raise Error("ivp: blank projection column name at index " + String(i))
+            raise Error("viewport: blank projection column name at index " + String(i))
 
     # Computed-column names must be non-blank (they name output columns).
     for i in range(t.computed.len()):
         if t.computed[i].name.byte_length() == 0:
-            raise Error("ivp: blank computed-column name at index " + String(i))
+            raise Error("viewport: blank computed-column name at index " + String(i))
 
     # ★ THE TICKET MAY NOT DECLARE ONE OUTPUT NAME TWICE.
     #
@@ -165,7 +165,7 @@ def validate_ticket(t: GridTicket, limits: IvpTicketLimits) raises:
         for j in range(i + 1, len(declared)):
             if declared[i] == declared[j]:
                 raise Error(
-                    "ivp: the ticket declares the output name '"
+                    "viewport: the ticket declares the output name '"
                     + declared[i]
                     + "' twice (declared names are the projection followed by"
                     + " the computed columns; positions "
@@ -177,7 +177,7 @@ def validate_ticket(t: GridTicket, limits: IvpTicketLimits) raises:
 
 
 def decode_and_validate_grid_ticket(
-    data: Span[UInt8, _], limits: IvpTicketLimits
+    data: Span[UInt8, _], limits: ViewportTicketLimits
 ) raises -> GridTicket:
     """The single hostile-ticket entry point: run all four defense layers in
     order (size → structural decode → Expr allow-list/depth → semantic) and

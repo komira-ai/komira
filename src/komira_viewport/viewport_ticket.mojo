@@ -1,5 +1,5 @@
 # =============================================================================
-# ivp_ticket.mojo — the IVP grid-facet TICKET model + wire codec.
+# viewport_ticket.mojo — the viewport-protocol grid-facet TICKET model + wire codec.
 # =============================================================================
 #
 # A grid ticket is the request a viewport client posts to a viewport server's
@@ -12,10 +12,10 @@
 # The ticket is a REMOTE-CLIENT-POSTED, UNTRUSTED byte blob. The codec here is
 # pure structure + strict framing (magic + version + facet + positional
 # fields); the SEMANTIC untrusted-ticket policy (size / depth / count caps,
-# allow-list enforcement, UDF rejection) lives in `ivp_validate.mojo`, which
+# allow-list enforcement, UDF rejection) lives in `viewport_validate.mojo`, which
 # runs AFTER a structural decode. Decode itself is already fail-closed: it
 # raises on a bad magic, an unknown version/facet/source-kind, a count past its
-# structural cap, or any malformed byte (via the strict IvpReader + the Expr
+# structural cap, or any malformed byte (via the strict ViewportReader + the Expr
 # allow-list decoder).
 #
 # Collections that hold `Expr` use `Slab[T]` (not `List[T]`), because `Expr` is
@@ -30,41 +30,43 @@
 from komira_core.collections import Slab
 from komira_core.plan.expr import Expr
 
-from .ivp_bytes import IvpWriter, IvpReader
-from .ivp_expr_codec import encode_expr, decode_expr
+from .viewport_bytes import ViewportWriter, ViewportReader
+from .viewport_expr_codec import encode_expr, decode_expr
 
 
 # --- Wire framing constants --------------------------------------------------
-# Magic "IVP1" — the first four bytes of every IVP message. A blob not starting
-# with these bytes is rejected before any field is read.
-comptime IVP_MAGIC_0: UInt8 = 0x49  # 'I'
-comptime IVP_MAGIC_1: UInt8 = 0x56  # 'V'
-comptime IVP_MAGIC_2: UInt8 = 0x50  # 'P'
-comptime IVP_MAGIC_3: UInt8 = 0x31  # '1'
+# Magic "IVP1" — the first four bytes of every viewport-protocol message. A
+# blob not starting with these bytes is rejected before any field is read.
+# The bytes are the wire format and stay as they are; only the Mojo names of
+# the constants carry the package's name.
+comptime VIEWPORT_MAGIC_0: UInt8 = 0x49  # 'I'
+comptime VIEWPORT_MAGIC_1: UInt8 = 0x56  # 'V'
+comptime VIEWPORT_MAGIC_2: UInt8 = 0x50  # 'P'
+comptime VIEWPORT_MAGIC_3: UInt8 = 0x31  # '1'
 
-comptime IVP_VERSION_1: UInt64 = 1
+comptime VIEWPORT_VERSION_1: UInt64 = 1
 
 # Facets (one protocol, two facets — grid now, text added by the M7 gate).
-comptime IVP_FACET_GRID: UInt8 = 0
-comptime IVP_FACET_TEXT: UInt8 = 1  # reserved (M7 textstore gate)
+comptime VIEWPORT_FACET_GRID: UInt8 = 0
+comptime VIEWPORT_FACET_TEXT: UInt8 = 1  # reserved (M7 textstore gate)
 
 # Source-locator kinds — the engine-scannable analytic table surface.
-comptime IVP_SRC_PARQUET_FILE: UInt8 = 0
-comptime IVP_SRC_GLOB: UInt8 = 1
-comptime IVP_SRC_HIVE_DIR: UInt8 = 2
-comptime IVP_SRC_ICEBERG_TABLE: UInt8 = 3
+comptime VIEWPORT_SRC_PARQUET_FILE: UInt8 = 0
+comptime VIEWPORT_SRC_GLOB: UInt8 = 1
+comptime VIEWPORT_SRC_HIVE_DIR: UInt8 = 2
+comptime VIEWPORT_SRC_ICEBERG_TABLE: UInt8 = 3
 
-# STRUCTURAL decode caps (a second, SEMANTIC layer lives in ivp_validate.mojo).
+# STRUCTURAL decode caps (a second, SEMANTIC layer lives in viewport_validate.mojo).
 # These bound the container allocations a hostile count field can force.
-comptime IVP_MAX_PROJECTION_COLS: Int = 4096
-comptime IVP_MAX_SORT_KEYS: Int = 256
-comptime IVP_MAX_COMPUTED_COLS: Int = 1024
+comptime VIEWPORT_MAX_PROJECTION_COLS: Int = 4096
+comptime VIEWPORT_MAX_SORT_KEYS: Int = 256
+comptime VIEWPORT_MAX_COMPUTED_COLS: Int = 1024
 
 
 def _src_kind_is_valid(kind: UInt8) -> Bool:
     return (
-        kind == IVP_SRC_PARQUET_FILE or kind == IVP_SRC_GLOB
-        or kind == IVP_SRC_HIVE_DIR or kind == IVP_SRC_ICEBERG_TABLE
+        kind == VIEWPORT_SRC_PARQUET_FILE or kind == VIEWPORT_SRC_GLOB
+        or kind == VIEWPORT_SRC_HIVE_DIR or kind == VIEWPORT_SRC_ICEBERG_TABLE
     )
 
 
@@ -84,7 +86,7 @@ struct SourceLocator(Movable, Copyable):
         return Self(self.kind, self.locator.copy())
 
 
-struct IvpSortKey(Movable, Deinitable):
+struct ViewportSortKey(Movable, Deinitable):
     """One sort key: an Expr (usually a column reference) + a direction."""
 
     var key: Expr
@@ -95,7 +97,7 @@ struct IvpSortKey(Movable, Deinitable):
         self.descending = descending
 
 
-struct IvpComputedCol(Movable, Deinitable):
+struct ViewportComputedCol(Movable, Deinitable):
     """One computed / derived column: an output name + an Expr over the row.
 
     NOTE: the output-name field is `name`, not `alias` — `alias` is a reserved
@@ -115,8 +117,8 @@ struct GridTicket(Movable, Deinitable):
     var source: SourceLocator
     var projection: List[String]  # empty => all columns
     var filter: Optional[Expr]
-    var sort_keys: Slab[IvpSortKey]
-    var computed: Slab[IvpComputedCol]
+    var sort_keys: Slab[ViewportSortKey]
+    var computed: Slab[ViewportComputedCol]
     var offset: UInt64
     var limit: UInt64
     var view_version: UInt64
@@ -126,8 +128,8 @@ struct GridTicket(Movable, Deinitable):
         var source: SourceLocator,
         var projection: List[String],
         var filter: Optional[Expr],
-        var sort_keys: Slab[IvpSortKey],
-        var computed: Slab[IvpComputedCol],
+        var sort_keys: Slab[ViewportSortKey],
+        var computed: Slab[ViewportComputedCol],
         offset: UInt64,
         limit: UInt64,
         view_version: UInt64,
@@ -150,8 +152,8 @@ struct GridTicket(Movable, Deinitable):
             source^,
             List[String](),
             no_filter^,
-            Slab[IvpSortKey](),
-            Slab[IvpComputedCol](),
+            Slab[ViewportSortKey](),
+            Slab[ViewportComputedCol](),
             offset,
             limit,
             UInt64(0),
@@ -164,15 +166,15 @@ struct GridTicket(Movable, Deinitable):
 
 
 def encode_grid_ticket(t: GridTicket) raises -> List[UInt8]:
-    """Serialize a GridTicket to the IVP wire bytes (magic + version + grid
+    """Serialize a GridTicket to the viewport-protocol wire bytes (magic + version + grid
     facet + positional fields)."""
-    var w = IvpWriter(capacity_hint=256)
-    w.write_u8(IVP_MAGIC_0)
-    w.write_u8(IVP_MAGIC_1)
-    w.write_u8(IVP_MAGIC_2)
-    w.write_u8(IVP_MAGIC_3)
-    w.write_uvarint(IVP_VERSION_1)
-    w.write_u8(IVP_FACET_GRID)
+    var w = ViewportWriter(capacity_hint=256)
+    w.write_u8(VIEWPORT_MAGIC_0)
+    w.write_u8(VIEWPORT_MAGIC_1)
+    w.write_u8(VIEWPORT_MAGIC_2)
+    w.write_u8(VIEWPORT_MAGIC_3)
+    w.write_uvarint(VIEWPORT_VERSION_1)
+    w.write_u8(VIEWPORT_FACET_GRID)
 
     # Source locator.
     w.write_u8(t.source.kind)
@@ -216,45 +218,45 @@ def encode_grid_ticket(t: GridTicket) raises -> List[UInt8]:
 
 
 def decode_grid_ticket(data: Span[UInt8, _]) raises -> GridTicket:
-    """Parse IVP grid-ticket bytes. RAISES on bad magic, unknown version /
+    """Parse viewport-protocol grid-ticket bytes. RAISES on bad magic, unknown version /
     facet / source-kind, a structural count past its cap, a disallowed Expr
     node, or any malformed / truncated / trailing byte."""
-    var r = IvpReader.from_span(data)
+    var r = ViewportReader.from_span(data)
 
     var m0 = r.read_u8()
     var m1 = r.read_u8()
     var m2 = r.read_u8()
     var m3 = r.read_u8()
     if (
-        m0 != IVP_MAGIC_0 or m1 != IVP_MAGIC_1
-        or m2 != IVP_MAGIC_2 or m3 != IVP_MAGIC_3
+        m0 != VIEWPORT_MAGIC_0 or m1 != VIEWPORT_MAGIC_1
+        or m2 != VIEWPORT_MAGIC_2 or m3 != VIEWPORT_MAGIC_3
     ):
-        raise Error("ivp: bad magic — not an IVP message")
+        raise Error("viewport: bad magic — not a viewport-protocol message")
 
     var version = r.read_uvarint()
-    if version != IVP_VERSION_1:
-        raise Error("ivp: unsupported protocol version " + String(version))
+    if version != VIEWPORT_VERSION_1:
+        raise Error("viewport: unsupported protocol version " + String(version))
 
     var facet = r.read_u8()
-    if facet != IVP_FACET_GRID:
+    if facet != VIEWPORT_FACET_GRID:
         raise Error(
-            "ivp: facet " + String(Int(facet)) + " is not the grid facet "
+            "viewport: facet " + String(Int(facet)) + " is not the grid facet "
             "(text facet arrives with the M7 textstore gate)"
         )
 
     # Source locator.
     var src_kind = r.read_u8()
     if not _src_kind_is_valid(src_kind):
-        raise Error("ivp: unknown source-locator kind " + String(Int(src_kind)))
+        raise Error("viewport: unknown source-locator kind " + String(Int(src_kind)))
     var locator = r.read_string()
     var source = SourceLocator(src_kind, locator)
 
     # Projection.
     var n_proj64 = r.read_uvarint()
-    if n_proj64 > UInt64(IVP_MAX_PROJECTION_COLS):
+    if n_proj64 > UInt64(VIEWPORT_MAX_PROJECTION_COLS):
         raise Error(
-            "ivp: projection column count " + String(n_proj64)
-            + " exceeds cap " + String(IVP_MAX_PROJECTION_COLS)
+            "viewport: projection column count " + String(n_proj64)
+            + " exceeds cap " + String(VIEWPORT_MAX_PROJECTION_COLS)
         )
     var projection = List[String]()
     for _ in range(Int(n_proj64)):
@@ -268,29 +270,29 @@ def decode_grid_ticket(data: Span[UInt8, _]) raises -> GridTicket:
 
     # Sort keys.
     var n_sort64 = r.read_uvarint()
-    if n_sort64 > UInt64(IVP_MAX_SORT_KEYS):
+    if n_sort64 > UInt64(VIEWPORT_MAX_SORT_KEYS):
         raise Error(
-            "ivp: sort-key count " + String(n_sort64)
-            + " exceeds cap " + String(IVP_MAX_SORT_KEYS)
+            "viewport: sort-key count " + String(n_sort64)
+            + " exceeds cap " + String(VIEWPORT_MAX_SORT_KEYS)
         )
-    var sort_keys = Slab[IvpSortKey]()
+    var sort_keys = Slab[ViewportSortKey]()
     for _ in range(Int(n_sort64)):
         var key = decode_expr(r)
         var desc = r.read_bool()
-        sort_keys.append(IvpSortKey(key^, desc))
+        sort_keys.append(ViewportSortKey(key^, desc))
 
     # Computed columns.
     var n_comp64 = r.read_uvarint()
-    if n_comp64 > UInt64(IVP_MAX_COMPUTED_COLS):
+    if n_comp64 > UInt64(VIEWPORT_MAX_COMPUTED_COLS):
         raise Error(
-            "ivp: computed-column count " + String(n_comp64)
-            + " exceeds cap " + String(IVP_MAX_COMPUTED_COLS)
+            "viewport: computed-column count " + String(n_comp64)
+            + " exceeds cap " + String(VIEWPORT_MAX_COMPUTED_COLS)
         )
-    var computed = Slab[IvpComputedCol]()
+    var computed = Slab[ViewportComputedCol]()
     for _ in range(Int(n_comp64)):
         var out_name = r.read_string()
         var cexpr = decode_expr(r)
-        computed.append(IvpComputedCol(out_name, cexpr^))
+        computed.append(ViewportComputedCol(out_name, cexpr^))
 
     # Window + version.
     var offset = r.read_uvarint()

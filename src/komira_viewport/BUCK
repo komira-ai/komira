@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The viewport protocol (IVP) v1, request half: a positional byte cursor
+# The viewport protocol v1, request half: a positional byte cursor
 # (LEB128 varints, zigzag, fixed floats, length-prefixed strings), the
 # versioned wire codec for Expr trees under a v1 allow-list, the grid-ticket
 # model and codec, the grid-response envelope, and the untrusted-ticket
@@ -12,21 +12,21 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the varint primitive, so it builds and tests without the engine.
 #
 # The welded tests:
-# - test_ivp_expr_roundtrip: every allow-listed Expr shape encodes and decodes
+# - test_viewport_expr_roundtrip: every allow-listed Expr shape encodes and decodes
 #   back to an identical structural hash.
-# - test_ivp_hostile_ticket: malformed and out-of-allow-list tickets (truncated,
+# - test_viewport_hostile_ticket: malformed and out-of-allow-list tickets (truncated,
 #   oversized, too deep, disallowed tags and ops, UDFs, duplicate output names)
 #   are rejected with an error, never accepted.
 mojo_library(
-    name = "komira_ivp",
+    name = "komira_viewport",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_core:komira_core",
         "//src/komira_protobuf:komira_protobuf",
     ],
     test_srcs = [
-        "tests/test_ivp_expr_roundtrip.mojo",
-        "tests/test_ivp_hostile_ticket.mojo",
+        "tests/test_viewport_expr_roundtrip.mojo",
+        "tests/test_viewport_hostile_ticket.mojo",
     ],
     visibility = ["PUBLIC"],
 )

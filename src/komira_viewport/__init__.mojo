@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_ivp — the viewport protocol (IVP) v1 codec + validation.
+# komira_viewport — the viewport protocol v1 codec + validation.
 # =============================================================================
 #
 # The wire contract of a viewport server: a viewport client posts
@@ -14,53 +14,53 @@
 #   * round-trip: Expr -> encode -> bytes -> decode -> identical structural hash
 #   * hostile-ticket: a malformed / out-of-allow-list ticket is rejected.
 #
-# Public surface (re-exported for `from komira_ivp import ...`):
+# Public surface (re-exported for `from komira_viewport import ...`):
 # =============================================================================
 
-from .ivp_bytes import (
-    IvpWriter,
-    IvpReader,
-    IVP_MAX_BYTESTRING_LEN,
+from .viewport_bytes import (
+    ViewportWriter,
+    ViewportReader,
+    VIEWPORT_MAX_BYTESTRING_LEN,
 )
 
-from .ivp_expr_codec import (
+from .viewport_expr_codec import (
     encode_expr,
     decode_expr,
     encode_scalar,
     decode_scalar,
-    IVP_MAX_EXPR_DEPTH,
+    VIEWPORT_MAX_EXPR_DEPTH,
 )
 
-from .ivp_ticket import (
+from .viewport_ticket import (
     SourceLocator,
-    IvpSortKey,
-    IvpComputedCol,
+    ViewportSortKey,
+    ViewportComputedCol,
     GridTicket,
     encode_grid_ticket,
     decode_grid_ticket,
-    IVP_FACET_GRID,
-    IVP_FACET_TEXT,
-    IVP_SRC_PARQUET_FILE,
-    IVP_SRC_GLOB,
-    IVP_SRC_HIVE_DIR,
-    IVP_SRC_ICEBERG_TABLE,
-    IVP_VERSION_1,
+    VIEWPORT_FACET_GRID,
+    VIEWPORT_FACET_TEXT,
+    VIEWPORT_SRC_PARQUET_FILE,
+    VIEWPORT_SRC_GLOB,
+    VIEWPORT_SRC_HIVE_DIR,
+    VIEWPORT_SRC_ICEBERG_TABLE,
+    VIEWPORT_VERSION_1,
 )
 
-from .ivp_validate import (
-    IvpTicketLimits,
+from .viewport_validate import (
+    ViewportTicketLimits,
     validate_ticket,
     validate_ticket_bytes,
     decode_and_validate_grid_ticket,
 )
 
-from .ivp_response import (
+from .viewport_response import (
     RowCount,
     GridResponse,
     encode_grid_response,
     decode_grid_response,
-    IVP_COUNT_EXACT,
-    IVP_COUNT_ESTIMATED,
-    IVP_PAYLOAD_ARROW_IPC,
-    IVP_PAYLOAD_JSON,
+    VIEWPORT_COUNT_EXACT,
+    VIEWPORT_COUNT_ESTIMATED,
+    VIEWPORT_PAYLOAD_ARROW_IPC,
+    VIEWPORT_PAYLOAD_JSON,
 )
