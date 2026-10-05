@@ -59,6 +59,15 @@ from komira_http_core.transport.io_stream import Connector
 from .azure_client import AzureClient
 
 
+# The most List Blobs pages one listing (`list` or `list_dir_shallow`)
+# drains before it raises, as GcsFs does with GCS_LIST_MAX_PAGES. A service
+# or proxy that keeps returning a non-empty `<NextMarker>` (the same one
+# forever, say) would otherwise spin the loop, and grow its result, without
+# bound. At 5000 entries a page (Azure's maximum) this admits 500 million
+# names, far past any listing this filesystem is meant to serve.
+comptime AZURE_LIST_MAX_PAGES: Int = 100_000
+
+
 # =============================================================================
 # AzureWriteFile — sentinel WriteFile type (read-only Azure in this slot)
 # =============================================================================
@@ -223,7 +232,10 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         S3's `NextContinuationToken` / GCS's `next_marker`) until
         `is_truncated()` is False, aggregating `<Blob><Name>` entries, with
         a "truncated-but-empty-marker" termination guard against a
-        non-conforming proxy looping forever on the same URL.
+        non-conforming proxy looping forever on the same URL, and a page cap:
+        a service that keeps returning a non-empty `<NextMarker>` (the same
+        one forever, say) gets AZURE_LIST_MAX_PAGES requests and then an
+        error, never an unbounded loop.
 
         RECURSIVE listing (no delimiter), as S3Fs.list and GcsFs.list do:
         the `FileSystem.list` trait carries no recursive
@@ -245,6 +257,8 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         Raises:
           * If the borrowed AzureClient is the sentinel (not configured).
           * HTTP 4xx/5xx via AzureStore.list_page's error channel.
+          * After AZURE_LIST_MAX_PAGES pages that each carry a `<NextMarker>`
+            ("page cap exceeded").
         """
         # Interior-mut ref to the owned AzureClient (single-worker;
         # slab sized 1, never grown).
@@ -256,9 +270,19 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
 
         var out = List[String]()
         var marker = String("")
+        var pages = 0
         # Pagination loop (mirror GcsFs.list): follow next_marker until
-        # is_truncated() is False. Flat listing -> delimiter="".
+        # is_truncated() is False, at most AZURE_LIST_MAX_PAGES requests.
+        # Flat listing -> delimiter="".
         while True:
+            pages += 1
+            if pages > AZURE_LIST_MAX_PAGES:
+                raise Error(
+                    String("AzureFs.list: page cap exceeded (")
+                    + String(AZURE_LIST_MAX_PAGES)
+                    + String(" List Blobs pages and the service still returns"
+                    " a NextMarker)")
+                )
             var page = store_opt.value().list_page[
                 PerCoreAsyncRuntime[NoopSink], Self.C,
             ](
@@ -528,8 +552,8 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         `AzureStore.list_page` exposes only a single page, so the pagination
         loop lives HERE — mirroring `AzureFs.list`'s loop over `<NextMarker>`
         until `is_truncated()` is False, including the defensive
-        truncated-but-empty-marker termination guard (non-conforming proxy).
-        Here we list WITH `delimiter="/"` to get the one-level folded view.
+        truncated-but-empty-marker termination guard (non-conforming proxy)
+        and the AZURE_LIST_MAX_PAGES page cap. Here we list WITH `delimiter="/"` to get the one-level folded view.
 
         KEY FORM: returned entry names are BARE final path components (G.3
         finding). We do NOT re-prepend `az://container/`.
@@ -541,6 +565,8 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         Raises:
           * If the borrowed AzureClient is the sentinel (not configured).
           * HTTP 4xx/5xx via AzureStore.list_page's error channel.
+          * After AZURE_LIST_MAX_PAGES pages that each carry a `<NextMarker>`
+            ("page cap exceeded").
         """
         var probe_prefix = prefix
         if probe_prefix.byte_length() > 0 and not probe_prefix.endswith(String("/")):
@@ -553,12 +579,22 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
 
         var out = List[ShallowDirEntry]()
         var marker = String("")
+        var pages = 0
         # Pagination loop (mirror AzureFs.list): follow next_marker until
         # is_truncated() is False, but WITH delimiter="/" for the one-level
         # folded view. BlobPrefixes -> dirs, Blobs -> files; the cloud store
         # returns keys lexicographically, and we append in arrival order so the
-        # natural sorted order survives across pages.
+        # natural sorted order survives across pages. At most
+        # AZURE_LIST_MAX_PAGES requests, as `list`.
         while True:
+            pages += 1
+            if pages > AZURE_LIST_MAX_PAGES:
+                raise Error(
+                    String("AzureFs.list_dir_shallow: page cap exceeded (")
+                    + String(AZURE_LIST_MAX_PAGES)
+                    + String(" List Blobs pages and the service still returns"
+                    " a NextMarker)")
+                )
             var page = store_opt.value().list_page[
                 PerCoreAsyncRuntime[NoopSink], Self.C,
             ](
