@@ -587,7 +587,7 @@ def test_rollback_reverse_skips_keep_and_confirmed() raises:
 #      merely ADOPTED — even on a FIRST apply, where no prior intent exists.
 #
 # The `already_confirmed` skip in (3) is NOT sufficient, and the gap is exactly
-# the case a customer hits first. `already_confirmed` is a fact about OUR INTENT
+# the case a user hits first. `already_confirmed` is a fact about OUR INTENT
 # LEDGER ("a prior apply of ours confirmed this key"), NOT about who created the
 # resource. On the FIRST apply against a PRE-EXISTING cloud resource there is no
 # prior intent, so `record_or_adopt_intent` writes a fresh PROVISIONING row and
@@ -597,7 +597,7 @@ def test_rollback_reverse_skips_keep_and_confirmed() raises:
 # The resource is therefore recorded as {already_confirmed: False, verb: NOOP}.
 # A rollback that skipped only RETAIN_KEEP and already_confirmed would issue
 # `delete(physical_id)` against a resource THIS DEPLOY NEVER CREATED — a
-# customer's pre-existing bucket / table / secret, destroyed because an unrelated
+# user's pre-existing bucket / table / secret, destroyed because an unrelated
 # node failed later in the same apply.
 #
 # VERB_NOOP is the discriminator the record already carries: it means "live
@@ -610,7 +610,7 @@ def test_rollback_reverse_skips_keep_and_confirmed() raises:
 def test_rollback_never_deletes_an_adopted_node_on_first_apply() raises:
     var g = ResourceGraph()
 
-    # The customer's PRE-EXISTING resource: live MATCHED, RETAIN_DELETE (so the
+    # The user's PRE-EXISTING resource: live MATCHED, RETAIN_DELETE (so the
     # RETAIN_KEEP arm cannot be what saves it), and NO pre-confirmed intent (so
     # the already_confirmed arm cannot be what saves it either). This is a first
     # apply that discovers a resource it did not create.
@@ -666,7 +666,7 @@ def test_rollback_never_deletes_an_adopted_node_on_first_apply() raises:
         preexisting.deleted(),
         (
             "rollback DELETED a resource this deploy only ADOPTED (verb=NOOP) —"
-            " that is a customer's pre-existing resource destroyed by an unrelated"
+            " that is a user's pre-existing resource destroyed by an unrelated"
             " node's failure"
         ),
     )
@@ -927,7 +927,7 @@ def test_destroy_reverse_skips_keep_idempotent() raises:
 
 
 # =============================================================================
-# (7e) full erasure — the force_delete_data OVERRIDE: a CUSTOMER
+# (7e) full erasure — the force_delete_data OVERRIDE: a USER
 #      compute-env DELETE = an ERASURE request, so `destroy_graph(...,
 #      force_delete_data=True)` LIFTS the RETAIN_KEEP skip and REAPS the shared/
 #      standing bucket + signing seed too (nothing left billing / holding PII).
@@ -935,12 +935,12 @@ def test_destroy_reverse_skips_keep_idempotent() raises:
 #      passes False.
 # =============================================================================
 def test_env_erase_reaps_retain_keep_bucket() raises:
-    """The FALSIFIER for the customer-erase RETAIN override: the SAME graph as
+    """The FALSIFIER for the user-erase RETAIN override: the SAME graph as
     (7) — a RETAIN_KEEP shared bucket + a RETAIN_DELETE app — but destroyed with
     `force_delete_data=True`. NOW the RETAIN_KEEP bucket IS deleted + its intent
     reaped (the erase override), where the default (7) SKIPPED it. FAILS ON a build
     that ignores force_delete_data: the bucket would survive (the RETAIN_KEEP leak
-    the customer DELETE must not tolerate)."""
+    the user DELETE must not tolerate)."""
     var g = ResourceGraph()
     var bucket = FakeResource(
         String("bucket"), List[String](), RETAIN_KEEP, RES_PRESENT_MATCHED
@@ -1990,7 +1990,7 @@ def main() raises:
 def verifier_adopted_node_survives_a_real_downstream_failure() raises:
     var g = ResourceGraph()
 
-    # A: the customer's PRE-EXISTING resource. RETAIN_DELETE (so RETAIN_KEEP is not
+    # A: the user's PRE-EXISTING resource. RETAIN_DELETE (so RETAIN_KEEP is not
     # what saves it) and NO prior intent (so already_confirmed is not what saves it).
     var preexisting = FakeResource(
         String("preexisting"), List[String](), RETAIN_DELETE, RES_PRESENT_MATCHED
