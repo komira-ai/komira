@@ -98,6 +98,70 @@ gen_check(
     ],
 )
 
+# `module_names`: item.proto is generated as the module shop_item, and the
+# file that imports it (shop.proto) names that module. The library builds
+# only once its layout probe, which imports every module, compiles and runs.
+mojo_gcp_client(
+    name = "komira_gcp_shop_renamed",
+    bundle_only = ["example/shop/v1/item.proto"],
+    bundle_proto_deps = True,
+    messages_only = True,
+    methods = ["ShopService.GetItem"],
+    module_names = {"example/shop/v1/item.proto": "shop_item"},
+    proto_deps = [":shop_deps"],
+    protos = ["example/shop/v1/shop.proto"],
+    deps = ["//functional/proto:komira_proto_codec"],
+)
+
+gen_check(
+    name = "komira_gcp_shop_renamed_modules",
+    absent = ["komira_gcp_shop_renamed.item"],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "shop.mojo",
+        "shop_item.mojo",
+    ],
+    gen = ":komira_gcp_shop_renamed[gen]",
+    present = [
+        "struct Item(",
+        "from komira_gcp_shop_renamed.shop_item import Item",
+        "size_of[shop_item.Item]()",
+    ],
+)
+
+# `module_names` on one of the target's own `protos`, under an
+# `import_prefix`: an own file is named by its import path (the prefix, then
+# its source path), and the library's sources are that module's file.
+mojo_gcp_client(
+    name = "komira_gcp_shop_own_renamed",
+    bundle_only = ["example/shop/v1/item.proto"],
+    bundle_proto_deps = True,
+    import_prefix = "fixture",
+    messages_only = True,
+    methods = ["ShopService.GetItem"],
+    module_names = {"fixture/example/shop/v1/shop.proto": "shop_api"},
+    proto_deps = [":shop_deps"],
+    protos = ["example/shop/v1/shop.proto"],
+    deps = ["//functional/proto:komira_proto_codec"],
+)
+
+gen_check(
+    name = "komira_gcp_shop_own_renamed_modules",
+    absent = ["size_of[shop."],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "item.mojo",
+        "shop_api.mojo",
+    ],
+    gen = ":komira_gcp_shop_own_renamed[gen]",
+    present = [
+        "struct GetItemRequest(",
+        "size_of[shop_api.GetItemRequest]()",
+    ],
+)
+
 # The layout probe is welded into each library, not only generated: the
 # libraries ran exactly these tests, and each passed. gen_check reads `[gen]`
 # and cannot see the weld.
@@ -247,7 +311,7 @@ proto_srcs(
     proto_deps = [":shop_deps"],
 )
 
-# watch.proto, a streaming method, as a proto_deps entry, so
+# watch.proto, a bidirectional-streaming method, as a proto_deps entry, so
 # ../../negative/mojo_gcp_client can list it in a "rest" client and be refused.
 proto_srcs(
     name = "watch_api",

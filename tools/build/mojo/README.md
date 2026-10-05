@@ -14,7 +14,7 @@ the compiler sees. Worked uses of each rule are in
 
 | rule | produces | example |
 |---|---|---|
-| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
+| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
@@ -65,7 +65,56 @@ L/ungated/I.mojoc   the compiler's output (sub-target [ungated])
 L/pkg/I.mojoc       the public package, gated on every test's PASS marker
 L/src/I/...         the staged package sources
 L/tests/<t>/...     one binary and one PASS marker per test
+L/tests/readme/...  the README's generated program, binary and marker
 ```
+
+### README examples
+
+A library whose package holds a `README.md` runs the README's examples as one
+more welded test, `[tests][readme]`, so the documentation cannot rot. Nothing
+declares it: the README is declared by existing. The reader and the program
+generator are [`//tools/build/readme_examples`](../readme_examples/BUCK)
+(pure Mojo; `buildtools.doc_links` reads code through the same CommonMark
+fence reader, so the link check and the examples agree on what is code).
+
+- **An example** is a fenced block whose info string is exactly `mojo`
+  (```` ``` ```` or `~~~`; a closing fence is the same character, at least as
+  long, so a ```` ```` ```` fence may quote ```` ``` ````). Every example
+  runs: there is no skip word. A sketch that cannot run is fenced ```` ```text ````.
+  Any word after `mojo` (`mojo skip`) and any near miss (`Mojo`, `mojo,`,
+  `.mojo`) is refused, naming `README.md:<line>`.
+- **A fragment**, as a Rust doctest: its column-0 `from`/`import` lines are
+  hoisted (deduplicated) and so are its column-0 declarations (`def`,
+  `struct`, `trait`, `comptime`, a decorator); the rest becomes
+  `def _example_<line>() raises:`. Assertions are visible `std.testing`
+  calls. Examples share one module, so two declaring the same name collide.
+- **Hidden lines**: an HTML comment `<!-- mojo-hidden ... -->` ending on the
+  line just before an example's fence is prepended to it, and one starting on
+  the line just after is appended (one line, or `<!-- mojo-hidden`, the code,
+  then `-->`). GitHub's page does not render it; every raw view, and the
+  installed copy, shows it. A `mojo-hidden` comment next to no example, or a
+  misspelled marker, is refused.
+- **The program** is `readme_<I>.mojo` (never `<I>.mojo`: a file named like the
+  package beside the program would shadow it). It runs every example inside
+  `try`, prints `<package>/README.md:<line>: FAILED: <error>` for each that
+  raises, then `readme_<I> validation: P of E checks passed`, and fails if any
+  failed. Each line copied from the README ends with `# README.md:<n>`, so a
+  compile error, which quotes the line, names the README line too.
+- **No example**: whether a README holds one is in its bytes, which analysis
+  cannot read, so a dynamic action reads the count. With none, nothing is
+  compiled or run and the marker reads `NO EXAMPLE <label>`, never `PASS`. A
+  README's examples do not count as the tests a conda package needs.
+- The tool's own package, `tools/build/readme_examples`, may hold no README:
+  the tool would depend on itself.
+- **A README that ships** (the library has a conda package the build can
+  make, which installs it at `share/doc/<conda name>/README.md`; see
+  [Conda packages](../../../packaging/conda/README.md#the-readme-in-the-package))
+  refuses a relative link outside code, naming `README.md:<line>`: the
+  installed copy has no neighbours. Link an absolute URL or an `#anchor`.
+
+Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
+a README that uses every form, and requires a raising example, a compile
+error and a `mojo skip` fence each to fail naming its README line.
 
 ### The compile watchdog
 

@@ -12,6 +12,7 @@ from kci_api import (
     STEP_KIND_BUILD,
     STEP_KIND_DEPLOY,
     STEP_KIND_PUBLISH,
+    VALIDATION_KIND_CONDA_INSTALL_ENV,
     VALIDATION_KIND_CONDA_INSTALL_SMOKE,
     VERB_RUN,
     all_step_kinds,
@@ -74,16 +75,19 @@ def test_step_kinds() raises:
 
 def test_validation_kinds() raises:
     var k = all_validation_kinds()
-    assert_equal(len(k), 1)
+    assert_equal(len(k), 2)
     assert_equal(k[0], String("CONDA_INSTALL_SMOKE"))
+    assert_equal(k[1], String("CONDA_INSTALL_ENV"))
     assert_equal(String(VALIDATION_KIND_CONDA_INSTALL_SMOKE), String("CONDA_INSTALL_SMOKE"))
+    assert_equal(String(VALIDATION_KIND_CONDA_INSTALL_ENV), String("CONDA_INSTALL_ENV"))
     require_validation_kind(String("CONDA_INSTALL_SMOKE"))
+    require_validation_kind(String("CONDA_INSTALL_ENV"))
     var refused = String("")
     try:
         require_validation_kind(String("SMOKE"))
     except e:
         refused = String(e)
-    assert_equal(refused, String("validation kind 'SMOKE' is not CONDA_INSTALL_SMOKE"))
+    assert_equal(refused, String("validation kind 'SMOKE' is not CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV"))
 
 
 def main() raises:

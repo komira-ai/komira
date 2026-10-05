@@ -3,13 +3,17 @@
 A link resolves when its target, relative to the Markdown file, is a listed
 file or a directory holding one, stays inside the root, and a `#fragment`
 names a heading of the target Markdown file (GitHub's slugs). Links in code
-spans and fenced blocks, and URLs with a scheme, are not checked. The input
-is the root (a real path) and the list of paths under it that count as
+spans and fenced blocks, and URLs with a scheme, are not checked. What is
+code, and what is a link, is `readme_examples.markdown`'s CommonMark reading
+(tools/build/readme_examples), the one the README examples are read with.
+The input is the root (a real path) and the list of paths under it that count as
 present: `git ls-files -z` output, or every file of a staged tree (the
 markdown_docs validation, tools/build/lint).
 """
 
 from std.os.path import exists, isfile, lexists, realpath
+from readme_examples.markdown import code_mask, relative_links
+from readme_examples.text import split_lines
 from buildtools.bytes import (
     byte_at,
     bytes_less,
@@ -23,178 +27,6 @@ from buildtools.bytes import (
     suffix,
     to_string,
 )
-
-
-def _lines(text: String) -> List[String]:
-    """Lines without their newline (and without a CR before it)."""
-    var out = List[String]()
-    var n = text.byte_length()
-    var start = 0
-    for i in range(n + 1):
-        if i == n or byte_at(text, i) == 10:
-            if i == n and start == n:
-                break
-            var end = i
-            if end > start and byte_at(text, end - 1) == 13:
-                end -= 1
-            out.append(substr(text, start, end))
-            start = i + 1
-    return out^
-
-
-def _is_fence(line: String) -> Bool:
-    var i = 0
-    var n = line.byte_length()
-    while i < n and is_space(byte_at(line, i)):
-        i += 1
-    var rest = suffix(line, i)
-    return rest.startswith("```") or rest.startswith("~~~")
-
-
-def _mask_code(line: String) -> String:
-    """Inline code spans become two backticks."""
-    var out = String()
-    var n = line.byte_length()
-    var i = 0
-    var start = 0
-    while i < n:
-        if byte_at(line, i) == 96:
-            var j = i + 1
-            while j < n and byte_at(line, j) != 96:
-                j += 1
-            if j < n:
-                out += substr(line, start, i) + "``"
-                i = j + 1
-                start = i
-                continue
-            break
-        i += 1
-    out += suffix(line, start)
-    return out^
-
-
-def _inline_at(line: String, p: Int, mut target: String) -> Int:
-    """Matches `!?[text](<?target>? "title"?)` at p; returns the end or -1."""
-    var n = line.byte_length()
-    var i = p
-    if i < n and byte_at(line, i) == 33:
-        var r = _inline_at(line, p + 1, target)
-        if r >= 0:
-            return r
-        return -1
-    if i >= n or byte_at(line, i) != 91:
-        return -1
-    i += 1
-    while i < n:
-        var c = byte_at(line, i)
-        if c == 93:
-            break
-        if c == 91:
-            var j = i + 1
-            while j < n and byte_at(line, j) != 93:
-                j += 1
-            if j >= n:
-                return -1
-            i = j + 1
-            continue
-        i += 1
-    if i >= n or byte_at(line, i) != 93:
-        return -1
-    i += 1
-    if i >= n or byte_at(line, i) != 40:
-        return -1
-    i += 1
-    while i < n and is_space(byte_at(line, i)):
-        i += 1
-    if i < n and byte_at(line, i) == 60:
-        var alt = String()
-        var r = _inline_rest(line, i + 1, alt)
-        if r >= 0:
-            target = alt
-            return r
-    return _inline_rest(line, i, target)
-
-
-def _inline_rest(line: String, p: Int, mut target: String) -> Int:
-    var n = line.byte_length()
-    var i = p
-    var start = i
-    while i < n:
-        var c = byte_at(line, i)
-        if c == 41 or c == 62 or is_space(c):
-            break
-        i += 1
-    if i == start:
-        return -1
-    var t = substr(line, start, i)
-    if i < n and byte_at(line, i) == 62:
-        i += 1
-    # An optional title: whitespace, then "...".
-    var j = i
-    while j < n and is_space(byte_at(line, j)):
-        j += 1
-    if j > i and j < n and byte_at(line, j) == 34:
-        var k = j + 1
-        while k < n and byte_at(line, k) != 34:
-            k += 1
-        if k < n:
-            var m = k + 1
-            while m < n and is_space(byte_at(line, m)):
-                m += 1
-            if m < n and byte_at(line, m) == 41:
-                target = t
-                return m + 1
-    while i < n and is_space(byte_at(line, i)):
-        i += 1
-    if i < n and byte_at(line, i) == 41:
-        target = t
-        return i + 1
-    return -1
-
-
-def _inline_targets(line: String) -> List[String]:
-    var out = List[String]()
-    var n = line.byte_length()
-    var p = 0
-    while p < n:
-        var t = String()
-        var r = _inline_at(line, p, t)
-        if r >= 0:
-            out.append(t)
-            p = r
-        else:
-            p += 1
-    return out^
-
-
-def _refdef_target(line: String, mut target: String) -> Bool:
-    """`[id]: target` at the start of a line (up to three spaces before)."""
-    var n = line.byte_length()
-    var i = 0
-    while i < 3 and i < n and is_space(byte_at(line, i)):
-        i += 1
-    if i >= n or byte_at(line, i) != 91:
-        return False
-    var j = i + 1
-    while j < n and byte_at(line, j) != 93:
-        j += 1
-    if j >= n or j == i + 1 or j + 1 >= n or byte_at(line, j + 1) != 58:
-        return False
-    var k = j + 2
-    while k < n and is_space(byte_at(line, k)):
-        k += 1
-    var start = k
-    while k < n and not is_space(byte_at(line, k)):
-        k += 1
-    if k == start:
-        return False
-    var t = substr(line, start, k)
-    if t.startswith("<") and t.byte_length() > 1:
-        t = suffix(t, 1)
-    if t.endswith(">") and t.byte_length() > 1:
-        t = substr(t, 0, t.byte_length() - 1)
-    target = t
-    return True
 
 
 def _heading_text(line: String, mut text: String) -> Bool:
@@ -322,14 +154,11 @@ def _anchors(path: String) raises -> List[String]:
     var seen_slug = List[String]()
     var seen_count = List[Int]()
     var out = List[String]()
-    var fenced = False
-    var lines = _lines(to_string(read_file(path)))
+    var lines = split_lines(to_string(read_file(path)))
+    var code = code_mask(lines)
     for li in range(len(lines)):
         var line = lines[li]
-        if _is_fence(line):
-            fenced = not fenced
-            continue
-        if fenced:
+        if code[li]:
             continue
         var text = String()
         if _heading_text(line, text):
@@ -350,31 +179,6 @@ def _anchors(path: String) raises -> List[String]:
             else:
                 out.append(s + "-" + String(k))
     return out^
-
-
-def _external(t: String) -> Bool:
-    if t.startswith("//"):
-        return True
-    var n = t.byte_length()
-    if n == 0:
-        return False
-    var c = byte_at(t, 0)
-    if not ((c >= 65 and c <= 90) or (c >= 97 and c <= 122)):
-        return False
-    for i in range(1, n):
-        var d = byte_at(t, i)
-        if d == 58:
-            return True
-        if not (
-            (d >= 65 and d <= 90)
-            or (d >= 97 and d <= 122)
-            or (d >= 48 and d <= 57)
-            or d == 43
-            or d == 46
-            or d == 45
-        ):
-            return False
-    return False
 
 
 def _contains(xs: List[String], x: String) -> Bool:
@@ -429,51 +233,38 @@ def doc_links(root: String, tracked_z: List[UInt8]) raises -> Int:
     for f in range(len(md_files)):
         var md = md_files[f]
         var rel_md = suffix(md, root.byte_length() + 1)
-        var lines = _lines(to_string(read_file(md)))
-        var fenced = False
-        for li in range(len(lines)):
-            if _is_fence(lines[li]):
-                fenced = not fenced
-                continue
-            if fenced:
-                continue
-            var line = _mask_code(lines[li])
-            var targets = _inline_targets(line)
-            var rd = String()
-            if _refdef_target(line, rd):
-                targets.append(rd)
-            for ti in range(len(targets)):
-                var t = targets[ti]
-                if _external(t):
-                    continue
-                checked += 1
-                var hash = t.find("#")
-                var path = t if hash < 0 else substr(t, 0, hash)
-                var frag = String("") if hash < 0 else suffix(t, hash + 1)
-                var dest = md if path.byte_length() == 0 else normpath(path_join(dirname(md), path))
-                var where = rel_md + ":" + String(li + 1) + ": " + t
-                var real = dest
-                if exists(dest):
-                    real = realpath(dest)
-                if not _inside(root, real) or not _inside(root, dest):
-                    dead.append(where + " (leaves the repository)")
-                elif not exists(dest):
-                    dead.append(where + " (no such file)")
-                elif not _contains(tracked, dest) and not _contains(dirs, dest):
-                    dead.append(where + " (not tracked by git)")
-                elif frag.byte_length() > 0 and dest.endswith(".md") and isfile(dest):
-                    var idx = -1
-                    for a in range(len(anchor_paths)):
-                        if anchor_paths[a] == dest:
-                            idx = a
-                    if idx < 0:
-                        anchor_paths.append(dest)
-                        var got = _anchors(dest)
-                        sort_strings(got)
-                        anchor_sets.append(got^)
-                        idx = len(anchor_paths) - 1
-                    if not _contains(anchor_sets[idx], frag):
-                        dead.append(where + " (no heading #" + frag + ")")
+        var links = relative_links(split_lines(to_string(read_file(md))))
+        for k in range(len(links)):
+            var li = links[k].line
+            var t = links[k].target
+            checked += 1
+            var hash = t.find("#")
+            var path = t if hash < 0 else substr(t, 0, hash)
+            var frag = String("") if hash < 0 else suffix(t, hash + 1)
+            var dest = md if path.byte_length() == 0 else normpath(path_join(dirname(md), path))
+            var where = rel_md + ":" + String(li + 1) + ": " + t
+            var real = dest
+            if exists(dest):
+                real = realpath(dest)
+            if not _inside(root, real) or not _inside(root, dest):
+                dead.append(where + " (leaves the repository)")
+            elif not exists(dest):
+                dead.append(where + " (no such file)")
+            elif not _contains(tracked, dest) and not _contains(dirs, dest):
+                dead.append(where + " (not tracked by git)")
+            elif frag.byte_length() > 0 and dest.endswith(".md") and isfile(dest):
+                var idx = -1
+                for a in range(len(anchor_paths)):
+                    if anchor_paths[a] == dest:
+                        idx = a
+                if idx < 0:
+                    anchor_paths.append(dest)
+                    var got = _anchors(dest)
+                    sort_strings(got)
+                    anchor_sets.append(got^)
+                    idx = len(anchor_paths) - 1
+                if not _contains(anchor_sets[idx], frag):
+                    dead.append(where + " (no heading #" + frag + ")")
     if len(dead) > 0:
         for i in range(len(dead)):
             print("dead link: " + dead[i])

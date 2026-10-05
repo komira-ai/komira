@@ -61,6 +61,8 @@ def test_base64_outputs_match() raises:
     assert_equal(base64_url_encode_nopad(fb), String("-_8"))
     var fbfe: List[UInt8] = [0xFB, 0xFF, 0xFE]
     assert_equal(base64_url_encode(fbfe), String("-__-"))
+    assert_equal(base64_encode(fbfe), String("+//+"))
+    assert_true(_same(base64_decode(String("+//+")), fbfe))
 
 
 def test_base64_decode_acceptance_matches() raises:

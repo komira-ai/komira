@@ -65,7 +65,7 @@ def _make_engine(num_workers: Int) raises -> SharedEngine:
         "query finished in {} ms scanned {} rows", "komira_engine"
     ]()
     eng.register_site["opened file {} size {} bytes", "komira_parquet"]()
-    eng.register_site["retry {} reason {}", "komira_agent"]()
+    eng.register_site["retry {} reason {}", "komira_job_supervisor"]()
     eng.register_site["connection {} from {} closed", "komira_broker"]()
     eng.register_site["login {} status {}", "komira_auth"]()
     return eng^
@@ -93,7 +93,7 @@ def _emit_corpus(mut eng: SharedEngine, wid: Int, n: Int):
                 ArgI64(298000000),
             )
         elif m == 3:
-            _ = emit_record["retry {} reason {}", "komira_agent"](
+            _ = emit_record["retry {} reason {}", "komira_job_supervisor"](
                 r, LEVEL_ERROR, c, ArgI64(3),
                 ArgStr(String("connection timeout to upstream")),
             )

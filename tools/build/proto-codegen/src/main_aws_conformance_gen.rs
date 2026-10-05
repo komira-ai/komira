@@ -270,6 +270,7 @@ fn run(args: &Args) -> Result<(), String> {
                 pure_only: true,
                 omit_preamble: true,
                 s3: false,
+                route53: false,
             },
         );
         match r {
