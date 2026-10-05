@@ -359,11 +359,12 @@ def test_write_all_is_refused_on_a_release_job() raises:
 
 def _not_farm_connected() raises -> Tuple[String, String]:
     """The pull request stage without the farm connection, and its workflow:
-    no condition, no farm connection, no identity token."""
+    the pr job keeps its fork condition (every pull request job carries it)
+    and loses the farm connection and its identity token; the release jobs
+    are unchanged."""
     var machine = String(_MACHINE).replace(String("trigger: PULL_REQUEST farm_connected: true"), String("trigger: PULL_REQUEST"))
-    var wf = _pr(String("    if: github.event.pull_request.head.repo.full_name == github.repository\n"), String(""))
-    wf = wf.replace(String("      - name: farm\n        uses: ./.github/actions/farm-connect\n        with:\n          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"), String(""))
-    wf = wf.replace(String("      id-token: write\n"), String(""))
+    var wf = _wf(String("      - name: farm\n        uses: ./.github/actions/farm-connect\n        with:\n          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"), String(""))
+    wf = wf.replace(String("      contents: read\n      id-token: write\n"), String("      contents: read\n"))
     return (machine^, wf^)
 
 
@@ -401,12 +402,12 @@ def test_an_id_token_block_scalar_is_a_grant_in_the_release_workflow() raises:
     var machine = String(_MACHINE).replace(String("stage { name: \"build\" farm_connected: true"), String("stage { name: \"build\""))
     var styles = _block_styles()
     for i in range(len(styles)):
-        var job = _release(
+        var job = _wf(
             String("    environment: build\n    permissions:\n      id-token: write\n    steps:\n      - uses: ./.github/actions/farm-connect\n"),
             String("    environment: build\n    permissions:\n      id-token: ") + styles[i] + String("\n        write\n    steps:\n"),
         )
         _reports_on(machine, job, String("job 'build': R4: has `id-token: write`, but stage 'build' publishes to no OIDC channel"))
-        var top = _release(String("permissions: {}\n"), String("permissions:\n  id-token: ") + styles[i] + String("\n    write\n"))
+        var top = _wf(String("permissions: {}\n"), String("permissions:\n  id-token: ") + styles[i] + String("\n    write\n"))
         _reports(top, String("R4: `id-token: write` at the workflow level reaches every job"))
 
 
@@ -433,7 +434,7 @@ def test_a_permissions_scalar_other_than_plain_read_all_is_refused() raises:
     others.append(String("|-\n  read-all\n"))
     others.append(String(">-\n  write-all\n"))
     for i in range(len(others)):
-        var wf = _pr(String("permissions: {}\n"), String("permissions: ") + others[i])
+        var wf = _wf(String("permissions: {}\n"), String("permissions: ") + others[i])
         _reports(wf, String("workflow: R4: `permissions: "))
         _reports(wf, String("R4: `id-token: write` at the workflow level reaches every job"))
 
