@@ -37,13 +37,17 @@
 #
 # VALIDATIONS. A PUBLISH step may carry `validation { ... }` blocks that check
 # what it published. A validation name is unique in its stage (the grammar of
-# a step name). The one kind is CONDA_INSTALL_SMOKE (kci_api), which
-# installs the published packages inside a container and runs a program
-# against them:
+# a step name). Two kinds (kci_api): CONDA_INSTALL_SMOKE installs the
+# published packages inside a container and runs a program against them;
+# CONDA_INSTALL_ENV installs them on the machine that runs kci, with no
+# container (a pinned pixi, a scratch directory, a cleared environment), and
+# runs each installed library's README examples against them:
 #
-#   image             the container image, pinned by digest:
+#   image             CONDA_INSTALL_SMOKE only, required: the container
+#                     image, pinned by digest:
 #                     `<reference>@sha256:<64 lowercase hex>` (a tag alone is
-#                     refused: it names whatever the registry serves today)
+#                     refused: it names whatever the registry serves today).
+#                     Refused on CONDA_INSTALL_ENV, which runs no container
 #   install           repeated, at least one: a package to install from the
 #                     step's channel at this release's version and build (kci
 #                     checks it is a member of the release set when it runs;
@@ -52,8 +56,12 @@
 #   extra_channel     repeated: a channel that may supply only packages
 #                     outside the release set; an https:// URL or the bare
 #                     `conda-forge`
-#   program           the program to run, a relative path to a .mojo file
-#                     under `release/` (no `..` segment)
+#   program           CONDA_INSTALL_SMOKE only, required: the program to
+#                     run, a relative path to a .mojo file under `release/`
+#                     (no `..` segment). Refused on CONDA_INSTALL_ENV: what it
+#                     runs is each installed library's README
+#                     (share/doc/<name>/README.md), whose bytes the release
+#                     pins
 #   wait_for_index_seconds
 #                     how long to wait for the channel's index to LIST the
 #                     release's files (0, the default, waits not at all; at
@@ -87,6 +95,7 @@ from kci_api import (
     Selector,
     is_step_name,
     require_release_platform,
+    VALIDATION_KIND_CONDA_INSTALL_ENV,
     require_validation_kind,
 )
 
@@ -369,18 +378,33 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
             + String(": a validation belongs to a PUBLISH step (it checks what the step published)")
         )
     if v.kind.byte_length() == 0:
-        raise Error(_at(source, v.line) + where + String(" has no kind (CONDA_INSTALL_SMOKE)"))
+        raise Error(_at(source, v.line) + where + String(" has no kind (CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV)"))
     try:
         require_validation_kind(v.kind)
     except e:
         raise Error(_at(source, v.line) + where + String(": ") + String(e))
-    if v.image.byte_length() == 0:
-        raise Error(_at(source, v.line) + where + String(" has no image (the container image, pinned by digest)"))
-    if not is_digest_pinned_image(v.image):
-        raise Error(
-            _at(source, v.line) + where + String(" has image '") + v.image
-            + String("'; an image is pinned by digest, <reference>@sha256:<64 lowercase hex>")
-        )
+    var on_this_machine = v.kind == VALIDATION_KIND_CONDA_INSTALL_ENV
+    if on_this_machine:
+        if v.image.byte_length() > 0:
+            raise Error(
+                _at(source, v.line) + where + String(" has image '") + v.image
+                + String("'; a CONDA_INSTALL_ENV validation runs on this machine with no container")
+                + String(" (an image belongs to CONDA_INSTALL_SMOKE)")
+            )
+        if v.program.byte_length() > 0:
+            raise Error(
+                _at(source, v.line) + where + String(" has program '") + v.program
+                + String("'; a CONDA_INSTALL_ENV validation runs each installed library's README")
+                + String(" (share/doc/<name>/README.md), so it names no program")
+            )
+    else:
+        if v.image.byte_length() == 0:
+            raise Error(_at(source, v.line) + where + String(" has no image (the container image, pinned by digest)"))
+        if not is_digest_pinned_image(v.image):
+            raise Error(
+                _at(source, v.line) + where + String(" has image '") + v.image
+                + String("'; an image is pinned by digest, <reference>@sha256:<64 lowercase hex>")
+            )
     if len(v.installs) == 0:
         raise Error(_at(source, v.line) + where + String(" has no install (a package to install)"))
     for i in range(len(v.installs)):
@@ -402,9 +426,11 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
             _at(source, v.line) + where + String(" has compiler_channel '") + v.compiler_channel
             + String("'; a compiler channel is an https:// URL")
         )
-    if v.program.byte_length() == 0:
+    if not on_this_machine and v.program.byte_length() == 0:
         raise Error(_at(source, v.line) + where + String(" has no program (the program to run)"))
-    if not _is_relative_mojo_path(v.program) or not v.program.startswith(String(VALIDATION_PROGRAM_DIR)):
+    if not on_this_machine and (
+        not _is_relative_mojo_path(v.program) or not v.program.startswith(String(VALIDATION_PROGRAM_DIR))
+    ):
         raise Error(
             _at(source, v.line) + where + String(" has program '") + v.program
             + String("'; a program is a relative path to a .mojo file under ") + String(VALIDATION_PROGRAM_DIR)
