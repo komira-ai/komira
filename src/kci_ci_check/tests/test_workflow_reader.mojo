@@ -153,5 +153,51 @@ def test_cannot_tell() raises:
     _cannot(String("l:\n  - <<:\n      c: 2\n"), String("merge key"))
 
 
+# The two lines a single-quoted `if:` ends `''` on: `''` is an escaped quote,
+# so YAML carries the scalar on to the next line, which this reader must not
+# take as a key of its own.
+comptime _CARRIED_IF: String = (
+    "jobs:\n"
+    "  build:\n"
+    "    if: 'github.event_name != ''pull_request'' && needs.build.outputs.release == ''true''\n"
+    "    || ''a: b'''\n"
+    "    runs-on: x\n"
+)
+
+
+def test_a_single_quoted_scalar_closes_only_at_a_lone_quote() raises:
+    var d = read_workflow(
+        String("a: 'x'''\nb: ''''\nc: ''\nd: 'it''s'\ne: 'x''''y'\nf: ['a''', 'b']\n")
+    )
+    assert_equal(d.text(d.child(0, String("a"))), String("x'"))
+    assert_equal(d.text(d.child(0, String("b"))), String("'"))
+    assert_equal(d.text(d.child(0, String("c"))), String(""))
+    assert_equal(d.text(d.child(0, String("d"))), String("it's"))
+    assert_equal(d.text(d.child(0, String("e"))), String("x''y"))
+    var f = d.scalar_or_list(d.child(0, String("f")))
+    assert_equal(len(f), 2)
+    assert_equal(f[0], String("a'"))
+    assert_equal(f[1], String("b"))
+
+
+def test_a_single_quoted_scalar_ending_in_an_escaped_quote_is_not_closed() raises:
+    _cannot(String(_CARRIED_IF), String("line 3: a quoted scalar not closed on its line"))
+    _cannot(String("a: 'x''\n"), String("not closed"))
+    _cannot(String("a: '''''x''\n"), String("not closed"))
+    _cannot(String("a: 'x'' # c\n"), String("not closed"))
+    _cannot(String("a: ['x'']\n"), String("not closed"))
+    _cannot(String("a: [b, 'x'']\n"), String("not closed"))
+    _cannot(String("l:\n  - 'x''\n"), String("not closed"))
+
+
+def test_text_after_a_quoted_scalar_close_is_cannot_tell() raises:
+    _cannot(String("a: 'x' y\n"), String("text after a quoted scalar's close"))
+    _cannot(String("a: 'x' 'y'\n"), String("text after a quoted scalar's close"))
+    _cannot(String("a: \"x\" y\n"), String("text after a quoted scalar's close"))
+    _cannot(String("a: \"x\"y\"\n"), String("text after a quoted scalar's close"))
+    _cannot(String("a: ['x' y]\n"), String("text after a quoted scalar's close"))
+    _cannot(String("a: [b, \"x\" y]\n"), String("text after a quoted scalar's close"))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -345,6 +345,22 @@ def test_a_fork_condition_github_reads_as_a_format_string_is_refused() raises:
             raise Error(String("`if: ") + values[i] + String("`: ") + String(e))
 
 
+def test_a_fork_condition_carried_past_its_line_is_cannot_tell() raises:
+    # `''` is an escaped quote: the scalar does not close on the `if:` line,
+    # YAML carries it on to the next, and the condition GitHub reads is not
+    # the one on the line.
+    _cannot_tell(
+        String(_MACHINE),
+        _fork_if(String("'") + String(_FORK) + String(" ''\n    || ''a: b'''")),
+        String("a quoted scalar not closed on its line"),
+    )
+    _cannot_tell(
+        String(_MACHINE),
+        _fork_if(String("'${{ ") + String(_FORK) + String(" }}''\n    || ''a: b'''")),
+        String("a quoted scalar not closed on its line"),
+    )
+
+
 def _expression(text: String, block: Bool) -> Tuple[Bool, String]:
     var d = WorkflowDoc()
     var n = d.add(WorkflowNode(NODE_SCALAR, text.copy(), 1, not block, block))

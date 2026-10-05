@@ -20,6 +20,8 @@
 #             key `? `; a merge key `<<` (in any form); an escape (`\`) in a
 #             double-quoted key or value; a line indented in a way no open
 #             block can hold; a quoted scalar that is not closed on its line
+#             (in a single-quoted one `''` is an escaped quote, not a close)
+#             or has text after its close, as a value or a flow-list item
 #
 # `actionlint` (the repository's workflow lint) stays the YAML-validity
 # gate; this reader only has to be right on what it accepts.
@@ -210,6 +212,24 @@ def _indent_of(raw: String, number: Int) raises -> Int:
 # ---- scalars -----------------------------------------------------------------
 
 
+def _close_of(v: String) -> Int:
+    """The index of the quote that closes the quoted scalar `v` opens, or -1
+    when the text ends inside it. In a single-quoted scalar `''` is an
+    escaped quote, never a close: `'a'''` closes at its last byte, and `'a''`
+    is not closed at all (YAML carries it on to the next line)."""
+    var b = v.as_bytes()
+    var q = Int(b[0])
+    var i = 1
+    while i < len(b):
+        if Int(b[i]) == q:
+            if q == 39 and i + 1 < len(b) and Int(b[i + 1]) == 39:
+                i += 2
+                continue
+            return i
+        i += 1
+    return -1
+
+
 def _unquote(v: String, line: Int) raises -> String:
     """A plain, single- or double-quoted scalar's value."""
     if v.byte_length() == 0:
@@ -219,9 +239,12 @@ def _unquote(v: String, line: Int) raises -> String:
     if first == 38 or first == 42 or first == 33:  # & * !
         raise _cannot(line, String("an anchor, alias or tag ('") + v + String("')"))
     if first == 39 or first == 34:
-        if len(b) < 2 or Int(b[len(b) - 1]) != first:
+        var close = _close_of(v)
+        if close < 0:
             raise _cannot(line, String("a quoted scalar not closed on its line"))
-        var inner = String(v[byte = 1 : len(b) - 1])
+        if close != len(b) - 1:
+            raise _cannot(line, String("text after a quoted scalar's close"))
+        var inner = String(v[byte = 1:close])
         if first == 39:
             return inner.replace(String("''"), String("'"))
         if inner.find(String("\\")) >= 0:
