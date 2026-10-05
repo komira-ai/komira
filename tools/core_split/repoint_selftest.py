@@ -105,6 +105,22 @@ def main():
     r=sh(*cmd,'--renames'); ok=os.path.isdir(os.path.join(tree,'src/komira_scalar_arithmetic')) and not os.path.isdir(os.path.join(tree,'src/komira_scalar_arith')) and open(os.path.join(tree,'src/imp/r.mojo')).read()=='from komira_scalar_arithmetic.dec import D\n'
     check('--renames moves the directory and the import',ok,r.stdout+r.stderr)
     r=sh(*cmd,'--renames'); check('--renames is idempotent',r.returncode==0 and 'rewrote 0 files' in r.stdout,r.stdout)
+    # --check: red while a file names komira_core, green when none does
+    open(os.path.join(tree,'src/imp/leftover.mojo'),'w').write('# lives in komira_core\n'); sh('git','add','.',cwd=tree)
+    r=sh(sys.executable,os.path.join(a.tool,'repoint.py'),'--tree',tree,'--check'); check('--check is red for a file that names komira_core',r.returncode==1 and 'leftover.mojo' in r.stdout,r.stdout)
+    os.remove(os.path.join(tree,'src/imp/leftover.mojo')); sh('git','rm','-q','-f','--cached','src/imp/leftover.mojo',cwd=tree)
+    r=sh(sys.executable,os.path.join(a.tool,'repoint.py'),'--tree',tree,'--check'); check('--check is green when none does',r.returncode==0,r.stdout)
+    # after src/komira_core is deleted the tool reads it from the parent of the commit that deleted it
+    h=os.path.join(root,'hist'); os.makedirs(h); env=dict(os.environ,GIT_AUTHOR_NAME='t',GIT_AUTHOR_EMAIL='t@t',GIT_COMMITTER_NAME='t',GIT_COMMITTER_EMAIL='t@t')
+    for f,t in CORE.items():
+        os.makedirs(os.path.dirname(os.path.join(h,'src/komira_core',f)),exist_ok=True); open(os.path.join(h,'src/komira_core',f),'w').write(t)
+    open(os.path.join(h,'src/komira_core/BUCK'),'w').write('x\n')
+    for d in ('komira_parrow','komira_pcoll'): os.makedirs(os.path.join(h,'src',d),exist_ok=True); open(os.path.join(h,'src',d,'x.mojo'),'w').write('')
+    def g(*c): return subprocess.run(['git']+list(c),cwd=h,capture_output=True,text=True,env=env)
+    g('init','-q'); g('add','.'); g('commit','-q','-m','with core'); g('rm','-r','-q','src/komira_core'); g('commit','-q','-m','delete core')
+    os.makedirs(os.path.join(h,'src/late'),exist_ok=True); open(os.path.join(h,'src/late/a.mojo'),'w').write('from komira_core.arrow import Column\n'); g('add','.'); g('commit','-q','-m','late importer')
+    r=subprocess.run([sys.executable,os.path.join(a.tool,'repoint.py'),'--tree',h,'--map',mp,'--strict'],capture_output=True,text=True)
+    check('after the delete the tool reads komira_core from history',r.returncode==0 and open(os.path.join(h,'src/late/a.mojo')).read()=='from komira_parrow.column import Column\n',r.stdout+r.stderr)
     shutil.rmtree(root,ignore_errors=True)
     if bad: print('repoint_selftest RED:',bad,'checks failed'); return 1
     print('repoint_selftest GREEN'); return 0
