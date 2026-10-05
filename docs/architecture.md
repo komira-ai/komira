@@ -181,7 +181,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 | execution and operators: pipelines and morsel dispatch, aggregation, joins, sort, top-N, window | the engine libraries |
 | plan and optimizer: logical and physical planning, the plan wire format, the query optimizer | komira_compiler, komira_optimizer |
 | SDK and SQL: the plan-carrier surface, UDFs, the Python package, the SQL front ends | komira_sdk |
-| runtime: the async runtime, the job supervisor | komira_async, komira_job_supervisor |
+| runtime: the async runtime, the job supervisor and its job report wire | komira_async, komira_job_supervisor, komira_job_report_proto |
 | observability: logging and telemetry | komira_log |
 | agents: MCP and local models | komira_mcp_server, komira_localmodel |
 | cloud: the generated AWS and Google Cloud service clients, infrastructure providers, the service registry | the cloud SDK libraries (their cores, `komira_aws_core` and `komira_gcp_core`, and the generated `komira_aws_s3`, `komira_aws_dynamodb`, `komira_aws_dynamodbstreams`, `komira_aws_ecr`, `komira_aws_ecs`, `komira_aws_logs`, `komira_aws_secretsmanager`, `komira_aws_sqs`, `komira_gcp_logging` and `komira_gcp_storage`, are in `src/`) |
