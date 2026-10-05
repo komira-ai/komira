@@ -58,9 +58,11 @@ from komira_libc.posix import _thread_self
 
 comptime N_WORKERS: Int = 8
 
+# SAFETY: the C `void*` of pthread's start routine; used only at that FFI call.
 comptime _VoidPtr = UnsafePointer[NoneType, MutUntrackedOrigin]
 
 
+# SAFETY: returns NULL, used only as an FFI NULL argument (see docstring).
 @always_inline
 def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     """A NULL typed pointer with a concrete origin (Mojo has no null
@@ -70,6 +72,7 @@ def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     # pointer; `None` is the all-zero (NULL) bit pattern. FFI NULL args only.
     """
     var none: Optional[UnsafePointer[T, o]] = None
+    # SAFETY: `None` is the all-zero bit pattern of the pointer it wraps.
     return UnsafePointer(to=none).bitcast[UnsafePointer[T, o]]()[]
 
 
@@ -83,6 +86,7 @@ def _entry_record_tid(arg: _VoidPtr) -> _VoidPtr:
     # heap block the calling frame allocates before `pthread_create` and frees
     # only AFTER the join barrier, so it strictly outlives every reader.
     """
+    # SAFETY: `arg` is this thread's own UInt64 slot, alive until after join.
     arg.bitcast[UInt64]()[] = _thread_self()
     return _null_ptr[NoneType, MutUntrackedOrigin]()
 
@@ -114,9 +118,11 @@ def test_thread_self_differs_across_threads() raises:
 
     # One heap slot per worker, zero-initialised. Each thread receives a
     # pointer to ITS OWN slot, so the writes never alias.
+    # SAFETY: freed only after the join barrier below; each index < N_WORKERS.
     var slots = alloc[UInt64](N_WORKERS)
     for i in range(N_WORKERS):
         (slots + i).unsafe_write(UInt64(0))
+    # SAFETY: the untracked copy goes only to pthread_create, before the free.
     var slots_u = slots.unsafe_origin_cast[MutUntrackedOrigin]()
 
     var tids = List[Int64]()
@@ -126,10 +132,12 @@ def test_thread_self_differs_across_threads() raises:
     var started = 0
     var rc = Int32(0)
     for i in range(N_WORKERS):
+        # SAFETY: `tids[i]` and the slot both outlive the thread (joined below).
         rc = external_call["pthread_create", Int32](
             UnsafePointer(to=tids[i]).bitcast[UInt8](),  # pthread_t*
             _null_ptr[UInt8, MutUntrackedOrigin](),  # attr = NULL
             _entry_record_tid,  # start_routine (DIRECT thin-fn reference)
+            # SAFETY: slot i is in bounds and freed only after the join.
             (slots_u + i).bitcast[NoneType](),  # arg = this worker's slot
         )
         if rc != Int32(0):
