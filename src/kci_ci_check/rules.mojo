@@ -40,7 +40,8 @@
 #       Keys are read exactly: a `permissions` or `id-token` key written in
 #       another case, or two permissions keys that differ only in case, is
 #       a disagreement (an `id-token` key in another case counts as holding
-#       the token). `id-token` is the only permission these rules read.
+#       the token). Besides `id-token`, only a PULL_REQUEST stage's job's
+#       own permissions are read (R6).
 #   R5  each job's steps invoke `kci run` exactly once; a job named after a
 #       stage passes `--stage` its own id written literally (a `--stage`
 #       naming another stage, or one that is a variable, is a
@@ -89,6 +90,22 @@
 #           branch of this repository. A job that is not farm-connected holds
 #           no credential (no environment, no identity token) and needs no
 #           condition;
+#         * a PULL_REQUEST stage's job has its own `permissions:` mapping
+#           holding only `contents: read` and `id-token` (R4 holds the
+#           token). With no `permissions:` key, the job gets the
+#           workflow-level permissions or, with none there either, the
+#           repository's default token, which can write;
+#         * no stored secret reaches a pull request's code: no scalar of a
+#           PULL_REQUEST stage's job, nor of the `env:` of a workflow with
+#           a `pull_request` trigger (it reaches every job), names the
+#           `secrets` context (read ignoring case, as GitHub reads it; only
+#           `secrets.GITHUB_TOKEN`, written so, is the job's own token), and
+#           no key of that job is `secrets` (`secrets: inherit`);
+#         * a `push` trigger runs on the release branch only: `on.push` is
+#           exactly `branches: [main]` (one key, one plain item). A push
+#           with no branch filter, another pattern, `branches-ignore`,
+#           `tags` or a path filter runs the release jobs on a push to any
+#           branch, a pull request's head branch included;
 #         * a PUSH stage's `kci run` never carries `--affected-by`.
 #   R7  a release workflow's `workflow_dispatch` takes an input `revision`
 #       (the commit a manual run releases); a pull request workflow has no
@@ -164,6 +181,14 @@ comptime SAME_REPOSITORY_CONDITION: String = "github.event.pull_request.head.rep
 comptime CHECKOUT_ACTION: String = "actions/checkout@"
 """The checkout action's `uses:` prefix; under R6 each such step of a
 PULL_REQUEST stage's job fetches the full history."""
+
+comptime RELEASE_BRANCH: String = "main"
+"""The one branch a `push` trigger names (R6): `on.push` is exactly
+`branches: [main]`."""
+
+comptime GITHUB_TOKEN_SECRET: String = "secrets.GITHUB_TOKEN"
+"""The one name of the `secrets` context a pull request's job may hold
+(R6): the job's own token, bounded by its `permissions:`."""
 
 
 struct ChannelsFile(Copyable, Movable):
@@ -534,6 +559,143 @@ def _check_permissions_form(doc: WorkflowDoc, owner: Int, whose: String, mut fin
     )
 
 
+# ---- R6: what reaches a pull request's job ------------------------------------
+
+
+def _is_name_byte(c: UInt8) -> Bool:
+    """[A-Za-z0-9_]"""
+    return (
+        (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+        or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+        or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+        or c == UInt8(ord("_"))
+    )
+
+
+def _lower_byte(c: UInt8) -> UInt8:
+    if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
+        return c + 32
+    return c
+
+
+def _names_a_secret(text: String) -> Bool:
+    """`text` names the `secrets` context: the word `secrets` in any case,
+    not inside a longer name ([A-Za-z0-9_]), anywhere in `text` (a
+    `${{ }}`, a bare `if:`, a shell word alike), other than exactly
+    `secrets.GITHUB_TOKEN` followed by no name byte. Read wide on purpose:
+    `secrets.X`, `SECRETS.X`, `secrets['X']` and `toJSON(secrets)` all
+    name it."""
+    var b = text.as_bytes()
+    var n = len(b)
+    var word_text = String("secrets")
+    var token_text = String(GITHUB_TOKEN_SECRET)
+    var word = word_text.as_bytes()
+    var token = token_text.as_bytes()
+    for i in range(n - len(word) + 1):
+        var hit = True
+        for k in range(len(word)):
+            if _lower_byte(b[i + k]) != word[k]:
+                hit = False
+                break
+        if not hit:
+            continue
+        if i > 0 and _is_name_byte(b[i - 1]):
+            continue
+        var end = i + len(word)
+        if end < n and _is_name_byte(b[end]):
+            continue
+        var is_token = i + len(token) <= n
+        if is_token:
+            for k in range(len(token)):
+                if b[i + k] != token[k]:
+                    is_token = False
+                    break
+        if is_token and i + len(token) < n and _is_name_byte(b[i + len(token)]):
+            is_token = False
+        if not is_token:
+            return True
+    return False
+
+
+def _check_no_secret(doc: WorkflowDoc, node: Int, key: String, whose: String, mut findings: List[String]):
+    """R6: no scalar under `node` (the value of `key`) names the `secrets`
+    context, and no key under it is `secrets` in any case."""
+    if node < 0:
+        return
+    var kind = doc.kind(node)
+    if kind == NODE_SCALAR:
+        if _names_a_secret(doc.text(node)):
+            findings.append(
+                _at(doc, node) + whose + String("R6: the value of `") + key
+                + String("` names the `secrets` context; no stored secret reaches a pull request's code")
+                + String(" (only `") + String(GITHUB_TOKEN_SECRET) + String("`, written so, is the job's own token)")
+            )
+        return
+    var keys = doc.keys(node)
+    var items = doc.items(node)
+    for i in range(len(items)):
+        var at_key = key.copy()
+        if kind == NODE_MAP:
+            at_key = keys[i].copy()
+            if keys[i].lower() == String("secrets"):
+                findings.append(
+                    _at(doc, items[i]) + whose + String("R6: key `") + keys[i]
+                    + String("` passes stored secrets; no stored secret reaches a pull request's code")
+                )
+                continue
+        _check_no_secret(doc, items[i], at_key, whose, findings)
+
+
+def _check_pull_request_permissions(doc: WorkflowDoc, job_id: String, job: Int, mut findings: List[String]):
+    """R6: a PULL_REQUEST stage's job has its own `permissions:` mapping of
+    `contents: read` and `id-token` only (R4 holds `id-token`)."""
+    var where = _at(doc, job) + String("job '") + job_id + String("': R6: stage '") + job_id + String("' is a PULL_REQUEST stage")
+    var perms = doc.child(job, String("permissions"))
+    if perms < 0:
+        findings.append(
+            where + String(", so the job has its own `permissions:` mapping (`contents: read` and, only when the")
+            + String(" stage is farm-connected, `id-token: write`); it has none, so it would get the workflow-level")
+            + String(" permissions or the repository's default token")
+        )
+    elif doc.kind(perms) != NODE_MAP:
+        findings.append(
+            where + String(", so its `permissions` is a mapping of `contents: read` and, only when the stage is")
+            + String(" farm-connected, `id-token: write`; it is `") + doc.text(perms) + String("`")
+        )
+    else:
+        var keys = doc.keys(perms)
+        for i in range(len(keys)):
+            var v = doc.child(perms, keys[i])
+            var value = doc.text(v) if doc.kind(v) == NODE_SCALAR else String("(not a scalar)")
+            if keys[i] == String("contents") and doc.is_plain(v, String("read")):
+                continue
+            if keys[i] == String("id-token"):
+                continue  # R4 holds it to the farm connection
+            findings.append(
+                where + String(", so its permissions hold only `contents: read` and, for the farm connection,")
+                + String(" `id-token: write`; it grants `") + keys[i] + String(": ") + value + String("`")
+            )
+
+
+def _check_push_branches(doc: WorkflowDoc, on: Int, mut findings: List[String]):
+    """R6: `on.push` is exactly `branches: [main]`: one key, `branches`, a
+    list of one plain item, the release branch."""
+    var push = doc.child(on, String("push"))
+    var ok = False
+    if push >= 0 and doc.kind(push) == NODE_MAP:
+        var keys = doc.keys(push)
+        var branches = doc.child(push, String("branches"))
+        if len(keys) == 1 and branches >= 0 and doc.kind(branches) == NODE_LIST:
+            var items = doc.items(branches)
+            ok = len(items) == 1 and doc.is_plain(items[0], String(RELEASE_BRANCH))
+    if not ok:
+        findings.append(
+            _at(doc, on) + String("R6: the push trigger is exactly `branches: [") + String(RELEASE_BRANCH)
+            + String("]`: a push with no branch filter, another pattern, `branches-ignore`, `tags` or a path")
+            + String(" filter runs the release jobs on a push to any branch, a pull request's head branch included")
+        )
+
+
 def _job_calls(doc: WorkflowDoc, job: Int) -> List[KciRunCall]:
     """Every `kci run` in the `run:` steps of `job`."""
     var calls = List[KciRunCall]()
@@ -696,6 +858,8 @@ def _check_job(
     # R6: what a PULL_REQUEST stage's job runs, and that a PUSH stage's does not
     if st.is_pull_request():
         _check_pull_request_job(doc, job_id, job, st, calls, findings)
+        _check_pull_request_permissions(doc, job_id, job, findings)
+        _check_no_secret(doc, job, job_id, String("job '") + job_id + String("': "), findings)
     else:
         for i in range(len(calls)):
             if calls[i].has_affected_by:
@@ -1014,6 +1178,14 @@ def check_workflow_doc(
                 + String("' in a workflow triggered by pull_request: such a workflow has no other trigger")
                 + String(" (its job passes the pull request's base commit)")
             )
+    if _member(triggers, String("push")):
+        _check_push_branches(doc, on, findings)
+    if pr_workflow:
+        # the workflow-level `env:` reaches every job (R6)
+        var root_keys = doc.keys(root)
+        for k in range(len(root_keys)):
+            if root_keys[k].lower() == String("env"):
+                _check_no_secret(doc, doc.child(root, root_keys[k]), root_keys[k], String("workflow: "), findings)
     if not pr_workflow:
         var inputs = doc.child(doc.child(on, String("workflow_dispatch")), String("inputs"))
         if doc.child(inputs, String("revision")) < 0:

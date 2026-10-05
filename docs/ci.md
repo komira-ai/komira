@@ -265,7 +265,16 @@ value, and the release's `release_produced_by` names the one build run.
   of an old revision is refused, exit 3).
 - **Triggers:** a push to `main` and a manual run (`workflow_dispatch`).
   Never `pull_request`: the `build` job joins the tailnet, and the tailnet
-  credential must not reach a pull request's code.
+  credential must not reach a pull request's code. The push trigger is
+  exactly `branches: [main]` (rule R6): with no branch filter, another
+  pattern, `branches-ignore`, `tags` or a path filter, a push to any branch,
+  a pull request's head branch included, would run the release jobs. A
+  pull request's own job (a PULL_REQUEST stage) has its own `permissions:`
+  (`contents: read`, and `id-token: write` only for the farm connection),
+  so it never gets the workflow-level permissions or the repository's
+  default token, and no stored secret reaches it: no value of that job, nor
+  of the `env:` of a workflow with a `pull_request` trigger, names the
+  `secrets` context other than `secrets.GITHUB_TOKEN`.
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
   the run started on). Every job checks it out, kci refuses a checkout whose
