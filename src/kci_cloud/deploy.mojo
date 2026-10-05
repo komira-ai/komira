@@ -27,6 +27,11 @@
 # one owned by a resource the file no longer names is LEFTOVER, reported and
 # never deleted here.
 #
+# THE ROLE LABEL BUDGET. After lowering and before anything else, every
+# node's role must fit the 63-byte label value (`role_budget_findings`); one
+# that does not refuses the graph with the one refusal text. The owner of a
+# node is its first segment at any depth (`owner_of_node`).
+#
 # Every verb runs the engine's OWNED forms (the cell scope): the store keyed
 # by (machine, cell, resource), the stamp born with each object, and a
 # foreign or conflicting object refused before any change.
@@ -49,7 +54,7 @@ from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import CellContext, CloudAdapter, LoweredNode, Setting
 from kci_cloud.clouds import Clouds
-from kci_cloud.validate import refusal_text, validate_for
+from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
 
 
 def refuse_unless_valid[
@@ -167,7 +172,10 @@ struct Removals(Movable):
         self.leftover = List[String]()
 
 
-def _resource_of(node_id: String) -> String:
+def owner_of_node(node_id: String) -> String:
+    """The authored resource that owns node `node_id`: its FIRST segment, at
+    any depth (`top/a/b/c/run` -> `top`). Ids cannot hold `/`, so this is
+    exact however deep a node is."""
     var i = node_id.find("/")
     if i < 0:
         return node_id.copy()
@@ -195,7 +203,7 @@ def removals[
                 break
         if lowered:
             continue
-        var res = _resource_of(nid)
+        var res = owner_of_node(nid)
         var in_file = False
         for k in range(len(resources)):
             if resources[k].id == res:
@@ -233,8 +241,13 @@ def _graph_for[
     creds: Creds,
     mut leftover: List[String],
 ) raises -> ResourceGraph:
-    """Lowering + the roles `list_owned` says to remove, realized."""
+    """Lowering + the roles `list_owned` says to remove, realized. A role
+    over the label budget refuses the graph here: after lowering (data),
+    before `list_owned`, realize or any create."""
     var nodes = lower_data(cloud, resources)
+    var over = role_budget_findings(nodes)
+    if len(over) > 0:
+        raise Error(refusal_text(cloud.cloud_id(), over))
     var rem = removals(cloud, ctx, nodes, resources, creds)
     for i in range(len(rem.roles)):
         nodes.append(rem.roles[i].copy())
