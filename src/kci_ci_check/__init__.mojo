@@ -4,9 +4,9 @@
 #   test and by `kci run` at start-up).
 # =============================================================================
 #
-#   workflow_reader.mojo  `read_workflow`: a RESTRICTED reader of the YAML
-#                         subset a workflow uses; anything else is "cannot
-#                         tell", never a pass
+#   workflow_reader.mojo  `read_workflow`: a FAIL-CLOSED reader of a strict
+#                         YAML subset (its header); anything else is
+#                         "cannot tell", never a pass
 #   rules.mojo            `check_workflow`: every disagreement (R1 to R12;
 #                         R6 holds a pull request workflow to the
 #                         PULL_REQUEST stages);

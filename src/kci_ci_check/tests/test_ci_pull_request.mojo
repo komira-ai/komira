@@ -15,8 +15,10 @@ from kci_ci_check import (
     WorkflowNode,
     check_running_workflow,
     check_workflow,
+    check_workflow_doc,
     condition_expression,
     kci_run_calls,
+    read_workflow,
 )
 from kci_release_machine import parse_machine_file
 
@@ -308,12 +310,18 @@ def test_the_fork_condition_is_exactly_one_expression() raises:
     _agrees(String(_MACHINE), _fork_if(String("${{") + String(_FORK) + String("}}")))
     _agrees(String(_MACHINE), _fork_if(String("\"${{ ") + String(_FORK) + String(" }}\"")))
     _agrees(String(_MACHINE), _fork_if(String("'${{ ") + String(_FORK) + String(" }}'")))
-    # YAML trims a plain scalar: a tab after it is not part of the value
-    _agrees(String(_MACHINE), _fork_if(String("${{ ") + String(_FORK) + String(" }}\t")))
     _agrees(String(_MACHINE), _fork_if(String("\" ") + String(_FORK) + String(" \"")))
-    # a block scalar with no `${{` is the expression itself
-    _agrees(String(_MACHINE), _fork_if(String("|-\n      ") + String(_FORK)))
-    _agrees(String(_MACHINE), _fork_if(String("|\n      ") + String(_FORK)))
+
+
+def test_a_fork_condition_outside_the_subset_is_cannot_tell() raises:
+    # a block scalar (any style, with or without `${{`) and a TAB are
+    # outside the subset the reader reads: never read, never a pass
+    var expr = String("${{ ") + String(_FORK) + String(" }}")
+    for h in ["|", "|-", "|+", ">", ">-", ">+"]:
+        _cannot_tell(String(_MACHINE), _fork_if(String(h) + String("\n      ") + expr), String("block scalar"))
+        _cannot_tell(String(_MACHINE), _fork_if(String(h) + String("\n      ") + String(_FORK)), String("block scalar"))
+    _cannot_tell(String(_MACHINE), _fork_if(expr + String("\t")), String("a TAB"))
+    _cannot_tell(String(_MACHINE), _fork_if(String("\"") + expr + String("\t\"")), String("a TAB"))
 
 
 def test_a_fork_condition_github_reads_as_a_format_string_is_refused() raises:
@@ -322,17 +330,10 @@ def test_a_fork_condition_github_reads_as_a_format_string_is_refused() raises:
     # (or a push, or a manual run) runs the job.
     var expr = String("${{ ") + String(_FORK) + String(" }}")
     var values = List[String]()
-    values.append(String("|\n      ") + expr)
-    values.append(String(">\n      ") + expr)
-    values.append(String("|+\n      ") + expr)
-    values.append(String("|-\n      ") + expr)
-    values.append(String(">-\n      ") + expr)
-    values.append(String(">+\n      ") + expr)
     values.append(String("\" ") + expr + String("\""))
     values.append(String("\"") + expr + String(" \""))
     values.append(String("' ") + expr + String("'"))
     values.append(String("'") + expr + String(" '"))
-    values.append(String("\"") + expr + String("\t\""))
     values.append(String("x") + expr)
     values.append(expr + String(" && ${{ true }}"))
     for i in range(len(values)):
@@ -348,16 +349,16 @@ def test_a_fork_condition_github_reads_as_a_format_string_is_refused() raises:
 def test_a_fork_condition_carried_past_its_line_is_cannot_tell() raises:
     # `''` is an escaped quote: the scalar does not close on the `if:` line,
     # YAML carries it on to the next, and the condition GitHub reads is not
-    # the one on the line.
+    # the one on the line. The subset has no `''` at all.
     _cannot_tell(
         String(_MACHINE),
         _fork_if(String("'") + String(_FORK) + String(" ''\n    || ''a: b'''")),
-        String("a quoted scalar not closed on its line"),
+        String("an escaped quote"),
     )
     _cannot_tell(
         String(_MACHINE),
         _fork_if(String("'${{ ") + String(_FORK) + String(" }}''\n    || ''a: b'''")),
-        String("a quoted scalar not closed on its line"),
+        String("an escaped quote"),
     )
 
 
@@ -458,28 +459,28 @@ def _block_styles() -> List[String]:
     return s^
 
 
-def test_an_id_token_block_scalar_is_a_grant_on_a_pull_request_job() raises:
-    # a block scalar's value is `write` once folded: it grants the token
+def test_an_id_token_block_scalar_on_a_pull_request_job_is_cannot_tell() raises:
+    # a block scalar's value is `write` once folded: outside the subset
     var base = _not_farm_connected()
     var styles = _block_styles()
     for i in range(len(styles)):
         var wf = base[1].replace(
             String("      contents: read\n"), String("      contents: read\n      id-token: ") + styles[i] + String("\n        write\n")
         )
-        _reports_on(base[0], wf, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+        _cannot_tell(base[0], wf, String("block scalar"))
 
 
-def test_an_id_token_block_scalar_is_a_grant_at_the_pull_request_workflow_level() raises:
+def test_an_id_token_block_scalar_at_the_pull_request_workflow_level_is_cannot_tell() raises:
     var base = _not_farm_connected()
     var styles = _block_styles()
     for i in range(len(styles)):
         var wf = base[1].replace(
             String("permissions: {}\n"), String("permissions:\n  id-token: ") + styles[i] + String("\n    write\n")
         )
-        _reports_on(base[0], wf, String("R4: `id-token: write` at the workflow level reaches every job"))
+        _cannot_tell(base[0], wf, String("block scalar"))
 
 
-def test_an_id_token_block_scalar_is_a_grant_in_the_release_workflow() raises:
+def test_an_id_token_block_scalar_in_the_release_workflow_is_cannot_tell() raises:
     # `build` without the farm connection needs no token
     var machine = String(_MACHINE).replace(String("stage { name: \"build\" farm_connected: true"), String("stage { name: \"build\""))
     var styles = _block_styles()
@@ -488,9 +489,9 @@ def test_an_id_token_block_scalar_is_a_grant_in_the_release_workflow() raises:
             String("    environment: build\n    permissions:\n      id-token: write\n    steps:\n      - uses: ./.github/actions/farm-connect\n"),
             String("    environment: build\n    permissions:\n      id-token: ") + styles[i] + String("\n        write\n    steps:\n"),
         )
-        _reports_on(machine, job, String("job 'build': R4: has `id-token: write`, but stage 'build' publishes to no OIDC channel"))
+        _cannot_tell(machine, job, String("block scalar"))
         var top = _release(String("permissions: {}\n"), String("permissions:\n  id-token: ") + styles[i] + String("\n    write\n"))
-        _reports(top, String("R4: `id-token: write` at the workflow level reaches every job"))
+        _cannot_tell(String(_MACHINE), top, String("block scalar"))
 
 
 def test_only_a_plain_read_or_none_withholds_the_id_token() raises:
@@ -498,11 +499,11 @@ def test_only_a_plain_read_or_none_withholds_the_id_token() raises:
     # plain `read` and `none` grant nothing
     _agrees(base[0], base[1].replace(String("      contents: read\n"), String("      contents: read\n      id-token: read\n")))
     _agrees(base[0], base[1].replace(String("      contents: read\n"), String("      contents: read\n      id-token: none\n")))
-    # anything else is a grant: quoted, a block scalar of `read`, a mapping, empty
+    # anything else is a grant: quoted, a mapping, empty (a block scalar is
+    # outside the subset: cannot tell)
     var others = List[String]()
     others.append(String("'read'\n"))
     others.append(String("\"none\"\n"))
-    others.append(String("|\n        read\n"))
     others.append(String("{}\n"))
     others.append(String("\n"))
     for i in range(len(others)):
@@ -513,12 +514,18 @@ def test_only_a_plain_read_or_none_withholds_the_id_token() raises:
 def test_a_permissions_scalar_other_than_plain_read_all_is_refused() raises:
     var others = List[String]()
     others.append(String("'read-all'\n"))
-    others.append(String("|-\n  read-all\n"))
-    others.append(String(">-\n  write-all\n"))
+    others.append(String("\"read-all\"\n"))
+    others.append(String("Read-All\n"))
+    others.append(String("write-all\n"))
     for i in range(len(others)):
         var wf = _pr(String("permissions: {}\n"), String("permissions: ") + others[i])
         _reports(wf, String("workflow: R4: `permissions: "))
         _reports(wf, String("R4: `id-token: write` at the workflow level reaches every job"))
+    # a list is no permissions form at all
+    _reports(_pr(String("permissions: {}\n"), String("permissions: [write-all]\n")), String("workflow: R4: `permissions:` is a list"))
+    # a block scalar is outside the subset
+    _cannot_tell(String(_MACHINE), _pr(String("permissions: {}\n"), String("permissions: |-\n  read-all\n")), String("block scalar"))
+    _cannot_tell(String(_MACHINE), _pr(String("permissions: {}\n"), String("permissions: >-\n  write-all\n")), String("block scalar"))
 
 
 def _cannot_tell(machine: String, wf: String, needle: String) raises:
@@ -542,7 +549,7 @@ def _top_perms(wf: String, entry: String) -> String:
     return wf.replace(String("permissions: {}\n"), String("permissions:\n  ") + entry + String("\n"))
 
 
-def test_an_escape_in_a_double_quoted_permissions_key_is_cannot_tell() raises:
+def test_a_quoted_permissions_key_is_cannot_tell() raises:
     # `"id\x2dtoken": write` is `id-token: write` once the escape is decoded
     var base = _not_farm_connected()
     var keys = List[String]()
@@ -550,14 +557,16 @@ def test_an_escape_in_a_double_quoted_permissions_key_is_cannot_tell() raises:
     keys.append(String("\"id\\x2Dtoken\": write"))
     keys.append(String("\"id\\u002dtoken\": write"))
     for i in range(len(keys)):
-        _cannot_tell(base[0], _job_perms(base[1], keys[i]), String("an escape in a double-quoted key"))
-        _cannot_tell(base[0], _top_perms(base[1], keys[i]), String("an escape in a double-quoted key"))
+        _cannot_tell(base[0], _job_perms(base[1], keys[i]), String("a quoted key"))
+        _cannot_tell(base[0], _top_perms(base[1], keys[i]), String("a quoted key"))
     # `"permi\x73sions": write-all` is `permissions: write-all`
     var wa = String("\"permi\\x73sions\": write-all\n")
     _cannot_tell(
-        base[0], base[1].replace(String("    permissions:\n      contents: read\n"), String("    ") + wa), String("an escape in a double-quoted key")
+        base[0], base[1].replace(String("    permissions:\n      contents: read\n"), String("    ") + wa), String("a quoted key")
     )
-    _cannot_tell(base[0], base[1].replace(String("permissions: {}\n"), wa), String("an escape in a double-quoted key"))
+    _cannot_tell(base[0], base[1].replace(String("permissions: {}\n"), wa), String("a quoted key"))
+    # unescaped too: the subset has no quoted key
+    _cannot_tell(base[0], _job_perms(base[1], String("'id-token': write")), String("a quoted key"))
 
 
 def test_a_merge_key_in_permissions_is_cannot_tell() raises:
@@ -568,6 +577,36 @@ def test_a_merge_key_in_permissions_is_cannot_tell() raises:
     _cannot_tell(base[0], top, String("merge key"))
 
 
+def _doc_findings(machine: String, doc: WorkflowDoc) raises -> List[String]:
+    var g = parse_machine_file(machine, String("machine file"))
+    return check_workflow_doc(doc, g, _tokens(), String("release/machine.textproto"))
+
+
+def _doc_reports(machine: String, doc: WorkflowDoc, needle: String) raises:
+    var f = _doc_findings(machine, doc)
+    for i in range(len(f)):
+        if f[i].find(needle) >= 0:
+            return
+    raise Error(String("no finding containing '") + needle + String("'; findings: ") + _all(f))
+
+
+def _rekeyed(wf: String, old: String, new: String) raises -> WorkflowDoc:
+    """`wf` read, then every mapping key `old` renamed `new` in the tree: a
+    document the reader never builds (it refuses a rule key in another case
+    and keys that differ only in case), so the rules' own guards are held
+    on their own."""
+    var d = read_workflow(wf)
+    var hits = 0
+    for n in range(len(d.nodes)):
+        for k in range(len(d.nodes[n].keys)):
+            if d.nodes[n].keys[k] == old:
+                d.nodes[n].keys[k] = new.copy()
+                hits += 1
+    if hits == 0:
+        raise Error(String("no key '") + old + String("'"))
+    return d^
+
+
 def test_an_id_token_key_in_another_case_is_refused() raises:
     var base = _not_farm_connected()
     var keys = List[String]()
@@ -575,28 +614,35 @@ def test_an_id_token_key_in_another_case_is_refused() raises:
     keys.append(String("ID-TOKEN: write"))
     keys.append(String("id-Token: read"))
     for i in range(len(keys)):
-        var job = _job_perms(base[1], keys[i])
-        _reports_on(base[0], job, String("job 'pr': R4: permissions key '"))
-        _reports_on(base[0], job, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
-        var top = _top_perms(base[1], keys[i])
-        _reports_on(base[0], top, String("workflow: R4: permissions key '"))
-        _reports_on(base[0], top, String("R4: `id-token: write` at the workflow level reaches every job"))
+        _cannot_tell(base[0], _job_perms(base[1], keys[i]), String("in another case"))
+        _cannot_tell(base[0], _top_perms(base[1], keys[i]), String("in another case"))
+    # the rule's own guard, on a document the reader never builds
+    var job = _rekeyed(_job_perms(base[1], String("id-token: read")), String("id-token"), String("Id-Token"))
+    _doc_reports(base[0], job, String("job 'pr': R4: permissions key 'Id-Token'"))
+    _doc_reports(base[0], job, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+    var top = _rekeyed(_top_perms(base[1], String("id-token: read")), String("id-token"), String("ID-TOKEN"))
+    _doc_reports(base[0], top, String("workflow: R4: permissions key 'ID-TOKEN'"))
+    _doc_reports(base[0], top, String("R4: `id-token: write` at the workflow level reaches every job"))
 
 
 def test_permissions_keys_that_differ_only_in_case_are_refused() raises:
     var base = _not_farm_connected()
-    _reports_on(base[0], _job_perms(base[1], String("Contents: write")), String("job 'pr': R4: permissions keys 'contents' and 'Contents'"))
-    _reports_on(
-        base[0], _top_perms(base[1], String("contents: read\n  CONTENTS: write")), String("workflow: R4: permissions keys 'contents' and 'CONTENTS'")
-    )
+    _cannot_tell(base[0], _job_perms(base[1], String("Contents: write")), String("repeated"))
+    _cannot_tell(base[0], _top_perms(base[1], String("contents: read\n  CONTENTS: write")), String("repeated"))
+    # the rule's own guard
+    var job = _rekeyed(_job_perms(base[1], String("actions: write")), String("actions"), String("Contents"))
+    _doc_reports(base[0], job, String("job 'pr': R4: permissions keys 'contents' and 'Contents'"))
 
 
 def test_a_permissions_key_in_another_case_is_refused() raises:
     var base = _not_farm_connected()
     var job = base[1].replace(String("    permissions:\n      contents: read\n"), String("    Permissions: write-all\n"))
-    _reports_on(base[0], job, String("job 'pr': R4: key 'Permissions' is `permissions` in another case"))
+    _cannot_tell(base[0], job, String("key 'Permissions' is the key 'permissions' in another case"))
     var top = base[1].replace(String("permissions: {}\n"), String("PERMISSIONS: write-all\n"))
-    _reports_on(base[0], top, String("workflow: R4: key 'PERMISSIONS' is `permissions` in another case"))
+    _cannot_tell(base[0], top, String("key 'PERMISSIONS' is the key 'permissions' in another case"))
+    # the rule's own guard
+    var jd = _rekeyed(base[1].replace(String("    permissions:\n      contents: read\n"), String("    permissions: write-all\n")), String("permissions"), String("Permissions"))
+    _doc_reports(base[0], jd, String("job 'pr': R4: key 'Permissions' is `permissions` in another case"))
 
 
 def test_read_all_and_an_empty_map_are_accepted() raises:
