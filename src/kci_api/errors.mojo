@@ -47,7 +47,6 @@ comptime ERROR_WORKFLOW_MISMATCH: String = "KCI-E-WORKFLOW-MISMATCH"
 comptime ERROR_VALIDATION: String = "KCI-E-VALIDATION"
 comptime ERROR_AFFECTED: String = "KCI-E-AFFECTED"
 comptime ERROR_AFFECTED_VACUOUS: String = "KCI-E-AFFECTED-VACUOUS"
-comptime ERROR_EXPECT_RED: String = "KCI-E-EXPECT-RED"
 
 
 struct ErrorRow(Copyable, Movable):
@@ -95,7 +94,6 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_VALIDATION), String("a validation of what a step produced failed")))
     t.append(ErrorRow(String(ERROR_AFFECTED), String("a build system's affected command failed or answered outside its grammar (never a widening)")))
     t.append(ErrorRow(String(ERROR_AFFECTED_VACUOUS), String("a --affected-by change is empty, or reaches no declared unit")))
-    t.append(ErrorRow(String(ERROR_EXPECT_RED), String("an expect_red unit built, or failed without printing its declared message")))
     return t^
 
 

@@ -19,7 +19,6 @@ from kci_artifact_proto.artifact import (
     Artifacts,
     BuildSystem,
     Check,
-    ExpectRed,
 )
 from kci_artifact import (
     BUILD_NUMBER_PLACEHOLDER,
@@ -226,7 +225,7 @@ def test_render_refusals() raises:
     var systems = List[BuildSystem]()
     var artifacts = List[Artifact]()
     artifacts.append(Artifact(String("a"), String("zz"), _argv("{out_dir}"), List[String]()))
-    var raw = Artifacts(systems^, artifacts^, Int32(1), List[Check](), List[ExpectRed]())
+    var raw = Artifacts(systems^, artifacts^, Int32(1), List[Check]())
     assert_equal(
         _refusal(raw, String("a"), String("/o")),
         String("artifact 'a': build_system 'zz' is not declared"),
@@ -237,7 +236,7 @@ def test_render_refusals() raises:
     systems2.append(BuildSystem(String("t"), String("t"), List[String](), None, None))
     var artifacts2 = List[Artifact]()
     artifacts2.append(Artifact(String("a"), String("t"), _argv("{out_dir}", "{nope}"), List[String]()))
-    var raw2 = Artifacts(systems2^, artifacts2^, Int32(1), List[Check](), List[ExpectRed]())
+    var raw2 = Artifacts(systems2^, artifacts2^, Int32(1), List[Check]())
     assert_equal(_refusal(raw2, String("a"), String("/o")), String("unknown placeholder '{nope}'"))
 
 

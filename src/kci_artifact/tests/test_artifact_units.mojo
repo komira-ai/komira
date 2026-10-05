@@ -22,7 +22,6 @@ from kci_artifact_proto.artifact import (
     Artifacts,
     BuildSystem,
     Check,
-    ExpectRed,
     Command,
 )
 from kci_artifact import (
@@ -259,7 +258,7 @@ def test_file_checks_field_number_is_pinned() raises:
     var checks = List[Check]()
     checks.append(Check(String("c"), String("b"), _one(String("t"))))
     _expect_bytes(
-        encode_proto[Artifacts](Artifacts(List[BuildSystem](), List[Artifact](), Int32(1), checks^, List[ExpectRed]())),
+        encode_proto[Artifacts](Artifacts(List[BuildSystem](), List[Artifact](), Int32(1), checks^)),
         _bytes(0x18, 1, 0x22, 9, 0x0A, 1, 0x63, 0x12, 1, 0x62, 0x1A, 1, 0x74),
     )
 

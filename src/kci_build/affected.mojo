@@ -29,7 +29,7 @@
 #    (kci_artifact `parse_affected_answer`) is INDETERMINATE
 #    (KCI-E-AFFECTED): kci cannot tell what the change reaches, and it never
 #    widens instead. Every build system is asked, even after a WIDENED.
-# 4. The units to build, in unit order (artifacts, checks, expect_red): every
+# 4. The units to build, in unit order (artifacts, then checks): every
 #    declared unit when any answer is WIDENED (the result's verdict WIDENED,
 #    its reason `<build system>: <the tool's reason>` of the first); else
 #    every unit some answer named (verdict AFFECTED). None is REFUSED
@@ -42,13 +42,6 @@
 #    `<log>/<unit>.stdout|.stderr`. Non-zero, a signal or a timeout is
 #    FAILED (KCI-E-BUILD-FAILED) naming the unit; a build that cannot be
 #    started is INDETERMINATE (KCI-E-CANNOT-TELL); either way, stop.
-#    An EXPECT_RED unit's verdict is reversed (kci_artifact
-#    `expect_red_passed`): it passes (`RED_AS_EXPECTED <unit>`) when its
-#    build exits non-zero and its stdout or stderr holds the declared
-#    message; a build that SUCCEEDS ("built, but it must fail"), or fails
-#    without the message, is FAILED (KCI-E-EXPECT-RED) naming the unit, the
-#    message and the log; a build killed or timed out proves nothing and is
-#    FAILED (KCI-E-BUILD-FAILED) as for any unit; stop.
 #    Nothing is written under --release-dir, there is no manifest and no
 #    release.json: nothing ships.
 # 6. The result gets the step's row, the first error, and `affected_by`
@@ -68,8 +61,6 @@ from std.pathlib import Path
 
 from kci_artifact import (
     AffectedValues,
-    expect_red_passed,
-    find_unit,
     parse_affected_answer,
     read_artifacts,
     render_affected_argv,
@@ -88,7 +79,6 @@ from kci_api import (
     ERROR_ARTIFACT,
     ERROR_BUILD_FAILED,
     ERROR_CANNOT_TELL,
-    ERROR_EXPECT_RED,
     ERROR_PLATFORM,
     ERROR_RESULT_FILE,
     ERROR_REVISION,
@@ -331,10 +321,8 @@ def _affected[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                 o.lines.append(String("WOULD_BUILD ") + decision.units[i])
             return o^
         # ── step 5: each unit ───────────────────────────────────────────────
-        var reds = 0
         for i in range(len(decision.units)):
             ref name = decision.units[i]
-            var unit = find_unit(arts, name)
             var argv = render_targets_argv(arts, name)
             var spec = _spec(argv, req, req.log_dir + String("/") + name)
             print(String("BUILD step: building unit ") + name + String(": ") + spec.command_line(), file=_STDERR)
@@ -347,12 +335,6 @@ def _affected[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                     String(ERROR_CANNOT_TELL),
                     String("unit '") + name + String("': the build could not be started: ") + String(e),
                 )
-            if unit.is_expect_red and not r.signaled and not r.timed_out:
-                var red = _expect_red_end(name, unit.message, spec, r)
-                if not red.ok():
-                    return red^
-                reds += 1
-                continue
             if not r.ok():
                 var why = (
                     String("unit '") + name + String("': `") + spec.command_line() + String("` ")
@@ -361,46 +343,12 @@ def _affected[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                 if r.stderr_tail.byte_length() > 0:
                     why += String("\n") + r.stderr_tail
                 return _stop(String(OUTCOME_FAILED), String(ERROR_BUILD_FAILED), why)
-        var said = String(len(decision.units) - reds) + String(" unit(s) built")
-        if reds > 0:
-            said += String(", ") + String(reds) + String(" expect_red unit(s) failed as expected")
-        var done = BuildOutcome.succeeded(head + String(": ") + said)
+        var done = BuildOutcome.succeeded(head + String(": ") + String(len(decision.units)) + String(" unit(s) built"))
         for i in range(len(decision.units)):
-            var tag = String("BUILT ")
-            if find_unit(arts, decision.units[i]).is_expect_red:
-                tag = String("RED_AS_EXPECTED ")
-            done.lines.append(tag + decision.units[i])
+            done.lines.append(String("BUILT ") + decision.units[i])
         return done^
     except e:
         return _stop(String(OUTCOME_FAILED), String(ERROR_BUILD_FAILED), String(e))
-
-
-def _expect_red_end(name: String, message: String, spec: RunSpec, r: RunResult) -> BuildOutcome:
-    """Step 5 for an expect_red unit whose build exited (file header):
-    succeeded when it exited non-zero printing `message`."""
-    var output = String("")
-    try:
-        output = Path(spec.stdout_path).read_text() + String("\n") + Path(spec.stderr_path).read_text()
-    except e:
-        return _stop(
-            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
-            String("expect_red unit '") + name + String("': its build's output cannot be read: ") + String(e),
-        )
-    if expect_red_passed(True, Int(r.exit_code), output, message):
-        print(String("BUILD step: unit ") + name + String(": failed as expected, printing '") + message + String("'"), file=_STDERR)
-        return BuildOutcome.succeeded(String(""))
-    var why = String("expect_red unit '") + name + String("': `") + spec.command_line() + String("` ")
-    if r.exit_code == Int32(0):
-        why += String("built, but it must fail (printing '") + message + String("')")
-    else:
-        why += (
-            r.describe() + String(" without printing '") + message
-            + String("': it failed for another reason, which proves nothing about the rule it tests")
-        )
-    why += String(" (stdout: ") + spec.stdout_path + String(", stderr: ") + spec.stderr_path + String(")")
-    if r.stderr_tail.byte_length() > 0:
-        why += String("\n") + r.stderr_tail
-    return _stop(String(OUTCOME_FAILED), String(ERROR_EXPECT_RED), why)
 
 
 def run_affected[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](

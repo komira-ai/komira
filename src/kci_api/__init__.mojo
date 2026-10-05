@@ -55,7 +55,6 @@ from kci_api.errors import (
     ERROR_VALIDATION,
     ERROR_AFFECTED,
     ERROR_AFFECTED_VACUOUS,
-    ERROR_EXPECT_RED,
     ERROR_WORKFLOW_MISMATCH,
     ErrorRow,
     error_table,

@@ -20,7 +20,6 @@ from kci_artifact_proto.artifact import (
     Artifacts,
     BuildSystem,
     Check,
-    ExpectRed,
     Command,
 )
 from kci_artifact import parse_artifacts
@@ -157,7 +156,7 @@ def test_file_field_numbers_are_pinned() raises:
     var artifacts = List[Artifact]()
     artifacts.append(_art())
     _expect_bytes(
-        encode_proto[Artifacts](Artifacts(systems^, artifacts^, Int32(1), List[Check](), List[ExpectRed]())),
+        encode_proto[Artifacts](Artifacts(systems^, artifacts^, Int32(1), List[Check]())),
         _bytes(
             0x0A, 9, 0x0A, 1, 0x62, 0x12, 1, 0x65, 0x1A, 1, 0x78,
             0x12, 9, 0x0A, 1, 0x61, 0x1A, 1, 0x62, 0x22, 1, 0x78,
@@ -172,7 +171,7 @@ def test_parse_refusals() raises:
         _refusal(String("artifact {\n  name: \"a\"\n}\n")),
         String(
             "artifacts.textproto: line 1: unknown top-level field 'artifact'"
-            " (expected schema_version, build_systems, artifacts, checks, expect_red)"
+            " (expected schema_version, build_systems, artifacts, checks)"
         ),
     )
     assert_equal(
