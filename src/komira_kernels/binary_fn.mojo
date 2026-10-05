@@ -20,7 +20,7 @@
 #     PrimitiveArray[T]`); NO `UnsafePointer` crosses any module boundary
 #. The kernel's SIMD work
 #     happens INSIDE PrimitiveArray's `_typed_ptr_ro` / `load[width=W]` /
-#     `store[width=W]` (see `komira_core.eval.arithmetic:eval_add`),
+#     `store[width=W]` (see `komira_column_kernels.arithmetic:eval_add`),
 #     which is the existing hand-staged SIMD path.
 #
 # Mojo discipline:
@@ -40,7 +40,7 @@
 # TB: DType -- right input physical type (typically == TA in this version)
 # TR: DType -- result physical type (typically == TA in this version)
 #   OP: UInt8    -- arithmetic op tag (reuse `BIN_ADD` / `BIN_SUB` / `BIN_MUL`
-#                   / `BIN_DIV` / `BIN_MOD` from `komira_core.plan.expr`; the
+#                   / `BIN_DIV` / `BIN_MOD` from `komira_plan_expr.expr`; the
 #                   conformer asserts which tag it implements via the
 #                   `OP_TAG` member so the dispatcher can verify the kernel
 #                   matches the plan-level op tag).
@@ -50,7 +50,7 @@
 # conformer per cell (no trait change).
 # =============================================================================
 
-from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_arrow.primitive_array import PrimitiveArray
 
 
 trait BinaryFn(Movable, Copyable, Deinitable):
@@ -64,7 +64,7 @@ trait BinaryFn(Movable, Copyable, Deinitable):
         conformer per cell; no trait surface change).
       - `OP_TAG: UInt8` -- the arithmetic-op tag this kernel implements
         (`BIN_ADD` / `BIN_SUB` / `BIN_MUL` / `BIN_DIV` / `BIN_MOD` from
-        `komira_core.plan.expr`). The dispatcher / operator init verifies
+        `komira_plan_expr.expr`). The dispatcher / operator init verifies
         the kernel's OP_TAG matches the plan-level op tag.
       - `KERNEL_ID: UInt32` -- a stable identifier (akin to MapFn's
         `UDF_ID`). Used by EXPLAIN and any future kernel registry.
@@ -95,7 +95,7 @@ trait BinaryFn(Movable, Copyable, Deinitable):
     loops. Each conformer's
     `eval_chunk` body MUST hand-stage SIMD via the
     `_typed_ptr_ro / load[width=W] / store[width=W]` pattern (see
-    `komira_core.eval.arithmetic:eval_add` for the canonical
+    `komira_column_kernels.arithmetic:eval_add` for the canonical
     shape). The built-in conformers in `builtin_binary_fns.mojo`
     delegate to the existing `eval_add` / `eval_sub` / `eval_mul`
     primitives so they inherit the hand-staged kernel verbatim.

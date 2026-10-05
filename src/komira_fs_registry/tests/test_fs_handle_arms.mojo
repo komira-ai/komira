@@ -15,7 +15,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_aws_core import AwsCredential, StaticCredsSource, SystemAwsClock
-from komira_core.plan.fs_descriptor_pod import (
+from komira_plan_expr.fs_descriptor_pod import (
     FS_SCHEME_AZURE as CORE_FS_SCHEME_AZURE,
     FS_SCHEME_FILE as CORE_FS_SCHEME_FILE,
     FS_SCHEME_GCS as CORE_FS_SCHEME_GCS,

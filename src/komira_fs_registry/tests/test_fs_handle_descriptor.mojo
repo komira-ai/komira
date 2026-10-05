@@ -10,7 +10,7 @@
 # type) the same way.
 from std.testing import assert_equal, assert_raises
 
-from komira_core.plan.fs_descriptor_pod import FsDescriptorPod as CoreFsDescriptorPod
+from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod as CoreFsDescriptorPod
 from komira_fs_registry import (
     FsHandle,
     fs_arm_tag_for_descriptor,

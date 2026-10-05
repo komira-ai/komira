@@ -23,7 +23,7 @@
 # # ⛔ What this does NOT change
 #
 # A logger loop is RIGHT to give up rather than raise — "losing a diagnostic
-# beats wedging the process" (the rule `komira_core.io.fd_write_all` states).
+# beats wedging the process" (the rule `komira_libc.fd_write_all` states).
 # Nothing here raises. Nothing here blocks, sleeps or yields. Nothing here can
 # iterate more than `len(payload) + budget` times. What this adds is that
 # giving up is BOUNDED, CLASSIFIED and COUNTED instead of immediate, blind and
@@ -91,7 +91,7 @@
 from std.sys.info import CompilationTarget
 from std.ffi import external_call
 
-from komira_core.io.fd_write_all import FD_WRITE_MAX_CALL_BYTES
+from komira_libc.fd_write_all import FD_WRITE_MAX_CALL_BYTES
 
 
 # -----------------------------------------------------------------------------
@@ -405,7 +405,7 @@ def write_line_best_effort(fd: Int32, payload: Span[UInt8, _]) -> LineWrite:
             it is an `LOG_WRITE_FATAL` outcome with `EBADF` recorded.
         payload: The fully-rendered line, newline included. Empty issues NO
             syscall and reports complete, mirroring
-            `komira_core.io.fd_write_all.write_all_fd`.
+            `komira_libc.fd_write_all.write_all_fd`.
 
     Returns:
         The `LineWrite` describing what happened. `complete()` on the healthy
@@ -431,8 +431,8 @@ def write_line_best_effort(fd: Int32, payload: Span[UInt8, _]) -> LineWrite:
             request = FD_WRITE_MAX_CALL_BYTES
         # ⚠ `fd` GOES IN AS `Int32`, NOT `Int(fd)`. Mojo legalizes ONE
         # signature per external symbol per link unit, and the two existing
-        # declarations of this shim (`komira_core.io.posix_io.RawWriteFd.
-        # write_bytes` and `komira_core.io.fd_write_all.write_all_fd`) both
+        # declarations of this shim (`komira_libc.posix_io.RawWriteFd.
+        # write_bytes` and `komira_libc.fd_write_all.write_all_fd`) both
         # pass it as `Int32`. An `Int(fd)` here widens the first argument to
         # `index` and the link fails with "existing function with conflicting
         # signature" as soon as this module shares a closure with another

@@ -119,10 +119,10 @@
 #     unsafe pointers anywhere in this file.
 # =============================================================================
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.arrow_types import ArrowType
+from komira_buffer.heap_region import HeapRegion
 
 
 # =============================================================================
@@ -147,7 +147,7 @@ comptime TRUNC_MICROSECOND: UInt8 = 9
 #
 # ⚠ THESE THREE ARE NOT LIKE `TRUNC_*` ABOVE. `TRUNC_*` is a tight 0..9 kernel
 # encoding that the caller MAPS onto from the IR's 16..25; these are the IR
-# values themselves (`komira_core.plan.expr.EXTRACT_DAYOFWEEK` = 7,
+# values themselves (`komira_plan_expr.expr.EXTRACT_DAYOFWEEK` = 7,
 # `EXTRACT_ISODOW` = 8, `EXTRACT_DAYOFYEAR` = 9), restated here because this
 # module deliberately does not import the plan IR — the same MIRROR convention
 # `komira_kernels.runtime_expr` states for `RT_EXTRACT_*`.
@@ -162,7 +162,7 @@ comptime _K_ISODOW: UInt8 = 8
 comptime _K_DAYOFYEAR: UInt8 = 9
 
 # ISO WEEK-DATE field units. Same mirror rule; pinned by
-# the same test. `komira_core.plan.expr.EXTRACT_WEEK` = 10, `EXTRACT_ISOYEAR`
+# the same test. `komira_plan_expr.expr.EXTRACT_WEEK` = 10, `EXTRACT_ISOYEAR`
 # = 11, `EXTRACT_YEARWEEK` = 12.
 comptime _K_WEEK: UInt8 = 10
 comptime _K_ISOYEAR: UInt8 = 11

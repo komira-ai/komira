@@ -58,13 +58,15 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import StringArray, LargeStringArray, BooleanArray
-from komira_core.eval.string_eq_arm_counter import (
+from komira_arrow.string_array import StringArray
+from komira_arrow.large_string_array import LargeStringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_counters.string_eq_arm_counter import (
     reset_string_eq_ladder_call_count,
     string_eq_ladder_call_count,
 )
-from komira_core.eval import eval_string_eq, eval_string_ne
-from komira_core.eval.string_comparison import (
+from komira_column_kernels.string_comparison import eval_string_eq, eval_string_ne
+from komira_column_kernels.string_comparison import (
     eval_large_string_eq,
     eval_large_string_ne,
     _eq_block_width,

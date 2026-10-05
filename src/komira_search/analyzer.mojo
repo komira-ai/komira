@@ -62,7 +62,7 @@
 
 from std.sys import simd_width_of
 
-from komira_core.collections.string_column_view import StringColumnView
+from komira_arrow.string_column_view import StringColumnView
 
 
 # =============================================================================

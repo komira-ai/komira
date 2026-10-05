@@ -34,7 +34,7 @@
 #     for this row → that field's writer push_null arm fires.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 from komira_jsonl.simd_primitives import (
     TAG_OPEN_BRACE,

@@ -20,7 +20,7 @@
 # below are a CHARACTERIZATION of that loop, driven against a real kernel with
 # a real errno -- the evidence the defect is real rather than argued.
 #
-# ⛔ THE RULE THIS DOES **NOT** OVERTURN. `komira_core.io.fd_write_all`
+# ⛔ THE RULE THIS DOES **NOT** OVERTURN. `komira_libc.fd_write_all`
 # states that a logger loop is RIGHT to give up rather than raise: "losing a
 # diagnostic beats wedging the process". That stands. Nothing here raises and
 # nothing here spins; what changes is that giving up is BOUNDED, CLASSIFIED
@@ -519,7 +519,7 @@ def test_the_happy_path_still_writes_every_byte_exactly_once() raises:
 
 def test_an_empty_payload_issues_no_syscall() raises:
     """A zero-length line is complete by definition. Mirrors
-    `komira_core.io.fd_write_all.write_all_fd`, which returns 0 without a
+    `komira_libc.fd_write_all.write_all_fd`, which returns 0 without a
     syscall for the same reason."""
     var out = write_log_line(Int32(-1), String(""))
     assert_true(out.complete(), "nothing owed, nothing lost")

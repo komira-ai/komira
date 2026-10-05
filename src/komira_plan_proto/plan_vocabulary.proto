@@ -4,7 +4,7 @@
 // `plan/plan_wire_vocabulary.mojo`, which holds the same wire numbers.
 // There is no generator in this repository: a tag added to the engine must
 // be added here by hand, with the same wire number as in
-// `plan_wire_vocabulary.mojo`. src/komira_core/tests/test_plan_wire_vocabulary.mojo
+// `plan_wire_vocabulary.mojo`. src/komira_plan_wire/tests/test_plan_wire_vocabulary.mojo
 // checks that the Mojo vocabulary is complete against the engine's own tag
 // counts; nothing yet compares this file to it mechanically.
 
@@ -30,7 +30,7 @@ package komira.plan.v1;
 // LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15).
 // 16-17 were the ROW<->COLUMN converts and are DELETED; their numbers
 // stay burned.
-// Derived from: src/komira_core/plan/logical_plan.mojo
+// Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: PLAN_
 // ----------------------------------------------------------------------
 enum PlanTag {
@@ -58,7 +58,7 @@ enum PlanTag {
 // ----------------------------------------------------------------------
 // Expr node kind. EXPR_CORRELATED_SUBQUERY is the only cross-edge from
 // the expression tree back into the plan tree.
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: EXPR_
 //
 // EXEMPT — declared by the engine, deliberately NOT on the wire.
@@ -105,7 +105,7 @@ enum ExprTag {
 // Aggregate function. THE ENGINE HAS NO COUNT CONSTANT FOR THIS SPACE —
 // a drift hazard, and it is why count_const is empty here rather than
 // guessed.
-// Derived from: src/komira_core/plan/agg_expr.mojo
+// Derived from: src/komira_plan_expr/agg_expr.mojo
 // Engine prefix: AGG_
 // ----------------------------------------------------------------------
 enum AggFn {
@@ -153,7 +153,7 @@ enum AggFn {
 // Window / partition function. The engine numbering is SPARSE (ranking
 // 0-5, offset 10-14, aggregate 20-24); the gaps are unallocated, not
 // retired, and stay allocatable.
-// Derived from: src/komira_core/plan/partition_expr.mojo
+// Derived from: src/komira_plan_expr/partition_expr.mojo
 // Engine prefix: PF_
 // ----------------------------------------------------------------------
 enum WindowFn {
@@ -178,7 +178,7 @@ enum WindowFn {
 
 // ----------------------------------------------------------------------
 // Window frame units — ROWS vs RANGE.
-// Derived from: src/komira_core/plan/partition_frame.mojo
+// Derived from: src/komira_plan_expr/partition_frame.mojo
 // Engine prefix: FRAME_UNITS_
 // ----------------------------------------------------------------------
 enum FrameUnits {
@@ -189,7 +189,7 @@ enum FrameUnits {
 
 // ----------------------------------------------------------------------
 // Window frame boundary kind.
-// Derived from: src/komira_core/plan/partition_frame.mojo
+// Derived from: src/komira_plan_expr/partition_frame.mojo
 // Engine prefix: FRAME_BOUND_
 // ----------------------------------------------------------------------
 enum FrameBound {
@@ -205,7 +205,7 @@ enum FrameBound {
 // Join type. THIS IS THE SPACE THE MOTIVATING FAILURE IS ABOUT:
 // JoinData.join_type is a bare UInt8, so adding an arm here is invisible
 // to every compiler in the pipeline.
-// Derived from: src/komira_core/plan/logical_plan.mojo
+// Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: JOIN_
 // ----------------------------------------------------------------------
 enum JoinType {
@@ -221,7 +221,7 @@ enum JoinType {
 
 // ----------------------------------------------------------------------
 // Physical join algorithm hint carried on the logical node.
-// Derived from: src/komira_core/plan/logical_plan.mojo
+// Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: JOIN_ALGO_
 // ----------------------------------------------------------------------
 enum JoinAlgo {
@@ -233,7 +233,7 @@ enum JoinAlgo {
 
 // ----------------------------------------------------------------------
 // AS-OF join match direction.
-// Derived from: src/komira_core/plan/logical_plan.mojo
+// Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: ASOF_
 // ----------------------------------------------------------------------
 enum AsofDirection {
@@ -245,7 +245,7 @@ enum AsofDirection {
 
 // ----------------------------------------------------------------------
 // AS-OF join tolerance representation.
-// Derived from: src/komira_core/plan/logical_plan.mojo
+// Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: ASOF_TOL_
 // ----------------------------------------------------------------------
 enum AsofToleranceKind {
@@ -257,7 +257,7 @@ enum AsofToleranceKind {
 
 // ----------------------------------------------------------------------
 // Correlated-subquery flavour (EXISTS / NOT EXISTS / scalar / IN).
-// Derived from: src/komira_core/plan/corr_subquery_data.mojo
+// Derived from: src/komira_plan_expr/corr_subquery_data.mojo
 // Engine prefix: CORR_KIND_
 // ----------------------------------------------------------------------
 enum CorrelatedKind {
@@ -271,7 +271,7 @@ enum CorrelatedKind {
 // ----------------------------------------------------------------------
 // ScanData.source_type — the plan-node-level source discriminator.
 // SOURCE_BINDING is the pure-data arm every other arm is converging onto.
-// Derived from: src/komira_core/plan/logical_plan.mojo
+// Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: SOURCE_
 // ----------------------------------------------------------------------
 enum SourceType {
@@ -291,7 +291,7 @@ enum SourceType {
 // Row vs columnar orientation of a scan. Orthogonal to SourceType.
 // SOURCE_KIND_UNSET is 255, which is why the wire numbering is derived
 // from the engine value rather than from declaration order.
-// Derived from: src/komira_core/plan/logical_plan.mojo
+// Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: SOURCE_KIND_
 // ----------------------------------------------------------------------
 enum SourceOrientation {
@@ -305,7 +305,7 @@ enum SourceOrientation {
 // The closed SourceVariant union's arm tag. Most arms are carried by
 // SOURCE_VARIANT_BINDING; the two concrete arms that remain are the
 // EXEMPT rows below.
-// Derived from: src/komira_core/source/source_variant.mojo
+// Derived from: src/komira_scan_source/source_variant.mojo
 // Engine prefix: SOURCE_VARIANT_
 //
 // EXEMPT — declared by the engine, deliberately NOT on the wire.
@@ -338,7 +338,7 @@ enum SourceVariantTag {
 // Binary operator. Sparse by design (arithmetic 0-4, comparison 10-15,
 // logical 20-21) — PushdownGate.allowed_binary_ops is a bitmask over
 // these values.
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: BIN_
 // ----------------------------------------------------------------------
 enum BinaryOp {
@@ -360,7 +360,7 @@ enum BinaryOp {
 
 // ----------------------------------------------------------------------
 // Unary operator.
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: UN_
 // ----------------------------------------------------------------------
 enum UnaryOp {
@@ -378,7 +378,7 @@ enum UnaryOp {
 
 // ----------------------------------------------------------------------
 // String predicate operator.
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: STR_
 // ----------------------------------------------------------------------
 enum StringOp {
@@ -391,7 +391,7 @@ enum StringOp {
 
 // ----------------------------------------------------------------------
 // Unary scalar string function (EXPR_STRING_FN).
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: STRFN_
 // ----------------------------------------------------------------------
 enum StringFn {
@@ -419,7 +419,7 @@ enum StringFn {
 
 // ----------------------------------------------------------------------
 // Multi-argument scalar string function (EXPR_STRING_FN_N).
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: STRFNN_
 // ----------------------------------------------------------------------
 enum StringFnN {
@@ -442,7 +442,7 @@ enum StringFnN {
 
 // ----------------------------------------------------------------------
 // Which join input a column reference is qualified to.
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: COL_SIDE_
 // ----------------------------------------------------------------------
 enum ColSide {
@@ -454,7 +454,7 @@ enum ColSide {
 
 // ----------------------------------------------------------------------
 // Unary math function (EXPR_MATH_FN).
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: MATH_
 // ----------------------------------------------------------------------
 enum MathFn1 {
@@ -487,7 +487,7 @@ enum MathFn1 {
 
 // ----------------------------------------------------------------------
 // Binary math function (EXPR_MATH_FN2).
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: MATH2_
 // ----------------------------------------------------------------------
 enum MathFn2 {
@@ -501,7 +501,7 @@ enum MathFn2 {
 // truncation 16-25 — 10..15 is a RESERVED HOLE, and the membership test
 // consults this vocabulary rather than range-checking so a unit landing
 // in it is REFUSED at encode.
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: EXTRACT_
 // ----------------------------------------------------------------------
 enum ExtractField {
@@ -535,7 +535,7 @@ enum ExtractField {
 
 // ----------------------------------------------------------------------
 // Regular-expression operation.
-// Derived from: src/komira_core/plan/expr.mojo
+// Derived from: src/komira_plan_expr/expr.mojo
 // Engine prefix: REGEXP_
 // ----------------------------------------------------------------------
 enum RegexpOp {
@@ -563,7 +563,7 @@ enum RegexpOp {
 // set of type_ids a decoder may accept, and the names a non-Mojo
 // frontend validates against. Use `arrow_type_is_declared(type_id)`, NOT
 // `arrow_type_from_wire`, when checking a decoded `arrow_type_id`.
-// Derived from: src/komira_core/arrow/arrow_types.mojo
+// Derived from: src/komira_arrow/arrow_types.mojo
 // Engine prefix: 
 // ----------------------------------------------------------------------
 enum ArrowType {
@@ -629,7 +629,7 @@ enum ArrowType {
 // and `write_target_supported` in the same file is the one table that
 // decides it. Snappy is parquet-only, so (WFMT_CSV, WCOMP_SNAPPY) is two
 // valid members and no sink.
-// Derived from: src/komira_core/arrow/write_target.mojo
+// Derived from: src/komira_arrow/write_target.mojo
 // Engine prefix: WFMT_
 // ----------------------------------------------------------------------
 enum WriteFormat {
@@ -648,7 +648,7 @@ enum WriteFormat {
 // wall clock alike, which is the hazard `plan_write._sink_tag_for`'s own
 // docstring names. That is why the codec crosses as a validated enum
 // rather than as a bare uint32.
-// Derived from: src/komira_core/arrow/write_target.mojo
+// Derived from: src/komira_arrow/write_target.mojo
 // Engine prefix: WCOMP_
 // ----------------------------------------------------------------------
 enum WriteCompression {
@@ -669,7 +669,7 @@ enum WriteCompression {
 // (`SCALAR_KIND_DTYPE`) means `use the dtype field`, so the live arm is
 // the PAIR (kind, dtype) and no proto `oneof` over kind alone can
 // express it.
-// Derived from: src/komira_core/plan/scalar_value.mojo
+// Derived from: src/komira_plan_expr/scalar_value.mojo
 // Engine prefix: SCALAR_KIND_
 // ----------------------------------------------------------------------
 enum ScalarKind {
@@ -691,7 +691,7 @@ enum ScalarKind {
 // Arrow time unit for a TIME / DURATION scalar. Read together with
 // `int_val`, so a wrong unit is a silently wrong VALUE (a nanosecond
 // duration read as seconds) rather than a decode failure.
-// Derived from: src/komira_core/plan/scalar_value.mojo
+// Derived from: src/komira_plan_expr/scalar_value.mojo
 // Engine prefix: SCALAR_TIME_UNIT_
 // ----------------------------------------------------------------------
 enum ScalarTimeUnit {
@@ -706,7 +706,7 @@ enum ScalarTimeUnit {
 // The Excel error value carried by a SCALAR_KIND_ERROR literal.
 // Core-owned; a frontend copies its error code onto it verbatim, so an
 // unknown code decodes as a DIFFERENT error, not as an error.
-// Derived from: src/komira_core/plan/excel_error_code.mojo
+// Derived from: src/komira_plan_expr/excel_error_code.mojo
 // Engine prefix: XL_ERR_
 // ----------------------------------------------------------------------
 enum ExcelErrorCode {
@@ -730,7 +730,7 @@ enum ExcelErrorCode {
 // `UInt8(Int(e.tag))` and THEN comparing would turn a wire tag of 256 into
 // 0 and decode it as PARAM_STR — an out-of-range value silently becoming a
 // valid one — so the tag is validated before it is narrowed.
-// Derived from: src/komira_core/source/scan_params.mojo
+// Derived from: src/komira_scan_source/scan_params.mojo
 // Engine prefix: PARAM_
 // ----------------------------------------------------------------------
 enum ParamTag {
@@ -751,7 +751,7 @@ enum ParamTag {
 // something else. They are declared as `1 << n` so the literal-only
 // regex does not see them today — the exclusion is against the day
 // someone writes the constant out.
-// Derived from: src/komira_core/source/pushdown_gate.mojo
+// Derived from: src/komira_scan_source/pushdown_gate.mojo
 // Engine prefix: GATE_
 // ----------------------------------------------------------------------
 enum PushdownGateMode {
@@ -768,7 +768,7 @@ enum PushdownGateMode {
 // One byte that decides whether a cached plan may be replayed, so a
 // decoded wrong value is a correctness fault in the plan cache, not a
 // decode error.
-// Derived from: src/komira_core/source/scan_binding.mojo
+// Derived from: src/komira_scan_source/scan_binding.mojo
 // Engine prefix: SNAPSHOT_
 // ----------------------------------------------------------------------
 enum SnapshotPolicy {

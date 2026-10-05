@@ -39,7 +39,7 @@
 # the `SIMD.lt(a, b)` method form for comparisons. All SIMD ops below
 # use the method form. The `ne` / `lt` / `ge` methods on SIMD[uint8, W]
 # work via the unified Highway-style wrappers in
-# `komira_core.simd.byte_class.comparisons`.
+# `komira_simd.byte_class.comparisons`.
 # =============================================================================
 
 
@@ -50,7 +50,7 @@
 # The integer + float
 # SIMD fast paths (Lemire 8-digit / fast_parse_int64_simple /
 # fast_parse_float64_simple + their helpers) were promoted to
-# `komira_core.parsers.byte_span_numeric` so substrate-layer consumers
+# `komira_csv.byte_span_numeric` so substrate-layer consumers
 # (row-format decoders in komira_row_format) can reuse them without a `komira_row_format -> komira_csv` layering
 # inversion.
 #
@@ -64,7 +64,7 @@
 # =============================================================================
 
 
-from komira_core.parsers.byte_span_numeric import (
+from komira_csv.byte_span_numeric import (
     fast_parse_uint_8digit,
     fast_parse_uint_n_digits,
     fast_parse_int64_simple,
@@ -88,7 +88,7 @@ from komira_core.parsers.byte_span_numeric import (
 def _is_ascii_digit_byte(b: UInt8) -> Bool:
     """Branch-free helper — single-byte applicability check.
 
-    Mirror of `komira_core.parsers.byte_span_numeric._is_ascii_digit_byte`
+    Mirror of `komira_csv.byte_span_numeric._is_ascii_digit_byte`
     kept private to this module for use by the ISO date/time fast paths
     below. The compiler inlines this to a 1-3 cycle byte compare.
     """

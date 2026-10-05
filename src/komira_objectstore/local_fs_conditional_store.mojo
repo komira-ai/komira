@@ -92,7 +92,7 @@
 # Encapsulation discipline
 # -----------------------------------------------------------------------------
 #   * ZERO UnsafePointer in any PUBLIC signature. The byte-write reuses
-# `RawWriteFd` (komira_core.io.posix_io) whose public surface is
+# `RawWriteFd` (komira_libc.posix_io) whose public surface is
 #     String/Span/Int. The readdir + file-read FFI is confined to module-private
 # helpers with `# SAFETY:` blocks (mirroring `komira_fs.local_fs`
 #     — its helpers are private to komira_async, so the FFI shape is
@@ -108,7 +108,7 @@
 from std.ffi import external_call
 from std.time import perf_counter_ns
 
-from komira_core.io.posix_io import RawWriteFd
+from komira_libc.posix_io import RawWriteFd
 
 from komira_objectstore.path import Path
 from komira_objectstore.store import (
@@ -352,7 +352,7 @@ def _is_existing_dir(path: String) -> Bool:
     binary linking this store can hit. Same class as the `komira_mkdir` rename
     above; here the
     `access` trick avoids needing a shim symbol at all. The identical rationale is
-    documented at `komira_core_ffi.posix._path_is_directory`, which this
+    documented at `komira_libc.posix._path_is_directory`, which this
     mirrors."""
     var probe = path + String("/.")
     # SAFETY: synchronous `access(2)`; `probe` pins the path bytes across the

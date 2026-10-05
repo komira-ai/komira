@@ -67,11 +67,11 @@ The `Column.from_borrowed_*` constructors borrow more weakly. They wrap a `ByteV
 
 ### How are batches and tables built?
 
-A `Schema` stores its fields column-wise, one list per attribute (`_names`, `_arrow_types`, `_nullables`, ...), and a `Field` is one entry. A `RecordBatch` is a `Schema`, a `Slab[Column[HeapRegion]]` and a row count, and `RecordBatchBuilder` assembles one. A batch may carry a selection mask, a `BooleanArray` of live rows, while its columns keep every row. The Parquet source and some operators set one; a consumer either honours it or calls `materialize_selection_if_present` (`src/komira_core/helpers/compiler_helpers.mojo`) to gather the live rows first.
+A `Schema` stores its fields column-wise, one list per attribute (`_names`, `_arrow_types`, `_nullables`, ...), and a `Field` is one entry. A `RecordBatch` is a `Schema`, a `Slab[Column[HeapRegion]]` and a row count, and `RecordBatchBuilder` assembles one. A batch may carry a selection mask, a `BooleanArray` of live rows, while its columns keep every row. The Parquet source and some operators set one; a consumer either honours it or calls `materialize_selection_if_present` (`src/komira_column_kernels/compiler_helpers.mojo`) to gather the live rows first.
 
 A `Table` is a query result: one schema and a `Slab[RecordBatch]` of chunks in output order. `to_record_batch` returns one batch, concatenating the chunks when there are several. `into_single_batch` does not concatenate: it returns the only chunk, returns an empty batch with the table's schema when there are none, and raises when there are more.
 
-`ColumnNativeBatch` (`src/komira_core/arrow/column_native.mojo`) is a second batch type, used by engine stages such as sort, top-N, window and join probing. In wrapped mode it holds a `RecordBatch`'s columns, moved in without a copy. In contiguous mode it holds one body buffer in the layout the spill codec writes. The engine's spill layer converts between the two.
+`ColumnNativeBatch` (`src/komira_arrow/column_native.mojo`) is a second batch type, used by engine stages such as sort, top-N, window and join probing. In wrapped mode it holds a `RecordBatch`'s columns, moved in without a copy. In contiguous mode it holds one body buffer in the layout the spill codec writes. The engine's spill layer converts between the two.
 
 ### How are Arrow IPC messages encoded and decoded?
 
@@ -100,9 +100,9 @@ A `Table` is a query result: one schema and a `Slab[RecordBatch]` of chunks in o
 
 ### How does a scan name its source?
 
-`ScanBinding` (`src/komira_core/source/scan_binding.mojo`) describes a scan at plan time. It holds a kind id that `scan_kind_id` hashes from a reverse-DNS name such as `"komira.arrow.ipc"`, opaque `ScanParams`, a schema, optional statistics and a fingerprint, and no data. The concrete sources in `src/komira_core/source/` implement `SourceLike`. `SourceVariant` holds a `tag` and three optional arms: `ParquetSource`, `InMemorySource` and `ScanBinding`. The other five sources, `ArrowSource`, `AvroSource`, `CsvSource`, `JsonSource` and `OrcSource`, have no arm: `SourceVariant`'s constructors for them (`from_arrow_uncompressed`, `from_arrow_lz4_frame`, `from_arrow_zstd`, and an `__init__` for each of the other four) build a `ScanBinding`.
+`ScanBinding` (`src/komira_scan_source/scan_binding.mojo`) describes a scan at plan time. It holds a kind id that `scan_kind_id` hashes from a reverse-DNS name such as `"komira.arrow.ipc"`, opaque `ScanParams`, a schema, optional statistics and a fingerprint, and no data. The concrete sources in `src/komira_core/source/` implement `SourceLike`. `SourceVariant` holds a `tag` and three optional arms: `ParquetSource`, `InMemorySource` and `ScanBinding`. The other five sources, `ArrowSource`, `AvroSource`, `CsvSource`, `JsonSource` and `OrcSource`, have no arm: `SourceVariant`'s constructors for them (`from_arrow_uncompressed`, `from_arrow_lz4_frame`, `from_arrow_zstd`, and an `__init__` for each of the other four) build a `ScanBinding`.
 
-At execution, `ScanResolver` (`src/komira_core/source/scan_resolver.mojo`) answers only identity and freshness, through `epoch`, `is_bound` and `resolve_snapshot`. Its refinement `ScanPayloadResolver` adds `payload_arc`, which returns a handle's batches as an `ArcPointer[Slab[RecordBatch]]`. `ScanRegistry` (`src/komira_core/source/scan_registry.mojo`) is the one type in `komira_core` that conforms to `ScanPayloadResolver`; the SDK's engine context holds one and binds in-memory sources into it. `scan_resolver.mojo` also describes a second tier, `ScanMorselResolver`, defined by the morsel scheduler, whose `open_scan` returns a scan's rows at execution. The five file kinds are not resolved: `ScanData.__init__` (`src/komira_core/plan/logical_plan_variants.mojo`) reads the binding's `legacy_source_type` and `name` and turns them back into a legacy `SOURCE_*` type and a path.
+At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answers only identity and freshness, through `epoch`, `is_bound` and `resolve_snapshot`. Its refinement `ScanPayloadResolver` adds `payload_arc`, which returns a handle's batches as an `ArcPointer[Slab[RecordBatch]]`. `ScanRegistry` (`src/komira_scan_source/scan_registry.mojo`) is the one type in `komira_core` that conforms to `ScanPayloadResolver`; the SDK's engine context holds one and binds in-memory sources into it. `scan_resolver.mojo` also describes a second tier, `ScanMorselResolver`, defined by the morsel scheduler, whose `open_scan` returns a scan's rows at execution. The five file kinds are not resolved: `ScanData.__init__` (`src/komira_plan_ir/logical_plan_variants.mojo`) reads the binding's `legacy_source_type` and `name` and turns them back into a legacy `SOURCE_*` type and a path.
 
 ## Why is it built this way?
 
@@ -184,19 +184,19 @@ At execution, `ScanResolver` (`src/komira_core/source/scan_resolver.mojo`) answe
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_core/io/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
-| `src/komira_core/arrow/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
-| `src/komira_core/arrow/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
-| `src/komira_core/arrow/column.mojo` | The type-erased column | `Column`, `as_primitive`, `share`, `slice` |
-| `src/komira_core/arrow/arrow_types.mojo` | Type tags | `ArrowType` |
-| `src/komira_core/arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
-| `src/komira_core/arrow/ipc_encoder_dispatch.mojo`, `ipc_decoder_dispatch.mojo` | IPC messages | `encode_record_batch_message`, `decode_record_batch_message` |
-| `src/komira_core/arrow/ipc_flatbuf.mojo` | IPC metadata | `FlatbufWriter`, `FlatbufReader` |
-| `src/komira_core/arrow/compression_codecs.mojo` | Codec bindings | `Lz4Frame`, `Zstd`, `Snappy` |
-| `src/komira_core/arrow/c_data_stream.mojo` | C stream export and import | `build_record_batch_stream`, `drain_record_batch_stream` |
-| `src/komira_core/collections/slab.mojo` | Typed slab | `Slab` |
-| `src/komira_core/simd/width_policy.mojo` | SIMD width policy | `komira_simd_width`, `komira_simd_width_bitpack`, `komira_simd_width_delta` |
-| `src/komira_core/source/scan_binding.mojo`, `scan_resolver.mojo`, `scan_registry.mojo` | Scan descriptions and resolution | `ScanBinding`, `ScanResolver`, `ScanRegistry` |
+| `src/komira_buffer/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
+| `src/komira_buffer/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
+| `src/komira_buffer/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
+| `src/komira_arrow/column.mojo` | The type-erased column | `Column`, `as_primitive`, `share`, `slice` |
+| `src/komira_arrow/arrow_types.mojo` | Type tags | `ArrowType` |
+| `src/komira_arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
+| `src/komira_arrow_ipc/ipc_encoder_dispatch.mojo`, `ipc_decoder_dispatch.mojo` | IPC messages | `encode_record_batch_message`, `decode_record_batch_message` |
+| `src/komira_arrow_ipc/ipc_flatbuf.mojo` | IPC metadata | `FlatbufWriter`, `FlatbufReader` |
+| `src/komira_compression/compression_codecs.mojo` | Codec bindings | `Lz4Frame`, `Zstd`, `Snappy` |
+| `src/komira_arrow_ipc/c_data_stream.mojo` | C stream export and import | `build_record_batch_stream`, `drain_record_batch_stream` |
+| `src/komira_collections/slab.mojo` | Typed slab | `Slab` |
+| `src/komira_simd/width_policy.mojo` | SIMD width policy | `komira_simd_width`, `komira_simd_width_bitpack`, `komira_simd_width_delta` |
+| `src/komira_scan_source/scan_binding.mojo`, `scan_resolver.mojo`, `scan_registry.mojo` | Scan descriptions and resolution | `ScanBinding`, `ScanResolver`, `ScanRegistry` |
 | `src/komira_rowcell/row_cell.mojo` | The table cell | `RowCell` |
 | `src/komira_uuid/uuid.mojo`, `clock.mojo` | UUIDv7 and the wall clock | `Uuid`, `generate_uuidv7`, `now_unix_ms` |
 

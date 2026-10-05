@@ -69,14 +69,14 @@
 from std.memory import bitcast
 from std.sys import size_of
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.dtype_sentinel import DTYPE_NONE
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.column import Column
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.collections.byte_buffer import write_uleb128
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.dtype_sentinel import DTYPE_NONE
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.column import Column
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_buffer.byte_buffer import write_uleb128
 
 from .analyzer import (
     FIELD_CLASS_KEYWORD,
@@ -154,7 +154,7 @@ init_sink raises if a user column is literally named this."""
 # field" was a NAME for the absence, not a second concept.
 #
 # The `Optional[DType]` migration remains the end state and remains open
-# (see `komira_core/dtype_sentinel.mojo`). What changed here is that there is
+# (see `komira_arrow/dtype_sentinel.mojo`). What changed here is that there is
 # now ONE place to migrate instead of two that must be migrated in lockstep.
 comptime _DTYPE_NOT_A_FAST_FIELD: DType = DTYPE_NONE
 

@@ -37,7 +37,7 @@ from komira_async.reactor.socket_setup import inet_any_be, inet_loopback_be
 from komira_async.runtime.tcp_stream import TcpListener
 from komira_async.runtime.runtime_trait import Runtime
 from komira_async.ops.waker_sink import NoopSink
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_core.codec import (
     HttpMethod,

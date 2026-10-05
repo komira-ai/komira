@@ -22,17 +22,17 @@
 
 from std.testing import assert_equal, assert_true, assert_false, assert_raises
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.string_array import StringArray
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.string_array import StringArray
+from komira_plan_expr.expr import (
     Expr,
     EXPR_JSON_EXTRACT,
     parse_json_path,
 )
 
 from komira_jsonl.json_extract_kernel import extract_column
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 # =============================================================================

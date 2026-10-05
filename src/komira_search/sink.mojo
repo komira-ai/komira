@@ -42,11 +42,11 @@
 #     InlineArray[UInt8, 16]: no heap.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.collections.batch_view import batch_view_over
-from komira_core.source.sink import Sink
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.batch_view import batch_view_over
+from komira_scan_source.sink import Sink
 
 from .analyzer import (
     AnalyzerConfig,
@@ -70,7 +70,7 @@ from .split import DocStoreBuilder, serialize_split, FOOTER_NO_TOTAL_TOKENS
 
 from std.memory import bitcast
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 
 
 # =============================================================================

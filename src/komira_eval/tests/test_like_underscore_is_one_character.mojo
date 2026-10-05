@@ -16,7 +16,7 @@
 #
 # ★ THREE MATCHERS, FOUND BY MECHANISM (the `_` wildcard byte test), NOT BY NAME:
 #
-#   1. `komira_core.eval.string_comparison._like_match` — the columnar kernel
+#   1. `komira_column_kernels.string_comparison._like_match` — the columnar kernel
 #      behind `eval_string_like` / `eval_large_string_like` (the parquet /
 #      in-memory FILTER + PROJECTION routes). Its `%lit%lit%` fast path is
 #      `_`-free by construction and byte-exact on valid UTF-8, so it is not a
@@ -33,9 +33,9 @@
 
 from std.testing import TestSuite, assert_equal
 
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.large_string_array import LargeStringArray
-from komira_core.eval.string_comparison import (
+from komira_arrow.string_array import StringArray
+from komira_arrow.large_string_array import LargeStringArray
+from komira_column_kernels.string_comparison import (
     eval_string_like,
     eval_large_string_like,
 )

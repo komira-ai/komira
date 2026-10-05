@@ -45,23 +45,24 @@ from std.testing import (
     assert_raises,
 )
 
-from komira_core.arrow import ArrowType, Field, Schema, SchemaBuilder
-from komira_core.plan.expr import Expr, ScalarValue, BIN_EQ, BIN_GE, BIN_AND, BIN_OR
-from komira_core.plan.logical_plan import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_plan_expr.expr import Expr, ScalarValue, BIN_EQ, BIN_GE, BIN_AND, BIN_OR
+from komira_plan_ir.logical_plan import (
     LogicalPlan,
     SOURCE_BINDING,
     SOURCE_PARQUET,
 )
-from komira_core.plan.logical_plan_variants import SOURCE_KIND_COLUMNAR
-from komira_core.source.scan_binding import (
+from komira_plan_ir.logical_plan_variants import SOURCE_KIND_COLUMNAR
+from komira_scan_source.scan_binding import (
     ScanBinding,
     SNAPSHOT_LIVE,
     SCAN_HANDLE_UNBOUND,
 )
-from komira_core.source.scan_kind_registry import ScanKindRegistry
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_resolver import check_binding, resolve_for_execution
-from komira_core.source.source_variant import (
+from komira_scan_source.scan_kind_registry import ScanKindRegistry
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_resolver import check_binding, resolve_for_execution
+from komira_scan_source.source_variant import (
     SourceVariant,
     SOURCE_VARIANT_BINDING,
 )
@@ -78,10 +79,10 @@ from komira_broker.broker_scan_binding import (
 from komira_broker.broker_core import BrokerCore
 from komira_broker.broker_scan_kind import BrokerScanRuntime
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.string_array import StringArray
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.string_array import StringArray
 from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
 from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,

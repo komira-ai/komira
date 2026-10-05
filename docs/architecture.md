@@ -26,7 +26,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 | module | what it is |
 |---|---|
 | [`komira_core`](../src/komira_core/) | the Arrow-native core types the rest is built on: the columnar primitives (Column, Buffer, RecordBatch and the Arrow value types), the SIMD helpers operators vectorize over, and the shared plan IR (LogicalPlan, Expr, ScalarValue, AggExpr). Its [README](../src/komira_core/README.md) lists what lives in each subpackage. |
-| [`komira_core_ffi`](../src/komira_core_ffi/) | the canonical libc / POSIX FFI declarations: one declaration per C symbol, so two packages in one link unit never declare the same symbol with conflicting signatures. |
+| [`komira_libc`](../src/komira_libc/) | the canonical libc / POSIX FFI declarations: one declaration per C symbol, so two packages in one link unit never declare the same symbol with conflicting signatures. |
 | [`komira_atomic_alias`](../src/komira_atomic_alias/) | the one place the repository spells `Atomic[...]`; it imports only `std.atomic`, so any package may depend on it. |
 | [`komira_rowcell`](../src/komira_rowcell/) | the typed table-cell value model: one `RowCell` struct, its six scalar type tags, typed constructors and value equality. A leaf that imports only the Mojo standard library. |
 

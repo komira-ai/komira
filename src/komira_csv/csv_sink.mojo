@@ -24,7 +24,7 @@
 #   - `header: Bool = True`       — write the column-name row.
 #   - `quote: String = "\""`      — the RFC-4180 quote character.
 #
-# CSV value encoding (DuckDB-ish; matches `komira_core.arrow.csv_emit`'s
+# CSV value encoding (DuckDB-ish; matches `komira_arrow.csv_emit`'s
 # byte-format DECISIONS, with ONE deliberate divergence: `null` → an EMPTY
 # field, not the literal `NULL`; `csv_emit` is the parity-harness emitter and uses `NULL` to match
 # DuckDB `.mode csv`; `CsvSink` is a user-facing writer and uses the
@@ -69,14 +69,14 @@ from komira_async.runtime.local_dispatcher import LocalDispatcher
 from std.ffi import external_call
 from std.sys import num_physical_cores
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 # Writes go through LocalFs[NoopSink].write_at (64 MiB chunking
 # inside the trait body).
-from komira_core.source.sink import Sink
+from komira_scan_source.sink import Sink
 from komira_row_format.row_sink import RowSink
 from komira_row_format.row_output import RowOutput
 from komira_row_format.row_block import (

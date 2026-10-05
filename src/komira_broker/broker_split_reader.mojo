@@ -86,23 +86,23 @@
 # drops exactly once.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.ipc_decoder_dispatch import decode_record_batch_message
-from komira_core.arrow.ipc_flatbuf import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow_ipc.ipc_decoder_dispatch import decode_record_batch_message
+from komira_arrow_ipc.ipc_flatbuf import (
     flatbuf_reader_over,
     read_message,
     MESSAGE_HEADER_DICTIONARY_BATCH,
     MESSAGE_HEADER_RECORD_BATCH,
     MESSAGE_HEADER_SCHEMA,
 )
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, Schema
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.arrow_helpers.batch_slice import _slice_batch_range
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, Schema
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_column_kernels.batch_slice import _slice_batch_range
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
 
 from komira_scan_resolver.scan_split import (
     SplitPoll,

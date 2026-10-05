@@ -12,8 +12,11 @@ mojo_library(
     name = "komira_scan_planning",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_fs:komira_fs",
+        "//src/komira_plan_expr:komira_plan_expr",
     ],
     test_srcs = [
         "tests/test_partition_predicate_split.mojo",

@@ -32,7 +32,7 @@
 # This helper centralizes the fork-join safety contract.
 # =============================================================================
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 trait MultiPhaseWork(Copyable, Movable, Deinitable):

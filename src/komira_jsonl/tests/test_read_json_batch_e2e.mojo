@@ -19,10 +19,10 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.source.json_source import JsonSource
-from komira_core.source.source_variant import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_scan_source.json_source import JsonSource
+from komira_scan_source.source_variant import (
     SourceVariant,
     SOURCE_VARIANT_JSON,
 )

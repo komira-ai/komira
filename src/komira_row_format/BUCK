@@ -8,7 +8,12 @@ mojo_library(
     name = "komira_row_format",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [

@@ -13,10 +13,11 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow import PrimitiveArray, BooleanArray
-from komira_core.eval import eval_gt, eval_lt, eval_eq, filter_to_indices
-from komira_core.eval import SelectionVector
-from komira_core.eval.comparison import _filter_to_indices_scalar
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_column_kernels.comparison import eval_gt, eval_lt, eval_eq, filter_to_indices
+from komira_arrow.selection_vector import SelectionVector
+from komira_column_kernels.comparison import _filter_to_indices_scalar
 
 
 def _make_gt_mask(values: List[Scalar[DType.int32]], threshold: Int) raises -> BooleanArray:

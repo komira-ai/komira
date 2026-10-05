@@ -186,10 +186,10 @@
 # `Expr` throughout, no allocation except the error text on the refusal path.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Schema
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.expr import (
     Expr,
     BIN_EQ,
     BIN_GE,
@@ -240,7 +240,7 @@ from komira_core.plan.expr import (
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
 )
-from komira_core.plan.agg_expr import (
+from komira_plan_expr.agg_expr import (
     AGG_SUM,
     AGG_COUNT,
     AGG_MIN,
@@ -269,7 +269,7 @@ from komira_core.plan.agg_expr import (
     AGG_KURTOSIS_POP,
     agg_is_bivariate,
 )
-from komira_core.plan.logical_plan import (
+from komira_plan_ir.logical_plan import (
     LogicalPlan,
     agg_func_base_name,
     PLAN_SCAN,
@@ -289,7 +289,7 @@ from komira_core.plan.logical_plan import (
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
 )
-from komira_core.plan.corr_subquery import corr_subq_inner_plan_ref
+from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
 
 
 # =============================================================================

@@ -53,8 +53,8 @@
 from komira_atomic_alias import AtomicU8
 from std.memory import alloc, UnsafePointer, OwnedPointer
 
-from komira_core.collections import Slab
-from komira_core.io.posix_io import RawWriteFd
+from komira_collections.slab import Slab
+from komira_libc.posix_io import RawWriteFd
 
 from komira_clock import now_unix_ms
 from komira_log.log_write import LogWriteLosses, write_log_line

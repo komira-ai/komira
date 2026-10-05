@@ -80,7 +80,7 @@ from komira_aws_s3.komira_aws_s3 import (
     parse_put_object_response,
     parse_upload_part_response,
 )
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_objectstore.coalesce import plan_coalesce

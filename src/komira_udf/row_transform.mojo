@@ -66,14 +66,14 @@
 #     lifetime witness.
 #
 # Cross-references:
-#   - `komira_core.collections.multi_column_builder` — `MultiColumnBuilder`.
+#   - `komira_arrow.multi_column_builder` — `MultiColumnBuilder`.
 #   - expr_x.mojo — `ExprXI64` / `ExprXF64` (refine `RowTransform`; keep
 #     their own per-DType static `eval[W]`).
 #   - map_fn.mojo — `MapFn` (refines `RowTransform`).
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.multi_column_builder import (
+from komira_arrow.batch_view import BatchView
+from komira_arrow.multi_column_builder import (
     MultiColumnSink,
     SinkKind,
 )
@@ -85,7 +85,7 @@ from komira_udf.purity import Purity
 # MultiColumnSink — the minimal builder-trait bound for `RowTransform.write_one`
 # =============================================================================
 #
-# `MultiColumnSink` is declared in `komira_core.collections.multi_column_builder`
+# `MultiColumnSink` is declared in `komira_arrow.multi_column_builder`
 # (next to `MultiColumnBuilder`) and re-imported here. It MUST live in
 # `komira_core` rather than `komira_udf`: the production builder
 # `MultiColumnBuilder[*Bs]` lives in `komira_core`, and a struct can only

@@ -44,10 +44,10 @@
 from std.io import FileHandle
 from std.memory import unsafe_memcpy
 
-from komira_core.collections.slab import Slab
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.arrow_helpers.streaming_concat import (
+from komira_collections.slab import Slab
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.streaming_concat import (
     _concat_two_batches,
     _concat_variable_width_batches,
 )

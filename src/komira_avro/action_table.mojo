@@ -28,21 +28,21 @@
 
 from std.sys import size_of
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.binary_array import BinaryArray
-from komira_core.arrow.bitmap import Bitmap, bytes_for_bits
-from komira_core.io.heap_region import HeapRegion
-from komira_core.simd.validity_pack import pack_validity_from_null_flags
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.collections.slab import Slab
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.binary_array import BinaryArray
+from komira_arrow.bitmap import Bitmap, bytes_for_bits
+from komira_buffer.heap_region import HeapRegion
+from komira_simd.validity_pack import pack_validity_from_null_flags
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_collections.slab import Slab
 
 from .avro_schema import (
     AvroSchema,
@@ -969,7 +969,7 @@ struct _StringAcc(Copyable, Movable):
         self._null_count += 1
 
     def build(var self) raises -> Column[HeapRegion]:
-        from komira_core.arrow.string_array import StringArray
+        from komira_arrow.string_array import StringArray
 
         comptime int32_size = size_of[Int32]()
         var num_strings = len(self.offsets) - 1
@@ -1144,7 +1144,7 @@ def _null_count(nulls: List[Bool]) -> Int:
 def _bitmap_from_nulls(nulls: List[Bool]) raises -> Optional[Bitmap[HeapRegion]]:
     """Return a validity Bitmap iff any row is null; else None (all-valid).
 
-    Packs with the shared `komira_core.simd.validity_pack` movemask packer
+    Packs with the shared `komira_simd.validity_pack` movemask packer
     (16 rows/iteration, an order of magnitude faster than a bit-by-bit
     `create_all_valid + per-null clear` scalar pack). Output is bit-for-bit
     identical to the scalar pack. Cold on all-present columns (this

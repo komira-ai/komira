@@ -34,7 +34,7 @@
 
 from std.memory import OwnedPointer
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 from komira_async.cancellation.token import CancellationToken
 from komira_net.dns import parse_ip_literal, resolve_host_be
 from komira_clock import now_ns as _mono_now_ns

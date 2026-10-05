@@ -80,9 +80,9 @@
 
 from std.memory import ArcPointer
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.collections.slab import Slab
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_collections.slab import Slab
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.reactor import Reactor

@@ -108,9 +108,9 @@ from komira_async.runtime.wake_primitives import (
     wait_on_address,
     wake_one_by_address,
 )
-from komira_core.collections.slab import Slab
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
-from komira_core.runtime_traits.parallel_dispatch import ParallelDispatch
+from komira_collections.slab import Slab
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.parallel_dispatch import ParallelDispatch
 
 # -----------------------------------------------------------------------------
 # ⚠ THE BARRIER-STALL DUMP GOES TO **STDERR**, NEVER STDOUT.

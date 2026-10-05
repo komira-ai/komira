@@ -5,10 +5,12 @@
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 
-from komira_core.arrow import PrimitiveArray, BooleanArray, Bitmap
-from komira_core.eval import eval_cast, bitmap_and, eval_gt_nullable
-from komira_core.eval import eval_cast_float_to_int, round_half_to_even
-from komira_core.eval import eval_is_null, eval_is_not_null
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.bitmap import Bitmap
+from komira_column_kernels.cast_null import eval_cast, bitmap_and, eval_gt_nullable
+from komira_column_kernels.cast_null import eval_cast_float_to_int, round_half_to_even
+from komira_column_kernels.cast_null import eval_is_null, eval_is_not_null
 
 
 # =============================================================================

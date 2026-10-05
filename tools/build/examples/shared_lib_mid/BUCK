@@ -16,7 +16,8 @@ mojo_shared_lib(
     ],
     gate_srcs = ["mid_driver.mojo"],
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_encoding:komira_encoding",
         "//src/komira_gcp_core:komira_gcp_core",

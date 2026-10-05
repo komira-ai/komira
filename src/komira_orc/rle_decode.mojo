@@ -39,7 +39,7 @@
 from std.memory import bitcast
 from std.sys.info import simd_width_of
 
-from komira_core.simd.bit_unpack import simd_unpack_bits
+from komira_simd.bit_unpack import simd_unpack_bits
 
 
 # =============================================================================

@@ -56,17 +56,17 @@
 # is a broker concept core cannot spell.
 # =============================================================================
 
-from komira_core.arrow.schema import Schema
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_arrow.schema import Schema
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     scan_kind_id,
     SCAN_ORIENTATION_COLUMNAR,
     SNAPSHOT_LIVE,
 )
-from komira_core.source.scan_identity_audit import ScanIdentityCorpus
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import (
+from komira_scan_source.scan_identity_audit import ScanIdentityCorpus
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import (
     ScanParams,
     param_hash_string,
     PARAM_I64,

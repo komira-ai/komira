@@ -135,7 +135,7 @@ import "komira/plan/v1/plan_vocabulary.proto";
 // compare two plans by DECODED STRUCTURE, never by bytes.
 
 // ===========================================================================
-// Arrow schema — `komira_core.arrow.schema.{Field, Schema}`
+// Arrow schema — `komira_arrow.schema.{Field, Schema}`
 // ===========================================================================
 
 // A `Field`, TOTALLY. Every `var` on the engine struct has a slot here,
@@ -245,7 +245,7 @@ message WireSchema {
 }
 
 // ===========================================================================
-// ScalarValue — `komira_core.plan.scalar_value.ScalarValue`
+// ScalarValue — `komira_plan_expr.scalar_value.ScalarValue`
 // ===========================================================================
 
 // TOTAL, for the same reason `WireField` is: 18 `var`s, 18 slots. The struct
@@ -368,7 +368,7 @@ message WirePushdownGate {
   bool require_stat_friendly_col = 5;
 }
 
-// `komira_core.source.scan_binding.ScanBinding` MINUS `handle` and
+// `komira_scan_source.scan_binding.ScanBinding` MINUS `handle` and
 // `registry_epoch` — see the header. Everything else is pure data by
 // construction; that is the entire point of the type.
 message WireScanBinding {
@@ -419,7 +419,7 @@ message WireScanBinding {
   bool has_stats = 15;
 }
 
-// `komira_core.source.parquet_source.ParquetSource`.
+// `komira_scan_source.parquet_source.ParquetSource`.
 //
 // `mtime_ns` IS on the wire. The vocabulary marks SOURCE_VARIANT_PARQUET
 // EXEMPT because an mtime is environment-local — that is a statement about
@@ -974,7 +974,7 @@ message WireJsonExtract {
 // ONCE here for that reason: two frame messages would be two places for the
 // five bounds to drift apart.
 
-// `komira_core.plan.partition_expr.PartitionFrame`, all five `var`s.
+// `komira_plan_expr.partition_expr.PartitionFrame`, all five `var`s.
 //
 // ⚠ NOT ONE OF THESE FIVE REACHES ANY RENDER, ON ANY ARM, AT ANY VALUE.
 // `Expr.write_to`'s WINDOW_FN arm prints `func`, `col`, `offset` and the two
@@ -1004,7 +1004,7 @@ message WireFrame {
   int64 end_offset = 5;
 }
 
-// `komira_core.plan.expr.WindowFnData`, all seven `var`s.
+// `komira_plan_expr.expr.WindowFnData`, all seven `var`s.
 message WireWindowFn {
   // ⚠ THE SPARSEST TAG SPACE IN THE FORMAT AFTER ExtractField: three disjoint
   // runs, 0..5 (ranking), 10..14 (offset), 20..24 (aggregate), with 6..9 and
@@ -1163,7 +1163,7 @@ message WireUdfColumn {
   uint32 dtype_tag = 2;
 }
 
-// `komira_core.plan.udf_data.UdfData` MINUS `registered_handle_id` and MINUS
+// `komira_plan_expr.udf_data.UdfData` MINUS `registered_handle_id` and MINUS
 // `is_restartable` — the same shape, and for the same two reasons, as
 // `WireScanBinding` is `ScanBinding` minus `handle`/`registry_epoch`.
 //
@@ -1307,7 +1307,7 @@ message WireUnionNode {
   repeated WirePlan children = 1;
 }
 
-// `komira_core.plan.partition_expr.PartitionExpr`, all seven `var`s.
+// `komira_plan_expr.partition_expr.PartitionExpr`, all seven `var`s.
 //
 // ⚠ NO RENDER DESCENDS INTO ONE OF THESE. `plan_display`'s PartitionBy arm
 // prints the partition keys, the order keys, and `<n> funcs` — a COUNT. So
@@ -1394,7 +1394,7 @@ message WirePartitionTopNNode {
   WirePlan child = 9;
 }
 
-// `komira_core.plan.logical_plan.AsofTolerance`, all THREE `var`s.
+// `komira_plan_ir.logical_plan.AsofTolerance`, all THREE `var`s.
 //
 // ⚠ THE RENDER PRINTS THE KIND AND NEVER THE NUMBER, AND OMITS THE WHOLE
 // THING AT `NONE`. `plan_display`'s AsofJoin arm is
@@ -1417,7 +1417,7 @@ message WireAsofTolerance {
   double float_val = 3;
 }
 
-// `komira_core.plan.logical_plan_variants.AsofJoinData`, all twelve `var`s.
+// `komira_plan_ir.logical_plan_variants.AsofJoinData`, all twelve `var`s.
 //
 // ⚠ THE FOUR PRE-SORT HINT LISTS REACH NO RENDER AT ANY VALUE. `plan_display`
 // prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…]<, tolerance=…>)` and stops —
@@ -1449,7 +1449,7 @@ message WireAsofJoinNode {
   WirePlan right = 12;
 }
 
-// `komira_core.plan.logical_plan_variants.ViewRefData` — ONE of its two
+// `komira_plan_ir.logical_plan_variants.ViewRefData` — ONE of its two
 // `var`s. The other is `output_schema`, and it is DELIBERATELY ABSENT.
 //
 // ★ THERE IS NO SECOND SCHEMA HERE, BECAUSE IT WOULD BE UNOBSERVABLE.
@@ -1481,7 +1481,7 @@ message WireViewRefNode {
   string view_name = 1;
 }
 
-// `komira_core.plan.logical_plan_variants.CseRefData` — ONE of its two
+// `komira_plan_ir.logical_plan_variants.CseRefData` — ONE of its two
 // `var`s, for the same reason as WireViewRefNode above:
 // `LogicalPlan.cse_ref` copies its one schema argument into both slots, so a
 // duplicate on the wire could not be made to fail, and it is derived at decode
@@ -1497,7 +1497,7 @@ message WireCseRefNode {
   uint64 canonical_hash = 1;
 }
 
-// `komira_core.plan.logical_plan_variants.CastToVarcharData` — one `var`.
+// `komira_plan_ir.logical_plan_variants.CastToVarcharData` — one `var`.
 //
 // ⚠ THE RENDER IS FIFTEEN CHARACTERS AND CARRIES NO FIELD: `CastToVarchar()`.
 // That is honest here — the node HAS no field but its child — but the node's
@@ -1575,7 +1575,7 @@ message WirePlan {
 }
 
 // ===========================================================================
-// ★ WHERE THE ROWS GO — `komira_core.arrow.write_target.WriteTarget`
+// ★ WHERE THE ROWS GO — `komira_arrow.write_target.WriteTarget`
 // ===========================================================================
 
 // A DESTINATION. `COPY <query> TO '<path>' (FORMAT …, COMPRESSION …)`, and

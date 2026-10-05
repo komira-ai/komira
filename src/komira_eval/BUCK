@@ -11,12 +11,19 @@ mojo_library(
     deps = [
         # Imported only by tests/test_adaptive_filter_convergence.mojo;
         # mojo_library has no test-only dep attribute, so it is listed here.
+        "//src/komira_arrow:komira_arrow",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_agg:komira_agg",
-        "//src/komira_core:komira_core",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
         "//src/komira_expr:komira_expr",
         "//src/komira_kernels:komira_kernels",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_row_format:komira_row_format",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_simd:komira_simd",
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [

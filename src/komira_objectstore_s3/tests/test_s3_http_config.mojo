@@ -28,8 +28,8 @@ from std.testing import assert_equal, assert_raises, assert_true
 from std.time import perf_counter_ns
 
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_objectstore.path import Path

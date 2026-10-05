@@ -4,14 +4,18 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import PrimitiveArray, Bitmap, Schema, Field, RecordBatch
-from komira_core.eval import eval_gt, eval_add, SelectionVector
-from komira_core.eval import eval_lt, eval_eq, filter_to_indices
-from komira_core.eval import eval_sub, eval_mul, eval_div
-from komira_core.eval import eval_add_scalar, eval_mul_scalar
-from komira_core.eval import eval_and, eval_or, eval_not
-from komira_core.eval import eval_cast, bitmap_and, eval_gt_nullable
-from komira_core.eval import eval_is_null, eval_is_not_null
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.schema import Schema, Field, RecordBatch
+from komira_column_kernels.comparison import eval_gt
+from komira_column_kernels.arithmetic import eval_add
+from komira_arrow.selection_vector import SelectionVector
+from komira_column_kernels.comparison import eval_lt, eval_eq, filter_to_indices
+from komira_column_kernels.arithmetic import eval_sub, eval_mul, eval_div
+from komira_column_kernels.arithmetic import eval_add_scalar, eval_mul_scalar
+from komira_column_kernels.arithmetic import eval_and, eval_or, eval_not
+from komira_column_kernels.cast_null import eval_cast, bitmap_and, eval_gt_nullable
+from komira_column_kernels.cast_null import eval_is_null, eval_is_not_null
 
 
 def test_primitive_array_allocate() raises:

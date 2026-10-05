@@ -24,7 +24,7 @@ mojo_library(
     name = "kci_reconciler",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
         "//src/komira_log:komira_log",
     ],
     test_srcs = [

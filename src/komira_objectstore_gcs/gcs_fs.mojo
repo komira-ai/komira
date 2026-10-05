@@ -37,11 +37,11 @@ from komira_fs.footer_region import FooterRegion, speculative_tail_start
 # every object-store FileSystem shares, and a copy here could drift from it.
 from komira_fs.shallow_dir_entry import ShallowDirEntry, _shallow_basename
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
-from komira_core.plan.fs_descriptor_pod import FS_SCHEME_GCS
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
+from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_GCS
 
 from .backend import GCS_LIST_MAX_PAGES, GcsStorageBackend
 

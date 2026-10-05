@@ -38,11 +38,11 @@
 # Precedent: the EXPR_STRUCT_FIELD / EXPR_MAP_GET column evaluators.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.column import Column
-from komira_core.arrow.string_array import StringArray
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.column import Column
+from komira_arrow.string_array import StringArray
+from komira_buffer.heap_region import HeapRegion
 
 from komira_jsonl.simd_primitives import (
     TAG_OPEN_BRACE,

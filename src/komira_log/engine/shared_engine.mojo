@@ -67,7 +67,7 @@ from komira_atomic_alias import AtomicI64, AtomicU8
 from std.builtin.swap import swap
 from std.memory import alloc, UnsafePointer, OwnedPointer
 
-from komira_core.collections import Slab
+from komira_collections.slab import Slab
 
 from komira_spsc_ring.spsc_ring import (
     DEFAULT_RING_CAPACITY,

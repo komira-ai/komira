@@ -15,7 +15,7 @@ Record-level codec:
 
   3. `decode.parse_record[T: JsonCompatible](bytes: Span[UInt8, _]) -> T`
      — per-line parser. The structural-character scan uses the
-     `hadd_u8x16` primitive (`komira_core.simd.horizontal_add`, a direct
+     `hadd_u8x16` primitive (`komira_simd.horizontal_add`, a direct
      `llvm.aarch64.neon.uaddv` intrinsic).
 
 Columnar reading and writing: the SIMD structural index

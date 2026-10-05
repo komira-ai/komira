@@ -94,7 +94,7 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_client.client import HttpClient, build_get_request
 from komira_http_client.header_map import HeaderMap

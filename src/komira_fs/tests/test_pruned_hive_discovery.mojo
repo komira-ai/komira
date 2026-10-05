@@ -20,7 +20,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 from komira_fs.file_discovery import GlobDiscoveryOptions
 from komira_fs.partition_codec import (
     encode_partition_value,

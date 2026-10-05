@@ -99,7 +99,7 @@ comptime SITE_RADIX_UNTYPED_COMBINE: UInt32 = 39  # radix_hash_agg_untyped parti
 
 
 # -----------------------------------------------------------------------------
-# ids 40-42, DECLARED IN `komira_core.runtime_traits.sched_sites` and
+# ids 40-42, DECLARED IN `komira_async_api.sched_sites` and
 # re-exported here so the registry stays one ordered list.
 #
 # `gather_batch` (stage 4 of every ORDER BY, plus filter / join-output assembly)
@@ -108,7 +108,7 @@ comptime SITE_RADIX_UNTYPED_COMBINE: UInt32 = 39  # radix_hash_agg_untyped parti
 # visible in this file and so async-side readers (the tests, the dump) can use
 # the same names. Every one MUST mirror `_sched_site_name` in `_posix_shim.c`.
 # -----------------------------------------------------------------------------
-from komira_core.runtime_traits.sched_sites import (
+from komira_async_api.sched_sites import (
     SITE_GATHER_FIXEDWIDTH,
     SITE_GATHER_STR_LEN,
     SITE_GATHER_STR_SCATTER,

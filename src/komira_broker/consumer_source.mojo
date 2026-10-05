@@ -73,9 +73,9 @@
 #     substrate). The consumer is a stack value, not a byte-slab element.
 # =============================================================================
 
-from komira_core.arrow.schema import Schema
-from komira_core.collections.slab import Slab
-from komira_core.plan.expr import Expr
+from komira_arrow.schema import Schema
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import Expr
 
 from komira_objectstore.cas_manifest import CasManifestStore
 from komira_objectstore.store import ConditionalWriteStore

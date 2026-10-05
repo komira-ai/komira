@@ -33,14 +33,14 @@
 # value and is moved by `^` across the package boundary.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.collections.slab import Slab
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import Schema
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_collections.slab import Slab
 
 from komira_row_format.row_block import (
     RowBlock,

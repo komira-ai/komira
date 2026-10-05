@@ -48,8 +48,8 @@
 #     structs; it is never stored in a byte-backed slab.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.plan.expr import (
+from komira_arrow.record_batch import RecordBatch
+from komira_plan_expr.expr import (
     Expr,
     EXPR_BINARY_OP,
     EXPR_COL_REF,
@@ -64,7 +64,7 @@ from komira_core.plan.expr import (
     BIN_GE,
     COL_SIDE_NONE,
 )
-from komira_core.plan.scalar_value import ScalarValue
+from komira_plan_expr.scalar_value import ScalarValue
 
 from komira_search.analyzer import (
     AnalyzerConfig,

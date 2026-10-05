@@ -52,16 +52,16 @@
 # lives in the HIGHER package komira_search_scan, NOT here.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from std.memory import ArcPointer
 
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.arrow.string_array import StringArray
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.string_array import StringArray
 from std.builtin.swap import swap
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     EXPR_BINARY_OP,
     EXPR_COL_REF,
@@ -75,7 +75,7 @@ from komira_core.plan.expr import (
     BIN_GT,
     BIN_GE,
 )
-from komira_core.plan.scalar_value import (
+from komira_plan_expr.scalar_value import (
     ScalarValue,
     SCALAR_KIND_DATE32,
     SCALAR_KIND_TIMESTAMP,

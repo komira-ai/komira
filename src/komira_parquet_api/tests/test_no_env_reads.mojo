@@ -36,7 +36,7 @@ def test_no_environment_read() raises:
         "_read_env",
         "std.os",
         "external_call",
-        "komira_core_ffi",
+        "komira_libc",
         "from komira",
         "import komira",
         "UnsafePointer",

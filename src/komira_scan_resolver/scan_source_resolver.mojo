@@ -2,7 +2,7 @@
 # ScanSourceResolver: the execution-time scan-kind contract (tier 2).
 # =============================================================================
 #
-# THE TWO TIERS. `komira_core/source/scan_resolver.mojo` is tier 1: identity
+# THE TWO TIERS. `komira_scan_source/scan_resolver.mojo` is tier 1: identity
 # and freshness (`epoch`, `is_bound`, `resolve_snapshot`), the only questions
 # core can spell. Tier 2 (here) adds what a KIND owns and core must never learn:
 #
@@ -46,18 +46,18 @@
 # borrows the resolver set. The mutable cursor of a read belongs to the READER
 # (`SplitReader.poll(mut self, ...)`), which the caller owns. A kind whose
 # shared store needs `mut` (a reader cache) holds it behind an `ArcPointer`,
-# the same shape as `ScanRegistry` in `komira_core/source/scan_registry.mojo`.
+# the same shape as `ScanRegistry` in `komira_scan_source/scan_registry.mojo`.
 # =============================================================================
 
 from std.memory import ArcPointer, OwnedPointer, UnsafePointer, alloc
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.collections.slab import Slab
-from komira_core.plan.expr import Expr
-from komira_core.source.scan_binding import ScanBinding
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_resolver import ScanResolver
+from komira_arrow.record_batch import RecordBatch
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import Expr
+from komira_scan_source.scan_binding import ScanBinding
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_resolver import ScanResolver
 from komira_scan_resolver.scan_split import (
     DrainedSplit,
     ErasedSplitReader,

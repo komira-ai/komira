@@ -42,7 +42,7 @@ from std.sys.info import CompilationTarget
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_async.ops.waker_sink import NoopSink, WakerSink
 from komira_async.reactor.reactor import (

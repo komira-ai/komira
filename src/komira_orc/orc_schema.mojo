@@ -28,7 +28,7 @@
 # ArrowType, raised errors). No UnsafePointer crosses any module boundary.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 from .footer import OrcRawType
 

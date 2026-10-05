@@ -31,25 +31,25 @@
 #   * Reader returned by-value (Movable; caller stores in Slab).
 # =============================================================================
 
-from komira_core.arrow import Schema, RecordBatch
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema, RecordBatch
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.arrow_types import ArrowType
 
 from komira_fs.byte_range import ByteRange
 from komira_fs.file_system import FileSystem
 
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
-from komira_core.plan.expr import Expr
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
+from komira_plan_expr.expr import Expr
 
 # LAYERING CUT: `komira_scan_planning` does not name
 # `komira_morsel.HashAggDecodedRG`. The trait's fused-hash-agg return type is
 # now an associated type bounded by `HashAggDecodedLike` below, whose method
 # signatures name only `komira_core` / `komira_collections` types. See that
 # trait's docstring for why.
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.collections.slab import Slab
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_collections.slab import Slab
 
 
 trait FilterPayloadResultLike(Movable, Deinitable):

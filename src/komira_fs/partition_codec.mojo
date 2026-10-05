@@ -40,8 +40,8 @@
 # parse("__HIVE_DEFAULT_PARTITION__") -> "".  The round-trip holds both ways.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field
 
 
 # =============================================================================
@@ -178,7 +178,7 @@ def _url_unescape(segment: String) raises -> String:
             out.append(b)
             i += 1
     # LENGTH-EXPLICIT byte-exact materialization — the in-tree spelling
-    # (`komira_core/collections/string_column_view.mojo:145`); NOT
+    # (`komira_arrow/string_column_view.mojo:145`); NOT
     # `String(unsafe_from_utf8_ptr=)`, which stops at the first NUL.
     return String(StringSlice(unsafe_from_utf8=Span(out)))
 

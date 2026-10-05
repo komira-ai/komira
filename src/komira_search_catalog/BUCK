@@ -24,7 +24,7 @@ mojo_library(
     name = "komira_search_catalog",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
         "//src/komira_objectstore:komira_objectstore",
     ],
     test_srcs = [

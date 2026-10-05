@@ -22,7 +22,7 @@
 # =============================================================================
 
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 
 # =============================================================================

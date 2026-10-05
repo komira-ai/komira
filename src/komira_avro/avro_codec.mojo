@@ -51,7 +51,7 @@ from .ocf_header import (
 
 
 # =============================================================================
-# FFI buffer-coercion helpers (like komira_core.arrow.compression_codecs).
+# FFI buffer-coercion helpers (like komira_compression.compression_codecs).
 # =============================================================================
 #
 # The compress / decompress helpers pass the input Span pointer DIRECTLY to

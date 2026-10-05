@@ -24,7 +24,7 @@
 #   * ZERO wildcard origins.
 # =============================================================================
 
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.reactor import Reactor

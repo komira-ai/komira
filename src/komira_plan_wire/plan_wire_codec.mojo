@@ -456,14 +456,14 @@ from komira_plan_proto.plan_vocabulary import (
     WriteFormat,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections import Slab
-from komira_core.dtype_sentinel import DTYPE_NONE
-from komira_core.plan.agg_expr import AggExpr
-from komira_core.plan.expr import Expr, WhenCaseData
-from komira_core.plan.partition_pred_pod import PartitionPredicatePod
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_collections.slab import Slab
+from komira_arrow.dtype_sentinel import DTYPE_NONE
+from komira_plan_expr.agg_expr import AggExpr
+from komira_plan_expr.expr import Expr, WhenCaseData
+from komira_plan_expr.partition_pred_pod import PartitionPredicatePod
+from komira_plan_expr.expr import (
     COL_SIDE_NONE,
     COL_SIDE_LEFT,
     COL_SIDE_RIGHT,
@@ -499,8 +499,8 @@ from komira_core.plan.expr import (
     EXPR_JSON_EXTRACT,
     EXPR_WINDOW_FN,
 )
-from komira_core.plan.partition_expr import PartitionExpr, PartitionFrame
-from komira_core.plan.logical_plan import (
+from komira_plan_expr.partition_expr import PartitionExpr, PartitionFrame
+from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
     AggExprArray,
@@ -523,10 +523,10 @@ from komira_core.plan.logical_plan import (
     AsofTolerance,
     CORR_KIND_IN_CORRELATED,
 )
-from komira_core.plan.corr_subquery import corr_subq_inner_plan_ref
-from komira_core.plan.logical_plan_variants import UnionData
-from komira_core.plan.udf_data import UdfData
-from komira_core.plan.plan_wire_vocabulary import (
+from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
+from komira_plan_ir.logical_plan_variants import UnionData
+from komira_plan_expr.udf_data import UdfData
+from komira_plan_wire.plan_wire_vocabulary import (
     agg_fn_to_wire,
     agg_fn_from_wire,
     arrow_type_is_declared,
@@ -591,7 +591,7 @@ from komira_core.plan.plan_wire_vocabulary import (
     pushdown_gate_mode_from_wire,
     snapshot_policy_to_wire,
     snapshot_policy_from_wire,
-    # THE WRITE ENVELOPE. Declared in `komira_core/arrow/write_target.mojo` —
+    # THE WRITE ENVELOPE. Declared in `komira_arrow/write_target.mojo` —
     # DOWN in core rather than in the SQL frontend, because a wire vocabulary
     # outside this codec's `komira_core` import closure is one a vocabulary
     # completeness check over core structurally cannot see.
@@ -600,7 +600,7 @@ from komira_core.plan.plan_wire_vocabulary import (
     write_compression_to_wire,
     write_compression_from_wire,
 )
-from komira_core.arrow.write_target import WriteTarget, write_target_supported
+from komira_arrow.write_target import WriteTarget, write_target_supported
 
 # ★ THE STRUCTURAL REFUSALS. Everything below in this file is a PER-FIELD
 # refusal on a value a successful parse produced; `plan_wire_admit` is the
@@ -635,15 +635,15 @@ from .plan_wire_values import (
     PLAN_WIRE_NEGATIVE_COUNT,
     PLAN_WIRE_UNCHECKED_VALUE_SITE,
 )
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     SCAN_LEGACY_SOURCE_TYPE_NONE,
 )
-from komira_core.source.scan_params import ParamValue, ScanParams, PARAM_STR, PARAM_I64, PARAM_U64, PARAM_F64, PARAM_BOOL, PARAM_BYTES
-from komira_core.source.parquet_source import ParquetSource
-from komira_core.source.source_variant import (
+from komira_scan_source.scan_params import ParamValue, ScanParams, PARAM_STR, PARAM_I64, PARAM_U64, PARAM_F64, PARAM_BOOL, PARAM_BYTES
+from komira_scan_source.parquet_source import ParquetSource
+from komira_scan_source.source_variant import (
     SourceVariant,
     SOURCE_VARIANT_PARQUET,
     SOURCE_VARIANT_IN_MEMORY,

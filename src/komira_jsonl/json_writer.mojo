@@ -48,17 +48,17 @@
 from std.bit import count_trailing_zeros
 from std.memory import bitcast
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.large_string_array import LargeStringArray
-from komira_core.arrow.string_array import StringArray
-from komira_core.simd.byte_class.byte_find_any_of import byte_find_eq_2_u8x16
-from komira_core.simd.byte_class.byte_mask_ops import bytemask_or
-from komira_core.simd.byte_class.comparisons import byte_lt
-from komira_core.simd.byte_class.movemask import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.large_string_array import LargeStringArray
+from komira_arrow.string_array import StringArray
+from komira_simd.byte_class.byte_find_any_of import byte_find_eq_2_u8x16
+from komira_simd.byte_class.byte_mask_ops import bytemask_or
+from komira_simd.byte_class.comparisons import byte_lt
+from komira_simd.byte_class.movemask import (
     bool_vec_to_uint_u8x16,
     movemask_to_uint_u8x16,
 )

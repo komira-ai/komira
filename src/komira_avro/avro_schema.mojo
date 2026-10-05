@@ -23,7 +23,7 @@
 # module boundary. Internal storage uses owned List/String only.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 
 # =============================================================================

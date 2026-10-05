@@ -5,13 +5,14 @@
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 
-from komira_core.arrow import PrimitiveArray, BooleanArray
-from komira_core.eval import eval_add, eval_sub, eval_mul, eval_div
-from komira_core.eval import eval_add_scalar, eval_mul_scalar
-from komira_core.eval import eval_and, eval_or, eval_not
-from komira_core.eval import filtered_sum
-from komira_core.eval.arithmetic import eval_revenue_sum, eval_filtered_revenue_sum
-from komira_core.arrow.bitmap import Bitmap
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_column_kernels.arithmetic import eval_add, eval_sub, eval_mul, eval_div
+from komira_column_kernels.arithmetic import eval_add_scalar, eval_mul_scalar
+from komira_column_kernels.arithmetic import eval_and, eval_or, eval_not
+from komira_column_kernels.arithmetic import filtered_sum
+from komira_column_kernels.arithmetic import eval_revenue_sum, eval_filtered_revenue_sum
+from komira_arrow.bitmap import Bitmap
 
 
 # =============================================================================
