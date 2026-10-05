@@ -29,8 +29,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_snappy_exact_dst: both snappy decoders into a destination with less
 #   than kSlopBytes of room past the decoded length, sentinel-guarded, and a
 #   blob declaring more than the destination holds; hand-built blobs that
-#   put each single 16-byte store of the Mojo decoder at every distance from
-#   the end of an exact-size destination.
+#   put each of the Mojo decoder's four single 16-byte stores at every
+#   distance from the end of an exact-size destination.
 # - test_snappy_fuzz: a seeded differential fuzz of both snappy decoders
 #   (structured tag streams, random bytes, every prefix and single-byte
 #   corruptions of a valid stream), sentinel-guarded on both sides of the

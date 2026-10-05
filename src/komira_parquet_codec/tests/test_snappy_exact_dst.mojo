@@ -15,15 +15,17 @@
 #   than the destination holds is refused by both decoders before any byte
 #   is written.
 # - test_short_literal_store_exact_dst, test_short_copy2_store_exact_dst,
-#   test_apply_copy_store_exact_dst: hand-built blobs that put a short
-#   literal, a short copy-2 (offset >= 16) or a non-overlapping copy of at
-#   most 16 bytes at every distance from the end of the output. Each of those
-#   tags has a single 16-byte store that is legal only with room for it, so
-#   each blob is decoded into every capacity from the exact size to past the
-#   slop, the sentinel after it must be untouched and the Mojo output must
-#   equal the C library's. The tails are offset-1 copies of length 2, which
-#   both decoders write exactly, so any overshoot comes from the tag under
-#   test. The C compressor seldom emits these shapes near the end of a blob.
+#   test_copy1_fast_store_exact_dst, test_apply_copy_store_exact_dst:
+#   hand-built blobs that put a short literal, a short copy-2 (offset >= 16),
+#   a copy-1 with offset >= 16 or a non-overlapping copy of at most 16 bytes
+#   at every distance from the end of the output. Those are the four sites
+#   where the Mojo decoder does a single 16-byte store, each legal only with
+#   room for it, so each blob is decoded into every capacity from the exact
+#   size to past the slop, the sentinel after it must be untouched and the
+#   Mojo output must equal the C library's. The tails are offset-1 copies of
+#   length 2, which both decoders write exactly, so any overshoot comes from
+#   the tag under test. The C compressor seldom emits these shapes near the
+#   end of a blob.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -60,15 +62,29 @@ def _clobbered_past(buf: List[UInt8], cap: Int) -> Int:
     return n
 
 
+def _decode[
+    o: MutOrigin
+](decoder: SnappyDecoder, blob: List[UInt8], dst: Span[UInt8, o]) raises -> Int:
+    """Decode `blob` into `dst` with `decoder`. The process-wide decoder is
+    reset to the C library whether or not the decode raises, so a failure
+    here cannot leave a later test comparing the Mojo decoder with itself."""
+    set_snappy_decoder(decoder)
+    try:
+        var n = snappy_decompress(Span(blob), dst)
+        set_snappy_decoder(SnappyDecoder.C_LIBRARY)
+        return n
+    except e:
+        set_snappy_decoder(SnappyDecoder.C_LIBRARY)
+        raise e^
+
+
 def _canary_check(blob: List[UInt8], want_len: Int) raises:
     """Decode `blob` with each decoder into an exact-size window; the sentinel
     bytes after it must be untouched."""
     for d in range(2):
         var decoder = _decoder(d)
         var buf = _guarded(want_len)
-        set_snappy_decoder(decoder)
-        var n = snappy_decompress(Span(blob), Span(buf)[0:want_len])
-        set_snappy_decoder(SnappyDecoder.C_LIBRARY)
+        var n = _decode(decoder, blob, Span(buf)[0:want_len])
         assert_equal(n, want_len, String(decoder) + ": length")
         assert_equal(
             _clobbered_past(buf, want_len),
@@ -150,9 +166,7 @@ def test_every_room_short_of_the_slop() raises:
                         + String(shape) + " room=" + String(room)
                     )
                     var buf = _guarded(cap)
-                    set_snappy_decoder(decoder)
-                    var got = snappy_decompress(Span(blob), Span(buf)[0:cap])
-                    set_snappy_decoder(SnappyDecoder.C_LIBRARY)
+                    var got = _decode(decoder, blob, Span(buf)[0:cap])
                     assert_equal(got, n, where + ": length")
                     assert_equal(
                         _clobbered_past(buf, cap),
@@ -182,12 +196,10 @@ def test_declared_length_larger_than_dst() raises:
             # bytes and its overshoot, so the guard covers all of it.
             var buf = _guarded(cap, n + _GUARD)
             var refused = False
-            set_snappy_decoder(decoder)
             try:
-                _ = snappy_decompress(Span(blob), Span(buf)[0:cap])
+                _ = _decode(decoder, blob, Span(buf)[0:cap])
             except:
                 refused = True
-            set_snappy_decoder(SnappyDecoder.C_LIBRARY)
             assert_equal(
                 _clobbered_past(buf, cap),
                 0,
@@ -252,12 +264,10 @@ def _every_room_matches_c(blob: List[UInt8], n: Int, what: String) raises:
         var cap = n + room
         var where = what + " room=" + String(room)
         var c_buf = _guarded(cap)
-        var c_n = snappy_decompress(Span(blob), Span(c_buf)[0:cap])
+        var c_n = _decode(SnappyDecoder.C_LIBRARY, blob, Span(c_buf)[0:cap])
         assert_equal(c_n, n, where + ": C length")
         var m_buf = _guarded(cap)
-        set_snappy_decoder(SnappyDecoder.MOJO)
-        var m_n = snappy_decompress(Span(blob), Span(m_buf)[0:cap])
-        set_snappy_decoder(SnappyDecoder.C_LIBRARY)
+        var m_n = _decode(SnappyDecoder.MOJO, blob, Span(m_buf)[0:cap])
         assert_equal(m_n, n, where + ": Mojo length")
         assert_equal(
             _clobbered_past(m_buf, cap),
@@ -321,12 +331,33 @@ def test_short_copy2_store_exact_dst() raises:
                 )
 
 
+def test_copy1_fast_store_exact_dst() raises:
+    # A literal of 16..20 bytes + a copy-1 of 4..11 bytes at offset 16..lit
+    # + `tail` RLE tags. With room, the copy-1 fast path stores 16 bytes from
+    # op - offset; the source window ends at or before op, so every byte the
+    # store would put past the output is a literal byte, never the sentinel.
+    for lit in range(16, 21):
+        for length in range(4, 12):
+            for tail in range(9):
+                var body = List[UInt8]()
+                _literal(body, lit, 5)
+                _copy1(body, length, 16 + (lit + length) % (lit - 15))
+                _rle_tail(body, tail)
+                var n = lit + length + 2 * tail
+                _every_room_matches_c(
+                    _blob(n, body),
+                    n,
+                    "copy-1 fast lit=" + String(lit) + " len="
+                    + String(length) + " tail=" + String(tail),
+                )
+
+
 def test_apply_copy_store_exact_dst() raises:
     # A literal of 4..15 bytes + a copy-1 of 4..11 bytes at offset lit (>=
     # length, so no overlap; < 16, so off the copy-1 fast path at any room) +
     # `tail` RLE tags. These reach _apply_copy's single 16-byte store, which
     # is legal only when 16 bytes fit before the decoded length. (Without
-    # slop the short copy-2 blobs above reach it too.)
+    # slop the short copy-2 and copy-1 fast-path blobs above reach it too.)
     for lit in range(4, 16):
         for length in range(4, 12):
             if length > lit:
