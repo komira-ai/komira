@@ -36,6 +36,7 @@ def test_the_field_names_are_the_golden_list() raises:
     want.append(String("validation.compiler_channel"))
     want.append(String("validation.extra_channel"))
     want.append(String("validation.program"))
+    want.append(String("validation.smoke"))
     want.append(String("validation.wait_for_index_seconds"))
     assert_equal(len(got), len(want))
     for i in range(len(want)):

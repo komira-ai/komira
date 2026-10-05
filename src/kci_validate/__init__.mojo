@@ -24,9 +24,13 @@
 #   readme_installed.mojo     an installed README as the program it runs,
 #                             byte-equal to the welded SOURCE-mode program
 #   request.mojo              `ValidateRequest`, `ContainerHost`; the release
-#                             and the pins, read the PUBLISH step's way
+#                             and the pins, read the PUBLISH step's way; a
+#                             metapackage's members from its own depends
 #   channel_index.mojo        check 1: the index lists and serves the bytes
 #                             the build made, with the wait for the index
+#   file_channel.mojo         a LOCAL channel (`file:///<dir>`, kci run
+#                             --channel): check 1's reads answered from a
+#                             directory, every other read over HTTPS
 #   container.mojo            the scratch layout, pixi.toml, the script and
 #                             the exact `docker` command lines
 #   readback.mojo             checks 2 to 4: records, payloads, the count
@@ -41,6 +45,7 @@
 
 from kci_validate.channel_index import (
     CHECK_CHANNEL,
+    FILE_CHANNEL_PREFIX,
     WAIT_POLL_SECONDS,
     ChannelUrl,
     IndexPollLog,
@@ -50,6 +55,7 @@ from kci_validate.channel_index import (
     poll_line,
 )
 from kci_validate.conda_install_env import run_install_env
+from kci_validate.file_channel import FileChannelTransport
 from kci_validate.conda_install_smoke import run_install_smoke
 from kci_validate.env import (
     AUTH_FILE_TEXT,
@@ -88,6 +94,8 @@ from kci_validate.request import (
     ValidateRequest,
     install_pins,
     load_validated_release,
+    metapackage_members,
     mojo_pin_of,
     readme_doc_path,
+    with_members,
 )

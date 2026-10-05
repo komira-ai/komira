@@ -26,7 +26,10 @@
 #                     kci_validate.run_install_env, the same runner,
 #                     transport, sleeper and poll log; pixi (--pixi, checked against
 #                     --pixi-sha256) gets an environment built from nothing,
-#                     and pixi's system config directory is /etc/pixi.
+#                     and pixi's system config directory is /etc/pixi;
+#                     the transport is `FileChannelTransport` over the
+#                     HTTPS one, so a --channel file:/// directory is read
+#                     from the disk and every host over HTTPS.
 #   lookahead      -> kci_publish.lookahead_new_names_https: a later stage's
 #                     NEW NAMES, anonymous reads over HTTPS.
 #   platform_env   -> this process's environment, for the platform-set
@@ -78,6 +81,7 @@ from kci_validate import (
     PIXI_SYSTEM_CONFIG_DIR,
     ContainerHost,
     EnvHost,
+    FileChannelTransport,
     StderrIndexPollLog,
     ValidateRequest,
     run_install_env,
@@ -274,7 +278,8 @@ struct LibrarySteps(StageSteps, Movable):
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
         if req.validation.kind == VALIDATION_KIND_CONDA_INSTALL_ENV:
             var env_runner = SupervisorRunner()
-            var env_transport = HttpPkgTransport[_Conn](_mk_connector)
+            # a host-less read is a local channel's file (--channel), the rest HTTPS
+            var env_transport = FileChannelTransport(HttpPkgTransport[_Conn](_mk_connector))
             var env_sleeper = UsleepSleeper()
             var env_log = StderrIndexPollLog()
             try:

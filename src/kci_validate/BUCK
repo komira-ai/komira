@@ -17,7 +17,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # compiler's pin, nothing from an undeclared channel), each library's
 # installed payload, and the program's `N of N checks passed`. Every failure
 # is VALIDATION_FAILED (exit 7). Under --plan either kind runs nothing and
-# reports WOULD_VALIDATE.
+# reports WOULD_VALIDATE. Before publishing, an ENV validation can read and
+# install from a LOCAL channel instead (`file:///<dir>`, what `komira_pack
+# conda-index` writes; kci run --channel), through FileChannelTransport.
 #
 # The welded tests drive kci_build's ScriptedRunner as a fake docker (it
 # writes what the container would leave in the mount, and the exact argv is
@@ -57,7 +59,8 @@ mojo_library(
         # CONDA_INSTALL_ENV over a fake pixi: the pass; each channel,
         # install and program failure (no network is INDETERMINATE with a
         # skip_reason, a 401 is a FAIL); RunSpec.cwd is the scratch work dir;
-        # the checkout, system-config and README refusals
+        # the checkout, system-config and README refusals; a LOCAL file:///
+        # channel read from its directory, and the file transport's refusals
         "tests/test_conda_install_env.mojo",
         # the child's whole environment, the pixi argv, the manifest, and
         # the installed README's program byte-equal to SOURCE mode's, golden

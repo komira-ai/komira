@@ -161,6 +161,9 @@
 #   R12 every `kci run` passes `--summary-file` (the job summary carries the
 #       run's outcome and the NEW NAMES an approver reads before approving a
 #       later stage)
+#   R14 no `kci run` passes `--channel`: a local channel is a developer's
+#       pre-publish mode, and a workflow validates only what a stage published
+#       (kci also refuses the flag at run time under GitHub Actions)
 #   R13 to R19: continuous auto-promotion (auto_promotion.mojo's header):
 #       main-only stages carry `github.ref == 'refs/heads/main'` (R13), one
 #       canonical concurrency group (R14), the push filter with its
@@ -426,7 +429,7 @@ def _farm_connect_steps(doc: WorkflowDoc, job: Int) -> Int:
 def _check_calls_common(
     doc: WorkflowDoc, job_id: String, job: Int, calls: List[KciRunCall], machine_path: String, mut findings: List[String]
 ):
-    """R10 and R12, for every job."""
+    """R10, R12 and R14, for every job."""
     var where = _at(doc, job) + String("job '") + job_id + String("'")
     for i in range(len(calls)):
         ref call = calls[i]
@@ -434,6 +437,11 @@ def _check_calls_common(
             findings.append(
                 where + String(": R12: `kci run` passes no --summary-file; the job summary carries the outcome")
                 + String(" and the NEW NAMES an approver reads")
+            )
+        if call.has_channel:
+            findings.append(
+                where + String(": R14: `kci run` passes --channel; a workflow validates only what a stage")
+                + String(" published, never a local channel")
             )
         if call.has_machine:
             if _path(call.machine) != _path(machine_path):

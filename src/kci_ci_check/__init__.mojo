@@ -7,7 +7,8 @@
 #   workflow_reader.mojo  `read_workflow`: a FAIL-CLOSED reader of a strict
 #                         YAML subset (its header); anything else is
 #                         "cannot tell", never a pass
-#   rules.mojo            `check_workflow`: every disagreement (R1 to R19);
+#   rules.mojo            `check_workflow`: every disagreement (R1 to R12,
+#                         R14 to R22);
 #                         `check_running_workflow`: the start-up check `kci
 #                         run` makes; `id_token_stages`: which stages publish
 #                         by OIDC; `kci_run_calls`

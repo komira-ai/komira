@@ -11,7 +11,13 @@
 # (env.mojo) and what program runs (readme_installed.mojo):
 #
 #   0  release   the release of the step's platform, built from
-#                --revision-id; a pin for every install name
+#                --revision-id; a pin for every install name, then for
+#                every member of a named metapackage (request.mojo
+#                `with_members`: read from the built metapackage's own
+#                depends, at release.json's version and build, equal to
+#                the set's libraries). pixi.toml names ONLY the install
+#                names, so the solver must bring each member through the
+#                metapackage; every later check covers EVERY pin
 #   -  network   every declared host asked once (network.mojo): NONE
 #                answered is no network, the one case that is not a FAIL:
 #                outcome INDETERMINATE (exit 5, never a pass) with
@@ -32,8 +38,8 @@
 #                against metadata.json `doc_files`, made into
 #                <w>/readme_<import>.mojo; refused when there is none, when
 #                the bytes differ, or when it holds no example. No library
-#                among the installs is refused too (a metapackage's members
-#                are not expanded here, so it would run nothing)
+#                among the pins is refused too (a README that runs nothing
+#                is not a pass)
 #   3  payload   kci hashes each library's installed payload itself and
 #                writes out/payload.<name>, the record the container script
 #                wrote; then readback.mojo's check
@@ -50,6 +56,15 @@
 #
 # The row records `environment` ENV, `channel_url` (the step's channel
 # location) and `pixi_sha256` (the bytes kci ran through bin/pixi).
+#
+# A LOCAL CHANNEL (`channel_override`, kci run --channel file:///<dir>):
+# the same checks, with that location in place of the step's everywhere:
+# check 1 reads its index and files (through file_channel.mojo's
+# `FileChannelTransport`), pixi.toml names it, every record's `url` must be
+# under it, and the row's `channel_url` records it. It has no host, so the
+# network check asks only the compiler and extra channels. This validates a
+# release BEFORE it is published, from the directory `komira_pack
+# conda-index` writes; which runs may name one is kci_cli's.
 #
 # The seams: kci_build's `ProcessRunner` starts pixi (ScriptedRunner in the
 # welded tests, which plays pixi by writing what it would leave in <w>);
@@ -81,7 +96,7 @@ from kci_api import (
 from kci_pkg_upload import PkgTransport
 from kci_release_set.member import file_sha256_hex
 
-from .channel_index import IndexPollLog, check_channel
+from .channel_index import ChannelUrl, IndexPollLog, check_channel
 from .container import MANIFEST_NAME, install_manifest_text, join_path, payload_record_name, work_subdirs
 from .env import (
     AUTH_FILE,
@@ -101,7 +116,7 @@ from .env import (
 from .network import CHECK_NETWORK, answered_count, declared_hosts, describe_answers, probe_hosts
 from .readback import CHECK_INSTALL, check_installed, check_payloads, check_program, install_exited_zero, read_or_empty
 from .readme_installed import ReadmeProgram, installed_readme
-from .request import InstallPin, ValidateRequest, install_pins, load_validated_release, mojo_pin_of
+from .request import InstallPin, ValidateRequest, install_pins, load_validated_release, mojo_pin_of, with_members
 
 comptime CHECK_HOST: String = "host"
 comptime CHECK_SCRATCH: String = "scratch"
@@ -184,14 +199,26 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
     var checks = List[ResultValidationCheck]()
 
     # 0. the release, the channel's location, the pins
+    var named: List[InstallPin]
     var pins: List[InstallPin]
     var mojo_pin: String
     var channel_url: String
     try:
         var rel = load_validated_release(req)
-        pins = install_pins(rel.loaded, v.installs)
+        named = install_pins(rel.loaded, v.installs)
+        pins = with_members(rel.loaded, named)
         mojo_pin = mojo_pin_of(rel.loaded)
         channel_url = rel.channel_url.copy()
+        if req.channel_override.byte_length() > 0:
+            # the LOCAL channel of a validation-only run (the step's channel
+            # is still resolved above, so a step naming none is refused)
+            var local = ChannelUrl(req.channel_override)
+            if not local.is_local():
+                raise Error(
+                    String("--channel '") + req.channel_override
+                    + String("' is not a file:/// directory: only a local channel replaces the step's")
+                )
+            channel_url = local.url.copy()
     except e:
         checks.append(
             _row(
@@ -290,7 +317,7 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
                 makedirs(join_path(work, subs[i]), exist_ok=True)
             _write(
                 join_path(work, String(MANIFEST_NAME)),
-                install_manifest_text(v, channel_url, pins[0].subdir, pins, mojo_pin),
+                install_manifest_text(v, channel_url, named[0].subdir, named, mojo_pin),
             )
             _write(join_path(work, String(AUTH_FILE)), String(AUTH_FILE_TEXT))
         except e:

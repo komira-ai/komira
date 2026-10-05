@@ -9,10 +9,11 @@
 # right after `;` `&&` `||` `|` `then` `do` `else` `exec` `!`, or after a
 # word ending in `;`) whose last `/`-separated part is `kci`, followed by
 # the word `run`. So `echo "... kci run ..."` is not one. Its arguments run
-# to the end of the line or the next `;` `&&` `||` `|`; `--stage`,
-# `--machine`, `--only`, `--summary-file`, `--affected-by` and
-# `--release-set-hash` take the next word, or `=<v>`. A GitHub expression `${{ ... }}` is one word, whatever
-# spaces it holds.
+# to the end of the line or the next `;` `&&` `||` `|`, and are kept as
+# written (unquoted); `--stage`, `--machine`, `--only`, `--summary-file`,
+# `--affected-by` and `--release-set-hash` take the next word, or `=<v>`;
+# `--channel` is recorded wherever it stands. A GitHub expression
+# `${{ ... }}` is one word, whatever spaces it holds.
 #
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
@@ -69,11 +70,12 @@ def _is_kci(word: String) -> Bool:
 struct KciRunCall(Copyable, Movable):
     """One `kci run` found in a job: the `--stage` value ("" when absent),
     the `--machine` value (`has_machine` False when absent), whether it
-    carries any `--only` and each `--only` value as written (unquoted), and
-    whether it passes `--summary-file`, the `--affected-by` value
-    (`has_affected_by` False when absent) and the `--release-set-hash` value
-    as written, unquoted (`has_release_set_hash` False when absent).
-    Layout: owned Strings, a List of Strings and Bools. No pointer field."""
+    carries any `--only` and each `--only` value as written (unquoted),
+    whether it passes `--summary-file` and `--channel`, the `--affected-by`
+    value (`has_affected_by` False when absent), the `--release-set-hash`
+    value as written, unquoted (`has_release_set_hash` False when absent),
+    and every argument after `run` as written (unquoted).
+    Layout: owned Strings, Lists of Strings and Bools. No pointer field."""
 
     var stage: String
     var machine: String
@@ -85,6 +87,8 @@ struct KciRunCall(Copyable, Movable):
     var has_affected_by: Bool
     var release_set_hash: String
     var has_release_set_hash: Bool
+    var has_channel: Bool
+    var args: List[String]
 
     def __init__(out self, var stage: String):
         self.stage = stage^
@@ -97,6 +101,8 @@ struct KciRunCall(Copyable, Movable):
         self.has_affected_by = False
         self.release_set_hash = String("")
         self.has_release_set_hash = False
+        self.has_channel = False
+        self.args = List[String]()
 
 
 def _command_position(w: List[String], j: Int) -> Bool:
@@ -124,6 +130,7 @@ def kci_run_calls(script: String) -> List[KciRunCall]:
                 continue
             var args = _call_args(w, j + 2)
             var call = KciRunCall(String(""))
+            call.args = args.copy()
             var seen_stage = False
             var k = 0
             while k < len(args):
@@ -160,6 +167,8 @@ def kci_run_calls(script: String) -> List[KciRunCall]:
                     call.has_release_set_hash = True
                     if has_value:
                         call.release_set_hash = value.copy()
+                elif flag == String("--channel"):
+                    call.has_channel = True
                 k += 1
             out.append(call^)
     return out^

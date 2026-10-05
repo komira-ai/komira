@@ -45,7 +45,7 @@ mojo_library(
         # the subset as a table: every spelling found to read one way to kci
         # and another to GitHub ends in cannot tell or in the rule's finding
         "tests/test_workflow_subset.mojo",
-        # a fixture that agrees, one mutation per rule R1-R12, the id-token
+        # a fixture that agrees, one mutation per rule R1-R12 and R14, the id-token
         # stages, the start-up entry point
         "tests/test_ci_rules.mojo",
         # one stage split over jobs whose --only parts run all of it once
@@ -63,7 +63,9 @@ mojo_library(
         "tests/test_ci_auto_promotion.mojo",
     ],
     # The repository's own release workflow, machine file and channels file
-    # (the root BUCK and release/BUCK).
+    # (the root BUCK and release/BUCK), the pixi pin its validate job
+    # downloads (the platform table's, written by //tools/build/toolchains),
+    # and the validation targets' record (release/validations/BUCK).
     test_data = {
         "tests/test_ci_auto_promotion.mojo": {
             "channels.textproto": "//release:channels.textproto",
@@ -75,7 +77,8 @@ mojo_library(
             "kci.yml": "//:kci.yml",
             "machine.textproto": "//release:machine.textproto",
             "release_version.sh": "//tools/build/package:release_version.sh",
-            "smoke_komira_encoding.mojo": "//release/smoke:smoke_komira_encoding.mojo",
+            "pixi_pin.txt": "//tools/build/toolchains:pixi_pin_linux_x86_64",
+            "validations.txt": "//release/validations:names",
         },
     },
     visibility = ["PUBLIC"],
