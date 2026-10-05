@@ -147,26 +147,52 @@ struct Catalog(Copyable, Movable, Deinitable):
         return c^
 
 
+@fieldwise_init
+struct BodyArm(Copyable, Movable, Deinitable):
+    """One arm of the `Resource.body` oneof: its field number and its name."""
+
+    var field: Int
+    var name: String
+
+
+def body_arms() -> List[BodyArm]:
+    """The `Resource.body` arms, in DECLARATION ORDER: entry `k` is the arm
+    the generated struct records as position `k + 1`. One row per declared
+    arm; a new arm is one new row here, at its declaration position, pinned
+    against wire bytes by `test_catalog_arms_match_the_wire`."""
+    var l = List[BodyArm]()
+    l.append(BodyArm(FIELD_SERVICE, String("service")))
+    l.append(BodyArm(FIELD_JOB, String("job")))
+    return l^
+
+
 def body_field(r: Resource) raises -> Int:
     """The `Resource.body` field number of `r`'s set arm. The generated
     struct records the arm by its 1-based position in the oneof; this is the
-    one place that maps position to field number, pinned against wire bytes
-    by `test_catalog_arms_match_the_wire`."""
+    one place that maps position to field number (through `body_arms`).
+    No arm set, and an arm beyond the table, both raise: a new arm in the
+    proto without a row is refused, never mapped to a wrong type."""
     var arm = r._oneof0_case
-    if arm == 1:
-        return FIELD_SERVICE
-    if arm == 2:
-        return FIELD_JOB
+    var arms = body_arms()
     if arm == 0:
+        var names = String("")
+        for i in range(len(arms)):
+            if i > 0:
+                names += String(", ")
+            names += arms[i].name
         raise Error(
             String("resource '")
             + r.id
-            + String("' has no type: exactly one of service, job must be set")
+            + String("' has no type: exactly one of ")
+            + names
+            + String(" must be set")
         )
-    raise Error(
-        String("resource '")
-        + r.id
-        + String("': body arm ")
-        + String(arm)
-        + String(" is not in this kci's catalog table")
-    )
+    if arm < 0 or arm > len(arms):
+        raise Error(
+            String("resource '")
+            + r.id
+            + String("': body arm ")
+            + String(arm)
+            + String(" is not in this kci's catalog table")
+        )
+    return arms[arm - 1].field

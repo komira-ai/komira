@@ -11,12 +11,20 @@
 #   * keys are the six `kci_*` names, unchanged (`[a-z_]`, legal everywhere);
 #   * a value is `[a-z0-9_-]`, at most 63 bytes (the strictest common rule:
 #     GCP label values; AWS tag values accept a superset);
-#   * the one character a value must carry and may not is `/` (a role such as
-#     `uses/jobs`). It is written `--`, which no machine, cell or resource id
-#     can contain (the id grammar forbids a doubled `-`), so decoding is
-#     exact;
+#   * the one character a value must carry and may not is `/`: a role is the
+#     rest of a node id after its owner, so it holds one `/` per level of
+#     nesting (`uses/jobs`, `web/api/run`). It is written `_`, ONE byte, so
+#     the 63-byte budget pays one byte per level. Decoding (`_` -> `/`) is
+#     exact because no segment may hold `_`: resource ids and component ids
+#     are `[a-z0-9-]`, and the role vocabulary uses `-` only. A value that
+#     does hold `_` is REFUSED, since it would decode as a `/`;
 #   * anything else outside the rule is REFUSED, never rewritten: a lossy
 #     rewrite would make two different owners read as one.
+#
+# THE BUDGET. The `role` label is the longest value: one segment per level
+# plus a separator each. `role_budget_findings` (validate.mojo) checks every
+# lowered node against `LABEL_VALUE_MAX` before anything is realized, so a
+# role over the budget refuses the graph instead of failing at create time.
 #
 # A cloud object that cannot carry labels (a scheduler job, an IAM binding)
 # carries the identity as the first line of its description instead
@@ -38,9 +46,25 @@ def _legal_value_byte(c: Int) -> Bool:
     )
 
 
+comptime SEGMENT_SEPARATOR = "_"
+"""How a label value writes the node-id separator `/`."""
+
+
+def encoded_label_bytes(v: String) -> Int:
+    """The byte length of `v` once encoded (`/` is one byte either way)."""
+    return v.byte_length()
+
+
 def encode_label_value(v: String) raises -> String:
-    """`/` -> `--`, then the value must be `[a-z0-9_-]{0,63}`, else raise."""
-    var out = v.replace("/", "--")
+    """`/` -> `_`; a raw `_` is refused (it would decode as `/`); then the
+    value must be `[a-z0-9_-]{0,63}`, else raise."""
+    if v.find(SEGMENT_SEPARATOR) >= 0:
+        raise Error(
+            String("label value \"")
+            + v
+            + String("\" holds '_', which the rule writes for '/'; a segment may not hold it")
+        )
+    var out = v.replace("/", SEGMENT_SEPARATOR)
     var b = out.as_bytes()
     if len(b) > LABEL_VALUE_MAX:
         raise Error(
@@ -62,7 +86,7 @@ def encode_label_value(v: String) raises -> String:
 
 
 def decode_label_value(v: String) -> String:
-    return v.replace("--", "/")
+    return v.replace(SEGMENT_SEPARATOR, "/")
 
 
 def standard_label_rule(stamp: OwnerStamp) raises -> List[Label]:

@@ -1,12 +1,54 @@
 // The kci resource catalog (`kci.resource.v1`): what an author writes in a
-// deploy step. Typed resources, each a common, cloud-agnostic shape; the
-// cloud adapter built into kci for the cell's cloud turns each one into
-// engine nodes.
+// deploy step. The cloud adapter built into kci for the cell's cloud turns
+// each resource into engine nodes.
 //
-// V1 IS TWO TYPES: `service` and `job`. The other planned types (worker,
-// table, bucket, queue, secret, site, domain) are not declared yet; their
-// `Resource.body` numbers are held (see `Resource`), so adding one later is
-// an addition, never a renumber.
+// PRIMITIVES AND COMPOSITES
+//   * A PRIMITIVE is one `Resource.body` arm of this file. It is 1:1 with a
+//     resource kind of the major clouds, and it is the only thing a cloud
+//     adapter lowers to engine nodes. Each primitive lowers to a FIXED set of
+//     roles per cloud (the provider object plus at most a fixed set of
+//     private helper objects that exist only for it and die with it).
+//   * A COMPOSITE is DATA, not an arm of this file: a named graph of other
+//     resources (primitives or other composites, to any depth) with inputs
+//     and outputs. It is expanded into its primitives before lowering, so the
+//     engine only ever sees primitives. Its format and its instance arm are
+//     not declared yet (body arm 80 is held for the instance).
+//
+// THE RULE THAT DECIDES A PRIMITIVE'S SHAPE
+//   * R1, a NEUTRAL primitive (PORTABLE): one type for a kind whose identity
+//     (one provider object plus a fixed set of private helpers), meaning
+//     (every field the author must decide means the same thing: same unit,
+//     same effect, same failure) and delete (deleting it deletes the same
+//     thing) match on every cloud. Differences confined to optional tuning go
+//     in per-cloud extension fields; an extension may tune, never change
+//     meaning.
+//   * R1', a neutral primitive that is CLOUD_BOUND: R1 holds on the clouds
+//     that have the kind, and the others have no equivalent at all; they
+//     declare it absent by design.
+//   * R2, a PROVIDER primitive (CLOUD_BOUND): one type per provider kind,
+//     when R1 fails on any cloud (the objects decompose differently, the core
+//     field is the provider's own language, or one provider object would be
+//     shared by several owners).
+//
+// V1 DECLARES TWO PRIMITIVES: `service` 10 and `job` 11. Every other number
+// below is HELD: not declared, so it decodes as an unknown field today, and
+// declaring it later is an addition, never a renumber. The welded tests pin
+// each held number as undeclared.
+//   * `Resource.body` 12 to 36: the later neutral primitives (12 worker,
+//     13 table, 14 bucket, 15 queue, 16 secret, 17 and 19 unused, 18 DNS zone,
+//     20 service account, 21 topic, 22 schedule, 23 network, 24 registry,
+//     25 grant, 26 DNS record, 27 certificate, 28 subscription, 29 subnet,
+//     30 IP address, 31 event trigger, 32 mail domain, 33 parameter,
+//     34 encryption key, 35 function, 36 virtual machine).
+//   * `Resource.body` 80: a composite instance.
+//   * `Resource.body` 90: the `raw` escape hatch, specified separately.
+//   * `Resource.body` 100-299, 300-499 and 500-699: provider primitives (R2)
+//     of three clouds, one range each.
+//   * Fields 50, 51 and 52 of every primitive message: its per-cloud
+//     extension messages, one per cloud.
+// Provider primitives and per-cloud extensions carry provider words in their
+// names. Declaring any of them changes the promise below that no vendor word
+// appears in this schema, so it is a recorded decision, not an addition.
 //
 // WHAT THIS FILE PROMISES
 //   * Every field is a BEHAVIOUR (a port, a scale, a public URL, an expiry),
@@ -20,14 +62,14 @@
 //     id-bearing string is `Resource.id`. So one walk over `Ref` fields finds
 //     every edge of the graph.
 //
-// WHAT IS NOT HERE, ON PURPOSE
+// WHAT IS NOT HERE YET, ON PURPOSE
 //   * Identity, permissions, networks, gateways, load balancers and DNS
-//     records. The cloud adapter creates them while it builds a `service` or a
-//     `domain`; "this may read that" is one `Uses` line on the consumer.
+//     records as resources of their own. Each is a later primitive at a held
+//     number above (or a provider primitive). Until it lands, the cloud
+//     adapter creates what a `service` or a `job` needs as that type's own
+//     roles, and "this may call that" is one `Uses` line on the consumer.
 //   * Stage names. A stage's list of resources lives in the release machine
 //     file; no resource carries the name of a stage.
-//   * The `raw` escape hatch. Field 90 of `Resource.body` is left free for
-//     it; it is specified separately and not built yet.
 //   * A secret RESOURCE, and secret values. A service or a job receives a
 //     secret that already exists BY NAME (`SecretRef`); kci never reads,
 //     writes or stores the value. No `Value` ever carries a secret: `Value`
@@ -184,8 +226,10 @@ message Resource {
   reserved "only_in";
   // 5 is held for a typed per-cloud settings map, 6 for `physical_name`.
 
-  // Typed and closed. Held, not declared: 12 worker, 13 table, 14 bucket,
-  // 15 queue, 16 secret, 17 site, 18 domain; 90 the escape hatch.
+  // Typed and closed. Held, not declared (see the file header): 12 to 36
+  // the later neutral primitives, 80 a composite instance, 90 the escape
+  // hatch, 100-299 / 300-499 / 500-699 the provider primitives of three
+  // clouds.
   oneof body {
     Service service = 10;
     Job job = 11;
@@ -244,6 +288,7 @@ message Service {
   // variable. A key must not also appear in `env`.
   map<string, SecretRef> secret_env = 12;
   // 13 is held for a `source` that may be a non-image artifact.
+  // 50, 51 and 52 are held for the per-cloud extensions (file header).
 
   // Reachable from outside the graph at a URL.
   message Public {}
@@ -270,6 +315,7 @@ message Job {
   // A key must not also appear in `env`.
   map<string, SecretRef> secret_env = 7;
   // 8 is held for a `source` that may be a non-image artifact.
+  // 50, 51 and 52 are held for the per-cloud extensions (file header).
 
   oneof trigger {
     OnDemand on_demand = 10;
