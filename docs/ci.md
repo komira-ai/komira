@@ -412,30 +412,37 @@ Every PUSH run before it ran a `kci.yml` whose `prod` job is manual-only
 (checked for all 45 push runs of `kci.yml` on 2026-10-05), so re-running
 one never reaches `prod`.
 
-**The action (CEO), one of the two, before or when this merges:**
+**The action (CEO), before or when this merges: delete those runs.** It is
+the only action that closes this. List every manual run of `kci.yml` on
+`main` started before the merge, and delete each one (Actions -> the run ->
+"Delete workflow run", or `gh run delete <id>`). A deleted run cannot be
+re-run:
 
-1. **Delete those runs.** List every manual run of `kci.yml` on `main`
-   started before the merge, and delete each one (Actions -> the run ->
-   "Delete workflow run", or `gh run delete <id>`). A deleted run cannot be
-   re-run:
+    gh run list --workflow kci.yml --event workflow_dispatch --branch main --limit 100
+    gh run delete 37239801770
+    gh run delete 37238572861
 
-       gh run list --workflow kci.yml --event workflow_dispatch --branch main --limit 100
-       gh run delete 37239801770
-       gh run delete 37238572861
+Do not start a manual run of `main` between the deletion and the merge; if
+one is started, delete it too.
 
-   Do not start a manual run of `main` between the deletion and the merge;
-   if one is started, delete it too.
-2. **Or pause `prod` until the last of them expires**: add a required
-   reviewer to the `prod` environment (see [Pausing promotion to
-   prod](#pausing-promotion-to-prod)) until 30 days after the last manual
-   run of `main` started before the merge (for the two runs above, until
-   2026-11-04), and reject any `prod` job whose run is a
-   `workflow_dispatch`. Every release waits for that reviewer meanwhile.
+A required reviewer on `prod` is NOT a hold for these runs. A re-run of
+`37238572861` runs its old `gamma` job, which names the environment `gamma`
+on a manual run; its ref is `refs/heads/main`, so `gamma`'s branch rule
+(`main` only) lets it in, and it reaches the gamma publisher with no
+break-glass job, no `gamma-breakglass` reviewer and no recorded reason (the
+old `kci` has no reason check). A reviewer on `prod` alone leaves that open
+until 30 days after the last such run (for the two above, until
+2026-11-04). Until every such run is deleted, gamma without break-glass, and
+prod by a re-run, both stay open.
 
 ### Pausing promotion to prod
 
 **Pausing promotion to prod.** Settings -> Environments -> `prod` -> Required
-reviewers: add a reviewer. Every prod job from then on waits for approval;
+reviewers: add a reviewer, and confirm **Allow administrators to bypass
+configured protection rules** is UNCHECKED on `prod` (by default it is
+checked, and then a repository administrator can force a waiting prod job
+to proceed with no approval; the pause would bind everyone but
+administrators). Every prod job from then on waits for approval;
 build, gamma and validate still run for the revision being released. Because
 a release holds the `kci-release-main` group until its prod job ends, a
 waiting prod job also holds back later pushes: at most one newer run waits as
@@ -459,8 +466,9 @@ BREAK-GLASS: it builds its revision and publishes it to `komira-ai/gamma`
 the GitHub environment **`gamma-breakglass`** (the machine file's
 `break_glass_environment` for the stage `gamma`; rule R2 holds the job's
 `environment:` to exactly `${{ github.event_name == 'push' && 'gamma' ||
-'gamma-breakglass' }}`), which has a REQUIRED REVIEWER, so every break-glass
-publish waits for an approval that GitHub records with the run. The gamma
+'gamma-breakglass' }}`), which has a REQUIRED REVIEWER and administrator
+bypass turned off, so every break-glass publish waits for an approval that
+GitHub records with the run. The gamma
 channel trusts `gamma-breakglass` as a second trusted publisher
 (`break_glass_push_identity` in `release/channels.textproto`), and kci
 publishes a break-glass run only from it (`KCI-E-STAGE-ENVIRONMENT`
@@ -527,6 +535,24 @@ or whose summary lacks the line `BREAK-GLASS: <ref> <revision> by <actor>:
 <reason>`.** Turn on **Prevent self-review** for `gamma-breakglass` so that
 the approval comes from a second person.
 
+⚠ **Administrators bypass a reviewer by default.** GitHub's documentation
+("Managing environments for deployment"): "By default, administrators can
+bypass the protection rules and force deployments to specific
+environments"; its 2023-03-01 changelog adds that an administrator can
+"bypass all protection rules on a given environment ... and force the
+pending jobs referencing the environment to proceed". So with the box
+**Allow administrators to bypass configured protection rules** checked (the
+default), a repository administrator can force a `gamma-breakglass` job, a
+pull request's or a branch push's own included (no reason input, no kci
+reason check), and a paused `prod` job, with no second person's approval.
+Uncheck it on `gamma-breakglass` and on `prod`. The bypass forces a PENDING
+job; a job a deployment branch rule refuses is not pending, and GitHub
+matches that rule against the run's `GITHUB_REF` (`refs/pull/<n>/merge` for
+a pull request), so the `main`-only rule on `gamma` and `prod` holds either
+way. **Residual with every setting applied:** an administrator can re-check
+the box or change any setting here; these settings bind runs, not the
+administrators who own them (GitHub's audit log records the change).
+
 The ruleset row stays open until it is VERIFIED. GitHub's ruleset
 documentation does not say whether its pattern matching is case-sensitive.
 If it is not, "except the branch `main`" also excepts `MAIN`, and the rule
@@ -540,9 +566,10 @@ HEAD:refs/heads/MAIN`); it must be refused.
 | setting | value | what it locks |
 |---|---|---|
 | environment `prod`, deployment branches | Selected: `main` | only `main` publishes to prod (already set) |
-| manual runs of `main` started before this file merged (`37239801770`, `37238572861`, and any later one) | deleted, before or when this merges; or a required reviewer on `prod` until 30 days after the last of them | a re-run of one runs the OLD `kci.yml` (prod on any manual run) and the old `kci`, which nothing here can refuse ([Re-runs of runs from before auto-promotion](#re-runs-of-runs-from-before-auto-promotion-a-ceo-action)) |
+| environment `prod`, administrator bypass | **Allow administrators to bypass configured protection rules UNCHECKED** | a pause ([Pausing promotion to prod](#pausing-promotion-to-prod)) holds administrators too |
+| manual runs of `main` started before this file merged (`37239801770`, `37238572861`, and any later one) | deleted, before or when this merges (the only closing action: a reviewer on `prod` leaves the old `gamma` job, environment `gamma` on a manual run of `main`, open) | a re-run of one runs the OLD `kci.yml` (gamma as `gamma` and prod on any manual run) and the old `kci`, which nothing here can refuse ([Re-runs of runs from before auto-promotion](#re-runs-of-runs-from-before-auto-promotion-a-ceo-action)) |
 | environment `gamma`, deployment branches | Selected: `main` | only `main` publishes to gamma without break-glass |
-| environment `gamma-breakglass` (FIRST: before the next row) | any branch, **required reviewer**, **Prevent self-review**. It may already exist, auto-created by GitHub with no protection: confirm the reviewer rule is on it | every break-glass publish waits for a recorded approval by a second person (for a run of an unmodified `kci.yml` the reason is recorded too; for any other run, the reviewer refuses it) |
+| environment `gamma-breakglass` (FIRST: before the next row) | any branch, **required reviewer**, **Prevent self-review**, **Allow administrators to bypass configured protection rules UNCHECKED**. It may already exist, auto-created by GitHub with no protection: confirm the reviewer rule is on it | every break-glass publish waits for a recorded approval by a second person (for a run of an unmodified `kci.yml` the reason is recorded too; for any other run, the reviewer refuses it) |
 | prefix.dev `komira-ai/gamma`, trusted publishers (ONLY AFTER `gamma-breakglass` shows a required reviewer) | `komira-ai/komira`, `kci.yml`, environment `gamma`, AND a second one for environment `gamma-breakglass` | a break-glass run can publish to gamma at all (without it, every break-glass publish is refused by prefix.dev) |
 | prefix.dev `komira-ai/prod`, trusted publisher | `komira-ai/komira`, `kci.yml`, environment `prod` only | (already set) |
 | repository ruleset, then VERIFIED | block creating and updating branches and tags matching `[Mm][Aa][Ii][Nn]` except the branch `main`, and the tag `main`. Then try to create the branch `MAIN`: it must be refused | no ref that is `main` in another case exists, so GitHub's case-insensitive `if:` and concurrency comparisons cannot be fooled by one (whether the environment branch rule `main` matches `MAIN` is undocumented). Until the check passes, prod's case-variant exposure is OPEN |
