@@ -15,7 +15,9 @@
 #                         PULL_REQUEST stage's job runs (same-repository
 #                         pull requests only, `contents: read` and the farm
 #                         connection's token); every other job is
-#                         release-only (`excludes_pull_request`)
+#                         release-only (`excludes_pull_request`);
+#                         `condition_expression`: the expression GitHub
+#                         evaluates for a job's `if:`
 #
 # The machine file owns the release machine; the workflow is written by hand and
 # checked against it. This package reads text it is given: it opens no file.
@@ -37,6 +39,7 @@ from kci_ci_check.pull_request import (
     PULL_REQUEST_BASE_EXPRESSION,
     PULL_REQUEST_EVENT,
     SAME_REPOSITORY_CONDITION,
+    condition_expression,
     excludes_pull_request,
 )
 from kci_ci_check.rules import (

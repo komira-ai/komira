@@ -79,7 +79,10 @@
 #           node is reached from a pull request;
 #         * the PULL_REQUEST stage's job carries the job-level condition
 #           `if: github.event.pull_request.head.repo.full_name ==
-#           github.repository` (bare or inside `${{ }}`, nothing else): a
+#           github.repository` (bare, or exactly `${{ <it> }}`: nothing
+#           before `${{` or after `}}`, not even whitespace inside quotes,
+#           and no block scalar holding `${{`; GitHub reads any other `if:` holding
+#           `${{` as a format string, which is always true): a
 #           pull request from a fork runs nothing (its code reaches the farm
 #           only when a maintainer pushes it to a branch of this
 #           repository), and a push or a manual run skips the job;

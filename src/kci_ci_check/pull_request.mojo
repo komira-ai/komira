@@ -17,7 +17,12 @@
 #     (`excludes_pull_request`). `github.event_name != 'pull_request'`
 #     keeps out a pull request only because the triggers are an allow-list
 #     (rules.mojo, R6: push, workflow_dispatch and pull_request): any other
-#     event that runs a pull request's code is refused as a trigger.
+#     event that runs a pull request's code is refused as a trigger;
+#   * the fork condition is read by `condition_expression`: an `if:` holding
+#     `${{` is exactly `${{ <expression> }}` (nothing before `${{` or after
+#     `}}`, not even whitespace inside quotes) and no block scalar holds it.
+#     GitHub reads any other `if:` holding `${{` as a format string, which
+#     is always true.
 #
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
@@ -54,6 +59,41 @@ def is_expression(text: String, expression: String) -> Bool:
         return False
     var inner = String(String(t[byte = 3 : t.byte_length() - 2]).strip())
     return inner == expression
+
+
+def _expression_of(text: String, mut expression: String) -> Bool:
+    """The expression GitHub evaluates for a job-level `if:` whose value is
+    `text`, written as a plain or quoted scalar. With no `${{` in `text`,
+    GitHub reads the whole text as the expression (whitespace around it
+    aside). With one, `text` is exactly `${{ <expression> }}`: nothing
+    before `${{` or after `}}`, not even whitespace, and no other `${{` or
+    `}}` inside. Anything else is a format string, which GitHub reads as
+    always true: False (and `expression` unspecified)."""
+    if text.find(String("${{")) < 0:
+        expression = String(text.strip())
+        return True
+    var n = text.byte_length()
+    if n < 5 or not text.startswith(String("${{")) or not text.endswith(String("}}")):
+        return False
+    var inner = String(text[byte = 3 : n - 2])
+    if inner.find(String("${{")) >= 0 or inner.find(String("}}")) >= 0:
+        return False
+    expression = String(inner.strip())
+    return True
+
+
+def condition_expression(doc: WorkflowDoc, node: Int, mut expression: String) -> Bool:
+    """The expression a job-level `if:` (node `node`) has GitHub evaluate,
+    by `_expression_of`. A block scalar holding `${{` is refused whatever its
+    chomping: its value is not exactly `${{ <expression> }}` (`|` and `>`
+    keep a final newline) and so can be a format string. False when `node`
+    is not a scalar."""
+    if node < 0 or doc.kind(node) != NODE_SCALAR:
+        return False
+    var text = doc.text(node)
+    if doc.is_block(node) and text.find(String("${{")) >= 0:
+        return False
+    return _expression_of(text, expression)
 
 
 comptime EVENT_NAME: String = "github.event_name"
@@ -246,16 +286,13 @@ def check_pull_request_job(
         )
     # the fork condition: every PULL_REQUEST stage's job, farm-connected or not
     var cond = doc.child(job, String("if"))
-    var ok = False
-    if cond >= 0 and doc.kind(cond) == NODE_SCALAR:
-        var text = doc.text(cond)
-        ok = String(text.strip()) == String(SAME_REPOSITORY_CONDITION) or is_expression(
-            text, String(SAME_REPOSITORY_CONDITION)
-        )
+    var expression = String("")
+    var ok = condition_expression(doc, cond, expression) and expression == String(SAME_REPOSITORY_CONDITION)
     if not ok:
         findings.append(
             where + String(", so the job carries `if: ") + String(SAME_REPOSITORY_CONDITION)
-            + String("`: a pull request from a fork runs nothing, and an event without a pull request skips the job")
+            + String("`, bare or as exactly `${{ <it> }}` (nothing around it, no block scalar)")
+            + String(": a pull request from a fork runs nothing, and an event without a pull request skips the job")
         )
     # permissions: `contents: read`, and `id-token: write` (R4) only for the farm connection
     var perms = doc.child(job, String("permissions"))

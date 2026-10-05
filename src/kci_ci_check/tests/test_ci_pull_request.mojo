@@ -11,7 +11,17 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_ci_check import ChannelsFile, check_running_workflow, check_workflow, excludes_pull_request, kci_run_calls
+from kci_ci_check import (
+    NODE_SCALAR,
+    ChannelsFile,
+    WorkflowDoc,
+    WorkflowNode,
+    check_running_workflow,
+    check_workflow,
+    condition_expression,
+    excludes_pull_request,
+    kci_run_calls,
+)
 from kci_release_machine import parse_machine_file
 
 
@@ -372,6 +382,34 @@ def test_a_release_job_condition_that_is_not_a_top_level_conjunction_is_refused(
     _reports(wf, String("job 'build': R6: runs stage 'build', a release stage"))
 
 
+def _format_strings(expr: String) -> List[String]:
+    """`if:` values (written after `if:`, to the line's end) that hold
+    `expr` and are not exactly it: block scalars, whitespace inside quotes
+    around it. GitHub reads each as a format string, always true."""
+    var v = List[String]()
+    v.append(String("|\n      ") + expr)
+    v.append(String(">\n      ") + expr)
+    v.append(String("|+\n      ") + expr)
+    v.append(String("|-\n      ") + expr)
+    v.append(String(">-\n      ") + expr)
+    v.append(String(">+\n      ") + expr)
+    v.append(String("\" ") + expr + String("\""))
+    v.append(String("\"") + expr + String(" \""))
+    v.append(String("\"") + expr + String("\t\""))
+    v.append(String("\"\t") + expr + String("\""))
+    v.append(String("x") + expr)
+    v.append(expr + String(" && ${{ true }}"))
+    return v^
+
+
+def _reports_each(old: String, values: List[String], needle: String) raises:
+    for i in range(len(values)):
+        try:
+            _reports(_wf(old, String("    if: ") + values[i] + String("\n")), needle)
+        except e:
+            raise Error(String("`if: ") + values[i] + String("`: ") + String(e))
+
+
 def test_a_pull_request_stage_runs_whole_in_its_own_job() raises:
     var wf = String(_WF) + String(
         "  pr-part:\n    if: github.event.pull_request.head.repo.full_name == github.repository\n"
@@ -400,6 +438,76 @@ def test_a_pull_request_job_never_runs_a_fork() raises:
         want,
     )
     _reports(_wf(String("    if: github.event.pull_request.head.repo.full_name == github.repository\n"), String("    if: always()\n")), want)
+
+
+comptime _FORK_IF: String = "    if: github.event.pull_request.head.repo.full_name == github.repository\n"
+comptime _FORK: String = "github.event.pull_request.head.repo.full_name == github.repository"
+
+
+def test_the_fork_condition_is_exactly_one_expression() raises:
+    var expr = String("${{ ") + String(_FORK) + String(" }}")
+    _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: ") + expr + String("\n")))
+    _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: ${{") + String(_FORK) + String("}}\n")))
+    _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: \"") + expr + String("\"\n")))
+    _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: '") + expr + String("'\n")))
+    _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: ") + expr + String("\t\n")))
+    _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: \" ") + String(_FORK) + String(" \"\n")))
+    _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: |-\n      ") + String(_FORK) + String("\n")))
+    _agrees(String(_MACHINE), _wf(String(_FORK_IF), String("    if: |\n      ") + String(_FORK) + String("\n")))
+
+
+def test_a_fork_condition_github_reads_as_a_format_string_is_refused() raises:
+    # always true on GitHub: a fork's pull request, a push or a manual run
+    # would run the job
+    var expr = String("${{ ") + String(_FORK) + String(" }}")
+    var values = _format_strings(expr)
+    values.append(String("' ") + expr + String("'"))
+    values.append(String("'") + expr + String(" '"))
+    _reports_each(
+        String(_FORK_IF),
+        values,
+        String("R6: stage 'pr' is a PULL_REQUEST stage, so the job carries `if: ") + String(_FORK),
+    )
+
+
+def _expression(text: String, block: Bool) -> Tuple[Bool, String]:
+    var d = WorkflowDoc()
+    var n = d.add(WorkflowNode(NODE_SCALAR, text.copy(), 1, not block, block))
+    var e = String("")
+    var ok = condition_expression(d, n, e)
+    return (ok, e^)
+
+
+def test_condition_expression_refuses_every_block_scalar_holding_an_expression() raises:
+    # A block scalar's value is refused when it holds `${{`, even when its
+    # text (as a reader that drops the indentation would give it) is
+    # exactly `${{ <it> }}`; one with no `${{` is the expression itself.
+    var expr = String("${{ ") + String(_FORK) + String(" }}")
+    assert_false(_expression(expr, True)[0])
+    assert_false(_expression(String("x == '${{'"), True)[0])
+    var bare = _expression(String(_FORK), True)
+    assert_true(bare[0])
+    assert_equal(bare[1], String(_FORK))
+    var quoted = _expression(expr, False)
+    assert_true(quoted[0])
+    assert_equal(quoted[1], String(_FORK))
+    # exactly one `${{ }}`, nothing around it
+    assert_false(_expression(expr + String(" "), False)[0])
+    assert_false(_expression(String(" ") + expr, False)[0])
+    assert_false(_expression(expr + String("\n"), False)[0])
+    assert_false(_expression(String("${{ a }} && ${{ b }}"), False)[0])
+    assert_false(_expression(String("${{ a == '}}' }}"), False)[0])
+    assert_false(_expression(String("${{ a == '${{' }}"), False)[0])
+    assert_false(_expression(String("${{ a"), False)[0])
+    var spaced = _expression(String("  ") + String(_FORK) + String(" "), False)
+    assert_true(spaced[0])
+    assert_equal(spaced[1], String(_FORK))
+    # not a scalar
+    var d = WorkflowDoc()
+    var m = d.add(WorkflowNode(0, String(""), 1))
+    var e = String("")
+    assert_false(condition_expression(d, m, e))
+    assert_false(condition_expression(d, -1, e))
 
 
 def test_a_pull_request_job_holds_minimal_permissions() raises:
