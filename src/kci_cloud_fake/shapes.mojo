@@ -28,12 +28,15 @@
 # validate, as a limit).
 #
 #   * `generic`   the fake's own shape: service -> identity, run, public;
-#                 job -> identity, run, schedule; bucket -> bucket; service
-#                 account -> identity; every grant -> `grant`.
+#                 job -> identity, run, schedule; table -> table; bucket ->
+#                 bucket; service account -> identity; every grant ->
+#                 `grant`.
 #   * `aws`       service -> identity (AWS::IAM::Role), run
 #                 (AWS::Lambda::Function), public (AWS::Lambda::Url);
 #                 job -> identity, run (AWS::ECS::TaskDefinition), schedule
-#                 (AWS::Scheduler::Schedule); bucket -> bucket
+#                 (AWS::Scheduler::Schedule); table -> table
+#                 (AWS::DynamoDB::Table: its indexes are GSIs and its TTL
+#                 a setting, both inline); bucket -> bucket
 #                 (AWS::S3::Bucket); service account -> identity
 #                 (AWS::IAM::Role, trusted by the compute service only).
 #                 Grants: on a service, the function's resource policy
@@ -42,7 +45,18 @@
 #   * `gcp`       service -> identity (iam.googleapis.com/ServiceAccount), run
 #                 (run.googleapis.com/Service), public (an invoker member
 #                 binding); job -> identity, run (run.googleapis.com/Job),
-#                 schedule (cloudscheduler.googleapis.com/Job); bucket ->
+#                 schedule (cloudscheduler.googleapis.com/Job); table ->
+#                 Firestore has NO table object: a table is a collection
+#                 group, and what kci creates for it is ONE COMPOSITE INDEX
+#                 PER ACCESS PATH (firestore.googleapis.com/Index) and a TTL
+#                 policy (firestore.googleapis.com/Field). The key's index is
+#                 the role `table` (the catalog's primary role, so a
+#                 reference to the table lands on it), each secondary index
+#                 the role `ix-<h>` (`kci_cloud.index_role`: 5 base32
+#                 characters of its name, one node per index, found through
+#                 `list_owned` like a grant's `u-<h>`), and the TTL policy
+#                 the role `ttl` (wanted iff `ttl_field` is set). Two index
+#                 names whose roles collide are a limit. bucket ->
 #                 bucket (storage.googleapis.com/Bucket); service account ->
 #                 identity. Every grant is a member binding on its target.
 #                 GCP has no asset type for one binding: the kind id names
@@ -50,11 +64,17 @@
 #   * `azure`     service -> identity
 #                 (Microsoft.ManagedIdentity/userAssignedIdentities), run
 #                 (Microsoft.App/containerApps); job -> identity, run
-#                 (Microsoft.App/jobs); bucket -> bucket
+#                 (Microsoft.App/jobs); table -> table
+#                 (Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers,
+#                 in the cell's Cosmos account: indexes and TTL are settings
+#                 of the container); bucket -> bucket
 #                 (Microsoft.Storage/storageAccounts/blobServices/containers,
 #                 in the cell's storage account); service account ->
 #                 identity. Every grant is a
-#                 Microsoft.Authorization/roleAssignments. There is NO public
+#                 Microsoft.Authorization/roleAssignments, except to a table:
+#                 Cosmos data access is granted by its own role assignment
+#                 (Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments),
+#                 not by ARM RBAC. There is NO public
 #                 row and NO schedule row: a container app's ingress and a
 #                 job's schedule trigger are settings of the run object, so
 #                 they FOLD into the run node's desired fields (`ingress`,
@@ -81,6 +101,12 @@
 #                 policy attached to the `vault` auth role) arrives with the
 #                 first Vault-backed type. A cell resource has NO row: the
 #                 edge folds into the identity (`cell.LOGS`).
+#                 A TABLE IS NOT_YET on onprem: which datastore backs it is
+#                 an open design question (Q17: PostgreSQL via
+#                 CloudNativePG, CockroachDB, ScyllaDB or FoundationDB), so
+#                 the shape declares it absent rather than pick one, and a
+#                 graph with a table is refused on onprem before anything is
+#                 lowered (a coverage finding naming the type and Q17).
 #
 # THE BUILT-IN CLOUDS ARE DATA: `builtin_shapes()` is the list aws, gcp,
 # azure, onprem, and `shape_named(name)` looks a cloud name up in it and
@@ -92,7 +118,13 @@
 # off is an update of the node it folds into.
 #
 # A bucket has ONE role on every shape, `bucket`, and no identity: it runs
-# as nobody, it is only granted to. A grant resource has no row: its roles
+# as nobody, it is only granted to. A table likewise runs as nobody; its
+# roles are `table` on every shape that hosts it, plus `ix-<h>` and `ttl`
+# where the indexes and the TTL are objects of their own (gcp).
+#
+# A shape's ABSENCES (`not_yet`) are the catalog types it does not host yet,
+# each with its reason; the fake cloud built with the shape declares them,
+# and is complete only when there are none. A grant resource has no row: its roles
 # are its edge's (`grant`, and `rules` where the row names a helper).
 #
 # A shape is chosen by the constructor of a fake cloud, never from the
@@ -100,14 +132,22 @@
 # =============================================================================
 
 from kci_cloud import (
+    Absence,
     FIELD_BUCKET,
     FIELD_JOB,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_TABLE,
+    NOT_YET,
 )
 
 
 comptime ROLE_BUCKET = "bucket"
+comptime ROLE_TABLE = "table"
+comptime ROLE_INDEX = "ix"
+"""A shape row meaning "each secondary index is a node of its own", role
+`ix-<h>` (`kci_cloud.index_role`); never a role itself."""
+comptime ROLE_TTL = "ttl"
 comptime ROLE_IDENTITY = "identity"
 comptime ROLE_RUN = "run"
 comptime ROLE_PUBLIC = "public"
@@ -127,6 +167,11 @@ comptime _K8S_SA = "v1/ServiceAccount"
 comptime _VAULT_ROLE = "vault:auth/kubernetes/role"
 comptime _K8S_BINDING = "rbac.authorization.k8s.io/v1/RoleBinding"
 comptime _K8S_ROLE = "rbac.authorization.k8s.io/v1/Role"
+comptime _FIRESTORE_INDEX = "firestore.googleapis.com/Index"
+comptime ONPREM_TABLE_REASON = (
+    "the onprem datastore that backs a table is an open question (Q17:"
+    " PostgreSQL via CloudNativePG, CockroachDB, ScyllaDB or FoundationDB)"
+)
 
 
 @fieldwise_init
@@ -160,21 +205,37 @@ def helper_role(role: String) -> String:
 
 struct ProviderShape(Copyable, Movable, Deinitable):
     """Per catalog field, the ordered roles and provider kinds; per target
-    type, the kind a grant edge lowers to."""
+    type, the kind a grant edge lowers to; and the types not hosted yet."""
 
     var name: String
     var rows: List[ShapeRow]
     var grants: List[GrantRow]
+    var not_yet: List[Absence]
 
-    def __init__(out self, name: String, var rows: List[ShapeRow], var grants: List[GrantRow]):
+    def __init__(
+        out self,
+        name: String,
+        var rows: List[ShapeRow],
+        var grants: List[GrantRow],
+        var not_yet: List[Absence] = List[Absence](),
+    ):
         self.name = name
         self.rows = rows^
         self.grants = grants^
+        self.not_yet = not_yet^
 
     def __init__(out self, *, copy: Self):
         self.name = copy.name.copy()
         self.rows = copy.rows.copy()
         self.grants = copy.grants.copy()
+        self.not_yet = copy.not_yet.copy()
+
+    def hosts(self, field: Int) -> Bool:
+        """False for a type the shape declares NOT_YET."""
+        for i in range(len(self.not_yet)):
+            if self.not_yet[i].field == field:
+                return False
+        return True
 
     def roles_of(self, field: Int) -> List[ShapeRow]:
         """The rows of `field`, in lowering order."""
@@ -225,6 +286,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_JOB, String(ROLE_IDENTITY), String("identity")))
         r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("run")))
         r.append(ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("schedule")))
+        r.append(ShapeRow(FIELD_TABLE, String(ROLE_TABLE), String("table")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String("identity")))
         var g = List[GrantRow]()
@@ -240,6 +302,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_JOB, String(ROLE_IDENTITY), String(_AWS_ROLE)))
         r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("AWS::ECS::TaskDefinition")))
         r.append(ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("AWS::Scheduler::Schedule")))
+        r.append(ShapeRow(FIELD_TABLE, String(ROLE_TABLE), String("AWS::DynamoDB::Table")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("AWS::S3::Bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_AWS_ROLE)))
         var g = List[GrantRow]()
@@ -258,6 +321,9 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(
             ShapeRow(FIELD_JOB, String(ROLE_SCHEDULE), String("cloudscheduler.googleapis.com/Job"))
         )
+        r.append(ShapeRow(FIELD_TABLE, String(ROLE_TABLE), String(_FIRESTORE_INDEX)))
+        r.append(ShapeRow(FIELD_TABLE, String(ROLE_INDEX), String(_FIRESTORE_INDEX)))
+        r.append(ShapeRow(FIELD_TABLE, String(ROLE_TTL), String("firestore.googleapis.com/Field")))
         r.append(ShapeRow(FIELD_BUCKET, String(ROLE_BUCKET), String("storage.googleapis.com/Bucket")))
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_GCP_SA)))
         var g = List[GrantRow]()
@@ -273,6 +339,13 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         r.append(ShapeRow(FIELD_JOB, String(ROLE_RUN), String("Microsoft.App/jobs")))
         r.append(
             ShapeRow(
+                FIELD_TABLE,
+                String(ROLE_TABLE),
+                String("Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers"),
+            )
+        )
+        r.append(
+            ShapeRow(
                 FIELD_BUCKET,
                 String(ROLE_BUCKET),
                 String("Microsoft.Storage/storageAccounts/blobServices/containers"),
@@ -280,6 +353,13 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         )
         r.append(ShapeRow(FIELD_SERVICE_ACCOUNT, String(ROLE_IDENTITY), String(_AZURE_ID)))
         var g = List[GrantRow]()
+        g.append(
+            GrantRow(
+                FIELD_TABLE,
+                String("Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments"),
+                String(""),
+            )
+        )
         g.append(GrantRow(TARGET_ANY, String("Microsoft.Authorization/roleAssignments"), String("")))
         return ProviderShape(String("azure"), r^, g^)
 
@@ -304,7 +384,9 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         g.append(GrantRow(FIELD_JOB, String(_K8S_BINDING), String(_K8S_ROLE)))
         g.append(GrantRow(FIELD_SERVICE_ACCOUNT, String(_K8S_BINDING), String(_K8S_ROLE)))
         g.append(GrantRow(FIELD_BUCKET, String("minio:policy"), String("")))
-        return ProviderShape(String("onprem"), r^, g^)
+        var later = List[Absence]()
+        later.append(Absence(FIELD_TABLE, NOT_YET, String(ONPREM_TABLE_REASON)))
+        return ProviderShape(String("onprem"), r^, g^, later^)
 
 
 def builtin_shapes() -> List[ProviderShape]:

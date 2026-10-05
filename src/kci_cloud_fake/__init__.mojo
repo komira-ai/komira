@@ -7,7 +7,7 @@ module runs against them unchanged.
   * `FakeCloud` ("fake"): complete; the executable specification of a
     cloud and the offline test double.
   * `FakeLimitedCloud` ("fake-limited"): deliberately partial (no `job`,
-    no `bucket`, no public ingress); the offline proof that a graph a cloud cannot
+    no `table`, no `bucket`, no public ingress); the offline proof that a graph a cloud cannot
     host is refused before anything is created.
 
 `FakeCloud` takes a provider shape (`ProviderShape`: generic by default;
@@ -35,12 +35,15 @@ from kci_cloud_fake.nodes import (
     fake_bucket_address,
     fake_bucket_name,
     fake_host,
+    fake_table_name,
     fake_url,
+    live_key,
     static_digest,
 )
 from kci_cloud_fake.clouds import FakeLimitedCloud, FakeCloud
 from kci_cloud_fake.shapes import (
     GrantRow,
+    ONPREM_TABLE_REASON,
     ProviderShape,
     ShapeRow,
     TARGET_ANY,
