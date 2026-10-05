@@ -15,6 +15,7 @@ from kci_api import (
     CREDENTIAL_PROBE_MINTED,
     CREDENTIAL_PROBE_NOT_UNDER_CI,
     ContextEntry,
+    credential_probe_note,
     ERROR_PUBLISH_READ_BACK,
     ERROR_SELECTOR,
     ERROR_SELECTOR_NO_MATCH,
@@ -616,6 +617,18 @@ def test_credential_probe() raises:
     var u = _gamma_publish(True)
     u.steps[0].credential_probe = String("PASSED")
     assert_true(_render_refusal(u).find(String("credential_probe 'PASSED' is not one of")) >= 0)
+
+
+def test_credential_probe_note() raises:
+    # NOT_UNDER_CI is said next to the outcome; MINTED, NOT_OIDC and no probe say nothing
+    var r = _gamma_publish(True)
+    assert_equal(credential_probe_note(r.steps), String(""))
+    r.steps[0].credential_probe = String(CREDENTIAL_PROBE_MINTED)
+    assert_equal(credential_probe_note(r.steps), String(""))
+    r.steps[0].credential_probe = String("NOT_OIDC")
+    assert_equal(credential_probe_note(r.steps), String(""))
+    r.steps[0].credential_probe = String(CREDENTIAL_PROBE_NOT_UNDER_CI)
+    assert_equal(credential_probe_note(r.steps), String("credential probe NOT RUN (not under GitHub Actions)"))
 
 
 def test_new_names() raises:

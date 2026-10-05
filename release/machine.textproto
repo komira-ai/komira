@@ -4,7 +4,7 @@
 # is reported as SELECTIVE, never as a full run). kci reads THIS path by
 # convention (release/machine.textproto); `--machine <path>` overrides it.
 # .github/workflows/kci.yml runs each stage as the job of the same name, in the
-# stage's GitHub environment. kci holds that workflow to this file at start-up
+# stage's GitHub environment (the pr stage in none). kci holds that workflow to this file at start-up
 # under GitHub Actions, and the welded test
 # src/kci_ci_check/tests/test_repo_kci_yml.mojo does the same on every build, so
 # a drift fails `./buck2 build //...`. This file owns the stages: edit both
@@ -45,6 +45,17 @@
 #          `prod` (prefix.dev komira-ai/prod), in the GitHub environment `prod`,
 #          whose required reviewer approves the job. The gamma job's summary
 #          lists the names new to prod (NEW NAMES) before that approval.
+#   pr     the per-change check of a pull request (trigger PULL_REQUEST):
+#          `kci run --stage pr --affected-by <the pull request's base commit>`
+#          builds, with each build system's `build_targets` command, exactly
+#          the units of release/artifacts.textproto (its artifacts and
+#          checks) that the change reaches, as each build system's
+#          `affected` command says, and ships nothing. It is the only job of
+#          kci.yml that runs on a pull request, and only for a pull request
+#          from a branch of this repository (a fork's runs nothing). No
+#          environment, no publishing step; FARM-CONNECTED, like build, so its
+#          identity token is the farm connection's only. It runs after no
+#          stage and no stage runs after it.
 #
 # A stage's `environment` is the GitHub environment its job runs in, and the
 # one its channel's trusted publisher names (push_identity
@@ -120,5 +131,17 @@ stage {
     artifacts: "release/artifacts.textproto"
     channels: "release/channels.textproto"
     channel: "prod"
+  }
+}
+
+stage {
+  name: "pr"
+  trigger: PULL_REQUEST
+  farm_connected: true
+  step {
+    name: "check"
+    kind: BUILD
+    platform: "linux-x86_64"
+    artifacts: "release/artifacts.textproto"
   }
 }

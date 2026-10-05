@@ -4,13 +4,20 @@
 #   test and by `kci run` at start-up).
 # =============================================================================
 #
-#   workflow_reader.mojo  `read_workflow`: a RESTRICTED reader of the YAML
-#                         subset a workflow uses; anything else is "cannot
-#                         tell", never a pass
+#   workflow_reader.mojo  `read_workflow`: a FAIL-CLOSED reader of a strict
+#                         YAML subset (its header); anything else is
+#                         "cannot tell", never a pass
 #   rules.mojo            `check_workflow`: every disagreement (R1 to R12, R14);
 #                         `check_running_workflow`: the start-up check `kci
 #                         run` makes; `id_token_stages`: which stages publish
 #                         by OIDC; `kci_run_calls`
+#   pull_request.mojo     R6: on a `pull_request` trigger only the
+#                         PULL_REQUEST stage's job runs (same-repository
+#                         pull requests only, `contents: read` and the farm
+#                         connection's token); every other job is
+#                         release-only (`excludes_pull_request`);
+#                         `condition_expression`: the expression GitHub
+#                         evaluates for a job's `if:`
 #
 # The machine file owns the release machine; the workflow is written by hand and
 # checked against it. This package reads text it is given: it opens no file.
@@ -26,6 +33,15 @@ from kci_ci_check.workflow_reader import (
     WorkflowDoc,
     WorkflowNode,
     read_workflow,
+)
+from kci_ci_check.pull_request import (
+    CHECKOUT_ACTION,
+    PULL_REQUEST_BASE_EXPRESSION,
+    PULL_REQUEST_EVENT,
+    PULL_REQUEST_RUNNER,
+    SAME_REPOSITORY_CONDITION,
+    condition_expression,
+    excludes_pull_request,
 )
 from kci_ci_check.rules import (
     FARM_CONNECT_ACTION,

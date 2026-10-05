@@ -12,7 +12,11 @@
 # The machine file's validations run each installed library's README examples
 # (src/<library>/README.md, shipped as share/doc/<name>/README.md): the same
 # examples are a welded test of the library's own build, so they cannot rot.
+# release/ci holds the commands the per-change check runs (artifacts.textproto's
+# `affected`, `build_targets` and `derive_checks`).
 # Changes need the release approver's review (.github/CODEOWNERS).
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
 export_file(
     name = "artifacts.textproto",
     visibility = ["//src/kci_artifact:"],
@@ -28,4 +32,9 @@ export_file(
     name = "machine.textproto",
     mode = "reference",
     visibility = ["//release/validations:", "//src/kci_ci_check:", "//src/kci_release_machine:"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["ci/*.sh"]),
 )

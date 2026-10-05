@@ -46,6 +46,10 @@ mojo_library(
         "tests/test_kci_args.mojo",
         # kci run over a recording fake: the steps, the workflow check, validations, NEW NAMES, the summary
         "tests/test_kci_dispatch.mojo",
+        # the start-up check accepts a pull request's check (and refuses a
+        # drifted one); a dry run outside CI says its credential probe did
+        # not run, next to the outcome
+        "tests/test_kci_pr_stage_and_probe.mojo",
         # the result file: RUNNING then FINISHED, temp-and-rename, usage errors recorded
         "tests/test_kci_result_file.mojo",
         # the real libraries through a machine file; the secret store by name

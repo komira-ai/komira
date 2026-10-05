@@ -4,7 +4,10 @@
 Deps come from deps.py over the files under --out (split.py's output), never from src/komira_core/BUCK.
 Not generated, added by hand in the commit that makes the package: the cxx_library of a C-symbol owner
 (komira_libc, komira_concurrency, komira_scan_source) and the arrow_ipc extras (large_writes_check, the
-arrow_types.mojo data of the census test)."""
+arrow_types.mojo data of the census test).
+Added by hand later, not from komira_core: komira_collections' hyperloglog.mojo and its test
+tests/test_hyperloglog.mojo. A re-run drops that test from the BUCK test_srcs and check.py copy reports the
+module as an extra; put both back."""
 import os,re,sys,argparse
 sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
 import split as S, deps as D

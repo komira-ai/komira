@@ -26,9 +26,9 @@
 #     targets: "//:docs"
 #   }
 #
-# A build system may also hold the two per-change commands, each a block:
-# `affected { executable: "..." args: "..." }` and `build_targets { ... }`
-# (the .proto's header).
+# A build system may also hold the per-change commands, each a block:
+# `affected { executable: "..." args: "..." }`, `build_targets { ... }` and
+# `derive_checks { ... }` (the .proto's header).
 #
 # which kci renders as `buck2 build
 # //src/komira_json:komira_json_conda[release] --out <dir>`. `build` belongs in
@@ -182,6 +182,7 @@ def _parse_build_system(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Bui
     var args = List[String]()
     var affected = Optional[Command](None)
     var build_targets = Optional[Command](None)
+    var derive_checks = Optional[Command](None)
     while True:
         var me = _label(String("build system"), name, ordinal)
         var f = _field(x, open_line, me)
@@ -210,9 +211,14 @@ def _parse_build_system(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Bui
                 _twice(x, t.line, t.text, me)
             var line = _open_block(x)
             build_targets = _parse_command(x, line, String("the build_targets command of ") + me)
+        elif t.text == "derive_checks":
+            if derive_checks:
+                _twice(x, t.line, t.text, me)
+            var line = _open_block(x)
+            derive_checks = _parse_command(x, line, String("the derive_checks command of ") + me)
         else:
-            _unknown(x, t.line, t.text, me, String("name, executable, args, affected, build_targets"))
-    return BuildSystem(name^, executable^, args^, affected^, build_targets^)
+            _unknown(x, t.line, t.text, me, String("name, executable, args, affected, build_targets, derive_checks"))
+    return BuildSystem(name^, executable^, args^, affected^, build_targets^, derive_checks^)
 
 
 def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Artifact:

@@ -206,6 +206,9 @@ def test_pixi_flags_values() raises:
     assert_equal(c.pixi_sha256, String("807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f"))
     _refused(_run("--pixi", "pixi"), String("--pixi 'pixi' is not an absolute path"))
     _refused(_run("--pixi-sha256", "ABC"), String("--pixi-sha256 'ABC' is not 64 lowercase hex characters"))
+    # an empty sha (an unset variable in the job) is a usage error before any pixi runs
+    _refused(_run("--pixi-sha256", ""), String("--pixi-sha256 is EMPTY"))
+    _refused(_run("--pixi-sha256="), String("--pixi-sha256 is EMPTY"))
     _refused(
         _run("--pixi-sha256", "807EABF195B13D6393B832ECCCF93BF59BF784425674A60C7B50B1B84A58367F"),
         String("is not 64 lowercase hex characters"),

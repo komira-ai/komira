@@ -86,7 +86,12 @@
 #  10. the LAST stderr line is the run's evidence (kci_api
 #      `run_evidence_line`): `kci: FULL run of stage S: <OUTCOME>`, or
 #      `kci: SELECTIVE run of stage S (<only>): <OUTCOME> -- not a full run`
-#      (`(affected-by <base>)` for the per-change check).
+#      (`(affected-by <base>)` for the per-change check). When a PUBLISH
+#      step recorded its credential probe NOT_UNDER_CI, the line says
+#      `credential probe NOT RUN (not under GitHub Actions)` right after the
+#      outcome, and so do the summary's heading and that step's row: a green
+#      dry run outside CI never exchanged a token, so it is never read as
+#      covering the OIDC mint.
 #      The result document says the same in `scope` and `only`. A selective
 #      success exits 0 like a full one, so the scope, never the number, is
 #      what tells them apart. A run refused before its selectors parse (a
@@ -114,7 +119,10 @@ from komira_clock import now_unix_ms
 from kci_build import BuildRequest
 from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow
 from kci_api import (
+    CREDENTIAL_PROBE_NOT_RUN_NOTE,
+    CREDENTIAL_PROBE_NOT_UNDER_CI,
     VALIDATION_NOT_REACHED,
+    credential_probe_note,
     ERROR_CANNOT_TELL,
     ERROR_CHANNEL,
     ERROR_FORMAT,
@@ -333,11 +341,17 @@ def _split(e: Error) -> Tuple[String, String]:
     return (String(s[byte = 0:nl]), String(s[byte = nl + 1 :]))
 
 
+def evidence_line_of(result: KciRunResult, outcome: String) raises -> String:
+    """The run's last stderr line (file header, 10), the credential probe's
+    note next to the outcome when a step recorded it NOT_UNDER_CI."""
+    var base = result.affected_base.copy() if result.has_affected_by else String("")
+    return run_evidence_line(result.scope, result.stage, result.only, outcome, base, credential_probe_note(result.steps))
+
+
 def _evidence(result: KciRunResult, outcome: String, rc: Int) -> Int:
-    """Say the run's last line (file header, 6); return `rc`."""
+    """Say the run's last line (file header, 10); return `rc`."""
     try:
-        var base = result.affected_base.copy() if result.has_affected_by else String("")
-        _say(run_evidence_line(result.scope, result.stage, result.only, outcome, base))
+        _say(evidence_line_of(result, outcome))
     except e:
         _say(String("kci: ") + String(e))
     return rc
@@ -590,7 +604,10 @@ def _lookahead[S: StageSteps](
 
 def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead: List[NewNamesReport]) -> String:
     """The `--summary-file` block of a finished run (file header, 9)."""
+    var note = credential_probe_note(result.steps)
     var s = String("## kci run --stage ") + result.stage + String(": ") + result.outcome
+    if note.byte_length() > 0:
+        s += String(", ") + note
     s += String(" (exit ") + String(result.exit_code) + String(")\n\n")
     if result.scope == SCOPE_SELECTIVE:
         var only = String("")
@@ -644,6 +661,8 @@ def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead:
                 o = String("not selected")
             elif o.byte_length() == 0:
                 o = String("not reached")
+            elif st.credential_probe == CREDENTIAL_PROBE_NOT_UNDER_CI:
+                o += String(", ") + String(CREDENTIAL_PROBE_NOT_RUN_NOTE)
             s += String("| ") + st.name + String(" | ") + st.kind + String(" | ") + o + String(" |\n")
     if len(result.validations) > 0:
         s += String("\n| validation | step | outcome |\n|---|---|---|\n")

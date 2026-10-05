@@ -42,7 +42,7 @@ from kci_reconciler import (
     VERB_CREATE,
     FAULT_UNSET,
     FAULT_OURS,
-    FAULT_CUSTOMER,
+    FAULT_USER,
     FAULT_PROVIDER,
     FaultAttribution,
     is_our_responsibility,
@@ -66,7 +66,7 @@ def test_unset_is_ours() raises:
         String("an UNCLASSIFIED error must read as OURS"),
     )
     assert_true(is_our_responsibility(FAULT_OURS))
-    assert_false(is_our_responsibility(FAULT_CUSTOMER))
+    assert_false(is_our_responsibility(FAULT_USER))
     assert_false(is_our_responsibility(FAULT_PROVIDER))
 
 
@@ -121,7 +121,7 @@ def test_operator_line_says_unclassified_out_loud() raises:
     assert_true(String("node=svc") in stated)
     assert_true(String("verb=create") in stated)
     var theirs = FaultAttribution(
-        FAULT_CUSTOMER, String("svc"), String("create"), String("boom")
+        FAULT_USER, String("svc"), String("create"), String("boom")
     ).operator_line()
     assert_true(String("NOT OURS") in theirs)
 
@@ -133,7 +133,7 @@ def test_wire_tokens_round_trip_and_unknown_words_are_ours() raises:
     a guess."""
     assert_equal(fault_domain_of_word(fault_domain_word(FAULT_OURS)), FAULT_OURS)
     assert_equal(
-        fault_domain_of_word(fault_domain_word(FAULT_CUSTOMER)), FAULT_CUSTOMER
+        fault_domain_of_word(fault_domain_word(FAULT_USER)), FAULT_USER
     )
     assert_equal(
         fault_domain_of_word(fault_domain_word(FAULT_PROVIDER)), FAULT_PROVIDER
@@ -164,9 +164,9 @@ def test_a_stated_domain_survives_the_raise() raises:
     """The raise-site carrier: the only channel a Mojo `Error` has is a String,
     so a stated domain rides a canonical token WE author. The message is
     otherwise verbatim."""
-    var msg = String("the customer revoked roles/run.admin on their project")
-    var e = fault_error(FAULT_CUSTOMER, msg)
-    assert_equal(fault_domain_of_error(String(e)), FAULT_CUSTOMER)
+    var msg = String("the user revoked roles/run.admin on their project")
+    var e = fault_error(FAULT_USER, msg)
+    assert_equal(fault_domain_of_error(String(e)), FAULT_USER)
     assert_false(is_our_responsibility(fault_domain_of_error(String(e))))
     assert_equal(fault_message_of_error(String(e)), msg)
     # An explicitly-UNSET stamp is legal and still reads as ours: a site that
@@ -181,24 +181,24 @@ def test_a_stated_domain_survives_the_raise() raises:
 def test_a_malformed_token_is_ours() raises:
     """The reader matches ONE fixed prefix that `fault_error` wrote. Anything
     that merely LOOKS like it — an unterminated token, an unknown word, the word
-    `customer` appearing in a backend message — is not our token, and not-our-
+    `user` appearing in a backend message — is not our token, and not-our-
     token means UNSET, which means ours. This is the guard against the reader
     ever drifting into prose matching."""
-    assert_true(is_our_responsibility(fault_domain_of_error(String("[fault=cus"))))
+    assert_true(is_our_responsibility(fault_domain_of_error(String("[fault=us"))))
     assert_true(
         is_our_responsibility(fault_domain_of_error(String("[fault=martian] x")))
     )
     assert_true(
         is_our_responsibility(
             fault_domain_of_error(
-                String("403: the customer principal is not permitted")
+                String("403: the user principal is not permitted")
             )
         )
     )
     # ...and a token that is not at the FRONT does not count either.
     assert_true(
         is_our_responsibility(
-            fault_domain_of_error(String("backend said [fault=customer] once"))
+            fault_domain_of_error(String("backend said [fault=user] once"))
         )
     )
     # A malformed token is left in place by the stripper rather than half-eaten.
@@ -277,11 +277,11 @@ struct _FailingNode(Resource, Movable, Deinitable):
         return self._declared
 
 
-# The backend's own words. Deliberately worded like a CUSTOMER fault (it names
-# the customer's project and a permission) while being, in every case below,
+# The backend's own words. Deliberately worded like a USER fault (it names
+# the user's project and a permission) while being, in every case below,
 # whatever the DECLARATION says — which is the point: prose is not the input.
 comptime _BACKEND_MESSAGE: String = (
-    "CreateService: HTTP 403 PERMISSION_DENIED on projects/customer-proj"
+    "CreateService: HTTP 403 PERMISSION_DENIED on projects/user-proj"
 )
 
 
@@ -303,7 +303,7 @@ def _apply_and_capture(var node: _FailingNode) raises -> String:
 def test_B1_an_unconsidered_conformer_is_ours() raises:
     """B1 — THE UNCONSIDERED CONFORMER. A conformer that has never been
     considered declares nothing, so the engine attributes its failure to US, and
-    the backend's own customer-flavoured words do not change that."""
+    the backend's own user-flavoured words do not change that."""
     var surfaced = _apply_and_capture(
         _FailingNode(String("svc"), FAULT_UNSET, FAULT_UNSET, False)
     )
@@ -334,19 +334,19 @@ def test_B2_a_declaring_conformer_reaches_the_engine() raises:
     future edit precisely because dropping it fails SAFE and produces no other
     symptom."""
     var surfaced = _apply_and_capture(
-        _FailingNode(String("svc"), FAULT_CUSTOMER, FAULT_UNSET, False)
+        _FailingNode(String("svc"), FAULT_USER, FAULT_UNSET, False)
     )
-    assert_equal(fault_domain_of_error(surfaced), FAULT_CUSTOMER)
+    assert_equal(fault_domain_of_error(surfaced), FAULT_USER)
     assert_false(is_our_responsibility(fault_domain_of_error(surfaced)))
     assert_true(_BACKEND_MESSAGE in surfaced)
 
 
 def test_B3_the_raise_site_outranks_the_per_verb_declaration() raises:
     """B3 — PRECEDENCE. A site that knew about THIS failure outranks a claim
-    about the verb in general. The node declares CUSTOMER for every create and
+    about the verb in general. The node declares USER for every create and
     the raise says PROVIDER about this one; PROVIDER wins."""
     var surfaced = _apply_and_capture(
-        _FailingNode(String("svc"), FAULT_CUSTOMER, FAULT_PROVIDER, False)
+        _FailingNode(String("svc"), FAULT_USER, FAULT_PROVIDER, False)
     )
     assert_equal(fault_domain_of_error(surfaced), FAULT_PROVIDER)
     # EXACTLY ONE token survives, at the front. Two would answer correctly and
@@ -361,7 +361,7 @@ def test_B4_a_broken_classifier_is_ours_and_costs_nothing() raises:
     intact. A deploy failure must never be replaced by a message about
     attribution."""
     var surfaced = _apply_and_capture(
-        _FailingNode(String("svc"), FAULT_CUSTOMER, FAULT_UNSET, True)
+        _FailingNode(String("svc"), FAULT_USER, FAULT_UNSET, True)
     )
     assert_true(is_our_responsibility(fault_domain_of_error(surfaced)))
     assert_equal(fault_domain_of_error(surfaced), FAULT_UNSET)
@@ -375,12 +375,12 @@ def test_B5_the_attribution_is_recoverable_many_frames_up() raises:
     frames above the apply; `FaultAttribution.of_error` is the whole read side,
     and it yields a record whose `reason` is the message WITHOUT our token."""
     var surfaced = _apply_and_capture(
-        _FailingNode(String("svc"), FAULT_CUSTOMER, FAULT_UNSET, False)
+        _FailingNode(String("svc"), FAULT_USER, FAULT_UNSET, False)
     )
     var a = FaultAttribution.of_error(
         surfaced, String("svc"), String("create")
     )
-    assert_equal(a.domain, FAULT_CUSTOMER)
+    assert_equal(a.domain, FAULT_USER)
     assert_false(a.is_ours())
     assert_true(a.is_classified())
     assert_true(_BACKEND_MESSAGE in a.reason)
