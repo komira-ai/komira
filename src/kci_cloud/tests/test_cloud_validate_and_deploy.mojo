@@ -879,6 +879,24 @@ def test_depth_n_ids_round_trip_the_owner_and_the_stamp() raises:
     print("  test_depth_n_ids_round_trip_the_owner_and_the_stamp: PASS")
 
 
+def test_a_double_dash_role_label_is_never_an_owner() raises:
+    """`--` was once the separator written for `/`. It was never deployed, so
+    there is no compatibility: a role value written that way is an ordinary
+    value that holds `--`, and no node's identity."""
+    var scope = _ctx().scope.copy()
+    var want = scope.stamp(String("uses"), String("uses/jobs"))
+    var labels = standard_label_rule(want)
+    for i in range(len(labels)):
+        if labels[i].key == "kci_role":
+            labels[i] = Label(String("kci_role"), String("jobs--run"))
+    assert_equal(decode_label_value(String("uses--jobs")), "uses--jobs", "no '/' is made of '--'")
+    var got = standard_identity_of(labels)
+    assert_true(got.byte_length() > 0, "a complete stamp still reads")
+    assert_true(got != want.identity(), "it is not the node it resembles")
+    assert_true(not _has(got, "jobs/run"), "its role is never split into segments")
+    print("  test_a_double_dash_role_label_is_never_an_owner: PASS")
+
+
 # ---- 14. the role label budget, before apply ------------------------------------------
 
 
@@ -949,5 +967,6 @@ def main() raises:
     test_the_adapter_interface_and_the_label_rule()
     test_the_label_rule_writes_slash_as_underscore()
     test_depth_n_ids_round_trip_the_owner_and_the_stamp()
+    test_a_double_dash_role_label_is_never_an_owner()
     test_a_role_over_the_label_budget_is_refused_before_apply()
     print("ALL kci_cloud VALIDATE AND DEPLOY TESTS PASSED")

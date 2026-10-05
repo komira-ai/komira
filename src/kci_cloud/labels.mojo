@@ -18,6 +18,11 @@
 #     exact because no segment may hold `_`: resource ids and component ids
 #     are `[a-z0-9-]`, and the role vocabulary uses `-` only. A value that
 #     does hold `_` is REFUSED, since it would decode as a `/`;
+#   * `--` was once written for `/`. That form was never deployed (no adapter
+#     outside the offline fakes has ever stamped an object), so there is no
+#     migration and no compatibility: a value holding `--` is an ordinary
+#     value, never split into segments, so it can never read as an owner or a
+#     role of a node it resembles;
 #   * anything else outside the rule is REFUSED, never rewritten: a lossy
 #     rewrite would make two different owners read as one.
 #
