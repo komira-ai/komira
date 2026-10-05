@@ -123,6 +123,12 @@ pub struct RecoveredHttpRule {
     /// body — all leaf fields are path/query), or a field name (that one
     /// field is the body). Empty string when the annotation omits `body`.
     pub body: String,
+    /// The rule's `additional_bindings`, in declaration order: further
+    /// (verb, path, body) forms of the same method, each flattened as this
+    /// one is. A binding never carries bindings of its own (`http.proto`:
+    /// "Nested bindings must not contain an `additional_bindings` field
+    /// themselves"), so each entry's own list is empty.
+    pub additional_bindings: Vec<RecoveredHttpRule>,
 }
 
 /// The decoded HTTP-annotation side-table for one request, keyed by
@@ -217,10 +223,29 @@ fn flatten_rule(r: &HttpRuleMirror) -> Result<Option<RecoveredHttpRule>, String>
     let Some((verb, path_template)) = found else {
         return Ok(None);
     };
+    let mut additional_bindings = Vec::new();
+    for (i, b) in r.additional_bindings.iter().enumerate() {
+        if !b.additional_bindings.is_empty() {
+            return Err(format!(
+                "http_options: additional binding {i} (`{}`) carries additional_bindings \
+                 of its own, which `google.api.HttpRule` forbids",
+                path_template
+            ));
+        }
+        match flatten_rule(b)? {
+            Some(flat) => additional_bindings.push(flat),
+            None => {
+                return Err(format!(
+                    "http_options: additional binding {i} of `{path_template}` names no verb"
+                ))
+            }
+        }
+    }
     Ok(Some(RecoveredHttpRule {
         verb,
         path_template,
         body: r.body.clone().unwrap_or_default(),
+        additional_bindings,
     }))
 }
 
@@ -276,5 +301,64 @@ mod tests {
             ..Default::default()
         };
         assert!(flatten_rule(&r).unwrap().is_none());
+    }
+
+    #[test]
+    fn flatten_carries_additional_bindings_in_order() {
+        let r = HttpRuleMirror {
+            get: Some("/v1/{name=roles/*}".to_string()),
+            additional_bindings: vec![
+                HttpRuleMirror {
+                    get: Some("/v1/{name=organizations/*/roles/*}".to_string()),
+                    ..Default::default()
+                },
+                HttpRuleMirror {
+                    get: Some("/v1/{name=projects/*/roles/*}".to_string()),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let flat = flatten_rule(&r).unwrap().unwrap();
+        let paths: Vec<&str> = flat
+            .additional_bindings
+            .iter()
+            .map(|b| b.path_template.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            ["/v1/{name=organizations/*/roles/*}", "/v1/{name=projects/*/roles/*}"]
+        );
+        assert!(flat.additional_bindings.iter().all(|b| b.additional_bindings.is_empty()));
+    }
+
+    #[test]
+    fn a_nested_additional_binding_is_an_error() {
+        let inner = HttpRuleMirror {
+            get: Some("/v1/c".to_string()),
+            ..Default::default()
+        };
+        let r = HttpRuleMirror {
+            get: Some("/v1/a".to_string()),
+            additional_bindings: vec![HttpRuleMirror {
+                get: Some("/v1/b".to_string()),
+                additional_bindings: vec![inner],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let err = flatten_rule(&r).unwrap_err();
+        assert!(err.contains("carries additional_bindings"), "{err}");
+    }
+
+    #[test]
+    fn an_additional_binding_with_no_verb_is_an_error() {
+        let r = HttpRuleMirror {
+            get: Some("/v1/a".to_string()),
+            additional_bindings: vec![HttpRuleMirror::default()],
+            ..Default::default()
+        };
+        let err = flatten_rule(&r).unwrap_err();
+        assert!(err.contains("names no verb"), "{err}");
     }
 }

@@ -250,6 +250,79 @@ def _rest_path_var(value: String, pattern: String, field: String) raises -> Stri
     return out^
 
 
+def _rest_drop_members(json: String, names: List[String]) raises -> String:
+    """`json` without its top-level members whose key is in `names`: the
+    `body: "*"` of a method whose path binds fields, which
+    `google/api/http.proto` defines as every field the path does not bind.
+    `json` is an object as `encode_json` writes it, with no whitespace; each
+    kept member is copied byte for byte, so no value is rendered again. An
+    error never echoes the text."""
+    var b = json.as_bytes()
+    var n = len(b)
+    if n < 2 or b[0] != 0x7B or b[n - 1] != 0x7D:
+        raise Error(String("REST body is not a JSON object"))
+    var out = List[UInt8](capacity=n)
+    out.append(0x7B)  # '{'
+    var kept = 0
+    var i = 1
+    while i < n - 1:
+        var start = i
+        # The key: a JSON string, its escapes skipped.
+        if b[i] != 0x22:
+            raise Error(String("REST body member has no key"))
+        var k = i + 1
+        while k < n - 1 and b[k] != 0x22:
+            if b[k] == 0x5C:
+                k += 1
+            k += 1
+        if k + 1 >= n - 1 or b[k] != 0x22 or b[k + 1] != 0x3A:
+            raise Error(String("REST body member has no key"))
+        var drop = False
+        for name in names:
+            var nb = name.as_bytes()
+            if len(nb) == k - i - 1:
+                var same = True
+                var t = 0
+                while same and t < len(nb):
+                    same = nb[t] == b[i + 1 + t]
+                    t += 1
+                if same:
+                    drop = True
+        # The value: up to the `,` at this depth, or the closing `}`.
+        var depth = 0
+        var in_str = False
+        var j = k + 2
+        while j < n - 1:
+            var c = b[j]
+            if in_str:
+                if c == 0x5C:
+                    j += 1
+                elif c == 0x22:
+                    in_str = False
+            elif c == 0x22:
+                in_str = True
+            elif c == 0x7B or c == 0x5B:
+                depth += 1
+            elif c == 0x7D or c == 0x5D:
+                depth -= 1
+            elif c == 0x2C and depth == 0:
+                break
+            j += 1
+        if in_str or depth != 0 or j > n - 1:
+            raise Error(String("REST body member has an unterminated value"))
+        if not drop:
+            if kept > 0:
+                out.append(0x2C)  # ','
+            var x = start
+            while x < j:
+                out.append(b[x])
+                x += 1
+            kept += 1
+        i = j + 1
+    out.append(0x7D)  # '}'
+    return String(unsafe_from_utf8=Span(out))
+
+
 def _rest_hex_upper(nibble: UInt8) -> String:
     """One uppercase hex digit for a 4-bit nibble."""
     if nibble < 10:
@@ -314,12 +387,21 @@ struct DocsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         no `google.api.default_host`, so every method refuses to send until
         `set_rest_host` names a host."""
 
+    var _rest_port: UInt16
+    """The port the request URLs name; 0, the default, is the scheme's."""
+
+    var _rest_plaintext: Bool
+    """Whether the request URLs are `http` rather than `https`. False
+        unless `set_rest_endpoint` says otherwise."""
+
     def __init__(out self, var client: HttpClient[Self.C], var token_source: Self.T):
         """Construct with no default headers."""
         self._client = client^
         self._token_source = token_source^
         self._default_headers = HeaderMap()
         self._rest_host = String("")
+        self._rest_port = UInt16(0)
+        self._rest_plaintext = False
 
     def __init__(
         out self,
@@ -332,6 +414,8 @@ struct DocsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._token_source = token_source^
         self._default_headers = default_headers^
         self._rest_host = String("")
+        self._rest_port = UInt16(0)
+        self._rest_plaintext = False
 
     def set_rest_host(mut self, var host: String):
         """Point the request URLs at `host` (a regional or private endpoint,
@@ -339,6 +423,17 @@ struct DocsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
             resolution and the injected `Host:` header. An empty host makes
             every method refuse to send."""
         self._rest_host = host^
+
+    def set_rest_endpoint(mut self, var host: String, port: UInt16, plaintext: Bool):
+        """Point the request URLs at an endpoint other than the service's
+            public one: `host`, `port` (0 for the scheme's own) and, with
+            `plaintext`, `http` instead of `https`, which is how an emulator
+            serves. The connector must match the scheme: the `HttpClient`
+            refuses an `http` URL over a TLS connector and an `https` one over
+            a plaintext connector. The bearer token is sent either way."""
+        self._rest_host = host^
+        self._rest_port = port
+        self._rest_plaintext = plaintext
 
     def _rest_require_host(self, method: String) raises:
         """Raise, naming the method, when no host is set."""
@@ -361,7 +456,11 @@ struct DocsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         path += String("/docs")
         path += String("/")
         path += _rest_path_segment(_rest_to_str(req.name), String("name"))
-        var url = Url.https(self._rest_host.copy(), UInt16(0), path^)
+        var url: Url
+        if self._rest_plaintext:
+            url = Url.http(self._rest_host.copy(), self._rest_port, path^)
+        else:
+            url = Url.https(self._rest_host.copy(), self._rest_port, path^)
         var headers = HeaderMap()
         self._rest_apply_default_headers(headers)
         headers.append(String("Authorization"), String("Bearer ") + self._token_source.access_token())
@@ -384,7 +483,11 @@ struct DocsClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         path += String("/docs")
         path += String("/")
         path += _rest_path_segment(_rest_to_str(req.name), String("name"))
-        var url = Url.https(self._rest_host.copy(), UInt16(0), path^)
+        var url: Url
+        if self._rest_plaintext:
+            url = Url.http(self._rest_host.copy(), self._rest_port, path^)
+        else:
+            url = Url.https(self._rest_host.copy(), self._rest_port, path^)
         var headers = HeaderMap()
         self._rest_apply_default_headers(headers)
         headers.append(String("Authorization"), String("Bearer ") + self._token_source.access_token())

@@ -6,12 +6,13 @@ import "google/api/annotations.proto";
 
 service S {
   rpc M(Req) returns (Req) {
-    option (google.api.http) = { get: "/v1/things" };
+    option (google.api.http) = { get: "/v1/things/{blob}" };
   }
 }
 
-// `blob` is a query field: proto3 JSON writes `bytes` as base64, which this
-// client does not render into a URL.
+// `blob` is a path variable: proto3 JSON writes `bytes` as base64, whose `/`
+// and `+` this client does not put into a path segment. (A `bytes` query
+// field is sent, base64 and percent-encoded.)
 message Req {
   bytes blob = 1;
 }
