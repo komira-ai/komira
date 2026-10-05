@@ -36,8 +36,8 @@
 #   27-digit number no INT64 column can carry. This engine's int-family SUM
 #   output column is INT64 for a signed aggregand and UINT64 for an unsigned
 #   one (since 2026-09-25), so until that type widens to HUGEINT (a product
-#   decision with a board card, komira-ai/komira#9500056, not a code change to make
-#   quietly) the honest answer is the second: refuse, and say which column.
+#   decision, not a code change to make quietly) the honest answer is the
+#   second: refuse, and say which column.
 # =============================================================================
 
 from std.memory import bitcast
