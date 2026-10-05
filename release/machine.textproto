@@ -34,8 +34,8 @@
 #   pr     the per-change check of a pull request (trigger PULL_REQUEST):
 #          `kci run --stage pr --affected-by <the pull request's base commit>`
 #          builds, with each build system's `build_targets` command, exactly
-#          the units of release/artifacts.textproto (its artifacts, checks and
-#          expect_red units) that the change reaches, as each build system's
+#          the units of release/artifacts.textproto (its artifacts and
+#          checks) that the change reaches, as each build system's
 #          `affected` command says, and ships nothing. It is the only job of
 #          kci.yml that runs on a pull request, and only for a pull request
 #          from a branch of this repository (a fork's runs nothing). No

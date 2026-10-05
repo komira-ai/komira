@@ -42,7 +42,8 @@
 #
 # THE PER-CHANGE CHECK (`kci run --stage pr --affected-by <base>`, the pr
 # stage of release/machine.textproto; the .proto's header). Its UNITS are the
-# artifacts, the checks and the expect_red units below. Each artifact names
+# artifacts and the checks below, and a unit passes only when it builds and
+# its tests pass: the check has one meaning, every unit green. Each artifact names
 # the buck2 targets it stands for (`targets`): every `//` label of its
 # combined args (its build system's, then its own), with the `[subtarget]`
 # removed, which the welded test of this file holds. Building a target builds
@@ -62,8 +63,12 @@
 # `bin`, `release`, `tests`, `third_party`, `tools_<t>` for each `//tools/<t>`
 # tree, and `functional_tests` for the tests cell's positive tests (built
 # only, as `./buck2 build tests//functional/...` builds them). A target an
-# artifact names is in no check. The tests cell's must-fail cases are not
-# here: they become expect_red units.
+# artifact names is in no check. The tests cell's must-fail fixtures
+# (`tests//negative`) are not units and not in the universe: the build
+# system's self-tests (tools/build/tests/run_tests.sh) build each one and
+# assert its refusal. A negative case the per-change check runs is an
+# ordinary passing test (a tests-cell test whose body builds the fixture and
+# asserts the refusal), named in a check like any other target.
 #
 # THE COMMANDS. `build_targets` (release/ci/build_targets.sh) builds a unit's
 # targets, then runs `buck2 test` over the ones in this cell, as `./buck2

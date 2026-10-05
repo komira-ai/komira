@@ -4,8 +4,7 @@
   python3 release/ci/unit_census.py --check   # exit 1 when it is not current
 
 The per-change check (`kci run --stage pr --affected-by <base>`) builds units
-of release/artifacts.textproto: artifacts, checks and expect_red units, each
-naming targets. A target that is in no unit's dependency closure would never
+of release/artifacts.textproto: artifacts and checks, each naming targets. A target that is in no unit's dependency closure would never
 be built by the check. The census is the set of targets whose closures cover
 everything: every ROOT of the universe (a target no other target of the
 universe depends on) and every test target (`buck2 test` runs it, so building
