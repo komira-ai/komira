@@ -19,14 +19,14 @@ somewhere else, even when the retry code uses it.
 
 | name | file | what it is |
 |---|---|---|
-| `MonotonicClock`, `Sleeper`, `RetryRng` | [seams.mojo](seams.mojo) | the injected time, wait and random-number seams |
-| `SystemClock`, `SystemSleeper`, `SplitMix64Rng` | [seams.mojo](seams.mojo) | the real conformers (`std.time`; SplitMix64 is not a CSPRNG) |
-| `ManualClock`, `RecordingSleeper` | [seams.mojo](seams.mojo) | test fakes: time moves only when told, sleeps are recorded and return at once |
-| `Jitter`, `Backoff` | [policy.mojo](policy.mojo) | exponential backoff with FULL or BAND(pct) jitter |
-| `Verdict` | [policy.mojo](policy.mojo) | a classifier's reading: retryable, throttled, server delay, budget cost, reason |
-| `RetryPolicy`, `Decision` | [policy.mojo](policy.mojo) | the limits on a call, and the pure `decide` |
-| `RetryBudget`, `NoBudget`, `TokenBucket` | [budget.mojo](budget.mojo) | an optional retry budget shared across calls |
-| `RetryClassifier`, `RetryLoop`, `system_retry_loop` | [loop.mojo](loop.mojo) | the classifier trait and the loop that sleeps between sends |
+| `MonotonicClock`, `Sleeper`, `RetryRng` | `seams.mojo` | the injected time, wait and random-number seams |
+| `SystemClock`, `SystemSleeper`, `SplitMix64Rng` | `seams.mojo` | the real conformers (`std.time`; SplitMix64 is not a CSPRNG) |
+| `ManualClock`, `RecordingSleeper` | `seams.mojo` | test fakes: time moves only when told, sleeps are recorded and return at once |
+| `Jitter`, `Backoff` | `policy.mojo` | exponential backoff with FULL or BAND(pct) jitter |
+| `Verdict` | `policy.mojo` | a classifier's reading: retryable, throttled, server delay, budget cost, reason |
+| `RetryPolicy`, `Decision` | `policy.mojo` | the limits on a call, and the pure `decide` |
+| `RetryBudget`, `NoBudget`, `TokenBucket` | `budget.mojo` | an optional retry budget shared across calls |
+| `RetryClassifier`, `RetryLoop`, `system_retry_loop` | `loop.mojo` | the classifier trait and the loop that sleeps between sends |
 
 ## Semantics
 
@@ -101,10 +101,48 @@ assert_equal(sends, 3)
 ```
 
 If a decision says to retry, `after_failure` / `after_outcome` has already
-slept. A test builds `RetryLoop[ManualClock, RecordingSleeper, R]` with a
-fixed random source. Each test advances the clock itself, by the time a
-send takes and by each wait the loop asked for, and then reads
-`loop.sleeper().slept`.
+slept.
+
+A test builds `RetryLoop[ManualClock, RecordingSleeper, R]` with a fixed
+random source. It advances the clock itself, by the time a send takes and by
+each wait the loop asked for, and then reads `loop.sleeper().slept`. With no
+jitter the waits are exactly the backoff caps:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_retry import Backoff, Jitter, ManualClock, RecordingSleeper, RetryLoop, RetryPolicy, SplitMix64Rng, Verdict
+
+var policy = RetryPolicy(
+    Backoff(initial_ms=100, multiplier=2.0, max_ms=1000, jitter=Jitter.band(0)),
+    max_attempts=4,
+)
+var loop = RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
+    policy^, ManualClock(), RecordingSleeper(), SplitMix64Rng(1)
+)
+loop.start()
+while True:
+    loop.clock().advance(10)  # the send took 10 ms and failed
+    var d = loop.after_failure(Verdict.transient("503"))
+    if not d.retry:
+        break
+    loop.clock().advance(d.delay_ms)
+assert_equal(loop.attempts(), 4)
+assert_equal(loop.sleeper().slept, [Int64(100), 200, 400])
+```
+
+A bad setting is refused when it is built, naming the setting:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_retry import Backoff
+
+var message = String()
+try:
+    _ = Backoff(initial_ms=100, multiplier=0.5)
+except e:
+    message = String(e)
+assert_equal(message, "Backoff: multiplier must be >= 1, got 0.5")
+```
 
 ## Clock
 
@@ -116,7 +154,7 @@ small library, conforms to `MonotonicClock` there, and callers inject it into
 
 ## Tests
 
-Every file in [tests/](tests/) is welded to the package (`test_srcs`). The
+Every file in `tests/` is welded to the package (`test_srcs`). The
 package is published only if they all pass:
 
 - `test_decide` covers the `decide` table.
