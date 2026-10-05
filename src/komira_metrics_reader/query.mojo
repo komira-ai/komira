@@ -155,10 +155,11 @@ struct MetricsQuery(Copyable, Movable, Deinitable):
 
     The two limits bound what one read materialises on a service instance
     sized for HTTP. A reader that stops at one sets `MetricsPage.truncated`, so
-    a cut answer never reads as a complete one. Which samples a series keeps
-    at the point limit follows the order its store answers in (the oldest
-    for a store read oldest first, the newest for one read newest first);
-    each reader states which."""
+    a cut answer never reads as a complete one. At the point limit a series
+    keeps its NEWEST samples, whatever order its store answers in: the
+    default window ends now, and an answer cut at the other end would drop
+    exactly the most recent steps. A store read oldest first is read newest
+    first instead, or read whole and cut at its old end."""
 
     var start_ns: Int64
     var end_ns: Int64

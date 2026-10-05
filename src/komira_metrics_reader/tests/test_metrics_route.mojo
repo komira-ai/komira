@@ -187,6 +187,11 @@ def test_arguments_reach_the_reader() raises:
     assert_true(q.matchers[1].negated)
     assert_equal(q.series_limit, 7)
     assert_equal(q.point_limit, 9)
+    # Well-formed multibyte UTF-8, percent-encoded, reaches the reader as text.
+    _ = _ok(d, String("metric=m&label.caf%C3%A9=%E2%82%AC%F0%9F%93%88"))
+    q = d.last_query()
+    assert_equal(q.matchers[0].key, String("café"))
+    assert_equal(q.matchers[0].value, String("€📈"))
 
 
 def test_a_bad_argument_is_a_400_never_a_default() raises:
@@ -204,6 +209,9 @@ def test_a_bad_argument_is_a_400_never_a_default() raises:
         "metric=m&label.=x",
         "metric=m&series_limit=ten",
         "metric=m&point_limit=-1",
+        "metric=m&label.k=%FF",
+        "metric=m&label.%C3=v",
+        "metric=%ED%A0%80",
     ]:
         var r = _run(d, String(query), AllowAll())
         assert_equal(r.status, Int32(400), String(query) + " -> " + _body(r))
