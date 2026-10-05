@@ -13,8 +13,10 @@
 #   the workflow passes --machine. The workflow names no removed input or verb
 #   (`ci check`, a claim, an expected set hash) and no channel but the machine
 #   file's. Continuous auto-promotion: build and gamma are break_glass, prod
-#   is not; the push trigger's documentation filter is the documentation
-#   release_version.sh does not count (R15).
+#   is not; a break-glass publish to gamma goes through the environment
+#   gamma-breakglass, which the gamma channel trusts as its second
+#   publisher, and prod has none; the push trigger's documentation filter is
+#   the documentation release_version.sh does not count (R15).
 # =============================================================================
 #
 # The files are staged as test data (BUCK): `kci.yml` (the root BUCK exports
@@ -38,7 +40,12 @@ from kci_ci_check import (
     read_workflow,
 )
 from kci_api import DEFAULT_MACHINE_FILE
-from kci_release_channel import find_channel, parse_channels_file, push_identity_environment
+from kci_release_channel import (
+    break_glass_push_identity_environment,
+    find_channel,
+    parse_channels_file,
+    push_identity_environment,
+)
 from kci_release_machine import ReleaseMachine, parse_machine_file
 
 
@@ -118,6 +125,13 @@ def test_the_release_machine() raises:
         # names: kci refuses a trusted publish from any other.
         var ch = find_channel(channels, p.steps[0].channel)
         assert_equal(push_identity_environment(ch.repositories[0]), p.environment)
+        # a break-glass publish: its own environment, the channel's second
+        # trusted publisher; prod has neither
+        assert_equal(break_glass_push_identity_environment(ch.repositories[0]), p.break_glass_environment)
+        if name == String("gamma"):
+            assert_equal(p.break_glass_environment, String("gamma-breakglass"))
+        else:
+            assert_equal(p.break_glass_environment, String(""))
         after = name.copy()
     var paths = channels_paths(g)
     assert_equal(len(paths), 1)

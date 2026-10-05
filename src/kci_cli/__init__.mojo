@@ -54,11 +54,13 @@ from kci_cli.seam import StageSteps, StepEnd
 from kci_cli.start_checks import (
     GITHUB_ACTIONS,
     GITHUB_ACTOR,
+    GITHUB_EVENT_NAME,
     GITHUB_REF,
     GITHUB_REPOSITORY,
     GITHUB_SHA,
     GITHUB_WORKFLOW_REF,
     GITHUB_WORKFLOW_SHA,
+    MAIN_TRACKING_REF,
     NOT_UNDER_GITHUB_ACTIONS,
     workflow_path_of,
 )
@@ -69,5 +71,5 @@ from kci_cli.dispatch import (
     run_stage_with,
     validation_failure_message,
 )
-from kci_cli.summary import append_summary, break_glass_line, promotion_line, run_summary_markdown
-from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, git_is_ancestor, kci_main
+from kci_cli.summary import append_summary, break_glass_line, carried_markdown, promotion_line, run_summary_markdown
+from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, git_first_parent, git_is_ancestor, kci_main

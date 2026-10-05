@@ -1,29 +1,40 @@
 # =============================================================================
-# src/kci_ci_check/auto_promotion.mojo -- rules R13 to R18 (and R4's
+# src/kci_ci_check/auto_promotion.mojo -- rules R13 to R19 (and R4's
 #   permission allow-list): continuous auto-promotion, where a push to main
 #   IS the release (build -> gamma -> validate -> prod), held to the machine
 #   file.
 # =============================================================================
 #
 #   R13 MAIN-ONLY STAGES. The machine file's `break_glass` stage field says
-#       which stages a manual run of another branch may run (a PREFIX of the
+#       which stages a manual (BREAK-GLASS) run may run (a PREFIX of the
 #       chain; kci_release_machine refuses anything else). The job of every
 #       PUSH stage WITHOUT `break_glass`, and every part job of one, carries
-#       the top-level conjunct `github.ref == 'refs/heads/main'` in its
-#       job-level `if:` (exactly that term, spaces around `==` aside; read
-#       by pull_request.mojo's `top_level_terms`, so a grouping, negation,
-#       call or `||` reads as missing). `github.ref_name == 'main'` is not
-#       it (a TAG named main matches). A break_glass stage's job never
-#       carries it: the workflow and the machine file would disagree about
-#       which stages a branch reaches.
+#       BOTH top-level conjuncts `github.event_name == 'push'` and
+#       `github.ref == 'refs/heads/main'` in its job-level `if:` (exactly
+#       those terms, spaces around `==` aside; read by pull_request.mojo's
+#       `top_level_terms`, so a grouping, negation, call or `||` reads as
+#       missing): a manual run of main never reaches it, only a push does.
+#       `github.ref_name == 'main'` is not it (a TAG named main matches). A
+#       break_glass stage's job carries neither: the workflow and the
+#       machine file would disagree about which stages a manual run
+#       reaches. ⚠ GitHub compares strings IGNORING CASE, so the `ref`
+#       conjunct also passes for a branch `MAIN`: it is defence in depth.
+#       The LOCKS are GitHub's: the `prod` environment's deployment
+#       branches (`main`), a repository ruleset refusing branches and tags
+#       that are main in another case (docs/ci.md), and R19's byte-exact
+#       shell step.
 #   R14 ONE RELEASE AT A TIME. The workflow-level `concurrency:` is a
 #       mapping of exactly `group` and `cancel-in-progress`, each the
 #       canonical text below byte for byte: a pull request's runs in a
 #       group per pull request (a newer push cancels the older check); a
-#       run of main in `kci-release-main`, never cancelled in progress (a
-#       newer run replaces only the PENDING one); a break-glass run in a
-#       group per branch. No job has a `concurrency:` of its own (a
-#       job-level group's pending replacement could drop a prod job).
+#       PUSH to main in `kci-release-main`, never cancelled in progress (a
+#       newer push replaces only the PENDING one); a manual DRY run in a
+#       group of its own run (`kci-plan-<run id>`: it writes nothing, so it
+#       never waits for or replaces anything); any other run (a manual run,
+#       of main too) in a group per ref (`kci-ref-<ref name>`), so no
+#       manual run, whatever revision it names, can replace a pending
+#       release. No job has a `concurrency:` of its own (a job-level
+#       group's pending replacement could drop a prod job).
 #   R15 THE PUSH FILTER (took over R6's push clause). `on.push` holds
 #       exactly `branches: [main]` (a list of one plain item) and
 #       `paths-ignore:`, a BLOCK list of exactly the quoted items 'docs/**'
@@ -54,6 +65,23 @@
 #   R18 THE PROD LINE. Every job of a PUSH stage, and every part job of one,
 #       ends with a step named `the prod line` whose `if:` is `always()`: one
 #       plain line in the job summary says what happens to prod.
+#   R19 THE REVISION IS THIS RUN'S, checked by the workflow itself. Every
+#       job of a PUSH stage, and every part job of one, starts with exactly
+#       two steps: `actions/checkout` (pinned, R8) with `ref: ${{
+#       env.REVISION }}`, then the step `the revision this run releases`, whose
+#       `run:` is the canonical script below byte for byte and which has no
+#       other key (no `if:`, `continue-on-error:`, `shell:` or `env:`): on a
+#       push REVISION is GITHUB_SHA, on any other run a full commit id on
+#       GITHUB_SHA's history. A job of a stage WITHOUT `break_glass` has a
+#       third, `only a push to main reaches this job`, the same way: the
+#       event is `push` and GITHUB_REF is `refs/heads/main`, byte for byte.
+#       So a run of main, whose workflow file is main's own, refuses a
+#       `revision` input naming an unmerged commit BEFORE anything built
+#       from that revision runs (the farm-connect action, ./buck2, kci):
+#       those are the revision's own code and could leave any in-kci check
+#       out. No release job has `continue-on-error:` or `defaults:`, nor has
+#       the workflow `defaults:` (a default `shell` would run the script
+#       elsewhere).
 #   R4  (amended) a `permissions:` mapping, of the workflow or of a release
 #       job, grants `contents: read` and R4's `id-token` only: no other
 #       permission (no `actions: read`, no write) reaches a release job. The
@@ -69,11 +97,15 @@ from .pull_request import PULL_REQUEST_BASE_EXPRESSION, RELEASE_BRANCH, is_expre
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc
 
 comptime MAIN_REF_TERM: String = "github.ref == 'refs/heads/main'"
-"""R13: the conjunct of a main-only stage's job."""
+"""R13: a conjunct of a main-only stage's job."""
+
+comptime PUSH_EVENT_TERM: String = "github.event_name == 'push'"
+"""R13: the other conjunct of a main-only stage's job."""
 
 comptime CONCURRENCY_GROUP: String = (
     "kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
-    " || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}"
+    " || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main'"
+    " || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}"
 )
 """R14: the workflow-level concurrency group, byte for byte."""
 
@@ -87,6 +119,36 @@ comptime PROD_LINE_STEP: String = "the prod line"
 comptime SET_HASH_ENV: String = "RELEASE_SET_HASH"
 """R17: the job-level env variable `--release-set-hash` reads."""
 
+comptime REVISION_STEP: String = "the revision this run releases"
+"""R19: the second step of every release job."""
+
+comptime REVISION_STEP_RUN: String = (
+    "case \"$REVISION\" in\n"
+    "  *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
+    "esac\n"
+    "[ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
+    "if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n"
+    "  [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "    { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n"
+    "else\n"
+    "  git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
+    "    { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "fi\n"
+)
+"""R19: that step's `run:`, byte for byte."""
+
+comptime MAIN_ONLY_STEP: String = "only a push to main reaches this job"
+"""R19: the third step of a main-only stage's job."""
+
+comptime MAIN_ONLY_STEP_RUN: String = (
+    "[ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n"
+    "  { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
+)
+"""R19: that step's `run:`, byte for byte."""
+
+comptime CHECKOUT_REF: String = "${{ env.REVISION }}"
+"""R19: the first step's `with.ref`."""
+
 comptime SET_HASH_OUTPUT: String = "set_hash"
 comptime VALIDATED_SET_HASH_OUTPUT: String = "validated_set_hash"
 
@@ -97,18 +159,38 @@ def _at(doc: WorkflowDoc, node: Int) -> String:
     return String("line ") + String(doc.line(node)) + String(": ")
 
 
-def _is_main_term(term: String) -> Bool:
-    """Exactly `github.ref == 'refs/heads/main'`, spaces around `==`
-    aside."""
+def _is_term(term: String, head: String, literal: String) -> Bool:
+    """Exactly `<head> == '<literal>'`, spaces around `==` aside."""
     var t = String(term.strip())
-    var head = String("github.ref")
     if not t.startswith(head):
         return False
     var rest = String(String(t[byte = head.byte_length() :]).lstrip(String(" ")))
     if not rest.startswith(String("==")):
         return False
     var lit = String(String(rest[byte=2:]).lstrip(String(" ")))
-    return lit == String("'refs/heads/") + String(RELEASE_BRANCH) + String("'")
+    return lit == String("'") + literal + String("'")
+
+
+def _is_main_term(term: String) -> Bool:
+    """Exactly `github.ref == 'refs/heads/main'`, spaces around `==`
+    aside."""
+    return _is_term(term, String("github.ref"), String("refs/heads/") + String(RELEASE_BRANCH))
+
+
+def _is_push_term(term: String) -> Bool:
+    """Exactly `github.event_name == 'push'`, spaces around `==` aside."""
+    return _is_term(term, String("github.event_name"), String("push"))
+
+
+def break_glass_environment_expression(environment: String, break_glass_environment: String) -> String:
+    """R2 for a stage with a `break_glass_environment`: its job's
+    `environment:`, byte for byte. A push runs in the stage's environment
+    (locked to main by its deployment branches); every other run in the
+    break-glass one (a required reviewer)."""
+    return (
+        String("${{ github.event_name == 'push' && '") + environment + String("' || '") + break_glass_environment
+        + String("' }}")
+    )
 
 
 def check_main_only(doc: WorkflowDoc, job_id: String, job: Int, st: Stage, mut findings: List[String]):
@@ -116,22 +198,84 @@ def check_main_only(doc: WorkflowDoc, job_id: String, job: Int, st: Stage, mut f
     var terms = List[String]()
     var read = top_level_terms(doc, doc.child(job, String("if")), terms)
     var has_main = False
+    var has_push = False
     if read:
         for i in range(len(terms)):
             if _is_main_term(terms[i]):
                 has_main = True
+            if _is_push_term(terms[i]):
+                has_push = True
     var where = _at(doc, job) + String("job '") + job_id + String("': R13: stage '") + st.name + String("'")
-    if not st.break_glass and not has_main:
+    if not st.break_glass and not (has_main and has_push):
         findings.append(
-            where + String(" runs only on main (the machine file gives it no `break_glass`), so the job's `if:` is")
-            + String(" a top-level conjunction with the term `") + String(MAIN_REF_TERM)
-            + String("` (not `github.ref_name`, which a tag named main matches)")
+            where + String(" runs only on a push to main (the machine file gives it no `break_glass`), so the job's")
+            + String(" `if:` is a top-level conjunction with the terms `") + String(PUSH_EVENT_TERM) + String("` and `")
+            + String(MAIN_REF_TERM) + String("` (not `github.ref_name`, which a tag named main matches; a manual run")
+            + String(" of main is not a push)")
         )
-    elif st.break_glass and has_main:
+    elif st.break_glass and (has_main or has_push):
+        var held = String(MAIN_REF_TERM) if has_main else String(PUSH_EVENT_TERM)
         findings.append(
-            where + String(" is break_glass in the machine file (a manual run of a branch runs it), and the job's")
-            + String(" `if:` holds `") + String(MAIN_REF_TERM) + String("`: the workflow and the machine file disagree")
+            where + String(" is break_glass in the machine file (a manual run runs it), and the job's")
+            + String(" `if:` holds `") + held + String("`: the workflow and the machine file disagree")
         )
+
+
+def _step_is(doc: WorkflowDoc, step: Int, name: String, run: String) -> Bool:
+    """`step` has exactly the keys `name` (plain or quoted `name`) and `run`
+    (a block scalar, `run` byte for byte)."""
+    if step < 0 or doc.kind(step) != NODE_MAP or len(doc.keys(step)) != 2:
+        return False
+    var n = doc.child(step, String("name"))
+    var r = doc.child(step, String("run"))
+    return (
+        n >= 0 and doc.kind(n) == NODE_SCALAR and not doc.is_block(n) and doc.text(n) == name
+        and r >= 0 and doc.is_block(r) and doc.text(r) == run
+    )
+
+
+def _is_revision_checkout(doc: WorkflowDoc, step: Int) -> Bool:
+    if step < 0 or doc.kind(step) != NODE_MAP:
+        return False
+    var u = doc.child(step, String("uses"))
+    if u < 0 or doc.kind(u) != NODE_SCALAR or not doc.text(u).startswith(String("actions/checkout@")):
+        return False
+    if doc.child(step, String("if")) >= 0 or doc.child(step, String("continue-on-error")) >= 0:
+        return False
+    var wref = doc.child(doc.child(step, String("with")), String("ref"))
+    return wref >= 0 and doc.kind(wref) == NODE_SCALAR and not doc.is_block(wref) and doc.text(wref) == String(CHECKOUT_REF)
+
+
+def check_revision_steps(doc: WorkflowDoc, job_id: String, job: Int, st: Stage, mut findings: List[String]):
+    """R19 for a job that runs PUSH stage `st` or a part of it."""
+    var steps = doc.items(doc.child(job, String("steps")))
+    var where = _at(doc, job) + String("job '") + job_id + String("': R19: ")
+    if len(steps) < 1 or not _is_revision_checkout(doc, steps[0]):
+        findings.append(
+            where + String("its first step is `actions/checkout` with `ref: ") + String(CHECKOUT_REF)
+            + String("` (no `if:`, no `continue-on-error:`)")
+        )
+    if len(steps) < 2 or not _step_is(doc, steps[1], String(REVISION_STEP), String(REVISION_STEP_RUN)):
+        findings.append(
+            where + String("its second step is `name: ") + String(REVISION_STEP) + String("` with the canonical `run:`")
+            + String(" (auto_promotion.mojo REVISION_STEP_RUN, byte for byte) and no other key: the workflow refuses a")
+            + String(" revision that is not this run's before anything built from it runs")
+        )
+    if not st.break_glass and (
+        len(steps) < 3 or not _step_is(doc, steps[2], String(MAIN_ONLY_STEP), String(MAIN_ONLY_STEP_RUN))
+    ):
+        findings.append(
+            where + String("stage '") + st.name + String("' runs only on a push to main, so its third step is `name: ")
+            + String(MAIN_ONLY_STEP) + String("` with the canonical `run:` (MAIN_ONLY_STEP_RUN, byte for byte) and no")
+            + String(" other key: GITHUB_REF compared byte for byte, which no `if:` can do")
+        )
+    for key in [String("continue-on-error"), String("defaults")]:
+        var k = doc.child(job, key)
+        if k >= 0:
+            findings.append(
+                _at(doc, k) + String("job '") + job_id + String("': R19: a release job has no `") + key
+                + String(":` (it could run the revision check elsewhere, or carry on past it)")
+            )
 
 
 def check_concurrency(doc: WorkflowDoc, mut findings: List[String]):
@@ -420,7 +564,7 @@ def check_permission_grants(doc: WorkflowDoc, owner: Int, whose: String, mut fin
 def check_auto_promotion(
     doc: WorkflowDoc, g: ReleaseMachine, ids: List[String], nodes: List[Int], part_stage: List[String], mut findings: List[String]
 ):
-    """R13 to R18 and R4's allow-list over every job (file header).
+    """R13 to R19 and R4's allow-list over every job (file header).
     `part_stage[i]` is the stage job `ids[i]` runs a part of ("" for none);
     a job named after a stage runs that stage."""
     var root = 0
@@ -429,6 +573,12 @@ def check_auto_promotion(
     check_dispatch_inputs(doc, on, findings)
     check_no_expression_in_run(doc, findings)
     check_permission_grants(doc, root, String("workflow: "), findings)
+    var defaults = doc.child(root, String("defaults"))
+    if defaults >= 0:
+        findings.append(
+            _at(doc, defaults) + String("workflow: R19: the workflow has no `defaults:` (a default `shell` would run")
+            + String(" the revision check, and every script, elsewhere)")
+        )
     var sources = List[String]()
     var outputs = List[String]()
     for i in range(len(ids)):
@@ -448,6 +598,7 @@ def check_auto_promotion(
         var whose = String("job '") + ids[i] + String("': ")
         check_permission_grants(doc, nodes[i], whose, findings)
         check_main_only(doc, ids[i], nodes[i], st, findings)
+        check_revision_steps(doc, ids[i], nodes[i], st, findings)
         check_prod_line(doc, ids[i], nodes[i], findings)
         var needs_hash = part or st.has_kind(String("PUBLISH"))
         var source = String("")

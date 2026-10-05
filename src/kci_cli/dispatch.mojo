@@ -41,15 +41,23 @@
 #      (`workflow.checked` false, reason "not under GitHub Actions");
 #   4a. THE REF CHECK, under GitHub Actions, for a PUSH stage (continuous
 #      auto-promotion; the PULL_REQUEST stage is R6's): the platform-set
-#      `GITHUB_REF` and `GITHUB_SHA` are read (unset or malformed:
-#      INDETERMINATE, exit 5). A stage WITHOUT the machine file's
-#      `break_glass` runs only on main: `GITHUB_REF` is `refs/heads/main`
-#      and the revision is on `origin/main`'s history, else REFUSED
-#      (KCI-E-NOT-ON-MAIN, exit 3). A break_glass stage on main is held to
-#      `origin/main` the same way; off main (BREAK-GLASS) its revision is on
-#      `GITHUB_SHA`'s history and `--context reason=` is given, non-empty and
-#      at most 200 bytes, else REFUSED (KCI-E-BREAK-GLASS-REASON). History
-#      that git cannot read (a shallow clone, no `origin/main`) is
+#      `GITHUB_REF`, `GITHUB_SHA` and `GITHUB_EVENT_NAME` are read (unset or
+#      malformed: INDETERMINATE, exit 5). Refs compare BYTE FOR BYTE (GitHub's
+#      expressions and concurrency groups ignore case; kci does not), and a
+#      `GITHUB_REF` that is `refs/heads/main` in another case is REFUSED
+#      (KCI-E-NOT-ON-MAIN) for every stage. A RELEASE run is a `push` to
+#      `refs/heads/main`; any other run is BREAK-GLASS. A stage WITHOUT the
+#      machine file's `break_glass` runs only on a release run, whose
+#      revision is `GITHUB_SHA` itself and on `refs/remotes/origin/main`'s
+#      history (a full refname: a tag named `origin/main` does not answer),
+#      else REFUSED (KCI-E-NOT-ON-MAIN, exit 3). A break_glass stage on a
+#      release run is held the same way; on a break-glass run its revision is
+#      on `GITHUB_SHA`'s history and `--context reason=` is given, non-empty
+#      and at most 200 bytes, else REFUSED (KCI-E-BREAK-GLASS-REASON), and
+#      each PUBLISH step runs as break-glass (kci_publish: the stage's
+#      `break_glass_environment` and the channel's
+#      `break_glass_push_identity`). History git cannot read (a shallow
+#      clone, no `refs/remotes/origin/main`, an unknown commit) is
 #      INDETERMINATE, never a pass. A break-glass run's summary and stderr
 #      start `BREAK-GLASS: <ref> <revision> by <actor>: <reason>`;
 #   4b. THE SET HASH, for a run that selects a PUBLISH step or a
@@ -353,7 +361,7 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
     return req^
 
 
-def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep) raises -> PublishRequest:
+def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep, break_glass: Bool) raises -> PublishRequest:
     var req = PublishRequest(cmd.run_identity())
     req.step_name = step.name.copy()
     req.artifacts_file = step.artifacts.copy()
@@ -362,6 +370,11 @@ def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep) raises -> P
     req.revision_id = cmd.revision_id.copy()
     req.stage = stage.name.copy()
     req.environment = stage.environment.copy()
+    # a break-glass run publishes from the stage's break-glass environment
+    # (kci_publish refuses one without it on an OIDC channel)
+    req.break_glass = break_glass
+    if break_glass and stage.break_glass_environment.byte_length() > 0:
+        req.environment = stage.break_glass_environment.copy()
     req.channels_file = step.channels.copy()
     req.channel = step.channel.copy()
     req.release_version_file = cmd.release_version.copy()
@@ -437,7 +450,7 @@ def _lookahead[S: StageSteps](
                 out.append(r^)
                 continue
             try:
-                r = steps.lookahead(_publish_request(cmd, later, step))
+                r = steps.lookahead(_publish_request(cmd, later, step, False))
             except e:
                 r = NewNamesReport(later.name.copy(), step.name.copy(), step.channel.copy())
                 r.detail = String("not read: ") + String(e)
@@ -458,16 +471,17 @@ def _run_step[S: StageSteps](
     mut recorder: CliRecorder,
     mut result: KciRunResult,
     mut step_blocks: List[String],
+    break_glass: Bool,
 ) -> StepEnd:
     """One selected step (file header, 6): run it, print its lines, keep its
-    summary block."""
+    summary block. `break_glass`: the run is break-glass (4a)."""
     _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(" (") + step.kind + String(")"))
     var end: StepEnd
     try:
         if step.is_build():
             end = steps.build(_build_request(cmd, step), result, recorder)
         else:
-            end = steps.publish(_publish_request(cmd, stage, step), result, recorder, cmd.store)
+            end = steps.publish(_publish_request(cmd, stage, step, break_glass), result, recorder, cmd.store)
             # the run's dry-run flag is the command line's: a step refused
             # before it read its request records `plan` false
             result.plan = cmd.plan
@@ -544,7 +558,8 @@ def _run_stage[S: StageSteps](
     if verdict.outcome.byte_length() > 0:
         return _stop_run(result, recorder, verdict.outcome, verdict.error_id, verdict.message)
     # 4a. the ref this run is on; 4b. the set it was handed
-    var ref_verdict = check_ref_at_start(cmd, stage, steps, banner)
+    var break_glass = False
+    var ref_verdict = check_ref_at_start(cmd, stage, steps, banner, break_glass)
     if ref_verdict.outcome.byte_length() > 0:
         return _stop_run(result, recorder, ref_verdict.outcome, ref_verdict.error_id, ref_verdict.message)
     var hash_verdict = check_set_hash_at_start(cmd, stage, sel, steps, result)
@@ -580,7 +595,7 @@ def _run_stage[S: StageSteps](
             _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(": not selected (--only)"))
             result.steps.append(ResultStep.unselected(step.name.copy(), step.kind.copy(), step.platform.copy()))
         else:
-            var end = _run_step(cmd, stage, step, steps, recorder, result, step_blocks)
+            var end = _run_step(cmd, stage, step, steps, recorder, result, step_blocks, break_glass)
             try:
                 outcome = worst_outcome(outcome, end.outcome)
             except e:

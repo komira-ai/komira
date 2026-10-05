@@ -59,6 +59,8 @@ from .plan import (
     approved_names_for,
     plan_from_state,
     state_name,
+    build_number_of,
+    previous_build_number,
     superseding_files,
 )
 from kci_api import ERROR_CREDENTIAL, ERROR_SUPERSEDED
@@ -191,6 +193,10 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
             )
             r.stop(String(REASON_REFUSED), String(ERROR_SUPERSEDED), String("\n").join(later))
             return r^
+        # what this release carries (plan.mojo `previous_build_number`)
+        if len(targets) > 0:
+            r.build_number = build_number_of(targets[0])
+        r.previous_build = previous_build_number(targets, channel_read.listed_files)
     var to_upload = 0
     for i in range(len(targets)):
         var word = String("WOULD UPLOAD ") if channel_read.states[i].kind == STATE_ABSENT else String("PRESENT ")

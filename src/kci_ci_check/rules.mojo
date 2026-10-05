@@ -19,7 +19,14 @@
 #       RULING: before, the job ids were exactly the stage names.]
 #   R2  each job runs in its stage's GitHub environment, the stage's
 #       `environment` (by default its name): `environment: <env>`, or
-#       `environment: {name: <env>}` as a block
+#       `environment: {name: <env>}` as a block. A stage with a
+#       `break_glass_environment` (kci_release_machine) instead runs in
+#       exactly `${{ github.event_name == 'push' && '<env>' || '<break-glass
+#       env>' }}` (auto_promotion.mojo `break_glass_environment_expression`):
+#       a break-glass publish goes through an environment of its own (a
+#       required reviewer), never through the stage's own, which is locked
+#       to main. (A break_glass stage without one that publishes by OIDC is
+#       refused at run time on a break-glass run: kci_publish.)
 #   R3  each job's `needs` is exactly the jobs that run its stage's `after`
 #       (none for none): the job named after that stage, and, when that
 #       stage is split (R9), each of its part jobs too, so a later stage waits
@@ -154,13 +161,14 @@
 #   R12 every `kci run` passes `--summary-file` (the job summary carries the
 #       run's outcome and the NEW NAMES an approver reads before approving a
 #       later stage)
-#   R13 to R18: continuous auto-promotion (auto_promotion.mojo's header):
+#   R13 to R19: continuous auto-promotion (auto_promotion.mojo's header):
 #       main-only stages carry `github.ref == 'refs/heads/main'` (R13), one
 #       canonical concurrency group (R14), the push filter with its
 #       documentation `paths-ignore` (R15, which took over R6's push
 #       clause), the manual run's inputs and no expression in a script
 #       (R16), the release set's hash handed from job to job (R17), and
-#       every release job's last step `the prod line` (R18); and R4's
+#       every release job's last step `the prod line` (R18), the revision
+#       checked by the workflow's own first steps (R19); and R4's
 #       allow-list: a release job's permissions map grants `contents: read`
 #       and `id-token` only.
 #
@@ -176,7 +184,7 @@ from kci_api import DEFAULT_MACHINE_FILE, Selector, parse_selector
 from kci_release_channel import Channel, find_channel, parse_channels_file
 from kci_release_machine import Selection, Stage, ReleaseMachine, joined_names, resolve_selection
 
-from .auto_promotion import check_auto_promotion, check_push_filter
+from .auto_promotion import break_glass_environment_expression, check_auto_promotion, check_push_filter
 from .kci_run_calls import KciRunCall, kci_run_calls
 from .pull_request import check_no_secret, check_pull_request_job, check_release_only
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
@@ -469,6 +477,15 @@ def _check_job(
             findings.append(
                 where + String(": R2: stage '") + job_id + String("' is a PULL_REQUEST stage, so its job runs in no")
                 + String(" environment: no environment secret or approval reaches a pull request's code")
+            )
+    elif st.break_glass_environment.byte_length() > 0:
+        var want = break_glass_environment_expression(st.environment, st.break_glass_environment)
+        if env < 0 or doc.kind(env) != NODE_SCALAR or doc.is_block(env) or doc.text(env) != want:
+            findings.append(
+                where + String(": R2: stage '") + st.name + String("' has break_glass_environment '")
+                + st.break_glass_environment + String("', so the job runs in exactly `environment: ") + want
+                + String("` (a push in '") + st.environment + String("', every other run in '") + st.break_glass_environment
+                + String("')")
             )
     elif env_name != st.environment:
         if env_name.byte_length() == 0:
@@ -858,7 +875,7 @@ def check_workflow_doc(
             _check_part_job(doc, job_ids[parts[k]], job_nodes[parts[k]], st, g, machine_path, pr_trigger, findings)
         if split:
             _check_split(doc, st, job_ids[found], job_nodes[found], job_ids, job_nodes, parts, findings)
-    # R13 to R18, and R4's allow-list (auto_promotion.mojo)
+    # R13 to R19, and R4's allow-list (auto_promotion.mojo)
     check_auto_promotion(doc, g, job_ids, job_nodes, part_stage, findings)
     # R8
     _collect_uses(doc, root, findings)

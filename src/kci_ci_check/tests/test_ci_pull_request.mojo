@@ -63,7 +63,7 @@ comptime _WF: String = (
     "permissions: {}\n"
     "concurrency:\n"
     "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
-    " || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n"
+    " || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
     "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
     "jobs:\n"
     "  build:\n"
@@ -74,6 +74,22 @@ comptime _WF: String = (
     "    permissions:\n"
     "      id-token: write\n"
     "    steps:\n"
+    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+    "        with:\n"
+    "          ref: ${{ env.REVISION }}\n"
+    "      - name: the revision this run releases\n"
+    "        run: |\n"
+    "          case \"$REVISION\" in\n"
+    "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
+    "          esac\n"
+    "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n"
+    "          else\n"
+    "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
+    "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          fi\n"
     "      - uses: ./.github/actions/farm-connect\n"
     "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
     "      - name: the prod line\n"
@@ -88,6 +104,22 @@ comptime _WF: String = (
     "    permissions:\n"
     "      id-token: write\n"
     "    steps:\n"
+    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+    "        with:\n"
+    "          ref: ${{ env.REVISION }}\n"
+    "      - name: the revision this run releases\n"
+    "        run: |\n"
+    "          case \"$REVISION\" in\n"
+    "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
+    "          esac\n"
+    "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n"
+    "          else\n"
+    "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
+    "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          fi\n"
     "      - run: kci run --stage publish-gamma --plan --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
     "      - name: the prod line\n"
     "        if: always()\n"
@@ -757,7 +789,7 @@ def test_an_id_token_block_scalar_on_a_release_job_is_cannot_tell() raises:
     var styles = _block_styles()
     for i in range(len(styles)):
         var job = _wf(
-            String("    environment: build\n    permissions:\n      id-token: write\n    steps:\n      - uses: ./.github/actions/farm-connect\n"),
+            String("    environment: build\n    permissions:\n      id-token: write\n    steps:\n"),
             String("    environment: build\n    permissions:\n      id-token: ") + styles[i] + String("\n        write\n    steps:\n"),
         )
         _cannot_tell(machine, job, String("block scalar"))

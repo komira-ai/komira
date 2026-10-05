@@ -14,6 +14,11 @@
 #   break_glass_line      `BREAK-GLASS: <ref> <revision> by <actor>:
 #                         <reason>`, the first line of every break-glass
 #                         run's summary
+#   carried_markdown      what a never-backward (main-only) publish CARRIES:
+#                         main's first-parent commits after the channel's
+#                         previous build of this version, so a run that was
+#                         replaced while pending (or never started) is
+#                         reported by the run that released its commit
 #   append_summary        appends to the file, never truncates
 #
 # Pure functions over owned values (append_summary writes the one file it is
@@ -197,3 +202,40 @@ def break_glass_line(ref_value: String, revision: String, actor: String, reason:
     """The first line of a break-glass run's summary (file header)."""
     var short = String(revision[byte = 0 : 8]) if revision.byte_length() >= 8 else revision.copy()
     return String("BREAK-GLASS: ") + ref_value + String(" ") + short + String(" by ") + actor + String(": ") + reason
+
+
+comptime CARRIED_SHOWN_MAX: Int = 40
+"""At most this many carried commits are listed one by one."""
+
+
+def carried_markdown(stage: String, previous: Int, ours: Int, first_parent: List[String]) -> String:
+    """The file header's `carried_markdown`. `first_parent` is `git rev-list
+    --first-parent --reverse <revision>` (oldest first, so entry i is the
+    commit whose first-parent count, a build number, is i + 1); `previous`
+    is the channel's highest earlier build of this version (-1 for none),
+    `ours` this release's. "" when `ours` is not read."""
+    if ours < 0:
+        return String("")
+    var head = String("#### carried to ") + stage + String("\n\n")
+    if previous < 0:
+        return head + String("The channel lists no earlier build of this version: build ") + String(ours) + String(
+            " is its first.\n\n"
+        )
+    if previous >= len(first_parent):
+        return head + String("The channel's previous build is ") + String(previous) + String(
+            ", past this revision's first-parent history: the carried commits cannot be listed.\n\n"
+        )
+    var n = len(first_parent) - previous
+    var s = head + String(n) + String(" commit(s) of main ride in build ") + String(ours) + String(
+        " (after build "
+    ) + String(previous) + String(
+        ", the channel's last of this version). A commit here that is not this run's own revision was released by"
+    ) + String(" no run of its own: that run was replaced while pending, or never started.\n\n")
+    var shown = 0
+    for i in range(previous, len(first_parent)):
+        if shown == CARRIED_SHOWN_MAX:
+            s += String("- ... and ") + String(n - shown) + String(" more\n")
+            break
+        s += String("- `") + first_parent[i] + String("`\n")
+        shown += 1
+    return s + String("\n")

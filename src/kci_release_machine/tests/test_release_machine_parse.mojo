@@ -684,5 +684,41 @@ def test_break_glass_refusals() raises:
     )
 
 
+def test_break_glass_environment() raises:
+    var g = parse_machine_file(
+        _chain(
+            String(" break_glass: true\n"),
+            String(" break_glass: true\n break_glass_environment: \"gamma-breakglass\"\n"),
+            String(""),
+        ),
+        String(_SRC),
+    )
+    assert_equal(g.stage(String("gamma")).break_glass_environment, String("gamma-breakglass"))
+    assert_equal(g.stage(String("gamma")).environment, String("gamma"))
+    assert_equal(g.stage(String("build")).break_glass_environment, String(""))
+    # only a break_glass stage has one
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n"), String(" break_glass_environment: \"p-bg\"\n")),
+        String("stage 'prod' has break_glass_environment 'p-bg' and is not break_glass"),
+    )
+    # an environment name, and not the stage's own environment
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n break_glass_environment: \"Gamma_BG\"\n"), String("")),
+        String("stage 'gamma' has break_glass_environment 'Gamma_BG'; an environment name is"),
+    )
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n break_glass_environment: \"gamma\"\n"), String("")),
+        String("stage 'gamma' has break_glass_environment 'gamma', the stage's own environment"),
+    )
+    _assert_refused(
+        _chain(
+            String(" break_glass: true\n"),
+            String(" break_glass: true\n break_glass_environment: \"a\"\n break_glass_environment: \"b\"\n"),
+            String(""),
+        ),
+        String("field 'break_glass_environment' is set twice in stage 'gamma'"),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

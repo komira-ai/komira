@@ -36,6 +36,17 @@
 # later one. A PULL_REQUEST stage is never break_glass (it is no release
 # stage).
 #
+# `break_glass_environment: "<env>"` names the GitHub environment a
+# break_glass stage's job runs in on a BREAK-GLASS run (any run but a push
+# to main), in place of its `environment`. It exists so the stage's own
+# environment can be locked to main (deployment branches: `main`) while a
+# break-glass run goes through an environment of its own, with a required
+# reviewer, whose approval GitHub records. Only a break_glass stage has one,
+# it is an environment name and it is not the stage's `environment`. A
+# break-glass run of a stage that publishes by OIDC trusted publishing
+# without one is refused by kci_publish (the channel's trusted publisher
+# accepts the stage's main environment only).
+#
 # A STEP has a name (unique in its stage), a kind and the inputs of that
 # kind:
 #
@@ -222,6 +233,7 @@ struct Stage(Copyable, Movable):
     var farm_connected: Bool
     var trigger: String
     var break_glass: Bool
+    var break_glass_environment: String
     var steps: List[StageStep]
     var line: Int
 
@@ -232,6 +244,7 @@ struct Stage(Copyable, Movable):
         self.farm_connected = False
         self.trigger = String(STAGE_TRIGGER_PUSH)
         self.break_glass = False
+        self.break_glass_environment = String("")
         self.steps = List[StageStep]()
         self.line = line
 
@@ -580,6 +593,8 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                 + String("'; an environment name is [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
                 + String(" bytes, not ending in '-'")
             )
+        if s.break_glass_environment.byte_length() > 0:
+            _check_break_glass_environment(source, s)
         if s.after.byte_length() > 0:
             if s.after == s.name:
                 raise Error(_at(source, s.line) + String("stage '") + s.name + String("' runs after itself"))
@@ -616,6 +631,25 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                 )
             _check_step_validations(source, s, s.steps[k])
         _check_validation_names_unique(source, s)
+
+
+def _check_break_glass_environment(source: String, s: Stage) raises:
+    """`break_glass_environment` (file header): only on a break_glass
+    stage, an environment name, not the stage's `environment`."""
+    var where = _at(source, s.line) + String("stage '") + s.name + String("' has break_glass_environment '")
+    where += s.break_glass_environment + String("'")
+    if not s.break_glass:
+        raise Error(where + String(" and is not break_glass: only a stage a break-glass run reaches has one"))
+    if not is_stage_or_step_name(s.break_glass_environment):
+        raise Error(
+            where + String("; an environment name is [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
+            + String(" bytes, not ending in '-'")
+        )
+    if s.break_glass_environment == s.environment:
+        raise Error(
+            where + String(", the stage's own environment: a break-glass run goes through an environment of its")
+            + String(" own, so the stage's environment can be locked to main")
+        )
 
 
 def _check_pull_request_stage(source: String, g: ReleaseMachine, i: Int) raises:

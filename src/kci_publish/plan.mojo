@@ -41,6 +41,13 @@
 #   number publishes the same bytes, or NOOP); a build string without a
 #   number after its last `_` is not read as one.
 #
+# `previous_build_number(targets, listed_files)` -- what a never-backward
+#   publish CARRIES: the highest build number the channel lists for a
+#   target's name and version (in its subdir) that is LOWER than the
+#   target's, over every target; -1 when it lists none. kci_cli reports the
+#   commits between that build and this one (they rode in this release: the
+#   runs that would have published them were replaced or skipped).
+#
 # `approved_names_for(targets)` -- the uploader's last gate
 #   (`kci_pkg_upload.ApprovedNames`): every name of the declared set, so an
 #   undeclared name cannot be uploaded even by a bug above this layer. Never
@@ -437,3 +444,29 @@ def superseding_files(targets: List[PublishTarget], listed_files: List[String]) 
                     + String(") by ") + f + String(" (build number ") + String(theirs) + String(")")
                 )
     return out^
+
+
+def build_number_of(target: PublishTarget) -> Int:
+    """The target's own build number (`h<8 hex>_<N>`), -1 when its build
+    string has none."""
+    ref c = target.coordinate
+    return _build_number(_build_of(c.file_name, c.distribution, c.version))
+
+
+def previous_build_number(targets: List[PublishTarget], listed_files: List[String]) -> Int:
+    """The file header's `previous_build_number`."""
+    var best = -1
+    for i in range(len(targets)):
+        ref c = targets[i].coordinate
+        var ours = build_number_of(targets[i])
+        if ours < 0:
+            continue
+        var prefix = c.subdir + String("/")
+        for k in range(len(listed_files)):
+            ref f = listed_files[k]
+            if not f.startswith(prefix):
+                continue
+            var theirs = _build_number(_build_of(String(f[byte = prefix.byte_length() :]), c.distribution, c.version))
+            if theirs >= 0 and theirs < ours and theirs > best:
+                best = theirs
+    return best

@@ -1,6 +1,7 @@
 # =============================================================================
 # src/kci_ci_check/tests/test_ci_auto_promotion.mojo -- continuous
-#   auto-promotion (auto_promotion.mojo, R13 to R18 and R4's allow-list),
+#   auto-promotion (auto_promotion.mojo, R13 to R19, R2's break-glass
+#   environment and R4's allow-list),
 #   held by a table of mutations of the repository's OWN kci.yml and
 #   release/machine.textproto: the canonical pair agrees, and every row that
 #   breaks a rule must end in that rule's finding (or the reader's "cannot
@@ -23,16 +24,10 @@ comptime _FINDING: Int = 1
 comptime _CANNOT: Int = 2
 comptime _REFUSED: Int = 3
 
-comptime _GROUP_LINE: String = (
-    "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
-    " || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n"
-)
+comptime _GROUP_LINE: String = "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
 comptime _CANCEL_LINE: String = "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
-comptime _PROD_IF: String = "    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'\n"
-comptime _GAMMA_IF: String = (
-    "    # a break_glass stage: a manual run of a branch publishes here (R13)\n"
-    "    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
-)
+comptime _PROD_IF: String = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"
+comptime _GAMMA_IF: String = "    # a break_glass stage: a manual run publishes here, from the\n    # environment gamma-breakglass (R13, R2)\n    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
 comptime _PATHS_IGNORE: String = "    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n"
 comptime _PROD_HASH_ENV: String = "      RELEASE_SET_HASH: ${{ needs.validate.outputs.validated_set_hash }}\n"
 comptime _GAMMA_KCI_HASH: String = (
@@ -49,7 +44,7 @@ comptime _PROD_REASON: String = (
 comptime _VALIDATE_PROD_LINE: String = (
     "      # needs a permission no job holds): NEXT says so.\n      - name: the prod line\n        if: always()\n"
 )
-comptime _GAMMA_PERMS: String = "    environment: gamma\n    permissions:\n      contents: read\n      id-token: write\n"
+comptime _GAMMA_PERMS: String = "    environment: ${{ github.event_name == 'push' && 'gamma' || 'gamma-breakglass' }}\n    permissions:\n      contents: read\n      id-token: write\n"
 comptime _VALIDATE_OUTPUTS: String = (
     "    outputs:\n"
     "      # the set this job installed and validated, from its own kci result\n"
@@ -58,7 +53,12 @@ comptime _VALIDATE_OUTPUTS: String = (
 )
 comptime _PROD_HEAD: String = "  prod:\n    # after the stage gamma: its publish AND its validation\n"
 comptime _M_PROD: String = "  name: \"prod\"\n  environment: \"prod\"\n  after: \"gamma\"\n"
-comptime _M_GAMMA_BG: String = "  after: \"build\"\n  break_glass: true\n"
+comptime _M_GAMMA_BG: String = "  after: \"build\"\n  break_glass: true\n  break_glass_environment: \"gamma-breakglass\"\n"
+comptime _M_GAMMA_BG_ENV: String = "  break_glass_environment: \"gamma-breakglass\"\n"
+comptime _REV_STEP: String = "      # R19: the revision this run releases, checked by THIS file (on a run of\n      # main, main's own) before anything built from the revision runs.\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n          else\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          fi\n"
+"""R19: the revision step as kci.yml writes it in every release job."""
+comptime _MAIN_STEP: String = "      # R19: a push to main, byte for byte (no `if:` can compare case).\n      - name: only a push to main reaches this job\n        run: |\n          [ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n            { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
+comptime _GAMMA_ENV: String = "    environment: ${{ github.event_name == 'push' && 'gamma' || 'gamma-breakglass' }}\n"
 comptime _M_BUILD_BG: String = "  farm_connected: true\n  break_glass: true\n"
 
 
@@ -95,15 +95,21 @@ def _rows() -> List[_Row]:
     var r = List[_Row]()
     r.append(_wf(String("1 canonical"), String(""), String(""), _CLEAN, String("")))
     # ---- R13 main-only stages ----------------------------------------------------------------
-    r.append(_wf(String("2 prod without the main conjunct"), String(_PROD_IF), String("    if: github.event_name != 'pull_request'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on main")))
-    r.append(_wf(String("3 prod on github.ref_name"), String(_PROD_IF), String("    if: github.event_name != 'pull_request' && github.ref_name == 'main'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on main")))
+    r.append(_wf(String("2 prod without the main conjunct"), String(_PROD_IF), String("    if: github.event_name == 'push'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on a push to main")))
+    r.append(_wf(String("2b prod without the push conjunct (a manual run of main reaches it)"), String(_PROD_IF), String("    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on a push to main")))
+    r.append(_wf(String("2c prod on workflow_dispatch"), String(_PROD_IF), String("    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on a push to main")))
+    r.append(_wf(String("3 prod on github.ref_name"), String(_PROD_IF), String("    if: github.event_name == 'push' && github.ref_name == 'main'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on a push to main")))
     r.append(_wf(String("4 the main conjunct on gamma (break_glass)"), String(_GAMMA_IF), String(_GAMMA_IF).replace(String("== 'true'\n"), String("== 'true' && github.ref == 'refs/heads/main'\n")), _FINDING, String("job 'gamma': R13: stage 'gamma' is break_glass")))
+    r.append(_wf(String("4b the push conjunct on gamma (break_glass)"), String(_GAMMA_IF), String(_GAMMA_IF).replace(String("== 'true'\n"), String("== 'true' && github.event_name == 'push'\n")), _FINDING, String("job 'gamma': R13: stage 'gamma' is break_glass")))
     r.append(_m(String("5 machine: prod break_glass"), String(_M_PROD), String(_M_PROD) + String("  break_glass: true\n"), _FINDING, String("job 'prod': R13: stage 'prod' is break_glass")))
-    r.append(_m(String("5b machine: gamma not break_glass"), String(_M_GAMMA_BG), String("  after: \"build\"\n"), _FINDING, String("job 'validate': R13: stage 'gamma' runs only on main")))
+    r.append(_m(String("5b machine: gamma not break_glass"), String(_M_GAMMA_BG), String("  after: \"build\"\n"), _FINDING, String("job 'validate': R13: stage 'gamma' runs only on a push to main")))
+    r.append(_m(String("5d machine: a break_glass_environment on a stage that is not break_glass"), String(_M_GAMMA_BG), String("  after: \"build\"\n") + String(_M_GAMMA_BG_ENV), _REFUSED, String("stage 'gamma' has break_glass_environment 'gamma-breakglass' and is not break_glass")))
     r.append(_m(String("5c machine: build not break_glass, gamma is"), String(_M_BUILD_BG), String("  farm_connected: true\n"), _REFUSED, String("stage 'gamma' is break_glass and runs after 'build', which is not")))
-    r.append(_wf(String("18 prod `always() &&`"), String(_PROD_IF), String("    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on main")))
+    r.append(_wf(String("18 prod `always() &&`"), String(_PROD_IF), String("    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'\n"), _FINDING, String("job 'prod': R13: stage 'prod' runs only on a push to main")))
     # ---- R14 concurrency ------------------------------------------------------------------------
     r.append(_wf(String("6 main's per-revision group"), String(_GROUP_LINE), String("  group: kci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || inputs.revision || github.sha }}\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
+    r.append(_wf(String("6b #315's first group: every run of main in release-main"), String(_GROUP_LINE), String("  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
+    r.append(_wf(String("6c a dry run in the release group"), String(_GROUP_LINE), String(_GROUP_LINE).replace(String(" || inputs.dry_run && format('plan-{0}', github.run_id)"), String("")), _FINDING, String("R14: the workflow-level `concurrency:`")))
     r.append(_wf(String("7 cancel-in-progress: true"), String(_CANCEL_LINE), String("  cancel-in-progress: true\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
     r.append(_wf(String("7b cancel-in-progress: false"), String(_CANCEL_LINE), String("  cancel-in-progress: false\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
     r.append(_wf(String("8 concurrency: kci (a scalar)"), String("concurrency:\n  # R14, byte for byte (file header, ONE RELEASE AT A TIME).\n") + String(_GROUP_LINE) + String(_CANCEL_LINE), String("concurrency: kci\n"), _FINDING, String("R14: the workflow-level `concurrency:`")))
@@ -137,6 +143,22 @@ def _rows() -> List[_Row]:
     # ---- R18 the prod line ------------------------------------------------------------------------
     r.append(_wf(String("16 validate's last step renamed"), String(_VALIDATE_PROD_LINE), String(_VALIDATE_PROD_LINE).replace(String("name: the prod line"), String("name: summary")), _FINDING, String("job 'validate': R18")))
     r.append(_wf(String("16b validate's prod line not always()"), String(_VALIDATE_PROD_LINE), String(_VALIDATE_PROD_LINE).replace(String("if: always()"), String("if: success()")), _FINDING, String("job 'validate': R18")))
+    # ---- R19 the revision checked by the workflow -------------------------------------------------
+    r.append(_wf(String("19 build without the revision step"), String(_REV_STEP) + String("      # The farm connection"), String("      # The farm connection"), _FINDING, String("job 'build': R19: its second step is `name: the revision this run releases`")))
+    r.append(_wf(String("19b the revision step after farm-connect"), String(_REV_STEP) + String("      # The farm connection: tailnet join, refusal unless the farm answers, and\n      # the machine buckconfig, from repository variables (docs/ci.md).\n      - uses: ./.github/actions/farm-connect\n"), String("      # The farm connection: tailnet join, refusal unless the farm answers, and\n      # the machine buckconfig, from repository variables (docs/ci.md).\n      - uses: ./.github/actions/farm-connect\n") + String(_REV_STEP), _FINDING, String("job 'build': R19: its second step")))
+    r.append(_wf(String("19c the revision step skipped by an if:"), String(_REV_STEP) + String("      - uses: actions/download-artifact"), String(_REV_STEP).replace(String("      - name: the revision this run releases\n"), String("      - name: the revision this run releases\n        if: github.event_name == 'push'\n")) + String("      - uses: actions/download-artifact"), _FINDING, String("job 'gamma': R19: its second step")))
+    r.append(_wf(String("19d the revision step carries on past a refusal"), String(_REV_STEP) + String("      - uses: actions/download-artifact"), String(_REV_STEP).replace(String("      - name: the revision this run releases\n"), String("      - name: the revision this run releases\n        continue-on-error: true\n")) + String("      - uses: actions/download-artifact"), _FINDING, String("job 'gamma': R19: its second step")))
+    r.append(_wf(String("19e a manual run of main may name any revision"), String(_REV_STEP) + String("      - uses: actions/download-artifact"), String(_REV_STEP).replace(String("git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||"), String("true ||")) + String("      - uses: actions/download-artifact"), _FINDING, String("job 'gamma': R19: its second step")))
+    r.append(_wf(String("19f prod without the push-to-main step"), String(_MAIN_STEP), String(""), _FINDING, String("job 'prod': R19: stage 'prod' runs only on a push to main, so its third step")))
+    r.append(_wf(String("19g the push-to-main step compares no ref"), String(_MAIN_STEP), String(_MAIN_STEP).replace(String(" && [ \"$GITHUB_REF\" = refs/heads/main ]"), String("")), _FINDING, String("job 'prod': R19: stage 'prod' runs only on a push to main, so its third step")))
+    r.append(_wf(String("19h prod checks out another ref"), String("          ref: ${{ env.REVISION }}\n          fetch-depth: 0\n          persist-credentials: false\n") + String(_REV_STEP) + String(_MAIN_STEP), String("          ref: ${{ github.sha }}\n          fetch-depth: 0\n          persist-credentials: false\n") + String(_REV_STEP) + String(_MAIN_STEP), _FINDING, String("job 'prod': R19: its first step is `actions/checkout` with `ref: ${{ env.REVISION }}`")))
+    r.append(_wf(String("19i a workflow default shell"), String("permissions: {}\n"), String("permissions: {}\n\ndefaults:\n  run:\n    shell: sh\n"), _FINDING, String("workflow: R19: the workflow has no `defaults:`")))
+    r.append(_wf(String("19j continue-on-error on prod"), String(_PROD_HEAD), String(_PROD_HEAD) + String("    continue-on-error: true\n"), _FINDING, String("job 'prod': R19: a release job has no `continue-on-error:`")))
+    # ---- R2 the break-glass environment ----------------------------------------------------------
+    r.append(_wf(String("20 gamma in its own environment on every run"), String(_GAMMA_ENV), String("    environment: gamma\n"), _FINDING, String("job 'gamma': R2: stage 'gamma' has break_glass_environment 'gamma-breakglass'")))
+    r.append(_wf(String("20b the environments swapped"), String(_GAMMA_ENV), String("    environment: ${{ github.event_name == 'push' && 'gamma-breakglass' || 'gamma' }}\n"), _FINDING, String("job 'gamma': R2: stage 'gamma' has break_glass_environment")))
+    r.append(_wf(String("20c chosen by ref, not by event"), String(_GAMMA_ENV), String("    environment: ${{ github.ref == 'refs/heads/main' && 'gamma' || 'gamma-breakglass' }}\n"), _FINDING, String("job 'gamma': R2: stage 'gamma' has break_glass_environment")))
+    r.append(_m(String("20d machine: gamma without its break-glass environment"), String(_M_GAMMA_BG_ENV), String(""), _FINDING, String("job 'gamma': R2: runs in environment '${{ github.event_name == 'push' && 'gamma' || 'gamma-breakglass' }}'; it must run in 'gamma'")))
     # ---- R4 the permission allow-list ----------------------------------------------------------------
     r.append(_wf(String("17 actions: read on gamma"), String(_GAMMA_PERMS), String(_GAMMA_PERMS) + String("      actions: read\n"), _FINDING, String("job 'gamma': R4: permissions grant `actions: read`")))
     r.append(_wf(String("17b contents: write on prod"), String("    environment: prod\n    permissions:\n      contents: read\n"), String("    environment: prod\n    permissions:\n      contents: write\n"), _FINDING, String("job 'prod': R4: permissions grant `contents: write`")))

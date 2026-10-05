@@ -13,7 +13,10 @@
 #   (3) an EQUAL build number of another commit, a LOWER one, and a higher
 #       one of ANOTHER version or another name do not supersede;
 #   (4) a re-run whose files are all present (equal N) is NOOP, exit 0, even
-#       when a higher build is listed: nothing would be written.
+#       when a higher build is listed: nothing would be written;
+#   (5) what a never-backward publish CARRIES: its build number and the
+#       highest LOWER build of a member's name and version the channel lists
+#       (-1 for none), so kci_cli can name the commits in between.
 #
 # Hermetic: ScriptedChannel; NoWaitSleeper; no network.
 # =============================================================================
@@ -36,6 +39,7 @@ from kci_publish import (
     PublishTarget,
     RunOptions,
     ScriptedChannel,
+    previous_build_number,
     run_publish,
     superseding_files,
 )
@@ -163,7 +167,35 @@ def test_an_equal_rerun_is_noop_even_when_superseded() raises:
     assert_equal(rep.exit_code(), EXIT_OK)
 
 
+def test_what_a_release_carries() raises:
+    var t = _targets(String("carries"))  # build 3
+    # lower builds 1 and 2 of komira_alpha 1.0.0 listed: the previous is 2
+    var ch = _channel(String("komira_alpha-1.0.0-h89abcdef_2.conda"))
+    ch.put(String("linux-64"), String("komira_alpha-1.0.0-h11111111_1.conda"), _bytes(String("one")))
+    var reg = _registry(ch^)
+    var rep = _run(t, reg, True)
+    assert_equal(rep.reason, String(REASON_PUBLISHED), String("\n").join(rep.lines))
+    assert_equal(rep.build_number, 3)
+    assert_equal(rep.previous_build, 2)
+    # nothing of this version listed (another version's build 9 is not it): -1
+    var reg2 = _registry(_channel(String("komira_alpha-1.0.1-h89abcdef_9.conda")))
+    var rep2 = _run(t, reg2, True)
+    assert_equal(rep2.previous_build, -1)
+    # without the rule nothing is read for it
+    var reg3 = _registry(_channel(String("komira_alpha-1.0.0-h89abcdef_2.conda")))
+    var rep3 = _run(t, reg3, False)
+    assert_equal(rep3.previous_build, -1)
+    # the pure reading: an equal or higher build is not "previous"
+    var listed = List[String]()
+    listed.append(String("linux-64/komira_alpha-1.0.0-h89abcdef_3.conda"))
+    listed.append(String("linux-64/komira_alpha-1.0.0-h89abcdef_7.conda"))
+    assert_equal(previous_build_number(t, listed), -1)
+    listed.append(String("linux-64/komira_alpha-1.0.0-h89abcdef_1.conda"))
+    assert_equal(previous_build_number(t, listed), 1)
+
+
 def main() raises:
+    test_what_a_release_carries()
     test_a_higher_build_number_supersedes()
     test_without_the_rule_it_publishes()
     test_what_does_not_supersede()

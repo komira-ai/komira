@@ -44,6 +44,12 @@ comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SET_HASH: String = "5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a"
 
 
+comptime _R19: String = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ env.REVISION }}\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n          else\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          fi\n"
+"""R19: the first two steps of every release job (auto_promotion.mojo)."""
+comptime _R19_MAIN: String = "      - name: only a push to main reaches this job\n        run: |\n          [ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n            { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
+"""R19: the third step of a main-only job."""
+
+
 struct FakeSteps(StageSteps, Movable):
     """Answers each step from `ends`, in order, and records the call. The
     platform-set variables come from `env_names`/`env_values`, the committed
@@ -555,7 +561,7 @@ def _release_machine(dir: String, validation: Bool = False, env_validation: Bool
 
 def _workflow(machine: String) -> String:
     """A workflow that agrees with `_release_machine` without a validation
-    (R1-R18): build and gamma break-glass, prod main only."""
+    (R1-R19): build and gamma break-glass, prod main only."""
     var run = String("kci run --machine ") + machine + String(" --summary-file \"$GITHUB_STEP_SUMMARY\" --stage ")
     var hash = String(" --release-set-hash \"$RELEASE_SET_HASH\"")
     var line = String("      - name: the prod line\n        if: always()\n        run: echo prod line\n")
@@ -566,19 +572,19 @@ def _workflow(machine: String) -> String:
         + String("      dry_run:\n        type: boolean\n        default: false\n")
         + String("permissions: {}\n")
         + String("concurrency:\n  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)")
-        + String(" || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n")
+        + String(" || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n")
         + String("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n")
         + String("jobs:\n")
         + String("  build:\n    environment: build\n    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
-        + String("    steps:\n      - run: ") + run + String("build\n") + line
+        + String("    steps:\n") + String(_R19) + String("      - run: ") + run + String("build\n") + line
         + String("  gamma:\n    needs: build\n    environment: gamma\n    permissions:\n      id-token: write\n")
         + String("    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
         + String("    env:\n      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n")
-        + String("    steps:\n      - run: ") + run + String("gamma") + hash + String("\n") + line
-        + String("  prod:\n    needs: gamma\n    if: github.ref == 'refs/heads/main'\n    environment: prod\n")
+        + String("    steps:\n") + String(_R19) + String("      - run: ") + run + String("gamma") + hash + String("\n") + line
+        + String("  prod:\n    needs: gamma\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n    environment: prod\n")
         + String("    permissions:\n      id-token: write\n")
         + String("    env:\n      RELEASE_SET_HASH: ${{ needs.gamma.outputs.set_hash }}\n")
-        + String("    steps:\n      - run: ") + run + String("prod") + hash + String("\n") + line
+        + String("    steps:\n") + String(_R19) + String(_R19_MAIN) + String("      - run: ") + run + String("prod") + hash + String("\n") + line
     )
 
 
@@ -587,9 +593,10 @@ def _under_actions(mut steps: FakeSteps, workflow: String):
     steps.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
     steps.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/kci.yml@refs/heads/main"))
     steps.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
-    # a run of main (the ref check, test_kci_ref_check)
+    # a push to main of the revision (the ref check, test_kci_ref_check)
     steps.set_env(String("GITHUB_REF"), String("refs/heads/main"))
-    steps.set_env(String("GITHUB_SHA"), String(_SHA))
+    steps.set_env(String("GITHUB_EVENT_NAME"), String("push"))
+    steps.set_env(String("GITHUB_SHA"), String(_REV))
     steps.workflow = workflow.copy()
 
 

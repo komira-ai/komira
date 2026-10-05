@@ -56,7 +56,7 @@ comptime _WF: String = (
     "permissions: {}\n"
     "concurrency:\n"
     "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
-    " || github.ref == 'refs/heads/main' && 'release-main' || format('breakglass-{0}', github.ref_name) }}\n"
+    " || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
     "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
     "jobs:\n"
     "  build:\n"
@@ -64,6 +64,22 @@ comptime _WF: String = (
     "    outputs:\n"
     "      set_hash: ${{ steps.kci.outputs.set_hash }}\n"
     "    steps:\n"
+    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+    "        with:\n"
+    "          ref: ${{ env.REVISION }}\n"
+    "      - name: the revision this run releases\n"
+    "        run: |\n"
+    "          case \"$REVISION\" in\n"
+    "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
+    "          esac\n"
+    "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n"
+    "          else\n"
+    "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
+    "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          fi\n"
     "      - run: kci run --stage build --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
     + _PROD_LINE
     + "  gamma:\n"
@@ -75,6 +91,22 @@ comptime _WF: String = (
     "    env:\n"
     "      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n"
     "    steps:\n"
+    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+    "        with:\n"
+    "          ref: ${{ env.REVISION }}\n"
+    "      - name: the revision this run releases\n"
+    "        run: |\n"
+    "          case \"$REVISION\" in\n"
+    "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
+    "          esac\n"
+    "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n"
+    "          else\n"
+    "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
+    "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          fi\n"
     "      - run: kci run --stage gamma --only step:publish --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
     + _PROD_LINE
     + "  validate:\n"
@@ -86,11 +118,33 @@ comptime _WF: String = (
     "    permissions:\n"
     "      contents: read\n"
     "    steps:\n"
+    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+    "        with:\n"
+    "          ref: ${{ env.REVISION }}\n"
+    "      - name: the revision this run releases\n"
+    "        run: |\n"
+    "          case \"$REVISION\" in\n"
+    "            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n"
+    "          esac\n"
+    "          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n"
+    "          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n"
+    "            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n"
+    "              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n"
+    "          else\n"
+    "            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n"
+    "              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n"
+    "          fi\n"
     "      - run: |\n"
     "          kci run --stage gamma --only validation:install --only=validation:read-back \\\n"
     "            --scratch-dir \"$RUNNER_TEMP/v\" --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n"
     + _PROD_LINE
 )
+
+
+comptime _R19: String = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ env.REVISION }}\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = push ]; then\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a push releases the commit it pushed ($GITHUB_SHA), not $REVISION\"; exit 1; }\n          else\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          fi\n"
+"""R19: the first two steps of every release job (auto_promotion.mojo)."""
+comptime _R19_MAIN: String = "      - name: only a push to main reaches this job\n        run: |\n          [ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n            { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
+"""R19: the third step of a main-only job."""
 
 
 def _token_stages() -> List[String]:
@@ -181,7 +235,7 @@ def test_a_selector_must_be_literal_and_match() raises:
 
 def test_a_part_job_holds_no_token_no_environment_and_needs_the_step_job() raises:
     _reports(
-        _mutated(String("    permissions:\n      contents: read\n    steps:\n      - run: |\n"), String("    permissions:\n      contents: read\n      id-token: write\n    steps:\n      - run: |\n")),
+        _mutated(String("    permissions:\n      contents: read\n    steps:\n"), String("    permissions:\n      contents: read\n      id-token: write\n    steps:\n")),
         String("job 'validate': R4: runs only validations of stage 'gamma', so it must not hold `id-token: write`"),
     )
     _reports(
@@ -211,10 +265,10 @@ def test_a_later_stage_needs_every_job_of_a_split_stage() raises:
     # prod is not break_glass: main only (R13); it publishes the set validate
     # validated (R17)
     var prod = (
-        String("  prod:\n    needs: [gamma, validate]\n    if: github.ref == 'refs/heads/main'\n    environment: prod\n")
+        String("  prod:\n    needs: [gamma, validate]\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n    environment: prod\n")
         + String("    permissions:\n      id-token: write\n")
         + String("    env:\n      RELEASE_SET_HASH: ${{ needs.validate.outputs.validated_set_hash }}\n")
-        + String("    steps:\n      - run: kci run --stage prod --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n")
+        + String("    steps:\n") + String(_R19) + String(_R19_MAIN) + String("      - run: kci run --stage prod --summary-file \"$GITHUB_STEP_SUMMARY\" --release-set-hash \"$RELEASE_SET_HASH\"\n")
         + String(_PROD_LINE)
     )
     var ok = check_workflow(String(_WF) + prod, g, tokens, String("release/machine.textproto"))

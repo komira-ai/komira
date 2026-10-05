@@ -50,8 +50,13 @@ comptime NOT_UNDER_GITHUB_ACTIONS: String = "not under GitHub Actions"
 comptime GITHUB_REF: String = "GITHUB_REF"
 comptime GITHUB_SHA: String = "GITHUB_SHA"
 comptime GITHUB_ACTOR: String = "GITHUB_ACTOR"
+comptime GITHUB_EVENT_NAME: String = "GITHUB_EVENT_NAME"
+comptime PUSH_EVENT: String = "push"
 comptime MAIN_REF: String = "refs/heads/main"
-comptime MAIN_TRACKING_REF: String = "origin/main"
+# A FULL refname: `origin/main` would resolve a TAG of that name first
+# (gitrevisions(7): refs/tags/<name> before refs/remotes/<name>), and a
+# checkout with fetch-depth 0 fetches every tag.
+comptime MAIN_TRACKING_REF: String = "refs/remotes/origin/main"
 comptime REASON_CONTEXT_KEY: String = "reason"
 comptime BREAK_GLASS_REASON_MAX_BYTES: Int = 200
 
@@ -199,62 +204,89 @@ def _refuse(var outcome: String, var error_id: String, var message: String) -> S
 
 
 def check_ref_at_start[S: StageSteps](
-    cmd: KciCommand, stage: Stage, mut steps: S, mut banner: String
+    cmd: KciCommand, stage: Stage, mut steps: S, mut banner: String, mut break_glass: Bool
 ) -> StartVerdict:
-    """File header, 4a. `banner` gets a break-glass run's first line."""
+    """File header, 4a (dispatch.mojo's header). `banner` gets a break-glass
+    run's first line and `break_glass` says the run is one."""
+    break_glass = False
     if steps.platform_env(String(GITHUB_ACTIONS)) != String("true") or stage.is_pull_request():
         return StartVerdict()
     var ref_value = steps.platform_env(String(GITHUB_REF))
     var sha = steps.platform_env(String(GITHUB_SHA))
-    if ref_value.byte_length() == 0:
-        return _refuse(
-            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
-            String(GITHUB_ACTIONS) + String(" is true and ") + String(GITHUB_REF)
-            + String(" is not set: which ref this run is on cannot be told, so nothing is run"),
-        )
+    var event = steps.platform_env(String(GITHUB_EVENT_NAME))
+    for name in [String(GITHUB_REF), String(GITHUB_EVENT_NAME)]:
+        if steps.platform_env(name).byte_length() == 0:
+            return _refuse(
+                String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+                String(GITHUB_ACTIONS) + String(" is true and ") + name
+                + String(" is not set: what this run is cannot be told, so nothing is run"),
+            )
     if not is_full_commit_id(sha):
         return _refuse(
             String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
             String(GITHUB_SHA) + String(" '") + sha + String("' is not a full commit id, so nothing is run"),
         )
-    var on_main = ref_value == String(MAIN_REF)
     var where = String("stage '") + stage.name + String("'")
-    if not stage.break_glass and not on_main:
+    if ref_value != String(MAIN_REF) and ref_value.lower() == String(MAIN_REF):
         return _refuse(
             String(OUTCOME_REFUSED), String(ERROR_NOT_ON_MAIN),
-            where + String(" runs only on main (the machine file gives it no break_glass), and this run is on ")
-            + ref_value + String(": a break-glass run stops at the last break_glass stage, so nothing is run"),
+            String("this run is on ") + ref_value + String(", main in another case: GitHub compares refs and")
+            + String(" concurrency groups ignoring case, so such a ref would pass for main there; kci refuses it")
+            + String(" for every stage, so nothing is run"),
         )
-    var of = String(MAIN_TRACKING_REF) if on_main else sha.copy()
-    var on_history: Bool
-    try:
-        on_history = steps.is_ancestor(cmd.revision_id, of)
-    except e:
+    var release = event == String(PUSH_EVENT) and ref_value == String(MAIN_REF)
+    if not stage.break_glass and not release:
         return _refuse(
-            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
-            String("whether the revision ") + cmd.revision_id + String(" is on ") + of
-            + String("'s history cannot be told (") + String(e) + String("), so nothing is run"),
+            String(OUTCOME_REFUSED), String(ERROR_NOT_ON_MAIN),
+            where + String(" runs only on a push to main (the machine file gives it no break_glass), and this run")
+            + String(" is a ") + event + String(" of ") + ref_value
+            + String(": a manual or break-glass run stops at the last break_glass stage, so nothing is run"),
         )
-    if not on_history:
-        if on_main:
+    if release:
+        if cmd.revision_id != sha:
+            return _refuse(
+                String(OUTCOME_REFUSED), String(ERROR_NOT_ON_MAIN),
+                String("a push to main releases the commit it pushed (") + String(GITHUB_SHA) + String(" ") + sha
+                + String("), and this run's revision is ") + cmd.revision_id + String(", so nothing is run"),
+            )
+        var on_main: Bool
+        try:
+            on_main = steps.is_ancestor(cmd.revision_id, String(MAIN_TRACKING_REF))
+        except e:
+            return _refuse(
+                String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+                String("whether the revision ") + cmd.revision_id + String(" is on ") + String(MAIN_TRACKING_REF)
+                + String("'s history cannot be told (") + String(e) + String("), so nothing is run"),
+            )
+        if not on_main:
             return _refuse(
                 String(OUTCOME_REFUSED), String(ERROR_NOT_ON_MAIN),
                 String("the revision ") + cmd.revision_id + String(" is not on main's history (") + String(MAIN_TRACKING_REF)
                 + String("): a run of main releases a merged commit only, so nothing is run"),
             )
+        return StartVerdict()
+    break_glass = True
+    var on_history: Bool
+    try:
+        on_history = steps.is_ancestor(cmd.revision_id, sha)
+    except e:
+        return _refuse(
+            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+            String("whether the revision ") + cmd.revision_id + String(" is on ") + sha
+            + String("'s history cannot be told (") + String(e) + String("), so nothing is run"),
+        )
+    if not on_history:
         return _refuse(
             String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REASON),
             String("BREAK-GLASS on ") + ref_value + String(": the revision ") + cmd.revision_id
-            + String(" is not on the history of the branch the run was started on (") + sha
+            + String(" is not on the history of the commit the run was started on (") + sha
             + String("), so nothing is run"),
         )
-    if on_main:
-        return StartVerdict()
     var reason = _context_value(cmd, String(REASON_CONTEXT_KEY))
     if reason.byte_length() == 0 or reason.byte_length() > BREAK_GLASS_REASON_MAX_BYTES:
         return _refuse(
             String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REASON),
-            String("BREAK-GLASS on ") + ref_value + String(" (") + where + String(" runs off main) needs --context ")
+            String("BREAK-GLASS on ") + ref_value + String(" (a ") + event + String(", not a push to main) needs --context ")
             + String(REASON_CONTEXT_KEY) + String("=<why>, 1 to ") + String(BREAK_GLASS_REASON_MAX_BYTES)
             + String(" bytes on one line; it has ") + String(reason.byte_length()) + String(" bytes, so nothing is run"),
         )

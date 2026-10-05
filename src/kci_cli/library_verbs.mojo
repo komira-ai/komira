@@ -40,6 +40,11 @@
 #                     tell), then `git merge-base --is-ancestor`: exit 0
 #                     True, 1 False, anything else raises; the same
 #                     RUNNER_TEMP rule.
+#   publish's carried commits -> for a never-backward publish, `git rev-list
+#                     --first-parent --reverse <revision>` (`git_first_parent`)
+#                     feeds summary.mojo's `carried_markdown`; git that
+#                     cannot answer is said in the summary, never a failure
+#                     of the step.
 #   release_set_hash -> kci_publish.load_release over the artifacts file
 #                     (kci_artifact): the set the members recompute to.
 #
@@ -65,6 +70,7 @@ from kci_api import (
     VALIDATION_VALIDATED,
     ResultValidation,
     ResultValidationCheck,
+    is_full_commit_id,
 )
 from kci_pkg_upload import HttpPkgTransport
 from kci_publish import UsleepSleeper
@@ -96,6 +102,7 @@ from .args import SecretStoreChoice
 from .dispatch import kci_main_with, recorder_for
 from .seam import StageSteps, StepEnd
 from .recorder import CliRecorder
+from .summary import carried_markdown
 
 
 struct RefusingSecretStore(SecretStore, Movable):
@@ -182,8 +189,38 @@ def git_is_ancestor[R: ProcessRunner](mut runner: R, tmp: String, commit: String
     argv.append(String("--is-ancestor"))
     argv.append(commit.copy())
     argv.append(of.copy())
+    # `_git` already raises on any exit above 1; this states the contract
+    # where it is read: 0 True, 1 False, nothing else is an answer.
     var r = _git(runner, tmp, argv^)
-    return r[0] == 0
+    if r[0] == 0:
+        return True
+    if r[0] == 1:
+        return False
+    raise Error(String("`git merge-base --is-ancestor` exited ") + String(r[0]) + String(", which is no answer"))
+def git_first_parent[R: ProcessRunner](mut runner: R, tmp: String, revision: String) raises -> List[String]:
+    """`git rev-list --first-parent --reverse <revision>`: main's first-parent
+    commits up to `revision`, oldest first. Raises when git exits non-zero
+    or a line is not a full commit id."""
+    var argv = List[String]()
+    argv.append(String("rev-list"))
+    argv.append(String("--first-parent"))
+    argv.append(String("--reverse"))
+    argv.append(revision.copy())
+    var r = _git(runner, tmp, argv^)
+    if r[0] != 0:
+        raise Error(String("`git rev-list --first-parent --reverse ") + revision + String("` exited ") + String(r[0]))
+    var out = List[String]()
+    var lines = r[1].split(String("\n"))
+    for i in range(len(lines)):
+        var line = String(String(lines[i]).strip())
+        if line.byte_length() == 0:
+            continue
+        if not is_full_commit_id(line):
+            raise Error(String("`git rev-list` printed '") + line + String("', not a full commit id"))
+        out.append(line^)
+    return out^
+
+
 def _failed_row(req: ValidateRequest, why: String) -> ResultValidation:
     """A validation that raised: VALIDATION_FAILED with the reason."""
     var row = ResultValidation(
@@ -218,7 +255,21 @@ struct LibrarySteps(StageSteps, Movable):
         end.retry = r.retry()
         end.changed_outside = r.landed()
         end.summary = new_names_markdown(new_names_of(r, req.stage, req.step_name))
+        if req.never_backward and r.build_number >= 0:
+            end.summary += self._carried(req, r.previous_build, r.build_number)
         return end^
+
+    def _carried(mut self, req: PublishRequest, previous: Int, ours: Int) -> String:
+        if previous < 0:
+            return carried_markdown(req.stage, previous, ours, List[String]())
+        var tmp = self.platform_env(String("RUNNER_TEMP"))
+        if tmp.byte_length() == 0:
+            return String("#### carried to ") + req.stage + String("\n\nnot listed: RUNNER_TEMP is not set\n\n")
+        var runner = SupervisorRunner()
+        try:
+            return carried_markdown(req.stage, previous, ours, git_first_parent(runner, tmp, req.revision_id))
+        except e:
+            return String("#### carried to ") + req.stage + String("\n\nnot listed: ") + String(e) + String("\n\n")
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
         if req.validation.kind == VALIDATION_KIND_CONDA_INSTALL_ENV:
