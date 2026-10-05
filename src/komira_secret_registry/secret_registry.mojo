@@ -65,12 +65,12 @@
 # value.
 # =============================================================================
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_secret_store.secret_store import SecretStore
 from komira_secret_store.secret_value import SecretValue
 
-from komira_core.plan.secret_bindings import (
+from komira_secret_registry.secret_bindings import (
     SecretBindings,
     SecretRegistryEntry,
 )
@@ -80,7 +80,7 @@ from .credential_consumer import CredentialConsumer
 
 # =============================================================================
 # §1 SecretRegistryEntry and SecretBindings live in
-#   `komira_core.plan.secret_bindings` and are imported above.
+#   `komira_secret_registry.secret_bindings` and are imported above.
 #
 # Both are FLAT value types that import nothing, and the logical plan holds a
 # `SecretBindings` field. Keeping them in `komira_core` keeps this package, and

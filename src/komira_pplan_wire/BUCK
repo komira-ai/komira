@@ -7,7 +7,10 @@ mojo_library(
     name = "komira_pplan_wire",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
     ],
     test_srcs = [
         "tests/test_pplan_wire_roundtrip.mojo",

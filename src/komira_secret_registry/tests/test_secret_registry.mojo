@@ -42,7 +42,7 @@ from std.testing import assert_equal, assert_true, assert_false, assert_raises
 
 from komira_crypto import zeroize_inline_array
 
-from komira_core.plan.secret_bindings import SecretBindings
+from komira_secret_registry.secret_bindings import SecretBindings
 
 from komira_secret_store.secret_store import StaticSecretStore
 from komira_secret_store.secret_value import MAX_SECRET_LEN

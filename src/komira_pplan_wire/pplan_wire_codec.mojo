@@ -61,7 +61,7 @@
 #   cheaper than a per-kind case analysis and total by construction.
 # =============================================================================
 
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     COL_SIDE_LEFT,
     COL_SIDE_RIGHT,
@@ -72,9 +72,9 @@ from komira_core.plan.expr import (
     EXPR_ALIAS,
     COL_SIDE_NONE,
 )
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.logical_plan import ExprArray
-from komira_core.plan.physical_plan import (
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_ir.logical_plan import ExprArray
+from komira_plan_ir.physical_plan import (
     ParquetSourceData,
     ParquetRowWindow,
     MorselOp,
@@ -82,11 +82,11 @@ from komira_core.plan.physical_plan import (
     OP_PROJECT,
     OP_LIMIT,
 )
-from komira_core.plan.fs_descriptor_pod import FsDescriptorPod
-from komira_core.collections import Slab
-from komira_core.arrow.schema import Field
+from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod
+from komira_collections.slab import Slab
+from komira_arrow.schema import Field
 from std.memory import bitcast
-from komira_core.dtype_sentinel import DTYPE_NONE
+from komira_arrow.dtype_sentinel import DTYPE_NONE
 
 
 # =============================================================================
