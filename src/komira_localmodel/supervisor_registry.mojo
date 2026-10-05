@@ -11,8 +11,8 @@
 #
 # WHAT IS HERE:
 #   * SupervisorRegistry: id -> Supervisor. spawn(id, spec) -> pid,
-#     terminate(id, grace) -> ExitInfo, poll(id) -> is the child still alive,
-#     count(), contains(id), ids(). The registry OWNS the Supervisors (Movable,
+#     terminate(id, grace) -> ExitInfo, poll(id) -> is the child still alive
+#     (draining its output pipes), drain_output(id), count(), contains(id), ids(). The registry OWNS the Supervisors (Movable,
 #     single owner; no shared ownership).
 #   * find_free_port(): bind a loopback socket to port 0 (the kernel picks an
 #     ephemeral port), read the port back, then RELEASE the socket (the
@@ -128,20 +128,21 @@ struct SupervisorRegistry(Movable):
     canonical Movable-only owned collection — Supervisor is not Copyable, so a
     plain List is rejected) with parallel `List[String]` ids and `List[Bool]`
     spawned-flags. An id is unique within the registry; spawn() on a duplicate
-    id is a no-op that returns pid 0 (the caller must terminate + remove the old
-    child first, or use a distinct id).
+    id is a no-op that returns pid 0, including an id whose child has been
+    terminated: ids are not reused, so a restart uses a new id.
 
     Lifecycle per child: spawn(id, spec) -> poll(id) (alive?) -> terminate(id,
-    grace) (SIGTERM -> grace -> SIGKILL, reap). terminate_all() on
-    shutdown stops every child (no orphans).
+    grace) (SIGTERM -> grace -> SIGKILL, reap). poll() also drains the
+    child's output pipes, so the owner calls it regularly (an engine that
+    logs blocks once its pipe buffer fills). terminate_all() on shutdown
+    stops every child (no orphans).
     """
 
     var _ids: List[String]
     var _children: Slab[Supervisor]
-    # Whether the slot's Supervisor has been spawned (vs a default-constructed
-    # placeholder). A child that has been terminate()'d stays in the slab with
-    # spawned=False until removed (so ids() reflects the registry shape; the
-    # owner can re-key or compact).
+    # Whether the slot's child is still running as far as the registry knows.
+    # A terminated or collected child stays in the slab with spawned=False
+    # (its pipes closed), so ids() lists every id ever spawned.
     var _spawned: List[Bool]
 
     def __init__(out self):
@@ -162,7 +163,7 @@ struct SupervisorRegistry(Movable):
         return self._index_of(id) >= 0
 
     def count(self) -> Int:
-        """Number of registered slots (spawned or terminated-but-not-removed)."""
+        """Number of registered slots (running, terminated or collected)."""
         return len(self._ids)
 
     def live_count(self) -> Int:
@@ -195,7 +196,9 @@ struct SupervisorRegistry(Movable):
         present (no-op — the caller must use a distinct id or terminate the old
         child first).
 
-        The registry takes ownership of the child's Supervisor.
+        The child's stdout and stderr are pipes to this process, set
+        non-blocking; `drain_output` (which `poll` calls) empties them. The
+        registry takes ownership of the child's Supervisor.
         """
         if self._index_of(id) >= 0:
             return ChildHandle(id, Int32(0))  # duplicate id -> no spawn.
@@ -204,14 +207,43 @@ struct SupervisorRegistry(Movable):
         if pid <= Int32(0):
             # Spawn failed — do NOT register the dead slot (nothing to manage).
             return ChildHandle(id, pid)
+        _ = sup.set_nonblocking(sup.stdout_fd())
+        _ = sup.set_nonblocking(sup.stderr_fd())
         self._ids.append(id)
         self._children.append(sup^)
         self._spawned.append(True)
         return ChildHandle(id, pid)
 
+    def drain_output(mut self, id: String) -> String:
+        """Read everything `id`'s child has written to stdout and stderr so
+        far, without blocking, and return it (stdout first, then stderr).
+        Empty for an absent id or a child whose pipes are closed.
+
+        An engine that logs fills its pipe buffer (64 KiB on Linux) and then
+        blocks in its next write until the pipe is read, so the owner must
+        call this (or `poll`, which calls it) regularly."""
+        var idx = self._index_of(id)
+        if idx < 0:
+            return String("")
+        var out = String("")
+        var fds = List[Int32]()
+        fds.append(self._children[idx].stdout_fd())
+        fds.append(self._children[idx].stderr_fd())
+        for f in range(len(fds)):
+            if fds[f] < Int32(0):
+                continue
+            while True:
+                var chunk = self._children[idx].read_available(fds[f])
+                if chunk.text.byte_length() == 0:
+                    break
+                out += chunk.text
+        return out^
+
     def poll(mut self, id: String) -> ChildState:
-        """Poll `id`: is the child still alive? Does a non-blocking WNOHANG reap
-        (so an exited child is reaped + the slot flips to CHILD_GONE, no zombie).
+        """Poll `id`: drain its output (see `drain_output`; the bytes are
+        discarded), then check whether the child is still alive with a
+        non-blocking WNOHANG reap, so an exited child is reaped, its pipes are
+        closed and the slot flips to CHILD_GONE (no zombie, no leaked fd).
 
         Returns CHILD_NOT_FOUND if `id` is absent; CHILD_GONE if the child has
         exited (now or previously); CHILD_SPAWNED if it is still running.
@@ -221,19 +253,22 @@ struct SupervisorRegistry(Movable):
             return ChildState(CHILD_NOT_FOUND, Int32(-1))
         if not self._spawned[idx]:
             return ChildState(CHILD_GONE, self._children[idx].pid())
+        _ = self.drain_output(id)
         var pid = self._children[idx].pid()
         var r = self._children[idx].try_wait()
         if r.collected:
-            # Child exited — flip the slot to GONE (reaped by try_wait).
+            # Child exited — reaped by try_wait; release its pipes.
+            self._children[idx].close()
             self._spawned[idx] = False
             return ChildState(CHILD_GONE, pid)
         return ChildState(CHILD_SPAWNED, pid)
 
     def terminate(mut self, id: String, grace_ms: Int) -> ExitInfo:
         """Stop `id`'s child (SIGTERM -> grace -> SIGKILL, reap exactly-once) +
-        close its pipes. Flips the slot to spawned=False (kept in the registry
-        until remove()). Returns the decoded ExitInfo; a sentinel ExitInfo
-        (all -1) when `id` is absent or already terminated.
+        close its pipes. Flips the slot to spawned=False; the id stays
+        registered (and `spawn` refuses it) for the registry's lifetime.
+        Returns the decoded ExitInfo; a sentinel ExitInfo (all -1) when `id` is
+        absent or already terminated or collected.
         """
         var idx = self._index_of(id)
         if idx < 0 or not self._spawned[idx]:

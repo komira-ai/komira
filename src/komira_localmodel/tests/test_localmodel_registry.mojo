@@ -19,6 +19,11 @@
 #   (3) BOOKKEEPING — count / live_count / contains / ids / pid_of /
 #       duplicate-id rejection.
 #   (4) terminate_all — the shutdown sweep stops every still-spawned child.
+#   (5) poll drains the children's output pipes, so a child that writes more
+#       than a pipe buffer runs to completion and is collected.
+#
+#   After every terminate the test checks the process itself is gone
+#   (kill(pid, 0) fails), not only the registry's own bookkeeping.
 #
 # The children are `/bin/sh -c 'exec sleep 30'`: they stay alive until
 # terminated and exit on their own if the test dies first. Liveness here is the
@@ -50,6 +55,13 @@ def _sleep_ms(ms: Int):
 # a bounded time if the test dies before terminating it.
 def _spawn_sleeper(mut reg: SupervisorRegistry, id: String) -> ChildHandle:
     return reg.spawn(id, ChildSpec.shell(String("exec sleep 30")))
+
+
+def _process_gone(pid: Int32) -> Bool:
+    """True when no process `pid` exists: kill(pid, 0) fails (ESRCH). A
+    terminated-and-reaped child is gone; one the registry only forgot about
+    is not."""
+    return external_call["kill", Int32](pid, Int32(0)) != Int32(0)
 
 
 # =============================================================================
@@ -100,6 +112,7 @@ def test_multi_child_lifecycle() raises:
 
     # Terminate engine-a INDEPENDENTLY; engine-b stays alive.
     var info_a = reg.terminate(String("engine-a"), 3000)
+    assert_true(_process_gone(ha.pid), "engine-a's process is gone")
     print("  terminated engine-a shell_code", info_a.shell_code)
     assert_equal(reg.poll(String("engine-a")).state, CHILD_GONE)
     assert_equal(
@@ -111,6 +124,7 @@ def test_multi_child_lifecycle() raises:
 
     # Terminate engine-b; both now gone, NO orphan (poll reaps the zombie).
     var info_b = reg.terminate(String("engine-b"), 3000)
+    assert_true(_process_gone(hb.pid), "engine-b's process is gone")
     print("  terminated engine-b shell_code", info_b.shell_code)
     assert_equal(reg.poll(String("engine-b")).state, CHILD_GONE)
     assert_equal(reg.live_count(), 0)
@@ -147,6 +161,7 @@ def test_registry_bookkeeping() raises:
 
     reg.terminate_all(2000)
     assert_equal(reg.live_count(), 0)
+    assert_true(_process_gone(h.pid), "the child's process is gone")
 
 
 # =============================================================================
@@ -154,17 +169,52 @@ def test_registry_bookkeeping() raises:
 # =============================================================================
 def test_terminate_all() raises:
     var reg = SupervisorRegistry()
-    _ = _spawn_sleeper(reg, String("a"))
-    _ = _spawn_sleeper(reg, String("b"))
-    _ = _spawn_sleeper(reg, String("c"))
+    var pids = List[Int32]()
+    pids.append(_spawn_sleeper(reg, String("a")).pid)
+    pids.append(_spawn_sleeper(reg, String("b")).pid)
+    pids.append(_spawn_sleeper(reg, String("c")).pid)
     _sleep_ms(600)
     assert_equal(reg.live_count(), 3)
 
     reg.terminate_all(3000)
     assert_equal(reg.live_count(), 0)
+    for i in range(len(pids)):
+        assert_true(_process_gone(pids[i]), "every child process is gone")
     assert_equal(reg.poll(String("a")).state, CHILD_GONE)
     assert_equal(reg.poll(String("b")).state, CHILD_GONE)
     assert_equal(reg.poll(String("c")).state, CHILD_GONE)
+
+
+# =============================================================================
+# (5) OUTPUT DRAINING — a child that writes more than a pipe buffer (64 KiB on
+#     Linux) can only finish if the registry reads its pipes. poll() drains
+#     them, so the child runs to completion and is collected with its pipes
+#     closed.
+# =============================================================================
+def test_poll_drains_output_and_collects() raises:
+    var reg = SupervisorRegistry()
+    var h = reg.spawn(
+        String("chatty"),
+        ChildSpec.shell(
+            String("head -c 200000 /dev/zero | tr '\\0' x; echo done >&2")
+        ),
+    )
+    assert_true(h.ok())
+    var total = 0
+    var state = CHILD_SPAWNED
+    var iters = 0
+    # Without draining the child blocks after 64 KiB and never exits.
+    while state == CHILD_SPAWNED and iters < 500:
+        total += reg.drain_output(String("chatty")).byte_length()
+        state = reg.poll(String("chatty")).state
+        _sleep_ms(10)
+        iters += 1
+    assert_equal(state, CHILD_GONE, "the child ran to completion")
+    # poll() discards what it drains, so only part of the output is counted.
+    assert_true(total > 0, "drain_output returned the child's output")
+    assert_true(_process_gone(h.pid))
+    # Collected children report GONE and terminate is a no-op.
+    assert_equal(reg.terminate(String("chatty"), 100).shell_code, Int32(-1))
 
 
 def main() raises:
