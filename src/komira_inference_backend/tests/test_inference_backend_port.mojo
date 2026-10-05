@@ -22,8 +22,8 @@
 #   3. THE COMPTIME-OS DEFAULT RESOLVES. `default_backend_base_url()` /
 #      `default_local_backend()` switch on `CompilationTarget.is_macos()`.
 #
-# Not covered here: the live spawn/probe/teardown lifecycle, which needs a
-# real listening socket.
+# The spawning backends' probes and launch failure are in
+# test_spawning_backend.mojo.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false

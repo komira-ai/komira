@@ -8,10 +8,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # HTTP (komira_http_client, on a komira_async BlockingRuntime) and stop it on
 # teardown. The probes are parametric over a komira_http_core Connector.
 #
-# The welded test is hermetic: it spawns nothing and opens no socket.
-# test_inference_backend_port declares its own InferenceBackend conformer and
-# drives it and MlxBackend through one generic, pins the argv each child-spec
-# factory assembles, and checks the comptime-OS default URL.
+# The welded tests are hermetic: no engine runs and nothing listens.
+# - test_inference_backend_port: a conformer declared in the test and
+#   MlxBackend through one generic, the argv each child-spec factory
+#   assembles, and the comptime-OS default URL.
+# - test_spawning_backend: the child spec each spawning backend would spawn
+#   (defaults, explicit host and port, llama-server's --parallel flags), both
+#   probes and health() against a refused port on 127.0.0.1, and launch()
+#   of a binary that does not exist, which raises naming the spawn failure.
 mojo_library(
     name = "komira_inference_backend",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -23,6 +27,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_inference_backend_port.mojo",
+        "tests/test_spawning_backend.mojo",
     ],
     visibility = ["PUBLIC"],
 )

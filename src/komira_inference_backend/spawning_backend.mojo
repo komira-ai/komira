@@ -58,14 +58,9 @@ from komira_http_client.url import Url
 from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST, HttpMethod
 from komira_http_core.transport.io_stream import Connector
 
-
 from komira_supervisor import ChildSpec, Supervisor
 
-from .inference_backend import (
-    InferenceBackend,
-    MLX_DEFAULT_BASE_URL,
-    LLAMACPP_DEFAULT_BASE_URL,
-)
+from .inference_backend import InferenceBackend
 
 
 # -----------------------------------------------------------------------------

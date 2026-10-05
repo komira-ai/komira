@@ -44,6 +44,7 @@ print(spec.argv[6], spec.argv[7])  # --n-gpu-layers 99
 `be.teardown()` stops a child it spawned.
 
 The package reads no environment: binary paths, models, hosts and ports are
-the caller's arguments. The welded test spawns nothing: it pins the argv of
-each factory, the comptime-OS default, and that a conformer declared outside
-the package satisfies the trait.
+the caller's arguments. The welded tests run no engine: they pin the argv of
+each factory, the comptime-OS default, that a conformer declared outside the
+package satisfies the trait, that both probes report a refused port as not
+serving, and that `launch()` of a missing binary raises.
