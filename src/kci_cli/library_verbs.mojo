@@ -14,14 +14,19 @@
 #                       secret NAME is the environment variable's name.
 #               An OIDC channel resolves no secret at all, whichever store.
 #               The step's NEW NAMES block goes to the job summary.
-#   validate       -> kci_validate.run_install_smoke: a `SupervisorRunner`
+#   validate       -> by kind. CONDA_INSTALL_SMOKE:
+#                     kci_validate.run_install_smoke, a `SupervisorRunner`
 #                     for `docker`, anonymous HTTPS reads of the channel
 #                     (`HttpPkgTransport`, no credential), `UsleepSleeper`
 #                     for the index wait, each poll a line on stderr
 #                     (`StderrIndexPollLog`). The container runs as this
 #                     process's uid:gid; the docker CLI gets this process's
 #                     PATH (platform-set; a default when unset) and nothing
-#                     else it holds.
+#                     else it holds. CONDA_INSTALL_ENV:
+#                     kci_validate.run_install_env, the same runner,
+#                     transport, sleeper and poll log; pixi (--pixi, checked against
+#                     --pixi-sha256) gets an environment built from nothing,
+#                     and pixi's system config directory is /etc/pixi.
 #   lookahead      -> kci_publish.lookahead_new_names_https: a later stage's
 #                     NEW NAMES, anonymous reads over HTTPS.
 #   platform_env   -> this process's environment, for the platform-set
@@ -47,10 +52,24 @@ from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_secret_env import EnvSecretStore, ProcessEnv
 from komira_secret_store import SecretStore, SecretValue
 
-from kci_api import OUTCOME_VALIDATION_FAILED, VALIDATION_VALIDATED, ResultValidation, ResultValidationCheck
+from kci_api import (
+    OUTCOME_VALIDATION_FAILED,
+    VALIDATION_KIND_CONDA_INSTALL_ENV,
+    VALIDATION_VALIDATED,
+    ResultValidation,
+    ResultValidationCheck,
+)
 from kci_pkg_upload import HttpPkgTransport
 from kci_publish import UsleepSleeper
-from kci_validate import ContainerHost, StderrIndexPollLog, ValidateRequest, run_install_smoke
+from kci_validate import (
+    PIXI_SYSTEM_CONFIG_DIR,
+    ContainerHost,
+    EnvHost,
+    StderrIndexPollLog,
+    ValidateRequest,
+    run_install_env,
+    run_install_smoke,
+)
 
 from kci_build import GIT_PROGRAM, BuildRequest, RunSpec, SupervisorRunner, run_build
 from kci_build import RunResult as ProcessResult
@@ -119,6 +138,16 @@ def _mk_connector(host: String) -> _Conn:
         abort(String("validation: TLS connector for ") + host + String(": ") + String(e))
 
 
+def _failed_row(req: ValidateRequest, why: String) -> ResultValidation:
+    """A validation that raised: VALIDATION_FAILED with the reason."""
+    var row = ResultValidation(
+        req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(),
+        String(VALIDATION_VALIDATED), String(OUTCOME_VALIDATION_FAILED),
+    )
+    row.checks.append(ResultValidationCheck(String("validation"), String("a validation kci runs"), why.copy(), False))
+    return row^
+
+
 struct LibrarySteps(StageSteps, Movable):
     """The steps as the kci binary runs them. Layout: no fields."""
 
@@ -146,6 +175,17 @@ struct LibrarySteps(StageSteps, Movable):
         return end^
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
+        if req.validation.kind == VALIDATION_KIND_CONDA_INSTALL_ENV:
+            var env_runner = SupervisorRunner()
+            var env_transport = HttpPkgTransport[_Conn](_mk_connector)
+            var env_sleeper = UsleepSleeper()
+            var env_log = StderrIndexPollLog()
+            try:
+                return run_install_env(
+                    env_runner, env_transport, env_sleeper, env_log, req, EnvHost(String(PIXI_SYSTEM_CONFIG_DIR))
+                )
+            except e:
+                return _failed_row(req, String(e))
         var path = self.platform_env(String("PATH"))
         if path.byte_length() == 0:
             path = String(DEFAULT_CHILD_PATH)
@@ -160,12 +200,7 @@ struct LibrarySteps(StageSteps, Movable):
         try:
             return run_install_smoke(runner, transport, sleeper, log, req, host)
         except e:
-            var row = ResultValidation(
-                req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(),
-                String(VALIDATION_VALIDATED), String(OUTCOME_VALIDATION_FAILED),
-            )
-            row.checks.append(ResultValidationCheck(String("validation"), String("a validation kci runs"), String(e), False))
-            return row^
+            return _failed_row(req, String(e))
 
     def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
         return lookahead_new_names_https(req)

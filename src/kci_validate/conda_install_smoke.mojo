@@ -60,6 +60,7 @@ from kci_build.runner import ProcessRunner, RunSpec
 from kci_api import (
     OUTCOME_SUCCEEDED,
     OUTCOME_VALIDATION_FAILED,
+    VALIDATION_ENVIRONMENT_CONTAINER,
     VALIDATION_KIND_CONDA_INSTALL_SMOKE,
     VALIDATION_VALIDATED,
     VALIDATION_WOULD_VALIDATE,
@@ -149,6 +150,7 @@ def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPol
     var row = ResultValidation(
         v.name.copy(), req.step_name.copy(), v.kind.copy(), String(VALIDATION_VALIDATED), String("")
     )
+    row.environment = String(VALIDATION_ENVIRONMENT_CONTAINER)
     var checks = List[ResultValidationCheck]()
 
     # 0. the release, the channel's location, the pins
@@ -160,6 +162,7 @@ def run_install_smoke[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPol
         pins = install_pins(rel.loaded, v.installs)
         mojo_pin = mojo_pin_of(rel.loaded)
         channel_url = rel.channel_url.copy()
+        row.channel_url = channel_url.copy()
     except e:
         checks.append(
             ResultValidationCheck(

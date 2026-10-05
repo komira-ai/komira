@@ -20,7 +20,8 @@
 # over the written members, so it is exactly what a BUILD step would write.
 #
 # `set_meta(member, key, raw_json)` replaces one `metadata.json` key AFTER
-# the derived values are filled in, so a test can make any one key wrong.
+# the derived values are filled in, so a test can make any one key wrong; a
+# key it does not write (`doc_files`) is added.
 #
 # It also renders the matching artifacts file and `--release-version`
 # text, and reads back the set hash `release.json` records.
@@ -137,7 +138,7 @@ struct ExampleRelease(Copyable, Movable):
 
     def set_meta(mut self, var member: String, var key: String, var raw_json: String):
         """Replace `member`'s metadata `key` with the JSON text `raw_json`
-        (applied last)."""
+        (applied last); a key the written metadata does not hold is added."""
         self._edit_member.append(member^)
         self._edit_key.append(key^)
         self._edit_raw.append(raw_json^)
@@ -203,6 +204,10 @@ struct ExampleRelease(Copyable, Movable):
                     replaced = True
             if not replaced:
                 out.set_member(k.copy(), doc.value_at(i))
+        # a key the packer writes only sometimes (`doc_files`): added
+        for e in range(len(self._edit_member)):
+            if self._edit_member[e] == m.name and not doc.has(self._edit_key[e]):
+                out.set_member(self._edit_key[e].copy(), parse_json_value(self._edit_raw[e]))
         return out.serialize() + String("\n")
 
     def manifest_json(self, m: FixtureMember) -> String:

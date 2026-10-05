@@ -19,14 +19,14 @@ somewhere else, even when the retry code uses it.
 
 | name | file | what it is |
 |---|---|---|
-| `MonotonicClock`, `Sleeper`, `RetryRng` | [seams.mojo](seams.mojo) | the injected time, wait and random-number seams |
-| `SystemClock`, `SystemSleeper`, `SplitMix64Rng` | [seams.mojo](seams.mojo) | the real conformers (`std.time`; SplitMix64 is not a CSPRNG) |
-| `ManualClock`, `RecordingSleeper` | [seams.mojo](seams.mojo) | test fakes: time moves only when told, sleeps are recorded and return at once |
-| `Jitter`, `Backoff` | [policy.mojo](policy.mojo) | exponential backoff with FULL or BAND(pct) jitter |
-| `Verdict` | [policy.mojo](policy.mojo) | a classifier's reading: retryable, throttled, server delay, budget cost, reason |
-| `RetryPolicy`, `Decision` | [policy.mojo](policy.mojo) | the limits on a call, and the pure `decide` |
-| `RetryBudget`, `NoBudget`, `TokenBucket` | [budget.mojo](budget.mojo) | an optional retry budget shared across calls |
-| `RetryClassifier`, `RetryLoop`, `system_retry_loop` | [loop.mojo](loop.mojo) | the classifier trait and the loop that sleeps between sends |
+| `MonotonicClock`, `Sleeper`, `RetryRng` | [seams.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_retry/seams.mojo) | the injected time, wait and random-number seams |
+| `SystemClock`, `SystemSleeper`, `SplitMix64Rng` | [seams.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_retry/seams.mojo) | the real conformers (`std.time`; SplitMix64 is not a CSPRNG) |
+| `ManualClock`, `RecordingSleeper` | [seams.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_retry/seams.mojo) | test fakes: time moves only when told, sleeps are recorded and return at once |
+| `Jitter`, `Backoff` | [policy.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_retry/policy.mojo) | exponential backoff with FULL or BAND(pct) jitter |
+| `Verdict` | [policy.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_retry/policy.mojo) | a classifier's reading: retryable, throttled, server delay, budget cost, reason |
+| `RetryPolicy`, `Decision` | [policy.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_retry/policy.mojo) | the limits on a call, and the pure `decide` |
+| `RetryBudget`, `NoBudget`, `TokenBucket` | [budget.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_retry/budget.mojo) | an optional retry budget shared across calls |
+| `RetryClassifier`, `RetryLoop`, `system_retry_loop` | [loop.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_retry/loop.mojo) | the classifier trait and the loop that sleeps between sends |
 
 ## Semantics
 
@@ -116,7 +116,7 @@ small library, conforms to `MonotonicClock` there, and callers inject it into
 
 ## Tests
 
-Every file in [tests/](tests/) is welded to the package (`test_srcs`). The
+Every file in [tests/](https://github.com/komira-ai/komira/tree/main/src/komira_retry/tests) is welded to the package (`test_srcs`). The
 package is published only if they all pass:
 
 - `test_decide` covers the `decide` table.

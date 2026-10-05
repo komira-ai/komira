@@ -63,7 +63,8 @@
 #                       NOT_UNDER_CI (no CI token to exchange; never a pass),
 #                       NOT_OIDC (the channel's credential is not exchanged),
 #                       or "" (no probe: not a plan, or not a PUBLISH step)
-#   validations[]       {checks[], effect, kind, name, outcome, step}: the
+#   validations[]       {channel_url, checks[], effect, environment, kind,
+#                       name, outcome, pixi_sha256, skip_reason, step}: the
 #                       validations of the selected steps, in machine-file
 #                       order. effect VALIDATED (it ran; outcome is its
 #                       verdict), WOULD_VALIDATE (--plan: it did not run, so
@@ -71,7 +72,16 @@
 #                       a pass) or NOT_REACHED (the run stopped before it).
 #                       checks[] rows are {check, expected, got, ok}; a
 #                       SUCCEEDED validation holds at least one check and
-#                       every check ok
+#                       every check ok. environment is where it ran: ENV
+#                       (this machine, no container) or CONTAINER, "" when
+#                       it did not run; pixi_sha256 the sha256 of the pixi
+#                       an ENV validation ran ("" otherwise); channel_url
+#                       the step's channel location it installed from ("" when
+#                       not known); skip_reason why it could not run at all
+#                       (no network: no declared host answered), only on an
+#                       INDETERMINATE outcome, "" otherwise. The last four
+#                       were added inside major 1: a reader takes an absent
+#                       one as ""
 #   verb                run: the one verb
 #   workflow            {checked, path, reason, sha}: the start-up check of
 #                       the CI workflow running kci against the machine file.
@@ -116,7 +126,7 @@ from komira_json import JSON_ARRAY, JSON_BOOL, JSON_NUMBER, JSON_OBJECT, JSON_ST
 from kci_api.errors import require_error_id
 from kci_api.exit_codes import EXIT_PARTIAL, default_retry, exit_code_of, require_retry_for
 from kci_api.formats import FORMAT_RESULT, current_major, produced_header
-from kci_api.outcome import OUTCOME_INTERRUPTED, OUTCOME_SUCCEEDED, RETRY_UNSAFE, require_outcome
+from kci_api.outcome import OUTCOME_INDETERMINATE, OUTCOME_INTERRUPTED, OUTCOME_SUCCEEDED, RETRY_UNSAFE, require_outcome
 from kci_api.platform import platform_row
 from kci_api.revision import is_full_commit_id
 from kci_api.run_identity import ContextEntry, RunIdentity
@@ -146,6 +156,11 @@ comptime ARTIFACT_NOT_REACHED: String = "NOT_REACHED"
 comptime VALIDATION_VALIDATED: String = "VALIDATED"
 comptime VALIDATION_WOULD_VALIDATE: String = "WOULD_VALIDATE"
 comptime VALIDATION_NOT_REACHED: String = "NOT_REACHED"
+
+comptime VALIDATION_ENVIRONMENT_ENV: String = "ENV"
+"""`validations[].environment` of a validation that ran on this machine."""
+comptime VALIDATION_ENVIRONMENT_CONTAINER: String = "CONTAINER"
+"""`validations[].environment` of a validation that ran in a container."""
 
 comptime CREDENTIAL_PROBE_MINTED: String = "MINTED"
 comptime CREDENTIAL_PROBE_NOT_UNDER_CI: String = "NOT_UNDER_CI"
@@ -285,6 +300,10 @@ struct ResultValidation(Copyable, Movable):
     var effect: String
     var outcome: String
     var checks: List[ResultValidationCheck]
+    var environment: String
+    var pixi_sha256: String
+    var channel_url: String
+    var skip_reason: String
 
     def __init__(out self, var name: String, var step: String, var kind: String, var effect: String, var outcome: String):
         self.name = name^
@@ -293,6 +312,10 @@ struct ResultValidation(Copyable, Movable):
         self.effect = effect^
         self.outcome = outcome^
         self.checks = List[ResultValidationCheck]()
+        self.environment = String("")
+        self.pixi_sha256 = String("")
+        self.channel_url = String("")
+        self.skip_reason = String("")
 
 
 struct ResultNewName(Copyable, Movable):
@@ -708,6 +731,17 @@ def _member(words: List[String], w: String) -> Bool:
     return False
 
 
+def _is_sha256_hex(s: String) -> Bool:
+    var b = s.as_bytes()
+    if len(b) != 64:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
+            return False
+    return True
+
+
 def _check_validations(r: RunResult) raises:
     for i in range(len(r.validations)):
         ref v = r.validations[i]
@@ -718,6 +752,18 @@ def _check_validations(r: RunResult) raises:
             if r.validations[j].name == v.name:
                 raise Error(where + String("is given twice"))
         require_validation_kind(v.kind)
+        if (
+            v.environment.byte_length() > 0
+            and v.environment != VALIDATION_ENVIRONMENT_ENV
+            and v.environment != VALIDATION_ENVIRONMENT_CONTAINER
+        ):
+            raise Error(where + String("environment '") + v.environment + String("' is not ENV or CONTAINER"))
+        if v.pixi_sha256.byte_length() > 0 and not _is_sha256_hex(v.pixi_sha256):
+            raise Error(where + String("pixi_sha256 '") + v.pixi_sha256 + String("' is not 64 lowercase hex characters"))
+        if v.skip_reason.byte_length() > 0 and (v.effect != VALIDATION_VALIDATED or v.outcome != OUTCOME_INDETERMINATE):
+            raise Error(where + String("a skip_reason belongs to a validation that ran and is INDETERMINATE"))
+        if v.effect != VALIDATION_VALIDATED and (v.environment.byte_length() > 0 or v.pixi_sha256.byte_length() > 0):
+            raise Error(where + String("a validation that did not run has no environment and no pixi_sha256"))
         var found = False
         for j in range(len(r.steps)):
             if r.steps[j].name == v.step:
@@ -892,11 +938,15 @@ def render_result(r: RunResult) raises -> String:
             c.put(String("ok"), JsonValue.from_bool(v.checks[k].ok))
             checks.push(c.build())
         var o = _Obj()
+        o.put_str(String("channel_url"), v.channel_url)
         o.put(String("checks"), checks^)
         o.put_str(String("effect"), v.effect)
+        o.put_str(String("environment"), v.environment)
         o.put_str(String("kind"), v.kind)
         o.put_str(String("name"), v.name)
         o.put_str(String("outcome"), v.outcome)
+        o.put_str(String("pixi_sha256"), v.pixi_sha256)
+        o.put_str(String("skip_reason"), v.skip_reason)
         o.put_str(String("step"), v.step)
         vals.push(o.build())
     top.put(String("validations"), vals^)
@@ -930,6 +980,14 @@ def _need(doc: JsonValue, key: String, tag: Int, source: String, where: String) 
 
 def _s(doc: JsonValue, key: String, source: String, where: String = String("")) raises -> String:
     return _need(doc, key, JSON_STRING, source, where).as_string()
+
+
+def _s_absent_empty(doc: JsonValue, key: String, source: String, where: String) raises -> String:
+    """A string key added inside the major: "" when a document written before
+    it has none; the wrong JSON type is still refused."""
+    if not doc.has(key):
+        return String("")
+    return _s(doc, key, source, where)
 
 
 def _i(doc: JsonValue, key: String, source: String, where: String = String("")) raises -> Int:
@@ -1119,7 +1177,10 @@ def parse_result(text: String, source: String) raises -> RunResult:
             _refuse(source, where + String("not an object"))
         _no_dup_keys(a, source, where)
         _note_unknown(
-            a, _keys(String("checks effect kind name outcome step")), String("validations[") + String(i) + String("]."), r.ignored_keys
+            a,
+            _keys(String("channel_url checks effect environment kind name outcome pixi_sha256 skip_reason step")),
+            String("validations[") + String(i) + String("]."),
+            r.ignored_keys,
         )
         var v = ResultValidation(
             _s(a, String("name"), source, where),
@@ -1128,6 +1189,10 @@ def parse_result(text: String, source: String) raises -> RunResult:
             _s(a, String("effect"), source, where),
             _s(a, String("outcome"), source, where),
         )
+        v.environment = _s_absent_empty(a, String("environment"), source, where)
+        v.pixi_sha256 = _s_absent_empty(a, String("pixi_sha256"), source, where)
+        v.channel_url = _s_absent_empty(a, String("channel_url"), source, where)
+        v.skip_reason = _s_absent_empty(a, String("skip_reason"), source, where)
         var checks = _need(a, String("checks"), JSON_ARRAY, source, where)
         for k in range(checks.array_len()):
             var cw = where + String("checks[") + String(k) + String("]: ")

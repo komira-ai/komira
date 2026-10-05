@@ -781,10 +781,17 @@ plants three defects, each of which must fail naming its README line: an
 example that raises (`README.md:13: FAILED`, while the other example still
 runs), one that does not compile (the compiler quotes the line, ending
 `# README.md:9`) and a `mojo skip` fence (refused at `README.md:3`).
+A README that ships (its library has a conda package, which installs it at
+`share/doc/<name>/README.md`) refuses a relative link:
+[`negative/readme_examples/relative_link`](negative/readme_examples/relative_link/BUCK)
+fails naming `README.md:11`, and
+[`functional/readme_examples/unshipped`](functional/readme_examples/unshipped/BUCK),
+the same README in a library with `conda = False`, builds.
 
 ```sh
 ./buck2 build tests//functional/readme_examples/...
 ./buck2 build tests//negative/readme_examples/raises:raises   # must fail: README.md:13: FAILED
+./buck2 build tests//negative/readme_examples/relative_link:relative_link   # must fail: README.md:11: greet.mojo: a relative link
 ```
 
 ## Diagnostics
