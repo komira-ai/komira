@@ -93,18 +93,27 @@ def prose_lines(f,text):
     elif os.path.basename(f) in('BUCK','BUCK.v2') or f.endswith(('.bzl','.sh','.py','.yml','.yaml','.toml')):
         out={i for i,l in enumerate(lines) if l.lstrip().startswith('#')}
     return out
-def reword_prose(f,text,dirpkg):
-    """Say what a comment or document meant now that komira_core is gone. A mention of a komira_core directory names the
-    package that took it; 'lives in komira_core' names the package of the file; any other mention becomes 'the core
-    packages'. Lines that are not prose (a string literal, code) are left for a person, and reported."""
+def reword_prose(f,text,dirpkg=None):
+    """Say what a comment meant now that komira_core is gone. `lives in komira_core` names the package of the file; any
+    other mention of komira_core, or of one of its directories, becomes `the core packages`. Markdown is left for a
+    person (a table row or a path cannot be reworded by rule), and so is any line that is not prose (a string literal,
+    code): both are reported."""
+    if f.endswith('.md'): return text
     m=re.match(r'src/([a-z0-9_]+)/',f); own=m.group(1) if m else None
     keep=prose_lines(f,text); lines=text.split('\n'); out=[]
     for i,l in enumerate(lines):
         if not CORE_ONLY.search(l) or (keep is not None and i not in keep) or '"komira_core"' in l: out.append(l); continue
-        l=re.sub(r'komira_core(/|\.)([a-z0-9_]+)',lambda m: dirpkg.get(m.group(2),'komira_core'+m.group(1)+m.group(2)) if m.group(2) in dirpkg else m.group(0),l)
         if own and own in KNOWN_OWN: l=OWN_PHRASE.sub(lambda m:'%s%s`%s`'%(m.group(1),m.group(2),own),l)
-        l=re.sub(r"`komira_core`'s",'the core packages\'',l); l=re.sub(r"komira_core's",'the core packages\'',l)
-        l=re.sub(r'`komira_core`','the core packages',l); l=CORE_ONLY.sub('the core packages',l)
+        # a directory of komira_core (komira_core/collections/, komira_core.arrow) is the core packages too
+        l=re.sub(r'`komira_core(?:[/.][a-z0-9_]+)*/?`(?![A-Za-z0-9_])','the core packages',l)
+        l=re.sub(r'(?<![A-Za-z0-9_])komira_core(?:[/.][a-z0-9_]+)*/?(?![A-Za-z0-9_])','the core packages',l)
+        l=re.sub(r"the core packages's",'the core packages\'',l)
+        l=re.sub(r'the core packages package\b','the core packages',l)
+        l=re.sub(r'\b(the|The) the core packages',lambda m:m.group(1)+' core packages',l)
+        l=re.sub(r'\ba the core packages',"a core-package",l)
+        l=re.sub(r'\ban the core packages',"a core-package",l)
+        l=re.sub(r'(?<![A-Za-z0-9`])(the core packages)(?=\s+(?:is|are|has|have|holds|sits|owns|does|depends|never|can|cannot|must|links|ships|defines|only|alone)\b)',lambda m:m.group(1),l)
+        l=re.sub(r'([.!?]\s+)the core packages',lambda m:m.group(1)+'The core packages',l)
         out.append(l)
     return '\n'.join(out)
 CORE_ONLY=re.compile(r'(?<![A-Za-z0-9_])komira_core(?![A-Za-z0-9_])')
@@ -218,7 +227,7 @@ def run(a):
         if not ((CORE.search(t) and not a.renames_only) or any(r.search(t) for r,_ in rename_re)): continue
         if os.path.basename(f) in('BUCK','BUCK.v2'): continue
         u=t if a.renames_only else (rw.rewrite(f,t) if f.endswith('.mojo') else rw.textual(t))
-        if a.reword_prose and not a.renames_only: u=reword_prose(f,u,dirpkg)
+        if a.reword_prose and not a.renames_only: u=reword_prose(f,u)
         u=rn(u)
         if u!=t: new[f]=u; stats['files_'+('mojo' if f.endswith('.mojo') else 'text')]+=1
     # created files may belong to a package whose BUCK needs the tests
@@ -231,7 +240,7 @@ def run(a):
         if (CORE.search(t) and not a.renames_only) or any(r.search(t) for r,_ in rename_re):
             if not a.renames_only:
                 u,n=fix_buck(tree,f,t,texts,known,own,third,rename_map); notes+=n; u=rw.textual(u)
-                if a.reword_prose: u=reword_prose(f,u,dirpkg)
+                if a.reword_prose: u=reword_prose(f,u)
             u=rn(u)
         pk=os.path.dirname(f)
         added=[np[len(pk)+1:] for np in created if np.startswith(pk+'/tests/') and np.endswith('.mojo') and os.path.dirname(os.path.dirname(np))==pk]
