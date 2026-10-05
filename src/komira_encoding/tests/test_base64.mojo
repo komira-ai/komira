@@ -108,6 +108,12 @@ def test_every_byte_value() raises:
     assert_equal(base64_url_encode(all), String(_ALL_URL))
     assert_true(_same(base64_decode(String(_ALL_STD)), all))
     assert_true(_same(base64_url_decode(String(_ALL_URL)), all))
+    # Unpadded (RFC 7515): the same symbols without the trailing `==`.
+    var url = String(_ALL_URL)
+    var url_nopad = String(url[byte=: url.byte_length() - 2])
+    assert_equal(base64_url_encode_nopad(all), url_nopad)
+    assert_true(_same(base64_url_decode_nopad(url_nopad), all))
+    assert_true(_same(base64_url_decode(url_nopad), all))
 
 
 def test_round_trip_lengths_0_to_64() raises:

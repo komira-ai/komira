@@ -318,6 +318,106 @@ def test_refuses_bad_member_rows() raises:
     )
 
 
+comptime _DOC = "share/doc/komira_name_registry/README.md"
+comptime _H = "94a65a7d5ca61240531cfc9271b1ccceaacd7f5e79ff88c8976edc5695bf15ce"
+
+
+def _docs(rows: String) raises -> String:
+    return _edit(String(_LIB), String("doc_files"), rows)
+
+
+def _row(path: String, sha: String = String(_H)) -> String:
+    return String('{"path":"') + path + String('","sha256":"') + sha + String('"}')
+
+
+def test_doc_files_rows_parse() raises:
+    var md = parse_conda_metadata(
+        _docs(String("[") + _row(String(_DOC)) + String("]")), String(_SRC)
+    )
+    assert_true(md.has_doc_files)
+    assert_equal(len(md.doc_files), 1)
+    assert_equal(md.doc_files[0].path, String(_DOC))
+    assert_equal(md.doc_files[0].sha256_hex, String(_H))
+    # a known key: never listed as ignored
+    assert_equal(len(md.ignored_keys), 0)
+    var empty = parse_conda_metadata(_docs(String("[]")), String(_SRC))
+    assert_true(empty.has_doc_files)
+    assert_equal(len(empty.doc_files), 0)
+
+
+def test_doc_files_absent_is_recorded_not_refused() raises:
+    # A package written before the packer shipped docs has no `doc_files`:
+    # read, and recorded as absent. Whether a release needs it is the
+    # validation's rule, not the reader's.
+    var md = read_conda_metadata(String(_LIB))
+    assert_false(md.has_doc_files)
+    assert_equal(len(md.doc_files), 0)
+
+
+def test_refuses_bad_doc_files() raises:
+    _expect(_docs(String('"README.md"')), String("'doc_files' is not an array"))
+    _expect(_docs(String("[1]")), String("doc_files[0]: not an object"))
+    _expect(
+        _docs(String('[{"path":"') + String(_DOC) + String('"}]')),
+        String("doc_files[0]: missing 'sha256'"),
+    )
+    _expect(
+        _docs(String('[{"sha256":"') + String(_H) + String('"}]')),
+        String("doc_files[0]: missing 'path'"),
+    )
+    _expect(
+        _docs(String("[") + _row(String(_DOC), String("00")) + String("]")),
+        String("doc_files[0]: 'sha256' is not 64 lowercase hex characters"),
+    )
+    _expect(_docs(String("[") + _row(String("")) + String("]")), String("doc_files[0]: 'path' is EMPTY"))
+    _expect(
+        _docs(
+            String('[{"path":"') + String(_DOC) + String('","path":"x","sha256":"') + String(_H) + String('"}]')
+        ),
+        String("doc_files[0]: 'path' is given twice"),
+    )
+    # installed under share/doc/<name>/, and nowhere else
+    _expect(
+        _docs(String("[") + _row(String("share/doc/other/README.md")) + String("]")),
+        String(
+            "doc_files[0]: 'path' share/doc/other/README.md is not under"
+            " share/doc/komira_name_registry/ with no empty, '.' or '..' component"
+        ),
+    )
+    _expect(
+        _docs(String("[") + _row(String("share/doc/komira_name_registry/../x")) + String("]")),
+        String(
+            "doc_files[0]: 'path' share/doc/komira_name_registry/../x is not under"
+            " share/doc/komira_name_registry/ with no empty, '.' or '..' component"
+        ),
+    )
+    _expect(
+        _docs(String("[") + _row(String("share/doc/komira_name_registry/")) + String("]")),
+        String(
+            "doc_files[0]: 'path' share/doc/komira_name_registry/ is not under"
+            " share/doc/komira_name_registry/ with no empty, '.' or '..' component"
+        ),
+    )
+    _expect(
+        _docs(String("[") + _row(String(_DOC)) + String(",") + _row(String(_DOC)) + String("]")),
+        String("doc_files[1]: 'path' " + _DOC + " is given twice"),
+    )
+    # an unknown key in a row of a known major is ignored and listed
+    var md = parse_conda_metadata(
+        _docs(
+            String('[{"path":"') + String(_DOC) + String('","sha256":"') + String(_H) + String('","mode":1}]')
+        ),
+        String(_SRC),
+    )
+    assert_equal(len(md.ignored_keys), 1)
+    assert_equal(md.ignored_keys[0], String("doc_files[0].mode"))
+    # a metapackage ships no doc
+    _expect(
+        _edit(String(_META), String("doc_files"), String("[]")),
+        String("'doc_files' does not belong to a metapackage"),
+    )
+
+
 def test_read_names_an_unreadable_file() raises:
     try:
         _ = read_conda_metadata(String(_DATA) + String("absent.json"))

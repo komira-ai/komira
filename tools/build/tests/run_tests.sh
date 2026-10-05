@@ -278,6 +278,14 @@
 #      --target-platforms is configured for it; the reserved linux-arm64 row
 #      has no platform and its `[komira_re]` key is refused
 #      (tools/build/tests/functional/platform_table/check.sh).
+#  38. README examples (tools/build/mojo/README.md#readme-examples): the
+#      examples of tests//functional/readme_examples/ok run and its marker is
+#      PASS; a README with no example (.../none) compiles and runs nothing,
+#      its marker NO EXAMPLE; tests//negative/readme_examples fail naming the
+#      README line of a raising example, a compile error and a `mojo skip` fence.
+#      A README that ships (its library has a conda package) refuses a relative
+#      link naming its line (.../relative_link); the same README in a library
+#      with `conda = False` builds (tests//functional/readme_examples/unshipped).
 set -uo pipefail
 
 umbrella=1
@@ -1026,6 +1034,25 @@ elif [ "$umbrella" = 1 ]; then
 else
     echo "SKIP  umbrella cache (--no-umbrella)"
 fi
+
+# 38
+expect_green readme_examples tests//functional/readme_examples/...
+for want in "ok:PASS tests//functional/readme_examples/ok:ok:README.md" \
+    "none:NO EXAMPLE tests//functional/readme_examples/none:none:README.md: no "; do
+    t=${want%%:*}
+    line=${want#*:}
+    out=$("$BUCK2" build "tests//functional/readme_examples/${t}:${t}[tests][readme]" --show-full-output 2> "$LOG/readme_marker_$t.log" | awk 'NF == 2 { print $2 }')
+    if [ -n "$out" ] && [ -f "$out" ] && [ "$(head -c "${#line}" "$out")" = "$line" ]; then
+        pass "readme_marker_$t"
+    else
+        fail "readme_marker_$t: the [tests][readme] marker must start '$line' (see $LOG/readme_marker_$t.log)"
+    fi
+done
+expect_red readme_example_raises 'negative/readme_examples/raises/README.md:13: FAILED: planted' tests//negative/readme_examples/raises:raises
+expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 checks passed' tests//negative/readme_examples/raises:raises
+expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
+expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
+expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
 
 # 37
 pt_rc=0

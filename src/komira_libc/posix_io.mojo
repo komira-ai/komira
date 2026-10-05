@@ -190,6 +190,7 @@ struct RawWriteFd(Movable):
         # created with arbitrary (typically zero) permission bits.
         var fd = external_call["komira_openat_creat", Int32](
             _at_fdcwd(),
+            # SAFETY: `p` owns this NUL-terminated buffer and outlives the call.
             p.as_c_string_slice().unsafe_ptr(),
             flags,
             _DEFAULT_MODE,
@@ -232,6 +233,7 @@ struct RawWriteFd(Movable):
         # copies what it needs and returns.
         var fd = external_call["komira_openat_creat", Int32](
             _at_fdcwd(),
+            # SAFETY: `p` owns this NUL-terminated buffer and outlives the call.
             p.as_c_string_slice().unsafe_ptr(),
             flags,
             _DEFAULT_MODE,
@@ -264,6 +266,7 @@ struct RawWriteFd(Movable):
         # copies what it needs and returns.
         var fd = external_call["komira_openat_creat", Int32](
             _at_fdcwd(),
+            # SAFETY: `p` owns this NUL-terminated buffer and outlives the call.
             p.as_c_string_slice().unsafe_ptr(),
             flags,
             _DEFAULT_MODE,
@@ -372,11 +375,10 @@ struct RawWriteFd(Movable):
         if n == 0:
             return
         var off = 0
-        # SAFETY: `bytes.unsafe_ptr()` is borrowed from the caller's
-        # span; we only use it for the duration of this synchronous
-        # syscall. The Span's origin pins it alive across the call.
         # `komira_write_bytes` is a fixed-arity shim around write(2)
         # to sidestep the stdlib's "write" name collision.
+        # SAFETY: `bytes.unsafe_ptr()` is borrowed from the caller's span, whose
+        # origin pins it alive across each synchronous syscall; it does not escape.
         var base = bytes.unsafe_ptr()
         while off < n:
             var remaining = n - off
@@ -446,12 +448,10 @@ struct RawWriteFd(Movable):
         var n = len(bytes)
         if n == 0:
             return
-        # SAFETY: `bytes.unsafe_ptr()` is borrowed from the caller's
-        # span; we only use it for the duration of this synchronous
-        # syscall. The Span's origin pins it alive across the call.
-        # No pointer escapes this function body.
         # `komira_pwrite` is a fixed-arity shim around pwrite(2) to
         # sidestep the stdlib's "pwrite" name collision.
+        # SAFETY: `bytes.unsafe_ptr()` is borrowed from the caller's span, whose
+        # origin pins it alive across each synchronous syscall; it does not escape.
         var base = bytes.unsafe_ptr()
         var written = 0
         while written < n:
@@ -581,12 +581,11 @@ struct RawWriteFd(Movable):
         # We use an `InlineArray[UInt8, 16 * IOV_MAX]` = 16 KiB stack;
         # then bitcast to write the per-slot pointer + length.
         var iov_bytes = Array[UInt8, 16 * IOV_MAX](fill=UInt8(0))
-        # SAFETY: `iov_bytes` is stack-local and outlives the syscall
-        # (the kernel reads-only). Each iovec slot is 16 bytes; we
-        # write the pointer at offset +0 and the length at offset +8
-        # via Int64 bitcasts. The slot bytes are released when this
-        # function returns; the kernel completes its read before
-        # returning from the syscall (synchronous).
+        # Each iovec slot is 16 bytes; we write the pointer at offset +0 and
+        # the length at offset +8 via Int64 bitcasts. The kernel completes its
+        # read before returning from the syscall (synchronous).
+        # SAFETY: `iov_bytes` is stack-local and outlives the syscall, which
+        # only reads it; the byte pointer stays inside this function.
         var iov_base = UnsafePointer(to=iov_bytes).bitcast[UInt8]()
         var total_bytes: Int = 0
         for i in range(n_iovs):
@@ -594,9 +593,12 @@ struct RawWriteFd(Movable):
             total_bytes += n_bytes
             # Write iov_base (8 bytes) at slot_off + 0.
             var slot_off = i * 16
+            # SAFETY: i < n_iovs <= IOV_MAX, so [slot_off, slot_off + 16) lies
+            # inside `iov_bytes` (16 * IOV_MAX bytes).
             var slot_ptr_field = (iov_base + slot_off).bitcast[Int64]()
             slot_ptr_field[0] = Int64(addrs[i])
             # Write iov_len (8 bytes) at slot_off + 8.
+            # SAFETY: same slot as above, second 8 bytes; still in bounds.
             var slot_len_field = (iov_base + slot_off + 8).bitcast[Int64]()
             slot_len_field[0] = Int64(n_bytes)
         # SAFETY: synchronous syscall; iov_bytes outlives the call
@@ -728,11 +730,11 @@ def prefetch_file_into_page_cache(path: String, max_bytes: Int):
     `EnginePlacement.io_lane` is set.
     """
     var p = path
-    # SAFETY: `as_c_string_slice()` returns a NUL-terminated view owned by the
-    # local `p`, held alive across the synchronous shim call. The kernel (inside
-    # the shim) copies the path; no pointer escapes. `komira_prefetch_file`
-    # opens RO, posix_fadvise(WILLNEED) + sequentially reads to fault the pages,
-    # then closes — all in C. The return is ignored (best-effort).
+    # `komira_prefetch_file` opens RO, posix_fadvise(WILLNEED) + sequentially
+    # reads to fault the pages, then closes — all in C. The return is ignored
+    # (best-effort). The shim copies the path; no pointer escapes.
+    # SAFETY: the NUL-terminated view is owned by the local `p`, held alive
+    # across the synchronous shim call.
     var rc = external_call["komira_prefetch_file", Int32](
         p.as_c_string_slice().unsafe_ptr(), Int64(max_bytes)
     )
@@ -761,6 +763,7 @@ def fsync_dir(dir: String) raises:
     # the directory must already exist; the mode arg is ignored.
     var fd = external_call["komira_openat_creat", Int32](
         _at_fdcwd(),
+        # SAFETY: `p` owns this NUL-terminated buffer and outlives the call.
         p.as_c_string_slice().unsafe_ptr(),
         _O_RDONLY,
         _DEFAULT_MODE,

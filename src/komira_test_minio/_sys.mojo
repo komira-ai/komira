@@ -28,6 +28,9 @@ def _chmod(path: String, mode: Int) -> Bool:
     an owned local that outlives the call.
     """
     var p = path
+    # `chmod` reads the path during the call and keeps no pointer to it.
+    # SAFETY: `p` owns the NUL-terminated buffer and lives to the end of this
+    # function, past the synchronous call; the pointer does not escape.
     var rc = external_call["chmod", Int32](
         p.as_c_string_slice().unsafe_ptr(), UInt32(mode)
     )

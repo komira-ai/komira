@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package komira.test.refuse.oneof_path_leaf;
+
+import "google/api/annotations.proto";
+
+service S {
+  rpc M(Req) returns (Req) {
+    option (google.api.http) = { patch: "/v1/{thing.id}" body: "thing" };
+  }
+}
+
+message Req {
+  Thing thing = 1;
+  message Thing {
+    oneof key {
+      string id = 1;
+      int64 number = 2;
+    }
+  }
+}

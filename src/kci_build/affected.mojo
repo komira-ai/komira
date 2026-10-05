@@ -20,6 +20,16 @@
 #    --no-renames <base>...<revision>` into `<log>/_changed_files`). An EMPTY
 #    change is REFUSED (KCI-E-AFFECTED-VACUOUS): a check over nothing is
 #    never a pass.
+# 2b. Each build system declaring `derive_checks`, in file order: its
+#    command runs (cwd --work-dir, the affected command's placeholders,
+#    `{units_file}` = `<log>/_declared_units.tsv`, every declared unit's
+#    targets; stdout and stderr to `<log>/_derive_<bs>.stdout|.stderr`), and
+#    the checks it answers are added after the declared ones under the
+#    file's rules (kci_artifact derive.mojo). A tool that fails or answers
+#    outside the grammar is INDETERMINATE (KCI-E-AFFECTED); an UNMATCHED
+#    artifact target, or a derived check the file's rules refuse, is
+#    REFUSED (KCI-E-ARTIFACT); an UNMATCHED check target is a NOTICE line
+#    (stderr, and the outcome's lines before WOULD_BUILD / BUILT).
 # 3. Each build system owning a unit, in file order: `<log>/_units_<bs>.tsv`
 #    gets its units' targets (kci_artifact `units_file_text`), and its
 #    affected command runs through the ProcessRunner (cwd --work-dir, stdout
@@ -61,7 +71,12 @@ from std.pathlib import Path
 
 from kci_artifact import (
     AffectedValues,
+    add_derived_checks,
+    declared_units_file_text,
     parse_affected_answer,
+    parse_derive_answer,
+    render_derive_argv,
+    unmatched_artifacts,
     read_artifacts,
     render_affected_argv,
     render_targets_argv,
@@ -145,6 +160,78 @@ def _tool_failed(bs: String, spec: RunSpec, why: String) -> BuildOutcome:
         + spec.command_line() + String("`, ") + why
         + String(": kci cannot tell what the change reaches, and does not widen instead"),
     )
+
+
+def _derive[R: ProcessRunner](
+    req: BuildRequest, mut arts: Artifacts, changed_path: String, mut runner: R, mut notices: List[String]
+) -> BuildOutcome:
+    """Step 2b: each build system's derived checks, added to `arts`."""
+    var declared_path = req.log_dir + String("/_declared_units.tsv")
+    var declared = units_of(arts)
+    var wrote = False
+    for i in range(len(arts.build_systems)):
+        if not arts.build_systems[i].derive_checks:
+            continue
+        var bs = arts.build_systems[i].name.copy()
+        var argv: List[String]
+        try:
+            if not wrote:
+                _write(declared_path, declared_units_file_text(arts))
+                wrote = True
+            argv = render_derive_argv(
+                arts, bs,
+                AffectedValues(changed_path.copy(), declared_path.copy(), req.affected_by.copy(), req.revision_id.copy()),
+            )
+        except e:
+            return _stop(
+                String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+                String("--affected-by: build system '") + bs + String("': ") + String(e),
+            )
+        var spec = _spec(argv, req, req.log_dir + String("/_derive_") + bs)
+        print(String("BUILD step: derive_checks: ") + bs + String(": ") + spec.command_line(), file=_STDERR)
+        var what = String("the derive_checks command of build system '") + bs + String("', `") + spec.command_line() + String("`, ")
+        var cannot = String(": kci cannot tell which checks the build graph holds")
+        var r: RunResult
+        try:
+            r = runner.run(spec)
+        except e:
+            return _stop(String(OUTCOME_INDETERMINATE), String(ERROR_AFFECTED), what + String("could not be started: ") + String(e) + cannot)
+        if not r.ok():
+            var why = r.describe() + String(" (stderr: ") + spec.stderr_path + String(")")
+            if r.stderr_tail.byte_length() > 0:
+                why += String("\n") + r.stderr_tail
+            return _stop(String(OUTCOME_INDETERMINATE), String(ERROR_AFFECTED), what + why + cannot)
+        try:
+            var answer = parse_derive_answer(Path(spec.stdout_path).read_text(), declared)
+            var refused = unmatched_artifacts(arts, answer)
+            if len(refused) > 0:
+                var names = String("")
+                for k in range(len(refused)):
+                    names += String(" `") + refused[k] + String("`")
+                return _refused(
+                    String(ERROR_ARTIFACT),
+                    String("--affected-by: the build graph holds no target an artifact names:") + names
+                    + String(" (") + what + String("answered UNMATCHED): an artifact must name what a release builds"),
+                )
+            for k in range(len(answer.unmatched_units)):
+                var n = String("NOTICE check '") + answer.unmatched_units[k] + String("' names `")
+                n += answer.unmatched_targets[k] + String("`, which matches nothing in the build graph")
+                print(String("BUILD step: derive_checks: ") + bs + String(": ") + n, file=_STDERR)
+                notices.append(n^)
+            try:
+                add_derived_checks(arts, bs, answer, req.artifacts_file)
+            except e:
+                return _refused(String(ERROR_ARTIFACT), String("--affected-by: ") + String(e))
+            print(
+                String("BUILD step: derive_checks: ") + bs + String(": ") + String(len(answer.names))
+                + String(" check(s) derived"),
+                file=_STDERR,
+            )
+        except e:
+            return _stop(
+                String(OUTCOME_INDETERMINATE), String(ERROR_AFFECTED), what + String("answered outside the protocol: ") + String(e) + cannot
+            )
+    return BuildOutcome.succeeded(String(""))
 
 
 struct _Decision(Copyable, Movable):
@@ -297,6 +384,11 @@ def _affected[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
             + String(change.count) + String(" file(s)"),
             file=_STDERR,
         )
+        # ── step 2b: the derived checks ─────────────────────────────────────
+        var notices = List[String]()
+        var derived = _derive(req, arts, change.path, runner, notices)
+        if not derived.ok():
+            return derived^
         # ── steps 3 and 4: the answers, then the units ──────────────────────
         var asked = _ask(req, arts, change.path, runner, decision)
         if not asked.ok():
@@ -317,6 +409,8 @@ def _affected[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                 head + String(": plan: ") + String(len(decision.units))
                 + String(" unit(s) would be built; nothing was built"),
             )
+            for i in range(len(notices)):
+                o.lines.append(notices[i].copy())
             for i in range(len(decision.units)):
                 o.lines.append(String("WOULD_BUILD ") + decision.units[i])
             return o^
@@ -344,6 +438,8 @@ def _affected[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                     why += String("\n") + r.stderr_tail
                 return _stop(String(OUTCOME_FAILED), String(ERROR_BUILD_FAILED), why)
         var done = BuildOutcome.succeeded(head + String(": ") + String(len(decision.units)) + String(" unit(s) built"))
+        for i in range(len(notices)):
+            done.lines.append(notices[i].copy())
         for i in range(len(decision.units)):
             done.lines.append(String("BUILT ") + decision.units[i])
         return done^

@@ -115,6 +115,8 @@ def test_writev_n1() raises:
     var w = RawWriteFd.open_truncate(path)
     var data = _make_bytes(0x10, 0x20, 0x30)
     var addrs = List[Int]()
+    # SAFETY: the buffers stay alive until after the writev call that reads
+    # these addresses.
     addrs.append(Int(Span(data).unsafe_ptr()))
     var lens = List[Int]()
     lens.append(3)
@@ -148,8 +150,11 @@ def test_writev_n4() raises:
     var b4 = _make_bytes(0x11, 0x22, 0x33, 0x44)
 
     var addrs = List[Int]()
+    # SAFETY: the buffers stay alive until after the writev call that reads
+    # these addresses.
     addrs.append(Int(Span(b1).unsafe_ptr()))
     addrs.append(Int(Span(b2).unsafe_ptr()))
+    # SAFETY: as above, `b3` and `b4` outlive the writev call.
     addrs.append(Int(Span(b3).unsafe_ptr()))
     addrs.append(Int(Span(b4).unsafe_ptr()))
     var lens = List[Int]()
@@ -191,6 +196,8 @@ def test_writev_mixed_write_writev() raises:
     var body1 = _make_bytes(0xB1, 0xB2, 0xB3)
     var body2 = _make_bytes(0xC1, 0xC2)
     var addrs = List[Int]()
+    # SAFETY: the buffers stay alive until after the writev call that reads
+    # these addresses.
     addrs.append(Int(Span(body1).unsafe_ptr()))
     addrs.append(Int(Span(body2).unsafe_ptr()))
     var lens = List[Int]()
@@ -269,6 +276,8 @@ def test_open_existing_append_dual_fd_interleave() raises:
     var b1 = _make_bytes(0x42, 0x44, 0x59)  # "BDY"
     var b2 = _make_bytes(0x31, 0x32)  # "12"
     var addrs = List[Int]()
+    # SAFETY: the buffers stay alive until after the writev call that reads
+    # these addresses.
     addrs.append(Int(Span(b1).unsafe_ptr()))
     addrs.append(Int(Span(b2).unsafe_ptr()))
     var lens = List[Int]()

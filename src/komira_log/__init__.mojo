@@ -6,9 +6,9 @@ Usage:
 
     # once at program start, with the binary's parsed `--log-level` value
     init_logging_from_spec(log_level_flag, String(LOG_SPEC_SOURCE_FLAG))
-    log.info["agent started", "komira_agent"]()
-    log.info["job {} started", "komira_agent"](ArgStr(job_id))
-    log.warn["upload failed: {}", "komira_agent"](ArgStr(err),
+    log.info["job supervisor started", "komira_job_supervisor"]()
+    log.info["job {} started", "komira_job_supervisor"](ArgStr(job_id))
+    log.warn["upload failed: {}", "komira_job_supervisor"](ArgStr(err),
                                                    Field("attempt", ArgI64(3)))
 
 The facade is STABLE: P2 (binary/per-core-ring/drain) swaps the backend

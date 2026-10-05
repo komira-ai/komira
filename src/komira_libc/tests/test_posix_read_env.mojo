@@ -27,6 +27,7 @@ def _setenv(name: String, value: String):
     """Set env var `name` to `value` via libc `setenv(3)`."""
     var name_str = name
     var value_str = value
+    # SAFETY: both Strings outlive the setenv(3) call, which copies them.
     var name_ptr = name_str.as_c_string_slice().unsafe_ptr()
     var value_ptr = value_str.as_c_string_slice().unsafe_ptr()
     var _rc = external_call["setenv", Int32](name_ptr, value_ptr, Int32(1))
@@ -35,6 +36,7 @@ def _setenv(name: String, value: String):
 def _unsetenv(name: String):
     """Unset env var `name` via libc `unsetenv(3)`."""
     var name_str = name
+    # SAFETY: `name_str` outlives the unsetenv(3) call, which keeps no pointer.
     var name_ptr = name_str.as_c_string_slice().unsafe_ptr()
     var _rc = external_call["unsetenv", Int32](name_ptr)
 

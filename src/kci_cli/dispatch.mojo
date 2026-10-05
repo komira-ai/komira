@@ -24,7 +24,10 @@
 #      REFUSED (KCI-E-SELECTOR-NO-MATCH, exit 3, naming S's steps and
 #      validations); then the flags the SELECTED steps' kinds take, and
 #      `--scratch-dir` exactly when a validation is selected (args.mojo
-#      `require_stage_flags`, exit 2);
+#      `require_stage_flags`, exit 2); `--channel` (a local channel, the
+#      pre-publish mode) is refused, exit 2, when the platform-set
+#      `GITHUB_ACTIONS` is "true": a workflow validates only what was
+#      published;
 #   3. (no longer a refusal: validations run, step 6);
 #   4. THE WORKFLOW CHECK, when the platform-set `GITHUB_ACTIONS` is "true":
 #      the workflow file running this job is the one `GITHUB_WORKFLOW_REF`
@@ -56,9 +59,12 @@
 #      (kci_validate), each adding its `validations[]` row and printing each
 #      of its checks. The run stops at the first step that does not end
 #      SUCCEEDED or NOOP and at the first validation that does not end
-#      SUCCEEDED (VALIDATION_FAILED, KCI-E-VALIDATION, exit 7); a selected
-#      validation after that point gets a NOT_REACHED row. Under `--plan` a
-#      validation runs nothing and its row is WOULD_VALIDATE;
+#      SUCCEEDED (VALIDATION_FAILED, KCI-E-VALIDATION, exit 7; a
+#      CONDA_INSTALL_ENV validation that found no network at all is
+#      INDETERMINATE with a skip_reason, exit 5, never a pass, its reason the
+#      run's error message); a selected validation after that point gets a
+#      NOT_REACHED row. Under `--plan` a validation runs nothing and its row
+#      is WOULD_VALIDATE;
 #   7. NEW NAMES AHEAD: when the run ended SUCCEEDED or NOOP, every PUBLISH
 #      step of each stage whose `after` is S is read through `steps.lookahead`
 #      (anonymous reads of that stage's channel, kci_publish
@@ -73,14 +79,19 @@
 #   9. `--summary-file`: a markdown block APPENDED to that file on every exit
 #      path after the command line parsed (`run_summary_markdown`): the
 #      outcome and exit number, the scope, the revision and set hash, the
-#      workflow check, the steps, the validations with each failed check's
-#      finding, and each NEW NAMES block (this stage's
+#      workflow check, the steps, the validations with each failed row's
+#      finding and each check's first passing row, and each NEW NAMES block (this stage's
 #      PUBLISH steps, then the stages after it). A file that cannot be
 #      written is said on stderr; the exit number stands;
 #  10. the LAST stderr line is the run's evidence (kci_api
 #      `run_evidence_line`): `kci: FULL run of stage S: <OUTCOME>`, or
 #      `kci: SELECTIVE run of stage S (<only>): <OUTCOME> -- not a full run`
-#      (`(affected-by <base>)` for the per-change check).
+#      (`(affected-by <base>)` for the per-change check). When a PUBLISH
+#      step recorded its credential probe NOT_UNDER_CI, the line says
+#      `credential probe NOT RUN (not under GitHub Actions)` right after the
+#      outcome, and so do the summary's heading and that step's row: a green
+#      dry run outside CI never exchanged a token, so it is never read as
+#      covering the OIDC mint.
 #      The result document says the same in `scope` and `only`. A selective
 #      success exits 0 like a full one, so the scope, never the number, is
 #      what tells them apart. A run refused before its selectors parse (a
@@ -108,7 +119,10 @@ from komira_clock import now_unix_ms
 from kci_build import BuildRequest
 from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow
 from kci_api import (
+    CREDENTIAL_PROBE_NOT_RUN_NOTE,
+    CREDENTIAL_PROBE_NOT_UNDER_CI,
     VALIDATION_NOT_REACHED,
+    credential_probe_note,
     ERROR_CANNOT_TELL,
     ERROR_CHANNEL,
     ERROR_FORMAT,
@@ -327,11 +341,17 @@ def _split(e: Error) -> Tuple[String, String]:
     return (String(s[byte = 0:nl]), String(s[byte = nl + 1 :]))
 
 
+def evidence_line_of(result: KciRunResult, outcome: String) raises -> String:
+    """The run's last stderr line (file header, 10), the credential probe's
+    note next to the outcome when a step recorded it NOT_UNDER_CI."""
+    var base = result.affected_base.copy() if result.has_affected_by else String("")
+    return run_evidence_line(result.scope, result.stage, result.only, outcome, base, credential_probe_note(result.steps))
+
+
 def _evidence(result: KciRunResult, outcome: String, rc: Int) -> Int:
-    """Say the run's last line (file header, 6); return `rc`."""
+    """Say the run's last line (file header, 10); return `rc`."""
     try:
-        var base = result.affected_base.copy() if result.has_affected_by else String("")
-        _say(run_evidence_line(result.scope, result.stage, result.only, outcome, base))
+        _say(evidence_line_of(result, outcome))
     except e:
         _say(String("kci: ") + String(e))
     return rc
@@ -398,6 +418,9 @@ def _validate_request(cmd: KciCommand, stage: Stage, step: StageStep, v: StageVa
     req.scratch_dir = cmd.scratch_dir.copy()
     req.repo_root = String(".")
     req.plan = cmd.plan
+    req.pixi = cmd.pixi.copy()
+    req.pixi_sha256 = cmd.pixi_sha256.copy()
+    req.channel_override = cmd.channel.copy()
     return req^
 
 
@@ -411,6 +434,11 @@ def _selected(sel: Selection, name: String) -> Bool:
 def validation_failure_message(row: ResultValidation) -> String:
     """The run's error message for a failed validation: its name and each
     failed check's finding."""
+    if row.skip_reason.byte_length() > 0:
+        return (
+            String("validation '") + row.name + String("' of step '") + row.step + String("' could not run (")
+            + row.outcome + String(", never a pass): ") + row.skip_reason
+        )
     var s = String("validation '") + row.name + String("' of step '") + row.step + String("' failed:")
     for i in range(len(row.checks)):
         if not row.checks[i].ok:
@@ -576,7 +604,10 @@ def _lookahead[S: StageSteps](
 
 def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead: List[NewNamesReport]) -> String:
     """The `--summary-file` block of a finished run (file header, 9)."""
+    var note = credential_probe_note(result.steps)
     var s = String("## kci run --stage ") + result.stage + String(": ") + result.outcome
+    if note.byte_length() > 0:
+        s += String(", ") + note
     s += String(" (exit ") + String(result.exit_code) + String(")\n\n")
     if result.scope == SCOPE_SELECTIVE:
         var only = String("")
@@ -630,6 +661,8 @@ def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead:
                 o = String("not selected")
             elif o.byte_length() == 0:
                 o = String("not reached")
+            elif st.credential_probe == CREDENTIAL_PROBE_NOT_UNDER_CI:
+                o += String(", ") + String(CREDENTIAL_PROBE_NOT_RUN_NOTE)
             s += String("| ") + st.name + String(" | ") + st.kind + String(" | ") + o + String(" |\n")
     if len(result.validations) > 0:
         s += String("\n| validation | step | outcome |\n|---|---|---|\n")
@@ -637,9 +670,23 @@ def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead:
             ref v = result.validations[i]
             var o = v.outcome.copy() if v.outcome.byte_length() > 0 else v.effect.copy()
             s += String("| ") + v.name + String(" | ") + v.step + String(" | ") + o + String(" |\n")
+            # every failed row; and each check's first row when it passed
+            # (what was found, e.g. how long the channel's index was waited
+            # for), so a pass states its findings too
+            var shown = List[String]()
             for k in range(len(v.checks)):
-                if not v.checks[k].ok:
-                    s += String("| | | `") + v.checks[k].got + String("` |\n")
+                ref c = v.checks[k]
+                if not c.ok:
+                    s += String("| | | `") + c.got + String("` |\n")
+                    shown.append(c.check.copy())
+                    continue
+                var seen = False
+                for j in range(len(shown)):
+                    if shown[j] == c.check:
+                        seen = True
+                if not seen:
+                    s += String("| | | ok: `") + c.got + String("` |\n")
+                    shown.append(c.check.copy())
     s += String("\n")
     for i in range(len(step_blocks)):
         s += step_blocks[i]
@@ -745,6 +792,12 @@ def _run_stage[S: StageSteps](
         require_stage_flags(cmd, stage, sel)
     except e:
         return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
+    if cmd.given(String("--channel")) and steps.platform_env(String(GITHUB_ACTIONS)) == String("true"):
+        return _stop_run(
+            result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE),
+            String("kci: --channel names a local channel, and ") + String(GITHUB_ACTIONS)
+            + String(" is true: a workflow validates only what was published, from the step's channel"),
+        )
     # 4. the workflow this job runs under, held to the machine file
     var verdict = _check_workflow_at_start(cmd, g, steps, result)
     if verdict.outcome.byte_length() > 0:

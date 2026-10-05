@@ -986,5 +986,90 @@ def test_15c_no_blockmax_when_token_counts_absent() raises:
     assert_true(not sv.has_blockmax(), "OLD split must NOT carry BLOCKMAX")
 
 
+# =============================================================================
+# Case 16 — the region accessors and the doc-store blob reader are slices of
+# the split bytes: each returns exactly bytes[offset : offset + len].
+# =============================================================================
+
+
+def _assert_slice(
+    got: Span[UInt8, _], whole: List[UInt8], off: Int, ln: Int
+) raises:
+    assert_equal(len(got), ln)
+    for i in range(ln):
+        assert_equal(Int(got[i]), Int(whole[off + i]))
+
+
+def test_16_region_accessors_are_slices_of_the_split() raises:
+    var b = InvertedIndexBuilder.create("body")
+    b.add_document(0, _af([String("alpha"), String("beta")]))
+    b.add_document(1, _af([String("beta"), String("gamma")]))
+    var fi = b.finalize()
+    var td = TermDictBuilder.build_from_finalized(fi)
+    var ds = DocStoreBuilder(compress=False)
+    ds.append(String("r0").as_bytes())
+    ds.append(String("r1").as_bytes())
+    var l0: List[UInt8] = [UInt8(1), UInt8(2), UInt8(3), UInt8(250)]
+    var bytes = serialize_split(
+        fi,
+        td^,
+        ds,
+        String("body"),
+        _uuid(3),
+        0,
+        1,
+        2,
+        total_token_count=4,
+        l0_posting_region=l0^,
+    )
+    var whole = bytes.copy()
+    var sv = SplitView.parse(bytes^)
+    _assert_slice(
+        sv.term_dict_region(), whole, sv.termdict_offset(), sv.termdict_len()
+    )
+    _assert_slice(
+        sv.postings_region(), whole, sv.postings_offset(), sv.postings_len()
+    )
+    _assert_slice(
+        sv.docstore_region(), whole, sv.docstore_offset(), sv.docstore_len()
+    )
+    _assert_slice(
+        sv.fastfields_region(),
+        whole,
+        sv.fastfields_offset(),
+        sv.fastfields_len(),
+    )
+    _assert_slice(
+        sv.blockmax_region(), whole, sv.blockmax_offset(), sv.blockmax_len()
+    )
+    assert_true(sv.has_l0_posting())
+    var l0_got = sv.l0_posting_region()
+    _assert_slice(l0_got, whole, sv.l0_posting_offset(), sv.l0_posting_len())
+    assert_equal(len(l0_got), 4)
+    assert_equal(Int(l0_got[0]), 1)
+    assert_equal(Int(l0_got[3]), 250)
+
+
+def test_16b_docstore_blob_is_the_stored_slot() raises:
+    """`_read_docstore_blob` returns the stored bytes of one slot: for an
+    uncompressed doc-store, the `_source` itself."""
+    from komira_search.source import _read_docstore_blob
+
+    var sources: List[String] = [
+        String("first"),
+        String(""),
+        String('{"id":2}'),
+    ]
+    var region = _docstore_region_for(sources, compress=False)
+    for slot in range(len(sources)):
+        var blob = _read_docstore_blob(Span(region), slot)
+        var want = sources[slot].as_bytes()
+        assert_equal(len(blob), len(want))
+        for i in range(len(want)):
+            assert_equal(Int(blob[i]), Int(want[i]))
+    with assert_raises():
+        _ = _read_docstore_blob(Span(region), len(sources))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

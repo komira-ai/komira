@@ -53,6 +53,7 @@ ASSET_ROLES = [
     "libstdcxx",
     "libzlib",
     "mojo_compiler",
+    "pixi",
     "protoc",
     "rust_std",
     "rustc",
@@ -60,6 +61,16 @@ ASSET_ROLES = [
     "zig",
 ]
 _NONE_ALLOWED = ["busybox", "libgcc", "libstdcxx", "libzlib"]
+
+# Roles whose pin is the executable itself, downloaded with its mode bit set
+# and never unpacked: a real pin of one of these must say `executable = True`.
+_EXECUTABLE_ROLES = ["busybox", "pixi"]
+
+# Roles every row must pin at one release, read from the `/download/v<version>/`
+# segment of the URL: what one platform runs, every other platform runs too.
+# pixi defines the environment a release validation installs into, so a Mac
+# and the CI runner must use the same pixi.
+_ONE_RELEASE_ROLES = ["pixi"]
 
 # Fields of a row, all required. `assets` is checked role by role.
 ROW_FIELDS = [
@@ -132,6 +143,15 @@ PLATFORMS = {
                 "mojo_compiler_1.0.0_linux-64.conda",
                 "https://conda.modular.com/max-nightly/linux-64/mojo-compiler-1.0.0-release.conda",
                 "4394c6146d47ec7794a9a3ed5775ae158f59f83f8e1aed59408b17c4909821b3",
+            ),
+            # pixi, the raw static (musl) executable of the release: no archive,
+            # nothing to unpack. Release validations install into an environment
+            # this pixi defines (//tools/build/toolchains:pixi).
+            "pixi": pin(
+                "pixi-0.67.2-x86_64-unknown-linux-musl",
+                "https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-x86_64-unknown-linux-musl",
+                "807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f",
+                executable = True,
             ),
             "protoc": pin(
                 "protoc-29.1-linux-x86_64.zip",
@@ -245,6 +265,13 @@ PLATFORMS = {
                 "https://conda.modular.com/max-nightly/osx-arm64/mojo-compiler-1.0.0-release.conda",
                 "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59",
             ),
+            # pixi, the raw executable of the same release as linux-x86_64's.
+            "pixi": pin(
+                "pixi-0.67.2-aarch64-apple-darwin",
+                "https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-aarch64-apple-darwin",
+                "46665ae8c164120ad9b22293566fcd5b454cd25ff77f410a77970bb0e47e0622",
+                executable = True,
+            ),
             "protoc": pin(
                 "protoc-29.1-osx-aarch_64.zip",
                 "https://github.com/protocolbuffers/protobuf/releases/download/v29.1/protoc-29.1-osx-aarch_64.zip",
@@ -346,6 +373,7 @@ PLATFORMS = {
                 "https://conda.modular.com/max-nightly/linux-aarch64/mojo-compiler-1.0.0-release.conda",
                 "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57",
             ),
+            "pixi": pending("the pixi linux-aarch64 executable is recorded when the platform is brought up"),
             "protoc": pin(
                 "protoc-29.1-linux-aarch_64.zip",
                 "https://github.com/protocolbuffers/protobuf/releases/download/v29.1/protoc-29.1-linux-aarch_64.zip",
@@ -433,6 +461,18 @@ def _pin_refusal(row_name, role, a, registered):
         return "row {}: pin `{}`: sha256 is not 64 lowercase hex digits: `{}`".format(row_name, role, sha)
     if not a["url"].startswith("https://"):
         return "row {}: pin `{}`: url is not https: `{}`".format(row_name, role, a["url"])
+    if role in _EXECUTABLE_ROLES and a.get("executable") != True:
+        return "row {}: pin `{}` is an executable, but is not pinned with `executable = True`".format(row_name, role)
+    if role in _ONE_RELEASE_ROLES and _release_version(a["url"]) == None:
+        return "row {}: pin `{}`: url names no release (`/download/v<version>/`): `{}`".format(row_name, role, a["url"])
+    return None
+
+def _release_version(url):
+    # `.../download/v0.67.2/<file>` -> `0.67.2`; None when the URL has no such segment.
+    parts = url.split("/")
+    for i in range(len(parts) - 2):
+        if parts[i] == "download" and parts[i + 1].startswith("v") and len(parts[i + 1]) > 1:
+            return parts[i + 1][1:]
     return None
 
 def _hex_refusal(name, field, v, n):
@@ -556,6 +596,19 @@ def table_refusals(table):
         for role in row["assets"]:
             if role not in ASSET_ROLES:
                 out.append("row {}: unknown pin `{}`".format(name, role))
+    for role in _ONE_RELEASE_ROLES:
+        versions = {}
+        for name in sorted(table):
+            a = table[name].get("assets", {}).get(role)
+            if type(a) == "dict" and a.get("url"):
+                v = _release_version(a["url"])
+                if v != None:
+                    versions.setdefault(v, []).append(name)
+        if len(versions) > 1:
+            out.append("pin `{}` names more than one release: {}".format(
+                role,
+                "; ".join(["{} in {}".format(v, ", ".join(versions[v])) for v in sorted(versions)]),
+            ))
     return out
 
 def _refuse_incomplete():
@@ -613,6 +666,29 @@ def pinned_kwargs(name, role, **extra):
         kw["executable"] = True
     kw.update(extra)
     return kw
+
+def release_version(name, role):
+    """The release of `role`'s pin in row `name`, read from its URL (`.../download/v0.67.2/...` -> `0.67.2`)."""
+    v = _release_version(asset(name, role)["url"])
+    if v == None:
+        fail("platform {}: the `{}` pin's url names no release: {}".format(name, role, asset(name, role)["url"]))
+    return v
+
+def by_target_os(role):
+    """For `select()`: each registered row's os constraint -> `:<name of its pinned_file of role>`.
+
+    A tool chosen by this map comes from the row of the target platform, which
+    is the client's own row unless `--target-platforms` names another.
+    """
+    out = {}
+    rows = {}
+    for n in registered_names():
+        key = "prelude//os/constraints:" + PLATFORMS[n]["os"]
+        if key in rows:
+            fail("rows {} and {} share the os `{}`: `{}` cannot be chosen by os alone".format(rows[key], n, PLATFORMS[n]["os"], role))
+        rows[key] = n
+        out[key] = ":" + asset(n, role)["name"]
+    return out
 
 def os_floor_version(name):
     """The version of row `name`'s `os_floor` (`macos-11.0` -> `11.0`)."""

@@ -266,6 +266,8 @@ def test_write_chunked_string_binary_bytes_preserved() raises:
     raw.append(UInt8(0xFE))
     raw.append(UInt8(0x00))  # NUL — also a hazard for naive write paths
     raw.append(UInt8(0xFF))
+    # SAFETY: deliberately not UTF-8; the String only carries these bytes to
+    # `write_chunked_string`, which must write them back unchanged.
     var s = String(unsafe_from_utf8=Span(raw))
     write_chunked_string(h, s)
     _ = h^

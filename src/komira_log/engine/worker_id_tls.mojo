@@ -11,7 +11,7 @@
 #   set_worker_id(key, id)                  # pthread_setspecific, once per worker
 #   current_worker_id(key) -> UInt16        # pthread_getspecific, every log call
 #
-# Non-worker threads (the agent heartbeat loop, an HTTP handler, a CLI tool with
+# Non-worker threads (the job supervisor heartbeat loop, an HTTP handler, a CLI tool with
 # no runtime) never call `set_worker_id`, so `current_worker_id` returns the
 # WORKER_ID_UNSET sentinel (0xFFFF) → the facade routes them to the MPSC
 # fallback ring.
