@@ -154,6 +154,9 @@
 #   R12 every `kci run` passes `--summary-file` (the job summary carries the
 #       run's outcome and the NEW NAMES an approver reads before approving a
 #       later stage)
+#   R14 no `kci run` passes `--channel`: a local channel is a developer's
+#       pre-publish mode, and a workflow validates only what a stage published
+#       (kci also refuses the flag at run time under GitHub Actions)
 #
 # How `kci run` is found (R5): each `run:` block is split into shell words
 # (a line ending in `\` continues; quotes around a word are dropped); an
@@ -161,10 +164,10 @@
 # right after `;` `&&` `||` `|` `then` `do` `else` `exec` `!`, or after a
 # word ending in `;`) whose last `/`-separated part is `kci`, followed by
 # the word `run`. So `echo "... kci run ..."` is not one. Its arguments run
-# to the end of the line or the next `;` `&&` `||` `|`; `--stage`,
-# `--machine`, `--only`, `--summary-file` and `--affected-by` take the next
-# word, or `=<v>`. A GitHub expression `${{ ... }}` is one word, whatever
-# spaces it holds.
+# to the end of the line or the next `;` `&&` `||` `|`, and are kept as
+# written (unquoted); `--stage`, `--machine`, `--only`, `--summary-file` and
+# `--affected-by` take the next word, or `=<v>`. A GitHub expression
+# `${{ ... }}` is one word, whatever spaces it holds.
 #
 # A workflow the restricted reader cannot read raises (`cannot tell:`,
 # workflow_reader.mojo): the caller reports INDETERMINATE, never a pass.
@@ -303,10 +306,11 @@ def _is_kci(word: String) -> Bool:
 struct KciRunCall(Copyable, Movable):
     """One `kci run` found in a job: the `--stage` value ("" when absent),
     the `--machine` value (`has_machine` False when absent), whether it
-    carries any `--only` and each `--only` value as written (unquoted), and
-    whether it passes `--summary-file`, and the `--affected-by` value
-    (`has_affected_by` False when absent).
-    Layout: owned Strings, a List of Strings and Bools. No pointer field."""
+    carries any `--only` and each `--only` value as written (unquoted),
+    whether it passes `--summary-file` and `--channel`, the `--affected-by`
+    value (`has_affected_by` False when absent), and every argument after
+    `run` as written (unquoted).
+    Layout: owned Strings, Lists of Strings and Bools. No pointer field."""
 
     var stage: String
     var machine: String
@@ -316,6 +320,8 @@ struct KciRunCall(Copyable, Movable):
     var has_summary_file: Bool
     var affected_by: String
     var has_affected_by: Bool
+    var has_channel: Bool
+    var args: List[String]
 
     def __init__(out self, var stage: String):
         self.stage = stage^
@@ -326,6 +332,8 @@ struct KciRunCall(Copyable, Movable):
         self.has_summary_file = False
         self.affected_by = String("")
         self.has_affected_by = False
+        self.has_channel = False
+        self.args = List[String]()
 
 
 def _command_position(w: List[String], j: Int) -> Bool:
@@ -353,6 +361,7 @@ def kci_run_calls(script: String) -> List[KciRunCall]:
                 continue
             var args = _call_args(w, j + 2)
             var call = KciRunCall(String(""))
+            call.args = args.copy()
             var seen_stage = False
             var k = 0
             while k < len(args):
@@ -385,6 +394,8 @@ def kci_run_calls(script: String) -> List[KciRunCall]:
                     call.has_affected_by = True
                     if has_value:
                         call.affected_by = value.copy()
+                elif flag == String("--channel"):
+                    call.has_channel = True
                 k += 1
             out.append(call^)
     return out^
@@ -578,7 +589,7 @@ def _farm_connect_steps(doc: WorkflowDoc, job: Int) -> Int:
 def _check_calls_common(
     doc: WorkflowDoc, job_id: String, job: Int, calls: List[KciRunCall], machine_path: String, mut findings: List[String]
 ):
-    """R10 and R12, for every job."""
+    """R10, R12 and R14, for every job."""
     var where = _at(doc, job) + String("job '") + job_id + String("'")
     for i in range(len(calls)):
         ref call = calls[i]
@@ -586,6 +597,11 @@ def _check_calls_common(
             findings.append(
                 where + String(": R12: `kci run` passes no --summary-file; the job summary carries the outcome")
                 + String(" and the NEW NAMES an approver reads")
+            )
+        if call.has_channel:
+            findings.append(
+                where + String(": R14: `kci run` passes --channel; a workflow validates only what a stage")
+                + String(" published, never a local channel")
             )
         if call.has_machine:
             if _path(call.machine) != _path(machine_path):

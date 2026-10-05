@@ -12,14 +12,19 @@
 #   machine file) must be kci's default machine file, because no `kci` line of
 #   the workflow passes --machine. The workflow names no removed input or verb
 #   (`ci check`, a claim, an expected set hash) and no channel but the machine
-#   file's.
+#   file's. The validate job's `kci run` is the one each validation target
+#   (`./buck2 run //release/validations:<name>`) runs, but for paths and what
+#   a caller supplies.
 # =============================================================================
 #
 # The files are staged as test data (BUCK): `kci.yml` (the root BUCK exports
 # it), `machine.textproto` and `channels.textproto` (release/BUCK), and
 # `pixi_pin.txt`, the platform table's linux-x86_64 pixi pin
-# (//tools/build/toolchains:pixi_pin_linux_x86_64). gamma's validations run
-# each installed library's README, so they name no program.
+# (//tools/build/toolchains:pixi_pin_linux_x86_64), and `validations.txt`,
+# the validation targets' record (//release/validations:names, one line per
+# target: `<name> <stage> <kci> <argv...>`, paths and the platform's pixi
+# sha256 as `<placeholders>`). gamma's validations run each installed
+# library's README, so they name no program.
 # =============================================================================
 
 from std.pathlib import Path
@@ -28,6 +33,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from kci_ci_check import (
     FARM_CONNECT_ACTION,
     NODE_SCALAR,
+    KciRunCall,
     ChannelsFile,
     channels_paths,
     check_running_workflow,
@@ -263,6 +269,133 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     var prod_needs = doc.scalar_or_list(doc.child(doc.child(jobs, String("prod")), String("needs")))
     assert_equal(len(prod_needs), 2)
     assert_equal(prod_needs[1], String("validate"))
+
+
+# A validate-job flag that no validation target passes is one a caller of the
+# target supplies (`./buck2 run ... -- <these>`, or its launcher's default:
+# --scratch-dir, --run-id, --attempt), or the CI run's own record.
+def _supplied_flags() -> List[String]:
+    var out = List[String]()
+    for f in [
+        "--release-dir", "--revision-id", "--scratch-dir", "--result-file", "--plan", "--run-id", "--attempt",
+        "--context", "--summary-file",
+    ]:
+        out.append(String(f))
+    return out^
+
+
+def _in(names: List[String], s: String) -> Bool:
+    for i in range(len(names)):
+        if names[i] == s:
+            return True
+    return False
+
+
+def _flags(args: List[String], start: Int, where: String) raises -> List[List[String]]:
+    """`args[start:]` as [flag, value] pairs (value "" for --plan); the job's
+    `"$@"` (its --plan, when DRY_RUN) is the only other word allowed."""
+    var out = List[List[String]]()
+    var k = start
+    while k < len(args):
+        var a = args[k].copy()
+        if a == String("$@"):
+            k += 1
+            continue
+        if not a.startswith(String("--")):
+            raise Error(where + String(": '") + a + String("' is not a flag"))
+        var pair = List[String]()
+        var eq = a.find(String("="))
+        if eq > 0:
+            pair.append(String(a[byte=0:eq]))
+            pair.append(String(a[byte = eq + 1 :]))
+        elif a == String("--plan") or k + 1 >= len(args):
+            pair.append(a.copy())
+            pair.append(String(""))
+        else:
+            pair.append(a.copy())
+            pair.append(args[k + 1].copy())
+            k += 1
+        out.append(pair^)
+        k += 1
+    return out^
+
+
+def _values(pairs: List[List[String]], flag: String) -> List[String]:
+    var out = List[String]()
+    for i in range(len(pairs)):
+        if pairs[i][0] == flag:
+            out.append(pairs[i][1].copy())
+    return out^
+
+
+def test_the_validate_job_runs_what_the_validation_targets_run() raises:
+    var doc = read_workflow(Path(String("kci.yml")).read_text())
+    var validate = doc.child(doc.child(0, String("jobs")), String("validate"))
+    var calls = List[KciRunCall]()
+    var vsteps = doc.items(doc.child(validate, String("steps")))
+    for i in range(len(vsteps)):
+        var r = doc.child(vsteps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR:
+            calls.extend(kci_run_calls(doc.text(r)))
+    assert_equal(len(calls), 1, String("the validate job runs `kci run` once"))
+    var job = _flags(calls[0].args, 0, String("the validate job's kci run"))
+    var stage = _values(job, String("--stage"))
+    assert_equal(len(stage), 1)
+    var lines = Path(String("validations.txt")).read_text().split(String("\n"))
+    var target_flags = List[String]()
+    var want_only = List[String]()
+    for i in range(len(lines)):
+        var line = String(lines[i])
+        if line.byte_length() == 0:
+            continue
+        var words = List[String]()
+        var parts = line.split(String(" "))
+        for p in range(len(parts)):
+            words.append(String(parts[p]))
+        var where = String("validation target '") + words[0] + String("'")
+        assert_true(len(words) > 4 and words[2] == String("<kci>") and words[3] == String("run"), where)
+        if words[1] != stage[0]:
+            continue
+        want_only.append(String("validation:") + words[0])
+        # every argument the target passes, the job passes: the same value,
+        # or for a path or the platform's pin, the job's own
+        var mine = _flags(words, 4, where)
+        for f in range(len(mine)):
+            var flag = mine[f][0].copy()
+            var value = mine[f][1].copy()
+            target_flags.append(flag.copy())
+            var theirs = _values(job, flag)
+            if flag == String("--machine"):
+                # the job reads kci's default machine file, the one the
+                # target names (R10 holds every kci run of kci.yml to it)
+                assert_equal(value, String("<machine>"), where)
+                assert_equal(len(theirs), 0, String("the validate job passes --machine"))
+                continue
+            assert_true(
+                len(theirs) > 0,
+                where + String(" passes ") + flag + String(", which the validate job's kci run does not"),
+            )
+            if value == String("<pixi>") or value == String("<pixi-sha256>"):
+                assert_equal(len(theirs), 1, flag)
+                continue
+            assert_true(
+                _in(theirs, value),
+                where + String(" passes ") + flag + String(" ") + value + String("; the validate job passes ")
+                + flag + String(" ") + theirs[0],
+            )
+    # the job's validations are exactly the targets of its stage
+    var job_only = _values(job, String("--only"))
+    assert_true(len(want_only) > 0, String("no validation target runs stage ") + stage[0])
+    assert_equal(len(job_only), len(want_only))
+    for i in range(len(want_only)):
+        assert_true(_in(job_only, want_only[i]), String("the validate job does not run ") + want_only[i])
+    # and every flag of the job is a target's, a caller's or the run record's
+    for i in range(len(job)):
+        var flag = job[i][0].copy()
+        assert_true(
+            _in(target_flags, flag) or _in(_supplied_flags(), flag),
+            String("the validate job passes ") + flag + String(", which no validation target passes and no caller supplies"),
+        )
 
 
 def test_kci_yml_names_no_removed_input_and_no_other_channel() raises:

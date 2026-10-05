@@ -27,9 +27,11 @@ export_file(
     visibility = ["//src/kci_ci_check:", "//src/kci_release_channel:"],
 )
 
+# By reference: a validation target passes kci its path in the checkout.
 export_file(
     name = "machine.textproto",
-    visibility = ["//src/kci_ci_check:"],
+    mode = "reference",
+    visibility = ["//release/validations:", "//src/kci_ci_check:", "//src/kci_release_machine:"],
 )
 
 shell_lint(

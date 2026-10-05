@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_ci_check/tests/test_ci_rules.mojo -- a workflow held to a machine
-#   file: a fixture that agrees, then one mutation per rule (R1 to R12), each
+#   file: a fixture that agrees, then one mutation per rule (R1 to R12, R14), each
 #   of which must be reported; the stages that publish by OIDC; and the
 #   start-up entry point `kci run` calls.
 # =============================================================================
@@ -278,6 +278,18 @@ def test_r12_every_kci_run_writes_the_summary() raises:
     )
 
 
+def test_r14_never_a_local_channel() raises:
+    _reports(
+        _mutated(String("run --stage build \\\n"), String("run --stage build --channel file:///srv/c \\\n")),
+        String("job 'build': R14: `kci run` passes --channel"),
+    )
+    _reports(
+        _mutated(String("run --stage publish-prod --plan"), String("run --stage publish-prod --plan --channel=file:///srv/c")),
+        String("job 'publish-prod': R14: `kci run` passes --channel"),
+    )
+    _none_with(String(_WF), String("release/machine.textproto"), String("R14"))
+
+
 def test_r9_never_selective() raises:
     _reports(
         _mutated(String("run --stage build \\\n"), String("run --stage build --only step:build \\\n")),
@@ -370,6 +382,15 @@ def test_kci_run_calls() raises:
     assert_true(sf[0].has_summary_file)
     assert_false(sf[1].has_summary_file)
     assert_true(sf[2].has_summary_file)
+    # --channel, either spelling; every argument after `run` kept as written
+    var ch = kci_run_calls(String("kci run --stage a --channel file:///c; kci run --stage b --channel=x\nkci run --stage c 'q' \"d e\"\n"))
+    assert_true(ch[0].has_channel)
+    assert_true(ch[1].has_channel)
+    assert_false(ch[2].has_channel)
+    assert_equal(len(ch[0].args), 4)
+    assert_equal(ch[0].args[3], String("file:///c"))
+    assert_equal(ch[1].args[2], String("--channel=x"))
+    assert_equal(ch[2].args[2], String("q"))
 
 
 comptime _OIDC: String = (
