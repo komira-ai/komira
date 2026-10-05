@@ -61,7 +61,7 @@ from komira_aws_core import (
 )
 from komira_aws_core.aws_send import AwsConnectorTransport
 from komira_aws_core.credential_transport import CredentialHttpRequest
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_objectstore.types import WritePrecondition

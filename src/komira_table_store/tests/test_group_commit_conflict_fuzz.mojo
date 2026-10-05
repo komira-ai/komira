@@ -46,7 +46,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
 from komira_objectstore.shared_in_memory_conditional_store import (

@@ -12,7 +12,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Deps: komira_test_verdict (the stop verdict), komira_test_run_id (the run
 # id that names the temporary directory, and the entropy seam),
 # komira_validation_run (the run-id rule, checked before any filesystem
-# call), komira_crypto (the binary's sha256) and komira_core_ffi (`_read_env`,
+# call), komira_crypto (the binary's sha256) and komira_libc (`_read_env`,
 # for the welded tests' TEST_TMPDIR only). chmod(2) is this package's own
 # private `_sys` module.
 #
@@ -22,8 +22,8 @@ mojo_library(
     name = "komira_test_minio",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_libc:komira_libc",
         "//src/komira_test_run_id:komira_test_run_id",
         "//src/komira_test_verdict:komira_test_verdict",
         "//src/komira_validation_run:komira_validation_run",

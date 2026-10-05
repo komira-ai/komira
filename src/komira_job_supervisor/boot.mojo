@@ -21,7 +21,7 @@
 from std.ffi import external_call
 from std.os import mkdir as _os_mkdir
 
-from komira_core.io.posix_io import RawWriteFd
+from komira_libc.posix_io import RawWriteFd
 from komira_crypto.sha256 import sha256
 from komira_crypto.hex import hex_lower_array_32
 from komira_objectstore.path import Path
