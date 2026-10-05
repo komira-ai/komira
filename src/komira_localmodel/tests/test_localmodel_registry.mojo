@@ -9,8 +9,8 @@
 #
 #   (1) find_free_port — returns a non-zero port; two consecutive calls return
 #       DISTINCT ports (the kernel does not hand out the same ephemeral port
-#       twice in quick succession). The returned port is FREE (re-bindable)
-#       after the call (the listener was released).
+#       twice in quick succession). The returned port is FREE after the call
+#       (the listener was released): this process binds it again.
 #   (2) MULTI-CHILD LIFECYCLE — spawn TWO children through the registry under
 #       distinct ids, both alive (poll -> CHILD_SPAWNED), terminate one (the
 #       other stays alive), then the second; both end CHILD_GONE with NO orphan
@@ -20,7 +20,9 @@
 #       duplicate-id rejection.
 #   (4) terminate_all — the shutdown sweep stops every still-spawned child.
 #
-# Liveness here is the registry's own process-alive poll; no HTTP health probe.
+# The children are `/bin/sh -c 'exec sleep 30'`: they stay alive until
+# terminated and exit on their own if the test dies first. Liveness here is the
+# registry's own process-alive poll; no HTTP health probe.
 # =============================================================================
 
 from std.ffi import external_call
@@ -35,8 +37,8 @@ from komira_localmodel import (
     CHILD_NOT_FOUND,
     find_free_port,
 )
+from komira_async.runtime.tcp_stream import TcpListener
 from komira_supervisor.supervisor import ChildSpec
-from komira_core_ffi.posix import staged_python3
 
 
 def _sleep_ms(ms: Int):
@@ -44,36 +46,10 @@ def _sleep_ms(ms: Int):
         _ = external_call["usleep", Int32](UInt32(ms * 1000))
 
 
-# A child that BINDS the given port (proving the port was free and could be
-# handed to a real engine) then sleeps. Single-quoted shell -c arg, so the
-# python source uses DOUBLE-quoted literals ONLY. It binds + listens then sleeps
-# for a bounded time so a leaked child exits even if the test crashes before
-# terminate.
-def _binder_py(port: UInt16) -> String:
-    var p = String(Int(port))
-    return String(
-        "import socket, time\n"
-        "s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
-        "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
-        "s.bind((\"127.0.0.1\", "
-    ) + p + String(
-        "))\n"
-        "s.listen(8)\n"
-        "time.sleep(30)\n"
-    )
-
-
-def _spawn_binder(
-    mut reg: SupervisorRegistry, id: String, port: UInt16
-) -> ChildHandle:
-    var py = _binder_py(port)
-    # The interpreter comes from the test's staged runtime files; the literal
-    # path is the fallback when nothing is staged.
-    var _py = staged_python3()
-    if len(_py.as_bytes()) == 0:
-        _py = String("/usr/bin/python3")
-    var cmd = String("\"") + _py + String("\" -c '") + py + String("'")
-    return reg.spawn(id, ChildSpec.shell(cmd))
+# A child that stays alive until it is terminated, and exits on its own after
+# a bounded time if the test dies before terminating it.
+def _spawn_sleeper(mut reg: SupervisorRegistry, id: String) -> ChildHandle:
+    return reg.spawn(id, ChildSpec.shell(String("exec sleep 30")))
 
 
 # =============================================================================
@@ -90,45 +66,34 @@ def test_find_free_port_distinct() raises:
         String("two find_free_port calls returned the same port ") + String(p1),
     )
 
-    # The port is FREE after the call (the listener was released) — a child can
-    # bind it. We prove this by spawning a binder on p1; if the bind fails the
-    # child exits immediately and the poll flips to GONE quickly.
-    var reg = SupervisorRegistry()
-    var h = _spawn_binder(reg, String("bind-check"), p1)
-    assert_true(h.ok(), String("binder spawn failed pid=") + String(h.pid))
-    # Give python a moment to import + bind; a successful bind keeps it alive.
-    _sleep_ms(800)
-    var st = reg.poll(String("bind-check"))
-    assert_equal(
-        st.state,
-        CHILD_SPAWNED,
-        String("binder on the just-freed port did not stay alive"),
-    )
-    reg.terminate_all(2000)
+    # The port is FREE after the call (the listener was released): binding it
+    # again succeeds (bind_loopback raises on EADDRINUSE).
+    var again = TcpListener.bind_loopback(p1, Int32(16))
+    assert_equal(again.local_port(), p1)
 
 
 # =============================================================================
-# (2) MULTI-CHILD REGISTRY LIFECYCLE — two children on auto-picked ports.
+# (2) MULTI-CHILD REGISTRY LIFECYCLE — two children, two auto-picked ports.
 # =============================================================================
 def test_multi_child_lifecycle() raises:
-    print("(2) multi-child registry: spawn 2 binders on auto-picked ports")
+    print("(2) multi-child registry: spawn 2 children, one per auto-picked port")
     var reg = SupervisorRegistry()
 
     var port_a = find_free_port()
     var port_b = find_free_port()
     assert_true(port_a != port_b)
 
-    var ha = _spawn_binder(reg, String("engine-a"), port_a)
-    var hb = _spawn_binder(reg, String("engine-b"), port_b)
+    var ha = _spawn_sleeper(reg, String("engine-a"))
+    var hb = _spawn_sleeper(reg, String("engine-b"))
     assert_true(ha.ok(), String("engine-a spawn failed pid=") + String(ha.pid))
     assert_true(hb.ok(), String("engine-b spawn failed pid=") + String(hb.pid))
-    print("  spawned engine-a pid", ha.pid, "on port", port_a)
-    print("  spawned engine-b pid", hb.pid, "on port", port_b)
+    print("  spawned engine-a pid", ha.pid, "for port", port_a)
+    print("  spawned engine-b pid", hb.pid, "for port", port_b)
 
     assert_equal(reg.count(), 2)
     assert_equal(reg.live_count(), 2)
 
-    # Both alive after a moment to bind.
+    # Both still alive after a moment.
     _sleep_ms(800)
     assert_equal(reg.poll(String("engine-a")).state, CHILD_SPAWNED)
     assert_equal(reg.poll(String("engine-b")).state, CHILD_SPAWNED)
@@ -160,8 +125,7 @@ def test_registry_bookkeeping() raises:
     assert_equal(reg.count(), 0)
     assert_false(reg.contains(String("x")))
 
-    var port = find_free_port()
-    var h = _spawn_binder(reg, String("solo"), port)
+    var h = _spawn_sleeper(reg, String("solo"))
     assert_true(h.ok())
     assert_equal(reg.count(), 1)
     assert_true(reg.contains(String("solo")))
@@ -173,7 +137,7 @@ def test_registry_bookkeeping() raises:
     assert_equal(ids[0], String("solo"))
 
     # Duplicate id -> no-op spawn (pid 0, not ok), count unchanged.
-    var dup = _spawn_binder(reg, String("solo"), port)
+    var dup = _spawn_sleeper(reg, String("solo"))
     assert_false(dup.ok())
     assert_equal(dup.pid, Int32(0))
     assert_equal(reg.count(), 1)
@@ -190,12 +154,9 @@ def test_registry_bookkeeping() raises:
 # =============================================================================
 def test_terminate_all() raises:
     var reg = SupervisorRegistry()
-    var pa = find_free_port()
-    var pb = find_free_port()
-    var pc = find_free_port()
-    _ = _spawn_binder(reg, String("a"), pa)
-    _ = _spawn_binder(reg, String("b"), pb)
-    _ = _spawn_binder(reg, String("c"), pc)
+    _ = _spawn_sleeper(reg, String("a"))
+    _ = _spawn_sleeper(reg, String("b"))
+    _ = _spawn_sleeper(reg, String("c"))
     _sleep_ms(600)
     assert_equal(reg.live_count(), 3)
 

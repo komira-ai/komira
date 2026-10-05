@@ -1,0 +1,43 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Lifecycle supervision for local inference engines (servers with an
+# OpenAI-compatible /v1 API): a fit rating for a model on this host, N
+# supervised engine children on free ports, a per-model state machine (load on
+# first request, idle unload, LRU eviction, admission control) and a loopback
+# HTTP control API in front of it. See README.md.
+#
+# komira_core provides the Slab the state machine and the registry keep their
+# Movable-only members in. It is named rather than its komira_collections
+# copy because komira_async, a dep here, still depends on komira_core, and a
+# target may not reach both (tools/core_split/no_mixed_closure.sh).
+#
+# The welded tests are hermetic: no engine, no model, no GPU, no network
+# beyond 127.0.0.1. Engines are in-process stubs and clocks are virtual,
+# except where the subject is real: test_localmodel_registry spawns
+# `/bin/sh -c 'exec sleep 30'` children through komira_supervisor, the HTTP
+# tests bind a loopback HttpServer, and test_localmodel_sm_concurrency drives
+# one state machine from real pthreads.
+mojo_library(
+    name = "komira_localmodel",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_core:komira_core",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_supervisor:komira_supervisor",
+        # Test-only: test_localmodel_sm_concurrency counts with AtomicI64.
+        "//src/komira_atomic_alias:komira_atomic_alias",
+    ],
+    test_srcs = [
+        "tests/test_localmodel_admission.mojo",
+        "tests/test_localmodel_chat.mojo",
+        "tests/test_localmodel_control_api.mojo",
+        "tests/test_localmodel_fit.mojo",
+        "tests/test_localmodel_registry.mojo",
+        "tests/test_localmodel_server_daemon.mojo",
+        "tests/test_localmodel_sm_concurrency.mojo",
+        "tests/test_localmodel_state_machine.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

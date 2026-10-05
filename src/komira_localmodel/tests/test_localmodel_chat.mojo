@@ -32,7 +32,9 @@ from std.testing import assert_equal, assert_true, assert_false
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 
-from komira_http import HttpServer, HttpServerConfig, Router, NoopGrpcDispatch
+from komira_http_core.transport import NoopGrpcDispatch
+from komira_http_server.routing import Router
+from komira_http_server.server import HttpServer, HttpServerConfig
 
 from komira_localmodel import (
     BackendSupervisor,

@@ -51,12 +51,8 @@ from std.ffi import external_call
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_http import (
-    HttpMethod,
-    HttpRequest,
-    HttpResponse,
-    RequestDispatcher,
-)
+from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
+from komira_http_server.dispatch import RequestDispatcher
 
 from .backend_state_machine import (
     BackendSupervisor,
