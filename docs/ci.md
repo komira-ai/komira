@@ -280,6 +280,11 @@ value, and the release's `release_produced_by` names the one build run.
   conditions are written bare or as exactly `${{ <condition> }}`: a block
   scalar (`if: |`) holding `${{`, or whitespace inside quotes around it,
   makes GitHub read the `if:` as a format string, which is always true.
+  The `pr` job runs on `runs-on: ubuntu-24.04`, written as that plain
+  scalar: a fresh GitHub-hosted machine. A self-hosted label, a label list, a
+  runner group, an expression (`${{ vars.X }}`, a fork-conditional) or a
+  quoted value is refused, so a pull request's code never reaches a runner
+  that keeps state between jobs.
   The push trigger is exactly `branches: [main]`: with no branch filter,
   another pattern, `branches-ignore`, `tags` or a path filter, a push to a
   pull request's head branch would run the release jobs, and
@@ -398,7 +403,7 @@ at, never a pass. A workflow kci checks is written inside it:
 - **Mappings:** by indentation, `key: value` or `key:`. A key is plain
   (`[A-Za-z0-9_.-]`), never quoted. Keys of one mapping differ ignoring case,
   and a key the check reads (`on`, `jobs`, `permissions`, `id-token`, `if`,
-  `needs`, `environment`, `steps`, `run`, `uses`, `with`, `fetch-depth`,
+  `needs`, `runs-on`, `environment`, `steps`, `run`, `uses`, `with`, `fetch-depth`,
   `inputs` and the trigger names) is written in lower case.
 - **Lists:** by indentation, `- value` or `- key: value`, one space after the
   dash.

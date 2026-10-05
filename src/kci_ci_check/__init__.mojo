@@ -38,6 +38,7 @@ from kci_ci_check.pull_request import (
     CHECKOUT_ACTION,
     PULL_REQUEST_BASE_EXPRESSION,
     PULL_REQUEST_EVENT,
+    PULL_REQUEST_RUNNER,
     SAME_REPOSITORY_CONDITION,
     condition_expression,
     excludes_pull_request,

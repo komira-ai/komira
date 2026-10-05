@@ -239,6 +239,7 @@ def _rule_key(lower: String) -> Bool:
         "id-token",
         "if",
         "needs",
+        "runs-on",
         "environment",
         "steps",
         "run",

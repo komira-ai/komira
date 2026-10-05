@@ -902,6 +902,62 @@ def test_a_push_stage_never_carries_affected_by() raises:
     )
 
 
+comptime _RUNS_ON: String = "    runs-on: ubuntu-24.04\n"
+comptime _RUNNER_FINDING: String = "so the job runs on `runs-on: ubuntu-24.04`, written as that plain scalar"
+
+
+def test_a_pull_request_job_runs_on_the_hosted_runner_only() raises:
+    """R6: the pr job's `runs-on` is exactly the plain scalar `ubuntu-24.04`.
+    Every other runner (self-hosted, a label list, an expression, a runner
+    group, a fork-conditional) is refused, each row by the rule's finding or
+    by the reader's cannot tell."""
+    _agrees(String(_MACHINE), String(_WF))
+    # (the runs-on lines, the finding or cannot-tell needle, cannot tell?)
+    var rows = List[Tuple[String, String, Bool]]()
+    rows.append((String("    runs-on: self-hosted\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: [self-hosted, linux]\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: [ubuntu-24.04]\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on:\n      - ubuntu-24.04\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: ${{ vars.RUNNER }}\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: ${{ github.event.pull_request.head.ref }}\n"), String(_RUNNER_FINDING), False))
+    rows.append((
+        String("    runs-on: ${{ github.event.pull_request.head.repo.fork && 'self-hosted' || 'ubuntu-24.04' }}\n"),
+        String(_RUNNER_FINDING), False,
+    ))
+    rows.append((String("    runs-on:\n      group: big-runners\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on:\n      group: big-runners\n      labels: [ubuntu-24.04]\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on:\n      labels: ubuntu-24.04\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: komira-farm\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: ubuntu-latest\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: ubuntu-24.04-arm\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: Ubuntu-24.04\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: 'ubuntu-24.04'\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: \"ubuntu-24.04\"\n"), String(_RUNNER_FINDING), False))
+    rows.append((String("    runs-on: |-\n      ubuntu-24.04\n"), String("block scalar"), True))
+    rows.append((String("    runs-on: ''\n"), String(_RUNNER_FINDING), False))
+    rows.append((String(""), String(_RUNNER_FINDING), False))
+    rows.append((String("    Runs-On: self-hosted\n"), String("in another case"), True))
+    rows.append((String("    runs-on: ubuntu-24.04\n    runs-on: self-hosted\n"), String("repeated in one mapping"), True))
+    var missed = String("")
+    var n = 0
+    for i in range(len(rows)):
+        var wf = _wf(String(_RUNS_ON), rows[i][0])
+        try:
+            if rows[i][2]:
+                _cannot_tell(String(_MACHINE), wf, rows[i][1])
+            else:
+                _reports(wf, String("job 'pr': R6: stage 'pr' is a PULL_REQUEST stage, ") + rows[i][1])
+        except e:
+            n += 1
+            missed += String("\n  row ") + String(i) + String(" `") + String(rows[i][0].strip()) + String("`")
+    if n > 0:
+        raise Error(String(n) + String(" of ") + String(len(rows)) + String(" runs-on rows not refused:") + missed)
+    # a trailing comment is not part of the value
+    _agrees(String(_MACHINE), _wf(String(_RUNS_ON), String("    runs-on: ubuntu-24.04 # GitHub-hosted\n")))
+    # a release job's runner is not R6's
+    _agrees(String(_MACHINE), _wf(String("    environment: gamma\n"), String("    environment: gamma\n    runs-on: self-hosted\n")))
+
+
 def test_check_running_workflow_accepts_the_workflow() raises:
     var g = parse_machine_file(String(_MACHINE), String("release/machine.textproto"))
     var files = List[ChannelsFile]()

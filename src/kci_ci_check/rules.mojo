@@ -89,7 +89,10 @@
 #           only when a maintainer pushes it to a branch of this
 #           repository), and a push or a manual run skips the job;
 #         * that job runs the whole stage in one job (no part job), in no
-#           environment (R2); it has its own `permissions:` mapping (with
+#           environment (R2), on `runs-on: ubuntu-24.04` written as that
+#           plain scalar (a GitHub-hosted runner: no self-hosted label, label
+#           list, runner group, expression or quotes, so no pull request's
+#           code reaches a runner that keeps state between jobs); it has its own `permissions:` mapping (with
 #           no `permissions:` key it would get the workflow-level
 #           permissions or, with none there either, the repository's
 #           default token, which can write), holding `contents: read` and

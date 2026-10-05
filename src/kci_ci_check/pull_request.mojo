@@ -18,6 +18,10 @@
 #     keeps out a pull request only because the triggers are an allow-list
 #     (rules.mojo, R6: push, workflow_dispatch and pull_request): any other
 #     event that runs a pull request's code is refused as a trigger;
+#   * the PULL_REQUEST stage's job runs on `runs-on: ubuntu-24.04`, that
+#     plain scalar exactly (`check_pull_request_job`): a GitHub-hosted runner,
+#     never a self-hosted label, a label list, a runner group or an
+#     expression;
 #   * the PULL_REQUEST stage's job has its own `permissions:` mapping
 #     (`check_pull_request_job`), and no stored secret reaches it
 #     (`check_no_secret`, over the job and the workflow-level `env:`);
@@ -46,6 +50,12 @@ request runs nothing, and an event without a pull request skips the job."""
 comptime CHECKOUT_ACTION: String = "actions/checkout@"
 """The checkout action's `uses:` prefix; under R6 each such step of a
 PULL_REQUEST stage's job fetches the full history."""
+
+comptime PULL_REQUEST_RUNNER: String = "ubuntu-24.04"
+"""The one `runs-on` of a PULL_REQUEST stage's job (R6), as a plain scalar:
+a GitHub-hosted runner. A self-hosted label, a label list, a runner group or
+an expression could put a pull request's code on a machine that keeps state
+between jobs."""
 
 comptime PULL_REQUEST_EVENT: String = "pull_request"
 """The event name a release job's condition keeps out (R6)."""
@@ -309,6 +319,17 @@ def check_pull_request_job(
             where + String(", so the job carries `if: ") + String(SAME_REPOSITORY_CONDITION)
             + String("`, bare or as exactly `${{ <it> }}` (nothing around it, no block scalar)")
             + String(": a pull request from a fork runs nothing, and an event without a pull request skips the job")
+        )
+    # the runner: exactly the plain scalar, nothing else
+    if not doc.is_plain(doc.child(job, String("runs-on")), String(PULL_REQUEST_RUNNER)):
+        var r = doc.child(job, String("runs-on"))
+        var got = String("no `runs-on`") if r < 0 else (
+            String("`runs-on: ") + doc.text(r) + String("`") if doc.kind(r) == NODE_SCALAR else String("a `runs-on` that is not a scalar")
+        )
+        findings.append(
+            where + String(", so the job runs on `runs-on: ") + String(PULL_REQUEST_RUNNER)
+            + String("`, written as that plain scalar (no label list, runner group, expression or quotes); it has ")
+            + got
         )
     # permissions: `contents: read`, and `id-token: write` (R4) only for the farm connection
     var perms = doc.child(job, String("permissions"))
