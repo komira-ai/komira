@@ -107,6 +107,16 @@ changes it for every Mojo target; `omit = ["mojo"]` and declaring
 also set `toolchain =` itself. Leaving the call unchanged keeps the digests
 of a standalone checkout.
 
+**Your own Mojo packages may depend on komira's.** A `mojo_library`,
+`mojo_binary` or `mojo_test` in your cell can name a komira package in `deps`.
+buck2 keys a `.bzl` module by the cell of the BUCK file that loads it, so the
+rules are loaded once for your cell and once for `komira`, and each load has
+its own `MojoPkgTSet`; the rules re-wrap the closure of a dependency built by
+the other load (`mojo_pkg_children` in `mojo/providers.bzl`), and pass one
+built by the same load through untouched, so komira's own targets are built
+by exactly the actions they always were. Test 7 builds such a package, with its
+gated test and a binary on it.
+
 **Your own targets need a target platform too.**
 `target_platform_detector_spec` is a single key; `consumer.buckconfig` maps
 the root cell (`app`), `komira` and `toolchains` to
