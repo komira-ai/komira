@@ -4,7 +4,9 @@ from buildtools.bytes import bytes_less
 
 from change_map.graph import Graph, PackageOf, PACKAGE_FOUND, PACKAGE_NONE, PACKAGE_UNKNOWN
 from change_map.plan import KIND_AFFECTED, KIND_EMPTY, KIND_VACUOUS, KIND_WIDENED, Verdict, compute, uncovered
-from change_map.rules import Rules, parse_rules
+from change_map.report import render_units_answer
+from change_map.rules import Rules, parse_rules, read_rules
+from change_map.units import affected_units, parse_units_file
 
 # The fake repository:
 #
@@ -361,6 +363,71 @@ def test_coverage_is_what_no_unit_builds_or_depends_on() raises:
     assert_equal(len(uncovered(g.all_targets(), g.all_targets())), 0)
 
 
+# The release template's wiring, end to end over the fake repository: the
+# changed files of a pull request, the SHIPPED rules.txt, a units file of the
+# shape kci writes, and the exact text kci reads back. A row of this table is
+# the answer `kci run --stage pr` would act on.
+
+def _units_text() -> String:
+    return String(
+        "docs_unit\t//docs:doc_tree\nlib_a\t//lib/a:a\nlib_b\t//lib/b:b\napp\t//app:app\ntools_x\t//tools/x:y\n"
+    )
+
+
+def _answer(files: List[String]) raises -> String:
+    var g = FakeGraph()
+    var rules = read_rules(String("tools/build/ci/rules.txt"))
+    var v = compute(rules, files, g)
+    var units = parse_units_file(_units_text())
+    var names = affected_units(units, v.targets, String("komira"))
+    return render_units_answer(v, names)
+
+
+def test_the_answer_kci_reads_for_a_table_of_changes() raises:
+    # a doc: its link check, nothing else
+    assert_equal(_answer(_list("docs/x.md")), "UNIT docs_unit\nAFFECTED 1\n")
+    # a source: its package and everything above it, units in the units file's order
+    assert_equal(_answer(_list("lib/a/a.mojo")), "UNIT lib_a\nUNIT lib_b\nUNIT app\nAFFECTED 3\n")
+    assert_equal(_answer(_list("lib/b/b.mojo")), "UNIT lib_b\nUNIT app\nAFFECTED 2\n")
+    assert_equal(_answer(_list("app/main.mojo")), "UNIT app\nAFFECTED 1\n")
+    assert_equal(_answer(_list("tools/x/y.mojo")), "UNIT tools_x\nAFFECTED 1\n")
+    # a .bzl: every package that loads it, and what is above them
+    assert_equal(_answer(_list("macros/defs.bzl")), "UNIT lib_a\nUNIT lib_b\nUNIT app\nAFFECTED 3\n")
+    # a BUCK file: its package
+    assert_equal(_answer(_list("lib/b/BUCK")), "UNIT lib_b\nUNIT app\nAFFECTED 2\n")
+    # two files: the union, once each
+    assert_equal(
+        _answer(_list("docs/x.md", "app/main.mojo")),
+        "UNIT docs_unit\nUNIT app\nAFFECTED 2\n",
+    )
+    # a deleted file: the package that held it
+    assert_equal(_answer(_list("gone/old.mojo")), "UNIT lib_b\nUNIT app\nAFFECTED 2\n")
+
+
+def test_the_answer_for_what_cannot_be_mapped_is_widened_with_a_reason() raises:
+    var cannot = List[List[String]]()
+    cannot.append(_list(".buckconfig"))
+    cannot.append(_list("tools/build/cells/toolchains/BUCK"))
+    cannot.append(_list("stray.txt"))
+    cannot.append(_list("macros/loose.bzl"))
+    cannot.append(_list("lib/a/a.mojo", ".buckconfig"))
+    for i in range(len(cannot)):
+        var a = _answer(cannot[i])
+        assert_true(a.startswith("WIDENED "))
+        assert_true(a.find("UNIT") < 0)
+        assert_equal(len(a.split("\n")), 2)  # one line and the trailing newline
+
+
+def test_a_non_empty_change_reaching_nothing_is_never_answered_as_everything() raises:
+    # VACUOUS: no unit, and no widening: kci refuses `AFFECTED 0` (a check
+    # over nothing is not a pass); answering WIDENED would build everything
+    # and pass a change nothing maps.
+    assert_equal(_answer(_list("NOTES.md")), "AFFECTED 0\n")
+    assert_equal(_answer(_list("NOTES.md", "LICENSE")), "AFFECTED 0\n")
+    # the empty change prints the same, and kci refuses it before asking
+    assert_equal(_answer(List[String]()), "AFFECTED 0\n")
+
+
 def main() raises:
     test_coverage_is_what_no_unit_builds_or_depends_on()
     test_a_leaf_source_reaches_what_depends_on_it()
@@ -384,4 +451,7 @@ def main() raises:
     test_a_failing_rdeps_query_widens()
     test_an_rdeps_answer_of_nothing_widens()
     test_the_targets_are_sorted_and_unique()
+    test_the_answer_kci_reads_for_a_table_of_changes()
+    test_the_answer_for_what_cannot_be_mapped_is_widened_with_a_reason()
+    test_a_non_empty_change_reaching_nothing_is_never_answered_as_everything()
     print("test_plan: PASS")

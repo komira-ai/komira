@@ -43,6 +43,9 @@ mojo_library(
         "tests/test_process.mojo",
     ],
     test_data = {
+        "tests/test_plan.mojo": {
+            "tools/build/ci/rules.txt": ":rules.txt",
+        },
         "tests/test_rules_file.mojo": {
             "tools/build/ci/rules.txt": ":rules.txt",
         },
