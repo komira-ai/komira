@@ -235,12 +235,11 @@ def _snappy_decompress_mojo(
 ) raises -> Int:
     """Decompress a raw/unframed Snappy blob into `dst`. Returns bytes written.
 
-    PERF-CRITICAL slop requirement: for the SIMD overshoot fast paths to be
-    safe, the caller should pass a `dst` whose `len()` is
-    `uncompressed_length + kSlopBytes` (64), as a page decoder does. If
-    `dst.len() < uncompressed_length + 64` the overshoot paths disable
-    (op_slop_limit = 0) and the scalar / exact-bound paths take over — still
-    correct, just slower near the buffer end.
+    PERF-CRITICAL slop requirement: the 16-byte-store fast paths run only
+    when `dst.len() >= uncompressed_length + kSlopBytes` (64), as a page
+    decoder sizes it. With less room every overshooting path is off
+    (`has_slop` false) and each tag stores exactly the bytes it produces, so
+    nothing is written past `dst.len()` — correct, just slower.
 
     Thin boundary wrapper: the hot decode runs in
     `_snappy_decode_core`, which returns a status (ZERO inlined error-String
@@ -279,10 +278,22 @@ def _snappy_decode_core(
     if uncompressed_len > dst_cap:
         return _DecodeResult(_DEC_DST_TOO_SMALL, 0, uncompressed_len, ip_start)
 
-    # PERF: the max op at which unconditional 16/64-byte writes are safe
-    # (slop = kSlopBytes past the logical end). snappy.cc:2182 op_limit_min_slop.
+    # The 16-byte-store fast paths may write up to 15 bytes past the bytes a
+    # tag produces, so they run only when `dst` has kSlopBytes of room past
+    # the decoded length (`has_slop`). Without it every tag takes a path
+    # that stores exactly the bytes it produces.
+    #
+    # Each wide-store site is guarded by `has_slop`, directly or through
+    # `op < op_slop_limit` (op_slop_limit is 0 without slop, so that test is
+    # then false for every op): `op_slop_limit` is the largest op from which
+    # a 16-byte store stays inside the decoded length plus the slop
+    # (snappy.cc:2182 op_limit_min_slop). An end bound alone is not a guard:
+    # `op + n <= op_slop_limit + (kSlopBytes - 1)` holds for small n at
+    # op_slop_limit 0, which is how a 16-byte store once ran past an
+    # exact-size `dst`.
+    var has_slop = dst_cap >= uncompressed_len + kSlopBytes
     var op_slop_limit: Int
-    if dst_cap >= uncompressed_len + kSlopBytes:
+    if has_slop:
         op_slop_limit = uncompressed_len - (kSlopBytes - 1)
     else:
         op_slop_limit = 0
@@ -341,14 +352,15 @@ def _snappy_decode_core(
             # PERF-CRITICAL long-literal: 16-byte-stride inlined SIMD copy is
             # faster than a libc memcpy call for sizes 60..~2KB (no call
             # overhead). The loop may write up to 15 bytes past literal_length,
-            # safe only if op is within op_slop_limit at the start.
+            # so it needs the slop: op + literal_length <= uncompressed_len is
+            # checked above, and the slop covers the last store's overshoot.
             # Reference: EmitLiteral allow_fast_path loop (snappy.cc:648-656).
             # This is the DOMINANT path for poorly compressible data (FLOAT64 =
             # mostly long literals) — the loop LLVM should emit as a tight
             # `movdqu` self-loop like the C++ decoder's inlined literal copy.
             if (
-                literal_length >= 16
-                and op + literal_length <= op_slop_limit + (kSlopBytes - 1)
+                has_slop
+                and literal_length >= 16
                 and ip + literal_length + 15 <= compressed_len
             ):
                 var i = 0
@@ -400,10 +412,12 @@ def _snappy_decode_core(
                 op += length
                 continue
             # PERF-CRITICAL: length > 16, offset >= 16 → inlined 16-byte-stride
-            # copy (common on text with long identical runs).
+            # copy (common on text with long identical runs). The last store
+            # may overshoot op + length by up to 15 bytes, into the slop.
             if (
-                offset >= 16
-                and op + length <= op_slop_limit + (kSlopBytes - 1)
+                has_slop
+                and offset >= 16
+                and op + length <= uncompressed_len
                 and offset <= op
             ):
                 var i = 0

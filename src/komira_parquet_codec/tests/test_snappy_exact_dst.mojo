@@ -34,9 +34,10 @@ def _decoder(d: Int) -> SnappyDecoder:
     return SnappyDecoder.MOJO if d == 1 else SnappyDecoder.C_LIBRARY
 
 
-def _guarded(cap: Int) -> List[UInt8]:
-    var buf = List[UInt8](capacity=cap + _GUARD)
-    for _ in range(cap + _GUARD):
+def _guarded(cap: Int, guard: Int = _GUARD) -> List[UInt8]:
+    """`cap` bytes for the destination, then `guard` sentinel bytes."""
+    var buf = List[UInt8](capacity=cap + guard)
+    for _ in range(cap + guard):
         buf.append(_SENTINEL)
     return buf^
 
@@ -167,7 +168,9 @@ def test_declared_length_larger_than_dst() raises:
         for d in range(2):
             var decoder = _decoder(d)
             var where = String(decoder) + " shape=" + String(shape)
-            var buf = _guarded(cap)
+            # A decoder that ignored the declared length would write up to n
+            # bytes and its overshoot, so the guard covers all of it.
+            var buf = _guarded(cap, n + _GUARD)
             var refused = False
             set_snappy_decoder(decoder)
             try:
