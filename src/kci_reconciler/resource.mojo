@@ -104,12 +104,14 @@ delete path wired at all: deleting the resource is either impossible for this
 graph or provably wrong in a way the graph cannot distinguish from the safe case.
 It is a statement about US, not about the resource's value.
 
-⛔ IT IS NOT AUTHORABLE. There is no `Retention` wire ordinal for it and no
-`*Spec` accepts it: `full_manifest.proto`'s `Retention` stays at two policy
-members on purpose, and the two data-bearing AWS specs that validate their
-threaded retention (`S3BucketSpec.of`, `DynamoTableSpec.of`) refuse anything that
-is neither RETAIN_KEEP nor RETAIN_DELETE, which is also the enforcement of
-this invariant. A capability is DERIVED by the conformer that owns the verb; a
+⛔ IT IS NOT AUTHORABLE. There is no retention wire ordinal for it and no
+`*Spec` accepts it: the authored catalog, `kci_resource_proto`'s
+`resource.proto` (`kci.resource.v1`), has no retention field at all (`Resource`
+field 3 is held for a retention policy of data-bearing types, which v1 does not
+have), and when one lands it must not name this member. The two data-bearing
+AWS specs that validate their threaded retention (`S3BucketSpec.of`,
+`DynamoTableSpec.of`) refuse anything that is neither RETAIN_KEEP nor
+RETAIN_DELETE, which is also the enforcement of this invariant. A capability is DERIVED by the conformer that owns the verb; a
 manifest that could declare a resource undeletable would let an author disable a
 teardown from a text file.
 
