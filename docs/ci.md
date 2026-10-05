@@ -401,8 +401,12 @@ so the release files list no package:
   for every target no declared unit names or matches: `<p>` for each
   library `//src/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
   `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
-  for `tests//functional/...`; a name an artifact holds gets `_package`. kci
-  adds them after the declared units, under the file's own rules.
+  for `tests//functional/...`; a name an artifact holds gets `_package`.
+  Every name is one kci accepts (`[a-z][a-z0-9_]*`) whatever the directory
+  is called: upper case becomes lower, any other character `_`, and a name
+  not starting with a letter gets `pkg_` (`//src/3d` is `pkg_3d`); groups
+  whose names meet are one check. kci adds them after the declared units,
+  under the file's own rules.
 - **Coverage by construction:** every target of the graph is in some unit. A
   pull request that adds a package gets a check for it, and one that deletes
   a package no longer derives one; neither edits a release file.

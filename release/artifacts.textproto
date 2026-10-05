@@ -63,7 +63,9 @@
 # as `./buck2 build tests//functional/...` builds them). A name an artifact
 # holds gets `_package`: the rest of komira_encoding's package (its library,
 # whose welded tests its conda package does not run) is the derived check
-# `komira_encoding_package`. So every target of the graph is in some unit
+# `komira_encoding_package`. A derived name is always one kci accepts,
+# `[a-z][a-z0-9_]*` (lower case, any other character `_`, `pkg_` before one
+# not starting with a letter). So every target of the graph is in some unit
 # by construction: a pull request that adds a package gets a check for it,
 # and one that deletes a package loses it, with no edit here.
 #

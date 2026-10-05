@@ -4,6 +4,7 @@ in release/artifacts.textproto.
   python3 release/ci/derive_checks.py <units file>   # what kci runs
   python3 release/ci/derive_checks.py --from release/artifacts.textproto
                                                      # the same answer, for a reader
+  python3 release/ci/derive_checks.py --selftest     # the naming table (SELFTEST)
 
 The per-change check (`kci run --stage pr --affected-by <base>`) builds units:
 the artifacts and checks release/artifacts.textproto declares, and the checks
@@ -30,11 +31,17 @@ THE DERIVATION. Every target of the universe that no declared target names
 is a derived check naming the group's pattern: one check per library package
 `//src/<p>/...` (named `<p>`), `repo_root` (`//:`), `tools_<t>` for each
 `//tools/<t>/...`, `<d>` for any other top directory `//<d>/...`, and
-`functional_tests` (`tests//functional/...`); `-` and `.` become `_`. A name a
-declared unit holds gets `_package` (the rest of that artifact's package):
-artifacts and checks are one name space. So every target of the universe is
-in some unit by construction, a package added to the tree is in a derived
-check with no edit anywhere, and a deleted one is simply no longer derived.
+`functional_tests` (`tests//functional/...`). A name is one kci accepts,
+`[a-z][a-z0-9_]*`, whatever the directory is called: upper case becomes lower,
+any other character outside `[a-z0-9_]` becomes `_`, and a name that does not
+start with a letter gets `pkg_` before it; groups whose names meet are one
+check. A name a declared unit holds gets `_package` (the rest of that
+artifact's package), again until it is free: artifacts and checks are one
+name space. So every target of the universe is in some unit by construction,
+a package added to the tree is in a derived check with no edit anywhere, and a
+deleted one is simply no longer derived. Every run first holds the naming to
+the table SELFTEST and answers nothing (exit 1) if it fails; it also refuses
+to answer a name kci would refuse.
 
 Naming a target that DEPENDS on another is not enough for coverage: buck2
 builds only the outputs a dependent consumes, so a library's conda package
@@ -50,6 +57,10 @@ import subprocess
 import sys
 
 UNIVERSE = ["//...", "tests//functional/..."]
+
+# A name kci accepts for a unit (src/kci_artifact/validate.mojo,
+# is_valid_artifact_name).
+VALID_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 def _label(configured):
@@ -120,8 +131,13 @@ def check_name(label, taken=frozenset()):
         name = "tools_" + parts[1]
     else:
         name = parts[0]
-    name = re.sub(r"[.-]", "_", name)
-    if name in taken:
+    # A directory name is not constrained; a unit name is: lower case, every
+    # other character `_`, and `pkg_` before one that does not start with a
+    # letter. Two groups whose names meet are one check.
+    name = re.sub(r"[^a-z0-9_]", "_", re.sub(r"[A-Z]", lambda m: m.group(0).lower(), name))
+    if not re.match(r"[a-z]", name):
+        name = "pkg_" + name
+    while name in taken:
         name += "_package"
     return name
 
@@ -162,6 +178,9 @@ def derive(declared, labels):
 
 def answer(declared, labels):
     checks, unmatched = derive(declared, labels)
+    for name, _ in checks:
+        if not VALID_NAME.match(name):
+            raise SystemExit("derive_checks.py: the derived check name %r is not [a-z][a-z0-9_]*" % name)
     out = []
     for unit, target in unmatched:
         out.append("UNMATCHED %s %s" % (unit, target))
@@ -208,7 +227,54 @@ def read_artifacts_file(path):
     return declared
 
 
+# THE SELF-TEST: (label, declared unit names, the check name it must get).
+# Each name must also be one kci accepts, `[a-z][a-z0-9_]*`.
+SELFTEST = [
+    ("//src/komira_clock:komira_clock", [], "komira_clock"),
+    ("//src/komira-x.y:t", [], "komira_x_y"),
+    ("//src/Komira_Up:komira_clock", [], "komira_up"),
+    ("//src/3d:t", [], "pkg_3d"),
+    ("//src/_x:t", [], "pkg__x"),
+    ("//src/komira+x:t", [], "komira_x"),
+    ("//src/komira\u00e9:t", [], "komira_"),
+    ("//Bench/a:t", [], "bench"),
+    ("//tools/Foo:t", [], "tools_foo"),
+    ("//tools/9z:t", [], "tools_9z"),
+    ("//src:t", [], "src"),
+    ("//:t", [], "repo_root"),
+    ("tests//functional/x:t", [], "functional_tests"),
+    ("//src/Komira_Up:t", ["komira_up"], "komira_up_package"),
+    ("//src/a:t", ["a", "a_package"], "a_package_package"),
+]
+
+
+def selftest():
+    """The failures of SELFTEST (each a line of text); none is green."""
+    failures = []
+    for label, taken, want in SELFTEST:
+        got = check_name(label, frozenset(taken))
+        if got != want or not VALID_NAME.match(got):
+            failures.append("%s (taken %s): %r, want %r" % (label, taken, got, want))
+    checks, _ = derive([("u_%d" % i, "//nothing:%d" % i) for i in range(2)], [l for l, _, _ in SELFTEST])
+    for name, _ in checks:
+        if not VALID_NAME.match(name):
+            failures.append("derive() answered check %r" % name)
+    return failures
+
+
 def main(argv):
+    if argv[1:] == ["--selftest"]:
+        failures = selftest()
+        for f in failures:
+            sys.stderr.write("derive_checks.py selftest: RED: %s\n" % f)
+        sys.stderr.write("derive_checks.py selftest: %s (%d cases)\n" % ("RED" if failures else "GREEN", len(SELFTEST)))
+        return 1 if failures else 0
+    # The naming is held on every run: a name kci refuses would turn the
+    # check red for a change that only added a package.
+    failures = selftest()
+    if failures:
+        sys.stderr.write("derive_checks.py: the check naming is wrong: %s\n" % "; ".join(failures))
+        return 1
     if len(argv) == 2 and not argv[1].startswith("-"):
         declared = read_units_file(argv[1])
     elif len(argv) == 3 and argv[1] == "--from":
