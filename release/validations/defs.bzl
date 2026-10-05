@@ -25,6 +25,7 @@ argument list, so src/kci_release_machine's welded test can hold the targets
 equal to the machine file's validations both ways.
 """
 
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "registered_names", "row")
 
 # Placeholders of the `:names` record for the arguments that differ by the
@@ -126,7 +127,7 @@ def _pixi_sha256_by_target_os():
         out["prelude//os/constraints:" + row(n)["os"]] = pinned_kwargs(n, "pixi")["sha256"]
     return select(out)
 
-def kci_validations(validations, visibility = None):
+def _kci_validations(validations, visibility = None):
     """One runnable target per entry of `validations` ({name: stage}), and `:names`."""
     for name, stage in validations.items():
         _kci_validation(
@@ -145,3 +146,5 @@ def kci_validations(validations, visibility = None):
         validations = validations,
         visibility = ["komira//src/kci_ci_check:", "komira//src/kci_release_machine:"],
     )
+
+kci_validations = declares_docs(_kci_validations)
