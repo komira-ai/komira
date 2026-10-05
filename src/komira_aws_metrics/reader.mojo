@@ -31,6 +31,8 @@
 #
 # Paging follows `NextToken` up to `max_pages` calls; stopping with a token
 # left, or at the point limit, or on a final `PartialData`, sets `truncated`.
+# The scan is ascending, so at the point limit the series keeps its OLDEST
+# points.
 # A result whose `StatusCode` is `Forbidden` or `InternalError` raises.
 #
 # The transport, the signing clock and the credential source are type
