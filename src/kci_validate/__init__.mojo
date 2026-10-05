@@ -39,7 +39,16 @@
 # test is generated with. The command line is the kci binary's (`kci run`).
 # =============================================================================
 
-from kci_validate.channel_index import CHECK_CHANNEL, WAIT_POLL_SECONDS, ChannelUrl, check_channel
+from kci_validate.channel_index import (
+    CHECK_CHANNEL,
+    WAIT_POLL_SECONDS,
+    ChannelUrl,
+    IndexPollLog,
+    RecordingIndexPollLog,
+    StderrIndexPollLog,
+    check_channel,
+    poll_line,
+)
 from kci_validate.conda_install_env import run_install_env
 from kci_validate.conda_install_smoke import run_install_smoke
 from kci_validate.env import (

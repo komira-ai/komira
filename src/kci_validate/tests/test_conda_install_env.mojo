@@ -45,6 +45,7 @@ from kci_publish.release_fixture import ExampleRelease, write_example_inputs, wr
 from kci_release_machine import StageValidation
 from kci_validate import (
     EnvHost,
+    RecordingIndexPollLog,
     ValidateRequest,
     env_child_env,
     install_env_argv,
@@ -276,7 +277,8 @@ def _expect_run(
 
 
 def _run(mut runner: ScriptedRunner, mut t: ScriptedPkgTransport, mut sl: NoWaitSleeper, fx: Fixture) raises -> ResultValidation:
-    return run_install_env(runner, t, sl, fx.req, fx.host)
+    var log = RecordingIndexPollLog()
+    return run_install_env(runner, t, sl, log, fx.req, fx.host)
 
 
 def _failed(row: ResultValidation) -> String:

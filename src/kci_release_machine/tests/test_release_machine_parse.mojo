@@ -306,8 +306,9 @@ def test_validation_reads_back_alone() raises:
     ref v = g.stages[0].steps[0].validations[0]
     assert_equal(v.name, String("v"))
     assert_equal(len(v.extra_channels), 0)
-    # an unset wait is no wait
-    assert_equal(v.wait_for_index_seconds, 0)
+    # an unset wait is the default: 30 minutes (a registry can take a
+    # quarter of an hour to make a subdir's first index)
+    assert_equal(v.wait_for_index_seconds, 1800)
     assert_equal(v.line, 11)
 
 
@@ -454,6 +455,9 @@ def test_validation_compiler_channel() raises:
 def test_validation_wait_for_index_seconds() raises:
     var g = parse_machine_file(_with_validation(String(_V_OK) + String(" wait_for_index_seconds: 3600")), String(_SRC))
     assert_equal(g.stages[0].steps[0].validations[0].wait_for_index_seconds, 3600)
+    # 0 stays allowed and means no wait: the default applies only when unset
+    var g0 = parse_machine_file(_with_validation(String(_V_OK) + String(" wait_for_index_seconds: 0")), String(_SRC))
+    assert_equal(g0.stages[0].steps[0].validations[0].wait_for_index_seconds, 0)
     _assert_refused(
         _with_validation(String(_V_OK) + String(" wait_for_index_seconds: 3601")),
         String("has wait_for_index_seconds 3601; it is 0 to 3600"),

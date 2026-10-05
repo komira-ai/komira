@@ -18,12 +18,13 @@
 #                     kci_validate.run_install_smoke, a `SupervisorRunner`
 #                     for `docker`, anonymous HTTPS reads of the channel
 #                     (`HttpPkgTransport`, no credential), `UsleepSleeper`
-#                     for the index wait. The container runs as this
+#                     for the index wait, each poll a line on stderr
+#                     (`StderrIndexPollLog`). The container runs as this
 #                     process's uid:gid; the docker CLI gets this process's
 #                     PATH (platform-set; a default when unset) and nothing
 #                     else it holds. CONDA_INSTALL_ENV:
 #                     kci_validate.run_install_env, the same runner,
-#                     transport and sleeper; pixi (--pixi, checked against
+#                     transport, sleeper and poll log; pixi (--pixi, checked against
 #                     --pixi-sha256) gets an environment built from nothing,
 #                     and pixi's system config directory is /etc/pixi.
 #   lookahead      -> kci_publish.lookahead_new_names_https: a later stage's
@@ -60,7 +61,15 @@ from kci_api import (
 )
 from kci_pkg_upload import HttpPkgTransport
 from kci_publish import UsleepSleeper
-from kci_validate import PIXI_SYSTEM_CONFIG_DIR, ContainerHost, EnvHost, ValidateRequest, run_install_env, run_install_smoke
+from kci_validate import (
+    PIXI_SYSTEM_CONFIG_DIR,
+    ContainerHost,
+    EnvHost,
+    StderrIndexPollLog,
+    ValidateRequest,
+    run_install_env,
+    run_install_smoke,
+)
 
 from kci_build import GIT_PROGRAM, BuildRequest, RunSpec, SupervisorRunner, run_build
 from kci_build import RunResult as ProcessResult
@@ -170,9 +179,10 @@ struct LibrarySteps(StageSteps, Movable):
             var env_runner = SupervisorRunner()
             var env_transport = HttpPkgTransport[_Conn](_mk_connector)
             var env_sleeper = UsleepSleeper()
+            var env_log = StderrIndexPollLog()
             try:
                 return run_install_env(
-                    env_runner, env_transport, env_sleeper, req, EnvHost(String(PIXI_SYSTEM_CONFIG_DIR))
+                    env_runner, env_transport, env_sleeper, env_log, req, EnvHost(String(PIXI_SYSTEM_CONFIG_DIR))
                 )
             except e:
                 return _failed_row(req, String(e))
@@ -186,8 +196,9 @@ struct LibrarySteps(StageSteps, Movable):
         var runner = SupervisorRunner()
         var transport = HttpPkgTransport[_Conn](_mk_connector)
         var sleeper = UsleepSleeper()
+        var log = StderrIndexPollLog()
         try:
-            return run_install_smoke(runner, transport, sleeper, req, host)
+            return run_install_smoke(runner, transport, sleeper, log, req, host)
         except e:
             return _failed_row(req, String(e))
 

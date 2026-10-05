@@ -54,8 +54,8 @@
 # The seams: kci_build's `ProcessRunner` starts pixi (ScriptedRunner in the
 # welded tests, which plays pixi by writing what it would leave in <w>);
 # kci_pkg_upload's `PkgTransport` asks the hosts and reads the channel;
-# komira_retry's `Sleeper` waits; `EnvHost` names pixi's system config
-# directory.
+# komira_retry's `Sleeper` waits; an `IndexPollLog` says each poll of the
+# index; `EnvHost` names pixi's system config directory.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -81,7 +81,7 @@ from kci_api import (
 from kci_pkg_upload import PkgTransport
 from kci_release_set.member import file_sha256_hex
 
-from .channel_index import check_channel
+from .channel_index import IndexPollLog, check_channel
 from .container import MANIFEST_NAME, install_manifest_text, join_path, payload_record_name, work_subdirs
 from .env import (
     AUTH_FILE,
@@ -159,10 +159,11 @@ def _record_of(file: String) -> String:
     return file.copy()
 
 
-def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper](
-    mut runner: R, mut transport: T, mut sleeper: S, req: ValidateRequest, host: EnvHost
+def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollLog](
+    mut runner: R, mut transport: T, mut sleeper: S, mut log: L, req: ValidateRequest, host: EnvHost
 ) raises -> ResultValidation:
-    """One CONDA_INSTALL_ENV validation (file header). RAISES only on a
+    """One CONDA_INSTALL_ENV validation (file header); each poll of the
+    channel's index is a line on `log`. RAISES only on a
     caller's error (another kind); everything about the release, the
     network, the channel, this machine, the install and the README is a
     check."""
@@ -250,7 +251,7 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper](
     checks.append(_row(String(CHECK_NETWORK), expected_net^, String("network: ") + said, True))
 
     # 1. the channel, anonymously, from this machine
-    if not check_channel(transport, sleeper, channel_url, pins, v.wait_for_index_seconds, checks):
+    if not check_channel(transport, sleeper, log, channel_url, pins, v.wait_for_index_seconds, checks):
         return _finish(row^, checks^)
 
     # this machine: no pixi config kci did not write
