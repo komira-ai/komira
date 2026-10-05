@@ -11,8 +11,10 @@ module runs against them unchanged.
     host is refused before anything is created.
 
 `FakeCloud` takes a provider shape (`ProviderShape`: generic by default;
-`aws`, `gcp` and `azure` are the shaped fakes), the per-cloud table of roles
-and provider kinds each catalog type lowers to.
+`aws`, `gcp`, `azure` and `onprem` are the shaped fakes), the per-cloud table of roles
+and provider kinds each catalog type lowers to. The built-in clouds are a
+list of values (`builtin_shapes`); `shape_named` looks a cloud name up in it
+and refuses any other name.
 
 Both lower to data (the complete fixed set of roles of each type), realize
 one node type (`FakeNode`), deploy into a `FakeStore` (state, labels as
@@ -36,4 +38,4 @@ from kci_cloud_fake.nodes import (
     static_digest,
 )
 from kci_cloud_fake.clouds import FakeLimitedCloud, FakeCloud
-from kci_cloud_fake.shapes import ProviderShape, ShapeRow
+from kci_cloud_fake.shapes import ProviderShape, ShapeRow, builtin_shapes, shape_named

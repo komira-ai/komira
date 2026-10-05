@@ -17,7 +17,8 @@
 #   * kind `bucket`    `<id>/bucket`: a bucket. It exposes NAME and ADDRESS
 #                      (`stores`, a desired field, like `serves`).
 # Those are the generic shape's kinds. On a provider shape (shapes.mojo) the
-# kind is the provider kind id, and an `<id>/identity` node is added; the node
+# kind is the provider kind id, and an `<id>/identity` node is added (on
+# onprem also a service's `<id>/endpoint`, which serves nothing); the node
 # behaves the same: `serves` (a desired field), not the kind, decides whether
 # it exposes URL and HOST.
 # A role the file turned off is the same node with `wanted` False.

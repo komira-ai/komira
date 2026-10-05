@@ -24,9 +24,11 @@
 # producer's resource id alone: kci resolves that to the resource's primary
 # node (`run`, or `bucket`), so this lowering never reads another resource.
 # `FakeCloud` built with a provider shape (`shapes.mojo`: `aws`, `gcp`,
-# `azure`) lowers to THAT shape's fixed roles and provider kinds instead: a
-# private `<id>/identity` the run depends on and the grants hang off, and on
-# the azure shape a public ingress and a schedule folded into the run node.
+# `azure`, `onprem`) lowers to THAT shape's fixed roles and provider kinds
+# instead: a private `<id>/identity` the run depends on and the grants hang
+# off; on the azure shape a public ingress and a schedule folded into the run
+# node; on the onprem shape a service's `<id>/endpoint` (always wanted; the
+# public role depends on it) and a schedule folded into the run node.
 # A run node's desired fields are EVERY field the catalog models, with the
 # catalog's default filled in where the author wrote none (kci owns every
 # modelled field: writing a default out is not a change, a console edit of
@@ -97,6 +99,7 @@ from kci_cloud_fake.nodes import FakeNode
 from kci_cloud_fake.shapes import (
     ProviderShape,
     ROLE_BUCKET,
+    ROLE_ENDPOINT,
     ROLE_IDENTITY,
     ROLE_PUBLIC,
     ROLE_RUN,
@@ -252,7 +255,7 @@ def _lower(r: Resource, mechanism: String, shape: ProviderShape) raises -> List[
         ref svc = r.service.value()
         fields.append(Setting(String("img"), _image(svc.image)))
         var port = String(Int(svc.port)) if svc.port != 0 else String(DEFAULT_PORT)
-        fields.append(Setting(String("port"), port^))
+        fields.append(Setting(String("port"), port.copy()))
         for i in range(len(svc.args)):
             fields.append(Setting(String("arg"), svc.args[i].copy()))
         _env(String("service"), svc.env, fields, refs)
@@ -282,11 +285,29 @@ def _lower(r: Resource, mechanism: String, shape: ProviderShape) raises -> List[
             )
         fields.append(Setting(String("serves"), String("true")))
         out.append(LoweredNode(run, r.id, run_kind, run_deps^, refs^, fields^))
+        # What the public role fronts: the run, or the endpoint in front of it.
+        var front = run.copy()
+        if shape.has(FIELD_SERVICE, String(ROLE_ENDPOINT)):
+            var ep = List[Setting]()
+            ep.append(Setting(String("port"), port.copy()))
+            var ep_deps = List[String]()
+            ep_deps.append(run.copy())
+            front = r.id + String("/") + String(ROLE_ENDPOINT)
+            out.append(
+                LoweredNode(
+                    front.copy(),
+                    r.id,
+                    shape.kind_of(FIELD_SERVICE, String(ROLE_ENDPOINT)),
+                    ep_deps^,
+                    List[InputRef](),
+                    ep^,
+                )
+            )
         if has_public:
             var pub = List[Setting]()
             pub.append(Setting(String("mechanism"), mechanism.copy()))
             var deps = List[String]()
-            deps.append(run.copy())
+            deps.append(front.copy())
             out.append(
                 LoweredNode(
                     r.id + String("/") + String(ROLE_PUBLIC),
