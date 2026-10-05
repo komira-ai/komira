@@ -46,6 +46,25 @@
 #   * An object of a node whose retention is KEEP carries the non-identity
 #     label `kci_retain=keep` (labels.mojo), and `list_owned` reports it as
 #     `retained`: kci never deletes it through `list_owned`.
+#   * A table's KEY IS IMMUTABLE. Its `<id>/table` node has the desired field
+#     `key` (`data.table_key_text`), and `list_owned` reports each table
+#     object's key AS THE CLOUD STORES IT (`OwnedRecord.key`, same rendering;
+#     empty for every other kind). kci refuses a plan or an apply whose key
+#     differs from the stored one, before any change
+#     (`data.key_change_findings`): a new key is a new table, never an
+#     update.
+#
+# ⛔ PRECONDITION FOR THE FIRST REAL ADAPTER: NO `--` STAMPS MAY BE LEFT.
+# The standard label rule once wrote the `/` of a role as `--` (`uses--jobs`);
+# it now writes `_` (labels.mojo), and the two are NOT decode-compatible:
+# `identity_of` reads a `--` stamp as a role nobody lowers. On a cloud that
+# holds objects stamped the old way, `list_owned` would report each one as a
+# role the file turned off, and the closed world would DELETE it. Only the
+# offline fakes implement this trait today, so no such object exists. A real
+# adapter must not ship until either (a) the cloud is shown to hold no object
+# with a `--` stamp, or (b) a relabel step rewrites every `--` stamp of the
+# cell to `_` before the first deploy that reads `list_owned`. Neither exists
+# yet; the adapter's pull request carries one of them.
 #
 # THE REST OF THE INTERFACE (internal, not frozen; every built-in cloud
 # provides all of it):
@@ -253,9 +272,11 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     """One object of this machine and cell the cloud says is kci's (by its
     stamp): its kind, physical id, location, what it bills, when it was
     created, the run that made it (or `RUN_UNKNOWN`), whether kci may delete
-    it, the engine node that owns it (`<resource>/<role>`), and whether it
-    is RETAINED (it carries `kci_retain=keep`: kci reports it and never
-    deletes it through this list)."""
+    it, the engine node that owns it (`<resource>/<role>`), whether it is
+    RETAINED (it carries `kci_retain=keep`: kci reports it and never
+    deletes it through this list), and its immutable KEY as the cloud
+    stores it (a table's, rendered as `data.table_key_text`; empty for every
+    other kind)."""
 
     var kind: String
     var id: String
@@ -266,6 +287,7 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     var deletable_by_kci: Bool
     var owner_node: String
     var retained: Bool
+    var key: String
 
 
 @fieldwise_init

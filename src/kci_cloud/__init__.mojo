@@ -24,6 +24,9 @@ interface. This package names no cloud:
                        every grant edge it lowers (`uses` lines, a grant
                        resource, the implicit `cell LOGS WRITE`), each
                        with its role `u-<h>` (or `grant`) decided by kci.
+  * data.mojo        — the rules of the data types (table, bucket): their
+                       graph findings, a table's key as text, the index
+                       role `ix-<h>`, and the refusal of a changed key.
   * labels.mojo      — the standard label rule (encode, decode, check), and
                        the `kci_retain=keep` label of a kept object.
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
@@ -55,6 +58,7 @@ from kci_cloud.catalog import (
     CLOUD_BOUND,
     FIELD_SERVICE,
     FIELD_JOB,
+    FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
@@ -71,6 +75,7 @@ from kci_cloud.catalog import (
     RETENTION_DELETE,
     RETENTION_KEEP,
     ROLE_RUN,
+    ROLE_TABLE,
     ROLE_BUCKET,
     ROLE_IDENTITY,
     ROLE_GRANT,
@@ -96,6 +101,7 @@ from kci_cloud.grants import (
     edges_for,
     edges_of,
     grant_hash,
+    role_hash,
     holds_own_identity,
     identity_owner,
     principal_node,
@@ -123,6 +129,16 @@ from kci_cloud.adapter import (
     FINDING_LIMIT,
     FINDING_CELL,
     absence_word,
+)
+from kci_cloud.data import (
+    INDEX_ROLE_PREFIX,
+    KEY_FIELD,
+    data_findings,
+    index_role,
+    index_role_collisions,
+    key_change_findings,
+    path_text,
+    table_key_text,
 )
 from kci_cloud.labels import (
     LABEL_VALUE_MAX,

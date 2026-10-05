@@ -19,6 +19,9 @@
 #    `bucket`; a service and a job take no retention and land on `run`. The
 #    effective retention is the written one, else the default; a reference
 #    to a resource lands on its primary node.
+# 6. THE TABLE ROW: PORTABLE, exposes NAME only, accepts READ, WRITE,
+#    READ_WRITE and DESCRIBE (not CALL), retention default KEEP, primary
+#    role `table`; it is the third body arm, field 13.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -39,6 +42,7 @@ from kci_cloud import (
     CLOUD_BOUND,
     FIELD_SERVICE,
     FIELD_JOB,
+    FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
@@ -82,7 +86,9 @@ def _resource_with_body(field: Int) -> List[UInt8]:
 
 def test_catalog_arms_match_the_wire() raises:
     var c = Catalog.v1()
-    assert_equal(len(c.types), 5, "v1 declares service, job, bucket, service_account and grant")
+    assert_equal(
+        len(c.types), 6, "v1 declares service, job, table, bucket, service_account and grant"
+    )
     for i in range(len(c.types)):
         var field = c.types[i].field
         var r = decode_proto[Resource](_resource_with_body(field))
@@ -167,7 +173,9 @@ def _entry(
     return CloudEntry(CloudId(String("p")), complete, implemented^, absences^)
 
 
-def _ints(a: Int, b: Int = -1, c: Int = -1, d: Int = -1, e: Int = -1) -> List[Int]:
+def _ints(
+    a: Int, b: Int = -1, c: Int = -1, d: Int = -1, e: Int = -1, f: Int = -1
+) -> List[Int]:
     var l = List[Int]()
     l.append(a)
     if b >= 0:
@@ -178,6 +186,8 @@ def _ints(a: Int, b: Int = -1, c: Int = -1, d: Int = -1, e: Int = -1) -> List[In
         l.append(d)
     if e >= 0:
         l.append(e)
+    if f >= 0:
+        l.append(f)
     return l^
 
 
@@ -187,54 +197,54 @@ def test_artifact_rules() raises:
     # legal: complete, hosts every portable type, bound type absent by design
     var ok = List[Absence]()
     ok.append(Absence(18, ABSENT_BY_DESIGN, String("no such service here")))
-    assert_equal(len(artifact_problems(c, _entry(True, _ints(10, 11, 14, 20, 25), ok^))), 0)
+    assert_equal(len(artifact_problems(c, _entry(True, _ints(10, 11, 13, 14, 20, 25), ok^))), 0)
 
     # legal: not complete, a portable type not yet
     var later = List[Absence]()
     later.append(Absence(11, NOT_YET, String("no runner")))
     later.append(Absence(18, ABSENT_BY_DESIGN, String("none")))
-    assert_equal(len(artifact_problems(c, _entry(False, _ints(10, 14, 20, 25), later^))), 0)
+    assert_equal(len(artifact_problems(c, _entry(False, _ints(10, 13, 14, 20, 25), later^))), 0)
 
     # a type nobody decided about
-    var p = _joined(artifact_problems(c, _entry(True, _ints(10, 11, 14, 20, 25), List[Absence]())))
+    var p = _joined(artifact_problems(c, _entry(True, _ints(10, 11, 13, 14, 20, 25), List[Absence]())))
     assert_true(_has(p, "'bound_thing' is neither implemented nor declared absent"), p)
 
     # ABSENT_BY_DESIGN on a portable type
     var a1 = List[Absence]()
     a1.append(Absence(11, ABSENT_BY_DESIGN, String("x")))
     a1.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
-    p = _joined(artifact_problems(c, _entry(False, _ints(10, 14, 20, 25), a1^)))
+    p = _joined(artifact_problems(c, _entry(False, _ints(10, 13, 14, 20, 25), a1^)))
     assert_true(_has(p, "'job' is PORTABLE; ABSENT_BY_DESIGN is legal only"), p)
 
     # NOT_YET on a bound type
     var a2 = List[Absence]()
     a2.append(Absence(18, NOT_YET, String("x")))
-    p = _joined(artifact_problems(c, _entry(False, _ints(10, 11, 14, 20, 25), a2^)))
+    p = _joined(artifact_problems(c, _entry(False, _ints(10, 11, 13, 14, 20, 25), a2^)))
     assert_true(_has(p, "'bound_thing' is CLOUD_BOUND; NOT_YET is legal only"), p)
 
     # complete, yet a portable type is not yet
     var a3 = List[Absence]()
     a3.append(Absence(11, NOT_YET, String("x")))
     a3.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
-    p = _joined(artifact_problems(c, _entry(True, _ints(10, 14, 20, 25), a3^)))
+    p = _joined(artifact_problems(c, _entry(True, _ints(10, 13, 14, 20, 25), a3^)))
     assert_true(_has(p, "claims to be complete but does not host PORTABLE type 'job'"), p)
 
     # declared twice
     var a4 = List[Absence]()
     a4.append(Absence(11, NOT_YET, String("x")))
     a4.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
-    p = _joined(artifact_problems(c, _entry(False, _ints(10, 11, 14, 20, 25), a4^)))
+    p = _joined(artifact_problems(c, _entry(False, _ints(10, 11, 13, 14, 20, 25), a4^)))
     assert_true(_has(p, "'job' is declared more than once"), p)
 
     # outside the catalog
     var a5 = List[Absence]()
     a5.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
     a5.append(Absence(77, NOT_YET, String("x")))
-    p = _joined(artifact_problems(c, _entry(True, _ints(10, 11, 14, 20, 25), a5^)))
+    p = _joined(artifact_problems(c, _entry(True, _ints(10, 11, 13, 14, 20, 25), a5^)))
     assert_true(_has(p, "declares field 77 absent, which is not in the catalog"), p)
     var a6 = List[Absence]()
     a6.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
-    var impl = _ints(10, 11, 14, 20, 25)
+    var impl = _ints(10, 11, 13, 14, 20, 25)
     impl.append(40)
     p = _joined(artifact_problems(c, _entry(True, impl^, a6^)))
     assert_true(_has(p, "implements field 40, which is not in the catalog"), p)
@@ -243,10 +253,10 @@ def test_artifact_rules() raises:
 
 def test_clouds_refuse_at_add() raises:
     var reg = Clouds(Catalog.v1())
-    reg.add(CloudEntry(CloudId(String("a")), True, _ints(10, 11, 14, 20, 25), List[Absence]()))
+    reg.add(CloudEntry(CloudId(String("a")), True, _ints(10, 11, 13, 14, 20, 25), List[Absence]()))
     var raised = False
     try:
-        reg.add(CloudEntry(CloudId(String("a")), True, _ints(10, 11, 14, 20, 25), List[Absence]()))
+        reg.add(CloudEntry(CloudId(String("a")), True, _ints(10, 11, 13, 14, 20, 25), List[Absence]()))
     except e:
         raised = True
         assert_true(_has(String(e), "built in twice"), String(e))
@@ -268,9 +278,10 @@ def test_resolve_names_the_built_in_clouds() raises:
     """There is no plugin path: an id that is not built in is refused, naming
     every built-in cloud and the closest one when it is within two edits."""
     var clouds = Clouds(Catalog.v1())
-    clouds.add(CloudEntry(CloudId(String("fake")), True, _ints(10, 11, 14, 20, 25), List[Absence]()))
+    clouds.add(CloudEntry(CloudId(String("fake")), True, _ints(10, 11, 13, 14, 20, 25), List[Absence]()))
     var limited = List[Absence]()
     limited.append(Absence(11, NOT_YET, String("no runner")))
+    limited.append(Absence(13, NOT_YET, String("no tables")))
     limited.append(Absence(14, NOT_YET, String("no object store")))
     limited.append(Absence(20, NOT_YET, String("no identities")))
     limited.append(Absence(25, NOT_YET, String("no grants")))
@@ -379,13 +390,39 @@ def test_the_identity_rows() raises:
     assert_equal(len(g.accepts), 0, "a grant accepts nothing")
     assert_false(g.takes_retention())
     assert_equal(g.primary_role, "grant")
-    # DESCRIBE is accepted by nothing else.
+    # DESCRIBE is accepted by nothing else but a table (its definition).
     for i in range(len(c.types)):
-        if c.types[i].field != FIELD_SERVICE_ACCOUNT:
+        if c.types[i].field != FIELD_SERVICE_ACCOUNT and c.types[i].field != FIELD_TABLE:
             assert_false(c.types[i].accepts_access("DESCRIBE"), c.types[i].name + " takes no DESCRIBE")
     var l = _list(String('{"resource":[{"id":"runner","serviceAccount":{}}]}'))
     assert_equal(primary_node(c, l, String("runner")), "runner/identity")
     print("  test_the_identity_rows: PASS")
+
+
+def test_the_table_row() raises:
+    var c = Catalog.v1()
+    ref t = c.types[c.index_of(FIELD_TABLE)]
+    assert_equal(t.field, 13)
+    assert_equal(t.name, "table")
+    assert_equal(t.portability, PORTABLE)
+    assert_equal(len(t.exposes), 1, "a table exposes NAME only")
+    assert_true(t.exposes_output("NAME"))
+    assert_equal(len(t.accepts), 4)
+    for v in ["READ", "WRITE", "READ_WRITE", "DESCRIBE"]:
+        assert_true(t.accepts_access(String(v)), String("a table accepts ") + String(v))
+    assert_false(t.accepts_access("CALL"), "a table is not called")
+    assert_equal(t.retention_default, RETENTION_KEEP, "a table is kept by default")
+    assert_equal(t.primary_role, "table")
+    assert_equal(body_arms()[2].field, FIELD_TABLE, "the third arm, by declaration order")
+    var l = _list(
+        String('{"resource":[{"id":"orders","table":{}},')
+        + String('{"id":"cache","retention":"DELETE","table":{}}]}')
+    )
+    assert_equal(body_field(l[0]), FIELD_TABLE)
+    assert_equal(effective_retention(c, l[0]), RETENTION_KEEP, "unset: KEEP")
+    assert_equal(effective_retention(c, l[1]), RETENTION_DELETE, "written DELETE")
+    assert_equal(primary_node(c, l, String("orders")), "orders/table")
+    print("  test_the_table_row: PASS")
 
 
 def main() raises:
@@ -399,4 +436,5 @@ def main() raises:
     test_cloud_id_compares_by_value()
     test_the_bucket_row_retention_and_primary_role()
     test_the_identity_rows()
+    test_the_table_row()
     print("ALL kci_cloud CATALOG AND CLOUDS TESTS PASSED")

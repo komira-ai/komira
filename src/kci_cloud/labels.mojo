@@ -21,6 +21,11 @@
 #   * anything else outside the rule is REFUSED, never rewritten: a lossy
 #     rewrite would make two different owners read as one.
 #
+# ⛔ AN EARLIER RULE WROTE `/` AS `--`, AND IT IS NOT DECODE-COMPATIBLE WITH
+# THIS ONE: a `--` stamp decodes as a role no resource lowers, so the closed
+# world would delete its object. No real adapter may ship while such stamps
+# can exist without a relabel step (the precondition in adapter.mojo).
+#
 # THE BUDGET. The `role` label is the longest value: one segment per level
 # plus a separator each. `role_budget_findings` (validate.mojo) checks every
 # lowered node against `LABEL_VALUE_MAX` before anything is realized, so a

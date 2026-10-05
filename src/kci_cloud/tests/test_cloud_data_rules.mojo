@@ -25,6 +25,16 @@
 #    BEHIND (reported, never a node to remove); the same object unretained is
 #    a role to remove; an object of a resource gone from the file is
 #    leftover. An apply reports what it left behind.
+# 6. THE TABLE REFUSALS, in one pass: no key; an access path with no
+#    partition; an untyped field; an order with no field; an index with no
+#    name; two access paths with one name; an empty `ttl_field`; `uses` on a
+#    table. A good table graph (a key with an order, two indexes, a TTL, a
+#    service that reads its NAME and uses it READ_WRITE, another that
+#    DESCRIBEs it) is clean, and a table lowers KEEP by default.
+# 7. A TABLE'S KEY IS IMMUTABLE: with `list_owned` reporting the stored key,
+#    a plan and an apply asking for another key are refused before anything
+#    is created, and the refusal names the old and the new key; the same
+#    key is planned; a destroy is not refused.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -68,13 +78,16 @@ from kci_cloud import (
     RUN_UNKNOWN,
     Setting,
     FIELD_BUCKET,
+    FIELD_TABLE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
     FIELD_JOB,
     FIELD_SERVICE,
     FINDING_GRAPH,
+    KEY_FIELD,
     apply_resources,
     describe,
+    destroy_resources,
     graph_findings,
     lower_data,
     lowering_json,
@@ -82,6 +95,7 @@ from kci_cloud import (
     removals,
     standard_identity_of,
     standard_label_rule,
+    table_key_text,
 )
 
 
@@ -201,6 +215,7 @@ struct _Data(CloudAdapter, Movable):
         var l = List[Int]()
         l.append(FIELD_SERVICE)
         l.append(FIELD_JOB)
+        l.append(FIELD_TABLE)
         l.append(FIELD_BUCKET)
         l.append(FIELD_SERVICE_ACCOUNT)
         l.append(FIELD_GRANT)
@@ -223,8 +238,17 @@ struct _Data(CloudAdapter, Movable):
 
     def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
-        if r._oneof0_case == 3:
+        if Bool(r.bucket):
             out.append(LoweredNode(r.id + String("/bucket"), r.id, String("bucket")))
+            return out^
+        if Bool(r.table):
+            var key = List[Setting]()
+            key.append(Setting(String(KEY_FIELD), table_key_text(r.table.value())))
+            out.append(
+                LoweredNode(
+                    r.id + String("/table"), r.id, String("table"), List[String](), List[InputRef](), key^
+                )
+            )
             return out^
         var deps = List[String]()
         for u in range(len(r.uses)):
@@ -283,6 +307,7 @@ def _owned(node: String, retained: Bool) -> OwnedRecord:
         True,
         node.copy(),
         retained,
+        String(""),
     )
 
 
@@ -441,6 +466,152 @@ def test_a_retained_object_is_left_behind() raises:
     print("  test_a_retained_object_is_left_behind: PASS")
 
 
+# ---- 6. the table refusals --------------------------------------------------------------
+
+comptime _KEY = '"key":{"partition":{"name":"customer","type":"STRING"}}'
+
+
+def test_the_table_refusals_in_one_pass() raises:
+    var json = (
+        String('{"resource":[')
+        + String('{"id":"nokey","table":{}},')
+        + String('{"id":"nopart","table":{"key":{"name":"k"}}},')
+        + String('{"id":"untyped","table":{"key":{"partition":{"name":"customer"}}}},')
+        + String('{"id":"noorder","table":{"key":{"partition":{"name":"c","type":"STRING"},"order":{"type":"NUMBER"}}}},')
+        + String('{"id":"noname","table":{') + String(_KEY)
+        + String(',"indexes":[{"partition":{"name":"s","type":"STRING"}}]}},')
+        + String('{"id":"dup","table":{') + String(_KEY)
+        + String(',"indexes":[{"name":"by-s","partition":{"name":"s","type":"STRING"}},')
+        + String('{"name":"by-s","partition":{"name":"t","type":"BYTES"}}]}},')
+        + String('{"id":"ttl","table":{') + String(_KEY) + String(',"ttlField":""}},')
+        + String('{"id":"granting","table":{') + String(_KEY)
+        + String('},"uses":[{"target":{"resource":"ttl"},"access":"READ"}]}')
+        + String("]}")
+    )
+    var f = graph_findings(Catalog.v1(), _list(json))
+    var t = _all_text(f)
+    for want in [
+        "nokey|table.key|no key: a table finds its items by a key",
+        "nopart|table.key.partition|no partition field",
+        'untyped|table.key.partition.type|an untyped field ("customer"): its type is STRING, NUMBER or BYTES',
+        "noorder|table.key.order|an order with no field",
+        "noname|table.indexes[0].name|an index has no name",
+        'dup|table.indexes[1].name|duplicate access path name "by-s"',
+        "ttl|table.ttl_field|an empty ttl_field",
+        "granting|uses|a table runs as no identity, so it cannot use another resource",
+    ]:
+        assert_true(_has(t, String(want)), String("missing: ") + String(want) + "\n" + t)
+    assert_equal(len(f), 8, "exactly the findings above, each once:\n" + t)
+    for i in range(len(f)):
+        assert_equal(f[i].kind, FINDING_GRAPH)
+    print("  test_the_table_refusals_in_one_pass: PASS")
+
+
+def _table_graph(key: String) -> String:
+    return (
+        String('{"resource":[')
+        + String('{"id":"api","service":{') + String(IMG)
+        + String(',"env":{"ORDERS":{"ref":{"resource":"orders","standard":"NAME"}}}},')
+        + String('"uses":[{"target":{"resource":"orders"},"access":"READ_WRITE"}]},')
+        + String('{"id":"audit","service":{') + String(IMG) + String("},")
+        + String('"uses":[{"target":{"resource":"orders"},"access":"DESCRIBE"}]},')
+        + String('{"id":"orders","table":{"key":') + key
+        + String(',"indexes":[{"name":"by-state","partition":{"name":"state","type":"STRING"},')
+        + String('"order":{"name":"placed","type":"NUMBER"}},')
+        + String('{"name":"by-sku","partition":{"name":"sku","type":"BYTES"}}],')
+        + String('"ttlField":"expires"}}')
+        + String("]}")
+    )
+
+
+comptime _KEY_ONE = '{"name":"pk","partition":{"name":"customer","type":"STRING"}}'
+comptime _KEY_TWO = (
+    '{"name":"pk","partition":{"name":"customer","type":"STRING"},'
+    '"order":{"name":"placed","type":"NUMBER"}}'
+)
+
+
+def test_a_good_table_graph_is_clean() raises:
+    var resources = _list(_table_graph(String(_KEY_TWO)))
+    var f = graph_findings(Catalog.v1(), resources)
+    assert_equal(len(f), 0, _all_text(f))
+    assert_equal(table_key_text(resources[2].table.value()), "customer:STRING/placed:NUMBER")
+    var nodes = lower_data(_Data(), resources)
+    var at = -1
+    for i in range(len(nodes)):
+        if nodes[i].id == "orders/table":
+            at = i
+    assert_true(at >= 0, "the table lowers its primary node")
+    assert_equal(nodes[at].retention, RETAIN_KEEP, "a table is KEEP by default")
+    assert_equal(nodes[at].field(String(KEY_FIELD)), "customer:STRING/placed:NUMBER")
+    assert_equal(nodes[0].depends_on[0], "orders/table", "a bare id lands on the table node")
+    assert_equal(nodes[0].inputs[0].producer, "orders/table")
+    print("  test_a_good_table_graph_is_clean: PASS")
+
+
+# ---- 7. a table's key is immutable ------------------------------------------------------
+
+
+def _owned_table(node: String, key: String) -> OwnedRecord:
+    return OwnedRecord(
+        String("table"),
+        node.copy(),
+        String("data"),
+        String("none"),
+        String(""),
+        String(RUN_UNKNOWN),
+        True,
+        node.copy(),
+        True,
+        key.copy(),
+    )
+
+
+def test_a_changed_key_is_refused_before_any_change() raises:
+    var reg = Clouds(Catalog.v1())
+    reg.add(describe(_Data()))
+    var resources = _list(_table_graph(String(_KEY_TWO)))
+
+    var cloud = _Data()
+    cloud.owned.append(_owned_table(String("orders/table"), String("customer:STRING")))
+    var refused = 0
+    try:
+        var st = InMemoryStateStore()
+        _ = plan_resources(reg, cloud, _ctx(), resources, Creds.none(), st)
+    except e:
+        refused += 1
+        var t = String(e)
+        assert_true(_has(t, "orders"), t)
+        assert_true(_has(t, "table.key"), t)
+        assert_true(
+            _has(t, "the key changed from customer:STRING to customer:STRING/placed:NUMBER"), t
+        )
+        assert_true(_has(t, "a new key is a new table"), t)
+    try:
+        var st = InMemoryStateStore()
+        _ = apply_resources(reg, cloud, _ctx(), resources, Creds.none(), st)
+    except e:
+        refused += 1
+        assert_true(_has(String(e), "the key changed from customer:STRING"), String(e))
+    assert_equal(refused, 2, "the plan and the apply are both refused")
+    assert_equal(len(cloud.log[].created), 0, "nothing was created")
+
+    # The stored key, asked for again: planned.
+    var same = _Data()
+    same.owned.append(_owned_table(String("orders/table"), String("customer:STRING")))
+    var st = InMemoryStateStore()
+    var plan = plan_resources(
+        reg, same, _ctx(), _list(_table_graph(String(_KEY_ONE))), Creds.none(), st
+    )
+    assert_true(len(plan) > 0, "an unchanged key plans")
+    # A destroy removes what the cloud holds; it is not refused.
+    var gone = _Data()
+    gone.owned.append(_owned_table(String("orders/table"), String("customer:STRING")))
+    var st2 = InMemoryStateStore()
+    _ = destroy_resources(reg, gone, _ctx(), resources, Creds.none(), st2)
+    print("  test_a_changed_key_is_refused_before_any_change: PASS")
+
+
 def main() raises:
     print("test_cloud_data_rules")
     test_the_data_refusals_in_one_pass()
@@ -448,4 +619,7 @@ def main() raises:
     test_lowering_resolves_references_and_sets_retention()
     test_realize_must_keep_the_retention()
     test_a_retained_object_is_left_behind()
+    test_the_table_refusals_in_one_pass()
+    test_a_good_table_graph_is_clean()
+    test_a_changed_key_is_refused_before_any_change()
     print("ALL kci_cloud DATA RULE TESTS PASSED")
