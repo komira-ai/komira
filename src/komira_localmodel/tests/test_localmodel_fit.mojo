@@ -109,6 +109,15 @@ def _llama_70b_q6() -> ModelVariant:
     )
 
 
+def _llama_70b_q4() -> ModelVariant:
+    return ModelVariant(
+        String("Llama-3.3-70B-Q4"),
+        String("llama-3.3-70b"),
+        40 * GiB,
+        String("Q4"),
+    )
+
+
 def _qwen_7b_4bit() -> ModelVariant:
     return ModelVariant(
         String("Qwen-7B-4bit"),
@@ -233,13 +242,13 @@ def test_cpu_only_uses_total_ram_budget() raises:
 
 
 # =============================================================================
-# (4) THE YELLOW BAND — fits but tightly. A 50GB-Q6 model on a hypothetical
-# 64GB unified Mac sits above the GREEN margin (needs ~69GB for GREEN) but at/
-# below the 64GB budget -> YELLOW.
+# (4) THE YELLOW BAND — fits but tightly. Llama-3.3-70B-Q4 (40 GiB) on a 64 GiB
+# unified Mac: 45.2 GiB padded weights + 4 x 2.5 GiB KV + 2 GiB margin = 57.2
+# GiB, above the 54.4 GiB GREEN line but within the 64 GiB budget -> YELLOW.
 # =============================================================================
 def test_yellow_band() raises:
     var hw_64_unified = HostMemoryProfile(64 * GiB, 0, True, PLATFORM_MACOS)
-    var r = fit(_llama_70b_q6(), hw_64_unified)
+    var r = fit(_llama_70b_q4(), hw_64_unified)
     assert_equal(r.rating, FIT_YELLOW)
     assert_true(r.resident_bytes <= r.budget_bytes)  # fits.
     assert_true(
@@ -287,8 +296,8 @@ def test_auto_pick_green_first_highest_quality() raises:
 
 
 def test_auto_pick_picks_best_green_when_top_quant_too_big() raises:
-    # On a 32GB unified Mac: MXFP4 is RED, Q4 is YELLOW, Q2 is GREEN -> the
-    # policy picks the highest-quality GREEN (Q2, index 2), NOT the YELLOW Q4.
+    # On a 32GB unified Mac: MXFP4 and Q4 are RED, Q2 is GREEN -> the policy
+    # picks the highest-quality GREEN (Q2, index 2).
     var entry = _gpt_oss_catalog()
     var hw = HostMemoryProfile(32 * GiB, 0, True, PLATFORM_MACOS)
     var pick = auto_pick_highest_green_quant(entry, hw)
@@ -299,23 +308,23 @@ def test_auto_pick_picks_best_green_when_top_quant_too_big() raises:
 
 
 def test_auto_pick_falls_back_to_yellow() raises:
-    # A machine where the BEST that fits is YELLOW (none GREEN): a 26GB unified
-    # box. Q4 (24GB) resident ~30.8GB -> RED; build a catalog where exactly one
-    # variant lands YELLOW and none GREEN. Use a 64GB unified box with only the
-    # 50GB-Q6 llama variant (which is YELLOW there per test (4)).
+    # A machine where the BEST that fits is YELLOW (none GREEN): a 64GB unified
+    # box with the Q6 (RED there) and Q4 (YELLOW there, per test (4)) llama
+    # variants -> the Q4.
     var entry = CatalogEntry(String("llama-3.3-70b"), String("llama-3.3-70b"))
-    entry.add_variant(_llama_70b_q6())  # YELLOW on 64GB unified.
+    entry.add_variant(_llama_70b_q6())  # RED on 64GB unified.
+    entry.add_variant(_llama_70b_q4())  # YELLOW on 64GB unified.
     var hw = HostMemoryProfile(64 * GiB, 0, True, PLATFORM_MACOS)
     var pick = auto_pick_highest_green_quant(entry, hw)
     assert_true(pick.found)  # YELLOW counts as "runs".
-    assert_equal(pick.index, 0)
+    assert_equal(pick.index, 1)
     assert_equal(pick.result.rating, FIT_YELLOW)
     assert_true(pick.result.chosen)
 
 
 def test_auto_pick_not_found_all_red() raises:
     # On a 16GB unified Mac, every gpt-oss quant (including the 12GB Q2, whose
-    # conservative resident ~16.4GB exceeds 16GB) is RED -> found=False, and the
+    # conservative resident ~18.9GB exceeds 16GB) is RED -> found=False, and the
     # closest-miss is the smallest quant (Q2, index 2).
     var entry = _gpt_oss_catalog()
     var pick = auto_pick_highest_green_quant(entry, _mac_16gb_unified())
@@ -407,7 +416,7 @@ def _embed_variant() -> ModelVariant:
 
 
 def test_kv_scales_with_concurrency() raises:
-    # qwen-7b KV is 160 B/tok; under N streams the KV budget is N times the
+    # qwen-7b KV is 64 KiB/tok; under N streams the KV budget is N times the
     # single-stream cost.
     var single = kv_cache_bytes(String("qwen-7b"), DEFAULT_CONTEXT_TOKENS)
     var quad = kv_cache_bytes_concurrent(
@@ -453,27 +462,65 @@ def test_default_fit_is_concurrency_aware() raises:
 
 
 def test_concurrency_never_false_greens() raises:
-    # A model that is GREEN single-stream but whose N-stream KV pushes it over the
-    # budget must NOT stay GREEN under concurrency — the concurrency-aware fit
-    # converts a single-stream GREEN into YELLOW/RED as N grows (never the
-    # reverse). Construct a model whose KV term is the deciding factor: a large
-    # per-token KV family near the budget edge. Use a 64 GiB unified box and the
-    # llama-70b (640 B/tok) variant — it is YELLOW already; assert raising N never
-    # IMPROVES the rating (monotone non-improving as concurrency grows).
+    # Llama-3.3-70B-Q4 (40 GiB) on a 64 GiB unified Mac, where the KV term
+    # decides the rating (45.2 GiB padded weights, 2.5 GiB KV per 8k stream,
+    # 2 GiB margin, GREEN line 54.4 GiB, budget 64 GiB):
+    #   1 stream:   49.7 GiB -> GREEN
+    #   4 streams:  57.2 GiB -> YELLOW
+    #   16 streams: 87.2 GiB -> RED
+    # Each step must strictly lower the rating; a KV term that ignored the
+    # stream count would leave all three GREEN.
     var hw = HostMemoryProfile(64 * GiB, 0, True, PLATFORM_MACOS)
-    var v = _llama_70b_q6()
+    var v = _llama_70b_q4()
     var r1 = fit_concurrent(v, hw, DEFAULT_CONTEXT_TOKENS, 1)
+    var r4 = fit_concurrent(v, hw, DEFAULT_CONTEXT_TOKENS, 4)
     var r16 = fit_concurrent(v, hw, DEFAULT_CONTEXT_TOKENS, 16)
-    # resident estimate is non-decreasing in concurrency -> rating never improves.
-    assert_true(r16.resident_bytes >= r1.resident_bytes)
-    assert_true(r16.rating <= r1.rating)  # GREEN(2) > YELLOW(1) > RED(0).
+    assert_equal(r1.rating, FIT_GREEN)
+    assert_equal(r4.rating, FIT_YELLOW)
+    assert_equal(r16.rating, FIT_RED)
+
+
+# =============================================================================
+# (7b) GROUND TRUTH — the KV term against the fp16 size computed by hand from
+# each family's architecture: 2 (K and V) * layers * KV heads * head dim * 2
+# bytes per token. The table may round up, never down.
+# =============================================================================
+def test_kv_per_token_covers_architecture() raises:
+    # llama-3.3-70b: 80 layers, 8 KV heads, head dim 128.
+    var llama = 2 * 80 * 8 * 128 * 2
+    assert_true(kv_cache_bytes(String("llama-3.3-70b"), 1) >= llama)
+    # qwen-7b (Qwen2 / Qwen2.5 7B): 28 layers, 4 KV heads, head dim 128.
+    var qwen = 2 * 28 * 4 * 128 * 2
+    assert_true(kv_cache_bytes(String("qwen-7b"), 1) >= qwen)
+    # gpt-oss-120b: 36 layers, 8 KV heads, head dim 64.
+    var gpt = 2 * 36 * 8 * 64 * 2
+    assert_true(kv_cache_bytes(String("gpt-oss"), 1) >= gpt)
+    # An unknown family is covered up to Llama-2-13B (full multi-head
+    # attention: 40 layers, 40 heads, head dim 128).
+    var mha13 = 2 * 40 * 40 * 128 * 2
+    assert_true(kv_cache_bytes(String("some-other-family"), 1) >= mha13)
+    # 8k tokens of llama-3.3-70b KV is 2.5 GiB per stream.
+    assert_true(
+        kv_cache_bytes(String("llama-3.3-70b"), DEFAULT_CONTEXT_TOKENS)
+        >= 5 * GiB // 2
+    )
+
+
+def test_70b_q4_on_64gb_is_not_green() raises:
+    # With 4 streams of real KV (4 x 2.5 GiB) on top of the weights, a
+    # Llama-3.3-70B-Q4 on a 64 GiB Mac is tight, not comfortable; at a 32k
+    # context it does not fit at all.
+    var hw = HostMemoryProfile(64 * GiB, 0, True, PLATFORM_MACOS)
+    var v = _llama_70b_q4()
+    assert_true(fit(v, hw).rating != FIT_GREEN)
+    assert_equal(fit_with_context(v, hw, 32768).rating, FIT_RED)
 
 
 # =============================================================================
 # (8) The EMBED family KV=0 calibration row. An embedding model has no
 # KV-cache; its per-token KV cost is 0, so its resident estimate is concurrency-
 # invariant and its footprint is just weights (without this row the default
-# per-token cost would report ~2.27 GB for a ~65 MB model).
+# per-token cost would reserve 25 GiB of KV for a ~65 MB model).
 # =============================================================================
 def test_embed_family_zero_kv() raises:
     # The embed family's KV-cache cost is 0 at any context length / concurrency.
@@ -486,7 +533,7 @@ def test_embed_family_zero_kv() raises:
 
 def test_embed_footprint_is_weights_only() raises:
     # The embedder's OWN footprint (model_footprint_bytes, no OS headroom) is just
-    # its padded weights + 0 KV — NOT the ~2.27 GB the spurious KV term produced.
+    # its padded weights + 0 KV, with no KV term.
     # bge-small at ~96 MB weight -> footprint well under 200 MB (the embed fudge
     # is 1050 permille = +5%, no 2 GiB headroom in the footprint).
     var v = _embed_variant()

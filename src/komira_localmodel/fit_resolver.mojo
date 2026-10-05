@@ -19,10 +19,11 @@
 #            + kv_cache_bytes(ctx_tokens, family) * concurrent_streams
 #            + OS_HEADROOM_BYTES
 # The `family_fudge` and the per-token KV-cache cost are a TABLE keyed by model
-# family, not derived from architecture parameters. The table is a
-# conservative first cut, uncalibrated against measured RSS; lowering a value
-# toward measured truth needs care, raising one is always safe. See the
-# calibration note at the bottom of this file.
+# family. The KV row is the fp16 size from the family's architecture (layers,
+# KV heads, head dimension), rounded up; the weight fudge is a conservative
+# first cut, uncalibrated against measured RSS. Lowering a value toward
+# measured truth needs care, raising one is always safe. See the calibration
+# note at the bottom of this file.
 #
 # QUANTIZATION CHOICE: a CatalogEntry holds N quantizations of one model (e.g.
 # gpt-oss-120b at MXFP4 / Q8 / Q6 / Q4). `auto_pick_highest_green_quant` takes
@@ -96,12 +97,13 @@ comptime GREEN_BUDGET_PERMILLE: Int = 850
 # non-quantized layers like embeddings/norms kept in higher precision).
 comptime DEFAULT_WEIGHT_FUDGE_PERMILLE: Int = 1150
 
-# Default per-family KV-cache cost PER TOKEN (bytes). A conservative upper-bound
-# across the common 7B-70B-class architectures: roughly 2 bytes * 2 (K+V) *
-# n_layers * n_kv_heads * head_dim, but it is NOT derived from architecture
-# params: it is a flat conservative per-token cost, and `_kv_bytes_per_token`
-# overrides it per family.
-comptime DEFAULT_KV_BYTES_PER_TOKEN: Int = 320
+# KV-cache cost PER TOKEN (bytes) for a family with no row in
+# `_kv_bytes_per_token`: 2 (K and V) * layers * kv_heads * head_dim * 2 bytes
+# (fp16) for the largest common architecture up to 70B, Llama-2-13B with full
+# multi-head attention (2 * 40 * 40 * 128 * 2 = 819,200 = 800 KiB). It covers
+# the full-attention 7B models and the grouped-query 70B models; a family
+# larger than that needs its own row.
+comptime DEFAULT_KV_BYTES_PER_TOKEN: Int = 800 * 1024
 
 # -----------------------------------------------------------------------------
 # CONCURRENCY (the concurrency-aware fit). The KV-cache term sizes ONE
@@ -308,28 +310,31 @@ def _weight_fudge_permille(family: String) -> Int:
 
 
 def _kv_bytes_per_token(family: String) -> Int:
-    """Per-family KV-cache cost per token (bytes). Conservative upper bound.
+    """Per-family KV-cache cost per token (bytes), at fp16.
 
-    NOT derived from architecture params. Scales roughly with
-    the family's size class — a 120B model's KV-cache per token is far larger
-    than a 7B's (more layers, wider attention). These are deliberately
-    over-estimated.
+    One token keeps a key and a value vector per layer per KV head:
+    2 (K and V) * layers * kv_heads * head_dim * 2 bytes. The rows use the
+    published architecture of each family and round up:
+      * gpt-oss-120b: 36 layers, 8 KV heads, head dim 64 -> 73,728; the row
+        is 80 KiB. (Half its layers use a 128-token sliding window, so this
+        full-attention figure over-counts.)
+      * llama-3.3-70b: 80 layers, 8 KV heads, head dim 128 -> 327,680
+        (320 KiB).
+      * qwen-7b (the Qwen2 / Qwen2.5 7B architecture): 28 layers, 4 KV heads,
+        head dim 128 -> 57,344; the row is 64 KiB.
+    An engine that quantizes its KV cache uses less; none uses more.
     """
     if family == "gpt-oss":
-        return 1280  # very large model -> large per-token KV.
+        return 80 * 1024
     elif family == "llama-3.3-70b":
-        return 640
+        return 320 * 1024
     elif family == "qwen-7b":
-        return 160
+        return 64 * 1024
     elif family == "embed":
         # An EMBEDDING model has NO KV-cache: there is no autoregressive decode,
         # no per-token attention state to retain — an embed request is a single
         # forward pass that emits one vector and keeps nothing. So the per-token
-        # KV cost is ZERO. Without this row the default per-token cost would
-        # over-count the embedder resident by ~2.27 GB (the DEFAULT_CONTEXT_
-        # TOKENS * DEFAULT_KV_BYTES_PER_TOKEN term, for a ~65 MB model).
-        # KV=0 is the HONEST estimate, and it is also conservative-safe (a model
-        # with no KV genuinely needs no KV budget).
+        # KV cost is ZERO, and the embedder's estimate is concurrency-invariant.
         return 0
     return DEFAULT_KV_BYTES_PER_TOKEN
 
@@ -624,9 +629,10 @@ def auto_pick_highest_green_quant(
 # =============================================================================
 #
 # The resident-size estimate is the main accuracy unknown in this module. The
-# fudge factors (`_weight_fudge_permille`) and per-token KV-cache costs
-# (`_kv_bytes_per_token`) are a CONSERVATIVE first-cut table, not derived from
-# each model's architecture parameters, and they will be wrong in detail.
+# per-token KV-cache costs (`_kv_bytes_per_token`) are the fp16 sizes from each
+# family's architecture, rounded up; the weight fudge factors
+# (`_weight_fudge_permille`) are a CONSERVATIVE first cut, not measured, and
+# will be wrong in detail.
 #
 # How to calibrate it:
 #   1. Serve each catalog variant, warm-load it, run a representative inference
