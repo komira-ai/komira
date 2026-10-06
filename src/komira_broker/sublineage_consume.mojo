@@ -356,8 +356,8 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         """`_resolve_base_index` that ALSO captures the `_base`
         object_key set into `base_keys` in the SAME single `_base` walk. The
         captured set is BYTE-IDENTICAL to `SegmentBaseInputs._base_object_keys`
-        (same `log_start`-seeded `[log_start_seq .. head]` walk, same `marker_type
-        == MARKER_NONE` filter, same reaped-skip), so threading it into
+        (same `log_start`-seeded `[log_start_seq .. head]` walk, same `has_segment`
+        filter, same reaped-skip), so threading it into
         `folded_counts_cached` produces the EXACT same watermark the un-cached
         `folded_counts` would — while eliminating the duplicate `_base` LIST + GET
         traffic of a second walk."""
@@ -378,7 +378,11 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
             try:
                 var body_bytes = base.read_chunk(seq)
                 var body = ManifestBody.decode(body_bytes)
-                if body.marker_type != MARKER_NONE:
+                if not body.has_segment():
+                    # No segment object (`has_segment` False: a marker, 0
+                    # records): skip it. Its record_count still advances the
+                    # running offset, so later chunks keep their offsets.
+                    running_base += body.record_count
                     seq += Int64(1)
                     continue
                 var rc = body.record_count
@@ -466,7 +470,11 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
             try:
                 var body_bytes = shard.read_chunk(seq)
                 var body = ManifestBody.decode(body_bytes)
-                if body.marker_type != MARKER_NONE:
+                if not body.has_segment():
+                    # No segment object (`has_segment` False: a marker, 0
+                    # records): skip it. Its record_count still advances the
+                    # running offset, so later chunks keep their offsets.
+                    running += body.record_count
                     seq += Int64(1)
                     continue
                 var rc = body.record_count
@@ -527,7 +535,10 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         var running = sh.log_start_offset  # source-local base of the first chunk
         for i in range(len(sh.chunks)):
             ref c = sh.chunks[i]
-            if c.marker_type != MARKER_NONE:
+            if not c.has_segment():
+                # No segment object (a marker, 0 records): skip it; its
+                # record_count still advances the running offset.
+                running += c.record_count
                 continue
             var rc = c.record_count
             var chunk_lo = running
@@ -595,7 +606,11 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
             try:
                 var body_bytes = base.read_chunk(seq)
                 var body = ManifestBody.decode(body_bytes)
-                if body.marker_type != MARKER_NONE:
+                if not body.has_segment():
+                    # No segment object (`has_segment` False: a marker, 0
+                    # records): skip it. Its record_count still advances the
+                    # running offset, so later chunks keep their offsets.
+                    running_base += body.record_count
                     seq += Int64(1)
                     continue
                 var rc = body.record_count
@@ -652,7 +667,10 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         var running = sh.log_start_offset
         for i in range(len(sh.chunks)):
             ref c = sh.chunks[i]
-            if c.marker_type != MARKER_NONE:
+            if not c.has_segment():
+                # No segment object (a marker, 0 records): skip it; its
+                # record_count still advances the running offset.
+                running += c.record_count
                 continue
             var rc = c.record_count
             var chunk_lo = running
@@ -702,7 +720,11 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
             try:
                 var body_bytes = shard.read_chunk(seq)
                 var body = ManifestBody.decode(body_bytes)
-                if body.marker_type != MARKER_NONE:
+                if not body.has_segment():
+                    # No segment object (`has_segment` False: a marker, 0
+                    # records): skip it. Its record_count still advances the
+                    # running offset, so later chunks keep their offsets.
+                    running += body.record_count
                     seq += Int64(1)
                     continue
                 var rc = body.record_count
