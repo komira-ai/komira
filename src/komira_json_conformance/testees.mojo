@@ -25,13 +25,15 @@
 #                       Takes a String.
 #   komira_jsonl        infer_jsonl_schema, then materialize_jsonl_to_batch
 #                       with the inferred schema: the engine's JSONL reader,
-#                       on the text as one line. Takes bytes. A JSONL record
-#                       is an object, so the text is read right when its top
-#                       level is an object and it comes back as exactly one
-#                       row. A returned batch is MISREAD when the top level is
-#                       anything else (the reader refuses such a line; only a
-#                       text of nothing but whitespace comes back as zero rows
-#                       and no error) or when an object is not one row.
+#                       on the text as one line. Takes bytes. komira_jsonl
+#                       reads one object per line (its own rule: JSONL allows
+#                       any value, but a record becomes a row), so the text
+#                       is read right when its top level is an object and
+#                       it comes back as exactly one row. A returned batch is
+#                       MISREAD when the top level is anything else (the
+#                       reader refuses such a line; only a text of nothing
+#                       but whitespace comes back as zero rows and no error)
+#                       or when an object is not one row.
 #   komira_json_index   CRASH-ONLY. extract_column over a one-row STRING
 #                       column holding the file's bytes verbatim, with `->`
 #                       and with `->>`, on the path of the text's first key
@@ -66,10 +68,18 @@
 #   komira_connect      CRASH-ONLY. parse_connect_error_json on the raw bytes:
 #                       a tolerant scan for two keys, not a JSON parser.
 #
+# One testee is not a parser: `abort_probe` (CRASH-ONLY, test_abort_path.mojo)
+# aborts the process on a text that is `null` with only whitespace around it
+# (one suite file, y_structure_lonely_null.json) and accepts every other
+# text. It exists so the ABORTS: child path (runner.mojo) runs in a build
+# while no parser aborts; it has no allowlist file and is in no parser list.
+#
 # A String-taking entry point cannot be handed ill-formed UTF-8 (a String is
 # UTF-8 by type): such a file is converted with a checking conversion and,
 # when that fails, refused with NOT_UTF8 before the parser runs.
 # =============================================================================
+
+from std.os import abort
 
 from kci_logs import json_scan_string, json_skip_space, json_skip_value
 from kci_logs.aws_cloudwatch_query import parse_get_log_events_body
@@ -97,6 +107,11 @@ comptime PARSER_AVRO = "komira_avro"
 comptime PARSER_LOG_QUERY = "komira_log_query"
 comptime PARSER_KCI_LOGS = "kci_logs"
 comptime PARSER_CONNECT = "komira_connect"
+# Not a parser: a testee that aborts on one suite file (module header).
+comptime PARSER_ABORT_PROBE = "abort_probe"
+# The file abort_probe aborts on, and the text its abort prints.
+comptime ABORT_PROBE_FILE = "y_structure_lonely_null.json"
+comptime ABORT_PROBE_TEXT = "abort_probe: aborting on purpose"
 
 # The first word of the harness's two errors (module header).
 comptime NOT_UTF8 = "NOT_UTF8"
@@ -118,7 +133,12 @@ def parser_names() -> List[String]:
 
 def is_crash_only(parser: String) -> Bool:
     """The parsers whose verdicts are not gated (module header)."""
-    return parser == PARSER_JSON_INDEX or parser == PARSER_KCI_LOGS or parser == PARSER_CONNECT
+    return (
+        parser == PARSER_JSON_INDEX
+        or parser == PARSER_KCI_LOGS
+        or parser == PARSER_CONNECT
+        or parser == PARSER_ABORT_PROBE
+    )
 
 
 def _as_string(b: List[UInt8]) raises -> String:
@@ -317,6 +337,19 @@ def connect_testee(b: List[UInt8]) raises:
     _ = parse_connect_error_json(Span(b))
 
 
+def abort_probe_testee(b: List[UInt8]):
+    """Aborts the process when `b` is `null` with only whitespace around it;
+    returns (accepts) on anything else."""
+    var lo = 0
+    var hi = len(b)
+    while lo < hi and _is_ws(b[lo]):
+        lo += 1
+    while hi > lo and _is_ws(b[hi - 1]):
+        hi -= 1
+    if hi - lo == 4 and b[lo] == 0x6E and b[lo + 1] == 0x75 and b[lo + 2] == 0x6C and b[lo + 3] == 0x6C:
+        abort(ABORT_PROBE_TEXT)
+
+
 def run_testee(parser: String, b: List[UInt8]) raises:
     """Run `parser`'s testee on `b`: returns on accept, raises on reject."""
     if parser == PARSER_JSON:
@@ -335,5 +368,7 @@ def run_testee(parser: String, b: List[UInt8]) raises:
         kci_logs_testee(b)
     elif parser == PARSER_CONNECT:
         connect_testee(b)
+    elif parser == PARSER_ABORT_PROBE:
+        abort_probe_testee(b)
     else:
         raise Error("no testee named '" + parser + "'")

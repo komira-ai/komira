@@ -18,7 +18,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # pinned corpus and the allowlist), so it reruns only when one of them
 # changes, and nothing named komira_json_conformance exists unless every
 # parser passed. One test per parser, so an abort in one parser fails its
-# own test only and names it. Nothing depends on this package.
+# own test only and names it. test_abort_path runs the ABORTS: child path
+# with a test-only testee that aborts on one file (no parser aborts today, so
+# no allowlist runs it). Nothing depends on this package.
 
 _PARSERS = [
     "kci_logs",
@@ -72,13 +74,16 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     conda = False,
-    test_srcs = ["tests/test_gate.mojo"] + ["tests/test_{}.mojo".format(p) for p in _PARSERS],
+    test_srcs = [
+        "tests/test_abort_path.mojo",
+        "tests/test_gate.mojo",
+    ] + ["tests/test_{}.mojo".format(p) for p in _PARSERS],
     test_data = {
         "tests/test_{}.mojo".format(p): _SUITE | {
             "src/komira_json_conformance/allowlists/{}.txt".format(p): "allowlists/{}.txt".format(p),
         }
         for p in _PARSERS
-    },
+    } | {"tests/test_abort_path.mojo": _SUITE},
     visibility = ["PUBLIC"],
 )
 

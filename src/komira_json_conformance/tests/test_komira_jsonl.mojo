@@ -8,9 +8,12 @@
 # other size fails. An unlisted abort ends the process, so the test is red.
 # A text read right is one object coming back as exactly one row; a text
 # whose top level is anything else, returned without an error, is MISREAD
-# (testees.mojo). The reader refuses a line that is not one JSON object
-# (the y_ files whose top level is anything else are listed as REJECTED:, the
-# format's contract) and a repeated key; the n_ files it accepts are listed.
+# (testees.mojo). JSONL allows any JSON value on a line; komira_jsonl's own
+# rule is one object per line (a record becomes a row), so the y_ files whose
+# top level is anything else are listed as REJECTED:, as are a repeated key,
+# an object spanning lines (JSONL's rule) and nested members schema inference
+# does not take. The only n_ files listed are the two blank texts, MISREAD:
+# (komira_jsonl skips blank lines by choice and returns zero rows).
 # =============================================================================
 
 from komira_json_conformance import PARSER_JSONL, conformance_main

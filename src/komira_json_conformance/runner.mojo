@@ -96,16 +96,18 @@ def run_parser(
     return out^
 
 
-def check_abort(exe: String, name: String) raises -> AbortCheck:
-    """Run the ABORTS: file `name` alone in a child: this executable with
-    `--child <name>`."""
+def run_self(exe: String, name: String, args: List[String]) raises -> AbortCheck:
+    """Run `exe` with `args` in a child process and record how it ended
+    (`name` labels the record): died by a signal, or exited."""
     var spec = ChildSpec(exe)
-    spec.with_arg(String(CHILD_FLAG))
-    spec.with_arg(name)
+    var line = exe.copy()
+    for ref a in args:
+        spec.with_arg(a)
+        line += " " + a
     var sup = Supervisor()
     if sup.spawn(spec) <= Int32(0):
         sup.close()
-        raise Error("cannot spawn " + exe + " " + CHILD_FLAG + " " + name)
+        raise Error("cannot spawn " + line)
     var out_err = sup.drain_both(sup.stdout_fd(), sup.stderr_fd())
     var info = sup.wait_exit()
     sup.close()
@@ -119,16 +121,24 @@ def check_abort(exe: String, name: String) raises -> AbortCheck:
     )
 
 
+def check_abort(exe: String, name: String) raises -> AbortCheck:
+    """Run the ABORTS: file `name` alone in a child: this executable with
+    `--child <name>`."""
+    var args: List[String] = [String(CHILD_FLAG), name]
+    return run_self(exe, name, args)
+
+
 def run_child(parser: String, name: String) raises:
     """The child side: one file, its verdict on stdout, then exit."""
     var r = run_one(parser, name, suite_file_bytes(suite_dir(), name))
     print("CHILD", verdict_name(r.verdict), r.describe(), flush=True)
 
 
-def check_parser(parser: String) raises:
-    """`parser`'s conformance test: raises unless the gate passes."""
+def gate_parser(parser: String, allowlist: String) raises -> List[String]:
+    """Run `parser` over the suite against the allowlist text `allowlist`
+    (ABORTS: files in children) and return every gate problem."""
     var suite = load_suite()
-    var entries = parse_allowlist(read_data(allowlist_path(parser)))
+    var entries = parse_allowlist(allowlist)
     var skip = aborting_files(entries)
     var results = run_parser(parser, suite, skip)
     var exe = executable_path()
@@ -151,6 +161,12 @@ def check_parser(parser: String) raises:
         counts[Int(V_MISREAD)], "MISREAD;", len(skip), "ABORTS: files run in children;",
         len(entries), "allowlist entries;", "crash-only" if crash_only else "verdicts gated",
     )
+    return problems^
+
+
+def check_parser(parser: String) raises:
+    """`parser`'s conformance test: raises unless the gate passes."""
+    var problems = gate_parser(parser, read_data(allowlist_path(parser)))
     if len(problems) > 0:
         var msg = String(parser + ": " + String(len(problems)) + " conformance problem(s):")
         for ref p in problems:
