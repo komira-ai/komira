@@ -545,10 +545,13 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
         # first un-folded local offset == `folded_through_total`, at the first
         # surviving chunk seq). Monotone-forward; a stale 412 is a harmless lose
         # (a concurrent advance won — the pointer is monotone-forward).
-        # Swallowing ANY failure here is safe: the tombstones above then sit
-        # on chunks at or above `_LOG_START`, which ReapWorker skips and counts
-        # (`ReapResult.skipped_live_count`) and `CasManifestStore.reap` refuses;
-        # the next call re-reads `_LOG_START` and re-advances it.
+        # A swallowed failure deletes nothing live: the tombstones above then
+        # sit on chunks at or above `_LOG_START`, which `CasManifestStore.reap`
+        # refuses and the broker `ReapWorker` skips (chunk_reclaim_guard.mojo),
+        # and the next call re-reads `_LOG_START` and re-advances. That is NOT
+        # a claim that reaping these tombstones is safe once the advance lands:
+        # `_base` may still reference their `.seg` objects
+        # (komira-ai/komira#494).
         if folded_through_total > cur.log_start_offset:
             try:
                 _ = s.advance_log_start(

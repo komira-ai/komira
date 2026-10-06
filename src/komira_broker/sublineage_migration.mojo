@@ -585,10 +585,13 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         # Advance the durable legacy `_LOG_START` to the migrated watermark (the
         # first un-migrated dense offset, at the first surviving chunk seq).
         # Monotone-forward; a stale 412 is a harmless lose.
-        # Swallowing ANY failure here is safe: the tombstones above then sit
-        # on chunks at or above `_LOG_START`, which ReapWorker skips and counts
-        # (`ReapResult.skipped_live_count`) and `CasManifestStore.reap` refuses;
-        # the next call re-reads `_LOG_START` and re-advances it.
+        # A swallowed failure deletes nothing live: the tombstones above then
+        # sit on chunks at or above `_LOG_START`, which `CasManifestStore.reap`
+        # refuses and the broker `ReapWorker` skips (chunk_reclaim_guard.mojo),
+        # and the next call re-reads `_LOG_START` and re-advances. That is NOT
+        # a claim that reaping these tombstones is safe once the advance lands:
+        # `_base` may still reference their `.seg` objects
+        # (komira-ai/komira#494).
         if migrated_through_dense > cur.log_start_offset:
             try:
                 _ = legacy.advance_log_start(
