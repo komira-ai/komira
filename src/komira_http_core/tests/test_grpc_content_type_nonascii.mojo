@@ -6,9 +6,11 @@
 # `content-type` header to decide whether the request goes to the gRPC
 # dispatcher. The header value is the peer's: any byte can be in it. Reading
 # it with `ct[byte=i]` asserts on the first UTF-8 continuation byte ("does not
-# lie on a codepoint boundary") and aborts the whole process, so before the
-# fix every leg below with a non-ASCII byte killed the test binary (and, in
-# production, the server) instead of answering.
+# lie on a codepoint boundary") and aborts the whole process. The old scan
+# stopped at the first `;`, so a non-ASCII byte AFTER it was never read (T1
+# passed on the old code: it pins the behaviour, not the abort); one BEFORE
+# any `;` killed the test binary (and, in production, the server): T2 and the
+# second half of T3 aborted on the old code.
 #
 # Spec: RFC 9110 8.3.1, `media-type = type "/" subtype parameters`; only the
 # type/subtype decides the codec, a parameter (ASCII or not) is ignored. A
@@ -18,8 +20,9 @@
 #   T1  a non-ASCII parameter on each gRPC base type: still gRPC.
 #   T2  a non-ASCII byte in the base type, with and without `;`: not gRPC.
 #   T3  the value as the real HPACK decoder hands it to the serve loop (a
-#       literal header field whose value bytes are `... charset=caf C3 A9`):
-#       still gRPC.
+#       literal header field): `application/grpc; charset=caf C3 A9` is
+#       gRPC; `application/grpc C3 A9` (no parameter) is not, and must not
+#       abort.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -45,13 +48,13 @@ def test_t2_nonascii_base_is_not_grpc() raises:
     print("    OK")
 
 
-def test_t3_hpack_decoded_value() raises:
-    print("  T3 value from the HPACK decoder...")
-    # Literal header field without indexing, new name (RFC 7541 6.2.2):
-    # 0x00, name length, name, value length, value (no Huffman).
+def _hpack_content_type(prefix: String) raises -> String:
+    """`prefix` + bytes C3 A9 as the HPACK decoder returns a literal
+    `content-type` field carrying them (RFC 7541 6.2.2: literal without
+    indexing, new name, no Huffman)."""
     var name = String("content-type")
     var value = List[UInt8]()
-    for b in String("application/grpc; charset=caf").as_bytes():
+    for b in prefix.as_bytes():
         value.append(b)
     value.append(UInt8(0xC3))
     value.append(UInt8(0xA9))
@@ -67,7 +70,13 @@ def test_t3_hpack_decoded_value() raises:
     var headers = dec.decode_block(Span(block))
     assert_equal(len(headers), 1)
     assert_equal(String(headers[0].name), name)
-    assert_true(is_grpc_content_type(String(headers[0].value)))
+    return String(headers[0].value)
+
+
+def test_t3_hpack_decoded_value() raises:
+    print("  T3 value from the HPACK decoder...")
+    assert_true(is_grpc_content_type(_hpack_content_type(String("application/grpc; charset=caf"))))
+    assert_false(is_grpc_content_type(_hpack_content_type(String("application/grpc"))))
     print("    OK")
 
 

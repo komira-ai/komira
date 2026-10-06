@@ -7,7 +7,9 @@
 # asserts on the first UTF-8 continuation byte ("does not lie on a codepoint
 # boundary") and aborts the whole process, so before the fix every leg below
 # killed the test binary (and, in production, the server) instead of
-# answering.
+# answering. (The old content-type scan stopped at the first `;`, so only a
+# non-ASCII byte before any `;` reached the assert; each content-type leg has
+# one.)
 #
 # Spec:
 #   * content-type (RFC 9110 8.3.1): only type/subtype picks the codec; a
@@ -24,8 +26,10 @@
 #       well-formed value next to it still parses.
 #   T3  parse_connect_timeout_ms: the same.
 #   T4  ConnectService.dispatch_grpc with `application/grpc+proto;
-#       charset=café`: the echo answers grpc-status 0 with the request bytes,
-#       and the same service then answers a plain request (it survived).
+#       charset=café`: the echo answers grpc-status 0 with the request bytes.
+#       With `application/grpcé`: refused as an unknown codec (UNIMPLEMENTED,
+#       no handler run), and the same service then answers a plain request
+#       (it survived).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -37,6 +41,7 @@ from komira_connect import (
     CODEC_ID_UNKNOWN,
     ConnectService,
     DEADLINE_UNSET_MICROS,
+    GRPC_STATUS_UNIMPLEMENTED,
     codec_id_for_content_type,
     grpc_decode_unary,
     grpc_encode_unary,
@@ -109,6 +114,13 @@ def test_t4_dispatch_survives() raises:
     assert_equal(len(echoed), 2)
     assert_equal(echoed[0], UInt8(0xAA))
     assert_equal(echoed[1], UInt8(0xBB))
+
+    var refused = svc.dispatch_grpc(
+        String("/test.Svc/Echo"),
+        String("application/grpcé"),
+        grpc_encode_unary(Span(msg)),
+    )
+    assert_equal(refused.grpc_status, GRPC_STATUS_UNIMPLEMENTED)
 
     var resp2 = svc.dispatch_grpc(
         String("/test.Svc/Echo"),
