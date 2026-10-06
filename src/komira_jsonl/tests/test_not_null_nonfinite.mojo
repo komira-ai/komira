@@ -15,19 +15,30 @@
 #     the exact message from all six writers (write_batch_jsonl_direct,
 #     write_batch_json_pretty, write_batch_jsonl_fused,
 #     write_batch_jsonl_fused_range, encode.write_batch_jsonl,
-#     write_row_output_jsonl). Catches a writer that emits `null` into a
-#     NOT NULL column (the defect), or one path that lacks the check.
+#     write_row_output_jsonl); with a nullable column before the NOT NULL
+#     one, NaN in the nullable one is allowed and NaN in the NOT NULL one
+#     is refused; the row output writer numbers rows across blocks and
+#     refuses FLOAT32 too. Catches a writer that emits `null` into a NOT
+#     NULL column (the defect), one path that lacks the check, a check
+#     that reads column 0's nullability for every column, and a row
+#     number taken from the block instead of the output.
 #   * test_writers_nullable_unchanged -- in a nullable column NaN/+-Inf and
 #     a NULL cell are still written as `null` by every writer, and a NOT
-#     NULL column of finite values is written as before. Catches a check
-#     that refuses too much.
+#     NULL column of finite values is written as before; with a NOT NULL
+#     column before a nullable one, NaN/+Inf in the nullable one is written
+#     as null. Catches a check that refuses too much, or reads column 0's
+#     nullability for the nullable column.
 #   * test_reader_refuses_null_in_not_null -- `null` in a NOT NULL FLOAT64,
 #     INT64 or STRING field, and an object without the field's key, raise
-#     the exact message with the line (blank lines counted). Catches a
-#     reader that materializes NULL into a NOT NULL field (the defect).
+#     the exact message with the line (blank lines counted); with a
+#     nullable field first, null and a missing key in the NOT NULL second
+#     field are refused. Catches a reader that materializes NULL into a
+#     NOT NULL field (the defect), and one that reads the first field's
+#     nullability instead of the value's field.
 #   * test_reader_nullable_unchanged -- the same inputs read into nullable
 #     fields give NULLs, and NOT NULL fields with every value present read
-#     without NULLs and stay NOT NULL.
+#     without NULLs and stay NOT NULL; with mixed nullability, null and a
+#     missing key in the nullable field (first or second) read as NULL.
 # =============================================================================
 
 from std.memory import bitcast
@@ -39,7 +50,7 @@ from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_core.arrow.schema import Field, Schema, SchemaBuilder
 from komira_core.collections.slab import Slab
-from komira_row_format.row_block import DT_F64, RowBlock
+from komira_row_format.row_block import DT_F32, DT_F64, RowBlock
 from komira_row_format.row_output import RowOutput, RowOutputLayout
 
 from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
@@ -123,22 +134,69 @@ def _f32_not_null_batch(values: List[Float32]) raises -> RecordBatch:
     return rbb.build(sb.build())
 
 
-def _row_output(values: List[Float64], nullable: Bool) raises -> RowOutput:
-    """One FLOAT64 column `f` as a RowOutput of one block, no validity."""
+def _row_block(values: List[Float64], tag: UInt8) raises -> RowBlock:
+    """One block of one float column at offset 0 (FLOAT64 or FLOAT32)."""
     var blk = RowBlock.with_capacity(len(values), 0, 8)
     for i in range(len(values)):
-        blk.write_fixed[DType.float64](i, 0, values[i])
+        if tag == DT_F64:
+            blk.write_fixed[DType.float64](i, 0, values[i])
+        else:
+            blk.write_fixed[DType.float32](i, 0, Float32(values[i]))
     blk.set_n_rows(len(values))
+    return blk^
+
+
+def _row_output_blocks(
+    first: List[Float64], second: List[Float64], tag: UInt8, nullable: Bool
+) raises -> RowOutput:
+    """One float column `f` as a RowOutput, no validity: a block holding
+    `first`, then (when not empty) a block holding `second`."""
     var blocks = Slab[RowBlock]()
-    blocks.append(blk^)
+    blocks.append(_row_block(first, tag))
+    if len(second) > 0:
+        blocks.append(_row_block(second, tag))
     var offsets = List[Int]()
     offsets.append(0)
     var tags = List[UInt8]()
-    tags.append(DT_F64)
+    tags.append(tag)
     var layout = RowOutputLayout(offsets^, tags^, 0, False)
     var sb = SchemaBuilder()
-    sb.add_field(Field("f", ArrowType.FLOAT64, nullable))
+    var at = ArrowType.FLOAT64 if tag == DT_F64 else ArrowType.FLOAT32
+    sb.add_field(Field("f", at, nullable))
     return RowOutput(blocks^, layout^, sb.build())
+
+
+def _row_output(values: List[Float64], nullable: Bool) raises -> RowOutput:
+    """One FLOAT64 column `f` as a RowOutput of one block, no validity."""
+    return _row_output_blocks(values, List[Float64](), DT_F64, nullable)
+
+
+def _f64_pair_batch(
+    a: List[Float64], a_nullable: Bool, b: List[Float64], b_nullable: Bool
+) raises -> RecordBatch:
+    """FLOAT64 column `a` then FLOAT64 column `b`, each with its own
+    nullability, so a check that reads the wrong column's flag shows."""
+    var aa: PrimitiveArray[DType.float64]
+    var ba: PrimitiveArray[DType.float64]
+    if a_nullable:
+        aa = PrimitiveArray[DType.float64].allocate_nullable(len(a))
+    else:
+        aa = PrimitiveArray[DType.float64].allocate(len(a))
+    if b_nullable:
+        ba = PrimitiveArray[DType.float64].allocate_nullable(len(b))
+    else:
+        ba = PrimitiveArray[DType.float64].allocate(len(b))
+    for i in range(len(a)):
+        aa.set(i, a[i])
+    for i in range(len(b)):
+        ba.set(i, b[i])
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.FLOAT64, a_nullable))
+    sb.add_field(Field("b", ArrowType.FLOAT64, b_nullable))
+    var rbb = RecordBatchBuilder()
+    rbb.add_column(Column.from_primitive[DType.float64](aa^))
+    rbb.add_column(Column.from_primitive[DType.float64](ba^))
+    return rbb.build(sb.build())
 
 
 comptime _W = "json_writer: column '"
@@ -243,6 +301,28 @@ def test_writers_refuse_nonfinite_in_not_null() raises:
         _row_writer_error(_row_output(_l(0.5, 0.25, -inf64), False)),
         _want_writer("f", 2, "-Inf"), "row output",
     )
+    # Row output over two blocks: the row number counts across blocks
+    # (row 1 of the second block is row 3), not from each block's start.
+    assert_equal(
+        _row_writer_error(
+            _row_output_blocks(_l(0.5, 0.25), _l(1.0, -inf64), DT_F64, False)
+        ),
+        _want_writer("f", 3, "-Inf"), "row output, second block",
+    )
+    # Row output, NOT NULL FLOAT32 column.
+    assert_equal(
+        _row_writer_error(
+            _row_output_blocks(_l(0.5, nan64), List[Float64](), DT_F32, False)
+        ),
+        _want_writer("f", 1, "NaN"), "row output f32",
+    )
+    # Two columns, nullable `a` first and NOT NULL `b` second: NaN in `a`
+    # is allowed, NaN in `b` is refused. A check reading column 0's flag
+    # for column 1 lets `b` through.
+    _assert_all(
+        _writer_errors(_f64_pair_batch(_l(nan64, 1.0), True, _l(1.0, nan64), False)),
+        _want_writer("b", 1, "NaN"), "nullable a, NOT NULL b",
+    )
 
 
 def test_writers_nullable_unchanged() raises:
@@ -270,6 +350,27 @@ def test_writers_nullable_unchanged() raises:
     # NOT NULL with finite values only: written, no error.
     var errs = _writer_errors(_f64_batch(_l(1.5, _f(0x8000000000000000), _f(0x0000000000000001)), False))
     _assert_all(errs, String(""), "finite NOT NULL")
+    # The mirror of the two-column case: NOT NULL `a` (finite) first and
+    # nullable `b` holding NaN/+Inf second. Every writer writes null for
+    # `b`; a check reading column 0's flag for column 1 refuses it.
+    var pair = _f64_pair_batch(_l(1.5, 2.5), False, _l(nan64, inf64), True)
+    _assert_all(_writer_errors(pair), String(""), "NOT NULL a, nullable b")
+    var want_pair = String('{"a":1.5,"b":null}\n{"a":2.5,"b":null}\n')
+    buf.clear()
+    write_batch_jsonl_direct(buf, pair)
+    assert_equal(_text(buf), want_pair, "pair direct")
+    buf.clear()
+    write_batch_jsonl_fused(buf, pair)
+    assert_equal(_text(buf), want_pair, "pair fused")
+    buf.clear()
+    write_batch_jsonl(buf, pair)
+    assert_equal(_text(buf), want_pair, "pair encode")
+    # Row output: nullable FLOAT32 NaN over two blocks is written as null.
+    buf.clear()
+    write_row_output_jsonl(
+        buf, _row_output_blocks(_l(0.5), _l(nan64), DT_F32, True)
+    )
+    assert_equal(_text(buf), String('{"f":0.5}\n{"f":null}\n'), "row f32 nullable")
     buf.clear()
     write_batch_jsonl_direct(buf, _f64_batch(_l(1.5, _f(0x8000000000000000), _f(0x0000000000000001)), False))
     assert_equal(_text(buf), String('{"f":1.5}\n{"f":-0.0}\n{"f":5e-324}\n'))
@@ -278,6 +379,14 @@ def test_writers_nullable_unchanged() raises:
 def _schema1(name: String, ty: ArrowType, nullable: Bool) -> Schema:
     var sb = SchemaBuilder()
     sb.add_field(Field(name, ty, nullable))
+    return sb.build()
+
+
+def _schema2(a_nullable: Bool, b_nullable: Bool) -> Schema:
+    """FLOAT64 field `a` then FLOAT64 field `b`."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.FLOAT64, a_nullable))
+    sb.add_field(Field("b", ArrowType.FLOAT64, b_nullable))
     return sb.build()
 
 
@@ -311,6 +420,17 @@ def test_reader_refuses_null_in_not_null() raises:
         _read_error('{"s":null}\n', _schema1("s", ArrowType.STRING, False)),
         String("komira_jsonl: line 1: NOT NULL field 's' holds JSON null"),
     )
+    # Two fields, nullable `a` first and NOT NULL `b` second: the check
+    # reads the nullability of the field the value belongs to, not the
+    # first field's.
+    assert_equal(
+        _read_error('{"a":null,"b":1}\n{"a":1,"b":null}\n', _schema2(True, False)),
+        String("komira_jsonl: line 2: NOT NULL field 'b' holds JSON null"),
+    )
+    assert_equal(
+        _read_error('{"a":null,"b":1}\n{"a":1}\n', _schema2(True, False)),
+        String("komira_jsonl: line 2: NOT NULL field 'b' has no key in the object"),
+    )
 
 
 def test_reader_nullable_unchanged() raises:
@@ -332,6 +452,21 @@ def test_reader_nullable_unchanged() raises:
     assert_false(c2.is_null(0))
     assert_false(c2.is_null(1))
     assert_equal(c2.get(1), -2.0)
+    # Two fields with mixed nullability: a null or a missing key in the
+    # nullable field reads as NULL whether it is first or second.
+    var t3 = String('{"a":null,"b":1}\n{"b":2}\n')
+    var b3 = materialize_jsonl_to_batch(t3.as_bytes(), _schema2(True, False))
+    assert_equal(b3.num_rows(), 2)
+    assert_true(b3.column_as_primitive_float64(0).is_null(0))
+    assert_true(b3.column_as_primitive_float64(0).is_null(1))
+    assert_equal(b3.column_as_primitive_float64(1).get(1), 2.0)
+    var t4 = String('{"a":1,"b":null}\n{"a":2}\n')
+    var b4 = materialize_jsonl_to_batch(t4.as_bytes(), _schema2(False, True))
+    assert_equal(b4.num_rows(), 2)
+    var c4 = b4.column_as_primitive_float64(1)
+    assert_true(c4.is_null(0))
+    assert_true(c4.is_null(1))
+    assert_false(b4.column_as_primitive_float64(0).is_null(1))
 
 
 def main() raises:

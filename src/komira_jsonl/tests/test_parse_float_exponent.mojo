@@ -19,8 +19,10 @@
 #   * test_digits_shift_the_exponent -- 0.(399 zeros)1e400 and 1(400
 #     zeros)e-400 are both 1.0: the digit count and the decimal point move
 #     the exponent, and the exponent part is combined with them exactly even
-#     past the double range. Catches an exponent clamped before the digit
-#     adjustment is applied.
+#     past the double range; 0.(9999 zeros)1e10000 and 1(10000
+#     zeros)e-10000 are 1.0 too. Catches an exponent clamped before the
+#     digit adjustment is applied, including a cap that does not grow with
+#     the input length (a fixed cap of 1000 reads them as 0.0 and +Inf).
 #   * test_range_edges -- 1e308, DBL_MAX and the two decimals either side of
 #     the DBL_MAX/2^1024 midpoint, 4.9e-324 and 5e-324 (the smallest
 #     subnormal), the two decimals either side of half of it, DBL_MIN and
@@ -35,8 +37,11 @@
 #     more or less in the last digit moves the result; 2^-1075 (752
 #     digits) ties to 0.0 and goes to the smallest subnormal with a
 #     trailing 1, also when that 1 is past the 800th significant digit;
-#     trailing zeros past it do not. Catches a parser that rounds a
-#     truncated mantissa without an exact fallback.
+#     trailing zeros past it do not; the 768-digit midpoint between the
+#     largest subnormal and DBL_MIN ties to DBL_MIN, and one unit lower in
+#     its last digit reads the largest subnormal. Catches a parser that
+#     rounds a truncated mantissa without an exact fallback, and a digit
+#     cap in the fallback below the 768 digits that midpoint needs.
 #   * test_eisel_lemire_matches_exact -- 20000 pseudo-random (w, q), w up
 #     to 19 digits and q over the whole table: decimal_to_f64(w, q) is the
 #     double r with mid(prev(r), r) < w * 10^q < mid(r, next(r)) (ties to
@@ -128,6 +133,11 @@ def test_digits_shift_the_exponent() raises:
     _check(_zeros(400) + "1.5", 0x3FF8000000000000)
     # 10^308 spelled with 300 fraction zeros: 0.(300 zeros)1e609.
     _check("0." + _zeros(300) + "1e609", 0x7FE1CCF385EBC8A0)
+    # Digit shifts larger than 1000: the exponent cap must grow with the
+    # input length, or 1e10000 is held below 10000 before the shift of the
+    # 9999 fraction zeros (or the 10000 integer zeros) brings it back.
+    _check("0." + _zeros(9999) + "1e10000", ONE)
+    _check("1" + _zeros(10000) + "e-10000", ONE)
 
 
 def test_range_edges() raises:
@@ -183,6 +193,25 @@ def _half_min_subnormal_digits() -> String:
     )
 
 
+def _dbl_min_midpoint_digits() -> String:
+    """The 768 significant digits of (2^53 - 1) * 2^-1075 (= digits *
+    10^-1075), the midpoint between the largest subnormal (odd mantissa)
+    and DBL_MIN."""
+    return (
+        String("2225073858507201136057409796709131975934819546351645648023426109724822222021")
+        + "0769455165295239081350879141491589130396211068700864386945946455276572074078"
+        + "2062174337998814106326732925355228688137214901298112245145188984905722230728"
+        + "5255133155755015914397476397983411801999323962548289017107081850690630666655"
+        + "9949382757725720157630626906633326475653000092458883164330377797918696120494"
+        + "9739037782970490505108060994073026293712895895000358379996720725430436028407"
+        + "8895771796150945516748243471030702609144621572289880258182545180325707018860"
+        + "8721131280795122334262883686223215037756666225039825343359745688844239002654"
+        + "9819838548794829220689472168983109969836584681402285424333066033985088644580"
+        + "4001034933970427567186443383770486037861622771738545623065874679014086723327"
+        + "63671875"
+    )
+
+
 comptime _DBL_MAX_MIDPOINT = (
     "17976931348623158079372897140530341507993413271003782693617377898044496829276475094664901797758720709633028641669288791094655554785194040263065748867150582068190890200070838367627385484581771153176447573027006985557136695962284291481986083493647529271907416844436551070434271155969950809304288017790417449779"
 )
@@ -212,6 +241,14 @@ def test_long_mantissas() raises:
     # ... and zeros past it do not.
     _check(h + _zeros(100) + "e-1175", POS_ZERO)
     _check("0." + _zeros(323) + h + _zeros(200), POS_ZERO)
+    # The midpoint below DBL_MIN needs 768 digits to decide: on it, ties
+    # go to the even DBL_MIN; one unit lower in the last digit, to the
+    # largest subnormal. A digit cap under 768 truncates the midpoint
+    # below itself and reads the largest subnormal for both.
+    var mid = _dbl_min_midpoint_digits()
+    _check(mid + "e-1075", 0x0010000000000000)
+    _check(String(mid[byte=0:767]) + "4e-1075", 0x000FFFFFFFFFFFFF)
+    _check(String(mid[byte=0:767]) + "6e-1075", 0x0010000000000000)
     # 24 significant digits, all exact after the 19th (zeros).
     _check("1.00000000000000000000000", ONE)
     _check("100000000000000000000000e-23", ONE)
