@@ -28,6 +28,16 @@ BOTOCORE_MODELS = {
         api_version = "2018-11-29",
         sha256 = "fdb831dc9be4cb380b42e21525a1a7e6e379958b7d8a3df7fd71c6c7f50df47c",
     ),
+    # Amazon CloudWatch (//src/komira_aws_metrics), whose GetMetricData
+    # reader is hand-written: the model declares smithy-rpc-v2-cbor, which
+    # the AWS generator refuses. Its test_cloudwatch_model checks the
+    # reader's constants against this model and its endpoint against the
+    # service's endpoint tests. Its endpoint prefix and signing name are
+    # `monitoring`.
+    "cloudwatch": struct(
+        api_version = "2010-08-01",
+        sha256 = "c217274ee4301d6a1a826db9f0d2095c181c4c29e5f97360d84929006ea079dc",
+    ),
     # Amazon DynamoDB (//src/komira_aws_dynamodb).
     "dynamodb": struct(
         api_version = "2012-08-10",

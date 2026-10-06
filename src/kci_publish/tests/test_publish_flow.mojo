@@ -247,6 +247,53 @@ def test_an_oidc_channel_publishes_only_from_its_stage() raises:
     print("  test_an_oidc_channel_publishes_only_from_its_stage: PASS")
 
 
+def test_a_break_glass_run_publishes_only_from_the_break_glass_environment() raises:
+    # channel `gamma` trusts `gamma` and, for a break-glass run,
+    # `gamma-breakglass`; a break-glass run in `gamma-breakglass` proceeds
+    var store = NoSecretStore()
+    var ok = _flags(String("bg_ok"), String("gamma"), True)
+    ok.stage = String("gamma")
+    ok.environment = String("gamma-breakglass")
+    ok.break_glass = True
+    var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("gamma")), PublishCredential())
+    var got = _Rec()
+    var rep = _flow(ok, reg, store, got)
+    assert_equal(rep.exit_code(), EXIT_OK, String("\n").join(rep.lines))
+    # a break-glass run in the main environment `gamma` is refused: the
+    # break-glass publisher is the only one it may use
+    var main_env = _flags(String("bg_main"), String("gamma"), True)
+    main_env.stage = String("gamma")
+    main_env.environment = String("gamma")
+    main_env.break_glass = True
+    var reg2 = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("gamma")), PublishCredential())
+    var got2 = _Rec()
+    var rep2 = _flow(main_env, reg2, store, got2)
+    assert_equal(rep2.error_id, String(ERROR_STAGE_ENVIRONMENT), String("\n").join(rep2.lines))
+    assert_true(rep2.has_line_containing(String("names environment 'gamma-breakglass'")), String("\n").join(rep2.lines))
+    assert_equal(reg2.transport().call_count(), 0)
+    # a run that is not break-glass, in `gamma-breakglass`, is refused too
+    var not_bg = _flags(String("bg_not"), String("gamma"), True)
+    not_bg.stage = String("gamma")
+    not_bg.environment = String("gamma-breakglass")
+    var reg3 = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("gamma")), PublishCredential())
+    var got3 = _Rec()
+    var rep3 = _flow(not_bg, reg3, store, got3)
+    assert_equal(rep3.error_id, String(ERROR_STAGE_ENVIRONMENT), String("\n").join(rep3.lines))
+    # a channel that names no break-glass publisher refuses every break-glass run
+    var none = _flags(String("bg_none"), String("example-oidc"), True)
+    none.environment = String("prod")
+    none.break_glass = True
+    var reg4 = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc")), PublishCredential())
+    var got4 = _Rec()
+    var rep4 = _flow(none, reg4, store, got4)
+    assert_equal(rep4.exit_code(), EXIT_REFUSED, String("\n").join(rep4.lines))
+    assert_equal(rep4.error_id, String(ERROR_STAGE_ENVIRONMENT))
+    assert_true(rep4.has_line_containing(String("names no break_glass_push_identity")), String("\n").join(rep4.lines))
+    assert_equal(reg4.transport().call_count(), 0)
+    assert_equal(len(got4.rec.records), 0)
+    print("  test_a_break_glass_run_publishes_only_from_the_break_glass_environment: PASS")
+
+
 def test_an_unresolvable_secret_fails_before_any_write() raises:
     var f = _flags(String("nosecret"), String("example-stable"), False)
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-stable")), PublishCredential())
@@ -283,6 +330,7 @@ def main() raises:
     test_dry_run_private_oidc_is_refused()
     test_dry_run_private_api_token_reads_with_the_token()
     test_an_oidc_channel_publishes_only_from_its_stage()
+    test_a_break_glass_run_publishes_only_from_the_break_glass_environment()
     test_an_unresolvable_secret_fails_before_any_write()
     test_a_recorder_that_cannot_record_sends_nothing()
     print("test_publish_flow: ALL PASS")

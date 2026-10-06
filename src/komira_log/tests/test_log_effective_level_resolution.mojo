@@ -84,7 +84,7 @@ def _drained(mut eng: SharedEngine) raises -> List[String]:
 
 
 # ---------------------------------------------------------------------------
-# FINDING 3 — the LOWER direction, which was unreachable.
+# CASE 3 — the LOWER direction: a per-module rule below the global level.
 # ---------------------------------------------------------------------------
 
 

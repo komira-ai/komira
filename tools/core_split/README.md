@@ -23,9 +23,20 @@ them.
 | `no_mixed_closure.sh` | no target may depend on a package and on its replacement; `--selftest` proves it can fail |
 | `fixture/` | the seeded targets of that self-test |
 
-Run the Buck gates with `./buck2 test //tools/core_split/...`, and the closure
-check with `tools/core_split/no_mixed_closure.sh`. The remaining gates read
-history or the whole tree and run in `.github/workflows/core_split.yml`.
+Run the Buck gates with `./buck2 test //tools/core_split/...` (they also run in
+`./buck2 test //...`). **No workflow runs the rest, and no pull request check
+does:** the gates that read history or the whole tree (`core_frozen_vs_F`,
+`copy_range`, `importers`) are retired with the cutover that deletes
+`src/komira_core`, which was their only subject, and `no_mixed_closure` is red
+on `main` until then. Run them by hand when a split step needs them:
+
+```sh
+tools/core_split/no_mixed_closure.sh --selftest   # prove the check can fail
+tools/core_split/no_mixed_closure.sh              # check the tree
+python3 tools/core_split/check.py copy_range --repo . --base <base> --head HEAD ...
+python3 tools/core_split/check.py deps --tree . --map tools/core_split/split_map.tsv --core src
+python3 tools/core_split/check.py importers --root . --word <komira_core|komira_core_ffi> ...
+```
 
 ## Repointing importers (`repoint.py`)
 
@@ -80,8 +91,6 @@ python3 tools/core_split/repoint_selftest.py                                 # t
 
 ## What was proved without GitHub Actions
 
-`core_split.yml` has never run: it was not dry-run in a scratch repository. Every step was emulated
-locally, from the same commands the workflow runs (`check.py copy_range`, `check.py deps`, `check.py importers`,
-`no_mixed_closure.sh`, `./buck2 test //tools/core_split/...`), each with a seeded red case. What stays unproven until
-the workflow runs for real: the YAML itself (the event and secret plumbing, the `fetch-depth` history on the farm
-runner, `$RUNNER_TEMP`), and `core_frozen_vs_F`, which needs the history of the commit that records the digests.
+`core_split.yml` (now deleted) never ran. Every step was emulated
+locally, from the commands it ran (`check.py copy_range`, `check.py deps`, `check.py importers`,
+`no_mixed_closure.sh`, `./buck2 test //tools/core_split/...`), each with a seeded red case. `core_frozen_vs_F` stays unproven: it needs the history of the commit that records the digests.

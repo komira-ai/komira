@@ -13,11 +13,12 @@ These libraries give a Mojo process one way to write diagnostics. A call site wr
 | `komira_name_registry` (`src/komira_name_registry`) | `NameRegistry` and `name_id`, the compile-time name to 32-bit id mapping the metric and span libraries share |
 | `komira_spsc_ring` (`src/komira_spsc_ring`) | The generic single-producer single-consumer ring `SpscRing[T]` under both the log record ring and the span rings |
 | `komira_log_query` (`src/komira_log_query`) | The `ServiceLogSearch` trait, its erased facade, the `LogReadAccess` hook, and the `GET <path>` route |
+| `komira_metrics_reader` (`src/komira_metrics_reader`) | The `MetricsReader` trait, its erased facade and scripted double, the `MetricsReadAccess` hook, and the `GET <path>` metrics route |
 
 Out of scope:
 
 - Where a drained record goes next, and what answers a read query. These libraries stop at the drain and at the read seam: the `ServiceLogSearch` trait takes any conformer, and no conformer ships here.
-- Threshold detection over metric series and the readers of a cloud's own container logs and metrics.
+- Threshold detection over metric series, and the readers of a cloud's own container logs. A reader of a cloud's metrics, or of metric files in an object store, conforms to `MetricsReader` in a package of its own.
 - Worker threads and their idle hooks: the async runtime lives in `komira_async`.
 - Export over OTLP: not built; see the limits.
 
@@ -82,6 +83,12 @@ The second instrument is shaped after OpenTelemetry. `SeriesTable` (`series_tabl
 `ServiceLogSearch` (`komira_log_query/search_seam.mojo`) is the read trait, with one method, `scan(q: ServiceLogQuery) raises -> ServiceLogPage`. A `ServiceLogQuery` carries a nanosecond window, a term and a limit; a `ServiceLogPage` carries `ServiceLogHit`s. `ErasedServiceLogSearch` holds one conformer behind function pointers so a dispatcher holds a single non-generic field and the conformer's storage type instantiates only at `erase[S]`. The package depends on `komira_http_core` and nothing else. No conformer ships in this tree.
 
 `service_log_response(search, req, access, now_ns)` in `route.mojo` serves the route; `is_service_log_request(req, path)` matches `GET` at the exact path the service mounted it on. It asks the `access` hook first (`LogReadAccess.allows(req)` in `access.mojo`), then reads `q`, `since_ms`, `until_ms` and `limit`. The window ends at `now_ns` by default and starts 2,592,000,000 ms (30 days) before its end. `since_ms` after `until_ms` is a 400. The limit defaults to 50, is raised to 1 if lower, and is capped at 500. The function never raises. When `scan` raises, a query with no term (`q` empty) becomes a 400 that carries the conformer's own message, because the conformer could not answer a time-range query by itself; a query with a term becomes a 500, `log index read failed`, that names the fault.
+
+### How does a service read its metrics?
+
+`MetricsReader` (`komira_metrics_reader/reader.mojo`) is the read trait, with two methods. `refusal(q: MetricsQuery) -> String` returns "" when the reader can answer, else a sentence naming what its store cannot do (a step finer than it keeps, an aggregation it cannot compute, grouping it cannot express); it reads nothing. `read(q) raises -> MetricsPage` answers. A `MetricsQuery` carries an inclusive nanosecond window, a metric name, equality and inequality label matchers, an aggregation (`raw`, `sum`, `rate`, `mean`, `min`, `max`, `count`) over a step, group-by keys, and a series and a point limit. A `MetricsPage` carries `MetricsSeriesData` (metric, labels, samples oldest first, each a nanosecond time and a Float64), `truncated` when a limit cut the answer (a series cut at the point limit keeps its newest samples), and `sources_scanned`. `ErasedMetricsReader` is the non-generic facade, as `ErasedServiceLogSearch` is for logs, and `ScriptedMetricsReader` is the double. The package depends on `komira_http_core` and nothing else; no reader ships in it.
+
+`metrics_response(reader, req, access, now_ns)` in `route.mojo` serves `GET` at the exact path `is_metrics_request` matches. It asks the `MetricsReadAccess` hook first; a refusal, a raising hook and an unwired reader are one byte-identical 404. It then reads `metric` (required), `since_ms`, `until_ms`, `step_ms`, `agg`, `group_by`, `label.<k>`, `not_label.<k>`, `series_limit` and `point_limit`. The window ends at `now_ns` by default and starts one hour before its end; the step defaults to 60,000 ms; the limits default to 100 series and 1,440 points and are clamped to 1,000 and 100,000. A present but malformed number, an inverted window and an unknown aggregation are each a 400, never a default. So is any other parameter: a key that is not one of those names, or not `label.` or `not_label.` followed by a non-empty key, is a 400 that names it, and so is a key given more than once, so a misspelled bound is never read as an absent one. The reader's refusal is a 400 carrying its sentence, and the read is not made; a raise from the read is a 500, `metrics read failed`, that names it.
 
 ## Why is it built this way?
 
@@ -183,6 +190,7 @@ An allowed caller can still see a 400: an inverted window (`since_ms` after `unt
 | `src/komira_log/log_write.mojo`, `structured_log.mojo` | Writes, JSON selection | `write_log_line`, `log_format_is_json` |
 | `src/komira_clock/clock.mojo`, `src/komira_spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
 | `src/komira_log_query/route.mojo`, `access.mojo`, `search_seam.mojo`, `hit.mojo` | Read route, access hook, trait and values | `service_log_response`, `LogReadAccess`, `ServiceLogSearch`, `ServiceLogQuery` |
+| `src/komira_metrics_reader/route.mojo`, `access.mojo`, `reader.mojo`, `query.mojo`, `series.mojo` | Metrics read route, access hook, trait and values | `metrics_response`, `MetricsReadAccess`, `MetricsReader`, `MetricsQuery` |
 
 Entry points:
 
@@ -201,9 +209,10 @@ Each library below welds its tests with `test_srcs`, so building it runs them.
 | `komira_spsc_ring` | 2, `test_spsc_ring` and `test_ring_variants` | the generic ring: order, wrap, block and drop policies |
 | `komira_clock` | 1, `test_clock` | clock reads |
 | `komira_log_query` | 1, `test_service_log_route` | path match, the access hook and the one 404, window and limit, term decoding, the conformer-raise split, page rendering, the erased facade |
+| `komira_metrics_reader` | 3, `test_metrics_query`, `test_metrics_reader` and `test_metrics_route` | the value types, the erased facade and the double against the trait, and the route: path match, the one 404, arguments and their 400s, the refusal and fault split, page rendering |
 | `komira_name_registry` | 1, `test_name_registry` | name registry |
 
-Run: `./buck2 build //src/komira_log:komira_log //src/komira_trace:komira_trace //src/komira_metrics:komira_metrics //src/komira_spsc_ring:komira_spsc_ring //src/komira_clock:komira_clock //src/komira_name_registry:komira_name_registry //src/komira_log_query:komira_log_query`.
+Run: `./buck2 build //src/komira_log:komira_log //src/komira_trace:komira_trace //src/komira_metrics:komira_metrics //src/komira_spsc_ring:komira_spsc_ring //src/komira_clock:komira_clock //src/komira_name_registry:komira_name_registry //src/komira_log_query:komira_log_query //src/komira_metrics_reader:komira_metrics_reader`.
 
 `test_log_p2c_aot_perf` compares the typed and ambient reaches and only reports. Not tested: `emit_erased` has tests and no caller in these libraries.
 

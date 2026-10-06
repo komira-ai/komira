@@ -17,13 +17,16 @@
 # `./buck2 build //...`: the release workflow cannot be the first to find it.
 # =============================================================================
 
+from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_true
 
 from kci_artifact import (
     ReleaseStamp,
     find_build_system,
+    parse_affected_answer,
     read_artifacts,
     render_build_argv,
+    unit_names_of,
     require_affected_ready,
 )
 
@@ -257,6 +260,62 @@ def test_the_per_change_check_is_ready() raises:
         assert_true(Bool(b.affected), b.name)
         assert_true(Bool(b.build_targets), b.name)
         assert_equal(b.build_targets.value().args[0], String("release/ci/build_targets.sh"), b.name)
+
+
+def test_the_affected_command_is_the_real_tool_not_the_widening_script() raises:
+    """Every build system's `affected` runs //tools/build/ci:affected through
+    buck2, over the change's files, the base commit (for the files the change
+    deleted) and the units file; none names the retired widening script (which
+    answered WIDENED for every change)."""
+    var d = read_artifacts(String(_FILE))
+    var want = List[String]()
+    want.append(String("run"))
+    want.append(String("//tools/build/ci:affected"))
+    want.append(String("--"))
+    want.append(String("--files"))
+    want.append(String("{changed_files}"))
+    want.append(String("--base"))
+    want.append(String("{base_commit}"))
+    want.append(String("--units-file"))
+    want.append(String("{units_file}"))
+    for i in range(len(d.build_systems)):
+        ref b = d.build_systems[i]
+        ref c = b.affected.value()
+        assert_equal(c.executable, String("buck2"), b.name)
+        assert_equal(len(c.args), len(want), b.name)
+        for k in range(len(want)):
+            assert_equal(c.args[k], want[k], b.name)
+        for k in range(len(c.args)):
+            assert_true(c.args[k].find(String("widened")) < 0, b.name)
+            assert_true(c.args[k].find(String(".sh")) < 0, b.name)
+
+
+def test_the_text_of_the_file_no_longer_names_the_widening_script() raises:
+    """The retired script is named nowhere in the file, in a comment either:
+    a reader of the file would go looking for it."""
+    var text = Path(String(_FILE)).read_text()
+    assert_true(text.find(String("affected_widened")) < 0)
+    assert_true(text.find(String("WIDENED every unit")) < 0)
+
+
+def test_what_the_tool_prints_is_what_kci_reads() raises:
+    """The goldens of //tools/build/ci:affected's `--units-file` answers (the
+    same strings its own test_the_protocol_answer pins), through kci's parser
+    over the units of this file's buck2 build system."""
+    var d = read_artifacts(String(_FILE))
+    var owned = unit_names_of(d, String("buck2"))
+    assert_true(len(owned) >= 1)
+    var a = parse_affected_answer(String("UNIT ") + owned[0] + String("\nAFFECTED 1\n"), owned)
+    assert_equal(len(a.units), 1)
+    assert_true(not a.widened)
+    var w = parse_affected_answer(String("WIDENED the project configuration changed\n"), owned)
+    assert_true(w.widened)
+    assert_equal(len(w.units), 0)
+    # a change that reaches no unit is AFFECTED 0: parsed, and kci's
+    # decision over every build system's answer refuses it (KCI-E-AFFECTED-VACUOUS)
+    var z = parse_affected_answer(String("AFFECTED 0\n"), owned)
+    assert_equal(len(z.units), 0)
+    assert_true(not z.widened)
 
 
 def test_the_buck2_build_system_derives_the_checks_from_the_graph() raises:

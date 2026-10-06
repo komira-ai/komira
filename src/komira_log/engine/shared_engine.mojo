@@ -82,7 +82,7 @@ from komira_clock import now_unix_ms
 # re-anchor this often keeps the conversion accurate without measurable cost.
 comptime _ANCHOR_REFRESH_MS: Int64 = Int64(1000)
 
-# P4b.5 — end-of-query final-flush budget for `drain_captured_spans`. Large
+# End-of-query final-flush budget for `drain_captured_spans`. Large
 # enough to drain any realistic per-worker ring tail in one pass; the drain
 # loop stops early on the first empty pop, so this is just an upper bound.
 comptime _FINAL_FLUSH_BUDGET: Int = 1 << 30
@@ -192,7 +192,7 @@ struct SharedEngine(Movable):
     var _sink: LogSink
     var _tls_key: UInt64
     var _enabled: Bool
-    # P4b.5 — retained span collector. When `_capture_spans` is on, the
+    # Retained span collector. When `_capture_spans` is on, the
     # worker-loop drain (`drain_worker`) routes a completed SPAN line into the
     # per-worker `_span_buf[wid]` retained buffer INSTEAD of the output sink,
     # so the post-query `drain_traces_to_jsonl` reads the lines the continuous
@@ -299,7 +299,7 @@ struct SharedEngine(Movable):
         self._sink = LogSink.stderr()
         self._tls_key = create_worker_id_key()
         self._enabled = True
-        # P4b.5 — retained span collector, off by default (no retention for a
+        # Retained span collector, off by default (no retention for a
         # pure logging engine). One buffer per ring (N workers + 1 fallback).
         self._capture_spans = False
         self._span_buf = List[List[String]]()
@@ -383,7 +383,7 @@ struct SharedEngine(Movable):
         return self._capture_spans
 
     def set_capture_spans(mut self, on: Bool):
-        """P4b.5 — toggle the retained span collector. When ON, EVERY drain on
+        """Toggle the retained span collector. When ON, EVERY drain on
         this engine routes a completed SPAN line into the per-worker retained
         buffer (read back by `take_span_lines`); LOG records are unaffected
         (`drain_worker` always sinks them, the twins always return them). The
@@ -404,7 +404,7 @@ struct SharedEngine(Movable):
         self._capture_spans = on
 
     def take_span_lines(mut self, worker_id: Int) -> List[String]:
-        """P4b.5 — move out and clear the retained span buffer for `worker_id`.
+        """Move out and clear the retained span buffer for `worker_id`.
         The post-query trace drain calls this after a final ring flush to read
         the lines the continuous idle-loop drain accumulated. Leaves an empty
         buffer behind so the next query starts fresh.
@@ -794,8 +794,8 @@ struct SharedEngine(Movable):
         return total
 
     def spans_dropped_count(mut self) -> Int64:
-        """SPAN records this engine's drains consumed without producing a span
-       . Summed over every ring, the same span the two counters above use.
+        """SPAN records this engine's drains consumed without producing a span.
+        Summed over every ring, the same span the two counters above use.
 
         ⚠ THIS IS A TRACE-DATA-LOSS GAUGE, AND ITS ZERO IS THE ONLY EVIDENCE
         THAT TRACING IS INTACT. Three ways it moves, all of them policy:
@@ -930,7 +930,7 @@ struct SharedEngine(Movable):
         )
 
     def drain_captured_spans(mut self, worker_id: Int) -> List[String]:
-        """P4b.5 — the post-query trace-drain entry. First do a FINAL flush of
+        """The post-query trace-drain entry. First do a FINAL flush of
         any SPAN records still on `ring(worker_id)` into the retained buffer
         (the continuous idle-loop `drain_worker` has been filling it mid-query,
         but a tail of records may remain if the query ended between idle
@@ -981,7 +981,7 @@ struct SharedEngine(Movable):
             elif rec.kind == REC_SPAN_CLOSE:
                 var span_line = self._open_spans.ingest_close(rec, anchor)
                 if span_line:
-                    # P4b.5 — when the retained collector is on, the completed
+                    # When the retained collector is on, the completed
                     # OTLP span line goes ONLY to the per-worker buffer (the
                     # JSONL file becomes the span destination; stderr stays
                     # clean). When off, it writes to the sink as before. The

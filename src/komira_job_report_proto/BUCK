@@ -10,8 +10,9 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 #       JobHeartbeat, JobHeartbeatReply, JobFailure, JobPhase, JobDirective,
 #   )
 #
-# It imports no other `.proto`. The welded tests round-trip every message and
-# pin what an unknown enum number decodes to.
+# It imports no other `.proto`. The welded tests round-trip every message, pin
+# every JobHeartbeat and JobFailure field number by exact bytes, and pin what
+# an unknown enum number decodes to.
 mojo_proto_library(
     name = "komira_job_report_proto",
     srcs = ["job_report.proto"],
@@ -20,6 +21,7 @@ mojo_proto_library(
     test_srcs = [
         "tests/test_job_report_roundtrip.mojo",
         "tests/test_job_report_unknown_enums.mojo",
+        "tests/test_job_report_wire_bytes.mojo",
     ],
     visibility = ["PUBLIC"],
 )
