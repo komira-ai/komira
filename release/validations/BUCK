@@ -7,7 +7,7 @@ load(":defs.bzl", "kci_validations")
 # `komira_pack conda-index` wrote, before anything is published. Each entry
 # is a validation's name and its stage. src/kci_release_machine's welded test
 # holds these entries equal to the machine file's validations, both ways, and
-# src/kci_ci_check's test_repo_kci_yml holds the validate job's `kci run` to
+# src/kci_workflow_check's test_repo_kci_yml holds the validate job's `kci run` to
 # their arguments. Changes need the release approver's review
 # (.github/CODEOWNERS).
 kci_validations(

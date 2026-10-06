@@ -590,7 +590,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
   workflow file it runs under as it was committed (`GITHUB_WORKFLOW_REF`'s
   path at `GITHUB_WORKFLOW_SHA`, through `git show`) and holds it to the
   machine file and every channels file it names (rules R1-R12 and R14-R22 of
-  `src/kci_ci_check/rules.mojo` and `auto_promotion.mojo`: a job per stage named for it, each job's
+  `src/kci_workflow_check/rules.mojo` and `auto_promotion.mojo`: a job per stage named for it, each job's
   environment its stage's, `needs` the jobs that run the stage's `after`,
   `id-token: write` only where a stage publishes by trusted publishing or is
   farm-connected, one `kci run` per job with `--summary-file`, `--only` only
@@ -604,7 +604,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
   permissions `contents: read` and `id-token` only). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
   finding listed, nothing run); an unreadable workflow or channels file, or a
   missing variable, is exit 5 and never a pass. The same check is the welded
-  test `src/kci_ci_check/tests/test_repo_kci_yml.mojo`, so a drift also
+  test `src/kci_workflow_check/tests/test_repo_kci_yml.mojo`, so a drift also
   fails `./buck2 build //...`. Consequence: a revision whose machine file
   disagrees with the running `kci.yml` cannot be released by it (a manual run
   of an old revision is refused, exit 3).
@@ -615,7 +615,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
   skipped gamma, validate, prod or build job. No environment, publishing token
   or release job is reached from a pull request's code. The push trigger is
   exactly `branches: [main]` with the documentation `paths-ignore` (rule R17).
-  Rule R6 of `src/kci_ci_check` holds all of it, and holds pr.yml to the pull
+  Rule R6 of `src/kci_workflow_check` holds all of it, and holds pr.yml to the pull
   request's check alone (next section).
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
@@ -797,7 +797,7 @@ python3 release/ci/derive_checks.py --from release/artifacts.textproto  # the de
 ### The workflow subset kci reads
 
 kci holds a workflow to the machine file by reading it with its own reader
-(`src/kci_ci_check/workflow_reader.mojo`), which accepts a strict subset of
+(`src/kci_workflow_check/workflow_reader.mojo`), which accepts a strict subset of
 YAML and nothing else. Inside the subset every value it reads is exactly the
 value YAML, and so GitHub, reads. A line outside it is "cannot tell" (exit 5
 at start-up, a red welded test), naming the line: never read, never guessed
@@ -828,7 +828,7 @@ nested flow item; `---`, `...` and `%` directives. actionlint
 (`//:workflow_lint`) stays the YAML-validity gate. The subset is a reader
 rule, not a style: a spelling found to read one way to kci and another to
 GitHub is answered by keeping it outside the subset, and each such spelling
-is a row of `src/kci_ci_check/tests/test_workflow_subset.mojo`.
+is a row of `src/kci_workflow_check/tests/test_workflow_subset.mojo`.
 
 
 ## pr.yml: the pull request's check
@@ -836,11 +836,11 @@ is a row of `src/kci_ci_check/tests/test_workflow_subset.mojo`.
 [`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is the machine file's
 `pr` stage and nothing else: workflow `pr`, one job `check`, so the status check
 is **`pr / check`**. It is written by hand and held to the machine file the way
-kci.yml is (rule R6 of `src/kci_ci_check/rules.mojo`, `check_pull_request_workflow`):
+kci.yml is (rule R6 of `src/kci_workflow_check/rules.mojo`, `check_pull_request_workflow`):
 `kci run --stage pr` reads the file it runs under (`GITHUB_WORKFLOW_REF`) and
 holds it to the pull request's rules (a run of any other stage holds its file
 to the release workflow's), and the welded test
-`src/kci_ci_check/tests/test_repo_kci_yml.mojo` reads both files on every build.
+`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` reads both files on every build.
 
 | | |
 |---|---|

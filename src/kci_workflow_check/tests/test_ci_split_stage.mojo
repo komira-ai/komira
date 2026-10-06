@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_ci_split_stage.mojo -- one stage run by several
+# src/kci_workflow_check/tests/test_ci_split_stage.mojo -- one stage run by several
 #   jobs (R1 and R9 as amended, PENDING A RULING): the job named after the
 #   stage runs its steps with `--only step:<s>`, a second job runs the
 #   validations with `--only validation:<v>`; together they run the whole
@@ -9,7 +9,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_ci_check import check_workflow
+from kci_workflow_check import check_workflow
 from kci_release_machine import parse_machine_file
 
 comptime _MACHINE: String = (

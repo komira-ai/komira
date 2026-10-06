@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/rules.mojo -- a CI workflow held to a machine file's stage
+# src/kci_workflow_check/rules.mojo -- a CI workflow held to a machine file's stage
 #   graph: the workflow consistency check.
 # =============================================================================
 #

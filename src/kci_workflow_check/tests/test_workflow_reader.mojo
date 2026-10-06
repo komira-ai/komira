@@ -1,12 +1,12 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_workflow_reader.mojo -- the fail-closed
+# src/kci_workflow_check/tests/test_workflow_reader.mojo -- the fail-closed
 #   workflow reader: what it reads (exactly), and every construct outside its
 #   subset, which it answers "cannot tell" for instead of guessing.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_ci_check import NODE_LIST, NODE_MAP, NODE_SCALAR, read_workflow
+from kci_workflow_check import NODE_LIST, NODE_MAP, NODE_SCALAR, read_workflow
 
 
 comptime _WF: String = (
