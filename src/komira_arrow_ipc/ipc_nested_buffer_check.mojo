@@ -143,10 +143,16 @@ def check_struct_child_length(
     FieldNode (Message.fbs, `struct FieldNode { length; null_count; }`)
     carries no offset, so in a RecordBatch a child shorter than its STRUCT
     leaves struct slots with no child value. The format text does not state
-    that a longer child is invalid; it is refused as well because no writer
-    produces one (Arrow C++ slices each child to the struct's window before
-    writing it) and arrow-rs's `StructArray::try_new` refuses any child
-    whose length differs from the struct's.
+    that a longer child is invalid; this decoder refuses it as well, as a
+    policy: the Arrow C++ IPC writer slices each child to the struct's
+    window before writing it, and arrow-rs's IPC reader
+    (`StructArray::try_new`) refuses a child whose length differs from the
+    struct's. The policy has an interoperability cost: a writer that
+    serialises C Data Interface arrays as stored (nanoarrow's IPC encoder
+    writes each child's own length) emits a longer child for a struct
+    sliced at offset 0, Arrow C++ reads such a stream (its validation needs
+    only child length >= struct offset + length), and this decoder refuses
+    it.
     """
     if child_length != struct_length:
         raise Error(
