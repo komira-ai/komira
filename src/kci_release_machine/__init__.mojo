@@ -10,7 +10,7 @@
 #               `machine_field_names`
 #
 # `kci run --stage S` runs the steps of stage S and their validations; the
-# workflow consistency check (kci_ci_check) holds a CI workflow to the same
+# workflow consistency check (kci_workflow_check) holds a CI workflow to the same
 # graph. This package reads text it is given: it opens
 # no file.
 #

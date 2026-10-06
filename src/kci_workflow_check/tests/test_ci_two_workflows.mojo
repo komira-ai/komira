@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_ci_two_workflows.mojo -- the two workflow files
+# src/kci_workflow_check/tests/test_ci_two_workflows.mojo -- the two workflow files
 #   are held apart. The release workflow (kci.yml) runs the stages that are not
 #   a PULL_REQUEST stage and has NO `pull_request` trigger, so a pull request
 #   never reaches (or shows a skipped) release job; the pull request's check
@@ -9,7 +9,7 @@
 
 from std.testing import TestSuite, assert_true
 
-from kci_ci_check import ChannelsFile, check_running_workflow, check_workflow
+from kci_workflow_check import ChannelsFile, check_running_workflow, check_workflow
 from kci_release_machine import parse_machine_file
 
 

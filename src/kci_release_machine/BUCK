@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # order, each stage's GitHub environment and whether it is farm-connected,
 # and the steps of each (BUILD, PUBLISH; DEPLOY is reserved and refused) with
 # a PUBLISH step's validations. `kci run --stage S` runs one stage; the
-# workflow consistency check (kci_ci_check) holds a CI workflow to the same
+# workflow consistency check (kci_workflow_check) holds a CI workflow to the same
 # graph.
 #
 # Deps: the textproto lexer and kci_api (the format's schema_version,
