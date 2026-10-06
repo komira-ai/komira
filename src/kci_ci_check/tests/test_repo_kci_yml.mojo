@@ -1,10 +1,12 @@
 # =============================================================================
 # src/kci_ci_check/tests/test_repo_kci_yml.mojo -- the repository's own
-#   release workflow, .github/workflows/kci.yml, held to its own machine file,
-#   release/machine.textproto, by the same check `kci run` makes at start-up
-#   (`check_running_workflow`): it finds nothing. A drift between the two (a
-#   renamed job or environment, a stage the workflow does not run, a
-#   release job a pull request reaches, a pr job a fork reaches, an unpinned
+#   two workflows, .github/workflows/kci.yml (the release) and pr.yml (the pull
+#   request's check), each held to the machine file, release/machine.textproto,
+#   by the same check `kci run` makes at start-up (`check_running_workflow`,
+#   with `pull_request_file` for pr.yml): it finds nothing. A drift between the
+#   two (a renamed job or environment, a stage the workflow does not run, a
+#   `pull_request` trigger in kci.yml, a job in pr.yml that is not the pull
+#   request's check, a pr job a fork reaches, an unpinned
 #   action, a split of a stage that does not
 #   run all of it exactly once, a `kci run` without --summary-file or reading
 #   another machine file, farm-connect on the wrong job) fails this test, and with it `./buck2 build //...` on every pull
@@ -42,6 +44,7 @@ from kci_ci_check import (
     ChannelsFile,
     channels_paths,
     check_running_workflow,
+    check_workflow,
     documentation_filter_findings,
     id_token_stages,
     kci_run_calls,
@@ -238,6 +241,60 @@ def test_kci_yml_agrees_with_the_machine_file() raises:
         raise Error(String(".github/workflows/kci.yml disagrees with release/machine.textproto:") + all)
 
 
+def test_pr_yml_agrees_with_the_machine_file() raises:
+    # the pull request's check: the PULL_REQUEST stage alone, the same entry point
+    # `kci run --stage pr` calls (pull_request_file)
+    var findings = check_running_workflow(
+        _graph(), _channels(), Path(String("pr.yml")).read_text(), String(DEFAULT_MACHINE_FILE), True
+    )
+    if len(findings) > 0:
+        raise Error(String(".github/workflows/pr.yml disagrees with release/machine.textproto:") + _joined(findings))
+    var doc = read_workflow(Path(String("pr.yml")).read_text())
+    # the check is `pr / check`: workflow `pr`, the one job `check`
+    assert_equal(doc.text(doc.child(0, String("name"))), String("pr"))
+    var jobs = doc.child(0, String("jobs"))
+    var ids = doc.keys(jobs)
+    assert_equal(len(ids), 1)
+    assert_equal(ids[0], String("check"))
+    # nothing but the pull_request trigger
+    var triggers = doc.keys(doc.child(0, String("on")))
+    assert_equal(len(triggers), 1)
+    assert_equal(triggers[0], String("pull_request"))
+    # one `kci run --stage pr --affected-by`, one farm connection, no environment
+    var steps = doc.items(doc.child(doc.items(jobs)[0], String("steps")))
+    var runs = 0
+    var farm = 0
+    for i in range(len(steps)):
+        var u = doc.child(steps[i], String("uses"))
+        if u >= 0 and doc.kind(u) == NODE_SCALAR and doc.text(u) == FARM_CONNECT_ACTION:
+            farm += 1
+        var r = doc.child(steps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR:
+            var calls = kci_run_calls(doc.text(r))
+            for k in range(len(calls)):
+                runs += 1
+                assert_equal(calls[k].stage, String("pr"))
+                assert_true(calls[k].has_affected_by)
+                assert_true(calls[k].has_summary_file)
+    assert_equal(runs, 1)
+    assert_equal(farm, 1)
+    assert_true(doc.child(doc.items(jobs)[0], String("environment")) < 0)
+
+
+def test_each_real_workflow_is_refused_when_read_as_the_other() raises:
+    var g = _graph()
+    var tokens = id_token_stages(g, _channels())
+    var kci_as_pr = check_workflow(Path(String("kci.yml")).read_text(), g, tokens, String(DEFAULT_MACHINE_FILE), True)
+    assert_true(len(kci_as_pr) > 0, String("kci.yml read as the pull request's workflow is not refused"))
+    var pr_as_release = check_workflow(Path(String("pr.yml")).read_text(), g, tokens, String(DEFAULT_MACHINE_FILE), False)
+    assert_true(len(pr_as_release) > 0, String("pr.yml read as the release workflow is not refused"))
+    # the real kci.yml has no pull_request trigger
+    var doc = read_workflow(Path(String("kci.yml")).read_text())
+    var triggers = doc.keys(doc.child(0, String("on")))
+    for i in range(len(triggers)):
+        assert_true(triggers[i] != String("pull_request"), String("kci.yml has a pull_request trigger"))
+
+
 def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     var doc = read_workflow(Path(String("kci.yml")).read_text())
     var env = doc.child(0, String("env"))
@@ -269,13 +326,13 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
                     only_seen.append(ids[j] + String(" ") + calls[k].stage + String(" ") + calls[k].only[o])
                 assert_true(not calls[k].has_machine, String("a kci run in kci.yml passes --machine"))
                 assert_true(calls[k].has_summary_file, String("a kci run in kci.yml passes no --summary-file"))
-    assert_equal(runs, 5)
+    assert_equal(runs, 4)
     assert_equal(len(only_seen), 3)
     assert_equal(only_seen[0], String("gamma gamma step:publish"))
     assert_equal(only_seen[1], String("validate gamma validation:install-komira-encoding"))
     assert_equal(only_seen[2], String("validate gamma validation:install-set"))
-    # the build job and the pr job, and only they, join the tailnet
-    assert_equal(farm, 2)
+    # the build job, and only it, joins the tailnet (pr.yml's check is the other)
+    assert_equal(farm, 1)
     # the validate job: no environment, no identity token, after the publish
     var validate = doc.child(jobs, String("validate"))
     assert_true(validate >= 0, String("kci.yml has no job validate"))

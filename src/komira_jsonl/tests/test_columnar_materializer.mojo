@@ -26,7 +26,7 @@ from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
 from komira_jsonl.key_dispatch import KeyTable, KeyRegistryBuilder
 from komira_jsonl.value_parsers.parse_int import parse_int_i64
 from komira_jsonl.value_parsers.parse_bool import parse_bool, parse_null
-from komira_jsonl.value_parsers.parse_string import (
+from komira_json_index.parse_string import (
     parse_string,
     parse_string_raw,
     parse_string_with_escapes,

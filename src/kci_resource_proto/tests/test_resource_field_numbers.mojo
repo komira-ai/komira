@@ -23,15 +23,12 @@
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 #
-# ALSO PINNED: the three v1 `Resource.body` arms (10 service, 11 job,
-# 14 bucket) by number AND by which field each fills; the HELD numbers (body
-# 12, 13 and 15 to 36 for the later neutral primitives, 80 for a composite
-# instance, 90 for the escape hatch, 100, 300 and 500 for the first number of
-# each cloud's provider-primitive range, `Resource` 5 and 6, `Value` 4,
-# `Image` 4, `Service` 13 and 50 to 52, `Job` 8 and 50 to 52, `Bucket` 50 to
-# 52) decode as unknown today, so nothing else has taken
-# them; the retired field 4 is ignored; and every enum's ordinals in both
-# directions, held values undeclared.
+# ALSO PINNED: the six v1 `Resource.body` arms (10 service, 11 job, 13 table,
+# 14 bucket, 20 service account, 25 grant) by number AND by which field each
+# fills; the retired field 4 is ignored; and every enum's ordinals in both
+# directions, held values undeclared. EVERY HELD NUMBER (each number of each
+# held range of each message) is pinned as undeclared by one table in
+# test_resource_held_numbers.mojo.
 #
 # THE FIELDS ADDED AFTER THE FIRST DRAFT, each pinned the same two ways:
 # `Image.platform` 3 (an OCI-style string), `SecretRef` 1 name, 2 store and
@@ -52,6 +49,20 @@
 # ARCHIVE 3; `Output` ADDRESS 3 and NAME 4; `Access` READ 2, WRITE 3 and
 # READ_WRITE 4. Each by wire bytes and by name, and restated in
 # `test_added_numbers_are_kept`.
+#
+# IDENTITY AND GRANTS: the `service_account` arm 20 and the `grant` arm 25;
+# `Grant` 1 principal, 2 target, 3 access and 4 cell; `Uses.cell` 4 (3 stays
+# held); `Service.run_as` 14 and `Job.run_as` 13; `Access` DESCRIBE 8 (7
+# ACT_AS and 9 MANAGE stay held); `CellResource` LOGS 1, METRICS 2 and
+# ARTIFACTS 3 (4 stays held). The per-cloud extensions are four numbers,
+# 50 to 53, held on every primitive message, and the provider-primitive
+# ranges are four, 100-299, 300-499, 500-699 and 700-899.
+#
+# THE TABLE: the `table` arm 13; `Table` 1 key, 2 indexes (repeated) and 3
+# ttl_field (presence; 4 held); `Table.AccessPath` 1 name, 2 partition and 3
+# order; `Table.Field` 1 name and 2 type; `FieldType` STRING 1, NUMBER 2 and
+# BYTES 3. Each by wire bytes and by name, and restated in
+# `test_added_numbers_are_kept`.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -60,6 +71,9 @@ from komira_proto_codec import decode_proto, encode_proto
 from kci_resource_proto.resource import (
     Access,
     Bucket,
+    CellResource,
+    FieldType,
+    Grant,
     Image,
     Job,
     Output,
@@ -71,8 +85,10 @@ from kci_resource_proto.resource import (
     Scale,
     SecretRef,
     Service,
+    ServiceAccount,
     StepOutput,
     StorageTier,
+    Table,
     Uses,
     Value,
 )
@@ -377,14 +393,30 @@ def test_ref() raises:
 
 
 def test_uses() raises:
-    """Uses: 1 target, 2 access."""
+    """Uses: 1 target, 2 access, 4 cell; 3 held."""
     var b = List[UInt8]()
     _msg(b, 1, _ref("billing"))
     _uint(b, 2, UInt64(Access.CALL))
     var u = decode_proto[Uses](b.copy())
     assert_equal(u.target.value().resource, "billing")
     assert_equal(u.access.value, Access.CALL)
+    assert_equal(u.cell.value, CellResource.CELL_RESOURCE_UNSET, "absent = unset")
     _same(encode_proto(u), b, "Uses")
+
+    var c = List[UInt8]()
+    _uint(c, 2, UInt64(Access.WRITE))
+    _uint(c, 4, UInt64(CellResource.METRICS))
+    var uc = decode_proto[Uses](c.copy())
+    assert_true(not Bool(uc.target), "a cell line has no target")
+    assert_equal(uc.cell.value, CellResource.METRICS, "Uses field 4 is `cell`")
+    assert_equal(uc.access.value, Access.WRITE)
+    _same(encode_proto(uc), c, "Uses.cell")
+
+    # 3 is held. A NON-EMPTY payload: an empty one would decode as a declared
+    # field's zero value and re-encode to nothing, hiding it.
+    var h = b.copy()
+    _str(h, 3, "x")
+    _same(encode_proto(decode_proto[Uses](h.copy())), b, "Uses 3 is held")
     print("  test_uses: PASS")
 
 
@@ -546,6 +578,43 @@ def test_added_numbers_are_kept() raises:
     _same(
         encode_proto(decode_proto[Resource](res.copy())), res, "Resource 3 and 14"
     )
+
+    # Identity and grants: Service 14, Job 13, Uses 4, Grant 1 to 4,
+    # Resource 20 and 25, Access 8.
+    var svc_as = List[UInt8]()
+    _uint(svc_as, 2, 8080)
+    _msg(svc_as, 14, _ref("runner"))
+    _same(encode_proto(decode_proto[Service](svc_as.copy())), svc_as, "Service 14")
+    var job_as = List[UInt8]()
+    _str(job_as, 2, "report")
+    _msg(job_as, 13, _ref("runner"))
+    _same(encode_proto(decode_proto[Job](job_as.copy())), job_as, "Job 13")
+    var use_cell = List[UInt8]()
+    _uint(use_cell, 2, 3)
+    _uint(use_cell, 4, 1)
+    _same(encode_proto(decode_proto[Uses](use_cell.copy())), use_cell, "Uses 4")
+    var grant = List[UInt8]()
+    _msg(grant, 1, _ref("runner"))
+    _msg(grant, 2, _ref("store"))
+    _uint(grant, 3, 8)
+    _uint(grant, 4, 2)
+    _same(encode_proto(decode_proto[Grant](grant.copy())), grant, "Grant 1 to 4")
+    var acct = List[UInt8]()
+    _str(acct, 1, "runner")
+    _empty(acct, 20)
+    _same(encode_proto(decode_proto[Resource](acct.copy())), acct, "Resource 20")
+    var gres = List[UInt8]()
+    _str(gres, 1, "see")
+    _msg(gres, 25, grant)
+    _same(encode_proto(decode_proto[Resource](gres.copy())), gres, "Resource 25")
+
+    # The table: Resource 13, Table 1 to 3, AccessPath 1 to 3, Field 1 and 2.
+    var tbl = _table()
+    _same(encode_proto(decode_proto[Table](tbl.copy())), tbl, "Table 1 to 3")
+    var tres = List[UInt8]()
+    _str(tres, 1, "orders")
+    _msg(tres, 13, tbl)
+    _same(encode_proto(decode_proto[Resource](tres.copy())), tres, "Resource 13")
     print("  test_added_numbers_are_kept: PASS")
 
 
@@ -558,12 +627,18 @@ def _arm_of(r: Resource) -> String:
         return "service"
     if r.job:
         return "job"
+    if r.table:
+        return "table"
     if r.bucket:
         return "bucket"
+    if r.service_account:
+        return "service_account"
+    if r.grant:
+        return "grant"
     return ""
 
 
-def test_resource_body_arms_are_10_11_and_14() raises:
+def test_resource_body_arms_are_10_11_13_14_20_and_25() raises:
     """Each v1 body arm, by number AND by the field it fills.
 
     The arm numbers are the adapter registry's key (one adapter per arm), so a
@@ -572,11 +647,17 @@ def test_resource_body_arms_are_10_11_and_14() raises:
     var names = List[String]()
     names.append("service")
     names.append("job")
+    names.append("table")
     names.append("bucket")
+    names.append("service_account")
+    names.append("grant")
     var fields = List[Int]()
     fields.append(10)
     fields.append(11)
+    fields.append(13)
     fields.append(14)
+    fields.append(20)
+    fields.append(25)
     for i in range(len(names)):
         var field = fields[i]
         var b = List[UInt8]()
@@ -594,43 +675,7 @@ def test_resource_body_arms_are_10_11_and_14() raises:
             b,
             String("Resource.body field ") + String(field),
         )
-    print("  test_resource_body_arms_are_10_11_and_14: PASS")
-
-
-def test_held_body_numbers_are_undeclared() raises:
-    """Held, not declared: 12, 13 and 15 to 36 for the later neutral
-    primitives (14 is the bucket), 80 for
-    a composite instance, 90 for the escape hatch, and 100, 300 and 500, the
-    first number of each cloud's provider-primitive range (100-299, 300-499,
-    500-699). Today each decodes as an unknown field: no arm set, dropped on
-    re-encode. When a type lands at its held number this test changes with
-    it; anything else taking one of these numbers is a mistake."""
-    var held = List[Int]()
-    for n in range(12, 37):
-        if n != 14:
-            held.append(n)
-    held.append(80)
-    held.append(90)
-    held.append(100)
-    held.append(300)
-    held.append(500)
-    var head = List[UInt8]()
-    _str(head, 1, "r")
-    for k in range(len(held)):
-        var b = head.copy()
-        _empty(b, held[k])
-        var r = decode_proto[Resource](b.copy())
-        assert_equal(
-            r._oneof0_case,
-            0,
-            String("Resource.body field ") + String(held[k]) + " is held",
-        )
-        _same(
-            encode_proto(r),
-            head,
-            String("held field ") + String(held[k]) + " is unknown",
-        )
-    print("  test_held_body_numbers_are_undeclared: PASS")
+    print("  test_resource_body_arms_are_10_11_13_14_20_and_25: PASS")
 
 
 def test_field_3_is_retention_and_4_is_retired() raises:
@@ -660,77 +705,6 @@ def test_field_3_is_retention_and_4_is_retired() raises:
     _uint(retired, 4, 1)
     _same(encode_proto(decode_proto[Resource](retired.copy())), head, "field 4 is unknown")
     print("  test_field_3_is_retention_and_4_is_retired: PASS")
-
-
-def test_reserved_now_built_later_numbers_are_undeclared() raises:
-    """The numbers held for shapes that land later as additions: `Resource` 5
-    (cloud_settings) and 6 (physical_name), `Image` 4 (artifact_ref), the
-    `artifact_ref` arm of a later `source` on `Service` 13 and `Job` 8, and
-    the per-cloud extensions 50, 51 and 52 of `Service` and `Job`. Each
-    decodes as unknown today: dropped on re-encode."""
-    var rhead = List[UInt8]()
-    _str(rhead, 1, "r")
-    var rb = rhead.copy()
-    _empty(rb, 5)
-    _str(rb, 6, "kept-name")
-    _same(
-        encode_proto(decode_proto[Resource](rb.copy())),
-        rhead,
-        "Resource 5 and 6 are held",
-    )
-
-    var ihead = List[UInt8]()
-    _str(ihead, 2, "sha256:aa")
-    var ib = ihead.copy()
-    _empty(ib, 4)
-    var ii = decode_proto[Image](ib.copy())
-    assert_equal(ii._oneof0_case, 2, "Image 4 is not a source arm today")
-    _same(encode_proto(ii), ihead, "Image 4 is held")
-
-    var shead = List[UInt8]()
-    _uint(shead, 2, 8080)
-    var sb = shead.copy()
-    _empty(sb, 13)
-    _same(encode_proto(decode_proto[Service](sb.copy())), shead, "Service 13")
-    for n in range(50, 53):
-        var sx = shead.copy()
-        # A NON-EMPTY payload: an empty one would decode as a declared
-        # field's zero value and re-encode to nothing, hiding it.
-        _str(sx, n, "x")
-        _same(
-            encode_proto(decode_proto[Service](sx.copy())),
-            shead,
-            String("Service ") + String(n) + " is held",
-        )
-
-    var jhead = List[UInt8]()
-    _str(jhead, 2, "report")
-    var jb = jhead.copy()
-    _empty(jb, 8)
-    _same(encode_proto(decode_proto[Job](jb.copy())), jhead, "Job 8")
-    for n in range(50, 53):
-        var jx = jhead.copy()
-        # A NON-EMPTY payload: an empty one would decode as a declared
-        # field's zero value and re-encode to nothing, hiding it.
-        _str(jx, n, "x")
-        _same(
-            encode_proto(decode_proto[Job](jx.copy())),
-            jhead,
-            String("Job ") + String(n) + " is held",
-        )
-
-    var bhead = List[UInt8]()
-    _uint(bhead, 2, 1)
-    for n in range(50, 53):
-        var bx = bhead.copy()
-        # A NON-EMPTY payload (see `Service` above).
-        _str(bx, n, "x")
-        _same(
-            encode_proto(decode_proto[Bucket](bx.copy())),
-            bhead,
-            String("Bucket ") + String(n) + " is held",
-        )
-    print("  test_reserved_now_built_later_numbers_are_undeclared: PASS")
 
 
 def test_resource_header_fields() raises:
@@ -784,6 +758,7 @@ def test_service() raises:
     _uint(b, 9, 80)
     _empty(b, 10)
     _msg(b, 12, _entry("DB_PASSWORD", _secret("db_password")))
+    _msg(b, 14, _ref("runner"))
     var s = decode_proto[Service](b.copy())
     assert_equal(s.image.value().output.value().step, "build")
     assert_equal(s.image.value().output.value().name, "api_image")
@@ -807,6 +782,7 @@ def test_service() raises:
     assert_equal(len(s.secret_env), 1, "field 12 is `secret_env`")
     assert_equal(s.secret_env["DB_PASSWORD"].name, "db_password")
     assert_true("DB_PASSWORD" not in s.env, "a secret is not an env value")
+    assert_equal(s.run_as.value().resource, "runner", "field 14 is `run_as`")
     _same(encode_proto(s), b, "Service (public)")
 
     var i = List[UInt8]()
@@ -856,6 +832,7 @@ def test_job() raises:
     _msg(b, 6, _entry("API_URL", env_ref))
     _msg(b, 7, _entry("API_TOKEN", _secret("api_token")))
     _msg(b, 11, sched)
+    _msg(b, 13, _ref("runner"))
     var j = decode_proto[Job](b.copy())
     assert_equal(j.image.value()._oneof0_case, 2, "Image field 2 is `digest`")
     assert_equal(j.image.value().digest.value(), "sha256:ab")
@@ -872,6 +849,7 @@ def test_job() raises:
     assert_equal(j._oneof0_case, 2, "field 11 is `schedule`")
     assert_equal(j.schedule.value().cron, "0 3 * * *")
     assert_equal(j.schedule.value().timezone, "UTC")
+    assert_equal(j.run_as.value().resource, "runner", "field 13 is `run_as`")
     _same(encode_proto(j), b, "Job (schedule)")
 
     var d = List[UInt8]()
@@ -881,6 +859,7 @@ def test_job() raises:
     assert_equal(jd._oneof0_case, 1, "field 10 is `on_demand`")
     assert_true(Bool(jd.on_demand))
     assert_true(not Bool(jd.max_retries), "an unwritten max_retries is absent")
+    assert_true(not Bool(jd.run_as), "an unwritten run_as is absent")
     _same(encode_proto(jd), d, "Job (on_demand)")
 
     # An explicit "no retries" is a value, not the absence of one.
@@ -926,7 +905,7 @@ def test_bucket() raises:
     _msg(r, 14, b)
     var rr = decode_proto[Resource](r.copy())
     assert_equal(_arm_of(rr), "bucket", "body 14 is `bucket`")
-    assert_equal(rr._oneof0_case, 3, "the bucket is the third arm")
+    assert_equal(rr._oneof0_case, 4, "the bucket is the fourth arm")
     assert_equal(rr.retention.value, Retention.DELETE)
     assert_equal(Int(rr.bucket.value().object_expiry_days.value()), 30)
     _same(encode_proto(rr), r, "Resource with a bucket")
@@ -960,6 +939,130 @@ def test_new_ref_outputs_and_accesses() raises:
     print("  test_new_ref_outputs_and_accesses: PASS")
 
 
+# ---- identity: service account and grant -------------------------------------------
+
+
+def test_service_account_and_grant() raises:
+    """ServiceAccount: no field. Grant: 1 principal, 2 target, 3 access,
+    4 cell. As the `service_account` arm 20 and the `grant` arm 25 of a
+    Resource."""
+    var a = List[UInt8]()
+    _str(a, 1, "runner")
+    _empty(a, 20)
+    var ra = decode_proto[Resource](a.copy())
+    assert_equal(_arm_of(ra), "service_account", "body 20 is `service_account`")
+    assert_equal(ra._oneof0_case, 5, "the service account is the fifth arm")
+    _same(encode_proto(ra), a, "Resource with a service account")
+
+    var g = List[UInt8]()
+    _msg(g, 1, _ref("runner"))
+    _msg(g, 2, _ref("store"))
+    _uint(g, 3, UInt64(Access.READ_WRITE))
+    var d = decode_proto[Grant](g.copy())
+    assert_equal(d.principal.value().resource, "runner", "field 1 is `principal`")
+    assert_equal(d.target.value().resource, "store", "field 2 is `target`")
+    assert_equal(d.access.value, Access.READ_WRITE, "field 3 is `access`")
+    assert_equal(d.cell.value, CellResource.CELL_RESOURCE_UNSET, "absent = unset")
+    _same(encode_proto(d), g, "Grant (target)")
+
+    var c = List[UInt8]()
+    _msg(c, 1, _ref("runner"))
+    _uint(c, 3, UInt64(Access.WRITE))
+    _uint(c, 4, UInt64(CellResource.LOGS))
+    var dc = decode_proto[Grant](c.copy())
+    assert_true(not Bool(dc.target), "a cell grant has no target")
+    assert_equal(dc.cell.value, CellResource.LOGS, "field 4 is `cell`")
+    _same(encode_proto(dc), c, "Grant (cell)")
+
+    var r = List[UInt8]()
+    _str(r, 1, "see")
+    _msg(r, 25, g)
+    var rr = decode_proto[Resource](r.copy())
+    assert_equal(_arm_of(rr), "grant", "body 25 is `grant`")
+    assert_equal(rr._oneof0_case, 6, "the grant is the sixth arm")
+    assert_equal(rr.grant.value().principal.value().resource, "runner")
+    _same(encode_proto(rr), r, "Resource with a grant")
+
+    var desc = List[UInt8]()
+    _msg(desc, 1, _ref("runner"))
+    _uint(desc, 2, UInt64(Access.DESCRIBE))
+    var dd = decode_proto[Uses](desc.copy())
+    assert_equal(dd.access.value, 8, "DESCRIBE is 8")
+    _same(encode_proto(dd), desc, "Uses DESCRIBE")
+    print("  test_service_account_and_grant: PASS")
+
+
+# ---- data: table -------------------------------------------------------------------
+
+
+def _field(name: String, ftype: Int) -> List[UInt8]:
+    var b = List[UInt8]()
+    _str(b, 1, name)
+    _uint(b, 2, UInt64(ftype))
+    return b^
+
+
+def _path(name: String, partition: List[UInt8], order: List[UInt8]) -> List[UInt8]:
+    var b = List[UInt8]()
+    _str(b, 1, name)
+    _msg(b, 2, partition)
+    if len(order) > 0:
+        _msg(b, 3, order)
+    return b^
+
+
+def _table() -> List[UInt8]:
+    """A key (customer STRING, placed NUMBER), two indexes and a TTL."""
+    var b = List[UInt8]()
+    _msg(
+        b,
+        1,
+        _path("by-customer", _field("customer", FieldType.STRING), _field("placed", FieldType.NUMBER)),
+    )
+    _msg(b, 2, _path("by-sku", _field("sku", FieldType.BYTES), List[UInt8]()))
+    _msg(b, 2, _path("by-state", _field("state", FieldType.STRING), _field("placed", FieldType.NUMBER)))
+    _str(b, 3, "expires")
+    return b^
+
+
+def test_table() raises:
+    """Table: 1 key, 2 indexes (repeated), 3 ttl_field (presence).
+    AccessPath: 1 name, 2 partition, 3 order. Field: 1 name, 2 type. As the
+    `table` arm 13 of a Resource with retention 3."""
+    var b = _table()
+    var t = decode_proto[Table](b.copy())
+    ref key = t.key.value()
+    assert_equal(key.name, "by-customer", "AccessPath field 1 is `name`")
+    assert_equal(key.partition.value().name, "customer", "AccessPath 2 is `partition`, Field 1 `name`")
+    assert_equal(key.partition.value().type.value, FieldType.STRING, "Field 2 is `type`")
+    assert_equal(key.order.value().name, "placed", "AccessPath 3 is `order`")
+    assert_equal(key.order.value().type.value, FieldType.NUMBER)
+    assert_equal(len(t.indexes), 2, "Table field 2 is `indexes`, repeated, in order")
+    assert_equal(t.indexes[0].name, "by-sku")
+    assert_equal(t.indexes[0].partition.value().type.value, FieldType.BYTES)
+    assert_true(not Bool(t.indexes[0].order), "an index with no order has none")
+    assert_equal(t.indexes[1].name, "by-state")
+    assert_equal(t.ttl_field.value(), "expires", "Table field 3 is `ttl_field`")
+    _same(encode_proto(t), b, "Table")
+
+    # Presence: an unwritten TTL is absent (items never expire).
+    var none = decode_proto[Table](List[UInt8]())
+    assert_true(not Bool(none.ttl_field), "an unwritten ttl_field is absent")
+    assert_true(not Bool(none.key), "an unwritten key is absent")
+
+    var r = List[UInt8]()
+    _str(r, 1, "orders")
+    _uint(r, 3, UInt64(Retention.KEEP))
+    _msg(r, 13, b)
+    var rr = decode_proto[Resource](r.copy())
+    assert_equal(_arm_of(rr), "table", "body 13 is `table`")
+    assert_equal(rr._oneof0_case, 3, "the table is the third arm")
+    assert_equal(rr.retention.value, Retention.KEEP)
+    assert_equal(rr.table.value().ttl_field.value(), "expires")
+    _same(encode_proto(rr), r, "Resource with a table")
+    print("  test_table: PASS")
+
+
 # ---- enums ---------------------------------------------------------------------
 
 
@@ -973,8 +1076,8 @@ def _enum_row(got_name: String, want_name: String, n: Int, what: String) raises:
 
 def test_enum_ordinals() raises:
     """Every enum value by number AND by name: the number is what is stored.
-    The held values (Output 5; Access 5 to 9) render as bare numbers,
-    i.e. nothing has taken them."""
+    The held values (Output 5; Access 5, 6, 7 and 9; CellResource 4) render
+    as bare numbers, i.e. nothing has taken them."""
     var outputs = List[String]()
     outputs.append("OUTPUT_UNSET")
     outputs.append("URL")
@@ -995,9 +1098,26 @@ def test_enum_ordinals() raises:
     for n in range(len(access)):
         _enum_row(Access(n).json_name(), access[n], n, "Access")
         assert_equal(Access.from_json_name(access[n]).value, n)
-    # 5 SEND, 6 RECEIVE, 7 ACT_AS, 8 DESCRIBE, 9 MANAGE: held.
-    for n in range(5, 10):
+    _enum_row(Access(8).json_name(), "DESCRIBE", 8, "Access")
+    assert_equal(Access.from_json_name("DESCRIBE").value, 8)
+    # 5 SEND, 6 RECEIVE, 7 ACT_AS, 9 MANAGE: held.
+    for n in range(5, 11):
+        if n == 8:
+            continue
         assert_equal(Access(n).json_name(), String(n), "Access value held")
+    assert_true(not Access.is_known_json_name("ACT_AS"), "ACT_AS is not declared")
+    assert_true(not Access.is_known_json_name("MANAGE"), "MANAGE is not declared")
+
+    var cells = List[String]()
+    cells.append("CELL_RESOURCE_UNSET")
+    cells.append("LOGS")
+    cells.append("METRICS")
+    cells.append("ARTIFACTS")
+    for n in range(len(cells)):
+        _enum_row(CellResource(n).json_name(), cells[n], n, "CellResource")
+        assert_equal(CellResource.from_json_name(cells[n]).value, n)
+    assert_equal(CellResource(4).json_name(), "4", "CellResource 4 (COMPUTE) is held")
+    assert_true(not CellResource.is_known_json_name("COMPUTE"), "COMPUTE is not declared")
 
     var retention = List[String]()
     retention.append("RETENTION_UNSET")
@@ -1027,6 +1147,16 @@ def test_enum_ordinals() raises:
         assert_equal(Portability.from_json_name(port[n]).value, n)
     assert_equal(Portability(3).json_name(), "3", "Portability has three values")
 
+    var ftypes = List[String]()
+    ftypes.append("FIELD_TYPE_UNSET")
+    ftypes.append("STRING")
+    ftypes.append("NUMBER")
+    ftypes.append("BYTES")
+    for n in range(len(ftypes)):
+        _enum_row(FieldType(n).json_name(), ftypes[n], n, "FieldType")
+        assert_equal(FieldType.from_json_name(ftypes[n]).value, n)
+    assert_equal(FieldType(4).json_name(), "4", "FieldType has four values")
+
     print("  test_enum_ordinals: PASS")
 
 
@@ -1039,15 +1169,15 @@ def main() raises:
     test_image_platform()
     test_secret_ref()
     test_added_numbers_are_kept()
-    test_resource_body_arms_are_10_11_and_14()
-    test_held_body_numbers_are_undeclared()
+    test_resource_body_arms_are_10_11_13_14_20_and_25()
     test_field_3_is_retention_and_4_is_retired()
-    test_reserved_now_built_later_numbers_are_undeclared()
     test_resource_header_fields()
     test_service()
     test_scale_min_has_presence()
     test_job()
+    test_table()
     test_bucket()
+    test_service_account_and_grant()
     test_new_ref_outputs_and_accesses()
     test_enum_ordinals()
     print("ALL kci.resource.v1 FIELD-NUMBER TESTS PASSED")
