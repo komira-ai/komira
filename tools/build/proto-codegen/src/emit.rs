@@ -563,13 +563,16 @@ impl<'a> Emitter<'a> {
     /// An explicit copy constructor, so the struct is never trivially
     /// copyable.
     ///
-    /// On Mojo 1.0.0 the synthesized copy constructor of a struct with an
-    /// explicit `__deinit__` can be treated as trivial for some layouts (three
-    /// `Optional[String]` plus an `Optional[Bool]` or `Optional[Int64]` was
-    /// measured), and then `List.copy()` and `List.extend` copy the elements
-    /// with a memcpy: the copy and the original share their String buffers, and
-    /// dropping the copy frees them under the original. An explicit
-    /// constructor is never trivial. Every field is copied by its own
+    /// On Mojo 1.0.0 the synthesized copy constructor can be reported as
+    /// trivial (https://github.com/modular/modular/issues/7256): two fields of
+    /// the same non-trivial Variant-backed type (e.g. `Optional[String]`)
+    /// followed by a trivially copyable Variant-backed field (e.g.
+    /// `Optional[Bool]`) make `__copy_ctor_is_trivial` True, whether or not
+    /// the struct declares `__deinit__`. `List.copy()` and `List.extend` then
+    /// copy the elements with a memcpy: the copy and the original share their
+    /// heap buffers, and dropping the copy frees them under the original. An
+    /// explicit constructor is never trivial; remove this once that issue is
+    /// fixed in the pinned compiler. Every field is copied by its own
     /// `.copy()`, so a nested message, a repeated field, a map, an `Optional`
     /// and a oneof arm each go through that type's real copy.
     fn emit_explicit_copy_ctor(&mut self, msg: &IrMessage) {
@@ -2293,8 +2296,8 @@ mod mojo_100_service_client_tests {
         assert_eq!(
             ctors, 2,
             "one copy constructor per MESSAGE struct (2 messages, none on the \
-             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for a struct with \
-             an explicit __deinit__, and List.copy() then shares String buffers; \
+             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for some field \
+             orders (modular/modular#7256), and List.copy() then shares heap buffers; \
              got:\n{out}"
         );
     }

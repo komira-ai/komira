@@ -906,10 +906,10 @@ impl<'a> DbEmitter<'a> {
 
     /// An explicit copy constructor for the nested struct, so it is never
     /// trivially copyable. The nested struct is `Copyable`, and on Mojo 1.0.0
-    /// the synthesized copy of a struct with an explicit `__deinit__` can be
-    /// treated as trivial for some layouts, after which `List.copy()` copies
-    /// the elements with a memcpy and the copy shares its String buffers with
-    /// the original (see `emit.rs`, `emit_explicit_copy_ctor`). The DbStorable
+    /// the synthesized copy can be reported as trivial for some field orders
+    /// (https://github.com/modular/modular/issues/7256), after which
+    /// `List.copy()` copies the elements with a memcpy and the copy shares its
+    /// heap buffers with the original (see `emit.rs`, `emit_explicit_copy_ctor`). The DbStorable
     /// row and the DbSchema row are `Movable` only and are never copied.
     fn emit_explicit_copy_ctor(&mut self, msg: &IrMessage) {
         self.line("# Explicit so the struct is never trivially copyable: Mojo 1.0.0 can");
