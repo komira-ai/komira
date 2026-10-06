@@ -46,28 +46,48 @@
 #      that value. No other spelling names a non-finite value: "inf",
 #      "nan", "-inf", "infinity" (all of which the standard `atof`
 #      accepts) are refused.
-#   2. Any other JSON number, or JSON string holding a number, is parsed
-#      to a Float64 (the float64 reader's parser) and narrowed to Float32
-#      with round-to-nearest-even.
+#   2. Any other JSON number, or JSON string holding a number of the form
+#      `-?D+(.D+)?([eE][+-]?D+)?` (JSON number syntax, leading zeros
+#      allowed), is rounded STRAIGHT to the nearest float32, ties to even
+#      (`parse_decimal_f32` in `float32_parse.mojo`, exact integer
+#      arithmetic, no length limit). It is not parsed to a Float64 first:
+#      that rounds twice, and is wrong next to every float32 midpoint
+#      (1.0000000596046448 would read as 1.0, and the writer's own
+#      `7.038531e-26` for 0x15AE43FD would read back as 0x15AE43FE).
+#      Other text (" 1.5", "+1.5", "1.5f", ".5") is refused.
 #   3. A finite decimal outside float32 range is REFUSED, never read as an
-#      infinity: refused exactly when the narrowing overflows, i.e. when
-#      the parsed magnitude is at least float32 max plus half an ulp
-#      (2^128 - 2^103, about 3.40282357e38). So `3.4028235e38` (the
-#      shortest spelling of max, larger than max as a double) is max, and
-#      `3.4028236e38`, `1e39` and `1e400` (a float64 overflow) are refused.
-#      The decimal is rounded twice (to float64, then to float32); a decimal
-#      within one float64 ulp below that threshold can round to it and be
-#      refused, which no float32 the writer prints is near.
+#      infinity: refused exactly when it rounds past float32 max, i.e. when
+#      |x| >= 2^128 - 2^103 (the midpoint between max and 2^128, which ties
+#      to the even 2^128). So `3.4028235e38` (the shortest spelling of max,
+#      larger than max as a double) and 2^128 - 2^103 - 1 are max, and
+#      2^128 - 2^103, `3.4028236e38`, `1e39` and `1e400` are refused.
 #   4. Underflow is not an error, as for the float64 reader and protobuf's
 #      parsers: a value below the float32 normal range rounds to the
-#      nearest subnormal, and one below half the smallest subnormal
-#      (2^-150) rounds to zero, keeping its sign (`-1e-46` is -0.0).
+#      nearest subnormal, and one at or below half the smallest subnormal
+#      (2^-150; exactly 2^-150 ties to the even zero) is a zero of its sign
+#      (`-1e-46` is -0.0).
+#
+# ROUND TRIP. The writer's decimal lies inside the value's rounding
+# interval (exact arithmetic), on an endpoint only when the mantissa is
+# even, and the reader rounds correctly with ties to even, so every finite
+# float32 reads back as itself.
 # =============================================================================
 
 from std.math import isinf, isnan
 from std.memory import bitcast
 
-from komira_json import JsonValue, JSON_STRING, write_json_string
+from komira_json import JsonValue, JSON_NUMBER, JSON_STRING, write_json_string
+
+from .float32_bignum import (
+    big_add,
+    big_cmp,
+    big_from,
+    big_mul_pow10,
+    big_mul_small,
+    big_shl,
+    big_sub,
+)
+from .float32_parse import parse_decimal_f32
 
 
 # =============================================================================
@@ -109,79 +129,14 @@ def write_proto3_json_f32(mut buf: List[UInt8], v: Float32):
     _layout(buf, digits, n, k)
 
 
-comptime _LIMBS = 8
+comptime _LIMBS = 8  # the writer's largest intermediate is under 2^180
 comptime _Big = InlineArray[UInt32, _LIMBS]
-
-
-def _big(x: UInt64) -> _Big:
-    var b = _Big(fill=UInt32(0))
-    b[0] = UInt32(x & UInt64(0xFFFFFFFF))
-    b[1] = UInt32(x >> UInt64(32))
-    return b^
-
-
-def _big_shl(mut a: _Big, n: Int):
-    """a *= 2^n."""
-    var limbs = n // 32
-    var sh = n % 32
-    for i in reversed(range(_LIMBS)):
-        var src = i - limbs
-        var w = UInt64(0)
-        if src >= 0:
-            w = UInt64(a[src]) << UInt64(sh)
-            if sh > 0 and src >= 1:
-                w |= UInt64(a[src - 1]) >> UInt64(32 - sh)
-        a[i] = UInt32(w & UInt64(0xFFFFFFFF))
-
-
-def _big_mul_small(mut a: _Big, m: UInt32):
-    var carry = UInt64(0)
-    for i in range(_LIMBS):
-        var t = UInt64(a[i]) * UInt64(m) + carry
-        a[i] = UInt32(t & UInt64(0xFFFFFFFF))
-        carry = t >> UInt64(32)
-
-
-def _big_mul_pow10(mut a: _Big, p: Int):
-    var left = p
-    while left >= 9:
-        _big_mul_small(a, UInt32(1000000000))
-        left -= 9
-    while left > 0:
-        _big_mul_small(a, UInt32(10))
-        left -= 1
-
-
-def _big_add(a: _Big, b: _Big) -> _Big:
-    var out = _Big(fill=UInt32(0))
-    var carry = UInt64(0)
-    for i in range(_LIMBS):
-        var t = UInt64(a[i]) + UInt64(b[i]) + carry
-        out[i] = UInt32(t & UInt64(0xFFFFFFFF))
-        carry = t >> UInt64(32)
-    return out^
-
-
-def _big_sub(mut a: _Big, b: _Big):
-    """a -= b; requires a >= b."""
-    var borrow = UInt64(0)
-    for i in range(_LIMBS):
-        var t = UInt64(a[i]) - UInt64(b[i]) - borrow
-        a[i] = UInt32(t & UInt64(0xFFFFFFFF))
-        borrow = (t >> UInt64(63)) & UInt64(1)
-
-
-def _big_cmp(a: _Big, b: _Big) -> Int:
-    for i in reversed(range(_LIMBS)):
-        if a[i] != b[i]:
-            return 1 if a[i] > b[i] else -1
-    return 0
 
 
 def _high_reached(r: _Big, m_plus: _Big, s: _Big, closed: Bool) -> Bool:
     """r + m+ reaches s: the upper end of the interval is at or past s
     (at, only when the interval is closed)."""
-    var c = _big_cmp(_big_add(r, m_plus), s)
+    var c = big_cmp(big_add(r, m_plus), s)
     return c > 0 or (closed and c == 0)
 
 
@@ -200,19 +155,19 @@ def _shortest_digits(
     var m_plus: _Big
     var m_minus: _Big
     if e >= 0:
-        r = _big(f)
-        _big_shl(r, e + (2 if unequal else 1))
-        s = _big(UInt64(4) if unequal else UInt64(2))
-        m_plus = _big(UInt64(1))
-        _big_shl(m_plus, e + (1 if unequal else 0))
-        m_minus = _big(UInt64(1))
-        _big_shl(m_minus, e)
+        r = big_from[_LIMBS](f)
+        big_shl(r, e + (2 if unequal else 1))
+        s = big_from[_LIMBS](UInt64(4) if unequal else UInt64(2))
+        m_plus = big_from[_LIMBS](UInt64(1))
+        big_shl(m_plus, e + (1 if unequal else 0))
+        m_minus = big_from[_LIMBS](UInt64(1))
+        big_shl(m_minus, e)
     else:
-        r = _big(f * (UInt64(4) if unequal else UInt64(2)))
-        s = _big(UInt64(1))
-        _big_shl(s, (2 if unequal else 1) - e)
-        m_plus = _big(UInt64(2) if unequal else UInt64(1))
-        m_minus = _big(UInt64(1))
+        r = big_from[_LIMBS](f * (UInt64(4) if unequal else UInt64(2)))
+        s = big_from[_LIMBS](UInt64(1))
+        big_shl(s, (2 if unequal else 1) - e)
+        m_plus = big_from[_LIMBS](UInt64(2) if unequal else UInt64(1))
+        m_minus = big_from[_LIMBS](UInt64(1))
     # Estimate k = ceil(log10(v)) from the binary exponent (within one),
     # scale, then correct the estimate exactly.
     var bitlen = 0
@@ -223,37 +178,37 @@ def _shortest_digits(
     var e2 = e + bitlen - 1  # v in [2^e2, 2^(e2+1))
     k = (e2 * 1233) // 4096 + 1  # 1233 / 4096 ~ log10(2)
     if k >= 0:
-        _big_mul_pow10(s, k)
+        big_mul_pow10(s, k)
     else:
-        _big_mul_pow10(r, -k)
-        _big_mul_pow10(m_plus, -k)
-        _big_mul_pow10(m_minus, -k)
+        big_mul_pow10(r, -k)
+        big_mul_pow10(m_plus, -k)
+        big_mul_pow10(m_minus, -k)
     # Make 10^(k-1) <= high < 10^k (high's own end per `closed`).
     while _high_reached(r, m_plus, s, closed):
-        _big_mul_small(s, UInt32(10))
+        big_mul_small(s, UInt32(10))
         k += 1
     while True:
         var r10 = r.copy()
         var mp10 = m_plus.copy()
-        _big_mul_small(r10, UInt32(10))
-        _big_mul_small(mp10, UInt32(10))
+        big_mul_small(r10, UInt32(10))
+        big_mul_small(mp10, UInt32(10))
         if _high_reached(r10, mp10, s, closed):
             break
         r = r10^
         m_plus = mp10^
-        _big_mul_small(m_minus, UInt32(10))
+        big_mul_small(m_minus, UInt32(10))
         k -= 1
     # Generate digits.
     var n = 0
     while n < 20:
-        _big_mul_small(r, UInt32(10))
-        _big_mul_small(m_plus, UInt32(10))
-        _big_mul_small(m_minus, UInt32(10))
+        big_mul_small(r, UInt32(10))
+        big_mul_small(m_plus, UInt32(10))
+        big_mul_small(m_minus, UInt32(10))
         var d = 0
-        while _big_cmp(r, s) >= 0:
-            _big_sub(r, s)
+        while big_cmp(r, s) >= 0:
+            big_sub(r, s)
             d += 1
-        var c_low = _big_cmp(r, m_minus)
+        var c_low = big_cmp(r, m_minus)
         var low_ok = c_low < 0 or (closed and c_low == 0)
         var high_ok = _high_reached(r, m_plus, s, closed)
         if not low_ok and not high_ok:
@@ -263,7 +218,7 @@ def _shortest_digits(
         if high_ok and not low_ok:
             d += 1
         elif low_ok and high_ok:
-            var c_mid = _big_cmp(_big_add(r, r), s)
+            var c_mid = big_cmp(big_add(r, r), s)
             if c_mid > 0 or (c_mid == 0 and d % 2 == 1):
                 d += 1
         digits[n] = UInt8(d)
@@ -344,9 +299,9 @@ def _append_str(mut buf: List[UInt8], s: StaticString):
 
 def read_proto3_json_f32(v: JsonValue) raises -> Float32:
     """Read a float32 from a proto3-JSON value (a number, or a string
-    holding a number or one of the three non-finite spellings). Refuses a
-    finite value outside float32 range and any other non-finite spelling;
-    see the module header for the rules."""
+    holding a number or one of the three non-finite spellings), rounded
+    straight to float32. Refuses a value that rounds past float32 max and
+    any other non-finite spelling; see the module header for the rules."""
     if v.kind == JSON_STRING:
         if v.text == "NaN":
             return _f32_nan()
@@ -354,24 +309,11 @@ def read_proto3_json_f32(v: JsonValue) raises -> Float32:
             return _f32_inf()
         if v.text == "-Infinity":
             return -_f32_inf()
-    # A bool, null, object or array raises here, as for the float64 reader.
-    var d = v.as_float64()
-    if isnan(d):
-        raise Error(
-            "JsonError: not a proto3 float (only NaN, Infinity and"
-            " -Infinity name a non-finite value): "
-            + v.text
-        )
-    var f = Float32(d)
-    if isinf(f):
-        if isinf(d) and not _is_decimal_text(v.text):
-            raise Error(
-                "JsonError: not a proto3 float (only NaN, Infinity and"
-                " -Infinity name a non-finite value): "
-                + v.text
-            )
-        raise Error("JsonError: value out of float32 range: " + v.text)
-    return f
+    elif v.kind != JSON_NUMBER:
+        # A bool, null, object or array: the float64 reader's refusal.
+        _ = v.as_float64()
+        raise Error("JsonError: not a proto3 float")
+    return parse_decimal_f32(v.text)
 
 
 def _f32_inf() -> Float32:
@@ -380,13 +322,3 @@ def _f32_inf() -> Float32:
 
 def _f32_nan() -> Float32:
     return bitcast[DType.float32](UInt32(0x7FC00000))
-
-
-def _is_decimal_text(text: String) -> Bool:
-    """True iff `text` contains a decimal digit: a numeric spelling (which
-    overflowed) as opposed to an `atof` word such as "inf"."""
-    var b = text.as_bytes()
-    for i in range(len(b)):
-        if b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
-            return True
-    return False

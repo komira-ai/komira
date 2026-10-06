@@ -23,6 +23,9 @@ Modules:
                        round-trip decimal, the non-finite strings, the
                        float32 range check on read), shared by the `float`
                        field paths and `google.protobuf.FloatValue`.
+  - float32_parse.mojo: `parse_decimal_f32` — a decimal correctly rounded
+                       straight to float32 (the reader's core).
+  - float32_bignum.mojo: the fixed-width big integers both use.
   - codec.mojo       : `encode_proto` / `decode_proto` / `encode_json` /
                        `decode_json` — top-level convenience entry points.
 
@@ -63,6 +66,7 @@ from .proto_binary import (
 
 from .proto3_json import JsonEncoder, JsonDecoder, UnknownFields
 from .proto3_json_float import read_proto3_json_f32, write_proto3_json_f32
+from .float32_parse import parse_decimal_f32
 
 from .codec import (
     encode_proto,

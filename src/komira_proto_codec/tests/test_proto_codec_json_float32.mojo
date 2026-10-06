@@ -32,6 +32,18 @@
 #   R4  only the three spec spellings name a non-finite value: "inf",
 #       "nan", "-inf" are refused. Catches: the lenient `atof` spellings
 #       leaking through.
+#   R5  the reader rounds the decimal STRAIGHT to float32: the writer's
+#       `7.038531e-26` for 0x15AE43FD reads back as 0x15AE43FD, a decimal
+#       just past a midpoint (1.0000000596046448) rounds up, an exact
+#       midpoint ties to even, 2^-150 +- a little goes to the smallest
+#       subnormal / zero, T - 1 (T = 2^128 - 2^103) is max and T is
+#       refused, and a 100-digit decimal is read exactly. Catches: parsing
+#       to Float64 then narrowing (double rounding at float32 midpoints).
+#   E1  powers of two (the unequal-gap interval, both signs of the
+#       exponent), the subnormal / normal boundary, and every binade's
+#       all-zeros and all-ones mantissa: exact text for the named ones,
+#       round trip and minimality for all. Catches: a wrong lower or upper
+#       half-gap at a power of two (the strided sweep never visits one).
 #   S1  a strided sweep over float32 bit patterns (about 262000 values,
 #       every exponent): each round-trips bit-exactly through encode_json /
 #       decode_json, has at most 9 significant digits, and no decimal one
@@ -316,6 +328,14 @@ def test_r4_only_spec_spellings() raises:
     _expect_refused('{"v":"-inf"}', BAD, "-inf")
     _expect_refused('{"v":"nan"}', BAD, "nan")
     _expect_refused('{"v":"infinity"}', BAD, "lowercase infinity")
+    # A numeric string is JSON number syntax; `atof`'s extras are refused.
+    _expect_refused('{"v":" 1.5"}', BAD, "leading space")
+    _expect_refused('{"v":"+1.5"}', BAD, "leading plus")
+    _expect_refused('{"v":"1.5f"}', BAD, "C suffix")
+    _expect_refused('{"v":".5"}', BAD, "no integer digit")
+    _expect_refused('{"v":"1."}', BAD, "no fraction digit")
+    _expect_refused('{"v":"1e"}', BAD, "no exponent digit")
+    _expect_refused('{"v":""}', BAD, "empty string")
     print("  test_r4_only_spec_spellings: PASS")
 
 
@@ -393,11 +413,173 @@ def _no_shorter_decimal(json: String, v: Float32) raises:
     for cand in [shorter, shorter + 1]:
         var text = String("-") if neg else String("")
         text += String(cand) + "e" + String(exp + 1)
-        var back = Float32(atof(text))
+        # Read through the codec's reader (correctly rounded); a candidate
+        # past float32 max is refused, which is not `v` either.
+        var same = False
+        try:
+            same = _bits(_read_one('{"v":' + text + "}")) == _bits(v)
+        except:
+            same = False
         assert_true(
-            _bits(back) != _bits(v),
+            not same,
             "sweep: " + json + " is not shortest; " + text + " reads back",
         )
+
+
+def _check_round_trip_and_minimal(bits: UInt32, what: String) raises:
+    var v = _f(bits)
+    var json = _write_one(v)
+    assert_equal(_bits(_read_one(json)), bits, what + " round trip: " + json)
+    assert_true(_significant_digits(json) <= 9, what + " digits: " + json)
+    _no_shorter_decimal(json, v)
+
+
+def test_r5_correct_rounding() raises:
+    """The reader rounds the decimal straight to float32. Rounding to
+    float64 first can land exactly on a float32 midpoint and then break the
+    tie the wrong way."""
+    # The writer prints 0x15AE43FD as 7.038531e-26; that decimal lies just
+    # under the upper midpoint of 0x15AE43FD and its float64 rounding is
+    # exactly that midpoint.
+    assert_equal(
+        _write_one(_f(UInt32(0x15AE43FD))),
+        String('{"v":7.038531e-26}'),
+        "0x15AE43FD text",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":7.038531e-26}')),
+        UInt32(0x15AE43FD),
+        "7.038531e-26 reads back as 0x15AE43FD",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":-7.038531e-26}')),
+        UInt32(0x95AE43FD),
+        "-7.038531e-26",
+    )
+    # Just above the midpoint 1 + 2^-24: rounds up.
+    assert_equal(
+        _bits(_read_one('{"v":1.0000000596046448}')),
+        UInt32(0x3F800001),
+        "1.0000000596046448",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":1.00000005960464477550}')),
+        UInt32(0x3F800001),
+        "1.00000005960464477550",
+    )
+    # Exactly the midpoint 1 + 2^-24: a tie, to the even mantissa (1.0).
+    assert_equal(
+        _bits(_read_one('{"v":1.000000059604644775390625}')),
+        UInt32(0x3F800000),
+        "midpoint 1 + 2^-24 ties to even",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":1.000000059604644775390626}')),
+        UInt32(0x3F800001),
+        "one unit past the midpoint",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":1.000000059604644775390624}')),
+        UInt32(0x3F800000),
+        "one unit under the midpoint",
+    )
+    # Exactly the midpoint 1 + 3 * 2^-24: a tie, to the even mantissa 2.
+    assert_equal(
+        _bits(_read_one('{"v":1.000000178813934326171875}')),
+        UInt32(0x3F800002),
+        "midpoint 1 + 3 * 2^-24 ties to even",
+    )
+    # Half the smallest subnormal is 2^-150 = 7.00649232162408535...e-46:
+    # just above it is the smallest subnormal, just below it is zero.
+    assert_equal(
+        _bits(_read_one('{"v":7.0064923216240854e-46}')),
+        F32_MIN_SUBNORMAL_BITS,
+        "just above 2^-150",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":7.0064923216240853e-46}')),
+        UInt32(0),
+        "just below 2^-150",
+    )
+    # The overflow threshold T = 2^128 - 2^103 (the midpoint between max and
+    # 2^128) under correct rounding: T - 1 is max, T itself is refused.
+    assert_equal(
+        _bits(_read_one('{"v":340282356779733661637539395458142568447}')),
+        F32_MAX_BITS,
+        "T - 1 is max",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":3.40282356779733661637539395458142568447e38}')),
+        F32_MAX_BITS,
+        "T - 1 in exponent form is max",
+    )
+    _expect_refused(
+        '{"v":340282356779733661637539395458142568448}',
+        "out of float32 range",
+        "T",
+    )
+    # A long digit string is read exactly, not refused for its length.
+    assert_equal(
+        _bits(
+            _read_one(
+                '{"v":0.1000000014901161193847656250000000000000000000000'
+                + "00000000000000000000000000000000000000000000000000001}"
+            )
+        ),
+        _bits(Float32(0.1)),
+        "a 100-digit decimal",
+    )
+    print("  test_r5_correct_rounding: PASS")
+
+
+def test_e1_binade_edges() raises:
+    """Powers of two (the unequal-gap case on both sides of 1), the
+    subnormal / normal boundary, and the all-ones mantissa of every
+    binade. The strided sweep visits none of the powers of two."""
+    assert_equal(_write_one(_f(UInt32(0x3F800000))), String('{"v":1.0}'), "1")
+    assert_equal(_write_one(_f(UInt32(0x3F000000))), String('{"v":0.5}'), "0.5")
+    assert_equal(
+        _write_one(_f(UInt32(0x01000000))),
+        String('{"v":2.3509887e-38}'),
+        "2^-125",
+    )
+    assert_equal(
+        _write_one(_f(UInt32(0x7F000000))),
+        String('{"v":1.7014118e+38}'),
+        "2^127",
+    )
+    assert_equal(
+        _write_one(_f(UInt32(0x007FFFFF))),
+        String('{"v":1.1754942e-38}'),
+        "largest subnormal",
+    )
+    assert_equal(
+        _write_one(_f(UInt32(0x00800001))),
+        String('{"v":1.1754945e-38}'),
+        "smallest normal + 1",
+    )
+    assert_equal(
+        _write_one(_f(UInt32(0x00000002))), String('{"v":3e-45}'), "2 * 2^-149"
+    )
+    var named = List[UInt32]()
+    named.append(UInt32(0x3F800000))
+    named.append(UInt32(0x3F000000))
+    named.append(UInt32(0x01000000))
+    named.append(UInt32(0x7F000000))
+    named.append(UInt32(0x007FFFFF))
+    named.append(UInt32(0x00800001))
+    named.append(UInt32(0x00000002))
+    for i in range(len(named)):
+        _check_round_trip_and_minimal(named[i], "named edge")
+    # Every exponent field, mantissa all zeros (a power of two; field 0 is
+    # zero, skipped) and all ones, both signs.
+    for field in range(0, 255):
+        for sign in range(2):
+            var hi = (UInt32(sign) << UInt32(31)) | (UInt32(field) << UInt32(23))
+            if field > 0:
+                _check_round_trip_and_minimal(hi, "power of two")
+            _check_round_trip_and_minimal(hi | UInt32(0x7FFFFF), "all ones")
+    print("  test_e1_binade_edges: PASS")
 
 
 def test_s1_sweep_round_trip() raises:
@@ -434,5 +616,7 @@ def main() raises:
     test_r2_past_max_refused()
     test_r3_underflow_rounds()
     test_r4_only_spec_spellings()
+    test_r5_correct_rounding()
+    test_e1_binade_edges()
     test_s1_sweep_round_trip()
     print("test_proto_codec_json_float32: ALL PASS")

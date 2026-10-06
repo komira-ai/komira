@@ -48,3 +48,13 @@ mojo_test(
         ":copy_hazard_proto",
     ],
 )
+
+# Exhaustive round trip of the proto3-JSON float32 writer and reader over
+# four whole binades (about 34 million values; see the file header). Too slow
+# for the welded gate above, which samples every binade instead.
+mojo_test(
+    name = "test_float32_json_binades",
+    srcs = ["tests/test_float32_json_binades.mojo"],
+    deps = [":komira_proto_codec"],
+    optimization_level = "3",
+)
