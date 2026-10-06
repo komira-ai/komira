@@ -185,6 +185,31 @@ struct ManifestBody(Copyable, Movable, Deinitable):
     var marker_type: Int64
     var txn_id: String
 
+    def has_segment(self) -> Bool:
+        """True iff this chunk owns a `.seg` segment object at `object_key`:
+        a data chunk (`marker_type == MARKER_NONE`) with a non-empty key.
+
+        Every reader that GETs or DELETEs `object_key` checks this first. A
+        COMMIT / ABORT marker (and any other marker type) has zero records
+        and an empty key, so it owns no object; a reader that dereferences
+        its key GETs or DELETEs the bucket root `""`.
+
+        `record_count` is deliberately NOT part of the predicate: a flush of a
+        zero-row RecordBatch commits a MARKER_NONE chunk with `record_count
+        == 0` that still owns a real `.seg` object, which the reaper must
+        delete. A MARKER_NONE body with an empty key is not written by any
+        producer; it reports no segment rather than a read of `""`.
+
+        Compatibility: every reader MUST skip a chunk for which this is False.
+        A binary older than this check GETs / DELETEs the empty key of any
+        marker chunk, so once any marker chunk exists in a manifest (a txn
+        marker, or a future zero-record marker type), a binary that includes
+        this check is the rollback floor."""
+        return (
+            self.marker_type == MARKER_NONE
+            and self.object_key.byte_length() > 0
+        )
+
     @staticmethod
     def decode(bytes: List[UInt8]) raises -> ManifestBody:
         var record_count = _mb_get_i64_le(bytes, 0)

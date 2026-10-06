@@ -33,6 +33,7 @@ mojo_library(
         "tests/test_broker_log_compaction_offline.mojo",
         "tests/test_broker_log_start_advance_consistency_offline.mojo",
         "tests/test_broker_maintenance_authoritative_tail_offline.mojo",
+        "tests/test_broker_marker_chunk_readers_offline.mojo",
         "tests/test_broker_retention_offline.mojo",
         "tests/test_broker_scan_kind.mojo",
         "tests/test_broker_scan_kind_budget.mojo",
