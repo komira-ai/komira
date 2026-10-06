@@ -135,11 +135,13 @@ dependency order is the order of the rows.
 ### End-to-end test packages
 
 Packages that exist for their welded tests: each runs several libraries
-together, over loopback, inside the build action.
+together inside the build action (over loopback, or over the real local
+filesystem); nothing depends on them.
 
 | module | what it is |
 |---|---|
 | [`komira_http_tls_e2e`](../src/komira_http_tls_e2e/) | a real `komira_http_server` `HttpServer` against a real `komira_http_client` `HttpClient` in one process: an HTTP/1.1 GET over TLS checked byte for byte, the ALPN pivot to h2 on both sides, a 4 MiB plaintext response flushed through the server's buffered-write path (the server has no buffered-write path over TLS today), and the client refusing an untrusted root and a wrong server name while the server goes on serving. The library holds the shared TLS fixtures and the runner that steps the server on one thread while the client runs on another. |
+| [`komira_formats_e2e`](../src/komira_formats_e2e/) | one nullable dataset written through the ORC, Avro OCF, JSONL and CSV (`CsvSink`) writers into a Hive tree with a non-ASCII partition value (`city=Zürich`), discovered over the real `LocalFs` with `EagerGlobDiscovery` and `PrunedHiveDiscovery`, and read back with projections, values, NULLs and partition values compared with the source; the CSV and JSONL bytes, the Avro OCF framing and the ORC stripe statistics are also checked against literals spelled from the format specs, since a writer/reader round-trip alone cannot see a shared misencoding. |
 
 ### Third-party code
 
