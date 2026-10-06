@@ -224,19 +224,23 @@ def encode_metadata(stripe_stats: List[List[UInt8]]) -> List[UInt8]:
 # ColumnStatistics fields (orc_proto.proto):
 #   1 numberOfValues (uint64)  2 intStatistics  3 doubleStatistics
 #   4 stringStatistics  5 bucketStatistics  10 hasNull (bool)
-# IntegerStatistics: 1 minimum 2 maximum 3 sum  (ALL sint64 -> zigzag).
+# IntegerStatistics: 1 minimum 2 maximum 3 sum  (ALL sint64 -> zigzag); sum
+#   is omitted when it overflowed int64, as Apache ORC's Java writer does.
 # DoubleStatistics:  1 minimum 2 maximum 3 sum  (ALL double -> fixed64).
 # StringStatistics:  1 minimum (string) 2 maximum (string) 3 sum (sint64).
 # StripeStatistics:  1 colStats (repeated ColumnStatistics).
 
 
-def encode_integer_statistics(minimum: Int64, maximum: Int64, sum: Int64) -> List[
-    UInt8
-]:
+def encode_integer_statistics(
+    minimum: Int64, maximum: Int64, sum: Optional[Int64]
+) -> List[UInt8]:
+    """IntegerStatistics; field 3 (sum) only when `sum` is present (`None`
+    means the sum overflowed int64)."""
     var out = List[UInt8]()
     pb_write_sint64_field(out, 1, minimum)
     pb_write_sint64_field(out, 2, maximum)
-    pb_write_sint64_field(out, 3, sum)
+    if sum:
+        pb_write_sint64_field(out, 3, sum.value())
     return out^
 
 
