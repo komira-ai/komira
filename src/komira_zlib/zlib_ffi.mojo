@@ -628,8 +628,10 @@ def _zlib_skip_stream_ffi[
 #
 # The raw pointers are taken from the Spans here, inside this module, for the
 # one synchronous libz call; the Span origins are concrete, so the buffers are
-# alive for the whole call. libz counts in `uInt` (32 bits), so a source past
-# 4 GiB is refused and a larger destination is offered as 4 GiB.
+# alive for the whole call. libz counts in `uInt` (32 bits): `zlib_deflate_into`
+# feeds any length in 32-bit slices (compress2's own loop); inflate and
+# `zlib_skip_stream` refuse a source past 4 GiB and offer a larger
+# destination as 4 GiB.
 # =============================================================================
 
 # `window_bits` framing selectors (zlib.h).
