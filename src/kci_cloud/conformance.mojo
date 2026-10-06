@@ -12,7 +12,11 @@
 #                 is mutated;
 #   2. apply      creates every wanted node;
 #   3. labels     LABEL STAMPING: every live node carries labels the standard
-#                 rule accepts, and they decode to that node's identity;
+#                 rule accepts, and they decode to that node's identity; it
+#                 carries exactly one retention mark, the node's
+#                 (`kci-retention=retain|delete`); and it carries the scope's
+#                 validation run id under the run-id key exactly, or no
+#                 run-id label when the scope has none;
 #   4. re-apply   an IDEMPOTENT RE-APPLY under a NEW provenance (another run
 #                 id and revision) is NOOP everywhere and mutates nothing:
 #                 provenance is never part of a digest;
@@ -36,7 +40,14 @@
 #  11. race       TWO INTERLEAVED APPLIES of one cell: the second apply's
 #                 create lands first; the first apply fails loud at the
 #                 cloud (it never creates twice), and its re-run adopts the
-#                 object (same stamp) and settles.
+#                 object (same stamp) and settles;
+#  12. run tag    THE VALIDATION-RUN TAG, WHATEVER THE CALLER'S SCOPE: the
+#                 kit applies `base` into the emptied cloud under a
+#                 validation run id of its own (`KIT_VALIDATION_RUN`) and
+#                 checks step 3's labels against it, destroys, then does the
+#                 same with no validation run (no run-id label anywhere).
+#                 A caller's scope without a run id cannot let an adapter
+#                 whose create path skips the tag pass.
 # Every apply that should finish must: one that stops part-way fails the kit
 # with what landed and what is pending.
 #
@@ -75,7 +86,12 @@ from kci_cloud.deploy import (
     plan_resources,
 )
 from kci_cloud.clouds import Clouds
-from kci_cloud.labels import label_problems
+from kci_cloud.labels import (
+    label_problems,
+    retention_label_key,
+    retention_label_value,
+    validation_run_of,
+)
 
 
 trait ConformanceTarget(CloudAdapter):
@@ -180,6 +196,68 @@ def _with_adopt(ctx: CellContext, lid: String) -> CellContext:
     return c^
 
 
+comptime KIT_VALIDATION_RUN = "kit-run-5e0b71"
+"""The validation run id step 12 applies under: a legal id that is no
+caller's default."""
+
+
+def _with_validation_run(ctx: CellContext, run: Optional[String]) -> CellContext:
+    var c = ctx.copy()
+    c.scope.validation_run_id = run.copy()
+    return c^
+
+
+def _shown(v: Optional[String]) -> String:
+    return v.value().copy() if v else String("(none)")
+
+
+def _check_labels[
+    S: ConformanceTarget
+](step: String, cloud: S, ctx: CellContext, lowered: List[LoweredNode]) raises:
+    """Every wanted node's live labels: the standard rule, the node's
+    identity, one retention mark (the node's), and the scope's validation
+    run (or none)."""
+    var mark_key = retention_label_key()
+    for k in range(len(lowered)):
+        if not lowered[k].wanted:
+            continue
+        var labels = cloud.live_labels(lowered[k].id)
+        var problems = label_problems(labels)
+        if len(problems) > 0:
+            raise _fail(step, lowered[k].id + String(": ") + problems[0])
+        var want = ctx.scope.stamp(lowered[k].owner, lowered[k].id).identity()
+        var got = cloud.identity_of(labels)
+        if got != want:
+            raise _fail(
+                step,
+                lowered[k].id + String(" carries \"") + got + String("\", not \"") + want + String("\""),
+            )
+        var want_mark = retention_label_value(lowered[k].retention)
+        var marks = 0
+        var mark = String("(none)")
+        for i in range(len(labels)):
+            if labels[i].key == mark_key:
+                marks += 1
+                mark = labels[i].value.copy()
+        if marks != 1 or mark != want_mark:
+            raise _fail(
+                step,
+                lowered[k].id + String(" carries ") + String(marks) + String(" retention mark(s), \"")
+                + mark + String("\"; want one, \"") + want_mark + String("\""),
+            )
+        var run = validation_run_of(labels)
+        var want_run = ctx.scope.validation_run_id.copy()
+        var same = Bool(run) == Bool(want_run)
+        if same and Bool(run):
+            same = run.value() == want_run.value()
+        if not same:
+            raise _fail(
+                step,
+                lowered[k].id + String(" carries validation run \"") + _shown(run)
+                + String("\", not \"") + _shown(want_run) + String("\""),
+            )
+
+
 def _wanted(nodes: List[LoweredNode]) -> Int:
     var n = 0
     for i in range(len(nodes)):
@@ -250,20 +328,7 @@ def run_conformance[
         )
 
     # 3. label stamping
-    for k in range(len(lowered)):
-        if not lowered[k].wanted:
-            continue
-        var labels = cloud.live_labels(lowered[k].id)
-        var problems = label_problems(labels)
-        if len(problems) > 0:
-            raise _fail("labels", lowered[k].id + String(": ") + problems[0])
-        var want = ctx.scope.stamp(lowered[k].owner, lowered[k].id).identity()
-        var got = cloud.identity_of(labels)
-        if got != want:
-            raise _fail(
-                "labels",
-                lowered[k].id + String(" carries \"") + got + String("\", not \"") + want + String("\""),
-            )
+    _check_labels("labels", cloud, ctx, lowered)
 
     # 4. an idempotent re-apply, under a new run id and revision
     var m4 = cloud.mutations()
@@ -424,3 +489,16 @@ def run_conformance[
     _ = destroy_resources(clouds, cloud, ctx, base, creds, store11)
     if cloud.live_count() != 0:
         raise _fail("race", String("nodes left after the final destroy"))
+
+    # 12. the validation-run tag, under the kit's own run id and under none
+    for p in range(2):
+        var run: Optional[String] = None
+        if p == 0:
+            run = String(KIT_VALIDATION_RUN)
+        var c12 = _with_validation_run(ctx, run)
+        var store12 = InMemoryStateStore()
+        _ = _applied("run tag", apply_resources(clouds, cloud, c12, base, creds, store12))
+        _check_labels("run tag", cloud, c12, lowered)
+        _ = destroy_resources(clouds, cloud, c12, base, creds, store12)
+        if cloud.live_count() != 0:
+            raise _fail("run tag", String("nodes left after the run-tag destroy"))

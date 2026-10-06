@@ -1,6 +1,6 @@
 # =============================================================================
-# kci_logs/run_log_path.mojo — the run-scoped READ paths of the pipeline
-#   manager, in ONE place every validator and kci compose from.
+# kci_logs/run_log_path.mojo — the run-scoped READ paths of the run server,
+#   in ONE place every validator and kci compose from.
 # =============================================================================
 #
 # ⛔ WHY THIS FILE EXISTS: a failing validate step should return the relevant
@@ -70,8 +70,8 @@ def build_run_status_path(run_path_prefix: String, run_id: String) -> String:
 
 
 def build_run_logs_path(run_path_prefix: String, run_id: String) -> String:
-    """Compose the run-LOGS read path `<prefix><run_id>/logs` — the pipeline
-    manager's run-log route. Derived
+    """Compose the run-LOGS read path `<prefix><run_id>/logs` — the run
+    server's run-log route. Derived
     from the SAME prefix + run id as the status path so the two cannot drift onto
     different runs."""
     return build_run_status_path(run_path_prefix, run_id) + String("/logs")

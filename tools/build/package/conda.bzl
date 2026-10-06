@@ -305,14 +305,49 @@ def conda_package(**kwargs):
     read here, in the macro, so they key only the packages and never a
     compile.
     """
-    _conda_package(
+    _conda_package_with_stamp(
         commit = read_config("komira", "package_commit", ""),
         stamp = read_config("komira", "package_stamp", "0"),
+        timestamp_ms = read_config("komira", "package_timestamp_ms", "0"),
+        **kwargs
+    )
+
+# The test stamp of conda_package_test_stamped. No release carries it: a
+# release's build number is a first-parent commit count (release_version.sh),
+# never 999999999; its commit is a real one, and this id is not (its first 8
+# hex spell "test code", and no 8-hex slice of it repeats another or is the
+# unstamped build string's `00000000`, so a packer that took the wrong slice,
+# or no commit, writes another build string than TEST_BUILD); its commit time
+# is not one day after the epoch. TEST_BUILD is written out, not computed, so
+# the check that compares against it shares no formula with the packer.
+TEST_STAMP = "999999999"
+TEST_COMMIT = "7e57c0de1f2e3d4c5b6a79880a1b2c3d4e5f6071"
+TEST_TIMESTAMP_MS = "86400000"
+TEST_BUILD = "h7e57c0de_999999999"
+
+def conda_package_test_stamped(**kwargs):
+    """The same package as conda_package, stamped with the fixed TEST stamp
+    above instead of the configuration's, so a build without
+    `-c komira.package_stamp` still has a stamped `[release]` to check
+    (release_set.bzl). The only stamp a BUCK file can give is this one: a
+    release's stamp comes from `-c komira.package_*` alone.
+    """
+    _conda_package_with_stamp(
+        commit = TEST_COMMIT,
+        stamp = TEST_STAMP,
+        timestamp_ms = TEST_TIMESTAMP_MS,
+        **kwargs
+    )
+
+def _conda_package_with_stamp(commit, stamp, timestamp_ms, **kwargs):
+    _conda_package(
+        commit = commit,
+        stamp = stamp,
         subdir = select({
             "komira//tools/build/package:is_linux_x86_64": "linux-64",
             "DEFAULT": "unsupported",
         }),
-        timestamp_ms = read_config("komira", "package_timestamp_ms", "0"),
+        timestamp_ms = timestamp_ms,
         exec_compatible_with = LINUX_X86_64,
         **kwargs
     )
@@ -446,5 +481,6 @@ def conda_doc_check(**kwargs):
     _conda_doc_check(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 conda_package = declares_docs(conda_package)
+conda_package_test_stamped = declares_docs(conda_package_test_stamped)
 conda_manifest_kci = declares_docs(conda_manifest_kci)
 conda_doc_check = declares_docs(conda_doc_check)

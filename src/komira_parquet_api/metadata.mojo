@@ -79,14 +79,15 @@ struct Statistics(Movable, Copyable):
             across row groups instead of summing `distinct_count` (which
             over-counts a key that appears in several row groups). Absent
             in files from other writers; a reader then falls back to
-            summing `distinct_count`. Not part of the Parquet format, and
-            its old placement as Statistics field 9 now collides with it:
-            parquet.thrift defines field 9 as `optional i64 nan_count`. A
-            spec-current reader meets a binary where it expects an i64, and
-            a reader that takes field 9 as registers would take another
-            writer's `nan_count` for them. Nothing here encodes or decodes
-            it; a writer must not put it in field 9, and a reader must not
-            accept field 9 as registers.
+            summing `distinct_count`. Not part of the Parquet format and
+            not a Statistics field on the wire: it travels in the column
+            chunk's `ColumnMetaData.key_value_metadata` under
+            `hll_footer.HLL_REGISTERS_KEY` (see `hll_footer`). Its old
+            location, Statistics field 9, is the spec's `nan_count`.
+        nan_count: Number of NaN values (parquet.thrift Statistics field 9,
+            `optional i64 nan_count`; floating-point columns only). A reader
+            decodes field 9 into this only when its wire type is i64
+            (`hll_footer.statistics_field_9_is_nan_count`).
     """
 
     var null_count: Optional[Int]
@@ -98,6 +99,7 @@ struct Statistics(Movable, Copyable):
     var min: Optional[List[UInt8]]
     var max: Optional[List[UInt8]]
     var hll_registers: Optional[List[UInt8]]
+    var nan_count: Optional[Int]
 
     def __init__(
         out self,
@@ -108,6 +110,7 @@ struct Statistics(Movable, Copyable):
         is_min_value_exact: Bool = True,
         is_max_value_exact: Bool = True,
         var hll_registers: Optional[List[UInt8]] = None,
+        nan_count: Optional[Int] = None,
     ):
         self.null_count = null_count
         self.distinct_count = distinct_count
@@ -118,6 +121,7 @@ struct Statistics(Movable, Copyable):
         self.min = None
         self.max = None
         self.hll_registers = hll_registers^
+        self.nan_count = nan_count
 
 
 # =============================================================================
@@ -284,6 +288,9 @@ struct ColumnMetaData(Movable, Copyable):
         num_values: Number of values (including nulls).
         total_uncompressed_size: Total uncompressed size in bytes.
         total_compressed_size: Total compressed size in bytes.
+        key_value_metadata: The column chunk's own key-value metadata
+            (parquet.thrift ColumnMetaData field 8, optional). Where this
+            project's writers put a chunk's HLL registers (`hll_footer`).
         data_page_offset: Byte offset of the first data page.
         index_page_offset: Byte offset of the index page (if any).
         dictionary_page_offset: Byte offset of the dictionary page (if any).
@@ -299,6 +306,7 @@ struct ColumnMetaData(Movable, Copyable):
     var num_values: Int
     var total_uncompressed_size: Int
     var total_compressed_size: Int
+    var key_value_metadata: Optional[List[KeyValue]]
     var data_page_offset: Int
     var index_page_offset: Optional[Int]
     var dictionary_page_offset: Optional[Int]
@@ -321,6 +329,7 @@ struct ColumnMetaData(Movable, Copyable):
         var statistics: Optional[Statistics] = None,
         bloom_filter_offset: Optional[Int] = None,
         bloom_filter_length: Optional[Int] = None,
+        var key_value_metadata: Optional[List[KeyValue]] = None,
     ):
         self.type = type
         self.encodings = encodings^
@@ -335,6 +344,7 @@ struct ColumnMetaData(Movable, Copyable):
         self.statistics = statistics^
         self.bloom_filter_offset = bloom_filter_offset
         self.bloom_filter_length = bloom_filter_length
+        self.key_value_metadata = key_value_metadata^
 
 
 # =============================================================================

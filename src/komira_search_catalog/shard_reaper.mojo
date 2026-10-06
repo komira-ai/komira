@@ -29,6 +29,7 @@ from komira_objectstore.sublineage_shard_keys import (
 
 from komira_search_catalog.generation import (
     advance_log_start_to,
+    generation_bumps_key,
     read_log_start_seq,
     read_retired_shards,
     record_retired_shard,
@@ -63,8 +64,10 @@ from komira_search_catalog.metastore import SearchMetastore
 # reader cannot replay. Per shard, in this order:
 #
 #   1. Snapshot: LIST every key under the shard.
-#   2. Read the shard's generation `g`. For a drained shard that is exactly
-#      the slot of the writer's next publish: `reap_chunk` keeps reaped
+#   2. Read the shard's next slot `g` (`SearchMetastore._next_slot`, the
+#      chunks it has ever committed; not `generation()`, which also counts
+#      retires and reaps). For a drained shard that is exactly the slot of
+#      the writer's next publish: `reap_chunk` keeps reaped
 #      chunks as stubs until the log start passes them, and raises the
 #      generation floor first, so the lineage never looks shorter than the
 #      writer's tail.
@@ -90,12 +93,18 @@ from komira_search_catalog.metastore import SearchMetastore
 #      deleted since step 2, the log start is already above `g`. A publish
 #      at `g` after the seal loses the slot to it, so nothing can be written
 #      at `g` between the seal and the re-read.
-#   6. Record the shard's final generation, `g + 1` (the seal is a chunk),
-#      in the index's `_RETIRED_SHARDS` record. The index generation does not
-#      drop, and readers skip the shard from now on.
-#   7. Delete the snapshot's keys except the log start, every seal, and
-#      every chunk above the earliest seal. A publish creates a key that did
-#      not exist, so it is never in the snapshot.
+#   6. Record the shard's final generation, `g + 1` (the seal is a chunk)
+#      plus its `_GENERATION_BUMPS` count, in the index's `_RETIRED_SHARDS`
+#      record. The index generation does not drop, and readers skip the shard
+#      from now on.
+#   7. Delete the snapshot's keys except the log start, the
+#      `_GENERATION_BUMPS` counter, every seal, and every chunk above the
+#      earliest seal. A publish creates a key that did not exist, so it is
+#      never in the snapshot. The counter stays because a `reap_chunk` that
+#      finished its change before the drained check may still be about to
+#      write its second bump: deleting the counter would lose a value a
+#      reader may already have counted, and the record from step 6 may not
+#      cover it.
 #
 # The seal is terminal and is never deleted, nor is any chunk above it.
 # Deleting one would free a slot at or above the writer's next slot, and the
@@ -105,12 +114,13 @@ from komira_search_catalog.metastore import SearchMetastore
 # finds one, below the slot it won or as the slot it lost, rewrites its own
 # chunk into a seal and raises `[SHARD_RETIRED]` (`SearchMetastore.publish`);
 # the caller publishes into a fresh shard id. What remains of a retired shard
-# is its seals and the log start: two objects in the common case.
+# is its seals, the log start and the generation counter: three objects in
+# the common case.
 #
 # A sweep can find a seal no `_RETIRED_SHARDS` record covers yet, and must
 # keep it:
 #   * a reaper crashed after step 4 (before step 6). Replay skips its seal,
-#     so the next sweep finds the shard drained again, reads generation
+#     so the next sweep finds the shard drained again, reads next slot
 #     `g + 1` and seals that slot. The old seal at `g` is the writer's next
 #     slot, so it stays.
 #   * two reapers ran concurrently and both read `_RETIRED_SHARDS` before
@@ -142,8 +152,9 @@ struct DrainedShardReapResult(
       shards_fenced:   drained shards left alone because a publish took the
                        fenced slot after the drained check, or because the
                        slot had been written and reaped since the check.
-      objects_deleted: objects deleted across the reaped shards. The seals
-                       and the log start of a retired shard stay.
+      objects_deleted: objects deleted across the reaped shards. The seals,
+                       the log start and the generation counter of a
+                       retired shard stay.
     """
 
     var shards_examined: Int
@@ -288,7 +299,7 @@ def reap_drained_shards[
             storage.clone(), lineage_prefix.copy(), RetryPolicy.default()
         )
         var meta = SearchMetastore[Storage](manifest^, index_name.copy())
-        var g = meta.generation()
+        var g = meta._next_slot()
         if not _shard_is_drained(meta):
             continue
         var seal = chunk_key(lineage_prefix, g)
@@ -315,12 +326,16 @@ def reap_drained_shards[
             meta._read_head_settled().next_offset,
         )
         record_retired_shard(
-            storage, index_meta_prefix, shard_ids[i], g + Int64(1)
+            storage,
+            index_meta_prefix,
+            shard_ids[i],
+            g + Int64(1) + meta._generation_bumps(),
         )
         var keep = log_start_key(lineage_prefix).raw()
+        var keep_bumps = generation_bumps_key(lineage_prefix).raw()
         var first_kept = _earliest_seal(storage, lineage_prefix, snapshot)
         for k in range(len(snapshot)):
-            if snapshot[k] == keep:
+            if snapshot[k] == keep or snapshot[k] == keep_bumps:
                 continue
             var seq = _chunk_seq_of(lineage_prefix, snapshot[k])
             if seq >= first_kept:

@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package example.valuenull.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+// proto3 JSON reads `null` in a singular google.protobuf.Value field as
+// NULL_VALUE and in every other field as absent (komira-ai/komira#62).
+// One field per position a Value takes, and one per other field shape.
+message Inner {
+  string name = 1;
+}
+
+message Holder {
+  // The Value positions whose `null` is NULL_VALUE.
+  google.protobuf.Value v = 1;
+  optional google.protobuf.Value opt_v = 2;
+  oneof kind {
+    google.protobuf.Value arm_v = 3;
+    string arm_s = 4;
+  }
+
+  // Positions whose `null` is absent.
+  repeated google.protobuf.Value list_v = 5;
+  map<string, google.protobuf.Value> map_v = 6;
+  google.protobuf.Struct st = 7;
+  google.protobuf.ListValue lv = 8;
+  google.protobuf.Int64Value wrapped = 9;
+  Inner inner = 10;
+  string s = 11;
+  int64 n = 12;
+  optional bool b = 13;
+  repeated string names = 14;
+}

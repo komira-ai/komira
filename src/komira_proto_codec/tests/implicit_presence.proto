@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package example.presence.v1;
+
+// The proto3 JSON mapping omits a field holding its default only when the
+// field has implicit presence (a plain proto3 scalar or enum). A field with
+// explicit presence (`optional`, a oneof member, a message) is written
+// whenever it is set, even to its default. `Plain` has one field of each
+// kind (test_implicit_presence_json.mojo).
+
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  COLOR_RED = 1;
+}
+
+message Inner {
+  string name = 1;
+}
+
+message Plain {
+  // Implicit presence: omitted at the default.
+  string s = 1;
+  bytes by = 2;
+  bool b = 3;
+  int32 i32 = 4;
+  int64 i64 = 5;
+  uint32 u32 = 6;
+  uint64 u64 = 7;
+  sint32 si32 = 8;
+  sint64 si64 = 9;
+  fixed32 f32x = 10;
+  fixed64 f64x = 11;
+  sfixed32 sf32 = 12;
+  sfixed64 sf64 = 13;
+  float fl = 14;
+  double db = 15;
+  Color color = 16;
+
+  // Explicit presence: written when set, at the default too.
+  optional string opt_s = 17;
+  optional int64 opt_n = 18;
+  optional bool opt_b = 19;
+  optional Color opt_color = 20;
+  optional double opt_d = 21;
+  oneof arm {
+    string arm_s = 22;
+    int64 arm_n = 23;
+    Color arm_color = 24;
+  }
+  Inner inner = 25;
+
+  // Omitted when empty; an element or entry at its default is still written.
+  repeated string names = 26;
+  map<string, int64> counts = 27;
+}

@@ -17,18 +17,23 @@
 # on every billable resource that run creates, and the ONLY thing an unattended
 # auto-delete is permitted to act on.
 #
-# ── ⛔ WHY THE KEY LIVES HERE AND NOT BESIDE EITHER CLOUD'S CLIENT ───────────
-# It is stamped by BOTH clouds' creation paths (an ECS `RunTask` tag and a Cloud
-# Run label) and READ by a third party that is neither (an external leak
-# checker). A copy in each would be three copies that drift silently — and a tag key that
-# drifts does not fail: it stamps a key nothing looks for, and the checker
-# reports a clean fleet forever. So it is written down ONCE, here, and every
-# consumer imports it.
+# ── ⛔ WHY THE KEY LIVES HERE AND NOT BESIDE ANY ONE CLOUD'S CLIENT ──────────
+# It is stamped by every cloud's creation path and READ by a third party that
+# is none of them (a leak checker). A copy in each would be copies that drift
+# silently — and a tag key that drifts does not fail: it stamps a key nothing
+# looks for, and the checker reports a clean fleet forever. So it is written
+# down ONCE, here, and every consumer imports it. Today they are kci_cloud,
+# komira_test_run_id (a minted id must pass the rule), and komira_test_bucket
+# / komira_test_minio (an id is checked before it names anything). kci_cloud's
+# `create_labels` writes `kci-run-id=<id>` when the cell scope carries a
+# validation run id, and the `kci-retention` mark on every object it creates
+# or adopts; its conformance kit holds every adapter to both, and plan and
+# apply refuse an id this file's rule rejects before any create. No kci verb
+# sets a scope's validation run id yet (kci_cli and kci_api have no flag for
+# it), so a kci deploy today stamps the retention mark and no run-id.
 #
-# Having no deps is deliberate and load-bearing: this package is imported by
-# both cloud wire layers (the ECS wire and the Cloud Run wire), whose closures
-# are deliberately tight and disjoint. A dep here would be placed upstream of
-# both, widening both closures to carry one string.
+# Having no deps is deliberate and load-bearing: a dep here would be placed
+# upstream of every consumer, widening each closure to carry one string.
 #
 # ── ⛔ THE SPELLING IS CONSTRAINED BY BOTH CLOUDS AT ONCE, AND THE TWO
 #      COMMON KEY CONVENTIONS EACH FAIL ON THE OTHER CLOUD ──────────────────
@@ -201,8 +206,8 @@ red."""
 # The wire ordinals of the manifest's `Retention` enum. ⛔ WRITTEN AS INTS HERE
 # ON PURPOSE: this package has no deps, and importing the generated manifest
 # module to reach `Retention.RETENTION_RETAIN_KEEP` would place a proto codegen
-# dep upstream of BOTH cloud wire layers — the one thing having no deps exists
-# to prevent. The duplication must therefore be CHECKED rather than trusted: a
+# dep upstream of every consumer (see the header) — the one thing having no
+# deps exists to prevent. The duplication must therefore be CHECKED rather than trusted: a
 # consumer that does depend on the generated enum asserts these three ints
 # against it.
 comptime _RETENTION_ORDINAL_UNSPECIFIED: Int = 0

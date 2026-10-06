@@ -16,11 +16,10 @@
 # `localhost` (resolved without the network) with `set_rest_host`; the
 # default host is test_run_endpoint's subject.
 #
-# One part of the bodies is the codec's, not the API's: komira_proto_codec
-# writes default-valued fields (`"uid":""`, `"generation":"0"`,
-# `"launchStage":"LAUNCH_STAGE_UNSPECIFIED"`, empty lists and maps), which
-# the proto3 JSON mapping lets a writer omit and the service reads as
-# unset; an output-only field sent at its default is ignored.
+# A body holds only the fields the caller set: a plain field at its default
+# (`uid`, `generation`, `launchStage`, the output-only fields) and an empty
+# list or map are omitted, as the proto3 JSON mapping omits them; the
+# service reads each as unset.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -65,27 +64,16 @@ comptime _SERVICE = (
     + '"scaling":{"maxInstanceCount":4}}}'
 )
 
-# The same service as the client writes it, after its name.
+# The same service as the client writes it, after its name: the fields the
+# caller set, in declaration order (`scaling` before `serviceAccount`).
 comptime _SERVICE_WIRE_TAIL = (
-    '"description":"","uid":"","generation":"0","labels":{"app":"web"},'
-    + '"creator":"","lastModifier":"","client":"","clientVersion":"",'
-    + '"ingress":"INGRESS_TRAFFIC_ALL","launchStage":"LAUNCH_STAGE_UNSPECIFIED",'
-    + '"template":{"revision":"",'
-    + '"scaling":{"minInstanceCount":0,"maxInstanceCount":4},'
+    '"labels":{"app":"web"},"ingress":"INGRESS_TRAFFIC_ALL","template":{'
+    + '"scaling":{"maxInstanceCount":4},'
     + '"serviceAccount":"web-runtime@demo-project.iam.gserviceaccount.com",'
-    + '"containers":[{"name":"","image":"us-docker.pkg.dev/demo-project/apps/web@sha256:0f1e",'
+    + '"containers":[{"image":"us-docker.pkg.dev/demo-project/apps/web@sha256:0f1e",'
     + '"args":["--port=8080"],"env":[{"name":"MODE","value":"serve"},'
     + '{"name":"SMTP_PASSWORD","valueSource":{"secretKeyRef":{"secret":"smtp-password",'
-    + '"version":"3"}}}],"ports":[{"name":"","containerPort":8080}],'
-    + '"workingDir":"","baseImageUri":""}],'
-    + '"executionEnvironment":"EXECUTION_ENVIRONMENT_UNSPECIFIED","encryptionKey":"",'
-    + '"maxInstanceRequestConcurrency":0,'
-    + '"encryptionKeyRevocationAction":"ENCRYPTION_KEY_REVOCATION_ACTION_UNSPECIFIED",'
-    + '"sessionAffinity":false,"healthCheckDisabled":false},'
-    + '"invokerIamDisabled":false,"defaultUriDisabled":false,"iapEnabled":false,'
-    + '"observedGeneration":"0",'
-    + '"latestReadyRevision":"","latestCreatedRevision":"","uri":"",'
-    + '"satisfiesPzs":false,"threatDetectionEnabled":false,"reconciling":false,"etag":""}'
+    + '"version":"3"}}}],"ports":[{"containerPort":8080}]}]}}'
 )
 
 # A running operation, as Create/Update/Delete answer.
@@ -223,7 +211,7 @@ def test_create_service() raises:
         _wire(capture),
         _expected(
             "POST /v2/projects/demo-project/locations/us-central1/services?serviceId=web",
-            String('{"name":"",') + _SERVICE_WIRE_TAIL,
+            String('{') + _SERVICE_WIRE_TAIL,
         ),
     )
     assert_equal(op.name, "projects/demo-project/locations/us-central1/operations/0f8e3a")
