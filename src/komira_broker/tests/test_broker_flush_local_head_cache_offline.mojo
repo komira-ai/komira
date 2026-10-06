@@ -1,8 +1,8 @@
 # =============================================================================
 # tests/test_broker_flush_local_head_cache_offline.mojo
-#   The durable-ack hot path is 2 synchronous object-store ops, not 5: a
+#   The durable-ack hot path is 3 synchronous object-store ops, not 6: a
 #   local `_HEAD` cache + a deferred (off-the-ack-path) durable `_HEAD`
-#   advance.
+#   advance. (The third op is the reaped-slot check's `_LOG_START` GET, #486.)
 # =============================================================================
 #
 # THE REDUCTION (correctness-neutral). A naive steady-state single-writer
@@ -36,8 +36,9 @@
 # call tallies shared across every clone) — the only place the win is observable
 # (one fewer round-trip is identical wall-time on a single local store):
 #   * `test_steady_state_ack_is_two_ops` — a warm single-writer ack does EXACTLY
-#     2 synchronous ops (segment PUT + chunk create-CAS), 0 GET, 0 HEAD (the
-#     naive path would do 5: +1 GET +1 HEAD +1 advance PUT).
+#     3 synchronous ops (segment PUT + chunk create-CAS + the reaped-slot
+#     check's `_LOG_START` GET), 0 HEAD (the naive path would add +1 `_HEAD`
+#     GET +1 HEAD +1 advance PUT). The name predates the check.
 #   * `test_contention_falls_back_and_commits_dense` — a stale local cache (a
 #     concurrent sibling won the slot) 412s at the create-CAS, falls back to the
 #     re-read path, and STILL commits at the correct dense contiguous offset (no
@@ -123,18 +124,24 @@ def _body(tag: Int, n: Int) -> List[UInt8]:
 
 
 # =============================================================================
-# (1) A warm single-writer durable ack is EXACTLY 2 synchronous ops.
-#     RED before the source edit (5 ops: +1 GET +1 HEAD +1 advance PUT);
-#     GREEN after (segment PUT + chunk create-CAS only).
+# (1) A warm single-writer durable ack is EXACTLY 3 synchronous ops: segment
+#     PUT + chunk create-CAS + the reaped-slot check's `_LOG_START` GET (#486).
+#     The local cache elides the `_HEAD` GET, its etag HEAD and the advance PUT.
 # =============================================================================
 
 # The per-ack synchronous object-store op count for ONE warm single-writer
-# durable ack (segment PUT + chunk create-CAS). If a future change re-introduces
-# a synchronous GET/HEAD/advance on the ack path, these counts rise -> FAIL LOUD.
+# durable ack (segment PUT + chunk create-CAS + the reaped-slot check's
+# `_LOG_START` GET). If a future change re-introduces a synchronous
+# GET/HEAD/advance on the ack path, these counts rise -> FAIL LOUD.
+#
+# The ONE GET is the reaped-slot check (#486, manifest_slot_guard.mojo): after
+# the chunk create wins, the broker's partition manifest GETs the `_LOG_START`
+# body and refuses a win below it. It is the accepted per-ack cost of acking
+# only what a reader can see; the `_HEAD` GET and etag HEAD stay elided.
 comptime _ACK_PUTS = Int64(2)  # segment PUT + chunk create-CAS
-comptime _ACK_GETS = Int64(0)  # _HEAD GET elided by the local cache
+comptime _ACK_GETS = Int64(1)  # the reaped-slot check's _LOG_START GET
 comptime _ACK_HEADS = Int64(0)  # _HEAD etag HEAD elided by the local cache
-comptime _ACK_TOTAL_OPS = Int64(2)  # 2 synchronous ops total (down from 5)
+comptime _ACK_TOTAL_OPS = Int64(3)  # 3 synchronous ops total (the naive is 6)
 
 
 def test_steady_state_ack_is_two_ops() raises:
@@ -167,11 +174,15 @@ def test_steady_state_ack_is_two_ops() raises:
     assert_equal(r1.last_offset, Int64(7), "warm ack last 7")
     assert_equal(r1.record_count, Int64(4), "warm ack record_count 4")
 
-    # The reduction — exactly 2 synchronous ops, 0 GET, 0 HEAD.
+    # The reduction — exactly 3 synchronous ops: 1 GET (the reaped-slot
+    # check's _LOG_START, not the elided _HEAD), 0 HEAD.
     assert_equal(
         gets,
         _ACK_GETS,
-        "warm ack issues 0 _HEAD GET (elided by the local cache; was 1)",
+        (
+            "warm ack issues exactly 1 GET: the reaped-slot check's _LOG_START"
+            " (the _HEAD GET stays elided by the local cache)"
+        ),
     )
     assert_equal(
         heads,
@@ -190,15 +201,15 @@ def test_steady_state_ack_is_two_ops() raises:
         gets + heads + puts,
         _ACK_TOTAL_OPS,
         (
-            "warm single-writer durable ack = 2 synchronous object-store ops"
-            " (the naive path does 5)"
+            "warm single-writer durable ack = 3 synchronous object-store ops"
+            " (segment PUT, chunk create-CAS, _LOG_START GET)"
         ),
     )
     _ = broker^
     _ = store^
     print(
-        "[test_steady_state_ack_is_two_ops] PASS — warm ack = 2 synchronous ops"
-        " (segment PUT + chunk create-CAS), 0 GET, 0 HEAD"
+        "[test_steady_state_ack_is_two_ops] PASS — warm ack = 3 synchronous ops"
+        " (segment PUT + chunk create-CAS + _LOG_START GET), 0 HEAD"
     )
 
 
@@ -421,7 +432,7 @@ def test_fresh_handle_num_chunks_counts_deferred_chunks() raises:
     )
 
     # The WARM path is unchanged by this fix and is pinned by (1) above, which
-    # asserts the steady-state ack is still exactly 2 synchronous ops — a
+    # asserts the steady-state ack is still exactly 3 synchronous ops — a
     # change to an always-authoritative read would add a LIST per ack and
     # break that op-count assertion first.
 

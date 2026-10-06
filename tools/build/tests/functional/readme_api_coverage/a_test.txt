@@ -1,0 +1,4 @@
+# A struct of a test file: tests/ is not the package's API.
+struct Greeter:
+    def only_in_a_test(self):
+        pass
