@@ -44,6 +44,12 @@
 #       all-zeros and all-ones mantissa: exact text for the named ones,
 #       round trip and minimality for all. Catches: a wrong lower or upper
 #       half-gap at a power of two (the strided sweep never visits one).
+#   R6  long inputs: a 7-digit exponent offset by a million leading zeros
+#       (or integer zeros against a 7-digit negative exponent) reads as
+#       1.0 / 1.5, and a 26- or 50-digit exponent saturates to zero / out of
+#       range. Catches: an exponent clamped at a fixed bound, which misreads
+#       the offset cases (0.(1000001 zeros)1e1000002 read as 10^-900002,
+#       i.e. zero).
 #   S1  a strided sweep over float32 bit patterns (about 262000 values,
 #       every exponent): each round-trips bit-exactly through encode_json /
 #       decode_json, has at most 9 significant digits, and no decimal one
@@ -582,6 +588,64 @@ def test_e1_binade_edges() raises:
     print("  test_e1_binade_edges: PASS")
 
 
+def _zeros(n: Int) -> String:
+    var s = String("")
+    for _ in range(n):
+        s += "0"
+    return s^
+
+
+def test_r6_long_inputs() raises:
+    """The exponent is read exactly however long the digit string is: a
+    huge exponent offset by as many leading or trailing zeros is an
+    ordinary value, not one bent by an exponent cap. (A cap at 100000 stops
+    reading the exponent after the digit that reaches it, so it bites from
+    a 7-digit exponent on: 1000002 was read as 100000.)"""
+    var one = UInt32(0x3F800000)
+    # 0.(100001 zeros)1 * 10^100002 = 1 (a 6-digit exponent).
+    assert_equal(
+        _bits(_read_one('{"v":0.' + _zeros(100001) + "1e100002}")),
+        one,
+        "leading zeros against a 6-digit exponent",
+    )
+    # 0.(1000001 zeros)1 * 10^1000002 = 1
+    assert_equal(
+        _bits(_read_one('{"v":0.' + _zeros(1000001) + "1e1000002}")),
+        one,
+        "leading zeros against a huge positive exponent",
+    )
+    # 1(1000001 zeros) * 10^-1000001 = 1
+    assert_equal(
+        _bits(_read_one('{"v":1' + _zeros(1000001) + "e-1000001}")),
+        one,
+        "integer zeros against a huge negative exponent",
+    )
+    # 1(1000000 zeros).0 * 10^-1000000 = 1, as a numeric string
+    assert_equal(
+        _bits(_read_one('{"v":"1' + _zeros(1000000) + '.0e-1000000"}')),
+        one,
+        "the same as a numeric string",
+    )
+    # 0.(1500000 zeros)15 * 10^1500001 = 1.5
+    assert_equal(
+        _read_one('{"v":0.' + _zeros(1500000) + "15e1500001}"),
+        Float32(1.5),
+        "1.5 behind 1500000 leading zeros",
+    )
+    # A long exponent with no offset still saturates the right way.
+    _expect_refused(
+        '{"v":1e' + _zeros(30) + "99999999999999999999999}",
+        "out of float32 range",
+        "a 50-digit positive exponent",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":-1e-99999999999999999999999999}')),
+        F32_NEG_ZERO_BITS,
+        "a 26-digit negative exponent",
+    )
+    print("  test_r6_long_inputs: PASS")
+
+
 def test_s1_sweep_round_trip() raises:
     var checked = 0
     var bits = 0
@@ -618,5 +682,6 @@ def main() raises:
     test_r4_only_spec_spellings()
     test_r5_correct_rounding()
     test_e1_binade_edges()
+    test_r6_long_inputs()
     test_s1_sweep_round_trip()
     print("test_proto_codec_json_float32: ALL PASS")

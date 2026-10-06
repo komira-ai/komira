@@ -7,7 +7,8 @@
 # not a plain identifier, grouping a raw read, a step under 60 s or not whole
 # seconds); it maps a query to one GET (filter, interval one nanosecond
 # before the inclusive start, aligner, reducer, group-by fields, page size)
-# with a bearer token; it follows nextPageToken and merges a series
+# with a bearer token, through the generated MetricServiceClient (the
+# request line is pinned whole); it follows nextPageToken and merges a series
 # continued on the next page, oldest first, keyed on the series' whole wire
 # identity, so two series apart only in a label the query did not name stay
 # two; it keeps resource labels only when the query names them; the series limit, the point limit (keeping the
@@ -178,20 +179,24 @@ def test_the_request_on_the_wire() raises:
     assert_false(page.truncated)
     assert_equal(page.sources_scanned, 1)
     var wire = _wire(capture)
-    assert_true(
-        wire.startswith(
+    # The request line, whole. The generated client writes the query keys in
+    # the request message's declaration order (TimeInterval declares
+    # end_time first) and leaves out `view`, whose FULL is the enum's zero
+    # value and the service's default.
+    assert_equal(
+        String(wire[byte = 0 : wire.find("\r\n")]),
+        String(
             "GET /v3/projects/demo-project/timeSeries"
             "?filter=metric.type%20%3D%20%22run.googleapis.com%2Frequest_count%22"
             "%20AND%20resource.labels.service_name%20%3D%20%22api%22"
-            "&interval.startTime=2026-09-12T09%3A59%3A59.999999999Z"
             "&interval.endTime=2026-09-12T10%3A02%3A00Z"
+            "&interval.startTime=2026-09-12T09%3A59%3A59.999999999Z"
             "&aggregation.alignmentPeriod=120s"
             "&aggregation.perSeriesAligner=ALIGN_RATE"
             "&aggregation.crossSeriesReducer=REDUCE_SUM"
             "&aggregation.groupByFields=metric.label.response_code"
-            "&view=FULL&pageSize=1000 HTTP/1.1\r\n"
+            "&pageSize=1000 HTTP/1.1"
         ),
-        wire,
     )
     assert_true(wire.lower().find("authorization: bearer test-token\r\n") >= 0, wire)
 

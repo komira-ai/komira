@@ -1,4 +1,6 @@
-# `timeSeries.list` responses.
+# `timeSeries.list` responses, decoded by the generated
+# ListTimeSeriesResponse (as the generated client decodes them) and read by
+# the adapter.
 #
 # The bodies are hand-written in the form the Cloud Monitoring v3 reference
 # documents for ListTimeSeriesResponse and TimeSeries: `int64Value` is a JSON
@@ -7,7 +9,9 @@
 # metric and resource labels apart, carries `nextPageToken` and counts
 # `executionErrors`. An empty or absent `timeSeries` is an answer with no
 # series. A distribution value is refused with a sentence naming the metric;
-# a malformed body raises naming its size, never its bytes.
+# a body that does not decode raises naming its size and the decoder's
+# reason (a position or a field path), never the body; a decoded point with
+# no interval, end time or value is refused by the adapter.
 
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
@@ -97,33 +101,40 @@ def test_malformed_bodies_raise_without_echo() raises:
         raise Error("parsed a non-JSON body")
     except e:
         var msg = String(e)
-        assert_true(msg.startswith("ListTimeSeries: the 40-byte response is not JSON"), msg)
+        assert_true(
+            msg.startswith(
+                "ListTimeSeries: the 40-byte response is not a"
+                " ListTimeSeriesResponse: JsonError"
+            ),
+            msg,
+        )
         assert_false("demo-secret-project" in msg, msg)
-    with assert_raises(contains="timeSeries is not an array"):
-        _ = parse_time_series_list_response(String('{"timeSeries":{}}'))
-    with assert_raises(contains="series 0 is not an object"):
-        _ = parse_time_series_list_response(String('{"timeSeries":[1]}'))
+    var undecodable: List[String] = [
+        String('{"timeSeries":{}}'),
+        String('{"timeSeries":[1]}'),
+        String(
+            '{"timeSeries":[{"points":[{"interval":{"endTime":"yesterday"},'
+            '"value":{"int64Value":"1"}}]}]}'
+        ),
+        String(
+            '{"timeSeries":[{"points":[{"interval":{"endTime":"2026-09-12T10:00:00Z"},'
+            '"value":{"int64Value":true}}]}]}'
+        ),
+        String('{"timeSeries":[{"metric":{"type":"m","labels":{"k":1}}}]}'),
+    ]
+    for i in range(len(undecodable)):
+        with assert_raises(contains="response is not a ListTimeSeriesResponse"):
+            _ = parse_time_series_list_response(undecodable[i])
     with assert_raises(contains="no interval or no value"):
         _ = parse_time_series_list_response(
             String('{"timeSeries":[{"points":[{"value":{"int64Value":"1"}}]}]}')
         )
-    with assert_raises(contains="endTime is not RFC 3339"):
+    with assert_raises(contains="interval has no endTime"):
         _ = parse_time_series_list_response(
             String(
-                '{"timeSeries":[{"points":[{"interval":{"endTime":"yesterday"},'
-                '"value":{"int64Value":"1"}}]}]}'
+                '{"timeSeries":[{"points":[{"interval":{"startTime":'
+                '"2026-09-12T10:00:00Z"},"value":{"int64Value":"1"}}]}]}'
             )
-        )
-    with assert_raises(contains="an int64Value is not a number"):
-        _ = parse_time_series_list_response(
-            String(
-                '{"timeSeries":[{"points":[{"interval":{"endTime":"2026-09-12T10:00:00Z"},'
-                '"value":{"int64Value":true}}]}]}'
-            )
-        )
-    with assert_raises(contains="a metric label is not a string"):
-        _ = parse_time_series_list_response(
-            String('{"timeSeries":[{"metric":{"type":"m","labels":{"k":1}}}]}')
         )
 
 
