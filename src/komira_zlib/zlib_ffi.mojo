@@ -775,3 +775,33 @@ def zlib_skip_stream(
             + " bytes consumed from a " + String(n) + "-byte source"
         )
     return consumed
+
+
+# libz's `crc32` takes a 32-bit `uInt` length: feed it at most 1 GiB per call,
+# so a buffer larger than 4 GiB cannot wrap the length and yield a valid-looking
+# but wrong checksum. CRC-32 is incremental, so chunking is exact.
+comptime _CRC_CHUNK: Int = 1 << 30
+
+
+def zlib_crc32(data: Span[UInt8, _], crc: UInt32 = 0) raises -> UInt32:
+    """The CRC-32 of RFC 1952 (the gzip trailer's checksum) of `data`,
+    continuing from `crc` (0 to start; pass a previous result to extend it over
+    the next piece). libz's `crc32`."""
+    var handle_ptr = _default_zlib_ffi_handle()
+    var acc = UInt64(crc)
+    var off = 0
+    var n = len(data)
+    while off < n:
+        var take = min(_CRC_CHUNK, n - off)
+        # SAFETY: `data` holds `n` readable bytes, alive across this
+        # synchronous call through its Span origin; libz reads exactly `take`
+        # bytes from `off` (in bounds: `off + take <= n`) and keeps no pointer.
+        acc = handle_ptr[].call["crc32", UInt64](
+            acc,
+            (data.unsafe_ptr() + off)
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin](),
+            UInt32(take),
+        )
+        off += take
+    return UInt32(acc & 0xFFFFFFFF)

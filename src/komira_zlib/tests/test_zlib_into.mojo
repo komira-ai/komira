@@ -1,7 +1,7 @@
 # =============================================================================
 # src/komira_zlib/tests/test_zlib_into.mojo
 #   The Span entries of komira_zlib: zlib_deflate_into, zlib_inflate_into,
-#   zlib_compress_bound and zlib_skip_stream.
+#   zlib_compress_bound, zlib_skip_stream and zlib_crc32.
 # =============================================================================
 #
 # The known-answer vector is the zlib 1.3.1 release tarball, a gzip stream the
@@ -24,6 +24,7 @@ from komira_zlib import (
     ZLIB_WINDOW_BITS_RAW,
     ZLIB_WINDOW_BITS_ZLIB,
     zlib_compress_bound,
+    zlib_crc32,
     zlib_deflate_into,
     zlib_inflate_into,
     zlib_skip_stream,
@@ -408,6 +409,38 @@ def test_skip_stream_refuses_truncated_and_empty() raises:
     except:
         raised = True
     assert_true(raised, "an empty source cannot be skipped")
+
+
+# --- crc32 --------------------------------------------------------------------
+
+
+def test_crc32_check_value() raises:
+    # The CRC-32 check value of the ASCII digits "123456789" (the catalogue
+    # value for CRC-32/ISO-HDLC, the gzip polynomial), and of nothing.
+    var digits = List[UInt8](capacity=9)
+    for d in range(9):
+        digits.append(UInt8(0x31 + d))
+    assert_equal(Int(zlib_crc32(Span(digits))), 0xCBF43926)
+    var empty = List[UInt8]()
+    assert_equal(Int(zlib_crc32(Span(empty))), 0)
+
+
+def test_crc32_matches_the_tarball_trailer() raises:
+    # RFC 1952: the member ends with CRC32 then ISIZE, both little-endian.
+    var gz = _read(_TARBALL)
+    var n = len(gz)
+    var want = (
+        Int(gz[n - 8])
+        | (Int(gz[n - 7]) << 8)
+        | (Int(gz[n - 6]) << 16)
+        | (Int(gz[n - 5]) << 24)
+    )
+    var tar = _inflated_tarball()
+    assert_equal(Int(zlib_crc32(Span(tar))), want)
+    # Continued over two pieces, the same value.
+    var half = len(tar) // 2
+    var first = zlib_crc32(Span(tar)[0:half])
+    assert_equal(Int(zlib_crc32(Span(tar)[half:], first)), want)
 
 
 def main() raises:
