@@ -6,7 +6,7 @@ and target, the annotations the check run left out (when it left any out),
 a table of every measured package (touched packages first, each
 group sorted; in a report, then a total row), the findings, the exemptions (each needs approval), the
 changed lines (informational; at most 200 uncovered ranges are listed, the
-rest are counted: the annotations carry them all) and what was set aside.
+rest are counted: the --annotations-out file lists them all) and what was set aside.
 
 GitHub refuses a summary over 65535 characters: `truncate_summary` cuts
 the text at a line end and says how many bytes were left out.
@@ -177,7 +177,7 @@ def render_summary(
                     i += 1
                 s += String("\n")
             if len(d.ranges) > shown:
-                s += String("- and ") + String(len(d.ranges) - shown) + String(" more ranges, omitted here (the annotations list every one)\n")
+                s += String("- and ") + String(len(d.ranges) - shown) + String(" more ranges, omitted here (the --annotations-out file lists every one)\n")
             s += String("\n")
 
     s += String("### Set aside\n\n")
