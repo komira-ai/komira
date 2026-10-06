@@ -69,7 +69,7 @@ from komira_aws_s3.komira_aws_s3 import (
     S3HeadObjectRequest,
     S3ListObjectsV2Request,
     S3PutObjectRequest,
-    S3S3Client,
+    S3Client,
     S3UploadPartRequest,
     S3_ENCODING_TYPE_URL,
     parse_complete_multipart_upload_response,
@@ -214,7 +214,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
     """
 
     var _config: S3Config
-    var _client: S3S3Client[Self.C, Self.T]
+    var _client: S3Client[Self.C, Self.T]
     var _transport: AwsConnectorTransport[Self.C]
     var _clock: Self.K
     # The retry quota every request of this store spends from.
@@ -234,7 +234,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         self._transport = AwsConnectorTransport[Self.C](
             http_config, mk_connector()
         )
-        self._client = S3S3Client[Self.C, Self.T](
+        self._client = S3Client[Self.C, Self.T](
             mk_connector,
             http_config,
             creds^,
