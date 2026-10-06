@@ -13,7 +13,7 @@
 #     GCP label values; AWS tag values accept a superset);
 #   * the one character a value must carry and may not is `/`: a role is the
 #     rest of a node id after its owner, so it holds one `/` per level of
-#     nesting (`uses/jobs`, `web/api/run`). It is written `_`, ONE byte, so
+#     nesting (`api/run`, `web/api/u-mz4k2q`). It is written `_`, ONE byte, so
 #     the 63-byte budget pays one byte per level. Decoding (`_` -> `/`) is
 #     exact because no segment may hold `_`: resource ids and component ids
 #     are `[a-z0-9-]`, and the role vocabulary uses `-` only. A value that
@@ -25,6 +25,11 @@
 #     role of a node it resembles;
 #   * anything else outside the rule is REFUSED, never rewritten: a lossy
 #     rewrite would make two different owners read as one.
+#
+# ⛔ AN EARLIER RULE WROTE `/` AS `--`, AND IT IS NOT DECODE-COMPATIBLE WITH
+# THIS ONE: a `--` stamp decodes as a role no resource lowers, so the closed
+# world would delete its object. No real adapter may ship while such stamps
+# can exist without a relabel step (the precondition in adapter.mojo).
 #
 # THE BUDGET. The `role` label is the longest value: one segment per level
 # plus a separator each. `role_budget_findings` (validate.mojo) checks every
