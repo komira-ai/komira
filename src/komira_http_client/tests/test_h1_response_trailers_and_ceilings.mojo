@@ -568,6 +568,7 @@ def test_body_ceiling_content_length_both_sides_of_the_boundary() raises:
     var s_a = ScriptedStream.from_read_script(body_100^)
     var b_a = RecvRingBody[ScriptedStream].new_content_length(
         s_a^, cl_total=100, pre_body_bytes=List[UInt8](),
+        max_body_bytes=100 * 1024 * 1024,
     )
     b_a.set_max_body_bytes(100)
     var reactor = _make_reactor()
@@ -586,6 +587,7 @@ def test_body_ceiling_content_length_both_sides_of_the_boundary() raises:
     var s_r = ScriptedStream.from_read_script(body_101^)
     var b_r = RecvRingBody[ScriptedStream].new_content_length(
         s_r^, cl_total=101, pre_body_bytes=List[UInt8](),
+        max_body_bytes=100 * 1024 * 1024,
     )
     b_r.set_max_body_bytes(100)
     var out_r = List[UInt8]()
@@ -674,6 +676,7 @@ def test_cancel_between_polls_surfaces_cancelled_and_leaves_body_open() raises:
     stream.set_max_read_per_call(5)
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl_total=20, pre_body_bytes=List[UInt8](),
+        max_body_bytes=100 * 1024 * 1024,
     )
     var reactor = _make_reactor()
     var tok = CancellationToken.new()

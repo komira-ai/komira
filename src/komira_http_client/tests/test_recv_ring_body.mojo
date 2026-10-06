@@ -96,6 +96,7 @@ def test_recv_ring_cl_pre_body_only() raises:
     var stream = ScriptedStream.empty()
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl_total=5, pre_body_bytes=pre^,
+        max_body_bytes=100 * 1024 * 1024,
     )
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
@@ -124,6 +125,7 @@ def test_recv_ring_cl_streaming_from_wire() raises:
     stream.set_max_read_per_call(10)  # Force partial-read loop
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl_total=20, pre_body_bytes=pre^,
+        max_body_bytes=100 * 1024 * 1024,
     )
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
@@ -208,6 +210,7 @@ def test_recv_ring_large_body_streaming() raises:
     var pre = List[UInt8]()
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl_total=total, pre_body_bytes=pre^,
+        max_body_bytes=100 * 1024 * 1024,
     )
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
@@ -238,6 +241,7 @@ def test_recv_ring_pending_surfaced() raises:
     var pre = List[UInt8]()
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl_total=5, pre_body_bytes=pre^,
+        max_body_bytes=100 * 1024 * 1024,
     )
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
@@ -270,6 +274,7 @@ def test_recv_ring_eof_mid_body_yields_error() raises:
     # stream.arm_eof() means the next try_read returns Eof.
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl_total=10, pre_body_bytes=pre^,
+        max_body_bytes=100 * 1024 * 1024,
     )
     var reactor = _make_reactor()
     var tok = CancellationToken.never()

@@ -38,6 +38,7 @@ mojo_library(
         "tests/test_regexp_replace_memo_duplicates.mojo",
         "tests/test_regexp_scratch_reuse_and_span_subject.mojo",
         "tests/test_selection_mask_c1.mojo",
+        "tests/test_simd_scalar_tail_lengths.mojo",
         "tests/test_unary_math_domain_guard.mojo",
     ],
     visibility = ["PUBLIC"],

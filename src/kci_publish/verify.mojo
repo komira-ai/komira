@@ -41,14 +41,11 @@
 
 from kci_release_channel import ARTIFACT_TYPE_CONDA
 from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE
+from kci_release_set.closure import MOJO_COMPILER_PACKAGE
 from kci_release_set.member import ReleaseMember
 
 from .inputs import LoadedRelease
 from .release_version import ReleaseVersion
-
-
-comptime MOJO_COMPILER_PACKAGE: String = "mojo-compiler"
-"""The conda name of the compiler every library pins exactly."""
 
 
 def guard_for_subdir(subdir: String) -> String:
