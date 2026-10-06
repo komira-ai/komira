@@ -25,6 +25,8 @@
 
 from komira_core.arrow.arrow_types import ArrowType
 
+from .json_string import decode_json_string
+
 
 # =============================================================================
 # Avro type tags (internal discriminant for the parsed schema tree).
@@ -1140,55 +1142,12 @@ struct _JsonParser:
         raise Error("AvroSchemaError.MALFORMED_JSON: unexpected character")
 
     def _parse_string(mut self) raises -> _JsonValue:
-        # Consume opening quote.
-        self.pos += 1
-        var out = String("")
-        while not self.at_end():
-            var c = self.data[self.pos]
-            if c == UInt8(ord('"')):
-                self.pos += 1
-                var v = _json_null()
-                v.tag = _JSON_STRING
-                v.str_val = out^
-                return v^
-            elif c == UInt8(ord("\\")):
-                self.pos += 1
-                if self.at_end():
-                    raise Error("AvroSchemaError.MALFORMED_JSON: bad escape")
-                var e = self.data[self.pos]
-                if e == UInt8(ord('"')):
-                    out += '"'
-                elif e == UInt8(ord("\\")):
-                    out += "\\"
-                elif e == UInt8(ord("/")):
-                    out += "/"
-                elif e == UInt8(ord("n")):
-                    out += "\n"
-                elif e == UInt8(ord("t")):
-                    out += "\t"
-                elif e == UInt8(ord("r")):
-                    out += "\r"
-                elif e == UInt8(ord("b")):
-                    out += String(chr(8))
-                elif e == UInt8(ord("f")):
-                    out += String(chr(12))
-                elif e == UInt8(ord("u")):
-                    # \uXXXX — parse 4 hex digits, emit code point (BMP only,
-                    # sufficient for Avro identifiers).
-                    var cp = 0
-                    for _k in range(4):
-                        self.pos += 1
-                        if self.at_end():
-                            raise Error("AvroSchemaError.MALFORMED_JSON: bad \\u")
-                        cp = cp * 16 + _hex_digit(self.data[self.pos])
-                    out += String(chr(cp))
-                else:
-                    raise Error("AvroSchemaError.MALFORMED_JSON: unknown escape")
-                self.pos += 1
-            else:
-                out += String(chr(Int(c)))
-                self.pos += 1
-        raise Error("AvroSchemaError.MALFORMED_JSON: unterminated string")
+        # Escapes (including UTF-16 surrogate pairs) and raw UTF-8 are decoded
+        # byte-exact by `decode_json_string`; see json_string.mojo.
+        var v = _json_null()
+        v.tag = _JSON_STRING
+        self.pos = decode_json_string(Span(self.data), self.pos, v.str_val)
+        return v^
 
     def _parse_object(mut self, depth: Int) raises -> _JsonValue:
         self.pos += 1  # consume '{'
@@ -1369,14 +1328,3 @@ def _parse_decimal_f64(data: List[UInt8], start: Int, end: Int) -> Float64:
         else:
             val *= factor
     return -val if neg else val
-
-
-@always_inline
-def _hex_digit(c: UInt8) -> Int:
-    if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
-        return Int(c - UInt8(ord("0")))
-    elif c >= UInt8(ord("a")) and c <= UInt8(ord("f")):
-        return Int(c - UInt8(ord("a")) + 10)
-    elif c >= UInt8(ord("A")) and c <= UInt8(ord("F")):
-        return Int(c - UInt8(ord("A")) + 10)
-    return 0

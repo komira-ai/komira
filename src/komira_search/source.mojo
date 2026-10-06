@@ -524,7 +524,8 @@ struct QueryIR(Copyable, Movable, Deinitable):
       top_k:           the `size` bound (number of ranked hits to return).
       analyzer_config: the field's analyzer (the symmetry carrier; must be TEXT).
       generation:      the metastore seam — the manifest generation
-                       (SearchMetastore.generation() = num_chunks) this query
+                       (SearchMetastore.generation(), which moves on every
+                       publish, retire and reap) this query
                        reads. It is a SNAPSHOT, not identity: the
                        `komira.search.index` scan kind stamps the generation it
                        resolved for the execution (LIVE: re-read per execution;

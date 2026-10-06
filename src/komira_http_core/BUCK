@@ -9,7 +9,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # on nothing of each other.
 #
 # The TLS tests read the throwaway certificates under tests/fixtures, which the
-# client package's tests read too: the three they use are exported below.
+# client package's tests and komira_http_tls_e2e's read too: the ones they use
+# are exported below.
 
 mojo_library(
     name = "komira_http_core",
@@ -126,3 +127,4 @@ mojo_deps(
 export_file(name = "tests/fixtures/tls/leaf_cert.pem", visibility = ["PUBLIC"])
 export_file(name = "tests/fixtures/tls/leaf_key.pem", visibility = ["PUBLIC"])
 export_file(name = "tests/fixtures/tls/root_ca.pem", visibility = ["PUBLIC"])
+export_file(name = "tests/fixtures/smoke_cert.pem", visibility = ["PUBLIC"])

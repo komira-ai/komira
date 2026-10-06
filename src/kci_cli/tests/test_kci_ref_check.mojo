@@ -12,8 +12,9 @@
 #       cannot read (a shallow clone, no origin/main) is exit 5;
 #   (2) any other run of a break_glass stage (gamma) is BREAK-GLASS, a
 #       manual run of main included: its revision is held to the run's own
-#       commit (GITHUB_SHA), its reason is required (empty or over 200
-#       bytes: KCI-E-BREAK-GLASS-REASON, exit 3; over one line: the command
+#       commit (GITHUB_SHA; a dry run's to that commit's history), else
+#       KCI-E-BREAK-GLASS-REVISION, exit 3; its reason is required (empty or
+#       over 200 bytes: KCI-E-BREAK-GLASS-REASON, exit 3; over one line: the command
 #       line's own refusal, exit 2), its summary starts with the BREAK-GLASS
 #       line, and its PUBLISH step runs in the stage's
 #       break_glass_environment as break-glass (kci_publish holds the
@@ -497,7 +498,8 @@ def test_break_glass_with_a_reason_publishes_to_gamma_and_says_so() raises:
         kci_main_with(_publish(m, String("gamma"), "--release-set-hash", _H, "--context", "reason=x", "--plan"), off, rec2), 3
     )
     assert_equal(len(off.calls), 0)
-    assert_equal(_last(rec2).error.id, String("KCI-E-BREAK-GLASS-REASON"))
+    # a revision refusal, not a reason refusal: the run has a reason
+    assert_equal(_last(rec2).error.id, String("KCI-E-BREAK-GLASS-REVISION"))
     assert_true(_last(rec2).error.message.find(String("is not on the history of the commit the run was started on")) >= 0, _last(rec2).error.message)
 
 
@@ -513,7 +515,8 @@ def test_a_publishing_break_glass_run_releases_its_own_commit() raises:
         assert_equal(kci_main_with(_publish(m, String("gamma"), "--release-set-hash", _H, "--context", "reason=x"), f, rec), 3)
         assert_equal(len(f.calls), 0)
         assert_equal(len(f.asked), 0)
-        assert_equal(_last(rec).error.id, String("KCI-E-BREAK-GLASS-REASON"))
+        # a revision refusal, not a reason refusal: the run has a reason
+        assert_equal(_last(rec).error.id, String("KCI-E-BREAK-GLASS-REVISION"))
         assert_true(_last(rec).error.message.find(String("another revision is for a dry run")) >= 0, _last(rec).error.message)
         # the same revision as a dry run: held to the run's commit's history
         var plan = Fake()

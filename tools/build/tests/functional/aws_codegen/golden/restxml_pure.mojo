@@ -13,7 +13,7 @@
 #   model sha256 : 7f960b9d0f5a4c8b06d4f3338c525c68bef960651af9318bae43810df3675a49
 #   operations   : GetBlob, GetBytes, GetPolicy, PutThing, SetConfig
 #   shapes       : 10 messages, 0 enums
-#   generator    : aws-client-gen version 10
+#   generator    : aws-client-gen version 12
 #   mode         : pure (no transport)
 #   customize    : s3 (botocore handlers.py: 200-with-<Error> as an
 #                  error, an invalid Expires header left unset)
@@ -874,7 +874,7 @@ def parse_put_thing_response(resp: AwsResponse) raises -> S3PutThingResponse:
     if aws_xml_body_is_error(resp):
         var _ei = aws_rest_xml_error(resp)
         raise Error(
-            String("S3S3.PutThing failed: HTTP 500 ")
+            String("S3.PutThing failed: HTTP 500 ")
             + _ei.code
             + String(" ")
             + _ei.message

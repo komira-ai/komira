@@ -38,6 +38,7 @@
 from komira_atomic_alias import AtomicI64
 from std.memory import OwnedPointer, alloc
 from std.sys.info import CompilationTarget
+from std.time import sleep
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.completion_queue import (
@@ -106,7 +107,6 @@ from komira_async.reactor.socket_io import (
     try_recv,
     try_send,
 )
-from std.ffi import external_call
 
 from komira_async.runtime.op_id_index_map import OpIdIndexMap
 from komira_async.runtime.wake_primitives import (
@@ -121,16 +121,16 @@ from komira_async.runtime.wake_primitives import (
 
 
 @always_inline
-def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
-    """A NULL typed pointer with a concrete origin (replaces the b2-removed
-    `UnsafePointer[T, o](_unsafe_null=())` null ctor).
+def _yield_10us():
+    """Yields the CPU for about 10 microseconds (the mock and nothing-to-park
+    branches below use it so a caller's loop does not pin a core).
 
-    # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the bare
-    # pointer (modular/mojo/proposals/non-null-pointer.md); `None` is the all-zero
-    # (NULL) bit pattern. Used only for NULL syscall arguments below.
-    """
-    var none: Optional[UnsafePointer[T, o]] = None
-    return UnsafePointer(to=none).bitcast[UnsafePointer[T, o]]()[]
+    It waits through `std.time.sleep`, the standard library's `nanosleep`,
+    and this module declares no `nanosleep` of its own: a program holds one
+    foreign declaration per symbol, so a second one with another signature
+    would stop any binary linking the reactor from also calling
+    `std.time.sleep` (komira_retry's `SystemSleeper`, for one)."""
+    sleep(Float64(0.00001))
 
 
 # BackendKind enum: UInt8 sentinel
@@ -660,20 +660,9 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
             # No-op when timeout_us=0 (the spin phase's non-blocking
             # poll); only fires on the "block forever" intent.
             if timeout_us < Int32(0):
-                # Use nanosleep for ~10us pause to actually yield CPU
-                # and avoid busy-spinning. struct timespec is {tv_sec,
-                # tv_nsec} = 16 bytes on Linux x86_64.
-                var ts_sec: Int64 = 0
-                var ts_nsec: Int64 = 10_000  # 10 microseconds
-                var ts = SIMD[DType.int64, 2](ts_sec, ts_nsec)
-                _ = external_call["nanosleep", Int32](
-                    UnsafePointer(to=ts).bitcast[UInt8](),
-                    # SAFETY: arg1 points at
-                    # stack-local `ts` (lives across the call); arg2 (`rem`
-                    # out-param) is NULL — we don't restart on EINTR and don't
-                    # need the remaining time, libc tolerates NULL here.
-                    _null_ptr[UInt8, MutUntrackedOrigin](),
-                )
+                # Pause ~10us to actually yield the CPU and avoid
+                # busy-spinning.
+                _yield_10us()
             return 0
         # branch on platform. On Linux the
         # `_epoll_fd` field holds the epoll fd; on Mac under
@@ -814,7 +803,7 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
         prior behavior for those conformers).
 
         Linux-only park; on the mock / non-epoll backend (`_epoll_fd < 0`)
-        it yields ~10µs via nanosleep (same fair-scheduling intent as
+        it yields ~10µs via `_yield_10us` (same fair-scheduling intent as
         run_once's mock branch) and returns 0, so the caller's spin loop
         does not pin a core under test fixtures.
         """
@@ -822,17 +811,7 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
             # Mock / uninitialized backend — no epoll fd to park on. Yield
             # ~10µs so the caller's drain loop doesn't busy-pin under the
             # test fixture (mirrors run_once's mock-park branch).
-            var ts_sec: Int64 = 0
-            var ts_nsec: Int64 = 10_000  # 10 microseconds
-            var ts = SIMD[DType.int64, 2](ts_sec, ts_nsec)
-            _ = external_call["nanosleep", Int32](
-                UnsafePointer(to=ts).bitcast[UInt8](),
-                # SAFETY: arg1 points at
-                # stack-local `ts` (lives across the call); arg2 (`rem`
-                # out-param) is NULL — we don't restart on EINTR and don't
-                # need the remaining time, libc tolerates NULL here.
-                _null_ptr[UInt8, MutUntrackedOrigin](),
-            )
+            _yield_10us()
             return 0
 
         # --- Register every pollable fd transiently. We use a sentinel
@@ -892,17 +871,7 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
             # No pollable fd was registered (all -1, or all already-in-set).
             # Yield ~10µs to avoid a hot caller spin and return — the caller
             # re-polls.
-            var ts_sec2: Int64 = 0
-            var ts_nsec2: Int64 = 10_000
-            var ts2 = SIMD[DType.int64, 2](ts_sec2, ts_nsec2)
-            _ = external_call["nanosleep", Int32](
-                UnsafePointer(to=ts2).bitcast[UInt8](),
-                # SAFETY: arg1 points at
-                # stack-local `ts2` (lives across the call); arg2 (`rem`
-                # out-param) is NULL — we don't restart on EINTR and don't
-                # need the remaining time, libc tolerates NULL here.
-                _null_ptr[UInt8, MutUntrackedOrigin](),
-            )
+            _yield_10us()
             return 0
 
         # --- One epoll_wait. LEVEL-TRIGGERED EPOLLIN: if any fd is already
@@ -1268,21 +1237,11 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
         self._pending_completions = List[Completion]()
         if self._epoll_fd < 0:
             # Mock / uninitialized: nothing to drive. Mirror run_once's
-            # H1-fix nanosleep on the "block forever" intent so a worker
+            # H1-fix ~10us yield on the "block forever" intent so a worker
             # that calls poll_completions(-1) under MOCK doesn't tightly
             # busy-spin (matches the run_once contract).
             if timeout_us < Int32(0):
-                var ts_sec: Int64 = 0
-                var ts_nsec: Int64 = 10_000  # 10us
-                var ts = SIMD[DType.int64, 2](ts_sec, ts_nsec)
-                _ = external_call["nanosleep", Int32](
-                    UnsafePointer(to=ts).bitcast[UInt8](),
-                    # SAFETY: arg1 points at
-                    # stack-local `ts` (lives across the call); arg2 (`rem`
-                    # out-param) is NULL — we don't restart on EINTR and don't
-                    # need the remaining time, libc tolerates NULL here.
-                    _null_ptr[UInt8, MutUntrackedOrigin](),
-                )
+                _yield_10us()
             return out^
 
         # branch on platform. See run_once's
