@@ -4,6 +4,9 @@ Modules:
   - avro_schema.mojo  — Avro schema JSON parse -> Parsing Canonical Form ->
     CRC-64-AVRO ("Rabin") fingerprint; Avro->Arrow type lattice;
     recursive-schema reject-on-detect via name visit-stack.
+  - json_string.mojo  — JSON string-literal decode for the schema parser
+    (escapes incl. UTF-16 surrogate pairs, raw UTF-8 byte-exact) and the
+    UTF-8 well-formedness check the header decoder uses.
   - ocf_header.mojo   — OCF header decode (magic + Avro-binary metadata map),
     codec dispatch on the Avro spec wire-name strings (note "zstandard",
     not "zstd"), 16-byte sync marker extraction.

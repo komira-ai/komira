@@ -31,8 +31,9 @@
 # chosen — and `_materialize_batch_with_schema` loops `c in [0, num_cols)`
 # allocating the FULL row count up front in every builder
 # (`PrimitiveArray[int64].allocate(num_rows)`, the string builder's
-# `(num_rows + 1) * 4`-byte offsets buffer, ...). Rows shorter than the header
-# are padded with nulls, so allocation is rows x cols, not rows x present-cells.
+# `(num_rows + 1) * 4`-byte offsets buffer, ...), so allocation is rows x cols,
+# not rows x present-cells. (Rows shorter than the header used to be padded with
+# nulls; the readers now refuse them in `record_shape`, before any allocation.)
 #
 # A 400 KB file — a header of 100k comma-separated names (~200 KB) followed by
 # 100k one-cell rows (~200 KB) — therefore demands 100k columns x 100k rows,
@@ -59,7 +60,7 @@ def check_csv_column_count(n_cols: Int) raises:
             + " columns, exceeding the "
             + String(MAX_CSV_COLUMNS)
             + "-column limit. Every column allocates a full row-count buffer"
-            + " up front (short rows are null-padded), so the column count"
+            + " up front, so the column count"
             + " multiplies the row count into the allocation — and the"
             + " parallel reader pays it once per worker. If this file really"
             + " is this wide, project the columns you need."
@@ -81,7 +82,7 @@ def check_csv_column_count(n_cols: Int) raises:
 # The shape is identical to the JSON one. Every column builder allocates the
 # FULL row count up front (`PrimitiveArray[...].allocate_nullable(num_rows)` in
 # `typed_column_builders.mojo`, the `(num_rows + 1) * 4`-byte offsets buffer in
-# `string_column_simd.mojo`) and short rows are NULL-PADDED, so the allocation
+# `string_column_simd.mojo`), so the allocation
 # is rows x cols and NOT rows x present-cells. Neither multiplicand was tied to
 # the size of the input that produced them:
 #
@@ -156,8 +157,8 @@ def check_csv_cell_budget(
             + String(MAX_CSV_CELLS_PER_INPUT_BYTE)
             + " cells per input byte (ceiling for this width: "
             + String(max_rows)
-            + " rows). Every column allocates the FULL row count up front and"
-            + " short rows are null-padded, so a wide header over many short"
+            + " rows). Every column allocates the FULL row count up front,"
+            + " so a wide header over many"
             + " rows allocates quadratically in two quantities the input"
             + " controls — and the parallel reader pays it once per worker."
             + " Project the columns you need, or read the file in batches."

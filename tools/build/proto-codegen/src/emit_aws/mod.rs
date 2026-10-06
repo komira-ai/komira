@@ -1329,12 +1329,13 @@ impl<'a> AwsEmitter<'a> {
 
         // -- copy ----------------------------------------------------------
         // An explicit copy constructor: the 1.0.0 compiler can report the
-        // synthesized one of a struct with an explicit `__deinit__` as
-        // trivial (it did for S3's `DeletedObject`: three `Optional[String]`
-        // and an `Optional[Bool]`), and `List.copy()` then copies the
-        // elements with memcpy, so two lists share each String buffer and
-        // the first one destroyed frees it under the other. A user-defined
-        // constructor is never trivial.
+        // synthesized one as trivial (it did for S3's `DeletedObject`: three
+        // `Optional[String]` and an `Optional[Bool]`; the trigger is the field
+        // order, https://github.com/modular/modular/issues/7256), and
+        // `List.copy()` then copies the elements with memcpy, so two lists
+        // share each String buffer and the first one destroyed frees it under
+        // the other. A user-defined constructor is never trivial; remove this
+        // once that issue is fixed in the pinned compiler.
         self.line("def __init__(out self, *, copy: Self):");
         self.push();
         self.line("\"\"\"Explicit, never bitwise: a List copies its elements with it.\"\"\"");
