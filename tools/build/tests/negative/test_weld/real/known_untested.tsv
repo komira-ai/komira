@@ -1,0 +1,4 @@
+# Test 39 (test_weld): the unwelded test files of komira_real (BUCK says why).
+negative/test_weld/real/src/komira_real/tests/test_commented.mojo	planted: named only in a comment of test_srcs
+negative/test_weld/real/src/komira_real/tests/test_imported.mojo	planted: a mojo_test src that is not its main
+negative/test_weld/real/src/komira_real/tests/test_shared.mojo	planted: test_srcs welds komira_other's file of this name
