@@ -53,6 +53,9 @@
 #       MOVED marker, another reaper reaps chunk 0 (key, then marker). This
 #       pass skips chunk 0 and reaps 1..3. Catches: the plain-tombstone read
 #       raising not_found and aborting the whole pass.
+#  (10) A transport error (503) reading a plain tombstone is NOT taken for
+#       "another reaper took it": the pass raises and that chunk's `.seg` is
+#       still there. Catches: the skip swallowing every error.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -78,6 +81,7 @@ from komira_objectstore.cas_manifest import (
     chunk_key,
     log_start_key,
     moved_tombstone_key,
+    tombstone_key,
 )
 from komira_objectstore.path import Path
 from komira_objectstore.shared_in_memory_conditional_store import (
@@ -111,6 +115,8 @@ comptime _STALE_UNTIL_TOMB = "__fault__/stale_until_tomb/"
 # A GET of the target finds it reaped by another reaper: the target is
 # deleted and the GET reads as absent.
 comptime _OTHER_REAPER = "__fault__/other_reaper/"
+# A GET of the target fails with a transport error (not absence).
+comptime _FAIL_GET = "__fault__/get/"
 
 
 def _inner_has(inner: _Inner, key: String) -> Bool:
@@ -165,6 +171,8 @@ struct _FaultStore(
     def get(self, path: Path) raises -> List[UInt8]:
         if _inner_has(self._inner, String(_STALE_UNTIL_TOMB) + path.raw()):
             raise Error("injected: not_found (404), a stale pre-migration view")
+        if _inner_has(self._inner, String(_FAIL_GET) + path.raw()):
+            raise Error("injected fault: transport error status=503")
         var other = String(_OTHER_REAPER) + path.raw()
         if _inner_has(self._inner, other):
             self._inner.delete(Path.parse(other))
@@ -667,6 +675,36 @@ def test_concurrent_reaper_took_a_moved_seq() raises:
     print("[test_concurrent_reaper_took_a_moved_seq] PASS")
 
 
+# =============================================================================
+# (10) a transport error on the plain tombstone read raises
+# =============================================================================
+
+
+def test_plain_tombstone_read_error_raises() raises:
+    print("[test_plain_tombstone_read_error_raises] starting...")
+    var store = _new_store()
+    var prefix = _prefix(Int64(9))
+    _produce_at(store, prefix, Int64(9), 3)
+    var keys = _seg_keys(store, prefix, 3)
+    var m = _manifest(store, prefix)
+    var rp = RetentionPass[_Store](RetentionPolicy.time_based(Int64(7500)))
+    var res = rp.run(m, Int64(10_000))
+    _ = rp^
+    _ = m^
+    assert_equal(res.new_log_start_seq, Int64(2), "retention retired 0, 1")
+
+    store.arm(String(_FAIL_GET), tombstone_key(prefix, Int64(0)).raw())
+    var raised = False
+    try:
+        _ = _reap(store, prefix, Int64(10_000) + _GRACE)
+    except e:
+        raised = True
+        assert_true(String(e).find("503") >= 0, String(e))
+    assert_true(raised, "the transport error is raised, not skipped")
+    assert_true(_has(store, keys[0]), ".seg 0 still there")
+    print("[test_plain_tombstone_read_error_raises] PASS")
+
+
 def main() raises:
     test_migration_then_reap_keeps_base_segments()
     test_fold_then_reap_keeps_base_segments()
@@ -677,4 +715,5 @@ def main() raises:
     test_migration_rerun_after_failed_advance()
     test_fold_rerun_after_failed_advance()
     test_concurrent_reaper_took_a_moved_seq()
-    print("[OK] test_broker_moved_payload_reap_offline — 9 cases passed")
+    test_plain_tombstone_read_error_raises()
+    print("[OK] test_broker_moved_payload_reap_offline — 10 cases passed")

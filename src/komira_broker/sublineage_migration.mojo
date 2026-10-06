@@ -60,12 +60,14 @@
 #      objects stay referenced by `_base`, so the broker `ReapWorker` reclaims
 #      only the legacy chunk keys; `_base`'s own retention reclaims the `.seg`
 #      objects later). The MOVED marker of each chunk is written during
-#      materialize, BEFORE the `_base` append that references its `.seg`, so a
-#      RetentionPass running concurrently with the migration can never leave
-#      a `_base`-referenced `.seg` with only a plain tombstone. The retire
-#      re-stamps the markers when it advances. Trade-off: a migration
-#      abandoned after marking leaves those `.seg` objects unreclaimed (a
-#      leak, never a loss).
+#      materialize, BEFORE the `_base` append that references its `.seg`. So
+#      for every chunk the migration has already marked (that is, every chunk
+#      `_base` references at the time of its append), no ordering of
+#      retention, reaping and migration deletes its `.seg`. Retention that
+#      expires a legacy chunk AHEAD of the migration cursor is not handled
+#      here (komira-ai/komira#560). The retire re-stamps the markers when it
+#      advances. Trade-off: a migration abandoned after marking leaves those
+#      `.seg` objects unreclaimed (a leak).
 #
 #   3. NEW gen=N+1 mints shard_ids + appends to `<part>/_lineage/<shard>` (the
 #      sub-lineage write path). Consume reads `_base` (the old content, dense,
@@ -507,12 +509,15 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
                     creation_ts_ms=created,
                 )
                 # MOVED marker FIRST, then the `_base` append that makes `_base`
-                # reference this `.seg` (komira-ai/komira#494). From here on no
-                # plain tombstone (a RetentionPass running concurrently with this
-                # migration) can let the reaper delete the `.seg`: the reaper
-                # checks MOVED first, and never touches a chunk at or above the
-                # legacy floor. If the migration stops after this mark and never
-                # appends, the `.seg` is kept: a leak, never a loss.
+                # reference this `.seg` (komira-ai/komira#494). For every chunk
+                # the migration has already marked (that is, every chunk `_base`
+                # references at the time of its append), no ordering of
+                # retention, reaping and migration deletes its `.seg`: the
+                # reaper checks MOVED first, and never touches a chunk at or
+                # above the legacy floor. Retention that expires a legacy chunk
+                # AHEAD of the migration cursor is not handled here
+                # (komira-ai/komira#560). If the migration stops after this
+                # mark and never appends, the `.seg` is kept (a leak).
                 legacy.schedule_moved_for_delete_at(seq, now_ms)
                 var r = base.append(base_body^, rc)
                 if r.base_offset != expected_dense:
@@ -604,7 +609,9 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         have advanced it past chunks this migration materialized; those
         already carry the MOVED marker `migrate_partition` wrote before each
         `_base` append, so the reaper keeps their `.seg` whether or not this
-        walk reaches them.
+        walk reaches them. (That covers only chunks the migration had marked;
+        retention that expires a legacy chunk AHEAD of the migration cursor is
+        not handled here, komira-ai/komira#560.)
 
         That `_LOG_START` pointer IS the durable migration cursor: the legacy
         resolver reads it for `running_base` (so it serves NOTHING below the
