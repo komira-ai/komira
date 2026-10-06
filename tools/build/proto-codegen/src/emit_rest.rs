@@ -407,10 +407,19 @@ impl<'a> MessageIndex<'a> {
     }
 }
 
-/// The one well-known type a query parameter carries as a single value: its
-/// proto3 JSON form is a plain string (`title,includedPermissions`), which
-/// `google/api/http.proto` sends as the parameter's value.
-const FIELD_MASK: &str = ".google.protobuf.FieldMask";
+/// The well-known types a query parameter carries as one value, its proto3
+/// JSON string, which `google/api/http.proto` sends as the parameter's
+/// value: a FieldMask's `title,includedPermissions`, a Timestamp's RFC 3339
+/// `2026-10-01T00:00:00.5Z` and a Duration's `60s`. The generated code calls
+/// komira_wkt's `to_proto3_json()`, the formatter its JSON codec uses, so the
+/// query and a JSON body spell one value the same way. Sending their fields
+/// instead (`at.seconds=&at.nanos=`) would be wrong even when the type is
+/// declared among the generated files.
+const QUERY_WKTS: [&str; 3] = [
+    ".google.protobuf.FieldMask",
+    ".google.protobuf.Timestamp",
+    ".google.protobuf.Duration",
+];
 
 /// How one query value is rendered.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -423,13 +432,14 @@ enum LeafKind {
     /// Any other scalar.
     OtherScalar,
     Enum,
-    /// A `google.protobuf.FieldMask`: its JSON string.
-    FieldMask,
+    /// One of [`QUERY_WKTS`]: its proto3 JSON string.
+    WktString,
 }
 
 /// One query parameter: its key and where its value is read.
 struct QueryLeaf {
-    /// The key: the field's JSON name, or `parent.child` for a field of a
+    /// The key: the field's JSON name, or the dotted JSON names of the
+    /// fields leading to it (`interval.startTime`) for a field of a
     /// message-typed request field.
     key: String,
     /// The Mojo expression of the field: `req.page_size`, or
@@ -440,14 +450,28 @@ struct QueryLeaf {
 }
 
 /// A query field of the request: a value, or a message whose fields are
-/// sent as `field.subField=` parameters when it is set.
+/// sent, each under its dotted key, when it is set.
 enum QueryItem {
     Leaf(QueryLeaf),
     Nested {
-        /// The request field holding the message (`options`).
-        field: String,
-        leaves: Vec<QueryLeaf>,
+        /// The expression of the field holding the message
+        /// (`req.interval`, `_rest_mid.leaf_opts`).
+        access: String,
+        /// The name its value is bound to inside the presence check
+        /// (`_rest_interval`, `_rest_mid__leaf_opts`): the field path, so no
+        /// two bindings of one method share a name.
+        binding: String,
+        items: Vec<QueryItem>,
     },
+}
+
+impl QueryItem {
+    fn any_leaf(&self, pred: &dyn Fn(&QueryLeaf) -> bool) -> bool {
+        match self {
+            QueryItem::Leaf(l) => pred(l),
+            QueryItem::Nested { items, .. } => items.iter().any(|i| i.any_leaf(pred)),
+        }
+    }
 }
 
 /// The leaf for a scalar or enum field, or `None` for a message or a map.
@@ -465,11 +489,14 @@ fn scalar_leaf(key: String, access: String, fld: &IrField) -> Option<QueryLeaf> 
 
 /// The query items of `fields`, as `google/api/http.proto` maps them: a
 /// scalar, enum or repeated scalar is one parameter (repeated: one per
-/// element); a non-repeated message whose own fields are all scalars is one
-/// parameter per field, keyed `field.subField`, sent only when the message
-/// is set; a `FieldMask` is one parameter, its JSON string. Anything else
-/// (a repeated message, a map, a message holding a message) has no query
-/// form and is refused by name.
+/// element); a FieldMask, Timestamp or Duration is one parameter, its JSON
+/// string; a non-repeated message is flattened, each of its fields sent
+/// under the dotted JSON names of the path to it (`interval.startTime`,
+/// `aggregation.alignmentPeriod`), to any depth, only when the message is
+/// set. Fields go in declaration order at every level. Anything else (a
+/// repeated message, a map, a oneof arm, another well-known type, a message
+/// that holds itself) has no query form and is refused by name, with its
+/// dotted path.
 fn query_items(
     m: &IrMethod,
     idx: MessageIndex<'_>,
@@ -477,88 +504,126 @@ fn query_items(
     fields: &[String],
 ) -> Result<Vec<QueryItem>, String> {
     let mut items = Vec::new();
+    let mut stack = vec![req_msg.fq_name.clone()];
     for f in fields {
         let fld = req_msg
             .fields
             .iter()
             .find(|x| &x.name == f)
             .expect("partition field came from the message");
-        if fld.oneof_index.is_some() {
-            return Err(oneof_url_field(m, f));
-        }
-        if let Some(leaf) = scalar_leaf(fld.json_name.clone(), format!("req.{f}"), fld) {
-            items.push(QueryItem::Leaf(leaf));
-            continue;
-        }
-        let tref = match &fld.ty {
-            IrType::Message(tref) => tref,
-            IrType::Map(..) => {
-                return Err(format!(
-                    "REST method `{}`: query field `{f}` is a map, which has no query form",
-                    m.name
-                ))
-            }
-            // Scalars and enums were taken above; a nested list is built
-            // only by the AWS front end, never for a proto field.
-            _ => {
-                return Err(format!(
-                    "REST method `{}`: query field `{f}` is a list of lists, which has no \
-                     query form",
-                    m.name
-                ))
-            }
+        let q = QueryPath {
+            names: vec![f.clone()],
+            json: fld.json_name.clone(),
+            access: format!("req.{f}"),
         };
-        if fld.label == Label::Repeated {
-            return Err(format!(
-                "REST method `{}`: query field `{f}` is a repeated message, which has no \
-                 query form",
-                m.name
-            ));
-        }
-        if tref.fq_name == FIELD_MASK {
-            items.push(QueryItem::Leaf(QueryLeaf {
-                key: fld.json_name.clone(),
-                access: format!("req.{f}"),
-                label: Label::Optional,
-                kind: LeafKind::FieldMask,
-            }));
-            continue;
-        }
-        // Any other well-known type is one parameter too, its JSON string
-        // (`2026-10-01T00:00:00Z`, `1.5s`), never `ts.seconds=&ts.nanos=`:
-        // sending its fields would be wrong even if its file were generated.
-        if tref.fq_name.starts_with(".google.protobuf.") {
-            return Err(format!(
-                "REST method `{}`: query field `{f}` is a `{}`, whose query form is its \
-                 JSON string, which is implemented only for `{FIELD_MASK}`",
-                m.name, tref.fq_name
-            ));
-        }
-        let sub = idx.get(&tref.fq_name).ok_or_else(|| {
-            format!(
-                "REST method `{}`: query field `{f}` is a `{}`, which is not declared in \
-                 the generated files, so its fields cannot be sent",
-                m.name, tref.fq_name
-            )
-        })?;
-        let mut leaves = Vec::new();
-        for sf in &sub.fields {
-            let key = format!("{}.{}", fld.json_name, sf.json_name);
-            let access = format!("_rest_{f}.{}", sf.name);
-            match scalar_leaf(key, access, sf) {
-                Some(leaf) if sf.oneof_index.is_none() => leaves.push(leaf),
-                _ => {
-                    return Err(format!(
-                        "REST method `{}`: query field `{f}` is a `{}` whose field `{}` is \
-                         not a plain scalar, so it has no query form",
-                        m.name, tref.fq_name, sf.name
-                    ))
-                }
-            }
-        }
-        items.push(QueryItem::Nested { field: f.clone(), leaves });
+        items.push(query_item(m, idx, fld, &q, &mut stack)?);
     }
     Ok(items)
+}
+
+/// Where a query field sits: its proto field path (`interval.start_time`,
+/// for messages and bindings), its dotted JSON key (`interval.startTime`)
+/// and the Mojo expression that reads it.
+struct QueryPath {
+    names: Vec<String>,
+    json: String,
+    access: String,
+}
+
+impl QueryPath {
+    fn dotted(&self) -> String {
+        self.names.join(".")
+    }
+}
+
+/// The query item of one field at `q`. `stack` holds the fully qualified
+/// names of the messages enclosing it, so a message that holds itself is
+/// refused rather than flattened forever.
+fn query_item(
+    m: &IrMethod,
+    idx: MessageIndex<'_>,
+    fld: &IrField,
+    q: &QueryPath,
+    stack: &mut Vec<String>,
+) -> Result<QueryItem, String> {
+    let f = q.dotted();
+    if fld.oneof_index.is_some() {
+        return Err(oneof_url_field(m, &f));
+    }
+    if let Some(leaf) = scalar_leaf(q.json.clone(), q.access.clone(), fld) {
+        return Ok(QueryItem::Leaf(leaf));
+    }
+    let tref = match &fld.ty {
+        IrType::Message(tref) => tref,
+        IrType::Map(..) => {
+            return Err(format!(
+                "REST method `{}`: query field `{f}` is a map, which has no query form",
+                m.name
+            ))
+        }
+        // Scalars and enums were taken above; a nested list is built
+        // only by the AWS front end, never for a proto field.
+        _ => {
+            return Err(format!(
+                "REST method `{}`: query field `{f}` is a list of lists, which has no \
+                 query form",
+                m.name
+            ))
+        }
+    };
+    if fld.label == Label::Repeated {
+        return Err(format!(
+            "REST method `{}`: query field `{f}` is a repeated message, which has no \
+             query form",
+            m.name
+        ));
+    }
+    if QUERY_WKTS.contains(&tref.fq_name.as_str()) {
+        return Ok(QueryItem::Leaf(QueryLeaf {
+            key: q.json.clone(),
+            access: q.access.clone(),
+            label: Label::Optional,
+            kind: LeafKind::WktString,
+        }));
+    }
+    // Any other well-known type is one parameter too, its JSON string,
+    // which is not implemented here (a Struct or a wrapper in a query).
+    if tref.fq_name.starts_with(".google.protobuf.") {
+        return Err(format!(
+            "REST method `{}`: query field `{f}` is a `{}`, whose query form would be its \
+             JSON string, which is implemented only for `{}`, `{}` and `{}`",
+            m.name, tref.fq_name, QUERY_WKTS[0], QUERY_WKTS[1], QUERY_WKTS[2]
+        ));
+    }
+    if stack.contains(&tref.fq_name) {
+        return Err(format!(
+            "REST method `{}`: query field `{f}` is a `{}`, which holds itself, so it has \
+             no finite query form",
+            m.name, tref.fq_name
+        ));
+    }
+    let sub = idx.get(&tref.fq_name).ok_or_else(|| {
+        format!(
+            "REST method `{}`: query field `{f}` is a `{}`, which is not declared in \
+             the generated files, so its fields cannot be sent",
+            m.name, tref.fq_name
+        )
+    })?;
+    let binding = format!("_rest_{}", q.names.join("__"));
+    stack.push(tref.fq_name.clone());
+    let mut items = Vec::new();
+    for sf in &sub.fields {
+        let mut names = q.names.clone();
+        names.push(sf.name.clone());
+        let sq = QueryPath {
+            names,
+            json: format!("{}.{}", q.json, sf.json_name),
+            access: format!("{binding}.{}", sf.name),
+        };
+        items.push(query_item(m, idx, sf, &sq, stack)?);
+    }
+    stack.pop();
+    Ok(QueryItem::Nested { access: q.access.clone(), binding, items })
 }
 
 /// Emit one annotated unary or server-streaming REST method. Returns
@@ -683,10 +748,7 @@ fn emit_rest_method(
     }
     let url_fields = UrlFields { bools: &bool_fields, enums: &enum_fields };
     let items = query_items(m, idx, req_msg, &part.query_fields)?;
-    let needs_base64 = items.iter().any(|item| match item {
-        QueryItem::Leaf(l) => l.kind == LeafKind::Bytes,
-        QueryItem::Nested { leaves, .. } => leaves.iter().any(|l| l.kind == LeafKind::Bytes),
-    });
+    let needs_base64 = items.iter().any(|item| item.any_leaf(&|l| l.kind == LeafKind::Bytes));
 
     let verb = rule.verb.as_str();
     let has_body = !matches!(part.body, BodyDesignator::None);
@@ -1135,19 +1197,20 @@ fn emit_query_build(w: &mut Writer, items: &[QueryItem]) {
         return;
     }
     w.line("var query = String(\"\")");
+    emit_query_items(w, items);
+}
+
+fn emit_query_items(w: &mut Writer, items: &[QueryItem]) {
     for item in items {
         match item {
             QueryItem::Leaf(leaf) => emit_query_leaf(w, leaf),
-            // A message field: its fields are sent only when it is set. The
-            // binding is named for the field (an identifier), so it cannot
-            // collide with another item's.
-            QueryItem::Nested { field, leaves } => {
-                w.line(&format!("if req.{field}:"));
+            // A message field: its fields are sent only when it is set, read
+            // through a binding named for its field path.
+            QueryItem::Nested { access, binding, items } => {
+                w.line(&format!("if {access}:"));
                 w.indent();
-                w.line(&format!("ref _rest_{field} = req.{field}.value()"));
-                for leaf in leaves {
-                    emit_query_leaf(w, leaf);
-                }
+                w.line(&format!("ref {binding} = {access}.value()"));
+                emit_query_items(w, items);
                 w.dedent();
             }
         }
@@ -1165,7 +1228,7 @@ fn emit_query_leaf(w: &mut Writer, leaf: &QueryLeaf) {
     let stringify = |expr: &str| match leaf.kind {
         LeafKind::Bool => format!("_rest_bool_str({expr})"),
         LeafKind::Bytes => format!("base64_encode(Span({expr}))"),
-        LeafKind::FieldMask => format!("{expr}.to_proto3_json()"),
+        LeafKind::WktString => format!("{expr}.to_proto3_json()"),
         LeafKind::Enum => enum_url_str(expr),
         LeafKind::String | LeafKind::OtherScalar => format!("_rest_to_str({expr})"),
     };
@@ -1185,7 +1248,7 @@ fn emit_query_leaf(w: &mut Writer, leaf: &QueryLeaf) {
                 LeafKind::Bytes => Some(format!("if len({acc}) > 0:")),
                 LeafKind::OtherScalar => Some(format!("if {acc} != 0:")),
                 LeafKind::Enum => Some(format!("if {acc}.number() != 0:")),
-                LeafKind::FieldMask => None,
+                LeafKind::WktString => None,
             };
             (guard, stringify(acc))
         }
@@ -2961,6 +3024,147 @@ mod tests {
         ), "{}", e.source);
     }
 
+    fn named(mut f: IrField, json: &str, number: u32) -> IrField {
+        f.json_name = json.into();
+        f.proto_field_number = number;
+        f
+    }
+
+    #[test]
+    fn timestamp_and_duration_query_fields_are_their_json_strings() {
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![
+                msg_field("at", ".google.protobuf.Timestamp", "Timestamp"),
+                named(msg_field("max_age", ".google.protobuf.Duration", "Duration"), "maxAge", 2),
+            ],
+        );
+        let svc = svc_over(&req, rule("get", "/v1/x", "", &[]));
+        let file = file_with(vec![req], svc.clone());
+        let e = emit_rest_service(&file, &svc).unwrap();
+        assert!(e.source.contains(
+            "        if req.at:\n            if query.byte_length() > 0:\n                query += String(\"&\")\n            query += String(\"at=\") + _rest_pct_encode(req.at.value().to_proto3_json())\n"
+        ), "{}", e.source);
+        assert!(e.source.contains(
+            "        if req.max_age:\n            if query.byte_length() > 0:\n                query += String(\"&\")\n            query += String(\"maxAge=\") + _rest_pct_encode(req.max_age.value().to_proto3_json())\n"
+        ), "{}", e.source);
+    }
+
+    /// Cloud Monitoring's `ListTimeSeriesRequest`, cut to what its query
+    /// carries: `interval` (two Timestamps, `end_time` declared first) and
+    /// `aggregation` (a Duration, an enum and a repeated string).
+    fn list_time_series() -> Result<RestServiceEmit, String> {
+        let interval = msg_in(
+            "google.monitoring.v3",
+            "TimeInterval",
+            vec![
+                named(msg_field("end_time", ".google.protobuf.Timestamp", "Timestamp"), "endTime", 2),
+                named(msg_field("start_time", ".google.protobuf.Timestamp", "Timestamp"), "startTime", 1),
+            ],
+        );
+        let mut groups = named(scalar_field("group_by_fields", ScalarKind::String), "groupByFields", 5);
+        groups.label = Label::Repeated;
+        let aggregation = msg_in(
+            "google.monitoring.v3",
+            "Aggregation",
+            vec![
+                named(msg_field("alignment_period", ".google.protobuf.Duration", "Duration"), "alignmentPeriod", 1),
+                named(enum_field("per_series_aligner"), "perSeriesAligner", 2),
+                groups,
+            ],
+        );
+        let req = msg_in(
+            "google.monitoring.v3",
+            "ListTimeSeriesRequest",
+            vec![
+                scalar_field("name", ScalarKind::String),
+                scalar_field("filter", ScalarKind::String),
+                msg_field("interval", ".google.monitoring.v3.TimeInterval", "TimeInterval"),
+                msg_field("aggregation", ".google.monitoring.v3.Aggregation", "Aggregation"),
+            ],
+        );
+        let svc = svc_over(&req, rule("get", "/v3/{name=projects/*}/timeSeries", "", &[]));
+        let file = file_with(vec![req, interval, aggregation], svc.clone());
+        emit_rest_service(&file, &svc)
+    }
+
+    #[test]
+    fn a_message_holding_well_known_types_is_flattened_to_dotted_json_names() {
+        let e = list_time_series().unwrap();
+        let want = concat!(
+            "        if req.interval:\n",
+            "            ref _rest_interval = req.interval.value()\n",
+            "            if _rest_interval.end_time:\n",
+            "                if query.byte_length() > 0:\n",
+            "                    query += String(\"&\")\n",
+            "                query += String(\"interval.endTime=\") + _rest_pct_encode(_rest_interval.end_time.value().to_proto3_json())\n",
+            "            if _rest_interval.start_time:\n",
+            "                if query.byte_length() > 0:\n",
+            "                    query += String(\"&\")\n",
+            "                query += String(\"interval.startTime=\") + _rest_pct_encode(_rest_interval.start_time.value().to_proto3_json())\n",
+            "        if req.aggregation:\n",
+            "            ref _rest_aggregation = req.aggregation.value()\n",
+            "            if _rest_aggregation.alignment_period:\n",
+            "                if query.byte_length() > 0:\n",
+            "                    query += String(\"&\")\n",
+            "                query += String(\"aggregation.alignmentPeriod=\") + _rest_pct_encode(_rest_aggregation.alignment_period.value().to_proto3_json())\n",
+            "            if _rest_aggregation.per_series_aligner.number() != 0:\n",
+        );
+        assert!(e.source.contains(want), "{}", e.source);
+        assert!(e.source.contains(
+            "                query += String(\"aggregation.perSeriesAligner=\") + _rest_pct_encode(_rest_aggregation.per_series_aligner.json_name())\n"
+        ), "{}", e.source);
+        assert!(e.source.contains(
+            "            for _rest_v in _rest_aggregation.group_by_fields:\n"
+        ), "{}", e.source);
+        assert!(e.source.contains(
+            "query += String(\"aggregation.groupByFields=\") + _rest_pct_encode(_rest_to_str(_rest_v))"
+        ), "{}", e.source);
+    }
+
+    #[test]
+    fn a_message_two_levels_down_is_bound_by_its_whole_path() {
+        let leaf = msg_in("tiny.rest.v1", "Leaf", vec![named(scalar_field("max_items", ScalarKind::Int32), "maxItems", 1)]);
+        let mid = msg_in(
+            "tiny.rest.v1",
+            "Mid",
+            vec![named(msg_field("leaf_opts", ".tiny.rest.v1.Leaf", "Leaf"), "leafOpts", 1)],
+        );
+        let req = msg_in("tiny.rest.v1", "Req", vec![msg_field("mid", ".tiny.rest.v1.Mid", "Mid")]);
+        let svc = svc_over(&req, rule("get", "/v1/x", "", &[]));
+        let file = file_with(vec![req, mid, leaf], svc.clone());
+        let e = emit_rest_service(&file, &svc).unwrap();
+        let want = concat!(
+            "        if req.mid:\n",
+            "            ref _rest_mid = req.mid.value()\n",
+            "            if _rest_mid.leaf_opts:\n",
+            "                ref _rest_mid__leaf_opts = _rest_mid.leaf_opts.value()\n",
+            "                if _rest_mid__leaf_opts.max_items != 0:\n",
+            "                    if query.byte_length() > 0:\n",
+            "                        query += String(\"&\")\n",
+            "                    query += String(\"mid.leafOpts.maxItems=\") + _rest_pct_encode(_rest_to_str(_rest_mid__leaf_opts.max_items))\n",
+        );
+        assert!(e.source.contains(want), "{}", e.source);
+    }
+
+    #[test]
+    fn a_recursive_message_in_the_query_is_refused() {
+        let node = msg_in(
+            "tiny.rest.v1",
+            "Node",
+            vec![scalar_field("v", ScalarKind::String), msg_field("next", ".tiny.rest.v1.Node", "Node")],
+        );
+        let req = msg_in("tiny.rest.v1", "Req", vec![msg_field("head", ".tiny.rest.v1.Node", "Node")]);
+        let svc = svc_over(&req, rule("get", "/v1/x", "", &[]));
+        let file = file_with(vec![req, node], svc.clone());
+        let err = emit_rest_service(&file, &svc).unwrap_err();
+        assert!(
+            err.contains("query field `head.next` is a `.tiny.rest.v1.Node`, which holds itself, so it has no finite query form"),
+            "{err}"
+        );
+    }
+
     #[test]
     fn a_bytes_query_field_is_base64_and_the_file_imports_the_encoder() {
         let req = msg_in(
@@ -2993,20 +3197,21 @@ mod tests {
             json_name: "labels".into(),
             oneof_index: None,
         };
-        let ts = msg_field("at", ".google.protobuf.Timestamp", "Timestamp");
-        // Declared among the generated files, the Timestamp is still refused:
+        let ts = msg_field("doc", ".google.protobuf.Struct", "Struct");
+        // Declared among the generated files, the Struct is still refused:
         // its fields are not its query form.
         let ts_msg = msg_in(
             "google.protobuf",
-            "Timestamp",
+            "Struct",
             vec![scalar_field("seconds", ScalarKind::Int64), scalar_field("nanos", ScalarKind::Int32)],
         );
         let cases = [
             (map, "query field `labels` is a map, which has no query form"),
             (
                 ts,
-                "query field `at` is a `.google.protobuf.Timestamp`, whose query form is its \
-                 JSON string, which is implemented only for `.google.protobuf.FieldMask`",
+                "query field `doc` is a `.google.protobuf.Struct`, whose query form would be its \
+                 JSON string, which is implemented only for `.google.protobuf.FieldMask`, \
+                 `.google.protobuf.Timestamp` and `.google.protobuf.Duration`",
             ),
         ];
         for (fld, want) in cases {
@@ -3019,14 +3224,21 @@ mod tests {
     }
 
     #[test]
-    fn a_repeated_message_or_nested_message_query_field_is_refused() {
+    fn a_repeated_message_at_any_depth_of_the_query_is_refused() {
         let inner = msg_in("tiny.rest.v1", "Inner", vec![scalar_field("v", ScalarKind::String)]);
-        let outer = msg_in("tiny.rest.v1", "Outer", vec![msg_field("inner", ".tiny.rest.v1.Inner", "Inner")]);
         let mut many = msg_field("items", ".tiny.rest.v1.Inner", "Inner");
         many.label = Label::Repeated;
         let a = msg_in("tiny.rest.v1", "Req", vec![many]);
         let b = msg_in("tiny.rest.v1", "Req", vec![msg_field("outer", ".tiny.rest.v1.Outer", "Outer")]);
-        for (req, want) in [(a, "repeated message"), (b, "not a plain scalar")] {
+        // `outer.inner` is a message two levels down, flattened; its own
+        // repeated message is what has no query form.
+        let mut many_inner = msg_field("inner", ".tiny.rest.v1.Inner", "Inner");
+        many_inner.label = Label::Repeated;
+        let outer = msg_in("tiny.rest.v1", "Outer", vec![many_inner]);
+        for (req, want) in [
+            (a, "query field `items` is a repeated message"),
+            (b, "query field `outer.inner` is a repeated message"),
+        ] {
             let svc = svc_over(&req, rule("get", "/v1/x", "", &[]));
             let file = file_with(vec![req, inner.clone(), outer.clone()], svc.clone());
             let err = emit_rest_service(&file, &svc).unwrap_err();

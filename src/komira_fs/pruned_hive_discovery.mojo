@@ -11,8 +11,9 @@
 #      the partition cols in PATH ORDER, consume the longest leading run of
 #      EQUALITY constraints into the static list prefix; STOP at the first
 #      unpinned col. `IN (v1..vN)` -> N targeted prefixes (one list per value).
-#      A value komira and Spark spell differently on disk (non-ASCII, space,
-#      `:`, ...) gets a prefix per spelling, so either writer's tree is found.
+#      A value the modelled writers (komira, Spark, DuckDB/pyarrow, Windows
+#      Spark) spell differently on disk (non-ASCII, space, `:`, ...) gets a
+#      prefix per distinct spelling, so any of those writers' trees is found.
 #   2. the post-listing `filter_partitions` fold: for non-enumerable
 #      residual predicates (ranges / OR / function-wrapped), parse each
 #      survivor path's partition values and drop non-matching files BEFORE any
@@ -199,8 +200,8 @@ struct PrefixDerivation(Copyable, Movable, Deinitable):
     """The result of `evaluate_partition_prefix`:
       * `prefixes`: the targeted static list prefixes to issue (one for the
         all-equality case; N for an IN fan-out; the cartesian for mixed
-        EQ/IN; times the extra spelling of each value komira and Spark spell
-        differently). Each is `base_prefix + "col=<spelling>/..."` ending in
+        EQ/IN; times the extra spellings of each value the modelled writers
+        spell differently). Each is `base_prefix + "col=<spelling>/..."` ending in
         `/`.
       * `residual_cols`: the partition columns NOT pinned into the prefix
         (the stop column + everything after it) — the fold evaluates the
@@ -233,19 +234,20 @@ def evaluate_partition_prefix(
     `IN` constraints. Each pinned col contributes its DISTINCT directory
     spellings `col=<s>/`, where each value's spellings are
     `partition_value_spellings(value)`: komira's `encode_partition_value`
-    form, plus Spark's `escapePathName` form when it differs (raw UTF-8,
-    raw space, `%3A` for `:`). The running prefix set fans out by that count
-    (the cartesian). STOPS at the
+    form, then each of Spark's, DuckDB/pyarrow's and Windows Spark's that
+    differs from those before it (raw UTF-8, raw space, `%3A` for `:`). The
+    running prefix set fans out by that count (the cartesian). STOPS at the
     first col with no constraint or a non-enumerable constraint; that col and
     all after it become `residual_cols` for the fold. With no enumerable
     leading run the single prefix is `base_prefix` itself (list everything,
     fold filters).
 
     BOUND. With S_i the distinct spellings of pinned col i (N_i <= S_i <=
-    2 * N_i for N_i values: N_i when every value is spelled alike by both
+    4 * N_i for N_i values: N_i when every value is spelled alike by all four
     writers), the prefix count is the product of S_i. Versus the single-
-    spelling product of N_i, the factor is at most 2^k, k = the number of
-    pinned cols holding a value the writers spell differently. Every one of
+    spelling product of N_i, the factor is at most 4^k, k = the number of
+    pinned cols holding a value the writers spell differently (3^k when no
+    value mixes non-ASCII, a space and `:`; 2^k for non-ASCII alone). Every one of
     those prefixes can hold files (a tree may mix spellings per level), so
     none is redundant. A value made only of ASCII letters, digits and
     `- _ . ~` has one spelling, so such predicates derive the prefixes they
@@ -282,9 +284,9 @@ def evaluate_partition_prefix(
             continue
         # Enumerable: EQ (1 value) or IN (N values) -> fan the running set out
         # over the column's DISTINCT directory spellings. Each value has one
-        # spelling (komira's == Spark's) or two (they differ: a byte >= 0x80,
-        # a space, `:`, ...); see `partition_value_spellings`. Both are listed
-        # so a tree written by either writer is found. Spellings are deduped
+        # to four (komira, Spark, DuckDB/pyarrow, Windows Spark differ on
+        # bytes >= 0x80, a space, `:`, ...); see `partition_value_spellings`.
+        # All are listed so a tree written by any of those writers is found. Spellings are deduped
         # per column in first-seen order, so a repeated value or two values
         # sharing a spelling never yield the same prefix twice.
         var segs = List[String]()

@@ -496,6 +496,31 @@ proto_codegen_golden(
     ],
 )
 
+# Well-known types in the query, and messages holding them: a Timestamp or
+# Duration query field is one parameter, its proto3 JSON string through
+# komira_wkt's `to_proto3_json()` (the codec's own formatter); a message is
+# flattened, to any depth, to dotted lowerCamelCase keys
+# (`interval.startTime`, `window.bounds.endTime`), each level sent only when
+# it is set.
+proto_codegen_golden(
+    name = "series_rest",
+    srcs = ["corpus/rest/v1/series_rest.proto"],
+    import_roots = _GOOGLEAPIS,
+    generate = ["rest/v1/series_rest.proto"],
+    golden = ["golden/series_rest/series_rest.mojo.golden"],
+    options = "default_protocol=rest,package_prefix=komira_test_series_rest",
+    present = [
+        "query += String(\"interval.startTime=\") + _rest_pct_encode(_rest_interval.start_time.value().to_proto3_json())",
+        "query += String(\"aggregation.alignmentPeriod=\") + _rest_pct_encode(_rest_aggregation.alignment_period.value().to_proto3_json())",
+        "query += String(\"window.bounds.endTime=\") + _rest_pct_encode(_rest_window__bounds.end_time.value().to_proto3_json())",
+        "query += String(\"asOf=\") + _rest_pct_encode(req.as_of.value().to_proto3_json())",
+    ],
+    absent = [
+        "startTime.seconds",
+        "alignmentPeriod.nanos",
+    ],
+)
+
 # `gcp=true` (what mojo_gcp_client passes) leaves a REST client as it is:
 # REST clients are Google Cloud clients either way. logging_rest's golden,
 # byte for byte.
@@ -751,6 +776,7 @@ proto_codegen_goldens(
         ":shapes_rest",
         ":wkt_rest",
         ":update_rest",
+        ":series_rest",
         ":rest_unary_beside_streaming",
         ":refuse_rest_streaming_method_listed",
         ":refuse_rest_default_host_with_port",
