@@ -1,0 +1,6 @@
+package	init	readme	exported	used	percent	names	names_used	methods	methods_used	excepted	undocumented
+komira_a	yes	examples:3	16	9	56.2	10	6	6	3	1	6
+komira_b	yes	none	1	0	0.0	1	0	0	0	0	1
+komira_c	yes	no-example	1	0	0.0	1	0	0	0	0	1
+komira_d	yes	refused	1	0	0.0	1	0	0	0	0	1
+komira_gen	no	none	0	0	-	0	0	0	0	0	0

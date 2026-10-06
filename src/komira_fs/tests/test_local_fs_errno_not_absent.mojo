@@ -7,9 +7,10 @@
 #   (1) the `komira_list_dir_shallow` / `komira_walk_dir_recursive` C shims
 #       answered an EMPTY listing when opendir failed, and the walk silently
 #       skipped every subdirectory it could not open;
-#   (2) `_local_fs_path_exists` (LocalFs.delete's probe after a failed
-#       remove(3)) read a failed fopen probe as "already gone", so delete
-#       returned success while the entry remained;
+#   (2) LocalFs.delete probed existence after a failed remove(3) and read a
+#       failed probe as "already gone", so delete returned success while the
+#       entry remained (delete now reads remove(3)'s own errno; that contract
+#       is tested in test_local_fs_delete_errno.mojo);
 #   (3) `_local_fs_is_directory` read any fopen failure as "does not exist",
 #       so LocalFs.list / list_dir_shallow answered [] and is_dir said "path
 #       not found" for a path it could not even check.

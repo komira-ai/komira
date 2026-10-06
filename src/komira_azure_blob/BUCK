@@ -33,7 +33,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # refused writes and the inherited delete default), test_azure_presign (the
 # service SAS against independent goldens, its sixteen-field string-to-sign
 # and its refusals) and test_no_env_reads (the package's sources read no
-# environment).
+# environment). The same verbs over a real socket, against a fake service
+# that checks each signature itself, are komira_azure_blob_e2e's test.
 mojo_library(
     name = "komira_azure_blob",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

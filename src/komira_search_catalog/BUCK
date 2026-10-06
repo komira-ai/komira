@@ -22,7 +22,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # chunks in any order never leaves a lineage a cold reader refuses. The
 # fourth shows that every catalog change (publish, retire, reap) moves the
 # generation, that a scan straddling a retire or a reap sees it move, and
-# that retire and reap move it both before and after their change.
+# that retire and reap move it both before and after their change. The fifth
+# stages two reapers racing on one chunk: the loser of the stub rewrite carries
+# on when the winner left a stub or deleted the chunk, and raises otherwise.
 mojo_library(
     name = "komira_search_catalog",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -34,6 +36,7 @@ mojo_library(
         "tests/test_search_catalog_lifecycle.mojo",
         "tests/test_search_generation_moves.mojo",
         "tests/test_search_metastore_concurrent.mojo",
+        "tests/test_search_reap_chunk_race_offline.mojo",
         "tests/test_search_sublineage_sharding.mojo",
     ],
     visibility = ["PUBLIC"],

@@ -1,0 +1,1 @@
+# A package with no __init__.mojo (its sources are generated): it exports nothing.

@@ -7,7 +7,8 @@
 # classify a path (ENOTDIR, ELOOP, EACCES, EIO, ENAMETOOLONG, ...) raises an
 # error naming the path and the errno with its symbolic name. A probe that
 # cannot check a path must not answer "absent": LocalFs.list would then list
-# [] and LocalFs.delete would report success while the entry remains.
+# [] for a directory it cannot read. (LocalFs.delete reads remove(3)'s own
+# errno through `komira_fs_remove` and needs no probe.)
 #
 # FFI-BOUNDARY: every call goes to `_fs_shim.c` (cxx_library `komira_fs_posix`),
 # which reads errno immediately after the failing stat/lstat and owns the
@@ -80,9 +81,3 @@ def _local_fs_is_directory(path: String) raises -> Int:
         return 1
     return 0
 
-
-def _local_fs_path_exists(path: String) raises -> Bool:
-    """True iff an entry exists at `path` itself (lstat: a symlink is the
-    entry, as remove(3) sees it); False iff it does not (ENOENT). Raises on
-    any other failure: a path that cannot be checked is not "gone"."""
-    return _local_fs_path_kind(path, False) != Int32(0)
