@@ -57,6 +57,7 @@ mojo_library(
         "tests/test_bulk_extend_recv_buf.mojo",
         "tests/test_client_send_buffered_honors_request_timeout.mojo",
         "tests/test_clock.mojo",
+        "tests/test_content_length_body_cap.mojo",
         "tests/test_dial_resolve_is_lazy.mojo",
         "tests/test_drain_bodies_round_robin.mojo",
         "tests/test_e2e_dns_public_ca_tls.mojo",

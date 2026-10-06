@@ -198,6 +198,7 @@ def test_content_length_body_leaves_following_bytes_on_the_stream() raises:
         stream.set_max_read_per_call(k)
         var body = RecvRingBody[ScriptedStream].new_content_length(
             stream^, cl_total=cl, pre_body_bytes=List[UInt8](),
+            max_body_bytes=100 * 1024 * 1024,
         )
         var got = List[UInt8]()
         var detail = _drain(body, reactor, tok, got)
