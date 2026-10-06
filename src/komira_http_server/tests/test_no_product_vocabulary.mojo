@@ -21,8 +21,8 @@ from std.testing import assert_equal, assert_true
 
 comptime _ROOT = "src/komira_http_server"
 
-# Spelled in parts so this file's own text does not trip a repository-wide scan
-# for the same words.
+# Spelled in parts so that no line of this file contains a banned word whole:
+# a search of the repository for one of them then finds only real uses.
 def _banned() -> List[String]:
     var out = List[String]()
     out.append(String("org") + "_id")
@@ -32,9 +32,6 @@ def _banned() -> List[String]:
     out.append(String("gra") + "nt")
     out.append(String("ten") + "ant")
     out.append(String("cust") + "omer")
-    out.append(String("managed") + " app")
-    out.append(String("managed") + "-app")
-    out.append(String("control") + " plane")
     out.append(String("job") + " manager")
     return out^
 

@@ -35,6 +35,7 @@ def test_set_appends_new_keys_in_order() raises:
     assert_equal(c.key_at(1), String("b"))
     assert_equal(c.value_at(1), String("2"))
     assert_true(c.has(String("b")))
+    assert_true(Bool(c.get(String("b"))), "a set key reads Some")
     assert_equal(c.get(String("b")).value(), String("2"))
     # Lookup is by whole-key equality.
     assert_false(c.has(String("")), "the empty key was never set")
@@ -49,6 +50,7 @@ def test_set_replaces_in_place() raises:
     assert_equal(c.len(), 2, "replacing a key does not add an entry")
     assert_equal(c.key_at(0), String("a"), "the first-set order is kept")
     assert_equal(c.value_at(0), String("3"), "the later value wins")
+    assert_true(Bool(c.get(String("a"))), "a replaced key still reads Some")
     assert_equal(c.get(String("a")).value(), String("3"))
     assert_equal(c.value_at(1), String("2"), "the other key is untouched")
 
@@ -62,6 +64,7 @@ def test_principal_constructors_and_with_claim() raises:
     c.set(String("role"), String("reader"))
     var given = Principal(String("svc-2"), c^)
     assert_equal(given.subject, String("svc-2"))
+    assert_true(Bool(given.claims.get(String("role"))), "the constructor keeps the claims it is given")
     assert_equal(given.claims.get(String("role")).value(), String("reader"))
 
     var built = Principal(String("svc-3")).with_claim(
@@ -69,6 +72,7 @@ def test_principal_constructors_and_with_claim() raises:
     ).with_claim(String("role"), String("admin"))
     assert_equal(built.subject, String("svc-3"))
     assert_equal(built.claims.len(), 1, "with_claim replaces an existing key")
+    assert_true(Bool(built.claims.get(String("role"))), "with_claim stores the claim")
     assert_equal(built.claims.get(String("role")).value(), String("admin"))
 
 

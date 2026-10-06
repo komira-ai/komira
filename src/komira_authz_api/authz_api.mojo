@@ -214,12 +214,12 @@ struct AllowAuthenticatedAuthz(AuthzPort):
     """An `AuthzPort` that grants any action to any AUTHENTICATED principal — i.e.
     one whose `subject` is non-empty — and denies an unauthenticated one.
 
-    The DB-free single-tenant default: it delegates the whole authorization
-    decision to whatever authenticated the caller (a verified grant token names a
-    user, an org and a workspace; a host that has already fenced the request to its
-    own tenant has nothing left to look up without a membership store). A host with
-    a membership store should bind a conformer backed by it instead; a host with
-    per-repo ACLs should bind one that reads `resource.resource_id`."""
+    The DB-free default: it delegates the whole authorization decision to
+    whatever authenticated the caller (a host that has already verified the
+    caller's credential has nothing left to look up without a membership store).
+    A host with a membership store should bind a conformer backed by it
+    instead; a host with per-repo ACLs should bind one that reads
+    `resource.resource_id`."""
 
     def __init__(out self):
         pass

@@ -256,10 +256,10 @@ struct MiddlewareChain(Movable, Deinitable):
         """Run the `before` legs in outer→inner order:
             CORS.before → Tracing.before → Logging.before → user_mw.before.
 
-        `user_mw` is the innermost interceptor — for an authenticated API it is the
-        an embedder's authentication middleware, whose `before` either sets `ctx.principal`
-        (returns None → continue to the dispatcher) OR short-circuits with a
-        `Some(401)`.
+        `user_mw` is the innermost interceptor — for an authenticated API it is
+        the embedder's authentication middleware, whose `before` either sets
+        `ctx.principal` (returns None → continue to the dispatcher) OR
+        short-circuits with a `Some(401)`.
 
         Returns `Some(response)` if ANY leg short-circuited (the dispatcher
         must NOT run; the caller goes straight to `run_after_legs` on that
