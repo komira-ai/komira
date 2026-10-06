@@ -41,12 +41,12 @@ and its limits. A family's doc lands together with the libraries it describes;
 | build | [the Mojo rules and toolchain](design/mojo_rules_and_toolchain.md), [build gates, test welding and lints](design/gates_test_welding_and_lints.md) |
 | connectors | [crypto](design/crypto_and_tls.md), [databases](design/databases.md), [HTTP](design/http.md), [object stores](design/object_store.md), [protobuf, gRPC and code generation](design/protobuf_grpc_and_codegen.md); file-system discovery: no design doc yet |
 | storage | [text and row formats](design/text_and_row_formats.md) (CSV, Avro, ORC, XML); compression codecs, Parquet, Iceberg, an MVCC table store: no design doc yet; CDC: coming with its library |
-| execution and operators | [shuffle through an object store](design/shuffle.md); pipelines and morsel dispatch, aggregation, joins, sort, top-N and window: coming with the engine libraries |
-| plan and optimizer | logical plans and expressions, physical planning, the plan wire format, the query optimizer: coming with `komira_compiler` and `komira_optimizer` |
-| SDK and SQL | the plan-carrier surface, UDFs, the Python package, the SQL front ends: coming with `komira_sdk` |
+| execution and operators | [shuffle through an object store](design/shuffle.md); pipelines and morsel dispatch, aggregation, joins, top-N and the kernels: no design doc yet; sort and window: coming with the engine libraries |
+| plan and optimizer | logical plans and expressions, physical planning, the plan wire format: no design doc yet; the query optimizer: coming with `komira_optimizer` |
+| SDK and SQL | UDFs: no design doc yet; the plan-carrier surface, the Python package, the SQL front ends: coming with `komira_sdk` |
 | runtime | [the async runtime](design/async_runtime.md); the job supervisor and its job report wire: no design doc yet |
 | observability | [logging and telemetry](design/logging_and_telemetry.md) |
 | agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |
-| cloud | AWS clients, cloud credentials, infrastructure providers, secrets and service registry, deploy marks: coming with the cloud SDK libraries |
-| CI and deploy | the bundle model, apply, validate and rollout, the `kci` command line: coming with `kci` |
+| cloud | the AWS, GCP and Azure clients and their credentials, secrets and the service registry: no design doc yet; deploy marks: coming with the cloud SDK libraries |
+| CI and deploy | the `kci` command line, the resource model and its cloud providers, apply, validate and rollout: no design doc yet ([release machines](design/release_machine.md) covers komira's own release stages) |
 | packaging | [release machines: bundles, tarballs and OCI images](design/release_machine.md); the shared-library ABI: coming with `komira_so` |
