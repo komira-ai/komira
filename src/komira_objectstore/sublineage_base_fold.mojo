@@ -1090,8 +1090,8 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         # advance lands, reaping these chunks loses nothing: this model's
         # `_base` chunks carry their own copy of the source payload, so a shard
         # chunk names no object `_base` reads. (The broker's segment fold shares
-        # `.seg` objects with `_base` instead, and marks its tombstones
-        # `payload_moved`; chunk_reclaim_guard.mojo.)
+        # `.seg` objects with `_base` instead, and retires with MOVED markers;
+        # cas_manifest.mojo, `schedule_moved_for_delete_at`.)
         if folded_through_total > cur.log_start_offset:
             try:
                 _ = s.advance_log_start(

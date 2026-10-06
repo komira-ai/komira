@@ -135,11 +135,8 @@ from komira_objectstore.path import Path
 # Reclamation never touches a live chunk (at or above `_LOG_START`):
 # decisions + error text, no I/O (cycle-free: imports nothing from here).
 from komira_objectstore.chunk_reclaim_guard import (
-    Tombstone,
     advance_regress_error,
     advance_would_regress,
-    decode_tombstone_body,
-    encode_tombstone_body,
     reap_is_refused,
     reap_refused_error,
     rewrite_target_deleted_error,
@@ -1019,9 +1016,16 @@ def head_key(prefix: String) raises -> Path:
 # durability bug): one tiny S3 object per tombstoned chunk:
 #
 #   <prefix>/tombstones/<chunk_seq:020d>.tomb   ← body = schedule_ts_ms (i64 LE)
-#                                                  [+ flags u8: payload moved]
+#   <prefix>/moved_tombstones/<chunk_seq:020d>.tomb   ← same body
 #
-# (Body codec and the `payload_moved` flag: chunk_reclaim_guard.mojo.)
+# A MOVED marker retires a chunk whose payload objects (the objects its body
+# names, the broker's `.seg`) another manifest now references: a reaper deletes
+# the chunk key and the markers, never the payload. It is a separate key so
+# that a plain tombstone written later for the same chunk (a retention pass
+# working from an older `_LOG_START` snapshot) cannot overwrite it: only
+# `schedule_moved_for_delete_at` writes it. A chunk is ScheduledForDelete when
+# either marker exists, `tombstone_seqs` lists both, and `reap` and
+# `purge_all` delete both.
 #
 # Per-chunk markers are idempotent (create-or-overwrite of one key), discovered
 # on restart via a LIST of `<prefix>/tombstones/`, and decoupled from the hot
@@ -1046,6 +1050,14 @@ def head_key(prefix: String) raises -> Path:
 def tombstone_key(prefix: String, chunk_seq: Int64) raises -> Path:
     return Path.parse(
         prefix + "/tombstones/" + _pad20(chunk_seq) + ".tomb"
+    )
+
+
+def moved_tombstone_key(prefix: String, chunk_seq: Int64) raises -> Path:
+    """The MOVED marker of `chunk_seq`: retire the chunk key, keep the payload
+    another manifest references."""
+    return Path.parse(
+        prefix + "/moved_tombstones/" + _pad20(chunk_seq) + ".tomb"
     )
 
 
@@ -1163,10 +1175,37 @@ def decode_log_start(bytes: List[UInt8], etag: String) raises -> LogStart:
     return LogStart(off, seq, etag)
 
 
+def _sorted_unique(var xs: List[Int64]) -> List[Int64]:
+    """`xs` ascending with duplicates removed (insertion sort: manifests'
+    marker sets are small)."""
+    for i in range(1, len(xs)):
+        var v = xs[i]
+        var j = i - 1
+        while j >= 0 and xs[j] > v:
+            xs[j + 1] = xs[j]
+            j -= 1
+        xs[j + 1] = v
+    var out = List[Int64]()
+    for i in range(len(xs)):
+        if len(out) == 0 or out[len(out) - 1] != xs[i]:
+            out.append(xs[i])
+    return out^
+
+
 @always_inline
 def _seq_from_tombstone_key(key: String) -> Int64:
     # Extract the <chunk_seq:020d> from "..../tombstones/<020d>.tomb".
-    var marker = String("/tombstones/")
+    return _seq_after_marker(key, String("/tombstones/"))
+
+
+@always_inline
+def _seq_from_moved_tombstone_key(key: String) -> Int64:
+    # Extract the <chunk_seq:020d> from "..../moved_tombstones/<020d>.tomb".
+    return _seq_after_marker(key, String("/moved_tombstones/"))
+
+
+@always_inline
+def _seq_after_marker(key: String, marker: String) -> Int64:
     var idx = key.rfind(marker)
     if idx < 0:
         return Int64(-1)
@@ -3126,20 +3165,13 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         self.schedule_for_delete_at(chunk_seq, _now_millis())
 
     def schedule_for_delete_at(
-        mut self,
-        chunk_seq: Int64,
-        schedule_ts_ms: Int64,
-        payload_moved: Bool = False,
+        mut self, chunk_seq: Int64, schedule_ts_ms: Int64
     ) raises -> None:
         """Tombstone `chunk_seq` with an EXPLICIT schedule timestamp (ms).
         Writes (idempotently — last-writer-wins on the tiny marker key) the
         persisted tombstone `<prefix>/tombstones/<seq>.tomb` whose body is the
         schedule ts. Verifies the chunk exists first (fail-loud on a bad
         seq). The grace-aware reaper reads the ts to gate the actual delete.
-        `payload_moved` marks a chunk whose payload objects another manifest
-        now references: the reaper then reclaims the chunk key only
-        (chunk_reclaim_guard.mojo). Rewriting a marker replaces its ts and
-        its flag.
         """
         # CAS-GATE: WRITE verb (tombstone PUT) -> EXCLUSIVE lock. Serializes the
         # existence-check GET + tombstone PUT. NOTE: `schedule_for_delete`
@@ -3154,7 +3186,8 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             # Persist the marker (last-writer-wins keeps it idempotent — a
             # re-tombstone just refreshes the ts; the offline twin's `put`
             # overwrites, S3's PUT overwrites).
-            var tomb = encode_tombstone_body(schedule_ts_ms, payload_moved)
+            var tomb = List[UInt8]()
+            _put_i64_le(tomb, schedule_ts_ms)
             _ = self._store.put(
                 tombstone_key(self._prefix, chunk_seq), tomb
             )
@@ -3163,11 +3196,41 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             _cas_gate_unlock()
             raise e^
 
-    def _is_marked(self, chunk_seq: Int64) raises -> Bool:
-        # Consult S3: the tombstone marker object exists iff the chunk is
-        # ScheduledForDelete. (No process-local state — restart-safe.)
+    def schedule_moved_for_delete_at(
+        mut self, chunk_seq: Int64, schedule_ts_ms: Int64
+    ) raises -> None:
+        """Retire `chunk_seq` with a MOVED marker
+        `<prefix>/moved_tombstones/<seq>.tomb` (body: the schedule ts): another
+        manifest now references the payload objects the chunk body names, so a
+        reaper deletes the chunk key and never the payload. No other verb writes
+        this key, so a later `schedule_for_delete_at` on the same chunk cannot
+        undo it. Idempotent (a rewrite refreshes the ts); fail-loud if the chunk
+        does not exist."""
+        # CAS-GATE: WRITE verb -> EXCLUSIVE lock (existence GET + marker PUT).
+        _cas_gate_wrlock()
         try:
-            var _t = self._store.get(tombstone_key(self._prefix, chunk_seq))
+            var _c = self._store.get(chunk_key(self._prefix, chunk_seq))
+            _ = _c
+            var tomb = List[UInt8]()
+            _put_i64_le(tomb, schedule_ts_ms)
+            _ = self._store.put(
+                moved_tombstone_key(self._prefix, chunk_seq), tomb
+            )
+            _cas_gate_unlock()
+        except e:
+            _cas_gate_unlock()
+            raise e^
+
+    def _is_marked(self, chunk_seq: Int64) raises -> Bool:
+        # Consult S3: a plain or a moved marker object exists iff the chunk is
+        # ScheduledForDelete. (No process-local state — restart-safe.)
+        if self._marker_exists(tombstone_key(self._prefix, chunk_seq)):
+            return True
+        return self._marker_exists(moved_tombstone_key(self._prefix, chunk_seq))
+
+    def _marker_exists(self, key: Path) raises -> Bool:
+        try:
+            var _t = self._store.get(key)
             _ = _t
             return True
         except e:
@@ -3175,50 +3238,84 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                 return False
             raise e^
 
+    def _list_marker_seqs(
+        self, dir: String, moved: Bool
+    ) raises -> List[Int64]:
+        """The seqs under `<prefix>/<dir>/`, unsorted. Caller holds the lock."""
+        var res = self._store.list_with_delimiter(
+            Path.parse(self._prefix + "/" + dir + "/")
+        )
+        var out = List[Int64]()
+        for i in range(len(res.objects)):
+            ref loc = res.objects[i].location
+            var seq = (
+                _seq_from_moved_tombstone_key(loc) if moved
+                else _seq_from_tombstone_key(loc)
+            )
+            if seq >= Int64(0):
+                out.append(seq)
+        return out^
+
     def tombstone_seqs(self) raises -> List[Int64]:
         """The chunk_seqs currently ScheduledForDelete — discovered by LISTing
-        `<prefix>/tombstones/` (restart-safe; this is how a fresh broker
-        re-discovers marks, ground-truth #1). Returned ascending."""
+        `<prefix>/tombstones/` AND `<prefix>/moved_tombstones/` (restart-safe;
+        this is how a fresh broker re-discovers marks, ground-truth #1). A seq
+        with both markers appears once. Returned ascending."""
         # READ verb -> SHARED (read) lock.
         _cas_gate_rdlock()
         try:
-            var lk = Path.parse(self._prefix + "/tombstones/")
-            var res = self._store.list_with_delimiter(lk)
-            var out = List[Int64]()
-            for i in range(len(res.objects)):
-                var seq = _seq_from_tombstone_key(res.objects[i].location)
-                if seq >= Int64(0):
-                    out.append(seq)
+            var out = self._list_marker_seqs(String("tombstones"), False)
+            var moved = self._list_marker_seqs(String("moved_tombstones"), True)
             _cas_gate_unlock()
-            # ascending insertion sort (manifests are small)
-            for i in range(1, len(out)):
-                var v = out[i]
-                var j = i - 1
-                while j >= 0 and out[j] > v:
-                    out[j + 1] = out[j]
-                    j -= 1
-                out[j + 1] = v
-            return out^
+            for i in range(len(moved)):
+                out.append(moved[i])
+            return _sorted_unique(out^)
         except e:
             _cas_gate_unlock()
             raise e^
 
+    def moved_tombstone_seqs(self) raises -> List[Int64]:
+        """The chunk_seqs carrying a MOVED marker (LIST of
+        `<prefix>/moved_tombstones/`). Returned ascending."""
+        # READ verb -> SHARED (read) lock.
+        _cas_gate_rdlock()
+        try:
+            var out = self._list_marker_seqs(String("moved_tombstones"), True)
+            _cas_gate_unlock()
+            return _sorted_unique(out^)
+        except e:
+            _cas_gate_unlock()
+            raise e^
+
+    def moved_tombstone_ts(self, chunk_seq: Int64) raises -> Optional[Int64]:
+        """The schedule ts of `chunk_seq`'s MOVED marker, or None when it has
+        none. Any read error other than absence raises."""
+        # READ verb -> SHARED (read) lock.
+        _cas_gate_rdlock()
+        try:
+            var t = self._store.get(
+                moved_tombstone_key(self._prefix, chunk_seq)
+            )
+            var ts = _get_i64_le(t, 0)
+            _cas_gate_unlock()
+            return Optional[Int64](ts)
+        except e:
+            _cas_gate_unlock()
+            if _is_not_found(String(e)):
+                return None
+            raise e^
+
     def tombstone_schedule_ts(self, chunk_seq: Int64) raises -> Int64:
         """The schedule timestamp (ms) recorded for a tombstoned chunk. Raises
-        `not_found` if the chunk is not tombstoned."""
-        return self.read_tombstone(chunk_seq).schedule_ts_ms
-
-    def read_tombstone(self, chunk_seq: Int64) raises -> Tombstone:
-        """The tombstone of `chunk_seq`, in one GET: its schedule ts (the
-        grace-aware reaper's clock) and whether its payload moved. Raises
-        `not_found` if the chunk is not tombstoned."""
+        `not_found` if the chunk is not tombstoned. The grace-aware reaper
+        reads this to decide whether the grace window has elapsed."""
         # READ verb -> SHARED (read) lock.
         _cas_gate_rdlock()
         try:
             var t = self._store.get(tombstone_key(self._prefix, chunk_seq))
-            var tomb = decode_tombstone_body(t)
+            var ts = _get_i64_le(t, 0)
             _cas_gate_unlock()
-            return tomb
+            return ts
         except e:
             _cas_gate_unlock()
             raise e^
@@ -3226,8 +3323,12 @@ struct CasManifestStore[Store: ConditionalWriteStore](
     def reap(mut self, chunk_seq: Int64) raises -> None:
         """Remove the chunk object for a ScheduledForDelete chunk (the reaper
         verb). Fail-loud if the chunk is NOT tombstoned (tombstone before you
-        reap). Idempotent (deleting an absent object succeeds). Deletes the
-        tombstone marker too (the chunk is gone; the marker is spent).
+        reap). Either marker counts: a plain tombstone or a MOVED marker.
+        Idempotent (deleting an absent object succeeds). Deletes both markers
+        too (the chunk is gone; the markers are spent). It never touches the
+        payload objects the chunk body names: deleting those is the caller's
+        decision (the broker `ReapWorker` deletes them only without a MOVED
+        marker).
 
         Grace gating lives ABOVE this verb (in the ReapWorker / the
         BrokerCore reap trigger, which reads `tombstone_schedule_ts` and only
@@ -3251,8 +3352,9 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             if reap_is_refused(chunk_seq, floor):
                 raise reap_refused_error(chunk_seq, floor)
             self._store.delete(chunk_key(self._prefix, chunk_seq))
-            # Drop the spent marker (idempotent — deleting absent is fine).
+            # Drop the spent markers (idempotent — deleting absent is fine).
             self._store.delete(tombstone_key(self._prefix, chunk_seq))
+            self._store.delete(moved_tombstone_key(self._prefix, chunk_seq))
             _cas_gate_unlock()
         except e:
             _cas_gate_unlock()
@@ -3260,7 +3362,8 @@ struct CasManifestStore[Store: ConditionalWriteStore](
 
     def purge_all(mut self) raises -> Int64:
         """WHOLE-LINEAGE reclamation: delete EVERY object this manifest owns —
-        all `manifest/<seq>.chunk` chunks, all `tombstones/<seq>.tomb` markers,
+        all `manifest/<seq>.chunk` chunks, all `tombstones/<seq>.tomb` and
+        `moved_tombstones/<seq>.tomb` markers,
         all `_meta/dedup/<pid>/<seq>.seq` sentinels, the `_HEAD` cache, and the
         `_LOG_START` pointer. Returns the number of DELETE calls issued.
 
@@ -3286,7 +3389,8 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         the singleton `_HEAD` / `_LOG_START` keys.
 
         Key-layout encapsulation: the manifest's internal key shapes
-        (`manifest/`, `tombstones/`, `_meta/dedup/`, `_HEAD`, `_LOG_START`) stay
+        (`manifest/`, `tombstones/`, `moved_tombstones/`, `_meta/dedup/`,
+        `_HEAD`, `_LOG_START`) stay
         PRIVATE to this module — the reaper above this layer reclaims a manifest
         lineage by calling THIS verb, never by reconstructing the CAS-internal
         key names."""
@@ -3309,6 +3413,12 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             var tomb_res = self._store.list_with_delimiter(tomb_lk)
             for i in range(len(tomb_res.objects)):
                 self._store.delete(Path.parse(tomb_res.objects[i].location))
+                deletes += Int64(1)
+            # moved_tombstones/<seq>.tomb
+            var moved_lk = Path.parse(self._prefix + "/moved_tombstones/")
+            var moved_res = self._store.list_with_delimiter(moved_lk)
+            for i in range(len(moved_res.objects)):
+                self._store.delete(Path.parse(moved_res.objects[i].location))
                 deletes += Int64(1)
             # _meta/dedup/<pid>/<seq>.seq  (the idempotency sentinels)
             var dedup_lk = Path.parse(self._prefix + "/_meta/dedup/")

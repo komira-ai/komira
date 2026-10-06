@@ -32,24 +32,8 @@
 # lineage (every chunk and `_LOG_START` itself) once its caller has decided
 # that nothing reads the lineage any more.
 #
-# A tombstone also says what the reaper may reclaim BESIDES the chunk key. A
-# chunk body may name payload objects (the broker's `.seg`). A retention
-# tombstone retires the payload with the chunk. A tombstone written with
-# `payload_moved` retires only the chunk: another manifest now references
-# the payload (a sub-lineage migration or segment fold re-recorded it into
-# `_base`), so that manifest's own retention owns it. The tombstone body:
-#
-#   [ schedule_ts_ms: i64 LE ]                  retention tombstone (8 bytes)
-#   [ schedule_ts_ms: i64 LE ][ flags: u8 ]     payload moved (9 bytes)
-#
-# An 8-byte body (every tombstone written before the flag existed) decodes as
-# `payload_moved = False`. Any nonzero flags byte decodes as `payload_moved =
-# True`, so a flag this reader does not know never causes a delete. A reaper
-# built before the flag existed reads only the first 8 bytes and would delete
-# the payload: upgrade reapers before running a migration or a fold.
-#
-# This module holds decisions, the tombstone body codec and error text only;
-# it does no I/O, so `cas_manifest.mojo` imports it without a cycle.
+# This module holds decisions and error text only; it does no I/O, so
+# `cas_manifest.mojo` imports it without a cycle.
 # =============================================================================
 
 
@@ -112,61 +96,3 @@ def advance_regress_error(
         + String(new_offset)
         + ")"
     )
-
-
-# =============================================================================
-# Tombstone body codec
-# =============================================================================
-
-comptime TOMBSTONE_TS_BYTES = 8
-comptime TOMBSTONE_FLAG_PAYLOAD_MOVED = UInt8(1)
-
-
-@fieldwise_init
-struct Tombstone(Copyable, ImplicitlyCopyable, Movable, Deinitable):
-    """A decoded tombstone marker.
-
-    Field layout:
-      var schedule_ts_ms: Int64 — when the chunk was retired (ms); the reaper
-                                  counts its grace window from here.
-      var payload_moved: Bool   — True: reclaim the chunk key only; the
-                                  payload objects its body names belong to
-                                  another manifest now.
-    """
-
-    var schedule_ts_ms: Int64
-    var payload_moved: Bool
-
-
-def encode_tombstone_body(
-    schedule_ts_ms: Int64, payload_moved: Bool
-) -> List[UInt8]:
-    """The tombstone body. Without `payload_moved` it is the 8-byte body every
-    tombstone had before the flag existed, byte for byte."""
-    var out = List[UInt8]()
-    var u = UInt64(schedule_ts_ms)
-    for i in range(TOMBSTONE_TS_BYTES):
-        out.append(UInt8((u >> UInt64(8 * i)) & UInt64(0xFF)))
-    if payload_moved:
-        out.append(TOMBSTONE_FLAG_PAYLOAD_MOVED)
-    return out^
-
-
-def decode_tombstone_body(bytes: List[UInt8]) raises -> Tombstone:
-    """Decode a tombstone body. Raises on a body shorter than its timestamp.
-    An 8-byte body is a retention tombstone; a nonzero flags byte after the
-    timestamp means the payload moved."""
-    if len(bytes) < TOMBSTONE_TS_BYTES:
-        raise Error(
-            "tombstone body: truncated, "
-            + String(len(bytes))
-            + " bytes (want at least 8)"
-        )
-    var u = UInt64(0)
-    for i in range(TOMBSTONE_TS_BYTES):
-        u |= UInt64(Int(bytes[i])) << UInt64(8 * i)
-    var moved = (
-        len(bytes) > TOMBSTONE_TS_BYTES
-        and bytes[TOMBSTONE_TS_BYTES] != UInt8(0)
-    )
-    return Tombstone(schedule_ts_ms=Int64(u), payload_moved=moved)

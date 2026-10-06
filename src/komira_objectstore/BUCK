@@ -57,12 +57,12 @@ mojo_library(
         "tests/test_local_fs_store_list_dir_errno.mojo",
         "tests/test_manifest_reaped_slot_async_offline.mojo",
         "tests/test_manifest_reaped_slot_guard_offline.mojo",
+        "tests/test_moved_tombstone_offline.mojo",
         "tests/test_objectstore_bytes_non_ascii.mojo",
         "tests/test_path_uri.mojo",
         "tests/test_sharded_lineage_kernel.mojo",
         "tests/test_slow_cas_store_start_412_abi.mojo",
         "tests/test_sublineage_base_fold.mojo",
-        "tests/test_tombstone_payload_moved_offline.mojo",
     ],
     visibility = ["PUBLIC"],
 )
