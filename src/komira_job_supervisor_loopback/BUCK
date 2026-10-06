@@ -1,0 +1,54 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_job_supervisor's whole run loop over HTTP, against a
+# stateful heartbeat receiver served by a real komira_http_server HttpServer
+# on 127.0.0.1, in one build action (komira_fork_join: the server steps on one
+# thread while run_job_supervisor runs on the other). The supervisor's peer is
+# not in komira, so the library supplies one: HeartbeatReceiver decodes each
+# komira.job_report.v1 JobHeartbeat, keeps one run's state (ASSIGNED, RUNNING,
+# CANCELLING, then COMPLETED, FAILED or CANCELLED), records every beat that
+# breaks that machine, and answers with a JobHeartbeatReply. It is a package
+# of its own so komira_job_supervisor's deps do not gain an HTTP server.
+#
+# The welded tests: every rule of the receiver's state machine fires on a beat
+# that breaks it (test_heartbeat_receiver_rules, no socket); and
+# run_job_supervisor with the real HttpHeartbeatReporter and real /bin/sh
+# children (test_job_supervisor_heartbeat_loopback): a COMPLETED lifecycle
+# whose first beat precedes the spawn; a CANCEL the receiver decides on, after
+# which the child's pid is gone; a FAILED
+# job whose 8960-byte stderr tail arrives byte for byte in a beat larger than
+# the server's first recv; and a directive this build has no name for, which
+# does not stop the job.
+mojo_library(
+    name = "komira_job_supervisor_loopback",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_job_report_proto:komira_job_report_proto",
+        "//src/komira_job_supervisor:komira_job_supervisor",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_supervisor:komira_supervisor",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_heartbeat_receiver_rules.mojo",
+        "tests/test_job_supervisor_heartbeat_loopback.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
