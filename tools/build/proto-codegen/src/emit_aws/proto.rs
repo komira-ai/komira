@@ -254,9 +254,10 @@ pub const SIGV4_AUTH: &str = "aws.auth#sigv4";
 /// wrong scheme is rejected by the service as a signature mismatch, which
 /// points at the credential.
 ///
-/// ⚠ This reads the service metadata only. A per-operation `authtype` or
-/// `auth` (an anonymous or bearer operation inside a SigV4 service) is not
-/// checked here, and such an operation is signed with SigV4 like the rest.
+/// This reads the service metadata only. A per-operation `authtype` or
+/// `auth` (an anonymous or bearer operation inside a SigV4 service) is read
+/// by `auth::operation_auth`: an anonymous operation is sent unsigned, and a
+/// bearer one is refused in client mode.
 pub fn check_signature_version(meta: &AwsServiceMeta) -> Result<(), String> {
     let auth_names_sigv4 = meta.auth.iter().any(|a| a == SIGV4_AUTH);
     match meta.signature_version.as_str() {

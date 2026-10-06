@@ -1,0 +1,11 @@
+# A release workflow that has drifted from machine.textproto: its one job
+# names no stage of the machine file.
+name: kci
+on:
+  push:
+    branches: [main]
+permissions: {}
+jobs:
+  publish-build:
+    steps:
+      - run: echo drifted

@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The read-only Iceberg catalog client: resolves `namespace.table` to the
+# table's current metadata location through the IcebergCatalog seam. Two
+# conformers ride it: a storage-based resolver (no network) and a REST client
+# over the standard Iceberg REST protocol. For the REST conformer, the HTTP
+# transport is komira_http's, the loadTable and config responses are
+# parsed with komira_json's DOM parser, and the synchronous per-call request
+# runs on komira_async's BlockingRuntime. The tests drive the client over a
+# scripted transport: no network and no sockets.
+mojo_library(
+    name = "komira_iceberg_catalog",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
+    ],
+    test_srcs = [
+        "tests/test_iceberg_rest_catalog.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

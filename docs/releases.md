@@ -45,6 +45,31 @@ A project that uses a package lists the komira channel and Modular's `max`
 channel (or already depends on `mojo`, which pulls the same pinned compiler,
 `mojo-compiler ==<the package's version>`); the snippet is in the README.
 
+### Declaring a library
+
+A library is published once `release/artifacts.textproto` declares it. A
+library that builds and whose tests pass is not declared on that alone: a
+published name is permanent, and the people who will depend on it read its
+tests, not its source. The pull request that declares a library is opened with
+the [declare template](../.github/PULL_REQUEST_TEMPLATE/declare.md)
+(`gh pr create --template declare.md`, or `?template=declare.md` on the
+compare page), whose testing plan the release approver reads before
+approving. For every library it declares, the plan states:
+
+- what is tested: each test the build runs, what it proves and which defect
+  it would catch;
+- the mutants: each defect planted to see a test go red, the command and its
+  result line, and every planted defect that no test caught (a surviving
+  mutant), with why it is accepted or the test that now catches it;
+- deadlines: every operation that can block, its deadline and the test that
+  proves it fires, or that it has none;
+- untested composition: what a user will combine the library with that no
+  test exercises.
+
+A declaration whose plan leaves a part empty waits. The plan lives in the pull
+request, not in the repository: what the build enforces is the tests
+themselves (`test_srcs`) and the README examples the release machine runs.
+
 ## Pinning komira from another repository
 
 A repository that builds Mojo with komira's rules names komira as its `komira`

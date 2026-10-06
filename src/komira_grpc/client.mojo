@@ -81,6 +81,7 @@ from komira_grpc.call_options import CallOptions
 from komira_grpc.error import (
     GrpcError,
     format_grpc_error_message,
+    grpc_error_from_http_non_200,
     parse_grpc_status_initial_headers,
     parse_grpc_status_trailers,
 )
@@ -388,6 +389,31 @@ def _non_rpc_content_type(headers: HeaderMap) -> Optional[String]:
     return Optional[String](ct)
 
 
+def _raise_if_http_non_200[P: Protocol](http_status: UInt16) raises:
+    """Raise the spec's gRPC status for a classic-gRPC response whose HTTP
+    status is not 200 and which stated no `grpc-status` of its own.
+
+    Classic gRPC answers every RPC, failed or not, with `:status: 200`; a
+    non-200 means something in front of the service answered (an edge proxy's
+    503, an auth layer's 401). `grpc_error_from_http_non_200` maps it through
+    the spec's HTTP-to-gRPC table, so a proxy 429/502/503/504 reaches the
+    caller as UNAVAILABLE, the one code `RetryPolicy.idempotent()` replays.
+
+    ORDER at every call site: AFTER the `grpc-status` raise (the spec's mapping
+    applies only to a response that carried no `grpc-status`), and BEFORE the
+    content-type check (a proxy's 503 page is `text/html`; reporting it as an
+    INTERNAL content-type problem would hide the 503 and keep it out of the
+    retryable set). grpc-go orders the two the same way.
+
+    Connect protocols carry their own status in the body and HTTP status;
+    this check is classic gRPC only.
+    """
+    comptime if P.unary_is_enveloped():
+        if http_status != 200:
+            var ge = grpc_error_from_http_non_200(http_status)
+            raise Error(format_grpc_error_message(ge.code, ge.message))
+
+
 def _raise_if_non_rpc_content_type(ct_problem: Optional[String]) raises:
     """Raise the typed INTERNAL status for a `_non_rpc_content_type` finding.
 
@@ -638,7 +664,12 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
                     raise Error(
                         format_grpc_error_message(ge.code, ge.message)
                     )
-        # 4b. No status was stated. If the body is not an RPC body at all, say
+        # 4b. No status was stated. A non-200 HTTP status is an intermediary's
+        # answer: map it through the spec's table (a proxy 503 -> UNAVAILABLE,
+        # retryable) before the content-type check can call its HTML page an
+        # INTERNAL routing failure. See `_raise_if_http_non_200`.
+        _raise_if_http_non_200[P](http_status)
+        # 4c. No status was stated. If the body is not an RPC body at all, say
         # THAT — feeding it to the envelope decoder yields a framing diagnostic
         # for a routing failure. Ordered after the status raise on purpose: a
         # server that stated a real `grpc-status` has already answered.
@@ -904,6 +935,7 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
         var resp = self._send_server_stream_bounded_goaway_retry[RT, P](
             path, request_message_bytes, opts, now_us, reactor,
         )
+        var http_status = UInt16(Int(resp.status))
         # 3a. gRPC status from the response HEADERS / TRAILERS, captured BEFORE
         # the drain. A server-streaming ERROR
         # (e.g. ReadObject on a missing object -> NOT_FOUND, code 5) is a
@@ -933,6 +965,9 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
                     raise Error(
                         format_grpc_error_message(ge.code, ge.message)
                     )
+        # Non-200 with no stated status: the spec's HTTP-to-gRPC table, before
+        # the content-type check. See `_raise_if_http_non_200`.
+        _raise_if_http_non_200[P](http_status)
         _raise_if_non_rpc_content_type(ct_problem)
         var decoder = ServerStreamDecoder[P].new()
         decoder.feed_owned(body_bytes^)
@@ -1234,6 +1269,9 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
                     raise Error(
                         format_grpc_error_message(ge.code, ge.message)
                     )
+        # Non-200 with no stated status: the spec's HTTP-to-gRPC table, before
+        # the content-type check. See `_raise_if_http_non_200`.
+        _raise_if_http_non_200[P](http_status)
         _raise_if_non_rpc_content_type(ct_problem)
         # 3. The response is streaming-framed; pull the FIRST message.
         var decoder = ServerStreamDecoder[P].new()
@@ -1295,6 +1333,7 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
         )
         # Pooled h2 multiplex.
         var resp = self._http[].send_grpc_pooled[RT, BytesBody](req^, reactor)
+        var http_status = UInt16(Int(resp.status))
         # ⭐ THE TERMINAL-STATUS CHECK, as on the other three entry points.
         #
         # `unary_call` (§3a), `server_stream` (§4 3a) and `client_stream` (§5
@@ -1322,6 +1361,9 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
                     raise Error(
                         format_grpc_error_message(ge.code, ge.message)
                     )
+        # Non-200 with no stated status: the spec's HTTP-to-gRPC table, before
+        # the content-type check. See `_raise_if_http_non_200`.
+        _raise_if_http_non_200[P](http_status)
         _raise_if_non_rpc_content_type(ct_problem)
         var decoder = ServerStreamDecoder[P].new()
         decoder.feed_owned(body_bytes^)

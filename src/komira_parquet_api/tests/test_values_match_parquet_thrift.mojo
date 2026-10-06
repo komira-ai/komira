@@ -19,6 +19,7 @@ from komira_parquet_api import (
     PageType,
     ParquetType,
 )
+from komira_parquet_api.hll_footer import STATISTICS_NAN_COUNT_FIELD_ID
 from komira_parquet_api.types import (
     CONVERTED_TYPE_BSON,
     CONVERTED_TYPE_DATE,
@@ -247,11 +248,21 @@ def _struct_block(text: String, name: String) raises -> String:
 
 
 def test_statistics_field_9_is_the_spec_nan_count() raises:
-    # metadata.mojo's Statistics.hll_registers doc says field 9 is the spec's
-    # nan_count, so registers must not be written to or read from it. This
-    # keeps that doc true for the pinned spec.
+    # metadata.mojo's Statistics.nan_count doc and hll_footer say field 9
+    # is the spec's i64 nan_count, so registers must not be written to or read
+    # from it. This keeps both true for the pinned spec.
     var block = _struct_block(_read(_THRIFT), "Statistics")
     assert_true(block.find("\n   9: optional i64 nan_count;") >= 0)
+    assert_equal(STATISTICS_NAN_COUNT_FIELD_ID, 9)
+
+
+def test_column_meta_data_field_8_is_key_value_metadata() raises:
+    # hll_footer puts a chunk's HLL registers in
+    # ColumnMetaData.key_value_metadata, which metadata.mojo documents as
+    # field 8, an optional list of KeyValue, so a reader that does not know
+    # the key skips it.
+    var block = _struct_block(_read(_THRIFT), "ColumnMetaData")
+    assert_true(block.find("\n  8: optional list<KeyValue> key_value_metadata") >= 0)
 
 
 def test_page_header_crc_is_optional_standard_crc32() raises:
