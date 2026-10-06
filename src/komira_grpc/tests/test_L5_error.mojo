@@ -24,6 +24,9 @@
 #        message — see the docstring.
 #   T11  from_connect_error_envelope — code preserved + message preserved.
 #   T12  parse_grpc_error_message — multi-digit code (e.g. 14) parses.
+#   T13  grpc_error_for_missing_status — the reference clients' code for each
+#        shape of a response that states no grpc-status, and every message
+#        names grpc-status.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -32,6 +35,7 @@ from komira_grpc import (
     GrpcError,
     GRPC_STATUS_OK,
     GRPC_STATUS_UNKNOWN,
+    GRPC_STATUS_INTERNAL,
     GRPC_STATUS_NOT_FOUND,
     GRPC_STATUS_UNAVAILABLE,
     GRPC_STATUS_PERMISSION_DENIED,
@@ -40,6 +44,7 @@ from komira_grpc import (
     parse_grpc_status_trailers,
     parse_grpc_status_initial_headers,
     grpc_error_from_http_non_200,
+    grpc_error_for_missing_status,
     from_connect_error_envelope,
 )
 from komira_http_client.header_map import HeaderMap
@@ -215,6 +220,27 @@ def test_t12_multi_digit_code() raises:
     assert_equal(parsed[1], String("503"), "msg")
 
 
+def test_t13_missing_status() raises:
+    """T13 — a response with no grpc-status: trailers present -> UNKNOWN
+    (grpc-java "missing GRPC status in response"); no trailers after a body ->
+    INTERNAL (grpc-go "server closed the stream without sending trailers");
+    bodyless 200 -> UNKNOWN (http-grpc-status-mapping.md); non-200 -> the
+    HTTP table. Each mutant that swaps two branches reds one row."""
+    var t = grpc_error_for_missing_status(UInt16(200), True, 7)
+    assert_equal(t.code, GRPC_STATUS_UNKNOWN, "trailers without status")
+    var d = grpc_error_for_missing_status(UInt16(200), False, 7)
+    assert_equal(d.code, GRPC_STATUS_INTERNAL, "no trailers after a body")
+    var e = grpc_error_for_missing_status(UInt16(200), False, 0)
+    assert_equal(e.code, GRPC_STATUS_UNKNOWN, "bodyless 200")
+    var n = grpc_error_for_missing_status(UInt16(503), False, 0)
+    assert_equal(n.code, GRPC_STATUS_UNAVAILABLE, "503 maps to UNAVAILABLE")
+    assert_true(String("status=503") in n.message, n.message)
+    assert_true(String("grpc-status") in t.message, t.message)
+    assert_true(String("grpc-status") in d.message, d.message)
+    assert_true(String("grpc-status") in e.message, e.message)
+    assert_true(String("grpc-status") in n.message, n.message)
+
+
 def main() raises:
     test_t1_constructors()
     test_t2_format_parse_round_trip()
@@ -228,4 +254,5 @@ def main() raises:
     test_t10_http_non_200_synthesis()
     test_t11_from_connect_envelope()
     test_t12_multi_digit_code()
-    print("test_L5_error: 12/12 PASS")
+    test_t13_missing_status()
+    print("test_L5_error: 13/13 PASS")
