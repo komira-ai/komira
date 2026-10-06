@@ -41,12 +41,10 @@ comptime _SPAN_ID_WORKER_SHIFT: UInt64 = UInt64(48)
 struct SpanContextSlot(
     Copyable, Movable, Deinitable
 ):
-    # MOJO-1.0.0: `ImplicitlyCopyable` DROPPED, `Copyable` kept. 1.0.0 makes
-    # `InlineArray` non-implicitly-copyable, and a struct owning one cannot
-    # synthesise an implicit copy ctor -- there is no manual override (a
-    # hand-written `__copyinit__` is not consulted). Copies of this POD
-    # record are now spelled `.copy()`; that is the SAME memcpy b2 emitted
-    # implicitly, so codegen and cost are unchanged.
+    # `Copyable` but not `ImplicitlyCopyable`: `InlineArray` is not
+    # implicitly copyable, and a struct owning one cannot synthesise an
+    # implicit copy ctor (a hand-written `__copyinit__` is not consulted).
+    # Copies of this POD record are spelled `.copy()`, a plain memcpy.
     """Per-worker span-id stack + id/trace allocation state — POD.
 
     Disjoint per worker; the owning core is the only reader/writer, so the
