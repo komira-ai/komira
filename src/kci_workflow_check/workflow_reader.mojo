@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/workflow_reader.mojo -- a FAIL-CLOSED reader of a STRICT
+# src/kci_workflow_check/workflow_reader.mojo -- a FAIL-CLOSED reader of a STRICT
 #   SUBSET of YAML, into a tree of maps, lists and scalars.
 # =============================================================================
 #

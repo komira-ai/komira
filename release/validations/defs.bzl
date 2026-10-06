@@ -14,7 +14,7 @@ with kci and pixi built by this repository, from the repository's root (the
 machine file's relative paths are relative to the directory kci starts in, and
 a scratch directory inside the checkout is refused), whatever directory
 `buck2 run` is started in. It adds no verb: the validation that runs is the
-code kci.yml's `validate` job runs, and src/kci_ci_check's test_repo_kci_yml
+code kci.yml's `validate` job runs, and src/kci_workflow_check's test_repo_kci_yml
 holds that job's `kci run` to these arguments. When the arguments name no
 `--scratch-dir`, a fresh one is made under the system temp directory; no
 `--run-id` means `local`, no `--attempt` means `1`.
@@ -144,7 +144,7 @@ def _kci_validations(validations, visibility = None):
     _kci_validation_names(
         name = "names",
         validations = validations,
-        visibility = ["komira//src/kci_ci_check:", "komira//src/kci_release_machine:"],
+        visibility = ["komira//src/kci_workflow_check:", "komira//src/kci_release_machine:"],
     )
 
 kci_validations = declares_docs(_kci_validations)

@@ -32,7 +32,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # publish by OIDC) and kci_api (the default machine file). Pure: it
 # checks text it is given.
 mojo_library(
-    name = "kci_ci_check",
+    name = "kci_workflow_check",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_api:kci_api",

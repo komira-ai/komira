@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_ci_check -- the workflow consistency check: a hand-written CI workflow
+# kci_workflow_check -- the workflow consistency check: a hand-written CI workflow
 #   held to the machine file's release machine (library code; used by the welded
 #   test and by `kci run` at start-up).
 # =============================================================================
@@ -37,7 +37,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_ci_check.workflow_reader import (
+from kci_workflow_check.workflow_reader import (
     CANNOT_TELL,
     NODE_LIST,
     NODE_MAP,
@@ -46,7 +46,7 @@ from kci_ci_check.workflow_reader import (
     WorkflowNode,
     read_workflow,
 )
-from kci_ci_check.pull_request import (
+from kci_workflow_check.pull_request import (
     CHECKOUT_ACTION,
     PULL_REQUEST_BASE_EXPRESSION,
     PULL_REQUEST_EVENT,
@@ -55,7 +55,7 @@ from kci_ci_check.pull_request import (
     condition_expression,
     excludes_pull_request,
 )
-from kci_ci_check.auto_promotion import (
+from kci_workflow_check.auto_promotion import (
     CHECKOUT_REF,
     CONCURRENCY_CANCEL,
     CONCURRENCY_GROUP,
@@ -70,8 +70,8 @@ from kci_ci_check.auto_promotion import (
     documentation_filter_findings,
     documentation_paths,
 )
-from kci_ci_check.kci_run_calls import KciRunCall, kci_run_calls
-from kci_ci_check.rules import (
+from kci_workflow_check.kci_run_calls import KciRunCall, kci_run_calls
+from kci_workflow_check.rules import (
     FARM_CONNECT_ACTION,
     ChannelsFile,
     channels_paths,
