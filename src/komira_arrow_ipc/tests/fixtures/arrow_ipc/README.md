@@ -12,10 +12,13 @@ producer is only worth something while the bytes are the producer's.
 | `arrow_file.arrow` | `gen_fixtures.py` | Arrow IPC File |
 | `tensor_1d_int64.tensor` | `gen_fixtures.py` | one Tensor message (needs numpy) |
 
-To regenerate, run the script from this directory with pyarrow installed
+To regenerate, run the script from this directory with pyarrow 24.0.0 installed
 (`python3 gen_fixtures.py [name ...]`, `python3 gen_pyarrow_interop_fixtures.py`).
-Both are deterministic. A regenerated file that differs from the committed one
-means the producer changed; review the diff before replacing it.
+Both scripts refuse to start under any other pyarrow version: regenerating every
+file here with 24.0.0 reproduces the committed bytes exactly, and another version
+may not. Both are deterministic. Moving to a new pyarrow is a deliberate change:
+update `PYARROW_VERSION` in both scripts, regenerate, and review every byte that
+differs before committing it.
 
 `dict_replacement_stream.arrow` holds no replacement DictionaryBatch: its two
 batches carry equal dictionaries, so pyarrow writes one isDelta=false

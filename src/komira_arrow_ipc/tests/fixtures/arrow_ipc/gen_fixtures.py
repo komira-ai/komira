@@ -28,6 +28,17 @@ import os
 import sys
 import pyarrow as pa
 
+# The committed bytes are pyarrow 24.0.0's (regenerating every fixture here with
+# 24.0.0 reproduces them byte for byte). Another version may write different
+# bytes, so refuse to run under it. A raise, not `assert`: `python3 -O` strips
+# asserts.
+PYARROW_VERSION = "24.0.0"
+if pa.__version__ != PYARROW_VERSION:
+    raise SystemExit(
+        f"{os.path.basename(__file__)}: pyarrow {PYARROW_VERSION} required, "
+        f"found {pa.__version__}"
+    )
+
 
 FIXTURE_DIR = os.path.dirname(os.path.abspath(__file__))
 

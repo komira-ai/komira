@@ -493,7 +493,14 @@ def test_file_round_trip_mixed_codecs() raises:
                 _ = decode_record_batch_message_mmap(_frame(buf, blk), types, region, Int(blk.offset))
             except e:
                 raised = True
-                assert_true("BodyCompression" in String(e), String(e))
+                assert_equal(
+                    String(e),
+                    "decode_record_batch_message_mmap: frame carries"
+                    + " BodyCompression.codec="
+                    + String(Int(codecs[k]))
+                    + "; mmap path requires Uncompressed bodies. Caller should"
+                    + " fall back to copy-on-read path for compressed frames.",
+                )
             assert_true(raised, what + ": mmap must refuse a compressed body")
         base += rows[k]
 
@@ -717,7 +724,9 @@ def _null_int64_types() -> List[ArrowType]:
     return t^
 
 
-def _expect_raise(var frame: SharedAlignedBuffer[HeapRegion], types: List[ArrowType], n_slots: Int, needle: String) raises:
+def _expect_raise(var frame: SharedAlignedBuffer[HeapRegion], types: List[ArrowType], n_slots: Int, want: String) raises:
+    """The copy decoder raises, and with exactly `want`: the whole message, so
+    an earlier check that fires for a different reason fails the case."""
     var no_dict = List[Bool]()
     for _ in range(len(types)):
         no_dict.append(False)
@@ -726,8 +735,8 @@ def _expect_raise(var frame: SharedAlignedBuffer[HeapRegion], types: List[ArrowT
         _ = decode_record_batch_message_with_dicts(frame^, types, no_dict, _placeholders(n_slots))
     except e:
         raised = True
-        assert_true(needle in String(e), String(e))
-    assert_true(raised, "decode must raise: " + needle)
+        assert_equal(String(e), want)
+    assert_true(raised, "decode must raise: " + want)
 
 
 def test_null_column_and_legacy_framing() raises:
@@ -774,15 +783,29 @@ def test_null_column_and_legacy_framing() raises:
 
 
 def test_read_path_refusals() raises:
-    """Each refusal on this read path raises with its reason instead of
+    """Each refusal on this read path raises its full message instead of
     returning columns: a schema with fewer columns than the batch (FieldNode
     count), fewer dictionary slots than columns, a DictionaryBatch handed to
-    the RecordBatch decoder, an index past the end of its dictionary, and a
-    nested type given to the mmap decoder."""
+    the RecordBatch decoder (refused by the codec peek that runs before the
+    decoder's own header check), an index past the end of its dictionary, and
+    a nested type given to the mmap decoder (refused by the flat count helper;
+    see the comment at that case)."""
     var too_few = List[ArrowType]()
     too_few.append(ArrowType.INT64)
-    _expect_raise(_two_col_frame(), too_few, 1, "FieldNode count mismatch")
-    _expect_raise(_two_col_frame(), _null_int64_types(), 1, "dict_values has only")
+    _expect_raise(
+        _two_col_frame(),
+        too_few,
+        1,
+        "decode_record_batch_message_with_dicts: FieldNode count mismatch (got 2, expected 1)",
+    )
+    _expect_raise(
+        _two_col_frame(),
+        _null_int64_types(),
+        1,
+        "decode_record_batch_message_with_dicts: dict_values has only 1 entries"
+        " but the schema has 2 columns (one slot per column is required —"
+        " placeholder Columns for non-dict columns)",
+    )
 
     var dict_vals: List[String] = [String("a"), String("b")]
     var dict_frame = encode_dictionary_batch_message_from_string_column(
@@ -790,7 +813,14 @@ def test_read_path_refusals() raises:
     )
     var str_types = List[ArrowType]()
     str_types.append(ArrowType.STRING)
-    _expect_raise(dict_frame^, str_types, 1, "expected RECORD_BATCH")
+    # Tag 2 is DictionaryBatch, 3 RecordBatch. The codec peek in front of the
+    # decoder parses the header first, so its message is the one raised.
+    _expect_raise(
+        dict_frame^,
+        str_types,
+        1,
+        "peek_record_batch_codec_from_frame: expected RECORD_BATCH header (tag 3), got 2",
+    )
 
     # Index 2 against a two-entry dictionary.
     var idx: List[Int] = [0, 2]
@@ -805,9 +835,16 @@ def test_read_path_refusals() raises:
         _ = decode_record_batch_message_with_dicts(rb_frame^, str_types, is_dict, values^)
     except e:
         raised = True
-        assert_true("out of range" in String(e), String(e))
+        assert_equal(String(e), "expand_dict_indices_to_string: index 2 at row 1 out of range [0, 2)")
     assert_true(raised, "an index past the dictionary must raise")
 
+    # A nested type on the mmap path. decode_record_batch_message_mmap ends its
+    # per-column loop with its own "nested types are not" refusal, but no
+    # schema reaches it: the count pass before the loop calls _node_count_for
+    # on every column, which raises for any type outside NULL, BOOL, the four
+    # var-len types, DICTIONARY and the fixed-width types, and the loop has an
+    # arm for each of those. So the refusal pinned here is _node_count_for's
+    # (type id 20 is LIST), and the frame needs no LIST layout to reach it.
     var list_types = List[ArrowType]()
     list_types.append(ArrowType.LIST)
     list_types.append(ArrowType.INT64)
@@ -822,8 +859,12 @@ def test_read_path_refusals() raises:
         _ = decode_record_batch_message_mmap(frame^, list_types, region, 0)
     except e:
         raised = True
-        assert_true("not supported" in String(e), String(e))
-    assert_true(raised, "mmap must refuse a nested type")
+        assert_equal(
+            String(e),
+            "_node_count_for: ArrowType 20 not supported in the flat decoder"
+            " (nested types go through decode_record_batch_message_nested)",
+        )
+    assert_true(raised, "mmap must refuse a nested type (via _node_count_for)")
 
 
 def test_zstd_dictionary_batch() raises:
