@@ -320,16 +320,16 @@ def _mmap_refuses(
     buf: SharedAlignedBuffer[HeapRegion],
     blk: Block,
     types: List[ArrowType],
-    needle: String,
+    expected: String,
 ) raises:
-    """The mmap decoder raises, naming `needle`, rather than borrowing bytes it
+    """The mmap decoder raises exactly `expected` rather than borrowing bytes it
     cannot serve zero-copy."""
     var raised = False
     try:
         _ = _decode_mmap(path, buf, blk, types)
     except e:
         raised = True
-        assert_true(needle in String(e), String(e))
+        assert_equal(String(e), expected)
     assert_true(raised, "mmap decode must refuse this batch")
 
 
@@ -512,7 +512,16 @@ def _codec_file(name: String, codec: Int8, mul: Int, var cat: List[String]) rais
     assert_equal(_rb_codec(_block_frame(buf, blk)), codec)
     var types = _types_i64_i64_str()
     _check_id_n_s(_decode_copy(buf, blk, types), 300, 0, mul, cat)
-    _mmap_refuses(path, buf, blk, types, "BodyCompression.codec=" + String(Int(codec)))
+    _mmap_refuses(
+        path,
+        buf,
+        blk,
+        types,
+        "decode_record_batch_message_mmap: frame carries BodyCompression.codec="
+        + String(Int(codec))
+        + "; mmap path requires Uncompressed bodies. Caller should fall back"
+        + " to copy-on-read path for compressed frames.",
+    )
 
 
 def test_codec_lz4() raises:
@@ -614,7 +623,16 @@ def test_dict_string_nulls() raises:
     var dict_types = List[ArrowType]()
     dict_types.append(ArrowType.INT64)
     dict_types.append(ArrowType.DICTIONARY)
-    _mmap_refuses(path, buf, blk, dict_types, "DICTIONARY")
+    _mmap_refuses(
+        path,
+        buf,
+        blk,
+        dict_types,
+        "decode_record_batch_message_mmap: DICTIONARY columns require"
+        " dict-aware decode. Caller should use the copy-on-read dict-aware"
+        " dispatch instead of the mmap path for files containing"
+        " dict-encoded columns.",
+    )
 
 
 def main() raises:

@@ -56,6 +56,44 @@ def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
 comptime _SHARED_ALIGN: Int = 64
 
 
+def _check_mmap_borrow_range(
+    region_len: Int64,
+    offset: Int64,
+    length: Int64,
+    context: StringLiteral,
+) raises:
+    """Raise unless `[offset, offset + length)` lies inside a mapping of
+    `region_len` bytes.
+
+    The mmap borrow constructors derive a pointer `base + offset` and read
+    nothing while building the buffer, so an unchecked range returns a buffer
+    that reads outside the mapping on first use. This is a real check in every
+    build mode (a `debug_assert` is elided unless assertions are compiled in),
+    and it never forms `offset + length`, which can wrap Int64 for
+    caller-supplied values. An empty range at `region_len` is in range.
+    """
+    if offset < 0 or length < 0:
+        raise Error(
+            String(context)
+            + ": negative offset/length (offset="
+            + String(offset)
+            + ", length="
+            + String(length)
+            + ")"
+        )
+    if offset > region_len or length > region_len - offset:
+        raise Error(
+            String(context)
+            + ": range (offset="
+            + String(offset)
+            + ", length="
+            + String(length)
+            + ") exceeds the mapped region (length="
+            + String(region_len)
+            + ")"
+        )
+
+
 def bridge_oab_to_sab[
     K: MemoryRegion
 ](var buf: OwnedAlignedBuffer) -> SharedAlignedBuffer[K]:
@@ -430,7 +468,7 @@ struct SharedAlignedBuffer[K: MemoryRegion = HeapRegion](
         var region: ArcPointer[MmapRegion],
         offset: Int64,
         length: Int64,
-    ) -> SharedAlignedBuffer[MmapRegion]:
+    ) raises -> SharedAlignedBuffer[MmapRegion]:
         """LocalFs zero-copy borrow path. K is pinned to MmapRegion at
         the static-constructor level — the caller's broader K is not
         in scope; this is the explicit cross-K constructor for the
@@ -445,17 +483,16 @@ struct SharedAlignedBuffer[K: MemoryRegion = HeapRegion](
 
         Returns:
             A SharedAlignedBuffer[MmapRegion] over the mmap'd bytes.
+
+        Raises:
+            When `[offset, offset + length)` is not inside the mapping
+            (see `_check_mmap_borrow_range`).
         """
-        debug_assert(
-            offset >= 0 and length >= 0,
-            "SharedAlignedBuffer.borrow_from_mmap: negative offset/length",
-        )
-        debug_assert(
-            offset + length <= region[].length(),
-            (
-                "SharedAlignedBuffer.borrow_from_mmap: offset+length >"
-                " region.length()"
-            ),
+        _check_mmap_borrow_range(
+            region[].length(),
+            offset,
+            length,
+            "SharedAlignedBuffer.borrow_from_mmap",
         )
         return SharedAlignedBuffer[MmapRegion](
             region=region^, offset=offset, length=length
@@ -466,7 +503,7 @@ struct SharedAlignedBuffer[K: MemoryRegion = HeapRegion](
         var region: ArcPointer[MmapRegion],
         offset: Int64,
         length: Int64,
-    ) -> SharedAlignedBuffer[HeapRegion]:
+    ) raises -> SharedAlignedBuffer[HeapRegion]:
         """Zero-copy mmap borrow that returns K=HeapRegion via a type-erased
         keepalive cookie.
 
@@ -519,17 +556,16 @@ struct SharedAlignedBuffer[K: MemoryRegion = HeapRegion](
         Returns:
             A SharedAlignedBuffer[HeapRegion] aliasing the mmap bytes,
             with the mmap mapping pinned via the keepalive cookie.
+
+        Raises:
+            When `[offset, offset + length)` is not inside the mapping
+            (see `_check_mmap_borrow_range`).
         """
-        debug_assert(
-            offset >= 0 and length >= 0,
-            "SharedAlignedBuffer.borrow_mmap_erased: negative offset/length",
-        )
-        debug_assert(
-            offset + length <= region[].length(),
-            (
-                "SharedAlignedBuffer.borrow_mmap_erased: offset+length >"
-                " region.length()"
-            ),
+        _check_mmap_borrow_range(
+            region[].length(),
+            offset,
+            length,
+            "SharedAlignedBuffer.borrow_mmap_erased",
         )
         # SAFETY: derive the cached pointer from the mmap region's base via
         # the trait-surface `as_view()`. The widening to MutExternalOrigin

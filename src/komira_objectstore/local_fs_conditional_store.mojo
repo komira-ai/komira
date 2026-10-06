@@ -28,18 +28,18 @@
 #
 #   * `If-None-Match: *` (create-if-absent): succeeds iff the key is ABSENT;
 #     otherwise raises a precondition error (the 412 the loser of a slot race
-#     sees). We map this to `open(path, O_WRONLY|O_CREAT|O_EXCL)` — the kernel
-#     guarantees EXACTLY ONE creator wins atomically; a second O_EXCL create on
-#     an existing path fails with EEXIST. This is the LINEARIZATION POINT for a
-#     manifest chunk append: the create-winner of slot K owns slot K. After the
-#     exclusive create succeeds we write the bytes into that fd; if a later
-#     read sees a zero-length-but-present chunk it is a torn write (crash
-#     between create and write) — handled by the read path raising not_found
-#     so recovery re-derives the tail (the chunk slot is never re-used because
-#     the create already succeeded, so a torn chunk is a permanent gap the
-#     protocol's gapless-by-construction invariant forbids; in practice the
-#     write follows the create with no intervening await, so the window is the
-#     single synchronous write(2)).
+#     sees). A present key (stat probe) raises the 412 at once. Otherwise the
+#     bytes are written, fsynced and closed in a sibling temp file
+#     `<final>.tmp.<nonce>` (the `_write_atomic` naming, so listings skip it),
+#     and the temp is `link(2)`ed to the final path. link never replaces an
+#     existing name: EXACTLY ONE creator's link succeeds and every other one
+#     fails with EEXIST, the 412. The link is the LINEARIZATION POINT for a
+#     manifest chunk append (the create-winner of slot K owns slot K), and it
+#     publishes the whole fsynced inode at once, so no reader ever sees a
+#     zero-length or partial object at the key. The temp name is unlinked in
+#     every outcome. Any other link errno, and any temp create / write / fsync
+#     / close failure, raises a non-412 I/O error and publishes nothing, so a
+#     retried create of the same key can still win.
 #
 #   * `If-Match: <etag>`: succeeds iff the object's current etag matches; else
 #     a precondition error. Used for the `_HEAD` advance. We read the current
@@ -52,7 +52,8 @@
 #     Content-addressed table objects use this; an identical-bytes rewrite is a
 #     harmless idempotent no-op (same content hash → same etag).
 #
-#   * `delete`: idempotent `remove(3)` (an absent key succeeds, S3 semantics).
+#   * `delete`: idempotent `remove(3)` (an absent key, ENOENT, succeeds: S3
+#     semantics); any other remove failure raises naming the errno.
 #
 # THE ETAG. S3's single-part ETag IS the object's content MD5. We mirror that:
 # the etag is a quoted FNV-1a-64 hex of the bytes. This is CRASH-SAFE (no
@@ -66,7 +67,7 @@
 # SINGLE-THREADED loopback service (one Electron desktop app). The process-wide
 # CAS-gate in `cas_manifest.mojo` serializes all composite ops regardless of
 # backend, so within one process there is no concurrent-thread race on the
-# `_HEAD` advance. The O_EXCL create + atomic-rename design ALSO makes the store
+# `_HEAD` advance. The link(2) create + atomic-rename design ALSO makes the store
 # safe against a second PROCESS racing the same root (e.g. two capture nodes on
 # one KG dir) for the CREATE path; the If-Match advance has a read-compare-write
 # window that, like S3's best-effort `_HEAD` cache, is not strictly linearizable
@@ -91,9 +92,10 @@
 # -----------------------------------------------------------------------------
 # Encapsulation discipline
 # -----------------------------------------------------------------------------
-#   * ZERO UnsafePointer in any PUBLIC signature. The byte-write reuses
-# `RawWriteFd` (komira_core.io.posix_io) whose public surface is
-#     String/Span/Int. The readdir FFI is confined to module-private helpers
+#   * ZERO UnsafePointer in any PUBLIC signature. The write-temp-then-rename
+#     byte-write reuses `RawWriteFd` (komira_core.io.posix_io) whose public
+#     surface is String/Span/Int; the create-if-absent temp write and its
+#     link(2) go through `_objectstore_shim.c`, which returns errno. The readdir FFI is confined to module-private helpers
 #     with `# SAFETY:` blocks (mirroring `komira_fs.local_fs` — its helpers are
 #     private to komira_async, so the FFI shape is re-derived here against the
 #     SAME C shim symbols komira_fs_posix defines). The object-file READ and the
@@ -113,9 +115,15 @@ from std.time import perf_counter_ns
 from komira_core.io.posix_io import RawWriteFd
 
 from komira_objectstore.local_fs_file_read import (
+    _STAGE_LINK,
+    _STAGE_OPEN,
+    _eexist,
+    _errno_name,
     _object_file_present,
     _read_whole_file,
+    _remove_object_file,
     _root_is_listable,
+    _stage_name,
 )
 from komira_objectstore.path import Path
 from komira_objectstore.store import (
@@ -404,7 +412,9 @@ def _write_atomic(dir: String, final_path: String, bytes: List[UInt8]) raises:
 
 
 def _remove_best_effort(path: String):
-    """libc `remove(3)`, swallowing the rc (idempotent delete)."""
+    """libc `remove(3)`, swallowing the rc. Only for cleaning up a temp file on
+    an error path that is already raising; `delete` uses `_remove_object_file`,
+    which raises on any errno but ENOENT."""
     var p = path
     # SAFETY: `p` pins the path bytes across the synchronous syscall; no pointer
     # escapes. `remove` is fixed-arity.
@@ -523,7 +533,8 @@ struct LocalFsConditionalStore(
     replacement for `S3ConditionalStore[C]` in the personal-KG storage seam.
 
     The atomicity contract (see module header): create-if-absent via
-    `O_CREAT|O_EXCL` (the 412-or-win linearization point), If-Match CAS via
+    write-temp + `link(2)` (EEXIST is the 412; the link is the linearization
+    point and publishes only complete bytes), If-Match CAS via
     read-compare + write-temp-then-atomic-rename, content-hash etags (S3
     single-part ETag analog — crash-safe, no counter state).
 
@@ -632,8 +643,10 @@ struct LocalFsConditionalStore(
     ) raises -> ObjectMeta:
         """PUT `bytes` at `path` conditioned on `precond`.
 
-          * create-if-absent (`If-None-Match: *` / exact): atomic
-            `O_CREAT|O_EXCL`; EEXIST → precondition (412).
+          * create-if-absent (`If-None-Match: *` / exact): present key → 412;
+            else write + fsync a sibling temp and `link(2)` it to the key;
+            link EEXIST → precondition (412); any other failure → a non-412
+            I/O error with nothing published.
           * `If-Match: <etag>`: read current etag; mismatch / absent → 412;
             match → write-temp-then-atomic-rename.
           * NONE: unconditional write-temp-then-atomic-rename.
@@ -643,48 +656,51 @@ struct LocalFsConditionalStore(
         var new_etag = _content_etag(bytes)
 
         if precond.is_create():
-            # Atomic create-if-absent. O_EXCL → EEXIST iff the key exists. The
-            # create IS the linearization point (the slot's create-winner).
-            # Presence probe: ENOENT → absent; any other stat failure RAISES
-            # (a key that cannot be checked is not "absent").
+            # Atomic create-if-absent. The link(2) inside
+            # `_create_exclusive_and_write` is the linearization point (the
+            # slot's create-winner). Presence probe first: an existing key is
+            # the 412 without writing a temp; ENOENT → absent; any other stat
+            # failure RAISES (a key that cannot be checked is not "absent").
             var existed = _object_file_present(fpath)
             if existed:
                 raise Error(
                     "LocalFsConditionalStore.conditional_put: precondition"
                     " (412) — key already exists (If-None-Match): " + key
                 )
-            # Open O_EXCL: if a racing creator beat us between the probe and
-            # here, the EXCL open fails. We MUST distinguish a TRUE create-loss
-            # (EEXIST — someone else created the key, the expected 412 a slot-
-            # race / claim loser sees) from ANY OTHER failure (ENOSPC / EIO /
-            # EMFILE / EACCES, or a write/fsync/close failure AFTER a successful
-            # create). FAIL-CLOSED: only a TRUE create-loss raises the
+            # If a racing creator made the key between the probe and our link,
+            # the link fails with EEXIST. We MUST distinguish that TRUE
+            # create-loss (the expected 412 a slot-race / claim loser sees)
+            # from ANY OTHER failure (ENOSPC / EIO / EMFILE / EACCES / EFBIG on
+            # the temp, or a non-EEXIST link errno). FAIL-CLOSED: only a TRUE
+            # create-loss raises the
             # precondition(412); every other failure raises a NON-precondition
             # (transport/IO-shaped) Error. Conflating the two was a fail-open
             # data-loss bug: a real IO failure surfaced as a fake-412 would make
             # a `claim_partition` loser silently skip a partition NO worker
             # actually claimed.
-            var res = _create_exclusive_and_write(fpath, bytes)
+            var detail = String("")
+            var res = _create_exclusive_and_write(fpath, bytes, detail)
             if res == _CREATE_OK:
                 return ObjectMeta(
                     key, Int64(len(bytes)), new_etag^, Int64(-1), String("")
                 )
             if res == _CREATE_LOST_EEXIST:
-                # TRUE create-loss: the EXCL open failed AND the file is present
-                # ⇒ a racing creator won between our probe and our open. This is
-                # the atomic 412 (byte-identical to the prior behavior).
+                # TRUE create-loss: link(2) failed with EEXIST ⇒ a racing
+                # creator won between our probe and our link. The atomic 412.
                 raise Error(
                     "LocalFsConditionalStore.conditional_put: precondition"
                     " (412) — exclusive create lost the race for: " + key
                 )
-            # _CREATE_IO_ERROR — a real create/write/fsync/close failure that is
-            # NOT a create-loss. Raise a transport/IO-shaped Error whose message
-            # contains NEITHER "412" NOR "precondition" so it is NOT misread as a
-            # slot-race loss anywhere downstream (fail closed).
+            # _CREATE_IO_ERROR — a temp create/write/fsync/close or non-EEXIST
+            # link failure; nothing was published at the key. Raise a
+            # transport/IO-shaped Error whose message contains NEITHER "412"
+            # NOR "precondition" so it is NOT misread as a slot-race loss
+            # anywhere downstream (fail closed). `detail` names the failing
+            # call and errno only, never a path (a path may hold "412").
             raise Error(
                 "LocalFsConditionalStore.conditional_put: I/O error on"
-                " exclusive create (not a create-loss; disk full / permission /"
-                " transient) for: " + key
+                " exclusive create (not a create-loss; nothing written at the"
+                " key) for: " + key + " (" + detail + ")"
             )
 
         if precond.is_if_match():
@@ -748,8 +764,9 @@ struct LocalFsConditionalStore(
         return _read_whole_file(self._path_for_key(path.raw()))
 
     def delete(self, path: Path) raises -> None:
-        """DELETE — idempotent (an absent key succeeds, S3 semantics)."""
-        _remove_best_effort(self._path_for_key(path.raw()))
+        """DELETE — idempotent (an absent key, ENOENT, succeeds: S3
+        semantics). Any other remove(3) failure raises naming the errno."""
+        _remove_object_file(self._path_for_key(path.raw()))
 
 
 # =============================================================================
@@ -758,73 +775,96 @@ struct LocalFsConditionalStore(
 
 
 # Tri-state classification for `_create_exclusive_and_write` — distinguishes a
-# TRUE create-loss (EEXIST) from a real I/O failure so the create-CAS path can
-# FAIL CLOSED (a real failure must NOT masquerade as a 412). See the
+# TRUE create-loss (link EEXIST) from a real I/O failure so the create-CAS path
+# can FAIL CLOSED (a real failure must NOT masquerade as a 412). See the
 # `conditional_put` create arm.
-comptime _CREATE_OK: Int = 0  # exclusive create + write + fsync + close OK
-comptime _CREATE_LOST_EEXIST: Int = 1  # EXCL open failed AND the file is present
-comptime _CREATE_IO_ERROR: Int = 2  # any other create/write/fsync/close failure
+comptime _CREATE_OK: Int = 0  # temp written + fsynced, linked to the final path
+comptime _CREATE_LOST_EEXIST: Int = 1  # link(2) failed with EEXIST
+comptime _CREATE_IO_ERROR: Int = 2  # any other failure; nothing published
 
 
-def _create_exclusive_and_write(path: String, bytes: List[UInt8]) -> Int:
-    """Atomically create `path` (O_CREAT|O_EXCL) and write `bytes` into it.
+def _create_exclusive_and_write(
+    path: String, bytes: List[UInt8], mut detail: String
+) -> Int:
+    """Publish `bytes` at `path` iff nothing exists there, all-or-nothing.
+
+    Writes, fsyncs and closes a sibling temp `<path>.tmp.<nonce>` (created
+    O_EXCL, so another writer's temp is never truncated), then `link(2)`s it
+    to `path`. link never replaces an existing name, so it is the atomic
+    create-if-absent, and it publishes the complete fsynced inode in one step.
+    The temp name is then unlinked whatever the outcome (unless the temp's own
+    exclusive create failed, in which case the name is not ours).
 
     Returns a TRI-STATE classification (NOT a bare Bool — the caller must
     distinguish a true create-loss from a real I/O error to fail closed):
 
-      * `_CREATE_OK`          — the exclusive create + write + fsync + close all
-                                succeeded; `path` now holds `bytes`.
-      * `_CREATE_LOST_EEXIST` — the exclusive create FAILED and `path` EXISTS
-                                ⇒ a racing creator won (EEXIST). This is the
-                                atomic 412 (the slot-race / claim loser outcome).
-      * `_CREATE_IO_ERROR`    — the exclusive create FAILED and `path` is ABSENT
-                                (ENOSPC / EIO / EMFILE / EACCES at create), OR a
-                                write/fsync/close FAILED after a successful
-                                create. NOT a create-loss — a real I/O failure
-                                the caller MUST surface as a non-precondition.
+      * `_CREATE_OK`          — the link succeeded; `path` holds `bytes`.
+      * `_CREATE_LOST_EEXIST` — link(2) failed with EEXIST: something already
+                                exists at `path` (a racing creator won). The
+                                atomic 412 (the slot-race / claim loser).
+      * `_CREATE_IO_ERROR`    — the temp create / write / fsync / close failed,
+                                or link(2) failed with any errno but EEXIST.
+                                `path` was never created by this call. `detail`
+                                is set to the failing call and its errno.
 
-    WHY THE RE-PROBE (and not errno). `open_create_exclusive` surfaces a generic
-    Error on ANY openat failure (errno is not threaded across the FFI shim). With
-    O_EXCL the ONLY reason the file can be PRESENT after a FAILED create is that a
-    racing creator already made it — i.e. EEXIST. So re-probing existence after a
-    create-open failure POSITIVELY identifies EEXIST without an FFI change
-    (errno-surfacing would require a new C shim across the posix_io boundary; the
-    re-probe is self-contained here and exactly equivalent for the O_EXCL case).
-    A write/fsync/close failure AFTER a successful create is unambiguously an I/O
-    error: WE created the file (so it exists), but the bytes did not land — never
-    a create-loss, so it is classified `_CREATE_IO_ERROR` directly.
+    A failure to unlink the temp AFTER a successful link does not change the
+    outcome: the object is already published (a retry would now 412), and the
+    stray `.tmp.` name is excluded from listings.
     """
-    # Step 1 — the exclusive create-open is the linearization point. Separate it
-    # from the write so we can tell a failed CREATE (re-probe to classify
-    # EEXIST vs I/O) from a failed WRITE-after-create (always an I/O error).
-    var w: RawWriteFd
-    try:
-        w = RawWriteFd.open_create_exclusive(path)  # EEXIST → raises
-    except:
-        # The exclusive create failed. Re-probe: present ⇒ a racing creator won
-        # (EEXIST, the true 412); absent ⇒ a real create failure (ENOSPC / EIO /
-        # EMFILE / EACCES / …) that must surface as an I/O error, NOT a fake-412.
-        # A probe that itself fails proves nothing about EEXIST: fail closed.
-        try:
-            if _object_file_present(path):
-                return _CREATE_LOST_EEXIST
-        except:
-            pass
+    var tmp = path + ".tmp." + _unique_suffix()
+    var stage = Int32(0)
+    # FFI-BOUNDARY: `komira_objstore_write_new_file` / `komira_objstore_link` /
+    # `komira_objstore_remove` / `komira_objstore_eexist` live in
+    # `_objectstore_shim.c`. Each returns 0 or the errno read immediately after
+    # the failing call; the shim allocates nothing, opens and closes its own fd
+    # and retains no pointer. Errno values are never spelled in Mojo.
+    # SAFETY: `tmp` pins the NUL-terminated temp path and `bytes` (borrowed,
+    # unchanged) pins its buffer across the synchronous call; the shim reads at
+    # most `len(bytes)` bytes. `stage` is a local out-param.
+    var wrc = external_call["komira_objstore_write_new_file", Int32](
+        tmp.as_c_string_slice().unsafe_ptr(),
+        bytes.unsafe_ptr(),
+        Int64(len(bytes)),
+        UnsafePointer(to=stage),
+    )
+    if wrc != 0 and stage == _STAGE_OPEN:
+        # The temp was never created by us (its exclusive create failed), so
+        # the name is not ours to unlink.
+        detail = _create_detail(String("temp open"), wrc)
         return _CREATE_IO_ERROR
+    var outcome = _CREATE_OK
+    if wrc != 0:
+        detail = _create_detail(String("temp ") + _stage_name(stage), wrc)
+        outcome = _CREATE_IO_ERROR
+    else:
+        var dst = path
+        # SAFETY: `tmp` / `dst` pin both NUL-terminated paths across the
+        # synchronous call; the kernel copies them and the shim keeps nothing.
+        var lrc = external_call["komira_objstore_link", Int32](
+            tmp.as_c_string_slice().unsafe_ptr(),
+            dst.as_c_string_slice().unsafe_ptr(),
+        )
+        if lrc == _eexist():
+            outcome = _CREATE_LOST_EEXIST
+        elif lrc != 0:
+            detail = _create_detail(_stage_name(_STAGE_LINK), lrc)
+            outcome = _CREATE_IO_ERROR
+    # SAFETY: `tmp` pins the path across the synchronous call; no pointer
+    # escapes. The temp is ours (its exclusive create succeeded above).
+    var urc = external_call["komira_objstore_remove", Int32](
+        tmp.as_c_string_slice().unsafe_ptr()
+    )
+    if urc != 0 and outcome == _CREATE_IO_ERROR:
+        detail += "; temp unlink failed with errno " + String(Int(urc)) + " ("
+        detail += _errno_name(urc) + ")"
+    return outcome
 
-    # Step 2 — the create succeeded; WE own the slot. A write/fsync/close failure
-    # here is a real I/O error (NOT a create-loss): the file exists because we
-    # made it, but the bytes did not durably land. (A torn-create chunk — present
-    # but zero/partial — is re-derived by the protocol's LIST recovery; surfacing
-    # it as an I/O error is correct and fail-closed.)
-    try:
-        if len(bytes) > 0:
-            w.write_bytes(Span(bytes))
-        w.fsync()
-        w.close()
-        return _CREATE_OK
-    except:
-        return _CREATE_IO_ERROR
+
+def _create_detail(call: String, e: Int32) -> String:
+    """`<call> failed with errno N (NAME)`: no path, so no "412" can leak in."""
+    return call + " failed with errno " + String(Int(e)) + " (" + _errno_name(
+        e
+    ) + ")"
 
 
 @always_inline

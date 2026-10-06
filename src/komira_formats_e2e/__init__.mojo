@@ -22,6 +22,11 @@ projection in a different column order, comparing values, NULLs and the
 partition value with the dataset above, and pin the writers' bytes against
 literals spelled from the format specs (the oracle a writer/reader
 self-round-trip lacks). Nothing here is shipped (`conda = False`).
+
+The numeric edge fixture is separate: `edge_numerics.mojo` (integer limits
+and IEEE-754 edge values, each float given by its bit pattern, with the
+expected text spelled by hand) and `edge_checks.mojo` (collect-every-
+mismatch checks and byte builders for the edge tests).
 """
 
 from .dataset import (
@@ -43,4 +48,40 @@ from .hive_tree import (
     file_path,
     write_file_bytes,
     write_hive_tree,
+)
+from .edge_numerics import (
+    NUM_INT_EDGE_ROWS,
+    NUM_FLOAT_EDGE_ROWS,
+    F_NEG_ZERO,
+    F_POS_INF,
+    F_NEG_INF,
+    F_NAN,
+    F_NAN_PAYLOAD,
+    F_NEG_NAN,
+    int64_edges,
+    int32_edges,
+    int64_edge_text,
+    int32_edge_text,
+    float_edge_bits,
+    float_edge_text,
+    is_finite_row,
+    f64_of,
+    bits_of,
+    int_edge_batch,
+    float_batch_of_bits,
+    float_edge_batch,
+)
+from .edge_checks import (
+    Mismatches,
+    hex_u64,
+    hex_of,
+    le_bytes,
+    be_bytes,
+    hex_bytes,
+    same_bytes,
+    check_bytes,
+    is_nan_bits,
+    column_index,
+    check_int_column,
+    check_float_column_bits,
 )

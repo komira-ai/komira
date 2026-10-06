@@ -1,0 +1,30 @@
+load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
+load("//functional/readme_api_coverage:fixture.bzl", "README_API_LEDGER", "README_API_TREE")
+
+# Test 40 (README API coverage), the half that must go red: one planted defect
+# per target, in the tree of functional/readme_api_coverage (whose `ok`
+# builds). run_tests.sh requires each to fail naming its finding.
+[
+    readme_api_coverage(
+        name = name,
+        enforce = enforce,
+        exceptions = ledger or README_API_LEDGER,
+        files = README_API_TREE,
+        root = root,
+    )
+    for name, ledger, enforce, root in [
+        # A row with no reason, and a row whose symbol is not an identifier.
+        ("malformed", "ledger_malformed.tsv", False, "src"),
+        # The same row twice.
+        ("duplicate", "ledger_duplicate.tsv", False, "src"),
+        # Rows for a struct that is not exported and for a private method.
+        ("stale_gone", "ledger_stale_gone.tsv", False, "src"),
+        # A row for greet, which the README uses (the ledger only shrinks),
+        # and for bye, used only in hidden lines.
+        ("stale_used", "ledger_stale_used.tsv", False, "src"),
+        # Enforcing: each undocumented symbol without a row is a finding.
+        ("enforce", None, True, "src"),
+        # No package under the root: the lint checks nothing, so it fails.
+        ("empty", None, False, "nosuch"),
+    ]
+]

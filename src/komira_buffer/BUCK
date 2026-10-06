@@ -18,6 +18,7 @@ mojo_library(
         "tests/test_mmap_region_open_readonly.mojo",
         "tests/test_mmap_region_willneed.mojo",
         "tests/test_owned_aligned_buffer_reserve_regrow.mojo",
+        "tests/test_sab_borrow_mmap_range_check.mojo",
         "tests/test_sab_borrowed_view_mmap_keepalive.mojo",
         "tests/test_sab_share_range_window.mojo",
     ],

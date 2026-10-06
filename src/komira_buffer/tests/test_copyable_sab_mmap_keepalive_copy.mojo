@@ -38,7 +38,7 @@ from komira_buffer.heap_region import HeapRegion
 from komira_buffer.mmap_region import MmapRegion
 
 
-def _make_mmap_borrowed_sab() -> SharedAlignedBuffer[HeapRegion]:
+def _make_mmap_borrowed_sab() raises -> SharedAlignedBuffer[HeapRegion]:
     """Build a SAB[HeapRegion] whose bytes are an mmap borrow via the
     type-erased keepalive cookie (`borrow_mmap_erased`).
 
