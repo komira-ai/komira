@@ -1,26 +1,24 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Read a project's Cloud Monitoring metrics through komira_metrics_reader:
-# `projects.timeSeries.list`'s path, query, filter and response parse
-# (pure), and `CloudMonitoringMetricsReader`, a `MetricsReader` for one
-# project that sends each GET through komira_http_client over the connector
-# it is given, with a bearer token from a komira_gcp_core token source, and
-# raises a non-2xx answer through komira_gcp_core's `gcp_status_error`.
-#
-# Hand-written, not generated: ListTimeSeries is a GET whose `interval` and
-# `aggregation` query fields hold a Timestamp and a Duration, which the REST
-# generator refuses by name.
+# `CloudMonitoringMetricsReader`, a `MetricsReader` for one project, over
+# the generated komira_gcp_monitoring_client's `MetricServiceClient.
+# list_time_series`, with a bearer token from a komira_gcp_core token
+# source; a non-2xx answer raises through komira_gcp_core's
+# `gcp_status_error`. time_series_list.mojo is the adapter (pure): the
+# request it builds and refuses, the filter, and the page it reads from the
+# generated response.
 #
 # Welded tests, none of which talks to the service: test_monitoring_protos
 # (the host, path, page-size ceiling, minimum alignment, point order,
 # interval and aligner and reducer names against the pinned googleapis
 # protos, //tools/vendor/googleapis:monitoring_v3), test_monitoring_requests
-# (the path, the query and the filter, byte for byte, and their refusals),
-# test_monitoring_responses (series, the quoted int64Value, point order,
-# malformed bodies never echoed), test_monitoring_reader (the reader against
-# the seam over komira_http_core's ScriptedConnector: the request as it
-# reached the wire, paging and merging on the whole series identity, the
-# limits, the error shape) and
+# (the generated request the adapter builds, field by field, its refusals,
+# and the filter), test_monitoring_responses (series, the quoted int64Value,
+# NaN, point order, malformed bodies never echoed), test_monitoring_reader
+# (the reader against the seam over komira_http_core's ScriptedConnector:
+# the request line as it reached the wire, byte for byte, paging and merging
+# on the whole series identity, the limits, the error shape) and
 # test_no_env_reads (the sources read no environment).
 mojo_library(
     name = "komira_gcp_monitoring",
@@ -47,12 +45,13 @@ mojo_library(
     ],
     deps = [
         "//src/komira_async:komira_async",
-        "//src/komira_datetime:komira_datetime",
         "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_gcp_monitoring_client:komira_gcp_monitoring_client",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
-        "//src/komira_json:komira_json",
         "//src/komira_metrics_reader:komira_metrics_reader",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
     ],
     visibility = ["PUBLIC"],
 )
