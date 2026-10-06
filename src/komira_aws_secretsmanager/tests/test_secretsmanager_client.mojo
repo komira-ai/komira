@@ -1,5 +1,5 @@
 # The generated AWS Secrets Manager client
-# (`SecretsManagerSecretsManagerClient`) end to end over komira_http_client
+# (`SecretsManagerClient`) end to end over komira_http_client
 # and komira_http_core's ScriptedConnector (no socket): a GetSecretValue
 # answered, and a DescribeSecret of a secret that does not exist, raised
 # under its code with the service's message. The error is a 400 naming no
@@ -23,7 +23,7 @@ from komira_aws_secretsmanager.komira_aws_secretsmanager import (
     SecretsManagerEndpointConfig,
     SecretsManagerGetSecretValueRequest,
     SecretsManagerPutSecretValueRequest,
-    SecretsManagerSecretsManagerClient,
+    SecretsManagerClient,
     parse_create_secret_response,
 )
 from komira_aws_core import (
@@ -93,10 +93,10 @@ def _mk_err() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> SecretsManagerSecretsManagerClient[C, StaticCredsSource]:
+) raises -> SecretsManagerClient[C, StaticCredsSource]:
     var config = SecretsManagerEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return SecretsManagerSecretsManagerClient[C, StaticCredsSource](
+    return SecretsManagerClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(
@@ -121,7 +121,7 @@ def test_get_secret_value() raises:
 
 def test_an_error_is_raised_under_its_code() raises:
     var client = _client(_mk_err)
-    with assert_raises(contains="SecretsManagerSecretsManager.DescribeSecret failed: HTTP 400 ResourceNotFoundException Secrets Manager can't find the specified secret."):
+    with assert_raises(contains="SecretsManager.DescribeSecret failed: HTTP 400 ResourceNotFoundException Secrets Manager can't find the specified secret."):
         _ = client.describe_secret(SecretsManagerDescribeSecretRequest(String("gone")))
 
 

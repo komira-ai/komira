@@ -1,0 +1,7 @@
+# Test 39 (test_weld): a package whose test file komira_real welds by label
+# (../../BUCK). Exported by reference, so the file keeps its own path.
+export_file(
+    name = "tests/test_shared.mojo",
+    mode = "reference",
+    visibility = ["tests//negative/test_weld/real:"],
+)

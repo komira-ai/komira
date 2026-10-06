@@ -23,7 +23,7 @@
 # ── THE STATUS OF EVERY OTHER ANSWER ────────────────────────────────────────
 #   | condition                                        | answer |
 #   |--------------------------------------------------|--------|
-#   | a missing `metric`, a malformed or inverted bound, an unknown `agg`, a malformed number, a parameter not UTF-8 once decoded, an unknown or repeated parameter | 400 |
+#   | a missing `metric`, a malformed or inverted bound, an unknown `agg`, a malformed number, a parameter not UTF-8 once decoded, an unknown or repeated parameter, a segment with an empty name (`=v`), a malformed `%` escape in a parameter name | 400 |
 #   | the reader refuses the query (`MetricsReader.refusal`) | 400, its sentence |
 #   | the reader raises while reading                  | 500, naming it |
 #   | an answer                                        | 200    |
@@ -37,6 +37,20 @@
 # 400 naming it: a misspelled `since_ms` ignored would be the default window
 # by another road. A key given twice is a 400 naming it, rather than keeping
 # one of its values.
+#
+# ⚠ SO IS A NAME THAT IS NOT ONE. A segment `=v` names no parameter; skipped,
+# it drops a value the caller sent, so it is a 400 quoting the segment. A
+# parameter name holding a `%` not followed by two hex digits is a 400
+# quoting the name as written: read as a literal `%`, `label.a%2` would match
+# a label the caller never named. (A VALUE still keeps a stray `%` literally.)
+#
+# WHAT A LABEL NAME IS. The writer, komira_metrics, holds a label key as an
+# id the caller interned from its own string, in an OTel attribute set: a
+# map from a non-empty key, compared exactly, with no character rule. So the
+# route asks the same of `<k>` in `label.<k>` / `not_label.<k>`, non-empty
+# and UTF-8, and adds no character set of its own: a store's narrower rule
+# (Cloud Monitoring's identifiers) is its reader's `refusal`, a 400 with the
+# reader's sentence.
 #
 # Encapsulation: `HttpRequest` borrowed in, `HttpResponse` moved out. No
 # pointer. Never raises.
@@ -208,6 +222,32 @@ comptime _MAX_WINDOW_MS: Int64 = 9_223_372_036_854
 
 
 def _query_from(params: List[_Param], now_ns: Int64) -> _Built:
+    # A name is checked as the caller spelled it before anything is decoded
+    # text: an empty one names nothing, and a malformed escape in one was
+    # decoded as a literal `%` into a name the caller did not write.
+    for i in range(len(params)):
+        if params[i].key.byte_length() == 0:
+            return _refused(
+                String("the query segment '")
+                + params[i].segment
+                + String(
+                    "' has an empty parameter name; every parameter is"
+                    " name=value"
+                )
+            )
+        if params[i].bad_key_escape:
+            ref seg = params[i].segment
+            var eq = seg.find("=")
+            var raw = String(seg[byte=:eq]) if eq >= 0 else seg.copy()
+            return _refused(
+                String("the query parameter name '")
+                + raw
+                + String(
+                    "' has a malformed percent escape: '%' must be followed"
+                    " by two hex digits (a literal '%' is %25)"
+                )
+            )
+
     # Every decoded key and value is text from here on (a reader quotes it
     # into a filter or a JSON body), so bytes that are not UTF-8 are refused
     # here, naming the parameter, rather than passed down.
@@ -644,16 +684,21 @@ def _not_found() -> HttpResponse:
 
 @fieldwise_init
 struct _Param(Copyable, Movable):
-    """One `key=value` of the query string, both percent- and plus-decoded."""
+    """One `key=value` of the query string, both percent- and plus-decoded,
+    with the segment as written (for a refusal to quote) and whether its key
+    held a `%` not followed by two hex digits."""
 
     var key: String
     var value: String
+    var segment: String
+    var bad_key_escape: Bool
 
 
 def _decoded_params(query_string: String) -> List[_Param]:
     """Every `key=value` segment of `query_string` (no leading `?`), decoded.
-    A segment with no `=` has an empty value. A malformed `%` escape is kept
-    as a literal `%`."""
+    A segment with no `=` has an empty value; an empty segment is skipped; a
+    segment `=v` is kept with an empty key, for `_query_from` to refuse. A
+    malformed `%` escape is kept as a literal `%` (and flagged in a key)."""
     var out = List[_Param]()
     var qb = query_string.as_bytes()
     var n = len(qb)
@@ -665,12 +710,19 @@ def _decoded_params(query_string: String) -> List[_Param]:
         var eq = i
         while eq < seg_end and qb[eq] != UInt8(ord("=")):
             eq += 1
-        if eq > i:
+        if eq > i or eq < seg_end:
             var key = _decode(qb, i, eq)
             var value = String("")
             if eq < seg_end:
                 value = _decode(qb, eq + 1, seg_end)
-            out.append(_Param(key^, value^))
+            out.append(
+                _Param(
+                    key^,
+                    value^,
+                    String(query_string[byte=i:seg_end]),
+                    _has_bad_escape(qb, i, eq),
+                )
+            )
         i = seg_end + 1
     return out^
 
@@ -700,6 +752,20 @@ def _decode(b: Span[UInt8, _], start: Int, end: Int) -> String:
     # Not yet checked: `_query_from` refuses a key or value that is not
     # UTF-8 (`_is_utf8`) before anything reads it as text.
     return String(unsafe_from_utf8=out^)
+
+
+def _has_bad_escape(b: Span[UInt8, _], start: Int, end: Int) -> Bool:
+    """True iff `b[start:end]` holds a `%` that `_decode` keeps literally: one
+    not followed, before `end`, by two hex digits."""
+    var j = start
+    while j < end:
+        if b[j] == UInt8(ord("%")):
+            if j + 2 >= end or _hex_val(b[j + 1]) < 0 or _hex_val(b[j + 2]) < 0:
+                return True
+            j += 3
+        else:
+            j += 1
+    return False
 
 
 def _hex_val(c: UInt8) -> Int:

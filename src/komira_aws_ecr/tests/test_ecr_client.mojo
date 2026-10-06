@@ -1,4 +1,4 @@
-# The generated Amazon ECR client (`ECRECRClient`) end to end over
+# The generated Amazon ECR client (`ECRClient`) end to end over
 # komira_http_client and komira_http_core's ScriptedConnector (no socket): a
 # GetAuthorizationToken answered, and a DescribeRepositories naming a
 # repository that does not exist, raised under its code with the service's
@@ -13,7 +13,7 @@
 from komira_aws_ecr.komira_aws_ecr import (
     ECRCreateRepositoryRequest,
     ECRDescribeRepositoriesRequest,
-    ECRECRClient,
+    ECRClient,
     ECREndpointConfig,
     ECRGetAuthorizationTokenRequest,
 )
@@ -83,10 +83,10 @@ def _mk_err() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> ECRECRClient[C, StaticCredsSource]:
+) raises -> ECRClient[C, StaticCredsSource]:
     var config = ECREndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return ECRECRClient[C, StaticCredsSource](
+    return ECRClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(
@@ -112,7 +112,7 @@ def test_get_authorization_token() raises:
 
 def test_an_error_is_raised_under_its_code() raises:
     var client = _client(_mk_err)
-    with assert_raises(contains="ECRECR.DescribeRepositories failed: HTTP 400 RepositoryNotFoundException The repository with name 'gone' does not exist"):
+    with assert_raises(contains="ECR.DescribeRepositories failed: HTTP 400 RepositoryNotFoundException The repository with name 'gone' does not exist"):
         _ = client.describe_repositories(_named(String("gone")))
 
 

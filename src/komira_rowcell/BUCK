@@ -4,9 +4,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # constructors, value equality). A zero-dependency leaf: the empty `deps` is
 # load-bearing, because every CDC provider client and the Iceberg writer depend
 # on this library, and anything added here lands in all of their closures.
-# It welds no test of its own; its consumers' tests exercise it.
+# Its own tests (constructor round trips, NULL and cross-type equality,
+# rows_equal) are welded below; they import nothing outside this library.
 mojo_library(
     name = "komira_rowcell",
-    srcs = glob(["**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_row_cell.mojo",
+    ],
     visibility = ["PUBLIC"],
 )

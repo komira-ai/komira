@@ -23,7 +23,11 @@
 from std.io import FileHandle
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow_ipc.chunked_read import read_chunked, read_chunked_into_list
+from komira_arrow_ipc.chunked_read import (
+    read_chunked,
+    read_chunked_into_list,
+    read_chunked_range,
+)
 from komira_libc.chunked_write import write_chunked
 from komira_libc.posix import _read_env
 
@@ -202,6 +206,47 @@ def test_read_chunked_into_list_round_trip() raises:
 # =============================================================================
 # main
 # =============================================================================
+
+
+def _oob(path: String, offset: Int, length: Int) -> String:
+    """`read_chunked_range`'s out-of-bounds text for a 64-byte file."""
+    return (
+        "read_chunked_range: range out of bounds: offset=" + String(offset)
+        + " length=" + String(length) + " file_size=64 path=" + path
+    )
+
+
+def _range_error(path: String, offset: Int, length: Int) raises -> String:
+    """`read_chunked_range`'s refusal text, or "" when it returned a buffer."""
+    try:
+        _ = read_chunked_range(path, offset, length)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_read_chunked_range_bounds() raises:
+    """`read_chunked_range` refuses every range outside the file, including
+    an offset + length that wraps Int (a bound written as
+    `offset + length > file_size` alone passes it and the borrow aliases
+    memory far outside the mapping), and accepts the exact-fit edges."""
+    var path = _make_tmp_path("range_bounds")
+    _write_file_bytes(path, _build_pattern(64))
+
+    assert_equal(_range_error(path, 60, 8), _oob(path, 60, 8))
+    assert_equal(_range_error(path, 65, 0), _oob(path, 65, 0))
+    assert_equal(_range_error(path, Int.MAX - 2, 16), _oob(path, Int.MAX - 2, 16))
+    assert_equal(_range_error(path, 8, Int.MAX - 2), _oob(path, 8, Int.MAX - 2))
+    assert_equal(
+        _range_error(path, -1, 4),
+        "read_chunked_range: negative offset/length: offset=-1 length=4 path="
+        + path,
+    )
+
+    var tail = read_chunked_range(path, 60, 4)
+    assert_equal(tail.len(), 4)
+    assert_equal(tail.read_u8_at(3), UInt8(63))
+    assert_equal(_range_error(path, 64, 0), String(""))
 
 
 def main() raises:

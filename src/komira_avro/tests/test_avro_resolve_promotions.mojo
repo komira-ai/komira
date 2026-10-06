@@ -5,6 +5,11 @@
 # The 6 numeric promotions (int→long, int→float, int→double, long→float,
 # long→double, float→double) + bidirectional string↔bytes. The writer encodes
 # the narrower type; the reader expects the wider type. Fixtures hand-emitted.
+#
+# bytes→string reads the writer's bytes as UTF-8 (the Avro spec's rule). The
+# promotion used to widen each byte through `chr(byte)`, so C3 BC came out as
+# "Ã¼" and a lone FF was accepted as "ÿ". test_resolve_bytes_to_string_utf8
+# pins byte-exact copy of valid UTF-8 and refusal of invalid UTF-8.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -214,6 +219,60 @@ def test_resolve_string_bytes_bidirectional() raises:
     assert_equal(scol.get(0), String("ok"), "bytes->string")
 
 
+def _bytes_to_string_file(raw: List[UInt8]) -> List[UInt8]:
+    var buf = List[UInt8]()
+    _make_header(_one_field_schema("v", "bytes"), buf)
+    var p = List[UInt8]()
+    _enc_bytes(raw, p)
+    _append_block(buf, Int64(1), p)
+    return buf^
+
+
+def _assert_promoted_refused(raw: List[UInt8], what: String) raises:
+    var buf = _bytes_to_string_file(raw)
+    var raised = False
+    try:
+        var _rb = read_avro_bytes_resolved(
+            Span(buf), _one_field_schema("v", "string")
+        )
+    except e:
+        raised = True
+        assert_true(
+            "AvroDecodeError.MALFORMED: bytes value promoted to string: not"
+            " valid UTF-8" in String(e),
+            what + ": wrong error: " + String(e),
+        )
+    assert_true(raised, what + ": invalid UTF-8 promoted to string")
+
+
+def test_resolve_bytes_to_string_utf8() raises:
+    # Valid multi-byte UTF-8 (2- and 4-byte) comes through byte-exact.
+    var raw = List[UInt8]()
+    raw.append(0x61)
+    raw.append(0xC3)
+    raw.append(0xBC)
+    raw.append(0xF0)
+    raw.append(0x9F)
+    raw.append(0x98)
+    raw.append(0x80)
+    var buf = _bytes_to_string_file(raw)
+    var rb = read_avro_bytes_resolved(Span(buf), _one_field_schema("v", "string"))
+    var got = rb.column_at(0).as_string().get(0)
+    var g = got.as_bytes()
+    assert_equal(len(g), len(raw), "bytes->string utf8 len")
+    for i in range(len(raw)):
+        assert_equal(Int(g[i]), Int(raw[i]), "bytes->string utf8 byte " + String(i))
+
+    # Invalid UTF-8 is refused.
+    var ff = List[UInt8]()
+    ff.append(0xFF)
+    _assert_promoted_refused(ff, "lone FF")
+    var bad = List[UInt8]()
+    bad.append(0xC3)
+    bad.append(0x28)
+    _assert_promoted_refused(bad, "C3 28")
+
+
 def main() raises:
     test_promote_int_to_long()
     test_promote_int_to_float()
@@ -222,4 +281,5 @@ def main() raises:
     test_promote_long_to_double()
     test_promote_float_to_double()
     test_resolve_string_bytes_bidirectional()
+    test_resolve_bytes_to_string_utf8()
     print("test_avro_resolve_promotions: ALL PASS")

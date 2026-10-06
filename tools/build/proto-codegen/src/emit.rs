@@ -37,6 +37,49 @@ fn map_scalar_write_suffix(t: &IrType) -> &'static str {
     }
 }
 
+/// The `WireEncoder` comptime constant a generated `encode` reads to decide
+/// whether an implicit-presence field at its default is written. The proto3
+/// JSON mapping omits such a field, so `JsonEncoder` sets it; `PbEncoder`
+/// does not, so the binary bytes do not change.
+const OMITS_IMPLICIT_DEFAULTS: &str = "OMITS_IMPLICIT_DEFAULTS";
+
+/// The Mojo condition that `value_expr`, a plain (implicit-presence) proto3
+/// scalar or enum field, is off its default: the test the proto3 JSON
+/// mapping omits a field by, as `emit_rest`'s query parameters do. A float
+/// compares its bits rather than its value, so `-0.0` (whose sign JSON
+/// keeps) is written and only `+0.0` is the default. `None` for a type with
+/// no implicit presence (a message).
+fn implicit_presence_test(ty: &IrType, value_expr: &str) -> Option<String> {
+    use ScalarKind as K;
+    match ty {
+        IrType::Scalar(s) => Some(match s {
+            K::String => format!("{value_expr}.byte_length() > 0"),
+            K::Bytes => format!("len({value_expr}) > 0"),
+            K::Bool => value_expr.to_string(),
+            K::Float => format!("bitcast[DType.uint32]({value_expr}) != 0"),
+            K::Double => format!("bitcast[DType.uint64]({value_expr}) != 0"),
+            K::Int64 | K::Uint64 | K::Int32 | K::Uint32 | K::Sint64 | K::Sint32
+            | K::Fixed64 | K::Fixed32 | K::Sfixed64 | K::Sfixed32 => {
+                format!("{value_expr} != 0")
+            }
+        }),
+        IrType::Enum(_) => Some(format!("{value_expr}.number() != 0")),
+        IrType::Message(_) | IrType::Map(_, _) | IrType::List(_) => None,
+    }
+}
+
+/// Whether a generated `encode` in `file` compares a float's bits (a plain
+/// `float` or `double` field), which takes `bitcast` from `std.memory`.
+fn encode_tests_float_bits(file: &IrFile) -> bool {
+    file.messages.iter().filter(|m| !m.is_map_entry).any(|m| {
+        m.fields.iter().any(|f| {
+            f.oneof_index.is_none()
+                && f.label == Label::Single
+                && matches!(f.ty, IrType::Scalar(ScalarKind::Float | ScalarKind::Double))
+        })
+    })
+}
+
 /// The `read_into_<suffix>_<suffix>_map` component suffix for a map key/value.
 fn map_scalar_read_suffix(t: &IrType) -> &'static str {
     // read/write suffixes coincide for every scalar kind.
@@ -269,6 +312,9 @@ impl<'a> Emitter<'a> {
             self.line("    WireEncoder,");
             self.line("    WireDecoder,");
             self.line(")");
+        }
+        if encode_tests_float_bits(self.file) {
+            self.line("from std.memory import bitcast");
         }
         if !self.file.services.is_empty() {
             if self.protocol == ProtocolMode::Rest {
@@ -563,13 +609,16 @@ impl<'a> Emitter<'a> {
     /// An explicit copy constructor, so the struct is never trivially
     /// copyable.
     ///
-    /// On Mojo 1.0.0 the synthesized copy constructor of a struct with an
-    /// explicit `__deinit__` can be treated as trivial for some layouts (three
-    /// `Optional[String]` plus an `Optional[Bool]` or `Optional[Int64]` was
-    /// measured), and then `List.copy()` and `List.extend` copy the elements
-    /// with a memcpy: the copy and the original share their String buffers, and
-    /// dropping the copy frees them under the original. An explicit
-    /// constructor is never trivial. Every field is copied by its own
+    /// On Mojo 1.0.0 the synthesized copy constructor can be reported as
+    /// trivial (https://github.com/modular/modular/issues/7256): two fields of
+    /// the same non-trivial Variant-backed type (e.g. `Optional[String]`)
+    /// followed by a trivially copyable Variant-backed field (e.g.
+    /// `Optional[Bool]`) make `__copy_ctor_is_trivial` True, whether or not
+    /// the struct declares `__deinit__`. `List.copy()` and `List.extend` then
+    /// copy the elements with a memcpy: the copy and the original share their
+    /// heap buffers, and dropping the copy frees them under the original. An
+    /// explicit constructor is never trivial; remove this once that issue is
+    /// fixed in the pinned compiler. Every field is copied by its own
     /// `.copy()`, so a nested message, a repeated field, a map, an `Optional`
     /// and a oneof arm each go through that type's real copy.
     fn emit_explicit_copy_ctor(&mut self, msg: &IrMessage) {
@@ -755,7 +804,8 @@ impl<'a> Emitter<'a> {
                     ));
                     self.pop_indent();
                 } else {
-                    self.line(&self.write_call(s, field, value_expr));
+                    let write = self.write_call(s, field, value_expr);
+                    self.emit_implicit_presence_write(field, value_expr, &write);
                 }
             }
             IrType::Enum(r) => {
@@ -782,10 +832,11 @@ impl<'a> Emitter<'a> {
                     ));
                     self.pop_indent();
                 } else {
-                    self.line(&format!(
+                    let write = format!(
                         "enc.write_enum_field[{}]({}, \"{}\", {})",
                         en, field.proto_field_number, field.json_name, value_expr
-                    ));
+                    );
+                    self.emit_implicit_presence_write(field, value_expr, &write);
                 }
             }
             IrType::Message(r) => {
@@ -873,6 +924,23 @@ impl<'a> Emitter<'a> {
             }
             IrType::List(_) => unreachable!("{}", crate::ir::LIST_IS_AWS_FRONT_END_ONLY),
         }
+    }
+
+    /// Emit `write`, the `enc.write_*` call of a plain (implicit-presence)
+    /// scalar or enum field, behind its default test: an encoder whose
+    /// `OMITS_IMPLICIT_DEFAULTS` holds (proto3 JSON) skips the field at its
+    /// default, as the JSON mapping omits it; any other (binary) writes it.
+    /// The test is a comptime constant `or` a runtime one, so each
+    /// monomorphized `encode` keeps only its own half.
+    fn emit_implicit_presence_write(&mut self, field: &IrField, value_expr: &str, write: &str) {
+        let Some(test) = implicit_presence_test(&field.ty, value_expr) else {
+            self.line(write);
+            return;
+        };
+        self.line(&format!("if not E.{OMITS_IMPLICIT_DEFAULTS} or {test}:"));
+        self.push_indent();
+        self.line(write);
+        self.pop_indent();
     }
 
     /// Emit the `enc.write_*` call for one oneof arm, guarded by the caller's
@@ -981,16 +1049,23 @@ impl<'a> Emitter<'a> {
     // -- the `decode` body ---------------------------------------------
 
     /// The JSON spellings (the `json_name`, then the proto name when it
-    /// differs) of every non-repeated field of `msg` whose type is the enum
-    /// `google.protobuf.NullValue`, in declaration order.
-    fn null_value_field_spellings(msg: &IrMessage) -> Vec<String> {
+    /// differs) of every non-repeated field of `msg` whose JSON `null` is a
+    /// value rather than "absent", in declaration order. The proto3 JSON
+    /// mapping names two: the enum `google.protobuf.NullValue` (`null` is
+    /// NULL_VALUE) and the message `google.protobuf.Value` (`null` is a
+    /// Value of kind NULL_VALUE; komira-ai/komira#62). A repeated or map
+    /// field of either reads `null` as an absent list or map.
+    fn null_is_a_value_field_spellings(msg: &IrMessage) -> Vec<String> {
         let mut out = Vec::new();
         for f in &msg.fields {
-            let is_null_enum = matches!(
+            let null_is_a_value = matches!(
                 &f.ty,
                 IrType::Enum(t) if t.fq_name == ".google.protobuf.NullValue"
+            ) || matches!(
+                &f.ty,
+                IrType::Message(t) if t.fq_name == ".google.protobuf.Value"
             );
-            if !is_null_enum || f.label == Label::Repeated {
+            if !null_is_a_value || f.label == Label::Repeated {
                 continue;
             }
             out.push(f.json_name.clone());
@@ -1020,10 +1095,11 @@ impl<'a> Emitter<'a> {
             msg.fq_name.trim_start_matches('.'),
             Self::accepted_field_spellings(msg).join(","),
         ));
-        // A `google.protobuf.NullValue` field's JSON value IS `null`, which
-        // the JSON backend otherwise reads as an absent field (and, for a
-        // oneof arm, as no arm at all): name its spellings to the decoder.
-        let null_keys = Self::null_value_field_spellings(msg);
+        // A `google.protobuf.NullValue` or singular `google.protobuf.Value`
+        // field's JSON value may be `null`, which the JSON backend otherwise
+        // reads as an absent field (and, for a oneof arm, as no arm at all):
+        // name its spellings to the decoder.
+        let null_keys = Self::null_is_a_value_field_spellings(msg);
         if !null_keys.is_empty() {
             self.line(&format!(
                 "dec.keep_null_fields(\"{}\")",
@@ -1998,6 +2074,10 @@ pub fn emit_layout_probe_with_names(
 }
 
 #[cfg(test)]
+#[path = "emit_presence_tests.rs"]
+mod presence_tests;
+
+#[cfg(test)]
 mod oneof_recursion_box_tests {
     use super::*;
     use crate::ir::{IrField, IrFile, IrMessage, IrOneof, IrType, Label, TypeRef};
@@ -2293,8 +2373,8 @@ mod mojo_100_service_client_tests {
         assert_eq!(
             ctors, 2,
             "one copy constructor per MESSAGE struct (2 messages, none on the \
-             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for a struct with \
-             an explicit __deinit__, and List.copy() then shares String buffers; \
+             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for some field \
+             orders (modular/modular#7256), and List.copy() then shares heap buffers; \
              got:\n{out}"
         );
     }
@@ -2571,5 +2651,58 @@ mod null_value_field_tests {
         // named once.
         let single = file(vec![field("n", "n", null_enum(), Label::Single, None)], vec![]);
         assert!(Emitter::new(&single).emit().contains("dec.keep_null_fields(\"n\")"));
+    }
+
+    fn message(fq: &str, mojo: &str) -> IrType {
+        IrType::Message(TypeRef { fq_name: fq.to_string(), mojo_name: mojo.to_string() })
+    }
+
+    fn value_msg() -> IrType {
+        message(".google.protobuf.Value", "Value")
+    }
+
+    // komira-ai/komira#62: proto3 JSON reads `null` in a singular
+    // `google.protobuf.Value` field as NULL_VALUE, so its key is named to the
+    // decoder like a NullValue field's: plain, `optional` and oneof arm alike
+    // (LOWER gives a singular message field `Label::Optional` either way).
+    #[test]
+    fn a_singular_value_field_keeps_its_json_null() {
+        let f = file(
+            vec![
+                field("v", "v", value_msg(), Label::Optional, None),
+                field("opt_v", "optV", value_msg(), Label::Optional, None),
+                field("arm_v", "armV", value_msg(), Label::Optional, Some(0)),
+                field("arm_s", "armS", IrType::Scalar(ScalarKind::String), Label::Optional, Some(0)),
+            ],
+            vec![IrOneof {
+                name: "kind".to_string(),
+                arms: vec!["arm_v".to_string(), "arm_s".to_string()],
+            }],
+        );
+        let src = Emitter::new(&f).emit();
+        let expect = src.find("dec.expect_fields(").unwrap();
+        let keep = src.find("dec.keep_null_fields(\"v|optV|opt_v|armV|arm_v\")").unwrap();
+        let lp = src.find("while True:").unwrap();
+        assert!(expect < keep && keep < lp, "{src}");
+    }
+
+    // Every other type keeps `null` as absent: a repeated Value (`null` for
+    // the whole list is no list), the other struct WKTs, an ordinary message
+    // and the scalars declare nothing.
+    #[test]
+    fn null_stays_absent_for_every_other_field_type() {
+        for (ty, label) in [
+            (value_msg(), Label::Repeated),
+            (message(".google.protobuf.Struct", "Struct"), Label::Optional),
+            (message(".google.protobuf.ListValue", "ListValue"), Label::Optional),
+            (message(".google.protobuf.Int64Value", "Int64Value"), Label::Optional),
+            (message(".v.Value", "Value"), Label::Optional),
+            (IrType::Scalar(ScalarKind::String), Label::Single),
+            (IrType::Scalar(ScalarKind::Int64), Label::Optional),
+        ] {
+            let f = file(vec![field("x", "x", ty.clone(), label, None)], vec![]);
+            let src = Emitter::new(&f).emit();
+            assert!(!src.contains("keep_null_fields"), "{ty:?}:\n{src}");
+        }
     }
 }

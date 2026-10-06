@@ -116,7 +116,7 @@ from komira_buffer.mmap_region import MmapRegion
 
 def _mmap_borrow(
     var region: MmapRegion, offset: Int, length: Int
-) -> SharedAlignedBuffer[MmapRegion]:
+) raises -> SharedAlignedBuffer[MmapRegion]:
     """Internal: wrap an already-opened `MmapRegion` in an `ArcPointer`
     and return a `SharedAlignedBuffer[MmapRegion]` borrowing
     `[offset, offset+length)` out of it. Caller-validated bounds.
@@ -233,7 +233,10 @@ def read_chunked_range(
         )
     var region = MmapRegion.open_readonly(path)
     var region_len = region.len()
-    if offset + length > region_len:
+    # Compare without forming `offset + length`: both are caller-supplied and
+    # their sum can wrap Int to a negative value that passes a `> region_len`
+    # test, leaving a borrow far outside the mapping.
+    if offset > region_len or length > region_len - offset:
         raise Error(
             "read_chunked_range: range out of bounds: offset=",
             offset, " length=", length, " file_size=", region_len,

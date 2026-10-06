@@ -54,8 +54,14 @@
 #      range; the ack is "flush returned without raising".
 #
 # This is "ordering is fixed AT COMMIT, not at PUT": a broker that PUTs a
-# `.seg` but dies before the manifest append simply leaves an ORPHAN object
-# (GC-reaped, never referenced, never visible) — NO offset gap.
+# `.seg` but dies before the manifest append leaves an UNREFERENCED object
+# (never visible to a consumer) — NO offset gap. Nothing deletes an
+# unreferenced `.seg` today: retention deletes only the segments of chunks it
+# tombstoned, and no sweep exists (komira-ai/komira#488). So a flush whose
+# append fails or is fenced after its PUT leaks that object for good. A flush
+# from a writer this core already knows is displaced is refused BEFORE the PUT
+# (`flush_fence.mojo`), and the leaks that remain are counted
+# (`BrokerCore.flush_leak_stats`).
 #
 # -----------------------------------------------------------------------------
 # SEGMENT FORMAT — Arrow-IPC stream + a fixed 40-byte footer
@@ -136,6 +142,8 @@ from komira_objectstore.cas_manifest import (
 )
 from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
+
+from .flush_fence import FlushFence, FlushLeakStats
 from komira_objectstore.types import WritePrecondition
 
 # The disjoint-keyspace WRITE-path sub-lineage
@@ -1069,6 +1077,8 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
                                           (-1 = empty), for the time trigger.
       var _seg_counter: Int64          — monotone segment uniquifier (stands in
                                           for a uuid; unique per core).
+      var _flush_fence: FlushFence     — the cached lease fence + the
+                                          leaked-segment counters.
     """
 
     var _segment_store: Self.Storage
@@ -1120,6 +1130,10 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
     var _sublineage_write_enabled: Bool
     var _shard_id: String
     var _sublineage_manifest: Optional[CasManifestStore[Self.Storage]]
+    # The refuse-before-PUT fence: the highest lease epoch seen fencing a
+    # writer of this partition, and the counts of refused / leaked /
+    # possibly-leaked `.seg` objects (see `flush_fence.mojo`).
+    var _flush_fence: FlushFence
 
     def __init__(
         out self,
@@ -1154,6 +1168,7 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         self._sublineage_write_enabled = False
         self._shard_id = String("")
         self._sublineage_manifest = None
+        self._flush_fence = FlushFence()
 
     @always_inline
     def topic(self) -> String:
@@ -1327,6 +1342,51 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         )
 
     # -------------------------------------------------------------------------
+    # The refuse-before-PUT fence and the leaked-segment counters.
+    # -------------------------------------------------------------------------
+
+    @always_inline
+    def is_fenced(self) -> Bool:
+        """True once a flush of this partition has been fenced: refused at
+        entry, or refused by the manifest after its PUT. This core serves ONE
+        partition, so the query takes no partition id.
+
+        The node driver must DROP the partition when this turns true: stop
+        serving it and discard this core. Every later flush below the cached
+        fence is refused before its PUT (no `.seg` leaks), but only the driver
+        can stop the producers. No node driver exists on main yet; until one
+        does, nothing reads this."""
+        return self._flush_fence.is_fenced()
+
+    @always_inline
+    def fence_epoch(self) -> Int64:
+        """The cached fence: a flush whose `writer_lease_epoch` is below it is
+        refused before its PUT. 0 when none was recorded."""
+        return self._flush_fence.fence_epoch()
+
+    @always_inline
+    def flush_leak_stats(self) -> FlushLeakStats:
+        """Flushes refused before the PUT, fenced after it (`.seg` leaked),
+        and unknown-outcome appends (`.seg` possibly leaked)."""
+        return self._flush_fence.stats()
+
+    def _refused_at_entry(
+        mut self, writer_lease_epoch: Int64, current_lease_epoch: Int64
+    ) -> Bool:
+        """True iff a flush at `(writer, current)` must be refused before its
+        `.seg` PUT: `writer < current`, or `writer` below the cached fence.
+        On a refusal the buffered batches are dropped (a flush fenced by the
+        manifest dropped them too), the refusal is counted, and `current` is
+        recorded as a fence. No I/O."""
+        if not self._flush_fence.refuses(writer_lease_epoch, current_lease_epoch):
+            return False
+        self._buffer = Slab[RecordBatch]()
+        self._buffer_bytes = 0
+        self._oldest_ts_ms = Int64(-1)
+        self._flush_fence.note_refused(current_lease_epoch)
+        return True
+
+    # -------------------------------------------------------------------------
     # produce — append to the write buffer; flush if a trigger fires.
     # -------------------------------------------------------------------------
 
@@ -1344,6 +1404,12 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         not yet acked). The producer is acked (durability contract
         step 6) only when a `ProduceResult` is returned — buffered-but-not-
         flushed records are NOT yet durable.
+
+        The auto-flush runs at the default epochs (0, 0). Once this core is
+        fenced (`is_fenced()`), that flush is below the cached fence: it
+        raises `lease_fenced` before any `.seg` PUT and drops the buffer,
+        `rb` included. Every dropped batch is unacked (each earlier produce
+        returned `None`), so the producer retries against the new owner.
         """
         var est = _estimate_batch_bytes(rb)
         if self._oldest_ts_ms < Int64(0):
@@ -1398,9 +1464,17 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         The segment key carries no offset; the manifest append (step
         5, the caller) is the offset allocator + ordering point — re-keying the
         SEGMENT here is free (the key is purely a unique content address; only
-        the manifest body's reference to it is load-bearing). A DUPLICATE/loser
-        that re-keys just leaves the prior orphan for retention to reap; NO
-        offset is consumed (the manifest append has not run yet)."""
+        the manifest body's reference to it is load-bearing). A 412 usually means
+        another writer holds the key; but if an earlier attempt's create
+        landed and only its response was lost, a retried create can 412 on
+        our OWN object, which re-keying then leaves behind unreferenced.
+        Either way no offset is consumed (the manifest append has not run
+        yet).
+
+        The PUT is the point of no return: if the manifest append that follows
+        fails or is fenced, the `.seg` stays unreferenced, and nothing deletes
+        an unreferenced `.seg` today (komira-ai/komira#488). Callers refuse a
+        known-stale writer before calling this (`_refused_at_entry`)."""
         var attempts = 0
         while attempts < 8:
             attempts += 1
@@ -1457,10 +1531,23 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
 
         Raises if the buffer is empty (nothing to flush), or if either the PUT
         or the manifest append fails (in which case NO ack — the producer must
-        retry; a PUT-but-no-commit leaves a GC-reaped orphan, no offset gap).
+        retry). A PUT-but-no-commit leaves an unreferenced `.seg` and no
+        offset gap; nothing deletes that `.seg` today (komira-ai/komira#488).
+
+        Raises `lease_fenced` BEFORE the PUT (no `.seg` written) when
+        `writer_lease_epoch` is below `current_lease_epoch` or below the
+        cached fence (`fence_epoch`); the buffered batches are dropped. The
+        default epochs (0, 0) are not a no-op: they pass only while the core
+        is unfenced.
         """
         if len(self._buffer) == 0:
             raise Error("BrokerCore.flush: empty buffer (nothing to flush)")
+        if self._refused_at_entry(writer_lease_epoch, current_lease_epoch):
+            raise Error(
+                self._flush_fence.refusal_message(
+                    "flush", writer_lease_epoch, current_lease_epoch
+                )
+            )
 
         # SKIP the pre-flush `read_head` GET. Its ONLY consumer would be the
         # segment footer's DEBUG `base_offset`/`last_offset` fields
@@ -1504,9 +1591,15 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         # Branch on the sub-lineage flag — flag-OFF routes to the consolidated
         # `_manifest`,
         # flag-ON routes to this writer's own sub-lineage `_HEAD` slot.
-        var append_res = self._append_active(
-            body^, record_count, writer_lease_epoch, current_lease_epoch
-        )
+        var append_res: AppendResult
+        try:
+            append_res = self._append_active(
+                body^, record_count, writer_lease_epoch, current_lease_epoch
+            )
+        except e:
+            # After the PUT: count the leak, cache a fence.
+            self._flush_fence.note_append_raise(String(e), writer_lease_epoch)
+            raise e^
 
         # ---- Step 6: ACK (return == durable ack) ----
         return ProduceResult(
@@ -1527,8 +1620,9 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
     ) raises -> Optional[ProduceResult]:
         """Force a flush of any buffered records (e.g. on a time-tick or a
         clean shutdown). Returns `None` if the buffer is empty. The lease epochs
- thread through to the manifest append fence (default
-        0,0 = no-op)."""
+        go to `flush`, which refuses a writer below `current_lease_epoch` or
+        below the cached fence. The defaults (0, 0) pass only while the core
+        is unfenced: once `fence_epoch() > 0` they raise `lease_fenced`."""
         if len(self._buffer) == 0:
             return Optional[ProduceResult](None)
         return Optional[ProduceResult](
@@ -1559,9 +1653,18 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         The sequence advances exactly once ⟺ this append wins its slot. A
         broker that PUTs the .seg then dies BEFORE the append leaves the
         sequence un-advanced — the producer's retry is then treated as the
-        first attempt (no double-write, no false-dedup)."""
+        first attempt (no double-write, no false-dedup).
+
+        Refuses a stale writer with `lease_fenced` before the PUT, as `flush`
+        does."""
         if len(self._buffer) == 0:
             raise Error("BrokerCore.flush_with_producer: empty buffer")
+        if self._refused_at_entry(writer_lease_epoch, current_lease_epoch):
+            raise Error(
+                self._flush_fence.refusal_message(
+                    "flush_with_producer", writer_lease_epoch, current_lease_epoch
+                )
+            )
 
         # SKIP the pre-flush `read_head` GET — see the `flush` variant for the
         # full rationale. `pre_commit_base` seeds ONLY the segment footer's
@@ -1599,9 +1702,15 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
             last_seq,
         )
         # Route to the active lineage (sub-lineage or consolidated).
-        var append_res = self._append_active(
-            body^, record_count, writer_lease_epoch, current_lease_epoch
-        )
+        var append_res: AppendResult
+        try:
+            append_res = self._append_active(
+                body^, record_count, writer_lease_epoch, current_lease_epoch
+            )
+        except e:
+            # After the PUT: count the leak, cache a fence.
+            self._flush_fence.note_append_raise(String(e), writer_lease_epoch)
+            raise e^
 
         # Stale-HEAD forward progress: the commit LANDED (the append
         # won its slot) — advance the in-process per-producer cache so the next
@@ -1653,14 +1762,25 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
                          it to a retriable Kafka code; the buffered records are
                          RE-STAGED so the client retry re-drives cleanly).
 
-        The segment `.seg` is PUT before the sentinel claim (idempotent
-        last-writer-wins on the seg key; a DUPLICATE/loser just leaves an orphan
-        seg that retention reaps — no offset is consumed). On a DUPLICATE /
-        FENCED / RETRYABLE we drop the buffered batches WITHOUT advancing the
-        offset log; on RETRYABLE the caller is responsible for re-buffering."""
+        The segment `.seg` is PUT before the sentinel claim (a create at a
+        fresh key). A DUPLICATE / FENCED / RETRYABLE / LEASE_FENCED outcome
+        leaves that `.seg` unreferenced (no offset is consumed), and nothing
+        deletes an unreferenced `.seg` today (komira-ai/komira#488). On a
+        DUPLICATE / FENCED / RETRYABLE we drop the buffered batches WITHOUT
+        advancing the offset log; on RETRYABLE the caller is responsible for
+        re-buffering.
+
+        A writer below `current_lease_epoch` or the cached fence gets
+        `EO_LEASE_FENCED` BEFORE the PUT (no `.seg` written, the buffered
+        batches dropped). This check runs before the manifest's producer-epoch
+        check, so a call stale on both counts reports LEASE_FENCED."""
         if len(self._buffer) == 0:
             raise Error(
                 "BrokerCore.flush_with_producer_exactly_once: empty buffer"
+            )
+        if self._refused_at_entry(writer_lease_epoch, current_lease_epoch):
+            return ExactlyOnceFlushResult(
+                EO_LEASE_FENCED, Int64(-1), Int64(-1), Int64(0), Int64(-1)
             )
 
         # SKIP the pre-flush `read_head` GET. The exactly-once path's
@@ -1701,17 +1821,23 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         )
         # Route the exactly-once append to the active lineage (sub-lineage or
         # consolidated).
-        var ir = self._append_idempotent_active(
-            body^,
-            record_count,
-            producer_id,
-            producer_epoch,
-            first_seq,
-            last_seq,
-            registered_epoch,
-            writer_lease_epoch,  # the partition-ownership fence
-            current_lease_epoch,
-        )
+        var ir: IdempotentAppendResult
+        try:
+            ir = self._append_idempotent_active(
+                body^,
+                record_count,
+                producer_id,
+                producer_epoch,
+                first_seq,
+                last_seq,
+                registered_epoch,
+                writer_lease_epoch,  # the partition-ownership fence
+                current_lease_epoch,
+            )
+        except e:
+            # After the PUT: count the leak, cache a fence.
+            self._flush_fence.note_append_raise(String(e), writer_lease_epoch)
+            raise e^
 
         if ir.outcome == IDEMPOTENT_COMMITTED:
             # The commit LANDED — advance the in-process per-producer cache so
@@ -1742,7 +1868,11 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         if ir.outcome == IDEMPOTENT_LEASE_FENCED:
             # The partition-OWNERSHIP fence (distinct from the
             # producer-epoch EO_FENCED). The broker maps it to
-            # NOT_LEADER_OR_FOLLOWER.
+            # NOT_LEADER_OR_FOLLOWER. Unreachable today: the manifest checks
+            # only the `(writer, current)` pair `_refused_at_entry` already
+            # passed. A manifest that carries a fence of its own makes this
+            # reachable after the `.seg` PUT; that change must count it here
+            # with `self._flush_fence.note_fenced_after_put(writer_lease_epoch)`.
             return ExactlyOnceFlushResult(
                 EO_LEASE_FENCED, Int64(-1), Int64(-1), Int64(0), Int64(-1)
             )
@@ -1774,9 +1904,20 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         in the consume path). `read_uncommitted` consumers see it immediately
         (Kafka's default isolation). The (producer_id, epoch, first_seq,
         last_seq) sequence state is still folded in (idempotent dedupe applies
-        within a transaction too)."""
+        within a transaction too).
+
+        Refuses a stale writer with `lease_fenced` before the PUT, as `flush`
+        does."""
         if len(self._buffer) == 0:
             raise Error("BrokerCore.flush_with_producer_txn: empty buffer")
+        if self._refused_at_entry(writer_lease_epoch, current_lease_epoch):
+            raise Error(
+                self._flush_fence.refusal_message(
+                    "flush_with_producer_txn",
+                    writer_lease_epoch,
+                    current_lease_epoch,
+                )
+            )
 
         # SKIP the pre-flush `read_head` GET — see the `flush` variant for the
         # full rationale. `pre_commit_base` seeds ONLY the segment footer's
@@ -1816,9 +1957,15 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
             txn_id,
         )
         # Route to the active lineage (sub-lineage or consolidated).
-        var append_res = self._append_active(
-            body^, record_count, writer_lease_epoch, current_lease_epoch
-        )
+        var append_res: AppendResult
+        try:
+            append_res = self._append_active(
+                body^, record_count, writer_lease_epoch, current_lease_epoch
+            )
+        except e:
+            # After the PUT: count the leak, cache a fence.
+            self._flush_fence.note_append_raise(String(e), writer_lease_epoch)
+            raise e^
 
         return ProduceResult(
             base_offset=append_res.base_offset,

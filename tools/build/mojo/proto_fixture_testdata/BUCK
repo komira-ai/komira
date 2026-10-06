@@ -1,0 +1,87 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_fixture_case")
+
+# proto_fixture_check's welded self-test. Each case runs the check over
+# fixtures and asserts its verdict; every proto_fixture_check and
+# proto_encode action takes `:selftest` as an input, so a check that stops
+# refusing a defect fails every build that checks a fixture, the pull-request
+# check's included. Each defect fixture is one defect away from `sample`, and
+# trips one leg (leg 2's also trip leg 3: protoc's text parser refuses a bare
+# field number). tests//negative/proto_fixture builds the same fixtures as
+# planted-defect twins, end to end.
+
+proto_srcs(
+    name = "selftest_proto",
+    srcs = ["v1/selftest.proto"],
+    import_prefix = "example",
+    visibility = ["PUBLIC"],
+)
+
+# The fixtures, for the twins in another cell: `:fixtures[fixtures/<file>]`.
+staged_files(
+    name = "fixtures",
+    srcs = glob(["fixtures/*"]),
+    visibility = ["PUBLIC"],
+)
+
+_SAMPLE = "example.fixture.v1.Sample"
+_METERS = "example.fixture.v1.Meters"
+
+# Defect -> (root, the text the refusal must hold). The expected text names
+# the leg and the fixture's file; it is what run_tests.sh's twins require too.
+_REFUSED = {
+    # Three hex digits: not bytes.
+    "hex_odd": (_METERS, "hex_odd: FIXTURE: hex_odd.hex holds an odd number of hex digits (3)"),
+    # `id` written twice (1, then 150): the decode shows only 150.
+    "leg0_duplicate": (_SAMPLE, "leg0_duplicate: LEG 0: leg0_duplicate.hex writes a singular field of example.fixture.v1.Sample more than once"),
+    # A producer's bytes that are protoc's own: no producer is checked.
+    "leg0_identical": (_SAMPLE, "leg0_identical: LEG 0: leg0_identical.hex is byte for byte leg0_identical.canonical.hex"),
+    # The bytes hold `id: 150` and the .txtpb says 151; the .canonical.hex is
+    # protoc's encoding of that text.
+    "leg1_value": (_SAMPLE, "leg1_value: LEG 1: protoc's decode of leg1_value.hex as example.fixture.v1.Sample differs from leg1_value.txtpb"),
+    # Unknown fields: an empty group (`99 {`, with no `N:` line), inside a
+    # message (`  9: 1` under `inner {`), and at the top level (`99: 1`).
+    "leg2_group": (_SAMPLE, "leg2_group: LEG 2: leg2_group.hex carries field numbers example.fixture.v1.Sample does not declare"),
+    "leg2_nested": (_SAMPLE, "leg2_nested: LEG 2: leg2_nested.hex carries field numbers example.fixture.v1.Sample does not declare"),
+    "leg2_unknown": (_SAMPLE, "leg2_unknown: LEG 2: leg2_unknown.hex carries field numbers example.fixture.v1.Sample does not declare"),
+    # The .canonical.hex is a second non-protoc form of the same message.
+    "leg3_noncanonical": (_SAMPLE, "leg3_noncanonical: LEG 3: leg3_noncanonical.canonical.hex is not protoc's encoding of leg3_noncanonical.txtpb"),
+    # A Meters checked as a Feet, which have one wire form and one text form.
+    "leg4_root": ("example.fixture.v1.Feet", "leg4_root: LEG 4: leg4_root.txtpb names example.fixture.v1.Meters on its '# proto-message:' line, but the fixture is checked as example.fixture.v1.Feet"),
+    # `kind: 99`, a value Kind does not declare, which protoc prints and
+    # parses back as a number.
+    "leg5_enum": (_SAMPLE, "leg5_enum: LEG 5: leg5_enum.hex carries enum values the schema does not name"),
+}
+
+# Producers of protoc's own bytes, declared so leg 0 lets them through.
+_CANONICAL_PRODUCER = ["leg4_root", "length"]
+
+_SCHEMA = {
+    "dir": "fixtures",
+    "proto_deps": [":selftest_proto"],
+}
+
+# The control: the same schema and fixture format, accepted. sample.hex is a
+# producer's non-canonical bytes (fields reversed, `values` unpacked, so a
+# repeated field written more than once passes leg 0); length is protoc's.
+proto_fixture_case(
+    name = "accepts",
+    fixtures = {"length": _METERS, "sample": _SAMPLE},
+    canonical_producer = ["length"],
+    **_SCHEMA
+)
+
+[proto_fixture_case(
+    name = "refuses_" + stem,
+    fixtures = {stem: root},
+    canonical_producer = [stem] if stem in _CANONICAL_PRODUCER else [],
+    expect = expect,
+    **_SCHEMA
+) for stem, (root, expect) in _REFUSED.items()]
+
+filegroup(
+    name = "selftest",
+    srcs = [":accepts"] + [":refuses_" + stem for stem in _REFUSED],
+    visibility = ["PUBLIC"],
+)

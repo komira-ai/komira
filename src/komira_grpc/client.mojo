@@ -81,6 +81,8 @@ from komira_grpc.call_options import CallOptions
 from komira_grpc.error import (
     GrpcError,
     format_grpc_error_message,
+    grpc_error_from_http_non_200,
+    grpc_error_for_missing_status,
     parse_grpc_status_initial_headers,
     parse_grpc_status_trailers,
 )
@@ -388,6 +390,31 @@ def _non_rpc_content_type(headers: HeaderMap) -> Optional[String]:
     return Optional[String](ct)
 
 
+def _raise_if_http_non_200[P: Protocol](http_status: UInt16) raises:
+    """Raise the spec's gRPC status for a classic-gRPC response whose HTTP
+    status is not 200 and which stated no `grpc-status` of its own.
+
+    Classic gRPC answers every RPC, failed or not, with `:status: 200`; a
+    non-200 means something in front of the service answered (an edge proxy's
+    503, an auth layer's 401). `grpc_error_from_http_non_200` maps it through
+    the spec's HTTP-to-gRPC table, so a proxy 429/502/503/504 reaches the
+    caller as UNAVAILABLE, the one code `RetryPolicy.idempotent()` replays.
+
+    ORDER at every call site: AFTER the `grpc-status` raise (the spec's mapping
+    applies only to a response that carried no `grpc-status`), and BEFORE the
+    content-type check (a proxy's 503 page is `text/html`; reporting it as an
+    INTERNAL content-type problem would hide the 503 and keep it out of the
+    retryable set). grpc-go orders the two the same way.
+
+    Connect protocols carry their own status in the body and HTTP status;
+    this check is classic gRPC only.
+    """
+    comptime if P.unary_is_enveloped():
+        if http_status != 200:
+            var ge = grpc_error_from_http_non_200(http_status)
+            raise Error(format_grpc_error_message(ge.code, ge.message))
+
+
 def _raise_if_non_rpc_content_type(ct_problem: Optional[String]) raises:
     """Raise the typed INTERNAL status for a `_non_rpc_content_type` finding.
 
@@ -411,6 +438,51 @@ def _raise_if_non_rpc_content_type(ct_problem: Optional[String]) raises:
             " not 5-byte-enveloped and must not be read as though they were",
         )
     )
+
+
+def _raise_terminal_status[
+    P: Protocol
+](
+    grpc_err_opt: Optional[GrpcError],
+    ct_problem: Optional[String],
+    http_status: UInt16,
+    trailers_present: Bool,
+    body_len: Int,
+) raises:
+    """The terminal-status decision shared by all four entry points, run AFTER
+    the body drain so the stream slot is released first.
+
+    In order:
+      1. a stated non-OK `grpc-status` is raised as its `[grpc:N]` (classic
+         gRPC only; Connect states its outcome in the HTTP status and body);
+      2. a non-200 HTTP status not already raised by 1: the spec's
+         HTTP-to-gRPC table (`_raise_if_http_non_200`), ahead of 3 so a
+         proxy's 503 page is UNAVAILABLE rather than a content-type complaint;
+      3. a non-RPC content-type is raised as INTERNAL naming the type
+         (`_non_rpc_content_type`), ahead of 4 because "this is not a gRPC
+         response at all" is the more specific diagnosis;
+      4. a classic-gRPC HTTP 200 with NO `grpc-status` anywhere is an error
+         (`grpc_error_for_missing_status`, which carries the reference
+         clients' choice of code). Before this check such a response was read
+         as OK.
+    A stated `grpc-status: 0` on an HTTP 200 passes through all four
+    untouched; 4 fires only when no status was stated.
+    """
+    comptime if P.unary_is_enveloped():
+        if grpc_err_opt.__bool__():
+            ref ge = grpc_err_opt.value()
+            if not ge.is_ok():
+                raise Error(format_grpc_error_message(ge.code, ge.message))
+    _raise_if_http_non_200[P](http_status)
+    _raise_if_non_rpc_content_type(ct_problem)
+    comptime if P.unary_is_enveloped():
+        if not grpc_err_opt.__bool__():
+            var missing = grpc_error_for_missing_status(
+                trailers_present, body_len
+            )
+            raise Error(
+                format_grpc_error_message(missing.code, missing.message)
+            )
 
 
 # =============================================================================
@@ -625,24 +697,20 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
         var ct_problem = _non_rpc_content_type(resp.headers)
         # 4. Drain the streaming response body to completion (cancellation-
         #    aware) into one List[UInt8].
+        var trailers_present = not resp.trailers.is_empty()
         var body_bytes = self._drain_response_body[RT](resp^, reactor, token)
-        # 4a. Raise the trailer/header gRPC status if it is non-OK (do this
-        # AFTER the drain so the stream slot is released first). Only the
-        # enveloped (classic gRPC) protocol carries status in trailers; Connect
-        # carries it in the body/HTTP-status, which decode_unary_response below
-        # already handles.
-        comptime if P.unary_is_enveloped():
-            if grpc_err_opt.__bool__():
-                ref ge = grpc_err_opt.value()
-                if not ge.is_ok():
-                    raise Error(
-                        format_grpc_error_message(ge.code, ge.message)
-                    )
-        # 4b. No status was stated. If the body is not an RPC body at all, say
-        # THAT — feeding it to the envelope decoder yields a framing diagnostic
-        # for a routing failure. Ordered after the status raise on purpose: a
-        # server that stated a real `grpc-status` has already answered.
-        _raise_if_non_rpc_content_type(ct_problem)
+        # 4a. The terminal status (AFTER the drain so the stream slot is
+        # released first): a stated non-OK `grpc-status`, then a non-200 via
+        # the spec's HTTP-to-gRPC table, then a non-RPC body (feeding it to the
+        # envelope decoder yields a framing diagnostic for a routing failure),
+        # then a classic-gRPC response that stated NO
+        # `grpc-status` at all. Connect carries its status in the body/HTTP
+        # status, which decode_unary_response below handles.
+        # See `_raise_terminal_status`.
+        _raise_terminal_status[P](
+            grpc_err_opt, ct_problem, http_status, trailers_present,
+            len(body_bytes),
+        )
         # 5. Decode the unary response (raises GrpcError on non-OK).
         var inner = decode_unary_response[P](Span(body_bytes), http_status)
         # decode_unary_response returns a span over body_bytes; copy out so
@@ -904,6 +972,7 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
         var resp = self._send_server_stream_bounded_goaway_retry[RT, P](
             path, request_message_bytes, opts, now_us, reactor,
         )
+        var http_status = UInt16(Int(resp.status))
         # 3a. gRPC status from the response HEADERS / TRAILERS, captured BEFORE
         # the drain. A server-streaming ERROR
         # (e.g. ReadObject on a missing object -> NOT_FOUND, code 5) is a
@@ -922,18 +991,16 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
         # Is this a gRPC response AT ALL? Captured before the drain consumes
         # `resp`. See `_non_rpc_content_type`.
         var ct_problem = _non_rpc_content_type(resp.headers)
+        var trailers_present = not resp.trailers.is_empty()
         var body_bytes = self._drain_response_body[RT](resp^, reactor, token)
-        # 3b. Raise the trailer/header gRPC status if it is non-OK (AFTER the
-        # drain so the stream slot is released first). Only the enveloped
-        # (classic gRPC) protocol carries status in trailers.
-        comptime if P.unary_is_enveloped():
-            if grpc_err_opt.__bool__():
-                ref ge = grpc_err_opt.value()
-                if not ge.is_ok():
-                    raise Error(
-                        format_grpc_error_message(ge.code, ge.message)
-                    )
-        _raise_if_non_rpc_content_type(ct_problem)
+        # 3b. The terminal status, AFTER the drain so the stream slot is
+        # released first — see `_raise_terminal_status`. A classic-gRPC stream
+        # with no `grpc-status` raises here rather than returning a decoder the
+        # caller would read as a complete result.
+        _raise_terminal_status[P](
+            grpc_err_opt, ct_problem, http_status, trailers_present,
+            len(body_bytes),
+        )
         var decoder = ServerStreamDecoder[P].new()
         decoder.feed_owned(body_bytes^)
         return decoder^
@@ -1223,18 +1290,14 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
         # Is this a gRPC response AT ALL? Captured before the drain consumes
         # `resp`. See `_non_rpc_content_type`.
         var ct_problem = _non_rpc_content_type(resp.headers)
+        var trailers_present = not resp.trailers.is_empty()
         var body_bytes = self._drain_response_body[RT](resp^, reactor, token)
-        # 2b. Raise the trailer/header gRPC status if it is non-OK (AFTER the
-        # drain so the stream slot is released first). Only the enveloped
-        # (classic gRPC) protocol carries status in trailers.
-        comptime if P.unary_is_enveloped():
-            if grpc_err_opt.__bool__():
-                ref ge = grpc_err_opt.value()
-                if not ge.is_ok():
-                    raise Error(
-                        format_grpc_error_message(ge.code, ge.message)
-                    )
-        _raise_if_non_rpc_content_type(ct_problem)
+        # 2b. The terminal status, AFTER the drain so the stream slot is
+        # released first — see `_raise_terminal_status`.
+        _raise_terminal_status[P](
+            grpc_err_opt, ct_problem, http_status, trailers_present,
+            len(body_bytes),
+        )
         # 3. The response is streaming-framed; pull the FIRST message.
         var decoder = ServerStreamDecoder[P].new()
         decoder.feed_owned(body_bytes^)
@@ -1295,6 +1358,7 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
         )
         # Pooled h2 multiplex.
         var resp = self._http[].send_grpc_pooled[RT, BytesBody](req^, reactor)
+        var http_status = UInt16(Int(resp.status))
         # ⭐ THE TERMINAL-STATUS CHECK, as on the other three entry points.
         #
         # `unary_call` (§3a), `server_stream` (§4 3a) and `client_stream` (§5
@@ -1312,17 +1376,14 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
             resp.headers, resp.trailers,
         )
         var ct_problem = _non_rpc_content_type(resp.headers)
+        var trailers_present = not resp.trailers.is_empty()
         var body_bytes = self._drain_response_body[RT](resp^, reactor, token)
         # `codec` (and its now-drained encoder + empty decoder) drops here.
         _ = codec^
-        comptime if P.unary_is_enveloped():
-            if grpc_err_opt.__bool__():
-                ref ge = grpc_err_opt.value()
-                if not ge.is_ok():
-                    raise Error(
-                        format_grpc_error_message(ge.code, ge.message)
-                    )
-        _raise_if_non_rpc_content_type(ct_problem)
+        _raise_terminal_status[P](
+            grpc_err_opt, ct_problem, http_status, trailers_present,
+            len(body_bytes),
+        )
         var decoder = ServerStreamDecoder[P].new()
         decoder.feed_owned(body_bytes^)
         return decoder^

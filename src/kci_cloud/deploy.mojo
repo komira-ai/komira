@@ -4,12 +4,13 @@
 # =============================================================================
 #
 # The three verbs every command runs through. Each one runs in a CELL
-# (`CellContext`: machine, cell, provenance, adopt, settings) and FIRST
-# configures the adapter with the cell's settings and validates: any finding
-# (a setting, the graph, coverage, a limit, the platform, the public
-# mechanism) refuses the whole graph before lowering, so a refused graph
-# never reaches an adapter's `lower` and never reaches the engine: nothing is
-# created, and the adapter is never asked to.
+# (`CellContext`: machine, cell, provenance, adopt, validation run id,
+# settings) and FIRST configures the adapter with the cell's settings and
+# validates: any finding (a validation run id outside komira_validation_run's
+# rule, on plan and apply only; a setting, the graph, coverage, a limit, the
+# platform, the public mechanism) refuses the whole graph before lowering,
+# so a refused graph never reaches an adapter's `lower` and never reaches the
+# engine: nothing is created, and the adapter is never asked to.
 #
 # LOWERING IS DATA. `lower_data` asks the adapter for `LoweredNode`s and holds
 # them to the lowering contract on every run (not only in tests): each
@@ -34,7 +35,7 @@
 # never deleted here.
 #
 # RETENTION ON THAT PATH. An object `list_owned` reports as RETAINED (its
-# `kci_retain=keep` label) is never turned into a node to remove: it is LEFT
+# `kci-retention=retain` mark) is never turned into a node to remove: it is LEFT
 # BEHIND, reported beside the leftover, and nothing deletes it. That is the
 # only thing that can say "keep" once the file stops lowering the node (a
 # KEEP bucket whose id is re-used by another type, say): the lowering no
@@ -76,7 +77,14 @@ from kci_reconciler import (
 )
 from kci_resource_proto.resource import Resource
 
-from kci_cloud.adapter import CellContext, CloudAdapter, Finding, LoweredNode, Setting
+from kci_cloud.adapter import (
+    CellContext,
+    CloudAdapter,
+    FINDING_CELL,
+    Finding,
+    LoweredNode,
+    Setting,
+)
 from kci_cloud.catalog import (
     Catalog,
     RETENTION_KEEP,
@@ -86,21 +94,40 @@ from kci_cloud.catalog import (
 from kci_cloud.clouds import Clouds
 from kci_cloud.data import key_change_findings
 from kci_cloud.grants import edges_for
+from kci_cloud.labels import validation_run_problem
 from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
 
 
 def refuse_unless_valid[
     S: CloudAdapter
-](clouds: Clouds, mut cloud: S, ctx: CellContext, resources: List[Resource]) raises:
+](
+    clouds: Clouds,
+    mut cloud: S,
+    ctx: CellContext,
+    resources: List[Resource],
+    check_validation_run: Bool = True,
+) raises:
     """Configure `cloud` with the cell, then validate; any finding raises the
     one refusal text. An unowned scope (no machine or cell) is refused:
-    kci deploys only into a cell."""
+    kci deploys only into a cell. With `check_validation_run` (plan and
+    apply), a validation run id outside komira_validation_run's rule is a
+    FINDING_CELL finding (`validation_run_id`). Destroy passes False: it
+    writes no run-id label, and a cleanup must not be blocked by a mark it
+    never writes."""
     if not ctx.scope.owned():
         raise Error(
             String("kci deploys only into a cell: the context names no")
             + String(" machine and cell")
         )
-    var findings = cloud.configure(ctx)
+    var findings = List[Finding]()
+    var run_problem = String("")
+    if check_validation_run:
+        run_problem = validation_run_problem(ctx.scope.validation_run_id)
+    if run_problem.byte_length() > 0:
+        findings.append(
+            Finding(FINDING_CELL, String("(cell)"), String("validation_run_id"), run_problem)
+        )
+    findings.extend(cloud.configure(ctx))
     var more = validate_for(clouds, cloud, resources)
     for i in range(len(more)):
         findings.append(more[i].copy())
@@ -391,7 +418,7 @@ struct ApplyOutcome(Movable, Deinitable):
                      run; the failing node is the first. Empty on success.
       * `leftover` — nodes of resources the file no longer names that the
                      cloud says this cell owns; reported, never deleted here.
-      * `left_behind` — RETAINED objects (`kci_retain=keep`) of resources
+      * `left_behind` — RETAINED objects (`kci-retention=retain`) of resources
                      still in the file that the file no longer lowers;
                      reported, never deleted.
 
@@ -487,8 +514,9 @@ def destroy_resources[
     roles a resource in the file turned off are torn down with it; a retained
     object the file no longer lowers is not. A graph this cloud cannot host
     cannot have been applied by it, so it is refused here too rather than
-    half-lowered."""
-    refuse_unless_valid(clouds, cloud, ctx, resources)
+    half-lowered. The scope's validation run id is not checked: destroy
+    writes no run-id label, so a malformed one does not block a cleanup."""
+    refuse_unless_valid(clouds, cloud, ctx, resources, check_validation_run=False)
     var leftover = List[String]()
     var left_behind = List[String]()
     var graph = _graph_for(

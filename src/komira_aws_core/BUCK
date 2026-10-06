@@ -148,6 +148,7 @@ mojo_library(
         "tests/test_aws_rest_xml_errors.mojo",
         "tests/test_aws_retry.mojo",
         "tests/test_aws_send.mojo",
+        "tests/test_aws_send_unsigned.mojo",
         "tests/test_aws_text.mojo",
         "tests/test_aws_xml_codec.mojo",
         "tests/test_credential_chain.mojo",

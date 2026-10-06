@@ -1,4 +1,4 @@
-# The generated SQS client (`SQSSQSClient`) end to end over
+# The generated SQS client (`SQSClient`) end to end over
 # komira_http_client and komira_http_core's ScriptedConnector (no socket):
 # a GetQueueUrl answered, and one whose queue does not exist. SQS is
 # awsQueryCompatible, so it names the error's legacy query code in an
@@ -15,7 +15,7 @@
 from komira_aws_sqs.komira_aws_sqs import (
     SQSEndpointConfig,
     SQSGetQueueUrlRequest,
-    SQSSQSClient,
+    SQSClient,
 )
 from komira_aws_core import (
     AWS_ECHO_CODE,
@@ -78,10 +78,10 @@ def _mk_missing() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> SQSSQSClient[C, StaticCredsSource]:
+) raises -> SQSClient[C, StaticCredsSource]:
     var config = SQSEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:9324"))
-    return SQSSQSClient[C, StaticCredsSource](
+    return SQSClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(

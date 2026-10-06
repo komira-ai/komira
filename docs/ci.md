@@ -179,6 +179,49 @@ network so an action cannot reach storage or the scheduler; deny
 action-cache writes at the client-facing endpoint. Until then, treat an
 approved run as able to affect every build that uses the same service.
 
+## What a farm test action can do
+
+`./buck2 test //src/komira_test_minio:farm_capability_probe`
+([the probe](../src/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
+inside one test action (on the farm, a Linux worker; with no farm
+configured, the client, like any other standalone test), each thing an
+end-to-end test of a real server needs, and prints one
+`FARM-CAPABILITY <name> key=value ...` line per capability. The first four
+rows are required: the test fails, naming the capability, when one is
+missing. The rest are reported and never fail it.
+
+The probe watches the workers only when it runs: the PR check runs it when
+its unit (`//src/komira_test_minio/...`) is affected, that is, when a PR
+touches `komira_test_minio` or one of its dependencies. Anyone can run it on
+demand with the command above. A test result is not cached, so each run is a
+fresh probe.
+
+A passing test's output is not shown (the gate runner prints a test's log
+only when it fails), so the values below were read from two farm runs on
+2026-10-05, each with one capability broken on purpose in the probe: one ran
+setpriv without `--pdeathsig` (the `pdeathsig` check went red), the other
+connected to the wrong port (the `loopback` check went red). Every other line
+in each run is what the worker did; the broken row's value comes from the
+other run.
+
+| capability | observed | enables |
+|---|---|---|
+| `child_reap` (required): start `sleep 30` through `komira_supervisor`, stop it, reap it | alive after 300 ms, died of SIGTERM (15), a second reap finds no child | any test that runs its own server process (the embedded MinIO of `komira_test_minio`) |
+| `loopback` (required): bind 127.0.0.1 port 0, connect, accept, move one byte | all three yes | a client and a server talking over 127.0.0.1 in one action |
+| `pdeathsig` (required): `/usr/bin/setpriv --pdeathsig KILL`, parent SIGKILLed | setpriv present; the child died with its parent; the control child, started without setpriv, outlived its parent | a server that dies with the test (`die_with_parent` in `komira_test_minio/process.mojo`), so a killed test leaves no process behind |
+| `disk_1gib` (required): write 1 GiB under `TEST_TMPDIR`, read the size back, delete it | written and deleted, in 0.7 and 0.85 s; 749 and 835 GiB available in the two runs | tests that write large data (object store contents) |
+| `uid` (reported): the current uid; `setpriv --reuid --regid --clear-groups` to a non-root `/etc/passwd` entry | the action runs as uid 0; the drop to `nobody` (65534) works; `nobody` cannot create a file in `TEST_TMPDIR` | a server that refuses to run as root (PostgreSQL), given a directory the dropped user can reach |
+| `egress` (reported): TCP connect to `conda.modular.com:443` | connects | the install-path test (a package install from Modular's channel) |
+| `tmpdir_outside_checkout` (reported): no directory from `TEST_TMPDIR` up to `/` holds `.git` or `.buckconfig` | outside: six levels walked to `/`, no marker | the install-path test, whose scratch must be outside any checkout |
+
+`tmpdir_outside_checkout` is reported, not required: the gate runner
+([`gate_runner.sh`](../tools/build/mojo/gate_runner.sh)) makes `TEST_TMPDIR`
+under the action's working directory, which for an action run on the client
+(no farm configured) is inside the checkout, so a required check would fail
+there for that reason rather than for a missing capability (derived from the
+code; no client run was made). The install-path
+test needs the same walk and must refuse to run when it finds a checkout.
+
 ## Build-system self-tests
 
 [`tools/build/tests/run_tests.sh`](../tools/build/tests/README.md) tests what a
@@ -288,7 +331,9 @@ channel answers NOOP (exit 0).
   manual run of `main` whose `revision` input names an unmerged commit is
   refused there, before the farm-connect action, `./buck2` or `kci` (all of
   which are that revision's own code, and could leave any in-kci check out)
-  run; kci refuses the same at start-up (`KCI-E-BREAK-GLASS-REASON`). No
+  run; kci refuses the same at start-up (exit 3,
+  `KCI-E-BREAK-GLASS-REVISION`; `KCI-E-BREAK-GLASS-REASON` is for the reason
+  only: missing, blank, or over 200 bytes). No
   release job, and no step of one, has `continue-on-error:` (R21): a failed
   check, publish or validation never reads as a success.
 - **A push is never a dry run.** `DRY_RUN` is set once, in the workflow's
@@ -335,11 +380,15 @@ channel answers NOOP (exit 0).
     `main`. A re-run of a MANUAL run is a manual run, and a re-run of any
     run uses that run's own `kci.yml` and `kci`: see
     [Re-runs of runs from before auto-promotion](#re-runs-of-runs-from-before-auto-promotion-a-ceo-action).
-  - `prod`'s last step says when `main` has moved past what it released
-    (`prod: main is at <tip>, past <revision>: a newer run is pending, or
+  - `prod`'s last step says when `main` has moved past the revision it ran
+    for (`prod: main is at <tip>, past <revision>: a newer run is pending, or
     was replaced or cancelled; if none is queued, re-run the newest
     cancelled run of main`), counting only commits a push would release (not
-    `docs/**` or `**.md`).
+    `docs/**` or `**.md`). It says so on a FAILED job too, after the
+    `prod: FAILED` line: a re-run of an old run that replaced a newer
+    pending release is then refused at `prod` (`KCI-E-SUPERSEDED`), and this
+    line is what names the newer release to re-run (the step has no `exit`,
+    rule R20, and writes neither `GITHUB_ENV` nor `DRY_RUN`, rule R22).
   - ⚠ **A push GitHub does not start a run for is not reported by itself.**
     GitHub's path filter reads at most the first 300 changed files of a
     push; when the files that matter are past them, the workflow may not
@@ -379,8 +428,8 @@ channel answers NOOP (exit 0).
   environment has a required reviewer)`. `prod`'s own `kci run` writes
   `promoted to prod: <names> <build>` or `promoted to prod: nothing new
   (<build> already there)` and the commits it carried; its last step writes
-  `prod: FAILED (...)` when the job failed, and the `main is at ...` line
-  above. Whether `prod` is paused is not read by any job (it would need
+  `prod: FAILED (...)` when the job failed, and, whether it failed or not,
+  the `main is at ...` line above. Whether `prod` is paused is not read by any job (it would need
   `actions: read`, which no job holds); the environment's page says so.
 
 ### Re-runs of runs from before auto-promotion: a CEO action
@@ -480,7 +529,7 @@ R18; nor in a `with: script:`, and no step's or job's `name:` holds any
 expression at all), and kci refuses a break-glass run without one, with
 one that is only whitespace, or with one over 200 bytes once trimmed
 (exit 3, `KCI-E-BREAK-GLASS-REASON`). A break-glass run that can publish
-releases the commit it started on: a `revision` input is for a dry run only, on the history of that commit. Every job's summary of such a run
+releases the commit it started on: a `revision` input is for a dry run only, on the history of that commit (kci refuses any other, exit 3, `KCI-E-BREAK-GLASS-REVISION`). Every job's summary of such a run
 starts `BREAK-GLASS: <ref> <revision> by <actor>: <reason>`.
 
 **What is the lock, and what is not.** A pull request's run uses the
