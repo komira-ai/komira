@@ -352,6 +352,112 @@ crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
 in [`../proto-codegen/`](../proto-codegen/);
 [`tests//functional/proto`](../tests/functional/proto/BUCK) holds the example protos and tests.
 
+### Wire fixtures: proto_fixture_check
+
+```python
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_check")
+```
+
+protoc, the reference implementation, reads committed wire fixtures in a build
+action, so a producer and a reader under test are held to an implementation
+that never saw their code, as far as the legs below reach. A fixture `<stem>`
+is three files:
+
+| file | holds |
+|---|---|
+| `<stem>.hex` | the bytes a producer under test wrote |
+| `<stem>.txtpb` | the line `# proto-message: <root>`, then exactly what `protoc --decode=<root>` prints for those bytes |
+| `<stem>.canonical.hex` | what `protoc --encode=<root>` writes for the `.txtpb`, the bytes for a reader under test |
+
+The hex format: hex digits, either case, two per byte; spaces, tabs and line
+breaks anywhere are ignored; any other character, an odd number of digits and
+an empty file are refused. `proto_encode` writes lowercase, 64 digits a line.
+
+`proto_fixture_check(name, fixtures, dir, files, hex, canonical_producer, srcs,
+import_prefix, proto_deps)` checks each entry `<stem>: <root>` of `fixtures`
+(the root a fully qualified message name, `package.Message`), reading
+`<dir>/<stem>.hex`, `.txtpb` and `.canonical.hex` from the package, or from
+the `staged_files` target `files` names (`<files>[<dir>/<stem>.hex]`) when
+they are another package's. `hex = {<stem>: <label>}` replaces a `.hex` with a
+build output. Legs 0 and 5 read the schema as protoc's own descriptor set
+(`--descriptor_set_out`, decoded with protoc's `descriptor.proto`), never a
+list; the check fails (`SCHEMA`) if that table does not hold one complete row
+for every field it declares.
+
+0. The bytes show a producer: the `.hex` is not byte for byte the
+   `.canonical.hex` (then both ends of legs 1 and 3 are protoc, and no
+   producer is checked), unless the stem is in `canonical_producer`, which
+   declares a producer that writes protoc's bytes; and no singular field of
+   `<root>` is written twice at the top level (protoc's decode shows only the
+   last). This is a necessary condition, not provenance: bytes that differ
+   from protoc's can still be hand-made.
+1. `protoc --decode=<root>` of the `.hex` is the `.txtpb` after its first
+   line, compared byte for byte.
+2. That decode holds no field the schema does not declare, at any depth:
+   protoc prints one as a bare number (`99: 1`, or `99 {` for a group or a
+   length-delimited value that parses as a message) and does not fail, so leg
+   1 alone passes it once the `.txtpb` holds the number too.
+3. `protoc --encode=<root>` of the `.txtpb` is the bytes of the
+   `.canonical.hex`.
+4. The `.txtpb`'s first line is `# proto-message: <root>`, so a fixture of
+   another message is refused even when both messages give the same bytes and
+   text.
+5. Every enum value in the decode has a name: protoc prints a value an open
+   (proto3) enum does not declare as a number on the field (`kind: 99`),
+   exits 0, and parses the number back, so legs 1 to 4 all pass it. The decode
+   is walked from `<root>` with the schema table, which places each line in
+   its message; a line it cannot place is a failure, not skipped.
+
+Each leg reads protoc's output and the committed files itself, never another
+leg's verdict: every leg runs whatever the others found, except that legs 2
+and 5 need a decode (when protoc refuses the bytes, leg 1 says so), and a
+`.hex` or `.canonical.hex` that is not hex, or a root the schema does not
+declare, fails the fixture before any leg (`FIXTURE`). Each failure is
+reported on its own line, `proto_fixture: <stem>: LEG <n>: ...`, naming the
+file read (for a `hex` override, the build output). The output is a report
+with one `PASS` line per fixture, written only when every leg of every fixture
+passed: building the target is the check.
+
+What the check cannot see. Under proto3's text format a scalar at its default
+is absent from the decode whether or not the producer wrote it, so a producer
+that drops a field and one that writes it as zero give the same `.txtpb`; a
+singular field written twice inside a nested message decodes as the last
+value (leg 0 counts top-level fields only); a forger who appends a repeated
+field's tag passes leg 0. So the `.txtpb` says what the bytes mean to protoc,
+not everything the producer wrote. Leg 5 proves an enum value has a name, not
+that it is the right one. Leg 4 compares two strings an author wrote (the
+`fixtures` root and the header line), nothing in the bytes.
+
+The check is held to its own legs: `proto_fixture_case` targets
+([`proto_fixture_testdata/BUCK`](proto_fixture_testdata/BUCK)) run it over a
+control fixture it must accept and one planted defect per refusal (each leg,
+leg 2 at the top level, nested and as a group, and an odd-length `.hex`), and
+assert the refusal and its message. Every `proto_fixture_check` and
+`proto_encode` action takes their verdicts as an input, so a check that stops
+refusing a defect fails every build that checks a fixture, the pull-request
+check's included. [Test 23](../tests/README.md#23-protobuf) builds the same
+defects end to end as planted-defect twins; those run only in
+`build_system_selftests.yml` (nightly and on demand), not in the pull-request
+check.
+
+`proto_encode(name, root, txtpb, srcs, import_prefix, proto_deps)` writes
+`protoc --encode=<root>` of `txtpb` (which must begin with the same
+`# proto-message: <root>` line) as `<name>.hex`, and refuses a text that
+encodes to no bytes. It is how a `.canonical.hex` is made:
+`./buck2 build <proto_encode target> --out <dir>/<stem>.canonical.hex`. It
+runs as a build action, so on the remote executors when the build is
+configured for remote execution (as this repository's farm configuration is),
+and nobody hand-makes the bytes. Its output is protoc's, so as a `.hex` it
+checks no producer (leg 0).
+
+`srcs` are staged at `import_prefix` joined with their path in the package,
+and the `proto_deps` closure (`mojo_proto_library`, its welded `<name>_gen`,
+`proto_srcs`) and protoc's well-known types are on the proto path, as for
+`mojo_proto_library`; protoc reads every `.proto` file of `srcs` and of that
+closure. protoc comes from `toolchains//:mojo_proto`; the macros default
+`exec_compatible_with` to linux x86_64, the one execution platform that
+toolchain pins protoc for.
+
 ### Generated Google Cloud clients: mojo_gcp_client
 
 ```python
