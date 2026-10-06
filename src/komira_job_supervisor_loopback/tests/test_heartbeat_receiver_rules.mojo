@@ -17,7 +17,9 @@
 #   is missing or holds no complete line; a first beat that arrives while this
 #   process already has a child (the first-beat probe; a real child is
 #   spawned for it, and the CONTROL without one records nothing and still
-#   opens the gate); a request that is not `POST /beat`.
+#   opens the gate); a first beat that arrives while this process has an
+#   exited, unreaped child (recorded, and the child is left for its owner's
+#   waitpid); a request that is not `POST /beat`.
 #
 # The legal paths are walked too: the cancel path (CANCEL answers the beat
 # AFTER the one that flagged it) and a job that exits while CANCELLING.
@@ -27,12 +29,19 @@ from std.testing import assert_equal, assert_true
 
 from std.os import remove
 from std.pathlib import Path
+from std.sys.info import CompilationTarget
 
 from komira_http_core.codec import HttpMethod
 from komira_proto_codec import encode_proto
 from komira_runtime_paths import test_tmpdir
 from komira_supervisor import ChildSpec, Supervisor
-from komira_supervisor.proc_ffi import proc_kill
+from komira_supervisor.proc_ffi import (
+    proc_close,
+    proc_kill,
+    proc_kqueue_exit_wait,
+    proc_pidfd_open,
+    proc_pidfd_wait,
+)
 
 from komira_job_report_proto.job_report import (
     JobDirective,
@@ -42,6 +51,7 @@ from komira_job_report_proto.job_report import (
 )
 
 from komira_job_supervisor_loopback import (
+    CHILDREN_EXITED,
     CHILDREN_NONE,
     CHILDREN_NOT_PROBED,
     CHILDREN_RUNNING,
@@ -314,6 +324,55 @@ def test_the_first_beat_probe_fires_when_a_child_already_exists() raises:
     print("  test_the_first_beat_probe_fires_when_a_child_already_exists: PASS")
 
 
+def _await_exit_without_reaping(pid: Int32) raises:
+    """Wait up to 5 s for `pid` to exit through a kernel notification that
+    does not reap it (pidfd on Linux, EVFILT_PROC on macOS)."""
+    comptime if CompilationTarget.is_macos():
+        var fired = proc_kqueue_exit_wait(pid, Int32(5000))
+        assert_equal(fired, Int32(1), "kqueue saw the child exit")
+    else:
+        var fd = proc_pidfd_open(pid)
+        assert_true(fd >= Int32(0), "pidfd_open: " + String(fd))
+        var fired = proc_pidfd_wait(fd, Int32(5000))
+        proc_close(fd)
+        assert_equal(fired, Int32(1), "the pidfd saw the child exit")
+
+
+def test_the_first_beat_probe_leaves_an_exited_child_to_its_owner() raises:
+    # An exited, unreaped child of this process when beat 1 arrives. The
+    # probe must see it and must NOT reap it: the child belongs to whoever
+    # spawned it, and that owner's waitpid(pid) still has to collect it.
+    var f = _scratch_file(String("rules_gate_exited"), String(""))
+    var sup = Supervisor()
+    var pid = sup.spawn(ChildSpec.shell(String("exit 7")))
+    assert_true(pid > Int32(0), "spawned a child: " + String(pid))
+    _ = sup.drain_pipe(sup.stdout_fd())
+    _ = sup.drain_pipe(sup.stderr_fd())
+    _await_exit_without_reaping(pid)
+    var r = HeartbeatReceiver(
+        String(_JOB), String(_INST), first_beat_gate=f
+    )
+    _ = r.receive(_running())
+    var owner = sup.try_wait()
+    if not owner.collected:
+        _ = sup.terminate(1000)
+    sup.close()
+    _one_violation(
+        r, String("the first beat arrived after the job was spawned")
+    )
+    assert_equal(r.first_beat_children, CHILDREN_EXITED, "an exited child")
+    assert_true(
+        owner.collected,
+        "the owner's waitpid collected the child after the probe (error "
+        + String(owner.error)
+        + ")",
+    )
+    assert_equal(owner.exit_code, Int32(7), "the owner saw exit code 7")
+    print(
+        "  test_the_first_beat_probe_leaves_an_exited_child_to_its_owner: PASS"
+    )
+
+
 def test_only_post_beat_is_admitted() raises:
     var r = _rx()
     assert_true(r.admit(HttpMethod.post(), String("/beat")), "POST /beat")
@@ -346,5 +405,6 @@ def main() raises:
     test_a_first_beat_outside_the_enum_is_named_as_a_phase()
     test_a_half_written_pid_file_is_a_violation()
     test_the_first_beat_probe_fires_when_a_child_already_exists()
+    test_the_first_beat_probe_leaves_an_exited_child_to_its_owner()
     test_only_post_beat_is_admitted()
     print("test_heartbeat_receiver_rules: ALL PASS")

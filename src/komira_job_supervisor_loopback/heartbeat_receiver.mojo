@@ -53,7 +53,8 @@
 # decides "did the job exist before the first beat was answered" from an
 # ORDER of events, not from a wait. When beat 1 arrives, and before it is
 # answered, the receiver (1) asks the kernel whether THIS process has any
-# child (`waitpid(-1, WNOHANG)` through komira_supervisor's `proc_reap`), then
+# child, in any state (komira_supervisor's `proc_probe_children`:
+# `waitid(P_ALL, WEXITED | WNOHANG | WNOWAIT)`, which never reaps), then
 # (2) creates the file `first_beat_gate`, then (3) answers.
 #
 #   * The supervisor runs in this process, and its job is a posix_spawn child
@@ -69,9 +70,12 @@
 #     The test also has the job record whether the gate already existed when
 #     it started: the job-side record of the same order.
 #
-# `first_beat_children` keeps what (1) saw (CHILDREN_*). A child that had
-# already exited would be COLLECTED by the probe; that is recorded as a
-# violation too (the gate makes it unreachable from the loopback test).
+# `first_beat_children` keeps what (1) saw (CHILDREN_*). Any child is a
+# violation: a running one (CHILDREN_RUNNING) or one that has exited and is
+# not yet reaped (CHILDREN_EXITED; the gate makes it unreachable from the
+# loopback test). The probe leaves an exited child a zombie, so its owner's
+# waitpid(pid) still collects it. Only ECHILD means "no child"; any other
+# waitid failure is a violation carrying its errno (CHILDREN_PROBE_FAILED).
 #
 # THREADING: the receiver is owned by the serve loop, touched only by the
 # serving thread while a duet runs, and read by the test after the join.
@@ -94,10 +98,10 @@ from komira_http_core.codec.types import (
 from komira_http_server.dispatch import RequestDispatcher
 from komira_proto_codec import decode_proto, encode_proto
 
-# Test-only reuse of komira_supervisor's existing kill(2) wrapper as a
-# liveness probe (signal 0) and of its waitpid(2) wrapper as the first-beat
-# probe (pid -1, WNOHANG); no foreign function is declared here.
-from komira_supervisor.proc_ffi import proc_kill, proc_reap
+# Test-only reuse of komira_supervisor's kill(2) wrapper as a liveness probe
+# (signal 0) and of its non-reaping waitid(2) child probe as the first-beat
+# probe; no foreign function is declared here.
+from komira_supervisor.proc_ffi import proc_kill, proc_probe_children
 
 from komira_job_report_proto.job_report import (
     JobDirective,
@@ -124,7 +128,8 @@ comptime BEAT_PATH = "/beat"
 comptime CHILDREN_NOT_PROBED: Int = -1
 comptime CHILDREN_NONE: Int = 0
 comptime CHILDREN_RUNNING: Int = 1
-comptime CHILDREN_COLLECTED: Int = 2
+comptime CHILDREN_EXITED: Int = 2
+comptime CHILDREN_PROBE_FAILED: Int = 3
 
 
 def receiver_state_name(state: Int) -> String:
@@ -150,8 +155,10 @@ def children_name(children: Int) -> String:
         return String("no child")
     if children == CHILDREN_RUNNING:
         return String("a running child")
-    if children == CHILDREN_COLLECTED:
-        return String("an exited child (collected by the probe)")
+    if children == CHILDREN_EXITED:
+        return String("an exited, unreaped child")
+    if children == CHILDREN_PROBE_FAILED:
+        return String("a failed probe")
     return String("UNKNOWN(") + String(children) + String(")")
 
 
@@ -308,15 +315,24 @@ struct HeartbeatReceiver(RequestDispatcher):
         process, THEN open the gate; the caller answers after both."""
         if self.first_beat_gate.byte_length() == 0:
             return
-        var r = proc_reap(Int32(-1), nohang=True)
-        if r.collected:
-            self.first_beat_children = CHILDREN_COLLECTED
-        elif r.error:
-            # ECHILD: this process has no child at all.
-            self.first_beat_children = CHILDREN_NONE
-        else:
-            self.first_beat_children = CHILDREN_RUNNING
-        if self.first_beat_children != CHILDREN_NONE:
+        try:
+            var p = proc_probe_children()
+            if not p.any_child:
+                # ECHILD: this process has no child at all.
+                self.first_beat_children = CHILDREN_NONE
+            elif p.exited_pid != Int32(0):
+                self.first_beat_children = CHILDREN_EXITED
+            else:
+                self.first_beat_children = CHILDREN_RUNNING
+        except e:
+            self.first_beat_children = CHILDREN_PROBE_FAILED
+            self._violation(
+                beat, String("the first-beat probe failed: ") + String(e)
+            )
+        if (
+            self.first_beat_children != CHILDREN_NONE
+            and self.first_beat_children != CHILDREN_PROBE_FAILED
+        ):
             self._violation(
                 beat,
                 String("the first beat arrived after the job was spawned")
