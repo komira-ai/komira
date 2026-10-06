@@ -1145,8 +1145,9 @@ mod tests {
         let check = head.find("if aws_xml_body_is_error(resp):").expect("the 200 check");
         assert!(check < head.find("aws_xml_parse(resp.body)").expect("body"), "{src}");
         // Named as the client's error builder names the service: the type
-        // prefix, then the service name.
-        assert!(head.contains("String(\"S3S3.Head failed: HTTP 500 \")"), "{head}");
+        // prefix, once.
+        assert!(head.contains("String(\"S3.Head failed: HTTP 500 \")"), "{head}");
+        assert!(!src.contains("S3S3"), "{src}");
         // Not where the payload is a blob, streaming (`Get`, read by its head
         // parser) or not (`GetBytes`), or a string (`GetText`).
         for name in ["s3_parse_get_bytes_response", "s3_parse_get_text_response"] {

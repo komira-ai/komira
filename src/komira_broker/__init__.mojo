@@ -36,6 +36,7 @@ from .broker_core import (
     FLUSH_MS,
     SEGMENT_FOOTER_LEN,
 )
+from .flush_fence import FlushLeakStats
 
 # The broker PRODUCE path on the CoalescingWindow primitive (the parkable
 # path). The three broker conformers (BrokerHeadReader / BrokerSegCodec /

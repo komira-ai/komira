@@ -59,7 +59,9 @@ refuses a `target_compatible_with` with no marker, a marker with no row, a row
 with no marker, and a row whose retiring PR has merged (a commit subject on
 main contains `[native-pr:<n>]`) while its marker is still there. A PR that
 deletes a limit deletes its marker and its row; `never` is only for product
-statements (images are a Linux product).
+statements (images are a Linux product), including a test whose subject is
+one OS's features (the farm capability probe tests the Linux kernel features
+the Linux server products' end-to-end tests need).
 
 The **golden** ([`tools/build/tests/golden`](../tests/golden/golden.sh)) is the
 zero-execution check for `linux-x86_64`: its configuration, and a hash of the

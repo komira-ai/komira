@@ -29,6 +29,7 @@ file at the pinned commit.
 | `:cloudscheduler_v1` | the Cloud Scheduler v1 protos (root `google/cloud/scheduler/v1/cloudscheduler.proto`), checked the same way |
 | `:secretmanager_v1` | the Secret Manager v1 protos (root `google/cloud/secretmanager/v1/service.proto`), checked the same way |
 | `:monitoring_v3` | the Cloud Monitoring v3 protos (root `google/monitoring/v3/metric_service.proto`, for `ListTimeSeries`), checked the same way |
+| `:api_client` | the `(google.api.http)` and `(google.api.default_host)` option protos (roots `google/api/{annotations,client}.proto`), checked the same way: the import root of the proto codegen goldens (`tests//functional/proto_codegen`) |
 | `:googleapis[google/cloud/run/v2/run_v2.yaml]` | the Cloud Run Admin v2 service configuration, whose `http.rules` bind the long-running operations mixin to Run's paths (no `.proto` states them) |
 
 ## Using the protos

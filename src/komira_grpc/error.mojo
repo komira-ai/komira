@@ -161,7 +161,7 @@ def parse_grpc_status_code(msg: String) -> Int:
     var acc = 0
     var saw_digit = False
     while i < n:
-        var c = ord(msg[byte=i])
+        var c = Int(msg.as_bytes()[i])
         if c >= ord("0") and c <= ord("9"):
             acc = acc * 10 + (c - ord("0"))
             saw_digit = True
@@ -185,7 +185,7 @@ def parse_grpc_error_message(text: String) -> Tuple[UInt8, String]:
     var p_len = prefix.byte_length()
     var close_idx = -1
     for i in range(p_len, text.byte_length()):
-        if ord(text[byte=i]) == ord("]"):
+        if Int(text.as_bytes()[i]) == ord("]"):
             close_idx = i
             break
     if close_idx < 0:
@@ -193,7 +193,7 @@ def parse_grpc_error_message(text: String) -> Tuple[UInt8, String]:
     var code = UInt8(0)
     var any_digit = False
     for i in range(p_len, close_idx):
-        var c = ord(text[byte=i])
+        var c = Int(text.as_bytes()[i])
         if c >= ord("0") and c <= ord("9"):
             code = code * 10 + UInt8(c - ord("0"))
             any_digit = True
@@ -202,11 +202,12 @@ def parse_grpc_error_message(text: String) -> Tuple[UInt8, String]:
     if not any_digit:
         return (GRPC_STATUS_UNKNOWN, text)
     var msg_start = close_idx + 1
-    if msg_start < text.byte_length() and ord(text[byte=msg_start]) == ord(" "):
+    if msg_start < text.byte_length() and Int(text.as_bytes()[msg_start]) == ord(" "):
         msg_start += 1
-    var msg = String("")
-    for i in range(msg_start, text.byte_length()):
-        msg += text[byte=i]
+    # The message is the bytes after the prefix, copied as bytes: `msg_start`
+    # follows an ASCII byte, so the tail of a valid UTF-8 string is valid
+    # UTF-8. (Indexing `text[byte=i]` asserts on a continuation byte.)
+    var msg = String(StringSlice(unsafe_from_utf8=text.as_bytes()[msg_start:]))
     return (code, msg)
 
 
@@ -419,7 +420,7 @@ def _parse_decimal_uint8(s: String) -> Optional[UInt8]:
         return Optional[UInt8]()
     var v: Int = 0
     for i in range(n):
-        var b = ord(s[byte=i])
+        var b = Int(s.as_bytes()[i])
         if b < ord("0") or b > ord("9"):
             return Optional[UInt8]()
         v = v * 10 + (b - ord("0"))

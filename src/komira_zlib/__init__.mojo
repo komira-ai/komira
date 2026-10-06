@@ -22,6 +22,7 @@
 #   * `zlib_deflate_into(dst, src, level, window_bits) -> Int`
 #   * `zlib_compress_bound(src_len, window_bits) -> Int`
 #   * `zlib_skip_stream(src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int`
+#   * `zlib_crc32(data, crc=0) -> UInt32` (the gzip trailer's CRC-32)
 #   * the `ZLIB_WINDOW_BITS_*` framing selectors and `ZLIB_LEVEL_DEFAULT`
 #   (Span in, caller-owned Span out; a too-small `dst` is refused). No public
 #   signature holds a raw pointer: the pointer-taking `_zlib_*_ffi` entries
@@ -45,6 +46,7 @@ from .zlib_ffi import (
     ZLIB_WINDOW_BITS_RAW,
     ZLIB_WINDOW_BITS_ZLIB,
     zlib_compress_bound,
+    zlib_crc32,
     zlib_deflate_into,
     zlib_inflate_into,
     zlib_skip_stream,

@@ -74,7 +74,13 @@
 #       literal stands in for it. Job J declares the output O.
 #   R20 THE PROD LINE. Every job of a PUSH stage, and every part job of one,
 #       ends with a step named `the prod line` whose `if:` is `always()`: one
-#       plain line in the job summary says what happens to prod.
+#       plain line in the job summary says what happens to prod. Its `run:`
+#       script has no shell word `exit` (read as the shell reads it: quotes
+#       and backslashes removed, a `#` comment skipped, so a quoted message
+#       such as `"... exit $rc"` is not one): it never exits early, so what
+#       it reports after the job's status (prod's: main has moved past
+#       REVISION, a newer release to re-run) is reported on a failure as
+#       well as on a success.
 #   R21 THE REVISION IS THIS RUN'S, checked by the workflow itself. Every
 #       job of a PUSH stage, and every part job of one, starts with exactly
 #       two steps: `actions/checkout` (pinned, R8) with `ref: ${{
@@ -645,6 +651,71 @@ def check_prod_line(doc: WorkflowDoc, job_id: String, job: Int, mut findings: Li
             _at(doc, job) + String("job '") + job_id + String("': R20: its last step is `name: ") + String(PROD_LINE_STEP)
             + String("` with `if: always()`: every release job says in one line what happens to prod")
         )
+        return
+    var r = doc.child(steps[len(steps) - 1], String("run"))
+    if r >= 0 and doc.kind(r) == NODE_SCALAR and _has_unquoted_exit(doc.text(r)):
+        findings.append(
+            _at(doc, r) + String("job '") + job_id + String("': R20: `") + String(PROD_LINE_STEP)
+            + String("` runs `exit`: it must reach its end on every path, so what it reports after the job's")
+            + String(" status (main moved past the revision) is reported on a failure too")
+        )
+
+
+def _is_separator(c: Int) -> Bool:
+    """Whitespace and `;&|(){}` and the backquote end an unquoted word."""
+    return (
+        c == 32 or c == 9 or c == 10 or c == 59 or c == 38 or c == 124 or c == 40 or c == 41
+        or c == 123 or c == 125 or c == 96
+    )
+
+
+def _has_unquoted_exit(script: String) -> Bool:
+    """True iff some shell word of `script` is `exit` once its quotes and
+    backslashes are removed, as the shell reads it: words end at whitespace,
+    `;&|(){}` and the backquote outside quotes; '...' and "..." are part of
+    the word they sit in (so the message `"... ${rc:+: exit $rc}"` is one
+    word, never `exit`, while `"exit"` and `\\exit` are); a `#` that starts
+    a word starts a comment that runs to the end of the line (so an
+    apostrophe in a comment opens no quote, and `exit` in a comment is not
+    run). Conservative: an argument that is the word `exit` counts too."""
+    var b = script.as_bytes()
+    var n = len(b)
+    var word = String("")
+    var started = False
+    var i = 0
+    while i <= n:
+        var c = 10 if i == n else Int(b[i])
+        if c == 39 or c == 34:  # ' or ": the quoted text joins the word, quotes removed
+            started = True
+            var j = i + 1
+            while j < n and Int(b[j]) != c:
+                if c == 34 and Int(b[j]) == 92 and j + 1 < n:  # \ inside "..." escapes the next byte
+                    j += 1
+                word += chr(Int(b[j]))
+                j += 1
+            i = j + 1
+            continue
+        if c == 92 and i + 1 < n:  # an unquoted backslash escapes the next byte
+            if Int(b[i + 1]) != 10:  # a backslash-newline joins two lines
+                word += chr(Int(b[i + 1]))
+                started = True
+            i += 2
+            continue
+        if c == 35 and not started:  # `#` at a word's start: a comment to the end of the line
+            while i < n and Int(b[i]) != 10:
+                i += 1
+            continue
+        if _is_separator(c):
+            if started and word == String("exit"):
+                return True
+            word = String("")
+            started = False
+            i += 1
+            continue
+        word += chr(c)
+        started = True
+        i += 1
+    return False
 
 
 def check_workflow_dry_run(doc: WorkflowDoc, mut findings: List[String]):

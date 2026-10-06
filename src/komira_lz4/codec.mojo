@@ -8,15 +8,16 @@
 # leaf both depend on.
 #
 # The LZ4 FRAME entries (`LZ4F_*`, the interoperable Kafka/Arrow-IPC framing)
-# are a distinct codec (frame vs raw block) with a distinct consumer set, and
-# are not here.
+# are a distinct codec (frame vs raw block) and live in `frame.mojo`, which
+# shares this file's liblz4 handle.
 #
 # # Approach: runtime dlopen via OwnedDLHandle, singleton via stdlib `_Global`
 #
 # RUNTIME dlopen via OwnedDLHandle of the system liblz4, cached in a
 # process-lifetime `_Global` runtime slot (init-once, cross-compile-unit-
 # coherent). No env var and no `unsafe_from_address`. A distinct `_Global`
-# name keeps this raw-block handle independent of any frame-codec singleton.
+# name keeps this handle independent of other packages' liblz4 singletons;
+# `frame.mojo` uses this same handle.
 #
 # # Encapsulation (FFI boundary)
 #
@@ -61,8 +62,9 @@ comptime _LIBLZ4: StaticString = (
 #
 # `_Global[name, init_fn]` provides a name-keyed, process-global, init-once,
 # cross-compile-unit-coherent slot managed by the KGEN runtime: no env var, no
-# address laundering. The distinct `_Global` name keeps this liblz4 RAW-BLOCK
-# handle independent of any other codec's singleton.
+# address laundering. The distinct `_Global` name keeps this liblz4 handle
+# (raw-block and, through frame.mojo, frame entries) independent of any other
+# package's singleton.
 # -----------------------------------------------------------------------------
 
 

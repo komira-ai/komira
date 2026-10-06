@@ -28,7 +28,12 @@ interface. This package names no cloud:
                        graph findings, a table's key as text, the index
                        role `ix-<h>`, and the refusal of a changed key.
   * labels.mojo      — the standard label rule (encode, decode, check), and
-                       the `kci_retain=keep` label of a kept object.
+                       komira_validation_run's two marks: the retention
+                       mark `kci-retention=<retain|delete>` on every object
+                       kci creates or adopts, and the `kci-run-id=<id>`
+                       label of an object created in a scope with a
+                       validation run id (no kci verb sets one yet);
+                       `create_labels` is every label a create writes.
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
                        `resolve` (with a typo suggestion), and the rule that
                        every cloud declares every catalog type.
@@ -43,8 +48,9 @@ interface. This package names no cloud:
                        returns an `ApplyOutcome` (applied, landed, pending,
                        error, leftover); and the plan grouped by authored
                        resource.
-  * conformance.mojo — the conformance kit every cloud runs (eleven steps,
-                       from label stamping to two interleaved applies).
+  * conformance.mojo — the conformance kit every cloud runs (twelve steps,
+                       from label stamping to two interleaved applies and
+                       the validation-run tag under the kit's own run id).
 
 The fake clouds (working in-memory clouds, not mocks) that exercise all of it live in
 `kci_cloud_fake`.
@@ -142,9 +148,9 @@ from kci_cloud.data import (
 )
 from kci_cloud.labels import (
     LABEL_VALUE_MAX,
-    LABEL_RETAIN,
-    RETAIN_KEEP_VALUE,
     retain_labels,
+    retention_label_key,
+    retention_label_value,
     retained_by,
     encoded_label_bytes,
     encode_label_value,
@@ -152,6 +158,12 @@ from kci_cloud.labels import (
     standard_label_rule,
     standard_identity_of,
     label_problems,
+    VALIDATION_RUN_TAG_PREFIX,
+    create_labels,
+    validation_run_label_key,
+    validation_run_labels,
+    validation_run_of,
+    validation_run_problem,
 )
 from kci_cloud.clouds import (
     Clouds,
