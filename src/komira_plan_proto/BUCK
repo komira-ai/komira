@@ -22,6 +22,11 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # the result in the generated newtype for transport (`PlanTag(Int(wire))`).
 # The generated constants exist so the `.proto` is typed for the other
 # languages that read it, which name `PlanTag` rather than a bare `uint32`.
+#
+# `test_srcs` welds the package to a census of the envelope and of a few
+# leaf messages and vocabulary numbers; the whole plan wire is exercised by
+# `komira_plan_wire`'s round trips. README.md's examples run as one more
+# welded test.
 mojo_proto_library(
     name = "komira_plan_proto",
     srcs = [
@@ -30,5 +35,6 @@ mojo_proto_library(
     ],
     import_prefix = "komira/plan/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    test_srcs = ["tests/test_plan_field_numbers.mojo"],
     visibility = ["PUBLIC"],
 )

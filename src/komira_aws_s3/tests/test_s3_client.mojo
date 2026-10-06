@@ -1,4 +1,4 @@
-# The generated S3 client (`S3S3Client`), verb by verb, end to end: the
+# The generated S3 client (`S3Client`), verb by verb, end to end: the
 # request built, resolved through S3's endpoint ruleset to a local
 # endpoint (path style), signed and sent by komira_aws_core over
 # komira_http_client, and the answer parsed or raised. The connector is
@@ -43,7 +43,7 @@ from komira_aws_s3.komira_aws_s3 import (
     S3HeadObjectRequest,
     S3ListObjectsV2Request,
     S3PutObjectRequest,
-    S3S3Client,
+    S3Client,
     S3UploadPartRequest,
 )
 from komira_aws_core import (
@@ -114,7 +114,7 @@ def _creds() -> StaticCredsSource:
     )
 
 
-comptime _Client = S3S3Client[ScriptedConnector, StaticCredsSource]
+comptime _Client = S3Client[ScriptedConnector, StaticCredsSource]
 
 
 def _client(
@@ -371,7 +371,7 @@ def test_head_404_has_no_body() raises:
 # ---- the requests on the wire ----------------------------------------------------
 
 
-comptime _Echo = S3S3Client[AwsEchoConnector, StaticCredsSource]
+comptime _Echo = S3Client[AwsEchoConnector, StaticCredsSource]
 
 
 def _mk_echo() raises -> AwsEchoConnector:

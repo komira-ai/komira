@@ -12,11 +12,10 @@
 # the network) with `set_rest_host`; the default host is
 # test_cloudscheduler_endpoint's subject.
 #
-# One part of the bodies is the codec's, not the API's: komira_proto_codec
-# writes default-valued fields (`"description":""`,
-# `"state":"STATE_UNSPECIFIED"`, `"audience":""`), which the proto3 JSON
-# mapping lets a writer omit and the service reads as unset. The update
-# mask names exactly the fields the caller sets, so the unset ones are not
+# A body is the job as the caller states it: a field left at its default
+# (`description`, `state`, `audience`) is omitted, as the proto3 JSON
+# mapping omits it, and the service reads it as unset. The update mask
+# names exactly the fields the caller sets, so the unset ones are not
 # written over.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
@@ -56,16 +55,9 @@ comptime _JOB = (
     + '"oidcToken":{"serviceAccountEmail":"invoker@demo-project.iam.gserviceaccount.com"}}}'
 )
 
-# The same job as the client writes it.
-comptime _JOB_WIRE = (
-    '{"name":"projects/demo-project/locations/us-central1/jobs/nightly-sync",'
-    + '"description":"","schedule":"0 3 * * *","timeZone":"America/Chicago",'
-    + '"state":"STATE_UNSPECIFIED","attemptDeadline":"320s",'
-    + '"httpTarget":{"uri":"https://sync-abc123-uc.a.run.app/tick","httpMethod":"POST",'
-    + '"headers":{"Content-Type":"application/json"},"body":"e30=",'
-    + '"oidcToken":{"serviceAccountEmail":"invoker@demo-project.iam.gserviceaccount.com",'
-    + '"audience":""}}}'
-)
+# The job as the client writes it: byte for byte as stated, nothing the
+# caller left unset added.
+comptime _JOB_WIRE = _JOB
 
 # The job as the service answers it: the stated fields, and its own.
 comptime _JOB_ANSWER = (

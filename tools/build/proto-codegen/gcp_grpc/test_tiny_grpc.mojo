@@ -21,7 +21,7 @@
 #     decode into the generated types.
 #
 # The rig is HTTP/1.1, so a status arrives in the response headers (the
-# trailers-only shape). A status in real HTTP/2 trailers after DATA frames
+# trailers-only shape); every success response states `grpc-status: 0`. A status in real HTTP/2 trailers after DATA frames
 # reaches the client as the same `[grpc:N]` error; komira_grpc's
 # test_grpc_client_trailers_only_and_streams pins that for `unary_call` and
 # `server_stream`, and the mapping here does not depend on where the anchor
@@ -161,10 +161,14 @@ def _make_reactor() raises -> Reactor[NoopSink]:
     return Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_KQUEUE)
 
 
-def _http_200(body: List[UInt8], status_headers: String = "") -> List[UInt8]:
+def _http_200(
+    body: List[UInt8], status_headers: String = "grpc-status: 0\r\n"
+) -> List[UInt8]:
     """A canned HTTP/1.1 200 gRPC response: `status_headers` (CRLF-terminated
     lines) after the content type, then `body`. `Connection: close`, so each
-    call dials its own scripted stream."""
+    call dials its own scripted stream. The default states `grpc-status: 0`,
+    as a conforming server does: komira_grpc raises a classic-gRPC response
+    that states no status at all."""
     return _http_response("200 OK", "application/grpc", body, status_headers)
 
 

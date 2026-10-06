@@ -250,10 +250,14 @@ struct MessageBrokerConsumer[Storage: ConditionalWriteStore](
         return self._core.read_from(self._start_offset)
 
     def poll_tail(mut self, drained_chunks: Int64) raises -> Slab[ConsumeSegment]:
-        """TAIL / live-consume mode: a consumer that has already
-        drained `drained_chunks` segments re-polls for new ones. Returns the
-        segments for chunks `[drained_chunks, num_chunks)` — the new tail
+        """TAIL / live-consume mode: a consumer that has already drained the
+        first `drained_chunks` manifest chunks re-polls for new ones. Returns
+        the segments for chunks `[drained_chunks, num_chunks)` — the new tail
         appended since the last drain. Empty slab = no new segments yet.
+        `drained_chunks` counts manifest chunks, not segments: a chunk that
+        owns no segment (a txn COMMIT/ABORT marker) yields no entry, so the
+        caller resumes after the last returned `chunk_seq` (or the polled
+        chunk count), never after `len(result)`.
 
         `Slab[ConsumeSegment]` (Movable-only container) — see `drain_streams`.
         Read-only re-poll: no CAS contention (the gate does not bind consume).
@@ -262,7 +266,9 @@ struct MessageBrokerConsumer[Storage: ConditionalWriteStore](
         var out = Slab[ConsumeSegment]()
         var seq = drained_chunks
         while seq < total:
-            out.append(self._core.read_chunk_segment(seq))
+            var seg = self._core.read_chunk_segment(seq)
+            if seg:
+                out.append(seg.take())
             seq += Int64(1)
         return out^
 

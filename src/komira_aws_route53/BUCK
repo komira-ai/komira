@@ -11,7 +11,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # nothing of it is copied here), in client mode: each operation's request
 # builder and response parser, its endpoint resolved through Route 53's
 # published endpoint ruleset and partition table, embedded in the module,
-# and `Route53Route53Client`, which resolves each call's endpoint and sends
+# and `Route53Client`, which resolves each call's endpoint and sends
 # through komira_aws_core's send_sigv4_signed_request (signing name
 # `route53`) over the komira_http_core Connector it is given, retried as
 # botocore's standard mode retries (PriorRequestNotComplete, Route 53's

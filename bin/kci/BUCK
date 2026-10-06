@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_test")
 
 # kci: ONE binary with ONE command. `kci run --stage S` runs a stage of the
 # machine file (under GitHub Actions it first holds the workflow it runs under
@@ -13,3 +13,30 @@ mojo_binary(
 # Read by kci_cli's test that no kci source but kci_api spells an exit
 # number.
 export_file(name = "main.mojo", visibility = ["//src/kci_cli:"])
+
+# The kci binary run as a PROCESS (kci_cli's welded tests call it in-process):
+# its runnable directory is staged at `kci/` and started through kci_build's
+# SupervisorRunner, with the fixtures below and a fake git and buck2 the test
+# writes. Asserted per case: the exit number, stderr, and what kci wrote to
+# --result-file and/or --summary-file (bad argv 2; a PUBLISH --plan with no token 4,
+# KCI-E-CREDENTIAL; a drifted workflow under GitHub Actions 3, nothing run;
+# an unwritable --result-file 4 before any step; a BUILD --plan's summary).
+# A standalone test (`buck2 test`): kci_cli's test_srcs cannot depend on the
+# binary built from kci_cli.
+mojo_test(
+    name = "test_kci_process",
+    srcs = ["tests/test_kci_process.mojo"],
+    deps = [
+        "//src/kci_api:kci_api",
+        "//src/kci_build:kci_build_lib",
+        "//src/kci_publish:kci_publish_lib",
+        "//src/komira_libc:komira_libc",
+    ],
+    data = {
+        "kci": ":kci[runnable]",
+        "fixtures/artifacts.textproto": "tests/fixtures/artifacts.textproto",
+        "fixtures/channels.textproto": "tests/fixtures/channels.textproto",
+        "fixtures/kci_drifted.yml": "tests/fixtures/kci_drifted.yml",
+        "fixtures/machine.textproto": "tests/fixtures/machine.textproto",
+    },
+)

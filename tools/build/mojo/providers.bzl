@@ -125,3 +125,20 @@ def mojo_pkg_children(ctx, infos):
         if chain:
             children.append(chain)
     return children
+
+# The test files a target runs as tests, as the build graph resolved them: a
+# mojo_library's `test_srcs` (each built and run alone) and a mojo_test's
+# `main` (its binary runs `main` only: the other `srcs` are modules `main`
+# imports). The source artifacts themselves, not paths: the test_weld lint
+# (tools/build/lint/test_weld.bzl) asks Buck2 where each file is, so an entry
+# naming a file of another package (a label, e.g. an export_file) counts for
+# that file and never for a same-named one of this package. A generated
+# source (a target's output) is no file of the tree and is left out. A test
+# counts as welded by what the rule received, however the BUCK file spelt it.
+WeldedTestsInfo = provider(fields = {
+    "srcs": provider_field(list[Artifact]),
+})
+
+def welded_tests_info(srcs):
+    """WeldedTestsInfo of `srcs`, the test source artifacts a target runs."""
+    return WeldedTestsInfo(srcs = [s for s in srcs if s.is_source])

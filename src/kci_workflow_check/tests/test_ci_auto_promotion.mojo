@@ -44,6 +44,19 @@ comptime _PROD_REASON: String = (
 comptime _VALIDATE_PROD_LINE: String = (
     "      # needs a permission no job holds): NEXT says so.\n      - name: the prod line\n        if: always()\n"
 )
+comptime _PROD_LINE_FAILED: String = (
+    "            line=\"prod: FAILED ($JOB_STATUS${rc:+: exit $rc}) $REVISION: see kci-result-prod-$REVISION\"\n"
+    "            echo \"### $line\" >> \"$GITHUB_STEP_SUMMARY\"\n"
+    "            echo \"$line\" >&2\n"
+    "          fi\n"
+)
+"""R20: the failure branch of prod's prod line, which falls through to the
+main-tip comparison (its quoted `exit $rc` is a message, not a command)."""
+comptime _VALIDATE_PROD_LINE_FAILED: String = (
+    "            line=\"prod: NEXT (runs automatically; it waits only while the prod environment has a required reviewer)\"\n"
+    "          fi\n"
+)
+"""R20: the end of validate's prod line (a release job other than prod)."""
 comptime _GAMMA_PERMS: String = "    environment: ${{ github.event_name == 'push' && 'gamma' || 'gamma-breakglass' }}\n    permissions:\n      contents: read\n      id-token: write\n"
 comptime _VALIDATE_OUTPUTS: String = (
     "    outputs:\n"
@@ -172,6 +185,20 @@ def _rows() -> List[_Row]:
     # ---- R20 the prod line ------------------------------------------------------------------------
     r.append(_wf(String("16 validate's last step renamed"), String(_VALIDATE_PROD_LINE), String(_VALIDATE_PROD_LINE).replace(String("name: the prod line"), String("name: summary")), _FINDING, String("job 'validate': R20")))
     r.append(_wf(String("16b validate's prod line not always()"), String(_VALIDATE_PROD_LINE), String(_VALIDATE_PROD_LINE).replace(String("if: always()"), String("if: success()")), _FINDING, String("job 'validate': R20")))
+    # prod's prod line reports a main that moved past REVISION on a failure too: an `exit` before
+    # that comparison drops it from the failed run's summary (komira-ai/komira#371)
+    r.append(_wf(String("16c prod's prod line exits on a failure, before the main-tip comparison"), String(_PROD_LINE_FAILED), String(_PROD_LINE_FAILED).replace(String("            echo \"$line\" >&2\n          fi\n"), String("            echo \"$line\" >&2\n            exit 0\n          fi\n")), _FINDING, String("job 'prod': R20: `the prod line` runs `exit`")))
+    r.append(_wf(String("16d an exit after `||` in a prod line"), String(_PROD_LINE_FAILED), String(_PROD_LINE_FAILED).replace(String("          fi\n"), String("          fi\n          [ \"$JOB_STATUS\" = success ] || exit 0\n")), _FINDING, String("job 'prod': R20: `the prod line` runs `exit`")))
+    # the scanner reads shell words: no separator before `exit`, a quoted or escaped `exit`, and an
+    # apostrophe in a comment (which opens no quote) still find it; `exit` in a comment or inside a
+    # quoted message is not run; every release job's prod line is checked, not only prod's
+    r.append(_wf(String("16e an exit right after `||`"), String(_PROD_LINE_FAILED), String(_PROD_LINE_FAILED).replace(String("          fi\n"), String("          fi\n          [ \"$JOB_STATUS\" = success ] ||exit 0\n")), _FINDING, String("job 'prod': R20: `the prod line` runs `exit`")))
+    r.append(_wf(String("16f an apostrophe in a comment, then an exit"), String(_PROD_LINE_FAILED), String(_PROD_LINE_FAILED).replace(String("          fi\n"), String("          fi\n          # prod's last word\n          [ \"$JOB_STATUS\" = success ] || exit 0\n")), _FINDING, String("job 'prod': R20: `the prod line` runs `exit`")))
+    r.append(_wf(String("16g a quoted exit"), String(_PROD_LINE_FAILED), String(_PROD_LINE_FAILED).replace(String("          fi\n"), String("          fi\n          [ \"$JOB_STATUS\" = success ] || \"exit\" 0\n")), _FINDING, String("job 'prod': R20: `the prod line` runs `exit`")))
+    r.append(_wf(String("16h an escaped exit"), String(_PROD_LINE_FAILED), String(_PROD_LINE_FAILED).replace(String("          fi\n"), String("          fi\n          [ \"$JOB_STATUS\" = success ] || \\exit 0\n")), _FINDING, String("job 'prod': R20: `the prod line` runs `exit`")))
+    r.append(_wf(String("16i exit in a comment is not run"), String(_PROD_LINE_FAILED), String(_PROD_LINE_FAILED).replace(String("          fi\n"), String("          fi\n          # never exit here: the comparison below runs on every path\n")), _CLEAN, String("")))
+    r.append(_wf(String("16j exit inside a single-quoted message"), String(_PROD_LINE_FAILED), String(_PROD_LINE_FAILED).replace(String("          fi\n"), String("          fi\n          echo 'no exit here' >&2\n")), _CLEAN, String("")))
+    r.append(_wf(String("16k validate's prod line exits in a brace group"), String(_VALIDATE_PROD_LINE_FAILED), String(_VALIDATE_PROD_LINE_FAILED).replace(String("          fi\n"), String("          fi\n          [ \"$JOB_STATUS\" = success ] || { exit; }\n")), _FINDING, String("job 'validate': R20: `the prod line` runs `exit`")))
     # ---- R21 the revision checked by the workflow -------------------------------------------------
     r.append(_wf(String("19 build without the revision step"), String(_REV_STEP) + String("      # The farm connection"), String("      # The farm connection"), _FINDING, String("job 'build': R21: its second step is `name: the revision this run releases`")))
     r.append(_wf(String("19b the revision step after farm-connect"), String(_REV_STEP) + String("      # The farm connection: tailnet join, refusal unless the farm answers, and\n      # the machine buckconfig, from repository variables (docs/ci.md).\n      - uses: ./.github/actions/farm-connect\n"), String("      # The farm connection: tailnet join, refusal unless the farm answers, and\n      # the machine buckconfig, from repository variables (docs/ci.md).\n      - uses: ./.github/actions/farm-connect\n") + String(_REV_STEP), _FINDING, String("job 'build': R21: its second step")))

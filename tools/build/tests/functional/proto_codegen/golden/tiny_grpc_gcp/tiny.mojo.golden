@@ -49,7 +49,8 @@ struct GetThingRequest(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "name", self.name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.name.byte_length() > 0:
+            enc.write_string_field(1, "name", self.name)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -90,7 +91,8 @@ struct WatchThingsRequest(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "prefix", self.prefix)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.prefix.byte_length() > 0:
+            enc.write_string_field(1, "prefix", self.prefix)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -134,8 +136,10 @@ struct Thing(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "name", self.name)
-        enc.write_i64_field(2, "size", self.size)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.name.byte_length() > 0:
+            enc.write_string_field(1, "name", self.name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.size != 0:
+            enc.write_i64_field(2, "size", self.size)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -179,7 +183,8 @@ struct UploadThingsResponse(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_i64_field(1, "count", self.count)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.count != 0:
+            enc.write_i64_field(1, "count", self.count)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:

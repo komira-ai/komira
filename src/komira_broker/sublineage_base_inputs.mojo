@@ -77,7 +77,7 @@ from komira_objectstore.sublineage_base_fold import (
     SubLineageBaseFold,
 )
 
-from .manifest_body import ManifestBody, MARKER_NONE
+from .manifest_body import ManifestBody, chunk_has_segment
 from .partition_assignment import sublineage_prefix
 
 
@@ -126,7 +126,7 @@ struct _CachedShardChunk(Copyable, Movable, Deinitable):
     shard walk. Carries exactly the fields BOTH consumers need: `_base_folded_
     prefix` reads `record_count` + `object_key` + `marker_type`; the block->
     segment mapping reads `chunk_seq` + `record_count` + `crc32` + `object_key`
-    + `marker_type`. Marker chunks (`marker_type != MARKER_NONE`) are kept in
+    + `marker_type`. Chunks without a segment object (markers) are kept in
     the list so the replay skips them at the IDENTICAL points the live walk did."""
 
     var chunk_seq: Int64
@@ -136,6 +136,11 @@ struct _CachedShardChunk(Copyable, Movable, Deinitable):
     var txn_id: String
     var producer_epoch: Int64
     var marker_type: Int64
+
+    def has_segment(self) -> Bool:
+        """`ManifestBody.has_segment` over the captured fields (the same
+        `chunk_has_segment` predicate)."""
+        return chunk_has_segment(self.marker_type, self.object_key)
 
 
 @fieldwise_init
@@ -506,7 +511,7 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         while seq < n_chunks:
             try:
                 var body = ManifestBody.decode(base.read_chunk(seq))
-                if body.marker_type == MARKER_NONE:
+                if body.has_segment():
                     keys.append(String(body.object_key))
                 seq += Int64(1)
             except e:
@@ -550,9 +555,13 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         while seq < n_chunks:
             try:
                 var body = ManifestBody.decode(shard.read_chunk(seq))
-                if body.marker_type != MARKER_NONE:
+                if not body.has_segment():
+                    # No segment object (a marker, 0 records): skip, do not
+                    # break. Its record_count still advances `running`; it is
+                    # not counted as folded (the fold never re-records it).
+                    running += body.record_count
                     seq += Int64(1)
-                    continue  # a marker carries no records — skip, do not break
+                    continue
                 var rc = body.record_count
                 if not _str_in(base_keys, body.object_key):
                     break  # first un-materialized chunk — the prefix boundary
@@ -652,8 +661,11 @@ def _base_folded_prefix_cached(
     var folded = shard.log_start_offset  # seed: the retired/reaped prefix
     for i in range(len(shard.chunks)):
         ref c = shard.chunks[i]
-        if c.marker_type != MARKER_NONE:
-            continue  # a marker carries no records — skip, do not break
+        if not c.has_segment():
+            # No segment object (a marker, 0 records): skip, do not break —
+            # IDENTICAL to the live walk (`running` advances, `folded` not).
+            running += c.record_count
+            continue
         if not _str_in(base_keys, c.object_key):
             break  # first un-materialized chunk — the prefix boundary
         running += c.record_count

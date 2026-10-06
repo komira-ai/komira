@@ -120,7 +120,8 @@
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
-#      and gRPC service clients), protoc-gen-mojo's text goldens, and
+#      and gRPC service clients), protoc-gen-mojo's text goldens,
+#      proto_fixture_check (protoc reading wire fixtures), and
 #      deterministic generation across two uncached
 #      builds (skipped with --no-uncached; about 16 minutes): see
 #      tools/build/tests/proto_tests.sh.
@@ -156,12 +157,17 @@
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
 #      is private, empty and not /tmp in each of two actions; test_env and a
-#      mojo_test's data and env arrive under `buck2 test`; a red test stays
+#      mojo_test's data and env arrive under `buck2 test`, and so do its
+#      args, each $(location) an absolute path the test opens and an
+#      $(exe_target) a binary with its lib/ (also as a build action,
+#      mojo_test_args_action, which is what a pull request builds); a mojo_test
+#      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
 #      the runner itself, run twice in ONE action directory
 #      (tests//functional/test_data:runner_cases), gives each run its own empty
 #      TEST_TMPDIR under that directory and removes it, no --env reaches
-#      the verdict, and a test killed by SIGKILL or SIGABRT fails with its
+#      the verdict, --arg values arrive in order and unexported, exit 77 is
+#      red, and a test killed by SIGKILL or SIGABRT fails with its
 #      own status (137, 134) and no marker; five inadmissible data/env
 #      declarations are refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
@@ -286,6 +292,15 @@
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
+#  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
+#      its BXL script: //:test_weld (every package under src/) and
+#      tests//functional/test_weld:ok (a planted tree with its ledger) pass;
+#      each target of tests//negative/test_weld fails
+#      naming its one planted finding: an unwelded test file (named only in a
+#      comment of a test_srcs list), a package with no welded test, a ledger
+#      row for a welded test or package (the ledger only shrinks; one test is
+#      welded only by a computed list), a row naming nothing, a row with no
+#      reason, and a root with no package.
 set -uo pipefail
 
 umbrella=1
@@ -852,6 +867,21 @@ if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_data > "$LOG/
 else
     fail "td_mojo_test: buck2 test tests//functional/test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
 fi
+if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_args > "$LOG/td_mojo_test_args.log" 2>&1; then
+    pass "td_mojo_test_args: buck2 test of a mojo_test with args, \$(location) and \$(exe_target) expanded to files it opens"
+else
+    fail "td_mojo_test_args: buck2 test tests//functional/test_data:mojo_test_args failed (see $LOG/td_mojo_test_args.log)"
+fi
+expect_green td_mojo_test_args_action tests//functional/test_data:mojo_test_args_action
+if timeout 900 "$BUCK2" test tests//negative/test_data:skip_77 > "$LOG/td_skip_77.log" 2>&1; then
+    fail "td_skip_77: buck2 test tests//negative/test_data:skip_77 passed, but its test exits 77 (see $LOG/td_skip_77.log)"
+elif ! grep -qE "GATED TEST FAILED: [a-z]*//([a-z/]*/)?negative/test_data:skip_77 \(exit 77\)" "$LOG/td_skip_77.log"; then
+    fail "td_skip_77: failed without the test's exit 77 (see $LOG/td_skip_77.log)"
+elif ! grep -q "Fail 1" "$LOG/td_skip_77.log"; then
+    fail "td_skip_77: exit 77 was not counted as a test failure (see $LOG/td_skip_77.log)"
+else
+    pass "td_skip_77: a mojo_test exiting 77 (SKIP to some harnesses) fails, counted as Fail"
+fi
 expect_red td_env_bin_lib "GATED TEST FAILED: tests//negative/test_data:env_bin_lib:tests/test_red.mojo" tests//negative/test_data:env_bin_lib
 if timeout 900 "$BUCK2" test tests//negative/test_data:env_bin > "$LOG/td_env_bin.log" 2>&1; then
     fail "td_env_bin: buck2 test tests//negative/test_data:env_bin passed, but its test is red (env BIN reached the runner; see $LOG/td_env_bin.log)"
@@ -1053,6 +1083,52 @@ expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 check
 expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
 expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
+
+# 39
+# A test_weld target only declares its lint; its BXL script checks it
+# (tools/build/lint/test_weld.bzl says why).
+test_weld_check() { # name, lint target: the check's exit status, its log in $LOG
+    "$BUCK2" bxl //tools/build/lint/test_weld.bxl:check -- --lint "$2" > "$LOG/$1.log" 2>&1
+}
+for lint in //:test_weld tests//functional/test_weld:ok tests//negative/test_weld/real:ok; do
+    name="test_weld_green_$(printf '%s' "${lint#*//}" | tr '/:' '__')"
+    if test_weld_check "$name" "$lint"; then pass "$name"; else fail "$name: $lint (see $LOG/$name.log)"; fi
+done
+tw_tree=tests//functional/test_weld/src
+for want in \
+    "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \
+    "untested|$tw_tree/komira_b: 1 .mojo source(s) and no welded test" \
+    "shrink_package|src/komira_c: the package welds 1 test(s) now; delete the row (the ledger only shrinks)" \
+    "shrink_file|src/komira_c/wire/tests/test_wire.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
+    "shrink_computed|src/komira_a/tests/test_one.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
+    "nothing|src/komira_a/tests/test_gone.mojo: names neither a test file nor a package with a .mojo source" \
+    "nothing|src/komira_gen: names neither a test file nor a package with a .mojo source" \
+    "malformed|ledger_malformed.tsv:2: a row is <path><TAB><reason>, with a reason" \
+    "empty|test_weld: checked nothing (no package under nosuch)"; do
+    t=${want%%|*} text=${want#*|} name="test_weld_${want%%|*}"
+    if test_weld_check "$name" "tests//negative/test_weld:$t"; then
+        fail "$name: tests//negative/test_weld:$t passed, but it must fail"
+    elif grep -qF -- "$text" "$LOG/$name.log"; then
+        pass "$name"
+    else
+        fail "$name: failed without '$text' (see $LOG/$name.log)"
+    fi
+done
+# The real rules (negative/test_weld/real/BUCK): with no ledger row, exactly
+# the three unwelded files are named, and none of the welded ones.
+name=test_weld_real_red
+tw_real=tests//negative/test_weld/real/src
+if test_weld_check "$name" tests//negative/test_weld/real:red; then
+    fail "$name: tests//negative/test_weld/real:red passed, but it must fail"
+else
+    tw_named=$(grep -o "^$tw_real/[^:]*: a test file no target welds" "$LOG/$name.log" | sed 's/:.*//' | sort -u | tr '\n' ' ')
+    tw_want="$tw_real/komira_real/tests/test_commented.mojo $tw_real/komira_real/tests/test_imported.mojo $tw_real/komira_real/tests/test_shared.mojo "
+    if [ "$tw_named" = "$tw_want" ]; then
+        pass "$name"
+    else
+        fail "$name: named '$tw_named', want '$tw_want' (see $LOG/$name.log)"
+    fi
+fi
 
 # 37
 pt_rc=0

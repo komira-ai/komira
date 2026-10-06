@@ -83,7 +83,7 @@ from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
 
 from .broker_core import SegmentFooter
-from .manifest_body import ManifestBody, MARKER_NONE
+from .manifest_body import ManifestBody
 # decode_arrow_ipc_stream lives in komira_sdk (the self-describing stream
 # decoder). The broker LIBRARY does NOT depend on the SDK — that would invert
 # the build DAG (broker -> {core, objectstore, async, obs} only). So the
@@ -392,12 +392,14 @@ struct ConsumeCore[Storage: ConditionalWriteStore](Movable, Deinitable):
             try:
                 var body_bytes = self._manifest.read_chunk(seq)
                 var body = ManifestBody.decode(body_bytes)
-                # A COMMIT/ABORT MARKER chunk carries no data records
-                # (record_count 0, empty object_key) — it is NOT offset-bearing.
-                # Skip it in the offset index (do NOT GET its empty key); it
-                # never widens the offset range. The read_committed filter reads
-                # markers via `chunk_txn_tags`, not here.
-                if body.marker_type != MARKER_NONE:
+                # A chunk that owns no segment object (a COMMIT/ABORT MARKER:
+                # record_count 0, empty object_key) has no entry in the offset
+                # index (do NOT GET its empty key). Its record_count still
+                # feeds the running base (0 for a marker), so offsets match
+                # `read_chunk_segment`'s prior-chunk sum. The read_committed
+                # filter reads markers via `chunk_txn_tags`, not here.
+                if not body.has_segment():
+                    running_base += body.record_count
                     seq += Int64(1)
                     continue
                 # Read scalars BEFORE moving the heap-owning object_key out
@@ -645,11 +647,15 @@ struct ConsumeCore[Storage: ConditionalWriteStore](Movable, Deinitable):
 
     def read_chunk_segment(
         mut self, chunk_seq: Int64
-    ) raises -> ConsumeSegment:
+    ) raises -> Optional[ConsumeSegment]:
         """Read the segment at a specific manifest chunk seq, computing its
         base offset from the running sum of LIVE prior chunks. Used by the
         TAIL/live-consume mode: a consumer tracking `_next_chunk` re-polls
         `num_chunks`, and for each newly-appeared chunk calls this to read it.
+
+        Returns None for a chunk that owns no segment object
+        (`ManifestBody.has_segment` is False: a txn COMMIT/ABORT marker); the
+        chunk still occupies its manifest slot, so the caller advances past it.
 
         Retention: seeds the running base from the persisted
         log_start (NOT 0) and sums only LIVE prior chunks `[log_start_seq,
@@ -667,6 +673,9 @@ struct ConsumeCore[Storage: ConditionalWriteStore](Movable, Deinitable):
             seq += Int64(1)
         var body_bytes = self._manifest.read_chunk(chunk_seq)
         var body = ManifestBody.decode(body_bytes)
+        if not body.has_segment():
+            # A marker: no `.seg` to GET (its object_key is empty).
+            return None
         var rc = body.record_count
         var crc = body.crc32
         var key = String(body.object_key)  # copy so `body` destroys whole.
@@ -678,7 +687,7 @@ struct ConsumeCore[Storage: ConditionalWriteStore](Movable, Deinitable):
             object_key=key^,
             crc32=crc,
         )
-        return self.read_segment(seg^)
+        return Optional[ConsumeSegment](self.read_segment(seg^))
 
 
 @always_inline
