@@ -150,7 +150,9 @@ trait ProtoNullValueEnum(ProtoEnum):
 #   - Proto3JsonWire   keys by `json_name`, ignores `field_no`.
 #
 # The generated `encode` body for a message is a flat sequence of
-# `enc.write_*_field(...)` calls, one per set / non-default field. The same
+# `enc.write_*_field(...)` calls: one per set explicit-presence field, and
+# one per implicit-presence field (a plain proto3 scalar or enum) behind the
+# backend's `OMITS_IMPLICIT_DEFAULTS` and the field's default test. The same
 # source body works for both backends — the "derive once, all formats"
 # property.
 # =============================================================================
@@ -165,6 +167,13 @@ trait WireEncoder(Movable):
     cross-trait recursion — it is itself parameterized on a `Serializable`
     and calls `v.encode[Self]` for the nested message.
     """
+
+    comptime OMITS_IMPLICIT_DEFAULTS: Bool
+    """Whether a generated `encode` skips an implicit-presence field (a plain
+    proto3 scalar or enum, no `optional`, not a oneof member) that holds its
+    default value. True for proto3 JSON, whose mapping omits such a field;
+    an explicit-presence field is written whenever it is set either way, and
+    an empty repeated or map field is the backend's own concern."""
 
     def write_string_field(
         mut self, field_no: Int, json_name: StringSlice, v: String

@@ -17,8 +17,9 @@
 # `projects.roles.delete` (DELETE on the name, `etag` in the query, the
 # deleted role in the answer).
 #
-# Default-valued body keys are the codec's (see test_iam_service_accounts).
-# Every client is pointed at `localhost`, so no test needs DNS.
+# A body omits a plain field left at its default (see
+# test_iam_service_accounts). Every client is pointed at `localhost`, so no
+# test needs DNS.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -213,10 +214,10 @@ def test_create_sends_the_role_id_and_the_role() raises:
     assert_true(_has_header(wire, "content-type"))
     assert_equal(
         _body(wire),
-        '{"roleId":"deployer","role":{"name":"",'
+        '{"roleId":"deployer","role":{'
         + '"title":"Deployer","description":"deploys the services",'
         + '"includedPermissions":["run.services.get","run.services.update"],'
-        + '"stage":"GA","etag":"","deleted":false}}',
+        + '"stage":"GA"}}',
     )
     assert_equal(created.name, _ROLE)
 
@@ -250,9 +251,9 @@ def test_update_sends_the_role_as_the_body_with_no_mask() raises:
     )
     assert_equal(
         _body(wire),
-        '{"name":"","title":"Deployer","description":"deploys the services",'
+        '{"title":"Deployer","description":"deploys the services",'
         + '"includedPermissions":["run.services.get","run.services.update"],'
-        + '"stage":"GA","etag":"","deleted":false}',
+        + '"stage":"GA"}',
     )
 
 

@@ -24,6 +24,12 @@
 #     of them without saying WHICH invites exactly that fail-open. A document stating BOTH spellings of one field is
 #     a REFUSAL, not a merge — see `JsonDecoder.expect_fields`.
 #   - a nested message is a nested JSON object.
+#   - ENCODE omits a field at its default where the field has implicit
+#     presence: a plain proto3 scalar or enum (the generated `encode` skips
+#     it, reading `OMITS_IMPLICIT_DEFAULTS`) and an empty repeated or map
+#     field (this encoder cuts it back out). A field with explicit presence
+#     (`optional`, a oneof member, a message) is written whenever it is set,
+#     at its default too.
 #   - an absent proto3 `optional` field decodes to None (the generated decode
 #     body calls `has(json_name)` first); an absent `repeated` field decodes
 #     to an empty list.
@@ -84,6 +90,10 @@ from .wire_format import (
 
 struct JsonEncoder(WireEncoder):
     """The proto3-canonical-JSON `WireEncoder` over a `List[UInt8]`."""
+
+    comptime OMITS_IMPLICIT_DEFAULTS = True
+    """The proto3 JSON mapping omits an implicit-presence field at its
+    default (`"name":""` in a request body can ask an API to set it)."""
 
     var buf: List[UInt8]
     var _opened: Bool

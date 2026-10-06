@@ -39,6 +39,18 @@ mojo_proto_library(
     deps = [":komira_proto_codec"],
 )
 
+# A generated message with one field of every presence kind: its welded test
+# checks which fields its generated `encode` writes into proto3 JSON at their
+# default value (implicit presence omitted, explicit presence written) and
+# that the binary encoding is unchanged.
+mojo_proto_library(
+    name = "implicit_presence_proto",
+    srcs = ["tests/implicit_presence.proto"],
+    import_prefix = "example",
+    deps = [":komira_proto_codec"],
+    test_srcs = ["tests/test_implicit_presence_json.mojo"],
+)
+
 mojo_test(
     name = "test_copy_hazard",
     srcs = ["tests/test_copy_hazard.mojo"],
