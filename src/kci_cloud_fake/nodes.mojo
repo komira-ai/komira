@@ -13,14 +13,23 @@
 #   * kind `public`    `<id>/public`: the public ingress of a service, by the
 #                      mechanism the cell chose at validate time.
 #   * kind `schedule`  `<id>/schedule`: the trigger of a scheduled job.
-#   * kind `grant`     `<id>/uses/<target>`: one `Uses` line.
+#   * kind `identity`  `<id>/identity`: the private identity of a service or
+#                      a job, or a service account; an account's exposes
+#                      NAME (`account`, a desired field, like `serves`).
+#   * kind `grant`     `<id>/u-<h>` or `<id>/grant`: one grant edge.
 #   * kind `bucket`    `<id>/bucket`: a bucket. It exposes NAME and ADDRESS
 #                      (`stores`, a desired field, like `serves`).
+#   * kind `table`     `<id>/table`: a table. It exposes NAME (`named`, a
+#                      desired field, like `serves`). Its desired `key` is
+#                      part of the digest, and `live_key` reads it back from
+#                      a stored digest (what `list_owned` reports as the
+#                      object's key).
 # Those are the generic shape's kinds. On a provider shape (shapes.mojo) the
-# kind is the provider kind id, and an `<id>/identity` node is added (on
-# onprem also a service's `<id>/endpoint`, which serves nothing); the node
-# behaves the same: `serves` (a desired field), not the kind, decides whether
-# it exposes URL and HOST.
+# kind is the provider kind id (on onprem also a `<id>/vault` beside each
+# identity, a service's `<id>/endpoint`, which serves nothing, and a grant's
+# helper `<id>/r-<h>`; on gcp a table's `<id>/ix-<h>` and `<id>/ttl`); the
+# node behaves the same: `serves`, `stores`, `account` and `named` (desired
+# fields), not the kind, decide what it exposes.
 # A role the file turned off is the same node with `wanted` False.
 #
 # A node keeps the retention kci set on the lowered node. A KEEP node's object
@@ -82,6 +91,28 @@ def fake_bucket_address(resource_id: String) -> String:
     return String("fake-bucket://") + fake_bucket_name(resource_id)
 
 
+def fake_account_name(resource_id: String) -> String:
+    return resource_id + String("@identity.fake")
+
+
+def fake_table_name(resource_id: String) -> String:
+    return resource_id + String("-table")
+
+
+def live_key(digest: String) -> String:
+    """The `key` field of a stored digest (`kind|name=value|...`), or empty
+    when it has none."""
+    var at = digest.find("|key=")
+    if at < 0:
+        return String("")
+    var start = at + 5
+    var rest = String(digest[byte = start : digest.byte_length()])
+    var end = rest.find("|")
+    if end < 0:
+        return rest^
+    return String(rest[byte=0:end])
+
+
 def _plan(id: String, live: ResourceStatus, retention: Int) -> ChangeAction:
     var verb = VERB_UPDATE
     var why = String("drifted -> update")
@@ -102,11 +133,12 @@ def _unmanaged(v: FakeView) -> String:
 
 def static_digest(node: LoweredNode) raises -> String:
     """The digest of a lowered node's own desired fields, in order (the
-    `serves` and `stores` fields are how the node behaves, not state), and
-    the `kci_retain` label of a KEEP node."""
+    `serves`, `stores`, `account` and `named` fields are how the node
+    behaves, not state), and the `kci_retain` label of a KEEP node."""
     var d = ModelledDigest(node.kind)
     for i in range(len(node.desired)):
-        if node.desired[i].key == "serves" or node.desired[i].key == "stores":
+        ref key = node.desired[i].key
+        if key == "serves" or key == "stores" or key == "account" or key == "named":
             continue
         d.field(node.desired[i].key, node.desired[i].value)
     if node.retention == RETAIN_KEEP:
@@ -122,6 +154,8 @@ struct FakeNode(EngineResource, Movable, Deinitable):
     var _static: String
     var _serves: Bool
     var _stores: Bool
+    var _account: Bool
+    var _named: Bool
     var _retention: Int
     var _deps: List[String]
     var _refs: List[InputRef]
@@ -137,6 +171,8 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         self._static = static_digest(node)
         self._serves = node.field(String("serves")) == "true"
         self._stores = node.field(String("stores")) == "true"
+        self._account = node.field(String("account")) == "true"
+        self._named = node.field(String("named")) == "true"
         self._retention = node.retention
         self._deps = node.depends_on.copy()
         self._refs = node.inputs.copy()
@@ -259,6 +295,12 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         if self._stores:
             o.set(String("NAME"), fake_bucket_name(self._owner))
             o.set(String("ADDRESS"), fake_bucket_address(self._owner))
+            return o^
+        if self._account:
+            o.set(String("NAME"), fake_account_name(self._owner))
+            return o^
+        if self._named:
+            o.set(String("NAME"), fake_table_name(self._owner))
             return o^
         if not self._serves:
             return o^
