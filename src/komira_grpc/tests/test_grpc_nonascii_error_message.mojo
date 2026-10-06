@@ -31,8 +31,9 @@
 #       the client's decode raises `[grpc:9] MSG`. Also the Connect streaming
 #       end-of-stream envelope.
 #   T5  gRPC-Web: the in-body trailer block the codec writes carries exactly
-#       ENC and the client's decoder yields MSG. (Codec level: the unary
-#       dispatcher does not compose a gRPC-Web error body today.)
+#       ENC and the client's decoder yields MSG. (Codec level; the unary
+#       dispatcher's gRPC-Web error body is in komira_connect's
+#       test_grpc_web_error_trailer.)
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
