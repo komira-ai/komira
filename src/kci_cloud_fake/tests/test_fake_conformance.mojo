@@ -2,10 +2,11 @@
 # test_fake_conformance.mojo
 # =============================================================================
 #
-# 1. "fake" passes the kci_cloud conformance kit (all eleven steps: label
+# 1. "fake" passes the kci_cloud conformance kit (all twelve steps: label
 #    stamping, an idempotent re-apply under a new provenance, the tamper
 #    pair, failed then fixed, role removal, destroy of a graph with a
-#    reference, foreign refusal and adoption, two interleaved applies) on a
+#    reference, foreign refusal and adoption, two interleaved applies, the
+#    validation-run tag under the kit's own run id and under none) on a
 #    graph with every v1 shape: a public service, an internal service reading
 #    the first one's URL and HOST, a scheduled job, and two `Uses` grants;
 #    the roles turned off are api's public ingress and web's grant.

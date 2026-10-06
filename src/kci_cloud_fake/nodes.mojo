@@ -32,13 +32,17 @@
 # fields), not the kind, decide what it exposes.
 # A role the file turned off is the same node with `wanted` False.
 #
-# A node keeps the retention kci set on the lowered node. A KEEP node's object
-# carries `kci_retain=keep` from its create call on, and the label follows the
-# node: retention is part of the node's digest, so a changed retention is an
-# update, and the update writes the label in the same call.
+# A node keeps the retention kci set on the lowered node. Its object carries
+# the retention mark `kci-retention=<retain|delete>` from its create call on,
+# and the mark follows the node: retention is part of the node's digest, so a
+# changed retention is an update, and the update rewrites the mark in the same
+# call.
 #
-# Every node is born stamped (`create_owned` writes the standard label rule's
-# labels and the provenance annotation in the one create call), reads its
+# Every node is born stamped (`create_owned` writes `create_labels`: the
+# standard label rule's labels, the `kci-run-id` label when the scope has a
+# validation run, the retention mark; and the provenance annotation, in the
+# one create call). An adoption writes the identity and retention labels, and
+# never a validation run: the run did not create the object. A node reads its
 # stamp back from the labels, reports an out-of-band value on an unmodelled
 # field as an unmanaged difference, and never puts provenance in its digest.
 # =============================================================================
@@ -67,6 +71,7 @@ from kci_reconciler import (
 )
 from kci_cloud import (
     LoweredNode,
+    create_labels,
     retain_labels,
     standard_identity_of,
     standard_label_rule,
@@ -134,7 +139,8 @@ def _unmanaged(v: FakeView) -> String:
 def static_digest(node: LoweredNode) raises -> String:
     """The digest of a lowered node's own desired fields, in order (the
     `serves`, `stores`, `account` and `named` fields are how the node
-    behaves, not state), and the `kci_retain` label of a KEEP node."""
+    behaves, not state), and a KEEP node's retention (a `kci_retain` digest
+    field, not a label)."""
     var d = ModelledDigest(node.kind)
     for i in range(len(node.desired)):
         ref key = node.desired[i].key
@@ -251,8 +257,9 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         return self._id.copy()
 
     def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
-        var labels = standard_label_rule(stamp)
-        labels.extend(retain_labels(self._retention))
+        # The identity, the validation run (when the scope has one) and the
+        # retention mark, all in the one create call.
+        var labels = create_labels(stamp, self._retention)
         var note = stamp.provenance.run_id + String("@") + stamp.provenance.revision
         self._store[].create(
             self._id, self._kind, self._desired_digest(), self._url(), labels, note
@@ -263,14 +270,14 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
     ) raises:
         var note = stamp.provenance.run_id + String("@") + stamp.provenance.revision
+        # No validation-run label: this run did not create the object.
         var labels = standard_label_rule(stamp)
         labels.extend(retain_labels(self._retention))
         self._store[].relabel(physical_id, labels, note)
 
     def update(mut self, creds: Creds) raises:
-        self._store[].update(
-            self._id, self._desired_digest(), self._url(), self._retention == RETAIN_KEEP
-        )
+        var mark = retain_labels(self._retention)
+        self._store[].update(self._id, self._desired_digest(), self._url(), mark[0])
 
     def delete(mut self, physical_id: String, creds: Creds) raises:
         self._store[].remove(physical_id)
