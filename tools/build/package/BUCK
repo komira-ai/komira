@@ -66,7 +66,18 @@ config_setting(
 conda_release_set_check(
     name = "release_set_check",
     metapackage = "komira_all",
-    libs = ["//src/komira_encoding:komira_encoding"],
+    libs = [
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_json:komira_json",
+        "//src/komira_protobuf:komira_protobuf",
+        "//src/komira_xml:komira_xml",
+        "//src/komira_retry:komira_retry",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_textproto:komira_textproto",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_proto_codec:komira_proto_codec",
+    ],
     release_set = "release_set.txt",
 )
 

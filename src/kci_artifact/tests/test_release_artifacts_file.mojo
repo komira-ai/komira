@@ -59,12 +59,27 @@ def _flag_values(argv: List[String], flag: String) -> List[String]:
     return out^
 
 
-def test_the_first_release_is_komira_encoding_then_komira_all() raises:
+def test_the_declared_names_in_release_order() raises:
+    """The names this file declares, in build order: each library after the
+    libraries it depends on, and the metapackage last. A name added or
+    dropped here is a change to what is published, so it changes this list."""
     assert_equal(read_artifacts(String(_FILE)).schema_version, Int32(1))
     var d = read_artifacts(String(_FILE))
-    assert_equal(len(d.artifacts), 2)
-    assert_equal(d.artifacts[0].name, String("komira_encoding"))
-    assert_equal(d.artifacts[1].name, String("komira_all"))
+    var want = List[String]()
+    want.append(String("komira_encoding"))
+    want.append(String("komira_json"))
+    want.append(String("komira_protobuf"))
+    want.append(String("komira_xml"))
+    want.append(String("komira_retry"))
+    want.append(String("komira_datetime"))
+    want.append(String("komira_textproto"))
+    want.append(String("komira_hash"))
+    want.append(String("komira_atomic_alias"))
+    want.append(String("komira_proto_codec"))
+    want.append(String("komira_all"))
+    assert_equal(len(d.artifacts), len(want))
+    for i in range(len(want)):
+        assert_equal(d.artifacts[i].name, want[i], String("artifact ") + String(i))
 
 
 def test_every_library_builds_stamped_into_its_own_directory() raises:
