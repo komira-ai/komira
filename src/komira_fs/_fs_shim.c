@@ -53,11 +53,13 @@
 // =============================================================================
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -456,4 +458,50 @@ int64_t komira_fs_errno_name(int32_t e, uint8_t *buf, int64_t cap) {
     memcpy(buf, name, len);
     buf[len] = 0;
     return (int64_t)len;
+}
+
+// =============================================================================
+// TEST SEAM (tests/test_local_fs_errno_not_absent.mojo only). Forces EMFILE on
+// the SECOND descriptor a caller opens, which lets a test reach the walk's
+// below-root opendir failure even when it runs privileged (root bypasses
+// file modes, so EACCES cannot be forced; RLIMIT_NOFILE binds root too).
+// RLIMIT_NOFILE and `struct rlimit` are platform definitions, so they stay in
+// C. Not called by any library code.
+// =============================================================================
+
+// Lower the soft RLIMIT_NOFILE so exactly ONE more descriptor can be opened:
+// the lowest free fd L is found by opening /dev/null (then closed), and the
+// soft limit becomes L + 1, so the next open gets L and the one after fails
+// with EMFILE. Writes the previous soft limit for `komira_fs_test_set_nofile_soft`.
+// Returns 0 or the errno.
+int32_t komira_fs_test_allow_one_more_fd(int64_t *old_soft) {
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) {
+        return (int32_t)errno;
+    }
+    *old_soft = (int64_t)rl.rlim_cur;
+    int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return (int32_t)errno;
+    }
+    close(fd);
+    rl.rlim_cur = (rlim_t)fd + 1;
+    if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {
+        return (int32_t)errno;
+    }
+    return 0;
+}
+
+// Restore the soft RLIMIT_NOFILE to `soft` (a value the caller read before).
+// Returns 0 or the errno.
+int32_t komira_fs_test_set_nofile_soft(int64_t soft) {
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) {
+        return (int32_t)errno;
+    }
+    rl.rlim_cur = (rlim_t)soft;
+    if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {
+        return (int32_t)errno;
+    }
+    return 0;
 }

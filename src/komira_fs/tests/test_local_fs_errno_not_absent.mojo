@@ -25,6 +25,13 @@
 #     naming ENOTDIR and the path. Forceable for any user.
 #   * ELOOP (a symlink to itself): list, list_dir_shallow, is_dir, the two
 #     walkers, and delete of a path below it must raise naming ELOOP. Any user.
+#   * EMFILE BELOW THE ROOT (forceable for any user, root included: the soft
+#     RLIMIT_NOFILE binds root too): the limit is lowered through the shim's
+#     test seam so the walk's opendir of the ROOT takes the last descriptor
+#     and its opendir of `<root>/sub` fails. The walk must raise exactly
+#     `walk of '<root>' failed at '<root>/sub': errno N (EMFILE)` instead of
+#     skipping `sub` and listing its file away. The limit is restored before
+#     any assertion runs.
 #   * EACCES (mode 000 directory, and a mode 000 subdirectory inside a walked
 #     tree): only forceable unprivileged; the test probes access(R_OK) and
 #     prints which branch ran. Privileged, it asserts the listing succeeds.
@@ -193,6 +200,34 @@ def test_self_symlink_raises_eloop() raises:
 
 
 # -----------------------------------------------------------------------------
+# EMFILE below the root: the walk must not skip a subdirectory it cannot open.
+# -----------------------------------------------------------------------------
+def test_walk_subdir_emfile_raises() raises:
+    var root = _disk_root(String("emfile"))
+    var sub = root + String("/sub")
+    _sh(String("mkdir -p '") + sub + String("'"))
+    _sh(String("printf 'A' > '") + sub + String("/a.parquet'"))
+    var old_soft = Int64(0)
+    # SAFETY: `old_soft` is a local out-param written during the synchronous
+    # call only.
+    var rc = external_call["komira_fs_test_allow_one_more_fd", Int32](
+        UnsafePointer(to=old_soft)
+    )
+    assert_equal(Int(rc), 0, "could not lower RLIMIT_NOFILE")
+    var msg = _err_walk(root)
+    var rrc = external_call["komira_fs_test_set_nofile_soft", Int32](old_soft)
+    assert_equal(Int(rrc), 0, "could not restore RLIMIT_NOFILE")
+    var want = (
+        String("walk of '") + root + "' failed at '" + sub + "': errno "
+    )
+    assert_true(msg.find(want) >= 0, "below-root failure not raised: " + msg)
+    assert_true(msg.find("(EMFILE)") >= 0, "EMFILE not named: " + msg)
+    # With the limit restored the same walk lists the file.
+    assert_equal(_err_walk(root), String("<listed 1>"))
+    _sh(String("rm -rf '") + root + String("'"))
+
+
+# -----------------------------------------------------------------------------
 # EACCES: unreadable directory / subdirectory (unprivileged processes only).
 # -----------------------------------------------------------------------------
 def test_unreadable_directory_raises_eacces() raises:
@@ -255,9 +290,16 @@ def main() raises:
         failures += 1
         print("FAIL test_self_symlink_raises_eloop:", String(e))
 
+    try:
+        test_walk_subdir_emfile_raises()
+        print("PASS test_walk_subdir_emfile_raises")
+    except e:
+        failures += 1
+        print("FAIL test_walk_subdir_emfile_raises:", String(e))
+
     if failures > 0:
         raise Error(
             "[test_local_fs_errno_not_absent] " + String(failures)
             + " test(s) FAILED"
         )
-    print("[test_local_fs_errno_not_absent] all 4 tests PASS")
+    print("[test_local_fs_errno_not_absent] all 5 tests PASS")
