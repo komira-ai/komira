@@ -161,7 +161,7 @@ def parse_grpc_status_code(msg: String) -> Int:
     var acc = 0
     var saw_digit = False
     while i < n:
-        var c = ord(msg[byte=i])
+        var c = Int(msg.as_bytes()[i])
         if c >= ord("0") and c <= ord("9"):
             acc = acc * 10 + (c - ord("0"))
             saw_digit = True
@@ -185,7 +185,7 @@ def parse_grpc_error_message(text: String) -> Tuple[UInt8, String]:
     var p_len = prefix.byte_length()
     var close_idx = -1
     for i in range(p_len, text.byte_length()):
-        if ord(text[byte=i]) == ord("]"):
+        if Int(text.as_bytes()[i]) == ord("]"):
             close_idx = i
             break
     if close_idx < 0:
@@ -193,7 +193,7 @@ def parse_grpc_error_message(text: String) -> Tuple[UInt8, String]:
     var code = UInt8(0)
     var any_digit = False
     for i in range(p_len, close_idx):
-        var c = ord(text[byte=i])
+        var c = Int(text.as_bytes()[i])
         if c >= ord("0") and c <= ord("9"):
             code = code * 10 + UInt8(c - ord("0"))
             any_digit = True
@@ -202,11 +202,12 @@ def parse_grpc_error_message(text: String) -> Tuple[UInt8, String]:
     if not any_digit:
         return (GRPC_STATUS_UNKNOWN, text)
     var msg_start = close_idx + 1
-    if msg_start < text.byte_length() and ord(text[byte=msg_start]) == ord(" "):
+    if msg_start < text.byte_length() and Int(text.as_bytes()[msg_start]) == ord(" "):
         msg_start += 1
-    var msg = String("")
-    for i in range(msg_start, text.byte_length()):
-        msg += text[byte=i]
+    # The message is the bytes after the prefix, copied as bytes: `msg_start`
+    # follows an ASCII byte, so the tail of a valid UTF-8 string is valid
+    # UTF-8. (Indexing `text[byte=i]` asserts on a continuation byte.)
+    var msg = String(StringSlice(unsafe_from_utf8=text.as_bytes()[msg_start:]))
     return (code, msg)
 
 
@@ -218,8 +219,9 @@ def parse_grpc_error_message(text: String) -> Tuple[UInt8, String]:
 # `:status: 200` at the HTTP layer; the gRPC status rides in trailers via
 # the `grpc-status` (decimal-string) + `grpc-message` (percent-encoded)
 # header pair. If the HTTP layer itself surfaces a non-200 BEFORE any
-# gRPC framing (a proxy 502, a TLS reject), the consumer's call shim is
-# expected to map it via `grpc_error_from_http_non_200`.
+# gRPC framing (a proxy 502, a TLS reject), `GrpcClient` maps it via
+# `grpc_error_from_http_non_200` (client.mojo `_raise_if_http_non_200` on all
+# four entry points; wire.mojo `decode_unary_response` for unary).
 # =============================================================================
 
 
@@ -386,11 +388,13 @@ def grpc_error_from_http_non_200(http_status: UInt16) -> GrpcError:
 #
 # The code is the one the reference clients choose for the same wire shape:
 #
-#   * HTTP non-200 -> the HTTP->gRPC table above (§4). That table exists for
-#     exactly this case ("only for clients that received a response that did
-#     not include grpc-status", grpc/doc/http-grpc-status-mapping.md), and
+#   * HTTP non-200 -> NOT HERE: the HTTP->gRPC table above (§4,
+#     `grpc_error_from_http_non_200`), which GrpcClient raises first
+#     (client.mojo `_raise_if_http_non_200`). That table exists for exactly
+#     this case ("only for clients that received a response that did not
+#     include grpc-status", grpc/doc/http-grpc-status-mapping.md), and
 #     grpc-java's `Http2ClientStreamTransportState.statusFromTrailers` and
-#     grpc-go's `operateHeaders` both map through it.
+#     grpc-go's `operateHeaders` both map through it. What follows is HTTP 200.
 #   * HTTP 200, the response ended in a TRAILERS block without `grpc-status`
 #     -> UNKNOWN. grpc-java: `Status.UNKNOWN.withDescription("missing GRPC
 #     status in response")`; grpc-go initialises the status to `codes.Unknown`
@@ -414,24 +418,17 @@ def grpc_error_from_http_non_200(http_status: UInt16) -> GrpcError:
 
 
 def grpc_error_for_missing_status(
-    http_status: UInt16, trailers_present: Bool, body_len: Int
+    trailers_present: Bool, body_len: Int
 ) -> GrpcError:
-    """The error for a classic-gRPC response that stated no `grpc-status` in
-    its trailers or its trailers-only HEADERS (see the table above).
+    """The error for a classic-gRPC HTTP 200 response that stated no
+    `grpc-status` in its trailers or its trailers-only HEADERS (see the table
+    above). A non-200 is mapped by `grpc_error_from_http_non_200` instead.
 
     Args:
-      http_status: The response `:status`.
       trailers_present: True iff the response carried a TRAILERS section
         (any field), i.e. it ended in a HEADERS block, not on a DATA frame.
       body_len: The response body length in bytes.
     """
-    if http_status != 200:
-        var mapped = grpc_error_from_http_non_200(http_status)
-        return GrpcError.simple(
-            mapped.code,
-            String("komira_grpc: the response carries no grpc-status; ")
-            + mapped.message,
-        )
     if trailers_present:
         return GrpcError.simple(
             GRPC_STATUS_UNKNOWN,
@@ -505,7 +502,7 @@ def _parse_decimal_uint8(s: String) -> Optional[UInt8]:
         return Optional[UInt8]()
     var v: Int = 0
     for i in range(n):
-        var b = ord(s[byte=i])
+        var b = Int(s.as_bytes()[i])
         if b < ord("0") or b > ord("9"):
             return Optional[UInt8]()
         v = v * 10 + (b - ord("0"))

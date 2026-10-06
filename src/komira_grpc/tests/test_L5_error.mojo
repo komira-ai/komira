@@ -221,24 +221,20 @@ def test_t12_multi_digit_code() raises:
 
 
 def test_t13_missing_status() raises:
-    """T13 — a response with no grpc-status: trailers present -> UNKNOWN
+    """T13 — an HTTP 200 with no grpc-status: trailers present -> UNKNOWN
     (grpc-java "missing GRPC status in response"); no trailers after a body ->
     INTERNAL (grpc-go "server closed the stream without sending trailers");
-    bodyless 200 -> UNKNOWN (http-grpc-status-mapping.md); non-200 -> the
-    HTTP table. Each mutant that swaps two branches reds one row."""
-    var t = grpc_error_for_missing_status(UInt16(200), True, 7)
+    bodyless -> UNKNOWN (http-grpc-status-mapping.md). A mutant that swaps two
+    branches reds a row. (Non-200 is T10's table.)"""
+    var t = grpc_error_for_missing_status(True, 7)
     assert_equal(t.code, GRPC_STATUS_UNKNOWN, "trailers without status")
-    var d = grpc_error_for_missing_status(UInt16(200), False, 7)
+    var d = grpc_error_for_missing_status(False, 7)
     assert_equal(d.code, GRPC_STATUS_INTERNAL, "no trailers after a body")
-    var e = grpc_error_for_missing_status(UInt16(200), False, 0)
+    var e = grpc_error_for_missing_status(False, 0)
     assert_equal(e.code, GRPC_STATUS_UNKNOWN, "bodyless 200")
-    var n = grpc_error_for_missing_status(UInt16(503), False, 0)
-    assert_equal(n.code, GRPC_STATUS_UNAVAILABLE, "503 maps to UNAVAILABLE")
-    assert_true(String("status=503") in n.message, n.message)
     assert_true(String("grpc-status") in t.message, t.message)
     assert_true(String("grpc-status") in d.message, d.message)
     assert_true(String("grpc-status") in e.message, e.message)
-    assert_true(String("grpc-status") in n.message, n.message)
 
 
 def main() raises:

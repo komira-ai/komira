@@ -26,7 +26,9 @@
 #                        truly OK response")
 #   * a non-200 with no `grpc-status`
 #       -> the spec's HTTP->gRPC table (503 -> UNAVAILABLE(14)), as grpc-java
-#          and grpc-go both map it.
+#          and grpc-go both map it. That mapping is `_raise_if_http_non_200`'s
+#          (pinned by test_grpc_http_non_200_status); the case here checks the
+#          missing-status check does not pre-empt it.
 #
 # Each case names the defect it catches: before the fix every one of these
 # calls either RETURNED (unary / streams read the missing status as OK) or
@@ -263,6 +265,7 @@ def _expect_status(
     what: String,
     got: Tuple[Bool, String, String],
     code: Int,
+    names_grpc_status: Bool = True,
 ) raises:
     """`got` must be a raise carrying `[grpc:<code>]` whose text names the
     missing `grpc-status`."""
@@ -276,7 +279,7 @@ def _expect_status(
         raise Error(
             what + ": expected [grpc:" + String(code) + "], got: " + got[1]
         )
-    if String("grpc-status") not in got[1]:
+    if names_grpc_status and String("grpc-status") not in got[1]:
         raise Error(what + ": the error does not name grpc-status: " + got[1])
 
 
@@ -416,9 +419,9 @@ def test_trailers_only_without_grpc_status_is_unknown() raises:
 
 def test_non_200_without_grpc_status_maps_through_the_http_table() raises:
     """A bodyless `:status: 503` with no `grpc-status` (a proxy's answer) is
-    UNAVAILABLE per the spec's HTTP->gRPC table. Defects caught: server_stream
-    returned an empty success; unary collapsed it to UNKNOWN, outside the
-    retryable set."""
+    UNAVAILABLE per the spec's HTTP->gRPC table, not the missing-status
+    UNKNOWN: the table runs first. Its message is the table's ("HTTP non-200
+    ... status=503"), so it is not required to name grpc-status."""
     _expect_status(
         "unary",
         _call(
@@ -428,6 +431,7 @@ def test_non_200_without_grpc_status_maps_through_the_http_table() raises:
             ),
         ),
         _UNAVAILABLE,
+        names_grpc_status=False,
     )
     _expect_status(
         "server_stream",
@@ -438,6 +442,7 @@ def test_non_200_without_grpc_status_maps_through_the_http_table() raises:
             ),
         ),
         _UNAVAILABLE,
+        names_grpc_status=False,
     )
 
 

@@ -263,7 +263,7 @@ def parse_connect_error_json(body: Span[UInt8, _]) raises -> ConnectErrorEnvelop
 def _append_str(mut out: List[UInt8], s: String):
     """Append the bytes of `s` to `out`."""
     for i in range(s.byte_length()):
-        out.append(UInt8(ord(s[byte=i])))
+        out.append(s.as_bytes()[i])
 
 
 def _append_json_escaped(mut out: List[UInt8], s: String):
@@ -272,7 +272,7 @@ def _append_json_escaped(mut out: List[UInt8], s: String):
     Escapes:  `\\` -> `\\\\`, `"` -> `\\"`, control chars (0x00..0x1F) -> `\\uXXXX`.
     """
     for i in range(s.byte_length()):
-        var b = ord(s[byte=i])
+        var b = Int(s.as_bytes()[i])
         if b == ord("\\"):
             out.append(UInt8(ord("\\")))
             out.append(UInt8(ord("\\")))
@@ -332,7 +332,7 @@ def _extract_json_string_field(text: String, key: String) raises -> String:
     var needle_bytes = List[UInt8]()
     needle_bytes.append(UInt8(ord("\"")))
     for i in range(key.byte_length()):
-        needle_bytes.append(UInt8(ord(key[byte=i])))
+        needle_bytes.append(key.as_bytes()[i])
     needle_bytes.append(UInt8(ord("\"")))
     var idx = _find_byte_sequence(text, Span(needle_bytes))
     if idx < 0:
@@ -341,24 +341,24 @@ def _extract_json_string_field(text: String, key: String) raises -> String:
     var cursor = idx + len(needle_bytes)
     # Skip optional whitespace + ':' + optional whitespace
     cursor = _skip_ws(text, cursor)
-    if cursor >= text.byte_length() or ord(text[byte=cursor]) != ord(":"):
+    if cursor >= text.byte_length() or Int(text.as_bytes()[cursor]) != ord(":"):
         raise Error("komira_connect.connect_json: expected ':' after key")
     cursor += 1
     cursor = _skip_ws(text, cursor)
     # Expect opening quote
-    if cursor >= text.byte_length() or ord(text[byte=cursor]) != ord("\""):
+    if cursor >= text.byte_length() or Int(text.as_bytes()[cursor]) != ord("\""):
         raise Error("komira_connect.connect_json: expected '\"' opening string value")
     cursor += 1
     # Scan for closing quote, JSON-unescaping
     var out_bytes = List[UInt8]()
     while cursor < text.byte_length():
-        var b = ord(text[byte=cursor])
+        var b = Int(text.as_bytes()[cursor])
         if b == ord("\""):
             return String(unsafe_from_utf8=Span(out_bytes))
         elif b == ord("\\"):
             if cursor + 1 >= text.byte_length():
                 raise Error("komira_connect.connect_json: dangling escape at end of string")
-            var nxt = ord(text[byte=cursor + 1])
+            var nxt = Int(text.as_bytes()[cursor + 1])
             if nxt == ord("\""):
                 out_bytes.append(UInt8(ord("\"")))
                 cursor += 2
@@ -387,10 +387,10 @@ def _extract_json_string_field(text: String, key: String) raises -> String:
                 # \uXXXX — basic ASCII-range support
                 if cursor + 5 >= text.byte_length():
                     raise Error("komira_connect.connect_json: truncated \\u escape")
-                var h1 = _hex_to_int_v(ord(text[byte=cursor + 2]))
-                var h2 = _hex_to_int_v(ord(text[byte=cursor + 3]))
-                var h3 = _hex_to_int_v(ord(text[byte=cursor + 4]))
-                var h4 = _hex_to_int_v(ord(text[byte=cursor + 5]))
+                var h1 = _hex_to_int_v(Int(text.as_bytes()[cursor + 2]))
+                var h2 = _hex_to_int_v(Int(text.as_bytes()[cursor + 3]))
+                var h3 = _hex_to_int_v(Int(text.as_bytes()[cursor + 4]))
+                var h4 = _hex_to_int_v(Int(text.as_bytes()[cursor + 5]))
                 if h1 < 0 or h2 < 0 or h3 < 0 or h4 < 0:
                     raise Error("komira_connect.connect_json: malformed \\u escape")
                 var codepoint = (h1 << 12) | (h2 << 8) | (h3 << 4) | h4
@@ -425,7 +425,7 @@ def _find_byte_sequence(text: String, needle: Span[UInt8, _]) -> Int:
     for i in range(n - m + 1):
         var is_match = True
         for j in range(m):
-            if UInt8(ord(text[byte=i + j])) != needle[j]:
+            if text.as_bytes()[i + j] != needle[j]:
                 is_match = False
                 break
         if is_match:
@@ -437,7 +437,7 @@ def _skip_ws(text: String, start: Int) -> Int:
     """Skip JSON whitespace (space / tab / newline / CR) starting at `start`."""
     var cursor = start
     while cursor < text.byte_length():
-        var b = ord(text[byte=cursor])
+        var b = Int(text.as_bytes()[cursor])
         if b == ord(" ") or b == 0x09 or b == 0x0A or b == 0x0D:
             cursor += 1
         else:
