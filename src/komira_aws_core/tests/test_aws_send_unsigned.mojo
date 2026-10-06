@@ -191,6 +191,21 @@ def test_the_unsigned_request_refuses_what_the_signed_one_refuses() raises:
         _ = build_unsigned_request(
             String("GET"), _endpoint(), String("/"), String(""), Span(empty), crlf
         )
+    # A header the signer owns, in any case, is refused unsigned too: an
+    # anonymous request must not carry a caller-supplied signature or token.
+    for name in ["Authorization", "x-AMZ-Security-Token", "X-Amz-Date", "x-amz-content-sha256"]:
+        var owned = List[Header]()
+        owned.append(Header(String(name), String("v")))
+        with assert_raises(contains="the signer writes it"):
+            _ = build_unsigned_request(
+                String("GET"), _endpoint(), String("/"), String(""), Span(empty), owned
+            )
+    var unnamed = List[Header]()
+    unnamed.append(Header(String(""), String("v")))
+    with assert_raises(contains="empty name"):
+        _ = build_unsigned_request(
+            String("GET"), _endpoint(), String("/"), String(""), Span(empty), unnamed
+        )
 
 
 def test_an_unsigned_send_is_retried_unsigned() raises:

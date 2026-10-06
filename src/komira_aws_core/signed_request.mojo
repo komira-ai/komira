@@ -53,8 +53,10 @@
 # `build_unsigned_request` is the same request with no signature: what an
 # operation the model marks anonymous (`authtype` `none`, `auth`
 # `smithy.api#noAuth`) sends, through `send_unsigned_request`
-# (aws_send.mojo). It makes the same checks and sends the same headers up to
-# Content-Length, and nothing after them.
+# (aws_send.mojo). It sends the same headers up to Content-Length, and
+# nothing after them. Both builders refuse the same `extra` headers
+# (`_request_headers`): CR/LF, an empty name, a name the signer writes in any
+# case, and Host, Content-Type or Content-Length.
 #
 # The result holds the signature and, for a temporary credential, the session
 # token. It is not `Writable`; `to_wire()` is for the transport and tests.
@@ -70,6 +72,8 @@ from .sigv4 import (
     UNSIGNED_PAYLOAD,
     Header,
     SigV4SigningContext,
+    _is_signer_owned_header,
+    _trim_collapse,
     sigv4_sign_payload_hash,
 )
 from .sources import AwsClock, amz_date_from_unix
@@ -269,16 +273,14 @@ def build_unsigned_request(
     x-amz-content-sha256, X-Amz-Security-Token or Authorization. `body` is
     sent as given, byte for byte.
 
-    Refuses what that builder refuses before it signs: a malformed method,
-    a `uri` not starting with '/', CR/LF in the path, the content type or
-    any `extra` header, and an `extra` header named Host, Content-Type or
-    Content-Length.
+    Refuses the `extra` headers that builder refuses: CR/LF in a name or
+    value, an empty name, a name the signer writes (Authorization,
+    X-Amz-Date, X-Amz-Security-Token, x-amz-content-sha256, in any case)
+    and Host, Content-Type or Content-Length; and a malformed method, a
+    `uri` not starting with '/', and CR/LF in the path or content type.
     """
     _check_method(method)
     var headers = _request_headers(endpoint, uri, content_type, extra)
-    for i in range(len(extra)):
-        if has_crlf(extra[i].name) or has_crlf(extra[i].value):
-            raise Error("an AWS request header holds CR or LF")
     return _request(method, endpoint, endpoint.target_for(uri), headers^, body)
 
 
@@ -290,7 +292,12 @@ def _request_headers(
 ) raises -> List[Header]:
     """The checks of the path, the content type and `extra` both builders
     make, and the headers both send ahead of Content-Length: Host,
-    Content-Type (when not "") and each of `extra`."""
+    Content-Type (when not "") and each of `extra`. An `extra` header is
+    refused for CR/LF in its name or value, an empty name (after trimming
+    spaces and tabs), a name the signer writes, in any case
+    (`_is_signer_owned_header`), and Host, Content-Type or Content-Length,
+    which have their own arguments. The signer refuses the first three too
+    (`_canonical_header_pairs`); here they hold for the unsigned request."""
     if not uri.startswith("/"):
         raise Error("an AWS request path does not start with '/'")
     if has_crlf(uri) or has_crlf(content_type):
@@ -300,6 +307,17 @@ def _request_headers(
     if content_type.byte_length() > 0:
         headers.append(Header(String("Content-Type"), content_type))
     for i in range(len(extra)):
+        if has_crlf(extra[i].name) or has_crlf(extra[i].value):
+            raise Error("an AWS request header holds CR or LF")
+        var name = _trim_collapse(ascii_lower(extra[i].name))
+        if name.byte_length() == 0:
+            raise Error("an AWS request header has an empty name")
+        if _is_signer_owned_header(name):
+            raise Error(
+                "the extra header "
+                + extra[i].name
+                + " is a signature header; the signer writes it"
+            )
         if _is_reserved(extra[i].name):
             raise Error(
                 "the extra header "
