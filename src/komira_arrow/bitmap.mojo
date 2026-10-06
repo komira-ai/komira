@@ -410,7 +410,7 @@ struct Bitmap[K: MemoryRegion = HeapRegion](Movable):
         region: ArcPointer[MmapRegion],
         offset: Int,
         num_bits: Int,
-    ) -> Bitmap[MmapRegion]:
+    ) raises -> Bitmap[MmapRegion]:
         """Construct a non-owning Bitmap[MmapRegion] borrowing into an mmap region.
 
         The return type is the SEMANTIC-FAITHFUL `Bitmap[MmapRegion]` (not a
@@ -445,7 +445,7 @@ struct Bitmap[K: MemoryRegion = HeapRegion](Movable):
         region: ArcPointer[MmapRegion],
         offset: Int,
         num_bits: Int,
-    ) -> Bitmap[HeapRegion]:
+    ) raises -> Bitmap[HeapRegion]:
         """Zero-copy mmap-borrow validity bitmap that returns K=HeapRegion
         via the type-erased keepalive cookie.
 
