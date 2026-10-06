@@ -62,52 +62,61 @@ def modname(dest,new_path):
     p=new_path[len('src/'+dest+'/'):-5]
     return dest+'.'+p.replace('/','.')
 FFI_WORD=re.compile(r'(?<![A-Za-z0-9_])komira_core_ffi(?![A-Za-z0-9_])')
-def derive(core_root,rows,pkg=None,ffi_rows=None):
-    core=Core(os.path.join(core_root,'komira_core'))
-    core.dirs|={key(r['file']) for r in rows if r['kind']=='src' and r['disposition']=='facade'}
-    dest={}
-    for r in rows:
-        if r['kind']=='src' and r['disposition'] in('copy','moves-with-consumer'): dest[key(r['file'])]=(r['dest'],r['new_path'])
-    unresolved=collections.Counter(); out={}
-    def rewrite(f,text):
+class Rewriter:
+    """derive()'s import and text rewriting, usable on any file (repoint.py applies it to the importers of komira_core).
+    `external=True` is for a file OUTSIDE komira_core: its relative imports (`from .x import y`) name its own package,
+    so they are left alone. `unresolved` counts the imported names that no copy/moves-with-consumer row defines."""
+    def __init__(s,core_root,rows,external=False):
+        s.core=Core(os.path.join(core_root,'komira_core')); s.external=external
+        s.core.dirs|={key(r['file']) for r in rows if r['kind']=='src' and r['disposition']=='facade'}
+        s.dest={}
+        for r in rows:
+            if r['kind']=='src' and r['disposition'] in('copy','moves-with-consumer'): s.dest[key(r['file'])]=(r['dest'],r['new_path'])
+        s.unresolved=collections.Counter()
+        s.testdest={r['file']:r['new_path'] for r in rows if r['kind']=='test' and r['disposition'] in('copy','moves-with-consumer')}
+        s.fixdest={r['file']:r['new_path'] for r in rows if r['kind']=='fixture'}
+    def rewrite(s,f,text):
         mt=masked(text); res=[]; last=0
         for m in STMT.finditer(mt):
-            r=core.resolve_mod(f,modname_of(m))
+            mod=modname_of(m)
+            if s.external and mod.startswith('.'): continue
+            r=s.core.resolve_mod(f,mod)
             if r is None: continue
             groups=collections.OrderedDict()
             for n in names_of(m):
-                nm=n.split(' as ')[0].strip(); t=core.symbol(r,nm)
-                if t not in dest: unresolved[(f,modname_of(m),nm,t)]+=1; groups.setdefault('?',[]).append(n); continue
-                groups.setdefault(modname(*dest[t]),[]).append(n)
+                nm=n.split(' as ')[0].strip(); t=s.core.symbol(r,nm)
+                if t not in s.dest: s.unresolved[(f,mod,nm,t)]+=1; groups.setdefault('?',[]).append(n); continue
+                groups.setdefault(modname(*s.dest[t]),[]).append(n)
             res.append(text[last:m.start()]); last=m.end(); ind=m.group(1); orig=text[m.start():m.end()]
             if len(groups)==1:
                 (tm,_),=groups.items()
                 res.append(orig if tm=='?' else ind+'from '+tm+text[m.end(2):m.end()])
             else:
                 res.append('\n'.join('%sfrom %s import %s'%(ind,tm,', '.join(ns)) for tm,ns in groups.items()))
-        res.append(text[last:]); return textual(''.join(res))
-    testdest={r['file']:r['new_path'] for r in rows if r['kind']=='test' and r['disposition'] in('copy','moves-with-consumer')}
-    fixdest={r['file']:r['new_path'] for r in rows if r['kind']=='fixture'}
-    def textual(t):
+        res.append(text[last:]); return s.textual(''.join(res))
+    def textual(s,t):
         t=FFI_WORD.sub('komira_libc',t)   # komira_core_ffi is renamed komira_libc (word-bounded, so komira_core_posix etc. are untouched)
         def slash(m):
             p=m.group(1)
             if p.startswith('tests/'):
                 q=p if p.endswith('.mojo') else p+'.mojo'
-                if q in testdest: return testdest[q][len('src/'):]
-                if p in fixdest: return fixdest[p][len('src/'):]
+                if q in s.testdest: return s.testdest[q][len('src/'):]
+                if p in s.fixdest: return s.fixdest[p][len('src/'):]
                 return m.group(0)
             k=p[:-5] if p.endswith('.mojo') else p
-            if k in dest: return dest[k][1][len('src/'):]
+            if k in s.dest: return s.dest[k][1][len('src/'):]
             return m.group(0)
-        t=re.sub(r'komira_core/((?:[a-z0-9_]+/)*[a-z0-9_]+(?:\.(?:mojo|arrow|tensor))?)',lambda m: (lambda r: r if r!=m.group(0) else r)(slash(m)),t)
+        t=re.sub(r'komira_core/((?:[a-z0-9_]+/)*[a-z0-9_]+(?:\.(?:mojo|arrow|tensor))?)',lambda m: slash(m),t)
         def dot(m):
             parts=m.group(1).split('.')
             for n in range(len(parts),0,-1):
                 k='/'.join(parts[:n])
-                if k in dest: return modname(*dest[k])+''.join('.'+x for x in parts[n:])
+                if k in s.dest: return modname(*s.dest[k])+''.join('.'+x for x in parts[n:])
             return m.group(0)
         return re.sub(r'komira_core\.((?:[a-z0-9_]+\.)*[a-z0-9_]+)(?![a-z0-9_])',dot,t)
+def derive(core_root,rows,pkg=None,ffi_rows=None):
+    rw=Rewriter(core_root,rows); rewrite=rw.rewrite; unresolved=rw.unresolved; out={}
+    textual=rw.textual
     for r in rows:
         if r['disposition'] not in('copy','moves-with-consumer') or r['kind'] not in('src','test'): continue
         if pkg and r['dest']!=pkg: continue

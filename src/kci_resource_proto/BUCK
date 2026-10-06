@@ -10,6 +10,7 @@ mojo_proto_library(
     ],
     test_srcs = [
         "tests/test_resource_field_numbers.mojo",
+        "tests/test_resource_held_numbers.mojo",
         "tests/test_resource_list_copy_and_json.mojo",
         "tests/test_held_numbers_are_unused.mojo",
     ],

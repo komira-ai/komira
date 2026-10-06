@@ -69,6 +69,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    GrantEdge,
     CloudAdapter,
     Absence,
     ArtifactNeed,
@@ -99,7 +100,10 @@ from kci_cloud import (
     FINDING_LIMIT,
     FIELD_SERVICE,
     FIELD_JOB,
+    FIELD_TABLE,
     FIELD_BUCKET,
+    FIELD_SERVICE_ACCOUNT,
+    FIELD_GRANT,
     apply_resources,
     body_field,
     describe,
@@ -266,14 +270,20 @@ struct _Stub(CloudAdapter, Movable):
         l.append(FIELD_SERVICE)
         if self._full:
             l.append(FIELD_JOB)
+            l.append(FIELD_TABLE)
             l.append(FIELD_BUCKET)
+            l.append(FIELD_SERVICE_ACCOUNT)
+            l.append(FIELD_GRANT)
         return l^
 
     def absences(self) -> List[Absence]:
         var l = List[Absence]()
         if not self._full:
             l.append(Absence(FIELD_JOB, NOT_YET, String("no runner for jobs")))
+            l.append(Absence(FIELD_TABLE, NOT_YET, String("no tables")))
             l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
+            l.append(Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("no identities")))
+            l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -327,14 +337,14 @@ struct _Stub(CloudAdapter, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
         if self._bad_owner:
             owner = String("someone-else")
         var out = List[LoweredNode]()
         var run = List[Setting]()
         run.append(Setting(String("type"), String(r._oneof0_case)))
-        var role = String("bucket") if r._oneof0_case == 3 else String("run")
+        var role = String("bucket") if Bool(r.bucket) else String("run")
         out.append(
             LoweredNode(r.id + String("/") + role, owner, role, List[String](), List[InputRef](), run^)
         )
@@ -381,6 +391,7 @@ struct _Stub(CloudAdapter, Movable):
                 OwnedRecord(
                     String("stub"), id.copy(), String("stub"), String("none"),
                     String(""), String(RUN_UNKNOWN), True, id.copy(), False,
+                    String(""),
                 )
             )
         return l^
@@ -473,13 +484,14 @@ def test_every_graph_finding_in_one_pass() raises:
         'api|uses[0]|ref to missing resource "ghost"',
         'api|uses[1]|service "web" does not accept access ACCESS_UNSET',
         "api|uses[2]|access is granted to a resource, not to one of its outputs",
+        'api|uses[2]|a second edge from the identity of "api" to web; the first is uses[1] of "api"',
         "batch|job.image|the image is a build output that was not resolved",
         "web|id|duplicate id",
         "a/b|id|an id is lowercase letters, digits and '-' only",
         "empty|body|resource 'empty' has no type",
     ]:
         assert_true(_has(t, String(want)), String("missing: ") + String(want) + "\n" + t)
-    assert_equal(len(f), 13, "exactly the findings above, each once:\n" + t)
+    assert_equal(len(f), 14, "exactly the findings above, each once:\n" + t)
     for i in range(len(f)):
         assert_equal(f[i].kind, FINDING_GRAPH)
     assert_equal(len(graph_findings(Catalog.v1(), _list(_good()))), 0, "a good graph is clean")
