@@ -55,6 +55,7 @@ mojo_library(
         "tests/test_log_facade_error_escalation.mojo",
         "tests/test_log_facade_smoke.mojo",
         "tests/test_log_json_severity.mojo",
+        "tests/test_log_layout_init_order.mojo",
         "tests/test_log_level_config.mojo",
         "tests/test_log_manager_global.mojo",
         "tests/test_log_p1.mojo",

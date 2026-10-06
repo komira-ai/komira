@@ -24,6 +24,7 @@ from kci_release_channel import (
     is_valid_secret_name,
     oidc_exchange_implemented,
     parse_channels_file,
+    break_glass_push_identity_environment,
     push_identity_environment,
     validate_channels,
 )
@@ -481,6 +482,60 @@ def test_push_identity_environment() raises:
     assert_equal(_identity_env(oidc, String("repo:o/r:environment:stable:x")), String(""))
     # an API token's push identity is a principal, not a token subject
     assert_equal(_identity_env(token, String("repo:o/r:environment:stable")), String(""))
+
+
+# ── break_glass_push_identity: a second trusted publisher. ──────────────────
+
+
+def _bg(kind_block: String, identity: String, break_glass: String) -> String:
+    return (
+        String("channel {\n  name: \"beta\"\n  visibility: PRIVATE\n")
+        + String("  repository {\n    artifact_type: CONDA\n")
+        + String("    location: \"registry.example.invalid/beta\"\n")
+        + String("    push_identity: \"") + identity + String("\"\n")
+        + String("    break_glass_push_identity: \"") + break_glass + String("\"\n")
+        + kind_block
+        + String("  }\n}\n")
+    )
+
+
+def test_break_glass_push_identity() raises:
+    var oidc = String("    credential { kind: OIDC_TRUSTED_PUBLISHING }\n")
+    var token = String("    credential { kind: API_TOKEN secret_name: \"T\" }\n")
+    var main = String("repo:o/r:environment:gamma")
+    var r = _parse(_bg(oidc, main, String("repo:o/r:environment:gamma-breakglass")))[0].repositories[0].copy()
+    assert_equal(break_glass_push_identity_environment(r), String("gamma-breakglass"))
+    assert_equal(push_identity_environment(r), String("gamma"))
+    # none declared: none
+    var plain = (
+        String("channel {\n  name: \"beta\"\n  visibility: PRIVATE\n  repository {\n    artifact_type: CONDA\n")
+        + String("    location: \"registry.example.invalid/beta\"\n    push_identity: \"") + main + String("\"\n") + oidc
+        + String("  }\n}\n")
+    )
+    assert_equal(break_glass_push_identity_environment(_parse(plain)[0].repositories[0]), String(""))
+    assert_equal(
+        break_glass_push_identity_environment(
+            _parse(_bg(oidc, main, String("repo:o/r:environment:g2")))[0].repositories[0]
+        ),
+        String("g2"),
+    )
+    # refusals: an API token; no environment; the same environment; another
+    # repository or workflow; set twice
+    _assert_refused(
+        _bg(token, String("repo:o/r:environment:gamma"), String("repo:o/r:environment:gamma-bg")),
+        String("which does not publish by OIDC trusted publishing"),
+    )
+    _assert_refused(_bg(oidc, main, String("repo:o/r:ref:refs/heads/x")), String("it names no environment"))
+    _assert_refused(_bg(oidc, main, String("repo:o/r:environment:gamma")), String("it names the push_identity's own environment 'gamma'"))
+    _assert_refused(
+        _bg(oidc, main, String("repo:o/other:environment:gamma-bg")),
+        String("it is not push_identity 'repo:o/r:environment:gamma' with another environment"),
+    )
+    var twice = _bg(oidc, main, String("repo:o/r:environment:a")).replace(
+        String("    credential"), String("    break_glass_push_identity: \"repo:o/r:environment:b\"\n    credential")
+    )
+    _assert_refused(twice, String("break_glass_push_identity"))
+
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

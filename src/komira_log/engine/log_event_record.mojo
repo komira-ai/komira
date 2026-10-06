@@ -85,12 +85,10 @@ comptime ARG_INLINE_BYTES: Int = 48
 struct LogEventRecord(
     Copyable, Movable, Deinitable
 ):
-    # MOJO-1.0.0: `ImplicitlyCopyable` DROPPED, `Copyable` kept. 1.0.0 makes
-    # `InlineArray` non-implicitly-copyable, and a struct owning one cannot
-    # synthesise an implicit copy ctor -- there is no manual override (a
-    # hand-written `__copyinit__` is not consulted). Copies of this POD
-    # record are now spelled `.copy()`; that is the SAME memcpy b2 emitted
-    # implicitly, so codegen and cost are unchanged.
+    # `Copyable` but not `ImplicitlyCopyable`: `InlineArray` is not
+    # implicitly copyable, and a struct owning one cannot synthesise an
+    # implicit copy ctor (a hand-written `__copyinit__` is not consulted).
+    # Copies of this POD record are spelled `.copy()`, a plain memcpy.
     """The POD on-ring record — fixed stride, no heap-owning field.
 
     Crosses the producer→drain boundary by value (a single fixed-stride

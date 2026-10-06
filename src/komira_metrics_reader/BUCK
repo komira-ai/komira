@@ -1,0 +1,25 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Read a service's metrics back: the query and series values, the
+# `MetricsReader` trait (a refusal and a read) with a type-erased facade a
+# service holds as one field and a scripted double, the `MetricsReadAccess`
+# hook the service supplies, and the `GET <path>` route. A leaf on
+# `komira_http_core` alone; the readers (CloudWatch, Cloud Monitoring, an
+# object store) are packages of their own.
+#
+# Welded tests: test_metrics_query (the value types), test_metrics_reader
+# (the erased facade and the double against the trait) and
+# test_metrics_route (the route over the double and fake access hooks).
+mojo_library(
+    name = "komira_metrics_reader",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_metrics_query.mojo",
+        "tests/test_metrics_reader.mojo",
+        "tests/test_metrics_route.mojo",
+    ],
+    deps = [
+        "//src/komira_http_core:komira_http_core",
+    ],
+    visibility = ["PUBLIC"],
+)

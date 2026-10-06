@@ -10,6 +10,9 @@ def _include_arg(pkg):
 MojoPkgTSet = transitive_set(args_projections = {"include": _include_arg})
 
 MojoInfo = provider(fields = {
+    # The definition `pkgs` was built with: this module as buck2 loaded it for
+    # the BUILD file's cell. See mojo_pkg_children.
+    "pkgs_def": provider_field(typing.Any, default = None),
     # C/C++ libraries (the prelude's MergedLinkInfo, e.g. from `cxx_library`)
     # that code in this package calls, with those of every package it depends
     # on: what a binary linking this package must also link. None when there
@@ -89,3 +92,36 @@ MojoProgramInfo = provider(fields = {
     "runtime": provider_field(typing.Any),  # artifact: directory of runtime libraries
     "target_cpu": provider_field(str),  # the CPU the program was compiled for
 })
+
+
+def mojo_pkg_children(ctx, infos):
+    """The `pkgs` of each MojoInfo in `infos`, as children of a MojoPkgTSet of this module.
+
+    buck2 keys a .bzl module by the cell of the BUILD file that loads it, so a
+    target in a consuming repository's own cell and a target in the `komira`
+    cell get two MojoPkgTSet definitions, and a transitive set refuses
+    children of another definition. The packages of a closure built with
+    another definition are re-wrapped here as a chain of this definition, in
+    their original order and without repeating one already taken from an
+    earlier dependency; a closure built with this definition is passed
+    through, so a build where every package is in one cell creates exactly the
+    sets it always did.
+    """
+    children = []
+    seen = {}
+    for info in infos:
+        if info.pkgs_def == MojoPkgTSet:
+            children.append(info.pkgs)
+            continue
+        pkgs = []
+        for pkg in info.pkgs.traverse():
+            key = str(pkg)
+            if key not in seen:
+                seen[key] = True
+                pkgs.append(pkg)
+        chain = None
+        for pkg in reversed(pkgs):
+            chain = ctx.actions.tset(MojoPkgTSet, value = pkg, children = [chain] if chain else [])
+        if chain:
+            children.append(chain)
+    return children
