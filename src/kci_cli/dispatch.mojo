@@ -35,7 +35,10 @@
 #      .github/workflows/), read as it was COMMITTED at `GITHUB_WORKFLOW_SHA`
 #      (`git show <sha>:<path>`; the checkout may be another revision), and
 #      held to the machine file by kci_ci_check's `check_running_workflow`
-#      with every channels file the machine file names. Any finding is
+#      with every channels file the machine file names: a run of the
+#      PULL_REQUEST stage is held to the pull request's workflow (pr.yml, the
+#      PULL_REQUEST stage alone), a run of any other stage to the release
+#      workflow (kci.yml). Any finding is
 #      REFUSED (KCI-E-WORKFLOW-MISMATCH, exit 3), every finding printed and
 #      no step run. A variable that is unset or malformed, a `git show` that
 #      fails, a channels file or a workflow that cannot be read is

@@ -199,7 +199,7 @@ def test_golden_bucket_lowering_per_shape() raises:
     var nodes = lower_data(aws, _list(_storage("8080")))
     var found = False
     for i in range(len(nodes)):
-        if nodes[i].id == "web/uses/store":
+        if nodes[i].id == "web/u-tx7pzu":
             found = True
             assert_equal(nodes[i].kind, "AWS::IAM::RolePolicy")
             assert_equal(len(nodes[i].depends_on), 2)
@@ -207,6 +207,19 @@ def test_golden_bucket_lowering_per_shape() raises:
             assert_equal(nodes[i].depends_on[1], "store/bucket", "the grant waits for the bucket")
             assert_equal(nodes[i].field(String("access")), "READ_WRITE")
     assert_true(found, "web's grant on the bucket is lowered")
+
+    # On onprem a bucket is MinIO's, so the grant is a MinIO policy, with no
+    # Kubernetes Role helper.
+    var onprem = FakeCloud(String("p-2e"), shape=ProviderShape.onprem())
+    var on = lower_data(onprem, _list(_storage("8080")))
+    var policy = False
+    for i in range(len(on)):
+        if on[i].id == "web/u-tx7pzu":
+            policy = True
+            assert_equal(on[i].kind, "minio:policy")
+            assert_equal(len(on[i].depends_on), 2, "the identity and the bucket, no helper")
+        assert_true(on[i].id != "web/r-tx7pzu", "a MinIO grant has no Role helper")
+    assert_true(policy, "web's grant on the bucket is a MinIO policy on onprem")
     print("  test_golden_bucket_lowering_per_shape: PASS")
 
 

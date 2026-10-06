@@ -167,9 +167,15 @@ def check_workflow_at_start[S: StageSteps](
             return StartVerdict.cannot_tell(
                 String("the channels file '") + paths[i] + String("' cannot be read: ") + String(e)
             )
+    # A run of the PULL_REQUEST stage is held to pr.yml's rules (the file it runs
+    # under: GITHUB_WORKFLOW_REF), every other stage to the release workflow's.
+    var pull_request_file = False
+    for i in range(len(g.stages)):
+        if g.stages[i].name == cmd.stage and g.stages[i].is_pull_request():
+            pull_request_file = True
     var findings: List[String]
     try:
-        findings = check_running_workflow(g, files, text, cmd.machine)
+        findings = check_running_workflow(g, files, text, cmd.machine, pull_request_file)
     except e:
         result.workflow_reason = String("the workflow could not be checked")
         return StartVerdict.cannot_tell(path + String(" at ") + sha + String(": ") + String(e))
