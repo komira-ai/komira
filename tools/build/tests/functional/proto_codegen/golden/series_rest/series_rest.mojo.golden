@@ -133,8 +133,10 @@ struct ListPointsRequest(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "name", self.name)
-        enc.write_string_field(2, "filter", self.filter)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.name.byte_length() > 0:
+            enc.write_string_field(1, "name", self.name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.filter.byte_length() > 0:
+            enc.write_string_field(2, "filter", self.filter)
         if self.interval:
             enc.write_message_field[Interval](3, "interval", self.interval.value())
         if self.aggregation:
@@ -143,7 +145,8 @@ struct ListPointsRequest(Serializable, Copyable, Movable):
             enc.write_message_field[Window](5, "window", self.window.value())
         if self.as_of:
             enc.write_message_field[Timestamp](6, "asOf", self.as_of.value())
-        enc.write_i32_field(7, "pageSize", self.page_size)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_size != 0:
+            enc.write_i32_field(7, "pageSize", self.page_size)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -260,7 +263,8 @@ struct Aggregation(Serializable, Copyable, Movable):
         """Encode this message's fields into `enc`."""
         if self.alignment_period:
             enc.write_message_field[Duration](1, "alignmentPeriod", self.alignment_period.value())
-        enc.write_enum_field[Aggregation_Aligner](2, "perSeriesAligner", self.per_series_aligner)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.per_series_aligner.number() != 0:
+            enc.write_enum_field[Aggregation_Aligner](2, "perSeriesAligner", self.per_series_aligner)
         enc.begin_list_field(3, "groupByFields")
         for i in range(len(self.group_by_fields)):
             enc.write_string_element(3, self.group_by_fields[i])
@@ -368,7 +372,8 @@ struct ListPointsResponse(Serializable, Copyable, Movable):
         for i in range(len(self.points)):
             enc.write_string_element(1, self.points[i])
         enc.end_list_field()
-        enc.write_string_field(2, "nextPageToken", self.next_page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.next_page_token.byte_length() > 0:
+            enc.write_string_field(2, "nextPageToken", self.next_page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:

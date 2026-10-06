@@ -1,0 +1,18 @@
+diff --git a/src/alpha/a.mojo b/src/alpha/a.mojo
+index 1111111..2222222 100644
+--- a/src/alpha/a.mojo
++++ b/src/alpha/a.mojo
+@@ -2,0 +3,2 @@
++        return 1
++    # nothing
+@@ -5 +6,2 @@
+-    return 2
++        return 2
++    abort()  # cov: unreachable x is never in [-5, 0]
+diff --git a/docs/x.md b/docs/x.md
+index 3333333..4444444 100644
+--- a/docs/x.md
++++ b/docs/x.md
+@@ -1 +1 @@
+-old
++new

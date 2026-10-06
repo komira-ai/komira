@@ -74,14 +74,17 @@ comptime _CT_CONNECT_STREAM_PROTO: String = "application/connect+proto"
 
 
 def _strip_ct_params(ct: String) -> String:
-    """Return the base content-type (text before any `; param=value`)."""
-    var n = ct.byte_length()
-    for i in range(n):
-        if ord(ct[byte=i]) == ord(";"):
-            var out = List[UInt8](capacity=i)
-            for j in range(i):
-                out.append(UInt8(ord(ct[byte=j])))
-            return String(unsafe_from_utf8=Span(out))
+    """Return the base content-type (text before any `; param=value`).
+
+    `ct` is the peer's header value and may hold any byte, so it is read
+    through `as_bytes()`: indexing `ct[byte=i]` asserts on a UTF-8
+    continuation byte and aborts the process. The cut is at an ASCII `;`, so
+    the prefix of a valid UTF-8 string is valid UTF-8.
+    """
+    var bytes = ct.as_bytes()
+    for i in range(len(bytes)):
+        if bytes[i] == UInt8(ord(";")):
+            return String(StringSlice(unsafe_from_utf8=bytes[:i]))
     return ct
 
 
