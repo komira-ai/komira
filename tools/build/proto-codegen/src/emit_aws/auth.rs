@@ -196,6 +196,12 @@ mod tests {
             "OnlyUnsignable": {"name": "OnlyUnsignable",
                 "http": {"method": "POST", "requestUri": "/"},
                 "input": {"shape": "In"}, "auth": ["aws.auth#sigv4a"]},
+            "SignedFirst": {"name": "SignedFirst",
+                "http": {"method": "POST", "requestUri": "/"},
+                "input": {"shape": "In"}, "auth": ["aws.auth#sigv4", "smithy.api#noAuth"]},
+            "SkipsToNoAuth": {"name": "SkipsToNoAuth",
+                "http": {"method": "POST", "requestUri": "/"},
+                "input": {"shape": "In"}, "auth": ["aws.auth#sigv4a", "smithy.api#noAuth"]},
             "NoAuthFirst": {"name": "NoAuthFirst",
                 "http": {"method": "POST", "requestUri": "/"},
                 "input": {"shape": "In"}, "auth": ["smithy.api#noAuth", "aws.auth#sigv4"]},
@@ -290,13 +296,24 @@ mod tests {
     #[test]
     fn an_operation_auth_list_is_read_in_order_and_ahead_of_authtype() {
         let src = emit(
-            &["SkipsUnsignable", "NoAuthFirst", "AuthOverAuthtype", "UnsignedBody"],
+            &[
+                "SkipsUnsignable",
+                "SignedFirst",
+                "SkipsToNoAuth",
+                "NoAuthFirst",
+                "AuthOverAuthtype",
+                "UnsignedBody",
+            ],
             false,
         )
         .unwrap();
         // SigV4a needs a signer this client does not have, and botocore
         // without it moves on to the next scheme.
         assert!(sends_signed(&src, "skips_unsignable"), "{src}");
+        // The first scheme the client applies wins: SigV4 listed ahead of
+        // noAuth is signed, never sent unsigned because noAuth is listed.
+        assert!(sends_signed(&src, "signed_first"), "{src}");
+        assert!(!sends_signed(&src, "skips_to_no_auth"), "{src}");
         assert!(!sends_signed(&src, "no_auth_first"), "{src}");
         assert!(sends_signed(&src, "auth_over_authtype"), "{src}");
         // `v4-unsigned-body` is SigV4; the body hash is sent.
