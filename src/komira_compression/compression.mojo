@@ -206,7 +206,7 @@ trait ArrowIpcCompression(Compression):
     prefix scan).
 
     The cached-dctx decompress path:
-      - `create_dctx() -> UnsafePointer[UInt8, MutExternalOrigin]`
+      - `create_dctx() -> UnsafePointer[UInt8, MutUntrackedOrigin]`
         creates one decompression context per worker (mirrors
         arrow-cpp's per-thread dctx cache).
       - `free_dctx(dctx)` releases it (called by `_CodecDctxHandle`'s
@@ -214,7 +214,8 @@ trait ArrowIpcCompression(Compression):
       - `decompress_into_with_dctx[o](dctx, src, dst, dst_capacity)`
         decompresses with a pre-created dctx; calls the codec's reset
         function between buffers to amortize ctor/dtor cost.
-        Lz4Frame: `LZ4F_resetDecompressionContext` + `LZ4F_decompress`.
+        Lz4Frame: `LZ4F_resetDecompressionContext` + `LZ4F_decompress`
+                  (through komira_lz4's `Lz4FrameDecoder`).
         Zstd: `ZSTD_DCtx_reset(ZSTD_reset_session_only)` +
               `ZSTD_decompressDCtx`.
         Uncompressed: memcpy (dctx ignored).

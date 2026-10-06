@@ -27,7 +27,7 @@
 #   - All conformer compress/decompress methods accept `Span[UInt8, _]`
 #     (origin-polymorphic, safe surface — encapsulation rule).
 #   - Internally, helpers use `.unsafe_ptr()` + `.unsafe_origin_cast[
-#     MutExternalOrigin]()` ONLY at the `external_call` boundary, with
+#     MutUntrackedOrigin]()` ONLY at the `external_call` boundary, with
 #     `# FFI-BOUNDARY:` comments. This mirrors
 #     `komira_parquet/compression.mojo` patterns.
 #   - The Snappy / Zstd / Uncompressed conformers each build a
@@ -139,7 +139,7 @@ def _zstd_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
 # =============================================================================
 #
 # Conformer trait methods accept `Span[UInt8, _]` (origin-poly). At the FFI
-# boundary we cast to `UnsafePointer[UInt8, MutExternalOrigin]` because the
+# boundary we cast to `UnsafePointer[UInt8, MutUntrackedOrigin]` because the
 # C ABI does not speak Mojo origins. The cast is sound because the C call
 # is synchronous and the caller proves the buffer outlives the call by
 # holding the `Span` in the enclosing scope.
@@ -147,7 +147,7 @@ def _zstd_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
 
 @always_inline
 def _span_ptr(s: Span[UInt8, _]) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    """Coerce a `Span[UInt8, _]` to a `MutExternalOrigin`-cast UnsafePointer
+    """Coerce a `Span[UInt8, _]` to a `MutUntrackedOrigin`-cast UnsafePointer
     for FFI. FFI-BOUNDARY: synchronous C call; caller owns the buffer.
     """
     # SAFETY: see header. The cast does not extend lifetime; the Span ref
@@ -1285,17 +1285,16 @@ struct Zlib[level: Int = 6](Compression):
 # owner / reader / writer of its slot.
 #
 # ENCAPSULATION: the raw
-# `UnsafePointer[UInt8, MutExternalOrigin]` is held in a PRIVATE field
+# `UnsafePointer[UInt8, MutUntrackedOrigin]` is held in a PRIVATE field
 # `_raw`. The handle exposes a single `decompress_into_with_dctx[o]`
 # method that forwards to `C.decompress_into_with_dctx`. The driver in
 # `ipc_body_compression.mojo` only ever sees the handle by reference;
 # the raw dctx pointer never crosses a module boundary.
 #
-# Movable semantics: handle moves transfer ownership of `_raw`; the
-# source's `_raw` becomes null (so __deinit__ is a no-op on the moved-from
-# instance). @fieldwise_init synthesizes the move correctly (UInt8*
-# field is trivially copyable; the moved-from value is dropped without
-# calling free_dctx because we manually null it out — see init / take).
+# Movable semantics: the synthesized move copies `_raw` into the destination
+# and ends the source's lifetime WITHOUT running its `__deinit__`, so a move
+# transfers ownership of the dctx and nothing frees it twice. The null check
+# in `__deinit__` covers the default-constructed handle (no dctx created yet).
 #
 # SAFETY:
 #   - One handle owns ONE dctx; the destructor calls free_dctx exactly
@@ -1320,13 +1319,13 @@ struct _CodecDctxHandle[C: ArrowIpcCompression](
     `ipc_body_compression.mojo`.
 
     Field set:
-      var _raw: UnsafePointer[UInt8, MutExternalOrigin]
-        # SAFETY: opaque codec-specific dctx pointer
-        # (a boxed Lz4FrameDecoder for Lz4Frame, ZSTD_DCtx* for Zstd, null for
-        # Uncompressed). Null sentinel = no live dctx (already freed,
-        # or moved-from, or default-constructed before first use). The
-        # destructor's null-guard ensures double-free safety on the
-        # moved-from instance.
+      var _raw: UnsafePointer[UInt8, MutUntrackedOrigin]
+        # SAFETY: opaque codec-specific dctx pointer from `C.create_dctx`
+        # (a heap-boxed `komira_lz4.frame.Lz4FrameDecoder` for Lz4Frame,
+        # ZSTD_DCtx* for Zstd, null for Uncompressed). Null = no dctx
+        # created yet (default-constructed, `acquire` not called); the
+        # destructor skips `free_dctx` then. A moved-from handle is never
+        # destroyed, so it needs no null.
     """
 
     # SAFETY: opaque codec-specific dctx pointer; never dereferenced
