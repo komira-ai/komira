@@ -251,6 +251,10 @@ tests_check(
 # compiled against the real runtime and tested.
 _TINY_QUERY_OPERATIONS = ["Ping", "SendThing"]
 
+# The client adds two anonymous operations (`authtype` `none`, `auth`
+# `smithy.api#noAuth`), which it sends unsigned.
+_TINY_QUERY_CLIENT_OPERATIONS = ["Ping", "PingAnonymous", "PingNoAuth", "SendThing"]
+
 aws_codegen_golden(
     name = "query_pure",
     gen_args = [
@@ -322,6 +326,8 @@ gen_check(
         "mode         : client",
         "var info = aws_query_error(res.to_response())",
         "from komira_http_core.transport.io_stream import Connector",
+        "var res = self.send_unsigned(req^)",
+        "return send_unsigned_request[Self.C](",
     ],
 )
 
@@ -336,7 +342,8 @@ tests_check(
 
 # The client-mode module of the tiny awsQuery model as a text golden, as for
 # logs_client and tiny_rest_json_client: the caller's HttpClientConfig
-# reaches the signed send.
+# reaches the signed send, and the anonymous operations go through the
+# unsigned one.
 aws_codegen_golden(
     name = "query_client",
     gen_args = [
@@ -345,7 +352,7 @@ aws_codegen_golden(
         "--service",
         "tiny",
         "--operations",
-        ",".join(_TINY_QUERY_OPERATIONS),
+        ",".join(_TINY_QUERY_CLIENT_OPERATIONS),
         "--probe-import",
         "komira_aws_tiny_query.komira_aws_tiny_query",
     ],
@@ -519,6 +526,23 @@ aws_codegen_refusal(
         "Ping",
     ],
     model = "model/tiny_restxml_checksum.json",
+)
+
+# A bearer-token operation of the tiny awsQuery model (`authtype` `bearer`):
+# the client has no token source, and a SigV4 signature is the wrong
+# credential.
+aws_codegen_refusal(
+    name = "refuse_bearer_operation",
+    expect = "REFUSED bearer-auth: operation `PingBearer`",
+    gen_args = [
+        "--model-sha256",
+        TINY_QUERY.sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping,PingBearer",
+    ],
+    model = TINY_QUERY.model,
 )
 
 # The generated client signs with SigV4 only: a supported protocol whose

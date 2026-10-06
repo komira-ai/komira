@@ -1,0 +1,2 @@
+fn a() -> Int:
+    return 1

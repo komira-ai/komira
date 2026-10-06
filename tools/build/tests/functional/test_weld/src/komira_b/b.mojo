@@ -1,0 +1,2 @@
+fn b() -> Int:
+    return 2

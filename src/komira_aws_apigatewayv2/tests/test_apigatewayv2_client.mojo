@@ -1,4 +1,4 @@
-# The generated API Gateway v2 client (`ApiGatewayV2ApiGatewayV2Client`)
+# The generated API Gateway v2 client (`ApiGatewayV2Client`)
 # end to end over komira_http_client and komira_http_core's
 # ScriptedConnector (no socket).
 #
@@ -16,7 +16,7 @@
 # SigV4 scope: signing name `apigateway`, the v1 name the v2 API is served
 # and signed under.
 from komira_aws_apigatewayv2.komira_aws_apigatewayv2 import (
-    ApiGatewayV2ApiGatewayV2Client,
+    ApiGatewayV2Client,
     ApiGatewayV2CreateApiRequest,
     ApiGatewayV2CreateAuthorizerRequest,
     ApiGatewayV2CreateIntegrationRequest,
@@ -135,10 +135,10 @@ def _mk_echo() raises -> AwsEchoConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> ApiGatewayV2ApiGatewayV2Client[C, StaticCredsSource]:
+) raises -> ApiGatewayV2Client[C, StaticCredsSource]:
     var config = ApiGatewayV2EndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return ApiGatewayV2ApiGatewayV2Client[C, StaticCredsSource](
+    return ApiGatewayV2Client[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(

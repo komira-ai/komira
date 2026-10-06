@@ -1,0 +1,6 @@
+# proto-message: example.fixture.v1.Sample
+id: 150
+inner {
+  count: 7
+  9: 1
+}

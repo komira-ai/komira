@@ -7,7 +7,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # phase (graph, coverage and limit findings, one pass, one refusal text),
 # plan / apply / destroy that validate before lowering, and the conformance
 # kit. Names no cloud; the fake clouds are kci_cloud_fake. komira_crypto is
-# the sha256 of a grant edge's role.
+# the sha256 of a grant edge's role. komira_validation_run is the run-id
+# and retention marks' keys, the retention mark's values, and the rule a
+# validation run id must pass before any create.
 #
 # komira_proto_codec is here for the welded tests, which read graphs in the
 # proto3 JSON form an author writes.
@@ -19,6 +21,7 @@ mojo_library(
         "//src/kci_resource_proto:kci_resource_proto",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_validation_run:komira_validation_run",
     ],
     test_srcs = [
         "tests/test_cloud_catalog_and_clouds.mojo",

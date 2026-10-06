@@ -36,6 +36,7 @@ mojo_library(
         "tests/test_fs_path_bytes_non_ascii.mojo",
         "tests/test_glob_engine.mojo",
         "tests/test_local_fs_clone.mojo",
+        "tests/test_local_fs_errno_not_absent.mojo",
         "tests/test_local_fs_list_dir_shallow.mojo",
         "tests/test_local_fs_list_recursive.mojo",
         "tests/test_local_fs_read_at_mmap.mojo",
@@ -43,6 +44,8 @@ mojo_library(
         "tests/test_local_fs_write_at.mojo",
         "tests/test_path_discovery.mojo",
         "tests/test_pruned_hive_discovery.mojo",
+        "tests/test_pruned_hive_raw_spelling.mojo",
+        "tests/test_pruned_hive_writer_spellings.mojo",
     ],
     visibility = ["PUBLIC"],
 )

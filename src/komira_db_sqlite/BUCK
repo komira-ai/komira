@@ -1,30 +1,55 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library")
 
 # The SQLite driver for komira_db: `SqliteDatabase` conforms to the
 # backend-generic `SqlDatabase` trait over the in-process libsqlite3 library,
 # reached through the FFI declarations in ffi.mojo.
 #
-# This package has no tests of its own yet (test_srcs is deliberately absent);
-# compiling the library is its gate.
-
-# Carries the libsqlite3 link flag, so a binary that depends on this package
-# links it and one that does not never sees it. UNVERIFIED: whether the
-# hermetic C toolchain finds the system library has not been tested, and no
-# test exercises the link. If it does not resolve, drop this target and have
-# the final binary link `-lsqlite3` itself.
-cxx_library(
-    name = "sqlite3",
-    exported_linker_flags = ["-lsqlite3"],
-    visibility = ["PUBLIC"],
-)
+# The library has no welded tests (no test_srcs); its test is the standalone
+# :test_dbstorable_sqlite_crud below.
 
 mojo_library(
     name = "komira_db_sqlite",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":sqlite3",
+        "//src/komira_async:komira_async",
+        "//src/komira_db:komira_db",
+        # libsqlite3, built from source and linked statically. A bare
+        # `-lsqlite3` linker flag on this library failed to link on the farm:
+        # the hermetic zig link reported "unable to find dynamic system
+        # library 'sqlite3' using strategy 'paths_first'. searched paths:
+        # none".
+        "//third_party/sqlite:sqlite3",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The test table: tests/records.proto through protoc-gen-mojo-db, so the
+# DbStorable row type the test stores is generated code, not hand-written.
+# Test-only; nothing else depends on it.
+mojo_db_proto_library(
+    name = "records_db",
+    srcs = ["tests/records.proto"],
+    outs = ["records_db.mojo"],
+    import_prefix = "example",
+    proto_deps = ["//tools/build/proto-codegen:db_options"],
+    deps = ["//src/komira_db:komira_db"],
+)
+
+# Full CRUD of the generated Record through SqliteDatabase on an in-memory
+# database: create table, insert, get by key, update, list, delete, with every
+# column kind records.proto declares, NULL and present optional columns, the
+# SQL DEFAULT and the UNIQUE constraint. A standalone mojo_test rather than a
+# welded test of komira_db_sqlite: a welded test sees only the library's own
+# `deps`, and putting :records_db there would ship a test fixture in the
+# closure of every consumer of the driver.
+mojo_test(
+    name = "test_dbstorable_sqlite_crud",
+    srcs = ["tests/test_dbstorable_sqlite_crud.mojo"],
+    deps = [
+        ":komira_db_sqlite",
+        ":records_db",
         "//src/komira_async:komira_async",
         "//src/komira_db:komira_db",
     ],
-    visibility = ["PUBLIC"],
 )

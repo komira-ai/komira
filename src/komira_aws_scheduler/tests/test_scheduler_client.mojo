@@ -1,4 +1,4 @@
-# The generated EventBridge Scheduler client (`SchedulerSchedulerClient`)
+# The generated EventBridge Scheduler client (`SchedulerClient`)
 # end to end over komira_http_client and komira_http_core's
 # ScriptedConnector (no socket).
 #
@@ -30,7 +30,7 @@ from komira_aws_scheduler.komira_aws_scheduler import (
     SchedulerEndpointConfig,
     SchedulerFlexibleTimeWindow,
     SchedulerGetScheduleInput,
-    SchedulerSchedulerClient,
+    SchedulerClient,
     SchedulerTarget,
     SchedulerUpdateScheduleInput,
 )
@@ -146,10 +146,10 @@ def _mk_echo() raises -> AwsEchoConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> SchedulerSchedulerClient[C, StaticCredsSource]:
+) raises -> SchedulerClient[C, StaticCredsSource]:
     var config = SchedulerEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return SchedulerSchedulerClient[C, StaticCredsSource](
+    return SchedulerClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(

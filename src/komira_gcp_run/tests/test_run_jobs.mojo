@@ -15,9 +15,9 @@
 # socket is opened. Each client is pointed at `localhost` with
 # `set_rest_host`; the default host is test_run_endpoint's subject.
 #
-# komira_proto_codec writes a scalar or enum at its default (`"uid":""`,
-# `..._UNSPECIFIED`), which the proto3 JSON mapping lets a writer omit and
-# the service reads as unset; an empty list or map it leaves out. A
+# A body omits a plain scalar or enum at its default (`uid`,
+# `..._UNSPECIFIED`) and an empty list or map, as the proto3 JSON mapping
+# omits them; the service reads each as unset. A
 # `body: "*"` method (RunJob, CancelExecution) leaves its path field
 # (`name`) out of the body, as google/api/http.proto states.
 from std.memory import ArcPointer
@@ -67,18 +67,13 @@ comptime _JOB = (
     + '"timeout":"600s"}}}'
 )
 
-# The same job as the client writes it, after its name.
+# The same job as the client writes it, after its name: the fields the
+# caller set. `maxRetries` is a oneof member (`retries`), so its 0 is
+# written: "no retries" is a value the caller chose, not an unset field.
 comptime _JOB_WIRE_TAIL = (
-    '"uid":"","generation":"0","creator":"",'
-    + '"lastModifier":"","client":"","clientVersion":"",'
-    + '"launchStage":"LAUNCH_STAGE_UNSPECIFIED","template":{'
-    + '"parallelism":0,"taskCount":1,"template":{"containers":[{"name":"",'
-    + '"image":"us-docker.pkg.dev/demo-project/apps/build@sha256:9a8b",'
-    + '"workingDir":"",'
-    + '"baseImageUri":""}],"timeout":"600s","serviceAccount":"",'
-    + '"executionEnvironment":"EXECUTION_ENVIRONMENT_UNSPECIFIED","encryptionKey":"",'
-    + '"maxRetries":0}},"observedGeneration":"0","executionCount":0,'
-    + '"reconciling":false,"satisfiesPzs":false,"etag":""}'
+    '"template":{"taskCount":1,"template":{"containers":[{'
+    + '"image":"us-docker.pkg.dev/demo-project/apps/build@sha256:9a8b"}],'
+    + '"timeout":"600s","maxRetries":0}}}'
 )
 
 # A running operation, as the mutating methods answer.
@@ -190,7 +185,7 @@ def test_create_job() raises:
         _wire(capture),
         _expected(
             String("POST /v2/") + _PARENT + "/jobs?jobId=build",
-            String('{"name":"",') + _JOB_WIRE_TAIL,
+            String('{') + _JOB_WIRE_TAIL,
         ),
     )
     assert_equal(op.name, "projects/demo-project/locations/us-central1/operations/7d1c22")
@@ -311,9 +306,9 @@ def test_run_job() raises:
         _wire(capture),
         _expected(
             String("POST /v2/") + _NAME + ":run",
-            String('{"validateOnly":false,"etag":"","overrides":{"containerOverrides":')
-            + '[{"name":"","args":["--commit=4f2a"],"env":[{"name":"STAGE","value":"test"}],'
-            + '"clearArgs":false}],"taskCount":1,"timeout":"600s"}}',
+            String('{"overrides":{"containerOverrides":')
+            + '[{"args":["--commit=4f2a"],"env":[{"name":"STAGE","value":"test"}]}],'
+            + '"taskCount":1,"timeout":"600s"}}',
         ),
     )
     # The execution the run started is named in the operation's metadata.
@@ -377,7 +372,7 @@ def test_cancel_execution() raises:
         _wire(capture),
         _expected(
             String("POST /v2/") + _EXECUTION + ":cancel",
-            String('{"validateOnly":false,"etag":""}'),
+            String('{}'),
         ),
     )
     assert_false(op.done)

@@ -1,0 +1,14 @@
+# Coverage floors per package, read by covcheck (tools/build/coverage).
+#
+# A row is: <package>	<line floor>	<branch floor>, separated by one tab.
+# <package> is a directory holding a BUCK file (src/<module>); the floors are
+# basis points (1/100 of a percent, 0 to 10000, so 8734 is 87.34%); the
+# branch floor is '-' when the package has none. Rows are sorted by package
+# in byte order, each package once. A floor may only rise: covcheck reports a
+# package measured below its floor, or a floor above 0 with nothing measured
+# for it (Regression), a measured package with no row (MissingRow), a row whose directory has no BUCK file (ExtraRow) and a
+# measured branch value whose row has '-' (BranchFloorMissing), and writes the
+# file with every floor raised to what it measured (--ratchet-out) to copy in.
+#
+# This file has no rows yet: the floors arrive with the first coverage run of
+# the packages, as the file covcheck proposes.

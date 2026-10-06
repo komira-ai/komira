@@ -13,7 +13,11 @@
 #       member; a member whose sha256 is not the set's file; a member that
 #       is not a library of the set (itself); a member row with no build (the
 #       packer's older shape); a member at another version;
-#   (3) the set: no metapackage; two; a subdir with no guard in the table.
+#   (3) the set: no metapackage; two; a subdir with no guard in the table;
+#   (4) the BUILD step's name check (`undeclared_requirements`) agrees: the
+#       good set is closed for it too, and an undeclared library
+#       (komira_gamma) and the pin on the metapackage are open for both, each
+#       named by the exact line BUILD prints.
 #
 # The members are loaded from a written good directory and changed in
 # memory (the closure is a property of the set, which `verify_member` cannot
@@ -28,6 +32,7 @@ from std.testing import assert_true
 
 from kci_publish.release_fixture import ExampleRelease, example_loaded
 from kci_publish.verify import require_closure
+from kci_release_set.closure import undeclared_requirements
 from kci_release_set.member import ReleaseMember
 
 
@@ -129,8 +134,36 @@ def test_the_set_has_exactly_one_metapackage_and_a_guard() raises:
     print("  test_the_set_has_exactly_one_metapackage_and_a_guard: PASS")
 
 
+def test_the_build_steps_name_check_agrees() raises:
+    assert_true(len(undeclared_requirements(_good())) == 0, "the good set is closed by name")
+    var m = _good()
+    m[0].conda.depends.append(String("komira_gamma ==1.0.0 ") + String(_B))
+    var open_a = undeclared_requirements(m)
+    assert_true(len(open_a) == 1)
+    assert_true(
+        open_a[0]
+        == String("artifact 'komira_alpha' requires 'komira_gamma ==1.0.0 h01234567_3', and 'komira_gamma'")
+        + String(" is not another library of this release set"),
+        open_a[0],
+    )
+    _refused(m, String("artifact 'komira_alpha': requirement 'komira_gamma ==1.0.0 h01234567_3'"))
+    m = _good()
+    m[1].conda.depends.append(String("komira ==1.0.0 ") + String(_B))
+    var open_b = undeclared_requirements(m)
+    assert_true(len(open_b) == 1)
+    assert_true(
+        open_b[0]
+        == String("artifact 'komira_beta' requires 'komira ==1.0.0 h01234567_3', and 'komira'")
+        + String(" is not another library of this release set"),
+        open_b[0],
+    )
+    _refused(m, String("artifact 'komira_beta': requirement 'komira ==1.0.0 h01234567_3'"))
+    print("  test_the_build_steps_name_check_agrees: PASS")
+
+
 def main() raises:
     test_control()
+    test_the_build_steps_name_check_agrees()
     test_a_library_requires_exactly_the_closure()
     test_the_metapackage_holds_exactly_the_libraries()
     test_the_set_has_exactly_one_metapackage_and_a_guard()

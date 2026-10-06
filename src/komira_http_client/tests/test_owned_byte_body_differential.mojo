@@ -175,6 +175,7 @@ def _decode_via_recv_ring_cl(
     var stream = ScriptedStream.empty()
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl_total=body_bytes.__len__(), pre_body_bytes=pre^,
+        max_body_bytes=100 * 1024 * 1024,
     )
     var reactor = _make_reactor()
     var tok = CancellationToken.never()

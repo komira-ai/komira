@@ -11,9 +11,9 @@
 # (resolved without the network) with `set_rest_host`; the default host is
 # test_secretmanager_endpoint's subject.
 #
-# komira_proto_codec writes a scalar or enum at its default (`"name":""`,
-# `..._UNSPECIFIED`), which the proto3 JSON mapping lets a writer omit and
-# the service reads as unset; an empty list or map it leaves out. A
+# A body omits a plain scalar or enum at its default (`name`, `etag`,
+# `..._UNSPECIFIED`) and an empty list or map, as the proto3 JSON mapping
+# omits them; the service reads each as unset. A
 # `body: "*"` method (AddSecretVersion) leaves its path field (`parent`)
 # out of the body, as google/api/http.proto states.
 from std.memory import ArcPointer
@@ -183,9 +183,7 @@ def test_create_secret() raises:
         _wire(capture),
         _expected(
             "POST /v1/projects/demo-project/secrets?secretId=smtp-password",
-            '{"name":"","replication":{"automatic":{}},"labels":{"owner":"deploy"},'
-            + '"etag":"",'
-            + '"secretType":"SECRET_TYPE_UNSPECIFIED"}',
+            '{"replication":{"automatic":{}},"labels":{"owner":"deploy"}}',
         ),
     )
     assert_equal(resp.name, "projects/123456789012/secrets/smtp-password")
