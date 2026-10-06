@@ -344,6 +344,7 @@ channel {
     artifact_type: CONDA
     location: "https://conda.example.invalid/example/gamma"
     push_identity: "repo:example/release:environment:gamma"
+    break_glass_push_identity: "repo:example/release:environment:gamma-breakglass"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
 }
