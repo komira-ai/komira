@@ -563,13 +563,16 @@ impl<'a> Emitter<'a> {
     /// An explicit copy constructor, so the struct is never trivially
     /// copyable.
     ///
-    /// On Mojo 1.0.0 the synthesized copy constructor of a struct with an
-    /// explicit `__deinit__` can be treated as trivial for some layouts (three
-    /// `Optional[String]` plus an `Optional[Bool]` or `Optional[Int64]` was
-    /// measured), and then `List.copy()` and `List.extend` copy the elements
-    /// with a memcpy: the copy and the original share their String buffers, and
-    /// dropping the copy frees them under the original. An explicit
-    /// constructor is never trivial. Every field is copied by its own
+    /// On Mojo 1.0.0 the synthesized copy constructor can be reported as
+    /// trivial (https://github.com/modular/modular/issues/7256): two fields of
+    /// the same non-trivial Variant-backed type (e.g. `Optional[String]`)
+    /// followed by a trivially copyable Variant-backed field (e.g.
+    /// `Optional[Bool]`) make `__copy_ctor_is_trivial` True, whether or not
+    /// the struct declares `__deinit__`. `List.copy()` and `List.extend` then
+    /// copy the elements with a memcpy: the copy and the original share their
+    /// heap buffers, and dropping the copy frees them under the original. An
+    /// explicit constructor is never trivial; remove this once that issue is
+    /// fixed in the pinned compiler. Every field is copied by its own
     /// `.copy()`, so a nested message, a repeated field, a map, an `Optional`
     /// and a oneof arm each go through that type's real copy.
     fn emit_explicit_copy_ctor(&mut self, msg: &IrMessage) {
@@ -981,16 +984,23 @@ impl<'a> Emitter<'a> {
     // -- the `decode` body ---------------------------------------------
 
     /// The JSON spellings (the `json_name`, then the proto name when it
-    /// differs) of every non-repeated field of `msg` whose type is the enum
-    /// `google.protobuf.NullValue`, in declaration order.
-    fn null_value_field_spellings(msg: &IrMessage) -> Vec<String> {
+    /// differs) of every non-repeated field of `msg` whose JSON `null` is a
+    /// value rather than "absent", in declaration order. The proto3 JSON
+    /// mapping names two: the enum `google.protobuf.NullValue` (`null` is
+    /// NULL_VALUE) and the message `google.protobuf.Value` (`null` is a
+    /// Value of kind NULL_VALUE; komira-ai/komira#62). A repeated or map
+    /// field of either reads `null` as an absent list or map.
+    fn null_is_a_value_field_spellings(msg: &IrMessage) -> Vec<String> {
         let mut out = Vec::new();
         for f in &msg.fields {
-            let is_null_enum = matches!(
+            let null_is_a_value = matches!(
                 &f.ty,
                 IrType::Enum(t) if t.fq_name == ".google.protobuf.NullValue"
+            ) || matches!(
+                &f.ty,
+                IrType::Message(t) if t.fq_name == ".google.protobuf.Value"
             );
-            if !is_null_enum || f.label == Label::Repeated {
+            if !null_is_a_value || f.label == Label::Repeated {
                 continue;
             }
             out.push(f.json_name.clone());
@@ -1020,10 +1030,11 @@ impl<'a> Emitter<'a> {
             msg.fq_name.trim_start_matches('.'),
             Self::accepted_field_spellings(msg).join(","),
         ));
-        // A `google.protobuf.NullValue` field's JSON value IS `null`, which
-        // the JSON backend otherwise reads as an absent field (and, for a
-        // oneof arm, as no arm at all): name its spellings to the decoder.
-        let null_keys = Self::null_value_field_spellings(msg);
+        // A `google.protobuf.NullValue` or singular `google.protobuf.Value`
+        // field's JSON value may be `null`, which the JSON backend otherwise
+        // reads as an absent field (and, for a oneof arm, as no arm at all):
+        // name its spellings to the decoder.
+        let null_keys = Self::null_is_a_value_field_spellings(msg);
         if !null_keys.is_empty() {
             self.line(&format!(
                 "dec.keep_null_fields(\"{}\")",
@@ -2293,8 +2304,8 @@ mod mojo_100_service_client_tests {
         assert_eq!(
             ctors, 2,
             "one copy constructor per MESSAGE struct (2 messages, none on the \
-             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for a struct with \
-             an explicit __deinit__, and List.copy() then shares String buffers; \
+             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for some field \
+             orders (modular/modular#7256), and List.copy() then shares heap buffers; \
              got:\n{out}"
         );
     }
@@ -2571,5 +2582,58 @@ mod null_value_field_tests {
         // named once.
         let single = file(vec![field("n", "n", null_enum(), Label::Single, None)], vec![]);
         assert!(Emitter::new(&single).emit().contains("dec.keep_null_fields(\"n\")"));
+    }
+
+    fn message(fq: &str, mojo: &str) -> IrType {
+        IrType::Message(TypeRef { fq_name: fq.to_string(), mojo_name: mojo.to_string() })
+    }
+
+    fn value_msg() -> IrType {
+        message(".google.protobuf.Value", "Value")
+    }
+
+    // komira-ai/komira#62: proto3 JSON reads `null` in a singular
+    // `google.protobuf.Value` field as NULL_VALUE, so its key is named to the
+    // decoder like a NullValue field's: plain, `optional` and oneof arm alike
+    // (LOWER gives a singular message field `Label::Optional` either way).
+    #[test]
+    fn a_singular_value_field_keeps_its_json_null() {
+        let f = file(
+            vec![
+                field("v", "v", value_msg(), Label::Optional, None),
+                field("opt_v", "optV", value_msg(), Label::Optional, None),
+                field("arm_v", "armV", value_msg(), Label::Optional, Some(0)),
+                field("arm_s", "armS", IrType::Scalar(ScalarKind::String), Label::Optional, Some(0)),
+            ],
+            vec![IrOneof {
+                name: "kind".to_string(),
+                arms: vec!["arm_v".to_string(), "arm_s".to_string()],
+            }],
+        );
+        let src = Emitter::new(&f).emit();
+        let expect = src.find("dec.expect_fields(").unwrap();
+        let keep = src.find("dec.keep_null_fields(\"v|optV|opt_v|armV|arm_v\")").unwrap();
+        let lp = src.find("while True:").unwrap();
+        assert!(expect < keep && keep < lp, "{src}");
+    }
+
+    // Every other type keeps `null` as absent: a repeated Value (`null` for
+    // the whole list is no list), the other struct WKTs, an ordinary message
+    // and the scalars declare nothing.
+    #[test]
+    fn null_stays_absent_for_every_other_field_type() {
+        for (ty, label) in [
+            (value_msg(), Label::Repeated),
+            (message(".google.protobuf.Struct", "Struct"), Label::Optional),
+            (message(".google.protobuf.ListValue", "ListValue"), Label::Optional),
+            (message(".google.protobuf.Int64Value", "Int64Value"), Label::Optional),
+            (message(".v.Value", "Value"), Label::Optional),
+            (IrType::Scalar(ScalarKind::String), Label::Single),
+            (IrType::Scalar(ScalarKind::Int64), Label::Optional),
+        ] {
+            let f = file(vec![field("x", "x", ty.clone(), label, None)], vec![]);
+            let src = Emitter::new(&f).emit();
+            assert!(!src.contains("keep_null_fields"), "{ty:?}:\n{src}");
+        }
     }
 }

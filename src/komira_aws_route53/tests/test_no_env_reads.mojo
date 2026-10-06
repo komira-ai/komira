@@ -70,7 +70,7 @@ def test_the_scan_saw_the_client() raises:
     assert_equal(_count(text, "#   mode         : client"), 1)
     # The client sends where the ruleset resolves each call, and signs as
     # the resolved endpoint says.
-    assert_equal(_count(text, "\nstruct Route53Route53Client["), 1)
+    assert_equal(_count(text, "\nstruct Route53Client["), 1)
     assert_equal(
         _count(
             text,

@@ -439,6 +439,31 @@ def test_struct_binary_repeated_key_last_write_wins() raises:
     assert_equal(back.keys[1], String("b"))
 
 
+def test_float_value_string_helpers_are_float32() raises:
+    """FloatValue's string helpers print the shortest float32 decimal and
+    range-check against float32, as the codec's `float` field does."""
+    assert_equal(FloatValue(Float32(0.1)).to_proto3_json(), String("0.1"))
+    assert_equal(
+        FloatValue(Float32(1.0) / Float32(3.0)).to_proto3_json(),
+        String("0.33333334"),
+    )
+    var big = Float32(1.0e30) * Float32(1.0e30)
+    assert_equal(FloatValue(big).to_proto3_json(), String('"Infinity"'))
+    assert_equal(FloatValue(big - big).to_proto3_json(), String('"NaN"'))
+    assert_equal(
+        FloatValue.from_proto3_json(String('"-Infinity"')).value, -big
+    )
+    assert_equal(
+        FloatValue.from_proto3_json(String("0.1")).value, Float32(0.1)
+    )
+    with assert_raises(contains="out of float32 range"):
+        _ = FloatValue.from_proto3_json(String("3.4028236e38"))
+    with assert_raises(contains="out of float32 range"):
+        _ = FloatValue.from_proto3_json(String("1e400"))
+    with assert_raises(contains="not a proto3 float"):
+        _ = FloatValue.from_proto3_json(String('"inf"'))
+
+
 def main() raises:
     test_timestamp_proto_roundtrip()
     test_timestamp_rfc3339_json()
@@ -453,6 +478,7 @@ def main() raises:
     test_uint_values()
     test_float_double_values()
     test_wrapper_string_helpers_follow_the_codec()
+    test_float_value_string_helpers_are_float32()
     test_struct_binary_repeated_key_last_write_wins()
     test_bool_value()
     test_string_value()

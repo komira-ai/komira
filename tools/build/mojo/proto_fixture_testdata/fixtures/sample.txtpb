@@ -1,0 +1,10 @@
+# proto-message: example.fixture.v1.Sample
+id: 150
+name: "fixture"
+raw: "\000\377"
+values: 1
+values: 300
+inner {
+  count: 7
+}
+kind: KIND_A

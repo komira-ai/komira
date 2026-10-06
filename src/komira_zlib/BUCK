@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The libz FFI shim: one-shot inflate / deflate / deflateBound and a bounded
-# stream skipper, over libz loaded at RUNTIME via dlopen (`libz.so.1` /
+# The libz FFI shim: one-shot inflate / deflate / deflateBound, a bounded
+# stream skipper and crc32, over libz loaded at RUNTIME via dlopen (`libz.so.1` /
 # `libz.dylib`), so there is no static archive to link and no link deps for
 # consumers.
 #
@@ -14,7 +14,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # //third_party/zlib and staged at golden/, with three of its members extracted
 # by busybox tar staged at golden/zlib/; plus round trips under each framing,
 # the empty stream, the too-small destination, corrupt and truncated streams,
-# and skipping a stream to the next.
+# skipping a stream to the next, and zlib_crc32 against the CRC-32 check value
+# and the tarball's own gzip trailer.
 mojo_library(
     name = "komira_zlib",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

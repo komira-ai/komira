@@ -47,10 +47,11 @@
 # whose `name` is the artifact's, exactly) is checked by placeholders.mojo's
 # `require_one_manifest` and `require_manifest_name`, after the build.
 #
-# Not here, by design (the PUBLISH step, over the built manifests): every
-# declared artifact built, versions in lockstep, exactly one metapackage
-# whose members are every library (a recommendation the CEO has not
-# answered; placeholders.mojo), requirement closure over the set.
+# Not here, by design (over the built manifests: the PUBLISH step, and for
+# requirement closure by name also the BUILD step): every declared artifact
+# built, versions in lockstep, exactly one metapackage whose members are
+# every library (a recommendation the CEO has not answered;
+# placeholders.mojo), requirement closure over the set.
 #
 # Owned values only; no pointer.
 # =============================================================================
