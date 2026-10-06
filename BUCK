@@ -74,6 +74,7 @@ _TESTS_LINTS = [
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
     "//src/komira_aws_lambda_http:deps_lint",
     "//src/komira_http_client:deps_lint",
+    "//src/komira_http_conformance:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
 ] if read_root_config("cells", "tests") else []
