@@ -22,8 +22,8 @@
 # =============================================================================
 
 
-comptime DEFAULT_RUN_PATH_PREFIX: String = "/pipelines/runs/"
-"""The run-status route prefix (`GET /pipelines/runs/<run_id>`). A run id appended
+comptime DEFAULT_RUN_PATH_PREFIX: String = "/runs/"
+"""The run-status route prefix (`GET /runs/<run_id>`). A run id appended
 to this is the run server's run-store read."""
 
 
@@ -38,7 +38,7 @@ precisely so that asking for less does not mean seeing less."""
 
 def join_url(base: String, path: String) -> String:
     """Join a base `target_url` (`https://svc.run.app`, no trailing slash expected)
-    with a `path` (`/pipelines/runs/<id>`) into ONE probe URL, collapsing a double
+    with a `path` (`/runs/<id>`) into ONE probe URL, collapsing a double
     slash and inserting a missing one. Empty base -> the path verbatim (surfaced
     later as a dial fault)."""
     if base.byte_length() == 0:
@@ -58,7 +58,7 @@ def join_url(base: String, path: String) -> String:
 
 def build_run_status_path(run_path_prefix: String, run_id: String) -> String:
     """Compose the run-status READ path `<prefix><run_id>` (e.g.
-    `/pipelines/runs/00000000-0000-0000-0000-000000000000`), inserting exactly one
+    `/runs/00000000-0000-0000-0000-000000000000`), inserting exactly one
     `/` between the prefix and the id (idempotent whether or not the prefix ends in
     a slash)."""
     var p = run_path_prefix.copy()
