@@ -840,7 +840,9 @@ identical (both build systems of `release/artifacts.textproto` share
 `sh release/ci/build_targets.sh`) are built in ONE run over the union of their
 targets, so a `build_targets` command must be correct on such a union.
 `release/ci/build_targets.sh` builds with `--keep-going`, then checks the lints
-and runs the tests among all the targets. The run's output is in
+and runs the tests among all the targets (a failed build stops before the lints
+and tests). The per-run timeout (`--build-timeout-s`, default 3600 s) bounds the
+whole batch, not each unit in it. The run's output is in
 `<log dir>/_batch_<k>.stdout` and `.stderr`, and its full argv, one argument per
 line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 `<unit>.stdout` and `.stderr`).
@@ -848,7 +850,8 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 - **The batch passes:** every unit in it is `BUILT`. Nothing is retried.
 - **The batch fails:** kci builds its units one at a time, in order, to name
   the failing ones (each logs to `<unit>.stdout` and `.stderr`; the batch
-  already built the rest, so the retries run warm). After 3 failed units it
+  already built every target that does not depend on a failure, so the retries
+  run warm). After 3 failed units it
   stops retrying: the rest are listed as not tried. The step is FAILED
   (`KCI-E-BUILD-FAILED`); the summary's line is `BUILD step: F of N unit(s)
   failed: ...`.

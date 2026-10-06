@@ -6,8 +6,10 @@
 # the union of each unit's builds, lints and tests.
 #
 # Every target is built (a library's welded tests run inside its build),
-# with --keep-going: a failed batch still builds every other target, so the
-# unit-by-unit retries kci runs to name the failing units start warm.
+# with --keep-going: a failed batch still builds every target that does not
+# depend on a failure, so the unit-by-unit retries kci runs to name the
+# failing units start warm. A failed build stops here (`set -e`), before the
+# lints and the tests.
 # Then each test_weld lint among the targets is checked: building one checks
 # nothing, because what it reads (which test files the graph's targets weld)
 # only a BXL script can query (tools/build/lint/test_weld.bzl). Then

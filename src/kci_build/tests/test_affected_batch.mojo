@@ -4,10 +4,11 @@
 #   ScriptedRunner: one run per shared build_targets command (the argv, its
 #   logs, its argv file), a target two units share given once, a unit alone
 #   built as before, a failed batch retried unit by unit to name each failing
-#   unit, the 3-failure cap, a timed-out batch attributed to no unit, a batch
-#   that cannot be started, interference never a pass, the outcome's
-#   precedence, and BUILT only for units an exit-0 run covered. One case
-#   runs a real fake build program through SupervisorRunner.
+#   unit, the 3-failure cap, a timed-out or signal-killed batch attributed
+#   to no unit, a run that cannot be started stopping the step,
+#   interference never a pass, the outcome's precedence, and BUILT only for
+#   units an exit-0 run covered. One case runs a real fake build program
+#   through SupervisorRunner.
 # =============================================================================
 #
 # A ScriptedRunner that is asked for a run its script does not hold RAISES,
@@ -374,6 +375,25 @@ def test_t8_a_timed_out_batch_is_not_split() raises:
     assert_equal(len(o.lines), 0)
 
 
+def test_t8_a_batch_killed_by_a_signal_is_not_split() raises:
+    var root = _fresh(String("t8s"))
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    # exit 0 but killed by a signal: not a pass, not retried, no unit named
+    var step = _build(_argv(_A, _B, _DOCS, _SHELL))
+    step.result.signaled = True
+    runner.expect(step^)
+    var o = _go(req, _argv("lib_a", "lib_b", "lints"), runner)
+    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
+    assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(len(runner.calls), 1)
+    assert_equal(runner.remaining(), 0)
+    var first = _first_line(o.message)
+    assert_true(first.find(String("` killed by a signal (stderr: ")) >= 0, o.message)
+    assert_true(first.find(String("no unit of it was attributed")) >= 0, o.message)
+    assert_equal(len(o.lines), 0)
+
+
 def test_t9_a_batch_that_cannot_start_names_every_unit() raises:
     var root = _fresh(String("t9"))
     var req = _request(root)
@@ -395,18 +415,41 @@ def test_t9_a_batch_that_cannot_start_names_every_unit() raises:
     assert_equal(_list(o.lines), String("[BUILT lib_c]"))
 
 
+def test_t9_a_batch_that_cannot_start_stops_the_step() raises:
+    var root = _fresh(String("t9a"))
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    # the batch over lib_a, lib_b, lints cannot start; lib_c alone (a later
+    # group, other's command) must never be started
+    var o = _go(req, _argv("lib_a", "lib_b", "lints", "lib_c"), runner)
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
+    assert_equal(len(runner.calls), 1)
+    assert_equal(runner.remaining(), 0)
+    assert_true(
+        o.message.startswith(
+            String("BUILD step: batch 1 (3 unit(s): lib_a, lib_b, lints): the build could not be started: ")
+        ),
+        o.message,
+    )
+    assert_equal(len(o.lines), 0)
+
+
 def test_t9_a_retry_that_cannot_start_stops_the_step() raises:
     var root = _fresh(String("t9b"))
     var req = _request(root)
     var runner = ScriptedRunner()
-    runner.expect(_build(_argv(_A, _B), exit_code=Int32(1)))
+    # the batch fails, lib_a alone passes, lib_b alone cannot start: lints
+    # must never be started
+    runner.expect(_build(_argv(_A, _B, _DOCS, _SHELL), exit_code=Int32(1)))
     runner.expect(_build(_argv(_A)))
-    var o = _go(req, _argv("lib_a", "lib_b"), runner)
+    var o = _go(req, _argv("lib_a", "lib_b", "lints"), runner)
     assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
     assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(len(runner.calls), 3)
     assert_equal(runner.remaining(), 0)
     assert_true(o.message.startswith(String("BUILD step: unit 'lib_b': the build could not be started: ")), o.message)
+    assert_false(o.message.find(String("interfere")) >= 0, o.message)
     assert_equal(_list(o.lines), String("[BUILT lib_a]"))
 
 

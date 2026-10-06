@@ -30,7 +30,7 @@
 # =============================================================================
 
 from kci_build.affected import run_affected
-from kci_build.affected_batch import MAX_FAILED_UNITS, affected_spec, build_affected_units
+from kci_build.affected_batch import MAX_FAILED_UNITS, build_affected_units
 from kci_build.build import check_log_dir, check_platform_dir, resolved_path, run_build
 from kci_build.request import DEFAULT_BUILD_TIMEOUT_S, BuildOutcome, BuildRequest
 from kci_build.revision import (
