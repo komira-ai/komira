@@ -33,6 +33,15 @@
 #     `walk of '<root>' failed at '<root>/sub': errno N (EMFILE)` instead of
 #     skipping `sub` and listing its file away. The limit is restored before
 #     any assertion runs.
+#   * ENAMETOOLONG ON AN ENTRY BELOW THE ROOT (forceable for any user, root
+#     included): a directory chain whose absolute path is just under PATH_MAX
+#     (4096) holds an entry created relative to it (a shell `cd` then
+#     `touch`), so opendir of the deepest directory succeeds and the walk's
+#     lstat of `<deepest>/<entry>` fails with ENAMETOOLONG. The walk must
+#     raise `walk of '<root>' failed at '<path>': errno N (ENAMETOOLONG)`
+#     with the path truncated to the 4095 bytes the error buffer holds,
+#     instead of skipping the entry. The entry is removed the same relative
+#     way before the tree is deleted.
 #   * EACCES (mode 000 directory, and a mode 000 subdirectory inside a walked
 #     tree): only forceable unprivileged; the test probes access(R_OK) and
 #     prints which branch ran. Privileged, it asserts the listing succeeds.
@@ -229,6 +238,53 @@ def test_walk_subdir_emfile_raises() raises:
 
 
 # -----------------------------------------------------------------------------
+# ENAMETOOLONG below the root: the walk must not skip an entry it cannot lstat.
+# -----------------------------------------------------------------------------
+def _repeat_x(n: Int) -> String:
+    var s = String("")
+    for _ in range(n):
+        s += "x"
+    return s
+
+
+def test_walk_entry_lstat_enametoolong_raises() raises:
+    var root = _disk_root(String("nametoolong"))
+    # Grow `deep` with 200-byte components until it is just under PATH_MAX;
+    # every mkdir names an absolute path of fewer than 4096 bytes.
+    var comp = _repeat_x(200)
+    var deep = root
+    while deep.byte_length() + 1 + 200 <= 4000:
+        deep += "/" + comp
+    assert_true(
+        deep.byte_length() > 3800,
+        "chain too short: " + String(deep.byte_length()),
+    )
+    _sh(String("mkdir -p '") + deep + String("'"))
+    # `<deep>/<entry>` is over 4095 bytes; create it relative to `deep` in a
+    # child shell, which is the only way to name it.
+    var entry = _repeat_x(200)
+    var rel = String("cd '") + deep + String("' && ")
+    _sh(rel + String("touch ") + entry)
+    var msg = _err_walk(root)
+    # Remove the entry the same relative way before asserting, so a failed
+    # assertion cannot leave an over-PATH_MAX path behind.
+    _sh(rel + String("rm ") + entry)
+    _sh(String("rm -rf '") + root + String("'"))
+    # The error buffer holds 4095 bytes: the reported path is `<deep>/` plus
+    # as much of the entry name as fits, immediately followed by "': errno".
+    var shown = deep + "/" + _repeat_x(4095 - deep.byte_length() - 1)
+    var want = (
+        String("walk of '") + root + "' failed at '" + shown + "': errno "
+    )
+    assert_true(
+        msg.find(want) >= 0,
+        "below-root lstat failure not raised: " + String(msg.byte_length())
+        + " bytes, starts " + String(msg[byte=0:min(80, msg.byte_length())]),
+    )
+    assert_true(msg.find("(ENAMETOOLONG)") >= 0, "ENAMETOOLONG not named")
+
+
+# -----------------------------------------------------------------------------
 # EACCES: unreadable directory / subdirectory (unprivileged processes only).
 # -----------------------------------------------------------------------------
 def test_unreadable_directory_raises_eacces() raises:
@@ -298,9 +354,16 @@ def main() raises:
         failures += 1
         print("FAIL test_walk_subdir_emfile_raises:", String(e))
 
+    try:
+        test_walk_entry_lstat_enametoolong_raises()
+        print("PASS test_walk_entry_lstat_enametoolong_raises")
+    except e:
+        failures += 1
+        print("FAIL test_walk_entry_lstat_enametoolong_raises:", String(e))
+
     if failures > 0:
         raise Error(
             "[test_local_fs_errno_not_absent] " + String(failures)
             + " test(s) FAILED"
         )
-    print("[test_local_fs_errno_not_absent] all 5 tests PASS")
+    print("[test_local_fs_errno_not_absent] all 6 tests PASS")
