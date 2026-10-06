@@ -685,8 +685,12 @@ struct ReapWorker[Storage: ConditionalWriteStore](
                 try:
                     var body_bytes = manifest.read_chunk(seq)
                     var body = ManifestBody.decode(body_bytes)
-                    # delete is idempotent (absent .seg → success).
-                    segment_store.delete(Path.parse(body.object_key))
+                    # A chunk with no segment object (a txn COMMIT/ABORT
+                    # marker: empty key) has nothing to delete; deleting
+                    # `Path.parse("")` would target the bucket root.
+                    if body.has_segment():
+                        # delete is idempotent (absent .seg → success).
+                        segment_store.delete(Path.parse(body.object_key))
                 except e:
                     if not _is_not_found(String(e)):
                         raise e^
