@@ -29,6 +29,7 @@ mojo_library(
         "//src/komira_validation_run:komira_validation_run",
     ],
     test_srcs = [
+        "tests/test_deploy_lifecycle_e2e.mojo",
         "tests/test_fake_bucket_retention.mojo",
         "tests/test_fake_conformance.mojo",
         "tests/test_fake_faulty_variant.mojo",
@@ -37,5 +38,9 @@ mojo_library(
         "tests/test_fake_table.mojo",
         "tests/test_fake_validation_run_tag.mojo",
     ],
+    test_data = {
+        # The authored graph the lifecycle test reads, as an author writes it.
+        "tests/test_deploy_lifecycle_e2e.mojo": ["tests/test_data/deploy_lifecycle_graph.json"],
+    },
     visibility = ["PUBLIC"],
 )
