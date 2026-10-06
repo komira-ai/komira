@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_iceberg_rest/iceberg_rest_catalog_client.mojo — the INBOUND Iceberg
+# komira_iceberg_catalog/iceberg_rest_catalog_client.mojo — the INBOUND Iceberg
 #   REST catalog READ client (RESOLVE-ONLY, standard Iceberg REST protocol).
 # =============================================================================
 #

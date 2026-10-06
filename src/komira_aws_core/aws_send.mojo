@@ -57,14 +57,9 @@
 # resend changes the size (botocore has no cap). Read such an object in
 # ranges.
 #
-# The retry loop runs on komira_clock's monotonic clock and waits in a
-# reactor (`AwsReactorSleeper`), not on komira_retry's `SystemClock` and
-# `SystemSleeper`. Those call `std.time.sleep`, whose foreign declaration of
-# libc's `nanosleep` has a different signature from the one komira_async's
-# reactor makes (it passes the timespec as a byte pointer and returns an
-# Int32), and one program cannot hold both declarations: a binary holding
-# the HTTP client cannot also hold them. Once those declarations agree,
-# `aws_system_retry_loop` becomes komira_retry's `system_retry_loop`.
+# The retry loop is komira_retry's `system_retry_loop`: the process's
+# monotonic clock and a blocking `std.time.sleep`, which a binary holding
+# the HTTP client can call (komira_async declares no `nanosleep` of its own).
 # =============================================================================
 
 from komira_async.ops.waker_sink import NoopSink
@@ -79,7 +74,6 @@ from komira_http_client.header_map import HeaderMap
 from komira_http_client.url import Url
 from komira_http_core.codec.types import HttpMethod
 from komira_http_core.transport.io_stream import Connector
-from komira_clock import now_ns
 from komira_retry import (
     MonotonicClock,
     RetryBudget,
@@ -87,7 +81,7 @@ from komira_retry import (
     RetryPolicy,
     RetryRng,
     Sleeper,
-    SplitMix64Rng,
+    system_retry_loop,
 )
 
 from ._text import sub
@@ -200,55 +194,6 @@ struct AwsConnectorTransport[C: Connector](AwsHttpTransport, Movable, Deinitable
         for i in range(len(entries)):
             out.add_header(entries[i].name.copy(), entries[i].value.copy())
         return out^
-
-
-struct AwsMonotonicClock(MonotonicClock, Movable, Deinitable):
-    """komira_clock's monotonic clock, in milliseconds."""
-
-    def __init__(out self):
-        pass
-
-    def now_ms(mut self) -> Int64:
-        return Int64(Int(now_ns() // 1_000_000))
-
-
-struct AwsReactorSleeper(Sleeper, Movable, Deinitable):
-    """Blocks the calling thread for a retry's wait in a reactor with
-    nothing registered (epoll or kqueue with a timeout). The reactor is
-    made on the first wait, so a call that is never retried makes none."""
-
-    var _rt: Optional[BlockingRuntime[NoopSink]]
-
-    def __init__(out self):
-        self._rt = None
-
-    def sleep_ms(mut self, ms: Int64) raises:
-        if ms <= 0:
-            return
-        var deadline = Int64(Int(now_ns())) + ms * 1_000_000
-        if not self._rt:
-            self._rt = BlockingRuntime[NoopSink].new(
-                NoopSink(_placeholder=UInt8(0))
-            )
-        ref reactor = self._rt.value().reactor()
-        while True:
-            var left_us = (deadline - Int64(Int(now_ns()))) // 1000
-            if left_us <= 0:
-                return
-            _ = reactor.run_once(Int32(Int(min(left_us, Int64(1_000_000_000)))))
-
-
-def aws_system_retry_loop(
-    var policy: RetryPolicy,
-) raises -> RetryLoop[AwsMonotonicClock, AwsReactorSleeper, SplitMix64Rng]:
-    """A retry loop on the process's monotonic clock, waiting in a reactor,
-    with jitter seeded from the clock."""
-    return RetryLoop[AwsMonotonicClock, AwsReactorSleeper, SplitMix64Rng](
-        policy^,
-        AwsMonotonicClock(),
-        AwsReactorSleeper(),
-        SplitMix64Rng(UInt64(now_ns())),
-    )
 
 
 def _starts_with_byte(body: List[UInt8], c: UInt8) -> Bool:
@@ -402,7 +347,7 @@ def send_sigv4_signed_request[C: Connector](
     when the last attempt got none."""
     var transport = AwsConnectorTransport[C](http_config, mk_connector())
     var clock = SystemAwsClock()
-    var loop = aws_system_retry_loop(aws_standard_retry_policy())
+    var loop = system_retry_loop(aws_standard_retry_policy())
     return send_sigv4_signed_request_with(
         transport,
         clock,

@@ -29,11 +29,59 @@ writer serializes them into one, and code that only inspects metadata (a
 pruner, a statistics consumer, a schema printer) depends on this package
 alone.
 
-```mojo
-from komira_parquet_api import CompressionCodec, ParquetType
+Every example below runs as a test when the package is built, so it cannot
+go stale.
 
-print(ParquetType.INT64.byte_width().value())  # 8
-print(CompressionCodec.ZSTD)                   # ZSTD
+## The enums
+
+Each enum is a `UInt8` whose value is the spec's, and prints the spec's name.
+
+```mojo
+from komira_parquet_api import CompressionCodec, Encoding, ParquetType
+from std.testing import assert_equal, assert_false
+
+assert_equal(ParquetType.INT64.byte_width().value(), 8)
+assert_false(Bool(ParquetType.BYTE_ARRAY.byte_width()))  # variable length: no width
+assert_equal(String(CompressionCodec.ZSTD), "ZSTD")
+assert_equal(CompressionCodec.ZSTD.value, UInt8(6))
+assert_equal(String(Encoding(8)), "RLE_DICTIONARY")
+```
+
+## Footer metadata
+
+A footer's schema is flattened depth first: the root group names how many
+children follow it.
+
+```mojo
+from komira_parquet_api import CONVERTED_TYPE_UTF8, FieldRepetitionType, FileMetaData, KeyValue
+from komira_parquet_api import ParquetType, RowGroup, SchemaElement
+from std.testing import assert_equal
+
+var schema = List[SchemaElement]()
+schema.append(SchemaElement(name="schema", num_children=2))
+schema.append(SchemaElement(name="id", type=ParquetType.INT64, repetition_type=FieldRepetitionType.REQUIRED))
+schema.append(
+    SchemaElement(
+        name="name",
+        type=ParquetType.BYTE_ARRAY,
+        repetition_type=FieldRepetitionType.OPTIONAL,
+        converted_type=CONVERTED_TYPE_UTF8,
+    )
+)
+var kvs = List[KeyValue]()
+kvs.append(KeyValue("writer.version", String("1.0")))
+
+var footer = FileMetaData(
+    version=2,
+    schema=schema^,
+    num_rows=0,
+    row_groups=List[RowGroup](),
+    key_value_metadata=kvs^,
+)
+assert_equal(footer.schema[0].num_children, 2)
+assert_equal(String(footer.schema[2].repetition_type.value()), "OPTIONAL")
+assert_equal(footer.schema[2].converted_type.value(), CONVERTED_TYPE_UTF8)
+assert_equal(footer.key_value_metadata.value()[0].value.value(), "1.0")
 ```
 
 Every type and ConvertedType constant is re-exported from the package root.

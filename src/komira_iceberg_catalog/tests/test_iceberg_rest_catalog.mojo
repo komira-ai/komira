@@ -33,15 +33,15 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_iceberg_rest.iceberg_catalog import (
+from komira_iceberg_catalog.iceberg_catalog import (
     IcebergCatalog,
     ResolvedTable,
     StorageBasedCatalog,
 )
-from komira_iceberg_rest.iceberg_rest_transport import (
+from komira_iceberg_catalog.iceberg_rest_transport import (
     ScriptedIcebergRestTransport,
 )
-from komira_iceberg_rest.iceberg_rest_catalog_client import (
+from komira_iceberg_catalog.iceberg_rest_catalog_client import (
     IcebergRestCatalog,
     StaticBearerToken,
 )

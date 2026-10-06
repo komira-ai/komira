@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_iceberg_rest/iceberg_rest_transport.mojo — the Iceberg-REST HTTP
+# komira_iceberg_catalog/iceberg_rest_transport.mojo — the Iceberg-REST HTTP
 #   transport SEAM + the production HTTP transport + the scripted test double.
 # =============================================================================
 #
