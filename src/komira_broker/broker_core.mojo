@@ -1536,7 +1536,9 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
 
         Raises `lease_fenced` BEFORE the PUT (no `.seg` written) when
         `writer_lease_epoch` is below `current_lease_epoch` or below the
-        cached fence (`fence_epoch`); the buffered batches are dropped.
+        cached fence (`fence_epoch`); the buffered batches are dropped. The
+        default epochs (0, 0) are not a no-op: they pass only while the core
+        is unfenced.
         """
         if len(self._buffer) == 0:
             raise Error("BrokerCore.flush: empty buffer (nothing to flush)")
@@ -1618,8 +1620,9 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
     ) raises -> Optional[ProduceResult]:
         """Force a flush of any buffered records (e.g. on a time-tick or a
         clean shutdown). Returns `None` if the buffer is empty. The lease epochs
- thread through to the manifest append fence (default
-        0,0 = no-op)."""
+        go to `flush`, which refuses a writer below `current_lease_epoch` or
+        below the cached fence. The defaults (0, 0) pass only while the core
+        is unfenced: once `fence_epoch() > 0` they raise `lease_fenced`."""
         if len(self._buffer) == 0:
             return Optional[ProduceResult](None)
         return Optional[ProduceResult](
