@@ -26,7 +26,7 @@ from komira_core.arrow.arrow_types import ArrowType
 from komira_core.arrow.schema import Schema, SchemaBuilder, Field
 
 from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
-from komira_jsonl.structural_index import build_structural_index
+from komira_json_index.structural_index import build_structural_index
 
 
 comptime _FIXTURES = "src/komira_jsonl/tests/fixtures/jsonl_corpus/"

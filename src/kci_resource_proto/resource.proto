@@ -30,32 +30,40 @@
 //     field is the provider's own language, or one provider object would be
 //     shared by several owners).
 //
-// V1 DECLARES THREE PRIMITIVES: `service` 10, `job` 11 and `bucket` 14.
-// Every other number below is HELD: not declared, so it decodes as an
-// unknown field today, and declaring it later is an addition, never a
-// renumber. The welded tests pin each held number as undeclared.
-//   * `Resource.body` 12, 13 and 15 to 36: the later neutral primitives
-//     (12 worker, 13 table, 15 queue, 16 secret, 17 and 19 unused, 18 DNS zone,
-//     20 service account, 21 topic, 22 schedule, 23 network, 24 registry,
-//     25 grant, 26 DNS record, 27 certificate, 28 subscription, 29 subnet,
-//     30 IP address, 31 event trigger, 32 mail domain, 33 parameter,
-//     34 encryption key, 35 function, 36 virtual machine).
+// V1 DECLARES SIX PRIMITIVES: `service` 10, `job` 11, `table` 13, `bucket`
+// 14, `service_account` 20 and `grant` 25. Every other number below is HELD:
+// not declared, so it decodes as an unknown field today, and declaring it
+// later is an addition, never a renumber. The welded tests pin each held
+// number as undeclared.
+//   * `Resource.body` 12, 15 to 19, 21 to 24 and 26 to 36: the later
+//     neutral primitives (12 worker, 15 queue, 16 secret, 17 and
+//     19 unused, 18 DNS zone, 21 topic, 22 schedule, 23 network, 24 registry,
+//     26 DNS record, 27 certificate, 28 subscription, 29 subnet, 30 IP
+//     address, 31 event trigger, 32 mail domain, 33 parameter, 34 encryption
+//     key, 35 function, 36 virtual machine).
 //   * `Resource.body` 80: a composite instance.
 //   * `Resource.body` 90: the `raw` escape hatch, specified separately.
-//   * `Resource.body` 100-299, 300-499 and 500-699: provider primitives (R2)
-//     of three clouds, one range each.
-//   * Fields 50, 51 and 52 of every primitive message: its per-cloud
+//   * `Resource.body` 100-299, 300-499, 500-699 and 700-899: provider
+//     primitives (R2) of four clouds, one range each.
+//   * Fields 50, 51, 52 and 53 of every primitive message: its per-cloud
 //     extension messages, one per cloud.
 // THE HELD NUMBERS, MACHINE-READABLE. The lines below are what the welded
 // test `test_held_numbers_are_unused` reads: no field of the named message may
 // use a held number, and no message may reuse a `reserved` number. A held
 // number leaves this list in the same change that declares it.
-// held-numbers: Resource 5 6 12 13 15-36 80 90 100-299 300-499 500-699
+// held-numbers: Resource 5 6 12 15-19 21-24 26-36 80 90 100-299 300-499 500-699 700-899
 // held-numbers: Value 4
 // held-numbers: Image 4
-// held-numbers: Service 13 50-52
-// held-numbers: Job 8 50-52
-// held-numbers: Bucket 50-52
+// held-numbers: Uses 3
+// held-numbers: Service 13 50-53
+// held-numbers: Job 8 50-53
+// held-numbers: Table 4 50-53
+// held-numbers: Bucket 50-53
+// held-numbers: ServiceAccount 50-53
+// held-numbers: Grant 50-53
+// The list of clouds is data (a cloud is a value checked against the
+// built-in clouds); the four ranges and the four extension numbers are held
+// for the four built-in clouds, never named by a type here.
 // Provider primitives and per-cloud extensions carry provider words in their
 // names. Declaring any of them changes the promise below that no vendor word
 // appears in this schema, so it is a recorded decision, not an addition.
@@ -72,12 +80,28 @@
 //     id-bearing string is `Resource.id`. So one walk over `Ref` fields finds
 //     every edge of the graph.
 //
+// IDENTITY AND GRANTS
+//   * A `service_account` is a workload identity. A `service` or a `job`
+//     runs as the account its `run_as` names; with no `run_as` it runs as a
+//     PRIVATE identity of its own, a helper object that exists only for it
+//     and dies with it.
+//   * A `grant` is one edge: `principal` may do `access` to `target` (or to
+//     a resource the cell provides, `cell`). Its principal is an identity: a
+//     `service_account`, or a `service` or `job` with no `run_as`.
+//   * `Resource.uses` is the same edge written on the grantee: on a
+//     `service_account` it means "this identity may"; on a `service` or a
+//     `job` it means "the identity I run as may". It is refused on every
+//     other type. A `uses` line and a `grant` for one (principal, target)
+//     pair are the same edge, so writing both is refused.
+//   * Every identity a resource holds of its own also gets the edge
+//     `cell LOGS WRITE` (its logs), unless the resource writes it. It is
+//     lowered and printed like any other edge, never hidden.
+//
 // WHAT IS NOT HERE YET, ON PURPOSE
-//   * Identity, permissions, networks, gateways, load balancers and DNS
-//     records as resources of their own. Each is a later primitive at a held
-//     number above (or a provider primitive). Until it lands, the cloud
-//     adapter creates what a `service` or a `job` needs as that type's own
-//     roles, and "this may call that" is one `Uses` line on the consumer.
+//   * Permission sets, raw provider role bindings, federation, networks,
+//     gateways, load balancers and DNS records as resources of their own.
+//     Each is a later primitive at a held number above (or a provider
+//     primitive).
 //   * Stage names. A stage's list of resources lives in the release machine
 //     file; no resource carries the name of a stage.
 //   * A secret RESOURCE, and secret values. A service or a job receives a
@@ -87,10 +111,11 @@
 //
 // RETENTION (`Resource.retention`) says whether a resource's objects are
 // deleted when the resource leaves the file or the graph is destroyed. It
-// is for DATA primitives only (v1: `bucket`); each such type has a versioned
-// default (KEEP for a bucket) that applies while the field is unset. A
-// service or a job is always deleted with its resource, and setting
-// retention on one is refused when the graph is validated. A third answer,
+// is for DATA primitives only (v1: `table` and `bucket`); each such type has
+// a versioned default (KEEP for both) that applies while the field is unset. A
+// service, a job, a service account or a grant is always deleted with its
+// resource, and setting retention on one is refused when the graph is
+// validated. A third answer,
 // "kci cannot delete this", is a capability of a cloud object, not a policy
 // an author chooses, so it has no value here.
 //
@@ -100,8 +125,9 @@
 // { name, platform, revision }` source arm beside `output`, `Service` 13 and
 // `Job` 8 a `source` that may also be a non-image artifact, and `Output` 5
 // REVISION (the cloud's own revision of a service, not kci's revision id).
-// Per-cloud extensions 50, 51 and 52 are held on `Bucket` as on every
-// primitive.
+// `Table` 4 an analytics replica (its meaning differs per cloud, so it waits
+// for a decision). Per-cloud extensions 50 to 53 are held on `Table`,
+// `Bucket`, `ServiceAccount` and `Grant` as on every primitive.
 //
 // "PLATFORM" MEANS OS + CPU AND NOTHING ELSE (`Image.platform`). The deploy
 // target is the cloud, which this file never names.
@@ -129,7 +155,8 @@ enum Portability {
 }
 
 extend google.protobuf.MessageOptions {
-  // Marks each resource type message below (v1: `Service`, `Job`, `Bucket`).
+  // Marks each resource type message below (v1: `Service`, `Job`, `Table`,
+  // `Bucket`, `ServiceAccount`, `Grant`).
   Portability portability = 50001;
   // The outputs a type exposes to a `Ref`. A `Ref` asking a type for an
   // output it does not expose is refused when the graph is loaded.
@@ -164,15 +191,31 @@ message Ref {
 }
 
 // What a consumer may do to a resource. CALL is accepted by a service and a
-// job; READ, WRITE and READ_WRITE by a bucket. 5 and 6 are held for SEND and
-// RECEIVE (messaging), 7 for ACT_AS, 8 for DESCRIBE and 9 for MANAGE; none
-// is declared until a type accepts it.
+// job; READ, WRITE and READ_WRITE by a table and a bucket; DESCRIBE by a
+// table (read its definition, never its items) and by a service account
+// (read what the identity is, never act as it). 5 and 6 are held for
+// SEND and RECEIVE (messaging); 7 is held for ACT_AS (one identity acting as
+// another) and 9 for MANAGE (changing a resource's own configuration), both
+// undeclared until their rules are decided.
 enum Access {
   ACCESS_UNSET = 0;
   CALL = 1;
   READ = 2;
   WRITE = 3;
   READ_WRITE = 4;
+  DESCRIBE = 8;
+}
+
+// A resource the CELL provides, which a grant may target instead of a
+// resource of the list. LOGS and METRICS accept READ and WRITE (WRITE: the
+// workload's own logs or metrics); ARTIFACTS accepts READ (pull the cell's
+// artifacts). 4 is held for placing workloads into the cell, undeclared
+// until its rules are decided.
+enum CellResource {
+  CELL_RESOURCE_UNSET = 0;
+  LOGS = 1;
+  METRICS = 2;
+  ARTIFACTS = 3;
 }
 
 // Whether a data resource's objects are deleted when the resource leaves the
@@ -183,12 +226,15 @@ enum Retention {
   KEEP = 2;
 }
 
-// "This resource may do `access` to `target`." The cloud adapter turns it into
-// whatever its own permission system needs. `target.output` must be unset:
-// access is granted to a resource, not to one of its values.
+// "The identity of this resource may do `access` to `target`" (or to the
+// cell's `cell`): exactly one of `target` and `cell` is set. The cloud
+// adapter turns it into whatever its own permission system needs.
+// `target.output` must be unset: access is granted to a resource, not to one
+// of its values. 3 is held.
 message Uses {
   Ref target = 1;
   Access access = 2;
+  CellResource cell = 4;
 }
 
 // A configuration value: a literal, a release machine parameter, or a value
@@ -261,14 +307,17 @@ message Resource {
   reserved "only_in";
   // 5 is held for a typed per-cloud settings map, 6 for `physical_name`.
 
-  // Typed and closed. Held, not declared (see the file header): 12, 13 and
-  // 15 to 36 the later neutral primitives, 80 a composite instance, 90 the
-  // escape hatch, 100-299 / 300-499 / 500-699 the provider primitives of
-  // three clouds.
+  // Typed and closed. Held, not declared (see the file header): 12,
+  // 15 to 19, 21 to 24 and 26 to 36 the later neutral primitives, 80 a
+  // composite instance, 90 the escape hatch, 100-299 / 300-499 / 500-699 /
+  // 700-899 the provider primitives of four clouds.
   oneof body {
     Service service = 10;
     Job job = 11;
+    Table table = 13;
     Bucket bucket = 14;
+    ServiceAccount service_account = 20;
+    Grant grant = 25;
   }
 }
 
@@ -324,7 +373,10 @@ message Service {
   // variable. A key must not also appear in `env`.
   map<string, SecretRef> secret_env = 12;
   // 13 is held for a `source` that may be a non-image artifact.
-  // 50, 51 and 52 are held for the per-cloud extensions (file header).
+  // The `service_account` this service runs as. Unset: a private identity of
+  // its own.
+  Ref run_as = 14;
+  // 50 to 53 are held for the per-cloud extensions (file header).
 
   // Reachable from outside the graph at a URL.
   message Public {}
@@ -351,7 +403,10 @@ message Job {
   // A key must not also appear in `env`.
   map<string, SecretRef> secret_env = 7;
   // 8 is held for a `source` that may be a non-image artifact.
-  // 50, 51 and 52 are held for the per-cloud extensions (file header).
+  // The `service_account` this job runs as. Unset: a private identity of its
+  // own.
+  Ref run_as = 13;
+  // 50 to 53 are held for the per-cloud extensions (file header).
 
   oneof trigger {
     OnDemand on_demand = 10;
@@ -364,6 +419,50 @@ message Job {
     string cron = 1;
     string timezone = 2;
   }
+}
+
+// ---- data: table -----------------------------------------------------------------
+
+// A key-value table: items found by a key, and by secondary access paths.
+// An ACCESS PATH is how items are found: a `partition` field (equality) and
+// optionally an `order` field (items of one partition, sorted). The KEY is the
+// table's primary access path, and it is immutable: a new key is a new table,
+// so changing it is refused (give the new table a new id). Its retention
+// default is KEEP, as for a bucket. Only the fields an access path or the TTL
+// names are declared; an item's other attributes are the application's.
+message Table {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  AccessPath key = 1;
+  // Secondary access paths, each with a name unique in the table.
+  repeated AccessPath indexes = 2;
+  // A NUMBER attribute holding an item's expiry time (seconds since the
+  // epoch): an item is deleted some time after it. Unset: items never
+  // expire.
+  optional string ttl_field = 3;
+  // 4 is held for an analytics replica; 50 to 53 for the per-cloud
+  // extensions (file header).
+
+  message AccessPath {
+    string name = 1;
+    Field partition = 2;
+    Field order = 3;
+  }
+
+  message Field {
+    string name = 1;
+    FieldType type = 2;
+  }
+}
+
+// What a key or index attribute holds: the types every table service can key
+// on.
+enum FieldType {
+  FIELD_TYPE_UNSET = 0;
+  STRING = 1;
+  NUMBER = 2;
+  BYTES = 3;
 }
 
 // ---- data: bucket ----------------------------------------------------------------
@@ -394,5 +493,31 @@ message Bucket {
   bool versioning = 2;
   // UNSET means STANDARD.
   StorageTier tier = 3;
-  // 50, 51 and 52 are held for the per-cloud extensions (file header).
+  // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// ---- identity: service account and grant -------------------------------------------
+
+// A workload identity: the provider's own identity object for workloads (a
+// role only the compute service may assume, a service account, a managed
+// identity, a Kubernetes service account). Its NAME is the cloud's name for
+// it. An identity with an arbitrary trust is not this type. No field yet;
+// 50 to 53 are held for the per-cloud extensions (file header).
+message ServiceAccount {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+}
+
+// One edge: `principal` may do `access` to `target`, or to the cell's
+// `cell` (exactly one of the two). `principal` names a `service_account`,
+// or a `service` or `job` with no `run_as` (its private identity). The verb
+// must be one the target accepts. A grant exposes nothing and accepts
+// nothing. 50 to 53 are held for the per-cloud extensions (file header).
+message Grant {
+  option (portability) = PORTABLE;
+
+  Ref principal = 1;
+  Ref target = 2;
+  Access access = 3;
+  CellResource cell = 4;
 }
