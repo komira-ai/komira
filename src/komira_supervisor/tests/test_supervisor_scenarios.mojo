@@ -3,25 +3,28 @@
 # =============================================================================
 #
 # Spawn, capture, exit, kill and the exit monitor, plus two-pipe separation.
-# Live on BOTH platforms: scenario (f) asserts the darwin EVFILT_PROC arm on
-# macOS and the pidfd arm on Linux (see that scenario's header).
+# Live on BOTH platforms: the exit-monitor test asserts the darwin EVFILT_PROC
+# arm on macOS and the pidfd arm on Linux (see that test's header).
 #
-#   (a) capture N lines + exit 0       — full stdout captured, exit_code == 0
-#   (b) >1 MB output, no deadlock       — all bytes drained (reactor-shape drain)
-#   (c) SIGTERM a long-running child    — dies on SIGTERM, shell_code == 143
-#   (d) SIGTERM-ignoring child          — escalates to SIGKILL, shell_code == 137
-#   (e) no zombie after reap            — first reap ok, second reap ECHILD
-#   (f) reactor-clean exit monitor      — darwin EVFILT_PROC fires (Linux: pidfd)
-#   (g) TWO-PIPE SEPARATION             — stdout drain and stderr drain see only
-#                                         their own stream
-#   (n) BYTE-PRESERVING CAPTURE         — multi-byte UTF-8 written by a real
-#                                         child survives drain_pipe, drain_both
-#                                         and process_environ BYTE-FOR-BYTE.
-#                                         See that scenario's own header.
-#   (k) BARE-NAME PATH RESOLUTION       — a bare executable name is PATH-searched
-#                                         (posix_spawnp); an unresolvable one
-#                                         still fails loud. See the scenario's
-#                                         own header.
+# One scenario per `test_` function, run by `TestSuite`, so a failure names the
+# scenario that failed instead of a count of failures in one `main`:
+#
+#   test_capture_lines_and_exit_zero            full stdout captured, exit 0
+#   test_large_output_drains_without_deadlock   >1 MB drained, no deadlock
+#   test_sigterm_stops_a_long_running_child     dies on SIGTERM, shell_code 143
+#   test_sigterm_ignoring_child_escalates_to_sigkill   SIGKILL, shell_code 137
+#   test_no_zombie_after_reap                   second reap reports ECHILD
+#   test_exit_monitor_sees_exit_as_a_kernel_event   EVFILT_PROC / pidfd POLLIN
+#   test_stdout_and_stderr_are_separate_pipes   each drain sees its own stream
+#   test_concurrent_drain_does_not_deadlock     >64 KB stderr + stdout marker
+#   test_terminate_after_exit_is_idempotent     exit code cached
+#   test_spawn_of_missing_path_fails_with_errno negative rc, no fd leak
+#   test_bare_name_resolves_via_path            posix_spawnp PATH search
+#   test_unresolvable_bare_name_still_fails     no silent resolution
+#   test_process_environ_* / test_set_env_* / test_overlay_* / test_merge_*
+#                                               closed env vs inherited overlay
+#   test_*_preserves_utf8_* / test_chunked_capture_is_byte_exact
+#                                               byte-preserving capture
 #
 # Drained continuously to avoid the pipe-buffer deadlock: we drain stdout AND
 # stderr to EOF, THEN reap. With two pipes a child that writes a lot to ONE
@@ -30,6 +33,7 @@
 
 from std.ffi import external_call
 from std.sys.info import CompilationTarget
+from std.testing import TestSuite
 from std.time import sleep
 
 from komira_supervisor.supervisor import (
@@ -48,182 +52,164 @@ from komira_supervisor.proc_ffi import (
 )
 
 
-def _banner(label: String):
-    print("================================================================")
-    print(label)
-    print("================================================================")
+def _spawned(pid: Int32) raises:
+    """Refuse a failed spawn. Nothing was started, so there is nothing to
+    reap or close."""
+    if pid <= Int32(0):
+        raise Error(String("spawn returned ") + String(pid))
 
 
 # -----------------------------------------------------------------------------
-# (a) child prints N lines then exits 0 -> capture all + exit code 0.
+# Child prints N lines then exits 0 -> capture all + exit code 0.
 # -----------------------------------------------------------------------------
-def scenario_a(mut fails: Int):
-    print("(a) capture N lines + exit code 0")
+def test_capture_lines_and_exit_zero() raises:
     var sup = Supervisor()
-    var pid = sup.spawn(
-        ChildSpec.shell(
-            String("for i in 1 2 3 4 5; do echo line-$i; done; exit 0")
+    _spawned(
+        sup.spawn(
+            ChildSpec.shell(
+                String("for i in 1 2 3 4 5; do echo line-$i; done; exit 0")
+            )
         )
     )
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
     var out = sup.drain_pipe(sup.stdout_fd())
     _ = sup.drain_pipe(sup.stderr_fd())  # drain (empty) stderr too
     var info = sup.wait_exit()
+    sup.close()
     var ok_lines = True
     for i in range(1, 6):
         if String("line-") + String(i) not in out:
             ok_lines = False
-    if ok_lines and info.exit_code == Int32(0):
-        print("  PASS (5 lines captured, exit 0)")
-    else:
-        print("  FAIL: exit_code", info.exit_code, "out=", out)
-        fails += 1
-    sup.close()
+    if not (ok_lines and info.exit_code == Int32(0)):
+        raise Error(
+            String("exit_code ") + String(info.exit_code) + " out=" + out
+        )
 
 
 # -----------------------------------------------------------------------------
-# (b) child emits > one pipe buffer (~1MB) -> no deadlock, full capture.
+# Child emits > one pipe buffer (~1MB) -> no deadlock, full capture.
 # -----------------------------------------------------------------------------
-def scenario_b(mut fails: Int):
-    print("(b) >1MB output, no deadlock")
+def test_large_output_drains_without_deadlock() raises:
     var sup = Supervisor()
-    var pid = sup.spawn(
-        ChildSpec.shell(
-            String(
-                "i=0; while [ $i -lt 20000 ]; do "
-                + "echo"
-                + " AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-$i;"
-                + " i=$((i+1)); done; exit 0"
+    _spawned(
+        sup.spawn(
+            ChildSpec.shell(
+                String(
+                    "i=0; while [ $i -lt 20000 ]; do "
+                    + "echo"
+                    + " AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-$i;"
+                    + " i=$((i+1)); done; exit 0"
+                )
             )
         )
     )
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
     var total = sup.drain_pipe_bytes(sup.stdout_fd())
     _ = sup.drain_pipe_bytes(sup.stderr_fd())
     var info = sup.wait_exit()
-    if total > 1_000_000 and info.exit_code == Int32(0):
-        print("  PASS (no deadlock; drained", total, "bytes)")
-    else:
-        print("  FAIL: only", total, "bytes, exit_code", info.exit_code)
-        fails += 1
     sup.close()
-
-
-# -----------------------------------------------------------------------------
-# (c) long-running child -> SIGTERM -> exits; supervisor detects it.
-# -----------------------------------------------------------------------------
-def scenario_c(mut fails: Int):
-    print("(c) SIGTERM a long-running child")
-    var sup = Supervisor()
-    var pid = sup.spawn(ChildSpec.shell(String("sleep 30")))
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
-    var info = sup.terminate(2000)
-    # default SIGTERM disposition -> 128 + 15 = 143
-    if info.shell_code == Int32(143):
-        print("  PASS (died on SIGTERM, shell_code 143)")
-    else:
-        print(
-            "  FAIL: shell_code", info.shell_code, "signal", info.signal,
+    if not (total > 1_000_000 and info.exit_code == Int32(0)):
+        raise Error(
+            String("only ")
+            + String(total)
+            + " bytes, exit_code "
+            + String(info.exit_code)
         )
-        fails += 1
-    sup.close()
 
 
 # -----------------------------------------------------------------------------
-# (d) child traps/ignores SIGTERM -> escalate to SIGKILL -> dies.
+# Long-running child -> SIGTERM -> exits; supervisor detects it.
 # -----------------------------------------------------------------------------
-def scenario_d(mut fails: Int):
-    print("(d) SIGTERM-ignoring child escalates to SIGKILL")
+def test_sigterm_stops_a_long_running_child() raises:
     var sup = Supervisor()
-    var pid = sup.spawn(
-        ChildSpec.shell(
-            String("trap '' TERM; while true; do sleep 1; done")
+    _spawned(sup.spawn(ChildSpec.shell(String("sleep 30"))))
+    var info = sup.terminate(2000)
+    sup.close()
+    # default SIGTERM disposition -> 128 + 15 = 143
+    if info.shell_code != Int32(143):
+        raise Error(
+            String("shell_code ")
+            + String(info.shell_code)
+            + " signal "
+            + String(info.signal)
+        )
+
+
+# -----------------------------------------------------------------------------
+# Child traps/ignores SIGTERM -> escalate to SIGKILL -> dies.
+# -----------------------------------------------------------------------------
+def test_sigterm_ignoring_child_escalates_to_sigkill() raises:
+    var sup = Supervisor()
+    _spawned(
+        sup.spawn(
+            ChildSpec.shell(
+                String("trap '' TERM; while true; do sleep 1; done")
+            )
         )
     )
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
     # Let the shell install `trap '' TERM` before we signal — otherwise the
     # SIGTERM can race in before the trap is registered and kill the shell.
     sleep(0.15)
     var info = sup.terminate(800)  # 800ms grace, then SIGKILL
-    # SIGKILL -> 128 + 9 = 137
-    if info.shell_code == Int32(137):
-        print("  PASS (ignored SIGTERM, died on SIGKILL, shell_code 137)")
-    else:
-        print(
-            "  FAIL: shell_code", info.shell_code, "signal", info.signal,
-        )
-        fails += 1
     sup.close()
+    # SIGKILL -> 128 + 9 = 137
+    if info.shell_code != Int32(137):
+        raise Error(
+            String("shell_code ")
+            + String(info.shell_code)
+            + " signal "
+            + String(info.signal)
+        )
 
 
 # -----------------------------------------------------------------------------
-# (e) no zombies: after reap, a second reap reports ECHILD.
+# No zombies: after reap, a second reap reports ECHILD.
 # -----------------------------------------------------------------------------
-def scenario_e(mut fails: Int):
-    print("(e) no zombie remains after reap")
+def test_no_zombie_after_reap() raises:
     var sup = Supervisor()
     var pid = sup.spawn(ChildSpec.shell(String("echo done; exit 7")))
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
+    _spawned(pid)
     _ = sup.drain_pipe(sup.stdout_fd())
     _ = sup.drain_pipe(sup.stderr_fd())
     var info = sup.wait_exit()  # this reaps exactly once
     # A direct second reap (bypassing the Supervisor's idempotency cache) must
     # NOT find a live/zombie child -> ECHILD -> proc_reap reports error.
     var r2 = proc_reap(pid, nohang=True)
-    if info.exit_code == Int32(7) and r2.error:
-        print("  PASS (reaped once, no zombie, exit 7; 2nd reap ECHILD)")
-    else:
-        print(
-            "  FAIL: exit_code", info.exit_code,
-            "second-reap collected?", r2.collected, "error?", r2.error,
-        )
-        fails += 1
     sup.close()
+    if not (info.exit_code == Int32(7) and r2.error):
+        raise Error(
+            String("exit_code ")
+            + String(info.exit_code)
+            + " second-reap collected? "
+            + String(r2.collected)
+            + " error? "
+            + String(r2.error)
+        )
 
 
 # -----------------------------------------------------------------------------
-# (f) reactor-clean exit monitor: child exit is a kernel EVENT, no SIGCHLD
-#     handler. darwin: EVFILT_PROC / NOTE_EXIT (the production path registers
-#     this on the long-lived reactor kqueue via kevent_register_proc_exit; here
-#     we use the self-contained standalone wait to prove the kernel mechanism).
-#     Linux: pidfd_open + POLLIN (the production path registers the SAME pidfd
-#     on the reactor's epoll via exit_monitor.watch_process_exit; here we use
-#     the self-contained poll() for the same reason the darwin arm uses a fresh
-#     kqueue — to prove the KERNEL mechanism without standing up a reactor).
+# Reactor-clean exit monitor: child exit is a kernel EVENT, no SIGCHLD
+# handler. darwin: EVFILT_PROC / NOTE_EXIT (the production path registers
+# this on the long-lived reactor kqueue via kevent_register_proc_exit; here
+# we use the self-contained standalone wait to prove the kernel mechanism).
+# Linux: pidfd_open + POLLIN (the production path registers the SAME pidfd
+# on the reactor's epoll via exit_monitor.watch_process_exit; here we use
+# the self-contained poll() for the same reason the darwin arm uses a fresh
+# kqueue — to prove the KERNEL mechanism without standing up a reactor).
 #
-# Both arms ASSERT. A Linux arm that only printed SKIP would let scenario (f)
-# assert nothing on every Linux machine while the suite reported green. Each
-# Linux leg goes RED when the C shim is broken:
+# Both arms ASSERT. A Linux arm that only printed SKIP would assert nothing on
+# every Linux machine while the suite reported green. Each Linux leg goes RED
+# when the C shim is broken:
 #   leg 1  `komira_proc_pidfd_wait` stubbed to `return 1` (always ready)
-#            -> "FAIL: pidfd of a RUNNING child polled ready: 1". Leg 2 alone
+#            -> "pidfd of a RUNNING child polled ready: 1". Leg 2 alone
 #               would PASS under that stub.
 #   leg 2  `komira_proc_pidfd_open` stubbed to `return -ENOSYS`
-#            -> "FAIL: pidfd_open(live) returned -38".
+#            -> "pidfd_open(live) returned -38".
 # -----------------------------------------------------------------------------
-def _scenario_f_darwin(mut fails: Int):
+def _exit_monitor_darwin() raises:
     var sup = Supervisor()
     var pid = sup.spawn(
         ChildSpec.shell(String("sleep 0.3; echo from-child; exit 0"))
     )
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
+    _spawned(pid)
     # Drain the pipes first (short child); then ask the kernel for the exit
     # event WITHOUT reaping — proving EVFILT_PROC sees the transition itself.
     _ = sup.drain_pipe(sup.stdout_fd())
@@ -231,49 +217,46 @@ def _scenario_f_darwin(mut fails: Int):
     var fired = proc_kqueue_exit_wait(pid, Int32(5000))
     # Now reap to clear the zombie (EVFILT_PROC notifies, does not reap).
     var info = sup.wait_exit()
-    if fired == Int32(1) and info.exit_code == Int32(0):
-        print("  PASS (reactor saw exit as an EVENT, no SIGCHLD handler)")
-    else:
-        print("  FAIL: fired", fired, "exit_code", info.exit_code)
-        fails += 1
     sup.close()
+    if not (fired == Int32(1) and info.exit_code == Int32(0)):
+        raise Error(
+            String("fired ")
+            + String(fired)
+            + " exit_code "
+            + String(info.exit_code)
+        )
 
 
-def _scenario_f_linux(mut fails: Int):
+def _exit_monitor_linux() raises:
     # ---- LEG 1: a LIVE child's pidfd is NOT readable. --------------------
-    # This leg is what makes the scenario discriminating. Leg 2 alone is
-    # satisfied by a stub that returns 1 unconditionally — and this file's
+    # This leg is what makes the test discriminating. Leg 2 alone is
+    # satisfied by a stub that returns 1 unconditionally — and this package's
     # own darwin/Linux stub pair in _proc_shim.c is exactly the shape that
     # produces such a stub by accident. `sleep 30` polled at timeout=0 is a
-    # ~30s margin, not a race; scenario (c) already spawns the same child.
+    # ~30s margin, not a race; the SIGTERM test spawns the same child.
     var live = Supervisor()
     var live_pid = live.spawn(ChildSpec.shell(String("sleep 30")))
-    if live_pid <= Int32(0):
-        print("  FAIL: spawn(live) returned", live_pid)
-        fails += 1
-        return
+    _spawned(live_pid)
     var live_fd = proc_pidfd_open(live_pid)
     if live_fd < Int32(0):
-        print(
-            "  FAIL: pidfd_open(live) returned", live_fd,
-            "(negative is -errno; kernel >= 5.3 required)",
-        )
-        fails += 1
         _ = live.terminate(2000)
         live.close()
-        return
+        raise Error(
+            String("pidfd_open(live) returned ")
+            + String(live_fd)
+            + " (negative is -errno; kernel >= 5.3 required)"
+        )
     var live_ready = proc_pidfd_wait(live_fd, Int32(0))
     proc_close(live_fd)
     _ = live.terminate(2000)
     live.close()
     if live_ready != Int32(0):
-        print(
-            "  FAIL: pidfd of a RUNNING child polled ready:", live_ready,
-            "(expected 0 = timeout; 1 means the fd does not track the"
-            " process, -2 means the Linux arm was compiled out)",
+        raise Error(
+            String("pidfd of a RUNNING child polled ready: ")
+            + String(live_ready)
+            + " (expected 0 = timeout; 1 means the fd does not track the"
+            + " process, -2 means the Linux arm was compiled out)"
         )
-        fails += 1
-        return
 
     # ---- LEG 2: the pidfd becomes readable on the exit TRANSITION. -------
     # Opened while the child is still alive (it sleeps 0.3s), so POLLIN here
@@ -283,67 +266,58 @@ def _scenario_f_linux(mut fails: Int):
     var pid = sup.spawn(
         ChildSpec.shell(String("sleep 0.3; echo from-child; exit 0"))
     )
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
+    _spawned(pid)
     var pidfd = proc_pidfd_open(pid)
     if pidfd < Int32(0):
-        print("  FAIL: pidfd_open returned", pidfd)
-        fails += 1
         _ = sup.wait_exit()
         sup.close()
-        return
+        raise Error(String("pidfd_open returned ") + String(pidfd))
     _ = sup.drain_pipe(sup.stdout_fd())
     _ = sup.drain_pipe(sup.stderr_fd())
     var fired = proc_pidfd_wait(pidfd, Int32(5000))
     proc_close(pidfd)
     # Now reap to clear the zombie (POLLIN notifies, it does not reap).
     var info = sup.wait_exit()
-    if fired == Int32(1) and info.exit_code == Int32(0):
-        print(
-            "  PASS (pidfd not ready while alive; POLLIN on exit; no SIGCHLD"
-            " handler)"
-        )
-    else:
-        print("  FAIL: fired", fired, "exit_code", info.exit_code)
-        fails += 1
     sup.close()
+    if not (fired == Int32(1) and info.exit_code == Int32(0)):
+        raise Error(
+            String("fired ")
+            + String(fired)
+            + " exit_code "
+            + String(info.exit_code)
+        )
 
 
-def scenario_f(mut fails: Int):
-    print("(f) reactor-clean exit monitor (EVFILT_PROC / pidfd POLLIN)")
+def test_exit_monitor_sees_exit_as_a_kernel_event() raises:
     comptime if CompilationTarget.is_macos():
-        _scenario_f_darwin(fails)
+        _exit_monitor_darwin()
     else:
-        _scenario_f_linux(fails)
+        _exit_monitor_linux()
 
 
 # -----------------------------------------------------------------------------
-# (g) TWO-PIPE SEPARATION. The child writes DISTINCT text to stdout and stderr; the
-#     stdout drain must see ONLY the stdout text and the stderr drain ONLY the
-#     stderr text. This is load-bearing: a caller may stream stdout but only
-#     tail-capture stderr for forensics.
+# TWO-PIPE SEPARATION. The child writes DISTINCT text to stdout and stderr; the
+# stdout drain must see ONLY the stdout text and the stderr drain ONLY the
+# stderr text. This is load-bearing: a caller may stream stdout but only
+# tail-capture stderr for forensics.
 # -----------------------------------------------------------------------------
-def scenario_g(mut fails: Int):
-    print("(g) two-pipe separation (stdout vs stderr)")
+def test_stdout_and_stderr_are_separate_pipes() raises:
     var sup = Supervisor()
     # echo to stdout; echo ... >&2 to stderr. Interleave to prove they don't mix.
-    var pid = sup.spawn(
-        ChildSpec.shell(
-            String(
-                "echo OUT-ALPHA; echo ERR-BETA >&2; "
-                + "echo OUT-GAMMA; echo ERR-DELTA >&2; exit 0"
+    _spawned(
+        sup.spawn(
+            ChildSpec.shell(
+                String(
+                    "echo OUT-ALPHA; echo ERR-BETA >&2; "
+                    + "echo OUT-GAMMA; echo ERR-DELTA >&2; exit 0"
+                )
             )
         )
     )
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
     var out = sup.drain_pipe(sup.stdout_fd())
     var err = sup.drain_pipe(sup.stderr_fd())
     var info = sup.wait_exit()
+    sup.close()
 
     var out_ok = (
         (String("OUT-ALPHA") in out)
@@ -357,130 +331,120 @@ def scenario_g(mut fails: Int):
         and (String("OUT-ALPHA") not in err)
         and (String("OUT-GAMMA") not in err)
     )
-    if out_ok and err_ok and info.exit_code == Int32(0):
-        print("  PASS (stdout and stderr captured on SEPARATE pipes)")
-    else:
-        print("  FAIL: out_ok", out_ok, "err_ok", err_ok)
-        print("    stdout=[", out, "]")
-        print("    stderr=[", err, "]")
-        fails += 1
-    sup.close()
+    if not (out_ok and err_ok and info.exit_code == Int32(0)):
+        raise Error(
+            String("out_ok ")
+            + String(out_ok)
+            + " err_ok "
+            + String(err_ok)
+            + " stdout=["
+            + out
+            + "] stderr=["
+            + err
+            + "]"
+        )
 
 
 # -----------------------------------------------------------------------------
-# (j) CONCURRENT-DRAIN NO-DEADLOCK — the two-pipe drain deadlock.
+# CONCURRENT-DRAIN NO-DEADLOCK — the two-pipe drain deadlock.
 #
-#     The child floods STDERR with >64KB (256KB here) and writes its terminal
-#     marker line to STDOUT *last*. A sequential drain — `drain_pipe(stdout)`
-#     fully, then `drain_pipe(stderr)` — deadlocks: the stdout marker only
-#     arrives on child EXIT, so the stdout drain blocks until the child exits,
-#     but the child is itself blocked on write(2) to the FULL (>64KB) stderr
-#     pipe buffer that nobody is draining. The child never exits, the stdout
-#     drain never returns, and the test times out.
+# The child floods STDERR with >64KB (256KB here) and writes its terminal
+# marker line to STDOUT *last*. A sequential drain — `drain_pipe(stdout)`
+# fully, then `drain_pipe(stderr)` — deadlocks: the stdout marker only
+# arrives on child EXIT, so the stdout drain blocks until the child exits,
+# but the child is itself blocked on write(2) to the FULL (>64KB) stderr
+# pipe buffer that nobody is draining. The child never exits, the stdout
+# drain never returns, and the test times out.
 #
-#     The concurrent `drain_both(stdout_fd, stderr_fd)` interleaves both fds
-#     non-blocking so neither buffer can fill while the other is read; the
-#     child completes, both streams are captured in full, and the child exits 0.
+# The concurrent `drain_both(stdout_fd, stderr_fd)` interleaves both fds
+# non-blocking so neither buffer can fill while the other is read; the
+# child completes, both streams are captured in full, and the child exits 0.
 # -----------------------------------------------------------------------------
-def scenario_concurrent_drain_no_deadlock(mut fails: Int):
-    print("(j) concurrent drain: >64KB stderr flood + stdout marker last")
+def test_concurrent_drain_does_not_deadlock() raises:
     var sup = Supervisor()
     # Child: write ~256KB to STDERR (well past the ~64KB pipe buffer), THEN a
     # single terminal marker line to STDOUT as its LAST write, then exit 0.
     # `yes | head -c` emits deterministic bytes fast; redirect to fd 2 (stderr).
-    # The stdout marker is written AFTER the stderr flood, so under a sequential
-    # stdout-first drain the child wedges on the full stderr pipe before it can
-    # emit the marker -> stdout EOF never arrives -> deadlock.
-    var pid = sup.spawn(
-        ChildSpec.shell(
-            String(
-                "yes ERRLINE | head -c 262144 1>&2; "
-                + "echo DONE_MARKER=deadbeef; "
-                + "exit 0"
+    _spawned(
+        sup.spawn(
+            ChildSpec.shell(
+                String(
+                    "yes ERRLINE | head -c 262144 1>&2; "
+                    + "echo DONE_MARKER=deadbeef; "
+                    + "exit 0"
+                )
             )
         )
     )
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
     # Under test: drain BOTH pipes concurrently. Two sequential drain_pipe()
     # calls would HANG here.
     var streams = sup.drain_both(sup.stdout_fd(), sup.stderr_fd())
     var out = streams[0]
     var err = streams[1]
     var info = sup.wait_exit()
+    sup.close()
 
     var out_ok = String("DONE_MARKER=deadbeef") in out
     # stderr must be captured IN FULL (not silently dropped): 262144 bytes of
     # "ERRLINE\n" -> err.byte_length() should be ~262144 (head -c exact cut).
     var err_len = err.byte_length()
     var err_ok = err_len >= 262000 and (String("ERRLINE") in err)
-    if out_ok and err_ok and info.exit_code == Int32(0):
-        print(
-            "  PASS (no deadlock; stdout marker seen, stderr fully captured",
-            err_len, "bytes)",
+    if not (out_ok and err_ok and info.exit_code == Int32(0)):
+        raise Error(
+            String("out_ok ")
+            + String(out_ok)
+            + " err_ok "
+            + String(err_ok)
+            + " err_len "
+            + String(err_len)
+            + " exit_code "
+            + String(info.exit_code)
         )
-    else:
-        print(
-            "  FAIL: out_ok", out_ok, "err_ok", err_ok,
-            "err_len", err_len, "exit_code", info.exit_code,
-        )
-        fails += 1
-    sup.close()
 
 
 # -----------------------------------------------------------------------------
 # Idempotency edges: terminate after exit, and terminate twice.
 # -----------------------------------------------------------------------------
-def scenario_idempotent(mut fails: Int):
-    print("(h) terminate-after-exit / double-terminate idempotency")
+def test_terminate_after_exit_is_idempotent() raises:
     var sup = Supervisor()
-    var pid = sup.spawn(ChildSpec.shell(String("exit 3")))
-    if pid <= Int32(0):
-        print("  FAIL: spawn returned", pid)
-        fails += 1
-        return
+    _spawned(sup.spawn(ChildSpec.shell(String("exit 3"))))
     _ = sup.drain_pipe(sup.stdout_fd())
     _ = sup.drain_pipe(sup.stderr_fd())
     var info1 = sup.wait_exit()
     # The child already exited; terminate must be a no-op returning the cache.
     var info2 = sup.terminate(1000)
     var info3 = sup.terminate(1000)  # second terminate also a no-op
-    if (
+    sup.close()
+    if not (
         info1.exit_code == Int32(3)
         and info2.exit_code == Int32(3)
         and info3.exit_code == Int32(3)
     ):
-        print("  PASS (exit 3 cached; terminate idempotent)")
-    else:
-        print(
-            "  FAIL: e1", info1.exit_code, "e2", info2.exit_code,
-            "e3", info3.exit_code,
+        raise Error(
+            String("e1 ")
+            + String(info1.exit_code)
+            + " e2 "
+            + String(info2.exit_code)
+            + " e3 "
+            + String(info3.exit_code)
         )
-        fails += 1
-    sup.close()
 
 
 # -----------------------------------------------------------------------------
-# spawn failure: non-existent binary -> spawn returns a negative errno, no
+# Spawn failure: non-existent binary -> spawn returns a negative errno, no
 # pipe fds leaked (the C shim cleans up before returning).
 # -----------------------------------------------------------------------------
-def scenario_spawn_fail(mut fails: Int):
-    print("(i) spawn failure (non-existent binary path)")
+def test_spawn_of_missing_path_fails_with_errno() raises:
     var sup = Supervisor()
     var spec = ChildSpec(String("/nonexistent/komira/binary/zzz"))
     var rc = sup.spawn(spec)
-    if rc < Int32(0):
-        print("  PASS (spawn returned -errno", rc, "no fd leak)")
-    else:
-        print("  FAIL: spawn unexpectedly succeeded rc", rc)
-        fails += 1
+    if rc >= Int32(0):
         sup.close()
+        raise Error(String("spawn unexpectedly succeeded rc ") + String(rc))
 
 
 # -----------------------------------------------------------------------------
-# (k) BARE-NAME PATH RESOLUTION — posix_spawnp, not posix_spawn.
+# BARE-NAME PATH RESOLUTION — posix_spawnp, not posix_spawn.
 #
 # The non-`p` `posix_spawn` does NOT PATH-search, so every caller that passes a
 # BARE executable name gets ENOENT even when the binary is installed and on
@@ -488,63 +452,55 @@ def scenario_spawn_fail(mut fails: Int):
 # build driver spawning `crane`).
 #
 # With `posix_spawn`, `ChildSpec(String("sh"))` returns a NEGATIVE rc
-# (-ENOENT == -2) from `spawn`, so the scenario reports FAIL. With
-# `posix_spawnp` the bare name resolves against the inherited PATH exactly as
-# execvp(3) does, the child runs, and stdout carries its marker.
+# (-ENOENT == -2) from `spawn`. With `posix_spawnp` the bare name resolves
+# against the inherited PATH exactly as execvp(3) does, the child runs, and
+# stdout carries its marker.
 #
-# The second half is the guard against over-correcting: a bare name that is NOT
-# on PATH must STILL fail loud (negative rc), never silently resolve to
+# The second test is the guard against over-correcting: a bare name that is
+# NOT on PATH must STILL fail loud (negative rc), never silently resolve to
 # something else. A spawn that cannot find its binary must never look like a
 # pass.
 # -----------------------------------------------------------------------------
-def scenario_bare_name_path_resolution(mut fails: Int):
-    print("(k) bare-name binary resolves via PATH (posix_spawnp)")
-
-    # -- (k1) a bare name that IS on PATH must spawn and run. --
+def test_bare_name_resolves_via_path() raises:
     var sup = Supervisor()
     var spec = ChildSpec(String("sh"))
     spec.with_arg(String("-c"))
     spec.with_arg(String("echo path-resolved-ok"))
     var pid = sup.spawn(spec)
     if pid <= Int32(0):
-        print(
-            "  FAIL: bare-name spawn of 'sh' returned",
-            pid,
-            "— posix_spawn (non-p) does not PATH-search; the shim must use"
-            " posix_spawnp",
+        raise Error(
+            String("bare-name spawn of 'sh' returned ")
+            + String(pid)
+            + " — posix_spawn (non-p) does not PATH-search; the shim must use"
+            + " posix_spawnp"
         )
-        fails += 1
-    else:
-        var out = sup.drain_pipe(sup.stdout_fd())
-        _ = sup.drain_pipe(sup.stderr_fd())
-        var info = sup.wait_exit()
-        if String("path-resolved-ok") in out and info.exit_code == Int32(0):
-            print("  PASS (k1: bare 'sh' PATH-resolved, ran, exit 0)")
-        else:
-            print("  FAIL: exit_code", info.exit_code, "out=", out)
-            fails += 1
-        sup.close()
+    var out = sup.drain_pipe(sup.stdout_fd())
+    _ = sup.drain_pipe(sup.stderr_fd())
+    var info = sup.wait_exit()
+    sup.close()
+    if not (String("path-resolved-ok") in out and info.exit_code == Int32(0)):
+        raise Error(
+            String("exit_code ") + String(info.exit_code) + " out=" + out
+        )
 
-    # -- (k2) a bare name that is NOT on PATH must still fail loud. --
-    var sup2 = Supervisor()
+
+def test_unresolvable_bare_name_still_fails() raises:
+    var sup = Supervisor()
     var missing = ChildSpec(String("komira-no-such-tool-zzz-9d3f"))
-    var rc2 = sup2.spawn(missing)
-    if rc2 < Int32(0):
-        print("  PASS (k2: unresolvable bare name still fails, rc", rc2, ")")
-    else:
-        print(
-            "  FAIL: unresolvable bare name spawned anyway, rc",
-            rc2,
-            "— a missing binary must never look like a pass",
+    var rc = sup.spawn(missing)
+    if rc >= Int32(0):
+        sup.close()
+        raise Error(
+            String("unresolvable bare name spawned anyway, rc ")
+            + String(rc)
+            + " — a missing binary must never look like a pass"
         )
-        fails += 1
-        sup2.close()
 
 
 # -----------------------------------------------------------------------------
-# (m) ⛔ THE ENVIRONMENT IS ALL-OR-NOTHING, SO ONE AUTHORED VARIABLE CAN BE A
-#     KILL SWITCH. Covers `set_env_over_inherited` (`merge_env_overlay` +
-#     `process_environ`).
+# ⛔ THE ENVIRONMENT IS ALL-OR-NOTHING, SO ONE AUTHORED VARIABLE CAN BE A
+# KILL SWITCH. Covers `set_env_over_inherited` (`merge_env_overlay` +
+# `process_environ`).
 #
 # `posix_spawn` has exactly two env arms — inherit `environ`, or REPLACE it —
 # and `ChildSpec.set_env` takes the second. A caller that authors ONE variable
@@ -553,10 +509,11 @@ def scenario_bare_name_path_resolution(mut fails: Int):
 # loading shared libraries`, exit 127) and `$HOME` + `AWS_PROFILE` (every arm of
 # the AWS credential chain declines).
 #
-# ⚠ THE THREE ASSERTIONS BELOW ARE ONE CLAIM EACH, and the THIRD is the one a
-# naive "just append the authored entries" fix fails: glibc's `getenv` returns
-# the FIRST match in `envp`, so an appended override does not override. The
-# merge REPLACES IN PLACE.
+# ⚠ THE OVERLAY TESTS BELOW ARE ONE CLAIM EACH, and
+# `test_overlay_authored_value_wins_exactly_once` is the one a naive "just
+# append the authored entries" fix fails: glibc's `getenv` returns the FIRST
+# match in `envp`, so an appended override does not override. The merge
+# REPLACES IN PLACE.
 # -----------------------------------------------------------------------------
 def _setenv(name: String, value: String):
     # SAFETY: both locals are rebound to `var` so `as_c_string_slice()` (a
@@ -572,6 +529,11 @@ def _setenv(name: String, value: String):
     )
     _ = n
     _ = v
+
+
+def _set_ambient_markers():
+    _setenv(String("MARKER_AMBIENT"), String("ambient-ok"))
+    _setenv(String("MARKER_CLASH"), String("from-ambient"))
 
 
 comptime _ECHO_MARKERS: String = (
@@ -614,38 +576,7 @@ def _count_entries_named(entries: List[String], name: String) -> Int:
     return n
 
 
-def scenario_env_overlay_vs_closed(mut fails: Int) raises:
-    print("(m) closed env vs inherited-plus-overlay")
-    _setenv(String("MARKER_AMBIENT"), String("ambient-ok"))
-    _setenv(String("MARKER_CLASH"), String("from-ambient"))
-
-    # -- (m0) `process_environ` sees this process's own environment. --
-    var ambient = process_environ()
-    if _count_entries_named(ambient, String("MARKER_AMBIENT")) == 1:
-        print("  PASS (m0: process_environ reads the live environ)")
-    else:
-        print(
-            "  FAIL: process_environ returned",
-            len(ambient),
-            "entries and none of them was the one just set",
-        )
-        fails += 1
-
-    # -- (m1) THE CLOSED ARM — set_env replaces the environment. --
-    var closed = ChildSpec.shell(_ECHO_MARKERS)
-    closed.set_env(_slist(String("MARKER_AUTHORED=authored-ok")))
-    var out_closed = _run_capturing(closed^)
-    if (
-        String("A=[]") in out_closed
-        and String("C=[]") in out_closed
-        and String("AUTH=[authored-ok]") in out_closed
-    ):
-        print("  PASS (m1: set_env REPLACES — the child sees nothing else)")
-    else:
-        print("  FAIL: set_env is no longer all-or-nothing; out=", out_closed)
-        fails += 1
-
-    # -- (m2) THE OVERLAY ARM — inherited AND authored. --
+def _overlay_child_output() raises -> String:
     var overlay = ChildSpec.shell(_ECHO_MARKERS)
     overlay.set_env_over_inherited(
         _slist2(
@@ -653,52 +584,81 @@ def scenario_env_overlay_vs_closed(mut fails: Int) raises:
             String("MARKER_CLASH=from-authored"),
         )
     )
-    var out_overlay = _run_capturing(overlay^)
-    if (
-        String("A=[ambient-ok]") in out_overlay
-        and String("AUTH=[authored-ok]") in out_overlay
-    ):
-        print("  PASS (m2: the child inherits AND receives the authored value)")
-    else:
-        print("  FAIL: overlay lost one half; out=", out_overlay)
-        fails += 1
+    return _run_capturing(overlay^)
 
-    # -- (m3) ★ THE AUTHORED VALUE WINS, AND EXACTLY ONCE. --
+
+def test_process_environ_reads_the_live_environ() raises:
+    _set_ambient_markers()
+    var ambient = process_environ()
+    if _count_entries_named(ambient, String("MARKER_AMBIENT")) != 1:
+        raise Error(
+            String("process_environ returned ")
+            + String(len(ambient))
+            + " entries and none of them was the one just set"
+        )
+
+
+def test_set_env_replaces_the_environment() raises:
+    """THE CLOSED ARM — the child sees only what was authored."""
+    _set_ambient_markers()
+    var closed = ChildSpec.shell(_ECHO_MARKERS)
+    closed.set_env(_slist(String("MARKER_AUTHORED=authored-ok")))
+    var out = _run_capturing(closed^)
+    if not (
+        String("A=[]") in out
+        and String("C=[]") in out
+        and String("AUTH=[authored-ok]") in out
+    ):
+        raise Error(String("set_env is no longer all-or-nothing; out=") + out)
+
+
+def test_overlay_child_inherits_and_receives_the_authored_value() raises:
+    _set_ambient_markers()
+    var out = _overlay_child_output()
+    if not (
+        String("A=[ambient-ok]") in out
+        and String("AUTH=[authored-ok]") in out
+    ):
+        raise Error(String("overlay lost one half; out=") + out)
+
+
+def test_overlay_authored_value_wins_exactly_once() raises:
+    """★ Replaced IN PLACE: one entry, the authored value."""
+    _set_ambient_markers()
+    var out = _overlay_child_output()
     var merged = merge_env_overlay(
         process_environ(), _slist(String("MARKER_CLASH=from-authored"))
     )
     var dupes = _count_entries_named(merged, String("MARKER_CLASH"))
-    if String("C=[from-authored]") in out_overlay and dupes == 1:
-        print("  PASS (m3: replaced IN PLACE — one entry, the authored value)")
-    else:
-        print(
-            "  FAIL: the authored value did not win by name (entries named"
-            " MARKER_CLASH:",
-            dupes,
-            ") out=",
-            out_overlay,
+    if not (String("C=[from-authored]") in out and dupes == 1):
+        raise Error(
+            String("the authored value did not win by name (entries named")
+            + " MARKER_CLASH: "
+            + String(dupes)
+            + ") out="
+            + out
         )
-        fails += 1
 
-    # -- (m4) a NEW name is appended; an entry with no `=` is its own name. --
+
+def test_merge_env_overlay_replaces_in_place_and_appends() raises:
+    """A clashing name is replaced where it stands, a new name is appended,
+    and the order is preserved."""
     var base = _slist2(String("A=1"), String("B=2"))
-    var m2 = merge_env_overlay(
-        base^, _slist2(String("B=9"), String("C=3"))
-    )
-    if (
-        len(m2) == 3
-        and m2[0] == String("A=1")
-        and m2[1] == String("B=9")
-        and m2[2] == String("C=3")
+    var m = merge_env_overlay(base^, _slist2(String("B=9"), String("C=3")))
+    if not (
+        len(m) == 3
+        and m[0] == String("A=1")
+        and m[1] == String("B=9")
+        and m[2] == String("C=3")
     ):
-        print("  PASS (m4: replace in place, append new, order preserved)")
-    else:
-        print("  FAIL: merge_env_overlay ordering/replacement wrong, len=", len(m2))
-        fails += 1
+        raise Error(
+            String("merge_env_overlay ordering/replacement wrong, len=")
+            + String(len(m))
+        )
 
 
 # -----------------------------------------------------------------------------
-# (n) BYTE-PRESERVING CAPTURE — the `chr(Int(byte))` mojibake regression.
+# BYTE-PRESERVING CAPTURE — the `chr(Int(byte))` mojibake regression.
 #
 # A byte->String seam written as `out += chr(Int(buf[i]))` reads each raw byte
 # as a UNICODE CODEPOINT and re-encodes it, so every multi-byte character comes
@@ -707,12 +667,12 @@ def scenario_env_overlay_vs_closed(mut fails: Int) raises:
 #     wrote  4d e2 80 94 45 e2 80 a6 4e         "M—E…N"       9 bytes
 #     read   4d c3 a2 c2 80 c2 94 45 c3 a2 …    "MâE⦔   15 bytes
 #
-# With such a seam each leg below fails, byte-level:
+# With such a seam each test below fails, byte-level:
 #
-#   n1  drain_pipe          15 bytes: 4d c3 a2 c2 80 c2 94 45 c3 a2 c2 80 c2 a6 4e
-#   n2  drain_both          the same 15 bytes, on stdout AND on stderr
-#   n3  200000 written  ->  300000 read, 33334 mojibake pairs
-#   n4  process_environ     the parent set 9 bytes; the read-back is those 15
+#   drain_pipe          15 bytes: 4d c3 a2 c2 80 c2 94 45 c3 a2 c2 80 c2 a6 4e
+#   drain_both          the same 15 bytes, on stdout AND on stderr
+#   chunked capture     200000 written  ->  300000 read, 33334 mojibake pairs
+#   process_environ     the parent set 9 bytes; the read-back is those 15
 #
 # Protocol markers parsed out of captured stdout are usually ASCII and survive
 # such a transcode; only the prose an operator reads is corrupted. So the
@@ -769,94 +729,101 @@ def _mojibake_pairs(s: String) -> Int:
     return n
 
 
-def scenario_utf8_byte_preserving_capture(mut fails: Int) raises:
-    print("(n) byte-preserving capture: multi-byte UTF-8 survives the drain")
+def test_drain_pipe_preserves_utf8_bytes() raises:
+    """The blocking drain-to-EOF path."""
     var want = _utf8_marker_bytes()
-
-    # -- (n1) drain_pipe: the blocking drain-to-EOF path. --
-    var sup1 = Supervisor()
-    var pid1 = sup1.spawn(
-        ChildSpec.shell(String("printf '") + _UTF8_MARKER_OCTAL + String("'"))
-    )
-    if pid1 <= Int32(0):
-        print("  FAIL: spawn returned", pid1)
-        fails += 1
-        return
-    var out1 = sup1.drain_pipe(sup1.stdout_fd())
-    _ = sup1.drain_pipe(sup1.stderr_fd())
-    _ = sup1.wait_exit()
-    sup1.close()
-    if _bytes_are(out1, want) and _mojibake_pairs(out1) == 0:
-        print("  PASS (n1: drain_pipe returned the 9 bytes the child wrote)")
-    else:
-        print(
-            "  FAIL: drain_pipe mangled the stream — got",
-            out1.byte_length(), "bytes:", _hex_of(out1),
-            "( mojibake c3a2 pairs:", _mojibake_pairs(out1), ")",
-        )
-        fails += 1
-
-    # -- (n2) drain_both / read_available: the incremental non-blocking path,
-    #        asserted on BOTH streams (stderr is the one an operator reads on a
-    #        failure, and it goes through the same seam). --
-    var sup2 = Supervisor()
-    var pid2 = sup2.spawn(
-        ChildSpec.shell(
-            String("printf '") + _UTF8_MARKER_OCTAL + String("'; printf '")
-            + _UTF8_MARKER_OCTAL + String("' 1>&2")
+    var sup = Supervisor()
+    _spawned(
+        sup.spawn(
+            ChildSpec.shell(
+                String("printf '") + _UTF8_MARKER_OCTAL + String("'")
+            )
         )
     )
-    if pid2 <= Int32(0):
-        print("  FAIL: spawn returned", pid2)
-        fails += 1
-        return
-    var streams = sup2.drain_both(sup2.stdout_fd(), sup2.stderr_fd())
-    var out2 = streams[0]
-    var err2 = streams[1]
-    _ = sup2.wait_exit()
-    sup2.close()
-    if _bytes_are(out2, want) and _bytes_are(err2, want):
-        print("  PASS (n2: drain_both preserved both streams byte-for-byte)")
-    else:
-        print(
-            "  FAIL: drain_both mangled a stream — stdout", out2.byte_length(),
-            "bytes:", _hex_of(out2), "/ stderr", err2.byte_length(),
-            "bytes:", _hex_of(err2),
+    var out = sup.drain_pipe(sup.stdout_fd())
+    _ = sup.drain_pipe(sup.stderr_fd())
+    _ = sup.wait_exit()
+    sup.close()
+    if not (_bytes_are(out, want) and _mojibake_pairs(out) == 0):
+        raise Error(
+            String("drain_pipe mangled the stream — got ")
+            + String(out.byte_length())
+            + " bytes: "
+            + _hex_of(out)
+            + "( mojibake c3a2 pairs: "
+            + String(_mojibake_pairs(out))
+            + ")"
         )
-        fails += 1
 
-    # -- (n3) CHUNK-BOUNDARY STRESS. 200000 bytes >> the 65536-byte read chunk,
-    #        so multi-byte characters WILL be split across reads. Nothing on the
-    #        path decodes, so the fragments must rejoin exactly: the assertion
-    #        is the exact byte COUNT (a transcode inflates it) plus zero mojibake pairs anywhere in 200KB. --
-    var sup3 = Supervisor()
-    var pid3 = sup3.spawn(
-        ChildSpec.shell(
-            String("X=$(printf 'A\\342\\200\\224B'); yes \"$X\" | head -c 200000")
+
+def test_drain_both_preserves_utf8_bytes_on_both_streams() raises:
+    """The incremental non-blocking path, asserted on BOTH streams (stderr is
+    the one an operator reads on a failure, and it goes through the same
+    seam)."""
+    var want = _utf8_marker_bytes()
+    var sup = Supervisor()
+    _spawned(
+        sup.spawn(
+            ChildSpec.shell(
+                String("printf '") + _UTF8_MARKER_OCTAL + String("'; printf '")
+                + _UTF8_MARKER_OCTAL + String("' 1>&2")
+            )
         )
     )
-    if pid3 <= Int32(0):
-        print("  FAIL: spawn returned", pid3)
-        fails += 1
-        return
-    var streams3 = sup3.drain_both(sup3.stdout_fd(), sup3.stderr_fd())
-    var big = streams3[0]
-    _ = sup3.wait_exit()
-    sup3.close()
+    var streams = sup.drain_both(sup.stdout_fd(), sup.stderr_fd())
+    var out = streams[0]
+    var err = streams[1]
+    _ = sup.wait_exit()
+    sup.close()
+    if not (_bytes_are(out, want) and _bytes_are(err, want)):
+        raise Error(
+            String("drain_both mangled a stream — stdout ")
+            + String(out.byte_length())
+            + " bytes: "
+            + _hex_of(out)
+            + "/ stderr "
+            + String(err.byte_length())
+            + " bytes: "
+            + _hex_of(err)
+        )
+
+
+def test_chunked_capture_is_byte_exact() raises:
+    """CHUNK-BOUNDARY STRESS. 200000 bytes >> the 65536-byte read chunk, so
+    multi-byte characters WILL be split across reads. Nothing on the path
+    decodes, so the fragments must rejoin exactly: the assertion is the exact
+    byte COUNT (a transcode inflates it) plus zero mojibake pairs anywhere in
+    200KB."""
+    var sup = Supervisor()
+    _spawned(
+        sup.spawn(
+            ChildSpec.shell(
+                String(
+                    "X=$(printf 'A\\342\\200\\224B'); yes \"$X\" | head -c 200000"
+                )
+            )
+        )
+    )
+    var streams = sup.drain_both(sup.stdout_fd(), sup.stderr_fd())
+    var big = streams[0]
+    _ = sup.wait_exit()
+    sup.close()
     var big_len = big.byte_length()
     var big_bake = _mojibake_pairs(big)
-    if big_len == 200000 and big_bake == 0:
-        print("  PASS (n3: 200000 bytes across ~4 read chunks, none transcoded)")
-    else:
-        print(
-            "  FAIL: chunked capture is not byte-exact — got", big_len,
-            "bytes (want 200000), mojibake c3a2 pairs:", big_bake,
+    if not (big_len == 200000 and big_bake == 0):
+        raise Error(
+            String("chunked capture is not byte-exact — got ")
+            + String(big_len)
+            + " bytes (want 200000), mojibake c3a2 pairs: "
+            + String(big_bake)
         )
-        fails += 1
 
-    # -- (n4) `process_environ` — the SAME class on the env path, asserted
-    #        WITHOUT a child so the drain cannot mask or cause it. These entries
-    #        become the child's real environment via set_env_over_inherited. --
+
+def test_process_environ_preserves_utf8_value() raises:
+    """The SAME class on the env path, asserted WITHOUT a child so the drain
+    cannot mask or cause it. These entries become the child's real environment
+    via set_env_over_inherited."""
+    var want = _utf8_marker_bytes()
     var marker = String(unsafe_from_utf8=Span(want))
     _setenv(String("MARKER_UTF8"), marker)
     var entries = process_environ()
@@ -869,45 +836,16 @@ def scenario_utf8_byte_preserving_capture(mut fails: Int) raises:
             found = True
             var eb = e.as_bytes()
             got_value = String(unsafe_from_utf8=eb[plen : len(eb)])
-    if found and _bytes_are(got_value, want):
-        print("  PASS (n4: process_environ returned the value the parent set)")
-    else:
-        print(
-            "  FAIL: process_environ transcoded an environment VALUE — found",
-            found, "value", got_value.byte_length(), "bytes:",
-            _hex_of(got_value),
+    if not (found and _bytes_are(got_value, want)):
+        raise Error(
+            String("process_environ transcoded an environment VALUE — found ")
+            + String(found)
+            + " value "
+            + String(got_value.byte_length())
+            + " bytes: "
+            + _hex_of(got_value)
         )
-        fails += 1
 
 
 def main() raises:
-    print("")
-    print("== komira_supervisor scenarios ==")
-    print("Platform is_macos =", CompilationTarget.is_macos())
-    print("")
-
-    var fails = 0
-    scenario_a(fails)
-    scenario_b(fails)
-    scenario_c(fails)
-    scenario_d(fails)
-    scenario_e(fails)
-    scenario_f(fails)
-    scenario_g(fails)
-    scenario_concurrent_drain_no_deadlock(fails)
-    scenario_idempotent(fails)
-    scenario_spawn_fail(fails)
-    scenario_bare_name_path_resolution(fails)
-    scenario_env_overlay_vs_closed(fails)
-    scenario_utf8_byte_preserving_capture(fails)
-
-    print("")
-    _banner(
-        "RESULT: " + (String("ALL PASS") if fails == 0
-                      else (String(fails) + " FAILURE(S)"))
-    )
-    print("")
-    if fails != 0:
-        raise Error(
-            "komira_supervisor scenarios: " + String(fails) + " failure(s)"
-        )
+    TestSuite.discover_tests[__functions_in_module()]().run()
