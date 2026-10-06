@@ -36,9 +36,9 @@ comptime TK_LT: UInt8 = 16  # <
 comptime TK_LE: UInt8 = 17  # <=
 comptime TK_GT: UInt8 = 18  # >
 comptime TK_GE: UInt8 = 19  # >=
-comptime TK_DCOLON: UInt8 = 20  # :: — the POSTFIX cast operator (SQL-CAST, 2026-09-14)
-comptime TK_DSLASH: UInt8 = 21  # // — DuckDB's INTEGER division (2026-09-24, W0)
-comptime TK_PERCENT: UInt8 = 22  # %  — DuckDB's modulo, `mod()` (2026-09-24, W0)
+comptime TK_DCOLON: UInt8 = 20  # :: — the POSTFIX cast operator (2026-09-14)
+comptime TK_DSLASH: UInt8 = 21  # // — DuckDB's INTEGER division (2026-09-24)
+comptime TK_PERCENT: UInt8 = 22  # %  — DuckDB's modulo, `mod()` (2026-09-24)
 """⭐ THE LEXER HAD NO `:` TOKEN AT ALL, WHICH IS WHY `x::BIGINT` DIED HERE.
 
 `test_sql_cast_e2e.py`'s header records the absence as THREE independent
@@ -54,7 +54,7 @@ parameters, no array slices), so keeping it a refusal is correct; what would be
 wrong is refusing it with the SAME sentence as before, which said the character
 is unexpected when the only unexpected thing is that there is one of it."""
 
-# ★ W1 T1 OPERATOR SPELLINGS (2026-09-24). Four
+# ★ OPERATOR SPELLINGS (2026-09-24). Four
 # operators DuckDB v1.5.3 has and this lexer refused as an "unexpected
 # character" — a syntax error that named nothing. Each is ONE more token; what
 # each MEANS is the parser's and the binder's (`sql_parser._parse_op` /

@@ -30,13 +30,13 @@ comptime SX_STAR: UInt8 = 6  # '*' (only valid as COUNT(*) arg or SELECT *)
 comptime SX_DATE: UInt8 = 7  # date literal `date 'YYYY-MM-DD'` (raw string in `text`)
 comptime SX_LIKE: UInt8 = 8  # `child [NOT] LIKE 'pat'` (child in _agg; pat in text; negate in like_negate)
 comptime SX_CALL: UInt8 = 9  # scalar fn call `name(args...)` (name in `text`; args in _call)
-comptime SX_SUBQUERY: UInt8 = 10  # subquery reference by index (int_val -> SelectStmt.subqueries): the GENERIC subquery-operand node. Scalar `(SELECT ...)` (W2) AND the W3 predicate subqueries — `[NOT] EXISTS (...)`, `x [NOT] IN (...)` — all use this node. The referenced `SubqueryDef.kind` (scalar / exists / not-exists / in / not-in) drives how `bind_sql` pre-binds it; the outer binder just looks up `prebound[idx]` regardless of kind (a scalar Expr for SCALAR, a boolean predicate Expr for EXISTS/IN).
-comptime SX_CASE: UInt8 = 11  # `CASE [operand] WHEN cond THEN res ... [ELSE default] END` (W4). Children in `_case`: parallel WHEN-condition / THEN-result Slabs + a 0/1-entry ELSE Slab. A SIMPLE case (`CASE x WHEN v THEN ...`) is DESUGARED at parse time into a searched CASE (each condition becomes `x = v`), so the binder + AST only ever see the searched form. Binds to an `EXPR_WHEN` IR node (`_bind_case`); an omitted ELSE binds to a NULL literal (SQL default). The q8 market-share `sum(CASE WHEN ... THEN ... ELSE 0 END)` routes its CASE through the aggregate-argument binder (`_bind_agg_from_sx` -> `_bind_scalar`).
-comptime SX_WINDOW: UInt8 = 12  # `f(...) OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE frame])` window function (W7). Metadata in `_window` (a `SqlWindowData`): the SXWIN_* function, the aggregate ARG column (empty for ranking fns), the partition/order column lists + descending flags, and the frame bounds. `SqlWindowData` holds NO nested `SqlExpr` (arg + partition/order are plain column NAMES, per the corpus), so the AST stays ACYCLIC through this node (no new recursion cycle / no AOT-wedge risk). Binds to a `LogicalPlan.partition_by` (PLAN_PARTITION_BY) node — the existing engine window operator, no new executor.
+comptime SX_SUBQUERY: UInt8 = 10  # subquery reference by index (int_val -> SelectStmt.subqueries): the GENERIC subquery-operand node. Scalar `(SELECT ...)` AND the predicate subqueries — `[NOT] EXISTS (...)`, `x [NOT] IN (...)` — all use this node. The referenced `SubqueryDef.kind` (scalar / exists / not-exists / in / not-in) drives how `bind_sql` pre-binds it; the outer binder just looks up `prebound[idx]` regardless of kind (a scalar Expr for SCALAR, a boolean predicate Expr for EXISTS/IN).
+comptime SX_CASE: UInt8 = 11  # `CASE [operand] WHEN cond THEN res ... [ELSE default] END`. Children in `_case`: parallel WHEN-condition / THEN-result Slabs + a 0/1-entry ELSE Slab. A SIMPLE case (`CASE x WHEN v THEN ...`) is DESUGARED at parse time into a searched CASE (each condition becomes `x = v`), so the binder + AST only ever see the searched form. Binds to an `EXPR_WHEN` IR node (`_bind_case`); an omitted ELSE binds to a NULL literal (SQL default). The q8 market-share `sum(CASE WHEN ... THEN ... ELSE 0 END)` routes its CASE through the aggregate-argument binder (`_bind_agg_from_sx` -> `_bind_scalar`).
+comptime SX_WINDOW: UInt8 = 12  # `f(...) OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE frame])` window function. Metadata in `_window` (a `SqlWindowData`): the SXWIN_* function, the aggregate ARG column (empty for ranking fns), the partition/order column lists + descending flags, and the frame bounds. `SqlWindowData` holds NO nested `SqlExpr` (arg + partition/order are plain column NAMES, per the corpus), so the AST stays ACYCLIC through this node (no new recursion cycle / no AOT-wedge risk). Binds to a `LogicalPlan.partition_by` (PLAN_PARTITION_BY) node — the existing engine window operator, no new executor.
 comptime SX_UNARY: UInt8 = 13  # `NOT child` / `child IS [NOT] NULL` — a UNARY predicate. The SXUN_* code is in `op`; the child lives in the `_agg` slot, exactly as SX_LIKE's does. ⚠ THE `_agg` REUSE IS DELIBERATE, NOT A SHORTCUT: a new `Optional[SqlAggData]`-shaped FIELD would add another self-referential storage path for Mojo's AOT whole-program synthesis to walk, and this frontend has already paid for one of those (see SX_SUBQUERY's note on the `_bind_scalar <-> _bind_select` cycle that deadlocks the compiler). One-child nodes share one slot.
 comptime SX_BOOL: UInt8 = 14  # `TRUE` / `FALSE`, value in `int_val` (0/1). ⚠ NOT folded into SX_INT: `flag = 1` and `flag = true` are different queries, only the second type-checks against a BOOL column, and binding a bool literal as an integer would push the type error down into a comparison kernel instead of raising in the binder.
 
-# ★ SQL-TEMPORAL-LITERAL (2026-09-21). `timestamp 'YYYY-MM-DD HH:MM:SS[.f]'` /
+# ★ TEMPORAL LITERALS (2026-09-21). `timestamp 'YYYY-MM-DD HH:MM:SS[.f]'` /
 # `timestamptz '... +HH:MM'` — the raw string in `text`, the AWARENESS in `op`
 # (`TSLIT_NAIVE` / `TSLIT_AWARE`).
 #
@@ -109,13 +109,13 @@ comptime SXFRAME_FOLLOWING: UInt8 = 3
 comptime SXFRAME_UNBOUNDED_FOLLOWING: UInt8 = 4
 
 # --- Subquery-kind codes (on `SubqueryDef.kind` in the side-table) ------------
-comptime SUBQ_SCALAR: UInt8 = 0  # `(SELECT ...)` scalar operand (W2)
+comptime SUBQ_SCALAR: UInt8 = 0  # `(SELECT ...)` scalar operand
 comptime SUBQ_EXISTS: UInt8 = 1  # `EXISTS (SELECT ...)` -> CORR_KIND_EXISTS (SEMI)
 comptime SUBQ_NOT_EXISTS: UInt8 = 2  # `NOT EXISTS (SELECT ...)` -> CORR_KIND_NOT_EXISTS (ANTI)
 comptime SUBQ_IN: UInt8 = 3  # `x IN (SELECT ...)` -> EXISTS with the synthesized `inner_col = x` equi (SEMI)
 comptime SUBQ_NOT_IN: UInt8 = 4  # `x NOT IN (SELECT ...)` -> NULL-AWARE: the synthesized-equi ANTI join AND "no NULL y" AND "x IS NOT NULL or S empty" (`sql_binder._bind_null_aware_not_in`, 2026-09-25). It was the bare ANTI join, which answered rows DuckDB does not whenever a NULL was involved.
 comptime SUBQ_DERIVED: UInt8 = 5  # `FROM (SELECT ...) alias` derived table (bound to a subplan, inlined via the CTE scope under `alias`)
-# ★ SQL-UNION-ALL (2026-09-21). The RIGHT-HAND BRANCH of `<select> UNION ALL
+# ★ UNION ALL (2026-09-21). The RIGHT-HAND BRANCH of `<select> UNION ALL
 # <select>`, parked in the SAME flat side-table every other nested SELECT uses.
 #
 # ⭐ IT REUSES THE SIDE-TABLE RATHER THAN ADDING A `SelectStmt` FIELD, and that
@@ -138,7 +138,7 @@ comptime SUBQ_UNION_ALL: UInt8 = 6
 # JK_CROSS covers comma-joins, `CROSS JOIN`, and plain/`INNER JOIN` — for all of
 # these the binder builds a `JOIN_CROSS` node and the ON predicate (if any) is
 # ANDed into `where_pred` at parse time (the optimizer's `eliminate_cross_join`
-# folds equi-conjuncts into inner joins). JK_LEFT/RIGHT/FULL are the W6 OUTER
+# folds equi-conjuncts into inner joins). JK_LEFT/RIGHT/FULL are the OUTER
 # joins: the ON predicate STAYS ON the join (never folded to WHERE — folding would
 # collapse the null-extension into inner-join semantics) and the binder emits a
 # real `JOIN_LEFT`/etc. node so unmatched rows null-extend the opposite side.
@@ -171,7 +171,7 @@ comptime SXOP_MUL: UInt8 = 10
 comptime SXOP_DIV: UInt8 = 11  # `/`  — DuckDB's TRUE division (DOUBLE over integers)
 comptime SXOP_IDIV: UInt8 = 12  # `//` — DuckDB's INTEGER division = `divide()`
 comptime SXOP_MOD: UInt8 = 13  # `%`  — DuckDB's modulo = `mod()`
-# ★ W1 T1 operator spellings (2026-09-24). Each
+# ★ Operator spellings (2026-09-24). Each
 # names an operation a SQL FUNCTION already serves; the operator is a second
 # SPELLING, kept as its own code (not rewritten to the call at parse time) so
 # the unaliased result column is named the way DuckDB names it — `(a ^ 2)`,
@@ -206,7 +206,7 @@ comptime SXAGG_MIN: UInt8 = 2
 comptime SXAGG_MAX: UInt8 = 3
 comptime SXAGG_AVG: UInt8 = 4
 
-# --- Statement kinds (on `SqlStatement.kind`) — SQL-CORPUS W8 -----------------
+# --- Statement kinds (on `SqlStatement.kind`) -----------------
 # The top-level statement dispatch beyond a bare SELECT. A `SqlStatement` always
 # carries a source/query `SelectStmt` (`query`); the WRITE kinds additionally
 # carry a destination + format. `plan_from_sql` serves STMT_QUERY only; the write
@@ -242,7 +242,7 @@ from komira_arrow.write_target import WFMT_PARQUET, WCOMP_SNAPPY
 def sql_call_is_aggregate(name: String) -> Bool:
     """True iff the (lower-folded) scalar-call function name is actually a
     statistical AGGREGATE that rides on the general `SX_CALL fn(args)` grammar
-    rather than the `_agg_code` fast-path (SQL-CORPUS W5). `median`/`stddev`/
+    rather than the `_agg_code` fast-path. `median`/`stddev`/
     `var_samp` are unary; `corr` is bivariate. Kept as a free function so BOTH
     the AST's `contains_aggregate()` and the binder's `_extract_and_bind_post_agg`
     agree on the exact set. `sum`/`count`/`min`/`max`/`avg` are NOT here — the
@@ -264,7 +264,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
     which reads like an engine gap rather than the two-place edit it is. Add to
     BOTH or NEITHER.
 
-    AGG-PARITY: `var_samp` / `variance` join the
+    `var_samp` / `variance` join the
     set. The plan tag `AGG_VAR_SAMP` and every arm below it already existed —
     `logical_plan.agg_func_base_name`, `_infer_agg_field`'s always-FLOAT64
     branch, the untyped column driver (`agg_node_exec`), the row-streaming
@@ -273,7 +273,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
     kernel one. `variance` is the alias BOTH PostgreSQL and DuckDB give
     `var_samp` (ddof=1), so it is a spelling and not a second statistic.
 
-    ★★ SQL-AGG-SERVE (2026-09-14):
+    ★★ (2026-09-14):
     the ELEVEN BIVARIATE names join the set — `covar_pop` `covar_samp` and the
     nine `regr_*`. They are NOT eleven new kernels: `CorrelationState` already
     carries `[n | mean_x | mean_y | C | Sx | Sy]`, the complete sufficient
@@ -308,7 +308,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
         or name == "regr_sxx"
         or name == "regr_sxy"
         or name == "regr_syy"
-        # ★★ SQL-AGG-SERVE-2 (2026-09-14):
+        # ★★ (2026-09-14):
         # the POPULATION-FINALIZE
         # family. UNIVARIATE, unlike the eleven above — `_bind_agg_from_sx_call`
         # binds ONE argument for them and there is no swap to get wrong. They
@@ -318,7 +318,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
         or name == "var_pop"
         or name == "stddev_pop"
         or name == "sem"
-        # ★★ SQL-AGG-SERVE-3 (2026-09-14):
+        # ★★ (2026-09-14):
         # the MONOID-FOLD family plus
         # the one pure COUNT SPELLING. UNIVARIATE like the population trio.
         #
@@ -337,7 +337,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
         or name == "bool_and"
         or name == "bool_or"
         or name == "product"
-        # ★★ SQL-AGG-SERVE-4 (2026-09-14):
+        # ★★ (2026-09-14):
         # the ARRIVAL-ORDER PICK family.
         # UNIVARIATE like the two families above.
         #
@@ -352,7 +352,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
         or name == "arbitrary"
         or name == "first"
         or name == "last"
-        # ★★ SQL-AGG-SERVE-5 (2026-09-15) — the COMPENSATED sums and the
+        # ★★ (2026-09-15) — the COMPENSATED sums and the
         # HIGHER-MOMENT trio. UNIVARIATE like every family above.
         #
         # ⛔⛔ `fsum` / `kahan_sum` / `sumkahan` ARE ONE TAG AND `favg` IS
@@ -584,8 +584,8 @@ def sql_name_claimed_by_grammar(name: String) -> UInt8:
 
       * `date`  — claimed only by `date '<literal>'`, i.e. a following STRING.
                   `date(x)` is an ordinary call.
-      * `timestamp` / `timestamptz` — the same rule (SQL-TEMPORAL-LITERAL,
-                  2026-09-21): claimed only by a following STRING, so
+      * `timestamp` / `timestamptz` — the same rule
+                  (2026-09-21): claimed only by a following STRING, so
                   `timestamp(x)` is an ordinary call and a COLUMN called
                   `timestamp` still resolves.
       * `true` / `false` — the boolean-literal arm explicitly stands down when
@@ -639,7 +639,7 @@ def sql_name_claimed_by_grammar(name: String) -> UInt8:
         #
         # ⭐⭐ `cast` / `try_cast` JOINED THEM 2026-09-16, AND THEY ARRIVED THE
         # SAME WAY THE OTHER FIVE NAMESPACES DID: a grammar arm landed and this
-        # predicate was not consulted. SQL-CAST (2026-09-14) added
+        # predicate was not consulted. The cast grammar (2026-09-14) added
         # `CAST(<expr> AS <type>)` to `_parse_primary`
         # (`sql_parser.mojo:~1522`), which fires on the NAME + `(` and rewrites
         # the call to an internal desugar name — so `cast(a)` is never an
@@ -769,7 +769,7 @@ struct SqlCaseData(Movable):
 
 struct SqlWindowData(Copyable, Movable):
     """The metadata of a SX_WINDOW node — `f(...) OVER (PARTITION BY ... ORDER BY
-    ... [frame])` (W7). Holds ONLY plain column NAMES + scalar frame parameters,
+    ... [frame])`. Holds ONLY plain column NAMES + scalar frame parameters,
     NO nested `SqlExpr` — so it introduces no `SqlExpr -> SqlWindowData -> SqlExpr`
     recursion cycle (the AST stays acyclic through the window node, keeping it
     clear of the Mojo AOT recursive-destructor wedge).
@@ -1018,7 +1018,7 @@ struct SqlExpr(Movable):
 
     @staticmethod
     def subquery(idx: Int) -> SqlExpr:
-        """A parenthesized scalar subquery `(SELECT ...)` — W2. To keep
+        """A parenthesized scalar subquery `(SELECT ...)`. To keep
         `SqlExpr`'s type graph FREE of a `SelectStmt` cycle (an owning
         `SqlExpr -> SelectStmt -> SqlExpr` cycle deadlocks whole-program
         destructor synthesis in the Mojo AOT compiler), the subquery BODY lives
@@ -1078,7 +1078,7 @@ struct SqlExpr(Movable):
 
     @staticmethod
     def case(var conds: Slab[SqlExpr], var results: Slab[SqlExpr], var otherwise: Slab[SqlExpr]) -> SqlExpr:
-        """`CASE WHEN c0 THEN r0 [WHEN c1 THEN r1 ...] [ELSE d] END` (W4). `conds`
+        """`CASE WHEN c0 THEN r0 [WHEN c1 THEN r1 ...] [ELSE d] END`. `conds`
         and `results` are parallel (one WHEN/THEN pair per branch); `otherwise`
         carries the ELSE default in a 0-or-1-entry Slab (empty => the binder
         supplies a NULL literal). A simple `CASE x WHEN v ...` is already desugared
@@ -1089,7 +1089,7 @@ struct SqlExpr(Movable):
 
     @staticmethod
     def window(var w: SqlWindowData) -> SqlExpr:
-        """A window-function node `f(...) OVER (...)` (W7). The OVER-clause
+        """A window-function node `f(...) OVER (...)`. The OVER-clause
         metadata (function, arg column, partition/order keys, frame) lives in the
         `_window` slot; the binder (`_bind_window_projection` -> `_apply_window`)
         lowers it to a `LogicalPlan.partition_by` node."""
@@ -1099,7 +1099,7 @@ struct SqlExpr(Movable):
 
     @always_inline
     def is_window(self) -> Bool:
-        """True iff this node is a window function `f(...) OVER (...)` (W7)."""
+        """True iff this node is a window function `f(...) OVER (...)`."""
         return self.tag == SX_WINDOW
 
     def copy(self) -> SqlExpr:
@@ -1153,13 +1153,13 @@ struct SqlExpr(Movable):
 
     def contains_aggregate(self) -> Bool:
         """True iff this expression tree contains an aggregate call ANYWHERE
-        (top-level or nested in arithmetic / a LIKE child) — the W4 detector
+        (top-level or nested in arithmetic / a LIKE child) — the detector
         that routes `100.0*sum(x)/sum(y)` and `max(v1)-min(v2)` through the
         aggregate binder instead of the scalar binder."""
         if self.tag == SX_AGG:
             return True
         # A statistical aggregate riding on the `SX_CALL fn(args)` grammar
-        # (median / stddev / corr — SQL-CORPUS W5). `pow(corr(...), 2)` is NOT
+        # (median / stddev / corr). `pow(corr(...), 2)` is NOT
         # caught here (pow is scalar) but its `corr` arg IS, via the `_call`
         # arg walk below.
         if self.tag == SX_CALL and sql_call_is_aggregate(self.text):
@@ -1302,7 +1302,7 @@ struct FromRelation(Copyable, Movable):
     bound directly — no catalog entry needed). `tvf_path` is `Some(path)` iff
     this is a TVF, and `tvf_kind` says WHICH reader binds it.
 
-    A `FROM (SELECT ...) d` derived table (W3) is parked in the enclosing
+    A `FROM (SELECT ...) d` derived table is parked in the enclosing
     statement's `subqueries` side-table (kind `SUBQ_DERIVED`); the parser emits a
     `named(d)` relation for it, and `bind_sql` pre-binds the derived body into the
     per-query CTE scope under the alias `d` — so a derived table resolves through
@@ -1387,7 +1387,7 @@ struct OrderKey(Movable):
     `expr` to resolve to an output column name.
 
     ★ `nulls_first` IS AN `Optional[Bool]`, AND THE EMPTY STATE IS LOAD-BEARING
-    (ORDNULL-EXPRESS, 2026-09-22). `None` means the
+    (2026-09-22). `None` means the
     query said nothing, and the plan then DERIVES `nulls_first = not
     descending` exactly as it did before this clause existed
     (`logical_plan_variants._resolve_nulls_first`). A `Bool` cannot encode that
@@ -1411,7 +1411,7 @@ struct OrderKey(Movable):
 
 
 struct SelectStmt(Movable):
-    """The parsed analytical SELECT statement (v1 + wave-2 join grammar + W1 CTEs).
+    """The parsed analytical SELECT statement (v1 + join grammar + CTEs).
 
     `from_tables` holds every FROM relation — comma-separated (implicit join)
     AND `JOIN` targets (explicit). Explicit `JOIN .. ON <pred>` conditions are
@@ -1420,15 +1420,15 @@ struct SelectStmt(Movable):
     `eliminate_cross_join` folds the equi-conjuncts into real inner joins.
 
     `ctes` holds any `WITH name AS (<select>)[, ...]` definitions that precede
-    the SELECT (W1). Each CTE body is a full `SelectStmt`; the binder builds a
+    the SELECT. Each CTE body is a full `SelectStmt`; the binder builds a
     per-query CTE scope and INLINES a CTE's bound subplan wherever a FROM
     relation references its name (a named derived relation, not a materialized
     node). Only the TOP-LEVEL statement carries `ctes` — a CTE body's own
     `ctes` is always empty in v1 (no nested WITH).
 
     `subqueries` is the flat side-table of every parenthesized subquery body
-    parsed anywhere in the query tree — scalar `(SELECT ...)` operands (W2) AND
-    the W3 predicate subqueries (`[NOT] EXISTS`, `x [NOT] IN`) AND the W3 derived
+    parsed anywhere in the query tree — scalar `(SELECT ...)` operands AND
+    the predicate subqueries (`[NOT] EXISTS`, `x [NOT] IN`) AND the derived
     tables (`FROM (SELECT ...) alias`). Each entry is a `SubqueryDef` carrying the
     body PLUS its `kind` (SUBQ_*) and any extra metadata (the IN LHS column /
     the derived alias). An `SX_SUBQUERY` `SqlExpr` node stores only its INDEX into
@@ -1441,10 +1441,10 @@ struct SelectStmt(Movable):
     `SelectStmt -> Slab[SubqueryDef] -> SubqueryDef -> SelectStmt` self-cycle is
     broken exactly as `Slab[CteDef]` breaks the `ctes` cycle.
 
-    `distinct` marks `SELECT DISTINCT ...` (W3) — the binder wraps the SELECT
+    `distinct` marks `SELECT DISTINCT ...` — the binder wraps the SELECT
     output in a `PLAN_DISTINCT` node (before ORDER BY / LIMIT).
 
-    `joins` (W6) is the per-relation join descriptor, one entry PARALLEL to each
+    `joins` is the per-relation join descriptor, one entry PARALLEL to each
     `from_tables[i]` for i >= 1 (so `len(joins) == len(from_tables) - 1`, and
     `joins[i-1]` describes how `from_tables[i]` attaches to the accumulated left).
     A JK_CROSS entry (comma / CROSS / INNER) carries no ON (it was folded into
@@ -1468,8 +1468,8 @@ struct SelectStmt(Movable):
     var offset: Optional[Int]
     var ctes: Slab[CteDef]
     var subqueries: Slab[SubqueryDef]
-    var distinct: Bool  # SELECT DISTINCT (W3)
-    # ★ SQL-UNION-ALL: index into the TOP-LEVEL statement's `subqueries`
+    var distinct: Bool  # SELECT DISTINCT
+    # ★ UNION ALL: index into the TOP-LEVEL statement's `subqueries`
     # side-table of this SELECT's `UNION ALL` right-hand branch, or -1.
     #
     # ⚠ THE INDEX IS INTO THE **TOP-LEVEL** TABLE, NOT THIS STATEMENT'S OWN.
@@ -1517,7 +1517,7 @@ struct CteDef(Movable):
 
 
 struct SubqueryDef(Movable):
-    """One parked subquery body (W2 scalar + W3 predicate/derived) in the
+    """One parked subquery body (scalar + predicate/derived) in the
     top-level `SelectStmt.subqueries` side-table. Move-only.
 
     `kind` (SUBQ_*) tells `bind_sql`'s pre-bind loop HOW to lower the body:
@@ -1569,7 +1569,7 @@ struct SubqueryDef(Movable):
 
 
 struct JoinClause(Movable):
-    """One FROM join descriptor (W6), parallel to `SelectStmt.from_tables[i]` for
+    """One FROM join descriptor, parallel to `SelectStmt.from_tables[i]` for
     i >= 1. `kind` is a JK_* code. For JK_CROSS the ON predicate was already ANDed
     into `where_pred` at parse time (`on_pred` is None); for JK_LEFT/RIGHT/FULL the
     ON predicate is kept HERE (never folded to WHERE — folding an outer-join ON
@@ -1624,7 +1624,7 @@ struct JoinClause(Movable):
 
 
 struct SqlStatement(Movable):
-    """The parsed top-level statement (SQL-CORPUS W8). The parser's `parse()`
+    """The parsed top-level statement. The parser's `parse()`
     dispatches on the first keyword into one of the `STMT_*` kinds, but every
     kind is a THIN wrapper over a source/query `SelectStmt` (`query`) plus optional
     write metadata — so the entire SELECT grammar (joins / GROUP BY / CTEs /
@@ -1638,7 +1638,7 @@ struct SqlStatement(Movable):
                         `SELECT * FROM <table>` for a bare-table COPY); for
                         STMT_CREATE_TABLE_AS it is the `AS <select>` body. The
                         parser attaches the flat subquery side-table to
-                        `query.subqueries` (W2/W3), so `bind_sql(query, …)` threads
+                        `query.subqueries`, so `bind_sql(query, …)` threads
                         it as it does for a top-level SELECT.
         dest_path     — STMT_COPY: the `TO '<path>'` file path ("" otherwise).
         target_table  — STMT_CREATE_TABLE_AS: the table name to register ("" otherwise).
