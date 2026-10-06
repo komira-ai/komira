@@ -496,7 +496,7 @@ def send_unsigned_request[C: Connector](
     from `retry_quota`. Returns the last response; raises when the last
     attempt got none."""
     var transport = AwsConnectorTransport[C](http_config, mk_connector())
-    var loop = aws_system_retry_loop(aws_standard_retry_policy())
+    var loop = system_retry_loop(aws_standard_retry_policy())
     return send_unsigned_request_with(
         transport,
         loop,
