@@ -6,6 +6,7 @@
 #   sh kcov_check.sh cases <busybox> <zig_dir> <report_dir> <elf_rpath> <conda_payload>
 #       <fixture_dir> <zig_triple> <glibc_floor_minor>
 #   sh kcov_check.sh same  <busybox> - <report_dir> <dir_a> <dir_b>
+#   sh kcov_check.sh identity <busybox> - <report_dir> <kcov_dir> <sha256> <usage_line>
 # Exits 1 on the first wrong result, naming it; otherwise writes
 # <report_dir>/validation.json, the validation result (and, for `check`, the
 # fixture's reports).
@@ -41,9 +42,20 @@
 #   9. The HTML report writes the data files of the source archive's data/
 #      byte for byte (the arrays kcov_build.sh generated from them).
 # `cases` runs the functions behind 2, 4 and 7, and elf_rpath and
-# conda_payload, on inputs whose answer is known, wrong ones included.
+# conda_payload, and the mode `identity` (in its own process), on inputs
+# whose answer is known, wrong ones included.
 # `same` compares two builds of the distribution: same files, modes, bytes.
+# `identity` requires that bin/kcov is what the package guard refuses
+# (tools/build/package/kcov_guard.sh): its sha256 is <sha256> and it holds
+# <usage_line>, the two constants of identity.bzl.
+# Every pipeline fails when any of its stages fails (pipefail), so a stage
+# that cannot read its input never passes as an empty result. A grep that
+# ends a pipeline reads to the end (`>/dev/null`, not `-q`): `-q` exits at
+# the first match, and the stage before it would then fail on the closed
+# pipe.
 set -eu
+# shellcheck disable=SC3040 # busybox sh (ash) has pipefail; :kcov_check_cases fails without it
+set -o pipefail
 
 abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
 MODE=$1
@@ -53,6 +65,8 @@ case "$3" in
     *) ZIG=$(abs "$3")/zig ;;
 esac
 REPORT=$(abs "$4")
+# This script, for the cases that run a mode of it in its own process.
+SELF=$(abs "$0")
 shift 4
 
 case "${BUCK_SCRATCH_PATH:-}" in
@@ -95,11 +109,13 @@ decoys() {
 
 # The GLIBC_2.<n> versions above GLIBC_2.<floor> that <file>... name, one per
 # line (none: empty). Version names are strings of the dynamic string table,
-# so this also reads the libraries kcov embeds as byte arrays.
+# so this also reads the libraries kcov embeds as byte arrays. Fails when a
+# stage does (a <file> it cannot read); grep finding no version is not a
+# failure.
 glibc_over() {
     floor=$1
     shift
-    cat "$@" | strings -n 8 | grep -o 'GLIBC_2\.[0-9][0-9.]*' | sort -u | awk -F. -v f="$floor" '$2 + 0 > f + 0 { print }'
+    cat "$@" | strings -n 8 | { grep -o 'GLIBC_2\.[0-9][0-9.]*' || [ "$?" = 1 ]; } | sort -u | awk -F. -v f="$floor" '$2 + 0 > f + 0 { print }'
 }
 
 # The loader's list of what <exe> loads, with LD_LIBRARY_PATH=<decoy>, into
@@ -185,7 +201,7 @@ markers() {
     sed -n "/<class [^>]*filename=\"[^\"]*\\/$file\"/,/<\\/class>/p" "$xml" >"$T/class"
     [ -s "$T/class" ] || red "$file is not in ${xml#"$T"/} (by its full path): $(cat "$xml")"
     for kind in hit miss; do
-        lines=$(grep -n "/\* COV:$kind \*/" "$dir/$file" | cut -d: -f1)
+        lines=$(grep -n "/\* COV:$kind \*/" "$dir/$file" | cut -d: -f1) || red "$file has no COV:$kind line (or cannot be read)"
         [ -n "$lines" ] || red "$file has no COV:$kind line"
         for l in $lines; do
             case "$kind" in
@@ -232,8 +248,8 @@ check() {
     pass
 
     # 2. glibc floor (the static checks first)
-    cat "$KCOV" "$KDIR"/lib/* | strings -n 8 | grep -q 'GLIBC_2\.' || red "no GLIBC_ symbol version in bin/kcov: not a glibc binary?"
-    over=$(glibc_over "$FLOOR" "$KCOV" "$KDIR"/lib/*)
+    cat "$KCOV" "$KDIR"/lib/* | strings -n 8 | grep 'GLIBC_2\.' >/dev/null || red "no GLIBC_ symbol version in bin/kcov: not a glibc binary?"
+    over=$(glibc_over "$FLOOR" "$KCOV" "$KDIR"/lib/*) || red "glibc_over failed on bin/kcov or lib/"
     [ -z "$over" ] || red "bin/kcov or lib/ needs $over, above the floor GLIBC_2.$FLOOR"
     pass
 
@@ -241,7 +257,7 @@ check() {
     # libgcc_s.so.1; kcov's C++ frames must name the same unwinder. This
     # sees one GCC_3.0 import, not where every _Unwind_* comes from: the
     # run of check 6 ends in pthread_cancel, and a second unwinder crashes it.
-    strings -n 7 "$KCOV" | grep -qx 'GCC_3\.0' ||
+    strings -n 7 "$KCOV" | grep -x 'GCC_3\.0' >/dev/null ||
         red "bin/kcov imports no GCC_3.0 symbol from libgcc_s.so.1: its _Unwind_* are another unwinder's (README.md, The unwinder)"
     pass
 
@@ -318,8 +334,9 @@ check() {
     (cd "$B" && "$ZIG" cc -target "$TRIPLE" -g -O0 -fno-sanitize=undefined "-fdebug-prefix-map=$B=$PH" \
         cov_fixture.c cov_part.c -o "$T/cov_reloc") >"$T/log" 2>&1 || red "zig cc of the relocated fixture failed"
     rm -rf "$B"
-    strings -n 8 "$T/cov_reloc" | grep -qF "$PH" || red "the relocated fixture's DWARF does not name the placeholder $PH"
-    if strings -n 8 "$T/cov_reloc" | grep -qF "$B"; then red "the relocated fixture still names its build directory $B"; fi
+    strings -n 8 "$T/cov_reloc" >"$T/reloc_strings"
+    grep -qF "$PH" "$T/reloc_strings" || red "the relocated fixture's DWARF does not name the placeholder $PH"
+    if grep -qF "$B" "$T/reloc_strings"; then red "the relocated fixture still names its build directory $B"; fi
     LD_LIBRARY_PATH="$DECOY" "$KCOV" --cobertura-only --configure=cobertura-full-paths=1 "--include-path=$ROOT" \
         "--replace-src-path=^/_+:$ROOT" "$T/rout" "$T/cov_reloc" >"$T/log" 2>&1 || red "kcov run of the relocated fixture failed"
     grep -q '^cov_fixture 2$' "$T/log" || red "the relocated fixture's output is missing under kcov"
@@ -346,8 +363,8 @@ check() {
         js/jquery.tablesorter.widgets.min.js=js/jquery.tablesorter.widgets.min.js; do
         cmp "$T/hout/data/${pair%%=*}" "$DATA/${pair#*=}" >"$T/log" 2>&1 ||
             red "the HTML report's data/${pair%%=*} is not the archive's data/${pair#*=}"
-        pass
     done
+    pass
     green
 }
 
@@ -453,8 +470,15 @@ cases() {
     $CC "$FIX/glibc_new.c" -o "$T/glibc/floor" >"$T/log" 2>&1 && red "glibc_new.c linked for the floor: it must need a newer glibc"
     grep -q arc4random "$T/log" || red "glibc_new.c failed to link for the floor, but not over arc4random"
     "$ZIG" cc -target "${TRIPLE%%.*}.2.38" -O1 "$FIX/glibc_new.c" -o "$T/glibc/new" >"$T/log" 2>&1 || red "zig cc of glibc_new.c for glibc 2.38 failed"
-    over=$(glibc_over "$FLOOR" "$T/glibc/new")
+    over=$(glibc_over "$FLOOR" "$T/glibc/new") || red "glibc_over failed on a binary needing GLIBC_2.36"
     [ "$over" = "GLIBC_2.36" ] || red "glibc_over says '$over' of a binary needing GLIBC_2.36, want 'GLIBC_2.36'"
+    pass
+    # A stage of glibc_over's pipeline that fails fails it (set -o pipefail):
+    # without that, `cat` of a file it cannot read leaves an empty list, which
+    # reads as "nothing above the floor".
+    if glibc_over "$FLOOR" "$T/glibc/missing" >"$T/log" 2>&1; then
+        red "glibc_over exited 0 on a file that does not exist: a failing stage of its pipeline is ignored (set -o pipefail)"
+    fi
     pass
 
     # The decoy and the run path. libkcovprobe.so.1 and a program linked
@@ -467,7 +491,7 @@ cases() {
         red "zig cc of rpath_main.c failed"
     # shellcheck disable=SC2086
     $CC "$FIX/rpath_main.c" "$R/lib/libkcovprobe.so.1" -o "$R/bin/plain" >"$T/log" 2>&1 || red "zig cc of rpath_main.c without a run path failed"
-    over=$(glibc_over "$FLOOR" "$R/bin/probe" "$R/lib/libkcovprobe.so.1")
+    over=$(glibc_over "$FLOOR" "$R/bin/probe" "$R/lib/libkcovprobe.so.1") || red "glibc_over failed on the probe"
     [ -z "$over" ] || red "glibc_over says '$over' of binaries linked for the floor"
     pass
     [ "$("$R/bin/probe")" = "kcov_probe 42" ] || red "the probe does not find its library through its run path"
@@ -603,6 +627,41 @@ cases() {
         [ ! -e "$C/$p.tar" ] || red "conda_payload wrote an output for $p.conda, which it refused"
         pass
     done
+
+    # identity, in its own process, on a fixture standing for bin/kcov (its
+    # sha256 written here, not computed): accepted with its sha256 and a line
+    # it holds; refused, naming the constant and the sha256 to update it to,
+    # with a sha256 one digit off; refused with a line it does not hold.
+    I="$T/identity"
+    mkdir -p "$I/kcov/bin"
+    ID_SHA=3350799a0c9ff68ad6e690405c7a42bba0fe583311a46c7aea97c4a855abced2
+    ID_LINE="Usage: kcov_identity case [OPTIONS]"
+    printf 'kcov_check cases: this file stands for bin/kcov\000%s\000tail\n' "$ID_LINE" >"$I/kcov/bin/kcov"
+    for c in "ok|$ID_SHA|$ID_LINE|" \
+        "sha|4${ID_SHA#?}|$ID_LINE|Update KCOV_BIN_SHA256 to $ID_SHA" \
+        "line|$ID_SHA|$ID_LINE out-dir|does not hold KCOV_USAGE_LINE"; do
+        name=${c%%|*}
+        rest=${c#*|}
+        sha=${rest%%|*}
+        rest=${rest#*|}
+        line=${rest%%|*}
+        want=${rest#*|}
+        rm -rf "$I/report" "$I/scratch"
+        rc=0
+        BUCK_SCRATCH_PATH="$I/scratch" "$BB" sh "$SELF" identity "$BB" - "$I/report" "$I/kcov" "$sha" "$line" >"$I/out" 2>"$I/err" || rc=$?
+        case "$want" in
+            "")
+                [ "$rc" = 0 ] || red "identity_$name: exited $rc, want 0: $(cat "$I/err")"
+                grep -F -q '2 checks passed' "$I/report/validation.json" || red "identity_$name: the result is not 2 checks: $(cat "$I/report/validation.json")"
+                ;;
+            *)
+                [ "$rc" = 1 ] || red "identity_$name: exited $rc, want 1: $(cat "$I/err")"
+                grep -F -q -e "$want" "$I/err" || red "identity_$name: the refusal does not say '$want': $(cat "$I/err")"
+                [ ! -e "$I/report/validation.json" ] || red "identity_$name: refused, but wrote a result"
+                ;;
+        esac
+        pass
+    done
     green
 }
 
@@ -629,10 +688,34 @@ same() {
     green
 }
 
+# ---- identity ----------------------------------------------------------------
+
+identity() {
+    KCOV="$(abs "$1")/bin/kcov"
+    WANT=$2
+    LINE=$3
+    [ -f "$KCOV" ] || red "$KCOV is not a file"
+    got=$(sha256sum <"$KCOV") || red "cannot read bin/kcov"
+    got=${got%% *}
+    [ "$got" = "$WANT" ] ||
+        red "bin/kcov's sha256 is $got, but KCOV_BIN_SHA256 in tools/build/toolchains/kcov/identity.bzl is $WANT: kcov's bytes changed (a pin, kcov_build.sh or zig). Update KCOV_BIN_SHA256 to $got: the package guard refuses a file by it (tools/build/package/README.md, \"kcov is never packed\")"
+    pass
+    rc=0
+    grep -F -q -e "$LINE" "$KCOV" || rc=$?
+    case "$rc" in
+        0) ;;
+        1) red "bin/kcov does not hold KCOV_USAGE_LINE of tools/build/toolchains/kcov/identity.bzl, '$LINE': kcov's help text changed, so the package guard would find no kcov by it. Update KCOV_USAGE_LINE to a line of kcov's usage text that bin/kcov holds" ;;
+        *) red "grep failed (exit $rc) on bin/kcov" ;;
+    esac
+    pass
+    green
+}
+
 case "$MODE" in
     check) [ $# -eq 7 ] || red "usage: check needs 7 arguments after the report dir" ;;
     cases) [ $# -eq 5 ] || red "usage: cases needs 5 arguments after the report dir" ;;
     same) [ $# -eq 2 ] || red "usage: same needs 2 arguments after the report dir" ;;
+    identity) [ $# -eq 3 ] || red "usage: identity needs 3 arguments after the report dir" ;;
     *) red "unknown mode '$MODE'" ;;
 esac
 "$MODE" "$@"

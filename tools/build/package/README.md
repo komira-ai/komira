@@ -119,18 +119,26 @@ the greeting ([formats.sh](../tests/functional/formats.sh)).
 ## kcov is never packed
 
 kcov ([`toolchains/kcov`](../toolchains/kcov/README.md)) is GPL-2.0 and a
-build-only tool, so no published artifact may hold it. Every package format
-runs [`kcov_guard.sh`](kcov_guard.sh) over what it packs, as a build action
-whose output its published files depend on ([`kcov_guard.bzl`](kcov_guard.bzl)).
-The guard refuses a file whose sha256 is that of the built `bin/kcov` (the
-binary is an input of the action, so the sha256 follows the pin) or whose
-bytes contain kcov's usage line, `Usage: kcov [OPTIONS] out-dir in-file
-[args...]`. The message names the target and each refused file by its path in
-the package. kcov carries no `kcov v42` to search for (it prints `kcov %s`
-with the string `v42`), and the usage line is one string literal of its
-source, contiguous in every build of it; the guard first requires the line in
-the built `bin/kcov`, so a kcov whose help text changed fails there rather
-than passing every file.
+build-only tool (the licence decision is pending: [kcov's
+README](../toolchains/kcov/README.md#licences)), so no published artifact may
+hold it. Every package format runs [`kcov_guard.sh`](kcov_guard.sh) over what
+it packs, as a build action whose output its published files depend on
+([`kcov_guard.bzl`](kcov_guard.bzl)). The guard refuses a file whose sha256 is
+`KCOV_BIN_SHA256` or whose bytes contain `KCOV_USAGE_LINE`, `Usage: kcov
+[OPTIONS] out-dir in-file [args...]`, the two constants of
+[`toolchains/kcov/identity.bzl`](../toolchains/kcov/identity.bzl). The
+message names the target and each refused file by its path in the package.
+kcov carries no `kcov v42` to search for (it prints `kcov %s` with the string
+`v42`), and the usage line is one string literal of its source, contiguous in
+every build of it.
+
+The guard depends on no kcov target: a package build never builds kcov,
+never compiles its source, and is not blocked by a kcov that fails to build or
+a kcov pin that breaks. What holds the constants to the real binary is on the
+kcov side: `//tools/build/toolchains/kcov:kcov_identity`, which gates `:kcov`,
+fails when the built `bin/kcov` has another sha256 or lacks the line, naming
+the constant to update. Between such a change and the update, the guard
+refuses kcov by its usage line alone.
 
 | format | what the guard reads | what waits for it |
 |---|---|---|
@@ -156,28 +164,32 @@ The sha256 is that of the one kcov komira builds (its pin, for
 linux-x86_64); a kcov built otherwise (another version or CPU, patched or
 stripped) is refused by the usage line alone.
 
-The guard's kcov is `//tools/build/toolchains/kcov:kcov_dist`, the built
-distribution without kcov's own validations: a package build needs kcov
-built from its pinned source (a cache hit once built), but never traces
-anything under ptrace and does not wait on kcov's checks. A kcov pin bump
-that breaks kcov's build still fails every `<lib>_conda`,
-`release_set_check`, bundle, tarball and image build.
-
-`:kcov_guard` (the script and kcov as one dependency) is gated by the
-validation `:kcov_guard_cases`, so any build that packs anything also runs
-the guard on known inputs, and fails if one gets the wrong answer: kcov
-renamed (refused by its sha256, as a directory's file, as a file and under a
-destination path), kcov with one byte more and the usage line between NUL
-bytes (refused by the line), two offenders named together, a symlink to kcov
-and one to a directory holding it (refused under the link's name); near
-misses of the line, the line split by a NUL or a newline, and kcov's
-`lib/libgcc_s.so.1` (accepted). Planted, red: the sha256 comparison broken
-(`copy_in_dir: not refused by sha256`, when building only
-`examples:hello_tarball`), the line check removed (`changed: guard exited
-0`), the line shortened to `Usage: kcov` (`near_misses: guard exited 1`),
-`find -L` made `find` (`symlinked: guard exited 0`). On the examples: `hello_bundle` given
-`data = {"share/kcov": "//tools/build/toolchains/kcov:kcov[bin]"}` fails
-`share/kcov is kcov's bin/kcov`, and neither the tarball nor the image is
+`:kcov_guard` (the script) is gated by the validation `:kcov_guard_cases`, so
+any build that packs anything also runs the guard on known inputs (15 cases),
+and fails if one gets the wrong answer. The cases need no kcov: a fixture
+file stands for `bin/kcov`, and its sha256, written into the script, is the
+one they pass. Refused: a sha256 one digit short or in upper case, and an
+empty line, before any file is read; the fixture renamed (by its sha256, as a
+directory's file, as a file and under a destination path; the fixture holds
+no usage line, so only the sha256 can refuse it); a file holding the usage
+line after the fixture's bytes, and the line between NUL bytes (by the
+line); two offenders named together; a symlink to the fixture and one to a
+directory holding it (under the link's name). Accepted: near misses of the
+line, the line split by a NUL or a newline, and the fixture with one byte
+more. Three of the cases run the guard through its command line in its own
+process, as the package rules do (the fixture's copy refused by the sha256,
+the embedded line refused by the line, the near misses accepted, `<out>`
+written only then), so a sha256 or line read from the wrong argument is red.
+Planted, red: the sha256 comparison broken (`copy_in_dir: guard exited
+0, want 1`), `KCOV_USAGE_LINE` shortened to `Usage: kcov` (`near_misses:
+guard exited 1`) or emptied (`the fixture holds the usage line`); the
+`guard` mode reading its line with a character added (`cli_line: guard
+exited 0, want 1`) or a sha256 other than its argument (`cli_sha: guard
+exited 0, want 1`). On the
+examples: `hello_bundle` given
+`data = {"share/kcov": "//tools/build/toolchains/kcov:kcov[bin]"}` (the only
+state in which a package build depends on kcov) fails `share/kcov is kcov's
+bin/kcov (sha256 57243a23...)`, and neither the tarball nor the image is
 packed; a data file holding the usage line fails `share/marker.txt holds
 kcov's usage line`, while one holding only near misses of it builds; a conda
 package given `bin/kcov` as a licence file and a README holding the line

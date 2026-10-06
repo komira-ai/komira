@@ -27,7 +27,11 @@
 #   test runner sets LD_LIBRARY_PATH). zig 0.12 gives an executable a
 #   DT_RUNPATH whatever the flags say (elf_rpath.zig), so elf_rpath turns it
 #   into a DT_RPATH after the link.
+# Every pipeline fails when any of its stages fails (pipefail): an `od` that
+# cannot read a file never becomes an empty generated array.
 set -eu
+# shellcheck disable=SC3040 # busybox sh (ash) has pipefail; :kcov_check_cases fails without it
+set -o pipefail
 
 abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
 BB=$(abs "$1")
@@ -78,7 +82,8 @@ done
 # callers take zlib's.
 mkdir -p "$T/libelf"
 (cd "$T/libelf" && ar x "$C/elfutils/lib/libelf.a")
-[ "$(ar t "$C/elfutils/lib/libelf.a" | sort | uniq -d)" = "" ] || { echo "kcov_build: libelf.a has two members of one name" >&2; exit 2; }
+dups=$(ar t "$C/elfutils/lib/libelf.a" | sort | uniq -d)
+[ -z "$dups" ] || { echo "kcov_build: libelf.a has two members of one name" >&2; exit 2; }
 [ -f "$T/libelf/crc32.o" ] || { echo "kcov_build: libelf.a has no crc32.o; drop the workaround" >&2; exit 2; }
 rm "$T/libelf/crc32.o"
 LIBELF_OBJS=$(find "$T/libelf" -name '*.o' | sort)

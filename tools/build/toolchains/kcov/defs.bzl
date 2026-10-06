@@ -6,10 +6,10 @@ and generated sources, and compiles and links kcov with the pinned zig. Its
 output is a directory: `bin/kcov`, `lib/libgcc_s.so.1` (the one library it
 loads besides glibc) and `share/licenses/`.
 
-`kcov_check`, `kcov_check_cases` and `kcov_same` each run a mode of
-kcov_check.sh in a build action and return a `ValidationInfo`. `kcov_tool` is
-the distribution as other targets use it, with those checks as dependencies,
-so no build that uses kcov succeeds unless they pass. The checks and the tool
+`kcov_check`, `kcov_check_cases`, `kcov_same` and `kcov_identity` each run
+a mode of kcov_check.sh in a build action and return a `ValidationInfo`.
+`kcov_tool` is the distribution as other targets use it, with those checks as
+dependencies, so no build that uses kcov succeeds unless they pass. The checks and the tool
 take the distribution as an `exec_dep` with the same `exec_compatible_with`,
 so the checked bytes and the handed-out bytes are one configured target.
 """
@@ -162,6 +162,19 @@ _kcov_same = rule(
     }, zig = False),
 )
 
+def _identity_impl(ctx):
+    return _validate(ctx, "identity", [], [_out(ctx.attrs.kcov), ctx.attrs.sha256, ctx.attrs.usage_line])
+
+_kcov_identity = rule(
+    impl = _identity_impl,
+    doc = "Runs `kcov_check.sh identity`: the `kcov` distribution's `bin/kcov` has the sha256 `sha256` and holds `usage_line`, the constants of identity.bzl by which the package guard refuses kcov (tools/build/package/kcov_guard.bzl). Fails the build otherwise, saying which constant to update.",
+    attrs = _attrs({
+        "kcov": attrs.exec_dep(),
+        "sha256": attrs.string(doc = "KCOV_BIN_SHA256 of identity.bzl."),
+        "usage_line": attrs.string(doc = "KCOV_USAGE_LINE of identity.bzl."),
+    }, zig = False),
+)
+
 def _tool_impl(ctx):
     dist = _out(ctx.attrs.dist)
     return [DefaultInfo(default_output = dist, sub_targets = {"bin": [DefaultInfo(default_output = dist.project("bin/kcov"))]})]
@@ -179,4 +192,5 @@ kcov_dist = declares_docs(_kcov_dist)
 kcov_check = declares_docs(_kcov_check)
 kcov_check_cases = declares_docs(_kcov_check_cases)
 kcov_same = declares_docs(_kcov_same)
+kcov_identity = declares_docs(_kcov_identity)
 kcov_tool = declares_docs(_kcov_tool)

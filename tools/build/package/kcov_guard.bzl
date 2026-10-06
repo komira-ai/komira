@@ -14,29 +14,35 @@ holds kcov fails the build:
     member of the pkg tar. Both published directories are copies made after
     the guard passed (conda.bzl).
 
-The guard refuses a file whose sha256 is that of the built `bin/kcov` (the
-binary is an input, so the sha256 follows the pin) or whose bytes contain
-kcov's usage line. `:kcov_guard` is the script and kcov as one exec
-dependency, gated by the validation `:kcov_guard_cases`, which runs the guard
-on inputs whose answer is known.
+The guard refuses a file whose sha256 is `KCOV_BIN_SHA256` or whose bytes
+contain `KCOV_USAGE_LINE`, the constants of
+tools/build/toolchains/kcov/identity.bzl. It takes no dependency on any kcov
+target: a package build neither builds kcov nor waits on its checks, and a
+kcov that fails to build blocks no package. What ties the constants to the
+built kcov is `komira//tools/build/toolchains/kcov:kcov_identity`, which gates
+`:kcov` and fails when `bin/kcov` has another sha256 or lacks the line.
+
+`:kcov_guard` is the script as a dependency of the package rules, gated by
+the validation `:kcov_guard_cases`, which runs the guard on inputs whose
+answer is known, with a fixture file standing for `bin/kcov`.
 
 The sha256 is that of the one kcov this repository builds (the pinned
 version, for linux-x86_64, the same bytes in any configuration:
 `:kcov_reproducible`). A kcov built otherwise (another version, another
 CPU, patched or stripped) has another sha256; the usage line is what refuses
 it.
-
-`_kcov` is `:kcov_dist`, the built distribution without kcov's own
-validations, so a packaging build does not trace anything under ptrace and
-does not wait on kcov's checks; it still builds kcov from its pinned source
-(a cache hit once built).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/toolchains/kcov:identity.bzl", "KCOV_BIN_SHA256", "KCOV_USAGE_LINE")
 
-# busybox: the busybox executable; kcov: kcov's distribution directory (the
-# guard reads bin/kcov); script: kcov_guard.sh, staged under buck-out.
-KcovGuardInfo = provider(fields = ["busybox", "kcov", "script"])
+# The guard's identity arguments, one definition for the package rules and the
+# cases, so a wrong constant at one call cannot pass the other.
+_IDENTITY_ARGS = [KCOV_BIN_SHA256, KCOV_USAGE_LINE]
+
+# busybox: the busybox executable; script: kcov_guard.sh, staged under
+# buck-out.
+KcovGuardInfo = provider(fields = ["busybox", "script"])
 
 def _out(dep):
     return dep[DefaultInfo].default_outputs[0]
@@ -60,7 +66,7 @@ def kcov_guard(ctx, guard, identifier, pairs):
     for dest, artifact in pairs:
         args.extend([dest, artifact])
     ctx.actions.run(
-        cmd_args(info.busybox, "sh", info.script, "guard", info.busybox, info.kcov, out.as_output(), str(ctx.label.raw_target()), args),
+        cmd_args(info.busybox, "sh", info.script, "guard", info.busybox, _IDENTITY_ARGS, out.as_output(), str(ctx.label.raw_target()), args),
         category = "kcov_guard",
         identifier = identifier,
     )
@@ -70,18 +76,17 @@ def _guard_impl(ctx):
     script = _stage(ctx)
     return [
         DefaultInfo(default_output = script),
-        KcovGuardInfo(busybox = _out(ctx.attrs._busybox), kcov = _out(ctx.attrs._kcov), script = script),
+        KcovGuardInfo(busybox = _out(ctx.attrs._busybox), script = script),
     ]
 
 _ATTRS = {
     "script": attrs.source(doc = "kcov_guard.sh"),
     "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    "_kcov": attrs.exec_dep(default = "komira//tools/build/toolchains/kcov:kcov_dist"),
 }
 
 _kcov_guard_tool = rule(
     impl = _guard_impl,
-    doc = "kcov_guard.sh and kcov (configured for the execution platform) as one dependency of the package rules, gated by the validations in `checks`.",
+    doc = "kcov_guard.sh as a dependency of the package rules, gated by the validations in `checks`. Depends on no kcov target: the guard reads the constants of tools/build/toolchains/kcov/identity.bzl.",
     attrs = _ATTRS | {
         "checks": attrs.list(attrs.dep(providers = [ValidationInfo])),
     },
@@ -91,7 +96,7 @@ def _cases_impl(ctx):
     bb = _out(ctx.attrs._busybox)
     report = ctx.actions.declare_output("report", dir = True)
     ctx.actions.run(
-        cmd_args(bb, "sh", _stage(ctx), "cases", bb, _out(ctx.attrs._kcov), report.as_output()),
+        cmd_args(bb, "sh", _stage(ctx), "cases", bb, _IDENTITY_ARGS, report.as_output()),
         category = "kcov_guard_cases",
     )
     # One output: buck2 refuses a validation result whose action produces
@@ -104,7 +109,7 @@ def _cases_impl(ctx):
 
 _kcov_guard_cases = rule(
     impl = _cases_impl,
-    doc = "`kcov_guard.sh cases`: the guard on inputs whose answer is known (kcov renamed or with a byte more, its usage line between NUL bytes, symlinks to it, near misses, kcov's libgcc_s.so.1), as a validation.",
+    doc = "`kcov_guard.sh cases`: the guard on inputs whose answer is known, with a fixture file standing for bin/kcov (malformed constants, the fixture renamed, a file holding the usage line, symlinks to the fixture, near misses, and three through the guard's command line), as a validation. Needs no kcov.",
     attrs = _ATTRS,
 )
 

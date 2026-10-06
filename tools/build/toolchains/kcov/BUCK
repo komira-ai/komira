@@ -6,7 +6,8 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
-load(":defs.bzl", "kcov_check", "kcov_check_cases", "kcov_dist", "kcov_same", "kcov_tool")
+load(":defs.bzl", "kcov_check", "kcov_check_cases", "kcov_dist", "kcov_identity", "kcov_same", "kcov_tool")
+load(":identity.bzl", "KCOV_BIN_SHA256", "KCOV_USAGE_LINE")
 
 _ROW = "linux-x86_64"
 _TRIPLE = row(_ROW)["zig_triple"]
@@ -80,9 +81,6 @@ _DIST = dict(
 kcov_dist(
     name = "kcov_dist",
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
-    # The packaging guard reads the built bin/kcov without kcov's own
-    # checks, so a package build never needs ptrace (package/kcov_guard.bzl).
-    visibility = ["komira//tools/build/package:"],
     **_DIST
 )
 
@@ -149,6 +147,19 @@ kcov_same(
     script = "kcov_check.sh",
 )
 
+# bin/kcov is what the package guard refuses (tools/build/package/kcov_guard.bzl):
+# its sha256 is KCOV_BIN_SHA256 of identity.bzl and it holds KCOV_USAGE_LINE.
+# The guard reads only those constants, so this is what ties them to the build.
+kcov_identity(
+    name = "kcov_identity",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    kcov = ":kcov_dist",
+    script = "kcov_check.sh",
+    sha256 = KCOV_BIN_SHA256,
+    usage_line = KCOV_USAGE_LINE,
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = [
@@ -166,6 +177,7 @@ kcov_tool(
     checks = [
         ":kcov_check",
         ":kcov_check_cases",
+        ":kcov_identity",
         ":kcov_reproducible",
         ":shell_lint",
     ],

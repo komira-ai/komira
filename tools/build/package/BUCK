@@ -36,9 +36,10 @@ shell_lint(
 )
 
 # kcov is GPL-2.0 and build-only: every package format runs this guard over
-# what it packs and refuses a file that is kcov's bin/kcov or holds its usage
-# line (kcov_guard.bzl, README.md "kcov is never packed"). Gated by the
-# cases below, so a guard that cannot refuse is red.
+# what it packs and refuses a file that is kcov's bin/kcov (by the sha256 in
+# tools/build/toolchains/kcov/identity.bzl) or holds its usage line
+# (kcov_guard.bzl, README.md "kcov is never packed"). It depends on no kcov
+# target. Gated by the cases below, so a guard that cannot refuse is red.
 kcov_guard_tool(
     name = "kcov_guard",
     exec_compatible_with = LINUX_X86_64,
@@ -47,11 +48,15 @@ kcov_guard_tool(
     visibility = ["PUBLIC"],
 )
 
-# The guard on known inputs: kcov renamed, as a file and under a path; kcov
-# with a byte more and its usage line between NUL bytes (refused by the line);
-# two offenders named together; symlinks to kcov and to a directory holding
-# it; near misses of the line, the line split by a NUL or a newline, and
-# kcov's libgcc_s.so.1 (accepted).
+# The guard on known inputs, with a fixture file standing for bin/kcov (its
+# sha256 is passed as the constant): a malformed sha256 or an empty line
+# (refused); the fixture renamed, as a file and under a path (refused by the
+# sha256); a file holding the usage line after other bytes, and the line
+# between NUL bytes (refused by the line); two offenders named together;
+# symlinks to the fixture and to a directory holding it; near misses of the
+# line, the line split by a NUL or a newline, and the fixture with a byte
+# more (accepted); and three of those through the guard's command line, as
+# the package rules run it.
 kcov_guard_cases(
     name = "kcov_guard_cases",
     exec_compatible_with = LINUX_X86_64,
