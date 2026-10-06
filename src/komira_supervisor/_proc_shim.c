@@ -473,6 +473,8 @@ int komira_proc_reap(int pid, int nohang,
 //   its status with waitpid(pid). (waitpid(-1, WNOHANG) would reap it.) The
 //   constants stay here; the Mojo side sees only scalars.
 //   Return value:
+//   "Child" means one that reports its exit with SIGCHLD (every posix_spawn
+//   child does): without __WALL, Linux waitid skips __WCLONE children.
 //      1 -> at least one child exists. *out_exited_pid is the pid of a child
 //           that has exited and is still unreaped (left as it was), or 0 when
 //           no child has exited (all running or stopped).

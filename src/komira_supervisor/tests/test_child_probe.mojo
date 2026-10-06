@@ -12,12 +12,11 @@
 #       a live `sleep 30` -> any_child True, exited_pid 0, and it is still
 #       alive after the probe.
 #   test_an_exited_child_is_reported_and_left_reapable
-#       a child that exited with 7, observed through pidfd (Linux) or
-#       EVFILT_PROC (macOS), neither of which reaps -> any_child True,
-#       exited_pid == its pid; then waitpid(pid, WNOHANG) still collects
-#       exit code 7, and a second probe says no child. Goes red when the shim
-#       drops WNOWAIT (the probe would reap it and the waitpid would fail
-#       with ECHILD).
+#       a child that exited with 7, awaited by polling the probe until it
+#       names the pid -> any_child True, exited_pid == its pid; then
+#       waitpid(pid, WNOHANG) still collects exit code 7, and a second probe
+#       says no child. Goes red when the shim drops WNOWAIT: the probe that
+#       first sees the exit reaps it, and the waitpid fails with ECHILD.
 #
 # Not tested: a waitid failure other than ECHILD, which proc_probe_children
 # raises. With its fixed arguments (valid idtype and options, a stack
@@ -25,16 +24,13 @@
 # so no honest test reaches the raise.
 # =============================================================================
 
-from std.sys.info import CompilationTarget
 from std.testing import TestSuite
+from std.time import sleep
 
 from komira_supervisor.supervisor import ChildSpec, Supervisor
 from komira_supervisor.proc_ffi import (
-    proc_close,
+    ChildProbe,
     proc_kill,
-    proc_kqueue_exit_wait,
-    proc_pidfd_open,
-    proc_pidfd_wait,
     proc_probe_children,
 )
 
@@ -44,23 +40,30 @@ def _spawned(pid: Int32) raises:
         raise Error(String("spawn returned ") + String(pid))
 
 
-def _await_exit_without_reaping(pid: Int32) -> String:
-    """Wait up to 5 s for `pid` to exit, through a kernel notification that
-    does not reap it. Returns "" on success, else what went wrong."""
-    comptime if CompilationTarget.is_macos():
-        var fired = proc_kqueue_exit_wait(pid, Int32(5000))
-        if fired != Int32(1):
-            return String("kqueue exit wait returned ") + String(fired)
-        return String("")
-    else:
-        var fd = proc_pidfd_open(pid)
-        if fd < Int32(0):
-            return String("pidfd_open returned ") + String(fd)
-        var fired = proc_pidfd_wait(fd, Int32(5000))
-        proc_close(fd)
-        if fired != Int32(1):
-            return String("pidfd wait returned ") + String(fired)
-        return String("")
+def _await_exited_unreaped(pid: Int32) raises -> String:
+    """Poll the (non-reaping) probe 5 ms apart, up to 1000 times, until it names
+    `pid` as an exited, unreaped child. Returns "" on success, else what went
+    wrong. Polling the waitid state itself, not an exit notification: on XNU
+    EVFILT_PROC NOTE_EXIT may fire before the child is a waitable zombie."""
+    var polls = 0
+    while True:
+        var p = proc_probe_children()
+        if p.exited_pid == pid:
+            return String("")
+        polls += 1
+        if polls >= 1000:
+            return (
+                String("child ")
+                + String(pid)
+                + String(" not seen as exited after 1000 probes 5 ms apart")
+                + String(" (last probe:")
+                + String(" any_child ")
+                + String(p.any_child)
+                + String(", exited_pid ")
+                + String(p.exited_pid)
+                + String(")")
+            )
+        sleep(Float64(0.005))
 
 
 def test_no_child_reports_no_child() raises:
@@ -77,10 +80,18 @@ def test_a_running_child_exists_and_is_not_exited() raises:
     var sup = Supervisor()
     var pid = sup.spawn(ChildSpec.shell(String("exec sleep 30")))
     _spawned(pid)
-    var p = proc_probe_children()
+    var p = ChildProbe(any_child=False, exited_pid=Int32(-1))
+    var probe_error = String("")
+    try:
+        p = proc_probe_children()
+    except e:
+        probe_error = String(e)
     var alive_after = proc_kill(pid, Int32(0)) == Int32(0)
+    # Stopped and reaped on every path, so no `sleep 30` outlives the test.
     _ = sup.terminate(1000)
     sup.close()
+    if probe_error.byte_length() > 0:
+        raise Error(probe_error)
     if not (p.any_child and p.exited_pid == Int32(0) and alive_after):
         raise Error(
             String("running child ")
@@ -100,9 +111,13 @@ def test_an_exited_child_is_reported_and_left_reapable() raises:
     _spawned(pid)
     _ = sup.drain_pipe(sup.stdout_fd())
     _ = sup.drain_pipe(sup.stderr_fd())
-    var waited = _await_exit_without_reaping(pid)
+    var waited: String
+    try:
+        waited = _await_exited_unreaped(pid)
+    except e:
+        waited = String(e)
     if waited.byte_length() > 0:
-        _ = sup.wait_exit()
+        _ = sup.terminate(1000)
         sup.close()
         raise Error(waited)
     var p = proc_probe_children()

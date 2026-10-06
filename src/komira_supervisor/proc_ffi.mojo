@@ -351,8 +351,10 @@ def proc_reap(pid: Int32, nohang: Bool) -> ReapStatus:
 # proc_probe_children -- does this process have any child, asked WITHOUT
 # reaping one: waitid(P_ALL, 0, WEXITED | WNOHANG | WNOWAIT) in the shim.
 #
-# "A child exists" means any child of this process in any state: running,
-# stopped, or exited and not yet reaped. An exited child stays a zombie (its
+# "A child exists" means any child of this process that reports its exit with
+# SIGCHLD (every posix_spawn child does; without __WALL, Linux waitid skips
+# __WCLONE children), in any state: running, stopped, or exited and not yet
+# reaped. An exited child stays a zombie (its
 # owner still collects it with waitpid(pid)); `exited_pid` names one such
 # child, or is 0 when none has exited. Only ECHILD means "no child"; any other
 # waitid failure raises with its errno.

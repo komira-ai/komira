@@ -29,19 +29,13 @@ from std.testing import assert_equal, assert_true
 
 from std.os import remove
 from std.pathlib import Path
-from std.sys.info import CompilationTarget
+from std.time import sleep
 
 from komira_http_core.codec import HttpMethod
 from komira_proto_codec import encode_proto
 from komira_runtime_paths import test_tmpdir
 from komira_supervisor import ChildSpec, Supervisor
-from komira_supervisor.proc_ffi import (
-    proc_close,
-    proc_kill,
-    proc_kqueue_exit_wait,
-    proc_pidfd_open,
-    proc_pidfd_wait,
-)
+from komira_supervisor.proc_ffi import proc_kill, proc_probe_children
 
 from komira_job_report_proto.job_report import (
     JobDirective,
@@ -324,18 +318,21 @@ def test_the_first_beat_probe_fires_when_a_child_already_exists() raises:
     print("  test_the_first_beat_probe_fires_when_a_child_already_exists: PASS")
 
 
-def _await_exit_without_reaping(pid: Int32) raises:
-    """Wait up to 5 s for `pid` to exit through a kernel notification that
-    does not reap it (pidfd on Linux, EVFILT_PROC on macOS)."""
-    comptime if CompilationTarget.is_macos():
-        var fired = proc_kqueue_exit_wait(pid, Int32(5000))
-        assert_equal(fired, Int32(1), "kqueue saw the child exit")
-    else:
-        var fd = proc_pidfd_open(pid)
-        assert_true(fd >= Int32(0), "pidfd_open: " + String(fd))
-        var fired = proc_pidfd_wait(fd, Int32(5000))
-        proc_close(fd)
-        assert_equal(fired, Int32(1), "the pidfd saw the child exit")
+def _await_exited_unreaped(pid: Int32) raises:
+    """Poll komira_supervisor's non-reaping child probe 5 ms apart, up to 1000
+    times, until it names `pid` as an exited, unreaped child. (An exit
+    notification is not enough: on XNU EVFILT_PROC NOTE_EXIT may fire before
+    the child is a waitable zombie.)"""
+    var polls = 0
+    while proc_probe_children().exited_pid != pid:
+        polls += 1
+        assert_true(
+            polls < 1000,
+            "child "
+            + String(pid)
+            + " not seen as exited after 1000 probes 5 ms apart",
+        )
+        sleep(Float64(0.005))
 
 
 def test_the_first_beat_probe_leaves_an_exited_child_to_its_owner() raises:
@@ -348,7 +345,7 @@ def test_the_first_beat_probe_leaves_an_exited_child_to_its_owner() raises:
     assert_true(pid > Int32(0), "spawned a child: " + String(pid))
     _ = sup.drain_pipe(sup.stdout_fd())
     _ = sup.drain_pipe(sup.stderr_fd())
-    _await_exit_without_reaping(pid)
+    _await_exited_unreaped(pid)
     var r = HeartbeatReceiver(
         String(_JOB), String(_INST), first_beat_gate=f
     )

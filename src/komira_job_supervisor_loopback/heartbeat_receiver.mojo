@@ -53,7 +53,8 @@
 # decides "did the job exist before the first beat was answered" from an
 # ORDER of events, not from a wait. When beat 1 arrives, and before it is
 # answered, the receiver (1) asks the kernel whether THIS process has any
-# child, in any state (komira_supervisor's `proc_probe_children`:
+# SIGCHLD-reporting child (every posix_spawn child), in any state
+# (komira_supervisor's `proc_probe_children`:
 # `waitid(P_ALL, WEXITED | WNOHANG | WNOWAIT)`, which never reaps), then
 # (2) creates the file `first_beat_gate`, then (3) answers.
 #
