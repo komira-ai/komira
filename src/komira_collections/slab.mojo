@@ -56,13 +56,13 @@
 #   - Zero-cap default -> Slab[T]().
 #   - Compile-time-N fixed arrays -> stdlib InlineArray[T, N] directly.
 #
-# Non-Movable init:
-#   init_slot[init_fn] takes a closure of shape
-#   `fn (UnsafePointer[Self.T, MutAnyOrigin]) -> None`, NOT `fn (mut T)`.
-#   The latter would require T: Movable to move a fresh T into the receiver
-#   slot, which breaks the non-Movable use case. The MutAnyOrigin wildcard
-#   is safe because the pointer is not stored and does not outlive the
-#   closure body -- it's a narrow init-only escape analogous to FFI-init.
+# In-place slot init:
+#   init_slot[init_fn] takes a comptime function of shape
+#   `def (mut T) thin -> None` and hands it the slot as a `mut` reference.
+#   The function ASSIGNS FIELDS (`slot.counter = AtomicI64(0)`); it never
+#   builds and moves in a whole fresh T, so T needs no Movable for it. No
+#   pointer and no wildcard origin appears in the signature: the reference
+#   carries the slab's own `_bytes` origin and cannot outlive the call.
 #
 # Append fast/slow split:
 #   `append` MUST be split into @always_inline fast path + @no_inline
@@ -302,49 +302,37 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
     # =========================================================================
 
     @always_inline
-    def init_slot[
-        init_fn: def (UnsafePointer[Self.T, MutAnyOrigin]) thin -> None
-    ](mut self, idx: Int):
+    def init_slot[init_fn: def (mut Self.T) thin -> None](mut self, idx: Int):
         """Single-threaded in-place init of slot `idx`.
 
         PANICS if idx < 0 or idx >= _cap_t.
 
-        init_fn receives `UnsafePointer[Self.T, MutAnyOrigin]`
-        (not `mut T`). `fn (mut T)` would require T: Movable to move a
-        fresh T into the receiver slot, which breaks non-Movable T. The
-        MutAnyOrigin wildcard is safe because:
-          (a) the pointer is provided synchronously to the closure -- it
-              cannot be stored;
-          (b) the pointee is uninitialized BEFORE the closure runs and
-              initialized AFTER -- there is no "live data" to disable
-              tracking on;
-          (c) the closure is comptime-specialized and fully inlined --
-              there is no fn-pointer value escape.
-
-        Callers direct-field-assign via the raw pointer, e.g.:
-            `slot[].counter = Atomic[DType.int64](0)`.
+        `init_fn` receives the slot as `mut Self.T` and assigns its fields,
+        e.g. `slot.counter = AtomicI64(0)`. Field assignment destroys the
+        field's previous bytes first, so the slot's bytes must be ones every
+        assigned field's destructor accepts: zero-filled (`create_prefilled`),
+        or fields whose destructor is trivial (Int, Atomic). Never use it to
+        overwrite a live heap-owning field of a slot you have not zeroed.
 
         After init_fn returns, __getitem__ is safe on that slot. If the
         slot is in `[_len_t, _cap_t)` the caller MUST follow up with
-        `set_len_unchecked` (or have used `create(n)` which set _len_t=n
-        at construction time) before calling __getitem__.
+        `set_len_unchecked` (or have used `create_prefilled(n)`, which set
+        _len_t=n at construction time) before calling __getitem__.
 
         Parameters:
-            init_fn: Comptime-specialized closure that initializes the slot
-                via the raw pointer. MUST NOT store or leak the pointer.
+            init_fn: Comptime function that initializes the slot through the
+                `mut` reference it is given.
         """
         debug_assert(
             idx >= 0 and idx < self._cap_t,
             "Slab.init_slot: idx out of capacity range",
         )
-        # SAFETY: init-only wildcard; pointer does not escape
-        # the closure. idx bounds-checked above.
-        var t_ptr = (
-            self._bytes.unsafe_ptr()
-            .bitcast[Self.T]()
-            .unsafe_origin_cast[MutAnyOrigin]()
-        )
-        init_fn(t_ptr + idx)
+        # SAFETY: idx bounds-checked above, so slot idx lies inside `_bytes`.
+        # The typed pointer keeps `self._bytes`'s concrete origin and is
+        # dereferenced at once; init_fn sees only a `mut` reference that
+        # cannot escape the call.
+        var t_ptr = self._bytes.unsafe_ptr().bitcast[Self.T]()
+        init_fn((t_ptr + idx)[])
 
     # =========================================================================
     # Typed Atomic helpers -- universal

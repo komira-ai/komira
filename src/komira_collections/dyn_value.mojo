@@ -12,7 +12,10 @@
 #   - NO UnsafePointer fields -- avoids the mojo 0.26 packager bug that
 #     fires on hand-written __moveinit__ with UnsafePointer fields.
 #   - Destructor calls the stored _destroy function pointer on drop.
-#   - as_ref[T] / as_mut[T] provide typed access (caller must know T).
+#   - `get[T]()` is the one typed accessor. It is CHECKED: `create[T]` records
+#     T's qualified name (`reflect[T].name()`) and size, and `get[T]` raises
+#     unless the stored value is occupied and both match. `holds[T]()` asks the
+#     same question without raising. No public signature carries a pointer.
 #
 # Used by the engine's `DynAccumulator` for cold-path type-erased
 # accumulator storage.
@@ -44,7 +47,7 @@ def _make_destroy[T: Deinitable & Movable]() -> _DestroyFn:
 
     The returned fn-ptr bitcasts the byte-storage base pointer to `T*` and
     calls `destroy_pointee`. This is the only fn-ptr stored per DynValue --
-    all other operations use typed access via `_as_ptr[T]`.
+    all other operations use the checked typed access of `get[T]`.
 
     SAFETY: The byte pointer must point at a live, initialized T value.
     Calling the returned function on an already-destroyed or never-initialized
@@ -77,13 +80,23 @@ struct DynValue[MAX_SIZE: Int](Movable):
 
     Usage:
         var dv = DynValue[256].create[MyStruct](MyStruct(42))
-        ref val = dv._as_ptr[MyStruct]()[]
-        print(val.x)  # 42
+        print(dv.get[MyStruct]().x)  # 42
+        dv.get[MyStruct]().x = 7     # writes through when `dv` is mutable
+        _ = dv.get[Int]()            # raises: the stored type is MyStruct
+
+    Type check: `create[T]` records `reflect[T].name()` (the fully qualified
+    type name, parameters included) and `size_of[T]()`; `get[T]` compares both.
+    Two distinct types share a qualified name only if they are the same type,
+    so a mismatch is always caught; the size comparison is a second, cheap
+    guard. The check is a string compare, which is why DynValue stays a
+    cold-path container.
     """
 
     var _storage: Array[UInt8, Self.MAX_SIZE]
     var _destroy: _DestroyFn   # byte-storage-base destructor (FFI-POD fn-ptr)
     var _occupied: Bool
+    var _type_name: StaticString   # reflect[T].name() of the stored T ("" when empty)
+    var _type_size: Int            # size_of[T]() of the stored T (0 when empty)
 
     # NOTE: No __moveinit__ -- auto-synthesized. All fields (InlineArray,
     # fn-ptr, Bool) are trivially copyable.
@@ -93,6 +106,8 @@ struct DynValue[MAX_SIZE: Int](Movable):
         self._storage = Array[UInt8, Self.MAX_SIZE](fill=UInt8(0))
         self._destroy = _noop_destroy
         self._occupied = False
+        self._type_name = ""
+        self._type_size = 0
 
     @staticmethod
     def create[T: Deinitable & Movable](var value: T) -> Self:
@@ -116,44 +131,55 @@ struct DynValue[MAX_SIZE: Int](Movable):
         dst.unsafe_write(value^)
         result._destroy = _make_destroy[T]()
         result._occupied = True
+        result._type_name = reflect[T].name()
+        result._type_size = size_of[T]()
         return result^
 
-    def _as_ptr[
-        _mut: Bool, o: Origin[mut=_mut], //, T: Movable,
-    ](ref [o] self) -> UnsafePointer[T, o]:
-        """Return a typed pointer to the stored value with ORIGIN TIED to
-        `self`.
+    def is_occupied(self) -> Bool:
+        """Return True when this DynValue holds a value."""
+        return self._occupied
 
-        `_storage` is an `InlineArray[UInt8, MAX_SIZE]` stored INLINE in
-        `self` (no heap indirection), so the value's address IS
-        `UnsafePointer(to=self._storage)` carrying `self`'s origin. We bitcast
-        that to `T*` and re-tie the origin to the receiver borrow `o` — the
-        compiler tracks every deref site against `self`'s liveness, so an
-        ASAP-drop of the owning DynValue (or the DynAccumulator that embeds it)
-        can no longer fire between this call and the pointer's first use.
+    def holds[T: Movable](self) -> Bool:
+        """Return True when this DynValue holds a value of type `T`.
 
-        The origin tie matters: rebuilding a wildcard-origin pointer from a
-        raw storage address would sever the lifetime tie to `self`, so an
-        ASAP-drop of the owner could fire before the pointer's first use.
-        Returning an origin-tied pointer makes that hazard unrepresentable.
-
-        SAFETY: Caller must ensure T matches the type passed to `create[T]`.
-        The pointer is valid for the duration of `self`'s borrow `o`; do NOT
-        cache it across a move or drop of the owning DynValue.
-
-        Returns:
-            A pointer to the stored value, origin-tied to `self`.
+        The same check `get[T]` makes, without raising: occupied, and the
+        stored type's qualified name and size equal `T`'s.
         """
-        # SAFETY: _storage is MAX_SIZE bytes, size_of[T]() <= MAX_SIZE (checked
-        # at create[T]). The inline-storage address carries self's origin; the
-        # bitcast + unsafe_origin_cast[o] re-tie the typed pointer to the
-        # receiver borrow `o`. No Int round-trip, no wildcard origin.
         return (
-            UnsafePointer(to=self._storage)
-            .bitcast[T]()
-            .unsafe_mut_cast[_mut]()
-            .unsafe_origin_cast[o]()
+            self._occupied
+            and self._type_size == size_of[T]()
+            and self._type_name == reflect[T].name()
         )
+
+    def get[T: Movable](ref self) raises -> ref [self._storage] T:
+        """Return a reference to the stored value as a `T`, checked.
+
+        The reference borrows `self`: it is mutable when `self` is, and the
+        compiler keeps the DynValue alive while it is in use.
+
+        Raises:
+            An error naming both types when this DynValue is empty or holds a
+            value of a type other than `T`. A mismatch is a caller bug, but it
+            raises rather than aborts so a caller can recover and a test can
+            observe it.
+        """
+        if not self._occupied:
+            raise Error(
+                "DynValue.get: empty, asked for " + String(reflect[T].name())
+            )
+        if not self.holds[T]():
+            raise Error(
+                "DynValue.get: holds "
+                + String(self._type_name)
+                + ", asked for "
+                + String(reflect[T].name())
+            )
+        # SAFETY: `holds[T]` proved the storage holds an initialized T (it
+        # was moved in by `create[T]`, the only writer, and size_of[T]() <=
+        # MAX_SIZE was asserted there). The pointer is built from the inline
+        # `_storage` field, so it carries `self._storage`'s concrete origin,
+        # and is dereferenced at once: no pointer leaves this body.
+        return UnsafePointer(to=self._storage).bitcast[T]()[]
 
     def __deinit__(deinit self):
         """Destroy the stored value (if occupied) via the fn-ptr destructor."""

@@ -6,7 +6,8 @@
 #   Universal (any T: Deinitable):
 #     1. Empty construction + len/capacity == 0
 #     2. create(n) has len=n, cap=n
-#     3. init_slot[init_fn] on a non-Movable Atomic-bearing T
+#     3. init_slot[init_fn] on a non-Movable Atomic-bearing T (the init_fn's
+#        writes land in the slot it was given, and only that slot)
 #     4. __getitem__ read on init_slot-populated non-Movable T
 #     5. field_fetch_add_i64 / field_load_i64 on an Atomic[Int64] field
 #     6. clear / reserve / resize / set_len_unchecked
@@ -59,18 +60,20 @@ struct SlotWithList(Deinitable, Movable):
 # =============================================================================
 
 
-def _zero_atomic_counter(
-    slot: UnsafePointer[AtomicCounter, MutAnyOrigin]
-):
+def _zero_atomic_counter(mut slot: AtomicCounter):
     """Single-threaded in-place init of an AtomicCounter slot.
 
-    SAFETY: init-only; the pointer does not escape this closure body.
-    The MutAnyOrigin wildcard is confined to the init-only
-    closure body -- the pointer is provided synchronously to init_slot
-    and is not stored.
+    Assigns fields through the `mut` reference init_slot hands over; no
+    pointer is involved.
     """
-    slot[].counter = AtomicI64(0)
-    slot[].generation = 0
+    slot.counter = AtomicI64(0)
+    slot.generation = 0
+
+
+def _mark_generation_7(mut slot: AtomicCounter):
+    """init_fn that writes a value a zero-filled slot cannot hold by chance."""
+    slot.counter = AtomicI64(-3)
+    slot.generation = 7
 
 
 # =============================================================================
@@ -159,6 +162,23 @@ def test_init_slot_non_movable() raises:
         assert_equal(
             s.field_load_i64[_counter_accessor](i), Int64(0)
         )
+
+
+def test_init_slot_runs_init_fn_on_that_slot() raises:
+    """init_slot calls init_fn on slot idx, and on no other slot.
+
+    The slab is zero-filled, so a zero read-back cannot tell "init_fn ran"
+    from "init_fn never ran"; this init_fn writes (-3, 7), which a
+    zero-filled slot cannot hold by chance. Catches an init_slot that skips
+    the call, or hands init_fn a different slot.
+    """
+    var s = Slab[AtomicCounter].create_prefilled(3)
+    s.init_slot[_mark_generation_7](1)
+    assert_equal(s[1].generation, 7, "init_fn did not run on slot 1")
+    assert_equal(s.field_load_i64[_counter_accessor](1), Int64(-3))
+    assert_equal(s[0].generation, 0, "init_fn wrote slot 0")
+    assert_equal(s[2].generation, 0, "init_fn wrote slot 2")
+    assert_equal(s.field_load_i64[_counter_accessor](0), Int64(0))
 
 
 def test_field_fetch_add_load() raises:

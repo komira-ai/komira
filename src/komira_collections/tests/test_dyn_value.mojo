@@ -3,14 +3,19 @@
 # =============================================================================
 #
 # Tests:
-#   T1: create + as_ref reads back correct value
+#   T1: create + get[T] reads back correct value
 #   T2: move semantics (auto-synth __moveinit__)
 #   T3: occupied DynValue drops cleanly (destroy fires, no crash)
-#   T4: as_mut writes through to stored value
+#   T4: get[T] on a mutable DynValue writes through to stored value
 #   T5: unoccupied DynValue drops cleanly (no destroy call)
+#   T6: get[U] for a different U is refused (raises), holds[U] is False --
+#       including a same-size type and a different instantiation of one
+#       generic struct, so neither the size nor the base name alone passes
+#   T7: get[T] on an empty DynValue is refused
 # =============================================================================
 
 from std.memory import Pointer
+from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from komira_collections.dyn_value import DynValue
 
@@ -25,6 +30,24 @@ struct TwoInts(Movable):
     def __init__(out self, a: Int, b: Int):
         self.a = a
         self.b = b
+
+
+struct OtherTwoInts(Movable):
+    """Same layout and size as TwoInts, different type."""
+    var a: Int
+    var b: Int
+
+    def __init__(out self, a: Int, b: Int):
+        self.a = a
+        self.b = b
+
+
+struct Boxed[W: Int](Movable):
+    """One generic struct; Boxed[1] and Boxed[2] differ only by parameter."""
+    var v: Int
+
+    def __init__(out self, v: Int):
+        self.v = v
 
 
 # ★ THE ORIGIN IS A STRUCT PARAMETER, NOT A WILDCARD.
@@ -88,23 +111,23 @@ struct DropObserver[counter_origin: Origin[mut=True]](Movable):
 
 # --- Tests ---
 
-def test_create_and_as_ref() raises:
-    """T1: create + as_ref reads back correct value."""
+def test_create_and_get() raises:
+    """T1: create + get[T] reads back correct value."""
     var dv = DynValue[64].create[TwoInts](TwoInts(10, 20))
-    ref val = dv._as_ptr[TwoInts]()[]
+    ref val = dv.get[TwoInts]()
     if val.a != 10 or val.b != 20:
         raise Error(
             "T1 FAIL: expected (10, 20), got ("
             + String(val.a) + ", " + String(val.b) + ")"
         )
-    print("    PASS test_create_and_as_ref")
+    print("    PASS test_create_and_get")
 
 
 def test_move_semantics() raises:
     """T2: move semantics -- value survives auto-synth move."""
     var dv1 = DynValue[64].create[TwoInts](TwoInts(42, 99))
     var dv2 = dv1^  # auto-synth __moveinit__
-    ref val = dv2._as_ptr[TwoInts]()[]
+    ref val = dv2.get[TwoInts]()
     if val.a != 42 or val.b != 99:
         raise Error(
             "T2 FAIL: expected (42, 99), got ("
@@ -138,19 +161,19 @@ def test_destroy_fires_on_drop() raises:
     print("    PASS test_destroy_fires_on_drop")
 
 
-def test_as_mut_write_through() raises:
-    """T4: as_mut provides writable access to the stored value."""
+def test_get_write_through() raises:
+    """T4: get[T] on a mutable DynValue writes through to the stored value."""
     var dv = DynValue[64].create[TwoInts](TwoInts(1, 2))
-    var ptr = dv._as_ptr[TwoInts]()
-    ptr[].a = 100
-    ptr[].b = 200
-    ref val = dv._as_ptr[TwoInts]()[]
+    dv.get[TwoInts]().a = 100
+    ref slot = dv.get[TwoInts]()
+    slot.b = 200
+    ref val = dv.get[TwoInts]()
     if val.a != 100 or val.b != 200:
         raise Error(
             "T4 FAIL: expected (100, 200), got ("
             + String(val.a) + ", " + String(val.b) + ")"
         )
-    print("    PASS test_as_mut_write_through")
+    print("    PASS test_get_write_through")
 
 
 def test_unoccupied_drops_cleanly() raises:
@@ -161,11 +184,45 @@ def test_unoccupied_drops_cleanly() raises:
     print("    PASS test_unoccupied_drops_cleanly")
 
 
+def test_wrong_type_is_refused() raises:
+    """T6: get[U] raises and holds[U] is False for every U other than T."""
+    var dv = DynValue[64].create[TwoInts](TwoInts(1, 2))
+    assert_true(dv.holds[TwoInts]())
+    assert_false(dv.holds[Int]())
+    assert_false(dv.holds[OtherTwoInts]())  # same size, different type
+    with assert_raises(contains="asked for"):
+        _ = dv.get[Int]()
+    with assert_raises(contains="asked for"):
+        _ = dv.get[OtherTwoInts]()
+    # The value is untouched by the refused reads.
+    assert_equal(dv.get[TwoInts]().b, 2)
+
+    var boxed = DynValue[64].create[Boxed[1]](Boxed[1](5))
+    assert_true(boxed.holds[Boxed[1]]())
+    assert_false(boxed.holds[Boxed[2]]())  # same base name and size
+    with assert_raises(contains="asked for"):
+        _ = boxed.get[Boxed[2]]()
+    assert_equal(boxed.get[Boxed[1]]().v, 5)
+    print("    PASS test_wrong_type_is_refused")
+
+
+def test_empty_is_refused() raises:
+    """T7: get[T] on an unoccupied DynValue raises; holds[T] is False."""
+    var dv = DynValue[64]()
+    assert_false(dv.is_occupied())
+    assert_false(dv.holds[TwoInts]())
+    with assert_raises(contains="empty"):
+        _ = dv.get[TwoInts]()
+    print("    PASS test_empty_is_refused")
+
+
 def main() raises:
     print("Running DynValue tests...")
-    test_create_and_as_ref()
+    test_create_and_get()
     test_move_semantics()
     test_destroy_fires_on_drop()
-    test_as_mut_write_through()
+    test_get_write_through()
     test_unoccupied_drops_cleanly()
-    print("All DynValue tests passed (5/5)")
+    test_wrong_type_is_refused()
+    test_empty_is_refused()
+    print("All DynValue tests passed (7/7)")
