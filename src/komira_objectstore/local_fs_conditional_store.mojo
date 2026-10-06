@@ -432,8 +432,10 @@ def _list_dir_fnames(dir: String) raises -> List[String]:
     """Shallow (one-level) listing of `dir`'s immediate child filenames via the
     `komira_list_dir_shallow` C shim (the SAME shim `komira_fs` uses;
     threaded into every binary by `link_posix_shim=True`). Returns each child's
-    NAME (regular files only — we filter the dir tag). A non-existent dir yields
-    an EMPTY list (opendir-failure → empty, consistent with the shim contract).
+    NAME (regular files only — we filter the dir tag). A non-existent dir
+    (ENOENT) yields an EMPTY list; every other failure (the shim returns the
+    opendir / readdir / lstat errno) RAISES naming `dir` and the errno — a
+    root that exists but cannot be read is not an empty store.
 
     The shim hands back one heap buffer of `<tag><name>\\0` records; we copy each
     name into an owned String and `komira_free` the buffer. NO struct-offset
@@ -453,9 +455,24 @@ def _list_dir_fnames(dir: String) raises -> List[String]:
         c_dir, buf_pp, len_pp
     )
     if Int(rc) != 0:
+        # FFI-BOUNDARY: `komira_fs_enoent` / `komira_fs_errno_name` live in
+        # komira_fs's `_fs_shim.c` (linked through komira_fs_posix); errno
+        # numbers are never spelled in Mojo. Nothing was allocated on failure.
+        if rc == external_call["komira_fs_enoent", Int32]():
+            return List[String]()
+        var nb = Array[UInt8, 32](fill=UInt8(0))
+        # SAFETY: `nb` is a stack-local 32-byte buffer that outlives the
+        # synchronous call; the shim writes at most 32 bytes and keeps nothing.
+        var nlen = external_call["komira_fs_errno_name", Int64](
+            rc, UnsafePointer(to=nb).bitcast[UInt8](), Int64(32)
+        )
+        var name = List[UInt8]()
+        for k in range(Int(nlen)):
+            name.append(nb[k])
         raise Error(
             "LocalFsConditionalStore: shallow dir listing failed for '" + dir
-            + "'"
+            + "': errno " + String(Int(rc)) + " ("
+            + String(StringSlice(unsafe_from_utf8=Span(name))) + ")"
         )
     # The malloc'd char* the shim wrote into the slot — the documented
     # kernel/malloc-returned carve-out, used as a LOCAL, never a field.

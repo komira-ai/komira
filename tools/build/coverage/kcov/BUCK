@@ -1,0 +1,68 @@
+# The path tools of a kcov coverage run (README.md): static executables built
+# with the pinned zig, each gated by its cases, which run as build actions.
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "kcov_tool", "kcov_tool_cases")
+
+# debug_relocate: a directory path in a file overwritten by a placeholder of
+# the same length.
+zig_exe(
+    name = "debug_relocate_exe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "debug_relocate.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+kcov_tool_cases(
+    name = "debug_relocate_cases",
+    exec_compatible_with = LINUX_X86_64,
+    script = "debug_relocate_cases.sh",
+    tool = ":debug_relocate_exe",
+)
+
+kcov_tool(
+    name = "debug_relocate",
+    cases = [":debug_relocate_cases"],
+    exec_compatible_with = LINUX_X86_64,
+    exe = ":debug_relocate_exe",
+    visibility = ["PUBLIC"],
+)
+
+# cov_normalize: a kcov Cobertura report rewritten to repository paths, with
+# bytes that do not depend on the run.
+zig_exe(
+    name = "cov_normalize_exe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "cov_normalize.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+kcov_tool_cases(
+    name = "cov_normalize_cases",
+    exec_compatible_with = LINUX_X86_64,
+    data = [
+        "fixtures/kcov_full_paths.golden.xml",
+        "fixtures/kcov_full_paths.xml",
+    ],
+    script = "cov_normalize_cases.sh",
+    tool = ":cov_normalize_exe",
+)
+
+kcov_tool(
+    name = "cov_normalize",
+    cases = [":cov_normalize_cases"],
+    exec_compatible_with = LINUX_X86_64,
+    exe = ":cov_normalize_exe",
+    visibility = ["PUBLIC"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "cov_normalize_cases.sh",
+        "debug_relocate_cases.sh",
+    ],
+)

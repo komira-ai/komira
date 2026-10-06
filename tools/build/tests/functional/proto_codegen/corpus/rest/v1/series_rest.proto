@@ -1,0 +1,56 @@
+// A GET whose query carries well-known types and messages that hold them,
+// shaped like Cloud Monitoring's ListTimeSeries: `interval` holds two
+// Timestamps (`end_time` declared first), `aggregation` a Duration, an enum
+// and a repeated string, and `window.bounds` is a message two levels down.
+// Each is flattened to dotted lowerCamelCase keys, and a Timestamp or
+// Duration is its proto3 JSON string.
+syntax = "proto3";
+
+package rest.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+service Series {
+  rpc ListPoints(ListPointsRequest) returns (ListPointsResponse) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*}/points"
+    };
+  }
+}
+
+message ListPointsRequest {
+  string name = 1;
+  string filter = 2;
+  Interval interval = 3;
+  Aggregation aggregation = 4;
+  Window window = 5;
+  google.protobuf.Timestamp as_of = 6;
+  int32 page_size = 7;
+}
+
+message Interval {
+  google.protobuf.Timestamp end_time = 2;
+  google.protobuf.Timestamp start_time = 1;
+}
+
+message Aggregation {
+  enum Aligner {
+    ALIGN_NONE = 0;
+    ALIGN_SUM = 1;
+  }
+  google.protobuf.Duration alignment_period = 1;
+  Aligner per_series_aligner = 2;
+  repeated string group_by_fields = 3;
+}
+
+message Window {
+  Interval bounds = 1;
+  google.protobuf.Duration step = 2;
+}
+
+message ListPointsResponse {
+  repeated string points = 1;
+  string next_page_token = 2;
+}

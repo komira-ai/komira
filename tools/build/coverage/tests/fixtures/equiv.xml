@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<coverage line-rate="0.5" branch-rate="0.5" lines-covered="9" lines-valid="9">
+  <sources><source>/somewhere/else/</source></sources>
+  <packages><package name="p"><classes>
+    <class name="a" filename="src/alpha/a.mojo">
+      <methods><method name="f" signature=""><lines><line number="1" hits="9"/></lines></method></methods>
+      <lines>
+        <line number="1" hits="3"/>
+        <line number="2" hits="1" branch="true" condition-coverage="50% (1/2)"/>
+        <line hits='4' number='3' branch='false'></line>
+      </lines>
+    </class>
+    <class name="b" filename="src/alpha/b.mojo">
+      <lines><line number="7" hits="0"/></lines>
+    </class>
+  </classes></package></packages>
+</coverage>
