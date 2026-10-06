@@ -24,16 +24,16 @@ go stale.
 from komira_wkt import Duration, Timestamp
 from std.testing import assert_equal
 
-var ts = Timestamp(Int64(63108020), Int32(21000000))
-assert_equal(ts.to_proto3_json(), "1972-01-01T10:00:20.021Z")
+var ts = Timestamp(Int64(1788256820), Int32(21000000))
+assert_equal(ts.to_proto3_json(), "2026-09-01T10:00:20.021Z")
 
-var parsed = Timestamp.from_proto3_json("2023-01-01T00:00:00Z")
-assert_equal(parsed.seconds, Int64(1672531200))
+var parsed = Timestamp.from_proto3_json("2026-10-01T00:00:00Z")
+assert_equal(parsed.seconds, Int64(1790812800))
 assert_equal(parsed.nanos, Int32(0))
 
 # An offset is accepted on input and applied; output is always UTC.
-var offset = Timestamp.from_proto3_json("2023-01-01T01:00:00+01:00")
-assert_equal(offset.to_proto3_json(), "2023-01-01T00:00:00Z")
+var offset = Timestamp.from_proto3_json("2026-10-01T01:00:00+01:00")
+assert_equal(offset.to_proto3_json(), "2026-10-01T00:00:00Z")
 
 assert_equal(Duration(Int64(1), Int32(340012)).to_proto3_json(), "1.000340012s")
 assert_equal(Duration.from_proto3_json("90.5s").nanos, Int32(500000000))
@@ -130,8 +130,8 @@ struct Event(Serializable, Copyable, Movable):
         return Self(name^, at^)
 
 
-var e = Event("deploy", Timestamp(Int64(1672531200), Int32(0)))
+var e = Event("deploy", Timestamp(Int64(1790812800), Int32(0)))
 var doc = encode_json[Event](e)
-assert_equal(doc, '{"name":"deploy","at":"2023-01-01T00:00:00Z"}')
-assert_equal(decode_json[Event](doc).at.value().seconds, Int64(1672531200))
+assert_equal(doc, '{"name":"deploy","at":"2026-10-01T00:00:00Z"}')
+assert_equal(decode_json[Event](doc).at.value().seconds, Int64(1790812800))
 ```
