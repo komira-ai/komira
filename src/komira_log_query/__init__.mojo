@@ -61,6 +61,7 @@ from komira_log_query.route import (
     SERVICE_LOG_QUERY_PARAM,
     SERVICE_LOG_SINCE_PARAM,
     SERVICE_LOG_UNTIL_PARAM,
+    is_json_object_text,
     is_service_log_request,
     service_log_response,
 )

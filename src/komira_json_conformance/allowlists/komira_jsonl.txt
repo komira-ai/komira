@@ -1,0 +1,132 @@
+# komira_jsonl: the JSONTestSuite y_ and n_ files infer_jsonl_schema + materialize_jsonl_to_batch (komira_jsonl)
+# gets wrong, the verdict it gives every i_ file (ACCEPTS:, REJECTS:,
+# BOUNDARY:, MISREADS:), and the files that abort it (ABORTS:), one per
+# line with the reason (format and gate: gate.mojo). DEFECT in a reason marks
+# a verdict to be fixed in the product, not a choice. Shrink-only: a fix
+# makes its line STALE (or its i_ record CHANGED) and the test red until the
+# line is edited.
+
+i_number_double_huge_neg_exp.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_huge_exp.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_neg_int_huge_exp.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_pos_double_huge_exp.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_real_neg_overflow.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_real_pos_overflow.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_real_underflow.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_too_big_neg_int.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_too_big_pos_int.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_number_very_big_negative_int.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_object_key_lone_2nd_surrogate.json REJECTS: komira_jsonl: a key holds a lone low surrogate
+i_string_1st_surrogate_but_2nd_missing.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_1st_valid_surrogate_2nd_invalid.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_UTF-16LE_with_BOM.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with byte 0xFF; a JSONL record must be one JSON object
+i_string_UTF-8_invalid_sequence.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_UTF8_surrogate_U+D800.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_incomplete_surrogate_and_escape_valid.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_incomplete_surrogate_pair.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_incomplete_surrogates_escape_valid.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_invalid_lonely_surrogate.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_invalid_surrogate.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_invalid_utf-8.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_inverted_surrogates_U+1D11E.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_iso_latin_1.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_lone_second_surrogate.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_lone_utf8_continuation_byte.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_not_in_unicode_range.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_overlong_sequence_2_bytes.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_overlong_sequence_6_bytes.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_overlong_sequence_6_bytes_null.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_truncated-utf-8.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_string_utf16BE_no_BOM.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with byte 0x00; a JSONL record must be one JSON object
+i_string_utf16LE_no_BOM.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_structure_500_nested_arrays.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with '['; a JSONL record must be one JSON object
+i_structure_UTF-8_BOM_empty_object.json REJECTS: komira_jsonl: line 1: the line is not a JSON object: it starts with byte 0xEF; a JSONL record must be one JSON object
+n_single_space.json MISREAD: not a JSON text (nothing but whitespace), and the reader returned 0 rows without an error: as JSONL a blank input is zero records, the format's contract
+n_structure_no_data.json MISREAD: not a JSON text (nothing but whitespace), and the reader returned 0 rows without an error: as JSONL a blank input is zero records, the format's contract
+y_array_arraysWithSpaces.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_empty-string.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_empty.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_ending_with_newline.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_false.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_heterogeneous.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_null.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_with_1_and_newline.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_with_leading_space.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_with_several_null.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_array_with_trailing_space.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_0e+1.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_0e1.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_after_space.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_double_close_to_zero.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_int_with_exp.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_minus_zero.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_negative_int.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_negative_one.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_negative_zero.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_real_capital_e.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_real_capital_e_neg_exp.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_real_capital_e_pos_exp.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_real_exponent.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_real_fraction_exponent.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_real_neg_exp.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_real_pos_exponent.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_simple_int.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_number_simple_real.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_object_duplicated_key.json REJECTED: the object repeats a key; the reader refuses it, naming the line ("duplicate key ... a key the schema reads may appear once"), a choice RFC 8259 allows (names SHOULD be unique)
+y_object_duplicated_key_and_value.json REJECTED: the object repeats a key; the reader refuses it, naming the line ("duplicate key ... a key the schema reads may appear once"), a choice RFC 8259 allows (names SHOULD be unique)
+y_object_long_strings.json REJECTED: schema inference does not infer a nested object or array member ("wide-default inference of LIST / STRUCT / MAP is not supported")
+y_object_simple.json REJECTED: schema inference does not infer a nested object or array member ("wide-default inference of LIST / STRUCT / MAP is not supported")
+y_string_1_2_3_bytes_UTF-8_sequences.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_accepted_surrogate_pair.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_accepted_surrogate_pairs.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_allowed_escapes.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_backslash_and_u_escaped_zero.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_backslash_doublequotes.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_comments.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_double_escape_a.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_double_escape_n.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_escaped_control_character.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_escaped_noncharacter.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_in_array.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_in_array_with_leading_space.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_last_surrogates_1_and_2.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_nbsp_uescaped.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_nonCharacterInUTF-8_U+10FFFF.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_nonCharacterInUTF-8_U+FFFF.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_null_escape.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_one-byte-utf-8.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_pi.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_reservedCharacterInUTF-8_U+1BFFF.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_simple_ascii.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_space.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_surrogates_U+1D11E_MUSICAL_SYMBOL_G_CLEF.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_three-byte-utf-8.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_two-byte-utf-8.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_u+2028_line_sep.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_u+2029_par_sep.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_uEscape.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_uescaped_newline.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unescaped_char_delete.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicodeEscapedBackslash.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode_2.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode_U+10FFFE_nonchar.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode_U+1FFFE_nonchar.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode_U+200B_ZERO_WIDTH_SPACE.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode_U+2064_invisible_plus.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode_U+FDD0_nonchar.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode_U+FFFE_nonchar.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_unicode_escaped_double_quote.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_utf8.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_string_with_del_character.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_lonely_false.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_lonely_int.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_lonely_negative_real.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_lonely_null.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_lonely_string.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_lonely_true.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_string_empty.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_trailing_newline.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_true_in_array.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
+y_structure_whitespace_array.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
