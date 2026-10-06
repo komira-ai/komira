@@ -10,10 +10,10 @@
 #   api version  : 2026-10-02
 #   protocol     : query (awsQuery)
 #   model key    : tiny/2026-10-02
-#   model sha256 : 485983f34c7f0a2e52fd58adde6695c3b501269648b9c19e44f5113b04b14cf0
-#   operations   : Ping, SendThing
-#   shapes       : 7 messages, 0 enums
-#   generator    : aws-client-gen version 11
+#   model sha256 : 87209ff5e3cb2615b200d1c96910de79bdce9ea0d87e8fd845e74b204a5bcd62
+#   operations   : Ping, PingAnonymous, PingNoAuth, SendThing
+#   shapes       : 11 messages, 0 enums
+#   generator    : aws-client-gen version 12
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -78,6 +78,10 @@ from komira_retry import (
     RetryLoop,
     RetryRng,
     Sleeper,
+)
+from komira_aws_core import (
+    send_unsigned_request,
+    send_unsigned_request_with,
 )
 
 
@@ -236,6 +240,186 @@ struct TinyQueryPart(Copyable, Movable, Deinitable):
         var _xc_digest = aws_xml_child(node, String("Digest"))
         if _xc_digest >= 0:
             out.set_digest(aws_xml_blob_of(node.children[_xc_digest]))
+        return out^
+
+
+# ---------------------------------------------------------------------------
+# `TinyQueryPingAnonymousRequest` — AWS shape `PingAnonymousRequest`.
+# ---------------------------------------------------------------------------
+struct TinyQueryPingAnonymousRequest(Copyable, Movable, Deinitable):
+    """AWS shape `PingAnonymousRequest` — 0 member(s), 0 required by the model.
+
+        SYNTHESISED: the operation declares no shape here, so its request
+        sends only Action and Version, or its response reads nothing.
+
+        Required members are plain fields taken by `__init__`; every other
+        member is `Optional[...]` and writes no parameter when unset."""
+
+
+    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
+    # synthesis is not co-inductive and its cycle guard caches a
+    # negative, so a shape that reaches itself through the recursion
+    # box cannot prove itself. Field destructors still run;
+    # ownership is unchanged.
+    def __deinit__(deinit self):
+        pass
+
+    def __init__(out self):
+        pass
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
+    def copy(self) -> Self:
+        """Deep clone. Explicit, not implicit: every member is heap-owning."""
+        var out = Self()
+        return out^
+
+    def write_aws_query(self, mut q: AwsQueryWriter, prefix: String) raises:
+        """This shape's members, as form parameters named under `prefix`."""
+        pass
+
+    @staticmethod
+    def from_aws_xml(node: XmlNode) raises -> TinyQueryPingAnonymousRequest:
+        """Read this shape from its element. An element the shape does not
+            name is ignored; a non-list member that occurs twice takes the last."""
+        var out = TinyQueryPingAnonymousRequest()
+        return out^
+
+
+# ---------------------------------------------------------------------------
+# `TinyQueryPingAnonymousResponse` — AWS shape `PingAnonymousResponse`.
+# ---------------------------------------------------------------------------
+struct TinyQueryPingAnonymousResponse(Copyable, Movable, Deinitable):
+    """AWS shape `PingAnonymousResponse` — 0 member(s), 0 required by the model.
+
+        SYNTHESISED: the operation declares no shape here, so its request
+        sends only Action and Version, or its response reads nothing.
+
+        Required members are plain fields taken by `__init__`; every other
+        member is `Optional[...]` and writes no parameter when unset."""
+
+
+    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
+    # synthesis is not co-inductive and its cycle guard caches a
+    # negative, so a shape that reaches itself through the recursion
+    # box cannot prove itself. Field destructors still run;
+    # ownership is unchanged.
+    def __deinit__(deinit self):
+        pass
+
+    def __init__(out self):
+        pass
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
+    def copy(self) -> Self:
+        """Deep clone. Explicit, not implicit: every member is heap-owning."""
+        var out = Self()
+        return out^
+
+    def write_aws_query(self, mut q: AwsQueryWriter, prefix: String) raises:
+        """This shape's members, as form parameters named under `prefix`."""
+        pass
+
+    @staticmethod
+    def from_aws_xml(node: XmlNode) raises -> TinyQueryPingAnonymousResponse:
+        """Read this shape from its element. An element the shape does not
+            name is ignored; a non-list member that occurs twice takes the last."""
+        var out = TinyQueryPingAnonymousResponse()
+        return out^
+
+
+# ---------------------------------------------------------------------------
+# `TinyQueryPingNoAuthRequest` — AWS shape `PingNoAuthRequest`.
+# ---------------------------------------------------------------------------
+struct TinyQueryPingNoAuthRequest(Copyable, Movable, Deinitable):
+    """AWS shape `PingNoAuthRequest` — 0 member(s), 0 required by the model.
+
+        SYNTHESISED: the operation declares no shape here, so its request
+        sends only Action and Version, or its response reads nothing.
+
+        Required members are plain fields taken by `__init__`; every other
+        member is `Optional[...]` and writes no parameter when unset."""
+
+
+    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
+    # synthesis is not co-inductive and its cycle guard caches a
+    # negative, so a shape that reaches itself through the recursion
+    # box cannot prove itself. Field destructors still run;
+    # ownership is unchanged.
+    def __deinit__(deinit self):
+        pass
+
+    def __init__(out self):
+        pass
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
+    def copy(self) -> Self:
+        """Deep clone. Explicit, not implicit: every member is heap-owning."""
+        var out = Self()
+        return out^
+
+    def write_aws_query(self, mut q: AwsQueryWriter, prefix: String) raises:
+        """This shape's members, as form parameters named under `prefix`."""
+        pass
+
+    @staticmethod
+    def from_aws_xml(node: XmlNode) raises -> TinyQueryPingNoAuthRequest:
+        """Read this shape from its element. An element the shape does not
+            name is ignored; a non-list member that occurs twice takes the last."""
+        var out = TinyQueryPingNoAuthRequest()
+        return out^
+
+
+# ---------------------------------------------------------------------------
+# `TinyQueryPingNoAuthResponse` — AWS shape `PingNoAuthResponse`.
+# ---------------------------------------------------------------------------
+struct TinyQueryPingNoAuthResponse(Copyable, Movable, Deinitable):
+    """AWS shape `PingNoAuthResponse` — 0 member(s), 0 required by the model.
+
+        SYNTHESISED: the operation declares no shape here, so its request
+        sends only Action and Version, or its response reads nothing.
+
+        Required members are plain fields taken by `__init__`; every other
+        member is `Optional[...]` and writes no parameter when unset."""
+
+
+    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
+    # synthesis is not co-inductive and its cycle guard caches a
+    # negative, so a shape that reaches itself through the recursion
+    # box cannot prove itself. Field destructors still run;
+    # ownership is unchanged.
+    def __deinit__(deinit self):
+        pass
+
+    def __init__(out self):
+        pass
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
+    def copy(self) -> Self:
+        """Deep clone. Explicit, not implicit: every member is heap-owning."""
+        var out = Self()
+        return out^
+
+    def write_aws_query(self, mut q: AwsQueryWriter, prefix: String) raises:
+        """This shape's members, as form parameters named under `prefix`."""
+        pass
+
+    @staticmethod
+    def from_aws_xml(node: XmlNode) raises -> TinyQueryPingNoAuthResponse:
+        """Read this shape from its element. An element the shape does not
+            name is ignored; a non-list member that occurs twice takes the last."""
+        var out = TinyQueryPingNoAuthResponse()
         return out^
 
 
@@ -748,6 +932,32 @@ def parse_ping_response(resp: AwsResponse) raises -> TinyQueryPingResponse:
     _ = resp
     return TinyQueryPingResponse()
 
+def build_ping_anonymous_request(input: TinyQueryPingAnonymousRequest) raises -> AwsRequest:
+    """`PingAnonymous` — the awsQuery request, a form body, serialised and NOT signed."""
+    var req = AwsRequest(String("POST"), String("/"))
+    var q = AwsQueryWriter(String("PingAnonymous"), String(TINYQUERY_API_VERSION))
+    input.write_aws_query(q, String(""))
+    aws_query_set_body(req, q)
+    return req^
+
+def parse_ping_anonymous_response(resp: AwsResponse) raises -> TinyQueryPingAnonymousResponse:
+    """`PingAnonymous` — the operation declares no output, so nothing is read."""
+    _ = resp
+    return TinyQueryPingAnonymousResponse()
+
+def build_ping_no_auth_request(input: TinyQueryPingNoAuthRequest) raises -> AwsRequest:
+    """`PingNoAuth` — the awsQuery request, a form body, serialised and NOT signed."""
+    var req = AwsRequest(String("POST"), String("/"))
+    var q = AwsQueryWriter(String("PingNoAuth"), String(TINYQUERY_API_VERSION))
+    input.write_aws_query(q, String(""))
+    aws_query_set_body(req, q)
+    return req^
+
+def parse_ping_no_auth_response(resp: AwsResponse) raises -> TinyQueryPingNoAuthResponse:
+    """`PingNoAuth` — the operation declares no output, so nothing is read."""
+    _ = resp
+    return TinyQueryPingNoAuthResponse()
+
 def build_send_thing_request(input: TinyQuerySendThingRequest) raises -> AwsRequest:
     """`SendThing` — the awsQuery request, a form body, serialised and NOT signed."""
     var req = AwsRequest(String("POST"), String("/"))
@@ -904,6 +1114,68 @@ struct TinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
             extra^,
         )
 
+    def send_unsigned(mut self, var req: AwsRequest) raises -> HttpResult:
+        """Send `req` UNSIGNED: no signature and no access key, as botocore
+            sends an operation the model marks anonymous (`authtype` `none`,
+            `auth` `smithy.api#noAuth`). A call into the hand-written
+            `komira_aws_core.send_unsigned_request`, retried as `send` is."""
+        var extra = List[Header]()
+        var content_type = String(String(
+            AWS_QUERY_CONTENT_TYPE
+        ))
+        for _i in range(len(req.header_names)):
+            var n = req.header_names[_i].copy()
+            if n.lower() == String("content-type"):
+                # Header names are case-insensitive, and the substrate refuses an
+                # `extra` Content-Type in any case.
+                # The substrate takes the content type as its own argument and
+                # puts it in the wire headers; passing it again would send it twice.
+                content_type = req.header_values[_i].copy()
+            else:
+                extra.append(Header(n^, req.header_values[_i].copy()))
+        return send_unsigned_request[Self.C](
+            self._mk_connector,
+            self._http_config.copy(),
+            self._retry_quota,
+            req.method.copy(),
+            String(TINYQUERY_SERVICE),
+            resolve_endpoint(self._endpoint_override, komira_aws_tiny_query_host(self._region.copy())),
+            req.uri.copy(),
+            content_type^,
+            req.body.copy(),
+            extra^,
+        )
+
+    def send_unsigned_with[X: AwsHttpTransport, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, var req: AwsRequest, mut transport: X, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`send_unsigned`, over the transport, retry loop and budget given
+            (`komira_aws_core.send_unsigned_request_with`), as `send_with` is."""
+        var extra = List[Header]()
+        var content_type = String(String(
+            AWS_QUERY_CONTENT_TYPE
+        ))
+        for _i in range(len(req.header_names)):
+            var n = req.header_names[_i].copy()
+            if n.lower() == String("content-type"):
+                # Header names are case-insensitive, and the substrate refuses an
+                # `extra` Content-Type in any case.
+                # The substrate takes the content type as its own argument and
+                # puts it in the wire headers; passing it again would send it twice.
+                content_type = req.header_values[_i].copy()
+            else:
+                extra.append(Header(n^, req.header_values[_i].copy()))
+        return send_unsigned_request_with(
+            transport,
+            retry,
+            budget,
+            req.method.copy(),
+            String(TINYQUERY_SERVICE),
+            resolve_endpoint(self._endpoint_override, komira_aws_tiny_query_host(self._region.copy())),
+            req.uri.copy(),
+            content_type^,
+            req.body.copy(),
+            extra^,
+        )
+
     def ping(mut self, input: TinyQueryPingRequest) raises -> TinyQueryPingResponse:
         """`Ping` — POST /"""
         var req = build_ping_request(input)
@@ -917,6 +1189,34 @@ struct TinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
             or not. `parse_ping_response` reads a successful one."""
         var req = build_ping_request(input)
         return self.send_with(req^, transport, clock, retry, budget)
+
+    def ping_anonymous(mut self, input: TinyQueryPingAnonymousRequest) raises -> TinyQueryPingAnonymousResponse:
+        """`PingAnonymous` — POST /"""
+        var req = build_ping_anonymous_request(input)
+        var res = self.send_unsigned(req^)
+        if not aws_is_error_status(res.status):
+            return parse_ping_anonymous_response(res^.into_response())
+        raise _komira_aws_tiny_query_error(String("PingAnonymous"), res)
+
+    def ping_anonymous_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: TinyQueryPingAnonymousRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`PingAnonymous` over the given seams (`send_unsigned_with`): the response, successful
+            or not. `parse_ping_anonymous_response` reads a successful one."""
+        var req = build_ping_anonymous_request(input)
+        return self.send_unsigned_with(req^, transport, retry, budget)
+
+    def ping_no_auth(mut self, input: TinyQueryPingNoAuthRequest) raises -> TinyQueryPingNoAuthResponse:
+        """`PingNoAuth` — POST /"""
+        var req = build_ping_no_auth_request(input)
+        var res = self.send_unsigned(req^)
+        if not aws_is_error_status(res.status):
+            return parse_ping_no_auth_response(res^.into_response())
+        raise _komira_aws_tiny_query_error(String("PingNoAuth"), res)
+
+    def ping_no_auth_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: TinyQueryPingNoAuthRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`PingNoAuth` over the given seams (`send_unsigned_with`): the response, successful
+            or not. `parse_ping_no_auth_response` reads a successful one."""
+        var req = build_ping_no_auth_request(input)
+        return self.send_unsigned_with(req^, transport, retry, budget)
 
     def send_thing(mut self, input: TinyQuerySendThingRequest) raises -> TinyQuerySendThingResult:
         """`SendThing` — POST /"""

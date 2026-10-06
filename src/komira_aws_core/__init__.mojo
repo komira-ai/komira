@@ -51,7 +51,8 @@ clients.
 - `creds_source.mojo`: the `AwsCredsSource` trait a generated client signs
   through, a static source and the cached default chain.
 - `signed_request.mojo`: `build_sigv4_signed_request`, the socket-free half
-  of a send, `AwsPayloadSigning` (hashed, unsigned or precomputed), and
+  of a send, `build_unsigned_request`, the same request for an anonymous
+  operation, `AwsPayloadSigning` (hashed, unsigned or precomputed), and
   `is_s3_signing_name`, the signing names signed by S3's rules.
 - `endpoint_rules.mojo`: `EndpointRuleSet`, the interpreter of a service's
   Smithy endpoint ruleset (`endpoint-rule-set-1.json`), with its standard
@@ -64,7 +65,8 @@ clients.
   send a generated client calls: signed, sent over komira_http_client
   through a `Connector`, and retried; `send_sigv4_signed_request_with`
   over injected seams (`AwsHttpTransport`, the clocks, the retry loop and
-  budget), and `AwsConnectorTransport`.
+  budget), and `AwsConnectorTransport`; `send_unsigned_request` and
+  `send_unsigned_request_with`, the same sends for an anonymous operation.
 - `aws_retry.mojo`: `AwsRetryClassifier`, botocore's standard retry
   conditions for komira_retry over an `AwsAttempt`, with
   `aws_standard_retry_policy` and `AwsRetryQuota`, the retry quota a
@@ -201,6 +203,8 @@ from .aws_send import (
     aws_response_error_code,
     send_sigv4_signed_request,
     send_sigv4_signed_request_with,
+    send_unsigned_request,
+    send_unsigned_request_with,
 )
 from .echo_connector import (
     AWS_ECHO_CODE,
@@ -336,6 +340,7 @@ from .shared_config import (
 from .signed_request import (
     AwsPayloadSigning,
     build_sigv4_signed_request,
+    build_unsigned_request,
     is_s3_signing_name,
 )
 from .sigv4 import (

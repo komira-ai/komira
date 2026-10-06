@@ -10,10 +10,10 @@
 #   api version  : 2026-10-02
 #   protocol     : query (awsQuery)
 #   model key    : tiny/2026-10-02
-#   model sha256 : 485983f34c7f0a2e52fd58adde6695c3b501269648b9c19e44f5113b04b14cf0
+#   model sha256 : 87209ff5e3cb2615b200d1c96910de79bdce9ea0d87e8fd845e74b204a5bcd62
 #   operations   : Ping, SendThing
 #   shapes       : 7 messages, 0 enums
-#   generator    : aws-client-gen version 11
+#   generator    : aws-client-gen version 12
 #   mode         : pure (no transport)
 #
 # HAND-OVERRIDE SEAM: no overrides are declared for this service.
