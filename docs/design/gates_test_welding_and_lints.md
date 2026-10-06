@@ -147,6 +147,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 | `markdown_docs` | every relative link and anchor in every Markdown file resolves |
 | `lint_suite` | groups lints another graph does not reach, so their validations run in any build holding the suite |
 | `retired_names` | no file of the cell holds a renamed package's or type's old name except on a line carrying a `YYYY-MM-DD` date (a history note); `tools/build/lint/retired_names.bzl`, and a target with no `names` fails at analysis |
+| `readme_api_coverage` | README API coverage: per package under `src/`, the public symbols its `__init__.mojo` exports and which of them its README examples use, written as a census (`[packages]`, `[symbols]`, `[report]`); report-only (`enforce = False`), failing on a malformed or stale row of its shrink-only ledger, `tests/readme_api_exceptions.tsv`; `tools/build/lint/readme_api_coverage.bzl`, rules and census in [readme_api_coverage.md](../readme_api_coverage.md) |
 
 ## How is it tested?
 

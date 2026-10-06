@@ -1,0 +1,28 @@
+README API coverage (report-only)
+
+packages: 5; exported: 19; used: 9 (47.4%); names 6/13 (46.2%); methods 3/6 (50.0%); excepted: 1; undocumented: 9
+packages with no __init__.mojo (nothing exported): komira_gen
+packages whose __init__.mojo exports nothing (their API is their submodules, not counted): none
+packages with an __init__.mojo and no README (0%): 1: komira_b
+
+by package: percent used/exported, names, methods, readme
+  komira_a                                  56.2%     9/16    names 6/10 methods 3/6  examples:3
+  komira_b                                   0.0%     0/1     names 0/1 methods 0/0  none
+  komira_c                                   0.0%     0/1     names 0/1 methods 0/0  no-example
+  komira_d                                   0.0%     0/1     names 0/1 methods 0/0  refused
+  komira_gen                                    -     0/0     names 0/0 methods 0/0  none
+
+notes:
+  komira_b: `from .star import *` at src/komira_b/__init__.mojo:2: its names cannot be listed, so none is counted
+  komira_d: the readme tool refused src/komira_d/README.md (exit 1): src/komira_d/README.md:5: `mojo skip`: an example's info string is exactly `mojo`; nothing may follow it (there is no skip word: fence a sketch that cannot run as ```text)
+
+undocumented (package, symbol, where):
+  komira_a	Greeter.make	src/komira_a/greet.mojo:20
+  komira_a	Greeter.wave	src/komira_a/greet.mojo:23
+  komira_a	Square.area	src/komira_a/shapes.mojo:5
+  komira_a	area	src/komira_a/__init__.mojo:9
+  komira_a	errors	src/komira_a/__init__.mojo:17
+  komira_a	ANSWER	src/komira_a/__init__.mojo:21
+  komira_b	thing	src/komira_b/__init__.mojo:1
+  komira_c	one	src/komira_c/__init__.mojo:1
+  komira_d	dee	src/komira_d/__init__.mojo:1

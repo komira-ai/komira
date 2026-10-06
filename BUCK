@@ -2,6 +2,7 @@
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -121,5 +122,21 @@ _TESTS_LINTS = [
         "Stage" + "Graph",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
+    tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# README API coverage (tools/build/lint/readme_api_coverage.bzl; the rules and
+# today's census: docs/readme_api_coverage.md): per package under src/, the
+# public API its __init__.mojo exports and which of it the README's examples
+# (the welded [tests][readme] test) use. `[report]`, `[packages]` and
+# `[symbols]` are the census. The tree is every file of the cell (`:doc_tree`).
+# The ledger, tests/readme_api_exceptions.tsv, only shrinks: a malformed or
+# repeated row, or one for a symbol no longer exported or used by its README
+# now, fails the build. Report-only today: `enforce = True` makes every undocumented symbol
+# without a ledger row a finding.
+[readme_api_coverage(
+    name = "readme_api_coverage",
+    enforce = False,
+    exceptions = "tests/readme_api_exceptions.tsv",
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
