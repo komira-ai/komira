@@ -4,7 +4,7 @@ package komira.supervisor.v1;
 import "komira/broker/v1/broker.proto";
 
 // The wire contract between a job supervisor (or a co-located broker node)
-// and the job manager / broker coordinator: the job phase vocabulary, the
+// and the coordinator it reports to: the job phase vocabulary, the
 // supervisor heartbeat and its response, and the failure report. The
 // multi-node routing types the heartbeat and its response carry (NodeLoad,
 // ClusterConfig, BrokerClusterMap) are declared in `komira.broker.v1`,
@@ -13,8 +13,8 @@ import "komira/broker/v1/broker.proto";
 
 // ─── Job Phase (State Machine) ───────────────────────────────────────────
 
-// WARNING: this vocabulary is declared twice. `komira_job_store` keeps a
-// job's phase as a tag set and as text; this enum is the wire side. A phase
+// WARNING: this vocabulary is declared twice. A job store keeps a job's
+// phase as a tag set and as text; this enum is the wire side. A phase
 // stored there but missing here is invisible on the wire: an agent cannot
 // report it, and it decodes to JOB_PHASE_UNSPECIFIED at every proto boundary.
 // Add a phase in both places, in one change.
@@ -37,10 +37,10 @@ enum JobPhase {
   // The graceful-stop intermediate phase of an infinite job.
   JOB_PHASE_DRAINING = 8;
 
-  // CREATING collapses PENDING + ASSIGNED into one phase: the job manager
+  // CREATING collapses PENDING + ASSIGNED into one phase: the coordinator
   // writes CREATING, then creates and runs the job. The queue-claim protocol
-  // that PENDING -> ASSIGNED implemented does not apply when the pipeline
-  // manager calls the job manager directly.
+  // that PENDING -> ASSIGNED implemented does not apply when a job is created
+  // directly rather than claimed from a queue.
   JOB_PHASE_CREATING = 9;
 
   // SUPERVISOR_ABSENT: the job started and never sent a heartbeat, meaning
@@ -61,12 +61,12 @@ message SupervisorHeartbeat {
   optional string message = 5;
   optional FailureReport failure = 6;
 
-  // ── Multi-node control plane (additive, wire-safe proto3) ──
+  // ── Multi-node assignment (additive, wire-safe proto3) ──
   // A co-located supervisor+broker node reports its identity + load + the
-  // partitions it currently OWNS (is serving) on every heartbeat. The job
-  // manager folds these into its node registry, runs the assignment pass,
-  // and replies (HeartbeatResponse) with the partitions this node SHOULD be
-  // serving; the agent reconciles the diff in-process.
+  // partitions it currently OWNS (is serving) on every heartbeat. The
+  // coordinator folds these into its table of live nodes, runs the
+  // assignment pass, and replies (HeartbeatResponse) with the partitions
+  // this node SHOULD be serving; the agent reconciles the diff in-process.
   // These fields are all empty/absent for a plain job supervisor that owns
   // no broker partitions, so the existing job-only heartbeat is unchanged.
   optional string node_id = 7;          // stable cluster node identity
@@ -85,8 +85,8 @@ message SupervisorHeartbeat {
 message HeartbeatResponse {
   bool cancel = 1;
 
-  // ── Multi-node control plane (additive, wire-safe proto3) ──
-  // The desired assignment the job manager pushes back to the node: the partitions
+  // ── Multi-node assignment (additive, wire-safe proto3) ──
+  // The desired assignment the coordinator pushes back to the node: the partitions
   // this node SHOULD be serving after the assignment pass, plus the current
   // cluster config (total partition count) so the node can size its routing
   // view. Empty for a plain job supervisor (no partitions assigned).
