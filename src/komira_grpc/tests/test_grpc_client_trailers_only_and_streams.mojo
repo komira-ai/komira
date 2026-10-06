@@ -126,13 +126,22 @@ def _make_reactor() raises -> Reactor[NoopSink]:
 # ---- rig 1: HTTP/1.1, for claims about the BODY ------------------------------
 
 
-def _http_200(content_type: String, body: List[UInt8]) -> List[UInt8]:
+def _http_200(
+    content_type: String, body: List[UInt8], status_headers: String = ""
+) -> List[UInt8]:
     """A canned HTTP/1.1 200 whose body is `body`. Content-Length is exact so
-    the RecvRingBody drains one Data frame and then End."""
+    the RecvRingBody drains one Data frame and then End.
+
+    `status_headers` (CRLF-terminated lines) carries a classic-gRPC
+    `grpc-status` in the head: this rig cannot carry trailers, and GrpcClient
+    raises a classic-gRPC response that states no status at all
+    (test_grpc_missing_status.mojo)."""
     var head = _b(
         String("HTTP/1.1 200 OK\r\nContent-Type: ")
         + content_type
-        + "\r\nContent-Length: "
+        + "\r\n"
+        + status_headers
+        + "Content-Length: "
         + String(len(body))
         + "\r\n\r\n"
     )
@@ -602,9 +611,11 @@ def _client_stream_over[
 ](
     content_type: String,
     var body: List[UInt8],
+    status_headers: String = "",
 ) raises -> Tuple[Bool, String, String]:
     """Drive `client_stream[P]` against an HTTP/1.1 response whose body is
-    `body`. Returns (raised, returned_payload, error_message).
+    `body` (and whose head carries `status_headers`). Returns (raised,
+    returned_payload, error_message).
 
     ⚠ PARAMETERIC ON `P` BECAUSE THE WIRE SHAPE DECIDES THE PROTOCOL, NOT THE
     OTHER WAY AROUND. `_first_stream_message`'s four arms are protocol-generic
@@ -614,7 +625,7 @@ def _client_stream_over[
     `ProtocolConnectProto`, because classic gRPC has no such envelope. See
     `test_client_stream_end_error_is_reraised_with_its_status`.
     """
-    var client = _h1_client(_http_200(content_type, body))
+    var client = _h1_client(_http_200(content_type, body, status_headers))
     var reactor = _make_reactor()
     var token = CancellationToken.never()
     var opts = CallOptions()
@@ -641,9 +652,11 @@ def _client_stream_over_body(
     var body: List[UInt8],
 ) raises -> Tuple[Bool, String, String]:
     """`_client_stream_over` at classic gRPC — the default for every case whose
-    body is a classic-gRPC wire."""
+    body is a classic-gRPC wire. The head states `grpc-status: 0`, so each case
+    reaches the `_first_stream_message` arm it is about instead of the
+    missing-status raise ahead of it."""
     return _client_stream_over[ProtocolGrpcProto](
-        String("application/grpc"), body^
+        String("application/grpc"), body^, String("grpc-status: 0\r\n")
     )
 
 
@@ -800,7 +813,9 @@ def test_bidi_stream_round_trips_both_directions() raises:
     encode_stream_message[ProtocolGrpcProto](body, Span(_b(String("R1"))))
     encode_stream_message[ProtocolGrpcProto](body, Span(_b(String("R2"))))
 
-    var client = _h1_client(_http_200(String("application/grpc"), body))
+    var client = _h1_client(
+        _http_200(String("application/grpc"), body, String("grpc-status: 0\r\n"))
+    )
     var reactor = _make_reactor()
     var token = CancellationToken.never()
     var opts = CallOptions()
