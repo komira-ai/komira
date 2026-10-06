@@ -7,6 +7,8 @@
 # ones run it over the pinned zig. Exits 1 on the first wrong result, naming
 # it; writes the validation result and exits 0 when every case holds.
 set -eu
+# shellcheck disable=SC3040 # busybox sh (ash) has pipefail
+set -o pipefail
 
 abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
 BB=$(abs "$1")

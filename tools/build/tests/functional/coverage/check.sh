@@ -27,6 +27,8 @@
 # same: the binaries have one sha256.
 # Writes one line per binary to <out>; exits 1 naming the first failure.
 set -euf
+# shellcheck disable=SC3040 # busybox sh (ash) has pipefail
+set -o pipefail
 abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
 BB=$(abs "$1")
 OUT=$(abs "$2")
