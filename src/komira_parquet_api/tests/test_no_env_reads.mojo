@@ -25,6 +25,7 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
+    "hll_footer.mojo",
     "metadata.mojo",
     "types.mojo",
 ]

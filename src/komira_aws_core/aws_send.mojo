@@ -40,6 +40,12 @@
 # sleeper that records; `send_sigv4_signed_request` binds the process's
 # clocks and a blocking sleep.
 #
+# `send_unsigned_request` and `send_unsigned_request_with` are the same
+# sends for an operation the model marks anonymous (`authtype` `none`,
+# `auth` `smithy.api#noAuth`): each attempt is `build_unsigned_request`,
+# with no signature, so they take no credential, region or signing clock.
+# They retry exactly as the signed sends do.
+#
 # The connector is made once per call, so the attempts of one call share
 # its HTTP client (and a kept-alive connection) and the connector's dials.
 # That client is built from the caller's `HttpClientConfig`, which has no
@@ -57,14 +63,9 @@
 # resend changes the size (botocore has no cap). Read such an object in
 # ranges.
 #
-# The retry loop runs on komira_clock's monotonic clock and waits in a
-# reactor (`AwsReactorSleeper`), not on komira_retry's `SystemClock` and
-# `SystemSleeper`. Those call `std.time.sleep`, whose foreign declaration of
-# libc's `nanosleep` has a different signature from the one komira_async's
-# reactor makes (it passes the timespec as a byte pointer and returns an
-# Int32), and one program cannot hold both declarations: a binary holding
-# the HTTP client cannot also hold them. Once those declarations agree,
-# `aws_system_retry_loop` becomes komira_retry's `system_retry_loop`.
+# The retry loop is komira_retry's `system_retry_loop`: the process's
+# monotonic clock and a blocking `std.time.sleep`, which a binary holding
+# the HTTP client can call (komira_async declares no `nanosleep` of its own).
 # =============================================================================
 
 from komira_async.ops.waker_sink import NoopSink
@@ -79,7 +80,6 @@ from komira_http_client.header_map import HeaderMap
 from komira_http_client.url import Url
 from komira_http_core.codec.types import HttpMethod
 from komira_http_core.transport.io_stream import Connector
-from komira_clock import now_ns
 from komira_retry import (
     MonotonicClock,
     RetryBudget,
@@ -87,7 +87,7 @@ from komira_retry import (
     RetryPolicy,
     RetryRng,
     Sleeper,
-    SplitMix64Rng,
+    system_retry_loop,
 )
 
 from ._text import sub
@@ -107,7 +107,11 @@ from .aws_xml import aws_xml_body_is_error, aws_xml_error_info
 from .credential import AwsCredential
 from .credential_transport import CredentialHttpRequest
 from .endpoint import AwsEndpoint
-from .signed_request import AwsPayloadSigning, build_sigv4_signed_request
+from .signed_request import (
+    AwsPayloadSigning,
+    build_sigv4_signed_request,
+    build_unsigned_request,
+)
 from .sigv4 import Header
 from .sources import AwsClock, SystemAwsClock
 
@@ -202,55 +206,6 @@ struct AwsConnectorTransport[C: Connector](AwsHttpTransport, Movable, Deinitable
         return out^
 
 
-struct AwsMonotonicClock(MonotonicClock, Movable, Deinitable):
-    """komira_clock's monotonic clock, in milliseconds."""
-
-    def __init__(out self):
-        pass
-
-    def now_ms(mut self) -> Int64:
-        return Int64(Int(now_ns() // 1_000_000))
-
-
-struct AwsReactorSleeper(Sleeper, Movable, Deinitable):
-    """Blocks the calling thread for a retry's wait in a reactor with
-    nothing registered (epoll or kqueue with a timeout). The reactor is
-    made on the first wait, so a call that is never retried makes none."""
-
-    var _rt: Optional[BlockingRuntime[NoopSink]]
-
-    def __init__(out self):
-        self._rt = None
-
-    def sleep_ms(mut self, ms: Int64) raises:
-        if ms <= 0:
-            return
-        var deadline = Int64(Int(now_ns())) + ms * 1_000_000
-        if not self._rt:
-            self._rt = BlockingRuntime[NoopSink].new(
-                NoopSink(_placeholder=UInt8(0))
-            )
-        ref reactor = self._rt.value().reactor()
-        while True:
-            var left_us = (deadline - Int64(Int(now_ns()))) // 1000
-            if left_us <= 0:
-                return
-            _ = reactor.run_once(Int32(Int(min(left_us, Int64(1_000_000_000)))))
-
-
-def aws_system_retry_loop(
-    var policy: RetryPolicy,
-) raises -> RetryLoop[AwsMonotonicClock, AwsReactorSleeper, SplitMix64Rng]:
-    """A retry loop on the process's monotonic clock, waiting in a reactor,
-    with jitter seeded from the clock."""
-    return RetryLoop[AwsMonotonicClock, AwsReactorSleeper, SplitMix64Rng](
-        policy^,
-        AwsMonotonicClock(),
-        AwsReactorSleeper(),
-        SplitMix64Rng(UInt64(now_ns())),
-    )
-
-
 def _starts_with_byte(body: List[UInt8], c: UInt8) -> Bool:
     for i in range(len(body)):
         var b = body[i]
@@ -296,6 +251,83 @@ def _send_once[X: AwsHttpTransport](
         return None
 
 
+def _send_with_retries[
+    X: AwsHttpTransport,
+    K: AwsClock,
+    L: MonotonicClock,
+    S: Sleeper,
+    R: RetryRng,
+    B: RetryBudget,
+](
+    mut transport: X,
+    mut clock: K,
+    mut retry: RetryLoop[L, S, R],
+    mut budget: B,
+    method: String,
+    cred: Optional[AwsCredential],
+    region: String,
+    service: String,
+    endpoint: AwsEndpoint,
+    uri: String,
+    content_type: String,
+    body: List[UInt8],
+    extra: List[Header],
+    s3_200_error: Bool,
+    payload: AwsPayloadSigning,
+) raises -> HttpResult:
+    """The attempts of every send: each one signed with `cred` at `clock`'s
+    time (`build_sigv4_signed_request`) or, with no `cred`, unsigned
+    (`build_unsigned_request`), which reads neither `clock`, `region` nor
+    `payload`; sent through `transport` and retried as the module header
+    says."""
+    var classifier = AwsRetryClassifier(
+        service.copy(), conditional=aws_request_is_conditional(method, extra)
+    )
+    retry.start()
+    while True:
+        var req: CredentialHttpRequest
+        if cred:
+            req = build_sigv4_signed_request(
+                method,
+                cred.value(),
+                region,
+                service,
+                endpoint,
+                uri,
+                content_type,
+                Span(body),
+                extra,
+                clock,
+                payload,
+            )
+        else:
+            req = build_unsigned_request(
+                method, endpoint, uri, content_type, Span(body), extra
+            )
+        var error = String("")
+        var got = _send_once(transport, req, error)
+        if not got:
+            var d = retry.after_outcome(
+                classifier, AwsAttempt.transport(error^), budget
+            )
+            if not d.retry:
+                raise Error(
+                    String("the AWS request got no response (")
+                    + String(retry.attempts())
+                    + " attempts): "
+                    + d.reason
+                )
+            continue
+        var res = got.take()
+        var failed = _attempt_of(res, service, s3_200_error)
+        if not failed:
+            retry.after_success(budget)
+            return res^
+        var d = retry.after_outcome(classifier, failed.take(), budget)
+        if not d.retry:
+            return res^
+
+
 def send_sigv4_signed_request_with[
     X: AwsHttpTransport,
     K: AwsClock,
@@ -332,46 +364,23 @@ def send_sigv4_signed_request_with[
     header). A conditional write (`aws_request_is_conditional` over
     `method` and `extra`) is not resent once the service may have acted on
     it."""
-    var classifier = AwsRetryClassifier(
-        service.copy(), conditional=aws_request_is_conditional(method, extra)
+    return _send_with_retries(
+        transport,
+        clock,
+        retry,
+        budget,
+        method,
+        Optional[AwsCredential](cred),
+        region,
+        service,
+        endpoint,
+        uri,
+        content_type,
+        body,
+        extra,
+        s3_200_error,
+        payload,
     )
-    retry.start()
-    while True:
-        var signed = build_sigv4_signed_request(
-            method,
-            cred,
-            region,
-            service,
-            endpoint,
-            uri,
-            content_type,
-            Span(body),
-            extra,
-            clock,
-            payload,
-        )
-        var error = String("")
-        var got = _send_once(transport, signed, error)
-        if not got:
-            var d = retry.after_outcome(
-                classifier, AwsAttempt.transport(error^), budget
-            )
-            if not d.retry:
-                raise Error(
-                    String("the AWS request got no response (")
-                    + String(retry.attempts())
-                    + " attempts): "
-                    + d.reason
-                )
-            continue
-        var res = got.take()
-        var failed = _attempt_of(res, service, s3_200_error)
-        if not failed:
-            retry.after_success(budget)
-            return res^
-        var d = retry.after_outcome(classifier, failed.take(), budget)
-        if not d.retry:
-            return res^
 
 
 def send_sigv4_signed_request[C: Connector](
@@ -402,7 +411,7 @@ def send_sigv4_signed_request[C: Connector](
     when the last attempt got none."""
     var transport = AwsConnectorTransport[C](http_config, mk_connector())
     var clock = SystemAwsClock()
-    var loop = aws_system_retry_loop(aws_standard_retry_policy())
+    var loop = system_retry_loop(aws_standard_retry_policy())
     return send_sigv4_signed_request_with(
         transport,
         clock,
@@ -411,6 +420,88 @@ def send_sigv4_signed_request[C: Connector](
         method,
         cred,
         region,
+        service,
+        endpoint,
+        uri,
+        content_type,
+        body,
+        extra,
+        s3_200_error=s3_200_error,
+    )
+
+
+def send_unsigned_request_with[
+    X: AwsHttpTransport,
+    L: MonotonicClock,
+    S: Sleeper,
+    R: RetryRng,
+    B: RetryBudget,
+](
+    mut transport: X,
+    mut retry: RetryLoop[L, S, R],
+    mut budget: B,
+    method: String,
+    service: String,
+    endpoint: AwsEndpoint,
+    uri: String,
+    content_type: String,
+    body: List[UInt8],
+    extra: List[Header],
+    s3_200_error: Bool = False,
+) raises -> HttpResult:
+    """`send_sigv4_signed_request_with` for an anonymous operation: each
+    attempt is `build_unsigned_request`, with no signature, so no
+    credential, region or signing clock is taken. `service` names the
+    service the retry classifier reads (DynamoDB's checksum, S3's
+    200-with-<Error>). Retried, returned and raised exactly as the signed
+    send is."""
+    # Never read: an unsigned attempt carries no date.
+    var clock = SystemAwsClock()
+    return _send_with_retries(
+        transport,
+        clock,
+        retry,
+        budget,
+        method,
+        Optional[AwsCredential](),
+        String(""),
+        service,
+        endpoint,
+        uri,
+        content_type,
+        body,
+        extra,
+        s3_200_error,
+        AwsPayloadSigning.hashed(),
+    )
+
+
+def send_unsigned_request[C: Connector](
+    mk_connector: def () raises thin -> C,
+    http_config: HttpClientConfig,
+    mut retry_quota: AwsRetryQuota,
+    method: String,
+    service: String,
+    endpoint: AwsEndpoint,
+    uri: String,
+    content_type: String,
+    body: List[UInt8],
+    extra: List[Header],
+    s3_200_error: Bool = False,
+) raises -> HttpResult:
+    """`send_sigv4_signed_request` for an anonymous operation: `method uri`
+    sent UNSIGNED to `endpoint` (`build_unsigned_request`), over a
+    connector `mk_connector` makes, through an HTTP client built from
+    `http_config`, and retried as the signed send is, each retry paid for
+    from `retry_quota`. Returns the last response; raises when the last
+    attempt got none."""
+    var transport = AwsConnectorTransport[C](http_config, mk_connector())
+    var loop = system_retry_loop(aws_standard_retry_policy())
+    return send_unsigned_request_with(
+        transport,
+        loop,
+        retry_quota,
+        method,
         service,
         endpoint,
         uri,

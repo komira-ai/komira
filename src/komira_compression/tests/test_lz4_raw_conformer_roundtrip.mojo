@@ -3,12 +3,12 @@
 # =============================================================================
 #
 # Regression guard for the `Lz4Raw` (Parquet codec id 7) `Compression`
-# trait conformer in `arrow/compression_codecs.mojo`.
+# trait conformer in `compression_codecs.mojo`.
 #
 # These tests exercise the conformer directly — compress a buffer, decompress it, and assert a
 # byte-identical round-trip — confirming the liblz4 raw-block API
 # (`LZ4_compressBound` / `LZ4_compress_default` / `LZ4_decompress_safe`) is
-# correctly routed through the shared OwnedDLHandle singleton.
+# correctly routed through komira_lz4.
 #
 # Raw LZ4 BLOCK format (no frame header) — distinct on-wire from `Lz4Frame`.
 # =============================================================================

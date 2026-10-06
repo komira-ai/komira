@@ -8,7 +8,9 @@
 #   in two checks, and the per-change check is ready to run (both commands
 #   on every build system, and the buck2 build system derives the rest of
 #   the checks from the graph, release/ci/derive_checks.py, so every target
-#   of the graph is in some unit by construction).
+#   of the graph is in some unit by construction), and the release set that
+#   //tools/build/package:release_set_check builds with the test stamp
+#   (tools/build/package/release_set.txt) is this file's metapackage.
 # =============================================================================
 #
 # The file is staged as test data at `artifacts.textproto` (BUCK). A typo
@@ -31,6 +33,7 @@ from kci_artifact import (
 )
 
 comptime _FILE = "artifacts.textproto"
+comptime _SET = "release_set.txt"
 comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
 comptime _REL = "/work/rel"
@@ -331,6 +334,58 @@ def test_the_buck2_build_system_derives_the_checks_from_the_graph() raises:
     assert_equal(len(c.args), 2)
     assert_equal(c.args[0], String("release/ci/derive_checks.py"))
     assert_equal(c.args[1], String("{units_file}"))
+
+
+def _release_set_values(key: String) raises -> List[String]:
+    """The values of `key` in release_set.txt, in order: each line not
+    empty and not a `#` comment is `<key> <value>`."""
+    var out = List[String]()
+    var lines = Path(String(_SET)).read_text().split(String("\n"))
+    for i in range(len(lines)):
+        var line = String(lines[i])
+        if line.byte_length() == 0 or line.startswith(String("#")):
+            continue
+        var at = line.find(String(" "))
+        assert_true(at > 0, String("release_set.txt: a line is not `<key> <value>`: ") + line)
+        if String(line[byte = 0:at]) == key:
+            out.append(String(line[byte = at + 1 :]))
+    return out^
+
+
+def test_the_stamped_release_set_check_builds_this_files_metapackage() raises:
+    """//tools/build/package:release_set_check builds the release set with
+    a test stamp from release_set.txt's list (its stamp check holds its
+    `libs` and conda-meta arguments to that file). Here the file is held to
+    this one: the metapackage, its member libraries in order, and its
+    --license, --summary and --home. A library added to the release set and
+    not to release_set.txt, or the reverse, fails this library's build."""
+    var d = read_artifacts(String(_FILE))
+    var last = len(d.artifacts) - 1
+    var meta = d.artifacts[last].name.copy()
+    var metas = _release_set_values(String("metapackage"))
+    assert_equal(len(metas), 1)
+    assert_equal(metas[0], meta)
+    var members = _release_set_values(String("member"))
+    assert_equal(
+        len(members),
+        last,
+        String("release_set.txt names ") + String(len(members)) + String(" member(s), ") + String(_FILE)
+        + String(" has ") + String(last) + String(" librar(ies) before its metapackage"),
+    )
+    for i in range(last):
+        assert_equal(members[i], d.artifacts[i].name, String("release_set.txt member ") + String(i))
+    var argv = render_build_argv(d, meta, String(_REL), String("linux-x86_64"), _stamp())
+    var flags = List[String]()
+    flags.append(String("license"))
+    flags.append(String("summary"))
+    flags.append(String("home"))
+    for k in range(len(flags)):
+        var flag = flags[k].copy()
+        var want = _flag_values(argv, String("--") + flag)
+        var got = _release_set_values(flag)
+        assert_equal(len(want), 1, String("--") + flag)
+        assert_equal(len(got), 1, String("release_set.txt ") + flag)
+        assert_equal(got[0], want[0], String("release_set.txt ") + flag)
 
 
 def main() raises:

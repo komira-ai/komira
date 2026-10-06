@@ -60,6 +60,7 @@ def _seeded_body(
     var stream = ScriptedStream.from_read_script(List[UInt8]())
     return RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl, content^,
+        100 * 1024 * 1024,
     )
 
 

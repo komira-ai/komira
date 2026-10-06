@@ -1,0 +1,73 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: the user-defined-function traits of komira_udf run end to end
+# over in-memory Arrow columns with nulls, through the adapters and emitters
+# komira_expr and komira_agg provide, and a declared UDF across the
+# komira_plan_wire codec. The library is the nullable-column fixture the
+# tests share; the tests are the point. Nothing ships, so `conda = False`.
+#
+# The tests, each run as a build action:
+#   test_udf_e2e_map_filter -- a FilterFn picks rows of a nullable batch
+#     (through Predicate.eval's default body, NULL rows refused, lanes past
+#     the end never evaluated); Map1 sugar for four input
+#     dtypes projects them through MapFnRT and ProjectList.emit_projected;
+#     Map2 through run_row; a raising UDF's error reaches the caller.
+#   test_udf_e2e_agg_fn -- a stateful custom AggFn (distinct count with a
+#     captured limit) per group through AggFnAgg: masked update_chunk and
+#     row-at-a-time folds by three workers, partials combined in three
+#     orders; groups with nulls, with only nulls, with no rows; a partial
+#     last chunk folds only its in-bounds lanes.
+#   test_udf_e2e_window_fn -- two WindowFns over a ROWS frame read through
+#     FrameView (all four dtypes), frames clipped at partition edges, one
+#     state per partition; the trait's default methods; the frame-spec
+#     constructors.
+#   test_udf_e2e_plan_wire -- a declared scalar UDF call, a MAP UDF node and
+#     a FILTER UDF node with every tag non-zero round-trip byte for byte with
+#     name, signature, factory id and tags kept and the registry handle
+#     dropped; a live closure (no name) is refused at
+#     encode with the codec's exact message.
+#
+# `deps` lists the Mojo packages of the full transitive closure of
+# komira_udf, komira_expr, komira_eval, komira_agg and komira_plan_wire.
+mojo_library(
+    name = "komira_udf_e2e",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_agg:komira_agg",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_eval:komira_eval",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_json:komira_json",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_proto:komira_plan_proto",
+        "//src/komira_plan_wire:komira_plan_wire",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_protobuf:komira_protobuf",
+        "//src/komira_row_format:komira_row_format",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_udf_e2e_agg_fn.mojo",
+        "tests/test_udf_e2e_map_filter.mojo",
+        "tests/test_udf_e2e_plan_wire.mojo",
+        "tests/test_udf_e2e_window_fn.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

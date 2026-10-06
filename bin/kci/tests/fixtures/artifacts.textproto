@@ -1,0 +1,27 @@
+schema_version: 1
+build_systems {
+  name: "buck2"
+  executable: "buck2"
+  args: "build"
+}
+artifacts {
+  name: "komira_alpha"
+  build_system: "buck2"
+  args: "//src/komira_alpha:release"
+  args: "--out"
+  args: "{out_dir}"
+}
+artifacts {
+  name: "komira_beta"
+  build_system: "buck2"
+  args: "//src/komira_beta:release"
+  args: "--out"
+  args: "{out_dir}"
+}
+artifacts {
+  name: "komira"
+  build_system: "buck2"
+  args: "//src/komira:release"
+  args: "--out"
+  args: "{out_dir}"
+}

@@ -1,4 +1,4 @@
-# The generated SNS client (`SNSSNSClient`) end to end over
+# The generated SNS client (`SNSClient`) end to end over
 # komira_http_client and komira_http_core's ScriptedConnector (no socket),
 # sent to a custom endpoint: a Subscribe answered with its
 # <SubscribeResult>, and a DeleteTopic answered with an <ErrorResponse>,
@@ -13,7 +13,7 @@ from komira_aws_sns.komira_aws_sns import (
     SNSCreateTopicInput,
     SNSDeleteTopicInput,
     SNSEndpointConfig,
-    SNSSNSClient,
+    SNSClient,
     SNSSubscribeInput,
 )
 from komira_aws_core import (
@@ -81,10 +81,10 @@ def _mk_missing() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> SNSSNSClient[C, StaticCredsSource]:
+) raises -> SNSClient[C, StaticCredsSource]:
     var config = SNSEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return SNSSNSClient[C, StaticCredsSource](
+    return SNSClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(
@@ -109,7 +109,7 @@ def test_subscribe() raises:
 
 def test_a_missing_topic_is_raised_under_its_code() raises:
     var client = _client(_mk_missing)
-    with assert_raises(contains="SNSSNS.DeleteTopic failed: HTTP 404 NotFound Topic does not exist"):
+    with assert_raises(contains="SNS.DeleteTopic failed: HTTP 404 NotFound Topic does not exist"):
         _ = client.delete_topic(SNSDeleteTopicInput(String(_TOPIC)))
 
 

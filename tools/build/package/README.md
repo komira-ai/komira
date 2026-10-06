@@ -134,6 +134,35 @@ packaged keeps a target that builds as a refusal, and the bytes are reproducible
 `conda_manifest_kci` ([`manifest_probe/BUCK`](manifest_probe/BUCK)) is the build
 gate between the two: it builds one real package and reads its manifest with
 kci's parser, so `buck2 build //...` fails if the packer and kci disagree.
+`conda_release_set_check` ([`release_set.bzl`](release_set.bzl); the target
+`:release_set_check` in [`BUCK`](BUCK)) builds the stamped release path without a
+release's `-c komira.package_*`, in any build that includes it (`buck2 build //...`
+and the per-change check's unit that holds it). It packages each library of the
+release set (today only `komira_encoding`) with the fixed test stamp of
+`conda_package_test_stamped` in [`conda.bzl`](conda.bzl): build number 999999999,
+a made-up source commit whose first 8 hex are `7e57c0de` (no 8-hex slice of it
+repeats another or is `00000000`), commit time 86400000 ms. No release carries
+it. The target builds each package's `[release]` (so its `[release_check]` runs)
+and runs `komira_pack conda-meta --name komira_all` over those manifests. It
+fails the build in these cases:
+
+- a member or the metapackage does not carry build string `h7e57c0de_999999999`
+  (written out, not derived from the commit) in its file name and manifest, or
+  the stamp at the top level of its metadata.json; the message names the package;
+- the metapackage does not require a member at its version and build string; the
+  message names the member;
+- `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
+  metapackage;
+- its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`
+  it gives conda-meta differ from [`release_set.txt`](release_set.txt).
+
+The welded test `test_release_artifacts_file` of `src/kci_artifact` holds
+`release_set.txt` equal to `release/artifacts.textproto`'s metapackage, so a
+library added to the release set and not here is red. `:release_set_kci` reads
+the stamped metapackage's manifest with kci's parser. Not covered: the macro's
+reading of `-c komira.package_*` (these packages are given the test stamp), and,
+while the release set holds one library with no dependencies, one member's
+lockstep pin on another and agreement across members.
 [`list_conda_targets.sh`](list_conda_targets.sh) prints the package targets. The layout,
 the version scheme and the metapackage: [packaging/conda](../../../packaging/conda/README.md). The version
 a release carries comes from [`release_version.sh`](release_version.sh).

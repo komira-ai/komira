@@ -4,23 +4,27 @@
 #
 # Each fixture under tests/fixtures/jsonl_corpus/ has one of the shapes of
 # the newline-delimited files in the simdjson-data corpus:
-#   - mixed_objects.jsonl: a pretty-printed object spanning several lines,
-#     a top-level `null`, and flat objects with nested arrays and non-ASCII
-#     strings. Stage 2 yields one row per top-level object (4).
+#   - mixed_objects.jsonl: a pretty-printed object spanning lines 1-6, a
+#     top-level `null` on line 7, then three flat objects with nested
+#     arrays and non-ASCII strings (lines 8-10).
 #   - array_lines.jsonl: one top-level array per line, then an empty line.
-#     Stage 2 materializes only top-level objects, so it yields 0 rows.
 #   - array_rows_wide.jsonl: a header array and 400 array rows carrying
-#     escapes, `\/`, non-ASCII text, nulls and nested arrays. 0 rows.
+#     escapes, `\/`, non-ASCII text, nulls and nested arrays.
 #
 # For each file the test asserts that Stage 1 (`build_structural_index`)
-# succeeds, that Stage 2 (`materialize_jsonl_to_batch`) returns the
-# expected row count, and that a key absent from every record is an
-# all-null column. The fixtures are declared as test data and opened by
-# their repository path from the test's working directory.
+# succeeds. Stage 2 (`materialize_jsonl_to_batch`) reads JSONL, one object
+# per line, so it refuses each whole file naming its first bad line: line 1
+# of mixed_objects (the object does not end on its line) and line 1 of the
+# array files (not an object); before the fix these returned 4, 0 and 0
+# rows without an error. The three flat objects of mixed_objects, read on
+# their own, are three rows with every `player` set, and a key absent from
+# every record is an all-null column. The fixtures are declared as test
+# data and opened by their repository path from the test's working
+# directory.
 # =============================================================================
 
 from std.io import FileHandle
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Schema, SchemaBuilder, Field
@@ -49,40 +53,61 @@ def _schema_one(name: String) -> Schema:
     return sb.build()
 
 
-def _walk(name: String, expected_rows: Int) raises:
-    """Stage 1 then Stage 2 over one fixture, with a key that no record
-    carries: the batch has `expected_rows` rows, all null."""
+def _refused(name: String, line: Int, word: String) raises:
+    """Stage 1 then Stage 2 over one fixture: Stage 1 succeeds, Stage 2
+    raises naming `line` and saying `word`."""
     var path = String(_FIXTURES) + name
     var bytes = _read_file_bytes(path)
     if len(bytes) == 0:
         raise Error("fixture is empty: " + path)
     var idx = build_structural_index(bytes)
     _ = idx
-    var batch = materialize_jsonl_to_batch(
-        bytes, _schema_one(String("_phantom_key"))
-    )
-    assert_equal(batch._num_rows, expected_rows, name + ": rows")
-    assert_equal(
-        batch.column_at(0).null_count(), expected_rows, name + ": nulls"
-    )
-    print("  OK", name, "bytes=", len(bytes), "rows=", batch._num_rows)
+    var msg = String()
+    var refused = False
+    try:
+        var batch = materialize_jsonl_to_batch(
+            bytes, _schema_one(String("_phantom_key"))
+        )
+        _ = batch^
+    except e:
+        refused = True
+        msg = String(e)
+    assert_true(refused, name + ": not refused")
+    var want = String("line ") + String(line) + ":"
+    assert_true(want in msg, name + ": " + msg)
+    assert_true(word in msg, name + ": " + msg)
+    print("  OK", name, "bytes=", len(bytes), "refused:", msg)
 
 
 def test_mixed_objects() raises:
-    _walk(String("mixed_objects.jsonl"), 4)
-    # A key every object carries: 4 rows, none null.
+    _refused(String("mixed_objects.jsonl"), 1, "does not end on its line")
+    # Lines 8-10, the three flat objects, read on their own.
     var bytes = _read_file_bytes(String(_FIXTURES) + "mixed_objects.jsonl")
-    var batch = materialize_jsonl_to_batch(bytes, _schema_one(String("player")))
-    assert_equal(batch._num_rows, 4)
+    var lf = 0
+    var start = 0
+    for i in range(len(bytes)):
+        if bytes[i] == UInt8(0x0A):
+            lf += 1
+            if lf == 7:
+                start = i + 1
+                break
+    var tail = Span(bytes)[start:]
+    var batch = materialize_jsonl_to_batch(tail, _schema_one(String("player")))
+    assert_equal(batch._num_rows, 3)
     assert_equal(batch.column_at(0).null_count(), 0)
+    var phantom = materialize_jsonl_to_batch(
+        tail, _schema_one(String("_phantom_key"))
+    )
+    assert_equal(phantom._num_rows, 3)
+    assert_equal(phantom.column_at(0).null_count(), 3)
 
 
 def test_array_lines() raises:
-    _walk(String("array_lines.jsonl"), 0)
+    _refused(String("array_lines.jsonl"), 1, "not a JSON object")
 
 
 def test_array_rows_wide() raises:
-    _walk(String("array_rows_wide.jsonl"), 0)
+    _refused(String("array_rows_wide.jsonl"), 1, "not a JSON object")
 
 
 def main() raises:

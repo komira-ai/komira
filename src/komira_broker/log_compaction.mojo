@@ -628,6 +628,10 @@ struct LogCleaner[Storage: ConditionalWriteStore](Movable, Deinitable):
             # preserves record_count + retention/producer/txn metadata).
             var orig_bytes = manifest.read_chunk(seq)
             var orig = ManifestBody.decode(orig_bytes)
+            # A chunk with no segment object (a txn COMMIT/ABORT marker) has
+            # no rows to compact: leave its body untouched (no sidecar).
+            if not orig.has_segment():
+                continue
             # Rewrite the body (same object_key + crc here at the leaf level — the
             # S3-integration caller re-PUTs a compacted .seg and passes its new
             # key/crc; the offline path keeps the key, proving the offset-

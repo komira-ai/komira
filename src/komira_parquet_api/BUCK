@@ -18,7 +18,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   constant against parquet.thrift, read from the parquet-format archive
 #   //third_party/parquet-format pins by sha256 and staged at format/; no
 #   expected value is written by hand. It also holds the PageHeader.crc and
-#   Statistics.hll_registers docs to the spec's fields 4 and 9.
+#   Statistics.nan_count docs to the spec's fields 4 and 9, and
+#   ColumnMetaData.key_value_metadata to field 8.
+# - test_hll_footer: the registers' key-value encoding (round trip, the
+#   pinned alphabet, every malformed value refused, other keys ignored) and
+#   the field 9 rule (only i64 is nan_count; the old binary is not).
 # - test_no_env_reads: the package's sources read no environment, import no
 #   first-party package and hold no raw pointer. It is staged every source
 #   `srcs` compiles, subdirectories included, so a module the scan does not
@@ -38,6 +42,7 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_hll_footer.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_parquet_types.mojo",
         "tests/test_values_match_parquet_thrift.mojo",

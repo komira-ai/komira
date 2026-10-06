@@ -61,7 +61,10 @@ mojo_aws_client(
 # (komira_http_client and komira_http_core) and gated by its layout probe and
 # test_tiny_query_client: a call answered over a scripted connector, an
 # <ErrorResponse> raised under its code and message, and a request as it
-# reached the wire (komira_aws_core's AwsEchoConnector). No socket is opened.
+# reached the wire (komira_aws_core's AwsEchoConnector), signed, and
+# unsigned for the two anonymous operations (`authtype` `none`, `auth`
+# `smithy.api#noAuth`). No socket is opened. The model's bearer operation
+# (PingBearer) is refused in client mode (tests//functional/aws_codegen).
 mojo_aws_client(
     name = "komira_aws_tiny_query_client",
     mode = "client",
@@ -69,6 +72,8 @@ mojo_aws_client(
     model_sha256 = TINY_QUERY.sha256,
     operations = [
         "Ping",
+        "PingAnonymous",
+        "PingNoAuth",
         "SendThing",
     ],
     service = "tiny",

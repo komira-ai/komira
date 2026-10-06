@@ -35,7 +35,7 @@ from komira_retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleep
 from .komira_aws_secretsmanager import (
     SecretsManagerDeleteSecretRequest,
     SecretsManagerDeleteSecretResponse,
-    SecretsManagerSecretsManagerClient,
+    SecretsManagerClient,
 )
 
 comptime SECRETSMANAGER_MIN_RECOVERY_DAYS: Int64 = 7
@@ -66,7 +66,7 @@ def check_delete_secret_request(input: SecretsManagerDeleteSecretRequest) raises
 
 
 def delete_secret[C: Connector, T: AwsCredsSource](
-    mut client: SecretsManagerSecretsManagerClient[C, T],
+    mut client: SecretsManagerClient[C, T],
     input: SecretsManagerDeleteSecretRequest,
 ) raises -> SecretsManagerDeleteSecretResponse:
     """`DeleteSecret`: the arguments checked, then the generated verb."""
@@ -84,7 +84,7 @@ def delete_secret_with[
     R: RetryRng,
     B: RetryBudget,
 ](
-    mut client: SecretsManagerSecretsManagerClient[C, T],
+    mut client: SecretsManagerClient[C, T],
     input: SecretsManagerDeleteSecretRequest,
     mut transport: X,
     mut clock: K,

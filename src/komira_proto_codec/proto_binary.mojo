@@ -88,6 +88,11 @@ from .wire_format import (
 struct PbEncoder(WireEncoder):
     """The protobuf-binary `WireEncoder` (delegates to `komira_protobuf`)."""
 
+    comptime OMITS_IMPLICIT_DEFAULTS = False
+    """The binary encoding writes every plain field it is given, defaults
+    included, as it always has: a decoder reads either form to the same
+    message, and the bytes stay what they were."""
+
     var buf: List[UInt8]
     var _scratch_pool: List[List[UInt8]]
     # Map-entry framing state. While inside a `begin_map_entry` … `end_map_entry`

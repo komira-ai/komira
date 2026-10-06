@@ -236,7 +236,7 @@ def wait_on_address(
         if timeout_ns > Int64(0):
             # `struct timespec { long tv_sec; long tv_nsec; }` — two 64-bit
             # words on both LP64 targets, so a 2-lane int64 SIMD is a
-            # layout-exact stand-in (same idiom as the reactor's nanosleep).
+            # layout-exact stand-in for the timespec.
             var ts = SIMD[DType.int64, 2](
                 timeout_ns // Int64(1_000_000_000),
                 timeout_ns % Int64(1_000_000_000),

@@ -1,0 +1,43 @@
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# SQLite 3.53.4, the amalgamation (one sqlite3.c), public domain. Nothing of
+# it is committed here: the archive is fetched at build time and checked
+# against its sha256. (sqlite.org publishes the SHA3-256 of this archive,
+# 454e45f61c6bd75b7420e7190732dea03ce6639c63ada47bbc592f67fc340338; the file
+# that hashes to it hashes to the sha256 below.)
+pinned_file(
+    name = "sqlite-autoconf-3530400.tar.gz",
+    url = "https://www.sqlite.org/2026/sqlite-autoconf-3530400.tar.gz",
+    sha256 = "0e9483900e92cd5de8fd48d16bf9200145a61f7fd5be542a5ac81d8a9516eb9c",
+)
+
+archive_files(
+    name = "src",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":sqlite-autoconf-3530400.tar.gz",
+    files = [
+        "README.txt",
+        "sqlite3.c",
+        "sqlite3.h",
+    ],
+    strip_prefix = "sqlite-autoconf-3530400",
+)
+
+# The library, compiled from source and linked statically into each binary
+# that depends on it, so no libsqlite3 is needed on the build or the run
+# machine. Extension loading is compiled out, so it needs no libdl.
+cxx_library(
+    name = "sqlite3",
+    srcs = [":src[sqlite3.c]"],
+    compiler_flags = [
+        "-O2",
+        "-DNDEBUG",
+        "-DSQLITE_OMIT_LOAD_EXTENSION",
+        "-DSQLITE_THREADSAFE=1",
+    ],
+    exported_headers = {"sqlite3.h": ":src[sqlite3.h]"},
+    header_namespace = "",
+    visibility = ["PUBLIC"],
+)
