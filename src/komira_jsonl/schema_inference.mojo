@@ -47,7 +47,7 @@
 #     bounds-check overhead in -O3).
 #
 # Cross-references:
-#   - Stage 1 structural index: `komira_jsonl.structural_index`.
+#   - Stage 1 structural index: `komira_json_index.structural_index`.
 #   - Typed materializer (companion read path):
 #     `komira_jsonl.columnar_materializer`.
 # =============================================================================
@@ -69,9 +69,9 @@ from komira_core.arrow.schema import Field, Schema, SchemaBuilder
 from komira_core.collections.slab import Slab
 
 from komira_jsonl.columnar_materializer import _compute_jsonl_line_ranges
-from komira_jsonl.input_limits import check_json_column_count
+from komira_json_index.input_limits import check_json_column_count
 from komira_jsonl.key_dispatch import KeyRegistryBuilder
-from komira_jsonl.simd_primitives import (
+from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,
@@ -81,7 +81,7 @@ from komira_jsonl.simd_primitives import (
     TAG_QUOTE_OPEN,
     TAG_QUOTE_CLOSE,
 )
-from komira_jsonl.structural_index import (
+from komira_json_index.structural_index import (
     build_structural_index,
     JsonlPartitions,
     StructuralIndex,

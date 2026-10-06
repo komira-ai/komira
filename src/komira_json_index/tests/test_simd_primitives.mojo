@@ -1,5 +1,5 @@
 # =============================================================================
-# Tests for komira_jsonl/simd_primitives.mojo — JSON Stage 1 SIMD helpers.
+# Tests for komira_json_index/simd_primitives.mojo — JSON Stage 1 SIMD helpers.
 # =============================================================================
 #
 # Coverage:
@@ -22,7 +22,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_jsonl.simd_primitives import (
+from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,

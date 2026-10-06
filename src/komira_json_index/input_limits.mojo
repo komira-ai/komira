@@ -24,7 +24,7 @@
 #     row counter — one `Int` compare per row, no multiply in the loop.
 # None of these sit in a per-byte or per-value path.
 #
-# This module is a LEAF: it imports nothing from `komira_jsonl`, so every
+# This module is a LEAF: it imports nothing, so every
 # other module in the package can depend on it without a cycle.
 # =============================================================================
 
