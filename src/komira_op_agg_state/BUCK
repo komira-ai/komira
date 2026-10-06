@@ -13,9 +13,13 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_agg:komira_agg",
-        "//src/komira_core:komira_core",
+        "//src/komira_agg_api:komira_agg_api",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_expr:komira_expr",
         "//src/komira_kernels:komira_kernels",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
@@ -62,6 +66,14 @@ mojo_binary(
     srcs = ["tests/bench_agg_state.mojo"],
     deps = [
         ":komira_op_agg_state",
-        "//src/komira_core:komira_core",
+        "//src/komira_agg:komira_agg",
+        "//src/komira_agg_api:komira_agg_api",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_udf:komira_udf",
     ],
 )

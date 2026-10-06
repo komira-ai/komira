@@ -50,7 +50,7 @@
 #
 # ⚠ THIS PASS IS AN ACQUIRE, AND ITS CALLER OWES THE RELEASE. Step 4's bind
 # mints a registry slot and takes a SECOND retaining reference on the kind's
-# payload Arc — the shape `komira_core/plan/scan_binding_bind_pass.mojo`'s
+# payload Arc — the shape `komira_plan_ir/scan_binding_bind_pass.mojo`'s
 # RETENTION section documents as this epic's P0 leak. Nothing here remembers
 # what it bound, on purpose: the caller opens `ScanRegistry
 # .open_scan_bind_scope()` (`EngineContext.open_scan_bind_scope()`) BEFORE
@@ -77,7 +77,7 @@
 # scalar subquery straight off the scan's batch. A node cannot be skipped by
 # a reader of the scan (`_rerooted_subtree` has the whole argument).
 #
-# THE WALK MIRRORS `komira_core/plan/scan_binding_bind_pass.mojo` ARM FOR ARM,
+# THE WALK MIRRORS `komira_plan_ir/scan_binding_bind_pass.mojo` ARM FOR ARM,
 # including its raise on an unmodelled tag. A hole here is worse than a hole in
 # a check: an open-kind leaf underneath it would reach the executor UNRESOLVED.
 # The tag-coverage falsifier builds a node for EVERY `PLAN_*` and `EXPR_*` tag
@@ -86,12 +86,12 @@
 
 from std.memory import ArcPointer
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema, SchemaBuilder
-from komira_core.collections.slab import Slab
-from komira_core.plan.corr_subquery import corr_data_inner_plan_ref
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema, SchemaBuilder
+from komira_collections.slab import Slab
+from komira_plan_ir.corr_subquery import corr_data_inner_plan_ref
+from komira_plan_expr.expr import (
     Expr,
     BIN_AND,
     EXPR_COL_REF,
@@ -123,9 +123,9 @@ from komira_core.plan.expr import (
     EXPR_UDF_CALL,
     expr_tag_name,
 )
-from komira_core.plan.expr_helpers import flatten_and_conjuncts
-from komira_core.plan.expr_walk import ordered_name_sink, walk_expr_column_refs
-from komira_core.plan.logical_plan import (
+from komira_plan_expr.expr_helpers import flatten_and_conjuncts
+from komira_plan_expr.expr_walk import ordered_name_sink, walk_expr_column_refs
+from komira_plan_ir.logical_plan import (
     LogicalPlan,
     PLAN_SCAN,
     PLAN_FILTER,
@@ -145,16 +145,16 @@ from komira_core.plan.logical_plan import (
     PLAN_CAST_TO_VARCHAR,
     plan_tag_name,
 )
-from komira_core.plan.scan_binding_bind_pass import bind_plan_inmem_payloads
-from komira_core.source.in_memory_source import InMemorySource
-from komira_core.source.scan_binding import (
+from komira_plan_ir.scan_binding_bind_pass import bind_plan_inmem_payloads
+from komira_scan_source.in_memory_source import InMemorySource
+from komira_scan_source.scan_binding import (
     ScanBinding,
     SCAN_LEGACY_SOURCE_TYPE_NONE,
 )
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_registry import ScanRegistry
-from komira_core.source.scan_resolver import resolve_for_execution
-from komira_core.source.source_variant import SourceVariant
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_registry import ScanRegistry
+from komira_scan_source.scan_resolver import resolve_for_execution
+from komira_scan_source.source_variant import SourceVariant
 from komira_morsel.scan_morsel_resolver import (
     ScanMorselResolvers,
     ScanRequest,

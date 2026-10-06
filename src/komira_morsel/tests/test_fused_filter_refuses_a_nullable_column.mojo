@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # ⛔ THE DEFECT (2026-09-11, measured through the shipped `.so`).
-# `komira_core/eval/fused_predicate.mojo` is 622 lines in which the words
+# `komira_column_kernels/fused_predicate.mojo` is 622 lines in which the words
 # "validity" and "null" do not appear: the kernel walks the DATA plane at byte
 # granularity and never reads a validity bitmap. `fused_filter.
 # _try_collect_conjuncts_from_expr` — the gate that decides whether a
@@ -48,16 +48,16 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import PrimitiveArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import (
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.column import Column
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import (
     Schema, SchemaBuilder, Field, RecordBatch, RecordBatchBuilder,
 )
-from komira_core.plan.expr import Expr, BIN_AND, BIN_GT, BIN_LT
-from komira_core.plan.expr_pool import ExprPool
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.traits.expr_id import ExprId
+from komira_plan_expr.expr import Expr, BIN_AND, BIN_GT, BIN_LT
+from komira_plan_expr.expr_pool import ExprPool
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.expr_id import ExprId
 
 from komira_morsel.fused_filter import try_fused_eval
 

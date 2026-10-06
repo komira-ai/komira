@@ -42,9 +42,9 @@
 #   - No __init__ in the trait (construction params differ per variant).
 # =============================================================================
 
-from komira_core.arrow import Column
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.column import Column
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
 
 
 trait Accumulator(Movable, Deinitable):

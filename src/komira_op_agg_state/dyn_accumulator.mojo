@@ -72,11 +72,11 @@
 
 from std.sys import size_of
 
-from komira_core.arrow import Column
-from komira_core.collections.dyn_value import DynValue
+from komira_arrow.column import Column
+from komira_collections.dyn_value import DynValue
 
 from komira_op_agg_state.accumulator_trait import Accumulator
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 # PERF-CRITICAL: MAX_ACC_SIZE must be large enough for the largest accumulator.
