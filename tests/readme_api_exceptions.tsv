@@ -1,0 +1,5 @@
+# The ledger of README API coverage (//:readme_api_coverage, tools/build/lint/readme_api_coverage.bzl;
+# docs/readme_api_coverage.md): public symbols allowed to have no use in their package's README examples.
+# One row each: <package> TAB <symbol> TAB <reason>; a method is <Struct>.<method>. It only shrinks: the
+# build fails on a row whose symbol is no longer exported or is used by a README example now, so the change
+# that documents it deletes the row. Empty while the lint is report-only.
