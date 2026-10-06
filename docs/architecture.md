@@ -134,11 +134,12 @@ dependency order is the order of the rows.
 ### End-to-end test packages
 
 Packages that exist for their welded tests: each runs several libraries
-together, over loopback, inside the build action.
+together inside the build action.
 
 | module | what it is |
 |---|---|
 | [`komira_http_tls_e2e`](../src/komira_http_tls_e2e/) | a real `komira_http_server` `HttpServer` against a real `komira_http_client` `HttpClient` in one process: an HTTP/1.1 GET over TLS checked byte for byte, the ALPN pivot to h2 on both sides, a 4 MiB plaintext response flushed through the server's buffered-write path (the server has no buffered-write path over TLS today), and the client refusing an untrusted root and a wrong server name while the server goes on serving. The library holds the shared TLS fixtures and the runner that steps the server on one thread while the client runs on another. |
+| [`komira_udf_e2e`](../src/komira_udf_e2e/) | the user-defined-function traits over in-memory Arrow columns with nulls: `Map1` sugar projected through `MapFnRT` and `ProjectList` over the rows a `FilterFn` keeps; a stateful custom `AggFn` per group through `AggFnAgg`, with partials merged in several orders and groups that hold only nulls or no rows; `WindowFn`s over `ROWS` frames read through `FrameView`, with the frames written out by hand and null-free inputs (komira has no frame scan, and `FrameView` exposes no validity); and a declared UDF round-tripped byte for byte through `komira_plan_wire` while a live closure is refused at encode. The library holds the nullable-column fixture. |
 
 ### Third-party code
 
