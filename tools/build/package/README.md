@@ -119,7 +119,7 @@ the greeting ([formats.sh](../tests/functional/formats.sh)).
 ## kcov is never packed
 
 kcov ([`toolchains/kcov`](../toolchains/kcov/README.md)) is GPL-2.0 and a
-build-only tool (the licence decision is pending: [kcov's
+build-only tool (the licence decision is recorded in [kcov's
 README](../toolchains/kcov/README.md#licences)), so no published artifact may
 hold it. Every package format runs [`kcov_guard.sh`](kcov_guard.sh) over what
 it packs, as a build action whose output its published files depend on
