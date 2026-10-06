@@ -8,7 +8,8 @@
 # label of every ArrowType arm, which columns are right-aligned, the footer
 # for each row-limit case, and the cell reader for each storage shape
 # (string, dictionary-encoded string, large string, int32, int64, float64,
-# float32, and the int64 fallback).
+# float32, and the int64 fallback). The FLOAT32 arm's return line is
+# unreachable; the last test pins the route that would reach it.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -309,6 +310,29 @@ def test_cell_float32_arm_reads_float64() raises:
         raised = True
         assert_true(String(e).find("mismatch") != -1, String(e))
     assert_true(raised, "a float32 cell read as float64 raises")
+
+
+def test_cell_float32_field_over_float64_storage_is_refused() raises:
+    """The FLOAT32 arm's return line cannot run, and this pins the last way
+    in. Its float64 read needs a column tagged FLOAT64 under a FLOAT32
+    field. The test above covers a float32 column, which fails the tag
+    check. Re-typing the field over float64 storage, as the dictionary test
+    does, is refused by RecordBatch's layout guard (4-byte against 8-byte
+    values) before the cell is read. The tag repair rewrites any other
+    column tag to FLOAT32, which also fails the float64 read."""
+    var vals: List[Float64] = [2.5, -1.25]
+    var batch = _one_column("g", ArrowType.FLOAT64, _f64(vals))
+    batch.schema._arrow_types[0] = ArrowType.FLOAT32.type_id
+    assert_true(
+        batch.schema.field_arrow_type(0) == ArrowType.FLOAT32, "re-typed"
+    )
+    var raised = False
+    try:
+        _ = format_table(batch)
+    except e:
+        raised = True
+        assert_true(String(e).find("LAYOUT CONFLICT") != -1, String(e))
+    assert_true(raised, "float64 storage under a FLOAT32 field is refused")
 
 
 def main() raises:
