@@ -528,8 +528,6 @@ aws_codegen_refusal(
     model = "model/tiny_restxml_checksum.json",
 )
 
-# The generated client signs with SigV4 only: a supported protocol whose
-# model declares another signatureVersion is refused, naming the value.
 # A bearer-token operation of the tiny awsQuery model (`authtype` `bearer`):
 # the client has no token source, and a SigV4 signature is the wrong
 # credential.
@@ -547,6 +545,8 @@ aws_codegen_refusal(
     model = TINY_QUERY.model,
 )
 
+# The generated client signs with SigV4 only: a supported protocol whose
+# model declares another signatureVersion is refused, naming the value.
 aws_codegen_refusal(
     name = "refuse_unsupported_signature_version",
     expect = "declares signatureVersion `v2`",
