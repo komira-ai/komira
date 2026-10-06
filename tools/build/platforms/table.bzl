@@ -45,10 +45,16 @@ def pin(name, url, sha256, executable = False):
 # The pinned downloads every registered row must state, by role. `none` is
 # allowed where a platform can need nothing (the conda runtime libraries the
 # osx-arm64 compiler does not link; the container base of a platform that
-# ships no containers).
+# ships no containers; kcov on a platform coverage does not run on).
 ASSET_ROLES = [
     "actionlint",
     "busybox",
+    "kcov_bzip2",
+    "kcov_elfutils",
+    "kcov_lzma",
+    "kcov_src",
+    "kcov_zlib",
+    "kcov_zstd",
     "libgcc",
     "libstdcxx",
     "libzlib",
@@ -60,7 +66,11 @@ ASSET_ROLES = [
     "shellcheck",
     "zig",
 ]
-_NONE_ALLOWED = ["busybox", "libgcc", "libstdcxx", "libzlib"]
+# kcov, the line coverage tool (tools/build/toolchains/kcov/README.md): its
+# source archive and the conda-forge packages holding the static libraries it
+# links. Coverage runs on linux-x86_64 only; every other row states `none`.
+_KCOV_ROLES = ["kcov_bzip2", "kcov_elfutils", "kcov_lzma", "kcov_src", "kcov_zlib", "kcov_zstd"]
+_NONE_ALLOWED = ["busybox", "libgcc", "libstdcxx", "libzlib"] + _KCOV_ROLES
 
 # Roles whose pin is the executable itself, downloaded with its mode bit set
 # and never unpacked: a real pin of one of these must say `executable = True`.
@@ -109,6 +119,9 @@ FEATURES = ["epoll", "erms", "futex", "kqueue", "neon", "thp", "ulock", "x86_sim
 
 # ---- The rows ------------------------------------------------------------------
 
+# Why a row pins no kcov (tools/build/toolchains/kcov/README.md).
+_KCOV_NONE = "line coverage is measured on linux-x86_64 only (limits.tsv `coverage-linux-x86-64`)"
+
 PLATFORMS = {
     "linux-x86_64": {
         "applets": none("the pinned busybox (assets.busybox) carries every applet"),
@@ -123,6 +136,40 @@ PLATFORMS = {
                 "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox",
                 "6e123e7f3202a8c1e9b1f94d8941580a25135382b99e8d3e34fb858bba311348",
                 executable = True,
+            ),
+            # kcov v42 (GPL-2.0): the tag's source archive, and the conda-forge
+            # packages of the static libraries it links: libdw.a and libelf.a
+            # with their headers, zlib's libz.a and zlib.h, and the
+            # decompressors libdw.a calls.
+            "kcov_bzip2": pin(
+                "bzip2_1.0.8_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda",
+                "1a0d382c515ebf55f8ee1f38c8b81bc95af5c2acc42ad53b66bc5df932032f96",
+            ),
+            "kcov_elfutils": pin(
+                "elfutils_0.194_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/elfutils-0.194-h849f50c_0.conda",
+                "f71eae7dc8ff9392d225d2d529691b2db16289b7d8009646eeb1adf0caf3937b",
+            ),
+            "kcov_lzma": pin(
+                "liblzma-static_5.8.3_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/liblzma-static-5.8.3-ha02ee65_1.conda",
+                "237563ec760527207b84338807e49e817ac53c3306e566aecaa4fd4a32530b56",
+            ),
+            "kcov_src": pin(
+                "kcov-v42.tar.gz",
+                "https://github.com/SimonKagstrom/kcov/archive/refs/tags/v42.tar.gz",
+                "2c47d75397af248bc387f60cdd79180763e1f88f3dd71c94bb52478f8e74a1f8",
+            ),
+            "kcov_zlib": pin(
+                "zlib_1.3.2_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/zlib-1.3.2-h25fd6f3_3.conda",
+                "16080a1c7724f7d25727cdc23c7658e0cec2db52448c1dc0c33467ee2c6e1c62",
+            ),
+            "kcov_zstd": pin(
+                "zstd-static_1.5.7_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/zstd-static-1.5.7-hb72f32e_7.conda",
+                "62e9e4b9274c2c7028e0bcdf80c254ee95499d4860e7c13d8926485d03b0d27b",
             ),
             "libgcc": pin(
                 "libgcc_15.3.0_linux-64.conda",
@@ -257,6 +304,12 @@ PLATFORMS = {
             # tools/build/mojo/darwin/busybox.sh, a fixed list resolved from
             # /bin and /usr/bin.
             "busybox": none("macOS resolves its applets through komira//tools/build/mojo/darwin:busybox.sh, not a pinned binary"),
+            "kcov_bzip2": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_elfutils": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_lzma": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_src": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_zlib": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_zstd": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "libgcc": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
             "libstdcxx": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
             "libzlib": none("the osx-arm64 closure takes no conda library: rustc for aarch64-apple-darwin links and runs without one"),
@@ -353,6 +406,12 @@ PLATFORMS = {
             # holds i686 and x86_64 only); a pinned source build or another
             # extractor is chosen when the platform is brought up.
             "busybox": pending("no upstream aarch64 static busybox exists; the bring-up chooses a pinned source build or the zig-built unpacker"),
+            "kcov_bzip2": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_elfutils": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_lzma": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_src": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_zlib": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
+            "kcov_zstd": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "libgcc": pin(
                 "libgcc_15.3.0_linux-aarch64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-15.3.0-h954ee24_7.conda",

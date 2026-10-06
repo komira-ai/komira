@@ -3,6 +3,7 @@ load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
+load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
 load(":release_set.bzl", "conda_release_set_check")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
@@ -28,9 +29,38 @@ zig_exe(
 shell_lint(
     name = "shell_lint",
     srcs = [
+        "kcov_guard.sh",
         "list_conda_targets.sh",
         "release_version.sh",
     ],
+)
+
+# kcov is GPL-2.0 and build-only: every package format runs this guard over
+# what it packs and refuses a file that is kcov's bin/kcov (by the sha256 in
+# tools/build/toolchains/kcov/identity.bzl) or holds its usage line
+# (kcov_guard.bzl, README.md "kcov is never packed"). It depends on no kcov
+# target. Gated by the cases below, so a guard that cannot refuse is red.
+kcov_guard_tool(
+    name = "kcov_guard",
+    exec_compatible_with = LINUX_X86_64,
+    script = "kcov_guard.sh",
+    checks = [":kcov_guard_cases"],
+    visibility = ["PUBLIC"],
+)
+
+# The guard on known inputs, with a fixture file standing for bin/kcov (its
+# sha256 is passed as the constant): a malformed sha256 or an empty line
+# (refused); the fixture renamed, as a file and under a path (refused by the
+# sha256); a file holding the usage line after other bytes, and the line
+# between NUL bytes (refused by the line); two offenders named together;
+# symlinks to the fixture and to a directory holding it; near misses of the
+# line, the line split by a NUL or a newline, and the fixture with a byte
+# more (accepted); and three of those through the guard's command line, as
+# the package rules run it.
+kcov_guard_cases(
+    name = "kcov_guard_cases",
+    exec_compatible_with = LINUX_X86_64,
+    script = "kcov_guard.sh",
 )
 
 # release_version.sh as a file: kci_workflow_check's welded test holds kci.yml's
