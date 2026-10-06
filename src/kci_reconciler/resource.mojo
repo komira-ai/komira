@@ -704,8 +704,9 @@ trait Resource(Movable, Deinitable):
     def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
         """Create the resource AS `creds` CARRYING `stamp` in the same call
         (the identity as labels, or as the description's first line on an
-        object that cannot carry labels; the provenance as annotations), and
-        return its physical id. The owned scope's create: there is never a
+        object that cannot carry labels; the provenance as annotations; the
+        stamp's validation run, when it has one, as the cloud's run-id
+        label), and return its physical id. The owned scope's create: there is never a
         moment when an object kci made exists without its stamp.
 
         DEFAULT = REFUSE (the engine checks `stamps_ownership` first, so this
@@ -720,7 +721,9 @@ trait Resource(Movable, Deinitable):
         mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
     ) raises:
         """Stamp the EXISTING unstamped object `physical_id` with `stamp`: the
-        explicit `--adopt <id>` takeover, and nothing else calls it.
+        explicit `--adopt <id>` takeover, and nothing else calls it. The
+        stamp's validation run is NOT written: the run did not create the
+        object, so it must not be able to claim it.
 
         DEFAULT = REFUSE."""
         raise Error(

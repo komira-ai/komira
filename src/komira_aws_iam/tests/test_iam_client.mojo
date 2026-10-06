@@ -1,4 +1,4 @@
-# The generated IAM client (`IAMIAMClient`) end to end, with no socket.
+# The generated IAM client (`IAMClient`) end to end, with no socket.
 #
 # Over komira_http_client and komira_http_core's ScriptedConnector, sent to
 # a custom endpoint: a GetRole answered with its <GetRoleResult>, and one
@@ -21,7 +21,7 @@ from komira_aws_iam.komira_aws_iam import (
     IAMCreateUserRequest,
     IAMEndpointConfig,
     IAMGetRoleRequest,
-    IAMIAMClient,
+    IAMClient,
     parse_create_user_response,
 )
 from komira_aws_core import (
@@ -104,10 +104,10 @@ def _creds() -> StaticCredsSource:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> IAMIAMClient[C, StaticCredsSource]:
+) raises -> IAMClient[C, StaticCredsSource]:
     var config = IAMEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return IAMIAMClient[C, StaticCredsSource](
+    return IAMClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         _creds(),
@@ -127,7 +127,7 @@ def test_a_missing_role_is_raised_under_its_code() raises:
     var client = _client(_mk_missing)
     with assert_raises(
         contains=(
-            "IAMIAM.GetRole failed: HTTP 404 NoSuchEntity"
+            "IAM.GetRole failed: HTTP 404 NoSuchEntity"
             " The role with name gone cannot be found."
         )
     ):
@@ -176,7 +176,7 @@ struct Answering(AwsHttpTransport, Movable, Deinitable):
 def test_a_regional_client_reaches_the_global_endpoint() raises:
     # No endpoint override: the client resolves IAM's ruleset for its own
     # region, eu-west-1.
-    var client = IAMIAMClient[ScriptedConnector, StaticCredsSource](
+    var client = IAMClient[ScriptedConnector, StaticCredsSource](
         _mk_missing, HttpClientConfig.defaults(), _creds(), String("eu-west-1")
     )
     var transport = Answering(

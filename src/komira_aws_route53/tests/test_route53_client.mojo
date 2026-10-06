@@ -1,4 +1,4 @@
-# The generated Route 53 client (`Route53Route53Client`) end to end, with
+# The generated Route 53 client (`Route53Client`) end to end, with
 # no socket.
 #
 # Over komira_http_client and komira_http_core's ScriptedConnector, to a
@@ -34,7 +34,7 @@ from komira_aws_route53.komira_aws_route53 import (
     Route53ListResourceRecordSetsRequest,
     Route53ResourceRecord,
     Route53ResourceRecordSet,
-    Route53Route53Client,
+    Route53Client,
     parse_change_resource_record_sets_response,
     parse_list_hosted_zones_by_name_response,
 )
@@ -134,10 +134,10 @@ def _creds() -> StaticCredsSource:
 
 def _local[C: Connector](
     mk: def () raises thin -> C,
-) raises -> Route53Route53Client[C, StaticCredsSource]:
+) raises -> Route53Client[C, StaticCredsSource]:
     var config = Route53EndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return Route53Route53Client[C, StaticCredsSource](
+    return Route53Client[C, StaticCredsSource](
         mk, HttpClientConfig.defaults(), _creds(), String("eu-west-1"), config^
     )
 
@@ -309,10 +309,10 @@ def _never() raises -> ScriptedConnector:
     raise Error("a verb over injected seams dialed through the factory")
 
 
-def _global() raises -> Route53Route53Client[ScriptedConnector, StaticCredsSource]:
+def _global() raises -> Route53Client[ScriptedConnector, StaticCredsSource]:
     # No endpoint override: where the call goes is the ruleset's answer
     # for the client's region.
-    return Route53Route53Client[ScriptedConnector, StaticCredsSource](
+    return Route53Client[ScriptedConnector, StaticCredsSource](
         _never, HttpClientConfig.defaults(), _creds(), String("eu-west-1")
     )
 

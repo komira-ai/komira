@@ -8,7 +8,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # ownership labels, and a faulty variant (failure at call k, read lag, a
 # pre-existing foreign object, a raced create) runs offline. "fake" can be
 # built with a provider shape (aws, gcp, azure, onprem): the per-cloud fixed roles
-# and provider kinds each catalog type lowers to.
+# and provider kinds each catalog type lowers to. Every node's create path
+# calls kci_cloud's create_labels, so an object created in a scope with a
+# validation run id carries the `kci-run-id` label, and every object carries
+# the `kci-retention` mark, on every shape and both clouds.
+#
+# komira_validation_run is in the closure through kci_cloud's label rule
+# (create_labels); the welded run-tag test also imports it directly.
 #
 # komira_proto_codec is here for the welded tests, which read graphs in the
 # proto3 JSON form an author writes.
@@ -20,14 +26,21 @@ mojo_library(
         "//src/kci_reconciler:kci_reconciler",
         "//src/kci_resource_proto:kci_resource_proto",
         "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_validation_run:komira_validation_run",
     ],
     test_srcs = [
+        "tests/test_deploy_lifecycle_e2e.mojo",
         "tests/test_fake_bucket_retention.mojo",
         "tests/test_fake_conformance.mojo",
         "tests/test_fake_faulty_variant.mojo",
         "tests/test_fake_limited_refuses_offline.mojo",
         "tests/test_fake_provider_shapes.mojo",
         "tests/test_fake_table.mojo",
+        "tests/test_fake_validation_run_tag.mojo",
     ],
+    test_data = {
+        # The authored graph the lifecycle test reads, as an author writes it.
+        "tests/test_deploy_lifecycle_e2e.mojo": ["tests/test_data/deploy_lifecycle_graph.json"],
+    },
     visibility = ["PUBLIC"],
 )

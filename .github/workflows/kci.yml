@@ -87,6 +87,7 @@
 # Every release job ends with the step `the prod line` (R20), which says in
 # one plain line of the job summary what happens to prod: SKIPPED (and why),
 # NEXT, PLAN ONLY, or FAILED; prod's own kci run says `promoted to prod: ...`.
+# The step never runs `exit`, so it reaches its end on every path.
 #
 # Each channel trusts this repository, this file (kci.yml) and one environment
 # (trusted publishing): no secret is stored anywhere. The publish jobs stay
@@ -681,9 +682,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
       # R20: kci itself wrote `promoted to prod: ...` and the commits this
-      # release carried on success; this step says the failure, and a main
-      # that has moved past this revision (a newer run is pending, or one
-      # was replaced or cancelled: docs/ci.md, "Queued runs").
+      # release carried on success; this step says the failure, and, on a
+      # failure AND on a success, a main that has moved past this revision
+      # (a newer run is pending, or one was replaced or cancelled: docs/ci.md,
+      # "Queued runs"). A re-run of an old push run of main that replaced a
+      # newer pending release, then was refused at prod (KCI-E-SUPERSEDED),
+      # gets that line too, so its summary asks for the newer release to be
+      # re-run. The script has no `exit` (R20), and it writes neither
+      # GITHUB_ENV nor DRY_RUN (R22).
       - name: the prod line
         if: always()
         env:
@@ -694,11 +700,10 @@ jobs:
             line="prod: FAILED ($JOB_STATUS${rc:+: exit $rc}) $REVISION: see kci-result-prod-$REVISION"
             echo "### $line" >> "$GITHUB_STEP_SUMMARY"
             echo "$line" >&2
-            exit 0
           fi
-          tip=$(git rev-parse --verify --quiet refs/remotes/origin/main || true)
+          tip=$(git rev-parse --verify --quiet refs/remotes/origin/main 2>/dev/null || true)
           if [ -n "$tip" ] && [ "$tip" != "$REVISION" ] &&
-            [ -n "$(git rev-list --first-parent --max-count=1 "$REVISION..$tip" -- . ':(exclude)docs' ':(exclude)*.md')" ]; then
+            [ -n "$(git rev-list --first-parent --max-count=1 "$REVISION..$tip" -- . ':(exclude)docs' ':(exclude)*.md' 2>/dev/null)" ]; then
             line="prod: main is at ${tip:0:8}, past ${REVISION:0:8}: a newer run is pending, or was replaced or cancelled; if none is queued, re-run the newest cancelled run of main"
             echo "### $line" >> "$GITHUB_STEP_SUMMARY"
             echo "$line" >&2

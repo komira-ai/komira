@@ -19,8 +19,17 @@
 #     part of the identity, never compared and never in a digest: a per-run
 #     value in the digest would make every apply a diff (and, on Cloud Run,
 #     mint a new revision on every push).
+#   * `validation_run_id` is WHICH VALIDATION RUN CREATED IT, or None when the
+#     apply is not part of a validation run. It rides in the stamp beside the
+#     provenance and, like it, is never part of the identity, never compared
+#     and never in a digest. Unlike it, it is written ONCE, by the create call
+#     (an update or an adoption never writes it): it says who created the
+#     object, so a cleanup can act on what a run can prove it made. The engine
+#     carries it opaque; kci_cloud checks it against komira_validation_run's
+#     rule before any create and writes it as the `<prefix>-run-id` label.
 #
-# `CellScope (machine, cell, provenance, adopt)` is what an apply runs IN. An
+# `CellScope (machine, cell, provenance, adopt, validation_run_id)` is what an
+# apply runs IN. An
 # OWNED scope (machine and cell both set) turns on the ownership rules in
 # engine.mojo; the UNOWNED scope (both empty) is the engine's older single-cell
 # form, with no stamp and no foreign check, kept for the conformers that do
@@ -107,8 +116,9 @@ struct Provenance(Copyable, Movable, Deinitable):
 
 
 struct OwnerStamp(Copyable, Movable, Deinitable):
-    """The identity a node's object carries, plus the provenance written beside
-    it. `identity()` is what the engine compares; `provenance` is not."""
+    """The identity a node's object carries, plus the provenance and the
+    validation run written beside it. `identity()` is what the engine
+    compares; `provenance` and `validation_run_id` are not."""
 
     var machine: String
     var cell: String
@@ -116,6 +126,7 @@ struct OwnerStamp(Copyable, Movable, Deinitable):
     var role: String
     var scheme: Int
     var provenance: Provenance
+    var validation_run_id: Optional[String]
 
     def __init__(
         out self,
@@ -125,6 +136,7 @@ struct OwnerStamp(Copyable, Movable, Deinitable):
         role: String,
         scheme: Int = KCI_SCHEME,
         provenance: Provenance = Provenance.none(),
+        validation_run_id: Optional[String] = None,
     ):
         self.machine = machine
         self.cell = cell
@@ -132,6 +144,7 @@ struct OwnerStamp(Copyable, Movable, Deinitable):
         self.role = role
         self.scheme = scheme
         self.provenance = provenance.copy()
+        self.validation_run_id = validation_run_id.copy()
 
     def __init__(out self, *, copy: Self):
         self.machine = copy.machine.copy()
@@ -140,6 +153,7 @@ struct OwnerStamp(Copyable, Movable, Deinitable):
         self.role = copy.role.copy()
         self.scheme = copy.scheme
         self.provenance = copy.provenance.copy()
+        self.validation_run_id = copy.validation_run_id.copy()
 
     def identity(self) -> String:
         """The comparable identity, one line, the same words a cloud object
@@ -160,7 +174,7 @@ struct OwnerStamp(Copyable, Movable, Deinitable):
 
     def labels(self) -> List[Label]:
         """The six identity labels, raw (a cloud's label rule encodes them).
-        Provenance is not among them."""
+        Provenance and the validation run are not among them."""
         var out = List[Label]()
         out.append(Label(String(LABEL_MANAGED_BY), String(MANAGED_BY_KCI)))
         out.append(Label(String(LABEL_MACHINE), self.machine.copy()))
@@ -220,13 +234,15 @@ struct OwnerStamp(Copyable, Movable, Deinitable):
 
 struct CellScope(Copyable, Movable, Deinitable):
     """What an apply runs in: the release machine, the cell, the provenance of
-    this run, and the logical ids the run was told to ADOPT (`--adopt <id>`,
-    the only way an unstamped object of a wanted name is taken over)."""
+    this run, the logical ids the run was told to ADOPT (`--adopt <id>`, the
+    only way an unstamped object of a wanted name is taken over), and the id
+    of the validation run this apply is part of (None outside one)."""
 
     var machine: String
     var cell: String
     var provenance: Provenance
     var adopt: List[String]
+    var validation_run_id: Optional[String]
 
     def __init__(
         out self,
@@ -234,17 +250,20 @@ struct CellScope(Copyable, Movable, Deinitable):
         cell: String,
         provenance: Provenance = Provenance.none(),
         var adopt: List[String] = List[String](),
+        validation_run_id: Optional[String] = None,
     ):
         self.machine = machine
         self.cell = cell
         self.provenance = provenance.copy()
         self.adopt = adopt^
+        self.validation_run_id = validation_run_id.copy()
 
     def __init__(out self, *, copy: Self):
         self.machine = copy.machine.copy()
         self.cell = copy.cell.copy()
         self.provenance = copy.provenance.copy()
         self.adopt = copy.adopt.copy()
+        self.validation_run_id = copy.validation_run_id.copy()
 
     @staticmethod
     def unowned() -> CellScope:
@@ -263,7 +282,8 @@ struct CellScope(Copyable, Movable, Deinitable):
         """The stamp of node `logical_id` lowered from authored resource
         `owner`: resource = the owner, role = the rest of the node id (node
         ids are `<resource>/<role>`). A node with no owner is its own resource
-        with an empty role."""
+        with an empty role. The stamp carries this scope's provenance and
+        validation run."""
         var resource = logical_id.copy()
         var role = String("")
         var prefix = owner + String("/")
@@ -277,6 +297,7 @@ struct CellScope(Copyable, Movable, Deinitable):
             role^,
             KCI_SCHEME,
             self.provenance.copy(),
+            self.validation_run_id.copy(),
         )
 
     def adopts(self, logical_id: String) -> Bool:
