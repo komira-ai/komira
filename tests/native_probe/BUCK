@@ -1,0 +1,49 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load(":probe.bzl", "native_probe")
+
+# EXPERIMENT (branch exp/native-probe, never merged). Can a Mojo program
+# compiled against an installed, conda-shaped prefix (a directory of .mojoc
+# files) link a library whose native code ships (a) as a static archive passed
+# by flags, or (b) as a shared library opened by dlopen at run time?
+#
+#   ./buck2 build komira//tests/native_probe:report --show-output
+#
+# The cases are in case.sh. A0, AR0, B0 and BR0 are controls that must fail.
+# A case action always succeeds; its log holds MOJO_RC=, RUN_RC= and ANSWER.
+
+staged_files(
+    name = "probe_files",
+    srcs = ["probe.c"],
+)
+
+cxx_library(
+    name = "probe_c",
+    srcs = [":probe_files[probe.c]"],
+    soname = "libkomira_probe.so.1",
+)
+
+# No dependency on :probe_c: a .mojoc carries no native code, and the point is
+# what a consumer of the installed package must add.
+mojo_library(
+    name = "probe_static",
+    srcs = ["probe_static/__init__.mojo"],
+    conda = False,
+)
+
+mojo_library(
+    name = "probe_dl",
+    srcs = ["probe_dl/__init__.mojo"],
+    conda = False,
+)
+
+native_probe(
+    name = "report",
+    archive = ":probe_c[static-pic]",
+    cases = ["A0", "A0t", "A1", "A2", "A1t", "A1tf", "A3", "A3L", "AR0", "AR", "AR2", "AR3", "AR4", "B0", "B1", "B1bin", "B1binrp", "B2", "BR0", "BR"],
+    consumers = ["consumers/consumer_static.mojo", "consumers/consumer_dl.mojo"],
+    dl_pkg = ":probe_dl",
+    script = "case.sh",
+    shared = ":probe_c[shared]",
+    static_pkg = ":probe_static",
+)
