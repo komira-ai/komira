@@ -137,10 +137,12 @@ def test_the_same_file_applies_on_fake() raises:
     var store = InMemoryStateStore()
     var outcome = apply_resources(reg, fake, _ctx(), _list(_file()), Creds.none(), store)
     assert_true(outcome.ok())
-    # api/run, api/public, api/uses/nightly, nightly/run, nightly/schedule
-    assert_equal(len(outcome.applied), 5)
-    assert_equal(fake.live_count(), 5)
-    assert_true(fake.store[].find(String("api/uses/nightly")) >= 0, "the grant exists")
+    # api: identity, run, public, u-tvhrhu (CALL nightly), u-gktqg5 (cell LOGS);
+    # nightly: identity, run, schedule, u-g2ewtg (cell LOGS)
+    assert_equal(len(outcome.applied), 9)
+    assert_equal(fake.live_count(), 9)
+    assert_true(fake.store[].find(String("api/u-tvhrhu")) >= 0, "the grant exists")
+    assert_true(fake.store[].find(String("api/u-gktqg5")) >= 0, "the implicit LOGS grant exists")
     assert_true(fake.store[].find(String("api/public")) >= 0, "the public role exists")
     var i = fake.store[].find(String("nightly/schedule"))
     assert_true(_has(fake.store[].digests[i], "|cron=0 3 * * *|tz=UTC"), fake.store[].digests[i])
@@ -157,9 +159,10 @@ def test_fake_limited_hosts_what_it_can() raises:
     )
     var outcome = apply_resources(reg, limited, _ctx(), _list(ok), Creds.none(), store)
     assert_true(outcome.ok())
-    # api/run, and api/public turned off (internal): nothing to remove
-    assert_equal(len(outcome.applied), 2)
-    assert_equal(limited.live_count(), 1)
+    # api/identity, api/run, api/u-gktqg5 (cell LOGS), and api/public turned
+    # off (internal): nothing to remove
+    assert_equal(len(outcome.applied), 4)
+    assert_equal(limited.live_count(), 3)
     print("  test_fake_limited_hosts_what_it_can: PASS")
 
 
@@ -187,30 +190,9 @@ def test_a_limit_is_refused_the_same_way() raises:
 
 
 def _bound_job_catalog() raises -> Catalog:
-    """v1's three types, with `job` marked CLOUD_BOUND."""
-    var c = Catalog()
-    var svc_out = List[String]()
-    svc_out.append(String(OUTPUT_URL))
-    svc_out.append(String(OUTPUT_HOST))
-    var call = List[String]()
-    call.append(String(ACCESS_CALL))
-    c.add(CatalogType(FIELD_SERVICE, String("service"), PORTABLE, svc_out^, call.copy()))
-    c.add(CatalogType(FIELD_JOB, String("job"), CLOUD_BOUND, List[String](), call^))
-    var bucket_out = List[String]()
-    bucket_out.append(String(OUTPUT_NAME))
-    var read = List[String]()
-    read.append(String(ACCESS_READ))
-    c.add(
-        CatalogType(
-            FIELD_BUCKET,
-            String("bucket"),
-            PORTABLE,
-            bucket_out^,
-            read^,
-            retention_default=RETENTION_KEEP,
-            primary_role=String("bucket"),
-        )
-    )
+    """v1's types, with `job` marked CLOUD_BOUND."""
+    var c = Catalog.v1()
+    c.types[c.index_of(FIELD_JOB)].portability = CLOUD_BOUND
     return c^
 
 

@@ -32,7 +32,7 @@
 
 from komira_core.arrow.arrow_types import ArrowType
 
-from komira_jsonl.simd_primitives import (
+from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,
@@ -42,12 +42,12 @@ from komira_jsonl.simd_primitives import (
     TAG_QUOTE_OPEN,
     TAG_QUOTE_CLOSE,
 )
-from komira_jsonl.structural_index import StructuralIndex
+from komira_json_index.structural_index import StructuralIndex
 from komira_jsonl.value_parsers.parse_bool import parse_bool, parse_null
 from komira_jsonl.value_parsers.parse_date import parse_date32
 from komira_jsonl.value_parsers.parse_float import parse_float_f64
 from komira_jsonl.value_parsers.parse_int import parse_int_i64
-from komira_jsonl.value_parsers.parse_string import (
+from komira_json_index.parse_string import (
     parse_string_raw,
     parse_string_with_escapes,
 )
