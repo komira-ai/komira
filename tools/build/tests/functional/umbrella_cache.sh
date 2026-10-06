@@ -262,4 +262,65 @@ for d in umbrella umbrella_deep external; do
         die "action digests differ between the standalone checkout and $d"
     fi
 done
+# A package in the consumer's own cell depends on a komira package. buck2 keys a
+# .bzl module by the cell of the BUCK file that loads it, so the rules load once
+# for `app` and once for `komira`, and the two loads must still agree on what a
+# package closure is. The same check, a library, its gated test, and a binary
+# on the library, in the consumer that mounts komira at ./komira (the layout of
+# a repository whose root cell contains the komira directory) and in the one that
+# fetches it as an external cell. The binary's compile must put both packages on -I.
+for d in umbrella external; do
+    mkdir -p "$W/$d/cross/crosspkg" "$W/$d/cross/tests"
+    cat > "$W/$d/cross/BUCK" <<'BUCKEOF'
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+mojo_library(
+    name = "crosspkg",
+    srcs = ["crosspkg/__init__.mojo"],
+    test_srcs = ["tests/test_crosspkg.mojo"],
+    deps = ["komira//tools/build/examples:hellopkg"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_binary(
+    name = "cross_user",
+    srcs = ["cross_user.mojo"],
+    deps = [":crosspkg"],
+    expected_stdout = "hello from hellopkg, via crosspkg\n",
+)
+BUCKEOF
+    cat > "$W/$d/cross/crosspkg/__init__.mojo" <<'MOEOF'
+from hellopkg import greeting
+
+
+def shout() -> String:
+    return greeting() + String(", via crosspkg")
+MOEOF
+    cat > "$W/$d/cross/tests/test_crosspkg.mojo" <<'MOEOF'
+from crosspkg import shout
+from std.testing import assert_equal
+
+
+def main() raises:
+    assert_equal(shout(), "hello from hellopkg, via crosspkg", "a package built on one from another cell")
+    print("test_crosspkg: PASS")
+MOEOF
+    cat > "$W/$d/cross/cross_user.mojo" <<'MOEOF'
+from crosspkg import shout
+
+
+def main():
+    print(shout())
+MOEOF
+    build "$d" 3 app//cross:crosspkg app//cross:cross_user "app//cross:cross_user[run_check]"
+    (cd "$W/$d" && "$BUCK2" aquery 'attrfilter(category, mojo_build, app//cross:cross_user)' --output-attribute cmd) \
+        > "$W/$d.cross.json" 2>&1 || die "$d: aquery of app//cross:cross_user failed (see $W/$d.cross.json)"
+    for pkg in crosspkg hellopkg; do
+        grep -q -- "-I[^,]*/__${pkg}__/" "$W/$d.cross.json" ||
+            die "$d: app//cross:cross_user's compile does not put $pkg on -I (see $W/$d.cross.json)"
+    done
+    (cd "$W/$d" && "$BUCK2" kill > /dev/null 2>&1)
+done
+echo "      cross cell: a library, its gated test and a binary in the consumer's own cell build on a komira package (submodule and external cell)"
+
 echo "PASS  umbrella cache: $n actions, identical digests as a submodule at depths 1 and 2 (one with a frozen toolchains copy) and as a git external cell, every consumer command a cache hit; consumer toolchain overrides take effect"

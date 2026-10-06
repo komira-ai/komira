@@ -1,0 +1,178 @@
+# AzureSasSigner, komira_objectstore's ObjectUrlSigner as a blob service SAS,
+# at a fixed clock (2026-10-01T12:00:00Z), with a dummy account key.
+#
+# Rows: one generic mint over the trait gives a GET and a PUT URL on the
+# account's blob host, and only the upload carries the required
+# `x-ms-blob-type: BlockBlob`; both URLs equal goldens computed independently
+# (Python's hmac and urllib over the documented string-to-sign, values
+# below); the string-to-sign is sixteen positional fields (counted, since a
+# dropped empty field is invisible in a diff and fatal on the wire), the
+# permission letters are in Azure's order (`cw`, not `wc`), the resource is
+# URL-decoded and the instants are absolute RFC 3339 UTC; the TTL ceiling
+# refuses rather than clamps; the same inputs sign the same; and a key path
+# is signed as given, never normalized.
+#
+# Goldens, by Python, key = base64.b64decode(_AZURE_KEY):
+#   sts = "\n".join([sp, "2026-10-01T12:00:00Z", "2026-10-01T12:05:00Z",
+#                    "/blob/myaccount/repo-container/lake/events/part-0001.parquet",
+#                    "", "", "https", "2020-12-06", "b", "", "", "", "", "", "", ""])
+#   base64(hmac.new(key, sts.encode(), sha256).digest())
+#     sp="r"  -> xvFLpnr8zb+g9fCQsN0TM7jdDRj+l4QJkkpR38L/Lqo=
+#     sp="cw" -> BJcZ8XJeA6sKEeIbgE1lfuN2xjwWpi5oPGuYy2oC7qA=
+from std.testing import assert_equal, assert_raises, assert_true
+
+from komira_azure_blob import (
+    AZURE_SAS_PERM_CREATE_WRITE,
+    AZURE_SAS_PERM_READ,
+    AZURE_SAS_VERSION,
+    AzureSasSigner,
+    azure_blob_service_sas,
+    azure_sas_canonicalized_resource,
+    azure_sas_iso8601_utc,
+)
+from komira_objectstore.presign import (
+    PRESIGN_MAX_TTL_SECONDS,
+    ObjectUrlSigner,
+    PresignedUrl,
+)
+
+
+comptime _KEY = "lake/events/part-0001.parquet"
+comptime _TTL: Int = 300
+comptime _FIXED_NOW: Int64 = 1790856000  # 2026-10-01T12:00:00Z
+
+# A DUMMY account key: base64 of "azure-sas-test-key-not-a-real-account-key!".
+# Not a credential for anything.
+comptime _AZURE_KEY = "YXp1cmUtc2FzLXRlc3Qta2V5LW5vdC1hLXJlYWwtYWNjb3VudC1rZXkh"
+
+comptime _GET_URL = (
+    "https://myaccount.blob.core.windows.net/repo-container/lake/events/part-0001.parquet"
+    "?sp=r&st=2026-10-01T12%3A00%3A00Z&se=2026-10-01T12%3A05%3A00Z&spr=https"
+    "&sv=2020-12-06&sr=b&sig=xvFLpnr8zb%2Bg9fCQsN0TM7jdDRj%2Bl4QJkkpR38L%2FLqo%3D"
+)
+comptime _PUT_URL = (
+    "https://myaccount.blob.core.windows.net/repo-container/lake/events/part-0001.parquet"
+    "?sp=cw&st=2026-10-01T12%3A00%3A00Z&se=2026-10-01T12%3A05%3A00Z&spr=https"
+    "&sv=2020-12-06&sr=b&sig=BJcZ8XJeA6sKEeIbgE1lfuN2xjwWpi5oPGuYy2oC7qA%3D"
+)
+
+
+def _azure() -> AzureSasSigner:
+    return AzureSasSigner(
+        String("myaccount"),
+        String("repo-container"),
+        String(_AZURE_KEY),
+        _FIXED_NOW,
+    )
+
+
+def _mint[S: ObjectUrlSigner](
+    mut signer: S, key: String, ttl: Int
+) raises -> Tuple[PresignedUrl, PresignedUrl]:
+    """Names no cloud: the trait is the seam."""
+    return Tuple[PresignedUrl, PresignedUrl](
+        signer.presign_download(key, ttl), signer.presign_upload(key, ttl)
+    )
+
+
+def test_generic_mint_matches_the_goldens() raises:
+    var az = _azure()
+    var a = _mint(az, String(_KEY), _TTL)
+    assert_equal(az.signer_cloud(), String("azure"))
+    assert_equal(a[0].method, String("GET"))
+    assert_equal(a[1].method, String("PUT"))
+    assert_equal(a[0].url, String(_GET_URL))
+    assert_equal(a[1].url, String(_PUT_URL))
+    # Only the upload requires a client header.
+    assert_equal(len(a[0].required_headers), 0)
+    assert_equal(len(a[1].required_headers), 1)
+    assert_equal(a[1].required_headers[0].name, String("x-ms-blob-type"))
+    assert_equal(a[1].required_headers[0].value, String("BlockBlob"))
+    assert_equal(a[0].expires_unix_seconds, _FIXED_NOW + Int64(_TTL))
+    assert_equal(a[1].expires_unix_seconds, _FIXED_NOW + Int64(_TTL))
+
+
+def test_string_to_sign_is_sixteen_positional_fields() raises:
+    var res = azure_blob_service_sas(
+        String("myaccount"),
+        String("repo-container"),
+        String(_KEY),
+        String(AZURE_SAS_PERM_READ),
+        _FIXED_NOW,
+        _FIXED_NOW + Int64(_TTL),
+        String(_AZURE_KEY),
+    )
+    var lines = res.string_to_sign.split("\n")
+    assert_equal(len(lines), 16)
+    assert_equal(String(lines[0]), String("r"))  # sp
+    assert_equal(String(lines[1]), String("2026-10-01T12:00:00Z"))  # st
+    assert_equal(String(lines[2]), String("2026-10-01T12:05:00Z"))  # se
+    assert_equal(
+        String(lines[3]),
+        String("/blob/myaccount/repo-container/lake/events/part-0001.parquet"),
+    )
+    assert_equal(String(lines[4]), String(""))  # si
+    assert_equal(String(lines[5]), String(""))  # sip
+    assert_equal(String(lines[6]), String("https"))  # spr
+    assert_equal(String(lines[7]), String(AZURE_SAS_VERSION))  # sv
+    assert_equal(String(lines[8]), String("b"))  # sr
+    for k in range(9, 16):
+        assert_equal(String(lines[k]), String(""))  # snapshot, ses, rsc*
+    assert_equal(res.signature_base64, "xvFLpnr8zb+g9fCQsN0TM7jdDRj+l4QJkkpR38L/Lqo=")
+    # The permission letters are in Azure's documented order.
+    assert_equal(String(AZURE_SAS_PERM_CREATE_WRITE), String("cw"))
+    # The canonicalized resource is URL-DECODED.
+    assert_equal(
+        azure_sas_canonicalized_resource(String("acct"), String("cont"), String("a b/c")),
+        String("/blob/acct/cont/a b/c"),
+    )
+    # The instants are absolute RFC 3339 UTC, whole seconds.
+    assert_equal(azure_sas_iso8601_utc(_FIXED_NOW), String("2026-10-01T12:00:00Z"))
+    assert_equal(azure_sas_iso8601_utc(Int64(0)), String("1970-01-01T00:00:00Z"))
+
+
+def test_ttl_ceiling_refuses() raises:
+    assert_equal(PRESIGN_MAX_TTL_SECONDS, 3600)
+    var az = _azure()
+    with assert_raises():
+        _ = az.presign_upload(String(_KEY), PRESIGN_MAX_TTL_SECONDS + 1)
+    with assert_raises():
+        _ = az.presign_download(String(_KEY), 0)
+    # At the ceiling it mints.
+    var at = az.presign_download(String(_KEY), PRESIGN_MAX_TTL_SECONDS)
+    assert_equal(at.expires_unix_seconds, _FIXED_NOW + Int64(PRESIGN_MAX_TTL_SECONDS))
+    with assert_raises(contains="refusing to sign an empty blob name"):
+        _ = az.presign_download(String(""), _TTL)
+
+
+def test_signatures_are_deterministic() raises:
+    var a1 = _azure()
+    var a2 = _azure()
+    var u1 = a1.presign_download(String(_KEY), _TTL)
+    assert_equal(u1.url, a2.presign_download(String(_KEY), _TTL).url)
+    var up = a1.presign_upload(String(_KEY), _TTL)
+    assert_true(up.url != u1.url)
+
+
+def test_key_paths_are_never_normalized() raises:
+    """`a//b`, `a/./b` and `a/../b` are three DIFFERENT blobs: each is signed
+    and addressed as given."""
+    var az = _azure()
+    var keys: List[String] = ["d//x", "d/./x", "d/a/../x"]
+    for i in range(len(keys)):
+        var u = az.presign_download(keys[i], _TTL)
+        assert_true(
+            u.url.find(String("/repo-container/") + keys[i] + "?") > 0, u.url
+        )
+    # `&` is encoded in the path, `/` is not.
+    var amp = az.presign_download(String("d/a&c"), _TTL)
+    assert_true(amp.url.find(String("/repo-container/d/a%26c?")) > 0, amp.url)
+
+
+def main() raises:
+    test_generic_mint_matches_the_goldens()
+    test_string_to_sign_is_sixteen_positional_fields()
+    test_ttl_ceiling_refuses()
+    test_signatures_are_deterministic()
+    test_key_paths_are_never_normalized()
+    print("OK")

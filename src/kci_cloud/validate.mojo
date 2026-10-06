@@ -15,7 +15,11 @@
 #      facade before a cloud ever sees the resource) in `env` of a service
 #      AND of a job, a variable set by `env` or by `secret_env` but not both,
 #      a secret reference with a name, and an image platform written as
-#      `<os>/<cpu>` (empty means `linux/amd64`).
+#      `<os>/<cpu>` (empty means `linux/amd64`). And the data rules:
+#      `retention` only on a type that takes one (a service or a job is
+#      deleted with its resource) and only DELETE or KEEP; a bucket's
+#      `object_expiry_days` never an explicit 0; no `uses` on a bucket (it
+#      runs as no identity, so it can be granted to, never grant).
 #   2. COVERAGE findings: the chosen cloud has no adapter for a type. The
 #      text carries the cloud's typed absence and the built-in clouds
 #      that do host the type.
@@ -26,6 +30,14 @@
 #      service in a cell whose settings choose no public mechanism
 #      (`CloudAdapter.public_mechanism`). The mechanism is chosen HERE, from
 #      the cell's settings, and never fallen back on at apply time.
+#
+#   4. The ROLE LABEL BUDGET (`role_budget_findings`), the one check that
+#      needs the lowering: every lowered node's role (the node id after its
+#      owner) must fit the 63-byte label value once encoded. It is a GRAPH
+#      finding naming the node, the byte count and every segment's length,
+#      and it runs after lowering (data, nothing realized) and before
+#      anything is created. Nesting is unbounded in the schema; this is its
+#      practical bound.
 #
 # ⛔ A FINDING IS A REFUSAL OF THE WHOLE GRAPH. There is no "skip what the
 # cloud cannot do": that turns "cannot do it yet" into a silently thinner
@@ -38,14 +50,26 @@ from kci_cloud.adapter import (
     CloudAdapter,
     ArtifactNeed,
     Finding,
+    LoweredNode,
     FINDING_GRAPH,
     FINDING_COVERAGE,
     FINDING_LIMIT,
     absence_word,
 )
-from kci_cloud.catalog import Catalog, body_field, portability_word
+from kci_cloud.catalog import (
+    Catalog,
+    FIELD_BUCKET,
+    FIELD_JOB,
+    FIELD_SERVICE,
+    RETENTION_DELETE,
+    RETENTION_KEEP,
+    RETENTION_NONE,
+    body_field,
+    portability_word,
+)
 from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
+from kci_cloud.labels import LABEL_VALUE_MAX, encoded_label_bytes
 
 
 def _index_of_id(resources: List[Resource], id: String) -> Int:
@@ -331,8 +355,64 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             )
             continue
         var tname = catalog.types[t].name.copy()
-        _check_image(id, tname + String(".image"), r, out)
-        if field == 10:
+        var retention = r.retention.value
+        if retention != RETENTION_NONE:
+            if not catalog.types[t].takes_retention():
+                out.append(
+                    Finding(
+                        FINDING_GRAPH,
+                        id,
+                        String("retention"),
+                        String("a ")
+                        + tname
+                        + String(
+                            " takes no retention: it is deleted with its resource;"
+                            " retention is for data types"
+                        ),
+                    )
+                )
+            elif retention != RETENTION_DELETE and retention != RETENTION_KEEP:
+                out.append(
+                    Finding(
+                        FINDING_GRAPH,
+                        id,
+                        String("retention"),
+                        String("retention value ")
+                        + String(retention)
+                        + String(" is not DELETE or KEEP"),
+                    )
+                )
+        if field == FIELD_SERVICE or field == FIELD_JOB:
+            _check_image(id, tname + String(".image"), r, out)
+        if field == FIELD_BUCKET:
+            ref bkt = r.bucket.value()
+            if Bool(bkt.object_expiry_days) and bkt.object_expiry_days.value() == 0:
+                out.append(
+                    Finding(
+                        FINDING_GRAPH,
+                        id,
+                        String("bucket.object_expiry_days"),
+                        String(
+                            "0 would expire every object at once; leave it unset"
+                            " to keep objects until they are deleted"
+                        ),
+                    )
+                )
+            if len(r.uses) > 0:
+                out.append(
+                    Finding(
+                        FINDING_GRAPH,
+                        id,
+                        String("uses"),
+                        String(
+                            "a bucket runs as no identity, so it cannot use another"
+                            " resource; write the uses line on the service or job"
+                            " that reads or writes it"
+                        ),
+                    )
+                )
+                continue
+        if field == FIELD_SERVICE:
             ref svc = r.service.value()
             for entry in svc.env.items():
                 _check_value(
@@ -351,7 +431,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                     entry.value.name,
                     out,
                 )
-        if field == 11:
+        if field == FIELD_JOB:
             ref job = r.job.value()
             for entry in job.env.items():
                 _check_value(
@@ -551,3 +631,49 @@ def refusal_text(cloud: CloudId, findings: List[Finding]) -> String:
         if f.unverified:
             s += String(" [unverified]")
     return s^
+
+
+def node_role(node: LoweredNode) -> String:
+    """The role a node is stamped with: its id after `<owner>/`. A node whose
+    id does not start with its owner (the lowering contract refuses it) is
+    measured whole."""
+    var prefix = node.owner + String("/")
+    if node.owner.byte_length() > 0 and node.id.startswith(prefix):
+        return String(node.id[byte = prefix.byte_length() : node.id.byte_length()])
+    return node.id.copy()
+
+
+def role_budget_findings(nodes: List[LoweredNode]) -> List[Finding]:
+    """A GRAPH finding for every node whose role, encoded as a label value,
+    is over `LABEL_VALUE_MAX` bytes: the node, the byte count and the length
+    of each `/`-separated segment. Pure; empty when every role fits."""
+    var out = List[Finding]()
+    for i in range(len(nodes)):
+        ref n = nodes[i]
+        var role = node_role(n)
+        var size = encoded_label_bytes(role)
+        if size <= LABEL_VALUE_MAX:
+            continue
+        var segs = role.split("/")
+        var lens = String("")
+        for k in range(len(segs)):
+            if k > 0:
+                lens += String(", ")
+            lens += String(segs[k].byte_length())
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                n.owner,
+                String(""),
+                String("node \"")
+                + n.id
+                + String("\": its role label is ")
+                + String(size)
+                + String(" bytes encoded; at most ")
+                + String(LABEL_VALUE_MAX)
+                + String(" (segment lengths ")
+                + lens
+                + String("; shorter ids or less nesting fit)"),
+            )
+        )
+    return out^

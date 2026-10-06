@@ -44,6 +44,8 @@ python3 tools/core_split/repoint_selftest.py                                 # t
   ("lives in `komira_core`" names the package of the file, anything else says "the core
   packages"). Markdown, string literals and code are reported for a person.
 
-`.github/workflows/repoint_tool.yml` runs the self-tests and `--check` on every pull
-request, so a branch that adds an import of `komira_core` is red until it has been
-repointed. The directory can be deleted once no open branch predates the delete.
+No workflow runs the self-tests or `--check` (a pull request runs one check, `pr`:
+docs/ci.md); run them by hand, as above, on a branch that predates the delete. A
+branch that still imports `komira_core` does not build once it has merged main, so
+the `pr` check refuses it; `--check` also finds the prose and counter names. The
+directory can be deleted once no open branch predates the delete.
