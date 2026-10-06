@@ -46,6 +46,7 @@ mojo_library(
         "tests/test_cas_manifest_property.mojo",
         "tests/test_cas_recovery_log_start_aware_offline.mojo",
         "tests/test_cas_stale_head_forward_progress_offline.mojo",
+        "tests/test_chunk_reclaim_guard_offline.mojo",
         "tests/test_coalesce.mojo",
         "tests/test_coalescing_window.mojo",
         "tests/test_compact_window.mojo",
