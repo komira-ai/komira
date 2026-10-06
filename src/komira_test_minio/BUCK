@@ -50,7 +50,7 @@ mojo_test(
     target_compatible_with = ["prelude//os/constraints:linux"],  # komira-limit:farm-probe-linux
     deps = [
         "//src/komira_async:komira_async",
-        "//src/komira_core_ffi:komira_core_ffi",
+        "//src/komira_libc:komira_libc",
         "//src/komira_supervisor:komira_supervisor",
     ],
 )

@@ -93,7 +93,7 @@ from komira_avro import (
     scan_ocf_blocks,
     write_avro_bytes,
 )
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.record_batch import RecordBatch
 from komira_orc import (
     ORC_COMPRESSION_NONE,
     OrcFileTail,

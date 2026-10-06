@@ -98,9 +98,9 @@
 # =============================================================================
 
 from komira_async.ops.waker_sink import NoopSink
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, SchemaBuilder
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, SchemaBuilder
 from komira_csv import CsvReadOptions, Rfc4180
 from komira_csv.csv_sink import CsvSink
 from komira_csv.reader import read_csv_bytes_to_batch

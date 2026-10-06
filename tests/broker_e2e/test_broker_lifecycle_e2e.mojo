@@ -64,21 +64,21 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.ipc_decoder_dispatch import decode_record_batch_message
-from komira_core.arrow.ipc_flatbuf import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow_ipc.ipc_decoder_dispatch import decode_record_batch_message
+from komira_arrow_ipc.ipc_flatbuf import (
     flatbuf_reader_over,
     read_message,
     MESSAGE_HEADER_RECORD_BATCH,
     MESSAGE_HEADER_SCHEMA,
 )
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.arrow.string_array import StringArray
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.string_array import StringArray
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
 
 from komira_broker import (
     Assignment,
