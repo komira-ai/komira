@@ -1,0 +1,2 @@
+def thing() -> Int:
+    return 1

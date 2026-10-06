@@ -1,0 +1,66 @@
+# The check of a test_weld lint (test_weld.bzl says why it is a BXL script).
+#
+#   buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld
+#
+# Reads the lint's TestWeldInputsInfo, queries its `welds` pattern (which
+# names the lint's cell), keeps the targets of that cell, collects the
+# WeldedTestsInfo sources of every one (the welded test files, as the rules
+# resolved them), and asks Buck2 where each file is: its path in the cell,
+# whatever package or label named it. Does the same for the .mojo files of
+# the lint's tree, then runs test_weld.sh over the two path lists as a build
+# action on the lint's execution platform. Fails, printing the findings,
+# when the lint finds anything.
+
+load("@komira//tools/build/mojo:providers.bzl", "WeldedTestsInfo")
+load(":test_weld_check.bzl", "TestWeldInputsInfo", "test_weld_action")
+
+def _cell_paths(ctx, cell_root, artifacts):
+    """The paths in the cell rooted at `cell_root` of the source artifacts
+    among `artifacts`; a file outside that cell is none of its files."""
+    paths = []
+    for a in artifacts:
+        if not a.is_source:
+            continue
+        p = get_path_without_materialization(a, ctx, abs = True)
+        if p.startswith(cell_root):
+            paths.append(p[len(cell_root):])
+    return paths
+
+def _check_impl(ctx):
+    lint = ctx.configured_targets(ctx.cli_args.lint)
+    info = ctx.analysis(lint).providers()[TestWeldInputsInfo]
+    cell_root = ctx.audit().cell([info.cell])[info.cell].rstrip("/") + "/"
+    targets = ctx.cquery().eval(info.welds)
+    in_cell = [t.label for t in targets if t.label.cell == info.cell]
+    welded = {}
+    weld_targets = 0
+    for result in ctx.analysis(in_cell).values():
+        providers = result.providers()
+        if WeldedTestsInfo in providers:
+            weld_targets += 1
+            for p in _cell_paths(ctx, cell_root, providers[WeldedTestsInfo].srcs):
+                welded[p] = True
+    mojo = _cell_paths(ctx, cell_root, info.mojo)
+    ledger = _cell_paths(ctx, cell_root, [info.ledger])
+    if not ledger:
+        fail("test_weld {}: its ledger is not a source file of {}".format(info.label, info.cell))
+    actions = ctx.bxl_actions(exec_compatible_with = info.exec_compatible_with).actions
+    out = test_weld_action(actions, info, info.cell + "//" + ledger[0], mojo, welded.keys())
+    ctx.output.print("test_weld {}: {} targets match {} ({} in {}), {} of them weld tests ({} files); {} .mojo files; checked: {}".format(
+        info.label,
+        len(targets),
+        info.welds,
+        len(in_cell),
+        info.cell,
+        weld_targets,
+        len(welded),
+        len(mojo),
+        ctx.output.ensure(out),
+    ))
+
+check = bxl_main(
+    impl = _check_impl,
+    cli_args = {
+        "lint": cli_args.string(doc = "A test_weld target, e.g. //:test_weld"),
+    },
+)

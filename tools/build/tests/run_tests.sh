@@ -292,6 +292,26 @@
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
+#  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
+#      its BXL script: //:test_weld (every package under src/) and
+#      tests//functional/test_weld:ok (a planted tree with its ledger) pass;
+#      each target of tests//negative/test_weld fails
+#      naming its one planted finding: an unwelded test file (named only in a
+#      comment of a test_srcs list), a package with no welded test, a ledger
+#      row for a welded test or package (the ledger only shrinks; one test is
+#      welded only by a computed list), a row naming nothing, a row with no
+#      reason, and a root with no package.
+#  40. README API coverage (tools/build/lint/readme_api_coverage.bzl;
+#      docs/readme_api_coverage.md): //:readme_api_coverage (the census of
+#      every package under src/, report-only) and
+#      tests//functional/readme_api_coverage:ok (a planted tree whose census
+#      must equal its expected files, counts and statuses exactly) build; each
+#      target of tests//negative/readme_api_coverage fails naming its one
+#      planted finding: a malformed ledger row, a repeated row, a row for a
+#      symbol not exported, a row for a symbol the README uses (the ledger
+#      only shrinks), an undocumented symbol under `enforce = True`, and a
+#      root with no package.
+
 #  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
 set -uo pipefail
 
@@ -1075,6 +1095,69 @@ expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 check
 expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
 expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
+
+# 39
+# A test_weld target only declares its lint; its BXL script checks it
+# (tools/build/lint/test_weld.bzl says why).
+test_weld_check() { # name, lint target: the check's exit status, its log in $LOG
+    "$BUCK2" bxl //tools/build/lint/test_weld.bxl:check -- --lint "$2" > "$LOG/$1.log" 2>&1
+}
+for lint in //:test_weld tests//functional/test_weld:ok tests//negative/test_weld/real:ok; do
+    name="test_weld_green_$(printf '%s' "${lint#*//}" | tr '/:' '__')"
+    if test_weld_check "$name" "$lint"; then pass "$name"; else fail "$name: $lint (see $LOG/$name.log)"; fi
+done
+tw_tree=tests//functional/test_weld/src
+for want in \
+    "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \
+    "untested|$tw_tree/komira_b: 1 .mojo source(s) and no welded test" \
+    "shrink_package|src/komira_c: the package welds 1 test(s) now; delete the row (the ledger only shrinks)" \
+    "shrink_file|src/komira_c/wire/tests/test_wire.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
+    "shrink_computed|src/komira_a/tests/test_one.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
+    "nothing|src/komira_a/tests/test_gone.mojo: names neither a test file nor a package with a .mojo source" \
+    "nothing|src/komira_gen: names neither a test file nor a package with a .mojo source" \
+    "malformed|ledger_malformed.tsv:2: a row is <path><TAB><reason>, with a reason" \
+    "empty|test_weld: checked nothing (no package under nosuch)"; do
+    t=${want%%|*} text=${want#*|} name="test_weld_${want%%|*}"
+    if test_weld_check "$name" "tests//negative/test_weld:$t"; then
+        fail "$name: tests//negative/test_weld:$t passed, but it must fail"
+    elif grep -qF -- "$text" "$LOG/$name.log"; then
+        pass "$name"
+    else
+        fail "$name: failed without '$text' (see $LOG/$name.log)"
+    fi
+done
+# The real rules (negative/test_weld/real/BUCK): with no ledger row, exactly
+# the three unwelded files are named, and none of the welded ones.
+name=test_weld_real_red
+tw_real=tests//negative/test_weld/real/src
+if test_weld_check "$name" tests//negative/test_weld/real:red; then
+    fail "$name: tests//negative/test_weld/real:red passed, but it must fail"
+else
+    tw_named=$(grep -o "^$tw_real/[^:]*: a test file no target welds" "$LOG/$name.log" | sed 's/:.*//' | sort -u | tr '\n' ' ')
+    tw_want="$tw_real/komira_real/tests/test_commented.mojo $tw_real/komira_real/tests/test_imported.mojo $tw_real/komira_real/tests/test_shared.mojo "
+    if [ "$tw_named" = "$tw_want" ]; then
+        pass "$name"
+    else
+        fail "$name: named '$tw_named', want '$tw_want' (see $LOG/$name.log)"
+    fi
+fi
+
+# 40
+expect_green readme_api_coverage //:readme_api_coverage tests//functional/readme_api_coverage:ok
+L=tests//functional/readme_api_coverage:exceptions.tsv
+N=tests//negative/readme_api_coverage
+for want in \
+    "malformed|$N/ledger_malformed.tsv:2: a row is <package><TAB><symbol><TAB><reason>, with a reason" \
+    "duplicate|$N/ledger_duplicate.tsv:3: komira_a top_level has a row already, on line 1" \
+    "stale_gone|$N/ledger_stale_gone.tsv:2: komira_a Circle: not exported by src/komira_a/__init__.mojo; delete the row" \
+    "stale_used|$N/ledger_stale_used.tsv:3: komira_a bye: src/komira_a/README.md uses it now; delete the row (the ledger only shrinks)" \
+    "enforce|$N:enforce[files]/src/komira_a/greet.mojo:23: komira_a Greeter.wave: exported and used by no README example" \
+    "empty|readme_api_coverage: checked nothing (no package under nosuch)"; do
+    expect_red "readme_api_coverage_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red readme_api_coverage_malformed_symbol "$N/ledger_malformed.tsv:3: a row is" "$N:malformed"
+expect_red readme_api_coverage_stale_private "$N/ledger_stale_gone.tsv:3: komira_a Greeter._secret: not exported" "$N:stale_gone"
+expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enforce"
 
 # 41
 # shellcheck source=tools/build/tests/coverage_tests.sh

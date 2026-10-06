@@ -62,9 +62,12 @@ struct ListLogEntriesRequest(Serializable, Copyable, Movable):
         for i in range(len(self.resource_names)):
             enc.write_string_element(8, self.resource_names[i])
         enc.end_list_field()
-        enc.write_string_field(2, "filter", self.filter)
-        enc.write_i32_field(4, "pageSize", self.page_size)
-        enc.write_string_field(5, "pageToken", self.page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.filter.byte_length() > 0:
+            enc.write_string_field(2, "filter", self.filter)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_size != 0:
+            enc.write_i32_field(4, "pageSize", self.page_size)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_token.byte_length() > 0:
+            enc.write_string_field(5, "pageToken", self.page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -121,7 +124,8 @@ struct ListLogEntriesResponse(Serializable, Copyable, Movable):
         for i in range(len(self.entries)):
             enc.write_message_element[LogEntry](1, self.entries[i])
         enc.end_list_field()
-        enc.write_string_field(2, "nextPageToken", self.next_page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.next_page_token.byte_length() > 0:
+            enc.write_string_field(2, "nextPageToken", self.next_page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -168,8 +172,10 @@ struct ListMonitoredResourceDescriptorsRequest(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_i32_field(1, "pageSize", self.page_size)
-        enc.write_string_field(2, "pageToken", self.page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_size != 0:
+            enc.write_i32_field(1, "pageSize", self.page_size)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_token.byte_length() > 0:
+            enc.write_string_field(2, "pageToken", self.page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -220,7 +226,8 @@ struct ListMonitoredResourceDescriptorsResponse(Serializable, Copyable, Movable)
         for i in range(len(self.resource_descriptors)):
             enc.write_message_element[MonitoredResourceDescriptor](1, self.resource_descriptors[i])
         enc.end_list_field()
-        enc.write_string_field(2, "nextPageToken", self.next_page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.next_page_token.byte_length() > 0:
+            enc.write_string_field(2, "nextPageToken", self.next_page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:

@@ -2,6 +2,8 @@
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
+load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -74,11 +76,14 @@ _TESTS_LINTS = [
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
     "//src/komira_aws_lambda_http:deps_lint",
+    "//src/komira_azure_blob_e2e:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_conformance:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
     "//src/komira_http_tls_e2e:deps_lint",
+    "//src/komira_job_supervisor_loopback:deps_lint",
+    "//src/komira_udf_e2e:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
@@ -124,5 +129,38 @@ _TESTS_LINTS = [
         "Stage" + "Graph",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
+    tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# Test welding (tools/build/lint/test_weld.bzl): every tests/test_*.mojo under
+# src/ is welded by a target, so it runs; and every package with a .mojo
+# source welds a test. The exceptions are the rows of
+# tests/known_untested.tsv, which only shrinks. The .mojo files are those of
+# the cell (`:doc_tree`); what is welded is read from the build graph: the
+# `test_srcs` of every mojo_library (mojo_proto_library's welded form is one)
+# and the `main` of every mojo_test under src/, as the rules received them.
+# Building this target checks nothing: `./buck2 bxl
+# //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld` checks it, and
+# the pull request's check runs that (release/ci/build_targets.sh).
+[test_weld(
+    name = "test_weld",
+    known_untested = "tests/known_untested.tsv",
+    tree = ":doc_tree",
+    welds = "//src/...",
+) for _ in _TESTS_LINTS[:1]]
+
+# README API coverage (tools/build/lint/readme_api_coverage.bzl; the rules and
+# today's census: docs/readme_api_coverage.md): per package under src/, the
+# public API its __init__.mojo exports and which of it the README's examples
+# (the welded [tests][readme] test) use. `[report]`, `[packages]` and
+# `[symbols]` are the census. The tree is every file of the cell (`:doc_tree`).
+# The ledger, tests/readme_api_exceptions.tsv, only shrinks: a malformed or
+# repeated row, or one for a symbol no longer exported or used by its README
+# now, fails the build. Report-only today: `enforce = True` makes every undocumented symbol
+# without a ledger row a finding.
+[readme_api_coverage(
+    name = "readme_api_coverage",
+    enforce = False,
+    exceptions = "tests/readme_api_exceptions.tsv",
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]

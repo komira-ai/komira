@@ -21,14 +21,11 @@
 # ending in the EOS marker at exactly the last 8 bytes. The Schema message's
 # fields are checked against the generator (bit widths, signedness, float
 # precision, the date unit, the timestamp and duration units, the timestamp's
-# timezone, decimal precision, scale and width). The time32[ms] field's unit is
-# NOT checked: komira's `read_type_time` (like `read_type_date` and
-# `read_type_duration`) returns 0 for an absent unit instead of Schema.fbs's
-# declared default MILLISECOND, and pyarrow omits the field because it equals
-# that default. Two of the remaining temporal checks cannot fail on this
-# fixture: the date unit is DAY (= 0, the same value the absent-field fallback
-# returns) and the time bitWidth is 32 (pyarrow omits it; the reader's
-# 0 -> 32 fallback supplies it). Each RecordBatch is decoded copy-on-read through
+# timezone, decimal precision, scale and width). pyarrow omits the time32[ms]
+# field's unit and bitWidth, because they equal Schema.fbs's declared defaults
+# (MILLISECOND, 32), so those checks fail if the reader returns 0 for an absent
+# field instead of the declared default; it writes the date32 unit, DAY,
+# because DAY is not the default. Each RecordBatch is decoded copy-on-read through
 # `decode_record_batch_message_with_dicts` and, for the dictionary-free
 # streams, zero-copy through `decode_record_batch_message_mmap`.
 #
@@ -80,6 +77,7 @@ from komira_arrow_ipc.ipc_flatbuf import (
     PRECISION_DOUBLE,
     PRECISION_SINGLE,
     TIME_UNIT_MICROSECOND,
+    TIME_UNIT_MILLISECOND,
     TYPE_DATE,
     TYPE_DECIMAL,
     TYPE_DURATION,
@@ -393,20 +391,16 @@ def test_temporal_batch() raises:
     assert_equal(len(schema.fields), 4)
     assert_equal(schema.fields[0].name, "d32")
     assert_equal(schema.fields[0].type_tag, TYPE_DATE)
-    # Cannot fail on this fixture: DAY is 0, the absent-field fallback.
+    # pyarrow writes DAY (= 0): it is not Date.unit's default, MILLISECOND.
     assert_equal(read_type_date(r, schema.fields[0].type_table_pos).unit, DATE_UNIT_DAY)
     assert_equal(schema.fields[1].name, "t32_ms")
     assert_equal(schema.fields[1].type_tag, TYPE_TIME)
     var tt = read_type_time(r, schema.fields[1].type_table_pos)
-    # The unit is not asserted: this is a known komira defect, not a pass.
-    # pyarrow omits it here, because Schema.fbs declares
-    # `Time.unit: TimeUnit = MILLISECOND` and FlatBuffers drops a field equal
-    # to its default; `read_type_time` returns 0 (SECOND) for the absent field
-    # instead of the declared default, so `tt.unit == TIME_UNIT_MILLISECOND`
-    # fails today. The fix (default MILLISECOND in read_type_time, read_type_date
-    # and read_type_duration) restores that assertion.
-    # This bit-width check cannot fail on this fixture: pyarrow omits
-    # bitWidth=32 and the reader's absent-field fallback is 32.
+    # pyarrow omits both fields: Schema.fbs declares
+    # `Time.unit: TimeUnit = MILLISECOND` and `bitWidth: int = 32`, and
+    # FlatBuffers drops a field equal to its default. A reader returning 0 for
+    # the absent unit reads time32[s] here (komira-ai/komira#506).
+    assert_equal(tt.unit, TIME_UNIT_MILLISECOND)
     assert_equal(tt.bit_width, 32)
     assert_equal(schema.fields[2].name, "ts_us_utc")
     assert_equal(schema.fields[2].type_tag, TYPE_TIMESTAMP)
@@ -519,7 +513,13 @@ def test_dict_delta_stream() raises:
         _ = _decode_pass(1, path, buf, msgs[2], dict_types)
     except e:
         raised = True
-        assert_true("DICTIONARY" in String(e), String(e))
+        assert_equal(
+            String(e),
+            "decode_record_batch_message_mmap: DICTIONARY columns require"
+            " dict-aware decode. Caller should use the copy-on-read dict-aware"
+            " dispatch instead of the mmap path for files containing"
+            " dict-encoded columns.",
+        )
     assert_true(raised)
 
 

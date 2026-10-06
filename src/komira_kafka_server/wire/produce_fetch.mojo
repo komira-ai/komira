@@ -42,6 +42,11 @@ comptime ERROR_UNKNOWN_TOPIC_OR_PARTITION: Int16 = 3
 # did NOT write (the CAS arbitrates), so unlike REQUEST_TIMED_OUT (7) there is
 # no partial-write / duplicate ambiguity — a clean "didn't happen, retry".
 comptime ERROR_NOT_LEADER_OR_FOLLOWER: Int16 = 6
+# Kafka standard RETRIABLE Produce error: the request's outcome is unknown (it
+# may or may not have been written), so a retry can duplicate it.
+comptime ERROR_REQUEST_TIMED_OUT: Int16 = 7
+# Kafka standard: an unexpected server error (not retriable by itself).
+comptime ERROR_UNKNOWN_SERVER_ERROR: Int16 = -1
 
 
 # =============================================================================

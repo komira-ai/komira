@@ -805,12 +805,15 @@ def test_read_cut_off_message_with_ok_status_fails() raises:
     )
 
 
-def test_read_without_a_status_fails_when_short() raises:
-    """A stream with no `grpc-status` at all (komira_grpc reads that as OK)
-    that delivered less than it stated fails the read."""
+def test_read_without_a_status_fails() raises:
+    """A stream with no `grpc-status` at all (DATA with END_STREAM, no
+    trailers) fails the read: komira_grpc raises INTERNAL for a response that
+    ended without trailers, which maps to TRANSPORT. It must not reach the
+    read as a complete answer."""
     var body = _frame(_read_first_whole("hello ", 11, UInt32(0)))
     var msg = _read_fails(_body_script(body^, trailers=False), 0, 0)
-    assert_true(msg.find("short read: 6 of 11 stated bytes") >= 0, msg)
+    assert_equal(gcs_store_error_kind_from_message(msg), GCS_ERR_TRANSPORT, msg)
+    assert_true(msg.find("grpc_code=13 (INTERNAL)") >= 0, msg)
 
 
 def test_read_that_states_no_length_fails() raises:
@@ -1105,7 +1108,7 @@ def main() raises:
     test_read_whole_object_checks_length_and_crc()
     test_read_chunk_crc_mismatch_fails()
     test_read_cut_off_message_with_ok_status_fails()
-    test_read_without_a_status_fails_when_short()
+    test_read_without_a_status_fails()
     test_read_that_states_no_length_fails()
     test_read_envelope_the_decoder_refuses_fails()
     test_get_object_maps_the_metadata()

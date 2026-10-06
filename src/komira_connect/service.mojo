@@ -54,6 +54,7 @@ from .dispatch import (
     DispatchResult,
     codec_id_for_content_type,
     dispatch,
+    grpc_web_error_body,
 )
 from .status import (
     GRPC_STATUS_OK,
@@ -463,8 +464,14 @@ def _make_not_found_result(codec_id: UInt8, path: String) -> DispatchResult:
         body = build_connect_error_json(
             GRPC_STATUS_NOT_FOUND, String("method ") + path + " not registered"
         )
-    elif codec_id == CODEC_ID_GRPC or codec_id == CODEC_ID_GRPC_WEB:
+    elif codec_id == CODEC_ID_GRPC:
         # gRPC: 200 + trailer carries status; body empty
+        http_status = UInt16(200)
+    elif codec_id == CODEC_ID_GRPC_WEB:
+        # gRPC-Web: 200 + the trailer frame in the body.
+        body = grpc_web_error_body(
+            GRPC_STATUS_NOT_FOUND, String("method ") + path + " not registered"
+        )
         http_status = UInt16(200)
     return DispatchResult(
         body^,
