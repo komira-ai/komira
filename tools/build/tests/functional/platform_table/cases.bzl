@@ -43,6 +43,16 @@ def _edit(row_name, field = None, value = None, role = None, pin_value = None, d
 
 _GOOD_SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
+def _oci_without_last_layer_size():
+    oci = dict(PLATFORMS["linux-x86_64"]["oci_base"])
+    oci["layer_sizes"] = list(oci["layer_sizes"])[:-1]
+    return oci
+
+def _oci_with_config_size(z):
+    oci = dict(PLATFORMS["linux-x86_64"]["oci_base"])
+    oci["config_size"] = z
+    return oci
+
 # (what the case is, the table it checks, a sentence its refusals must contain; None: no refusal at all)
 _TABLE_CASES = [
     ("the table as committed", PLATFORMS, None),
@@ -60,7 +70,7 @@ _TABLE_CASES = [
     ("none for a pin that must be real", _edit("darwin-arm64", role = "rustc", pin_value = none("not needed")), "row darwin-arm64: pin `rustc` is `none(...)`"),
     ("none with no reason", _edit("darwin-arm64", role = "libgcc", pin_value = none("")), "row darwin-arm64: pin `libgcc` is `none` with no reason"),
     ("bundles with no container base", _edit("linux-x86_64", field = "oci_base", value = none("no")), "row linux-x86_64: bundles are a product of this row, but `oci_base` is none"),
-    ("a pin role nobody reads", _edit("linux-x86_64", role = "cmake", pin_value = pin("cmake", "https://example.com/cmake", _GOOD_SHA)), "row linux-x86_64: unknown pin `cmake`"),
+    ("a pin role nobody reads", _edit("linux-x86_64", role = "cmake", pin_value = pin("cmake", "https://example.com/cmake", _GOOD_SHA, size = 1)), "row linux-x86_64: unknown pin `cmake`"),
     ("a field missing", _edit("linux-x86_64", drop_field = "target_cpu"), "row linux-x86_64: missing field `target_cpu`"),
     ("the zig triple missing", _edit("darwin-arm64", drop_field = "zig_triple"), "row darwin-arm64: missing field `zig_triple`"),
     ("an unknown field", _edit("linux-x86_64", field = "cpu_floor", value = "x"), "row linux-x86_64: unknown field `cpu_floor`"),
@@ -87,8 +97,15 @@ _TABLE_CASES = [
     ("a registered row with a pending pixi", _edit("darwin-arm64", role = "pixi", pin_value = pending("later")), "row darwin-arm64: pin `pixi` is pending, but the row is registered"),
     ("a pixi pin that is not executable", _edit("linux-x86_64", role = "pixi", pin_value = pin("pixi", "https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-x86_64-unknown-linux-musl", _GOOD_SHA)), "row linux-x86_64: pin `pixi` is an executable, but is not pinned with `executable = True`"),
     ("a pixi pin whose url names no release", _edit("darwin-arm64", role = "pixi", pin_value = pin("pixi", "https://example.com/pixi", _GOOD_SHA, executable = True)), "row darwin-arm64: pin `pixi`: url names no release"),
-    ("pixi pinned at two releases", _edit("darwin-arm64", role = "pixi", pin_value = pin("pixi", "https://github.com/prefix-dev/pixi/releases/download/v0.66.0/pixi-aarch64-apple-darwin", _GOOD_SHA, executable = True)), "pin `pixi` names more than one release: 0.66.0 in darwin-arm64; 0.67.2 in linux-x86_64"),
+    ("pixi pinned at two releases", _edit("darwin-arm64", role = "pixi", pin_value = pin("pixi", "https://github.com/prefix-dev/pixi/releases/download/v0.66.0/pixi-aarch64-apple-darwin", _GOOD_SHA, executable = True, size = 1)), "pin `pixi` names more than one release: 0.66.0 in darwin-arm64; 0.67.2 in linux-x86_64"),
     ("a busybox pin that is not executable", _edit("linux-x86_64", role = "busybox", pin_value = pin("busybox", "https://example.com/busybox", _GOOD_SHA)), "row linux-x86_64: pin `busybox` is an executable"),
+    # The size is the last check of a pin, so every case above keeps its own refusal.
+    ("a pin with no size", _edit("linux-x86_64", role = "zig", pin_value = pin("zig", "https://example.com/zig", _GOOD_SHA)), "row linux-x86_64: pin `zig` has no positive `size`: None"),
+    ("a size of 0", _edit("darwin-arm64", role = "zig", pin_value = pin("zig", "https://example.com/zig", _GOOD_SHA, size = 0)), "row darwin-arm64: pin `zig` has no positive `size`: 0"),
+    ("a negative size", _edit("linux-arm64", role = "zig", pin_value = pin("zig", "https://example.com/zig", _GOOD_SHA, size = -5)), "row linux-arm64: pin `zig` has no positive `size`: -5"),
+    ("a size that is a string", _edit("linux-x86_64", role = "busybox", pin_value = pin("busybox", "https://example.com/busybox", _GOOD_SHA, executable = True, size = "1131168")), "row linux-x86_64: pin `busybox` has no positive `size`: \"1131168\""),
+    ("a container base missing a layer size", _edit("linux-x86_64", field = "oci_base", value = _oci_without_last_layer_size()), "row linux-x86_64: pin `oci_base`: `config_size` and each of `layer_sizes` must be a positive size, one per layer"),
+    ("a container base with a config size of 0", _edit("linux-x86_64", field = "oci_base", value = _oci_with_config_size(0)), "row linux-x86_64: pin `oci_base`"),
     ("a row named for another platform", _edit("linux-arm64", field = "cpu", value = "x86_64"), "row linux-arm64: named for neither its os nor its cpu"),
 ]
 
