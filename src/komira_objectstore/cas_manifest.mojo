@@ -135,8 +135,11 @@ from komira_objectstore.path import Path
 # Reclamation never touches a live chunk (at or above `_LOG_START`):
 # decisions + error text, no I/O (cycle-free: imports nothing from here).
 from komira_objectstore.chunk_reclaim_guard import (
+    Tombstone,
     advance_regress_error,
     advance_would_regress,
+    decode_tombstone_body,
+    encode_tombstone_body,
     reap_is_refused,
     reap_refused_error,
     rewrite_target_deleted_error,
@@ -1016,6 +1019,9 @@ def head_key(prefix: String) raises -> Path:
 # durability bug): one tiny S3 object per tombstoned chunk:
 #
 #   <prefix>/tombstones/<chunk_seq:020d>.tomb   ← body = schedule_ts_ms (i64 LE)
+#                                                  [+ flags u8: payload moved]
+#
+# (Body codec and the `payload_moved` flag: chunk_reclaim_guard.mojo.)
 #
 # Per-chunk markers are idempotent (create-or-overwrite of one key), discovered
 # on restart via a LIST of `<prefix>/tombstones/`, and decoupled from the hot
@@ -3120,13 +3126,20 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         self.schedule_for_delete_at(chunk_seq, _now_millis())
 
     def schedule_for_delete_at(
-        mut self, chunk_seq: Int64, schedule_ts_ms: Int64
+        mut self,
+        chunk_seq: Int64,
+        schedule_ts_ms: Int64,
+        payload_moved: Bool = False,
     ) raises -> None:
         """Tombstone `chunk_seq` with an EXPLICIT schedule timestamp (ms).
         Writes (idempotently — last-writer-wins on the tiny marker key) the
         persisted tombstone `<prefix>/tombstones/<seq>.tomb` whose body is the
         schedule ts. Verifies the chunk exists first (fail-loud on a bad
         seq). The grace-aware reaper reads the ts to gate the actual delete.
+        `payload_moved` marks a chunk whose payload objects another manifest
+        now references: the reaper then reclaims the chunk key only
+        (chunk_reclaim_guard.mojo). Rewriting a marker replaces its ts and
+        its flag.
         """
         # CAS-GATE: WRITE verb (tombstone PUT) -> EXCLUSIVE lock. Serializes the
         # existence-check GET + tombstone PUT. NOTE: `schedule_for_delete`
@@ -3141,8 +3154,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             # Persist the marker (last-writer-wins keeps it idempotent — a
             # re-tombstone just refreshes the ts; the offline twin's `put`
             # overwrites, S3's PUT overwrites).
-            var tomb = List[UInt8]()
-            _put_i64_le(tomb, schedule_ts_ms)
+            var tomb = encode_tombstone_body(schedule_ts_ms, payload_moved)
             _ = self._store.put(
                 tombstone_key(self._prefix, chunk_seq), tomb
             )
@@ -3193,15 +3205,20 @@ struct CasManifestStore[Store: ConditionalWriteStore](
 
     def tombstone_schedule_ts(self, chunk_seq: Int64) raises -> Int64:
         """The schedule timestamp (ms) recorded for a tombstoned chunk. Raises
-        `not_found` if the chunk is not tombstoned. The grace-aware reaper
-        reads this to decide whether the grace window has elapsed."""
+        `not_found` if the chunk is not tombstoned."""
+        return self.read_tombstone(chunk_seq).schedule_ts_ms
+
+    def read_tombstone(self, chunk_seq: Int64) raises -> Tombstone:
+        """The tombstone of `chunk_seq`, in one GET: its schedule ts (the
+        grace-aware reaper's clock) and whether its payload moved. Raises
+        `not_found` if the chunk is not tombstoned."""
         # READ verb -> SHARED (read) lock.
         _cas_gate_rdlock()
         try:
             var t = self._store.get(tombstone_key(self._prefix, chunk_seq))
-            var ts = _get_i64_le(t, 0)
+            var tomb = decode_tombstone_body(t)
             _cas_gate_unlock()
-            return ts
+            return tomb
         except e:
             _cas_gate_unlock()
             raise e^

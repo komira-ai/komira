@@ -56,9 +56,9 @@
 #      dense binding. AFTER materializing, the migrate ADVANCES the OLD single
 #      manifest's `_LOG_START` past the migrated range (so the legacy resolver no
 #      longer serves the now-migrated prefix) AND tombstones the migrated source
-#      chunks (the existing grace-gated reaper reclaims them; the `.seg` objects
-#      stay referenced by `_base`, so retire tombstones the MANIFEST chunks, NOT
-#      the segment objects).
+#      chunks with `payload_moved` (the `.seg` objects stay referenced by
+#      `_base`, so the broker `ReapWorker` reclaims only the legacy chunk keys;
+#      `_base`'s own retention reclaims the `.seg` objects later).
 #
 #   3. NEW gen=N+1 mints shard_ids + appends to `<part>/_lineage/<shard>` (the
 #      sub-lineage write path). Consume reads `_base` (the old content, dense,
@@ -138,8 +138,9 @@ struct MigrationStats(Copyable, Movable, Deinitable):
       var base_chunks_appended: Int — `_base` manifest chunks this call appended
                                       (one per migrated source chunk, REUSING the
                                       source `.seg` object).
-      var source_chunks_retired: Int — old single-manifest chunks tombstoned this
-                                      call (the manifest chunks; the `.seg`
+      var source_chunks_retired: Int — old single-manifest chunks newly
+                                      tombstoned this call, `payload_moved`
+                                      (the manifest chunks; the `.seg`
                                       objects stay referenced by `_base`).
       var dense_high_water: Int64   — the dense offset the un-folded NEW-gen tail
                                       will begin at (== `_base.next_offset` after
@@ -322,10 +323,10 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
              divergence is a torn migration and RAISES.
           3. RETIRE: advance the OLD single manifest's `_LOG_START` past the
              migrated range (the legacy resolver no longer serves the migrated
-             prefix) AND tombstone the migrated source MANIFEST chunks (the `.seg`
-             objects stay referenced by `_base`; the existing reaper reclaims the
-             manifest chunks under grace). The `_LOG_START` advance is the durable
-             migration cursor.
+             prefix) AND tombstone the migrated source MANIFEST chunks with
+             `payload_moved` (the `.seg` objects stay referenced by `_base`; the
+             `ReapWorker` reclaims only the chunk keys, under grace). The
+             `_LOG_START` advance is the durable migration cursor.
 
         OFFSET-PRESERVING (the production-flip correctness): `_base` is gapless
         one-block-per-chunk; the first established chunk seeds at the old
@@ -520,7 +521,8 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         _ = base^
 
         # RETIRE the migrated legacy chunks: tombstone the migrated MANIFEST chunks
-        # (the `.seg` objects stay referenced by `_base`) + advance the OLD single
+        # with `payload_moved` (the `.seg` objects stay referenced by `_base`, so
+        # the reaper keeps them) + advance the OLD single
         # manifest's `_LOG_START` past the migrated range (so the legacy resolver
         # serves nothing below `expected_dense`). The `_LOG_START` advance is the
         # durable migration cursor (a fold-process restart resumes from it).
@@ -550,13 +552,20 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
     ) raises -> Int:
         """RETIRE the legacy single-manifest chunks whose records are now FULLY
         established in `_base` (every chunk whose entire dense range is below
-        `migrated_through_dense`) by tombstoning them (the EXISTING grace-gated
-        reaper reclaims the MANIFEST chunks; a partially-migrated chunk past the
-        boundary is left live). The `.seg` objects are NOT tombstoned — they stay
-        referenced by `_base` (which reuses the SAME object_keys), so retire reaps
-        the legacy MANIFEST chunks, not the segment payloads. Then advance the
-        legacy `_LOG_START` to `migrated_through_dense` (the first still-UN-migrated
+        `migrated_through_dense`) by tombstoning them with `payload_moved`: the
+        `.seg` objects stay referenced by `_base` (which reuses the SAME
+        object_keys), so the grace-gated `ReapWorker` reclaims the legacy
+        MANIFEST chunk keys and never the segment payloads (a partially-migrated
+        chunk past the boundary is left live). Then advance the legacy
+        `_LOG_START` to `migrated_through_dense` (the first still-UN-migrated
         dense offset).
+
+        Every chunk the walk retires is (re)tombstoned at `now_ms`, including
+        one that already carries a tombstone: a RetentionPass tombstone left
+        on a live chunk by a failed advance would otherwise keep its old
+        schedule ts and no `payload_moved` flag, and the reaper would delete
+        a `.seg` that `_base` reads, with no grace counted from this advance.
+        The return value counts only chunks that carried no tombstone.
 
         That `_LOG_START` pointer IS the durable migration cursor: the legacy
         resolver reads it for `running_base` (so it serves NOTHING below the
@@ -564,7 +573,8 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         migrate-process restart resumes from it. The advance is monotone-forward;
         a stale 412 is a harmless lose (a concurrent advance won). Raw retention-key
         arithmetic stays INSIDE the substrate. Returns the number of legacy chunks
-        tombstoned this call. `now_ms` is recorded as the tombstone schedule ts."""
+        newly tombstoned this call. `now_ms` is recorded as the tombstone schedule
+        ts."""
         var head: ManifestHead
         try:
             head = legacy.read_head_authoritative()
@@ -593,26 +603,25 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
             # Fully migrated iff the chunk's entire dense range is <= the migrated
             # watermark.
             if chunk_hi <= migrated_through_dense:
-                if not _i64_in(already_tomb, seq):
-                    to_tomb.append(seq)
+                to_tomb.append(seq)
             elif not found_unmigrated:
                 first_unmigrated_seq = seq
                 found_unmigrated = True
             running = chunk_hi
             seq += Int64(1)
         for t in range(len(to_tomb)):
-            legacy.schedule_for_delete_at(to_tomb[t], now_ms)
-            retired += 1
+            legacy.schedule_for_delete_at(to_tomb[t], now_ms, payload_moved=True)
+            if not _i64_in(already_tomb, to_tomb[t]):
+                retired += 1
         # Advance the durable legacy `_LOG_START` to the migrated watermark (the
         # first un-migrated dense offset, at the first surviving chunk seq).
         # Monotone-forward; a stale 412 is a harmless lose.
         # A swallowed failure deletes nothing live: the tombstones above then
         # sit on chunks at or above `_LOG_START`, which `CasManifestStore.reap`
         # refuses and the broker `ReapWorker` skips (chunk_reclaim_guard.mojo),
-        # and the next call re-reads `_LOG_START` and re-advances. That is NOT
-        # a claim that reaping these tombstones is safe once the advance lands:
-        # `_base` may still reference their `.seg` objects
-        # (komira-ai/komira#494).
+        # and the next call re-reads `_LOG_START`, re-stamps them and
+        # re-advances. Once the advance lands the reaper reclaims their chunk
+        # keys; `payload_moved` keeps it off the `.seg` objects `_base` reads.
         if migrated_through_dense > cur.log_start_offset:
             try:
                 _ = legacy.advance_log_start(

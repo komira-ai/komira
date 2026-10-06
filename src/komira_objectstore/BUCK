@@ -61,6 +61,7 @@ mojo_library(
         "tests/test_sharded_lineage_kernel.mojo",
         "tests/test_slow_cas_store_start_412_abi.mojo",
         "tests/test_sublineage_base_fold.mojo",
+        "tests/test_tombstone_payload_moved_offline.mojo",
     ],
     visibility = ["PUBLIC"],
 )

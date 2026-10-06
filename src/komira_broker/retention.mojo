@@ -34,6 +34,9 @@
 #     A tombstone AT OR ABOVE it sits on a live chunk (step 6 failed or the
 #     process died between 5 and 6): skipped and counted, never deleted, and
 #     reclaimable once a later pass advances. Idempotent.
+#     A tombstone marked `payload_moved` (written by the sub-lineage migration
+#     and the segment fold, whose `.seg` objects `_base` now references) is
+#     reaped as a chunk key only: its `.seg` is `_base`'s to reclaim.
 #
 # ORDER (tombstone, THEN advance) is deliberate. A crash between the two
 # strands tombstones on live chunks, which the reaper skips, and the next pass
@@ -609,8 +612,9 @@ struct ReapResult(Copyable, Movable, Deinitable):
     """Outcome of one ReapWorker pass.
 
     Field layout:
-      var reaped_count: Int64        — tombstoned chunks deleted (`.seg` +
-                                       chunk key + marker).
+      var reaped_count: Int64        — tombstoned chunks deleted (chunk key +
+                                       marker, and the `.seg` unless the
+                                       payload moved).
       var skipped_live_count: Int64  — tombstones on LIVE chunks (seq at or
                                        above `log_start_seq`): left untouched.
                                        Nonzero means a log-start advance
@@ -652,7 +656,10 @@ struct ReapWorker[Storage: ConditionalWriteStore](
            skipped and counted in `skipped_live_count`, never deleted, and the
            pass goes on (no raise).
         For each grace-elapsed tombstone below the floor the reaper deletes
-        the now-unreferenced SEGMENT objects:
+        the now-unreferenced SEGMENT objects, unless the tombstone says the
+        payload moved (a migration or fold re-recorded the `.seg` into
+        `_base`, which still reads it): then it skips steps 2 and 3 and reaps
+        the chunk key only:
           2. reads the chunk body → decodes the broker `ManifestBody` to learn
              the `.seg` object key (the broker's domain payload);
           3. DELETEs the `.seg` segment object from `segment_store` (the actual
@@ -676,8 +683,14 @@ struct ReapWorker[Storage: ConditionalWriteStore](
                 # Step 1. A live chunk: keep its `.seg` and its chunk key.
                 skipped_live += Int64(1)
                 continue
-            var schedule_ts = manifest.tombstone_schedule_ts(seq)
-            if now_ms - schedule_ts >= self._grace_ms:
+            var tomb = manifest.read_tombstone(seq)
+            if now_ms - tomb.schedule_ts_ms >= self._grace_ms:
+                if tomb.payload_moved:
+                    # `_base` references this `.seg` now: reap the chunk key
+                    # and the marker, never the segment (komira-ai/komira#494).
+                    manifest.reap(seq)
+                    reaped += Int64(1)
+                    continue
                 # Delete the .seg segment object first (the durable data). Read
                 # the chunk body for its object_key; if the chunk is already
                 # gone (a concurrent reaper), skip — manifest.reap is a no-op

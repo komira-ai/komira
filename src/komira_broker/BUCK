@@ -35,6 +35,7 @@ mojo_library(
         "tests/test_broker_log_start_advance_consistency_offline.mojo",
         "tests/test_broker_maintenance_authoritative_tail_offline.mojo",
         "tests/test_broker_marker_chunk_readers_offline.mojo",
+        "tests/test_broker_moved_payload_reap_offline.mojo",
         "tests/test_broker_reap_below_log_start_offline.mojo",
         "tests/test_broker_reaped_slot_offline.mojo",
         "tests/test_broker_retention_offline.mojo",
