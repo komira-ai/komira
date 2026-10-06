@@ -397,9 +397,24 @@ def test_parent_compaction_failed_advance_marks_nothing() raises:
     print("[test_parent_compaction_failed_advance_marks_nothing] PASS")
 
 
+def test_parent_compaction_empty_parent_is_a_noop() raises:
+    print("[test_parent_compaction_empty_parent_is_a_noop] starting...")
+    var inner = _Inner()
+    var maint = _manifest(inner, Int64(4))
+    _schedule_parent_chunks_for_delete[_FaultStore](maint, Int64(50_000))
+    assert_false(
+        _has(inner, log_start_key(_prefix(Int64(4))).raw()),
+        "an empty parent writes no log start",
+    )
+    assert_equal(len(maint.tombstone_seqs()), 0, "and no tombstone")
+    _ = maint^
+    print("[test_parent_compaction_empty_parent_is_a_noop] PASS")
+
+
 def main() raises:
     test_failed_advance_tombstones_are_skipped_then_reclaimed()
     test_unreadable_log_start_reaps_nothing()
     test_parent_compaction_advances_then_reaper_reclaims()
     test_parent_compaction_failed_advance_marks_nothing()
-    print("[OK] test_broker_reap_below_log_start_offline — 4 cases passed")
+    test_parent_compaction_empty_parent_is_a_noop()
+    print("[OK] test_broker_reap_below_log_start_offline — 5 cases passed")

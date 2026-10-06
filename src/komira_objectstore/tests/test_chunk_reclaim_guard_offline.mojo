@@ -360,6 +360,30 @@ def test_rewrite_does_not_recreate_reaped_chunk() raises:
         assert_false(is_not_found(msg), "an unproven absence is not absence")
     assert_true(raised3, "the rewrite fails")
     _disarm(inner, _FAIL_HEAD, chunk_key(p, Int64(2)).raw())
+
+    # The conditional PUT fails for another reason: that error, unchanged.
+    _arm(inner, _FAIL_PUT, chunk_key(p, Int64(2)).raw())
+    var raised4 = False
+    try:
+        m.rewrite_chunk_body(Int64(2), _body(9))
+    except e:
+        raised4 = True
+        var msg = String(e)
+        assert_true(msg.find("injected fault") >= 0, msg)
+        assert_false(is_not_found(msg), "a transport error is not absence")
+    assert_true(raised4, "the failed PUT is reported")
+    _disarm(inner, _FAIL_PUT, chunk_key(p, Int64(2)).raw())
+
+    # A chunk that is already gone (never written, or reaped before the
+    # rewrite read it): the etag HEAD reports absence, nothing is written.
+    var raised5 = False
+    try:
+        m.rewrite_chunk_body(Int64(9), _body(9))
+    except e:
+        raised5 = True
+        assert_true(is_not_found(String(e)), String(e))
+    assert_true(raised5, "rewriting an absent chunk raises")
+    assert_false(_chunk_present(inner, p, Int64(9)), "and creates nothing")
     _ = m^
     print("[test_rewrite_does_not_recreate_reaped_chunk] PASS")
 
