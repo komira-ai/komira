@@ -234,14 +234,11 @@ def grpc_percent_encode_message(text: String) -> String:
     pass through verbatim. The '%' character itself is encoded as `%25`.
     All other byte values become `%XX` (uppercase hex).
 
-    Operates on the underlying byte sequence of `text` — handles non-UTF-8
-    bytes correctly (gRPC-message is a byte-oriented header value).
+    Operates on the UTF-8 bytes of `text`, so a non-ASCII character becomes
+    one `%XX` per byte: `café` is `caf%C3%A9`. (Reading `text[byte=i]` would
+    assert on the first continuation byte and abort the process.)
     """
-    var bytes = List[UInt8]()
-    var n = text.byte_length()
-    for i in range(n):
-        bytes.append(UInt8(ord(text[byte=i])))
-    return grpc_percent_encode_bytes(Span(bytes))
+    return grpc_percent_encode_bytes(text.as_bytes())
 
 
 def grpc_percent_encode_bytes(text: Span[UInt8, _]) -> String:
@@ -275,12 +272,12 @@ def grpc_percent_decode_message(text: String) raises -> String:
     var out_bytes = List[UInt8]()
     var i = 0
     while i < n:
-        var b = ord(text[byte=i])
+        var b = Int(text.as_bytes()[i])
         if b == ord("%"):
             if i + 2 >= n:
                 raise Error("komira_connect.grpc: truncated %XX at end of grpc-message")
-            var h1 = _hex_to_int(ord(text[byte=i + 1]))
-            var h2 = _hex_to_int(ord(text[byte=i + 2]))
+            var h1 = _hex_to_int(Int(text.as_bytes()[i + 1]))
+            var h2 = _hex_to_int(Int(text.as_bytes()[i + 2]))
             if h1 < 0 or h2 < 0:
                 raise Error("komira_connect.grpc: malformed %XX in grpc-message")
             out_bytes.append(UInt8((h1 << 4) | h2))
