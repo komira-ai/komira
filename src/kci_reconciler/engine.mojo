@@ -64,8 +64,8 @@
 #
 # ★ THE CELL SCOPE (kci_reconciler/ownership.mojo). Every verb has an OWNED form
 # (`plan_graph_owned`, `apply_graph_owned`, `destroy_graph_owned`) that runs in a
-# `CellScope (machine, cell, provenance, adopt)`; the older forms run in the
-# UNOWNED scope and behave exactly as before. In an owned scope:
+# `CellScope (machine, cell, provenance, adopt, validation_run_id)`; the older
+# forms run in the UNOWNED scope and behave exactly as before. In an owned scope:
 #   * the store is keyed `(machine, cell, logical id)`;
 #   * before ANY change, every node must stamp ownership and every present object
 #     must be this node's (stamped with its identity, or explicitly adopted):

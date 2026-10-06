@@ -11,7 +11,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # here), in client mode: each operation's request builder (a form body) and
 # response parser (its <OpResult> element), its endpoint resolved through
 # SNS's published endpoint ruleset and partition table, embedded in the
-# module, and `SNSSNSClient`, which resolves each call's endpoint and sends
+# module, and `SNSClient`, which resolves each call's endpoint and sends
 # through komira_aws_core's send_sigv4_signed_request (signing name `sns`)
 # over the komira_http_core Connector it is given. Every SNS operation is a
 # POST, and a call is retried as botocore's standard mode retries it

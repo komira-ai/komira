@@ -3,13 +3,13 @@
 # =============================================================================
 #
 # The in-process sqlite backend: a `Database`-trait conformer
-# over the embedded system `libsqlite3` via the FFI shim (sqlite/ffi.mojo). It
-# is the containerless, fast backend that makes most of the DB-abstraction
-# testing run in a plain unit test (no docker, no socket) — `libsqlite3`
-# is linked in-process.
+# over `libsqlite3` via the FFI shim (ffi.mojo). It is the containerless, fast
+# backend that makes most of the DB-abstraction testing run in a plain unit
+# test (no docker, no socket): `libsqlite3` is built from source
+# (//third_party/sqlite) and linked statically.
 #
 # ENCAPSULATION: every UnsafePointer / opaque handle lives behind
-# this struct's private helpers (the FFI declarations are in sqlite/ffi.mojo,
+# this struct's private helpers (the FFI declarations are in ffi.mojo,
 # the carve-out). The public surface is exactly `Database`:
 #   execute / query / query_opt / query_one / begin / commit / rollback +
 #   placeholder(i) / now_expr() + claim_pending — all String / List[DbValue]
@@ -130,7 +130,7 @@ from komira_db_sqlite.ffi import (
 struct SqliteDatabase(SqlDatabase):
     """A sqlite-backed `Database`. Owns one `sqlite3*` connection (a single file
     path or ":memory:"). All UnsafePointer / opaque-handle work is confined to
-    this struct's private helpers + the sqlite/ffi.mojo carve-out; the public
+    this struct's private helpers + the ffi.mojo carve-out; the public
     surface is the `Database` trait (String / List[DbValue] in, DbRows out)."""
 
     # SAFETY (FFI-POD opaque-handle carve-out): `_conn` is an FFI-POD opaque

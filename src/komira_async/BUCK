@@ -106,6 +106,7 @@ mojo_library(
         "tests/test_reactor_completion_queue_smoke.mojo",
         "tests/test_reactor_park_no_lost_wakeup.mojo",
         "tests/test_reactor_smoke.mojo",
+        "tests/test_reactor_with_std_sleep.mojo",
         "tests/test_real_timer_park_lifecycle.mojo",
         "tests/test_runtime_portability.mojo",
         "tests/test_runtime_smoke.mojo",

@@ -30,9 +30,18 @@
 #   (9) the minted token goes ONLY to the host it was minted at: a prefix.dev
 #       or index upload whose coordinate names another server is refused with
 #       ZERO requests on either transport (no ID token, no mint, no upload),
-#       on both surfaces and on reads; host case does not matter.
+#       on both surfaces and on reads; host case does not matter;
+#  (10) the ID-token request is RETRIED, bounded: a transport fault (the
+#       connect timeout a release job met), a 5xx and a 429 are sent again
+#       after a backoff wait through the injected sleeper, at most 4 sends,
+#       the error naming the attempts and still withholding secrets (a fault
+#       or a body that echoes the request token); the policy is pinned field
+#       by field; a Retry-After of 10 s is waited out, one of 11 s (or 120 s,
+#       or 7 digits, on a 429 or a 503) is final after ONE send, as are a 403
+#       and a 404; a token exchange that faults is NOT retried.
 #
-# Hermetic: ScriptedPkgTransport; no network. The test sets the two
+# Hermetic: ScriptedPkgTransport and komira_retry's RecordingSleeper (a wait
+# is recorded, never slept); no network. The test sets the two
 # handshake variables EMPTY for row (8) and never to a value.
 # =============================================================================
 
@@ -40,6 +49,7 @@ from std.os import setenv
 from std.testing import assert_equal, assert_raises, assert_true
 
 from komira_encoding import base64_url_encode_nopad
+from komira_retry import RecordingSleeper
 from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
 from komira_secret_store import SecretValue
 
@@ -58,8 +68,14 @@ from kci_pkg_upload.credential import (
 from kci_pkg_upload.github_oidc_credential import (
     ACTIONS_ID_TOKEN_REQUEST_TOKEN,
     ACTIONS_ID_TOKEN_REQUEST_URL,
+    ID_TOKEN_RETRY_DEADLINE_MS,
+    ID_TOKEN_RETRY_INITIAL_MS,
+    ID_TOKEN_RETRY_MAX_ATTEMPTS,
+    ID_TOKEN_RETRY_MAX_MS,
+    ID_TOKEN_RETRY_MAX_SERVER_DELAY_MS,
     GithubOidcCredential,
     decode_jwt_claims,
+    id_token_retry_policy,
     prefix_dev_audience,
 )
 from kci_pkg_upload.registry_set import RegistrySet
@@ -70,6 +86,8 @@ from kci_pkg_upload.wire import bytes_of
 comptime _URL: String = "https://token.actions.example.invalid/_apis/idtoken?api-version=2.0"
 comptime _REQ_TOKEN: String = "request-token-0123456789abcdef"
 comptime _MINTED: String = "pfx_minted_0123456789abcdef"
+comptime _TIMEOUT: String = "TcpStream.connect timed out after 5 s"
+comptime _Cred = GithubOidcCredential[ScriptedPkgTransport, RecordingSleeper]
 
 
 def _jwt(environment: String) -> String:
@@ -107,9 +125,9 @@ def _cred(
     prefix_host: String = String("prefix.dev"),
     pypi_index: String = String(""),
     url: String = String(_URL),
-) raises -> GithubOidcCredential[ScriptedPkgTransport]:
-    return GithubOidcCredential[ScriptedPkgTransport](
-        t^, url, SecretValue.from_string(String(_REQ_TOKEN)), prefix_host.copy(), pypi_index.copy()
+) raises -> _Cred:
+    return _Cred(
+        t^, RecordingSleeper(), url, SecretValue.from_string(String(_REQ_TOKEN)), prefix_host.copy(), pypi_index.copy()
     )
 
 
@@ -284,8 +302,8 @@ def test_unserved_surfaces_and_construction_refusals() raises:
         _ = only_prefix.authorization(SURFACE_PYPI_UPLOAD, String("test.pypi.org"))
     assert_equal(only_prefix.transport().call_count(), 0)
     with assert_raises(contains="request token is EMPTY"):
-        _ = GithubOidcCredential[ScriptedPkgTransport](
-            ScriptedPkgTransport(), String(_URL), SecretValue.from_string(String("")),
+        _ = _Cred(
+            ScriptedPkgTransport(), RecordingSleeper(), String(_URL), SecretValue.from_string(String("")),
             String("prefix.dev"), String(""),
         )
     with assert_raises(contains="is not an https:// URL"):
@@ -303,8 +321,8 @@ def test_from_actions_env_names_the_missing_variables() raises:
     _ = setenv(String(ACTIONS_ID_TOKEN_REQUEST_URL), String(""), True)
     _ = setenv(String(ACTIONS_ID_TOKEN_REQUEST_TOKEN), String(""), True)
     try:
-        _ = GithubOidcCredential[ScriptedPkgTransport].from_actions_env(
-            ScriptedPkgTransport(), String("prefix.dev"), String("")
+        _ = _Cred.from_actions_env(
+            ScriptedPkgTransport(), RecordingSleeper(), String("prefix.dev"), String("")
         )
         assert_true(False, "absent handshake variables must be refused")
     except e:
@@ -358,7 +376,7 @@ def test_the_token_goes_only_to_its_mint_host() raises:
     oidc.queue(_raw(200, String(_MINTED)))
     var w = ScriptedPkgTransport()
     w.queue(PkgResponse(201))
-    var rs = RegistrySet[ScriptedPkgTransport, GithubOidcCredential[ScriptedPkgTransport]](
+    var rs = RegistrySet[ScriptedPkgTransport, _Cred](
         w^, _cred(oidc^, String("prefix.dev"), String("test.pypi.org"))
     )
     var other = _conda_at(String("conda.example.org/example-channel"))
@@ -383,6 +401,149 @@ def test_the_token_goes_only_to_its_mint_host() raises:
     print("  test_the_token_goes_only_to_its_mint_host: PASS")
 
 
+def _with_retry_after(status: Int, seconds: String) -> PkgResponse:
+    var r = PkgResponse(status)
+    r.with_header(String("Retry-After"), seconds.copy())
+    return r^
+
+
+def test_the_id_token_request_is_retried() raises:
+    var policy = id_token_retry_policy()
+    assert_equal(policy.max_attempts, 4)
+    assert_equal(policy.backoff.initial_ms, Int64(1000))
+    assert_equal(policy.backoff.multiplier, 2.0)
+    assert_equal(policy.backoff.max_ms, Int64(4000))
+    assert_true(policy.backoff.jitter.is_full())
+    assert_equal(policy.deadline_ms, Int64(60_000))
+    assert_equal(policy.max_server_delay_ms, Int64(10_000))
+    assert_equal(ID_TOKEN_RETRY_MAX_ATTEMPTS, 4)
+    assert_equal(ID_TOKEN_RETRY_MAX_MS, Int64(4000))
+    assert_equal(ID_TOKEN_RETRY_DEADLINE_MS, Int64(60_000))
+    assert_equal(ID_TOKEN_RETRY_MAX_SERVER_DELAY_MS, Int64(10_000))
+    # (a) two connect timeouts, then the ID token: minted, after two waits
+    # within the first two backoff caps (full jitter: [0, 1 s], [0, 2 s]).
+    var jwt = _jwt(String("release"))
+    var t = ScriptedPkgTransport()
+    t.queue_fault(String(_TIMEOUT))
+    t.queue_fault(String(_TIMEOUT))
+    t.queue(_id_token_answer(jwt))
+    t.queue(_raw(200, String(_MINTED)))
+    var cred = _cred(t^)
+    assert_equal(cred.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String("Bearer ") + String(_MINTED))
+    assert_equal(cred.transport().call_count(), 4)
+    assert_equal(cred.transport().unconsumed(), 0)
+    for i in range(3):
+        assert_equal(cred.transport().call(i).path, String("/_apis/idtoken?api-version=2.0&audience=prefix.dev"))
+        assert_equal(
+            cred.transport().call(i).header_value(String("Authorization")), String("Bearer ") + String(_REQ_TOKEN)
+        )
+    assert_equal(cred.transport().call(3).method, HTTP_METHOD_POST)
+    assert_equal(cred.id_token_retry().attempts(), 3)
+    assert_equal(len(cred.id_token_retry().sleeper().slept), 2)
+    assert_true(cred.id_token_retry().sleeper().slept[0] <= ID_TOKEN_RETRY_INITIAL_MS)
+    assert_true(cred.id_token_retry().sleeper().slept[1] <= 2 * ID_TOKEN_RETRY_INITIAL_MS)
+    # (b) the runner's service never answers: 4 sends, 3 waits, no mint; the
+    # error names the attempts and the last fault.
+    var t2 = ScriptedPkgTransport()
+    for _ in range(4):
+        t2.queue_fault(String(_TIMEOUT))
+    var down = _cred(t2^)
+    try:
+        _ = down.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
+        assert_true(False, "an unreachable ID-token service must be refused")
+    except e:
+        var msg = String(e)
+        assert_true(msg.find(String("ID-token request faulted (after 4 attempts)")) >= 0, msg)
+        assert_true(msg.find(String(_TIMEOUT)) >= 0, msg)
+    assert_equal(down.transport().call_count(), 4, "bounded: no fifth send")
+    assert_equal(len(down.id_token_retry().sleeper().slept), 3)
+    for i in range(3):
+        assert_true(down.id_token_retry().sleeper().slept[i] <= ID_TOKEN_RETRY_INITIAL_MS * Int64(1 << i))
+    # (b2) a retried fault whose text echoes the request token: withheld.
+    var t2b = ScriptedPkgTransport()
+    for _ in range(4):
+        t2b.queue_fault(String("connect refused for Bearer ") + String(_REQ_TOKEN))
+    var echo = _cred(t2b^)
+    try:
+        _ = echo.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
+        assert_true(False, "an echoing fault must be refused")
+    except e:
+        var msg = String(e)
+        assert_true(msg.find(String(_REQ_TOKEN)) < 0, msg)
+        assert_true(msg.find(String("withheld")) >= 0, msg)
+    assert_equal(echo.transport().call_count(), 4)
+    # (c) a 503 and a 429 are sent again; the 429's Retry-After is the wait
+    # when it is longer than the backoff.
+    var t3 = ScriptedPkgTransport()
+    t3.queue(_raw(503, String("unavailable")))
+    t3.queue(_with_retry_after(429, String("3")))
+    t3.queue(_id_token_answer(jwt))
+    t3.queue(_raw(200, String(_MINTED)))
+    var busy = _cred(t3^)
+    assert_equal(busy.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String("Bearer ") + String(_MINTED))
+    assert_equal(busy.transport().call_count(), 4)
+    assert_equal(len(busy.id_token_retry().sleeper().slept), 2)
+    assert_equal(busy.id_token_retry().sleeper().slept[1], Int64(3000))
+    # (c2) the 10 s boundary: Retry-After 10 on a 503 is waited out.
+    var t3b = ScriptedPkgTransport()
+    t3b.queue(_with_retry_after(503, String("10")))
+    t3b.queue(_id_token_answer(jwt))
+    t3b.queue(_raw(200, String(_MINTED)))
+    var edge = _cred(t3b^)
+    _ = edge.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
+    assert_equal(edge.transport().call_count(), 3)
+    assert_equal(len(edge.id_token_retry().sleeper().slept), 1)
+    assert_equal(edge.id_token_retry().sleeper().slept[0], Int64(10_000))
+    # (d) a 503 every time: the status, the attempts, and a body echoing the
+    # request token still withheld.
+    var t4 = ScriptedPkgTransport()
+    for _ in range(4):
+        t4.queue(_raw(503, String("bad bearer ") + String(_REQ_TOKEN)))
+    var five = _cred(t4^)
+    try:
+        _ = five.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
+        assert_true(False, "a 503 every time must be refused")
+    except e:
+        var msg = String(e)
+        assert_true(msg.find(String("answered HTTP 503 (after 4 attempts)")) >= 0, msg)
+        assert_true(msg.find(String(_REQ_TOKEN)) < 0, msg)
+    assert_equal(five.transport().call_count(), 4)
+    # (e) final after ONE send, no wait: 403, 404, and a 429 asking for more
+    # than 10 s. The message carries no attempt count.
+    var finals = List[PkgResponse]()
+    finals.append(_raw(403, String("no id-token permission")))
+    finals.append(_raw(404, String("not found")))
+    finals.append(_with_retry_after(429, String("11")))
+    finals.append(_with_retry_after(429, String("120")))
+    finals.append(_with_retry_after(503, String("120")))
+    finals.append(_with_retry_after(429, String("1000000")))
+    var statuses = List[String]()
+    statuses.append(String("answered HTTP 403: "))
+    statuses.append(String("answered HTTP 404: "))
+    statuses.append(String("answered HTTP 429: "))
+    statuses.append(String("answered HTTP 429: "))
+    statuses.append(String("answered HTTP 503: "))
+    statuses.append(String("answered HTTP 429: "))
+    for i in range(len(finals)):
+        var tf = ScriptedPkgTransport()
+        tf.queue(finals[i].copy())
+        var c = _cred(tf^)
+        with assert_raises(contains=statuses[i]):
+            _ = c.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
+        assert_equal(c.transport().call_count(), 1, statuses[i])
+        assert_equal(len(c.id_token_retry().sleeper().slept), 0, statuses[i])
+    # (f) the token exchange is not retried: a mint fault ends the call.
+    var t6 = ScriptedPkgTransport()
+    t6.queue(_id_token_answer(jwt))
+    t6.queue_fault(String(_TIMEOUT))
+    var mint = _cred(t6^)
+    with assert_raises(contains="prefix.dev token exchange faulted"):
+        _ = mint.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
+    assert_equal(mint.transport().call_count(), 2)
+    assert_equal(len(mint.id_token_retry().sleeper().slept), 0)
+    print("  test_the_id_token_request_is_retried: PASS")
+
+
 def main() raises:
     test_the_prefix_dev_exchange()
     test_the_pypi_exchange()
@@ -393,4 +554,5 @@ def main() raises:
     test_unserved_surfaces_and_construction_refusals()
     test_from_actions_env_names_the_missing_variables()
     test_the_token_goes_only_to_its_mint_host()
+    test_the_id_token_request_is_retried()
     print("test_pkg_upload_github_oidc_credential: ALL PASS")
