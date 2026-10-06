@@ -640,9 +640,11 @@ trait WireDecoder(Copyable, Movable):
 
     def keep_null_fields(mut self, spellings: StringSlice):
         """Declare the keys, `|`-separated spellings, whose JSON `null` is a
-        VALUE rather than an absent field: the fields of type
-        `google.protobuf.NullValue` (`ProtoNullValueEnum`). Called once by a
-        generated `decode` body that has such a field, before its loop; the
+        VALUE rather than an absent field: the non-repeated fields of type
+        `google.protobuf.NullValue` (`ProtoNullValueEnum`), and of type
+        `google.protobuf.Value`, whose `null` is a Value of kind NULL_VALUE.
+        Called once by a generated `decode` body that has such a field,
+        before its loop; the
         JSON backend's `next_field()` then yields such a key where it skips
         any other `null` (proto3 reads `null` as the field's default, which
         for a oneof arm is "not set" and would lose the arm). The binary
