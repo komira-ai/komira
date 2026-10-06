@@ -33,7 +33,12 @@ from komira_connect.codec_grpc import (
 from komira_connect.codec_connect_json import parse_connect_error_json
 
 from komira_grpc.protocol import Protocol
-from komira_grpc.error import GrpcError, parse_grpc_status_trailers
+from komira_grpc.error import (
+    GrpcError,
+    format_grpc_error_message,
+    grpc_error_from_http_non_200,
+    parse_grpc_status_trailers,
+)
 from komira_connect.status import GRPC_STATUS_UNKNOWN
 
 
@@ -86,7 +91,8 @@ def decode_unary_response[
     """Decode the unary response body to a span over the inner message bytes.
 
     Framing and status:
-      - Classic gRPC: HTTP must be 200 (raised as UNKNOWN otherwise); body
+      - Classic gRPC: HTTP must be 200 (otherwise raised with the code the
+        spec's HTTP-to-gRPC table gives, `grpc_error_from_http_non_200`); body
         is 5-byte-enveloped → strip envelope and return the payload span.
         Status comes from TRAILERS, not body — that path is handled
         separately by `decode_unary_response_status`.
@@ -98,19 +104,17 @@ def decode_unary_response[
     feeds it straight into `Serializable.decode[D: WireDecoder]`.
 
     Raises GrpcError (as a raised Error with the [grpc:N] prefix) on:
-      - Classic gRPC: HTTP non-200 (UNKNOWN with HTTP-status diagnostic).
+      - Classic gRPC: HTTP non-200 (the table's code, with the HTTP status in
+        the message).
       - Connect unary: HTTP non-2xx (the JSON error envelope's code).
       - Malformed envelope (UNKNOWN with diagnostic).
     """
     comptime if P.unary_is_enveloped():
-        # Classic gRPC. HTTP non-200 maps to UNKNOWN.
+        # Classic gRPC. HTTP non-200 maps through the spec's HTTP-to-gRPC
+        # table (a proxy 503 -> UNAVAILABLE, retryable; 500 -> UNKNOWN).
         if http_status != 200:
-            raise Error(
-                String("[grpc:")
-                + String(Int(GRPC_STATUS_UNKNOWN))
-                + "] HTTP non-200 before gRPC framing: status="
-                + String(Int(http_status))
-            )
+            var ge = grpc_error_from_http_non_200(http_status)
+            raise Error(format_grpc_error_message(ge.code, ge.message))
         # Body is one 5-byte envelope. Strip it.
         return grpc_decode_unary(body)
     else:
