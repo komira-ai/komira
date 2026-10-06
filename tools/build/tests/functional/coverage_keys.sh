@@ -178,9 +178,11 @@ for c in false true; do
         $2 == "identity" { id[$1] = $3 }
         $2 == "reproducer" && $3 == "details" && $4 == "digest" { dg[$1] = $5 }
         END { for (n in id) { l = id[n]; sub(/ .*/, "", l); if (l in mine) print id[n] "\t" dg[n] } }' "$LOG/coverage_keys_ran_$c.lines" |
-        LC_ALL=C sort > "$LOG/coverage_keys_ran_$c.tsv"
+        LC_ALL=C sort > "$LOG/coverage_keys_ran_$c.tsv" ||
+        fail "cannot list the actions the komira.coverage=$c build ran (from $LOG/coverage_keys_ran_$c.lines)"
 done
-moved=$(LC_ALL=C comm -13 "$LOG/coverage_keys_ran_false.tsv" "$LOG/coverage_keys_ran_true.tsv")
+moved=$(LC_ALL=C comm -13 "$LOG/coverage_keys_ran_false.tsv" "$LOG/coverage_keys_ran_true.tsv") ||
+    fail "cannot compare $LOG/coverage_keys_ran_false.tsv and _true.tsv"
 [ -z "$moved" ] ||
     fail "with -c komira.coverage=true, building $(echo $rl) ran again, under a digest the build with it off did not have: $(printf '%s\n' "$moved" | cut -f 1 | sed 's/.*) (//; s/)$//' | head -n 5 | paste -sd ';' -) (see $LOG/coverage_keys_ran_false.tsv and _true.tsv)"
 nr=$(grep -c . "$LOG/coverage_keys_ran_true.tsv")

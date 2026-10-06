@@ -291,7 +291,7 @@ pass
 # it: no .debug_line. So case 14's line tables are cov_zig's doing.
 run "$ZIG/zig" cc -target "$TGT" -Wl,--strip-debug -Wl,--enable-new-dtags hello.o -o hello_release
 [ "$RC" -eq 0 ] || red "pinned zig, release: the link exited $RC"
-! grep -qF .debug_line hello_release || red "pinned zig, release: the binary has .debug_line; case 12 proves nothing"
+! grep -qF .debug_line hello_release || red "pinned zig, release: the binary has .debug_line; case 14 proves nothing"
 pass
 
 cd /
