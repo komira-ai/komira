@@ -155,10 +155,17 @@ def _status_trailers(
     _headers(hpack, t^, True, out)
 
 
-def _client(var script: List[UInt8]) -> FirestoreListenClient[ScriptedStream]:
+def _client(
+    var script: List[UInt8], pending_after_script: Int = 0
+) -> FirestoreListenClient[ScriptedStream]:
+    """A client over `script`. `pending_after_script` > 0 holds the
+    connection open (reads answer Pending) that many times after the script
+    instead of reading EOF, so an end can only come from the script itself."""
     var shared = ArcPointer[List[UInt8]](List[UInt8]())
     var stream = ScriptedStream.from_read_script_with_capture(script^, shared)
     stream.set_negotiated_protocol(NEGOTIATED_HTTP_2)
+    if pending_after_script > 0:
+        stream.set_pending_after_script(pending_after_script)
     return FirestoreListenClient[ScriptedStream](
         stream^, String("firestore.googleapis.com"), String("fake-token")
     )
@@ -327,7 +334,19 @@ def test_rst_stream_ends_the_stream_as_cancelled() raises:
     _grpc_head(hpack, out)
     encode_data_frame(_SID, _target_change_envelope(), end_stream=False, out=out)
     encode_rst_stream_frame(_SID, H2_ERR_CANCEL, out)
-    var client = _run_to_end(out^)
+    # The connection stays open after the RST (no EOF for a million reads),
+    # so only the RST can end the stream within these few polls. A loop that
+    # ignored the reset would time out every poll and never end.
+    var reactor = _make_reactor()
+    var client = _client(out^, pending_after_script=1_000_000)
+    _open(client, reactor)
+    var ended = False
+    for _ in range(3):
+        _ = client.poll_progress[_RT](reactor, max_wall_us=500_000)
+        if client.last_poll_ended():
+            ended = True
+            break
+    assert_true(ended, "a reset Listen stream did not end the receive loop")
     assert_equal(client.terminal_code(), Int(GRPC_STATUS_CANCELLED))
     assert_true(
         String("RST_STREAM") in client.terminal_message(),
