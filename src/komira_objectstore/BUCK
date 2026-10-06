@@ -53,6 +53,7 @@ mojo_library(
         "tests/test_delimiter_listing_byte_faithful.mojo",
         "tests/test_local_fs_conditional_store.mojo",
         "tests/test_local_fs_read_errno.mojo",
+        "tests/test_local_fs_store_delete_errno.mojo",
         "tests/test_local_fs_store_list_bytes_non_ascii.mojo",
         "tests/test_local_fs_store_list_dir_errno.mojo",
         "tests/test_manifest_reaped_slot_async_offline.mojo",

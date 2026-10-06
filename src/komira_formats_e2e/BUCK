@@ -16,6 +16,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   test_formats_projected_roundtrip -- every discovered file, read with
 #     column subsets in a different order, matches the source values, NULLs
 #     and partition value (a writer/reader self-round-trip).
+#   test_formats_edge_binary -- integer limits and IEEE-754 edges (-0.0,
+#     subnormals, DBL_MIN/MAX, +-Inf, NaN payloads, 17-digit values) through
+#     Avro OCF and ORC: encoded bytes (zig-zag varints, RLE v2 DIRECT runs,
+#     little-endian doubles, ColumnStatistics protobuf) against the specs,
+#     then a bit-exact read-back.
+#   test_formats_edge_text -- the same values through JSONL and CsvSink:
+#     exact text, then a bit-exact read-back; NaN/Inf as each format
+#     documents (JSON null and refusal, CSV `inf`/`nan` tokens). Known
+#     defects are held out by name in its header.
 #   test_formats_golden_bytes -- the writer-side oracle: exact CSV and JSONL
 #     bytes, Avro OCF framing and writer schema, ORC stripe stats and stream
 #     sizes, and hand-written JSONL the writer never produces.
@@ -52,6 +61,8 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_formats_edge_binary.mojo",
+        "tests/test_formats_edge_text.mojo",
         "tests/test_formats_golden_bytes.mojo",
         "tests/test_formats_hive_discovery.mojo",
         "tests/test_formats_projected_roundtrip.mojo",

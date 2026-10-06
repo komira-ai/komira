@@ -9,6 +9,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # readers); the tests are the point. Nothing ships, so `conda = False`.
 #
 # The tests, each run as a build action:
+#   test_search_e2e_catalog_generation -- the catalog's generation is
+#     paired with a live split set only when two reads of it around the live
+#     read agree: a counter bumped during the first attempt makes it read
+#     again and return the settled generation, and one that never settles
+#     is refused by name with nothing recorded.
 #   test_search_e2e_publish_race -- two store handles over one directory,
 #     interleaved deterministically, lose manifest slots to each other: the
 #     loser of a create-if-absent gets the precondition failure, a publish
@@ -24,8 +29,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     in-memory split bytes, and the same documents as one SearchCore over
 #     the whole corpus, for a term, a multi-term match, folded non-ASCII and
 #     ASCII terms, a CJK term, a term in no split and the no-query scan.
-#   test_search_e2e_retire_reap -- retiring and reaping splits: the reap
-#     waits for the grace period, and a query resolved before the retire
+#   test_search_e2e_retire_reap -- retiring and reaping splits: the
+#     generation rises on the retire (the catalog reports the metastore's),
+#     the reap waits for the grace period, and a query resolved before the retire
 #     still reads the split set it planned; after the reap the split object
 #     is gone, the generation never goes down and the scan equals the
 #     baseline without that split; a middle split and then every split are
@@ -64,6 +70,7 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_search_e2e_catalog_generation.mojo",
         "tests/test_search_e2e_publish_race.mojo",
         "tests/test_search_e2e_retire_reap.mojo",
         "tests/test_search_e2e_scan_equals_core.mojo",

@@ -12,23 +12,33 @@
 # whatever it reports comes from the objects in the store (for
 # `LocalFsConditionalStore`, the files in its root directory).
 #
-# THE CATALOG'S GENERATION IS NOT `SearchMetastore.generation()`. That counts
-# the chunks ever committed, so a retire (and a reap) leaves it where it was
-# while the live split set shrinks. The `SearchIndexCatalog` contract needs a
-# token that changes whenever the live set changes, and splits served by
-# ordinal from one stable set per token. So `MetastoreSearchCatalog`:
-#   * reports `2 * committed - live` (committed = `SearchMetastore.generation()`,
-#     live = the live split count). A publish adds one committed chunk and at
-#     most one live split, so the token rises; a retire removes a live split,
-#     so it rises by one; a reap changes neither. It never goes down.
-#   * records, on each `generation()` call, the object keys live at that
-#     token in a snapshot object `<index>/catalog/generation-<token>`
-#     (create-if-absent; a second writer of the same token must hold the same
-#     keys, or the call raises). `split_count_at`/`split_at` read that record,
-#     so a retire between `plan_splits` and `open_split` does not shift the
-#     ordinals: an execution resolved before the retire still reads the split
-#     objects it planned, which stay on disk until the reap. A token with no
-#     record is refused by name (`SEARCH_GENERATION_NOT_AVAILABLE`).
+# THE CATALOG'S GENERATION IS `SearchMetastore.generation()`. That value
+# moves on every catalog change (publish, retire, reap) and never goes down,
+# which is what the `SearchIndexCatalog` contract asks of the LIVE token.
+#
+# THE SPLIT SET OF A GENERATION IS RECORDED. The contract also asks
+# `splits_at(index, g)` for the splits live AT `g`, not now: an execution
+# resolves `g` and plans and opens its splits later, possibly after a
+# retire. The metastore answers only "live now", so `MetastoreSearchCatalog`
+# records, on each `generation()` call, the object keys live at that
+# generation in a snapshot object `<index>/catalog/generation-<g>`
+# (create-if-absent; a second writer of the same generation must hold the
+# same keys, or the call raises). `split_count_at`/`split_at` read that
+# record, so a retire between `plan_splits` and `open_split` does not shift
+# the ordinals: an execution resolved before the retire still reads the split
+# objects it planned, which stay on disk until the reap. A generation with no
+# record is refused by name (`SEARCH_GENERATION_NOT_AVAILABLE`).
+#
+# The live set is paired with a generation the way the metastore's ordering
+# argument expects (komira_search_catalog/generation.mojo): read the
+# generation, the live set, the generation again, and record only when the
+# two reads agree. A retire or reap bumps the generation before its change
+# and again after it, so when the first read comes before the first bump, a
+# live read that sees the change is followed by a different second read. A
+# first read that falls between the two bumps sees the same generation twice
+# and records whichever live set it read under it; if another reader already
+# recorded a different set under that generation, the record is refused
+# ("recorded with a different live set") rather than served wrongly.
 # A snapshot record outlives the reap of a split it names; reading it after
 # the reap fails with the store's not-found, which is the grace period's
 # contract (it must exceed the longest query), not a silent drop.
@@ -167,8 +177,8 @@ def live_split_bytes[
 
 
 def catalog_snapshot_key(index: String, generation: Int64) -> String:
-    """Where `MetastoreSearchCatalog` records the object keys live at its
-    token `generation`: `<index>/catalog/generation-<token>`."""
+    """Where `MetastoreSearchCatalog` records the object keys live at
+    `generation`: `<index>/catalog/generation-<generation>`."""
     return index + String("/catalog/generation-") + String(generation)
 
 
@@ -218,8 +228,8 @@ struct MetastoreSearchCatalog[S: CloneableConditionalWriteStore](
     SearchIndexCatalog, Movable, Deinitable
 ):
     """A `SearchIndexCatalog` over one index's `SearchMetastore`. Every call
-    opens a cold handle. `generation()` reports `2 * committed - live` and
-    records the object keys live at that token; the split reads serve that
+    opens a cold handle. `generation()` reports `SearchMetastore.generation()`
+    and records the object keys live at it; the split reads serve that
     record, in publish order (see the file header)."""
 
     var _store: Self.S
@@ -239,31 +249,29 @@ struct MetastoreSearchCatalog[S: CloneableConditionalWriteStore](
             )
 
     def generation(self, index: String) raises -> Int64:
-        """The token of the current live set, after recording its keys."""
+        """The metastore generation, after recording the keys live at it."""
         self._check_index(index)
         var meta = cold_metastore(self._store, self._index)
-        # Live, committed, live again: a token is recorded only for a live
-        # list that did not move around the committed count it is paired with.
+        # Generation, live, generation: a generation is recorded only with a
+        # live list read while it held (see the file header).
         for _ in range(8):
-            var before = meta.list_live_splits()
-            var committed = meta.generation()
+            var g = meta.generation()
             var live = meta.list_live_splits()
-            if not _same_keys(before, live):
+            if meta.generation() != g:
                 continue
-            var token = Int64(2) * committed - Int64(len(live))
             var keys = List[String]()
             for i in range(len(live)):
                 keys.append(live[i].object_key.copy())
-            self._record(token, _encode_keys(keys))
-            return token
+            self._record(g, _encode_keys(keys))
+            return g
         raise Error(
             String("komira_search_e2e: the live split set of '")
             + index
-            + String("' kept moving while its generation was read")
+            + String("' kept changing while its generation was read")
         )
 
-    def _record(self, token: Int64, encoded: List[UInt8]) raises:
-        var key = Path.parse(catalog_snapshot_key(self._index, token))
+    def _record(self, generation: Int64, encoded: List[UInt8]) raises:
+        var key = Path.parse(catalog_snapshot_key(self._index, generation))
         try:
             _ = self._store.conditional_put(
                 key, encoded, WritePrecondition.if_none_match_star()
@@ -274,7 +282,7 @@ struct MetastoreSearchCatalog[S: CloneableConditionalWriteStore](
             if not _same_bytes(self._store.get(key), encoded):
                 raise Error(
                     String("komira_search_e2e: generation ")
-                    + String(token)
+                    + String(generation)
                     + String(" of '")
                     + self._index
                     + String("' is recorded with a different live set")
@@ -330,7 +338,7 @@ struct MetastoreSearchCatalog[S: CloneableConditionalWriteStore](
 
     def _keys_at(self, index: String, generation: Int64) raises -> List[String]:
         """The object keys recorded for `generation`, refused by name when no
-        `generation()` call recorded that token."""
+        `generation()` call recorded that generation."""
         self._check_index(index)
         var raw: List[UInt8]
         try:
@@ -349,11 +357,3 @@ struct MetastoreSearchCatalog[S: CloneableConditionalWriteStore](
             )
         return _decode_keys(raw)
 
-
-def _same_keys(a: List[SplitSummary], b: List[SplitSummary]) -> Bool:
-    if len(a) != len(b):
-        return False
-    for i in range(len(a)):
-        if a[i].object_key != b[i].object_key:
-            return False
-    return True
