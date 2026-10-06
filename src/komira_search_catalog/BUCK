@@ -19,7 +19,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # shards are reaped, a publish that lands in a shard after the reaper found
 # it drained survives the reap, a publish into a retired shard is refused
 # and its re-publish into a fresh shard is the only copy, and reaping
-# chunks in any order never leaves a lineage a cold reader refuses.
+# chunks in any order never leaves a lineage a cold reader refuses. The
+# fourth shows that every catalog change (publish, retire, reap) moves the
+# generation, that a scan straddling a retire or a reap sees it move, and
+# that retire and reap move it both before and after their change.
 mojo_library(
     name = "komira_search_catalog",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -29,6 +32,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_search_catalog_lifecycle.mojo",
+        "tests/test_search_generation_moves.mojo",
         "tests/test_search_metastore_concurrent.mojo",
         "tests/test_search_sublineage_sharding.mojo",
     ],
