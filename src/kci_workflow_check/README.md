@@ -64,13 +64,13 @@ from kci_workflow_check import kci_run_calls
 
 var calls = kci_run_calls(
     "echo start\n"
-    "kci run --stage publish --summary-file out.md --only step=wheel\n"
+    "kci run --stage publish --summary-file out.md --only step:wheel\n"
 )
 assert_equal(len(calls), 1)
 assert_equal(calls[0].stage, "publish")
 assert_true(calls[0].has_summary_file)
 assert_true(calls[0].has_only)
-assert_equal(calls[0].only[0], "step=wheel")
+assert_equal(calls[0].only[0], "step:wheel")
 assert_false(calls[0].has_machine)
 ```
 
