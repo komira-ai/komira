@@ -59,7 +59,11 @@
 #      b. `verify_member` runs again over every member, and a member whose
 #         name, version, build or sha256 changed since its own check (a later
 #         build wrote into it) is REFUSED. The set hash is computed from this
-#         second pass, i.e. from the bytes that stay on disk.
+#         second pass, i.e. from the bytes that stay on disk;
+#      c. every requirement of every library member must name ANOTHER
+#         library of the set (kci_release_set's `undeclared_requirements`;
+#         the platform guard and the compiler pin aside): a set that needs a
+#         package it does not declare is REFUSED, naming each requirement.
 #    Then write `<P>/release.json` LAST (kci.release_set major 2: the
 #    revision, the platform, `produced_by` = --run-id/--attempt, the members
 #    and the set hash). It is the commit marker: a run that stopped leaves
@@ -131,6 +135,7 @@ from kci_release_set import (
     member_platform,
     release_manifest_of,
     render_release_manifest,
+    undeclared_requirements,
     verify_member,
 )
 
@@ -459,6 +464,15 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                     + String("`"),
                 )
             final.append(again^)
+        var open_reqs = undeclared_requirements(final)
+        if len(open_reqs) > 0:
+            var why = String(
+                "the release set does not declare every package its libraries require;"
+                " declare each in the artifacts file:"
+            )
+            for i in range(len(open_reqs)):
+                why += String("\n  ") + open_reqs[i]
+            return _refused(String(ERROR_MEMBER), why)
         var identity = ReleaseIdentity(
             req.revision_id.copy(), req.platform.copy(), req.run.run_id.copy(), req.run.attempt
         )

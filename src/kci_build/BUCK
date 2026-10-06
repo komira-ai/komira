@@ -70,6 +70,9 @@ mojo_library(
         # the whole step over ScriptedRunner: argv, order, empty dirs, every stop with its
         # outcome and error id, release.json v2 last, RUNNING before the first effect
         "tests/test_build_flow.mojo",
+        # a set whose libraries require an undeclared package (the metapackage,
+        # itself) is REFUSED after every build, before release.json
+        "tests/test_build_closure.mojo",
         # --revision-id against the checkout, the stamp from git, every refusal
         "tests/test_revision.mojo",
         # --affected-by: the change, the affected commands (golden argv, the

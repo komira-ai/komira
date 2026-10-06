@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_iceberg_rest/iceberg_catalog.mojo — the READ-path catalog-resolver
+# komira_iceberg_catalog/iceberg_catalog.mojo — the READ-path catalog-resolver
 #   SEAM: `IcebergCatalog` + `ResolvedTable` + a storage-based conformer.
 # =============================================================================
 #

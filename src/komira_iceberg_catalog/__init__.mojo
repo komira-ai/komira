@@ -1,6 +1,8 @@
-"""komira_iceberg_rest — the INBOUND Iceberg REST catalog READ client
+"""komira_iceberg_catalog — the read-only Iceberg catalog CLIENT
 
-  (RESOLVE-ONLY table resolution; standard Iceberg REST protocol).
+  (RESOLVE-ONLY table resolution: one `IcebergCatalog` seam, a storage-based
+  conformer and a REST conformer speaking the standard Iceberg REST protocol,
+  plus the transport and credential seams the REST conformer uses).
 
 Design decision: we WRITE Iceberg tables storage-based only (bucket+prefix), but
 we must be able to CONSUME external REST catalogs on the READ path. A REST
