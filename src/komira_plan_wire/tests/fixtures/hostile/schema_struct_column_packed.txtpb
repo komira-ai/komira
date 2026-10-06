@@ -1,0 +1,110 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 2
+plan {
+  output_schema {
+    fields {
+      name: "id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "qty"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "name"
+      arrow_type_id: 13
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "addr"
+      arrow_type_id: 21
+      dict_index_type_id: 4
+      union_type_ids: 7
+      union_type_ids: 9
+      child_names: "city"
+      child_names: "zip"
+      child_type_ids: 13
+      child_type_ids: 4
+      child_nullables: true
+      child_nullables: false
+    }
+  }
+  scan {
+    source {
+      parquet {
+        paths: "/tmp/example_plan_endpoint_door.parquet"
+        schema {
+          fields {
+            name: "id"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "qty"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "name"
+            arrow_type_id: 13
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "addr"
+            arrow_type_id: 21
+            dict_index_type_id: 4
+            union_type_ids: 7
+            union_type_ids: 9
+            child_names: "city"
+            child_names: "zip"
+            child_type_ids: 13
+            child_type_ids: 4
+            child_nullables: true
+            child_nullables: false
+          }
+        }
+        fs_is_local: true
+      }
+    }
+    has_schema: true
+    schema {
+      fields {
+        name: "id"
+        arrow_type_id: 5
+        dtype_code: _DT_INT64
+        dict_index_type_id: 4
+      }
+      fields {
+        name: "qty"
+        arrow_type_id: 5
+        dtype_code: _DT_INT64
+        dict_index_type_id: 4
+      }
+      fields {
+        name: "name"
+        arrow_type_id: 13
+        dict_index_type_id: 4
+      }
+      fields {
+        name: "addr"
+        arrow_type_id: 21
+        dict_index_type_id: 4
+        union_type_ids: 7
+        union_type_ids: 9
+        child_names: "city"
+        child_names: "zip"
+        child_type_ids: 13
+        child_type_ids: 4
+        child_nullables: true
+        child_nullables: false
+      }
+    }
+    source_kind: SOURCE_KIND_COLUMNAR
+  }
+}

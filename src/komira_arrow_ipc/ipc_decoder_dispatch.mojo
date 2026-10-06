@@ -57,6 +57,11 @@ from komira_arrow_ipc.ipc_field_node_check import (
     validity_present,
     varlen_offsets_bytes,
 )
+from komira_arrow_ipc.ipc_nested_buffer_check import (
+    check_node_buffers,
+    check_struct_child_length,
+    nested_node_buffer_count,
+)
 from komira_arrow_ipc.ipc_flatbuf import (
     BufferDescriptor,
     FieldNode,
@@ -2302,6 +2307,23 @@ def _decode_column_nested(
     var length = Int(n.length)
     var null_count = Int(n.null_count)
     check_field_node("_decode_column_nested", node_idx, length, null_count)
+    # ROBUSTNESS: the Buffer list is the message's; refuse a node whose
+    # descriptors it does not carry before an arm indexes one.
+    check_node_buffers(
+        "_decode_column_nested",
+        node_idx,
+        buffer_idx,
+        nested_node_buffer_count(
+            t,
+            len(spec.children),
+            spec.inner_size,
+            _fixed_width_bytes_for(t),
+            view_col_idx,
+            variadic_buffer_counts,
+            zerocopy=False,
+        ),
+        len(buffers),
+    )
 
     # Leaf cases (NULL / fixed-width primitive / BOOL / var-len) — delegate
     # to the flat _decode_column helper. Same shape as the flat decoder.
@@ -2489,6 +2511,14 @@ def _decode_column_nested(
             )
             var child_out = Column[HeapRegion]()
             swap(child_cursor.column, child_out)
+            check_struct_child_length(
+                "_decode_column_nested",
+                node_idx,
+                length,
+                child_i,
+                next_node,
+                child_out._length,
+            )
             col._children.append(child_out^)
             next_node = child_cursor.next_node_idx
             next_buf = child_cursor.next_buffer_idx
@@ -3420,6 +3450,23 @@ def _decode_column_nested_zerocopy[
         length,
         null_count,
     )
+    # ROBUSTNESS: the Buffer list is the message's; refuse a node whose
+    # descriptors it does not carry before an arm indexes one.
+    check_node_buffers(
+        "_decode_column_nested_zerocopy",
+        node_idx,
+        buffer_idx,
+        nested_node_buffer_count(
+            t,
+            len(spec.children),
+            spec.inner_size,
+            _fixed_width_bytes_for(t),
+            view_col_idx,
+            variadic_buffer_counts,
+            zerocopy=True,
+        ),
+        len(buffers),
+    )
 
     # NULL: 0 buffers, all-null sentinel.
     if t == ArrowType.NULL:
@@ -3779,6 +3826,14 @@ def _decode_column_nested_zerocopy[
             )
             var child_out = Column[HeapRegion]()
             swap(child_cursor.column, child_out)
+            check_struct_child_length(
+                "_decode_column_nested_zerocopy",
+                node_idx,
+                length,
+                child_i,
+                next_node,
+                child_out._length,
+            )
             col._children.append(child_out^)
             next_node = child_cursor.next_node_idx
             next_buf = child_cursor.next_buffer_idx
