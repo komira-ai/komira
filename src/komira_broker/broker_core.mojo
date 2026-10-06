@@ -1404,6 +1404,12 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         not yet acked). The producer is acked (durability contract
         step 6) only when a `ProduceResult` is returned — buffered-but-not-
         flushed records are NOT yet durable.
+
+        The auto-flush runs at the default epochs (0, 0). Once this core is
+        fenced (`is_fenced()`), that flush is below the cached fence: it
+        raises `lease_fenced` before any `.seg` PUT and drops the buffer,
+        `rb` included. Every dropped batch is unacked (each earlier produce
+        returned `None`), so the producer retries against the new owner.
         """
         var est = _estimate_batch_bytes(rb)
         if self._oldest_ts_ms < Int64(0):
@@ -1458,10 +1464,12 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         The segment key carries no offset; the manifest append (step
         5, the caller) is the offset allocator + ordering point — re-keying the
         SEGMENT here is free (the key is purely a unique content address; only
-        the manifest body's reference to it is load-bearing). A 412 here wrote
-        nothing (the colliding key belongs to another writer), so re-keying
-        leaves no object of ours behind and consumes NO offset (the manifest
-        append has not run yet).
+        the manifest body's reference to it is load-bearing). A 412 usually means
+        another writer holds the key; but if an earlier attempt's create
+        landed and only its response was lost, a retried create can 412 on
+        our OWN object, which re-keying then leaves behind unreferenced.
+        Either way no offset is consumed (the manifest append has not run
+        yet).
 
         The PUT is the point of no return: if the manifest append that follows
         fails or is fenced, the `.seg` stays unreferenced, and nothing deletes

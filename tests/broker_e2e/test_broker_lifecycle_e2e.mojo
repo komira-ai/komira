@@ -52,8 +52,8 @@
 # What each phase would catch (the planted mutants are in the change notes):
 #   * an assignment that is not persisted, or is read back wrong (phase 1, 3);
 #   * a lost, reordered or altered record across a restart (phase 3);
-#   * a `BrokerCore.flush` that does not forward the caller's current lease
-#     epoch to the manifest fence (phase 4);
+#   * a `BrokerCore.flush` that does not refuse a writer below the caller's
+#     current lease epoch (phase 4);
 #   * a log_start that is not the base of the first live chunk (phase 5);
 #   * a cleaner that keeps a superseded offset, or drops an empty value as if
 #     it were a tombstone (phase 5).

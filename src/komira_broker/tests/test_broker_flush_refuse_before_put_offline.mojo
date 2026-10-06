@@ -24,8 +24,12 @@
 #   (3) Unknown outcome. An append that raises anything else is counted as an
 #       unknown outcome and records no fence: the next flush at the same epoch
 #       commits.
+#   (4) Fenced auto-flush. Once fenced, `produce()`'s trigger flush (default
+#       epochs 0, 0) raises `lease_fenced` before any PUT, drops the unacked
+#       buffer and returns no ack. Defect caught: `produce` swallowing the
+#       refusal (the producer would never learn it must move).
 #
-# Each case runs for all four variants. The counters on `flush_leak_stats()`
+# Cases (1)-(3) run for all four variants. The counters on `flush_leak_stats()`
 # are asserted on every path.
 #
 # Hard-rule audit: no UnsafePointer in any signature, no wildcard origins,
@@ -44,6 +48,7 @@ from komira_broker.broker_core import (
     BrokerCore,
     EO_COMMITTED,
     EO_LEASE_FENCED,
+    FLUSH_MS,
 )
 
 from komira_objectstore.cas_manifest import (
@@ -405,8 +410,49 @@ def test_unknown_outcome_is_counted_not_fenced() raises:
     print("[test_unknown_outcome_is_counted_not_fenced] PASS")
 
 
+# =============================================================================
+# (4) A fenced core's produce() auto-flush raises, PUTs nothing, acks nothing.
+# =============================================================================
+
+
+def test_fenced_produce_auto_flush_raises() raises:
+    print("[test_fenced_produce_auto_flush_raises] starting...")
+    var store = _Store()
+    var core = _core(store)
+    # Fence the core with an epoch-aware flush refused at entry.
+    var got = _attempt(core, _V_FLUSH, Int64(1), Int64(1), Int64(2))
+    assert_equal(got, String("lease_fenced"), "the epoch-aware flush is refused")
+    assert_true(core.is_fenced(), "the core is fenced")
+    _assert_stats(core, 1, 0, 0, "after fencing: ")
+
+    # A produce that does not trigger the flush buffers and returns no ack.
+    var t0 = Int64(10_000)
+    var first = core.produce(_batch(Int64(100), 2), t0)
+    assert_true(not first, "a buffered produce is not acked")
+    assert_equal(core.buffered_batches(), 1, "one batch buffered")
+
+    # The time trigger fires: the default-epoch flush is below the fence.
+    var acked = False
+    var refused = False
+    try:
+        var r = core.produce(_batch(Int64(200), 2), t0 + FLUSH_MS)
+        acked = Bool(r)
+    except e:
+        var msg = String(e)
+        assert_true(is_lease_fenced(msg), "the auto-flush raises lease_fenced, got: " + msg)
+        refused = True
+    assert_true(refused, "the fenced auto-flush raised")
+    assert_true(not acked, "the fenced auto-flush returned no ack")
+    assert_equal(_segs(store), 0, "the fenced auto-flush PUT no .seg")
+    assert_equal(_chunks(store), 0, "the fenced auto-flush committed no chunk")
+    assert_equal(core.buffered_batches(), 0, "the unacked buffer was dropped")
+    _assert_stats(core, 2, 0, 0, "after the auto-flush: ")
+    print("[test_fenced_produce_auto_flush_raises] PASS")
+
+
 def main() raises:
     test_refused_at_entry_puts_no_segment()
     test_fence_after_put_is_cached()
     test_unknown_outcome_is_counted_not_fenced()
+    test_fenced_produce_auto_flush_raises()
     print("test_broker_flush_refuse_before_put_offline: ALL PASS")
