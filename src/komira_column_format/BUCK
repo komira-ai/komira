@@ -1,0 +1,19 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Column-format storage for the engine's untyped hash tables: per-column
+# contiguous fixed-width slot buffers, variable-width descriptor cells with
+# per-column payload heaps, and per-column validity bitmaps (`ColumnFormatStorage`).
+# The grouping, join and sort kernels of the operator packages keep their keys
+# and payloads in this storage.
+mojo_library(
+    name = "komira_column_format",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core:komira_core",
+    ],
+    test_srcs = [
+        "tests/test_column_format_storage.mojo",
+        "tests/test_var_heap_offset_ceiling.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

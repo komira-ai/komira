@@ -9,6 +9,8 @@
 #           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]
 #           [--release-version <file>] [--concurrency <n>]
 #           [--secret-store <none|env>] [--scratch-dir <dir>]
+#           [--release-set-hash <64 hex>]
+#           [--pixi <file> --pixi-sha256 <hex>] [--channel file:///<dir>]
 #   kci --help
 #
 # kci has exactly ONE command: `kci run --stage S` runs every step of stage S
@@ -59,14 +61,40 @@
 #   a selected PUBLISH step  needs --release-version; --concurrency,
 #                            --secret-store optional
 #   a selected validation    needs --scratch-dir, an ABSOLUTE path (the
-#                            container mounts a directory under it)
+#                            container mounts a directory under it; an ENV
+#                            validation refuses one inside the checkout)
+#   a selected CONDA_INSTALL_ENV validation
+#                            needs --pixi, the ABSOLUTE path of the pinned
+#                            pixi it installs with, and --pixi-sha256, its
+#                            pin (64 lowercase hex): the validation runs
+#                            pixi only when the bytes have that sha256
 #   no selected step of that kind   its flags are refused (and
-#                            --scratch-dir when no validation is selected)
+#                            --scratch-dir when no validation is selected,
+#                            --pixi and --pixi-sha256 when no ENV one is)
+#
+# `--channel file:///<absolute directory>` (optional) is the PRE-PUBLISH
+# local mode: the selected validations read and install from that directory
+# (what `komira_pack conda-index` writes from a release directory) instead
+# of the step's channel, so a release is validated before anything is
+# published. Only a plain absolute file:/// location is accepted. It is
+# refused unless the run is VALIDATION-ONLY: at least one validation is
+# selected, every selected one is CONDA_INSTALL_ENV (a container cannot see
+# this machine's directory), and no BUILD or PUBLISH step is selected. Under
+# GitHub Actions it is refused too (dispatch.mojo): a workflow validates
+# only what was published. The result row records the location
+# (`channel_url`).
 #
 # Only the SELECTED steps and validations count (every one, without
 # `--only`; `--only step:<s>` selects no validation). Which names
-# a release publishes is its artifacts file's: there is no per-run claim
-# and no expected set hash on the command line.
+# a release publishes is its artifacts file's: there is no per-run claim.
+#
+# `--release-set-hash <64 lowercase hex>` (a selected PUBLISH step or
+# validation): the set hash of the release the run was handed (kci.yml: the
+# build job's, or the validate job's for prod). kci recomputes the release
+# directory's set and refuses another (KCI-E-SET-HASH, exit 3) before any
+# effect; under GitHub Actions a run that publishes or validates without it
+# is a usage error (dispatch.mojo). It is refused with --affected-by and on a
+# stage whose selection publishes and validates nothing.
 #
 # Every refusal here is a usage error (kci_api's KCI-E-USAGE, exit 2;
 # a malformed `--only` is KCI-E-SELECTOR, also exit 2).
@@ -80,6 +108,7 @@ from kci_api import (
     DEFAULT_MACHINE_FILE,
     STEP_KIND_BUILD,
     STEP_KIND_PUBLISH,
+    VALIDATION_KIND_CONDA_INSTALL_ENV,
     ContextEntry,
     RunIdentity,
     Selector,
@@ -89,6 +118,7 @@ from kci_api import (
     require_full_commit_id,
 )
 from kci_release_machine import Selection, Stage
+from kci_validate import ChannelUrl
 
 comptime CLI_VERB_RUN: String = "run"
 comptime CLI_VERB_HELP: String = "help"
@@ -101,6 +131,9 @@ comptime KCI_USAGE: String = (
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
     "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
     "          --scratch-dir <dir>                                          (a selected validation)\n"
+    "          [--release-set-hash <64 hex>]                  (a selected PUBLISH step or validation)\n"
+    "          --pixi <file> --pixi-sha256 <hex>                  (a selected CONDA_INSTALL_ENV validation)\n"
+    "          [--channel file:///<dir>]       (validations only: install from this local channel, not the step's)\n"
     "  kci --help\n"
     "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
     "--machine defaults to release/machine.textproto.\n"
@@ -162,8 +195,12 @@ struct KciCommand(Copyable, Movable):
     var concurrency: Int
     var store: SecretStoreChoice
     var scratch_dir: String
+    var pixi: String
+    var pixi_sha256: String
+    var channel: String
     var only: List[String]
     var affected_by: String
+    var release_set_hash: String
     var seen: List[String]
 
     def __init__(out self):
@@ -185,8 +222,12 @@ struct KciCommand(Copyable, Movable):
         self.concurrency = 0
         self.store = SecretStoreChoice.NONE
         self.scratch_dir = String("")
+        self.pixi = String("")
+        self.pixi_sha256 = String("")
+        self.channel = String("")
         self.only = List[String]()
         self.affected_by = String("")
+        self.release_set_hash = String("")
         self.seen = List[String]()
 
     def given(self, flag: String) -> Bool:
@@ -212,7 +253,7 @@ def _run_common_flags() -> List[String]:
     var l = List[String]()
     for f in [
         "--machine", "--stage", "--only", "--affected-by", "--plan", "--revision-id", "--run-id", "--attempt",
-        "--context", "--release-dir", "--result-file", "--summary-file",
+        "--context", "--release-dir", "--result-file", "--summary-file", "--release-set-hash",
     ]:
         l.append(String(f))
     return l^
@@ -236,6 +277,32 @@ def validation_flags() -> List[String]:
     var l = List[String]()
     l.append(String("--scratch-dir"))
     return l^
+
+
+def env_validation_flags() -> List[String]:
+    """The flags of a CONDA_INSTALL_ENV validation (file header)."""
+    var l = List[String]()
+    l.append(String("--pixi"))
+    l.append(String("--pixi-sha256"))
+    return l^
+
+
+def local_channel_flags() -> List[String]:
+    """The PRE-PUBLISH local mode's flag (file header)."""
+    var l = List[String]()
+    l.append(String("--channel"))
+    return l^
+
+
+def _is_sha256_hex(s: String) -> Bool:
+    var b = s.as_bytes()
+    if len(b) != 64:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
+            return False
+    return True
 
 
 def _member(xs: List[String], x: String) -> Bool:
@@ -297,6 +364,16 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         except e:
             raise usage_error(String(e))
         cmd.affected_by = value.copy()
+    elif flag == String("--release-set-hash"):
+        var b = value.as_bytes()
+        var ok = len(b) == 64
+        for i in range(len(b)):
+            var c = Int(b[i])
+            if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
+                ok = False
+        if not ok:
+            raise usage_error(String("--release-set-hash '") + value + String("' is not 64 lowercase hex characters"))
+        cmd.release_set_hash = value.copy()
     elif flag == String("--run-id"):
         cmd.run_id = value.copy()
     elif flag == String("--attempt"):
@@ -331,6 +408,27 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         if not value.startswith(String("/")):
             raise usage_error(String("--scratch-dir '") + value + String("' is not an absolute path (a container mounts a directory under it)"))
         cmd.scratch_dir = value.copy()
+    elif flag == String("--pixi"):
+        if not value.startswith(String("/")):
+            raise usage_error(String("--pixi '") + value + String("' is not an absolute path"))
+        cmd.pixi = value.copy()
+    elif flag == String("--pixi-sha256"):
+        if not _is_sha256_hex(value):
+            raise usage_error(String("--pixi-sha256 '") + value + String("' is not 64 lowercase hex characters"))
+        cmd.pixi_sha256 = value.copy()
+    elif flag == String("--channel"):
+        var why = String("")
+        try:
+            if not ChannelUrl(value).is_local():
+                why = String("it is not a file:/// location")
+        except e:
+            why = String(e)
+        if why.byte_length() > 0:
+            raise usage_error(
+                String("--channel '") + value + String("' is not file:///<absolute directory>, a local channel")
+                + String(" (") + why + String(")")
+            )
+        cmd.channel = value.copy()
 
 
 def _find_value(args: List[String], flag: String) -> String:
@@ -384,6 +482,8 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
     allowed.extend(build_flags())
     allowed.extend(publish_flags())
     allowed.extend(validation_flags())
+    allowed.extend(env_validation_flags())
+    allowed.extend(local_channel_flags())
     var i = start
     while i < len(args):
         var a = args[i]
@@ -427,6 +527,10 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
         if cmd.given(String("--release-dir")):
             raise usage_error(
                 String("--release-dir is not used with --affected-by: the per-change check releases nothing")
+            )
+        if cmd.given(String("--release-set-hash")):
+            raise usage_error(
+                String("--release-set-hash is not used with --affected-by: the per-change check releases nothing")
             )
     elif not cmd.given(String("--release-dir")):
         raise usage_error(String("kci run needs --release-dir"))
@@ -476,6 +580,7 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
         which = String("the steps --only selects in stage '") + stage.name + String("'")
         has = String(" include")
         holds_no = String(" hold no")
+    _require_validation_only(cmd, stage, sel, has_build, has_publish)
     var bf = build_flags()
     var pf = publish_flags()
     if has_build:
@@ -494,6 +599,11 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
         for i in range(len(pf)):
             if cmd.given(pf[i]):
                 raise usage_error(pf[i] + String(" is a PUBLISH step's flag, and ") + which + holds_no + String(" PUBLISH step"))
+    if cmd.given(String("--release-set-hash")) and not has_publish and len(sel.validations) == 0:
+        raise usage_error(
+            String("--release-set-hash holds a PUBLISH step or a validation to the set it was handed, and ") + which
+            + holds_no + String(" PUBLISH step and no validation is selected")
+        )
     var vwhich = String("stage '") + stage.name + String("'")
     if len(cmd.only) > 0:
         vwhich = String("--only in stage '") + stage.name + String("'")
@@ -502,3 +612,54 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
             raise usage_error(vwhich + String(" selects a validation: kci run needs --scratch-dir"))
     elif cmd.given(String("--scratch-dir")):
         raise usage_error(String("--scratch-dir is a validation's flag, and ") + vwhich + String(" selects no validation"))
+    var env_name = _selected_env_validation(stage, sel)
+    var ef = env_validation_flags()
+    if env_name.byte_length() > 0:
+        for i in range(len(ef)):
+            if not cmd.given(ef[i]):
+                raise usage_error(
+                    vwhich + String(" selects the CONDA_INSTALL_ENV validation '") + env_name
+                    + String("': kci run needs ") + ef[i]
+                )
+    else:
+        for i in range(len(ef)):
+            if cmd.given(ef[i]):
+                raise usage_error(
+                    ef[i] + String(" is a CONDA_INSTALL_ENV validation's flag, and ") + vwhich
+                    + String(" selects none")
+                )
+
+
+def _require_validation_only(cmd: KciCommand, stage: Stage, sel: Selection, has_build: Bool, has_publish: Bool) raises:
+    """`--channel` only on a validation-only run of CONDA_INSTALL_ENV
+    validations (file header)."""
+    if not cmd.given(String("--channel")):
+        return
+    var why = String("--channel names a local channel, which only a validation-only run reads, and ")
+    if has_build or has_publish:
+        raise usage_error(
+            why + String("the run selects the ") + (String("BUILD") if has_build else String("PUBLISH"))
+            + String(" step of stage '") + stage.name + String("': select the validations with --only validation:<name>")
+        )
+    if len(sel.validations) == 0:
+        raise usage_error(why + String("the run selects no validation of stage '") + stage.name + String("'"))
+    for n in range(len(sel.validations)):
+        for k in range(len(stage.steps)):
+            for m in range(len(stage.steps[k].validations)):
+                ref v = stage.steps[k].validations[m]
+                if v.name == sel.validations[n] and v.kind != VALIDATION_KIND_CONDA_INSTALL_ENV:
+                    raise usage_error(
+                        why + String("the selected validation '") + v.name + String("' is ") + v.kind
+                        + String(", not CONDA_INSTALL_ENV: a container cannot read this machine's directory")
+                    )
+
+
+def _selected_env_validation(stage: Stage, sel: Selection) -> String:
+    """The first selected CONDA_INSTALL_ENV validation's name, "" for none."""
+    for n in range(len(sel.validations)):
+        for k in range(len(stage.steps)):
+            for m in range(len(stage.steps[k].validations)):
+                ref v = stage.steps[k].validations[m]
+                if v.name == sel.validations[n] and v.kind == VALIDATION_KIND_CONDA_INSTALL_ENV:
+                    return v.name.copy()
+    return String("")

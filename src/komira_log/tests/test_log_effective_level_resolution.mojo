@@ -84,7 +84,7 @@ def _drained(mut eng: SharedEngine) raises -> List[String]:
 
 
 # ---------------------------------------------------------------------------
-# FINDING 3 — the LOWER direction, which was unreachable.
+# CASE 3 — the LOWER direction: a per-module rule below the global level.
 # ---------------------------------------------------------------------------
 
 
@@ -192,7 +192,7 @@ def test_per_module_rule_above_the_global_still_suppresses() raises:
 def test_longest_prefix_wins_through_the_gate() raises:
     """The gate must honour the LONGEST-prefix resolution, not the first rule.
 
-    `komira_agent=warn` + `komira_agent.heartbeat=trace`: a TRACE on the
+    `komira_job_supervisor=warn` + `komira_job_supervisor.heartbeat=trace`: a TRACE on the
     dotted child is admitted even though its parent rule AND the global would
     both reject it — two levels of the same defect at once.
     """

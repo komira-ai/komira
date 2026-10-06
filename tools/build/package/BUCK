@@ -31,6 +31,15 @@ shell_lint(
     ],
 )
 
+# release_version.sh as a file: kci_workflow_check's welded test holds kci.yml's
+# documentation filter (its push trigger's paths-ignore) to the documentation
+# this script does not count (rule R17).
+export_file(
+    name = "release_version.sh",
+    src = "release_version.sh",
+    visibility = ["//src/kci_workflow_check:"],
+)
+
 # Selectable form of linux-x86_64: what conda_package derives its subdir from
 # (conda.bzl). Declared here and not in //tools/build/platforms, which holds
 # exactly the platform table's targets (tests//functional/platform_table).

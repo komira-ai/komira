@@ -6,7 +6,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # specification of a cloud, the offline test double, and the offline proof that a graph a
 # cloud cannot host is refused before anything is created. They honour the
 # ownership labels, and a faulty variant (failure at call k, read lag, a
-# pre-existing foreign object, a raced create) runs offline.
+# pre-existing foreign object, a raced create) runs offline. "fake" can be
+# built with a provider shape (aws, gcp, azure, onprem): the per-cloud fixed roles
+# and provider kinds each catalog type lowers to.
 #
 # komira_proto_codec is here for the welded tests, which read graphs in the
 # proto3 JSON form an author writes.
@@ -20,9 +22,12 @@ mojo_library(
         "//src/komira_proto_codec:komira_proto_codec",
     ],
     test_srcs = [
+        "tests/test_fake_bucket_retention.mojo",
         "tests/test_fake_conformance.mojo",
         "tests/test_fake_faulty_variant.mojo",
         "tests/test_fake_limited_refuses_offline.mojo",
+        "tests/test_fake_provider_shapes.mojo",
+        "tests/test_fake_table.mojo",
     ],
     visibility = ["PUBLIC"],
 )

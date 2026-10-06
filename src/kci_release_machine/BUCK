@@ -4,14 +4,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # order, each stage's GitHub environment and whether it is farm-connected,
 # and the steps of each (BUILD, PUBLISH; DEPLOY is reserved and refused) with
 # a PUBLISH step's validations. `kci run --stage S` runs one stage; the
-# workflow consistency check (kci_ci_check) holds a CI workflow to the same
+# workflow consistency check (kci_workflow_check) holds a CI workflow to the same
 # graph.
 #
 # Deps: the textproto lexer and kci_api (the format's schema_version,
 # the step kinds, the platform table). Pure: it parses text it is given.
 #
-# The welded tests: every refusal by its message, and the authored field
-# names pinned as a golden list (a rename is a visible edit of that test).
+# The welded tests: every refusal by its message, the authored field names
+# pinned as a golden list (a rename is a visible edit of that test), and the
+# repository's own validation targets held to its machine file.
 mojo_library(
     name = "kci_release_machine",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -27,6 +28,17 @@ mojo_library(
         # `kci run --only` against one stage: steps and validations, match,
         # no-match, scope, order
         "tests/test_stage_selection.mojo",
+        # release/validations/BUCK's targets == the machine file's
+        # validations, both ways
+        "tests/test_release_validation_targets.mojo",
     ],
+    # The repository's machine file (release/BUCK) and the validation
+    # targets' record (release/validations/BUCK).
+    test_data = {
+        "tests/test_release_validation_targets.mojo": {
+            "machine.textproto": "//release:machine.textproto",
+            "names.txt": "//release/validations:names",
+        },
+    },
     visibility = ["PUBLIC"],
 )

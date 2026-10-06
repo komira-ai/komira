@@ -1,18 +1,25 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "push_verdicts", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
 
-# The release workflow, read by kci_ci_check's welded test, which holds it to
+# The release workflow, read by kci_workflow_check's welded test, which holds it to
 # release/machine.textproto with the check `kci run` makes at start-up, so a
 # drift fails `./buck2 build //...`.
 export_file(
     name = "kci.yml",
     src = ".github/workflows/kci.yml",
-    visibility = ["//src/kci_ci_check:"],
+    visibility = ["//src/kci_workflow_check:"],
+)
+
+# The pull request's check, held to the same machine file by the same welded test.
+export_file(
+    name = "pr.yml",
+    src = ".github/workflows/pr.yml",
+    visibility = ["//src/kci_workflow_check:"],
 )
 
 shell_lint(
@@ -36,11 +43,6 @@ workflow_lint(
 action_pins(
     name = "action_pins",
     srcs = WORKFLOWS + ACTIONS,
-)
-
-push_verdicts(
-    name = "push_verdicts",
-    srcs = WORKFLOWS,
 )
 
 no_endpoint(
@@ -70,10 +72,10 @@ _TESTS_LINTS = [
     "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
+    "//src/komira_aws_lambda_http:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
-    "//src/komira_http_status_hook:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(

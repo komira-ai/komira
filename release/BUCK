@@ -4,14 +4,20 @@
 # machine file, which names the other two; nothing builds them. Each is welded
 # to the test of the parser that reads it, so a file kci would refuse fails
 # `./buck2 build //...`:
-#   machine.textproto    src/kci_ci_check (test_repo_kci_yml: the machine file,
+#   machine.textproto    src/kci_workflow_check (test_repo_kci_yml: the machine file,
 #                        and kci.yml held to it)
 #   artifacts.textproto  src/kci_artifact (test_release_artifacts_file)
 #   channels.textproto   src/kci_release_channel (test_release_channels_file),
-#                        src/kci_ci_check (test_repo_kci_yml)
-# The programs the machine file's validations run are in release/smoke, each a
-# mojo_test against the in-repository library.
+#                        src/kci_workflow_check (test_repo_kci_yml)
+# The machine file's validations run each installed library's README examples
+# (src/<library>/README.md, shipped as share/doc/<name>/README.md): the same
+# examples are a welded test of the library's own build, so they cannot rot.
+# release/ci holds the commands the per-change check runs (artifacts.textproto's
+# `build_targets` and `derive_checks`); its `affected` is the binary
+# //tools/build/ci:affected.
 # Changes need the release approver's review (.github/CODEOWNERS).
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
 export_file(
     name = "artifacts.textproto",
     visibility = ["//src/kci_artifact:"],
@@ -19,10 +25,17 @@ export_file(
 
 export_file(
     name = "channels.textproto",
-    visibility = ["//src/kci_ci_check:", "//src/kci_release_channel:"],
+    visibility = ["//src/kci_workflow_check:", "//src/kci_release_channel:"],
 )
 
+# By reference: a validation target passes kci its path in the checkout.
 export_file(
     name = "machine.textproto",
-    visibility = ["//src/kci_ci_check:"],
+    mode = "reference",
+    visibility = ["//release/validations:", "//src/kci_workflow_check:", "//src/kci_release_machine:"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["ci/*.sh"]),
 )

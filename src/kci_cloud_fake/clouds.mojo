@@ -7,22 +7,53 @@
 #     double for everything above the cloud module.
 #   * `FakeLimitedCloud` ("fake-limited")   is DELIBERATELY PARTIAL: it does
 #     not host `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a
-#     catalog that marks `job` CLOUD_BOUND) and it has no public ingress, so a
+#     catalog that marks `job` CLOUD_BOUND), `table`, `bucket`,
+#     `service_account` nor `grant` (NOT_YET), and it has no public ingress,
+#     so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
 #     in full, before anything is lowered or created.
 #
-# Both deploy into a `FakeStore` and lower identically, to DATA, with the
-# COMPLETE fixed set of roles of each type (the closed world):
-#   service -> `<id>/run`, `<id>/public` (wanted iff `public {}`), and
-#              `<id>/uses/<target>` per `Uses` line
-#   job     -> `<id>/run`, `<id>/schedule` (wanted iff scheduled), and the
-#              same grants
+# Both deploy into a `FakeStore` and lower, to DATA, with the COMPLETE fixed
+# set of roles of each type (the closed world). On the generic shape:
+#   service -> `<id>/identity` (wanted iff no `run_as`), `<id>/run`,
+#              `<id>/public` (wanted iff `public {}`), and one grant per edge
+#   job     -> `<id>/identity`, `<id>/run`, `<id>/schedule` (wanted iff
+#              scheduled), and the same grants
+#   table   -> `<id>/table` (data.mojo; it holds no identity, so no grants)
+#   bucket  -> `<id>/bucket` (it holds no identity, so no grants)
+#   service account -> `<id>/identity` (it exposes NAME), and its grants
+#   grant   -> `<id>/grant`
+# The grants are kci's EDGES (`kci_cloud.grants`), handed to `lower` with
+# each target's type: a `uses` line, the implicit `cell LOGS WRITE` of an
+# identity the resource holds itself, or a grant resource. An edge lowers to
+# `<id>/<role>` (`u-<h>` or `grant`), depends on its principal's identity
+# node and on its target, and has the desired fields principal, target (or
+# cell) and access. A dependency or a value on another resource is written
+# as that resource's id alone: kci resolves it to the resource's primary
+# node (`run`, `bucket`, `identity`), so this lowering never reads another
+# resource. A service or a job with `run_as` turns its private identity off,
+# its run depends on the account, and its run has the field `run_as`.
+# `FakeCloud` built with a provider shape (`shapes.mojo`: `aws`, `gcp`,
+# `azure`, `onprem`) lowers to THAT shape's fixed roles and provider kinds
+# instead: on the azure shape a public ingress and a schedule folded into the
+# run node; on the onprem shape a `<id>/vault` beside each identity, a
+# service's `<id>/endpoint` (always wanted; the public role depends on it), a
+# schedule folded into the run node, a grant's helper `r-<h>` (the
+# Kubernetes Role a RoleBinding binds) where its row names one, and a cell
+# edge folded into the identity as the field `cell.<NAME>`; on the gcp shape
+# a table's indexes and TTL policy as nodes of their own. A shape's NOT_YET
+# types (onprem: `table`) are the cloud's absences, and such a cloud is not
+# complete. `list_owned` reports a table object's stored key
+# (`OwnedRecord.key`), read back from the object.
 # A run node's desired fields are EVERY field the catalog models, with the
 # catalog's default filled in where the author wrote none (kci owns every
 # modelled field: writing a default out is not a change, a console edit of
-# one is drift). `env` and `secret_env` of a job included. Provenance is
-# never a field.
+# one is drift). `env` and `secret_env` of a job included; a bucket's expiry
+# (`never` when unset), versioning and tier (`STANDARD` when unset); a
+# table's key, indexes and TTL (`none` when unset).
+# Provenance is never a field, and neither is retention: kci sets it on the
+# lowered node, and the node carries it as the `kci_retain` label.
 #
 # THE CELL'S SETTINGS (`configure`): `public_mechanism` (`invoker` or
 # `gateway`, default `invoker`; `none` chooses none, and validate then
@@ -66,25 +97,49 @@ from kci_cloud import (
     Principal,
     RUN_UNKNOWN,
     Setting,
+    FIELD_BUCKET,
+    FIELD_GRANT,
     FIELD_JOB,
     FIELD_SERVICE,
+    FIELD_SERVICE_ACCOUNT,
+    FIELD_TABLE,
     FINDING_CELL,
     FINDING_LIMIT,
     NOT_YET,
     V1_IMAGE_PLATFORM,
+    GrantEdge,
+    body_field,
+    holds_own_identity,
+    run_as_of,
     decode_label_value,
+    retained_by,
     standard_identity_of,
     standard_label_rule,
 )
 from kci_resource_proto.resource import Image, Resource, SecretRef, Size, Value
 
+from kci_cloud_fake.data import lower_bucket, lower_table
 from kci_cloud_fake.fake_store import FakeStore
-from kci_cloud_fake.nodes import FakeNode
+from kci_cloud_fake.limits import (
+    FAKE_CITATION,
+    common_limits,
+    fold_limits,
+    index_limits,
+)
+from kci_cloud_fake.nodes import FakeNode, live_key
+from kci_cloud_fake.shapes import (
+    ProviderShape,
+    ROLE_BUCKET,
+    ROLE_ENDPOINT,
+    ROLE_IDENTITY,
+    ROLE_PUBLIC,
+    ROLE_RUN,
+    ROLE_SCHEDULE,
+    ROLE_VAULT,
+    helper_role,
+)
 
 
-comptime FAKE_CITATION = "kci_cloud_fake: reference limits"
-comptime JOB_TIMEOUT_MAX_SECONDS: Int = 86400
-comptime REQUEST_TIMEOUT_MAX_SECONDS: Int = 3600
 
 # The catalog's defaults, rendered (a default written out is not a change).
 comptime DEFAULT_PORT = "8080"
@@ -144,9 +199,8 @@ def _env(
         var field = kind + String(".env.") + sorted[i]
         if v._oneof0_case == 3:
             ref rf = v.ref_.value()
-            refs.append(
-                InputRef(rf.resource + String("/run"), rf.standard.value().json_name(), field)
-            )
+            # The producer by its resource id: kci resolves its primary node.
+            refs.append(InputRef(rf.resource.copy(), rf.standard.value().json_name(), field))
         else:
             fields.append(Setting(field, v.literal.value()))
 
@@ -176,17 +230,142 @@ def _duration(seconds: Int, nanos: Int) -> String:
     return String(seconds) + String("s") + String(nanos) + String("n")
 
 
-def _lower(r: Resource, mechanism: String) raises -> List[LoweredNode]:
-    """The complete fixed set of roles of `r`, as data."""
+def _identity(r: Resource, field: Int, shape: ProviderShape, own: Bool) raises -> List[LoweredNode]:
+    """`<id>/identity` (wanted iff the resource holds its own identity) and,
+    where the shape has one, its `<id>/vault` helper. A service account's
+    identity exposes NAME (`account`, how the node behaves, not state)."""
     var out = List[LoweredNode]()
+    var ident = r.id + String("/") + String(ROLE_IDENTITY)
+    var fields = List[Setting]()
+    if field == FIELD_SERVICE_ACCOUNT:
+        fields.append(Setting(String("account"), String("true")))
+    out.append(
+        LoweredNode(
+            ident.copy(),
+            r.id,
+            shape.kind_of(field, String(ROLE_IDENTITY)),
+            List[String](),
+            List[InputRef](),
+            fields^,
+            own,
+        )
+    )
+    if shape.has(field, String(ROLE_VAULT)):
+        var deps = List[String]()
+        deps.append(ident^)
+        out.append(
+            LoweredNode(
+                r.id + String("/") + String(ROLE_VAULT),
+                r.id,
+                shape.kind_of(field, String(ROLE_VAULT)),
+                deps^,
+                List[InputRef](),
+                List[Setting](),
+                own,
+            )
+        )
+    return out^
+
+
+def _edge_fields(e: GrantEdge, with_principal: Bool) -> List[Setting]:
+    var g = List[Setting]()
+    if with_principal:
+        g.append(Setting(String("principal"), e.principal.copy()))
+    if e.on_cell():
+        g.append(Setting(String("cell"), e.cell.copy()))
+    else:
+        g.append(Setting(String("target"), e.target.copy()))
+    g.append(Setting(String("access"), e.access.copy()))
+    return g^
+
+
+def _lower_edges(
+    r: Resource, edges: List[GrantEdge], shape: ProviderShape, mut out: List[LoweredNode]
+) raises:
+    """One grant per edge, by the shape's row for the target's type: the
+    binding (and its helper, where the row names one), or FOLDED into the
+    identity it is for when the shape has no row."""
+    for i in range(len(edges)):
+        ref e = edges[i]
+        var row = shape.grant_row(e.target_field)
+        if not row:
+            var ident = r.id + String("/") + String(ROLE_IDENTITY)
+            var at = -1
+            for k in range(len(out)):
+                if out[k].id == ident:
+                    at = k
+            if not e.on_cell() or e.principal != r.id or at < 0:
+                raise Error(
+                    String("fake: shape \"")
+                    + shape.name
+                    + String("\" folds this edge of \"")
+                    + r.id
+                    + String("\" into an identity it does not hold; validate refuses it")
+                )
+            out[at].desired.append(Setting(String("cell.") + e.cell, e.access.copy()))
+            continue
+        var deps = List[String]()
+        deps.append(e.principal_node())
+        if not e.on_cell():
+            # The target by its resource id: kci resolves its primary node.
+            deps.append(e.target.copy())
+        if row.value().helper.byte_length() > 0:
+            var hid = r.id + String("/") + helper_role(e.role)
+            var hdeps = List[String]()
+            if not e.on_cell():
+                hdeps.append(e.target.copy())
+            out.append(
+                LoweredNode(
+                    hid.copy(), r.id, row.value().helper.copy(), hdeps^, List[InputRef](), _edge_fields(e, False)
+                )
+            )
+            deps.append(hid^)
+        out.append(
+            LoweredNode(
+                r.id + String("/") + e.role,
+                r.id,
+                row.value().kind.copy(),
+                deps^,
+                List[InputRef](),
+                _edge_fields(e, True),
+            )
+        )
+
+
+def _lower(
+    r: Resource, edges: List[GrantEdge], mechanism: String, shape: ProviderShape
+) raises -> List[LoweredNode]:
+    """The complete fixed set of roles of `r` on `shape`, as data."""
+    var field = body_field(r)
+    if field == FIELD_BUCKET:
+        return lower_bucket(r, shape)
+    if field == FIELD_TABLE:
+        return lower_table(r, shape)
+    var out = List[LoweredNode]()
+    if field == FIELD_GRANT:
+        _lower_edges(r, edges, shape, out)
+        return out^
+    var own = holds_own_identity(r)
+    out.extend(_identity(r, field, shape, own))
+    if field == FIELD_SERVICE_ACCOUNT:
+        _lower_edges(r, edges, shape, out)
+        return out^
     var run = r.id + String("/run")
+    var run_deps = List[String]()
+    var account = run_as_of(r)
+    if own:
+        run_deps.append(r.id + String("/") + String(ROLE_IDENTITY))
+    else:
+        # The account by its resource id: kci resolves it to its identity.
+        run_deps.append(account.copy())
+    var run_kind = shape.kind_of(field, String(ROLE_RUN))
     var fields = List[Setting]()
     var refs = List[InputRef]()
     if r._oneof0_case == 1:
         ref svc = r.service.value()
         fields.append(Setting(String("img"), _image(svc.image)))
         var port = String(Int(svc.port)) if svc.port != 0 else String(DEFAULT_PORT)
-        fields.append(Setting(String("port"), port^))
+        fields.append(Setting(String("port"), port.copy()))
         for i in range(len(svc.args)):
             fields.append(Setting(String("arg"), svc.args[i].copy()))
         _env(String("service"), svc.env, fields, refs)
@@ -207,23 +386,51 @@ def _lower(r: Resource, mechanism: String) raises -> List[LoweredNode]:
             )
         fields.append(Setting(String("timeout"), timeout^))
         fields.append(Setting(String("concurrency"), String(Int(svc.max_concurrency))))
-        fields.append(Setting(String("serves"), String("true")))
-        out.append(LoweredNode(run, r.id, String("run"), List[String](), refs^, fields^))
-        var pub = List[Setting]()
-        pub.append(Setting(String("mechanism"), mechanism.copy()))
-        var deps = List[String]()
-        deps.append(run.copy())
-        out.append(
-            LoweredNode(
-                r.id + String("/public"),
-                r.id,
-                String("public"),
-                deps^,
-                List[InputRef](),
-                pub^,
-                svc._oneof0_case == 1,
+        var public = svc._oneof0_case == 1
+        var has_public = shape.has(FIELD_SERVICE, String(ROLE_PUBLIC))
+        if not has_public:
+            # Folded: the ingress is a setting of the run object.
+            fields.append(
+                Setting(String("ingress"), mechanism.copy() if public else String("none"))
             )
-        )
+        if not own:
+            fields.append(Setting(String("run_as"), account.copy()))
+        fields.append(Setting(String("serves"), String("true")))
+        out.append(LoweredNode(run, r.id, run_kind, run_deps^, refs^, fields^))
+        # What the public role fronts: the run, or the endpoint in front of it.
+        var front = run.copy()
+        if shape.has(FIELD_SERVICE, String(ROLE_ENDPOINT)):
+            var ep = List[Setting]()
+            ep.append(Setting(String("port"), port.copy()))
+            var ep_deps = List[String]()
+            ep_deps.append(run.copy())
+            front = r.id + String("/") + String(ROLE_ENDPOINT)
+            out.append(
+                LoweredNode(
+                    front.copy(),
+                    r.id,
+                    shape.kind_of(FIELD_SERVICE, String(ROLE_ENDPOINT)),
+                    ep_deps^,
+                    List[InputRef](),
+                    ep^,
+                )
+            )
+        if has_public:
+            var pub = List[Setting]()
+            pub.append(Setting(String("mechanism"), mechanism.copy()))
+            var deps = List[String]()
+            deps.append(front.copy())
+            out.append(
+                LoweredNode(
+                    r.id + String("/") + String(ROLE_PUBLIC),
+                    r.id,
+                    shape.kind_of(FIELD_SERVICE, String(ROLE_PUBLIC)),
+                    deps^,
+                    List[InputRef](),
+                    pub^,
+                    public,
+                )
+            )
     else:
         ref job = r.job.value()
         fields.append(Setting(String("img"), _image(job.image)))
@@ -240,8 +447,6 @@ def _lower(r: Resource, mechanism: String) raises -> List[LoweredNode]:
         if job.timeout:
             timeout = _duration(Int(job.timeout.value().seconds), Int(job.timeout.value().nanos))
         fields.append(Setting(String("timeout"), timeout^))
-        fields.append(Setting(String("serves"), String("false")))
-        out.append(LoweredNode(run, r.id, String("run"), List[String](), refs^, fields^))
         var sch = List[Setting]()
         var scheduled = job._oneof0_case == 2
         if scheduled:
@@ -251,83 +456,34 @@ def _lower(r: Resource, mechanism: String) raises -> List[LoweredNode]:
             if tz.byte_length() == 0:
                 tz = String(DEFAULT_TIMEZONE)
             sch.append(Setting(String("tz"), tz^))
-        var deps = List[String]()
-        deps.append(run.copy())
-        out.append(
-            LoweredNode(
-                r.id + String("/schedule"),
-                r.id,
-                String("schedule"),
-                deps^,
-                List[InputRef](),
-                sch^,
-                scheduled,
+        var has_schedule = shape.has(FIELD_JOB, String(ROLE_SCHEDULE))
+        if not has_schedule:
+            # Folded: the schedule is the run object's own trigger.
+            fields.append(
+                Setting(String("trigger"), String("schedule") if scheduled else String("on-demand"))
             )
-        )
-    for u in range(len(r.uses)):
-        ref use = r.uses[u]
-        var target = use.target.value().resource.copy()
-        var g = List[Setting]()
-        g.append(Setting(String("access"), use.access.json_name()))
-        var deps = List[String]()
-        deps.append(run.copy())
-        deps.append(target + String("/run"))
-        out.append(
-            LoweredNode(
-                r.id + String("/uses/") + target,
-                r.id,
-                String("grant"),
-                deps^,
-                List[InputRef](),
-                g^,
+            for i in range(len(sch)):
+                fields.append(Setting(String("trigger.") + sch[i].key, sch[i].value.copy()))
+        if not own:
+            fields.append(Setting(String("run_as"), account.copy()))
+        fields.append(Setting(String("serves"), String("false")))
+        out.append(LoweredNode(run, r.id, run_kind, run_deps^, refs^, fields^))
+        if has_schedule:
+            var deps = List[String]()
+            deps.append(run.copy())
+            out.append(
+                LoweredNode(
+                    r.id + String("/") + String(ROLE_SCHEDULE),
+                    r.id,
+                    shape.kind_of(FIELD_JOB, String(ROLE_SCHEDULE)),
+                    deps^,
+                    List[InputRef](),
+                    sch^,
+                    scheduled,
+                )
             )
-        )
+    _lower_edges(r, edges, shape, out)
     return out^
-
-
-def _common_limits(r: Resource, mut out: List[Finding]):
-    if r._oneof0_case == 1:
-        ref svc = r.service.value()
-        if Bool(svc.request_timeout) and Int(svc.request_timeout.value().seconds) > REQUEST_TIMEOUT_MAX_SECONDS:
-            out.append(
-                Finding(
-                    FINDING_LIMIT,
-                    r.id,
-                    String("service.request_timeout"),
-                    String("above this cloud's request limit of ")
-                    + String(REQUEST_TIMEOUT_MAX_SECONDS)
-                    + String("s"),
-                    String(FAKE_CITATION),
-                )
-            )
-        if (
-            Bool(svc.scale)
-            and Bool(svc.scale.value().min)
-            and svc.scale.value().max < svc.scale.value().min.value()
-        ):
-            out.append(
-                Finding(
-                    FINDING_LIMIT,
-                    r.id,
-                    String("service.scale"),
-                    String("max is below min"),
-                    String(FAKE_CITATION),
-                )
-            )
-    elif r._oneof0_case == 2:
-        ref job = r.job.value()
-        if Bool(job.timeout) and Int(job.timeout.value().seconds) > JOB_TIMEOUT_MAX_SECONDS:
-            out.append(
-                Finding(
-                    FINDING_LIMIT,
-                    r.id,
-                    String("job.timeout"),
-                    String("above this cloud's job limit of ")
-                    + String(JOB_TIMEOUT_MAX_SECONDS)
-                    + String("s"),
-                    String(FAKE_CITATION),
-                )
-            )
 
 
 def _label(labels: List[Label], key: String) -> String:
@@ -366,6 +522,8 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) -> List[OwnedRecord]:
                 run^,
                 True,
                 node^,
+                retained_by(labels),
+                live_key(s.digests[i]),
             )
         )
     return out^
@@ -413,11 +571,14 @@ def _setting_finding(key: String, why: String) -> Finding:
 
 
 struct FakeCloud(ConformanceTarget, Movable):
-    """The complete fake cloud."""
+    """The complete fake cloud. `shape` is the provider shape it lowers to
+    (`ProviderShape.generic()` by default: the fake's own roles); the shaped
+    fakes are this cloud built with `aws`, `gcp`, `azure` or `onprem`."""
 
     var _id: String
     var _mechanism: String
     var _principal: String
+    var _shape: ProviderShape
     var store: ArcPointer[FakeStore]
 
     def __init__(
@@ -426,8 +587,10 @@ struct FakeCloud(ConformanceTarget, Movable):
         fail_at_call: Int = 0,
         read_lag: Int = 0,
         foreign: List[String] = List[String](),
+        shape: ProviderShape = ProviderShape.generic(),
     ):
         self._id = id
+        self._shape = shape.copy()
         self._mechanism = String("invoker")
         self._principal = String("")
         self.store = ArcPointer[FakeStore](FakeStore(fail_at_call, read_lag, foreign))
@@ -436,16 +599,24 @@ struct FakeCloud(ConformanceTarget, Movable):
         return CloudId(self._id)
 
     def complete(self) -> Bool:
-        return True
+        return len(self._shape.not_yet) == 0
 
     def implemented(self) -> List[Int]:
+        var all = List[Int]()
+        all.append(FIELD_SERVICE)
+        all.append(FIELD_JOB)
+        all.append(FIELD_TABLE)
+        all.append(FIELD_BUCKET)
+        all.append(FIELD_SERVICE_ACCOUNT)
+        all.append(FIELD_GRANT)
         var l = List[Int]()
-        l.append(FIELD_SERVICE)
-        l.append(FIELD_JOB)
+        for i in range(len(all)):
+            if self._shape.hosts(all[i]):
+                l.append(all[i])
         return l^
 
     def absences(self) -> List[Absence]:
-        return List[Absence]()
+        return self._shape.not_yet.copy()
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
         var out = List[Finding]()
@@ -476,14 +647,16 @@ struct FakeCloud(ConformanceTarget, Movable):
 
     def check(self, r: Resource) -> List[Finding]:
         var out = List[Finding]()
-        _common_limits(r, out)
+        common_limits(r, out)
+        fold_limits(r, self._shape, self._id, out)
+        index_limits(r, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
-        return _lower(r, self._mechanism)
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+        return _lower(r, edges, self._mechanism, self._shape)
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))
@@ -565,7 +738,8 @@ struct FakeCloud(ConformanceTarget, Movable):
 
 
 struct FakeLimitedCloud(ConformanceTarget, Movable):
-    """The deliberately partial fake cloud: no `job`, no public ingress.
+    """The deliberately partial fake cloud: no `job`, no `bucket`, no
+    `service_account`, no `grant` (NOT_YET), no public ingress.
 
     `job_absence` is how it declares the missing `job`: NOT_YET (the default,
     for the v1 catalog, where `job` is PORTABLE) or ABSENT_BY_DESIGN (for a
@@ -611,6 +785,12 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
             l.append(
                 Absence(FIELD_JOB, NOT_YET, String("fake-limited has no run-to-completion runner"))
             )
+        l.append(Absence(FIELD_TABLE, NOT_YET, String("fake-limited has no tables")))
+        l.append(Absence(FIELD_BUCKET, NOT_YET, String("fake-limited has no object store")))
+        l.append(
+            Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("fake-limited has no shared identities"))
+        )
+        l.append(Absence(FIELD_GRANT, NOT_YET, String("fake-limited has no standalone grants")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -633,7 +813,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
 
     def check(self, r: Resource) -> List[Finding]:
         var out = List[Finding]()
-        _common_limits(r, out)
+        common_limits(r, out)
         if r._oneof0_case == 1 and r.service.value()._oneof0_case == 1:
             out.append(
                 Finding(
@@ -649,8 +829,8 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
-        return _lower(r, String(""))
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+        return _lower(r, edges, String(""), ProviderShape.generic())
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))

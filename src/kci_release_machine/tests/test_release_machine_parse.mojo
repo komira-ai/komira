@@ -301,13 +301,81 @@ def test_farm_connected() raises:
     )
 
 
+def _pr_and_release(pr_body: String, release_after: String = String("build")) -> String:
+    return (
+        String("schema_version: 1\n")
+        + String("stage {\n name: \"build\"\n") + String(_BUILD_STEP) + String("}\n")
+        + String("stage {\n name: \"prod\"\n after: \"") + release_after + String("\"\n") + String(_PUBLISH_STEP)
+        + String("}\n")
+        + String("stage {\n name: \"pr\"\n") + pr_body + String("}\n")
+    )
+
+
+def test_trigger_defaults_to_push() raises:
+    var g = parse_machine_file(_two_stages(), String(_SRC))
+    for i in range(len(g.stages)):
+        assert_equal(g.stages[i].trigger, String("PUSH"))
+        assert_false(g.stages[i].is_pull_request())
+        # a PUSH stage's environment defaults to its name
+        assert_equal(g.stages[i].environment, g.stages[i].name)
+
+
+def test_a_pull_request_stage_reads_back_with_no_environment() raises:
+    var g = parse_machine_file(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n farm_connected: true\n") + String(_BUILD_STEP)), String(_SRC)
+    )
+    var pr = g.stage(String("pr"))
+    assert_equal(pr.trigger, String("PULL_REQUEST"))
+    assert_true(pr.is_pull_request())
+    assert_true(pr.farm_connected)
+    # no environment is defaulted: the job runs in none
+    assert_equal(pr.environment, String(""))
+    assert_equal(g.stage(String("prod")).environment, String("prod"))
+    # PUSH written out is the default
+    var push = parse_machine_file(_one_stage(String(" name: \"b\"\n trigger: PUSH\n") + String(_BUILD_STEP)), String(_SRC))
+    assert_false(push.stages[0].is_pull_request())
+
+
+def test_pull_request_stage_refusals() raises:
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n trigger: MERGE\n") + String(_BUILD_STEP)),
+        String("line 2: stage 'b' has trigger 'MERGE'; a trigger is PUSH or PULL_REQUEST"),
+    )
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n trigger: PUSH\n trigger: PUSH\n") + String(_BUILD_STEP)),
+        String("field 'trigger' is set twice in stage 'b'"),
+    )
+    # no environment: no secret or approval reaches a pull request's code
+    _assert_refused(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n environment: \"pr\"\n") + String(_BUILD_STEP)),
+        String("line 18: stage 'pr' is a PULL_REQUEST stage and has environment 'pr': its job runs a pull request's code in NO environment"),
+    )
+    # it runs after nothing, and nothing runs after it
+    _assert_refused(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n after: \"build\"\n") + String(_BUILD_STEP)),
+        String("stage 'pr' is a PULL_REQUEST stage and runs after 'build'"),
+    )
+    _assert_refused(
+        String("schema_version: 1\n")
+        + String("stage {\n name: \"pr\"\n trigger: PULL_REQUEST\n") + String(_BUILD_STEP) + String("}\n")
+        + String("stage {\n name: \"prod\"\n after: \"pr\"\n") + String(_PUBLISH_STEP) + String("}\n"),
+        String("line 7: stage 'prod' runs after 'pr', a PULL_REQUEST stage: no stage runs after a pull request's check"),
+    )
+    # BUILD steps only: nothing is published from a pull request
+    _assert_refused(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n") + String(_BUILD_STEP) + String(_PUBLISH_STEP)),
+        String("stage 'pr' is a PULL_REQUEST stage and has PUBLISH step 'publish': a pull request's check builds and never publishes"),
+    )
+
+
 def test_validation_reads_back_alone() raises:
     var g = parse_machine_file(_with_validation(String(_V_OK)), String(_SRC))
     ref v = g.stages[0].steps[0].validations[0]
     assert_equal(v.name, String("v"))
     assert_equal(len(v.extra_channels), 0)
-    # an unset wait is no wait
-    assert_equal(v.wait_for_index_seconds, 0)
+    # an unset wait is the default: 30 minutes (a registry can take a
+    # quarter of an hour to make a subdir's first index)
+    assert_equal(v.wait_for_index_seconds, 1800)
     assert_equal(v.line, 11)
 
 
@@ -334,11 +402,11 @@ def test_validation_fields() raises:
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" install: \"a\" program: \"release/s.mojo\""))),
-        String("validation 'v' of step 'publish' of stage 'p' has no kind (CONDA_INSTALL_SMOKE)"),
+        String("validation 'v' of step 'publish' of stage 'p' has no kind (CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV)"),
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" kind: PYTEST install: \"a\" program: \"release/s.mojo\""))),
-        String("validation kind 'PYTEST' is not CONDA_INSTALL_SMOKE"),
+        String("validation kind 'PYTEST' is not CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV"),
     )
     _assert_refused(
         _with_validation(_v(String("name: \"v\" kind: CONDA_INSTALL_SMOKE program: \"release/s.mojo\""))),
@@ -359,11 +427,76 @@ def test_validation_fields() raises:
     _assert_refused(
         _with_validation(String(_V_OK) + String(" tool: pixi")),
         String("unknown field 'tool' in validation 'v' (expected name, kind, image, install, compiler_channel,")
-        + String(" extra_channel, program, wait_for_index_seconds)"),
+        + String(" extra_channel, program, smoke, wait_for_index_seconds)"),
     )
     _assert_refused(
         _with_validation(String(_V_OK) + String(" program: \"release/t.mojo\"")),
         String("field 'program' is set twice in validation 'v'"),
+    )
+
+
+comptime _V_ENV: String = (
+    "name: \"v\" kind: CONDA_INSTALL_ENV install: \"komira_encoding\""
+    " compiler_channel: \"https://conda.modular.com/max\" extra_channel: \"conda-forge\" wait_for_index_seconds: 1800"
+)
+"""A CONDA_INSTALL_ENV validation: no image, no program."""
+
+
+def test_env_validation_reads_back() raises:
+    var g = parse_machine_file(_with_validation(String(_V_ENV)), String(_SRC))
+    ref v = g.stages[0].steps[0].validations[0]
+    assert_equal(v.kind, String("CONDA_INSTALL_ENV"))
+    assert_equal(v.image, String(""))
+    assert_equal(v.program, String(""))
+    assert_equal(len(v.installs), 1)
+    assert_equal(v.wait_for_index_seconds, 1800)
+
+
+def test_env_validation_runs_no_container_and_names_no_program() raises:
+    # an ENV validation runs on this machine: an image is refused, digest or
+    # not (any image is the container kind's field)
+    _assert_refused(
+        _with_validation(String(_V_ENV) + String(" image: \"") + String(_IMAGE) + String("\"")),
+        String("line 11: validation 'v' of step 'publish' of stage 'p' has image '") + String(_IMAGE)
+        + String("'; a CONDA_INSTALL_ENV validation runs on this machine with no container"),
+    )
+    # what it runs is each installed library's README, so a program is refused
+    _assert_refused(
+        _with_validation(String(_V_ENV) + String(" program: \"release/smoke.mojo\"")),
+        String("has program 'release/smoke.mojo'; a CONDA_INSTALL_ENV validation runs each installed library's README"),
+    )
+    # the rest of the rules are the container kind's
+    _assert_refused(
+        _with_validation(String("name: \"v\" kind: CONDA_INSTALL_ENV compiler_channel: \"https://conda.modular.com/max\"")),
+        String("has no install (a package to install)"),
+    )
+    _assert_refused(
+        _with_validation(String("name: \"v\" kind: CONDA_INSTALL_ENV install: \"komira_encoding\"")),
+        String("has no compiler_channel"),
+    )
+
+
+def test_env_validation_smoke_is_the_readme() raises:
+    # omitted or written, the one word: each installed library's README
+    var g = parse_machine_file(_with_validation(String(_V_ENV) + String(" smoke: README")), String(_SRC))
+    assert_equal(g.stages[0].steps[0].validations[0].smoke, String("README"))
+    var g0 = parse_machine_file(_with_validation(String(_V_ENV)), String(_SRC))
+    assert_equal(g0.stages[0].steps[0].validations[0].smoke, String(""))
+    # a closed vocabulary: a typo cannot become a validation that runs nothing
+    for bad in [String("NONE"), String("readme"), String("skip")]:
+        _assert_refused(
+            _with_validation(String(_V_ENV) + String(" smoke: ") + bad),
+            String("has smoke '") + bad + String("'; the one word is README"),
+        )
+    # set twice
+    _assert_refused(
+        _with_validation(String(_V_ENV) + String(" smoke: README smoke: README")),
+        String("field 'smoke' is set twice"),
+    )
+    # the container kind runs its program
+    _assert_refused(
+        _with_validation(String(_V_OK) + String(" smoke: README")),
+        String("has smoke 'README'; a CONDA_INSTALL_SMOKE validation runs its program"),
     )
 
 
@@ -413,6 +546,9 @@ def test_validation_compiler_channel() raises:
 def test_validation_wait_for_index_seconds() raises:
     var g = parse_machine_file(_with_validation(String(_V_OK) + String(" wait_for_index_seconds: 3600")), String(_SRC))
     assert_equal(g.stages[0].steps[0].validations[0].wait_for_index_seconds, 3600)
+    # 0 stays allowed and means no wait: the default applies only when unset
+    var g0 = parse_machine_file(_with_validation(String(_V_OK) + String(" wait_for_index_seconds: 0")), String(_SRC))
+    assert_equal(g0.stages[0].steps[0].validations[0].wait_for_index_seconds, 0)
     _assert_refused(
         _with_validation(String(_V_OK) + String(" wait_for_index_seconds: 3601")),
         String("has wait_for_index_seconds 3601; it is 0 to 3600"),
@@ -519,6 +655,92 @@ def test_step_inputs() raises:
     _assert_refused(
         _one_stage(String(" name: \"p\"\n step { name: \"s\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d\" channels: \"c\" }\n")),
         String("has no channel (the channel to publish to)"),
+    )
+
+
+def _chain(build_bg: String, gamma_bg: String, prod_bg: String) -> String:
+    """build -> gamma -> prod, each stage's `break_glass` line as given
+    ("" for none)."""
+    return (
+        String("schema_version: 1\n")
+        + String("stage {\n name: \"build\"\n") + build_bg + String(_BUILD_STEP) + String("}\n")
+        + String("stage {\n name: \"gamma\"\n after: \"build\"\n") + gamma_bg + String(_PUBLISH_STEP) + String("}\n")
+        + String("stage {\n name: \"prod\"\n after: \"gamma\"\n") + prod_bg + String(_PUBLISH_STEP) + String("}\n")
+    )
+
+
+def test_break_glass_defaults_to_false_and_reads_back() raises:
+    var none = parse_machine_file(_chain(String(""), String(""), String("")), String(_SRC))
+    for i in range(len(none.stages)):
+        assert_false(none.stages[i].break_glass)
+    var g = parse_machine_file(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n"), String(" break_glass: false\n")),
+        String(_SRC),
+    )
+    assert_true(g.stage(String("build")).break_glass)
+    assert_true(g.stage(String("gamma")).break_glass)
+    assert_false(g.stage(String("prod")).break_glass)
+
+
+def test_break_glass_refusals() raises:
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n break_glass: yes\n") + String(_BUILD_STEP)),
+        String("line 4: field 'break_glass' of stage 'b' is 'yes'; it is true or false"),
+    )
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n break_glass: true\n break_glass: true\n") + String(_BUILD_STEP)),
+        String("field 'break_glass' is set twice in stage 'b'"),
+    )
+    # break-glass is a PREFIX of the chain: a stage that runs after a
+    # main-only stage cannot run off main
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(""), String(" break_glass: true\n")),
+        String("stage 'prod' is break_glass and runs after 'gamma', which is not"),
+    )
+    _assert_refused(
+        _chain(String(""), String(" break_glass: true\n"), String("")),
+        String("stage 'gamma' is break_glass and runs after 'build', which is not"),
+    )
+    # a pull request's check is no release stage
+    _assert_refused(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n break_glass: true\n") + String(_BUILD_STEP)),
+        String("stage 'pr' is a PULL_REQUEST stage and is break_glass"),
+    )
+
+
+def test_break_glass_environment() raises:
+    var g = parse_machine_file(
+        _chain(
+            String(" break_glass: true\n"),
+            String(" break_glass: true\n break_glass_environment: \"gamma-breakglass\"\n"),
+            String(""),
+        ),
+        String(_SRC),
+    )
+    assert_equal(g.stage(String("gamma")).break_glass_environment, String("gamma-breakglass"))
+    assert_equal(g.stage(String("gamma")).environment, String("gamma"))
+    assert_equal(g.stage(String("build")).break_glass_environment, String(""))
+    # only a break_glass stage has one
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n"), String(" break_glass_environment: \"p-bg\"\n")),
+        String("stage 'prod' has break_glass_environment 'p-bg' and is not break_glass"),
+    )
+    # an environment name, and not the stage's own environment
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n break_glass_environment: \"Gamma_BG\"\n"), String("")),
+        String("stage 'gamma' has break_glass_environment 'Gamma_BG'; an environment name is"),
+    )
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n break_glass_environment: \"gamma\"\n"), String("")),
+        String("stage 'gamma' has break_glass_environment 'gamma', the stage's own environment"),
+    )
+    _assert_refused(
+        _chain(
+            String(" break_glass: true\n"),
+            String(" break_glass: true\n break_glass_environment: \"a\"\n break_glass_environment: \"b\"\n"),
+            String(""),
+        ),
+        String("field 'break_glass_environment' is set twice in stage 'gamma'"),
     )
 
 

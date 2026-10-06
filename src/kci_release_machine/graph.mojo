@@ -6,7 +6,7 @@
 # A STAGE is a named list of STEPS that one `kci run --stage <name>` runs, in
 # order. Its name is also the id of the CI job that runs it. `environment` is
 # the GitHub environment that job runs in, and defaults to the stage's name
-# (kci_ci_check holds a workflow to both). `after` names the one stage that
+# (kci_workflow_check holds a workflow to both). `after` names the one stage that
 # must have finished first; it names an EARLIER stage, so the graph has no
 # cycle by construction.
 #
@@ -14,6 +14,38 @@
 # network the build farm is on. Such a job holds a network credential, so a
 # farm-connected stage may hold no PUBLISH step: the job that holds a tailnet
 # node must not hold a publishing token.
+#
+# `trigger` says which CI event runs the stage's job: PUSH (the default: a
+# release stage, run on a push or by hand) or PULL_REQUEST (the per-change
+# check of a pull request: `kci run --stage <S> --affected-by <base>`, the
+# one job of the workflow that runs on `pull_request`, as kci_workflow_check R6
+# holds). A PULL_REQUEST stage runs a pull request's code, so it may hold
+# BUILD steps only (nothing is published or deployed from it), runs in NO
+# GitHub environment (an `environment` field is refused, and none is
+# defaulted: an environment's secrets and approvals never reach a pull
+# request), runs after no stage and no stage runs after it (its job runs on
+# a pull request, where no release job runs). It may be farm-connected.
+#
+# `break_glass: true` declares that the stage may run off `main`: a manual
+# run of a branch (BREAK-GLASS: kci.yml's workflow_dispatch from another ref,
+# with a required reason) runs it. A stage without it runs only for a commit
+# on main's history, on a run of `main` (kci_cli's start-up ref check, and
+# kci_workflow_check R15 on its job's `if:`). The break-glass stages are a PREFIX
+# of the release chain: a break_glass stage's `after` is break_glass too, so
+# a run off main stops at the first stage without it and never reaches a
+# later one. A PULL_REQUEST stage is never break_glass (it is no release
+# stage).
+#
+# `break_glass_environment: "<env>"` names the GitHub environment a
+# break_glass stage's job runs in on a BREAK-GLASS run (any run but a push
+# to main), in place of its `environment`. It exists so the stage's own
+# environment can be locked to main (deployment branches: `main`) while a
+# break-glass run goes through an environment of its own, with a required
+# reviewer, whose approval GitHub records. Only a break_glass stage has one,
+# it is an environment name and it is not the stage's `environment`. A
+# break-glass run of a stage that publishes by OIDC trusted publishing
+# without one is refused by kci_publish (the channel's trusted publisher
+# accepts the stage's main environment only).
 #
 # A STEP has a name (unique in its stage), a kind and the inputs of that
 # kind:
@@ -37,13 +69,17 @@
 #
 # VALIDATIONS. A PUBLISH step may carry `validation { ... }` blocks that check
 # what it published. A validation name is unique in its stage (the grammar of
-# a step name). The one kind is CONDA_INSTALL_SMOKE (kci_api), which
-# installs the published packages inside a container and runs a program
-# against them:
+# a step name). Two kinds (kci_api): CONDA_INSTALL_SMOKE installs the
+# published packages inside a container and runs a program against them;
+# CONDA_INSTALL_ENV installs them on the machine that runs kci, with no
+# container (a pinned pixi, a scratch directory, a cleared environment), and
+# runs each installed library's README examples against them:
 #
-#   image             the container image, pinned by digest:
+#   image             CONDA_INSTALL_SMOKE only, required: the container
+#                     image, pinned by digest:
 #                     `<reference>@sha256:<64 lowercase hex>` (a tag alone is
-#                     refused: it names whatever the registry serves today)
+#                     refused: it names whatever the registry serves today).
+#                     Refused on CONDA_INSTALL_ENV, which runs no container
 #   install           repeated, at least one: a package to install from the
 #                     step's channel at this release's version and build (kci
 #                     checks it is a member of the release set when it runs;
@@ -52,12 +88,23 @@
 #   extra_channel     repeated: a channel that may supply only packages
 #                     outside the release set; an https:// URL or the bare
 #                     `conda-forge`
-#   program           the program to run, a relative path to a .mojo file
-#                     under `release/` (no `..` segment)
+#   program           CONDA_INSTALL_SMOKE only, required: the program to
+#                     run, a relative path to a .mojo file under `release/`
+#                     (no `..` segment). Refused on CONDA_INSTALL_ENV: what it
+#                     runs is each installed library's README
+#                     (share/doc/<name>/README.md), whose bytes the release
+#                     pins
+#   smoke             CONDA_INSTALL_ENV only, optional: what runs against
+#                     the install. `README` (the one word, and the default
+#                     when omitted): each installed library's README examples.
+#                     Any other word is refused (a closed vocabulary: a typo
+#                     cannot become a validation that runs nothing). Refused
+#                     on CONDA_INSTALL_SMOKE, which runs its `program`
 #   wait_for_index_seconds
 #                     how long to wait for the channel's index to LIST the
-#                     release's files (0, the default, waits not at all; at
-#                     most `VALIDATION_WAIT_MAX_SECONDS`)
+#                     release's files: 0 waits not at all; unset is
+#                     `VALIDATION_WAIT_DEFAULT_SECONDS`; at most
+#                     `VALIDATION_WAIT_MAX_SECONDS`
 #
 # SELECTION. `resolve_selection` turns `kci run --only ...` into the steps
 # and validations to run (file order, whatever the order on the command line)
@@ -87,17 +134,31 @@ from kci_api import (
     Selector,
     is_step_name,
     require_release_platform,
+    VALIDATION_KIND_CONDA_INSTALL_ENV,
     require_validation_kind,
 )
 
 comptime VALIDATION_PROGRAM_DIR: String = "release/"
 """Where a validation's program lives: the release files' directory."""
 
+comptime VALIDATION_SMOKE_README: String = "README"
+"""The one `smoke` word: run each installed library's README examples."""
+
 comptime VALIDATION_WAIT_MAX_SECONDS: Int = 3600
 """The longest `wait_for_index_seconds` a validation may declare."""
 
+comptime VALIDATION_WAIT_DEFAULT_SECONDS: Int = 1800
+"""`wait_for_index_seconds` when a validation does not set it. A registry
+can take a quarter of an hour to make a new subdir's first index."""
+
 comptime EXTRA_CHANNEL_CONDA_FORGE: String = "conda-forge"
 """The one bare channel name an `extra_channel` may be."""
+
+comptime STAGE_TRIGGER_PUSH: String = "PUSH"
+"""A stage run by a release workflow (a push, or by hand): the default."""
+
+comptime STAGE_TRIGGER_PULL_REQUEST: String = "PULL_REQUEST"
+"""A stage run by a pull request's per-change check (file header)."""
 
 comptime NAME_MAX_BYTES: Int = STEP_NAME_MAX_BYTES
 """Longest stage or step name: a stage name is also a CI job id and a
@@ -118,6 +179,7 @@ struct StageValidation(Copyable, Movable):
     var compiler_channel: String
     var extra_channels: List[String]
     var program: String
+    var smoke: String
     var wait_for_index_seconds: Int
     var line: Int
 
@@ -129,7 +191,8 @@ struct StageValidation(Copyable, Movable):
         self.compiler_channel = String("")
         self.extra_channels = List[String]()
         self.program = String("")
-        self.wait_for_index_seconds = 0
+        self.smoke = String("")
+        self.wait_for_index_seconds = VALIDATION_WAIT_DEFAULT_SECONDS
         self.line = line
 
 
@@ -168,8 +231,10 @@ struct StageStep(Copyable, Movable):
 
 struct Stage(Copyable, Movable):
     """One stage: a name, its GitHub environment (the parser sets it to the
-    name when the file does not), the stage it runs after ("" for none),
-    whether it is farm-connected, and its steps in file order.
+    name when the file does not, except on a PULL_REQUEST stage, which has
+    none), the stage it runs after ("" for none), whether it is
+    farm-connected, its trigger (PUSH or PULL_REQUEST), whether it may run
+    off main (`break_glass`, file header) and its steps in file order.
 
     Layout: owned values only. No pointer field."""
 
@@ -177,6 +242,9 @@ struct Stage(Copyable, Movable):
     var environment: String
     var after: String
     var farm_connected: Bool
+    var trigger: String
+    var break_glass: Bool
+    var break_glass_environment: String
     var steps: List[StageStep]
     var line: Int
 
@@ -185,8 +253,15 @@ struct Stage(Copyable, Movable):
         self.environment = String("")
         self.after = String("")
         self.farm_connected = False
+        self.trigger = String(STAGE_TRIGGER_PUSH)
+        self.break_glass = False
+        self.break_glass_environment = String("")
         self.steps = List[StageStep]()
         self.line = line
+
+    def is_pull_request(self) -> Bool:
+        """Whether a pull request's per-change check runs this stage."""
+        return self.trigger == STAGE_TRIGGER_PULL_REQUEST
 
     def has_kind(self, kind: String) -> Bool:
         for i in range(len(self.steps)):
@@ -369,18 +444,44 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
             + String(": a validation belongs to a PUBLISH step (it checks what the step published)")
         )
     if v.kind.byte_length() == 0:
-        raise Error(_at(source, v.line) + where + String(" has no kind (CONDA_INSTALL_SMOKE)"))
+        raise Error(_at(source, v.line) + where + String(" has no kind (CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV)"))
     try:
         require_validation_kind(v.kind)
     except e:
         raise Error(_at(source, v.line) + where + String(": ") + String(e))
-    if v.image.byte_length() == 0:
-        raise Error(_at(source, v.line) + where + String(" has no image (the container image, pinned by digest)"))
-    if not is_digest_pinned_image(v.image):
-        raise Error(
-            _at(source, v.line) + where + String(" has image '") + v.image
-            + String("'; an image is pinned by digest, <reference>@sha256:<64 lowercase hex>")
-        )
+    var on_this_machine = v.kind == VALIDATION_KIND_CONDA_INSTALL_ENV
+    if on_this_machine:
+        if v.image.byte_length() > 0:
+            raise Error(
+                _at(source, v.line) + where + String(" has image '") + v.image
+                + String("'; a CONDA_INSTALL_ENV validation runs on this machine with no container")
+                + String(" (an image belongs to CONDA_INSTALL_SMOKE)")
+            )
+        if v.program.byte_length() > 0:
+            raise Error(
+                _at(source, v.line) + where + String(" has program '") + v.program
+                + String("'; a CONDA_INSTALL_ENV validation runs each installed library's README")
+                + String(" (share/doc/<name>/README.md), so it names no program")
+            )
+        if v.smoke.byte_length() > 0 and v.smoke != VALIDATION_SMOKE_README:
+            raise Error(
+                _at(source, v.line) + where + String(" has smoke '") + v.smoke
+                + String("'; the one word is ") + String(VALIDATION_SMOKE_README)
+                + String(" (each installed library's README examples, the default)")
+            )
+    else:
+        if v.smoke.byte_length() > 0:
+            raise Error(
+                _at(source, v.line) + where + String(" has smoke '") + v.smoke
+                + String("'; a CONDA_INSTALL_SMOKE validation runs its program (smoke belongs to CONDA_INSTALL_ENV)")
+            )
+        if v.image.byte_length() == 0:
+            raise Error(_at(source, v.line) + where + String(" has no image (the container image, pinned by digest)"))
+        if not is_digest_pinned_image(v.image):
+            raise Error(
+                _at(source, v.line) + where + String(" has image '") + v.image
+                + String("'; an image is pinned by digest, <reference>@sha256:<64 lowercase hex>")
+            )
     if len(v.installs) == 0:
         raise Error(_at(source, v.line) + where + String(" has no install (a package to install)"))
     for i in range(len(v.installs)):
@@ -402,9 +503,11 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
             _at(source, v.line) + where + String(" has compiler_channel '") + v.compiler_channel
             + String("'; a compiler channel is an https:// URL")
         )
-    if v.program.byte_length() == 0:
+    if not on_this_machine and v.program.byte_length() == 0:
         raise Error(_at(source, v.line) + where + String(" has no program (the program to run)"))
-    if not _is_relative_mojo_path(v.program) or not v.program.startswith(String(VALIDATION_PROGRAM_DIR)):
+    if not on_this_machine and (
+        not _is_relative_mojo_path(v.program) or not v.program.startswith(String(VALIDATION_PROGRAM_DIR))
+    ):
         raise Error(
             _at(source, v.line) + where + String(" has program '") + v.program
             + String("'; a program is a relative path to a .mojo file under ") + String(VALIDATION_PROGRAM_DIR)
@@ -499,12 +602,21 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                     _at(source, s.line) + String("stage '") + s.name
                     + String("' is declared twice (first on line ") + String(g.stages[j].line) + String(")")
                 )
-        if not is_stage_or_step_name(s.environment):
+        if s.trigger != STAGE_TRIGGER_PUSH and s.trigger != STAGE_TRIGGER_PULL_REQUEST:
+            raise Error(
+                _at(source, s.line) + String("stage '") + s.name + String("' has trigger '") + s.trigger
+                + String("'; a trigger is PUSH or PULL_REQUEST")
+            )
+        if s.is_pull_request():
+            _check_pull_request_stage(source, g, i)
+        elif not is_stage_or_step_name(s.environment):
             raise Error(
                 _at(source, s.line) + String("stage '") + s.name + String("' has environment '") + s.environment
                 + String("'; an environment name is [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
                 + String(" bytes, not ending in '-'")
             )
+        if s.break_glass_environment.byte_length() > 0:
+            _check_break_glass_environment(source, s)
         if s.after.byte_length() > 0:
             if s.after == s.name:
                 raise Error(_at(source, s.line) + String("stage '") + s.name + String("' runs after itself"))
@@ -516,6 +628,12 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                 raise Error(
                     _at(source, s.line) + String("stage '") + s.name + String("' runs after '") + s.after
                     + String("', which is not a stage declared above it")
+                )
+            if s.break_glass and not g.stage(s.after).break_glass:
+                raise Error(
+                    _at(source, s.line) + String("stage '") + s.name + String("' is break_glass and runs after '")
+                    + s.after + String("', which is not: the break-glass stages are a prefix of the chain, so a")
+                    + String(" run off main stops at the first stage that runs only on main")
                 )
         if len(s.steps) == 0:
             raise Error(_at(source, s.line) + String("stage '") + s.name + String("' has no step"))
@@ -535,6 +653,61 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                 )
             _check_step_validations(source, s, s.steps[k])
         _check_validation_names_unique(source, s)
+
+
+def _check_break_glass_environment(source: String, s: Stage) raises:
+    """`break_glass_environment` (file header): only on a break_glass
+    stage, an environment name, not the stage's `environment`."""
+    var where = _at(source, s.line) + String("stage '") + s.name + String("' has break_glass_environment '")
+    where += s.break_glass_environment + String("'")
+    if not s.break_glass:
+        raise Error(where + String(" and is not break_glass: only a stage a break-glass run reaches has one"))
+    if not is_stage_or_step_name(s.break_glass_environment):
+        raise Error(
+            where + String("; an environment name is [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
+            + String(" bytes, not ending in '-'")
+        )
+    if s.break_glass_environment == s.environment:
+        raise Error(
+            where + String(", the stage's own environment: a break-glass run goes through an environment of its")
+            + String(" own, so the stage's environment can be locked to main")
+        )
+
+
+def _check_pull_request_stage(source: String, g: ReleaseMachine, i: Int) raises:
+    """The rules of a PULL_REQUEST stage (file header): no environment, no
+    `after` either way, BUILD steps only."""
+    ref s = g.stages[i]
+    var where = String("stage '") + s.name + String("' is a PULL_REQUEST stage")
+    if s.break_glass:
+        raise Error(
+            _at(source, s.line) + where + String(" and is break_glass: break-glass is a manual release run off")
+            + String(" main, and a pull request's check is no release stage")
+        )
+    if s.environment.byte_length() > 0:
+        raise Error(
+            _at(source, s.line) + where + String(" and has environment '") + s.environment
+            + String("': its job runs a pull request's code in NO environment, so no environment secret")
+            + String(" or approval reaches it")
+        )
+    if s.after.byte_length() > 0:
+        raise Error(
+            _at(source, s.line) + where + String(" and runs after '") + s.after
+            + String("': its job runs on a pull request, where no release stage runs")
+        )
+    for j in range(len(g.stages)):
+        if g.stages[j].after == s.name:
+            raise Error(
+                _at(source, g.stages[j].line) + String("stage '") + g.stages[j].name + String("' runs after '")
+                + s.name + String("', a PULL_REQUEST stage: no stage runs after a pull request's check")
+            )
+    for k in range(len(s.steps)):
+        if s.steps[k].kind != STEP_KIND_BUILD:
+            raise Error(
+                _at(source, s.steps[k].line) + where + String(" and has ") + s.steps[k].kind + String(" step '")
+                + s.steps[k].name + String("': a pull request's check builds and never publishes or deploys,")
+                + String(" so its steps are BUILD steps")
+            )
 
 
 def _check_validation_names_unique(source: String, s: Stage) raises:

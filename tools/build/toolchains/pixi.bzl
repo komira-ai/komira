@@ -1,4 +1,5 @@
-"""`pixi_version_check`: the pinned pixi runs and reports the release the platform table pins."""
+"""`pixi_version_check`: the pinned pixi runs and reports the release the platform table pins.
+`pixi_pin_record`: a pin's URL and sha256 as a two-line file, for checks that hold a copy elsewhere to it."""
 
 # Runs `<pixi> --version` with no environment but PATH (empty HOME: pixi
 # must not read a user's configuration to answer) and fails unless the one
@@ -35,5 +36,19 @@ pixi_version_check = rule(
         "pixi": attrs.exec_dep(),
         "version": attrs.string(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+    },
+)
+
+def _pin_record_impl(ctx):
+    out = ctx.actions.write(ctx.label.name + ".txt", "url {}\nsha256 {}\n".format(ctx.attrs.url, ctx.attrs.sha256))
+    return [DefaultInfo(default_output = out)]
+
+# Writes no action that runs a program: the two values are the rule's attributes.
+pixi_pin_record = rule(
+    impl = _pin_record_impl,
+    doc = "A file of two lines, `url <url>` and `sha256 <hex>`: one pixi pin of the platform table.",
+    attrs = {
+        "sha256": attrs.string(),
+        "url": attrs.string(),
     },
 )

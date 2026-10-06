@@ -14,6 +14,11 @@
 #                 principal that may write it) and its `credential` (how that
 #                 principal authenticates: a kind and, for API_TOKEN, the
 #                 NAME of the secret; see `channel_credential.mojo`).
+#                 An OIDC_TRUSTED_PUBLISHING repository may also name a
+#                 `break_glass_push_identity`: the subject a BREAK-GLASS run
+#                 publishes as (its own GitHub environment, a second trusted
+#                 publisher of the same channel; kci_release_machine's
+#                 `break_glass_environment`).
 #
 # Every function here takes the channel list as an argument, so adding a
 # channel is adding one value.
@@ -70,6 +75,9 @@ struct ChannelRepository(Copyable, Movable):
     var credential: Optional[ChannelCredential]
     """None when the channel names no credential; validation refuses
     that, so a validated repository always carries one."""
+    var break_glass_push_identity: String
+    """The subject a break-glass run publishes as ("" for none; module
+    header). Set by the parser after construction."""
 
     def __init__(
         out self,
@@ -82,6 +90,7 @@ struct ChannelRepository(Copyable, Movable):
         self.location = location^
         self.push_identity = push_identity^
         self.credential = credential^
+        self.break_glass_push_identity = String("")
 
     def declared_credential(self) raises -> ChannelCredential:
         """The credential this repository declares. Raises when it declares
@@ -98,6 +107,24 @@ struct ChannelRepository(Copyable, Movable):
 comptime _ENVIRONMENT_MARK: String = ":environment:"
 
 
+def _environment_of(subject: String) -> String:
+    var at = subject.rfind(String(_ENVIRONMENT_MARK))
+    if at < 0:
+        return String("")
+    var env = String(subject[byte = at + String(_ENVIRONMENT_MARK).byte_length() :])
+    if env.byte_length() == 0 or env.find(String(":")) >= 0:
+        return String("")
+    return env^
+
+
+def break_glass_push_identity_environment(repo: ChannelRepository) -> String:
+    """The GitHub environment `repo`'s `break_glass_push_identity` names
+    (as `push_identity_environment` reads `push_identity`), "" for none."""
+    if not repo.credential or not repo.credential.value().is_oidc_trusted_publishing():
+        return String("")
+    return _environment_of(repo.break_glass_push_identity)
+
+
 def push_identity_environment(repo: ChannelRepository) -> String:
     """The CI environment a trusted-publishing push identity names, or "".
 
@@ -106,21 +133,15 @@ def push_identity_environment(repo: ChannelRepository) -> String:
     `repo:<owner>/<repo>:environment:<name>`. This returns `<name>`: the
     GitHub environment whose job may publish here. The stage that may publish
     here is the one whose `environment` (by default its name) equals it, so
-    kci can refuse a publish from any other stage: stage `publish-gamma` runs
-    in environment `gamma`, whose trusted publisher names `gamma`. "" for an API_TOKEN repository, a
+    kci can refuse a publish from any other stage: stage `publish-staging` runs
+    in environment `staging`, whose trusted publisher names `staging`. "" for an API_TOKEN repository, a
     repository with no credential, and a subject that names no environment
     (or an empty one, or one holding `:`)."""
     if not repo.credential:
         return String("")
     if not repo.credential.value().is_oidc_trusted_publishing():
         return String("")
-    var at = repo.push_identity.rfind(String(_ENVIRONMENT_MARK))
-    if at < 0:
-        return String("")
-    var env = String(repo.push_identity[byte = at + String(_ENVIRONMENT_MARK).byte_length() :])
-    if env.byte_length() == 0 or env.find(String(":")) >= 0:
-        return String("")
-    return env^
+    return _environment_of(repo.push_identity)
 
 
 struct Channel(Copyable, Movable):
@@ -191,6 +212,31 @@ def _refuse(name: String, rest: String) raises:
 def _is_blank(value: String) -> Bool:
     """True for an empty or whitespace-only value."""
     return value.strip().byte_length() == 0
+
+
+def _check_break_glass_identity(name: String, r: ChannelRepository) raises:
+    """A `break_glass_push_identity` (module header): only on an
+    OIDC_TRUSTED_PUBLISHING repository, naming a GitHub environment, not
+    the one `push_identity` names, and otherwise the same subject."""
+    var what = String("declares break_glass_push_identity '") + r.break_glass_push_identity + String("' for its ")
+    what += r.artifact_type + String(" repository")
+    if not r.credential or not r.credential.value().is_oidc_trusted_publishing():
+        _refuse(name, what + String(", which does not publish by OIDC trusted publishing"))
+    var env = break_glass_push_identity_environment(r)
+    var main_env = push_identity_environment(r)
+    if env.byte_length() == 0:
+        _refuse(name, what + String(": it names no environment (`...:environment:<env>`)"))
+    if env == main_env:
+        _refuse(name, what + String(": it names the push_identity's own environment '") + env + String("'"))
+    var head = String(r.break_glass_push_identity[byte = 0 : r.break_glass_push_identity.byte_length() - env.byte_length()])
+    if main_env.byte_length() == 0 or not r.push_identity.startswith(head) or (
+        r.push_identity.byte_length() - main_env.byte_length() != head.byte_length()
+    ):
+        _refuse(
+            name,
+            what + String(": it is not push_identity '") + r.push_identity
+            + String("' with another environment (the same repository and workflow, a break-glass environment)"),
+        )
 
 
 def validate_channels(channels: List[Channel]) raises:
@@ -282,6 +328,8 @@ def validate_channels(channels: List[Channel]) raises:
                     + String(" one writer"),
                 )
             validate_channel_credential(d.name, r.artifact_type, r.credential)
+            if r.break_glass_push_identity.byte_length() > 0:
+                _check_break_glass_identity(d.name, r)
             for k in range(len(locations)):
                 if locations[k] != r.location:
                     continue

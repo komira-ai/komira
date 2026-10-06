@@ -1,0 +1,39 @@
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# Golden LZ4 files from github.com/pierrec/lz4 v4.1.21 (commit 294e765...,
+# BSD-3-Clause, LICENSE below). Its testdata/README.txt: "The golden data
+# files (*.lz4) have been compressed with the original C implementation of
+# lz4." Each file is fetched at build time and checked against its sha256; nothing of it is
+# committed here. The v4.1.21 source archive is 40 MB, so instead of the
+# usual pinned archive + archive_files, the three files are pinned one by one
+# at the tag's commit.
+#
+# Test data of //src/komira_lz4 (tests/test_codec_into.mojo) and
+# //src/komira_parquet_codec (tests/test_compression_lz4_framings.mojo):
+#   gettysburg.txt      - plain text, 1548 bytes;
+#   gettysburg.txt.lz4  - the same text as an LZ4 frame holding one compressed
+#                         block, the known-answer vector for raw-block decoding.
+_COMMIT = "294e7659e17723306ebf3a44cd7ad2c11f456c37"
+
+_URL = "https://raw.githubusercontent.com/pierrec/lz4/{}/".format(_COMMIT)
+
+pinned_file(
+    name = "LICENSE",
+    url = _URL + "LICENSE",
+    sha256 = "6a358d2540ca14048f02d366f23787c0a480157e58f058113f0e27168dd4e447",
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "gettysburg.txt",
+    url = _URL + "testdata/gettysburg.txt",
+    sha256 = "40878db5ff73f384fc64e02bac26a80371fb4fe83acac5ebe390a54280582aee",
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "gettysburg.txt.lz4",
+    url = _URL + "testdata/gettysburg.txt.lz4",
+    sha256 = "390ee60baadcd59446c591ef33e587801d472ce6eed7198d0011a9351ea674dd",
+    visibility = ["PUBLIC"],
+)

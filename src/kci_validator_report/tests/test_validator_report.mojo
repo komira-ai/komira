@@ -609,7 +609,7 @@ def test_the_document_carries_the_failure_reason_per_row() raises:
             String("send_relayed"),
             String("DELETE /v1/domains/{d}"),
             String("409"),
-            String("the domain is gone from the control plane"),
+            String("the domain is gone from the relay"),
             String("teardown refused: domain still has 1 active binding"
                    " (binding_id=rb_7f21)"),
         )

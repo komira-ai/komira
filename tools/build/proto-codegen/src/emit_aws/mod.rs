@@ -49,6 +49,10 @@ pub struct AwsEmitOptions {
     /// The `s3` customization (see [`S3_CUSTOMIZATION`]): refused unless the
     /// model's serviceId is `S3` and its protocol is restXml.
     pub s3: bool,
+    /// The `route53` customization (see [`ROUTE53_CUSTOMIZATION`]): refused
+    /// unless the model's serviceId is `Route 53` and its protocol is
+    /// restXml.
+    pub route53: bool,
 }
 
 /// The `s3` customization: what botocore does to S3 beyond the
@@ -80,6 +84,24 @@ pub struct AwsEmitOptions {
 ///   puts the bucket in the URL it chooses (`rest_request_uri` in
 ///   `rest.rs`).
 pub const S3_CUSTOMIZATION: &str = "s3";
+
+/// The `route53` customization: what botocore does to Route 53 beyond the
+/// model, from `botocore/handlers.py` at the pinned tag.
+///
+/// - `fix_route53_ids` (on `before-parameter-build.route53`): each
+///   top-level input member whose shape is one of
+///   [`ROUTE53_ID_SHAPES`] is sent as the part of its value after the last
+///   `/`, so the `/hostedzone/Z…`, `/change/C…` and `/delegationset/N…`
+///   Ids Route 53 answers with can be passed back as they came. A bare Id
+///   is sent as itself. It applies wherever the member is bound (a label,
+///   the query, the body) and before the request is validated, as
+///   botocore's handler runs before its validator: `build_<op>_request`
+///   copies the input, cuts those members, and builds the request from the
+///   copy.
+pub const ROUTE53_CUSTOMIZATION: &str = "route53";
+
+/// The input shapes `fix_route53_ids` cuts to their last `/` segment.
+pub const ROUTE53_ID_SHAPES: &[&str] = &["ResourceId", "DelegationSetId", "ChangeId"];
 
 /// The protocols this emitter implements, by botocore name. Anything else is
 /// refused.
@@ -594,6 +616,17 @@ pub fn emit_aws_module_with_endpoints(
             lowering.service.service, lowering.service.service_id, lowering.service.protocol
         ));
     }
+    if options.route53
+        && (lowering.service.service_id != "Route 53"
+            || selected.protocol != AwsProtocol::RestXml)
+    {
+        return Err(format!(
+            "emit_aws: the `{ROUTE53_CUSTOMIZATION}` customization is refused unless the \
+             model's serviceId is `Route 53` and its protocol is restXml, and service `{}` \
+             has serviceId `{}` and protocol `{}`",
+            lowering.service.service, lowering.service.service_id, lowering.service.protocol
+        ));
+    }
     check_request_checksums(&lowering.facts, options)?;
     check_modeled_retryable_errors(&lowering.facts, options)?;
     if selected.protocol == AwsProtocol::RestXml {
@@ -1002,6 +1035,11 @@ impl<'a> AwsEmitter<'a> {
                 self.line("#                  and a leading /{Bucket} dropped from each path:");
                 self.line("#                  the endpoint ruleset puts the bucket in the URL");
             }
+        }
+        if self.options.route53 {
+            self.line("#   customize    : route53 (botocore handlers.py: each top-level");
+            self.line("#                  ResourceId, DelegationSetId or ChangeId input");
+            self.line("#                  member sent as the part after its last `/`)");
         }
         self.line("#");
         if !self.options.pure_only {
@@ -1836,6 +1874,9 @@ impl<'a> AwsEmitter<'a> {
             svc.methods.clone()
         };
         let binding = self.binding;
+        if self.options.route53 {
+            self.emit_route53_bare_id_helper();
+        }
         for m in &methods {
             let facts = self.facts.operation_by_ir_method(&m.name)?.clone();
             binding.emit_request_builder(self, m, &facts)?;

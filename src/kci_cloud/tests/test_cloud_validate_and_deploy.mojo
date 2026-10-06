@@ -32,6 +32,15 @@
 # 11. THE REST OF THE ADAPTER INTERFACE: bootstrap resources, whoami, the
 #    trust pair, the artifact a resource needs, list_owned, and the standard
 #    label rule (encoded exactly, refused rather than rewritten).
+# 12. THE LABEL RULE WRITES `/` AS `_`: one byte per separator, decoded
+#    exactly; a value holding `_` is refused (it would decode as a `/`); the
+#    63/64-byte boundary.
+# 13. DEPTH-N IDS: a node `top/a/b/c/run` is owned by `top` and stamped with
+#    role `a/b/c/run`, written `a_b_c_run`, and the stamp round-trips.
+# 14. THE ROLE LABEL BUDGET IS CHECKED BEFORE APPLY: a lowered node whose
+#    encoded role is over 63 bytes refuses the whole graph with a GRAPH
+#    finding naming the node, its byte count and its segment lengths, before
+#    any node is realized or created; a 63-byte role is applied.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -60,6 +69,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    GrantEdge,
     CloudAdapter,
     Absence,
     ArtifactNeed,
@@ -78,6 +88,8 @@ from kci_cloud import (
     label_problems,
     lower_data,
     lowering_json,
+    owner_of_node,
+    role_budget_findings,
     standard_identity_of,
     standard_label_rule,
     CloudId,
@@ -88,6 +100,10 @@ from kci_cloud import (
     FINDING_LIMIT,
     FIELD_SERVICE,
     FIELD_JOB,
+    FIELD_TABLE,
+    FIELD_BUCKET,
+    FIELD_SERVICE_ACCOUNT,
+    FIELD_GRANT,
     apply_resources,
     body_field,
     describe,
@@ -141,6 +157,7 @@ struct _Node(EngineResource, Movable, Deinitable):
     var _id: String
     var _owner: String
     var _fail_create: Bool
+    var _retention: Int
 
     def __init__(
         out self,
@@ -148,11 +165,13 @@ struct _Node(EngineResource, Movable, Deinitable):
         id: String,
         owner: String,
         fail_create: Bool = False,
+        retention: Int = RETAIN_DELETE,
     ):
         self._log = log.copy()
         self._id = id
         self._owner = owner
         self._fail_create = fail_create
+        self._retention = retention
 
     def logical_id(mut self) -> String:
         return self._id.copy()
@@ -161,7 +180,7 @@ struct _Node(EngineResource, Movable, Deinitable):
         return List[String]()
 
     def retention(mut self) -> Int:
-        return RETAIN_DELETE
+        return self._retention
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
         var i = self._log[].find(self._id)
@@ -184,6 +203,8 @@ struct _Node(EngineResource, Movable, Deinitable):
         return True
 
     def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
+        # A real adapter writes the labels in the create call; so does this.
+        _ = standard_label_rule(stamp)
         if self._fail_create:
             raise Error(String("stub: create refused for ") + self._id)
         self._log[].created.append(self._id)
@@ -207,8 +228,10 @@ struct _Node(EngineResource, Movable, Deinitable):
 
 
 struct _Stub(CloudAdapter, Movable):
-    """Hosts `service` (and `job` when `full`); refuses port 1 as a limit;
-    lowers each resource to `<id>/run` and, for a service, `<id>/edge`.
+    """Hosts `service` (and `job` and `bucket` when `full`); refuses port 1
+    as a limit; lowers each resource to `<id>/run` (a bucket to
+    `<id>/bucket`) and, for a service, `<id>/edge`;
+    with `extra_role` set, also `<id>/<extra_role>` for every resource.
     Takes one setting, `public_mechanism` (`edge` or `none`, default
     `edge`), and trusts the principal `deployer` only."""
 
@@ -216,6 +239,7 @@ struct _Stub(CloudAdapter, Movable):
     var _full: Bool
     var _bad_owner: Bool
     var _fail_create: String
+    var _extra_role: String
     var _mechanism: String
     var log: ArcPointer[_Log]
 
@@ -225,11 +249,13 @@ struct _Stub(CloudAdapter, Movable):
         full: Bool,
         bad_owner: Bool = False,
         fail_create: String = String(""),
+        extra_role: String = String(""),
     ):
         self._id = id
         self._full = full
         self._bad_owner = bad_owner
         self._fail_create = fail_create
+        self._extra_role = extra_role
         self._mechanism = String("edge")
         self.log = ArcPointer[_Log](_Log())
 
@@ -244,12 +270,20 @@ struct _Stub(CloudAdapter, Movable):
         l.append(FIELD_SERVICE)
         if self._full:
             l.append(FIELD_JOB)
+            l.append(FIELD_TABLE)
+            l.append(FIELD_BUCKET)
+            l.append(FIELD_SERVICE_ACCOUNT)
+            l.append(FIELD_GRANT)
         return l^
 
     def absences(self) -> List[Absence]:
         var l = List[Absence]()
         if not self._full:
             l.append(Absence(FIELD_JOB, NOT_YET, String("no runner for jobs")))
+            l.append(Absence(FIELD_TABLE, NOT_YET, String("no tables")))
+            l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
+            l.append(Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("no identities")))
+            l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -303,15 +337,16 @@ struct _Stub(CloudAdapter, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
         if self._bad_owner:
             owner = String("someone-else")
         var out = List[LoweredNode]()
         var run = List[Setting]()
         run.append(Setting(String("type"), String(r._oneof0_case)))
+        var role = String("bucket") if Bool(r.bucket) else String("run")
         out.append(
-            LoweredNode(r.id + String("/run"), owner, String("run"), List[String](), List[InputRef](), run^)
+            LoweredNode(r.id + String("/") + role, owner, role, List[String](), List[InputRef](), run^)
         )
         if r._oneof0_case == 1:
             var edge = List[Setting]()
@@ -319,12 +354,20 @@ struct _Stub(CloudAdapter, Movable):
             out.append(
                 LoweredNode(r.id + String("/edge"), r.id, String("edge"), List[String](), List[InputRef](), edge^)
             )
+        if self._extra_role.byte_length() > 0:
+            out.append(LoweredNode(r.id + String("/") + self._extra_role, r.id, String("extra")))
         return out^
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         self.log[].realized.append(node.id)
         return ErasedResource.erase(
-            _Node(self.log, node.id, node.owner, fail_create=node.id == self._fail_create)
+            _Node(
+                self.log,
+                node.id,
+                node.owner,
+                fail_create=node.id == self._fail_create,
+                retention=node.retention,
+            )
         )
 
     def bootstrap_resources(self, machine: String, cell: String) -> List[BootstrapItem]:
@@ -347,7 +390,8 @@ struct _Stub(CloudAdapter, Movable):
             l.append(
                 OwnedRecord(
                     String("stub"), id.copy(), String("stub"), String("none"),
-                    String(""), String(RUN_UNKNOWN), True, id.copy(),
+                    String(""), String(RUN_UNKNOWN), True, id.copy(), False,
+                    String(""),
                 )
             )
         return l^
@@ -440,13 +484,14 @@ def test_every_graph_finding_in_one_pass() raises:
         'api|uses[0]|ref to missing resource "ghost"',
         'api|uses[1]|service "web" does not accept access ACCESS_UNSET',
         "api|uses[2]|access is granted to a resource, not to one of its outputs",
+        'api|uses[2]|a second edge from the identity of "api" to web; the first is uses[1] of "api"',
         "batch|job.image|the image is a build output that was not resolved",
         "web|id|duplicate id",
         "a/b|id|an id is lowercase letters, digits and '-' only",
         "empty|body|resource 'empty' has no type",
     ]:
         assert_true(_has(t, String(want)), String("missing: ") + String(want) + "\n" + t)
-    assert_equal(len(f), 13, "exactly the findings above, each once:\n" + t)
+    assert_equal(len(f), 14, "exactly the findings above, each once:\n" + t)
     for i in range(len(f)):
         assert_equal(f[i].kind, FINDING_GRAPH)
     assert_equal(len(graph_findings(Catalog.v1(), _list(_good()))), 0, "a good graph is clean")
@@ -682,9 +727,9 @@ def test_lowering_is_data_and_golden() raises:
     var got = lowering_json(lower_data(full, _list(_good())))
     var want = (
         String("[\n")
-        + String('  {"id":"api/run","owner":"api","kind":"run","wanted":true,"depends_on":[],"inputs":[],"desired":{"type":"1"}},\n')
-        + String('  {"id":"api/edge","owner":"api","kind":"edge","wanted":true,"depends_on":[],"inputs":[],"desired":{"mechanism":"edge"}},\n')
-        + String('  {"id":"batch/run","owner":"batch","kind":"run","wanted":true,"depends_on":[],"inputs":[],"desired":{"type":"2"}}\n')
+        + String('  {"id":"api/run","owner":"api","kind":"run","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{"type":"1"}},\n')
+        + String('  {"id":"api/edge","owner":"api","kind":"edge","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{"mechanism":"edge"}},\n')
+        + String('  {"id":"batch/run","owner":"batch","kind":"run","wanted":true,"retention":"delete","depends_on":[],"inputs":[],"desired":{"type":"2"}}\n')
         + String("]")
     )
     assert_equal(got, want)
@@ -779,8 +824,8 @@ def test_the_adapter_interface_and_the_label_rule() raises:
     var labels = full.label_rule(stamp)
     assert_equal(len(label_problems(labels)), 0)
     assert_equal(full.identity_of(labels), stamp.identity())
-    assert_equal(encode_label_value(String("uses/jobs")), "uses--jobs")
-    assert_equal(decode_label_value(String("uses--jobs")), "uses/jobs")
+    assert_equal(encode_label_value(String("uses/jobs")), "uses_jobs")
+    assert_equal(decode_label_value(String("uses_jobs")), "uses/jobs")
     var refused = False
     try:
         _ = encode_label_value(String("Upper"))
@@ -799,6 +844,142 @@ def test_the_adapter_interface_and_the_label_rule() raises:
     print("  test_the_adapter_interface_and_the_label_rule: PASS")
 
 
+# ---- 12. the label rule writes `/` as `_` -------------------------------------------
+
+
+def _repeat(c: String, n: Int) -> String:
+    var s = String("")
+    for _ in range(n):
+        s += c
+    return s^
+
+
+def _raises_encoding(v: String, why: String) raises -> String:
+    try:
+        _ = encode_label_value(v)
+    except e:
+        return String(e)
+    raise Error(String("not refused: ") + why)
+
+
+def test_the_label_rule_writes_slash_as_underscore() raises:
+    assert_equal(encode_label_value(String("a/b/c/run")), "a_b_c_run")
+    assert_equal(decode_label_value(String("a_b_c_run")), "a/b/c/run")
+    assert_equal(encode_label_value(String("run")), "run", "no separator, unchanged")
+    assert_equal(encode_label_value(String("a-b/c-d")), "a-b_c-d", "a single '-' is kept")
+    # A raw `_` would decode as a `/`: two different roles would read as one.
+    var e = _raises_encoding(String("a_b"), "a value holding '_'")
+    assert_true(_has(e, "'_'"), e)
+    _ = _raises_encoding(String("x/a_b"), "a segment holding '_'")
+    # The boundary: 63 bytes encoded is written, 64 is refused (never cut).
+    var r63 = _repeat(String("a"), 31) + String("/") + _repeat(String("b"), 31)
+    assert_equal(encode_label_value(r63).byte_length(), 63)
+    var r64 = r63 + String("c")
+    var e64 = _raises_encoding(r64, "a 64-byte value")
+    assert_true(_has(e64, "64 bytes encoded; at most 63"), e64)
+    print("  test_the_label_rule_writes_slash_as_underscore: PASS")
+
+
+# ---- 13. depth-N ids -------------------------------------------------------------
+
+
+def _label_value(labels: List[Label], key: String) -> String:
+    for i in range(len(labels)):
+        if labels[i].key == key:
+            return labels[i].value.copy()
+    return String("")
+
+
+def test_depth_n_ids_round_trip_the_owner_and_the_stamp() raises:
+    var scope = _ctx().scope.copy()
+    var stamp = scope.stamp(String("top"), String("top/a/b/c/run"))
+    assert_equal(stamp.resource, "top", "the owner is the first segment")
+    assert_equal(stamp.role, "a/b/c/run", "the role is the rest of the node id")
+    var labels = standard_label_rule(stamp)
+    assert_equal(_label_value(labels, String("kci_resource")), "top")
+    assert_equal(_label_value(labels, String("kci_role")), "a_b_c_run")
+    assert_equal(len(label_problems(labels)), 0)
+    assert_equal(standard_identity_of(labels), stamp.identity(), "the stamp round-trips")
+    assert_equal(owner_of_node(String("top/a/b/c/run")), "top", "the owner at depth 3")
+    assert_equal(owner_of_node(String("top/run")), "top", "the owner at depth 0")
+    print("  test_depth_n_ids_round_trip_the_owner_and_the_stamp: PASS")
+
+
+def test_a_double_dash_role_label_is_never_an_owner() raises:
+    """`--` was once the separator written for `/`. It was never deployed, so
+    there is no compatibility: a role value written that way is an ordinary
+    value that holds `--`, and no node's identity."""
+    var scope = _ctx().scope.copy()
+    var want = scope.stamp(String("uses"), String("uses/jobs"))
+    var labels = standard_label_rule(want)
+    for i in range(len(labels)):
+        if labels[i].key == "kci_role":
+            labels[i] = Label(String("kci_role"), String("jobs--run"))
+    assert_equal(decode_label_value(String("uses--jobs")), "uses--jobs", "no '/' is made of '--'")
+    var got = standard_identity_of(labels)
+    assert_true(got.byte_length() > 0, "a complete stamp still reads")
+    assert_true(got != want.identity(), "it is not the node it resembles")
+    assert_true(not _has(got, "jobs/run"), "its role is never split into segments")
+    print("  test_a_double_dash_role_label_is_never_an_owner: PASS")
+
+
+# ---- 14. the role label budget, before apply ------------------------------------------
+
+
+def _one_service() -> String:
+    return String('{"resource":[{"id":"api","service":{') + _img() + String(',"internal":{}}}]}')
+
+
+def test_a_role_over_the_label_budget_is_refused_before_apply() raises:
+    var reg = Clouds(Catalog.v1())
+    reg.add(describe(_Stub(String("full"), True)))
+
+    # 63 bytes encoded: within the budget, applied.
+    var r63 = _repeat(String("p"), 20) + String("/") + _repeat(String("q"), 42)
+    var fits = _Stub(String("full"), True, extra_role=r63)
+    var st = InMemoryStateStore()
+    var ok = apply_resources(reg, fits, _ctx(), _list(_one_service()), Creds.none(), st)
+    assert_true(ok.ok(), "a 63-byte role is applied")
+    assert_equal(len(fits.log[].created), 3, "api/run, api/edge and the 63-byte role")
+
+    # 64 bytes encoded: refused before anything is realized or created.
+    var r64 = r63 + String("q")
+    var over = _Stub(String("full"), True, extra_role=r64)
+    var st2 = InMemoryStateStore()
+    var msg = String("")
+    try:
+        var out = apply_resources(reg, over, _ctx(), _list(_one_service()), Creds.none(), st2)
+        msg = String("NOT REFUSED BEFORE APPLY; the apply ran and returned: ")
+        msg += out.error.value() if out.error else String("success")
+    except e:
+        msg = String(e)
+    assert_true(_has(msg, "Nothing was created."), msg)
+    assert_true(_has(msg, String('node "api/') + r64 + String('"')), msg)
+    assert_true(_has(msg, "64 bytes"), msg)
+    assert_true(_has(msg, "at most 63"), msg)
+    assert_true(_has(msg, "segment lengths 20, 43"), msg)
+    assert_equal(len(over.log[].created), 0, "nothing was created")
+    assert_equal(len(over.log[].realized), 0, "nothing was even realized")
+
+    # The pure check, at the depths the budget is stated for: four 12-byte
+    # component ids and an 8-byte role is 60 bytes (fits); a fifth is 73.
+    var c12 = _repeat(String("c"), 12)
+    var role8 = _repeat(String("r"), 8)
+    var d4 = String("top/") + c12 + "/" + c12 + "/" + c12 + "/" + c12 + "/" + role8
+    var d5 = String("top/") + c12 + "/" + c12 + "/" + c12 + "/" + c12 + "/" + c12 + "/" + role8
+    var nodes = List[LoweredNode]()
+    nodes.append(LoweredNode(d4, String("top"), String("run")))
+    assert_equal(len(role_budget_findings(nodes)), 0, "depth 4 at maximum id lengths fits")
+    nodes.append(LoweredNode(d5, String("top"), String("run")))
+    var f = role_budget_findings(nodes)
+    assert_equal(len(f), 1, "depth 5 at maximum id lengths does not")
+    assert_equal(f[0].kind, FINDING_GRAPH)
+    assert_equal(f[0].resource_id, "top")
+    assert_true(_has(f[0].reason, "73 bytes encoded; at most 63"), f[0].reason)
+    assert_true(_has(f[0].reason, "segment lengths 12, 12, 12, 12, 12, 8"), f[0].reason)
+    print("  test_a_role_over_the_label_budget_is_refused_before_apply: PASS")
+
+
 def main() raises:
     print("test_cloud_validate_and_deploy")
     test_every_graph_finding_in_one_pass()
@@ -810,4 +991,8 @@ def main() raises:
     test_lowering_is_data_and_golden()
     test_the_cell_is_configured_and_validated_first()
     test_the_adapter_interface_and_the_label_rule()
+    test_the_label_rule_writes_slash_as_underscore()
+    test_depth_n_ids_round_trip_the_owner_and_the_stamp()
+    test_a_double_dash_role_label_is_never_an_owner()
+    test_a_role_over_the_label_budget_is_refused_before_apply()
     print("ALL kci_cloud VALIDATE AND DEPLOY TESTS PASSED")

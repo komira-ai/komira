@@ -16,8 +16,9 @@
 #     6-step witness: read HEAD + log_start -> fold [start..head] -> project
 #     survivors -> append base -> If-Match advance _LOG_START (the K1 412-loser
 #     re-reads) -> schedule+reap the retired deltas (the K2 best-effort loop).
-#   * `komira_pgstore_columnar.log_compactor.run_once_columnarize_log`
-#     — the DERIVED-WATERMARK / cross-lineage variant: fold WAL [lo..hi]
+#   * the table store's columnar adapter (outside this repository),
+#     `log_compactor.run_once_columnarize_log` — the DERIVED-WATERMARK /
+#     cross-lineage variant: fold WAL [lo..hi]
 #     -> ONE Parquet object -> PUT -> append a ColumnarFileEntry (the lock-free
 #     If-None-Match append IS the watermark advance; no CAS to lose) ->
 #     schedule_for_delete the folded WAL chunks.

@@ -10,7 +10,7 @@
 #               `machine_field_names`
 #
 # `kci run --stage S` runs the steps of stage S and their validations; the
-# workflow consistency check (kci_ci_check) holds a CI workflow to the same
+# workflow consistency check (kci_workflow_check) holds a CI workflow to the same
 # graph. This package reads text it is given: it opens
 # no file.
 #
@@ -20,7 +20,10 @@
 from kci_release_machine.graph import (
     EXTRA_CHANNEL_CONDA_FORGE,
     NAME_MAX_BYTES,
+    STAGE_TRIGGER_PULL_REQUEST,
+    STAGE_TRIGGER_PUSH,
     VALIDATION_PROGRAM_DIR,
+    VALIDATION_WAIT_DEFAULT_SECONDS,
     VALIDATION_WAIT_MAX_SECONDS,
     ReleaseMachine,
     Stage,

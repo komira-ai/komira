@@ -1,0 +1,29 @@
+// An Update method, as the Google Cloud APIs declare one: the path is filled
+// from the body message's `name` (`{thing.name=...}` with `body: "thing"`),
+// and the FieldMask naming the fields to replace is a query parameter.
+syntax = "proto3";
+
+package rest.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+
+service Things {
+  rpc UpdateThing(UpdateThingRequest) returns (Thing) {
+    option (google.api.http) = {
+      patch: "/v1/{thing.name=projects/*/things/*}"
+      body: "thing"
+    };
+  }
+}
+
+message UpdateThingRequest {
+  Thing thing = 1;
+  google.protobuf.FieldMask update_mask = 2;
+  bool validate_only = 3;
+}
+
+message Thing {
+  string name = 1;
+  string title = 2;
+}

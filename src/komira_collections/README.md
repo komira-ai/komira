@@ -9,7 +9,10 @@ or `swap_remove` (O(1), the last value fills the hole). `VariadicPack`
 different types that share the `VariadicElement` trait, and a `comptime for`
 over it calls each one's trait method directly, with no dynamic dispatch.
 `DynValue` (`komira_collections.dyn_value`) holds one value of any type up to a
-fixed size inline, without a heap allocation.
+fixed size inline, without a heap allocation. `HyperLogLog`
+(`komira_collections.hyperloglog`) estimates how many distinct values it has
+seen in a fixed 4 KiB sketch, and two sketches merge into the sketch of their
+union.
 
 ## Examples
 
@@ -79,4 +82,26 @@ def total[*Ts: VariadicElement](pack: VariadicPack[*Ts]) -> Int:
 var pack = VariadicPack[Width, Margin, Width](Width(100), Margin(8), Width(20))
 assert_equal(total(pack), 136)
 assert_equal(pack.get[1]().px, 8)
+```
+
+Counting distinct values, and merging two sketches:
+
+<!-- mojo-hidden from std.testing import assert_true -->
+```mojo
+from komira_collections.hyperloglog import HyperLogLog
+
+var evens = HyperLogLog()
+var odds = HyperLogLog()
+for i in range(10_000):
+    if i % 2 == 0:
+        evens.add_int64(Int64(i))
+    else:
+        odds.add_int64(Int64(i))
+    evens.add_int64(Int64(0))  # repeats do not count again
+
+var seen = evens.estimate()
+assert_true(seen > 4_750 and seen < 5_250)  # about 1.6% standard error
+evens.merge(odds)
+var both = evens.estimate()
+assert_true(both > 9_500 and both < 10_500)
 ```

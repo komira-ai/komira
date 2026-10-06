@@ -125,13 +125,13 @@ def test_structured_fields_round_trip() raises:
     LogManager._test_install_borrow(eng)
     eng.bind_worker_thread(UInt16(0))
 
-    log.error["retry {}", "komira_agent"](
+    log.error["retry {}", "komira_job_supervisor"](
         ArgI64(3), Field("fatal", ArgBool(False))
     )
 
     var lines = eng.drain_worker_to_lines(0, 64)
     assert_equal(len(lines), 1)
-    assert_true(_has(lines[0], "ERROR [komira_agent] retry 3 fatal=false"))
+    assert_true(_has(lines[0], "ERROR [komira_job_supervisor] retry 3 fatal=false"))
 
     LogManager._test_reset()
 

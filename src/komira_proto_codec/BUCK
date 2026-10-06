@@ -18,6 +18,7 @@ mojo_library(
         "tests/test_proto_codec_json_nonascii_roundtrip.mojo",
         "tests/test_proto_codec_proto3_json_conformance.mojo",
         "tests/test_proto_codec_proto3_json_strictness.mojo",
+        "tests/test_proto_codec_null_value.mojo",
         "tests/test_proto_codec_roundtrip.mojo",
     ],
     visibility = ["PUBLIC"],

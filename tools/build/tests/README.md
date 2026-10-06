@@ -174,6 +174,14 @@ Rust (`rust:prost_roundtrip` and the protobuf plugin,
 `proto-codegen:protoc-gen-mojo`), whose compiles copy their sources into
 buck-out for the same reason (without it, 3 of 55 actions re-ran).
 
+It also builds, in the `./komira` submodule consumer and in the external-cell
+consumer, a package of the consumer's own cell that depends on
+`komira//tools/build/examples:hellopkg`, its gated test, and a binary on it
+whose run check compares stdout; the binary's compile must put both packages on -I.
+buck2 loads the rules once per cell of the BUCK file that loads them, and a
+transitive set of one load refuses children of the other, so before
+`mojo_pkg_children` this failed in analysis.
+
 A fifth consumer, fetched as a git external cell, has no `.buckconfig.local`:
 the remote-execution settings are appended to its root `.buckconfig`, and it
 runs with no user or system buckconfig and `HOME` in the scratch directory.
@@ -637,7 +645,8 @@ writing no file: an empty or missing `--operations`, an operation the model
 lacks, a protocol it does not implement (smithy-rpc-v2-cbor), a restXml
 model that reaches a union, an XML attribute or a map in the body (each by
 its refusal name), the `s3` customization unless the model's serviceId is
-`S3` and its protocol restXml, an unknown customization, a
+`S3` and its protocol restXml, the `route53` customization unless it is
+`Route 53` and restXml, an unknown customization, a
 missing `--model-sha256`, one that is not 64 lowercase hex digits (upper case,
 or one digit short), one that is not the model's, a zero-byte model, and
 `--probe-import` without `--probe-out`.
@@ -780,10 +789,17 @@ plants three defects, each of which must fail naming its README line: an
 example that raises (`README.md:13: FAILED`, while the other example still
 runs), one that does not compile (the compiler quotes the line, ending
 `# README.md:9`) and a `mojo skip` fence (refused at `README.md:3`).
+A README that ships (its library has a conda package, which installs it at
+`share/doc/<name>/README.md`) refuses a relative link:
+[`negative/readme_examples/relative_link`](negative/readme_examples/relative_link/BUCK)
+fails naming `README.md:11`, and
+[`functional/readme_examples/unshipped`](functional/readme_examples/unshipped/BUCK),
+the same README in a library with `conda = False`, builds.
 
 ```sh
 ./buck2 build tests//functional/readme_examples/...
 ./buck2 build tests//negative/readme_examples/raises:raises   # must fail: README.md:13: FAILED
+./buck2 build tests//negative/readme_examples/relative_link:relative_link   # must fail: README.md:11: greet.mojo: a relative link
 ```
 
 ## Diagnostics

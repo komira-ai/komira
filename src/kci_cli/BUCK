@@ -5,7 +5,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # resolves stage S and runs each of its steps in order through kci_build
 # (BUILD) or kci_publish (PUBLISH). Under GitHub Actions it first holds the
 # workflow it runs under (read at its commit) to the machine file
-# (kci_ci_check, library code: a mismatch is exit 3, unreadable exit 5). It
+# (kci_workflow_check, library code: a mismatch is exit 3, unreadable exit 5), then
+# the ref it runs on (a stage without break_glass runs only on main; a
+# break-glass run needs a reason) and the release set it was handed
+# (--release-set-hash). It
 # reports the NEW NAMES of the stages after it, and appends a markdown summary
 # to --summary-file. A step's validations run after it (kci_validate: the
 # release installed from the step's channel in a digest-pinned container);
@@ -26,8 +29,9 @@ mojo_library(
     name = "kci_cli",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/kci_artifact:kci_artifact",
         "//src/kci_build:kci_build_lib",
-        "//src/kci_ci_check:kci_ci_check",
+        "//src/kci_workflow_check:kci_workflow_check",
         "//src/kci_api:kci_api",
         "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_publish:kci_publish_lib",
@@ -46,8 +50,15 @@ mojo_library(
         "tests/test_kci_args.mojo",
         # kci run over a recording fake: the steps, the workflow check, validations, NEW NAMES, the summary
         "tests/test_kci_dispatch.mojo",
+        # the start-up check accepts a pull request's check (and refuses a
+        # drifted one); a dry run outside CI says its credential probe did
+        # not run, next to the outcome
+        "tests/test_kci_pr_stage_and_probe.mojo",
         # the result file: RUNNING then FINISHED, temp-and-rename, usage errors recorded
         "tests/test_kci_result_file.mojo",
+        # continuous auto-promotion at start-up: the ref (main only, break-glass
+        # with a reason), the set hash handed on, never backward, the prod line
+        "tests/test_kci_ref_check.mojo",
         # the real libraries through a machine file; the secret store by name
         "tests/test_kci_library_wiring.mojo",
         # no exit number is spelled outside kci_api
@@ -63,6 +74,9 @@ mojo_library(
             "kci_cli_dispatch.mojo": "//src/kci_cli:dispatch.mojo",
             "kci_cli_library_verbs.mojo": "//src/kci_cli:library_verbs.mojo",
             "kci_cli_recorder.mojo": "//src/kci_cli:recorder.mojo",
+            "kci_cli_seam.mojo": "//src/kci_cli:seam.mojo",
+            "kci_cli_start_checks.mojo": "//src/kci_cli:start_checks.mojo",
+            "kci_cli_summary.mojo": "//src/kci_cli:summary.mojo",
             "bin_kci_main.mojo": "//bin/kci:main.mojo",
         },
     },
@@ -73,3 +87,6 @@ export_file(name = "args.mojo", visibility = ["//src/kci_cli:"])
 export_file(name = "dispatch.mojo", visibility = ["//src/kci_cli:"])
 export_file(name = "library_verbs.mojo", visibility = ["//src/kci_cli:"])
 export_file(name = "recorder.mojo", visibility = ["//src/kci_cli:"])
+export_file(name = "seam.mojo", visibility = ["//src/kci_cli:"])
+export_file(name = "start_checks.mojo", visibility = ["//src/kci_cli:"])
+export_file(name = "summary.mojo", visibility = ["//src/kci_cli:"])

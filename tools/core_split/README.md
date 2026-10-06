@@ -13,6 +13,7 @@ them.
 | `core.sha256`, `libc.sha256` | the recorded digest of each frozen package (`defs.bzl` says how it is computed) |
 | `owners.tsv` | which branch may rewrite the importers of which package |
 | `split.py` | derives the modules and tests of the new packages from the map, rewriting imports |
+| `repoint.py`, `repoint_selftest.py` | rewrites the importers of `komira_core` and `komira_core_ffi` in place onto the new packages (imports, `BUCK` deps, mentions in text), on main or on an open branch, and can be run again; the self-test seeds each case and a second run that must change nothing |
 | `split_selftest.py` | seeded import statements and the line `split.py` must write for each, including `from .. arrow.x` (blanks after the dots, which Mojo accepts) |
 | `gen_build.py`, `deps.py` | write each package's `BUCK`, `__init__.mojo` and `README.md`; the deps come from the generated files' imports and `external_call` strings, never from `:komira_core` |
 | `packages.tsv`, `c_symbols.tsv` | the one sentence of each package; which package owns each C symbol of the shim |
@@ -22,9 +23,41 @@ them.
 | `no_mixed_closure.sh` | no target may depend on a package and on its replacement; `--selftest` proves it can fail |
 | `fixture/` | the seeded targets of that self-test |
 
-Run the Buck gates with `./buck2 test //tools/core_split/...`, and the closure
-check with `tools/core_split/no_mixed_closure.sh`. The remaining gates read
-history or the whole tree and run in `.github/workflows/core_split.yml`.
+Run the Buck gates with `./buck2 test //tools/core_split/...` (they also run in
+`./buck2 test //...`). **No workflow runs the rest, and no pull request check
+does:** the gates that read history or the whole tree (`core_frozen_vs_F`,
+`copy_range`, `importers`) are retired with the cutover that deletes
+`src/komira_core`, which was their only subject, and `no_mixed_closure` is red
+on `main` until then. Run them by hand when a split step needs them:
+
+```sh
+tools/core_split/no_mixed_closure.sh --selftest   # prove the check can fail
+tools/core_split/no_mixed_closure.sh              # check the tree
+python3 tools/core_split/check.py copy_range --repo . --base <base> --head HEAD ...
+python3 tools/core_split/check.py deps --tree . --map tools/core_split/split_map.tsv --core src
+python3 tools/core_split/check.py importers --root . --word <komira_core|komira_core_ffi> ...
+```
+
+## Repointing importers (`repoint.py`)
+
+```sh
+python3 tools/core_split/repoint.py --dry-run --report /path/to/report.txt   # what it would do, over the whole tree
+python3 tools/core_split/repoint.py --only src/komira_orc --exclude src/komira_compiler   # do it, for some paths
+python3 tools/core_split/repoint.py --strict                                 # exit 1 on an unresolved name or a left-over import
+python3 tools/core_split/repoint_selftest.py                                 # the self-test
+```
+
+- A name imported through a re-exporting `__init__.mojo` is resolved to the module that defines it, so
+  `from komira_core.arrow import Column, Schema` may become two statements in two packages.
+- The `BUCK` deps of a package are the packages its own files import plus the owners of the C symbols they call
+  (`c_symbols.tsv`), so the set is minimal and no `komira_core` edge is left. A package whose `deps` are
+  written on one line stays on one line.
+- It is safe to run on an open branch: a file that is already repointed is not touched, and a second run changes
+  nothing. Once `src/komira_core` is deleted the tool reads it from the parent of the commit that deleted it.
+- `--renames` also performs the package renames listed in `RENAMES` (directory, imports, labels, text); a rename the
+  tree has already done is honoured without the flag.
+- The report separates the **import and dep** lines that are left (these must be zero) from **prose** mentions in
+  comments and documents, which only a person can reword.
 
 ## What the checks do and do not prove yet
 
@@ -40,7 +73,9 @@ history or the whole tree and run in `.github/workflows/core_split.yml`.
   not such a `cxx_library`, a library with a source outside `native/`, a library defining a symbol of another package or
   of no row). `deps_selftest.py` seeds each of these cases and fails if one gets the wrong verdict. Not generated: the
   `cxx_library` of the three symbol owners and the two `komira_arrow_ipc` extras (`large_writes_check`, the
-  `arrow_types.mojo` data of the census test); the commits that make those packages add them.
+  `arrow_types.mojo` data of the census test); the commits that make those packages add them. Added by hand later, not
+  from `komira_core`: `komira_collections`' `hyperloglog.mojo` and `tests/test_hyperloglog.mojo`. A re-run of
+  `gen_build.py` drops that test from the `BUCK` `test_srcs`, and `check.py copy` reports the module as an extra.
 - **`copy_exact`** (`check.py copy_range`): a commit with a `Core-Split-Copy: <package>` trailer must equal what
   `split.py` generates from the `src/komira_core` of the same commit. A range with no trailered commit is reported
   NOT CHECKED, never GREEN; on events other than a pull request the range is the whole history.
@@ -56,8 +91,6 @@ history or the whole tree and run in `.github/workflows/core_split.yml`.
 
 ## What was proved without GitHub Actions
 
-`core_split.yml` has never run: it was not dry-run in a scratch repository. Every step was emulated
-locally, from the same commands the workflow runs (`check.py copy_range`, `check.py deps`, `check.py importers`,
-`no_mixed_closure.sh`, `./buck2 test //tools/core_split/...`), each with a seeded red case. What stays unproven until
-the workflow runs for real: the YAML itself (the event and secret plumbing, the `fetch-depth` history on the farm
-runner, `$RUNNER_TEMP`), and `core_frozen_vs_F`, which needs the history of the commit that records the digests.
+`core_split.yml` (now deleted) never ran. Every step was emulated
+locally, from the commands it ran (`check.py copy_range`, `check.py deps`, `check.py importers`,
+`no_mixed_closure.sh`, `./buck2 test //tools/core_split/...`), each with a seeded red case. `core_frozen_vs_F` stays unproven: it needs the history of the commit that records the digests.

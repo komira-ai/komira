@@ -291,6 +291,10 @@ pub struct IrHttpRule {
     /// `""` (no body — every leaf field is path or query), or a single
     /// field name (that field is the body).
     pub body: String,
+    /// The annotation's `additional_bindings`: further path forms of the
+    /// same method, in declaration order, each with no bindings of its own.
+    /// Empty for a rule with one form.
+    pub additional_bindings: Vec<IrHttpRule>,
 }
 
 
@@ -383,6 +387,15 @@ impl fmt::Display for IrService {
                     h.path_template,
                     if h.body.is_empty() { "<none>" } else { &h.body },
                 )?;
+                for b in &h.additional_bindings {
+                    writeln!(
+                        f,
+                        "      additional_binding {} {} body={}",
+                        b.verb,
+                        b.path_template,
+                        if b.body.is_empty() { "<none>" } else { &b.body },
+                    )?;
+                }
             }
             if let Some(r) = &m.routing_rule {
                 for p in &r.parameters {
@@ -418,5 +431,44 @@ fn type_token(ty: &IrType) -> String {
         IrType::Enum(r) => format!("enum:{}", r.fq_name),
         IrType::Map(k, v) => format!("map<{},{}>", type_token(k), type_token(v)),
         IrType::List(e) => format!("list<{}>", type_token(e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_dump_shows_every_additional_binding() {
+        let rule = |verb: &str, path: &str, body: &str| IrHttpRule {
+            verb: verb.into(),
+            path_template: path.into(),
+            body: body.into(),
+            additional_bindings: vec![],
+        };
+        let mut main = rule("get", "/v1/{name=roles/*}", "");
+        main.additional_bindings.push(rule("get", "/v1/{name=projects/*/roles/*}", ""));
+        main.additional_bindings.push(rule("post", "/v1/{name=orgs/*}:x", "*"));
+        let ty = TypeRef { fq_name: ".t.Req".into(), mojo_name: "Req".into() };
+        let svc = IrService {
+            name: "S".into(),
+            default_host: None,
+            methods: vec![IrMethod {
+                name: "M".into(),
+                input: ty.clone(),
+                output: ty,
+                client_streaming: false,
+                server_streaming: false,
+                idempotent: false,
+                http_rule: Some(main),
+                routing_rule: None,
+            }],
+        };
+        let dump = svc.to_string();
+        assert!(dump.contains(
+            "      http_rule get /v1/{name=roles/*} body=<none>\n\
+             \x20     additional_binding get /v1/{name=projects/*/roles/*} body=<none>\n\
+             \x20     additional_binding post /v1/{name=orgs/*}:x body=*\n"
+        ), "{dump}");
     }
 }
