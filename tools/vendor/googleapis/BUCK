@@ -178,6 +178,21 @@ _API_HTTP_CLOSURE = _API_HTTP_ROOTS + [
     "google/api/http.proto",
 ]
 
+# The `(google.api.http)` method option and the `(google.api.default_host)`
+# service option, for tests//functional/proto_codegen, whose REST goldens take
+# this tree as an import root: annotations.proto, client.proto and their import
+# closure, google/protobuf/* excepted. :api_client refuses this list unless it
+# is exactly that closure.
+_API_CLIENT_ROOTS = [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+]
+
+_API_CLIENT_CLOSURE = _API_CLIENT_ROOTS + [
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+]
+
 # IAM v1 (the service accounts, custom roles and service-account IAM
 # policies of the generated komira_gcp_iam): the root and its import
 # closure, google/protobuf/* excepted. :iam_admin_v1 refuses this list unless
@@ -368,6 +383,7 @@ _ALL_CLOSURES = (
     _APIGATEWAY_V1_CLOSURE +
     _FIRESTORE_V1_CLOSURE +
     _API_HTTP_CLOSURE +
+    _API_CLIENT_CLOSURE +
     _IAM_ADMIN_V1_CLOSURE +
     _RESOURCEMANAGER_V3_CLOSURE +
     _SERVICEUSAGE_V1_CLOSURE +
@@ -453,6 +469,16 @@ proto_check(
     name = "api_http",
     roots = _API_HTTP_ROOTS,
     srcs = [":googleapis[{}]".format(f) for f in sorted(_API_HTTP_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The `(google.api.http)` and `(google.api.default_host)` options' protos,
+# as :logging_v2 above: the import root of the proto codegen goldens.
+proto_check(
+    name = "api_client",
+    roots = _API_CLIENT_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_API_CLIENT_CLOSURE)],
     strip_prefix = "files",
     visibility = ["PUBLIC"],
 )

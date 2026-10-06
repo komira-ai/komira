@@ -124,6 +124,7 @@ mojo_library(
         "tests/test_so_error_optname_per_os.mojo",
         "tests/test_soak_continuous_churn.mojo",
         "tests/test_soak_http_24h.mojo",
+        "tests/test_socket_buffer_sizes.mojo",
         "tests/test_socket_nonblock_mac.mojo",
         "tests/test_socket_setup_fcntl_smoke.mojo",
         "tests/test_socket_write_no_sigpipe.mojo",

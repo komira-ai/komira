@@ -430,17 +430,13 @@ proto_codegen_golden(
 )
 
 # ---- REST clients: path templates, query fields and refusals ---------------
-# corpus/google/api/annotations.proto declares the `(google.api.http)` option
-# every REST fixture imports, and corpus/google/api/client.proto the
-# `(google.api.default_host)` service option. Both are stubs declaring only
-# the extension protoc-gen-mojo reads, not the googleapis files: a case's
-# srcs are its corpus, every file under corpus/ (defs.bzl), so the pinned
-# //tools/vendor/googleapis files cannot be named here until the case rule
-# takes a second import root.
+# The REST fixtures import googleapis' google/api/annotations.proto (the
+# `(google.api.http)` option) and, for `(google.api.default_host)`,
+# google/api/client.proto. Neither is in the corpus: protoc reads them from
+# the pinned googleapis tree, an import root after the corpus, so the goldens
+# see the definitions the Google Cloud clients are generated against.
 
-_ANNOTATIONS = "corpus/google/api/annotations.proto"
-
-_CLIENT = "corpus/google/api/client.proto"
+_GOOGLEAPIS = ["komira//tools/vendor/googleapis:api_client[tree]"]
 
 # The Cloud Logging calls a log reader makes: a custom-verb literal path
 # (POST /v2/entries:list), a `{parent=projects/*}` capture and a repeated
@@ -450,11 +446,8 @@ _CLIENT = "corpus/google/api/client.proto"
 # logging.googleapis.com.
 proto_codegen_golden(
     name = "logging_rest",
-    srcs = [
-        _ANNOTATIONS,
-        _CLIENT,
-        "corpus/google/logging/v2/logging.proto",
-    ],
+    srcs = ["corpus/google/logging/v2/logging.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["google/logging/v2/logging.proto"],
     golden = ["golden/logging_rest/logging.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_gcp_logging",
@@ -468,10 +461,8 @@ proto_codegen_golden(
 # `set_rest_host` names one.
 proto_codegen_golden(
     name = "shapes_rest",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/shapes/v1/shapes.proto",
-    ],
+    srcs = ["corpus/shapes/v1/shapes.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["shapes/v1/shapes.proto"],
     golden = ["golden/shapes_rest/shapes.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_test_shapes",
@@ -489,10 +480,8 @@ proto_codegen_golden(
 # read and write the binary-shaped message instead.
 proto_codegen_golden(
     name = "wkt_rest",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/rest/v1/wkt_rest.proto",
-    ],
+    srcs = ["corpus/rest/v1/wkt_rest.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["rest/v1/wkt_rest.proto"],
     golden = ["golden/wkt_rest/wkt_rest.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_test_wkt_rest",
@@ -512,11 +501,8 @@ proto_codegen_golden(
 # byte for byte.
 proto_codegen_golden(
     name = "logging_rest_gcp",
-    srcs = [
-        _ANNOTATIONS,
-        _CLIENT,
-        "corpus/google/logging/v2/logging.proto",
-    ],
+    srcs = ["corpus/google/logging/v2/logging.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["google/logging/v2/logging.proto"],
     golden = ["golden/logging_rest/logging.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_gcp_logging,gcp=true",
@@ -595,10 +581,8 @@ _REST_REFUSALS = [
 [
     proto_codegen_golden(
         name = "refuse_rest_" + name,
-        srcs = [
-            _ANNOTATIONS,
-            "corpus/refuse/{}.proto".format(name),
-        ],
+        srcs = ["corpus/refuse/{}.proto".format(name)],
+        import_roots = _GOOGLEAPIS,
         expect_error = expect,
         generate = ["refuse/{}.proto".format(name)],
         options = "default_protocol=rest,package_prefix=refused",
@@ -612,10 +596,8 @@ _REST_REFUSALS = [
 # proto3 JSON string when set.
 proto_codegen_golden(
     name = "update_rest",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/rest/v1/update_rest.proto",
-    ],
+    srcs = ["corpus/rest/v1/update_rest.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["rest/v1/update_rest.proto"],
     golden = ["golden/update_rest/update_rest.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_test_update_rest",
@@ -631,10 +613,8 @@ proto_codegen_golden(
 # bidirectional-streaming one: the client holds GetItem, and nothing of WatchItems.
 proto_codegen_golden(
     name = "rest_unary_beside_streaming",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/rest/v1/feed.proto",
-    ],
+    srcs = ["corpus/rest/v1/feed.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["rest/v1/feed.proto"],
     golden = ["golden/rest_unary_beside_streaming/feed.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_test_feed,methods=Feed.GetItem",
@@ -651,10 +631,8 @@ proto_codegen_golden(
 # form, and is generated.)
 proto_codegen_golden(
     name = "refuse_rest_streaming_method_listed",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/rest/v1/feed.proto",
-    ],
+    srcs = ["corpus/rest/v1/feed.proto"],
+    import_roots = _GOOGLEAPIS,
     expect_error = "--mojo_out: protoc-gen-mojo: service `Feed` method `WatchItems` is bidirectional-streaming, and a `rest` target generates unary and server-streaming methods only",
     generate = ["rest/v1/feed.proto"],
     options = "default_protocol=rest,package_prefix=komira_test_feed,methods=Feed.GetItem+Feed.WatchItems",
@@ -664,11 +642,8 @@ proto_codegen_golden(
 # than 443) is refused by name rather than written into the client.
 proto_codegen_golden(
     name = "refuse_rest_default_host_with_port",
-    srcs = [
-        _ANNOTATIONS,
-        _CLIENT,
-        "corpus/refuse/default_host_with_port.proto",
-    ],
+    srcs = ["corpus/refuse/default_host_with_port.proto"],
+    import_roots = _GOOGLEAPIS,
     expect_error = "service `refused.v1.Ported` declares `(google.api.default_host)` = \"ported.example.com:8443\", which is not a host name",
     generate = ["refuse/default_host_with_port.proto"],
     options = "default_protocol=rest,package_prefix=refused",
@@ -776,6 +751,9 @@ proto_codegen_goldens(
         ":shapes_rest",
         ":wkt_rest",
         ":update_rest",
+        ":rest_unary_beside_streaming",
+        ":refuse_rest_streaming_method_listed",
+        ":refuse_rest_default_host_with_port",
     ] + [":refuse_rest_" + name for name, _ in _REST_REFUSALS] + [
         ":refuse_module_names_" + name
         for name, _, _ in _MODULE_NAMES_REFUSALS
