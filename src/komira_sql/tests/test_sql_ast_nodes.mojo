@@ -24,6 +24,11 @@
 #   5. SqlWindowData: the constructor's defaults (one empty qualifier per
 #      PARTITION BY and ORDER BY name, the default frame) and set_frame().
 #      (mutant caught: a qualifier list not parallel to its names)
+#   6. Empty slots: a CASE with no ELSE, a CASE with no branches and a call
+#      with no arguments hold no aggregate (every walk loop runs zero
+#      times), and copy() of the argument-less call keeps an empty call slot.
+#      (mutants caught: an absent ELSE treated as an aggregate; copy()
+#      dropping the call slot when the argument list is empty)
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -197,6 +202,25 @@ def test_contains_aggregate_in_every_slot() raises:
     # A window node and a leaf hold no aggregate.
     assert_false(SqlExpr.window(_window()).contains_aggregate())
     assert_false(SqlExpr.column("x").contains_aggregate())
+
+
+def test_empty_slots_walk_to_false_and_copy_empty() raises:
+    # Each loop of contains_aggregate() and copy() runs zero times here: a
+    # CASE with no ELSE, a CASE with no branches at all, a call with no
+    # arguments. None holds an aggregate, and a copy keeps the empty slot.
+    var no_else = SqlExpr.case(
+        _one(SqlExpr.column("b")), _one(SqlExpr.int_lit(1)), Slab[SqlExpr]()
+    )
+    assert_false(no_else.contains_aggregate())
+    var bare = SqlExpr.case(Slab[SqlExpr](), Slab[SqlExpr](), Slab[SqlExpr]())
+    assert_false(bare.contains_aggregate())
+    var now = SqlExpr.call("now", Slab[SqlExpr]())
+    assert_false(now.contains_aggregate())
+    var now2 = now.copy()
+    assert_equal(Int(now2.tag), Int(SX_CALL))
+    assert_equal(now2.text, "now")
+    assert_true(Bool(now2._call))
+    assert_equal(len(now2._call.value().args), 0)
 
 
 def test_agg_has_arg() raises:
