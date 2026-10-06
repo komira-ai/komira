@@ -33,6 +33,11 @@
 #   pair joined (both ends of the range)    B11 D800 DC00 -> U+10000, DBFF DFFF
 #   _append_utf8 1/2/3/4-byte forms         B12 007F, 0080, 07FF, 0800, FFFF
 #   start offset honoured                   B13
+#   boundary guards, on a span that is a     B16
+#     PREFIX of a larger buffer, so a `>`
+#     mutant of `pos + 2 >= n` or
+#     `i + need >= n` reads a planted byte
+#     past the span and silently accepts
 #   utf8_well_formed: every lead class,     B14
 #     each continuation-range check,
 #     truncation
@@ -260,6 +265,40 @@ def test_b15_utf8_to_string() raises:
     assert_true(raised, "utf8_to_string accepted invalid UTF-8")
 
 
+def _prefix_decode_refused(full: List[UInt8], n: Int, needle: String, what: String) raises:
+    var raised = False
+    try:
+        var v = String("")
+        var _end = decode_json_string(Span(full)[:n], 0, v)
+    except e:
+        raised = True
+        assert_true(needle in String(e), what + ": wrong error: " + String(e))
+    assert_true(raised, what + ": expected a refusal")
+
+
+def test_b16_boundaries_on_prefix_spans() raises:
+    # `"\uD800\` ends right after the backslash; past the span lie
+    # `uDC00"`, so reading beyond the end would find a valid low half.
+    var full = _bytes(String('"\\uD800\\uDC00"'))
+    _prefix_decode_refused(full, 8, HIGH_LOW, "high + lone backslash at end")
+    # `"\uD800` ends on the last hex digit; past it `\uDC00"`.
+    _prefix_decode_refused(full, 7, HIGH_LOW, "high at end, pair beyond")
+    # The whole buffer is a valid pair (control: the prefix is what refuses).
+    var v = String("")
+    var _end = decode_json_string(Span(full), 0, v)
+    assert_equal(len(v.as_bytes()), 4, "pair in full buffer")
+
+    # utf8_well_formed: the span ends one byte short of a sequence; the
+    # byte past the span is a valid continuation.
+    var u = _bl(0xC3, 0xBC)
+    assert_false(utf8_well_formed(Span(u)[:1]), "C3 | BC")
+    var u3 = _bl(0xE2, 0x82, 0xAC)
+    assert_false(utf8_well_formed(Span(u3)[:2]), "E2 82 | AC")
+    var u4 = _bl(0xF0, 0x9F, 0x98, 0x80)
+    assert_false(utf8_well_formed(Span(u4)[:3]), "F0 9F 98 | 80")
+    assert_true(utf8_well_formed(Span(u4)), "full F0 9F 98 80")
+
+
 def main() raises:
     test_b2_result_not_utf8()
     test_b3_raw_runs()
@@ -275,4 +314,5 @@ def main() raises:
     test_b13_start_offset()
     test_b14_utf8_well_formed()
     test_b15_utf8_to_string()
+    test_b16_boundaries_on_prefix_spans()
     print("test_avro_json_string_branches: ALL PASS")

@@ -34,6 +34,10 @@
 #   T7  an OCF header whose `avro.schema` is not UTF-8 (bad continuation, a
 #       stray 0xFF, an encoded surrogate, a truncated sequence) is refused
 #       with MALFORMED_JSON. Catches: invalid bytes accepted into a String.
+#   T7b decode_ocf_header ALONE refuses a non-UTF-8 avro.schema with the exact
+#       header-level text, whether the bad bytes sit inside a JSON string or
+#       outside one. Catches: the header copy going unchecked (then only the
+#       JSON parser, or nothing, would refuse).
 #   T8  a header whose `avro.codec` value or a metadata key is not UTF-8 is
 #       refused with MALFORMED_HEADER (the other two callers of the header's
 #       byte-to-String copy).
@@ -286,6 +290,25 @@ def _assert_header_error(buf: List[UInt8], needle: String, what: String) raises:
     assert_true(raised, what + ": invalid UTF-8 accepted")
 
 
+def test_ocf_header_schema_utf8_refused_alone() raises:
+    """T7b."""
+    var want = String("AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8")
+    var inside = _bytes(String('{"type":"string","doc":"'))
+    inside.append(0xC3)
+    inside.append(0x28)
+    var tail = _bytes(String('"}'))
+    for i in range(len(tail)):
+        inside.append(tail[i])
+    _assert_header_error(_header_with_schema_bytes(inside), want, "in string")
+    # Outside any JSON string: a stray FF between tokens.
+    var outside = _bytes(String('{"type":'))
+    outside.append(0xFF)
+    var tail2 = _bytes(String('"string"}'))
+    for i in range(len(tail2)):
+        outside.append(tail2[i])
+    _assert_header_error(_header_with_schema_bytes(outside), want, "outside")
+
+
 def test_ocf_header_codec_and_key_utf8() raises:
     """T8."""
     var schema = _bytes(String('"string"'))
@@ -314,5 +337,6 @@ def main() raises:
     test_raw_utf8_byte_exact()
     test_ocf_header_raw_utf8_byte_exact()
     test_ocf_header_invalid_utf8_refused()
+    test_ocf_header_schema_utf8_refused_alone()
     test_ocf_header_codec_and_key_utf8()
     print("test_avro_schema_json_unicode: ALL PASS")
