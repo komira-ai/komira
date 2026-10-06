@@ -10,7 +10,12 @@
 #   - int64 / uint64 / fixed64 / sfixed64  -> JSON STRING (JS-number-precision
 #     safety; a 2^53+ int64 loses precision as a JSON number).
 #   - int32 / uint32 / fixed32 / sfixed32  -> JSON number.
-#   - float / double                      -> JSON number.
+#   - double                              -> JSON number.
+#   - float                               -> the shortest float32 JSON
+#                                            number; "NaN" / "Infinity" /
+#                                            "-Infinity" strings; refused on
+#                                            read outside float32 range
+#                                            (`proto3_json_float.mojo`).
 #   - bool                                -> JSON true / false.
 #   - string                              -> JSON string (escaped).
 #   - bytes                               -> base64 STRING (RFC 4648 §4, std
@@ -42,7 +47,9 @@
 #
 # Encode rides the direct-byte `List[UInt8]` writers in `komira_json`
 # (`write_json_string`, `write_i64_dec`, `write_u64_dec`, `write_f64_dtoa`)
-# — no intermediate `String` allocation on the value path; bytes >= 0x80
+# — no intermediate `String` allocation on the value path except a double
+# on `write_f64_dtoa`'s slow path (a float32 is written straight into the
+# buffer by `proto3_json_float.mojo`); bytes >= 0x80
 # are valid JSON content and pass through verbatim. Decode rides the
 # `komira_json.JsonValue` tree (the proto3-JSON decode path is the
 # debuggability format, off the codec hot path).
@@ -67,6 +74,7 @@ from komira_json import (
     write_f64_dtoa,
 )
 
+from .proto3_json_float import read_proto3_json_f32, write_proto3_json_f32
 from .wire_format import (
     FieldKey,
     ProtoEnum,
@@ -255,7 +263,7 @@ struct JsonEncoder(WireEncoder):
         mut self, field_no: Int, json_name: StringSlice, v: Float32
     ) raises:
         self._begin_field(json_name)
-        write_f64_dtoa(self.buf, Float64(v))
+        write_proto3_json_f32(self.buf, v)
         self._end_field()
 
     # -- WIRE-CORRECTNESS: sint / fixed / sfixed ----------
@@ -441,7 +449,7 @@ struct JsonEncoder(WireEncoder):
 
     def write_f32_element(mut self, field_no: Int, v: Float32) raises:
         self._list_sep()
-        write_f64_dtoa(self.buf, Float64(v))
+        write_proto3_json_f32(self.buf, v)
 
     # WIRE-CORRECTNESS: repeated sint / fixed / sfixed —
     # JSON-identical to the same-width plain int element.
@@ -760,7 +768,7 @@ struct JsonDecoder(WireDecoder):
         return self._cur().as_float64()
 
     def read_f32(mut self) raises -> Float32:
-        return Float32(self._cur().as_float64())
+        return read_proto3_json_f32(self._cur())
 
     # -- WIRE-CORRECTNESS: sint / fixed / sfixed ----------
     # proto3-JSON has no wire types — parse as the same-width plain int.
@@ -898,7 +906,7 @@ struct JsonDecoder(WireDecoder):
     def read_into_repeated_f32(mut self, mut out: List[Float32]) raises:
         var arr = self._cur_array()
         for i in range(len(arr.children)):
-            out.append(Float32(arr.children[i].as_float64()))
+            out.append(read_proto3_json_f32(arr.children[i]))
 
     # WIRE-CORRECTNESS: repeated sint / fixed / sfixed —
     # JSON-identical to the same-width plain int.

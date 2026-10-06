@@ -21,6 +21,21 @@
   "Ping": {
    "name": "Ping",
    "http": {"method": "POST", "requestUri": "/"}
+  },
+  "PingAnonymous": {
+   "name": "PingAnonymous",
+   "http": {"method": "POST", "requestUri": "/"},
+   "authtype": "none"
+  },
+  "PingNoAuth": {
+   "name": "PingNoAuth",
+   "http": {"method": "POST", "requestUri": "/"},
+   "auth": ["smithy.api#noAuth"]
+  },
+  "PingBearer": {
+   "name": "PingBearer",
+   "http": {"method": "POST", "requestUri": "/"},
+   "authtype": "bearer"
   }
  },
  "shapes": {
