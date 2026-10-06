@@ -1,0 +1,3 @@
+struct Suite:
+    def test_wire(self):
+        pass

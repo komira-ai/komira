@@ -1,0 +1,4 @@
+mojo_test(
+    name = "test_wire",
+    srcs = ["tests/test_wire.mojo"],
+)

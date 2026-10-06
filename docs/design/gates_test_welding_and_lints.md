@@ -10,7 +10,7 @@ Out of scope:
 
 - Running a binary as a test with `buck2 test`: [tools/build/mojo/README.md](../../tools/build/mojo/README.md#binaries-and-tests).
 - The compiler environment, the watchdog and the toolchain pin: [Mojo rules and toolchain](mojo_rules_and_toolchain.md).
-- Linting Mojo source. The lint rules in `tools/build/lint` check shell scripts, GitHub workflows, committed build configuration and documentation links.
+- Linting Mojo source. The lint rules in `tools/build/lint` check shell scripts, GitHub workflows, committed build configuration and documentation links; `test_weld` reads Mojo files only to find test files and count their `test_` functions.
 
 ## How does it work?
 
@@ -147,6 +147,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 | `markdown_docs` | every relative link and anchor in every Markdown file resolves |
 | `lint_suite` | groups lints another graph does not reach, so their validations run in any build holding the suite |
 | `retired_names` | no file of the cell holds a renamed package's or type's old name except on a line carrying a `YYYY-MM-DD` date (a history note); `tools/build/lint/retired_names.bzl`, and a target with no `names` fails at analysis |
+| `test_weld` | every `tests/test_*.mojo` under `src/` is named by a BUCK file, every package with a `.mojo` source welds a test, and no package welds fewer test files or test functions than its row in `tests/coverage_floor.tsv`; the exceptions are the rows of `tests/known_untested.tsv`, a ledger that only shrinks (a row whose test or package is welded is a finding). `tools/build/lint/test_weld.bzl`, test 39 |
 
 ## How is it tested?
 

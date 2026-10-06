@@ -1,0 +1,16 @@
+from komira_a import a
+
+
+fn helper() -> Int:
+    return a()
+
+
+fn test_one() raises:
+    _ = helper()
+
+
+fn test_one_again() raises:
+    _ = helper()
+
+
+# fn test_commented_is_still_a_line_that_does_not_start_with_fn

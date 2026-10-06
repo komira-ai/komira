@@ -2,6 +2,7 @@
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -121,5 +122,18 @@ _TESTS_LINTS = [
         "Stage" + "Graph",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
+    tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# Test welding (tools/build/lint/test_weld.bzl): every tests/test_*.mojo under
+# src/ is named by a BUCK file, so it runs; every package with a .mojo source
+# welds a test; and no package welds fewer test files or test functions than
+# its row in tests/coverage_floor.tsv. The exceptions are the rows of
+# tests/known_untested.tsv, which only shrinks. The tree is every file of the
+# cell (`:doc_tree`).
+[test_weld(
+    name = "test_weld",
+    coverage_floor = "tests/coverage_floor.tsv",
+    known_untested = "tests/known_untested.tsv",
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]

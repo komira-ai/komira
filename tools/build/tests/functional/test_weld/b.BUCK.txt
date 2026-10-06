@@ -1,0 +1,4 @@
+mojo_library(
+    name = "komira_b",
+    srcs = ["b.mojo"],
+)

@@ -1,0 +1,9 @@
+# The ledger of the test_weld lint (//:test_weld, tools/build/lint/test_weld.bzl): the test files
+# no BUCK file names and the packages with code that weld no test, each with its reason.
+# One row each: <path> TAB <reason>. It only shrinks: the build fails on a row whose test
+# is welded, or whose package welds a test, so the change that welds it deletes the row.
+src/komira_db_sqlite	no tests of its own yet: test_srcs is deliberately absent (BUCK), and no test exercises the libsqlite3 link
+src/komira_job_supervisor/tests/e2e/test_job_supervisor_s3_e2e.mojo	opt-in MinIO end-to-end test, a binary run by hand with --test-minio-binary; under the build it would SKIP (exit 77), which reads as a failure (BUCK)
+src/komira_job_supervisor/tests/e2e/test_job_supervisor_stream_logs_e2e.mojo	opt-in MinIO end-to-end test, a binary run by hand with --test-minio-binary; under the build it would SKIP (exit 77), which reads as a failure (BUCK)
+src/komira_plan_stats	no tests yet: the precision lattice laws and the HyperLogLog merge and error bound are to be tested
+src/komira_rowcell	welds no test of its own; its consumers' tests exercise it (BUCK)
