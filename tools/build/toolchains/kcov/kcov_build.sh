@@ -30,7 +30,7 @@
 # Every pipeline fails when any of its stages fails (pipefail): an `od` that
 # cannot read a file never becomes an empty generated array.
 set -eu
-# shellcheck disable=SC3040 # busybox sh (ash) has pipefail; :kcov_check_cases fails without it
+# shellcheck disable=SC3040 # busybox sh (ash) has pipefail (:kcov_check_cases proves it for kcov_check.sh)
 set -o pipefail
 
 abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }

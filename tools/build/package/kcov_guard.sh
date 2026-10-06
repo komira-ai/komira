@@ -12,8 +12,9 @@
 #       followed). <dest> is where the packer puts <path> (`.` for the root
 #       of a directory), and the message names a file by it; <what> names the
 #       target. Writes <out> when nothing is refused. Reads no kcov.
-#   sh kcov_guard.sh cases <busybox> <usage_line> <report_dir>
-#       Runs the guard on inputs whose answer is known, wrong ones included,
+#   sh kcov_guard.sh cases <busybox> <kcov_sha256> <usage_line> <report_dir>
+#       Checks the form of the pinned <kcov_sha256> and <usage_line> the package
+#       rules pass, then runs the guard on inputs whose answer is known, wrong ones included,
 #       with a fixture file standing for bin/kcov (its sha256 is FIXTURE_SHA256
 #       below), and writes <report_dir>/validation.json.
 set -eu
