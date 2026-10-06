@@ -301,6 +301,12 @@ def infer_jsonl_schema(bytes: Span[UInt8, _]) raises -> Schema:
       3. After all records consumed, build a Schema with one Field
          per column (insertion order, nullable=True).
 
+    Inference does not check that each line is one JSON object, nor the
+    grammar of values it does not classify: it skips a top-level token that
+    is not `{`. The read does check (`materialize_jsonl_to_batch` and the
+    paths built on it refuse a bad line naming it, `line_check.mojo`), so
+    a file inferred here and then read is refused there.
+
     Raises on:
       * Malformed JSON structure (unbalanced braces, missing colon).
       * Heterogeneous types in the same column (cross-family

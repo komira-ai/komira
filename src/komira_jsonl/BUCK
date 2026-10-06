@@ -21,6 +21,7 @@ mojo_library(
         "tests/test_columnar_materializer.mojo",
         "tests/test_dtoa_parity.mojo",
         "tests/test_json_encode_utf8_roundtrip.mojo",
+        "tests/test_jsonl_line_validation.mojo",
         "tests/test_nested_parsers.mojo",
         "tests/test_read_json_batch_e2e.mojo",
         "tests/test_read_json_end_to_end.mojo",

@@ -195,6 +195,14 @@ def parse_struct_one_value(
         var key_start = quote_open + 1
         var key_end = quote_close
         var field_idx = _child_field_index(child_names, bytes[key_start:key_end])
+        # A child key repeated in one object would push a second value into
+        # the child column and shift every later row: refused (the
+        # materializer's duplicate-key rule, columnar_materializer.mojo).
+        if field_idx >= 0 and per_field_seen[field_idx]:
+            raise Error(
+                "duplicate key '" + child_names[field_idx]
+                + "' in one object (a key the schema reads may appear once)"
+            )
 
         # Colon.
         if tape_pos >= tape_len or idx.tags[tape_pos] != TAG_COLON:
