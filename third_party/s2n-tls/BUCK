@@ -82,3 +82,30 @@ cxx_library(
     target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:s2n-tls-x86-64-linux
     visibility = ["PUBLIC"],
 )
+
+# EXPERIMENT (branch exp/native-probe-2, never merged; see
+# tests/native_probe2/BUCK): s2n-tls compiled against the prefixed aws-lc
+# (its libcrypto calls become komira_awslc_*) and with its own symbols renamed
+# komira_s2n_*, both by force-included prefix headers.
+cxx_library(
+    name = "s2n_komira_prefixed",
+    srcs = [":src[{}]".format(f) for f in SRCS],
+    headers = {k: ":src[{}]".format(v) for k, v in PRIVATE_HEADERS.items()} |
+              {h: ":src[{}]".format(h) for h in PUBLIC_HEADERS},
+    raw_headers = [":src[{}]".format(v) for v in sorted(PRIVATE_HEADERS.values())],
+    compiler_flags = _C_FLAGS,
+    preprocessor_flags = _DEFINES + [
+        "-include",
+        "$(location komira//tests/native_probe2:awslc_prefix_h)",
+        "-include",
+        "$(location komira//tests/native_probe2:s2n_prefix_h)",
+    ],
+    exported_headers = {
+        ("s2n.h" if h == "api/s2n.h" else "s2n/" + h[len("api/"):]): ":src[{}]".format(h)
+        for h in PUBLIC_HEADERS
+    },
+    header_namespace = "",
+    exported_deps = ["//third_party/aws-lc:crypto_komira_prefixed"],
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:s2n-tls-x86-64-linux
+    visibility = ["PUBLIC"],
+)

@@ -198,6 +198,29 @@ def check_snappy() -> Bool:
     return kat and rt_ok
 
 
+def check_s2n() raises -> Bool:
+    """s2n-tls through the shared object: init, a config with TLS 1.3 preferences, a client connection."""
+    var rc_init = external_call["komira_s2n_init", Int32]()
+    var cfg = external_call["komira_s2n_config_new", _Raw]()
+    var pref = String("default_tls13")
+    # SAFETY: `pref` owns the NUL-terminated buffer past the synchronous call;
+    # s2n looks the name up and keeps no pointer to it.
+    var rc_pref = external_call["komira_s2n_config_set_cipher_preferences", Int32](
+        cfg, pref.as_c_string_slice().unsafe_ptr()
+    )
+    _ = pref.byte_length()
+    var conn = external_call["komira_s2n_connection_new", _Raw](Int32(1))  # S2N_CLIENT
+    var rc_set = external_call["komira_s2n_connection_set_config", Int32](conn, cfg)
+    var rc_cfree = external_call["komira_s2n_connection_free", Int32](conn)
+    var rc_free = external_call["komira_s2n_config_free", Int32](cfg)
+    var ok = rc_init == 0 and Int(cfg) != 0 and rc_pref == 0 and Int(conn) != 0 and rc_set == 0 and rc_cfree == 0 and rc_free == 0
+    return _report(
+        "s2n_config_and_connection",
+        ok,
+        "komira_s2n_init " + String(rc_init) + ", set_cipher_preferences(default_tls13) " + String(rc_pref) + ", connection_set_config " + String(rc_set),
+    )
+
+
 # ---- interposition ------------------------------------------------------------
 
 

@@ -144,6 +144,16 @@ case "$CASE" in
         build_into_bin consumer_leaky $LEAKY
         run_bin consumer_leaky
         ;;
+    LOG1)
+        echo "komira_log's hidden holder accessors through the shared object: mojo run (expected to fail)"
+        run_jit $LINK "$SRC/consumer_log.mojo"
+        ;;
+    LOG2)
+        echo "komira_log's hidden holder accessors through the shared object: mojo build (expected to fail)"
+        RP='$ORIGIN/../lib'
+        build_into_bin consumer_log $LINK
+        run_bin consumer_log
+        ;;
     *)
         echo "unknown case $CASE"
         ;;

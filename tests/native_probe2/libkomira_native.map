@@ -2,7 +2,8 @@
 # names komira's Mojo code passes to external_call (every .mojo under src/,
 # library and test code): every komira_* shim name; each aws-lc name with
 # aws-lc's symbol prefix komira_awslc_; the snappy C API renamed
-# komira_snappy_*; and komira_crypto_sha256_block_data_order_hw, the exported
+# komira_snappy_*; each s2n-tls name renamed komira_s2n_*; and
+# komira_crypto_sha256_block_data_order_hw, the exported
 # wrapper of aws-lc's hidden assembly routine. Everything else is local.
 {
   global:
@@ -158,6 +159,48 @@
     komira_proc_spawn;
     komira_proc_spawn_detached;
     komira_pwrite;
+    komira_s2n_cert_chain_and_key_free;
+    komira_s2n_cert_chain_and_key_load_pem_bytes;
+    komira_s2n_cert_chain_and_key_new;
+    komira_s2n_cleanup;
+    komira_s2n_config_add_cert_chain_and_key_to_store;
+    komira_s2n_config_add_pem_to_trust_store;
+    komira_s2n_config_append_protocol_preference;
+    komira_s2n_config_disable_x509_verification;
+    komira_s2n_config_enable_quic;
+    komira_s2n_config_free;
+    komira_s2n_config_new;
+    komira_s2n_config_set_cipher_preferences;
+    komira_s2n_config_set_protocol_preferences;
+    komira_s2n_config_set_session_state_lifetime;
+    komira_s2n_config_set_session_tickets_onoff;
+    komira_s2n_config_set_verify_host_callback;
+    komira_s2n_config_wipe_trust_store;
+    komira_s2n_connection_free;
+    komira_s2n_connection_get_last_message_name;
+    komira_s2n_connection_get_session;
+    komira_s2n_connection_get_session_length;
+    komira_s2n_connection_get_wire_bytes_in;
+    komira_s2n_connection_get_wire_bytes_out;
+    komira_s2n_connection_is_quic_enabled;
+    komira_s2n_connection_is_session_resumed;
+    komira_s2n_connection_new;
+    komira_s2n_connection_set_config;
+    komira_s2n_connection_set_fd;
+    komira_s2n_connection_set_session;
+    komira_s2n_errno_location;
+    komira_s2n_error_get_type;
+    komira_s2n_get_application_protocol;
+    komira_s2n_get_server_name;
+    komira_s2n_init;
+    komira_s2n_negotiate;
+    komira_s2n_peek;
+    komira_s2n_recv;
+    komira_s2n_send;
+    komira_s2n_set_server_name;
+    komira_s2n_shutdown;
+    komira_s2n_strerror;
+    komira_s2n_strerror_debug;
     komira_sched_add_dispatch;
     komira_sched_add_msink_cpu;
     komira_sched_add_msink_phase;

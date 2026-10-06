@@ -51,6 +51,18 @@ _PREFIX_SCRIPT = """
     | grep -v -E '^(_Z|__x86\\.get_pc_thunk\\.|__real@)' \\
     | grep -v -x -E '__local_stdio_printf_options|__local_stdio_scanf_options|_vscprintf|_vscprintf_l|_vsscanf_l|_xmm|sscanf|vsnprintf|sdallocx|__umodti3' \\
     > "$4"
+if [ "$6" = plain ]; then
+    {
+        echo "/* Generated (tests/native_probe2): every global symbol X becomes $5X (s2n_ names) or $5s2n__X. */"
+        echo "#ifndef KOMIRA_PLAIN_PREFIX_H"
+        echo "#define KOMIRA_PLAIN_PREFIX_H"
+        awk -v p="$5" '{ if (index($0, "s2n_") == 1) print "#define " $0 " " p $0; else print "#define " $0 " " p "s2n__" $0 }' "$4"
+        echo "#endif"
+    } > "$3"
+    n=$(wc -l < "$4")
+    [ "$n" -gt 100 ] || { echo "prefix_header: only $n symbols read from $2" >&2; exit 1; }
+    exit 0
+fi
 {
     echo "/* Generated (tests/native_probe2): aws-lc's prefix header for prefix $5. */"
     echo "#ifndef BORINGSSL_PREFIX_SYMBOLS_H"
@@ -72,7 +84,7 @@ def _prefix_header_impl(ctx):
     hdr = ctx.actions.declare_output("boringssl_prefix_symbols.h")
     syms = ctx.actions.declare_output("symbols.txt")
     ctx.actions.run(
-        _sh(tc, _PREFIX_SCRIPT, ctx.attrs.tool[RunInfo], ctx.attrs.archive, hdr.as_output(), syms.as_output(), ctx.attrs.prefix),
+        _sh(tc, _PREFIX_SCRIPT, ctx.attrs.tool[RunInfo], ctx.attrs.archive, hdr.as_output(), syms.as_output(), ctx.attrs.prefix, ctx.attrs.style),
         category = "awslc_prefix_header",
     )
     return [DefaultInfo(default_output = hdr, sub_targets = {"symbols": [DefaultInfo(default_output = syms)]})]
@@ -80,6 +92,9 @@ def _prefix_header_impl(ctx):
 _awslc_prefix_header = rule(impl = _prefix_header_impl, attrs = {
     "archive": attrs.source(),
     "prefix": attrs.string(),
+    # boringssl: aws-lc's own boringssl_prefix_symbols.h form (X -> <prefix>_X).
+    # plain: X -> <prefix>X for s2n_ names, <prefix>s2n__X otherwise.
+    "style": attrs.string(default = "boringssl"),
     "tool": attrs.exec_dep(providers = [RunInfo]),
     "toolchain": _TC,
 })
