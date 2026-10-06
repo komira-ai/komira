@@ -11,12 +11,16 @@ from covcheck.text import render_bp
 # gate's numbers being the report's.
 
 
-def _repo() -> RepoFiles:
+def _repo(with_b: Bool = False) -> RepoFiles:
+    """src/alpha is a.mojo (and b.mojo when `with_b`) and a test; src/beta
+    is c.mojo. A test that reports only a.mojo leaves no file of src/alpha
+    out (the full-source denominator is test_full_source's)."""
     var l = List[String]()
     l.append("BUCK")
     l.append("src/alpha/BUCK")
     l.append("src/alpha/a.mojo")
-    l.append("src/alpha/b.mojo")
+    if with_b:
+        l.append("src/alpha/b.mojo")
     l.append("src/alpha/tests/test_a.mojo")
     l.append("src/beta/BUCK")
     l.append("src/beta/c.mojo")
@@ -193,10 +197,10 @@ def test_gate_numbers_equal_the_report() raises:
         "src/alpha/a.mojo\t1\tsurvived\top\td\nsrc/beta/c.mojo\t1\tkilled\top\td\n"
     )))
     var rat = parse_ratchet(String("src/alpha\t9000\t-\nsrc/beta\t1\t-\n"), String("r.tsv"))
-    var full = analyze(r, m, _repo(), rat, s, Options())
+    var full = analyze(r, m, _repo(True), rat, s, Options())
     var o = Options()
     o.only_package = String("src/alpha")
-    var gate = analyze(r, m, _repo(), rat, s, o)
+    var gate = analyze(r, m, _repo(True), rat, s, o)
     assert_equal(len(gate.packages), 1)
     var k = full.package_index(String("src/alpha"))
     assert_true(k >= 0)
@@ -220,13 +224,16 @@ def test_gate_numbers_equal_the_report() raises:
 def test_gate_on_a_package_with_no_data_fails() raises:
     # The gated package has a BUCK file and a ratchet row but no report
     # covers it (a forgotten strip prefix sends every path elsewhere): it
-    # cannot pass by having nothing measured.
+    # cannot pass by having nothing measured. The gated package is always
+    # measured, so its one source file counts too: 4 lines, none covered.
     var o = Options()
     o.only_package = String("src/alpha")
     o.mode = String("enforce")
     var rat = parse_ratchet(String("src/alpha\t9000\t-\n"), String("r.tsv"))
     var a = analyze(_lcov(String("SF:src/beta/c.mojo\nDA:1,1\nend_of_record\n")), _none(), _repo(), rat, _sources(), o)
-    assert_equal(_kinds(a), "NotMeasured:line Regression:line")
+    assert_equal(_kinds(a), "BelowTarget:line NotMeasured:line Regression:line UnmeasuredFile")
+    assert_equal(a.packages[0].line_found, 4)
+    assert_equal(a.packages[0].unmeasured_files, 1)
     assert_equal(a.conclusion, "failure")
     # The report: a package present only through its mutants is not measured.
     var m = List[Input]()

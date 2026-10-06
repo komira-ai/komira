@@ -1,6 +1,6 @@
-## Coverage: line 57.14% (4/7), branch 50.00% (1/2); changed lines 0.00% (0/2)
+## Coverage: line 40.00% (4/10), branch 50.00% (1/2); changed lines 0.00% (0/2)
 
-Line coverage counts only the lines the compiler emitted code for: a function that no test reaches may emit no lines at all, so these numbers are upper bounds until declaration reachability lands.
+Line coverage counts the lines the compiler emitted code for, and every executable line of a package's source file that no test binary compiled (`UnmeasuredFile`). Still missing: a function no test reaches inside a compiled file may emit no lines at all, so these numbers are upper bounds until declaration reachability lands.
 
 Mode: **neutral**, conclusion **neutral**. Target: 100.00% line and branch coverage per package.
 
@@ -8,21 +8,23 @@ Mode: **neutral**, conclusion **neutral**. Target: 100.00% line and branch cover
 
 | package | line % (hit/found) | branch % (hit/found) | mutants killed/total | floor line / branch | status |
 |---|---|---|---|---|---|
-| `src/alpha` (touched) | 40.00% (2/5) | 50.00% (1/2) | 1/2 | - | BelowTarget, MissingRow, MutantSurvived |
+| `src/alpha` (touched) | 25.00% (2/8) | 50.00% (1/2) | 1/2 | - | BelowTarget, MissingRow, MutantSurvived, UnmeasuredFile |
 | `src/beta` | 100.00% (2/2) | n/a | 0/1 (1 timeout, 0 error) | 100.00% / - | ok |
-| **total** | 57.14% (4/7) | 50.00% (1/2) | 1/3 (1 timeout, 0 error) | - | - |
+| **total** | 40.00% (4/10) | 50.00% (1/2) | 1/3 (1 timeout, 0 error) | - | - |
 
-### Findings (5)
+### Findings (6)
 
 - **BelowTarget** `src/alpha`: branch 50.00% is below the target 100.00%
-- **BelowTarget** `src/alpha`: line 40.00% is below the target 100.00%
-- **MissingRow** `src/alpha`: no ratchet row; measured line 40.00%
+- **BelowTarget** `src/alpha`: line 25.00% is below the target 100.00%
+- **MissingRow** `src/alpha`: no ratchet row; measured line 25.00%
 - **MutantSurvived** `src/alpha` `src/alpha/a.mojo:2`: mutant survived: negate: x > 0 -> x <= 0
+- **UnmeasuredFile** `src/alpha` `src/alpha/z.mojo`: no test binary compiled this file: its 3 executable lines count as not covered
 - **ExtraRow** `src/gone`: the ratchet has a row for a directory with no BUCK file
 
-### Exemptions (need approval) (1)
+### Exemptions (need approval) (2)
 
 - `src/alpha/a.mojo:7` (exempt): x is never in [-5, 0]
+- `src/alpha/z.mojo:6` (exempt): callers pass x >= 0
 
 ### Changed lines (informational)
 

@@ -9,7 +9,16 @@ from std.io import FileDescriptor
 from std.os import listdir, makedirs
 
 from covcheck.analyze import FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
-from covcheck.annotate import DiffCoverage, annotations, diff_coverage, touched_packages
+from covcheck.annotate import (
+    DEFAULT_MAX_ANNOTATIONS,
+    DiffCoverage,
+    annotations,
+    annotations_json,
+    cap_annotations,
+    cap_note,
+    diff_coverage,
+    touched_packages,
+)
 from covcheck.checkrun import body_name, checkrun_bodies, valid_sha
 from covcheck.diff import parse_diff
 from covcheck.paths import RepoFiles, parse_repo_files
@@ -30,7 +39,8 @@ comptime USAGE_REPORT = (
     "covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR"
     + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce] [--target-bp N]"
-    + " [--include-tests] [--name N] --summary-out F --checkrun-dir D --result-out F [--ratchet-out F]"
+    + " [--include-tests] [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
+    + " [--annotations-out F] [--ratchet-out F]"
 )
 comptime USAGE_GATE = (
     "covcheck gate --package DIR --repo-files F --source-root DIR"
@@ -101,7 +111,7 @@ def parse_args(args: List[String]) raises -> Args:
         _usage(String("unknown command '") + a.command + String("' (report or gate)"))
     var single = split_on(String("--repo-files --source-root --ratchet --mode --target-bp --summary-out --result-out"), 32)
     if report:
-        single.extend(split_on(String("--diff --head-sha --name --checkrun-dir --ratchet-out"), 32))
+        single.extend(split_on(String("--diff --head-sha --name --checkrun-dir --ratchet-out --max-annotations --annotations-out"), 32))
     else:
         single.append(String("--package"))
     var i = 1
@@ -157,9 +167,20 @@ def parse_args(args: List[String]) raises -> Args:
         var v = parse_count(t)
         if v < 0 or v > 10000:
             _usage(String("--target-bp '") + t + String("' is not a number of basis points from 0 to 10000"))
+    var cap = a.get(String("--max-annotations"))
+    if cap.byte_length() > 0 and parse_count(cap) < 1:
+        _usage(String("--max-annotations '") + cap + String("' is not a number of annotations of 1 or more"))
     if report and not valid_sha(a.get(String("--head-sha"))):
         _usage(String("--head-sha '") + a.get(String("--head-sha")) + String("' is not 40 lowercase hex digits"))
     return a^
+
+
+def max_annotations(a: Args) -> Int:
+    """`--max-annotations` (checked by `parse_args`), else the default."""
+    var v = a.get(String("--max-annotations"))
+    if v.byte_length() == 0:
+        return DEFAULT_MAX_ANNOTATIONS
+    return parse_count(v)
 
 
 def _options(a: Args) -> Options:
@@ -209,12 +230,14 @@ def run_report(a: Args) raises -> Int:
     var touched = touched_packages(an, d, repo)
     var dc = diff_coverage(an, d, repo, a.include_tests)
     var anns = annotations(an, d, touched)
-    var summary = render_summary(an, touched, dc, True, String(""))
+    var cap = max_annotations(a)
+    var anns_out = a.get(String("--annotations-out"))
+    var summary = render_summary(an, touched, dc, True, String(""), cap_note(len(anns), cap, anns_out.byte_length() > 0))
     var name = a.get(String("--name"))
     if name.byte_length() == 0:
         name = String("coverage")
     var bodies = checkrun_bodies(
-        name, a.get(String("--head-sha")), _title(an), truncate_summary(summary), an.conclusion, anns
+        name, a.get(String("--head-sha")), _title(an), truncate_summary(summary), an.conclusion, cap_annotations(anns, cap)
     )
     var dir = a.get(String("--checkrun-dir"))
     makedirs(dir, exist_ok=True)
@@ -224,6 +247,8 @@ def run_report(a: Args) raises -> Int:
     write_text(a.get(String("--result-out")), report_json(an, touched, dc))
     for i in range(len(bodies)):
         write_text(dir + String("/") + body_name(i), bodies[i])
+    if anns_out.byte_length() > 0:
+        write_text(anns_out, annotations_json(anns))
     var rout = a.get(String("--ratchet-out"))
     if rout.byte_length() > 0:
         write_text(rout, render_ratchet(an.proposal))

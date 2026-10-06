@@ -9,8 +9,11 @@ Diff coverage counts the changed lines of every changed file that is in a
 measured package, is not a left-out test source, and whose extension is one
 of the measured files' (so a README in a package is not counted): a line
 with a record is covered (hits > 0) or uncovered, a line an exemption
-removed is exempt, any other line (a file absent from the reports included)
-is not instrumented and never counted as covered. Uncovered changed lines
+removed is exempt, any other line is not instrumented and never counted as
+covered. A file of a measured package that no report names has a record
+(0 hits) for each of its executable lines (see analyze.mojo), so its
+changed executable lines are uncovered and its other changed lines not
+instrumented. Uncovered changed lines
 are merged into ranges where their numbers are consecutive.
 
 Annotations cover every measured file of every touched package, the changed
@@ -18,16 +21,26 @@ files first (each group by path, then line):
 
 - `Line not covered`: a run of uncovered lines, merged while no covered or
   exempt line comes between them (lines with no record do not break a run);
+- `File not compiled into any test`: in a file no report names, one per
+  run of consecutive executable lines (a blank, comment, docstring or
+  import line, or an exempt line, breaks a run);
 - `Branch not covered`: a line some of whose branches were never taken,
   `k of n branches taken on this line`;
 - `Mutant survived`: one per surviving mutant;
 - `Coverage exemption` (level `notice`): one per marker.
 
 Level `warning` in census and neutral mode, `failure` in enforce mode.
+
+The list can be long (a package's first run, a file nobody tests), so the
+check run carries at most `--max-annotations` of them (`cap_annotations`):
+the first ones in this order, which is why changed files come first: the
+cap must never empty the "Files changed" view, where a reviewer reads the
+annotations. The full list can be written apart (`annotations_json`).
 """
 
 from covcheck.analyze import Analysis
 from covcheck.diff import Diff
+from covcheck.jsonw import JsonOut
 from covcheck.exempt import STATUS_EXEMPT
 from covcheck.model import FileCov, branch_line
 from covcheck.mutants import SURVIVED
@@ -39,6 +52,9 @@ comptime TITLE_LINE = "Line not covered"
 comptime TITLE_BRANCH = "Branch not covered"
 comptime TITLE_MUTANT = "Mutant survived"
 comptime TITLE_EXEMPTION = "Coverage exemption"
+comptime TITLE_UNMEASURED = "File not compiled into any test"
+
+comptime DEFAULT_MAX_ANNOTATIONS: Int = 1000
 
 
 struct Annotation(Copyable, Movable):
@@ -217,6 +233,13 @@ def line_message(start: Int, end: Int) -> String:
     return String("Lines ") + String(start) + String("-") + String(end) + String(" are not executed by any test")
 
 
+def unmeasured_message(start: Int, end: Int) -> String:
+    var tail = String(" in a file no test binary compiled, so not executed by any test")
+    if start == end:
+        return String("Line ") + String(start) + String(" is") + tail
+    return String("Lines ") + String(start) + String("-") + String(end) + String(" are") + tail
+
+
 def _file_annotations(a: Analysis, path: String, level: String) -> List[Annotation]:
     """The annotations of one file, by line (lines, then branches, mutants,
     exemptions on the same line)."""
@@ -225,10 +248,16 @@ def _file_annotations(a: Analysis, path: String, level: String) -> List[Annotati
     var fi = a.file_index(path)
     if fi >= 0:
         ref f = a.files[fi]
-        var rs = uncovered_ranges(f, _exempt_lines(a, path))
-        for k in range(len(rs)):
-            keys.append(pad_int(rs[k].start, 12) + String("0"))
-            anns.append(Annotation(path, rs[k].start, rs[k].end, level, String(TITLE_LINE), line_message(rs[k].start, rs[k].end)))
+        if a.unmeasured[fi]:
+            var rs = merge_consecutive(f.lines())
+            for k in range(len(rs)):
+                keys.append(pad_int(rs[k].start, 12) + String("0"))
+                anns.append(Annotation(path, rs[k].start, rs[k].end, level, String(TITLE_UNMEASURED), unmeasured_message(rs[k].start, rs[k].end)))
+        else:
+            var rs = uncovered_ranges(f, _exempt_lines(a, path))
+            for k in range(len(rs)):
+                keys.append(pad_int(rs[k].start, 12) + String("0"))
+                anns.append(Annotation(path, rs[k].start, rs[k].end, level, String(TITLE_LINE), line_message(rs[k].start, rs[k].end)))
         var found = Dict[Int, Int]()
         var taken = Dict[Int, Int]()
         for e in f.branches.items():
@@ -300,3 +329,45 @@ def annotations(a: Analysis, d: Diff, touched: List[String]) -> List[Annotation]
         for k in range(len(fa)):
             out.append(fa[k].copy())
     return out^
+
+
+def cap_annotations(anns: List[Annotation], cap: Int) -> List[Annotation]:
+    """The first `cap` of `anns`, in their order (see the module header)."""
+    var out = List[Annotation]()
+    for i in range(min(cap, len(anns))):
+        out.append(anns[i].copy())
+    return out^
+
+
+def cap_note(total: Int, cap: Int, full_list_written: Bool) -> String:
+    """The summary's line on annotations left out of the check run, or the
+    empty string when none were."""
+    if total <= cap:
+        return String("")
+    var s = String(total - cap) + String(" annotations omitted (cap ") + String(cap) + String("); ")
+    if full_list_written:
+        return s + String("the full list is in the annotations file")
+    return s + String("the full list was not written (give --annotations-out)")
+
+
+def write_annotation(mut j: JsonOut, a: Annotation):
+    """One annotation object, as GitHub's check-run API takes it."""
+    j.begin_object()
+    j.field_str(String("path"), a.path)
+    j.field_int(String("start_line"), a.start_line)
+    j.field_int(String("end_line"), a.end_line)
+    j.field_str(String("annotation_level"), a.level)
+    j.field_str(String("title"), a.title)
+    j.field_str(String("message"), a.message)
+    j.end_object()
+
+
+def annotations_json(anns: List[Annotation]) -> String:
+    """Every annotation, a JSON array (the `--annotations-out` file)."""
+    var j = JsonOut()
+    j.begin_array()
+    for i in range(len(anns)):
+        j.item()
+        write_annotation(j, anns[i])
+    j.end_array()
+    return j.text() + String("\n")

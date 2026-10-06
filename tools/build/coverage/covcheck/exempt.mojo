@@ -1,15 +1,17 @@
 """Coverage exemptions: the lines a source file marks as untestable.
 
-The one marker form is an end-of-line comment: the exact bytes
-`# cov: unreachable`, at the start of the line or after a space or tab,
-then either the end of the line or one space and the reason (the rest of
-the line, without surrounding blanks). It exempts the line it is on, and
-nothing else. Anything that is not exactly that is not a marker: `#cov:`,
-`# cov:unreachable`, `# Cov: unreachable`, `# cov: unreachable:`,
-`# cov: unreachables`, `##cov: unreachable` and a marker inside a word or
-after a quote all leave the line counted. The scan is textual: it does not
-know Mojo's string literals, so a string holding the marker after a space
-is read as one.
+The one marker form is an end-of-line comment: the line's comment (its
+first `#` outside every string literal, as lexer.mojo finds it), at the
+start of the line or after a space or tab, is exactly the bytes
+`# cov: unreachable` followed by either the end of the line or one space
+and the reason (the rest of the line, without surrounding blanks). It
+exempts the line it is on, and nothing else. Anything that is not exactly
+that is not a marker: `#cov:`, `# cov:unreachable`, `# Cov: unreachable`,
+`# cov: unreachable:`, `# cov: unreachables`, `##cov: unreachable`, a
+marker inside a word, after a quote, inside a string literal or a
+docstring (one line or several), or after another comment's text
+(`# see # cov: unreachable`) all leave the line counted. A trailing
+carriage return (a CRLF file) is not part of the line.
 
 What a marker does depends on the line's record (see `apply_exemptions`):
 
@@ -29,8 +31,9 @@ What a marker does depends on the line's record (see `apply_exemptions`):
 Every marker in a measured file is listed: each needs a reviewer's approval.
 """
 
+from covcheck.lexer import LexState, lex_line, lex_source
 from covcheck.model import FileCov, branch_line
-from covcheck.text import byte_at, split_lines, suffix, trim
+from covcheck.text import byte_at, suffix, trim
 
 comptime MARKER = "# cov: unreachable"
 
@@ -67,34 +70,42 @@ struct Marker(Copyable, Movable):
         self.reason = reason
 
 
-def marker_in(line: String) -> Marker:
-    """The first marker of `line` (see the module header), if any."""
-    var m = String(MARKER)
-    var at = 0
-    while True:
-        var i = line.find(m, at)
-        if i < 0:
+def marker_at(text: String, comment: Int) -> Marker:
+    """The marker of a lexed line: `text` without its carriage return,
+    `comment` the offset of its comment's `#` (-1: none)."""
+    if comment < 0:
+        return Marker(False, String(""))
+    if comment > 0:
+        var before = byte_at(text, comment - 1)
+        if before != 32 and before != 9:
             return Marker(False, String(""))
-        at = i + 1
-        if i > 0:
-            var before = byte_at(line, i - 1)
-            if before != 32 and before != 9:
-                continue
-        var end = i + m.byte_length()
-        if end == line.byte_length():
-            return Marker(True, String(""))
-        if byte_at(line, end) != 32:
-            continue
-        return Marker(True, trim(suffix(line, end + 1)))
+    var rest = suffix(text, comment)
+    if not rest.startswith(MARKER):
+        return Marker(False, String(""))
+    var end = comment + String(MARKER).byte_length()
+    if end == text.byte_length():
+        return Marker(True, String(""))
+    if byte_at(text, end) != 32:
+        return Marker(False, String(""))
+    return Marker(True, trim(suffix(text, end + 1)))
+
+
+def marker_in(line: String) -> Marker:
+    """The marker of `line` read on its own (outside any string at its
+    start), if any; see the module header."""
+    var st = LexState()
+    var l = lex_line(line, st)
+    return marker_at(l.text, l.comment)
 
 
 def scan_markers(path: String, text: String) -> List[Exemption]:
     """Every marker of the source `text` of `path`, by line, with no status
-    yet."""
+    yet. The lines are lexed in order, so a line inside a string spanning
+    lines holds no comment."""
     var out = List[Exemption]()
-    var lines = split_lines(text)
+    var lines = lex_source(text)
     for i in range(len(lines)):
-        var m = marker_in(lines[i])
+        var m = marker_at(lines[i].text, lines[i].comment)
         if m.found:
             out.append(Exemption(path, i + 1, m.reason, String("")))
     return out^

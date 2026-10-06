@@ -3,7 +3,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_json import JsonValue, parse_json_value
 
-from covcheck.cli import EXIT_GATE, EXIT_INPUT, EXIT_OK, EXIT_USAGE, run
+from covcheck.cli import EXIT_GATE, EXIT_INPUT, EXIT_OK, EXIT_USAGE, max_annotations, parse_args, run
 from covcheck.text import read_text, sort_strings, write_text
 
 # The command line end to end on the e2e fixtures: the summary byte for
@@ -26,7 +26,9 @@ def _repo_files(dir: String) raises -> String:
     names.append("BUCK")
     names.append("docs/x.md")
     names.append("src/alpha/BUCK")
+    names.append("src/alpha/__init__.mojo")
     names.append("src/alpha/a.mojo")
+    names.append("src/alpha/z.mojo")
     names.append("src/alpha/tests/test_a.mojo")
     names.append("src/beta/BUCK")
     names.append("src/beta/c.mojo")
@@ -113,22 +115,49 @@ def test_report_end_to_end() raises:
     assert_equal(files[1], "001.json")
     var post = parse_json_value(read_text(dir + "/checkrun/000.json"))
     var anns = post.get(String("output")).get(String("annotations"))
-    assert_equal(anns.array_len(), 5)
+    # a.mojo (changed) 5; z.mojo (in no report) runs 4-5 and 8 around its
+    # exempt line 6, and that exemption; nothing for __init__.mojo.
+    assert_equal(anns.array_len(), 8)
     assert_equal(anns.element_at(0).get(String("path")).as_string(), "src/alpha/a.mojo")
     assert_equal(Int(anns.element_at(0).get(String("start_line")).as_int64()), 2)
     assert_equal(Int(anns.element_at(0).get(String("end_line")).as_int64()), 3)
     assert_equal(anns.element_at(4).get(String("annotation_level")).as_string(), "notice")
+    var z = String("")
+    for i in range(5, 8):
+        var e = anns.element_at(i)
+        z += e.get(String("path")).as_string() + String(":") + String(Int(e.get(String("start_line")).as_int64()))
+        z += String("-") + String(Int(e.get(String("end_line")).as_int64())) + String(" ") + e.get(String("title")).as_string() + String("\n")
+    assert_equal(z,
+        "src/alpha/z.mojo:4-5 File not compiled into any test\n"
+        "src/alpha/z.mojo:6-6 Coverage exemption\n"
+        "src/alpha/z.mojo:8-8 File not compiled into any test\n"
+    )
     assert_equal(post.get(String("output")).get(String("summary")).as_string(), want)
     var last = parse_json_value(read_text(dir + "/checkrun/001.json"))
     assert_equal(last.get(String("status")).as_string(), "completed")
     assert_equal(last.get(String("conclusion")).as_string(), "neutral")
     var result = parse_json_value(read_text(dir + "/result.json"))
     assert_equal(result.get(String("conclusion")).as_string(), "neutral")
-    assert_equal(Int(result.get(String("total")).get(String("line_found")).as_int64()), 7)
+    assert_equal(Int(result.get(String("total")).get(String("line_found")).as_int64()), 10)
     assert_equal(Int(result.get(String("diff")).get(String("uncovered")).as_int64()), 2)
     assert_equal(result.get(String("touched_packages")).element_at(0).as_string(), "src/alpha")
-    assert_equal(result.get(String("findings")).array_len(), 5)
-    assert_equal(read_text(dir + "/ratchet.tsv"), "# floors for the end-to-end test\nsrc/alpha\t4000\t5000\nsrc/beta\t10000\t-\n")
+    var findings = result.get(String("findings"))
+    assert_equal(findings.array_len(), 6)
+    var unmeasured = 0
+    for i in range(findings.array_len()):
+        var f = findings.element_at(i)
+        if f.get(String("kind")).as_string() == String("UnmeasuredFile"):
+            unmeasured += 1
+            assert_equal(f.get(String("path")).as_string(), "src/alpha/z.mojo")
+            assert_equal(Int(f.get(String("line")).as_int64()), 0)
+            assert_equal(Int(f.get(String("count")).as_int64()), 3)
+        else:
+            assert_true(f.get(String("count")).is_null())
+    assert_equal(unmeasured, 1)
+    var alpha = result.get(String("packages")).element_at(0)
+    assert_equal(Int(alpha.get(String("files")).as_int64()), 2)
+    assert_equal(Int(alpha.get(String("unmeasured_files")).as_int64()), 1)
+    assert_equal(read_text(dir + "/ratchet.tsv"), "# floors for the end-to-end test\nsrc/alpha\t2500\t5000\nsrc/beta\t10000\t-\n")
 
 
 def test_gate_entry_is_the_report_entry() raises:
@@ -147,15 +176,15 @@ def test_gate_entry_is_the_report_entry() raises:
             assert_equal(gate.get(String("package")).serialize(), p.serialize())
     assert_true(found)
     assert_equal(gate.get(String("conclusion")).as_string(), "failure")
-    assert_equal(gate.get(String("findings")).array_len(), 4)
+    assert_equal(gate.get(String("findings")).array_len(), 5)
     var ndir = _tmp(String("gate_neutral"))
     assert_equal(run(_gate(ndir, String("neutral"))), EXIT_OK)
-    assert_true(read_text(ndir + "/summary.md").startswith("## Coverage of `src/alpha`: line 40.00% (2/5)"))
+    assert_true(read_text(ndir + "/summary.md").startswith("## Coverage of `src/alpha`: line 25.00% (2/8)"))
     # Census: the same findings, labelled, never a failing exit.
     var cdir = _tmp(String("gate_census"))
     assert_equal(run(_gate(cdir, String("census"))), EXIT_OK)
     var census = read_text(cdir + "/summary.md")
-    assert_true(census.find("- **BelowTarget** (census) `src/alpha`: line 40.00%") >= 0, census)
+    assert_true(census.find("- **BelowTarget** (census) `src/alpha`: line 25.00%") >= 0, census)
     assert_equal(parse_json_value(read_text(cdir + "/result.json")).get(String("conclusion")).as_string(), "neutral")
 
 
@@ -175,6 +204,57 @@ def _with(var a: List[String], flag: String, value: String) -> List[String]:
     a.append(flag)
     a.append(value)
     return a^
+
+
+def _sent(dir: String) raises -> Int:
+    """How many annotations the check-run bodies in `dir` carry."""
+    var files = listdir(dir + "/checkrun")
+    var n = 0
+    for i in range(len(files)):
+        var v = parse_json_value(read_text(dir + "/checkrun/" + files[i]))
+        n += v.get(String("output")).get(String("annotations")).array_len()
+    return n
+
+
+comptime CAP_NOTE_WRITTEN = "**Annotations**: 5 annotations omitted (cap 3); the full list is in the annotations file.\n"
+comptime CAP_NOTE_NOT_WRITTEN = "**Annotations**: 5 annotations omitted (cap 3); the full list was not written (give --annotations-out).\n"
+
+
+def test_annotation_cap_and_full_list() raises:
+    # The e2e run has 8 annotations. Cap 3: the bodies carry the first 3
+    # (the changed file's), the summary says 5 were left out and where the
+    # full list is, and the --annotations-out file holds all 8 in order.
+    var dir = _tmp(String("cap3"))
+    var a = _with(_with(_report(dir), String("--max-annotations"), String("3")), String("--annotations-out"), dir + "/anns.json")
+    assert_equal(run(a), EXIT_OK)
+    assert_equal(_sent(dir), 3)
+    var post = parse_json_value(read_text(dir + "/checkrun/000.json"))
+    var sent = post.get(String("output")).get(String("annotations"))
+    for i in range(3):
+        assert_equal(sent.element_at(i).get(String("path")).as_string(), "src/alpha/a.mojo")
+    var summary = read_text(dir + "/summary.md")
+    assert_true(summary.find(CAP_NOTE_WRITTEN) >= 0, summary)
+    assert_equal(post.get(String("output")).get(String("summary")).as_string(), summary)
+    var full = parse_json_value(read_text(dir + "/anns.json"))
+    assert_equal(full.array_len(), 8)
+    assert_equal(full.element_at(0).serialize(), sent.element_at(0).serialize())
+    assert_equal(full.element_at(7).get(String("path")).as_string(), "src/alpha/z.mojo")
+    assert_equal(full.element_at(7).get(String("title")).as_string(), "File not compiled into any test")
+    # Omitted, and no --annotations-out: the summary says the list was not written.
+    var nd = _tmp(String("cap3_nofile"))
+    assert_equal(run(_with(_report(nd), String("--max-annotations"), String("3"))), EXIT_OK)
+    assert_equal(_sent(nd), 3)
+    assert_true(read_text(nd + "/summary.md").find(CAP_NOTE_NOT_WRITTEN) >= 0)
+    # A cap equal to the count: nothing omitted, no line, the file still full.
+    var eq = _tmp(String("cap8"))
+    var b = _with(_with(_report(eq), String("--max-annotations"), String("8")), String("--annotations-out"), eq + "/anns.json")
+    assert_equal(run(b), EXIT_OK)
+    assert_equal(_sent(eq), 8)
+    assert_true(read_text(eq + "/summary.md").find("**Annotations**") < 0)
+    assert_equal(read_text(eq + "/summary.md"), read_text(String(E2E) + "summary.md"))
+    assert_equal(parse_json_value(read_text(eq + "/anns.json")).array_len(), 8)
+    # The default is 1000.
+    assert_equal(max_annotations(parse_args(_report(_tmp(String("cap_default"))))), 1000)
 
 
 def _without(a: List[String], flag: String) -> List[String]:
@@ -207,6 +287,11 @@ def test_usage_errors_exit_2() raises:
     assert_equal(run(_without(_gate(dir, String("enforce")), String("--mode"))), EXIT_USAGE)
     # lcov and Cobertura identify branches differently: never mixed.
     assert_equal(run(_with(_report(dir), String("--lcov"), String(E2E) + "cov_alpha.xml")), EXIT_USAGE)
+    # --max-annotations: a number of 1 or more, and only for report.
+    assert_equal(run(_with(_report(dir), String("--max-annotations"), String("0"))), EXIT_USAGE)
+    assert_equal(run(_with(_report(dir), String("--max-annotations"), String("-1"))), EXIT_USAGE)
+    assert_equal(run(_with(_report(dir), String("--max-annotations"), String("many"))), EXIT_USAGE)
+    assert_equal(run(_with(_gate(dir, String("enforce")), String("--max-annotations"), String("3"))), EXIT_USAGE)
     var dangling = _report(dir)
     dangling.append("--name")
     assert_equal(run(dangling), EXIT_USAGE)
@@ -233,6 +318,7 @@ def main() raises:
     test_report_end_to_end()
     test_gate_entry_is_the_report_entry()
     test_report_exit_never_carries_the_conclusion()
+    test_annotation_cap_and_full_list()
     test_usage_errors_exit_2()
     test_input_errors_exit_1()
     print("test_cli: PASS")

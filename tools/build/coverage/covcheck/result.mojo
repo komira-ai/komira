@@ -15,7 +15,10 @@ one function for both, so the gate's entry for a package and the report's
 are the same bytes when the numbers are the same.
 
 Percentages are basis points, `null` when n/a; a floor is `null` when the
-package has no row (or, for the branch floor, the row has `-`).
+package has no row (or, for the branch floor, the row has `-`). A package's
+`files` counts every file in its numbers, `unmeasured_files` those that
+raised `UnmeasuredFile`; a finding's `line` is 0 when it is about a whole file, its `count`
+the lines an `UnmeasuredFile` counts uncovered (`null` for other kinds).
 """
 
 from covcheck.analyze import Analysis
@@ -26,6 +29,7 @@ from covcheck.stats import PackageStats
 
 def _numbers(mut j: JsonOut, p: PackageStats):
     j.field_int(String("files"), p.files)
+    j.field_int(String("unmeasured_files"), p.unmeasured_files)
     j.field_int(String("line_hit"), p.line_hit)
     j.field_int(String("line_found"), p.line_found)
     j.field_opt(String("line_bp"), p.line_bp())
@@ -71,6 +75,7 @@ def _tail(mut j: JsonOut, a: Analysis):
         j.field_str(String("path"), f.path)
         j.field_int(String("line"), f.line)
         j.field_str(String("message"), f.message)
+        j.field_opt(String("count"), f.count)
         j.end_object()
     j.end_array()
     j.key(String("exemptions"))

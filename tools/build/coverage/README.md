@@ -23,11 +23,18 @@ gate's JSON entry for a package equal to the report's.
 
 ## What line coverage means here
 
-Line coverage counts only the lines the compiler emitted code for. A Mojo
-function that no test reaches may emit no lines at all (a generic that is
-never instantiated is never compiled), so it is absent from the report rather
-than uncovered: these numbers are upper bounds until declaration
-reachability lands.
+The denominator is each measured package's full source. A line counts when
+the compiler emitted code for it in some test binary (its report record),
+and every executable line of a source file that no test binary compiled
+counts too, uncovered (see "Files no test compiled"), so a file nobody
+tests cannot leave a package reading 100%.
+
+What is still missing: inside a file some test compiled, a function no test
+reaches may emit no lines at all (a generic that is never instantiated is
+never compiled), so it is absent from the report rather than uncovered.
+These numbers are upper bounds until declaration reachability lands; it
+will also replace the executable-line heuristic below with what the
+compiler emits.
 
 ## Command line
 
@@ -35,8 +42,9 @@ reachability lands.
 covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR
                 (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce]
-                [--target-bp N] [--include-tests] [--name N]
-                --summary-out F --checkrun-dir D --result-out F [--ratchet-out F]
+                [--target-bp N] [--include-tests] [--name N] [--max-annotations N]
+                --summary-out F --checkrun-dir D --result-out F
+                [--annotations-out F] [--ratchet-out F]
 
 covcheck gate   --package DIR --repo-files F --source-root DIR
                 (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--mutants [PKGDIR=]F]...
@@ -49,7 +57,7 @@ Every input is a flag; nothing is read from the environment.
 | flag | meaning |
 |---|---|
 | `--repo-files F` | the output of `git ls-files -z` (NUL-terminated paths): the repository's files |
-| `--source-root DIR` | the checkout; the sources of measured files are read from it for exemption markers |
+| `--source-root DIR` | the checkout; the sources of measured files are read from it for exemption markers, and the files no test compiled for their executable lines |
 | `--cobertura [PKGDIR=]F`, `--lcov [PKGDIR=]F` | a report, repeatable (one per test binary), all of one format: the two formats identify a line's branches differently, so mixing them is bad usage. `PKGDIR` is the package the report's relative paths may be relative to; a file name holding `=` is given as `=F` |
 | `--mutants [PKGDIR=]F` | a mutation-testing result, repeatable (format below) |
 | `--strip-prefix P` | repeatable; a report path starting with `P` loses it (the longest matching prefix wins) |
@@ -60,6 +68,8 @@ Every input is a flag; nothing is read from the environment.
 | `--diff F` | the output of `git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ --unified=0 -M <merge-base> <head>` (the explicit prefixes override a `diff.noprefix` setting) |
 | `--head-sha SHA` | the commit the check run is for: 40 lowercase hex digits |
 | `--name N` | the check run's name; default `coverage` |
+| `--max-annotations N` | `report`: at most `N` annotations go into the check run (1 or more; default 1000); see Annotations |
+| `--annotations-out F` | `report`: every annotation, uncapped, as a JSON array of GitHub annotation objects (for upload as a build artifact) |
 | `--package DIR` | the package `gate` measures: a directory holding a BUCK file |
 | `--summary-out F` | the Markdown summary |
 | `--checkrun-dir D` | the check-run request bodies (created if absent; must be empty) |
@@ -68,11 +78,16 @@ Every input is a flag; nothing is read from the environment.
 
 ### Exit codes
 
+`report` exits 0 whenever it wrote its outputs, whatever they conclude: in
+enforce mode a failing package fails the PR through the check run's
+`conclusion: "failure"`, never through the exit code. `gate` exits 3 in
+enforce mode when the package has a finding, so the build fails.
+
 | code | meaning |
 |---|---|
 | 0 | the outputs were written, whatever they conclude (`report` never carries the conclusion in its exit code) |
 | 1 | an input is malformed (each reader names the file and line, or the byte's line), a report path is unmapped, a source cannot be read, `--checkrun-dir` is not empty, `--package` holds no BUCK file, or an output cannot be written |
-| 2 | bad usage: no or unknown command, an unknown flag, a flag without its value or given twice, a required flag missing, no report, both `--cobertura` and `--lcov` reports, a malformed `--mode`, `--target-bp` or `--head-sha` |
+| 2 | bad usage: no or unknown command, an unknown flag, a flag without its value or given twice, a required flag missing, no report, both `--cobertura` and `--lcov` reports, a malformed `--mode`, `--target-bp` or `--head-sha`, a `--max-annotations` that is not a number of 1 or more |
 | 3 | `gate` only: `--mode enforce` and the package has at least one finding |
 
 ## Reading the reports
@@ -149,17 +164,67 @@ A file's package is the nearest directory above it holding a `BUCK` file
 one; an error when none does. Files under `tests/` directly inside a package
 (`src/m/tests/...`) are test sources: left out of the numbers, the changed-line
 coverage and the annotations, and counted in the summary, unless
-`--include-tests`.
+`--include-tests`. Only that directory is: a test file or test helper
+anywhere else in the package (`src/m/testing.mojo`, `src/m/x/tests/t.mojo`)
+is source, measured and held to the target like any other file.
+
+## Files no test compiled
+
+A package is measured when a report names one of its files, with or
+without a record for it (a test source left out does not count), and the
+package `gate` checks always is. Every `.mojo` file of a measured package
+in `--repo-files` (its package is the nearest directory with a BUCK file)
+that no report gives a line or branch record, and that is not a left-out
+test source, is read from `--source-root` and counted: each of its
+executable lines is a line found with 0 hits. A file a report names with
+no record (an lcov `SF:` followed straight by `end_of_record`, a Cobertura
+class with no line) is counted this way too: it measured nothing.
+Exemption markers apply to those lines as to any other. Such a file with a
+line left counted is an `UnmeasuredFile` finding (its path, `line` 0, and
+`count`, the lines it counts) and, in a touched package, annotated `File
+not compiled into any test`, one annotation per run of consecutive
+executable lines not exempted (an exempted line ends a run). A file with
+no line left counted (an `__init__.mojo` of re-exports, a file whose every
+executable line is exempted) raises no `UnmeasuredFile` and is not in
+`unmeasured_files`; its markers are listed like any other.
+
+The executable lines are a heuristic over a lexed source
+(`covcheck/lexer.mojo`); declaration reachability will refine it. A line
+is executable unless it is:
+
+- blank (spaces, tabs, form feeds);
+- a comment only (its first non-blank byte outside a string is `#`);
+- inside, or made only of, string literals: a docstring, a line of a
+  triple-quoted string spanning lines, the line that closes one, or a line
+  holding nothing but a string (`"..."`, `r"""..."""`);
+- part of an import statement: a line whose first word is `import` or
+  `from` followed by a space or tab, and the lines after it while its
+  parentheses are open (`from x import (` .. `)`) or a line ends with a
+  backslash. A `;` outside every string ends the statement, so
+  `import os; os.abort()` is executable (and `import a; import b` is not).
+
+A UTF-8 byte-order mark at the start of the file and a carriage return at
+the end of a line (CRLF) are not part of the line.
+
+Everything else counts, declarations included (`def`, `struct`,
+`comptime`, a decorator, a lone `)`).
 
 ## Exemptions
 
 A line no test can reach is exempted in the source by an end-of-line comment:
-the exact bytes `# cov: unreachable`, at the start of the line or after a
-space or tab, then one space and the reason. It exempts the line it is on and
-nothing else. Anything else is not a marker: `#cov:`, `# cov:unreachable`,
-`# Cov: unreachable`, `# cov: unreachable:`, a marker after a quote or a `#`.
-The scan is textual (a string literal holding the marker after a space reads
-as one). Only the files measured in the reports are read (`--source-root`).
+the line's comment (its first `#` outside every string literal), at the
+start of the line or after a space or tab, is exactly the bytes
+`# cov: unreachable`, then one space and the reason. It exempts the line it
+is on and nothing else. Anything else is not a marker: `#cov:`,
+`# cov:unreachable`, `# Cov: unreachable`, `# cov: unreachable:`, a `#`
+right after code, a marker after a quote, inside a string literal or a
+docstring (on one line or several), or after another comment's text
+(`# see # cov: unreachable`). The source is lexed (`covcheck/lexer.mojo`):
+`"..."` and `'...'` strings, triple-quoted strings spanning lines, a
+backslash keeping the next quote from closing any string (raw strings
+included, as in Python), string prefixes such as `r`; a trailing carriage
+return (CRLF) is dropped first. The files measured in the reports and the
+files no test compiled are read (`--source-root`).
 
 | marker on | status | effect |
 |---|---|---|
@@ -204,12 +269,13 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | finding | when |
 |---|---|
 | `BelowTarget` | line, or branch when measured, below `--target-bp` (labelled `(census)` in census mode) |
-| `NotMeasured` | a package in the run (in `gate`, the gated package) has no line record and no exempted line while `--target-bp` is above 0: no report covers it, or none of its paths mapped to it |
+| `NotMeasured` | a package in the run (in `gate`, the gated package) has no line record from a report and no exempted recorded line while `--target-bp` is above 0: no report covers it, or none of its paths mapped to it (the lines of files no test compiled do not make it measured) |
 | `Regression` | line or branch below its ratchet floor; or a floor above 0 whose value was not measured (no data, `measured_bp` null): in `report` for every row whose directory holds a BUCK file, in `gate` for its package's row |
 | `MissingRow` | lines were measured and the ratchet has no row for the package |
 | `ExtraRow` | a ratchet row's directory holds no BUCK file (`report` checks every row; `gate` its package's) |
 | `BranchFloorMissing` | branches were measured and the row's branch floor is `-` |
 | `MutantSurvived` | a surviving mutant |
+| `UnmeasuredFile` | a source file of a measured package that no report names still has lines counted (see Files no test compiled) |
 | `ExemptionWithoutReason`, `StaleExemption` | see Exemptions |
 
 Conclusion: `neutral` in census and neutral mode whatever was found; in
@@ -256,14 +322,26 @@ touch their package too. A copy's source is unchanged and touches nothing.
 **Annotations** (one list, sent 50 per request): for every measured file of
 every touched package, changed files first, each group by path then line:
 `Line not covered` per run of uncovered lines (a run continues over lines
-with no record and breaks at a covered or exempt line), `Branch not covered`
+with no record and breaks at a covered or exempt line), `File not compiled
+into any test` per run of consecutive executable lines not exempted of a
+file no test compiled, `Branch not covered`
 per line some of whose branches were not taken (`k of n branches taken on
 this line`), `Mutant survived` per surviving mutant, `Coverage exemption`
 (`notice`) per marker. Level `warning` in census and neutral mode, `failure`
 in enforce mode.
 
+The check run carries the first `--max-annotations` (default 1000) of that
+list, in that order, and the summary then says
+`N annotations omitted (cap M); the full list is in the annotations file`
+(or, without `--annotations-out`, that the full list was not written).
+The order is what makes the cap safe: the changed files come first, so the
+"Files changed" view, where a reviewer reads them, keeps its annotations
+when a large package's other files are cut. `--annotations-out` writes the
+whole list, uncapped.
+
 **Summary** (`covcheck/summary.mojo`): a title line
-(total line and branch, changed lines), the caveat above, the mode, a table of
+(total line and branch, changed lines), the caveat above, the mode, the
+annotations the cap left out (only when it left some out), a table of
 every measured package (touched first: line, branch, mutants, floor, status)
 and a total row,
 the findings, the exemptions, the changed lines with at most 200 uncovered
@@ -279,14 +357,23 @@ the body of `POST /repos/{owner}/{repo}/check-runs`
 `summary` and the first 50 annotations); `001.json`, ... are the bodies of
 the PATCHes that follow (`output` with the next 50), the last one also
 `status: "completed"` and `conclusion`. There is always at least one PATCH:
-0 to 100 annotations make two files, 120 make three. Sorted file order is
-send order. The title is cut to 255 bytes.
+0 to 100 annotations make two files, 120 make three, 1000 (the default cap)
+make 20. Sorted file order is send order. The title is cut to 255 bytes.
+
+For the poster: GitHub's secondary rate limits apply to these
+content-creating requests. Send the files one at a time, in order (never
+in parallel), at no more than about 80 per minute; the default cap bounds a
+run at 20 requests (1 POST and 19 PATCHes).
 
 **Result** (`covcheck/result.mojo`): `conclusion`,
 `mode`, `target_bp`, `total`, `diff`, `touched_packages`, `packages`,
 `findings`, `exemptions` and the set-aside counts; `gate` writes `package`
 in place of `total`, `diff`, `touched_packages` and `packages`. A percentage
-or floor that does not apply is `null`.
+or floor that does not apply is `null`. A package's `files` counts every
+file in its numbers and `unmeasured_files` those that raised
+`UnmeasuredFile` (no report gave them a record, and a line is left counted); a
+finding about a whole file has `line` 0, and `count` is the lines an
+`UnmeasuredFile` counts (`null` for every other finding).
 
 ## Example
 

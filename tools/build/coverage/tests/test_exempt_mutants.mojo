@@ -54,6 +54,7 @@ def test_near_misses_are_not_markers() raises:
     misses.append("x()  # cov: unreachable\twhy")
     misses.append("s = \"# cov: unreachable why\"")
     misses.append("x()  # coverage: unreachable why")
+    misses.append("x()# cov: unreachable why")
     for i in range(len(misses)):
         assert_true(not marker_in(misses[i]).found, misses[i])
 

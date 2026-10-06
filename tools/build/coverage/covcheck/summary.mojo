@@ -2,7 +2,8 @@
 
 Sections, in order: the title line (total line and branch coverage, and the
 changed lines' coverage), the caveat on what line coverage counts, the mode
-and target, a table of every measured package (touched packages first, each
+and target, the annotations the check run left out (when it left any out),
+a table of every measured package (touched packages first, each
 group sorted; in a report, then a total row), the findings, the exemptions (each needs approval), the
 changed lines (informational; at most 200 uncovered ranges are listed, the
 rest are counted: the annotations carry them all) and what was set aside.
@@ -19,7 +20,7 @@ from covcheck.text import basis_points, render_bp, render_bp_or_na
 comptime MAX_SUMMARY: Int = 65535
 comptime MAX_RANGES: Int = 200
 
-comptime CAVEAT = "Line coverage counts only the lines the compiler emitted code for: a function that no test reaches may emit no lines at all, so these numbers are upper bounds until declaration reachability lands."
+comptime CAVEAT = "Line coverage counts the lines the compiler emitted code for, and every executable line of a package's source file that no test binary compiled (`UnmeasuredFile`). Still missing: a function no test reaches inside a compiled file may emit no lines at all, so these numbers are upper bounds until declaration reachability lands."
 
 
 def md_code(s: String) -> String:
@@ -89,10 +90,14 @@ def _is_in(xs: List[String], x: String) -> Bool:
     return False
 
 
-def render_summary(a: Analysis, touched: List[String], d: DiffCoverage, with_diff: Bool, scope: String) -> String:
+def render_summary(
+    a: Analysis, touched: List[String], d: DiffCoverage, with_diff: Bool, scope: String, note: String = String("")
+) -> String:
     """The summary of `a`. `scope` names what was measured in the title
     (empty: every package); without `with_diff` there is no changed-lines
-    section (the build gate has no change)."""
+    section (the build gate has no change); a `note` (the annotations the
+    check run leaves out) is a paragraph after the mode, so truncation
+    never cuts it."""
     var s = String("## Coverage")
     if scope.byte_length() > 0:
         s += String(" of ") + md_code(scope)
@@ -103,6 +108,8 @@ def render_summary(a: Analysis, touched: List[String], d: DiffCoverage, with_dif
     s += String("\n\n") + String(CAVEAT) + String("\n\n")
     s += String("Mode: **") + a.mode + String("**, conclusion **") + a.conclusion + String("**. Target: ")
     s += render_bp(a.target_bp) + String(" line and branch coverage per package.\n\n")
+    if note.byte_length() > 0:
+        s += String("**Annotations**: ") + note + String(".\n\n")
 
     s += String("### Packages\n\n")
     if len(a.packages) == 0:
@@ -131,8 +138,10 @@ def render_summary(a: Analysis, touched: List[String], d: DiffCoverage, with_dif
             if f.kind == String(BELOW_TARGET) and a.mode == String(MODE_CENSUS):
                 s += String(" (census)")
             s += String(" ") + md_code(f.package)
-            if f.path.byte_length() > 0:
+            if f.path.byte_length() > 0 and f.line > 0:
                 s += String(" ") + md_code(f.path + String(":") + String(f.line))
+            elif f.path.byte_length() > 0:
+                s += String(" ") + md_code(f.path)
             s += String(": ") + f.message + String("\n")
         s += String("\n")
 

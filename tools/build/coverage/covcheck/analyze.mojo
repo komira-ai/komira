@@ -12,14 +12,27 @@ and the findings: the one computation both `covcheck report` and
    sources (`<package>/tests/...`) are counted and dropped unless
    `include_tests`.
 4. Each kept file's source is read for exemption markers (exempt.mojo).
+   Then the full source: a package is measured when a report names a kept
+   file in it (with or without records), and the gated package
+   (`only_package`) always is. Every `.mojo` file of the repository whose
+   package is a measured one, that no report gives a line or branch record,
+   and that is not a left-out test source, is read from the checkout and
+   counted as a file no test compiled: each executable line (lexer.mojo's
+   heuristic) a line record with 0 hits, then exemptions applied as for any
+   file. Such a file with a line left raises `UnmeasuredFile` and is counted
+   in `unmeasured_files`; one with no line left (an `__init__.mojo` of
+   imports, every line exempted) raises nothing and is listed only for its
+   markers, if it has any.
 5. The mutants are read and mapped the same way.
 6. Per package: lines, branches, exemptions, mutants; the ratchet row.
 7. Findings: `BelowTarget` (line, and branch when measured, below
    `target_bp`), `NotMeasured` (a package in the run, the gated package
    included, with no line record and no exempted line, while `target_bp` is
    above 0: nothing was measured, so it cannot be shown to meet the
-   target), the ratchet's (ratchet.mojo), one `MutantSurvived` per
-   surviving mutant, `ExemptionWithoutReason` and `StaleExemption`.
+   target; a package whose only lines are those of files no test compiled
+   is still not measured), the ratchet's (ratchet.mojo), one
+   `MutantSurvived` per surviving mutant, `UnmeasuredFile` per file no test
+   compiled, `ExemptionWithoutReason` and `StaleExemption`.
 
 The reports must all be lcov or all Cobertura: the two formats identify a
 line's branches differently, so one file in both would count its branches
@@ -29,6 +42,7 @@ twice.
 from covcheck.cobertura import parse_cobertura
 from covcheck.exempt import STATUS_NO_REASON, STATUS_STALE, Exemption, apply_exemptions, scan_markers
 from covcheck.lcov import parse_lcov
+from covcheck.lexer import executable_lines
 from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, is_test_source, map_path, package_of
@@ -40,11 +54,12 @@ from covcheck.stats import (
     MODE_NEUTRAL,
     MUTANT_SURVIVED,
     STALE_EXEMPTION,
+    UNMEASURED_FILE,
     Finding,
     PackageStats,
     conclusion_of,
 )
-from covcheck.text import join, line_key, read_text, render_bp, sort_by_keys
+from covcheck.text import join, line_key, read_text, render_bp, sort_by_keys, sort_strings
 
 comptime FORMAT_LCOV = "lcov"
 comptime FORMAT_COBERTURA = "cobertura"
@@ -106,13 +121,16 @@ struct Sources(Copyable, Movable):
 
 struct Analysis(Copyable, Movable):
     """What one run measured and found. `files` holds the kept files (with
-    exemptions applied), `file_packages` the package of each; `packages`
+    exemptions applied), `file_packages` the package of each, `unmeasured`
+    whether each is a file no report named (counted from its source);
+    `packages`
     is sorted by package; `exemptions` and `mutants` by path then line."""
 
     var mode: String
     var target_bp: Int
     var files: List[FileCov]
     var file_packages: List[String]
+    var unmeasured: List[Bool]
     var packages: List[PackageStats]
     var exemptions: List[Exemption]
     var mutants: List[Mutant]
@@ -131,6 +149,7 @@ struct Analysis(Copyable, Movable):
         self.target_bp = 10000
         self.files = List[FileCov]()
         self.file_packages = List[String]()
+        self.unmeasured = List[Bool]()
         self.packages = List[PackageStats]()
         self.exemptions = List[Exemption]()
         self.mutants = List[Mutant]()
@@ -183,6 +202,69 @@ def _keep(package: String, path: String, opts: Options) -> Int:
     if not opts.include_tests and is_test_source(path, package):
         return 2
     return 0
+
+
+def _package_or_empty(path: String, repo: RepoFiles) -> String:
+    try:
+        return package_of(path, repo)
+    except:
+        return String("")
+
+
+def _unmeasured_files(
+    mut a: Analysis,
+    mut at: Dict[String, Int],
+    mut exemptions: List[Exemption],
+    measured: Dict[String, Bool],
+    named: Dict[String, Bool],
+    repo: RepoFiles,
+    sources: Sources,
+    opts: Options,
+) raises -> List[Finding]:
+    """Step 4's full source: counts every file of a `measured` package that
+    is not `named` (no report gives it a record); returns their
+    `UnmeasuredFile` findings."""
+    var paths = List[String]()
+    for e in repo.files.items():
+        var path = e.key
+        if not path.endswith(".mojo") or path in named:
+            continue
+        var pkg = _package_or_empty(path, repo)
+        if pkg.byte_length() == 0 or pkg not in measured or _keep(pkg, path, opts) != 0:
+            continue
+        paths.append(path)
+    sort_strings(paths)
+    var out = List[Finding]()
+    for i in range(len(paths)):
+        var pkg = package_of(paths[i], repo)
+        var text = sources.read(paths[i])
+        var f = FileCov(paths[i])
+        var exe = executable_lines(text)
+        for k in range(len(exe)):
+            f.add_line(exe[k], 0)
+        var markers = scan_markers(paths[i], text)
+        var removed = apply_exemptions(f, markers)
+        for e in range(len(markers)):
+            exemptions.append(markers[e].copy())
+        var found = f.line_found()
+        if found == 0 and len(markers) == 0:
+            continue
+        var k = _stats_at(a, at, pkg)
+        a.packages[k].files += 1
+        a.packages[k].exempt_lines += removed
+        a.packages[k].line_found += found
+        if found > 0:
+            a.packages[k].unmeasured_files += 1
+            out.append(Finding(
+                String(UNMEASURED_FILE), pkg, String(""), -1, -1, paths[i], 0,
+                String("no test binary compiled this file: its ") + String(found)
+                + String(" executable lines count as not covered"),
+                found,
+            ))
+        a.files.append(f^)
+        a.file_packages.append(pkg)
+        a.unmeasured.append(True)
+    return out^
 
 
 def analyze(
@@ -246,6 +328,10 @@ def analyze(
     # 3-4, 6: packages, test sources, exemptions, counts.
     var at = Dict[String, Int]()
     var exemptions = List[Exemption]()
+    var measured = Dict[String, Bool]()
+    if opts.only_package.byte_length() > 0:
+        measured[opts.only_package] = True
+    var named = Dict[String, Bool]()
     for i in range(len(merged)):
         var pkg = package_of(merged[i].path, repo)
         var keep = _keep(pkg, merged[i].path, opts)
@@ -253,11 +339,23 @@ def analyze(
             a.excluded_test_files += 1
         if keep != 0:
             continue
+        measured[pkg] = True
+        if merged[i].line_found() == 0 and merged[i].branch_found() == 0:
+            # Named with no record (an lcov `SF:` straight to
+            # `end_of_record`, a Cobertura class with no line): it measures
+            # nothing, so its source is counted as a file no test compiled.
+            # The package is in the run all the same (NotMeasured if no
+            # other file gives it a record).
+            _ = _stats_at(a, at, pkg)
+            continue
+        named[merged[i].path] = True
         var f = merged[i].copy()
         var markers = scan_markers(f.path, sources.read(f.path))
         var removed = apply_exemptions(f, markers)
         var k = _stats_at(a, at, pkg)
         a.packages[k].files += 1
+        if f.line_found() > 0 or removed > 0:
+            a.packages[k].has_records = True
         a.packages[k].exempt_lines += removed
         a.packages[k].line_found += f.line_found()
         a.packages[k].line_hit += f.line_hit()
@@ -267,6 +365,8 @@ def analyze(
             exemptions.append(markers[e].copy())
         a.files.append(f^)
         a.file_packages.append(pkg)
+        a.unmeasured.append(False)
+    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, repo, sources, opts)
     var mut_pkgs = List[String]()
     var kept_muts = List[Mutant]()
     for i in range(len(muts)):
@@ -325,7 +425,7 @@ def analyze(
     for i in range(len(a.packages)):
         ref p = a.packages[i]
         var lbp = p.line_bp()
-        if p.line_found == 0 and p.exempt_lines == 0 and opts.target_bp > 0:
+        if not p.has_records and opts.target_bp > 0:
             findings.append(Finding(
                 String(NOT_MEASURED), p.package, String("line"), -1, opts.target_bp, String(""), 0,
                 String("no line of this package was measured (no report for it, or none of its paths mapped to it)"),
@@ -341,6 +441,8 @@ def analyze(
                 String(BELOW_TARGET), p.package, String("branch"), bbp, opts.target_bp, String(""), 0,
                 String("branch ") + render_bp(bbp) + String(" is below the target ") + render_bp(opts.target_bp),
             ))
+    for i in range(len(unmeasured_findings)):
+        findings.append(unmeasured_findings[i].copy())
     var rf = compare(ratchet, a.packages, repo, opts.only_package.byte_length() == 0)
     for i in range(len(rf)):
         findings.append(rf[i].copy())

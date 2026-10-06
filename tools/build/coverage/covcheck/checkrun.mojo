@@ -11,11 +11,11 @@ GitHub takes at most 50 annotations per request, so a run is one POST
 
 There is always at least one PATCH, so the sender's loop is the same for
 any number of annotations: 0 to 100 annotations make two bodies, 120 make
-three. Every body repeats the title (cut to 255 bytes) and the summary
+three, 1000 (the default `--max-annotations`) make 20. Every body repeats the title (cut to 255 bytes) and the summary
 (given already within GitHub's 65535; see summary.mojo).
 """
 
-from covcheck.annotate import Annotation
+from covcheck.annotate import Annotation, write_annotation
 from covcheck.jsonw import JsonOut
 from covcheck.text import truncate_utf8
 
@@ -35,17 +35,6 @@ def valid_sha(s: String) -> Bool:
     return True
 
 
-def _annotation(mut j: JsonOut, a: Annotation):
-    j.begin_object()
-    j.field_str(String("path"), a.path)
-    j.field_int(String("start_line"), a.start_line)
-    j.field_int(String("end_line"), a.end_line)
-    j.field_str(String("annotation_level"), a.level)
-    j.field_str(String("title"), a.title)
-    j.field_str(String("message"), a.message)
-    j.end_object()
-
-
 def _output(mut j: JsonOut, title: String, summary: String, anns: List[Annotation], start: Int, end: Int):
     j.key(String("output"))
     j.begin_object()
@@ -55,7 +44,7 @@ def _output(mut j: JsonOut, title: String, summary: String, anns: List[Annotatio
     j.begin_array()
     for i in range(start, end):
         j.item()
-        _annotation(j, anns[i])
+        write_annotation(j, anns[i])
     j.end_array()
     j.end_object()
 

@@ -3,7 +3,19 @@ from std.testing import assert_equal, assert_true
 from komira_json import JsonValue, parse_json_value
 
 from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
-from covcheck.annotate import Annotation, annotations, diff_coverage, line_message, merge_consecutive, touched_packages, uncovered_ranges
+from covcheck.annotate import (
+    DEFAULT_MAX_ANNOTATIONS,
+    Annotation,
+    annotations,
+    annotations_json,
+    cap_annotations,
+    cap_note,
+    diff_coverage,
+    line_message,
+    merge_consecutive,
+    touched_packages,
+    uncovered_ranges,
+)
 from covcheck.checkrun import body_name, checkrun_bodies, valid_sha
 from covcheck.diff import parse_diff
 from covcheck.model import FileCov
@@ -65,6 +77,33 @@ def test_checkrun_batching() raises:
     assert_equal(_batches(51, String("failure")), "50 1")
     assert_equal(_batches(100, String("neutral")), "50 50")
     assert_equal(_batches(120, String("failure")), "50 50 20")
+
+
+def test_annotation_cap() raises:
+    # Cap 3 of 5: the first 3 in their order, and the note; the full list
+    # (annotations_json) keeps all 5.
+    var five = _anns(5)
+    var capped = cap_annotations(five, 3)
+    assert_equal(len(capped), 3)
+    for i in range(3):
+        assert_equal(capped[i].start_line, i + 1)
+    assert_equal(cap_note(5, 3, True), "2 annotations omitted (cap 3); the full list is in the annotations file")
+    assert_equal(cap_note(5, 3, False), "2 annotations omitted (cap 3); the full list was not written (give --annotations-out)")
+    var bodies = checkrun_bodies(String("coverage"), String(SHA), String("t"), String("s"), String("neutral"), capped)
+    var sent = 0
+    for i in range(len(bodies)):
+        sent += parse_json_value(bodies[i]).get(String("output")).get(String("annotations")).array_len()
+    assert_equal(sent, 3)
+    var full = parse_json_value(annotations_json(five))
+    assert_equal(full.array_len(), 5)
+    assert_equal(Int(full.element_at(4).get(String("start_line")).as_int64()), 5)
+    # A cap equal to the count (or above it) omits nothing and says nothing.
+    assert_equal(len(cap_annotations(five, 5)), 5)
+    assert_equal(cap_note(5, 5, False), "")
+    assert_equal(cap_note(5, 6, False), "")
+    # The default, and the requests it bounds a run to: 1 POST and 19 PATCHes.
+    assert_equal(DEFAULT_MAX_ANNOTATIONS, 1000)
+    assert_equal(_batches(1000, String("failure")), "50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50 50")
 
 
 def test_body_names_sort_in_send_order() raises:
@@ -148,6 +187,8 @@ def _analysis(mode: String) raises -> Analysis:
     s.texts[String("src/a/x.mojo")] = String("1\n2\n3\n4\n5\n6\n")
     s.texts[String("src/a/y.mojo")] = String("1\n2\n3  # cov: unreachable never\n")
     s.texts[String("src/b/w.mojo")] = String("1\n")
+    # In no report: counted from its source, both lines executable.
+    s.texts[String("src/a/z.mojo")] = String("1\n2\n")
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String(
         "SF:src/a/x.mojo\nDA:1,1\nDA:2,0\nDA:3,0\nDA:4,1\nDA:6,0\nBRDA:4,0,0,1\nBRDA:4,0,1,0\nBRDA:4,0,2,-\nend_of_record\n"
@@ -183,8 +224,9 @@ def test_annotations_cover_every_file_of_touched_packages_changed_first() raises
     var touched = touched_packages(a, d, _repo())
     assert_equal(len(touched), 1)
     assert_equal(touched[0], "src/a")
-    # y.mojo (changed) first; then x.mojo and z.mojo (only a mutant); never
-    # src/b, which the change does not touch.
+    # y.mojo (changed) first; then x.mojo and z.mojo (in no report: one run
+    # of executable lines, and a mutant); never src/b, which the change does
+    # not touch.
     assert_equal(_describe(annotations(a, d, touched)),
         "src/a/y.mojo:1-1 warning Line not covered | Line 1 is not executed by any test\n"
         "src/a/y.mojo:3-3 notice Coverage exemption | Exempt from coverage (exempt): never. Every exemption needs a reviewer's approval.\n"
@@ -192,7 +234,21 @@ def test_annotations_cover_every_file_of_touched_packages_changed_first() raises
         "src/a/x.mojo:4-4 warning Branch not covered | 1 of 3 branches taken on this line\n"
         "src/a/x.mojo:4-4 warning Mutant survived | negate: a > b; no test failed\n"
         "src/a/x.mojo:6-6 warning Line not covered | Line 6 is not executed by any test\n"
+        "src/a/z.mojo:1-2 warning File not compiled into any test | Lines 1-2 are in a file no test binary compiled, so not executed by any test\n"
         "src/a/z.mojo:2-2 warning Mutant survived | delete; no test failed\n"
+    )
+
+
+def test_cap_keeps_the_changed_files_first() raises:
+    # The changed y.mojo sorts after x.mojo by path, yet the cap keeps its
+    # annotations: it takes the first ones of the list in its order (changed
+    # files first), never the first ones by path.
+    var a = _analysis(String("neutral"))
+    var d = parse_diff(String(DIFF_Y))
+    var capped = cap_annotations(annotations(a, d, touched_packages(a, d, _repo())), 2)
+    assert_equal(_describe(capped),
+        "src/a/y.mojo:1-1 warning Line not covered | Line 1 is not executed by any test\n"
+        "src/a/y.mojo:3-3 notice Coverage exemption | Exempt from coverage (exempt): never. Every exemption needs a reviewer's approval.\n"
     )
 
 
@@ -230,13 +286,16 @@ def test_diff_coverage_counts() raises:
     var d = parse_diff(String(DIFF_X) + String(DIFF_Y) + String(DIFF_DOC) + String(DIFF_NEW))
     var dc = diff_coverage(a, d, _repo(), False)
     # x.mojo 2,3 uncovered, 6 uncovered; y.mojo 1 uncovered, 2 no record, 3
-    # exempt; z.mojo (absent from the report) 1,2 not instrumented; the
-    # README is not a source.
+    # exempt; z.mojo (in no report, so its executable lines 1,2 count with 0
+    # hits) uncovered; the README is not a source.
     assert_equal(dc.covered, 0)
-    assert_equal(dc.uncovered, 4)
-    assert_equal(dc.not_instrumented, 3)
+    assert_equal(dc.uncovered, 6)
+    assert_equal(dc.not_instrumented, 1)
     assert_equal(dc.exempt, 1)
-    assert_equal(len(dc.ranges), 3)
+    assert_equal(len(dc.ranges), 4)
+    assert_equal(dc.ranges[3].path, "src/a/z.mojo")
+    assert_equal(dc.ranges[3].start, 1)
+    assert_equal(dc.ranges[3].end, 2)
     assert_equal(dc.ranges[0].path, "src/a/x.mojo")
     assert_equal(dc.ranges[0].start, 2)
     assert_equal(dc.ranges[0].end, 3)
@@ -289,12 +348,14 @@ def test_summary_limit_is_exactly_65535() raises:
 
 def main() raises:
     test_checkrun_batching()
+    test_annotation_cap()
     test_body_names_sort_in_send_order()
     test_head_sha_validation()
     test_json_escaping_of_a_path_with_a_quote()
     test_merge_consecutive()
     test_uncovered_ranges_break_only_on_covered_or_exempt_lines()
     test_annotations_cover_every_file_of_touched_packages_changed_first()
+    test_cap_keeps_the_changed_files_first()
     test_annotation_level_is_failure_in_enforce_mode()
     test_untouched_change_annotates_nothing()
     test_binary_change_touches_its_package()

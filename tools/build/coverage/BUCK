@@ -32,6 +32,13 @@ mojo_library(
         # exemption markers and their near misses, their effect on the counts;
         # the mutants file format
         "tests/test_exempt_mutants.mojo",
+        # the source lexer: markers recognised only in a real comment (not
+        # in a string, a docstring or another comment's text), CRLF, and the
+        # executable-line heuristic over every kind of line
+        "tests/test_lexer.mojo",
+        # the full-source denominator: a measured package's source file no
+        # report names counts uncovered and raises UnmeasuredFile
+        "tests/test_full_source.mojo",
         # the ratchet grammar, the shipped ratchet.tsv, every comparison
         # outcome, and the proposed file
         "tests/test_ratchet.mojo",
@@ -43,7 +50,8 @@ mojo_library(
         # coverage, the summary's size limit, JSON escaping
         "tests/test_report.mojo",
         # the command line end to end: the summary golden, check-run files,
-        # result JSON, proposed ratchet, gate == report, every exit code
+        # result JSON, proposed ratchet, gate == report, the annotation cap
+        # and the full annotations file, every exit code
         "tests/test_cli.mojo",
     ],
     test_data = {
@@ -62,7 +70,9 @@ mojo_library(
             "tests/fixtures/e2e/diff.txt",
             "tests/fixtures/e2e/mutants.tsv",
             "tests/fixtures/e2e/ratchet.tsv",
+            "tests/fixtures/e2e/root/src/alpha/__init__.mojo",
             "tests/fixtures/e2e/root/src/alpha/a.mojo",
+            "tests/fixtures/e2e/root/src/alpha/z.mojo",
             "tests/fixtures/e2e/root/src/beta/c.mojo",
             "tests/fixtures/e2e/summary.md",
         ],

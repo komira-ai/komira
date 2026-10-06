@@ -19,16 +19,22 @@ comptime BRANCH_FLOOR_MISSING = "BranchFloorMissing"
 comptime MUTANT_SURVIVED = "MutantSurvived"
 comptime EXEMPTION_WITHOUT_REASON = "ExemptionWithoutReason"
 comptime STALE_EXEMPTION = "StaleExemption"
+comptime UNMEASURED_FILE = "UnmeasuredFile"
 
 comptime NO_FLOOR: Int = -1
 
 
 struct PackageStats(Copyable, Movable):
     """What was measured in one package, after test sources were set aside
-    and exemptions applied, and the package's ratchet row."""
+    and exemptions applied, and the package's ratchet row. `files` counts
+    every file in the numbers, the files no report gave a record included;
+    `unmeasured_files` those of them that raised `UnmeasuredFile`; `has_records` is whether a report had a line record (or an
+    exempted line) in the package at all."""
 
     var package: String
     var files: Int
+    var unmeasured_files: Int
+    var has_records: Bool
     var line_found: Int
     var line_hit: Int
     var branch_found: Int
@@ -46,6 +52,8 @@ struct PackageStats(Copyable, Movable):
     def __init__(out self, package: String):
         self.package = package
         self.files = 0
+        self.unmeasured_files = 0
+        self.has_records = False
         self.line_found = 0
         self.line_hit = 0
         self.branch_found = 0
@@ -79,7 +87,9 @@ struct Finding(Copyable, Movable):
 
     `metric` is `line`, `branch` or empty; `measured` and `bound` are basis
     points (the target or the floor) or -1 when they do not apply; `path`
-    and `line` place the finding in a file, or are empty and 0."""
+    and `line` place the finding in a file (line 0: the whole file), or are
+    empty and 0; `count` is the number of lines an `UnmeasuredFile` counts
+    uncovered, -1 for every other finding."""
 
     var kind: String
     var package: String
@@ -89,6 +99,7 @@ struct Finding(Copyable, Movable):
     var path: String
     var line: Int
     var message: String
+    var count: Int
 
     def __init__(
         out self,
@@ -100,6 +111,7 @@ struct Finding(Copyable, Movable):
         path: String,
         line: Int,
         message: String,
+        count: Int = -1,
     ):
         self.kind = kind
         self.package = package
@@ -109,6 +121,7 @@ struct Finding(Copyable, Movable):
         self.path = path
         self.line = line
         self.message = message
+        self.count = count
 
 
 def valid_mode(mode: String) -> Bool:
