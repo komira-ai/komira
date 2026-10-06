@@ -68,6 +68,7 @@ from komira_objectstore.cas_manifest import (
     RetryPolicy,
     chunk_key,
     log_start_key,
+    tombstone_key,
 )
 from komira_objectstore.path import Path
 from komira_objectstore.shared_in_memory_conditional_store import (
@@ -537,6 +538,57 @@ def test_parent_compaction_resumes_after_failed_advance() raises:
     print("[test_parent_compaction_resumes_after_failed_advance] PASS")
 
 
+def test_parent_compaction_failed_tombstone_then_resume() raises:
+    """Step 5's advance lands, then the tombstone write for chunk 1 fails:
+    the error is raised (not taken for an already-reaped chunk), and a re-run
+    through the resume path marks the rest and the parent is reclaimed."""
+    print("[test_parent_compaction_failed_tombstone_then_resume] starting...")
+    var inner = _Inner()
+    persist_create_if_absent[_FaultStore](
+        _FaultStore(inner.clone()),
+        String(_CLUSTER),
+        String(_TOPIC),
+        PartitionMap.auto_seed(),
+    )
+    _produce_chunks(inner, Int64(0), 3)
+    var segs = _seg_keys(inner, Int64(0), 3)
+    var split = split_topic[_FaultStore](
+        _FaultStore(inner.clone()),
+        String(_CLUSTER),
+        String(_TOPIC),
+        _manifest(inner, Int64(0)),
+        0,
+    )
+    var a = split.child_a_pid
+    var b = split.child_b_pid
+
+    var tk = tombstone_key(_prefix(Int64(0)), Int64(1)).raw()
+    _arm(inner, _FAIL_PUT, tk)
+    var batches = Slab[RecordBatch]()
+    batches.append(_batch(Int64(0), 30))
+    var raised = False
+    try:
+        _ = _compact_gen(inner, a, b, batches^)
+    except e:
+        raised = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised, "the failed tombstone write is raised")
+    var m = _manifest(inner, Int64(0))
+    assert_equal(m.read_log_start_seq(), Int64(3), "the advance had landed")
+    assert_equal(len(m.tombstone_seqs()), 1, "only chunk 0 was marked")
+    _disarm(inner, _FAIL_PUT, tk)
+
+    assert_true(
+        _compact_gen(inner, a, b, Slab[RecordBatch]()), "the re-run resumes"
+    )
+    assert_equal(len(m.tombstone_seqs()), 3, "all 3 parent chunks marked")
+    var r = _reap(inner, Int64(0), Int64(50_000) + _GRACE)
+    assert_equal(r.reaped_count, Int64(3), "the parent is reclaimed")
+    _assert_reclaimed(inner, Int64(0), segs, 3, "resumed after a failed mark")
+    _ = m^
+    print("[test_parent_compaction_failed_tombstone_then_resume] PASS")
+
+
 def test_parent_compaction_of_a_never_split_pid_raises() raises:
     print("[test_parent_compaction_of_a_never_split_pid_raises] starting...")
     var inner = _Inner()
@@ -621,7 +673,8 @@ def main() raises:
     test_parent_compaction_failed_advance_marks_nothing()
     test_parent_compaction_empty_parent_is_a_noop()
     test_parent_compaction_resumes_after_failed_advance()
+    test_parent_compaction_failed_tombstone_then_resume()
     test_parent_compaction_of_a_never_split_pid_raises()
     test_parent_with_a_reaped_prefix_is_retired()
     test_advance_retries_a_lost_cas_then_gives_up()
-    print("[OK] test_broker_reap_below_log_start_offline — 9 cases passed")
+    print("[OK] test_broker_reap_below_log_start_offline — 10 cases passed")

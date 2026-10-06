@@ -15,7 +15,9 @@
 #       True, and the chunk ends up reaped (stub reclaimed, marker spent).
 #   (2) The other reaper got further and already deleted the chunk: the
 #       rewrite reports absence, which `reap_chunk` already tolerated.
-#   (3) Something other than a stub replaced the chunk: the 412 is a real
+#   (3) The PUT loses its If-Match while the chunk is still there, and the
+#       chunk is gone by the time this reaper re-reads it: it carries on.
+#   (4) Something other than a stub replaced the chunk: the 412 is a real
 #       conflict and is raised.
 # Catches: a `reap_chunk` that raises on any 412 (case 1 red), or swallows
 # every 412 (case 3 red).
@@ -64,6 +66,11 @@ comptime _GRACE_MS = Int64(1000)
 comptime _STUB_BEFORE_PUT = "__hook__/stub_before_put/"
 comptime _DELETE_BEFORE_PUT = "__hook__/delete_before_put/"
 comptime _TOUCH_BEFORE_PUT = "__hook__/touch_before_put/"
+# A non-stub rewrite lands before the PUT (so the PUT loses its If-Match),
+# and the chunk is deleted just before the NEXT GET of it: after the
+# manifest's absence probe (a HEAD) saw it present, before the reaper re-read.
+comptime _TOUCH_THEN_GONE = "__hook__/touch_then_gone/"
+comptime _GONE_BEFORE_GET = "__hook__/gone_before_get/"
 
 
 def _has(store: _Inner, key: String) -> Bool:
@@ -113,6 +120,9 @@ struct _RaceStore(
         if _take(self._inner, _TOUCH_BEFORE_PUT, key):
             # A non-stub rewrite: same bytes, new etag.
             _ = self._inner.put(path, self._inner.get(path))
+        if _take(self._inner, _TOUCH_THEN_GONE, key):
+            _ = self._inner.put(path, self._inner.get(path))
+            _arm(self._inner, _GONE_BEFORE_GET, key)
 
     def head(self, path: Path) raises -> ObjectMeta:
         return self._inner.head(path)
@@ -129,6 +139,8 @@ struct _RaceStore(
         return self._inner.get_range(path, start, length)
 
     def get(self, path: Path) raises -> List[UInt8]:
+        if _take(self._inner, _GONE_BEFORE_GET, path.raw()):
+            self._inner.delete(path)
         return self._inner.get(path)
 
     def conditional_put(
@@ -232,6 +244,33 @@ def test_second_reaper_finds_the_chunk_gone() raises:
     print("[test_second_reaper_finds_the_chunk_gone] PASS")
 
 
+def test_second_reaper_loses_the_put_then_finds_the_chunk_gone() raises:
+    """The PUT loses its If-Match while the chunk is still there (so the
+    manifest reports a 412, not absence), and the other reaper deletes the
+    chunk before this one re-reads it: the reap carries on."""
+    print("[test_second_reaper_loses_the_put_then_finds_the_chunk_gone] starting...")
+    var inner = _Inner()
+    var lineage = _lineage(4)
+    var w = _writer(inner, lineage)
+    for i in range(3):
+        _ = w.publish(_summary(i, Int64(2)))
+    w.retire_at(Int64(0), Int64(0))
+    var ck = chunk_key(lineage, Int64(0)).raw()
+    _arm(inner, _TOUCH_THEN_GONE, ck)
+    assert_true(
+        w.reap_chunk(Int64(0), _GRACE_MS, _GRACE_MS),
+        "a 412 over a chunk that is then gone is reaped",
+    )
+    assert_false(_has(inner, _TOUCH_THEN_GONE + ck), "the 412 was staged")
+    assert_false(_has(inner, _GONE_BEFORE_GET + ck), "the delete was staged")
+    assert_false(_has(inner, ck), "the chunk stays gone")
+    assert_false(
+        _has(inner, tombstone_key(lineage, Int64(0)).raw()), "marker spent"
+    )
+    _ = w^
+    print("[test_second_reaper_loses_the_put_then_finds_the_chunk_gone] PASS")
+
+
 def test_a_non_stub_rewrite_is_a_real_conflict() raises:
     print("[test_a_non_stub_rewrite_is_a_real_conflict] starting...")
     var inner = _Inner()
@@ -261,5 +300,6 @@ def test_a_non_stub_rewrite_is_a_real_conflict() raises:
 def main() raises:
     test_second_reaper_loses_to_a_stub_and_carries_on()
     test_second_reaper_finds_the_chunk_gone()
+    test_second_reaper_loses_the_put_then_finds_the_chunk_gone()
     test_a_non_stub_rewrite_is_a_real_conflict()
-    print("[OK] test_search_reap_chunk_race_offline — 3 cases passed")
+    print("[OK] test_search_reap_chunk_race_offline — 4 cases passed")
