@@ -294,7 +294,7 @@ def test_farm_connected() raises:
         _one_stage(String(" name: \"b\"\n farm_connected: true\n farm_connected: true\n") + String(_BUILD_STEP)),
         String("field 'farm_connected' is set twice in stage 'b'"),
     )
-    # the job that holds a tailnet node must not hold a publishing token
+    # the job that holds a farm network node must not hold a publishing token
     _assert_refused(
         _one_stage(String(" name: \"p\"\n farm_connected: true\n") + _publish_step(String("gamma"), String(""))),
         String("line 2: stage 'p' is farm-connected and has PUBLISH step 'publish': a farm-connected stage may not publish"),
