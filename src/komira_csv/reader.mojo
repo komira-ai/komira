@@ -75,7 +75,7 @@ from .cell_parsers_simd import (
     fast_parse_iso_date32,
 )
 from .input_limits import check_csv_cell_budget, check_csv_column_count
-from .record_shape import check_csv_record_shape
+from .record_shape import check_csv_record_shape, skip_leading_blank_lines
 from .null_detection import is_null_cell
 from .quote_styles import QuoteStyle, Rfc4180, Excel, Posix
 from .typed_column_builders import dispatch_typed_builder
@@ -195,6 +195,8 @@ def read_csv_bytes_to_batch[
     # `ScannedCells.enforce_max_row_bytes` for why the check lives here and
     # not in the scanner's per-byte loop.
     cells.enforce_max_row_bytes(options.max_row_bytes)
+    # Blank lines before the header / first record (`record_shape`).
+    skip_leading_blank_lines(cells)
 
     var total_rows = cells.num_rows()
     if total_rows == 0:
@@ -427,6 +429,8 @@ def read_csv_bytes_to_schema[
     # `cell_to_string` below then copies it. ONE pass over the scanned row
     # starts, before the header names are built.
     cells.enforce_max_row_bytes(options.max_row_bytes)
+    # Blank lines before the header / first record (`record_shape`).
+    skip_leading_blank_lines(cells)
     var total_rows = cells.num_rows()
     if total_rows == 0:
         return sb_out.build()

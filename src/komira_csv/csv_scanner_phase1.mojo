@@ -362,6 +362,11 @@ def scan_csv_phase1[
                             cell_start = pos
                             continue
                     else:
+                        # The closing quote was the last byte: the record
+                        # ends here. Close the row so the end-of-input
+                        # flush does not append a phantom empty field.
+                        rows.append(cur_row^)
+                        cur_row = Row()
                         cell_start = pos
                         continue
                 pos = pos + 1
@@ -690,6 +695,11 @@ def scan_csv_phase2_movemask[
                             cell_start = pos
                             continue
                     else:
+                        # The closing quote was the last byte: the record
+                        # ends here. Close the row so the end-of-input
+                        # flush does not append a phantom empty field.
+                        rows.append(cur_row^)
+                        cur_row = Row()
                         cell_start = pos
                         continue
                 pos = pos + 1
@@ -1217,6 +1227,11 @@ def scan_csv_phase3_pclmulqdq[
                             cell_start = pos
                             continue
                     else:
+                        # The closing quote was the last byte: the record
+                        # ends here. Close the row so the end-of-input
+                        # flush does not append a phantom empty field.
+                        rows.append(cur_row^)
+                        cur_row = Row()
                         cell_start = pos
                         continue
                 pos = pos + 1
@@ -1475,6 +1490,10 @@ def scan_csv_phase1_into_cells[
                         pos = pos + 1
                         continue
                     else:
+                        # The closing quote was the last byte: the record
+                        # ends here. Close the row so the end-of-input
+                        # flush does not append a phantom empty field.
+                        cells.row_starts.append(len(cells.cell_starts))
                         cell_start = pos
                         continue
                 pos = pos + 1
@@ -1700,6 +1719,10 @@ def scan_csv_phase2_movemask_into_cells[
                         pos = pos + 1
                         continue
                     else:
+                        # The closing quote was the last byte: the record
+                        # ends here. Close the row so the end-of-input
+                        # flush does not append a phantom empty field.
+                        cells.row_starts.append(len(cells.cell_starts))
                         cell_start = pos
                         continue
                 pos = pos + 1
@@ -2007,6 +2030,11 @@ def scan_csv_phase2_movemask_projected[
                         pos = pos + 1
                         continue
                     else:
+                        # The closing quote was the last byte: the record
+                        # ends here. Close the row so the end-of-input
+                        # flush does not append a phantom empty field.
+                        cells.row_starts.append(len(cells.cell_starts))
+                        col_idx = 0
                         cell_start = pos
                         continue
                 pos = pos + 1
@@ -2321,6 +2349,10 @@ def scan_csv_phase3_pclmulqdq_into_cells[
                         pos = pos + 1
                         continue
                     else:
+                        # The closing quote was the last byte: the record
+                        # ends here. Close the row so the end-of-input
+                        # flush does not append a phantom empty field.
+                        cells.row_starts.append(len(cells.cell_starts))
                         cell_start = pos
                         continue
                 pos = pos + 1

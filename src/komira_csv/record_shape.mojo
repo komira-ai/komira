@@ -22,6 +22,12 @@
 # but not as a record. In a one-column file a blank line is a record holding
 # one empty field (a NULL), as before.
 #
+# Blank lines BEFORE the header (or before the first record of a headerless
+# file) are skipped whatever the column count: a header cannot be blank, and
+# the field count is not known yet. Every reader drops them with
+# `skip_leading_blank_lines` right after the scan; they too count as lines in
+# a refusal but not as records.
+#
 # All three are refused, under every dialect. Neither Excel nor Posix ever
 # tolerated them by design: no option or dialect flag selected the behaviour,
 # no test pinned it, and what they produced was wrong data (Excel split the
@@ -43,6 +49,14 @@
 from .csv_scanner_phase1 import scan_csv_phase1_into_cells
 from .quote_styles import QuoteStyle
 from .scanned_cells import ScannedCells, CELL_FLAG_WAS_QUOTED
+
+
+def skip_leading_blank_lines(mut cells: ScannedCells):
+    """Drop blank lines before the header / first record (see the module
+    header). Call right after the scan, before reading row 0. Only the scan of
+    the START of the input may call this (a parallel worker other than the
+    first must not: its first rows are not at the start of the file)."""
+    _ = cells.drop_leading_blank_rows()
 
 
 def check_csv_record_shape[
@@ -162,10 +176,10 @@ def _record_location[
             input[0:chunk_lo], delimiter, quote
         )
         before = prefix.num_rows()
-        if skip_blank:
-            for pr in range(prefix.num_rows()):
-                if prefix.row_is_blank(pr):
-                    before = before - 1
+        var lead = prefix.leading_blank_rows()
+        for pr in range(prefix.num_rows()):
+            if prefix.row_is_blank(pr) and (skip_blank or pr < lead):
+                before = before - 1
     if skip_blank:
         for pr in range(r):
             if cells.row_is_blank(pr):

@@ -36,6 +36,7 @@ from komira_async.runtime.runtime import (
 from komira_core.arrow.schema import RecordBatch
 
 from komira_csv import CsvReadOptions, Rfc4180
+from komira_csv.csv_chunk_split import compute_csv_quote_safe_row_ranges
 from komira_csv.parallel_reader import (
     read_csv_bytes_to_batch_parallel,
     read_csv_bytes_to_batch_parallel_with_dispatcher,
@@ -161,10 +162,10 @@ def test_bad_quote_worker0_slice() raises:
     print("  test_bad_quote_worker0_slice PASS")
 
 
-def _blank_fixture(var tail: String) -> List[UInt8]:
-    """`_N_ROWS` good rows with blank lines (LF and CRLF) after the header,
-    every 10000 rows and at the end, then `tail`."""
-    var s = String("a,b,c\n\n")
+def _blank_fixture(var tail: String, head: String = "") -> List[UInt8]:
+    """`head`, then the `a,b,c` header and `_N_ROWS` good rows with blank
+    lines (LF and CRLF) after the header and every 10000 rows, then `tail`."""
+    var s = head + String("a,b,c\n\n")
     for i in range(_N_ROWS):
         if i > 0 and i % 10000 == 0:
             s += "\n\r\n\n"
@@ -231,6 +232,93 @@ def test_refusal_after_blank_lines_late_slice() raises:
     print("  test_refusal_after_blank_lines_late_slice PASS")
 
 
+def _check_both_arms(data: List[UInt8], label: String) raises:
+    var rb = read_csv_bytes_to_batch_parallel[Rfc4180](
+        Span(data), CsvReadOptions(), 4
+    )
+    assert_equal(rb.schema.field_name(0), String("a"), label)
+    _check_rows(rb, label + " serial arm")
+    var runtime = PerCoreAsyncRuntime[NoopSink](
+        num_workers=4,
+        sink_factory=_noop_sink_factory,
+        backend=BACKEND_MOCK,
+        placement=PLACEMENT_FIXED,
+    )
+    ref disp = runtime.dispatcher()
+    var ct = CancellationToken.new()
+    var rb2 = read_csv_bytes_to_batch_parallel_with_dispatcher[
+        Rfc4180, origin_of(disp)
+    ](Span(data), CsvReadOptions(), Pointer(to=disp), ct.clone(), 4)
+    _ = ct^
+    assert_equal(rb2.schema.field_name(0), String("a"), label)
+    _check_rows(rb2, label + " dispatcher arm")
+
+
+def test_trailing_crlf_blank_line() raises:
+    _check_both_arms(_blank_fixture(String("\r\n")), String("trailing CRLF"))
+    print("  test_trailing_crlf_blank_line PASS")
+
+
+def test_leading_blank_lines_before_header() raises:
+    """Blank lines before the header are skipped in worker 0 and in the
+    driver's header scan; a later refusal still counts them as lines."""
+    _check_both_arms(
+        _blank_fixture(String(""), String("\n\r\n")), String("leading")
+    )
+    var data = _blank_fixture(String("\n\nshort\n"), String("\r\n\n"))
+    var bad_offset = len(data) - 6
+    var rec = _N_ROWS + 2
+    var line = rec + 2 + 1 + 5 * 3 + 2
+    var fx = _Fixture(data^, bad_offset)
+    var want = (
+        String("record ")
+        + String(rec)
+        + " (line "
+        + String(line)
+        + ", byte offset "
+        + String(bad_offset)
+        + ") has 1 field but the header has 3"
+    )
+    _assert_has(_serial_arm_refusal(fx), want)
+    _assert_has(_dispatcher_arm_refusal(fx), want)
+    print("  test_leading_blank_lines_before_header PASS")
+
+
+def test_blank_line_on_split_boundary() raises:
+    """Insert a blank line exactly at a split the partitioner computed, check
+    the partitioner (re-run on the new bytes) still puts a boundary at or just
+    after it, and that both arms read every row once."""
+    var plain = _blank_fixture(String(""))
+    var los = List[Int]()
+    var his = List[Int]()
+    compute_csv_quote_safe_row_ranges[Rfc4180](
+        Span(plain), 0, 4, UInt8(ord(",")), UInt8(ord('"')), los, his
+    )
+    assert_true(len(los) >= 3, "the fixture must split into 3+ ranges")
+    for w in range(1, len(los)):
+        var at = los[w]
+        var data = List[UInt8]()
+        for i in range(len(plain)):
+            if i == at:
+                data.append(UInt8(0x0A))
+            data.append(plain[i])
+        var los2 = List[Int]()
+        var his2 = List[Int]()
+        compute_csv_quote_safe_row_ranges[Rfc4180](
+            Span(data), 0, 4, UInt8(ord(",")), UInt8(ord('"')), los2, his2
+        )
+        var on_boundary = False
+        for x in los2:
+            if x == at or x == at + 1:
+                on_boundary = True
+        assert_true(
+            on_boundary,
+            "a split must start at the inserted blank line or just after it",
+        )
+        _check_both_arms(data, String("blank at split ") + String(w))
+    print("  test_blank_line_on_split_boundary PASS")
+
+
 def main() raises:
     print("test_csv_record_shape_parallel.mojo")
     test_extra_field_late_slice()
@@ -240,4 +328,7 @@ def main() raises:
     test_bad_quote_worker0_slice()
     test_blank_lines_skipped_in_every_slice()
     test_refusal_after_blank_lines_late_slice()
-    print("test_csv_record_shape_parallel: 7/7 PASS")
+    test_trailing_crlf_blank_line()
+    test_leading_blank_lines_before_header()
+    test_blank_line_on_split_boundary()
+    print("test_csv_record_shape_parallel: 10/10 PASS")

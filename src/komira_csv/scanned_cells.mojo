@@ -159,6 +159,41 @@ struct ScannedCells(Movable, Deinitable):
             and (self.cell_flags[lo] & CELL_FLAG_WAS_QUOTED) == 0
         )
 
+    def leading_blank_rows(self) -> Int:
+        """How many rows at the start are blank (`row_is_blank`)."""
+        var k = 0
+        var n = self.num_rows()
+        while k < n and self.row_is_blank(k):
+            k = k + 1
+        return k
+
+    def drop_leading_blank_rows(mut self) -> Int:
+        """Remove the blank rows before the first non-blank row (blank lines
+        before a header or before the first record) and return how many.
+        O(cells) only when there is one; a recorded quote violation's row
+        index is shifted to match."""
+        var k = self.leading_blank_rows()
+        if k == 0:
+            return 0
+        var n = self.num_rows()
+        var c0 = self.row_starts[k]  # == k: a blank row holds one cell
+        var total = len(self.cell_starts)
+        for i in range(c0, total):
+            self.cell_starts[i - c0] = self.cell_starts[i]
+            self.cell_ends[i - c0] = self.cell_ends[i]
+            self.cell_flags[i - c0] = self.cell_flags[i]
+        for _ in range(c0):
+            _ = self.cell_starts.pop()
+            _ = self.cell_ends.pop()
+            _ = self.cell_flags.pop()
+        for j in range(n - k + 1):
+            self.row_starts[j] = self.row_starts[j + k] - c0
+        for _ in range(k):
+            _ = self.row_starts.pop()
+        if self.quote_violation_at >= 0:
+            self.quote_violation_row = self.quote_violation_row - k
+        return k
+
     def drop_blank_rows(mut self, from_row: Int):
         """Remove every blank row (`row_is_blank`) at index >= `from_row`,
         compacting the cell arrays in place. O(cells after the first blank
