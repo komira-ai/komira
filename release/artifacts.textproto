@@ -178,24 +178,6 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_protobuf"
-  build_system: "buck2"
-  args: "//src/komira_protobuf:komira_protobuf_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_protobuf:komira_protobuf_conda"
-}
-
-artifacts {
-  name: "komira_xml"
-  build_system: "buck2"
-  args: "//src/komira_xml:komira_xml_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_xml:komira_xml_conda"
-}
-
-artifacts {
   name: "komira_retry"
   build_system: "buck2"
   args: "//src/komira_retry:komira_retry_conda[release]"
@@ -241,15 +223,6 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_proto_codec"
-  build_system: "buck2"
-  args: "//src/komira_proto_codec:komira_proto_codec_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_proto_codec:komira_proto_codec_conda"
-}
-
-artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -260,10 +233,6 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_json/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_protobuf/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_xml/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_retry/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_datetime/manifest.json"
@@ -273,8 +242,6 @@ artifacts {
   args: "{release_dir}/komira_hash/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_atomic_alias/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_proto_codec/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"
