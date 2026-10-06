@@ -18,15 +18,20 @@
 #     write_row_output_jsonl); with a nullable column before the NOT NULL
 #     one, NaN in the nullable one is allowed and NaN in the NOT NULL one
 #     is refused; the row output writer numbers rows across blocks and
-#     refuses FLOAT32 too. Catches a writer that emits `null` into a NOT
+#     refuses FLOAT32 too; the row output writer refuses NaN in a NOT
+#     NULL second field behind a nullable first one; the fused range
+#     writer does not refuse a NaN in a row before row_start, which it
+#     never writes. Catches a writer that emits `null` into a NOT
 #     NULL column (the defect), one path that lacks the check, a check
 #     that reads column 0's nullability for every column, and a row
-#     number taken from the block instead of the output.
+#     number taken from the block instead of the output, and a range
+#     check that scans from row 0.
 #   * test_writers_nullable_unchanged -- in a nullable column NaN/+-Inf and
 #     a NULL cell are still written as `null` by every writer, and a NOT
 #     NULL column of finite values is written as before; with a NOT NULL
 #     column before a nullable one, NaN/+Inf in the nullable one is written
-#     as null. Catches a check that refuses too much, or reads column 0's
+#     as null, by the columnar writers and the row output writer.
+#     Catches a check that refuses too much, or reads column 0's
 #     nullability for the nullable column.
 #   * test_reader_refuses_null_in_not_null -- `null` in a NOT NULL FLOAT64,
 #     INT64 or STRING field, and an object without the field's key, raise
@@ -171,6 +176,32 @@ def _row_output(values: List[Float64], nullable: Bool) raises -> RowOutput:
     return _row_output_blocks(values, List[Float64](), DT_F64, nullable)
 
 
+def _row_output_pair(
+    a: List[Float64], a_nullable: Bool, b: List[Float64], b_nullable: Bool
+) raises -> RowOutput:
+    """FLOAT64 columns `a` (offset 0) and `b` (offset 8) as a RowOutput of
+    one block, stride 16, no validity; each field has its own nullability,
+    so a check that reads the wrong column's flag shows."""
+    var blk = RowBlock.with_capacity(len(a), 0, 16)
+    for i in range(len(a)):
+        blk.write_fixed[DType.float64](i, 0, a[i])
+        blk.write_fixed[DType.float64](i, 8, b[i])
+    blk.set_n_rows(len(a))
+    var blocks = Slab[RowBlock]()
+    blocks.append(blk^)
+    var offsets = List[Int]()
+    offsets.append(0)
+    offsets.append(8)
+    var tags = List[UInt8]()
+    tags.append(DT_F64)
+    tags.append(DT_F64)
+    var layout = RowOutputLayout(offsets^, tags^, 0, False)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.FLOAT64, a_nullable))
+    sb.add_field(Field("b", ArrowType.FLOAT64, b_nullable))
+    return RowOutput(blocks^, layout^, sb.build())
+
+
 def _f64_pair_batch(
     a: List[Float64], a_nullable: Bool, b: List[Float64], b_nullable: Bool
 ) raises -> RecordBatch:
@@ -296,6 +327,13 @@ def test_writers_refuse_nonfinite_in_not_null() raises:
     except e:
         msg = String(e)
     assert_equal(msg, _want_writer("f", 2, "NaN"), "fused_range [1, 3)")
+    # A NaN before the range is never written, so it is not refused: the
+    # scan covers [row_start, row_end), not [0, row_end).
+    buf.clear()
+    write_batch_jsonl_fused_range(buf, _f64_batch(_l(nan64, 1.5, 2.5), False), 1, 3)
+    assert_equal(
+        _text(buf), String('{"f":1.5}\n{"f":2.5}\n'), "fused_range [1, 3) skips row 0"
+    )
     # Row output.
     assert_equal(
         _row_writer_error(_row_output(_l(0.5, 0.25, -inf64), False)),
@@ -322,6 +360,14 @@ def test_writers_refuse_nonfinite_in_not_null() raises:
     _assert_all(
         _writer_errors(_f64_pair_batch(_l(nan64, 1.0), True, _l(1.0, nan64), False)),
         _want_writer("b", 1, "NaN"), "nullable a, NOT NULL b",
+    )
+    # The same through the row output writer: nullable `a`, NOT NULL `b`
+    # holding NaN in row 1. A check reading field 0's flag writes null.
+    assert_equal(
+        _row_writer_error(
+            _row_output_pair(_l(nan64, 1.0), True, _l(1.0, nan64), False)
+        ),
+        _want_writer("b", 1, "NaN"), "row output, nullable a, NOT NULL b",
     )
 
 
@@ -365,6 +411,17 @@ def test_writers_nullable_unchanged() raises:
     buf.clear()
     write_batch_jsonl(buf, pair)
     assert_equal(_text(buf), want_pair, "pair encode")
+    # Row output mirror: NOT NULL `a` (finite) first, nullable `b` holding
+    # NaN second is written as null; a check reading field 0's flag for
+    # field 1 refuses it.
+    buf.clear()
+    write_row_output_jsonl(
+        buf, _row_output_pair(_l(1.5, 2.5), False, _l(0.5, nan64), True)
+    )
+    assert_equal(
+        _text(buf), String('{"a":1.5,"b":0.5}\n{"a":2.5,"b":null}\n'),
+        "row output, NOT NULL a, nullable b",
+    )
     # Row output: nullable FLOAT32 NaN over two blocks is written as null.
     buf.clear()
     write_row_output_jsonl(

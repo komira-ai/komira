@@ -10,7 +10,9 @@
 #   * test_exponent_saturates -- an exponent of 2^64 (1e18446744073709551616)
 #     reads as +Inf and -1e-18446744073709551616 as -0.0. Catches an
 #     exponent accumulated in a wrapping Int (2^64 wraps to 0 and the value
-#     reads as 1.0).
+#     reads as 1.0). 1e30800 -> +Inf and 1(19 zeros)e-3300 -> +0.0 pin the
+#     constant margin of the cap: a margin under about 325 holds those
+#     exponents inside the double range and reads a finite value.
 #   * test_huge_exponent_bounded -- 1e999999999, -1e999999999 and
 #     1e-999999999 read as +Inf, -Inf and +0.0. The scale comes from a
 #     table lookup, not from one multiplication per unit of exponent, so
@@ -112,6 +114,14 @@ def test_exponent_saturates() raises:
     # Leading zeros in the exponent are not magnitude: 1e(99 zeros)1 is 10.
     _check("1e" + _zeros(99) + "1", 0x4024000000000000)
     _check("1e-" + _zeros(99) + "1", 0x3FB999999999999A)
+    # The constant part of the cap: the exponent is held at the input
+    # length plus a margin, and that margin must carry the value past
+    # +-1000 (beyond DBL_MAX and below half the smallest subnormal). With
+    # a margin of 300 both exponents are held inside the double range and
+    # read as finite values (1e30800 as 1e308, 1(19 zeros)e-3300 as a
+    # subnormal); they must read as +Inf and +0.0.
+    _check("1e30800", POS_INF)
+    _check("1" + _zeros(19) + "e-3300", POS_ZERO)
 
 
 def test_huge_exponent_bounded() raises:
