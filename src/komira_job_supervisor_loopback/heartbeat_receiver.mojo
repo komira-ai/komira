@@ -49,13 +49,29 @@
 # pid that was never alive. The file may be half written when the probe
 # looks, so it waits up to `pid_wait_ms` for a complete line.
 #
-# FIRST-BEAT PROBE (optional): with `pid_file` set and `first_beat_wait_ms`
-# > 0, the receiver holds its reply to the FIRST beat for that long, watching
-# for the pid file. The sender is blocked on that reply, so if the first beat
-# is the one the supervisor sends BEFORE it spawns the job, the job cannot
-# exist yet and the file never appears; if the file appears, the first beat
-# came from a supervisor that had already spawned the job (it skipped the
-# initial beat), which is a violation.
+# FIRST-BEAT PROBE (optional): with `first_beat_gate` set, the receiver
+# decides "did the job exist before the first beat was answered" from an
+# ORDER of events, not from a wait. When beat 1 arrives, and before it is
+# answered, the receiver (1) asks the kernel whether THIS process has any
+# child (`waitpid(-1, WNOHANG)` through komira_supervisor's `proc_reap`), then
+# (2) creates the file `first_beat_gate`, then (3) answers.
+#
+#   * The supervisor runs in this process, and its job is a posix_spawn child
+#     of it: the child is in the process table, parented here, by the time
+#     the spawn call returns. A supervisor that spawned before sending beat 1
+#     (it skipped the initial pre-spawn beat) therefore has a child at (1),
+#     however slow the job itself is to start: a violation.
+#   * A supervisor that sends beat 1 and awaits its reply before spawning
+#     cannot have a child at (1): the spawn happens after (3).
+#   * The job script waits for `first_beat_gate` before doing anything else
+#     (a loop that never runs when the gate is already there), so when the
+#     spawn came first the child cannot exit, and be reaped, before (1) looks.
+#     The test also has the job record whether the gate already existed when
+#     it started: the job-side record of the same order.
+#
+# `first_beat_children` keeps what (1) saw (CHILDREN_*). A child that had
+# already exited would be COLLECTED by the probe; that is recorded as a
+# violation too (the gate makes it unreachable from the loopback test).
 #
 # THREADING: the receiver is owned by the serve loop, touched only by the
 # serving thread while a duet runs, and read by the test after the join.
@@ -79,8 +95,9 @@ from komira_http_server.dispatch import RequestDispatcher
 from komira_proto_codec import decode_proto, encode_proto
 
 # Test-only reuse of komira_supervisor's existing kill(2) wrapper as a
-# liveness probe (signal 0); no foreign function is declared here.
-from komira_supervisor.proc_ffi import proc_kill
+# liveness probe (signal 0) and of its waitpid(2) wrapper as the first-beat
+# probe (pid -1, WNOHANG); no foreign function is declared here.
+from komira_supervisor.proc_ffi import proc_kill, proc_reap
 
 from komira_job_report_proto.job_report import (
     JobDirective,
@@ -103,6 +120,12 @@ comptime REPLY_REFUSED: Int = -1
 
 comptime BEAT_PATH = "/beat"
 
+# What the first-beat probe saw (module header).
+comptime CHILDREN_NOT_PROBED: Int = -1
+comptime CHILDREN_NONE: Int = 0
+comptime CHILDREN_RUNNING: Int = 1
+comptime CHILDREN_COLLECTED: Int = 2
+
 
 def receiver_state_name(state: Int) -> String:
     if state == RECEIVER_ASSIGNED:
@@ -118,6 +141,18 @@ def receiver_state_name(state: Int) -> String:
     if state == RECEIVER_CANCELLED:
         return String("CANCELLED")
     return String("UNKNOWN(") + String(state) + String(")")
+
+
+def children_name(children: Int) -> String:
+    if children == CHILDREN_NOT_PROBED:
+        return String("not probed")
+    if children == CHILDREN_NONE:
+        return String("no child")
+    if children == CHILDREN_RUNNING:
+        return String("a running child")
+    if children == CHILDREN_COLLECTED:
+        return String("an exited child (collected by the probe)")
+    return String("UNKNOWN(") + String(children) + String(")")
 
 
 def _parse_pid(text: String) raises -> Int:
@@ -161,7 +196,7 @@ struct HeartbeatReceiver(RequestDispatcher):
     var cancel_after_running_beats: Int
     var continue_directive: Int
     var pid_file: String
-    var first_beat_wait_ms: Int
+    var first_beat_gate: String
     var pid_wait_ms: Int
 
     # The run's state.
@@ -186,6 +221,10 @@ struct HeartbeatReceiver(RequestDispatcher):
     var probed_pid: Int
     var probed_alive: Bool
 
+    # The first-beat probe (see the module header).
+    var first_beat_children: Int
+    var gate_opened: Bool
+
     var violations: List[String]
 
     def __init__(
@@ -195,7 +234,7 @@ struct HeartbeatReceiver(RequestDispatcher):
         cancel_after_running_beats: Int = 0,
         continue_directive: Int = JobDirective.JOB_DIRECTIVE_CONTINUE,
         var pid_file: String = String(""),
-        first_beat_wait_ms: Int = 0,
+        var first_beat_gate: String = String(""),
         pid_wait_ms: Int = 2000,
     ):
         self.job_id = job_id^
@@ -203,7 +242,7 @@ struct HeartbeatReceiver(RequestDispatcher):
         self.cancel_after_running_beats = cancel_after_running_beats
         self.continue_directive = continue_directive
         self.pid_file = pid_file^
-        self.first_beat_wait_ms = first_beat_wait_ms
+        self.first_beat_gate = first_beat_gate^
         self.pid_wait_ms = pid_wait_ms
         self.state = RECEIVER_ASSIGNED
         self.history = List[Int]()
@@ -219,6 +258,8 @@ struct HeartbeatReceiver(RequestDispatcher):
         self.terminal_body_len = -1
         self.probed_pid = -1
         self.probed_alive = False
+        self.first_beat_children = CHILDREN_NOT_PROBED
+        self.gate_opened = False
         self.violations = List[String]()
 
     # ---- the state machine ----
@@ -263,29 +304,79 @@ struct HeartbeatReceiver(RequestDispatcher):
         )
 
     def _first_beat_probe(mut self, beat: Int):
-        """The first-beat probe (module header)."""
-        if self.pid_file.byte_length() == 0 or self.first_beat_wait_ms <= 0:
+        """The first-beat probe (module header): look for a child of this
+        process, THEN open the gate; the caller answers after both."""
+        if self.first_beat_gate.byte_length() == 0:
             return
-        var until = now_ns() + UInt64(
-            self.first_beat_wait_ms
-        ) * 1_000_000
-        while True:
-            if Path(self.pid_file).exists():
-                self._violation(
-                    beat,
-                    String("the first beat arrived after the job started")
-                    + String(" (its pid file exists)"),
-                )
-                return
-            if now_ns() >= until:
-                return
-            sleep(Float64(0.01))
+        var r = proc_reap(Int32(-1), nohang=True)
+        if r.collected:
+            self.first_beat_children = CHILDREN_COLLECTED
+        elif r.error:
+            # ECHILD: this process has no child at all.
+            self.first_beat_children = CHILDREN_NONE
+        else:
+            self.first_beat_children = CHILDREN_RUNNING
+        if self.first_beat_children != CHILDREN_NONE:
+            self._violation(
+                beat,
+                String("the first beat arrived after the job was spawned")
+                + String(" (this process had ")
+                + children_name(self.first_beat_children)
+                + String(" before the beat was answered)"),
+            )
+        try:
+            Path(self.first_beat_gate).write_text(String("answered\n"))
+            self.gate_opened = True
+        except e:
+            self._violation(
+                beat,
+                String("could not open the gate ")
+                + self.first_beat_gate
+                + String(": ")
+                + String(e),
+            )
+
+    def describe(self) -> String:
+        """Everything this receiver recorded, one item per line, for a
+        failing test to print."""
+        var s = String("receiver: state ") + receiver_state_name(self.state)
+        s += String("\n  history:")
+        for i in range(len(self.history)):
+            s += String(" ") + receiver_state_name(self.history[i])
+        s += String("\n  beats (phase/reply/bytes):")
+        for i in range(len(self.phases)):
+            s += String(" ") + String(self.phases[i]) + String("/")
+            if i < len(self.replies):
+                s += String(self.replies[i])
+            else:
+                s += String("-")
+            s += String("/") + String(self.body_lens[i])
+        s += String("\n  running_beats ") + String(self.running_beats)
+        s += String(", cancel_requested ") + String(self.cancel_requested)
+        s += String("\n  first beat: ") + children_name(
+            self.first_beat_children
+        )
+        s += String(", gate opened ") + String(self.gate_opened)
+        s += String("\n  pid probe: pid ") + String(self.probed_pid)
+        s += String(", alive ") + String(self.probed_alive)
+        if self.exit_code:
+            s += String("\n  exit code ") + String(self.exit_code.value())
+        if self.signal:
+            s += String("\n  signal ") + String(self.signal.value())
+        s += String("\n  stderr tail lines ") + String(len(self.stderr_tail))
+        s += String("\n  violations: ") + String(len(self.violations))
+        for v in self.violations:
+            s += String("\n    ") + v
+        return s^
 
     def receive(mut self, var body: List[UInt8]) -> Int:
         """Take one beat's body; return the directive number to answer with,
         or REPLY_REFUSED when the body does not decode."""
         var beat = len(self.phases) + 1
         var body_len = len(body)
+        if beat == 1:
+            # Before anything else, and before the answer (module header).
+            self._first_beat_probe(beat)
         var hb: JobHeartbeat
         try:
             hb = decode_proto[JobHeartbeat](body^)
@@ -299,8 +390,6 @@ struct HeartbeatReceiver(RequestDispatcher):
         var phase = hb.phase.value
         self.phases.append(phase)
         self.body_lens.append(body_len)
-        if beat == 1:
-            self._first_beat_probe(beat)
         if hb.job_id != self.job_id:
             self._violation(beat, String("job_id ") + hb.job_id)
         if hb.instance_name != self.instance_name:

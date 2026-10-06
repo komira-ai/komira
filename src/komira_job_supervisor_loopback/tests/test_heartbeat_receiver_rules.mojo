@@ -14,8 +14,10 @@
 #   another instance's name; a phase outside the enum, after a RUNNING beat
 #   and as the FIRST beat (named as a phase, not as an early terminal beat); a
 #   body that does not decode (answered REPLY_REFUSED); a pid probe whose file
-#   is missing or holds no complete line; a first beat whose pid file already
-#   exists (the first-beat probe); a request that is not `POST /beat`.
+#   is missing or holds no complete line; a first beat that arrives while this
+#   process already has a child (the first-beat probe; a real child is
+#   spawned for it, and the CONTROL without one records nothing and still
+#   opens the gate); a request that is not `POST /beat`.
 #
 # The legal paths are walked too: the cancel path (CANCEL answers the beat
 # AFTER the one that flagged it) and a job that exits while CANCELLING.
@@ -29,6 +31,8 @@ from std.pathlib import Path
 from komira_http_core.codec import HttpMethod
 from komira_proto_codec import encode_proto
 from komira_runtime_paths import test_tmpdir
+from komira_supervisor import ChildSpec, Supervisor
+from komira_supervisor.proc_ffi import proc_kill
 
 from komira_job_report_proto.job_report import (
     JobDirective,
@@ -38,6 +42,9 @@ from komira_job_report_proto.job_report import (
 )
 
 from komira_job_supervisor_loopback import (
+    CHILDREN_NONE,
+    CHILDREN_NOT_PROBED,
+    CHILDREN_RUNNING,
     HeartbeatReceiver,
     RECEIVER_CANCELLED,
     RECEIVER_CANCELLING,
@@ -270,22 +277,41 @@ def test_a_half_written_pid_file_is_a_violation() raises:
     print("  test_a_half_written_pid_file_is_a_violation: PASS")
 
 
-def test_the_first_beat_probe_fires_when_the_job_already_runs() raises:
-    var f = _scratch_file(String("rules_first.pid"), String("1\n"))
+def test_the_first_beat_probe_fires_when_a_child_already_exists() raises:
+    # CONTROL first, while this process has no child: nothing recorded, the
+    # gate is opened, and only the FIRST beat probes.
+    var g = _scratch_file(String("rules_gate_control"), String(""))
+    var r0 = HeartbeatReceiver(
+        String(_JOB), String(_INST), first_beat_gate=g
+    )
+    assert_equal(r0.first_beat_children, CHILDREN_NOT_PROBED, "not yet")
+    _ = r0.receive(_running())
+    assert_equal(len(r0.violations), 0, "CONTROL: no child, no violation")
+    assert_equal(r0.first_beat_children, CHILDREN_NONE, "CONTROL: no child")
+    assert_true(r0.gate_opened, "CONTROL: the gate was opened")
+    assert_true(Path(g).exists(), "CONTROL: the gate file exists")
+
+    # A live child of this process when beat 1 arrives: the shape of a
+    # supervisor that spawned before its first beat.
+    var f = _scratch_file(String("rules_gate_child"), String(""))
+    var sup = Supervisor()
+    var pid = sup.spawn(ChildSpec.shell(String("exec sleep 30")))
+    assert_true(pid > Int32(0), "spawned a child: " + String(pid))
     var r = HeartbeatReceiver(
-        String(_JOB), String(_INST), pid_file=f, first_beat_wait_ms=50
+        String(_JOB), String(_INST), first_beat_gate=f
     )
     _ = r.receive(_running())
     _ = r.receive(_running())
-    _one_violation(r, String("the first beat arrived after the job started"))
-    # CONTROL: no file, the probe waits and records nothing.
-    var g = _scratch_file(String("rules_first_absent.pid"), String(""))
-    var r2 = HeartbeatReceiver(
-        String(_JOB), String(_INST), pid_file=g, first_beat_wait_ms=50
+    var still_alive = proc_kill(pid, Int32(0)) == 0
+    _ = sup.terminate(1000)
+    sup.close()
+    _one_violation(
+        r, String("the first beat arrived after the job was spawned")
     )
-    _ = r2.receive(_running())
-    assert_equal(len(r2.violations), 0, "CONTROL: no file, no violation")
-    print("  test_the_first_beat_probe_fires_when_the_job_already_runs: PASS")
+    assert_equal(r.first_beat_children, CHILDREN_RUNNING, "a running child")
+    assert_true(still_alive, "the probe did not reap the running child")
+    assert_true(r.gate_opened, "the gate is opened even on a violation")
+    print("  test_the_first_beat_probe_fires_when_a_child_already_exists: PASS")
 
 
 def test_only_post_beat_is_admitted() raises:
@@ -319,6 +345,6 @@ def main() raises:
     test_running_with_failure_is_a_violation()
     test_a_first_beat_outside_the_enum_is_named_as_a_phase()
     test_a_half_written_pid_file_is_a_violation()
-    test_the_first_beat_probe_fires_when_the_job_already_runs()
+    test_the_first_beat_probe_fires_when_a_child_already_exists()
     test_only_post_beat_is_admitted()
     print("test_heartbeat_receiver_rules: ALL PASS")

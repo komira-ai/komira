@@ -12,13 +12,20 @@
 # machine (a beat after a terminal one, CANCELLED without a CANCEL, RUNNING
 # after a CANCEL, a FAILED beat without a JobFailure, a wrong job id...).
 #
-#   (a) COMPLETED: the job writes its pid file, then `sleep 3`. History
-#       ASSIGNED, RUNNING, COMPLETED; the run returned COMPLETED. The receiver
-#       holds its reply to the FIRST beat for 500 ms watching for the pid
-#       file: the supervisor is blocked on that reply, so the file can only
-#       appear if the job was already spawned, i.e. the supervisor skipped its
-#       initial pre-spawn beat (planted: delete that beat; the first-beat
-#       probe records a violation). At least 3 RUNNING beats: the pre-spawn
+#   (a) COMPLETED: the job waits for the receiver's first-beat gate, then
+#       `sleep 3`. History ASSIGNED, RUNNING, COMPLETED; the run returned
+#       COMPLETED. The first beat is proven to precede the spawn by an ORDER
+#       of events, with no wait in it (heartbeat_receiver.mojo, FIRST-BEAT
+#       PROBE): before answering beat 1 the receiver asks the kernel whether
+#       this process has a child, and only then creates the gate file. The
+#       job is a posix_spawn child of this process, in the process table
+#       from the moment the spawn returns, so a supervisor that spawned
+#       before beat 1 (planted: delete the initial pre-spawn beat) has a
+#       child when beat 1 arrives, on any worker however slow, and the probe
+#       records a violation; the job cannot exit before the probe looks, as
+#       it is held at the gate. The job also records whether the gate was
+#       already there when it started (it must be: the job-side record of
+#       the same order). At least 3 RUNNING beats: the pre-spawn
 #       one, the one right after spawn, and one after a full interval with the
 #       job still running (a loop that never beats again sends only 2). The
 #       wire carries no exit code for COMPLETED: the receiver derives exit 0
@@ -81,6 +88,7 @@ from komira_job_supervisor.heartbeat_auth import NoHeartbeatAuth
 
 from komira_job_supervisor_loopback import (
     BEAT_PATH,
+    CHILDREN_NONE,
     ClientLeg,
     DispatchServeLoop,
     HeartbeatReceiver,
@@ -90,6 +98,7 @@ from komira_job_supervisor_loopback import (
     RECEIVER_COMPLETED,
     RECEIVER_FAILED,
     RECEIVER_RUNNING,
+    children_name,
     receiver_state_name,
     serve_while,
 )
@@ -175,7 +184,21 @@ def _run(var receiver: HeartbeatReceiver, var script: String) raises -> _Outcome
     )
     var loop = DispatchServeLoop(server^, receiver^)
     var leg = _SupervisorLeg(url^, script^)
-    serve_while(loop, leg)
+    try:
+        serve_while(loop, leg)
+    except e:
+        # What each side recorded, so the failure can be read off the log.
+        print(
+            "  the duet failed: "
+            + String(e)
+            + "\n  run returned "
+            + String(leg.phase.wire_str())
+            + " after "
+            + String(leg.wall_ms)
+            + " ms\n  "
+            + loop.dispatcher.describe()
+        )
+        raise e^
     return _Outcome(loop^, leg.phase, leg.wall_ms)
 
 
@@ -218,6 +241,30 @@ def _pid_file(name: String) raises -> String:
     return f^
 
 
+def _gated_then(gate: String, order_file: String, then: String) -> String:
+    """A script whose first act records whether `gate` already exists
+    (`open` or `closed`) in `order_file`, then waits for `gate` (the loop
+    never runs when it already exists), then runs `then`. The wait is
+    bounded (1200 polls of 50 ms): if the gate never opens (beat 1 never
+    reached the receiver), the job appends `gate-timeout` to `order_file`
+    and exits 97, so the run ends and the case fails with the receiver's
+    state printed instead of hanging."""
+    return (
+        String("if [ -e '")
+        + gate
+        + String("' ]; then echo open > '")
+        + order_file
+        + String("'; else echo closed > '")
+        + order_file
+        + String("'; fi; i=0; while [ ! -e '")
+        + gate
+        + String("' ]; do i=$((i + 1)); if [ \"$i\" -gt 1200 ]; then echo gate-timeout >> '")
+        + order_file
+        + String("'; exit 97; fi; sleep 0.05; done; ")
+        + then
+    )
+
+
 def _writes_pid_then(pid_file: String, then: String) -> String:
     """A script that writes its pid and a newline to `pid_file`, then runs
     `then` (which `exec`s, so the pid stays the job's)."""
@@ -225,18 +272,37 @@ def _writes_pid_then(pid_file: String, then: String) -> String:
 
 
 def test_a_completed_lifecycle() raises:
-    var pid_file = _pid_file(String("job_a.pid"))
+    var gate = _pid_file(String("job_a.gate"))
+    var order = _pid_file(String("job_a.order"))
     var res = _run(
         HeartbeatReceiver(
-            String(_JOB_ID),
-            String(_INSTANCE),
-            pid_file=pid_file,
-            first_beat_wait_ms=500,
+            String(_JOB_ID), String(_INSTANCE), first_beat_gate=gate
         ),
-        _writes_pid_then(pid_file, String("exec sleep 3")),
+        _gated_then(gate, order, String("exec sleep 3")),
     )
     ref r = res.loop.dispatcher
+    try:
+        _check_a(r, res, order)
+    except e:
+        print("  test_a_completed_lifecycle: FAIL\n  " + r.describe())
+        raise e^
+    print("  test_a_completed_lifecycle: PASS (" + _history(r) + ")")
+
+
+def _check_a(r: HeartbeatReceiver, res: _Outcome, order: String) raises:
     _assert_no_violations(r)
+    assert_equal(
+        r.first_beat_children,
+        CHILDREN_NONE,
+        "no child when beat 1 arrived: "
+        + children_name(r.first_beat_children),
+    )
+    assert_true(r.gate_opened, "the receiver opened the gate at beat 1")
+    assert_equal(
+        Path(order).read_text(),
+        String("open\n"),
+        "the job started after the gate (beat 1's answer) was there",
+    )
     var want = List[Int]()
     want.append(RECEIVER_ASSIGNED)
     want.append(RECEIVER_RUNNING)
@@ -258,7 +324,6 @@ def test_a_completed_lifecycle() raises:
     # COMPLETED exit code): see the header.
     assert_equal(r.exit_code.value(), Int32(0), "exit 0 maps to COMPLETED")
     assert_true(not r.cancel_requested, "no cancel was requested")
-    print("  test_a_completed_lifecycle: PASS (" + _history(r) + ")")
 
 
 def test_b_cancel_stops_and_reaps_the_child() raises:
@@ -273,41 +338,50 @@ def test_b_cancel_stops_and_reaps_the_child() raises:
         _writes_pid_then(pid_file, String("exec sleep 30")),
     )
     ref r = res.loop.dispatcher
-    _assert_no_violations(r)
-    var want = List[Int]()
-    want.append(RECEIVER_ASSIGNED)
-    want.append(RECEIVER_RUNNING)
-    want.append(RECEIVER_CANCELLING)
-    want.append(RECEIVER_CANCELLED)
-    _assert_history(r, want)
-    assert_true(r.cancel_requested, "the receiver flagged cancel_requested")
-    assert_true(
-        res.phase == JobSupervisorPhase.cancelled(),
-        "run returned " + String(res.phase.wire_str()),
-    )
-    assert_equal(len(r.phases), 5, "beats: RUNNING x4, CANCELLED")
-    for i in range(4):
-        assert_equal(
-            r.phases[i], JobPhase.JOB_PHASE_RUNNING, "beat " + String(i + 1)
+    try:
+        _assert_no_violations(r)
+        var want = List[Int]()
+        want.append(RECEIVER_ASSIGNED)
+        want.append(RECEIVER_RUNNING)
+        want.append(RECEIVER_CANCELLING)
+        want.append(RECEIVER_CANCELLED)
+        _assert_history(r, want)
+        assert_true(r.cancel_requested, "the receiver flagged cancel_requested")
+        assert_true(
+            res.phase == JobSupervisorPhase.cancelled(),
+            "run returned " + String(res.phase.wire_str()),
         )
-    assert_equal(r.phases[4], JobPhase.JOB_PHASE_CANCELLED, "beat 5")
-    for i in range(3):
-        assert_equal(
-            r.replies[i],
-            JobDirective.JOB_DIRECTIVE_CONTINUE,
-            "reply " + String(i + 1),
+        assert_equal(len(r.phases), 5, "beats: RUNNING x4, CANCELLED")
+        for i in range(4):
+            assert_equal(
+                r.phases[i], JobPhase.JOB_PHASE_RUNNING, "beat " + String(i + 1)
+            )
+        assert_equal(r.phases[4], JobPhase.JOB_PHASE_CANCELLED, "beat 5")
+        for i in range(3):
+            assert_equal(
+                r.replies[i],
+                JobDirective.JOB_DIRECTIVE_CONTINUE,
+                "reply " + String(i + 1),
+            )
+        assert_equal(r.replies[3], JobDirective.JOB_DIRECTIVE_CANCEL, "reply 4")
+        assert_true(r.probed_pid > 0, "the job's pid was read when CANCEL was sent")
+        assert_true(r.probed_alive, "the job was alive when CANCEL was sent")
+        assert_true(
+            proc_kill(Int32(r.probed_pid), Int32(0)) != 0,
+            "the job (pid " + String(r.probed_pid) + ") is gone after the run",
         )
-    assert_equal(r.replies[3], JobDirective.JOB_DIRECTIVE_CANCEL, "reply 4")
-    assert_true(r.probed_pid > 0, "the job's pid was read when CANCEL was sent")
-    assert_true(r.probed_alive, "the job was alive when CANCEL was sent")
-    assert_true(
-        proc_kill(Int32(r.probed_pid), Int32(0)) != 0,
-        "the job (pid " + String(r.probed_pid) + ") is gone after the run",
-    )
-    assert_true(
-        res.wall_ms < 20000,
-        "the job was stopped, not waited out: " + String(res.wall_ms) + " ms",
-    )
+        assert_true(
+            res.wall_ms < 20000,
+            "the job was stopped, not waited out: "
+            + String(res.wall_ms)
+            + " ms",
+        )
+    except e:
+        print(
+            "  test_b_cancel_stops_and_reaps_the_child: FAIL\n  "
+            + r.describe()
+        )
+        raise e^
     print("  test_b_cancel_stops_and_reaps_the_child: PASS (" + _history(r) + ")")
 
 
@@ -324,51 +398,57 @@ def test_c_failed_with_a_long_stderr_tail() raises:
         HeartbeatReceiver(String(_JOB_ID), String(_INSTANCE)), script^
     )
     ref r = res.loop.dispatcher
-    _assert_no_violations(r)
-    var want = List[Int]()
-    want.append(RECEIVER_ASSIGNED)
-    want.append(RECEIVER_RUNNING)
-    want.append(RECEIVER_FAILED)
-    _assert_history(r, want)
-    assert_true(
-        res.phase == JobSupervisorPhase.failed(),
-        "run returned " + String(res.phase.wire_str()),
-    )
-    assert_true(Bool(r.exit_code), "exit code on the wire")
-    assert_equal(r.exit_code.value(), Int32(3), "exit code")
-    assert_true(_TAIL_LINES < _MAX_STDERR_LINES, "the line cap is not under test")
-    assert_true(not r.signal, "no signal")
+    try:
+        _assert_no_violations(r)
+        var want = List[Int]()
+        want.append(RECEIVER_ASSIGNED)
+        want.append(RECEIVER_RUNNING)
+        want.append(RECEIVER_FAILED)
+        _assert_history(r, want)
+        assert_true(
+            res.phase == JobSupervisorPhase.failed(),
+            "run returned " + String(res.phase.wire_str()),
+        )
+        assert_true(Bool(r.exit_code), "exit code on the wire")
+        assert_equal(r.exit_code.value(), Int32(3), "exit code")
+        assert_true(_TAIL_LINES < _MAX_STDERR_LINES, "the line cap is not under test")
+        assert_true(not r.signal, "no signal")
 
-    var expected = String("")
-    for i in range(_TAIL_LINES):
-        expected += _tail_line(i) + String("\n")
-    var got = String("")
-    for line in r.stderr_tail:
-        got += line + String("\n")
-    assert_true(
-        expected.byte_length() > 4096,
-        "the tail is longer than 4096 bytes: " + String(expected.byte_length()),
-    )
-    assert_equal(
-        got.byte_length(), expected.byte_length(), "stderr tail byte length"
-    )
-    assert_equal(len(r.stderr_tail), _TAIL_LINES, "stderr tail lines")
-    assert_true(got == expected, "stderr tail bytes equal")
-    assert_true(
-        r.terminal_body_len > REQ_BUF_BYTES,
-        "the FAILED beat ("
-        + String(r.terminal_body_len)
-        + " bytes) exceeds the server's first recv ("
-        + String(REQ_BUF_BYTES)
-        + " bytes), so it was reassembled across recvs",
-    )
-    print(
-        "  test_c_failed_with_a_long_stderr_tail: PASS ("
-        + String(got.byte_length())
-        + " tail bytes, a "
-        + String(r.terminal_body_len)
-        + "-byte beat)"
-    )
+        var expected = String("")
+        for i in range(_TAIL_LINES):
+            expected += _tail_line(i) + String("\n")
+        var got = String("")
+        for line in r.stderr_tail:
+            got += line + String("\n")
+        assert_true(
+            expected.byte_length() > 4096,
+            "the tail is longer than 4096 bytes: " + String(expected.byte_length()),
+        )
+        assert_equal(
+            got.byte_length(), expected.byte_length(), "stderr tail byte length"
+        )
+        assert_equal(len(r.stderr_tail), _TAIL_LINES, "stderr tail lines")
+        assert_true(got == expected, "stderr tail bytes equal")
+        assert_true(
+            r.terminal_body_len > REQ_BUF_BYTES,
+            "the FAILED beat ("
+            + String(r.terminal_body_len)
+            + " bytes) exceeds the server's first recv ("
+            + String(REQ_BUF_BYTES)
+            + " bytes), so it was reassembled across recvs",
+        )
+        print(
+            "  test_c_failed_with_a_long_stderr_tail: PASS ("
+            + String(got.byte_length())
+            + " tail bytes, a "
+            + String(r.terminal_body_len)
+            + "-byte beat)"
+        )
+    except e:
+        print(
+            "  test_c_failed_with_a_long_stderr_tail: FAIL\n  " + r.describe()
+        )
+        raise e^
 
 
 def test_control_an_unknown_directive_does_not_stop_the_job() raises:
@@ -379,18 +459,26 @@ def test_control_an_unknown_directive_does_not_stop_the_job() raises:
         String("sleep 3"),
     )
     ref r = res.loop.dispatcher
-    _assert_no_violations(r)
-    assert_true(
-        res.phase == JobSupervisorPhase.completed(),
-        "an unknown directive is not CANCEL: the job ran to COMPLETED, got "
-        + String(res.phase.wire_str()),
-    )
-    assert_equal(r.state, RECEIVER_COMPLETED, "final state")
-    assert_true(
-        r.running_beats >= 3, "beats were answered while the job ran"
-    )
-    for i in range(len(r.replies)):
-        assert_equal(r.replies[i], 7, "every reply is directive 7")
+    try:
+        _assert_no_violations(r)
+        assert_true(
+            res.phase == JobSupervisorPhase.completed(),
+            "an unknown directive is not CANCEL: the job ran to COMPLETED, got "
+            + String(res.phase.wire_str()),
+        )
+        assert_equal(r.state, RECEIVER_COMPLETED, "final state")
+        assert_true(
+            r.running_beats >= 3, "beats were answered while the job ran"
+        )
+        for i in range(len(r.replies)):
+            assert_equal(r.replies[i], 7, "every reply is directive 7")
+    except e:
+        print(
+            "  test_control_an_unknown_directive_does_not_stop_the_job: FAIL"
+            + "\n  "
+            + r.describe()
+        )
+        raise e^
     print("  test_control_an_unknown_directive_does_not_stop_the_job: PASS")
 
 

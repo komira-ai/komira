@@ -13,6 +13,10 @@ loop against a stateful heartbeat receiver served by komira_http_server, over
 
 from .heartbeat_receiver import (
     BEAT_PATH,
+    CHILDREN_COLLECTED,
+    CHILDREN_NONE,
+    CHILDREN_NOT_PROBED,
+    CHILDREN_RUNNING,
     HeartbeatReceiver,
     RECEIVER_ASSIGNED,
     RECEIVER_CANCELLED,
@@ -21,6 +25,7 @@ from .heartbeat_receiver import (
     RECEIVER_FAILED,
     RECEIVER_RUNNING,
     REPLY_REFUSED,
+    children_name,
     receiver_state_name,
 )
 from .duet import ClientLeg, DispatchServeLoop, serve_while
