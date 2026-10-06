@@ -1,0 +1,34 @@
+@fieldwise_init
+struct Square(Copyable):
+    var side: Int
+
+    def area(self) -> Int:
+        return self.side * self.side
+
+    def perimeter(self) -> Int:
+        return 4 * self.side
+
+
+# Not exported: its method is not counted.
+struct Circle:
+    def radius(self) -> Int:
+        return 1
+
+
+# A header over several lines: its closing line is at column 0.
+@fieldwise_init
+struct Box[
+    T: Copyable,
+](Movable):
+    var item: Int
+
+    def get(self) -> Int:
+        return self.item
+
+
+def area(s: Square) -> Int:
+    return s.area()
+
+
+def _private_helper():
+    pass

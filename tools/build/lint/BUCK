@@ -8,6 +8,10 @@ export_file(name = "lint.sh", visibility = ["PUBLIC"])
 
 export_file(name = "retired_names.sh", visibility = ["PUBLIC"])
 
+export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
+
+export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
+
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
 tar_member(
@@ -29,6 +33,6 @@ tar_member(
 # The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["lint.sh", "retired_names.sh"],
+    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
 )

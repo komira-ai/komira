@@ -1,0 +1,36 @@
+load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("//functional/test_weld:fixture.bzl", "TEST_WELD_FILES", "TEST_WELD_LEDGER", "TEST_WELD_ROOT", "TEST_WELD_WELDS")
+
+# Test 39 (test_weld), the half that must go red: one planted defect per
+# target, in the tree of functional/test_weld (whose `ok` holds it exactly).
+# run_tests.sh requires each to fail naming its finding. real/ does the same
+# over real mojo_library and mojo_test targets.
+[
+    test_weld(
+        name = name,
+        files = TEST_WELD_FILES,
+        known_untested = ledger or TEST_WELD_LEDGER,
+        root = root,
+        welds = TEST_WELD_WELDS,
+    )
+    for name, ledger, root in [
+        # test_dead.mojo has no ledger row. Its only mention is a comment in
+        # komira_a's test_srcs, which does not weld it.
+        ("unwelded", "ledger_unwelded.tsv", TEST_WELD_ROOT),
+        # komira_b has no ledger row.
+        ("untested", "ledger_untested.tsv", TEST_WELD_ROOT),
+        # A row for a package that welds a test: the ledger only shrinks.
+        ("shrink_package", "ledger_shrink_package.tsv", TEST_WELD_ROOT),
+        # A row for a test file that is welded.
+        ("shrink_file", "ledger_shrink_file.tsv", TEST_WELD_ROOT),
+        # A row for a test file welded only by komira_a's computed list: the
+        # evaluated list counts, entry by entry.
+        ("shrink_computed", "ledger_shrink_computed.tsv", TEST_WELD_ROOT),
+        # Rows for a package with no .mojo and for a file that does not exist.
+        ("nothing", "ledger_nothing.tsv", TEST_WELD_ROOT),
+        # A row with no reason.
+        ("malformed", "ledger_malformed.tsv", TEST_WELD_ROOT),
+        # No package under the root: the lint checks nothing, so it fails.
+        ("empty", None, "nosuch"),
+    ]
+]

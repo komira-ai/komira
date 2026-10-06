@@ -114,7 +114,7 @@ from komira_objectstore.cas_manifest import (
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_base_fold import BASE_SHARD_ID
 
-from .manifest_body import ManifestBody, MARKER_NONE, encode_manifest_body
+from .manifest_body import ManifestBody, encode_manifest_body
 from .partition_assignment import sublineage_prefix
 
 
@@ -207,7 +207,10 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         """A `CasManifestStore` bound to the LEGACY single-manifest prefix (the
         partition base prefix `<base_prefix>` itself — where the pre-migration
         producer + the legacy `ConsumeCore` read/write). This is the dense source
-        lineage the migrate establishes `_base` from."""
+        lineage the migrate establishes `_base` from. Not opted in to the
+        reaped-slot guard: the migration only reads, retires and advances the
+        legacy manifest, never appends to it (the producer's `BrokerCore`
+        handle, which appends, is opted in)."""
         return CasManifestStore[Self.Store](
             self._store.clone(),
             String(self._base_prefix),
@@ -219,12 +222,15 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         (`<base_prefix>/_lineage/_base`), backed by a clone of the shared store.
         Identical key shape to `SubLineageConsumeResolver._base_manifest` +
         `SegmentBaseFold._base_manifest` — the SAME `_base` the consume resolver
-        reads + the segment fold appends to."""
-        return CasManifestStore[Self.Store](
+        reads + the segment fold appends to. Opted in to the reaped-slot
+        guard (#486)."""
+        var m = CasManifestStore[Self.Store](
             self._store.clone(),
             sublineage_prefix(self._base_prefix, BASE_SHARD_ID),
             RetryPolicy.fast_test(),
         )
+        m.enable_reaped_slot_guard()
+        return m^
 
     # -------------------------------------------------------------------------
     # is_migrated — has this partition been flipped onto sub-lineage already?
@@ -420,9 +426,23 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
             try:
                 var body_bytes = legacy.read_chunk(seq)
                 var body = ManifestBody.decode(body_bytes)
-                # A COMMIT/ABORT marker chunk carries no records — skip it (it is
-                # NOT offset-bearing; the legacy resolver skips it too).
-                if body.marker_type != MARKER_NONE:
+                # A chunk without a segment object (a COMMIT/ABORT marker, 0
+                # records) is skipped (it is NOT offset-bearing; the legacy
+                # resolver skips it too). One that still carries records cannot
+                # be re-recorded (its key is empty) nor dropped (every later
+                # dense offset would shift), so the migration refuses it.
+                if not body.has_segment():
+                    if body.record_count > Int64(0):
+                        _ = base^
+                        _ = legacy^
+                        raise Error(
+                            "SubLineageMigration.migrate_partition: legacy chunk "
+                            + String(seq)
+                            + " has "
+                            + String(body.record_count)
+                            + " records but no segment object (empty"
+                            " object_key); refusing to migrate it"
+                        )
                     seq += Int64(1)
                     continue
                 var rc = body.record_count
@@ -560,31 +580,39 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         var first_unmigrated_seq = head.chunk_seq + Int64(1)
         var found_unmigrated = False
         var retired = 0
+        var to_tomb = List[Int64]()
         while seq <= head.chunk_seq:
-            var rc: Int64
-            try:
-                var body_bytes = legacy.read_chunk(seq)
-                var body = ManifestBody.decode(body_bytes)
-                rc = body.record_count
-            except e2:
-                _ = e2
-                seq += Int64(1)
-                continue  # already-reaped chunk
+            # The walk starts AT the log start, so every chunk it reads is
+            # live: ANY read error (not_found included) is raised. Taking it
+            # for a reaped chunk would skip a live chunk's records and
+            # renumber the log. The whole walk runs before any tombstone or
+            # advance, so a failed read changes nothing.
+            var body = ManifestBody.decode(legacy.read_chunk(seq))
+            var rc = body.record_count
             var chunk_hi = running + rc  # exclusive dense end
             # Fully migrated iff the chunk's entire dense range is <= the migrated
             # watermark.
             if chunk_hi <= migrated_through_dense:
                 if not _i64_in(already_tomb, seq):
-                    legacy.schedule_for_delete_at(seq, now_ms)
-                    retired += 1
+                    to_tomb.append(seq)
             elif not found_unmigrated:
                 first_unmigrated_seq = seq
                 found_unmigrated = True
             running = chunk_hi
             seq += Int64(1)
+        for t in range(len(to_tomb)):
+            legacy.schedule_for_delete_at(to_tomb[t], now_ms)
+            retired += 1
         # Advance the durable legacy `_LOG_START` to the migrated watermark (the
         # first un-migrated dense offset, at the first surviving chunk seq).
         # Monotone-forward; a stale 412 is a harmless lose.
+        # A swallowed failure deletes nothing live: the tombstones above then
+        # sit on chunks at or above `_LOG_START`, which `CasManifestStore.reap`
+        # refuses and the broker `ReapWorker` skips (chunk_reclaim_guard.mojo),
+        # and the next call re-reads `_LOG_START` and re-advances. That is NOT
+        # a claim that reaping these tombstones is safe once the advance lands:
+        # `_base` may still reference their `.seg` objects
+        # (komira-ai/komira#494).
         if migrated_through_dense > cur.log_start_offset:
             try:
                 _ = legacy.advance_log_start(
