@@ -258,10 +258,51 @@ def test_too_few_fields() raises:
     _check_short_msg(_refusal[Posix](data, CsvReadOptions()))
 
 
-def test_blank_line_in_multi_column_file_is_a_short_record() raises:
-    var msg = _refusal[Rfc4180](String("a,b\n1,2\n\n3,4\n"), CsvReadOptions())
+def test_quoted_empty_line_is_a_short_record() raises:
+    """A line holding `""` is not blank (it has bytes): it is a record with
+    one empty field, and in a two-column file that is a short record. Fully
+    blank lines are skipped; `test_csv_blank_lines` covers them."""
+    var msg = _refusal[Rfc4180](String('a,b\n1,2\n""\n3,4\n'), CsvReadOptions())
     _assert_has(msg, "record 3 (line 3, byte offset 8)")
     _assert_has(msg, "has 1 field but the header has 2")
+
+
+def test_spaces_after_closing_quote_exact_message() raises:
+    """`"ab"  ,x`: padding after the closing quote is a violation too (RFC
+    4180 has no optional whitespace). The full message, byte for byte."""
+    var msg = _refusal[Rfc4180](String('a,b\n"ab"  ,x\n'), CsvReadOptions())
+    assert_equal(
+        msg,
+        String(
+            "CSV record 2 (line 2, byte offset 4), field 1 ('a'): byte 0x20"
+            " (' ') at byte offset 8 follows the field's closing quote. After"
+            " a closing quote RFC 4180 allows only the delimiter, a line end"
+            " or the end of input; a quote inside a quoted field must be"
+            " doubled."
+        ),
+    )
+
+
+def test_crlf_file_line_numbers() raises:
+    """CRLF is ONE line end: record 4 starts on line 4, not line 7. A quoted
+    CRLF inside record 2 moves the line, not the record number."""
+    var msg = _refusal[Rfc4180](
+        String('a,b\r\n1,2\r\n3,"x\r\ny"\r\n4,5,6\r\n'), CsvReadOptions()
+    )
+    assert_equal(
+        msg,
+        String(
+            "CSV record 4 (line 5, byte offset 20) has 3 fields but the header"
+            " has 2: field 3 has no column to go to. RFC 4180 requires every"
+            " record to have the same number of fields; the reader refuses"
+            " rather than drop or pad cells."
+        ),
+    )
+    var m3 = _refusal[Rfc4180, 3](
+        String("a,b\r\n1,2\r\n3\r\n"), CsvReadOptions()
+    )
+    _assert_has(m3, "record 3 (line 3, byte offset 10)")
+    _assert_has(m3, "field 2 ('b') is missing")
 
 
 # -----------------------------------------------------------------------------
@@ -381,10 +422,12 @@ def main() raises:
     test_too_many_fields_every_dialect_and_variant()
     test_too_many_fields_without_header()
     test_too_few_fields()
-    test_blank_line_in_multi_column_file_is_a_short_record()
+    test_quoted_empty_line_is_a_short_record()
+    test_spaces_after_closing_quote_exact_message()
+    test_crlf_file_line_numbers()
     test_dynamic_dispatch_refuses()
     test_schema_entry_refuses()
     test_bom_shifts_byte_offsets_not_records()
     test_well_formed_quoting_and_line_ends()
     test_well_formed_single_column_blank_line()
-    print("test_csv_record_shape: 19/19 PASS")
+    print("test_csv_record_shape: 21/21 PASS")

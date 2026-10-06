@@ -15,6 +15,13 @@
 # missing cell as NULL. RFC 4180 (section 2, rule 4) says every record has the
 # same number of fields.
 #
+# BLANK LINES. A fully blank line (zero bytes between two line terminators, so
+# not `""`) in a file with two or more columns is skipped, anywhere in the
+# file: it carries no data, and pandas skips it by default
+# (`skip_blank_lines=True`). It still counts for the LINE number in a refusal,
+# but not as a record. In a one-column file a blank line is a record holding
+# one empty field (a NULL), as before.
+#
 # All three are refused, under every dialect. Neither Excel nor Posix ever
 # tolerated them by design: no option or dialect flag selected the behaviour,
 # no test pinned it, and what they produced was wrong data (Excel split the
@@ -44,7 +51,7 @@ def check_csv_record_shape[
     input: Span[UInt8, _],
     chunk_lo: Int,
     file_offset: Int,
-    cells: ScannedCells,
+    mut cells: ScannedCells,
     data_start: Int,
     header_names: List[String],
     has_header: Bool,
@@ -52,7 +59,12 @@ def check_csv_record_shape[
     quote: UInt8,
     check_last_row: Bool = True,
 ) raises:
-    """Raise on the first malformed record in `cells`, in file order.
+    """Raise on the first malformed record in `cells`, in file order, then
+    drop the blank lines a file with two or more columns skips.
+
+    On return every row of `cells` from `data_start` on has exactly
+    `len(header_names)` cells (except, when `check_last_row` is False, the
+    last row), so callers must read `cells.num_rows()` AFTER this call.
 
     Args:
         input: The whole scanned input (after any stripped BOM). `cells`
@@ -62,7 +74,8 @@ def check_csv_record_shape[
             is a parallel worker's slice; it is always a record boundary).
         file_offset: Offset of `input[0]` in the caller's buffer (3 after a
             stripped UTF-8 BOM), so byte offsets in a refusal are file offsets.
-        cells: The scanner output for `input[chunk_lo:]`.
+        cells: The scanner output for `input[chunk_lo:]`; blank rows are
+            removed from it in place.
         data_start: First data row in `cells` (1 when row 0 is the header).
         header_names: One per column; its length is the required field count.
         has_header: Whether the field count comes from a header (wording only).
@@ -76,6 +89,8 @@ def check_csv_record_shape[
         and the problem.
     """
     var num_cols = len(header_names)
+    var skip_blank = num_cols >= 2
+    var n_blank = 0
     var n_rows = cells.num_rows()
     var stop = n_rows
     if not check_last_row and stop > 0:
@@ -89,6 +104,10 @@ def check_csv_record_shape[
     while r < stop:
         var n = cells.row_starts[r + 1] - cells.row_starts[r]
         if n != num_cols:
+            if skip_blank and n == 1 and cells.row_is_blank(r):
+                n_blank = n_blank + 1
+                r = r + 1
+                continue
             _raise_field_count[Q](
                 input, chunk_lo, file_offset, cells, r, n, header_names,
                 has_header, delimiter, quote,
@@ -99,6 +118,10 @@ def check_csv_record_shape[
             input, chunk_lo, file_offset, cells, data_start, header_names,
             delimiter, quote,
         )
+    if skip_blank and (
+        n_blank > 0 or (n_rows > data_start and cells.row_is_blank(n_rows - 1))
+    ):
+        cells.drop_blank_rows(data_start)
 
 
 # =============================================================================
@@ -116,13 +139,15 @@ def _record_location[
     r: Int,
     delimiter: UInt8,
     quote: UInt8,
+    skip_blank: Bool,
 ) raises -> String:
     """`record N (line L, byte offset B)` for row `r` of `cells`.
 
-    N counts records from the start of `input` (the header is record 1). L is
-    the physical line the record starts on: 1 + the line ends before it (LF,
-    CRLF or a bare CR), so a quoted newline in an earlier record moves L but
-    not N. B is a file offset.
+    N counts records from the start of `input` (the header is record 1); a
+    skipped blank line (`skip_blank`) is not a record. L is the physical line
+    the record starts on: 1 + the line ends before it (LF, CRLF or a bare
+    CR), so a quoted newline in an earlier record or a skipped blank line
+    moves L but not N. B is a file offset.
     """
     var first = cells.row_starts[r]
     var start = chunk_lo
@@ -133,9 +158,18 @@ def _record_location[
     var before = 0
     if chunk_lo > 0:
         # `chunk_lo` is a record boundary, so the prefix scans to whole rows.
-        before = scan_csv_phase1_into_cells[Q](
+        var prefix = scan_csv_phase1_into_cells[Q](
             input[0:chunk_lo], delimiter, quote
-        ).num_rows()
+        )
+        before = prefix.num_rows()
+        if skip_blank:
+            for pr in range(prefix.num_rows()):
+                if prefix.row_is_blank(pr):
+                    before = before - 1
+    if skip_blank:
+        for pr in range(r):
+            if cells.row_is_blank(pr):
+                before = before - 1
     var line = 1
     var i = 0
     while i < start:
@@ -190,7 +224,8 @@ def _raise_field_count[
     raise Error(
         String("CSV ")
         + _record_location[Q](
-            input, chunk_lo, file_offset, cells, r, delimiter, quote
+            input, chunk_lo, file_offset, cells, r, delimiter, quote,
+            len(header_names) >= 2,
         )
         + " has "
         + String(n)
@@ -245,7 +280,8 @@ def _raise_quote_violation[
     raise Error(
         String("CSV ")
         + _record_location[Q](
-            input, chunk_lo, file_offset, cells, r, delimiter, quote
+            input, chunk_lo, file_offset, cells, r, delimiter, quote,
+            len(header_names) >= 2,
         )
         + ", "
         + field

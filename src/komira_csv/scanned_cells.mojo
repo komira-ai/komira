@@ -148,6 +148,54 @@ struct ScannedCells(Movable, Deinitable):
         self.quote_violation_field = field
 
     @always_inline
+    def row_is_blank(self, r: Int) -> Bool:
+        """True iff row `r` is a fully blank line: one cell, unquoted, with
+        zero bytes (so `""` is not blank)."""
+        var lo = self.row_starts[r]
+        if self.row_starts[r + 1] - lo != 1:
+            return False
+        return (
+            self.cell_starts[lo] == self.cell_ends[lo]
+            and (self.cell_flags[lo] & CELL_FLAG_WAS_QUOTED) == 0
+        )
+
+    def drop_blank_rows(mut self, from_row: Int):
+        """Remove every blank row (`row_is_blank`) at index >= `from_row`,
+        compacting the cell arrays in place. O(cells after the first blank
+        row); called only when a blank row exists.
+
+        In-place safety: iteration `r` reads `row_starts[r]` and
+        `row_starts[r + 1]` before any write, and writes go only to row index
+        `out_row <= r` and cell index `w <= row_starts[r]`.
+        """
+        var n_rows = self.num_rows()
+        var out_row = from_row
+        var w = self.row_starts[from_row]
+        for r in range(from_row, n_rows):
+            var lo = self.row_starts[r]
+            var hi = self.row_starts[r + 1]
+            if (
+                hi - lo == 1
+                and self.cell_starts[lo] == self.cell_ends[lo]
+                and (self.cell_flags[lo] & CELL_FLAG_WAS_QUOTED) == 0
+            ):
+                continue
+            self.row_starts[out_row] = w
+            for i in range(lo, hi):
+                self.cell_starts[w] = self.cell_starts[i]
+                self.cell_ends[w] = self.cell_ends[i]
+                self.cell_flags[w] = self.cell_flags[i]
+                w = w + 1
+            out_row = out_row + 1
+        self.row_starts[out_row] = w
+        while len(self.row_starts) > out_row + 1:
+            _ = self.row_starts.pop()
+        while len(self.cell_starts) > w:
+            _ = self.cell_starts.pop()
+            _ = self.cell_ends.pop()
+            _ = self.cell_flags.pop()
+
+    @always_inline
     def cells_in_open_row(self) -> Int:
         """Cells appended to the row in progress (not yet closed by a
         `row_starts` entry)."""

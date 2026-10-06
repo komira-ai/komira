@@ -20,6 +20,7 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_csv_blank_lines.mojo",
         "tests/test_csv_cell_parsers.mojo",
         "tests/test_csv_cell_parsers_wire_to_builders.mojo",
         "tests/test_csv_dtype_completion.mojo",

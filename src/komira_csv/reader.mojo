@@ -244,7 +244,7 @@ def read_csv_bytes_to_batch[
         scan_bytes, 0, scan_start, cells, data_start, header_names,
         options.has_header, options.delimiter, options.quote,
     )
-    var num_rows = total_rows - data_start
+    var num_rows = cells.num_rows() - data_start  # after blank-line removal
     if num_rows == 0 or num_cols == 0:
         var sb1 = SchemaBuilder()
         var schema1 = sb1.build()
@@ -473,7 +473,7 @@ def read_csv_bytes_to_schema[
         options.has_header, options.delimiter, options.quote,
         check_last_row=(prefix_end == n),
     )
-    var num_rows = total_rows - data_start
+    var num_rows = cells.num_rows() - data_start  # after blank-line removal
     if num_rows == 0 or num_cols == 0:
         return sb_out.build()
 

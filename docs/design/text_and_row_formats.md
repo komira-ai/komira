@@ -101,7 +101,7 @@ Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a 
 
 **Decision.** `input_limits.mojo` checks, once per file and before any allocation, the column count (at most `MAX_CSV_COLUMNS`, 4,096), the cells per input byte (at most `MAX_CSV_CELLS_PER_INPUT_BYTE`, 256) and each string column's total bytes (at most `MAX_ARROW_STRING_BYTES`, 2^31 - 1).
 
-**Because.** The builders allocate rows times columns because short rows are padded with nulls, so a small file with a very wide header would demand billions of cells. Checks inside the per-cell loops would add work to every cell, and asserts vanish in builds that compile them out. The header of `input_limits.mojo` records the reasoning.
+**Because.** The builders allocate rows times columns: every record must have the header's field count (a short record is refused, not padded; see the record-shape invariant below), so a small file with a very wide header would demand billions of cells. Checks inside the per-cell loops would add work to every cell, and asserts vanish in builds that compile them out. The header of `input_limits.mojo` records the reasoning.
 
 **Revisit if** a legitimate input exceeds a ceiling; each ceiling is one constant.
 
@@ -136,6 +136,8 @@ Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a 
 ## What must always hold?
 
 - **A declared CSV schema is positional.** Column `i` of the file parses at declared type `i`, and a width mismatch raises rather than truncating, padding or re-inferring. Enforced by `check_declared_column_types` (`csv_options.mojo`), which the readers call; no `komira_csv` test imports it or is named for a mismatched width.
+- **A CSV record has exactly the header's field count, and nothing follows a closing quote but the delimiter, a line end or the end of input.** Under every dialect (Rfc4180, Excel, Posix) the readers refuse a record with more fields than the header, one with fewer, and a byte after a closing quote; the error names the record number (the header is record 1), its physical line, its byte offset, the field and the problem. No dialect or option tolerates these: before the check the extra cells were dropped, short records were padded with nulls and a stray byte split the field, all in silence. Enforced by `check_csv_record_shape` (`record_shape.mojo`), called by `read_csv_bytes_to_batch`, `read_csv_bytes_to_schema` and every worker of the parallel reader; pinned by `test_csv_record_shape` and `test_csv_record_shape_parallel`.
+- **Blank lines (policy).** A fully blank line (zero bytes between two line terminators; `""` is not blank) in a file with two or more columns is skipped, anywhere in the file, as pandas does by default: it holds no data. It is not counted as a record but is counted as a line in error messages. In a one-column file a blank line is a record with one empty field, read as NULL. Same paths as above; pinned by `test_csv_blank_lines` and `test_csv_record_shape_parallel`.
 - **A CSV split starts every range at a row start.** Pinned by `test_csv_quote_safe_chunk_split`, including a stray-quote fixture.
 - **Parallel decode keeps file order.** CSV concatenates in range order and Avro reassembles in block order. Pinned by `test_csv_parallel_reader` (parallel against serial values) and `test_avro_block_parallel_decode`.
 - **A writer refuses a type it cannot encode, by name.** Avro raises `AvroWriteError.UNSUPPORTED_TYPE`, pinned by `test_avro_write_roundtrip`; ORC raises `OrcWriteError.UNSUPPORTED_TYPE`, which no test checks.

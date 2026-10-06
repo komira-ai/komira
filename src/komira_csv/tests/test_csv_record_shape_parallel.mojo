@@ -23,7 +23,7 @@
 # (`record 2` instead of `record 50002`).
 # =============================================================================
 
-from std.testing import assert_true
+from std.testing import assert_equal, assert_true
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
@@ -32,6 +32,8 @@ from komira_async.runtime.runtime import (
     PLACEMENT_FIXED,
     PerCoreAsyncRuntime,
 )
+
+from komira_core.arrow.schema import RecordBatch
 
 from komira_csv import CsvReadOptions, Rfc4180
 from komira_csv.parallel_reader import (
@@ -159,6 +161,76 @@ def test_bad_quote_worker0_slice() raises:
     print("  test_bad_quote_worker0_slice PASS")
 
 
+def _blank_fixture(var tail: String) -> List[UInt8]:
+    """`_N_ROWS` good rows with blank lines (LF and CRLF) after the header,
+    every 10000 rows and at the end, then `tail`."""
+    var s = String("a,b,c\n\n")
+    for i in range(_N_ROWS):
+        if i > 0 and i % 10000 == 0:
+            s += "\n\r\n\n"
+        s += String(i) + "," + String(i * 2) + ",row" + String(i) + "\n"
+    s += tail
+    var out = List[UInt8]()
+    for byte in s.as_bytes():
+        out.append(byte)
+    return out^
+
+
+def _check_rows(rb: RecordBatch, label: String) raises:
+    assert_equal(rb.num_rows(), _N_ROWS, label + ": blank lines are not rows")
+    ref c = rb.column_at(0)
+    var arr = c.as_primitive[DType.int64]()
+    for i in range(_N_ROWS):
+        assert_equal(Int(arr.get(i)), i, label + ": a[" + String(i) + "]")
+
+
+def test_blank_lines_skipped_in_every_slice() raises:
+    var data = _blank_fixture(String("\n\n"))
+    _check_rows(
+        read_csv_bytes_to_batch_parallel[Rfc4180](
+            Span(data), CsvReadOptions(), 4
+        ),
+        String("serial arm"),
+    )
+    var runtime = PerCoreAsyncRuntime[NoopSink](
+        num_workers=4,
+        sink_factory=_noop_sink_factory,
+        backend=BACKEND_MOCK,
+        placement=PLACEMENT_FIXED,
+    )
+    ref disp = runtime.dispatcher()
+    var ct = CancellationToken.new()
+    var rb = read_csv_bytes_to_batch_parallel_with_dispatcher[
+        Rfc4180, origin_of(disp)
+    ](Span(data), CsvReadOptions(), Pointer(to=disp), ct.clone(), 4)
+    _ = ct^
+    _check_rows(rb, String("dispatcher arm"))
+    print("  test_blank_lines_skipped_in_every_slice PASS")
+
+
+def test_refusal_after_blank_lines_late_slice() raises:
+    """A short record at the very end, after 1 + 5 * 3 + 2 blank lines: it is
+    record _N_ROWS + 2 (blank lines are not records) but its line counts
+    every blank line."""
+    var data = _blank_fixture(String("\n\nshort\n"))
+    var bad_offset = len(data) - 6
+    var rec = _N_ROWS + 2
+    var line = rec + 1 + 5 * 3 + 2
+    var fx = _Fixture(data^, bad_offset)
+    var want = (
+        String("record ")
+        + String(rec)
+        + " (line "
+        + String(line)
+        + ", byte offset "
+        + String(bad_offset)
+        + ") has 1 field but the header has 3"
+    )
+    _assert_has(_serial_arm_refusal(fx), want)
+    _assert_has(_dispatcher_arm_refusal(fx), want)
+    print("  test_refusal_after_blank_lines_late_slice PASS")
+
+
 def main() raises:
     print("test_csv_record_shape_parallel.mojo")
     test_extra_field_late_slice()
@@ -166,4 +238,6 @@ def main() raises:
     test_bad_quote_late_slice()
     test_extra_field_worker0_slice()
     test_bad_quote_worker0_slice()
-    print("test_csv_record_shape_parallel: 5/5 PASS")
+    test_blank_lines_skipped_in_every_slice()
+    test_refusal_after_blank_lines_late_slice()
+    print("test_csv_record_shape_parallel: 7/7 PASS")
