@@ -3,15 +3,20 @@
 # =============================================================================
 #
 # Coverage:
-#   Universal (any T: Deinitable):
+#   Slab requires T: Movable & Deinitable; AtomicCounter (Atomic field,
+#   declared only Deinitable) meets Movable on Mojo 1.0, see test 14.
 #     1. Empty construction + len/capacity == 0
-#     2. create(n) has len=n, cap=n
-#     3. init_slot[init_fn] on a non-Movable Atomic-bearing T (the init_fn's
-#        writes land in the slot it was given, and only that slot)
-#     4. __getitem__ read on init_slot-populated non-Movable T
+#     2. create_prefilled(n) has len=n, cap=n
+#     3. init_slot[init_fn] moves init_fn() into exactly slot idx
+#        (mutant caught: the result not moved in / moved to another slot)
+#     3b. init_slot refuses a live slot and an index outside capacity
+#        (mutants caught: live-slot check removed, bounds check removed)
+#     3c. init_slot over never-written and over popped (stale) bytes of a
+#        heap-owning T drops nothing (a drop there is a double free)
+#     4. __getitem__ read on init_slot-populated Atomic-bearing T
 #     5. field_fetch_add_i64 / field_load_i64 on an Atomic[Int64] field
 #     6. clear / reserve / resize / set_len_unchecked
-#   Movable-gated (T: Movable & Deinitable):
+#   Growth and move-out:
 #     7. append growth schedule (4 -> 8 -> 16)
 #     8. pop returns the last appended value, or None when empty
 #     9. extend merges two slabs, len matches sum
@@ -19,15 +24,11 @@
 #    11. swap_remove on an interior index returns that slot in O(1)
 #    12. shrink_to_fit reduces capacity to len
 #    13. __setitem__ replaces a live slot (destroys the prior)
-#
-# Negative test (type-level):
-#   A call to Slab[NonMovable].append / pop / extend / etc. fails to
-#   compile with "no matching method" -- this is the receiver-refinement
-#   contract. Documented in the comment block at the bottom.
+#    14. append / pop / swap_remove compile and work on Slab[AtomicCounter]
 
 from std.memory import UnsafePointer
 from komira_atomic_alias import AtomicI64
-from std.testing import TestSuite, assert_equal, assert_true, assert_false
+from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
 from komira_collections.slab import Slab
 
@@ -38,10 +39,15 @@ from komira_collections.slab import Slab
 
 
 struct AtomicCounter(Deinitable):
-    """Non-Movable: contains Atomic fields."""
+    """Atomic-bearing slot type. Declared only Deinitable; it still meets
+    Slab's Movable bound because every field is movable."""
 
     var counter: AtomicI64
     var generation: Int
+
+    def __init__(out self, counter: Int64, generation: Int):
+        self.counter = AtomicI64(counter)
+        self.generation = generation
 
 
 struct SlotWithList(Deinitable, Movable):
@@ -60,20 +66,29 @@ struct SlotWithList(Deinitable, Movable):
 # =============================================================================
 
 
-def _zero_atomic_counter(mut slot: AtomicCounter):
-    """Single-threaded in-place init of an AtomicCounter slot.
-
-    Assigns fields through the `mut` reference init_slot hands over; no
-    pointer is involved.
-    """
-    slot.counter = AtomicI64(0)
-    slot.generation = 0
+def _zero_atomic_counter() -> AtomicCounter:
+    """init_fn: a zeroed AtomicCounter."""
+    return AtomicCounter(0, 0)
 
 
-def _mark_generation_7(mut slot: AtomicCounter):
-    """init_fn that writes a value a zero-filled slot cannot hold by chance."""
-    slot.counter = AtomicI64(-3)
-    slot.generation = 7
+def _mark_generation_7() -> AtomicCounter:
+    """init_fn returning a value no fresh or zeroed slot holds by chance."""
+    return AtomicCounter(-3, 7)
+
+
+def _list_slot() -> SlotWithList:
+    """init_fn returning a heap-owning value."""
+    return SlotWithList([1, 2, 3], 9)
+
+
+def _counters(n: Int) raises -> Slab[AtomicCounter]:
+    """n live zeroed counters, built the per-slot way: create(n), init_slot
+    each slot, then set_len_unchecked(n)."""
+    var s = Slab[AtomicCounter].create(n)
+    for i in range(n):
+        s.init_slot[_zero_atomic_counter](i)
+    s.set_len_unchecked(n)
+    return s^
 
 
 # =============================================================================
@@ -140,23 +155,15 @@ def test_create_allocates_with_len_and_cap() raises:
     var s = Slab[AtomicCounter].create_prefilled(10)
     assert_equal(s.len(), 10)
     assert_equal(s.capacity(), 10)
-    # Initialize all slots so __del__ sees valid state.
-    for i in range(10):
-        s.init_slot[_zero_atomic_counter](i)
+    # All-zero bytes are a valid AtomicCounter, so the slots are readable.
+    assert_equal(s[9].generation, 0)
 
 
-def test_init_slot_non_movable() raises:
-    """init_slot + __getitem__ on an Atomic-bearing non-Movable T."""
-    var s = Slab[AtomicCounter].create_prefilled(4)
-    for i in range(4):
-        s.init_slot[_zero_atomic_counter](i)
+def test_init_slot_atomic_bearing() raises:
+    """init_slot + reads on an Atomic-bearing T."""
+    var s = _counters(4)
 
-    # After init_slot, __getitem__ on the slab returns a readable ref.
-    # Direct field mutation via __getitem__ is NOT supported for non-
-    # Movable T (the ref is ref [self._bytes] T). Instead we use the
-    # field_fetch_add helper (universal), which does the Atomic op
-    # through a widened accessor. Read-back is via the same accessor's
-    # load path -- see test_field_fetch_add_load below.
+    # Read-back through the Atomic accessor's load path.
     for i in range(4):
         # load_i64 returns 0 because _zero_atomic_counter wrote 0.
         assert_equal(
@@ -167,13 +174,15 @@ def test_init_slot_non_movable() raises:
 def test_init_slot_runs_init_fn_on_that_slot() raises:
     """init_slot calls init_fn on slot idx, and on no other slot.
 
-    The slab is zero-filled, so a zero read-back cannot tell "init_fn ran"
-    from "init_fn never ran"; this init_fn writes (-3, 7), which a
-    zero-filled slot cannot hold by chance. Catches an init_slot that skips
-    the call, or hands init_fn a different slot.
+    _mark_generation_7 returns (-3, 7), which neither never-written nor
+    zeroed bytes hold by chance. Catches an init_slot that drops the
+    result instead of moving it in, or writes it to another slot.
     """
-    var s = Slab[AtomicCounter].create_prefilled(3)
+    var s = Slab[AtomicCounter].create(3)
+    s.init_slot[_zero_atomic_counter](0)
     s.init_slot[_mark_generation_7](1)
+    s.init_slot[_zero_atomic_counter](2)
+    s.set_len_unchecked(3)
     assert_equal(s[1].generation, 7, "init_fn did not run on slot 1")
     assert_equal(s.field_load_i64[_counter_accessor](1), Int64(-3))
     assert_equal(s[0].generation, 0, "init_fn wrote slot 0")
@@ -181,11 +190,52 @@ def test_init_slot_runs_init_fn_on_that_slot() raises:
     assert_equal(s.field_load_i64[_counter_accessor](0), Int64(0))
 
 
+def test_init_slot_refuses_live_and_out_of_range() raises:
+    """A live slot and an index outside capacity are refused, every build.
+
+    Catches removal of the live-slot check (init_slot would write over the
+    live value without dropping it) and of the bounds check.
+    """
+    var s = Slab[AtomicCounter].create(2)
+    s.init_slot[_mark_generation_7](0)
+    s.set_len_unchecked(1)
+    with assert_raises(contains="is live"):
+        s.init_slot[_zero_atomic_counter](0)
+    assert_equal(s[0].generation, 7, "refused init must not touch the slot")
+    with assert_raises(contains="outside capacity"):
+        s.init_slot[_zero_atomic_counter](2)
+    with assert_raises(contains="outside capacity"):
+        s.init_slot[_zero_atomic_counter](-1)
+    # Slot 1 is not live: accepted.
+    s.init_slot[_zero_atomic_counter](1)
+    s.set_len_unchecked(2)
+    assert_equal(s[1].generation, 0)
+
+
+def test_init_slot_heap_owning_over_fresh_and_stale_bytes() raises:
+    """init_slot on a heap-owning T drops nothing it did not build.
+
+    Slot 0 is never-written bytes; slot 1 holds the stale bytes `pop` left
+    (the moved-out List's pointer, bit for bit). Dropping either before the
+    write would free garbage or double-free the popped List.
+    """
+    var s = Slab[SlotWithList].create(2)
+    s.init_slot[_list_slot](0)
+    s.set_len_unchecked(1)
+    s.append(SlotWithList([7, 8], 1))
+    var popped = s.pop()
+    s.init_slot[_list_slot](1)
+    s.set_len_unchecked(2)
+    assert_equal(len(popped.value().items), 2)
+    assert_equal(s[0].tag, 9)
+    assert_equal(s[1].tag, 9)
+    assert_equal(len(s[1].items), 3)
+    assert_equal(s[1].items[2], 3)
+
+
 def test_field_fetch_add_load() raises:
     """field_fetch_add_i64 + field_load_i64 on an Atomic[Int64] field."""
-    var s = Slab[AtomicCounter].create_prefilled(3)
-    for i in range(3):
-        s.init_slot[_zero_atomic_counter](i)
+    var s = _counters(3)
 
     # fetch_add returns the value BEFORE the add (load; add).
     var old0 = s.field_fetch_add_i64[_counter_accessor](0, Int64(5))
@@ -221,9 +271,7 @@ def test_get_mut_interior_immutable_self_write() raises:
     `_mut_ptr` alias and the `field_load_i64` read path.
     """
     # Container-by-value so we can call _consume_like with immutable borrow.
-    var s = Slab[AtomicCounter].create_prefilled(4)
-    for i in range(4):
-        s.init_slot[_zero_atomic_counter](i)
+    var s = _counters(4)
 
     # Immutable-borrow helper that mirrors consume(self, worker_id, ...).
     # Inside, interior mutability is used to write slot `wid` through
@@ -244,11 +292,8 @@ def test_get_mut_interior_matches_mut_ptr_alias() raises:
     """Deprecated `_mut_ptr` alias produces the same observable effect
     as `get_mut_interior` — same wildcard origin, same slot addressing.
     """
-    var s1 = Slab[AtomicCounter].create_prefilled(2)
-    var s2 = Slab[AtomicCounter].create_prefilled(2)
-    for i in range(2):
-        s1.init_slot[_zero_atomic_counter](i)
-        s2.init_slot[_zero_atomic_counter](i)
+    var s1 = _counters(2)
+    var s2 = _counters(2)
 
     # s1: write via new primitive (ref-returning).
     ref slot1a = s1.get_mut_interior(0)
@@ -291,8 +336,8 @@ def test_reserve_and_resize() raises:
     assert_true(s.capacity() >= 64)
 
 
-def test_set_len_unchecked_non_movable() raises:
-    """set_len_unchecked + init_slot on a non-Movable slab.
+def test_set_len_unchecked_atomic_bearing() raises:
+    """set_len_unchecked + init_slot on an Atomic-bearing slab.
 
     This exercises the "create cap, init each, commit len" pattern
     that morsel-plan fast paths use.
@@ -537,23 +582,27 @@ def test_replace_drain_keeps_the_len_honest_when_the_body_raises() raises:
 
 
 # =============================================================================
-# Compile-fail documentation (in-tree proof for receiver refinement)
+# Movability of an Atomic-bearing T
 # =============================================================================
-# If you uncomment ANY of the following lines on a Slab[AtomicCounter]
-# (which is non-Movable), the compiler emits "no matching method" at the
-# call site -- exactly the receiver-refinement contract.
-#
-#   var s = Slab[AtomicCounter]()                              # OK: universal
-#   s.append(AtomicCounter(...))                               # FAILS
-#   _ = s.pop()                                                # FAILS
-#   _ = s.take_at(0)                                           # FAILS
-#   _ = s.swap_remove(0)                                       # FAILS
-#   s.shrink_to_fit()                                          # FAILS
-#   s.extend(Slab[AtomicCounter]())                            # FAILS
-#   s[0] = AtomicCounter(...)                                  # FAILS (__setitem__)
-#
-# stdlib Span uses the same receiver-refinement path and produces the same
-# negative-test diagnostic.
+
+
+def test_growth_api_on_atomic_bearing_t() raises:
+    """14: append / pop / swap_remove compile and work on Slab[AtomicCounter].
+
+    An earlier comment here claimed these fail to compile ("no matching
+    method") because AtomicCounter is not Movable. It is: Slab's own bound
+    is T: Movable, and this test is the farm proof that the claim was false.
+    """
+    var s = Slab[AtomicCounter]()
+    s.append(AtomicCounter(1, 1))
+    s.append(AtomicCounter(2, 2))
+    s.append(AtomicCounter(3, 3))
+    var removed = s.swap_remove(0)
+    assert_equal(removed.generation, 1)
+    assert_equal(s[0].generation, 3)
+    var last = s.pop()
+    assert_equal(last.value().generation, 2)
+    assert_equal(s.len(), 1)
 
 
 # =============================================================================

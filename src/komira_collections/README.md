@@ -9,9 +9,12 @@ The example below runs as a test when the package is built.
 `DynValue[MAX_SIZE]` holds one value of any `Movable` type of at most
 `MAX_SIZE` bytes, with no heap allocation, and destroys it when dropped.
 `get[T]()` returns a reference to the value, mutable when the `DynValue` is.
-It is checked: it raises when the `DynValue` is empty or holds another type
-(the stored type's qualified name and size are compared). `holds[T]()` asks
-the same question without raising.
+It is checked: it raises when the `DynValue` is empty or holds another type.
+The identity compared is the symbol name of a per-type instantiation, which
+is unique per type (a type's printed name is not: every function type prints
+the same). `holds[T]()` asks the same question without raising. `create[T]`
+refuses, at compile time, a type larger than `MAX_SIZE`, more aligned than 8
+bytes, or with a move constructor that is not trivial.
 
 ```mojo
 from komira_collections.dyn_value import DynValue

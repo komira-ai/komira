@@ -36,33 +36,35 @@
 #
 # Storage shape:
 #   Byte-backed storage (List[UInt8]) plus _len_t / _cap_t counters. The
-#   byte-backed shape is universal -- it serves ANY T: Deinitable
-#   including non-Movable (Atomic-bearing) types via `create(n)` + init_slot.
+#   byte-backed shape serves any T: Movable & Deinitable, including
+#   Atomic-bearing types (a struct whose fields are all movable, Atomic
+#   included, conforms to Movable on Mojo 1.0 without declaring it).
 #
-# Per-method receiver refinement:
-#   Growth methods (append, pop, extend, take_at, swap_remove, shrink_to_fit,
-#   __setitem__) are gated via:
-#     fn method[Self.T: Movable & Deinitable, //](
-#         mut self: Slab[Self.T], ...)
-#   Non-Movable T call-sites fail to compile with "no matching method".
+# Movability:
+#   The struct itself requires T: Movable & Deinitable, so every method is
+#   available for every T the slab can hold; there is no non-Movable T.
 #
 # Construction patterns:
-#   - Non-Movable T, all slots live -> Slab[T].create_prefilled(n)
-#     + init_slot[init_fn](i) per slot. `create_prefilled` zero-fills bytes
-#     and sets _len_t = n so the destructor runs on all slots.
+#   - All slots live, zero bytes -> Slab[T].create_prefilled(n). Sound only
+#     for a T whose all-zero bit pattern is a valid value (Int, Atomic,
+#     an empty List). `create_prefilled` sets _len_t = n so the destructor
+#     runs on all slots.
+#   - Per-slot construction -> Slab[T].create(n), init_slot[init_fn](i) for
+#     each i in [0, n), then set_len_unchecked(n).
 #   - Empty-with-capacity (_len_t=0; append to populate) ->
 #     Slab[T].create(capacity), Slab[T](capacity) or
 #     Slab[T].with_capacity(n).
 #   - Zero-cap default -> Slab[T]().
 #   - Compile-time-N fixed arrays -> stdlib InlineArray[T, N] directly.
 #
-# In-place slot init:
-#   init_slot[init_fn] takes a comptime function of shape
-#   `def (mut T) thin -> None` and hands it the slot as a `mut` reference.
-#   The function ASSIGNS FIELDS (`slot.counter = AtomicI64(0)`); it never
-#   builds and moves in a whole fresh T, so T needs no Movable for it. No
-#   pointer and no wildcard origin appears in the signature: the reference
-#   carries the slab's own `_bytes` origin and cannot outlive the call.
+# Slot init:
+#   init_slot[init_fn] takes a comptime function `def () thin -> T` and
+#   MOVES the value it returns into a slot that is not live (idx in
+#   [_len_t, _cap_t)). Nothing is dropped, so uninitialized bytes and the
+#   stale bytes a pop/take_at/swap_remove leaves behind are both safe. A
+#   live slot or an index outside the capacity is refused (raises), in
+#   release builds too. No pointer and no wildcard origin appears in the
+#   signature.
 #
 # Append fast/slow split:
 #   `append` MUST be split into @always_inline fast path + @no_inline
@@ -124,7 +126,7 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
         """Create an empty slab with `capacity` pre-allocated T slots.
 
         `_len_t = 0` — slots are uninitialized, callers use `append()`
-        (or `init_slot[...]` for non-Movable T) to fill.
+        (or `init_slot[...]` + `set_len_unchecked`) to fill.
 
         Args:
             capacity: Number of T slots to pre-allocate. If <= 0, no
@@ -141,9 +143,8 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
         """Allocate storage for N T-slots; leave slab empty (_len_t=0).
 
         The empty-with-capacity factory. Callers populate via
-        `append(...)` (for Movable T) or via `init_slot[init_fn](i)` +
-        `set_len_unchecked(n)` (for non-Movable T with explicit per-slot
-        init).
+        `append(...)`, or via `init_slot[init_fn](i)` for each slot and
+        then `set_len_unchecked(n)`.
 
         For the all-slots-live zero-filled factory, use
         `create_prefilled(n)` instead.
@@ -185,8 +186,10 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
         `PosixCondvar`, or `List` fields whose destructors check for
         null/zero bit patterns.
 
-        Callers populate per-slot fields via `get_mut_interior(i)` or
-        `init_slot[init_fn](i)` BEFORE any field-destroying mutation.
+        Every slot is live from the start, so `init_slot` refuses them;
+        overwrite a slot with `__setitem__`/`set` (which drops the zero
+        value first) or mutate it in place through `get_mut_interior(i)`.
+        Use this factory only for a T whose all-zero bytes are a valid value.
 
         Args:
             n: Number of T slots. Must be >= 0. If 0, returns an empty
@@ -200,8 +203,8 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
             out._reserve_t(n)
             # SAFETY: _reserve_t grew _bytes to n * size_of[T]() bytes;
             # zero-fill so that
-            # field-destroying operations on Atomic-bearing non-Movable T
-            # don't read uninitialized bytes. UInt8 is a plain byte — no
+            # the destructor (which runs on all n slots) and field-destroying
+            # operations on Atomic-bearing T don't read uninitialized bytes. UInt8 is a plain byte — no
             # T-level destructors can run until we set _len_t > 0.
             unsafe_memset(out._bytes.unsafe_ptr(), 0, n * size_of[Self.T]())
             out._len_t = n
@@ -270,7 +273,7 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
 
         PANICS if idx >= _len_t or idx < 0. Returns a tight-origin ref
         through the owning byte-allocation field. For
-        non-Movable T with Atomic fields: CAS through Atomic is sound
+        T with Atomic fields: CAS through Atomic is sound
         (interior mutability). Non-Atomic field mutation through this
         ref from multiple threads is UB -- caller SAFETY comment required.
         """
@@ -298,41 +301,49 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
         return (t_ptr + idx)[]
 
     # =========================================================================
-    # init_slot -- universal non-Movable init path
+    # init_slot -- construct a value into a slot that is not live
     # =========================================================================
 
-    @always_inline
-    def init_slot[init_fn: def (mut Self.T) thin -> None](mut self, idx: Int):
-        """Single-threaded in-place init of slot `idx`.
+    def init_slot[init_fn: def () thin -> Self.T](mut self, idx: Int) raises:
+        """Move `init_fn()` into slot `idx`, which must not be live.
 
-        PANICS if idx < 0 or idx >= _cap_t.
+        A slot is live when idx < len(). init_slot writes a whole value and
+        drops nothing, so the slot's previous bytes do not matter: never
+        written (`create`, `reserve`), or left behind by `pop`/`take_at`/
+        `swap_remove`. It does not change len(); after filling slots
+        [len(), k) call `set_len_unchecked(k)` so they become live (and are
+        dropped with the slab). Initializing the same non-live slot twice
+        before that leaks the first value (no double drop).
 
-        `init_fn` receives the slot as `mut Self.T` and assigns its fields,
-        e.g. `slot.counter = AtomicI64(0)`. Field assignment destroys the
-        field's previous bytes first, so the slot's bytes must be ones every
-        assigned field's destructor accepts: zero-filled (`create_prefilled`),
-        or fields whose destructor is trivial (Int, Atomic). Never use it to
-        overwrite a live heap-owning field of a slot you have not zeroed.
-
-        After init_fn returns, __getitem__ is safe on that slot. If the
-        slot is in `[_len_t, _cap_t)` the caller MUST follow up with
-        `set_len_unchecked` (or have used `create_prefilled(n)`, which set
-        _len_t=n at construction time) before calling __getitem__.
+        Raises:
+            When idx < 0 or idx >= capacity(), or when idx < len() (the
+            slot holds a live value; use `__setitem__`/`set` to replace it).
+            Checked in every build, not only debug.
 
         Parameters:
-            init_fn: Comptime function that initializes the slot through the
-                `mut` reference it is given.
+            init_fn: Comptime function returning the value to store.
         """
-        debug_assert(
-            idx >= 0 and idx < self._cap_t,
-            "Slab.init_slot: idx out of capacity range",
-        )
-        # SAFETY: idx bounds-checked above, so slot idx lies inside `_bytes`.
-        # The typed pointer keeps `self._bytes`'s concrete origin and is
-        # dereferenced at once; init_fn sees only a `mut` reference that
-        # cannot escape the call.
+        if idx < 0 or idx >= self._cap_t:
+            raise Error(
+                "Slab.init_slot: index "
+                + String(idx)
+                + " outside capacity "
+                + String(self._cap_t)
+            )
+        if idx < self._len_t:
+            raise Error(
+                "Slab.init_slot: slot "
+                + String(idx)
+                + " is live (len "
+                + String(self._len_t)
+                + "); use set() to replace it"
+            )
+        # SAFETY: 0 <= idx < _cap_t, so slot idx lies inside `_bytes`, and
+        # idx >= _len_t, so by I3/I4 it holds no live value: writing without
+        # dropping neither leaks nor double-frees. The typed pointer keeps
+        # `self._bytes`'s concrete origin and does not leave this body.
         var t_ptr = self._bytes.unsafe_ptr().bitcast[Self.T]()
-        init_fn((t_ptr + idx)[])
+        (t_ptr + idx).unsafe_write(init_fn())
 
     # =========================================================================
     # Typed Atomic helpers -- universal
@@ -461,7 +472,7 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
             destroyed (via take_at/swap_remove/pop) OR moved-out before
             this call -- otherwise their destructors leak.
           - If new_len > len(): slots [len(), new_len) must have been
-            manually initialized via init_slot -- otherwise the next drop
+            initialized via init_slot -- otherwise the next drop
             calls destroy_pointee on uninitialized memory (UB).
 
         Used by morsel fast paths that batch-init a range via init_slot
@@ -503,11 +514,10 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
         self._len_t = new_len
 
     # =========================================================================
-    # Movable-gated API (T: Movable & Deinitable)
+    # Growth and move-out API
     # -------------------------------------------------------------------------
-    # Each method uses receiver refinement (the stdlib `Span` pattern).
-    # Compile error "no matching method" on
-    # Slab[NonMovableT].<movable_method>(...) is the negative-test contract.
+    # Available for every T, since the struct bound already requires
+    # T: Movable & Deinitable.
     # =========================================================================
 
     @always_inline
@@ -1100,9 +1110,8 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
         Preserves T-level invariants by relying on List[UInt8]'s realloc
         to bitwise-move the existing bytes. For most Movable T this is
         equivalent to a move (Mojo moves are bitwise-copy + source-invalidate;
-        destructors do not fire on moved-from values). For non-Movable T
-        callers use `create(n)` once (fixed-size) and don't grow, so this
-        path is not hit.
+        destructors do not fire on moved-from values). A T whose move
+        constructor is not trivial is moved WITHOUT running it here.
 
         Args:
             new_cap_t: New T-slot capacity. Must be >= current capacity.
