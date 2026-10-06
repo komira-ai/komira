@@ -1,4 +1,4 @@
-# The generated Lambda client (`LambdaLambdaClient`) end to end over
+# The generated Lambda client (`LambdaClient`) end to end over
 # komira_http_client and komira_http_core's ScriptedConnector (no socket).
 #
 # Every verb meets one error answer and raises it under the restJson1 code
@@ -26,7 +26,7 @@ from komira_aws_lambda.komira_aws_lambda import (
     LambdaGetFunctionRequest,
     LambdaGetFunctionUrlConfigRequest,
     LambdaInvocationRequest,
-    LambdaLambdaClient,
+    LambdaClient,
     LambdaPutFunctionConcurrencyRequest,
     LambdaUpdateFunctionCodeRequest,
     LambdaUpdateFunctionConfigurationRequest,
@@ -150,10 +150,10 @@ def _mk_echo() raises -> AwsEchoConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> LambdaLambdaClient[C, StaticCredsSource]:
+) raises -> LambdaClient[C, StaticCredsSource]:
     var config = LambdaEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return LambdaLambdaClient[C, StaticCredsSource](
+    return LambdaClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(

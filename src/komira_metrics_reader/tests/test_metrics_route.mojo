@@ -5,7 +5,9 @@
 # access runs before any argument check; `metric` is required; the window
 # defaults to the last hour and a malformed, inverted or unrepresentable bound
 # is a 400, never a default; the step, the aggregation, group-by keys and label
-# matchers (both polarities, percent-decoded) reach the reader as written; the
+# matchers (both polarities, percent-decoded) reach the reader as written; an
+# unknown, repeated or empty parameter name and a malformed `%` escape in a
+# name are 400s naming them; the
 # limits default and clamp; the reader's refusal is a 400 carrying its
 # sentence and the read is never made; a fault raised by the read is a 500
 # naming it; the page renders with the question asked, its series, labels and
@@ -259,6 +261,64 @@ def test_an_unknown_or_repeated_parameter_is_a_400_naming_it() raises:
     assert_equal(len(d.last_query().matchers), 2)
 
 
+def test_an_empty_name_or_a_malformed_name_escape_is_a_400_naming_it() raises:
+    # A segment `=v` names no parameter: skipped, it would drop a value the
+    # caller sent (most often a key lost to a bad edit), so it is refused,
+    # quoting the segment. A parameter NAME with a `%` that is not followed
+    # by two hex digits is refused, quoting the name as written: read as a
+    # literal `%`, `label.a%2` would match a label the caller never named.
+    var d = ScriptedMetricsReader()
+    var queries: List[String] = [
+        "metric=m&=v",
+        "=v&metric=m",
+        "metric=m&=",
+        "metric=m&label.a%2=x",
+        "metric=m&not_label.a%zz=x",
+        "metric=m&label.a%=x",
+        "metric=m&label.%g1b=x",
+    ]
+    var quoted: List[String] = [
+        "'=v'",
+        "'=v'",
+        "'='",
+        "'label.a%2'",
+        "'not_label.a%zz'",
+        "'label.a%'",
+        "'label.%g1b'",
+    ]
+    var problem: List[String] = [
+        "empty parameter name",
+        "empty parameter name",
+        "empty parameter name",
+        "malformed percent escape",
+        "malformed percent escape",
+        "malformed percent escape",
+        "malformed percent escape",
+    ]
+    for i in range(len(queries)):
+        var query = queries[i].copy()
+        var r = _run(d, query, AllowAll())
+        assert_equal(r.status, Int32(400), query + " -> " + _body(r))
+        assert_true(quoted[i] in _body(r), query + " -> " + _body(r))
+        assert_true(problem[i] in _body(r), query + " -> " + _body(r))
+    assert_equal(d.read_count(), 0)
+    assert_equal(d.refusal_count(), 0)
+    # Not refused: an empty segment (no `=`) is no parameter; an escaped `%`
+    # in a label name is a label name; a VALUE keeps a stray `%` literally
+    # (the documented decoding, unchanged here); any other non-empty UTF-8
+    # label name, spaces and dots included, is the writer's to have used.
+    _ = _ok(d, String("metric=m&&label.a%25=x&"))
+    var q = d.last_query()
+    assert_equal(len(q.matchers), 1)
+    assert_equal(q.matchers[0].key, String("a%"))
+    _ = _ok(d, String("metric=m&label.k=5%"))
+    assert_equal(d.last_query().matchers[0].value, String("5%"))
+    _ = _ok(d, String("metric=m&label.http.route=%2F&not_label.Service+Name=x"))
+    q = d.last_query()
+    assert_equal(q.matchers[0].key, String("http.route"))
+    assert_equal(q.matchers[1].key, String("Service Name"))
+
+
 def test_limits_clamp() raises:
     var d = ScriptedMetricsReader()
     _ = _ok(d, String("metric=m&series_limit=0&point_limit=99999999999999999999"))
@@ -338,6 +398,7 @@ def main() raises:
     test_arguments_reach_the_reader()
     test_a_bad_argument_is_a_400_never_a_default()
     test_an_unknown_or_repeated_parameter_is_a_400_naming_it()
+    test_an_empty_name_or_a_malformed_name_escape_is_a_400_naming_it()
     test_limits_clamp()
     test_reader_refusal_is_a_400_and_no_read()
     test_a_read_fault_is_a_500_naming_it()

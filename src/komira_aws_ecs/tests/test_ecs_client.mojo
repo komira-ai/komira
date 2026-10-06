@@ -1,4 +1,4 @@
-# The generated Amazon ECS client (`ECSECSClient`) end to end over
+# The generated Amazon ECS client (`ECSClient`) end to end over
 # komira_http_client and komira_http_core's ScriptedConnector (no socket): a
 # ListClusters answered, and a StopTask in a cluster that does not exist,
 # raised under its code with the service's message. The error is a 400
@@ -15,7 +15,7 @@
 # and its retry after a 500 carries the same one, so the service starts the
 # task once; a token the caller set is sent as set.
 from komira_aws_ecs.komira_aws_ecs import (
-    ECSECSClient,
+    ECSClient,
     ECSEndpointConfig,
     ECSListClustersRequest,
     ECSRunTaskRequest,
@@ -94,10 +94,10 @@ def _mk_err() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> ECSECSClient[C, StaticCredsSource]:
+) raises -> ECSClient[C, StaticCredsSource]:
     var config = ECSEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return ECSECSClient[C, StaticCredsSource](
+    return ECSClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(
@@ -123,7 +123,7 @@ def test_list_clusters() raises:
 
 def test_an_error_is_raised_under_its_code() raises:
     var client = _client(_mk_err)
-    with assert_raises(contains="ECSECS.StopTask failed: HTTP 400 ClusterNotFoundException Cluster not found."):
+    with assert_raises(contains="ECS.StopTask failed: HTTP 400 ClusterNotFoundException Cluster not found."):
         _ = client.stop_task(_stop(String("gone")))
 
 

@@ -1,9 +1,13 @@
 # =============================================================================
 # kci_release_set -- what the BUILD step and the PUBLISH step both know about a
 #   release set: one artifact directory checked, the conda metadata read,
-#   `release.json`, and the set hash.
+#   `release.json`, the set hash, and requirement closure by name.
 # =============================================================================
 #
+#   closure.mojo           `undeclared_requirements`, `requirement_name`,
+#                          `MOJO_COMPILER_PACKAGE`: every library requirement
+#                          names another library of the set (BUILD refuses
+#                          an open one; PUBLISH's closure check also pins it)
 #   conda_metadata.mojo    `CondaMetadata`, `read_conda_metadata`
 #   member.mojo            `ReleaseMember`, `verify_member`: the per-artifact
 #                          checks both verbs run, so build's early refusal and
@@ -25,6 +29,11 @@ from kci_release_set.conda_metadata import (
     MetaMember,
     parse_conda_metadata,
     read_conda_metadata,
+)
+from kci_release_set.closure import (
+    MOJO_COMPILER_PACKAGE,
+    requirement_name,
+    undeclared_requirements,
 )
 from kci_release_set.member import ReleaseMember, file_sha256_hex, member_platform, verify_member
 from kci_release_set.release_manifest import (

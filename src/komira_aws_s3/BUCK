@@ -5,7 +5,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # model (//third_party/botocore, pinned by sha256; nothing of it is copied
 # here), in client mode: each operation's request builder and response
 # parser, its endpoint resolved through S3's published endpoint ruleset
-# and partition table, embedded in the module, and `S3S3Client`, whose
+# and partition table, embedded in the module, and `S3Client`, whose
 # verbs resolve that endpoint per call and send through komira_aws_core's
 # send_sigv4_signed_request (signed per attempt, retried as the AWS SDKs'
 # standard mode does) over the komira_http_core Connector it is given. The

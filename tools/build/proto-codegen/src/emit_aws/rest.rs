@@ -1032,7 +1032,8 @@ impl AwsEmitter<'_> {
         if !self.s3_answers_200_error(facts, members) {
             return;
         }
-        let svc = self.ty_name(&self.lowering.model.files[0].services[0].name);
+        // The service as the client's error builder names it: the prefix.
+        let svc = self.prefix.clone();
         self.line("if aws_xml_body_is_error(resp):");
         self.push();
         self.line("var _ei = aws_rest_xml_error(resp)");
