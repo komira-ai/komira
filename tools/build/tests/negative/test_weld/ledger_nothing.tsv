@@ -1,0 +1,4 @@
+src/komira_a/tests/test_dead.mojo	planted: the BUCK file names it only in a comment
+src/komira_b	planted: a package with a source and no test
+src/komira_gen	planted: no .mojo
+src/komira_a/tests/test_gone.mojo	planted: no such file

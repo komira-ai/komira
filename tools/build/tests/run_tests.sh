@@ -286,6 +286,13 @@
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
+#  39. Test welding (tools/build/lint/test_weld.bzl): //:test_weld (every
+#      package under src/) and tests//functional/test_weld:ok (a planted tree
+#      with its ledger) build; each target of tests//negative/test_weld fails
+#      naming its one planted finding: an unwelded test file, a package with
+#      no welded test, a ledger row for a welded test or package (the ledger
+#      only shrinks), a row naming nothing, a row with no reason, and a root
+#      with no package.
 set -uo pipefail
 
 umbrella=1
@@ -1053,6 +1060,20 @@ expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 check
 expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
 expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
+
+# 39
+expect_green test_weld //:test_weld tests//functional/test_weld:ok
+for want in \
+    "unwelded|tests//negative/test_weld:unwelded[files]/src/komira_a/tests/test_dead.mojo: a test file no BUCK file names" \
+    "untested|tests//negative/test_weld:untested[files]/src/komira_b: 1 .mojo source(s) and no welded test" \
+    "shrink_package|src/komira_c: the package welds 1 test(s) now; delete the row (the ledger only shrinks)" \
+    "shrink_file|src/komira_c/wire/tests/test_wire.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
+    "nothing|src/komira_a/tests/test_gone.mojo: names neither a test file nor a package with a .mojo source" \
+    "malformed|ledger_malformed.tsv:2: a row is <path><TAB><reason>, with a reason" \
+    "empty|test_weld: checked nothing (no package under nosuch)"; do
+    expect_red "test_weld_${want%%|*}" "${want#*|}" "tests//negative/test_weld:${want%%|*}"
+done
+expect_red test_weld_nothing_package 'src/komira_gen: names neither a test file nor a package with a .mojo source' tests//negative/test_weld:nothing
 
 # 37
 pt_rc=0

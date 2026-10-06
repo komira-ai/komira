@@ -1,0 +1,30 @@
+load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("//functional/test_weld:fixture.bzl", "TEST_WELD_LEDGER", "TEST_WELD_TREE")
+
+# Test 39 (test_weld), the half that must go red: one planted defect per
+# target, in the tree of functional/test_weld (whose `ok` holds it exactly).
+# run_tests.sh requires each to fail naming its finding.
+[
+    test_weld(
+        name = name,
+        files = TEST_WELD_TREE,
+        known_untested = ledger or TEST_WELD_LEDGER,
+        root = root,
+    )
+    for name, ledger, root in [
+        # test_dead.mojo has no ledger row.
+        ("unwelded", "ledger_unwelded.tsv", "src"),
+        # komira_b has no ledger row.
+        ("untested", "ledger_untested.tsv", "src"),
+        # A row for a package that welds a test: the ledger only shrinks.
+        ("shrink_package", "ledger_shrink_package.tsv", "src"),
+        # A row for a test file that is welded.
+        ("shrink_file", "ledger_shrink_file.tsv", "src"),
+        # Rows for a package with no .mojo and for a file that does not exist.
+        ("nothing", "ledger_nothing.tsv", "src"),
+        # A row with no reason.
+        ("malformed", "ledger_malformed.tsv", "src"),
+        # No package under the root: the lint checks nothing, so it fails.
+        ("empty", None, "nosuch"),
+    ]
+]

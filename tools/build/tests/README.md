@@ -802,6 +802,31 @@ the same README in a library with `conda = False`, builds.
 ./buck2 build tests//negative/readme_examples/relative_link:relative_link   # must fail: README.md:11: greet.mojo: a relative link
 ```
 
+## 39. Test welding
+
+A test file that no BUCK file names never runs, and nothing else notices.
+[`test_weld`](../lint/test_weld.bzl) is a validation over the packages under
+`src/` (each directory directly under it). It requires every `test_*.mojo`
+under a `tests/` directory to be named, as a string on a line that is not a
+comment, by the BUCK file of its directory or the nearest one above
+(`test_srcs`, or a `mojo_test`), and every package with a `.mojo` source to weld
+a test. The exceptions are the rows of
+[`tests/known_untested.tsv`](../../../tests/known_untested.tsv), each with its
+reason, and that ledger only shrinks: a row whose test is welded, or whose
+package welds a test, is a finding, as is a row naming nothing. `//:test_weld`
+in the root [`BUCK`](../../../BUCK) holds the repository to them.
+[`functional/test_weld:ok`](functional/test_weld/BUCK) builds a planted tree
+([`fixture.bzl`](functional/test_weld/fixture.bzl): a commented-out entry, a
+helper under `tests/`, a nested test, a `mojo_test` in a subpackage, a package
+with no `.mojo`) whose ledger holds it exactly, and each target of
+[`negative/test_weld`](negative/test_weld/BUCK) plants one defect in the same
+tree and must fail naming it.
+
+```sh
+./buck2 build //:test_weld tests//functional/test_weld:ok
+./buck2 build tests//negative/test_weld:untested   # must fail: src/komira_b: 1 .mojo source(s) and no welded test
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
