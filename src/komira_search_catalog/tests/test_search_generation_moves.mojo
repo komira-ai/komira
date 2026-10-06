@@ -20,12 +20,6 @@
 #      generation and the live set, a split in its view is retired, and the
 #      scan's re-check sees a different generation.
 #   5. test_scan_straddling_a_reap_detects_it: the same for a reap.
-#   7. test_refusal_carries_the_marker_when_the_bump_fails: a publish
-#      refused past a seal bumps the counter after rewriting its chunk into a
-#      seal. That bump is best effort: with an unreadable counter the publish
-#      must still raise `[SHARD_RETIRED]` (so the caller moves to a fresh
-#      shard id instead of retrying into the retired one) and the seal must
-#      still be written. Mutant: let the bump error propagate.
 #   6. test_retire_bumps_before_and_after_its_tombstone and
 #      test_reap_bumps_before_and_after_dropping_its_tombstone: the order.
 #      `_SpyStore` reads the generation counter at the moment the change is
@@ -35,10 +29,17 @@
 #      and the value after the call must be above it (the bump after the
 #      change, which retires the value a reader between the two may have
 #      paired with the old view).
+#   7. test_refusal_carries_the_marker_when_the_bump_fails: a publish
+#      refused past a seal bumps the counter after rewriting its chunk into a
+#      seal. That bump is best effort: with an unreadable counter the publish
+#      must still raise `[SHARD_RETIRED]` (so the caller moves to a fresh
+#      shard id instead of retrying into the retired one) and the seal must
+#      still be written. Mutant: let the bump error propagate.
 #
 # Mutants that turn these red: dropping both bumps from `retire_at` (2, 4,
 # 6), from `reap_chunk` (3, 5, 6); dropping only the first or only the
-# second bump of either (6).
+# second bump of either (6); letting the bump error propagate on a refused
+# publish (7).
 #
 # In-memory stores only, no network.
 # =============================================================================
