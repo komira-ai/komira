@@ -811,10 +811,19 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
 
         A folded dense offset O < the retained watermark thereafter resolves to
         the REAPED sentinel (the normal retention path), exactly as a reaped
-        prefix in a single-manifest partition does. `retain_from_dense == 0`
-        (default) is a no-op retention pass that simply reports the live count."""
+        prefix in a single-manifest partition does. A `retain_from_dense` at or
+        below the current floor (the default 0 included) retires nothing new; it
+        reaps only `_base` tombstones left below the log start by an earlier
+        compaction that failed or was interrupted (one GET + one LIST), then
+        reports the live count."""
         if retain_from_dense > self._base_log_start_offset:
             self._retire_base_below(retain_from_dense)
+        else:
+            # Nothing new to retire: still reclaim what an earlier compaction
+            # retired but did not finish reaping (`_reap_retired_base`).
+            var base = self._shard_store(BASE_SHARD_ID)
+            self._reap_retired_base(base)
+            _ = base^
         return len(self._base_chunks)
 
     # ---- RESUMABILITY + reaped-shard resolution: resolve a dense offset O to its record ----
@@ -1081,10 +1090,13 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         # Advance the durable source `_LOG_START` to the folded watermark (the
         # first un-folded local offset = `folded_through_total`, at the first
         # surviving chunk seq). Monotone-forward; a stale 412 is a harmless lose.
-        # Swallowing ANY failure here is safe: the tombstones above stay on
-        # chunks at or above `_LOG_START`, which `CasManifestStore.reap` refuses
-        # and the broker `ReapWorker` skips (chunk_reclaim_guard.mojo), and the
-        # next fold re-reads `_LOG_START` and re-advances it.
+        # A swallowed failure deletes nothing live: the tombstones above then
+        # sit on chunks at or above `_LOG_START`, which `CasManifestStore.reap`
+        # refuses and the broker `ReapWorker` skips (chunk_reclaim_guard.mojo),
+        # and the next call re-reads `_LOG_START` and re-advances. That is NOT
+        # a claim that reaping these tombstones is safe once the advance lands:
+        # `_base` may still reference their `.seg` objects
+        # (komira-ai/komira#494).
         if folded_through_total > cur.log_start_offset:
             try:
                 _ = s.advance_log_start(
@@ -1105,13 +1117,19 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         live block at ordinal `i` (in `_base_chunks`) is `_base_log_start_seq + i`.
         Reaping the first K live blocks advances `_base_log_start_seq` by K.
 
-        ORDER: the durable `_LOG_START` advance comes FIRST, then the tombstones
-        and reaps. `reap` refuses a chunk at or above the log start
-        (chunk_reclaim_guard.mojo), and reaping before the advance would delete
-        live chunks whenever the advance then failed. A failed advance or reap
-        RAISES with the in-memory index unchanged; the next `compact` retries it
-        (the advance rewrites the same pointer, and a chunk an earlier attempt
-        already reaped is skipped)."""
+        ORDER (RetentionPass's): tombstone the retired prefix, THEN advance the
+        durable `_LOG_START`, THEN reap every tombstone below it
+        (`_reap_retired_base`).
+          * A failure before the advance leaves tombstones on chunks at or
+            above the log start: harmless (`reap` refuses them,
+            chunk_reclaim_guard.mojo), and the retry re-tombstones and advances.
+          * A failure after the advance leaves tombstoned chunks below it. A
+            restart rebuilds the index from the log start and never retires
+            them again, but every `compact` sweeps tombstones below the log
+            start, so they are reclaimed.
+          * Advancing BEFORE tombstoning would strand untombstoned chunks below
+            the log start on such a failure: nothing would ever reap them.
+        Any failure RAISES with the in-memory index unchanged."""
         var base = self._shard_store(BASE_SHARD_ID)
         var keep = List[BaseChunkEntry]()
         var first_keep_off = retain_from_dense
@@ -1127,12 +1145,7 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
                     saw_keep = True
                 keep.append(e.copy())
         var new_log_start_seq = self._base_log_start_seq + retire_n
-        # 1. Advance the durable `_LOG_START` past the retired prefix, so a
-        #    restart sees it and `reap` accepts it. A failure raises here:
-        #    nothing reaped, index unchanged.
-        var ls = base.read_log_start()
-        _ = base.advance_log_start(new_log_start_seq, first_keep_off, ls.etag)
-        # 2. Tombstone + reap the retired prefix, now below the log start.
+        # 1. Tombstone the retired prefix.
         var j = Int64(0)
         while j < retire_n:
             var abs_seq = self._base_log_start_seq + j
@@ -1142,13 +1155,32 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
             except e3:
                 if not is_not_found(String(e3)):
                     raise e3^
-                continue  # chunk already gone: an earlier attempt reaped it
-            base.reap(abs_seq)
+                # The chunk is gone: an earlier attempt reaped it. A marker it
+                # left behind is below the log start, so step 3 reaps it.
+        # 2. Advance the durable `_LOG_START` past the retired prefix.
+        var ls = base.read_log_start()
+        _ = base.advance_log_start(new_log_start_seq, first_keep_off, ls.etag)
+        # 3. Reap every tombstone below the log start.
+        self._reap_retired_base(base)
         _ = base^
-        # 3. Every retired chunk is reaped: only now drop it from the index.
+        # 4. Every retired chunk is reaped: only now drop it from the index.
         self._base_chunks = keep^
         self._base_log_start_offset = first_keep_off
         self._base_log_start_seq = new_log_start_seq
+
+    def _reap_retired_base(
+        self, mut base: CasManifestStore[Self.Store]
+    ) raises:
+        """Reap every `_base` tombstone below the durable log start: the
+        retired prefix of this compaction, and any chunk an earlier compaction
+        tombstoned (or half reaped) before it failed or the process stopped.
+        A tombstone at or above the log start sits on a live block and is left
+        alone. Raises on the first failed reap."""
+        var floor = base.read_log_start_seq()
+        var tombs = base.tombstone_seqs()
+        for i in range(len(tombs)):
+            if tombs[i] < floor:
+                base.reap(tombs[i])
 
     def _offset_was_folded(self, o: Int64) -> Bool:
         """Whether dense offset O was ever folded (below the high-water-ever).

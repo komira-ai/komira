@@ -20,9 +20,12 @@
 #       reap-then-advance order (the reap is refused and swallowed, the chunk
 #       leaks, the index forgets it).
 #   (5) A failed advance, tombstone write or reap during `compact` raises and
-#       leaves the in-memory index intact; a retry reclaims everything, also
-#       after a reap that deleted the chunk but not its marker. Catches: the
-#       old swallow-and-drop.
+#       leaves the in-memory index intact; a retry reclaims everything and
+#       strands no marker, also after a reap that deleted the chunk but not
+#       its marker, and after a restart (`reload_from_base`) that follows a
+#       landed advance. Catches: the old swallow-and-drop; an advance before
+#       the tombstones (chunks below the floor that nothing revisits); a
+#       compact that does not sweep tombstones below the floor.
 #
 # Faults are injected by `_FaultStore`, which wraps the shared in-memory store
 # and keeps its rules as marker objects IN that store, so every clone (each
@@ -485,6 +488,16 @@ def test_base_fold_failed_advance_keeps_index() raises:
             "failed advance: nothing reaped",
         )
     _disarm(inner, _FAIL_PUT, lk)
+    # A sweep-only compact leaves tombstones at or above the log start alone.
+    _ = f.compact(Int64(0))
+    for s in range(6):
+        assert_true(
+            _chunk_present(inner, _base_prefix(), Int64(s)),
+            "sweep below the floor only: nothing reaped",
+        )
+    # A restart, then the retry.
+    f.reload_from_base()
+    _assert_index_intact(f, inner, "reload after failed advance")
     _ = f.compact(Int64(4))
     _assert_compacted(f, inner, "retry after failed advance")
     _ = f^
@@ -530,17 +543,64 @@ def test_base_fold_retry_after_half_reap() raises:
     _assert_index_intact(f, inner, "half reap")
     assert_false(_chunk_present(inner, _base_prefix(), Int64(0)), "chunk 0 gone")
     _disarm(inner, _FAIL_DELETE, tk)
-    # The retry finds chunk 0 already gone and moves on; its stale marker is
-    # left (nothing reaps `_base` markers), the other three are reaped.
+    # The retry finds chunk 0 already gone, reaps the other three, and sweeps
+    # chunk 0's leftover marker: no marker is stranded.
     _ = f.compact(Int64(4))
-    assert_equal(f.live_base_chunk_count(), 2, "retry: 2 live blocks")
-    for s in range(1, 4):
-        assert_false(
-            _chunk_present(inner, _base_prefix(), Int64(s)),
-            "retry: chunk " + String(s) + " deleted",
-        )
+    _assert_compacted(f, inner, "retry after half reap")
     _ = f^
     print("[test_base_fold_retry_after_half_reap] PASS")
+
+
+def test_base_fold_restart_after_advance_reclaims() raises:
+    """The advance lands, the reap of chunk 1 fails (or the process dies),
+    and the fold restarts: `reload_from_base` rebuilds from log start 4, so
+    no retire pass revisits chunks 0..3. The next compact sweeps them."""
+    print("[test_base_fold_restart_after_advance_reclaims] starting...")
+    var inner = _Inner()
+    var f = _fold_six(inner)
+    var ck = chunk_key(_base_prefix(), Int64(1)).raw()
+    _arm(inner, _FAIL_DELETE, ck)
+    var raised = False
+    try:
+        _ = f.compact(Int64(4))
+    except e:
+        raised = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised, "the reap after the advance fails")
+    _disarm(inner, _FAIL_DELETE, ck)
+    f.reload_from_base()
+    assert_equal(f.live_base_chunk_count(), 2, "restart: index from log start 4")
+    _ = f.compact(Int64(4))
+    _assert_compacted(f, inner, "restart after the advance")
+    _ = f^
+    print("[test_base_fold_restart_after_advance_reclaims] PASS")
+
+
+def test_base_fold_restart_after_failed_tombstone_reclaims() raises:
+    """The tombstone write for chunk 2 fails, then the fold restarts. The
+    tombstones come BEFORE the advance, so the log start has not moved: the
+    restart still sees all six blocks and the next compact retires 0..3.
+    (Advancing first would leave chunks 2, 3 below the floor, untombstoned,
+    and nothing would reap them.)"""
+    print("[test_base_fold_restart_after_failed_tombstone_reclaims] starting...")
+    var inner = _Inner()
+    var f = _fold_six(inner)
+    var tk = tombstone_key(_base_prefix(), Int64(2)).raw()
+    _arm(inner, _FAIL_PUT, tk)
+    var raised = False
+    try:
+        _ = f.compact(Int64(4))
+    except e:
+        raised = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised, "the tombstone write for chunk 2 fails")
+    _disarm(inner, _FAIL_PUT, tk)
+    f.reload_from_base()
+    _assert_index_intact(f, inner, "restart after a failed tombstone")
+    _ = f.compact(Int64(4))
+    _assert_compacted(f, inner, "restart after a failed tombstone")
+    _ = f^
+    print("[test_base_fold_restart_after_failed_tombstone_reclaims] PASS")
 
 
 def test_base_fold_failed_tombstone_keeps_index() raises:
@@ -572,5 +632,7 @@ def main() raises:
     test_base_fold_failed_advance_keeps_index()
     test_base_fold_failed_reap_keeps_index()
     test_base_fold_retry_after_half_reap()
+    test_base_fold_restart_after_advance_reclaims()
+    test_base_fold_restart_after_failed_tombstone_reclaims()
     test_base_fold_failed_tombstone_keeps_index()
-    print("[OK] test_chunk_reclaim_guard_offline — 8 cases passed")
+    print("[OK] test_chunk_reclaim_guard_offline — 10 cases passed")
