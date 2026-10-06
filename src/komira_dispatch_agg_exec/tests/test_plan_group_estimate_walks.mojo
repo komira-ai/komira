@@ -285,8 +285,13 @@ def test_no_row_cap_leaves_the_distinct_count_and_the_domain_alone() raises:
 def test_a_half_domain_or_a_float_domain_is_no_signal() raises:
     """A min without a max, or a min/max that is not an integer on either
     side, says nothing about a distinct count.
-    MUTANT: test only `min_value` (or only the min's type) and one of the
-    three columns resolves to a made-up span."""
+    A float ScalarValue keeps int_val = 0, so each float case puts the
+    integer side where a type-blind read of that 0 gives a positive span
+    (float min 1.5 with max 9 reads as 0..9; min -5 with float max 9.5 reads
+    as -5..0): the type check is the only arm that can refuse it.
+    MUTANT: test only `min_value` and the half domain reads a missing max;
+    drop the min's type check and float_lo reports 10 groups; drop the max's
+    type check and float_hi reports 6 groups."""
     var half = _scan(
         String("k"),
         _col_stats(None, Optional[ScalarValue](ScalarValue.from_int(1)), None),
@@ -301,11 +306,11 @@ def test_a_half_domain_or_a_float_domain_is_no_signal() raises:
         estimate_group_count(_group_by(String("k"), float_lo^)).why, GROUP_EST_WHY_NO_SIGNAL
     )
     var float_hi = _domain_scan(
-        String("k"), ScalarValue.from_int(1), ScalarValue.from_float(9.5), 100
+        String("k"), ScalarValue.from_int(-5), ScalarValue.from_float(9.5), 100
     )
-    assert_equal(
-        estimate_group_count(_group_by(String("k"), float_hi^)).why, GROUP_EST_WHY_NO_SIGNAL
-    )
+    var e_hi = estimate_group_count(_group_by(String("k"), float_hi^))
+    assert_false(e_hi.is_known(), "a float max read as an integer domain")
+    assert_equal(e_hi.why, GROUP_EST_WHY_NO_SIGNAL)
 
 
 def test_an_inverted_or_overflowing_domain_is_no_signal() raises:

@@ -3,8 +3,8 @@
 #                            any_value) answers in its INPUT COLUMN's type.
 # =============================================================================
 #
-# ★ THE DEFECT (`XS-TYPE-WIDENED`,
-#   `XS-TYPE-TIMEZONE-DROPPED`). The untyped aggregate routes fold every
+# ★ THE DEFECT (a widened integer or float type, a dropped timezone).
+#   The untyped aggregate routes fold every
 #   integer MIN / MAX into a signed 8-byte cell and every float one into an
 #   8-byte FLOAT64 cell, and their drains publish the CELL's type:
 #

@@ -6,7 +6,7 @@
 #
 # ⛔ READ THIS BEFORE WIRING ANYTHING TO IT.
 # ---------------------------------------------------------------------------
-# This module computes a number and PRINTS it. It does not write
+# This module computes a number; its caller prints it. It does not write
 # `AggregateData.estimated_groups`, and the pass that used to
 # (`precompute_group_estimates`) was deleted before it ever landed, on purpose.
 # The slot has three consumers — the in-mem choke point's GROUP arm, door-2's
@@ -20,7 +20,7 @@
 # WHAT THE INSTRUMENT IS FOR
 # ---------------------------------------------------------------------------
 # `inmem_agg_choose_strategy`'s GROUP arm has never fired: `[AST]` printed
-# `group_est=-1` at all fifteen in-mem sites of the lever census.
+# `group_est=-1` at all fifteen in-mem sites measured.
 # Before deciding whether to feed it, the open question is not "can we compute
 # an estimate" but "how WRONG is the estimate we can compute, per site, on real
 # corpus data" — and nothing in this repo has ever measured that. This module
