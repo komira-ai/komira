@@ -239,7 +239,7 @@ struct MiddlewareChain(Movable, Deinitable):
     # itself (that would force `komira_http_server.middleware` to depend on the
     # transport's `RequestDispatcher` trait — and the transport already imports
     # the chain, so it would be a cycle). Instead the chain exposes its `before`
-    # leg (run the builtins + the user/auth middleware's `before`) and its
+    # leg (run the builtins + the user middleware's `before`) and its
     # `after` leg (reverse) as two methods; the transport-side driver runs the
     # dispatcher BETWEEN them, wrapping the whole thing in the ErrorMapper try.
     # --------------------------------------------------------------------------
@@ -257,7 +257,7 @@ struct MiddlewareChain(Movable, Deinitable):
             CORS.before → Tracing.before → Logging.before → user_mw.before.
 
         `user_mw` is the innermost interceptor — for an authenticated API it is the
-        `AuthMiddleware`, whose `before` either resolves `ctx.authed_user`
+        an embedder's authentication middleware, whose `before` either sets `ctx.principal`
         (returns None → continue to the dispatcher) OR short-circuits with a
         `Some(401)`.
 
@@ -294,7 +294,7 @@ struct MiddlewareChain(Movable, Deinitable):
                 ctx.short_circuit = True
                 return r^
         # Innermost: the user / auth middleware. Its `before` sets
-        # `ctx.authed_user` (continue) OR short-circuits 401.
+        # `ctx.principal` (continue) OR short-circuits 401.
         user_before_ran = True
         var ur = user_mw.before(req, ctx)
         if ur:
