@@ -1,0 +1,90 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load(":repro.bzl", "compiler_version", "run_capture")
+
+# EXPERIMENT (branch exp/mojo-trivial-copy-repro, never merged). Refs #332.
+# Standalone reproducer (no komira imports) of the pinned Mojo compiler
+# synthesizing __copy_ctor_is_trivial = True and __del__is_trivial = True for
+# a struct whose fields own heap memory, when it has two fields of the same
+# non-trivial Variant-backed type (Optional[String], Optional[List[Int]],
+# Variant[Int, String]) followed by a Variant-backed field of a trivial type
+# (Optional[Bool], Optional[Int], Variant[Int, Bool]).
+#
+#   ./buck2 build komira//tests/mojo_trivial_copy_repro:minimal_report --show-output
+#       minimal.mojo: the flags only (A must print False False; prints True True)
+#   ./buck2 build komira//tests/mojo_trivial_copy_repro:report --show-output
+#       repro.mojo at -O3 (report_O1: -O1): List.copy() shares the buffers;
+#       with an explicit __deinit__ the original reads freed memory; the
+#       control (explicit copy constructor) is clean
+#   survey*_report: the layout matrix the trigger was derived from
+#   version: `mojo --version` of the pinned compiler
+#
+# Each run action always succeeds; its log holds the output and RUN_RC=.
+
+mojo_binary(
+    name = "survey",
+    srcs = ["survey.mojo"],
+)
+
+run_capture(
+    name = "survey_report",
+    bin = ":survey",
+    runs = [""],
+)
+
+mojo_binary(
+    name = "survey2",
+    srcs = ["survey2.mojo"],
+)
+
+run_capture(
+    name = "survey2_report",
+    bin = ":survey2",
+    runs = [""],
+)
+
+mojo_binary(
+    name = "repro",
+    srcs = ["repro.mojo"],
+)
+
+mojo_binary(
+    name = "repro_O1",
+    srcs = ["repro.mojo"],
+    optimization_level = "1",
+)
+
+run_capture(
+    name = "report",
+    bin = ":repro",
+    runs = ["plain", "deinit", "control"],
+)
+
+run_capture(
+    name = "report_O1",
+    bin = ":repro_O1",
+    runs = ["plain", "deinit", "control"],
+)
+
+mojo_binary(
+    name = "survey3",
+    srcs = ["survey3.mojo"],
+)
+
+run_capture(
+    name = "survey3_report",
+    bin = ":survey3",
+    runs = [""],
+)
+
+mojo_binary(
+    name = "minimal",
+    srcs = ["minimal.mojo"],
+)
+
+run_capture(
+    name = "minimal_report",
+    bin = ":minimal",
+    runs = [""],
+)
+
+compiler_version(name = "version")
