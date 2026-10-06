@@ -133,6 +133,11 @@ struct PublishReport(Copyable, Movable):
     var produced_by_attempt: Int
     var files: List[FileRow]
     var lines: List[String]
+    var build_number: Int
+    """The release's build number (`h<8 hex>_<N>`), -1 when not read."""
+    var previous_build: Int
+    """A never-backward publish's `previous_build_number` (plan.mojo), -1
+    for none or not read."""
 
     def __init__(out self):
         self.reason = String(REASON_PUBLISHED)
@@ -150,6 +155,8 @@ struct PublishReport(Copyable, Movable):
         self.produced_by_attempt = 0
         self.files = List[FileRow]()
         self.lines = List[String]()
+        self.build_number = -1
+        self.previous_build = -1
 
     @staticmethod
     def refused(var error_id: String, var message: String) -> PublishReport:
