@@ -75,7 +75,9 @@ _GOLDEN = [
 # window.txtpb gives the output field `lead_with_a_default` the metadata
 # (`unit` = `cents`) of the input column it reads: a LAG/LEAD output field is
 # the input field carried over (`partition_expr_output_field`,
-# src/komira_plan_expr/partition_expr.mojo), metadata included. Those two
+# src/komira_plan_expr/partition_expr.mojo), metadata included. That is the
+# right answer, not only the code's: a value shifted by rows is the same
+# quantity, so a LEAD of a price-in-cents column is price-in-cents. Those two
 # lines are what protoc decodes from window.hex; do not drop them.
 #
 # Not checked here: golden/index_pinned and golden/topic_live have committed
