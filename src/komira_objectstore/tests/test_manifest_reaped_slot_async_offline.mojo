@@ -397,6 +397,12 @@ def test_async_op_phase_branches() raises:
     assert_true(early, "a guarded op is not takeable before its check")
     var idle = AsyncManifestAppendOp[_Slow]()
     assert_true(idle.poll[NoopSink](ws, reactor).is_error(), "poll when idle: ERR")
+    var idle_take = False
+    try:
+        _ = idle.take(ws)
+    except e:
+        idle_take = String(e).find("no create-CAS in flight") >= 0
+    assert_true(idle_take, "take when idle raises")
 
     # `apply_async_append_win`'s own guard (a direct caller cannot bypass it).
     var dstore = _Store()

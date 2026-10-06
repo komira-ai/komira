@@ -21,6 +21,7 @@
 #   11 exactly-once: slot_reaped releases the
 #      sentinel and the retry commits once
 #   12 classification of both refusals
+#   13 a create that fails (not a 412) is raised, not retried or refused
 # All run on the in-memory stores; no network.
 # =============================================================================
 
@@ -144,8 +145,10 @@ struct _FaultStore(ConditionalWriteStore, ObjectStore, Movable, Deinitable):
     `key` before re-raising the 412, so the writer's probe of that slot 404s.
     MODE 1 (retire after win): when a create of `key` WINS, another writer
     commits the next slot and retention advances `_LOG_START` past `key`'s slot,
-    before the create returns (a legitimate win retired before its check). MODE 2 (unreadable log
-    start): while the object `<flag>` exists, a GET of `_LOG_START` fails."""
+    before the create returns (a legitimate win retired before its check).
+    MODE 2 (unreadable log start): while the object `<flag>` exists, a GET of
+    `_LOG_START` fails. MODE 3 (failed create): a create of `key` raises a
+    non-412 error."""
 
     var inner: _Store
     var mode: Int
@@ -182,6 +185,8 @@ struct _FaultStore(ConditionalWriteStore, ObjectStore, Movable, Deinitable):
     def conditional_put(
         self, path: Path, bytes: List[UInt8], precond: WritePrecondition
     ) raises -> ObjectMeta:
+        if self.mode == 3 and path.raw() == self.key:
+            raise Error("simulated create failure status=500")
         var meta: ObjectMeta
         try:
             meta = self.inner.conditional_put(path, bytes, precond)
@@ -701,6 +706,28 @@ def test_refusal_classification() raises:
     print("  PASS")
 
 
+# =============================================================================
+# 13. The create's own failure (not a 412) still propagates from the
+#     restructured `_try_append_at`: no retry, no post-win read, no ack.
+# =============================================================================
+def test_create_failure_is_raised() raises:
+    print("[reaped-slot] 13. a failed create (not a 412) is raised")
+    var store = _Store()
+    var prefix = String("rs/fail")
+    var w = _mk(
+        _FaultStore(store.clone(), 3, _chunk(prefix, Int64(0)), String(""), _ls(prefix)),
+        prefix,
+    )
+    var msg = String("")
+    try:
+        var won = w.append(_body(0), _RPC)
+        msg = "committed at " + String(won.chunk_seq)
+    except e:
+        msg = String(e)
+    assert_true(msg.find("simulated create failure") >= 0, msg)
+    print("  PASS")
+
+
 def main() raises:
     test_warm_writer_reaped_slot_not_committed()
     test_cold_head_below_log_start_is_clamped()
@@ -713,4 +740,5 @@ def main() raises:
     test_unguarded_manifest_pays_nothing()
     test_idempotent_slot_reaped_releases_sentinel()
     test_refusal_classification()
+    test_create_failure_is_raised()
     print("ALL reaped-slot guard tests PASSED")
