@@ -52,7 +52,8 @@ from komira_core.arrow_helpers.streaming_concat import (
     _concat_variable_width_batches,
 )
 
-from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
+from komira_jsonl.columnar_materializer import _materialize_checked
+from komira_jsonl.line_check import build_jsonl_index
 from komira_json_index.input_limits import (
     MAX_JSONL_LINE_BYTES,
     check_jsonl_carry_size,
@@ -236,6 +237,11 @@ def read_jsonl_streamed_to_batches(
     # reached. Any untrusted JSONL file that does not end in `\n` reaches
     # this; it shows up as a hang, not a crash.
     var hit_eof: Bool = False
+    # Lines in the chunks already read: an error in a later chunk names its
+    # line in the file. Each chunk read ends at the LF of its last complete
+    # line, so its line count is its number of complete lines.
+    var lines_done: Int = 0
+    var no_prefix = List[UInt8]()
     while True:
         var chunk = _read_next_chunk(f, chunk_bytes, carry^, hit_eof)
         if len(chunk) == 0:
@@ -283,8 +289,12 @@ def read_jsonl_streamed_to_batches(
             var trimmed = _trim_chunk_to_complete_lines(
                 chunk^, r.trailing_partial_start,
             )
-            var batch = materialize_jsonl_to_batch(trimmed, schema.copy())
+            var idx = build_jsonl_index(trimmed, no_prefix, lines_done)
+            var batch = _materialize_checked(
+                trimmed, schema.copy(), idx, no_prefix, lines_done
+            )
             batches.append(batch^)
+            lines_done += len(r.starts)
         else:
             # No complete line in this chunk -> drop chunk; bytes
             # already copied into `carry` for next iteration.
@@ -304,7 +314,10 @@ def read_jsonl_streamed_to_batches(
         # Append a synthetic `\n` so the materializer's structural index
         # closes the line cleanly.
         carry.append(UInt8(0x0A))
-        var tail = materialize_jsonl_to_batch(carry, schema^)
+        var tail_idx = build_jsonl_index(carry, no_prefix, lines_done)
+        var tail = _materialize_checked(
+            carry, schema^, tail_idx, no_prefix, lines_done
+        )
         batches.append(tail^)
     else:
         # Drop schema (was held across loop).

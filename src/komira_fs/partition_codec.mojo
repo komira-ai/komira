@@ -20,6 +20,9 @@
 #   * `parse_partition_value(segment, arrow_type) -> String`
 #       the EXACT inverse: URL-unescape, the null sentinel back to "" (the
 #       NULL marker), pass-through of canonical numeric/date text.
+#   * `partition_value_spellings(value, arrow_type) -> List[String]`
+#       read side only: the directory spellings to list for a value, komira's
+#       `encode` form plus Spark's `escapePathName` form when it differs.
 #   * `parse_key_value_segments(path) -> (keys, values)`
 #       split a discovered path's directory components into the ordered
 #       `(partition_col_name, value_string)` pairs, disqualifying
@@ -228,6 +231,106 @@ def parse_partition_value(segment: String, arrow_type: ArrowType) raises -> Stri
     if segment == HIVE_DEFAULT_PARTITION:
         return String("")
     return _url_unescape(segment)
+
+
+# =============================================================================
+# The Spark/Hive spelling of a partition value (read side only).
+# =============================================================================
+# `encode_partition_value` is komira's WRITE spelling and stays as it is. The
+# common writers spell a directory value differently: Spark's
+# `ExternalCatalogUtils.escapePathName` (sql/catalyst/src/main/scala/org/
+# apache/spark/sql/catalyst/catalog/ExternalCatalogUtils.scala, `charToEscape`,
+# itself taken from Hive's `FileUtils.escapePathName`) %-escapes, as uppercase
+# `%XX`, ONLY:
+#     0x01-0x1F   "  #  %  '  *  /  :  =  ?  \  0x7F  {  [  ]  ^
+# (a Windows writer adds space < > |, which this spelling does NOT model).
+# Every other char, including every char >= 0x80, is written raw, so the
+# directory for `Zürich` is `Zürich` (UTF-8 on disk), not `Z%C3%BCrich`, and
+# for `New York` it is `New York`, not `New%20York`.
+#
+# Because every UTF-8 byte of a non-ASCII char is >= 0x80 and Spark's set is
+# ASCII-only, escaping per BYTE is identical to Spark's per-char rule.
+# One deliberate addition: 0x00 is escaped too. Spark's set omits it, but a
+# NUL cannot occur in a path name, and a raw NUL handed to a C-string FS
+# boundary would truncate the prefix.
+#
+# The reader lists both spellings (`partition_value_spellings`);
+# `parse_partition_value` decodes either one to the same canonical value.
+# =============================================================================
+
+
+@always_inline
+def _spark_escapes_byte(b: UInt8) -> Bool:
+    """True iff Spark's `escapePathName` %-escapes byte `b` (plus 0x00, see
+    the section header)."""
+    if b <= 0x1F or b == 0x7F:
+        return True
+    return (
+        b == UInt8(ord('"'))
+        or b == UInt8(ord("#"))
+        or b == UInt8(ord("%"))
+        or b == UInt8(ord("'"))
+        or b == UInt8(ord("*"))
+        or b == UInt8(ord("/"))
+        or b == UInt8(ord(":"))
+        or b == UInt8(ord("="))
+        or b == UInt8(ord("?"))
+        or b == UInt8(ord("\\"))
+        or b == UInt8(ord("{"))
+        or b == UInt8(ord("["))
+        or b == UInt8(ord("]"))
+        or b == UInt8(ord("^"))
+    )
+
+
+@always_inline
+def _hex_digit_byte(nibble: Int) -> UInt8:
+    """The UPPERCASE ASCII hex digit byte for a 0..15 nibble."""
+    if nibble < 10:
+        return UInt8(ord("0") + nibble)
+    return UInt8(ord("A") + (nibble - 10))
+
+
+def _spark_escape_path_name(value: String) -> String:
+    """Spark's `escapePathName` over the bytes of `value`: the bytes in
+    `_spark_escapes_byte` become `%XX` (uppercase hex), every other byte is
+    copied verbatim. Accumulates BYTES (a `chr()` per byte would re-encode
+    each byte >= 0x80 into two; see `_url_unescape`)."""
+    var bs = value.as_bytes()
+    var out = List[UInt8]()
+    for i in range(len(bs)):
+        var b = bs[i]
+        if _spark_escapes_byte(b):
+            out.append(UInt8(ord("%")))
+            out.append(_hex_digit_byte(Int(b) >> 4))
+            out.append(_hex_digit_byte(Int(b) & 0xF))
+        else:
+            out.append(b)
+    # Byte-exact, length-explicit materialization (as in `_url_unescape`).
+    # The input was a valid String and only ASCII bytes were replaced by
+    # ASCII, so the output is valid UTF-8.
+    return String(StringSlice(unsafe_from_utf8=Span(out)))
+
+
+def partition_value_spellings(value: String, arrow_type: ArrowType) -> List[String]:
+    """The on-disk directory spellings a READER must try for `value`, in
+    order: `encode_partition_value(value)` (komira's spelling) first, then
+    Spark's `escapePathName` spelling when it differs. One element when they
+    coincide (all-alphanumeric values, the NULL sentinel), else two.
+
+    The NULL value (the empty string) is `__HIVE_DEFAULT_PARTITION__` in
+    both writers, so it has one spelling. Writers keep using
+    `encode_partition_value`; this function is for building list prefixes.
+    """
+    var out = List[String]()
+    var komira = encode_partition_value(value, arrow_type)
+    out.append(komira)
+    if value.byte_length() == 0:
+        return out^
+    var spark = _spark_escape_path_name(value)
+    if spark != komira:
+        out.append(spark^)
+    return out^
 
 
 # =============================================================================

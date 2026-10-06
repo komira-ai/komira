@@ -131,6 +131,15 @@ dependency order is the order of the rows.
 | [`komira_test_bucket`](../src/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
 | [`komira_test_s3_adapter`](../src/komira_test_s3_adapter/) | the real adapters behind those seams, for a test that runs on an embedded MinIO: `SpawnedProcessRunner` (starts the server through `spawn_detached` and setpriv so it dies with the test, Linux only; readiness from MinIO's health endpoint) and `MinioObjectStore` (an `S3Store`, path-style plaintext, the credential from the shared-credentials file), and `open_embedded_minio_test_bucket`, which opens a run's bucket from the test's flags with both. The only one of these libraries with an HTTP stack and a process supervisor. |
 
+### End-to-end test packages
+
+Packages that exist for their welded tests: each runs several libraries
+together, over loopback, inside the build action.
+
+| module | what it is |
+|---|---|
+| [`komira_http_tls_e2e`](../src/komira_http_tls_e2e/) | a real `komira_http_server` `HttpServer` against a real `komira_http_client` `HttpClient` in one process: an HTTP/1.1 GET over TLS checked byte for byte, the ALPN pivot to h2 on both sides, a 4 MiB plaintext response flushed through the server's buffered-write path (the server has no buffered-write path over TLS today), and the client refusing an untrusted root and a wrong server name while the server goes on serving. The library holds the shared TLS fixtures and the runner that steps the server on one thread while the client runs on another. |
+
 ### Third-party code
 
 C and C++ libraries are built from pinned source archives under
