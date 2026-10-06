@@ -55,9 +55,8 @@ comptime _WF: String = (
     + _ON
     + "permissions: {}\n"
     "concurrency:\n"
-    "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
-    " || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
-    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
+    "  group: kci-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
+    "  cancel-in-progress: false\n"
     "env:\n"
     "  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n"
     "jobs:\n"
@@ -282,7 +281,7 @@ def test_r6_never_pull_request() raises:
 
 
 def _other_triggers() -> List[String]:
-    """Events other than push, workflow_dispatch and pull_request: each can
+    """Events other than push and workflow_dispatch: each can
     run code a pull request carries (a review or a comment on it, a
     merge-queue candidate, a calling workflow's event), or is simply not on
     the allow-list (schedule)."""
@@ -303,7 +302,7 @@ def test_r6_triggers_are_an_allow_list() raises:
         var name = others[i].copy()
         _reports(
             _mutated(String("  push:\n"), String("  ") + name + String(":\n  push:\n")),
-            String("R6: trigger '") + name + String("': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+            String("R6: trigger '") + name + String("': the release workflow's triggers are push and workflow_dispatch only"),
         )
     # the list form of `on:`
     _reports(
@@ -311,7 +310,7 @@ def test_r6_triggers_are_an_allow_list() raises:
             String(_ON),
             String("on: [push, workflow_dispatch, merge_group]\n"),
         ),
-        String("R6: trigger 'merge_group': a workflow's triggers are push, workflow_dispatch and pull_request only"),
+        String("R6: trigger 'merge_group': the release workflow's triggers are push and workflow_dispatch only"),
     )
 
 

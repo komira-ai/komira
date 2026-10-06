@@ -1,11 +1,11 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# JSON for the engine: the SIMD structural index and line splitter, the
-# typed value parsers, schema inference, the columnar JSONL materializer
-# (serial and fork-join parallel over komira_async), the streaming JSONL
-# source, the `json_extract` kernel, and the JSON / JSONL writers (columnar
-# batches and the row format from komira_row_format). komira_runtime_paths is
-# declared because tests/test_read_json_batch_e2e.mojo takes its scratch
+# JSON for the engine: the line splitter, the typed value parsers, schema
+# inference, the columnar JSONL materializer (serial and fork-join parallel
+# over komira_async), the streaming JSONL source, and the JSON / JSONL writers
+# (columnar batches and the row format from komira_row_format); the structural
+# index and the json_extract kernel are in komira_json_index.
+# komira_runtime_paths is declared because tests/test_read_json_batch_e2e.mojo takes its scratch
 # directory from `test_tmpdir()`.
 mojo_library(
     name = "komira_jsonl",
@@ -15,6 +15,7 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_json_index:komira_json_index",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_row_format:komira_row_format",
         "//src/komira_scan_source:komira_scan_source",
@@ -25,16 +26,12 @@ mojo_library(
         "tests/test_columnar_materializer.mojo",
         "tests/test_dtoa_parity.mojo",
         "tests/test_json_encode_utf8_roundtrip.mojo",
-        "tests/test_json_extract.mojo",
-        "tests/test_json_extract_operator_diff.mojo",
         "tests/test_nested_parsers.mojo",
         "tests/test_read_json_batch_e2e.mojo",
         "tests/test_read_json_end_to_end.mojo",
         "tests/test_read_json_parallel.mojo",
         "tests/test_schema_inference.mojo",
-        "tests/test_simd_primitives.mojo",
         "tests/test_simdjson_corpus.mojo",
-        "tests/test_structural_index.mojo",
         "tests/test_value_parsers.mojo",
         "tests/test_write_json.mojo",
     ],

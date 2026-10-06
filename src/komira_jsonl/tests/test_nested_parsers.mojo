@@ -35,7 +35,7 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Schema, SchemaBuilder, Field
 
 from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
-from komira_jsonl.structural_index import build_structural_index
+from komira_json_index.structural_index import build_structural_index
 from komira_jsonl.value_parsers.parse_list import parse_list_one_value
 from komira_jsonl.value_parsers.parse_struct import parse_struct_one_value
 from komira_jsonl.value_parsers.parse_map import parse_map_one_value
