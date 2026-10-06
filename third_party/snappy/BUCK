@@ -108,3 +108,47 @@ cxx_library(
     preprocessor_flags = ["-DHAVE_CONFIG_H"],
     visibility = ["PUBLIC"],
 )
+
+# EXPERIMENT (branch exp/native-probe-2, never merged; see
+# tests/native_probe2/BUCK): snappy with its C API renamed komira_snappy_*, so
+# libkomira_native.so.1 exports no snappy_* name. The C++ API and zig's
+# libc++ stay inside the shared object (its version script makes them local).
+_KOMIRA_SNAPPY_RENAMES = ["-Dsnappy_{0}=komira_snappy_{0}".format(f) for f in [
+    "compress",
+    "max_compressed_length",
+    "uncompress",
+    "uncompressed_length",
+    "validate_compressed_buffer",
+]]
+
+cxx_library(
+    name = "snappy_komira_native",
+    srcs = [
+        ":src[snappy-c.cc]",
+        ":src[snappy-sinksource.cc]",
+        ":src[snappy-stubs-internal.cc]",
+        ":src[snappy.cc]",
+    ],
+    headers = {
+        "config.h": ":config[config.h]",
+        "snappy-internal.h": ":src[snappy-internal.h]",
+        "snappy-stubs-internal.h": ":src[snappy-stubs-internal.h]",
+    },
+    compiler_flags = [
+        "-O2",
+        "-DNDEBUG",
+        "-fno-exceptions",
+        "-fno-rtti",
+        "-Wno-sign-compare",
+    ],
+    exported_deps = ["komira//tools/build/toolchains:libcxx"],
+    exported_headers = {
+        "snappy-c.h": ":src[snappy-c.h]",
+        "snappy-sinksource.h": ":src[snappy-sinksource.h]",
+        "snappy-stubs-public.h": ":src[snappy-stubs-public.h]",
+        "snappy.h": ":src[snappy.h]",
+    },
+    header_namespace = "",
+    preprocessor_flags = ["-DHAVE_CONFIG_H"] + _KOMIRA_SNAPPY_RENAMES,
+    visibility = ["PUBLIC"],
+)

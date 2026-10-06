@@ -109,3 +109,27 @@ cxx_library(
     target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
     visibility = ["PUBLIC"],
 )
+
+# EXPERIMENT (branch exp/native-probe-2, never merged; see
+# tests/native_probe2/BUCK): libcrypto built with aws-lc's own symbol prefix.
+# aws-lc 1.39.0 ships empty include/openssl/boringssl_prefix_symbols{,_asm}.h,
+# which base.h and asm_base.h always include; a prefix build fills them with
+# `#define X komira_awslc_X` for every global symbol of the library. Here the
+# filled header (made from :crypto's own archive symbol table, as aws-lc's
+# util/read_symbols.go does) is force-included into every C and assembly
+# compile, so no Go and no CMake run.
+cxx_library(
+    name = "crypto_komira_prefixed",
+    srcs = [":src[{}]".format(f) for f in CRYPTO_SRCS + CRYPTO_ASM_X86_64 + BCM_SRCS + BCM_ASM_X86_64] +
+           [(":src[{}]".format(f), _S2N_BIGNUM_FLAGS) for f in S2N_BIGNUM_ASM_X86_64] +
+           [":builtins[umodti3.c]"],
+    raw_headers = [":src[{}]".format(v) for v in sorted(PRIVATE_HEADERS.values())],
+    headers = {k: ":src[{}]".format(v) for k, v in PRIVATE_HEADERS.items() if k != v},
+    compiler_flags = ["-w"],
+    lang_compiler_flags = {"c_cpp_output": _C_FLAGS},
+    preprocessor_flags = _DEFINES + ["-include", "$(location komira//tests/native_probe2:awslc_prefix_h)"],
+    exported_headers = {h[len("include/"):]: ":src[{}]".format(h) for h in PUBLIC_HEADERS},
+    header_namespace = "",
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
+    visibility = ["PUBLIC"],
+)
