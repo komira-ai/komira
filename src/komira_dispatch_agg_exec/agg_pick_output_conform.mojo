@@ -344,8 +344,8 @@ def conform_agg_picks(
         if not col:
             break
         moved.append(col.take())
-    if len(moved) != plan.n_cols:
-        raise Error(
+    if len(moved) != plan.n_cols:  # cov: unreachable the slab holds the batch's own columns, counted above
+        raise Error(  # cov: unreachable see the line above
             "agg_pick_output_conform.conform_agg_picks: took "
             + String(len(moved))
             + " columns out of a batch whose schema declared "

@@ -590,8 +590,8 @@ def _saturating_mul(a: Int, b: Int, imm bound: Optional[Int]) -> Int:
     if a > ceiling // b:
         return ceiling
     var prod = a * b
-    if prod > ceiling:
-        return ceiling
+    if prod > ceiling:  # cov: unreachable a <= ceiling // b and b > 0 give a * b <= ceiling
+        return ceiling  # cov: unreachable see the line above
     return prod
 
 
@@ -622,8 +622,8 @@ def _estimate_over(
         if per_key.provenance > weakest:
             weakest = per_key.provenance
         product = _saturating_mul(product, per_key.groups, bound)
-    if bound and product > bound.value():
-        product = bound.value()
+    if bound and product > bound.value():  # cov: unreachable every product is saturated at the bound
+        product = bound.value()  # cov: unreachable see the line above
     if product < 1:
         product = 1
     return GroupEstimate(product, weakest, GROUP_EST_WHY_OK)
