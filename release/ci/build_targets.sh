@@ -1,9 +1,13 @@
 #!/bin/sh
-# The per-change check's build of one unit: the `build_targets` command of
-# each build system in release/artifacts.textproto. kci appends the unit's
-# targets and runs this from the repository's root.
+# The per-change check's build of one unit, or of a batch of units (the
+# union of their targets): the `build_targets` command of each build system
+# in release/artifacts.textproto. kci appends the targets and runs this from
+# the repository's root. Everything below is correct on a union: it gives
+# the union of each unit's builds, lints and tests.
 #
-# Every target is built (a library's welded tests run inside its build).
+# Every target is built (a library's welded tests run inside its build),
+# with --keep-going: a failed batch still builds every other target, so the
+# unit-by-unit retries kci runs to name the failing units start warm.
 # Then each test_weld lint among the targets is checked: building one checks
 # nothing, because what it reads (which test files the graph's targets weld)
 # only a BXL script can query (tools/build/lint/test_weld.bzl). Then
@@ -16,7 +20,7 @@ if [ "$#" -eq 0 ]; then
   echo "build_targets.sh: no target given" >&2
   exit 2
 fi
-buck2 build "$@"
+buck2 build --keep-going "$@"
 universe=
 for t in "$@"; do
   universe="${universe:+$universe + }$t"

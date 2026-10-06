@@ -46,14 +46,22 @@
 #    (KCI-E-AFFECTED-VACUOUS): a non-empty change reaching nothing means the
 #    template does not cover the file, and that is never a pass.
 #    PLAN stops here: one `WOULD_BUILD <unit>` line each, nothing built.
-# 5. Each unit, one at a time: kci_artifact `render_targets_argv` (the build
-#    system's `build_targets` command, then the unit's targets; a library's
-#    welded tests run inside its build), cwd --work-dir, stdout and stderr to
-#    `<log>/<unit>.stdout|.stderr`. Non-zero, a signal or a timeout is
-#    FAILED (KCI-E-BUILD-FAILED) naming the unit; a build that cannot be
-#    started is INDETERMINATE (KCI-E-CANNOT-TELL); either way, stop.
-#    Nothing is written under --release-dir, there is no manifest and no
-#    release.json: nothing ships.
+# 5. The units, built (affected_batch.mojo `build_affected_units`): one
+#    run per group of units sharing a build_targets command (kci_artifact
+#    `batch_groups`; one group for a file whose build systems share one).
+#    A unit alone runs `render_targets_argv` with logs at
+#    `<log>/<unit>.stdout|.stderr`; a group of two or more runs once as batch
+#    k over the union of its targets (`render_batch_argv`), logs at
+#    `<log>/_batch_<k>.stdout|.stderr` and its argv at `<log>/_batch_<k>.argv`.
+#    A library's welded tests run inside its build. A batch that exits
+#    non-zero is retried unit by unit to name the failing units, up to
+#    MAX_FAILED_UNITS failures; a timed-out or killed batch is not retried.
+#    Any failed unit or unattributed batch is FAILED (KCI-E-BUILD-FAILED); a
+#    build that cannot be started is INDETERMINATE (KCI-E-CANNOT-TELL), and
+#    so is a batch that failed while each of its units built alone (never a
+#    pass). `BUILT <unit>` lines name exactly the units an exit-0 run
+#    covered, whatever the outcome. Nothing is written under --release-dir,
+#    there is no manifest and no release.json: nothing ships.
 # 6. The result gets the step's row, the first error, and `affected_by`
 #    (the base; the verdict, reason and units once step 4 decided them).
 #    No `artifacts[]` row: nothing was built to ship.
@@ -79,7 +87,6 @@ from kci_artifact import (
     unmatched_artifacts,
     read_artifacts,
     render_affected_argv,
-    render_targets_argv,
     require_affected_ready,
     unit_names_of,
     units_file_text,
@@ -110,6 +117,7 @@ from kci_api import (
 )
 from kci_api import RunResult as KciRunResult
 
+from kci_build.affected_batch import affected_spec, build_affected_units
 from kci_build.request import BuildOutcome, BuildRequest
 from kci_build.revision import changed_files
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
@@ -136,20 +144,6 @@ def _contains(xs: List[String], x: String) -> Bool:
         if xs[i] == x:
             return True
     return False
-
-
-def _spec(argv: List[String], req: BuildRequest, base: String) -> RunSpec:
-    var rest = List[String]()
-    for k in range(1, len(argv)):
-        rest.append(argv[k].copy())
-    return RunSpec(
-        argv[0].copy(),
-        rest^,
-        req.work_dir.copy(),
-        req.build_timeout_s,
-        base + String(".stdout"),
-        base + String(".stderr"),
-    )
 
 
 def _tool_failed(bs: String, spec: RunSpec, why: String) -> BuildOutcome:
@@ -187,7 +181,7 @@ def _derive[R: ProcessRunner](
                 String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
                 String("--affected-by: build system '") + bs + String("': ") + String(e),
             )
-        var spec = _spec(argv, req, req.log_dir + String("/_derive_") + bs)
+        var spec = affected_spec(argv, req, req.log_dir + String("/_derive_") + bs)
         print(String("BUILD step: derive_checks: ") + bs + String(": ") + spec.command_line(), file=_STDERR)
         var what = String("the derive_checks command of build system '") + bs + String("', `") + spec.command_line() + String("`, ")
         var cannot = String(": kci cannot tell which checks the build graph holds")
@@ -274,7 +268,7 @@ def _ask[R: ProcessRunner](
                 String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
                 String("--affected-by: build system '") + bs + String("': ") + String(e),
             )
-        var spec = _spec(argv, req, req.log_dir + String("/_affected_") + bs)
+        var spec = affected_spec(argv, req, req.log_dir + String("/_affected_") + bs)
         print(String("BUILD step: affected: ") + bs + String(": ") + spec.command_line(), file=_STDERR)
         var r: RunResult
         try:
@@ -414,35 +408,8 @@ def _affected[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
             for i in range(len(decision.units)):
                 o.lines.append(String("WOULD_BUILD ") + decision.units[i])
             return o^
-        # ── step 5: each unit ───────────────────────────────────────────────
-        for i in range(len(decision.units)):
-            ref name = decision.units[i]
-            var argv = render_targets_argv(arts, name)
-            var spec = _spec(argv, req, req.log_dir + String("/") + name)
-            print(String("BUILD step: building unit ") + name + String(": ") + spec.command_line(), file=_STDERR)
-            var r: RunResult
-            try:
-                r = runner.run(spec)
-            except e:
-                return _stop(
-                    String(OUTCOME_INDETERMINATE),
-                    String(ERROR_CANNOT_TELL),
-                    String("unit '") + name + String("': the build could not be started: ") + String(e),
-                )
-            if not r.ok():
-                var why = (
-                    String("unit '") + name + String("': `") + spec.command_line() + String("` ")
-                    + r.describe() + String(" (stderr: ") + spec.stderr_path + String(")")
-                )
-                if r.stderr_tail.byte_length() > 0:
-                    why += String("\n") + r.stderr_tail
-                return _stop(String(OUTCOME_FAILED), String(ERROR_BUILD_FAILED), why)
-        var done = BuildOutcome.succeeded(head + String(": ") + String(len(decision.units)) + String(" unit(s) built"))
-        for i in range(len(notices)):
-            done.lines.append(notices[i].copy())
-        for i in range(len(decision.units)):
-            done.lines.append(String("BUILT ") + decision.units[i])
-        return done^
+        # ── step 5: the units, built ────────────────────────────────────────
+        return build_affected_units(req, arts, decision.units, head, notices, runner)
     except e:
         return _stop(String(OUTCOME_FAILED), String(ERROR_BUILD_FAILED), String(e))
 
