@@ -15,11 +15,9 @@
 # the generated path expansion encodes); the service reads `%28default%29`
 # as `(default)`.
 #
-# One part of the bodies is NOT from the reference: the default-valued key
-# komira_proto_codec's JsonEncoder writes today (`"transaction":""`), as
-# test_logging_requests explains for Cloud Logging. The API reads it as
-# unset. An empty list or map (a write's `updateTransforms`) is omitted, as
-# the proto3 JSON mapping omits it.
+# A field at its default is omitted, as the proto3 JSON mapping omits it:
+# a commit outside a transaction sends no `transaction` key (an empty
+# bytes field) and no empty list or map (a write's `updateTransforms`).
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
@@ -134,7 +132,7 @@ def test_commit_create_if_absent() raises:
     var body = String(
         '{"writes":[{"currentDocument":{"exists":false},'
         + '"update":{"name":"projects/demo-project/databases/(default)/documents/items/a",'
-        + '"fields":{"value":{"stringValue":"v"}}}}],"transaction":""}'
+        + '"fields":{"value":{"stringValue":"v"}}}}]}'
     )
     assert_equal(
         String(unsafe_from_utf8=Span(capture[])),
@@ -166,8 +164,7 @@ def test_commit_update_time_precondition_and_delete() raises:
         + '"update":{"name":"projects/demo-project/databases/(default)/documents/items/a",'
         + '"fields":{"value":{"stringValue":"v"}}}},'
         + '{'
-        + '"delete":"projects/demo-project/databases/(default)/documents/items/b"}],'
-        + '"transaction":""}'
+        + '"delete":"projects/demo-project/databases/(default)/documents/items/b"}]}'
     )
     assert_equal(
         String(unsafe_from_utf8=Span(capture[])),

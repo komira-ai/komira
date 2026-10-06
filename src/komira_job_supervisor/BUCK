@@ -46,10 +46,6 @@ mojo_library(
         "//src/komira_objectstore_s3:komira_objectstore_s3",
         "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_supervisor:komira_supervisor",
-        "//src/komira_test_bucket:komira_test_bucket",
-        "//src/komira_test_minio:komira_test_minio",
-        "//src/komira_test_run_id:komira_test_run_id",
-        "//src/komira_test_verdict:komira_test_verdict",
     ],
     test_srcs = [
         "tests/test_job_supervisor_chatty_child.mojo",
@@ -65,7 +61,8 @@ mojo_library(
 
 # The MinIO end-to-end tests: the supervisor against a real S3-compatible server,
 # an embedded MinIO the test starts on 127.0.0.1 from a pinned binary
-# (komira_test_bucket / komira_test_minio). test_job_supervisor_s3_e2e fetches,
+# (komira_test_bucket / komira_test_minio, through komira_test_s3_adapter's
+# real process runner and object-store client). test_job_supervisor_s3_e2e fetches,
 # verifies, runs a job binary and writes logs.txt and crash_report.json;
 # test_job_supervisor_stream_logs_e2e streams a running job's stdout in chunks.
 #
@@ -83,21 +80,13 @@ mojo_library(
 # own prefix and `close()` deletes them, lists again to prove the prefix
 # empty and stops the server; a verdict that is not CLEAN fails the run. The
 # server is started through setpriv (PR_SET_PDEATHSIG), so it dies with the
-# test: Linux only (tests/e2e/job_supervisor_minio_e2e.mojo).
+# test: Linux only (komira_test_s3_adapter's SpawnedProcessRunner).
 _E2E_DEPS = [
     ":komira_job_supervisor",
-    "//src/komira_aws_core:komira_aws_core",
-    "//src/komira_libc:komira_libc",
     "//src/komira_crypto:komira_crypto",
-    "//src/komira_http_client:komira_http_client",
     "//src/komira_http_core:komira_http_core",
-    "//src/komira_objectstore:komira_objectstore",
-    "//src/komira_objectstore_s3:komira_objectstore_s3",
     "//src/komira_supervisor:komira_supervisor",
-    "//src/komira_test_bucket:komira_test_bucket",
-    "//src/komira_test_minio:komira_test_minio",
-    "//src/komira_test_run_id:komira_test_run_id",
-    "//src/komira_test_verdict:komira_test_verdict",
+    "//src/komira_test_s3_adapter:komira_test_s3_adapter",
 ]
 
 [

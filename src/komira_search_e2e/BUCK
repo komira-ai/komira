@@ -1,0 +1,79 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A test-only package: a search index published to the real local filesystem
+# and read back cold. Three splits of a small corpus (ASCII and non-ASCII
+# terms) are serialized with komira_search, written as objects into a
+# LocalFsConditionalStore rooted in the run's TEST_TMPDIR, and published
+# through komira_search_catalog's SearchMetastore. The sources are the shared
+# fixture (the corpus, a SearchIndexCatalog over the metastore, and the row
+# readers); the tests are the point. Nothing ships, so `conda = False`.
+#
+# The tests, each run as a build action:
+#   test_search_e2e_catalog_generation -- the catalog's generation is
+#     paired with a live split set only when two reads of it around the live
+#     read agree: a counter bumped during the first attempt makes it read
+#     again and return the settled generation, and one that never settles
+#     is refused by name with nothing recorded.
+#   test_search_e2e_publish_race -- two store handles over one directory,
+#     interleaved deterministically, lose manifest slots to each other: the
+#     loser of a create-if-absent gets the precondition failure, a publish
+#     whose cached head is stale loses its slot, retries and lands at the
+#     next one, and a publish with no retries left refuses as retryable
+#     contention with nothing visible; a cold handle then lists exactly the
+#     three splits, the generation went 0, 1, 2, 3 and the durable head never
+#     moved backwards. (Each loss is the store's existence-probe 412; the
+#     O_EXCL branch of a truly simultaneous create is komira_objectstore's.)
+#   test_search_e2e_scan_equals_core -- the `komira.search.index` scan,
+#     drained over the published splits, returns exactly the documents a
+#     hand-written table names, the same rows as SearchCore run on the
+#     in-memory split bytes, and the same documents as one SearchCore over
+#     the whole corpus, for a term, a multi-term match, folded non-ASCII and
+#     ASCII terms, a CJK term, a term in no split and the no-query scan.
+#   test_search_e2e_retire_reap -- retiring and reaping splits: the
+#     generation rises on the retire (the catalog reports the metastore's),
+#     the reap waits for the grace period, and a query resolved before the retire
+#     still reads the split set it planned; after the reap the split object
+#     is gone, the generation never goes down and the scan equals the
+#     baseline without that split; a middle split and then every split are
+#     reaped and read back cold; the reap helper never deletes a live split's
+#     object; and a store failure whose message names "404" only through the
+#     key fails the read and the scan instead of dropping a split.
+#
+# `deps` lists the Mojo packages of the full transitive closure of
+# komira_search, komira_search_catalog, komira_search_scan and
+# komira_objectstore (each package's C helper libraries come with it), plus
+# komira_runtime_paths for `test_tmpdir()`.
+mojo_library(
+    name = "komira_search_e2e",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_core:komira_core",
+        "//src/komira_core_ffi:komira_core_ffi",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs_posix",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_log:komira_log",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_scan_resolver:komira_scan_resolver",
+        "//src/komira_search:komira_search",
+        "//src/komira_search_catalog:komira_search_catalog",
+        "//src/komira_search_scan:komira_search_scan",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_trace:komira_trace",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_search_e2e_catalog_generation.mojo",
+        "tests/test_search_e2e_publish_race.mojo",
+        "tests/test_search_e2e_retire_reap.mojo",
+        "tests/test_search_e2e_scan_equals_core.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

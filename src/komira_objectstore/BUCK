@@ -1,3 +1,4 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The vendor-neutral object-storage layer: the Path / URI types, the
@@ -12,10 +13,26 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_runtime_paths is declared because several tests take their scratch
 # directory from `test_tmpdir()`.
 
+# The errno-surfacing file primitives behind LocalFsConditionalStore's reads
+# (`local_fs_file_read.mojo`): errno is read in C right after the failing call,
+# and the errno constants and names stay out of Mojo.
+staged_files(
+    name = "objectstore_shim_files",
+    srcs = ["_objectstore_shim.c"],
+)
+
+cxx_library(
+    name = "komira_objectstore_posix",
+    srcs = [":objectstore_shim_files[_objectstore_shim.c]"],
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
+    visibility = ["PUBLIC"],
+)
+
 mojo_library(
     name = "komira_objectstore",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        ":komira_objectstore_posix",
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
@@ -36,7 +53,9 @@ mojo_library(
         "tests/test_compact_window.mojo",
         "tests/test_delimiter_listing_byte_faithful.mojo",
         "tests/test_local_fs_conditional_store.mojo",
+        "tests/test_local_fs_read_errno.mojo",
         "tests/test_local_fs_store_list_bytes_non_ascii.mojo",
+        "tests/test_local_fs_store_list_dir_errno.mojo",
         "tests/test_objectstore_bytes_non_ascii.mojo",
         "tests/test_path_uri.mojo",
         "tests/test_sharded_lineage_kernel.mojo",

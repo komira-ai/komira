@@ -24,6 +24,7 @@ mojo_library(
         "tests/test_comparison_kleene_offset_validity.mojo",
         "tests/test_comptime_field_validation.mojo",
         "tests/test_expr_interpreter.mojo",
+        "tests/test_kleene_comparison_properties.mojo",
         "tests/test_kleene_helpers.mojo",
         "tests/test_sel_kernels.mojo",
         "tests/test_simd_of.mojo",

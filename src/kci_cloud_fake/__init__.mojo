@@ -20,8 +20,10 @@ Both lower to data (the complete fixed set of roles of each type), realize
 one node type (`FakeNode`), deploy into a `FakeStore` (state, labels as
 written, a failed flag per node, unmodelled values and a call log), honour
 the ownership labels (every object born stamped by the standard label
-rule, read back exactly, listed per cell), and pass the `kci_cloud`
-conformance kit. The faulty variant is built from constructor arguments:
+rule, read back exactly, listed per cell; every object carries the
+`kci-retention` mark, and an object created in a scope with a validation run
+id also carries `kci-run-id=<id>`, an adopted one never), and pass the
+`kci_cloud` conformance kit. The faulty variant is built from constructor arguments:
 `fail_at_call = k` (the k-th mutating call is refused once), `read_lag = n`
 (reads lag every create and delete by n reads) and `foreign = [names]`
 (objects made outside kci before it ran); the kit's race hook makes the next

@@ -43,9 +43,21 @@
 #     and a service account lower the role `<id>/identity` (turned off for a
 #     service or a job with `run_as`): a grant's principal is that node. `realize` turns one lowered node into the engine node,
 #     and must keep its id, owner, wanted and retention.
-#   * An object of a node whose retention is KEEP carries the non-identity
-#     label `kci_retain=keep` (labels.mojo), and `list_owned` reports it as
+#   * Every object carries the non-identity retention mark
+#     `kci-retention=<retain|delete>` (komira_validation_run's, written by
+#     `labels.retain_labels`), and `list_owned` reports a `retain` object as
 #     `retained`: kci never deletes it through `list_owned`.
+#   * An adapter's node builds a create's labels with `labels.create_labels`
+#     (`label_rule` is the identity only). So an object created in a scope
+#     with a validation run id carries it as the label `kci-run-id=<id>` from
+#     its create call on, and `list_owned` reports it
+#     (`OwnedRecord.validation_run_id`). An object created outside a
+#     validation run, or adopted, carries no such label. The conformance kit
+#     runs a pass under a validation run id of its own and a pass without
+#     one, so an adapter whose create path skips the label fails the kit. An
+#     id outside komira_validation_run's rule refuses a plan or an apply
+#     before any create (`deploy.refuse_unless_valid`). No kci verb sets the
+#     scope's validation run id yet.
 #   * A table's KEY IS IMMUTABLE. Its `<id>/table` node has the desired field
 #     `key` (`data.table_key_text`), and `list_owned` reports each table
 #     object's key AS THE CLOUD STORES IT (`OwnedRecord.key`, same rendering;
@@ -267,16 +279,17 @@ comptime RUN_UNKNOWN = "unknown"
 """`OwnedRecord.run_id` when the object does not say which run made it."""
 
 
-@fieldwise_init
 struct OwnedRecord(Copyable, Movable, Deinitable):
     """One object of this machine and cell the cloud says is kci's (by its
     stamp): its kind, physical id, location, what it bills, when it was
-    created, the run that made it (or `RUN_UNKNOWN`), whether kci may delete
-    it, the engine node that owns it (`<resource>/<role>`), whether it is
-    RETAINED (it carries `kci_retain=keep`: kci reports it and never
-    deletes it through this list), and its immutable KEY as the cloud
-    stores it (a table's, rendered as `data.table_key_text`; empty for every
-    other kind)."""
+    created, the run that last wrote it (its provenance, or `RUN_UNKNOWN`),
+    whether kci may delete it, the engine node that owns it
+    (`<resource>/<role>`), whether it is RETAINED (it carries
+    `kci-retention=retain`: kci reports it and never deletes it through this
+    list), its immutable KEY as the cloud stores it (a table's, rendered as
+    `data.table_key_text`; empty for every other kind), and the VALIDATION
+    RUN that created it: the `kci-run-id` label's value as the cloud stores
+    it (`labels.validation_run_of`), or None when the object carries none."""
 
     var kind: String
     var id: String
@@ -288,6 +301,46 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     var owner_node: String
     var retained: Bool
     var key: String
+    var validation_run_id: Optional[String]
+
+    def __init__(
+        out self,
+        kind: String,
+        id: String,
+        location: String,
+        billing: String,
+        created_at: String,
+        run_id: String,
+        deletable_by_kci: Bool,
+        owner_node: String,
+        retained: Bool,
+        key: String,
+        validation_run_id: Optional[String],
+    ):
+        self.kind = kind
+        self.id = id
+        self.location = location
+        self.billing = billing
+        self.created_at = created_at
+        self.run_id = run_id
+        self.deletable_by_kci = deletable_by_kci
+        self.owner_node = owner_node
+        self.retained = retained
+        self.key = key
+        self.validation_run_id = validation_run_id.copy()
+
+    def __init__(out self, *, copy: Self):
+        self.kind = copy.kind.copy()
+        self.id = copy.id.copy()
+        self.location = copy.location.copy()
+        self.billing = copy.billing.copy()
+        self.created_at = copy.created_at.copy()
+        self.run_id = copy.run_id.copy()
+        self.deletable_by_kci = copy.deletable_by_kci
+        self.owner_node = copy.owner_node.copy()
+        self.retained = copy.retained
+        self.key = copy.key.copy()
+        self.validation_run_id = copy.validation_run_id.copy()
 
 
 @fieldwise_init
@@ -463,7 +516,9 @@ trait CloudAdapter(Movable):
         ...
 
     def label_rule(self, stamp: OwnerStamp) raises -> List[Label]:
-        """The labels an object is created with for `stamp`."""
+        """The identity labels an object is created with for `stamp` (the
+        validation run and retention labels ride beside them:
+        `labels.create_labels`)."""
         ...
 
     def identity_of(self, labels: List[Label]) -> String:

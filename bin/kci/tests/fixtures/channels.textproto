@@ -1,0 +1,13 @@
+# One PRIVATE channel whose credential is an API token, on a host that does
+# not resolve: test_kci_process never reads it (the token is refused first).
+schema_version: 1
+channel {
+  name: "example-private"
+  visibility: PRIVATE
+  repository {
+    artifact_type: CONDA
+    location: "https://conda.example.invalid/example/private"
+    push_identity: "publisher@example.invalid"
+    credential { kind: API_TOKEN secret_name: "EXAMPLE_CONDA_TOKEN" }
+  }
+}

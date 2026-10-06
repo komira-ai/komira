@@ -12,9 +12,10 @@ package komira.broker.v1;
 // ─── Broker peer routing shared types (additive, wire-safe proto3) ───────────
 
 // The cluster-wide routing map: every live broker's reachable endpoint plus the
-// current per-partition leader. The coordinator assembles this from its (already
-// stale-pruned) node registry + the live PartitionMap assignment, and ships it
-// on each HeartbeatResponse so any broker can answer a complete Kafka Metadata.
+// current per-partition leader. The coordinator assembles this from its
+// (already stale-pruned) table of live nodes + the live PartitionMap
+// assignment, and ships it on each HeartbeatResponse so any broker can
+// answer a complete Kafka Metadata.
 message BrokerClusterMap {
   repeated NodeEndpoint nodes = 1;     // every LIVE broker's reachable endpoint
   repeated PartitionLeader leaders = 2; // per-partition leader (or NO_LEADER)
@@ -39,9 +40,9 @@ message PartitionLeader {
 
 // A node's soft-advisory load signal. Carried on the heartbeat and recorded
 // for observability and accounting (the record count is a free,
-// manifest-derived signal); the job manager's assignment pass does not
+// manifest-derived signal); the coordinator's assignment pass does not
 // currently use it (it could later bias the tie-break toward less-loaded
-// nodes). "Soft-advisory": the job manager never grants a lease off these
+// nodes). "Soft-advisory": the coordinator never grants a lease off these
 // numbers; ownership is the assignment table CAS, not a load-based lock.
 message NodeLoad {
   uint64 records_served = 1; // cumulative records this node has served
@@ -52,16 +53,16 @@ message NodeLoad {
   // partition map in object storage. Distinct from partition_count above
   // (the count this node currently owns): this is the total live partition
   // count of the topic, and it grows when a hot-shard split writes a grown
-  // map. The coordinator folds these reports into its registry and assigns
-  // partitions over max(configured count, max reported), so a split-driven
-  // partition-count change reaches the control plane (the coordinator never
+  // map. The coordinator folds these reports into its table of live nodes
+  // and assigns partitions over max(configured count, max reported), so a
+  // split-driven partition-count change reaches the coordinator (which never
   // re-reads the map itself; it learns the grown count only from this
   // heartbeat field). Absent (0 / unset) on a plain job supervisor and on a
   // broker that did not read the map.
   optional uint32 reported_partition_total = 3;
 }
 
-// The cluster shape the job manager publishes so a node can size its routing view.
+// The cluster shape the coordinator publishes so a node can size its routing view.
 message ClusterConfig {
   uint32 total_partitions = 1; // partition count of the (single) topic
   uint32 node_count = 2;       // live node count the assignment spread across

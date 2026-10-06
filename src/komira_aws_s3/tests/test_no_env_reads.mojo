@@ -68,7 +68,7 @@ def test_the_scan_saw_the_client() raises:
     assert_equal(_count(text, "#   mode         : client"), 1)
     # The client sends where the ruleset resolves each call, over the
     # configuration it was given.
-    assert_equal(_count(text, "\nstruct S3S3Client["), 1)
+    assert_equal(_count(text, "\nstruct S3Client["), 1)
     assert_equal(
         _count(
             text,

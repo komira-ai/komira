@@ -1,0 +1,69 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# Cloud Monitoring v3: a REST/JSON client generated at build time from the
+# googleapis protos //tools/vendor/googleapis:monitoring_v3 extracts from its
+# pinned archive (nothing of them is copied here). `MetricServiceClient`
+# sends through komira_http_client's `HttpClient` over the komira_http_core
+# `Connector` it is given, takes each request's bearer token from a
+# komira_gcp_core `GcpTokenSource`, and raises a non-2xx answer through
+# komira_gcp_core's `gcp_status_error`. It reads no environment.
+# komira_gcp_monitoring's `CloudMonitoringMetricsReader` is its caller.
+#
+# `methods` is what a metrics reader calls: ListTimeSeries (GET
+# /v3/{name=projects/*}/timeSeries, and the organizations and folders
+# forms), one page per call. It is a GET, so the whole request is the
+# query: `interval` (two Timestamps) and `aggregation` (a Duration, an
+# aligner, a reducer, the group-by fields) are flattened to
+# `interval.startTime=<RFC 3339>` and `aggregation.alignmentPeriod=60s`.
+# The service's other methods, the writes among them, are not generated.
+#
+# `bundle_only` is the files the ListTimeSeries closure reaches, each
+# generated into this package. google/api/metric.proto and
+# google/monitoring/v3/metric.proto share a basename, so the first is the
+# module `api_metric`. Timestamp, Duration, Struct and Any come from
+# komira_wkt.
+#
+# The library is gated by its layout probe and these tests, none of which
+# talks to the service: test_list_time_series_query (the request line of a
+# read with an interval and an aggregation, byte for byte, through
+# komira_http_core's ScriptedConnector: Timestamps in RFC 3339, Durations
+# as `<s>[.<frac>]s`, dotted lowerCamelCase keys, defaults left out; and a
+# response decoded) and test_no_env_reads (no generated module reads the
+# environment or holds a method but ListTimeSeries).
+
+mojo_gcp_client(
+    name = "komira_gcp_monitoring_client",
+    bundle_only = [
+        "google/monitoring/v3/metric_service.proto",
+        "google/monitoring/v3/common.proto",
+        "google/monitoring/v3/metric.proto",
+        "google/api/distribution.proto",
+        "google/api/metric.proto",
+        "google/api/monitored_resource.proto",
+        "google/rpc/status.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = ["MetricService.ListTimeSeries"],
+    module_names = {"google/api/metric.proto": "api_metric"},
+    proto_deps = ["//tools/vendor/googleapis:monitoring_v3"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        # The whole generated package, so the scan covers every file the
+        # generator writes with no second list of them to drift.
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_monitoring_client_gen"},
+    },
+    test_srcs = [
+        "tests/test_list_time_series_query.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)

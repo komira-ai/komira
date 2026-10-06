@@ -46,7 +46,8 @@ struct GetItemRequest(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "name", self.name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.name.byte_length() > 0:
+            enc.write_string_field(1, "name", self.name)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -87,7 +88,8 @@ struct Item(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "name", self.name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.name.byte_length() > 0:
+            enc.write_string_field(1, "name", self.name)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:

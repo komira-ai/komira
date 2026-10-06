@@ -26,7 +26,8 @@ WHAT IS IN HERE:
   * `RegistryCredential`, keyed by SURFACE (credential.mojo), and its
     conformers: `StaticTokenCredential` (one token from a file path or a
     secret name), `GithubOidcCredential` (trusted publishing from a GitHub
-    Actions job: the job's OIDC token exchanged for an upload token),
+    Actions job: the job's OIDC token exchanged for an upload token; the
+    ID-token request retried, bounded, through a caller-supplied `Sleeper`),
     `AnonymousCredential` (public reads) and `ScriptedCredential` (tests).
   * the legacy upload form and its classification (core_metadata.mojo,
     legacy_upload.mojo).
@@ -44,7 +45,8 @@ list and credential arrives from the caller. The one environment read is the
 GitHub Actions OIDC handshake (`GithubOidcCredential.from_actions_env`).
 
 Depends on komira_http_client, komira_http_core, komira_async,
-komira_crypto, komira_encoding, komira_json and komira_secret_store.
+komira_crypto, komira_encoding, komira_json, komira_libc, komira_retry and
+komira_secret_store.
 
 Encapsulation: owned values and seam conformers only. No UnsafePointer
 crosses a module boundary; no wildcard origin; no unsafe_from_address.

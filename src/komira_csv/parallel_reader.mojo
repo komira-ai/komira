@@ -105,6 +105,7 @@ from komira_buffer.heap_region import HeapRegion
 
 from .csv_options import CsvReadOptions, check_declared_column_types
 from .input_limits import check_csv_cell_budget, check_csv_column_count
+from .record_shape import check_csv_record_shape, skip_leading_blank_lines
 from .csv_scanner_phase1 import (
     scan_csv_phase1_into_cells,
     scan_csv_phase2_movemask_into_cells,
@@ -499,10 +500,29 @@ struct _CsvScanTask[
             )
             var scan_us_local = (Int(perf_counter_ns() - t_scan0) // 1000) if timing_enabled else 0
 
-            # Worker 0 strips the header row. Workers 1..k-1 scan all rows.
+            # Worker 0 skips blank lines before the header / first record
+            # and strips the header row. Workers 1..k-1 scan all rows.
+            if tid == 0:
+                skip_leading_blank_lines(cells_local)
             var data_skip = 0
             if tid == 0 and sp[].options_ptr[].has_header:
                 data_skip = 1
+            # RECORD SHAPE (komira-ai/komira#449), per worker: this slice is
+            # all this worker sees. The whole input is passed so a refusal
+            # can number the record from the start of the file.
+            check_csv_record_shape[Self.Q](
+                Span[UInt8, Self.in_o](
+                    unsafe_ptr=sp[].bytes_base, length=sp[].bytes_len
+                ),
+                lo,
+                0,
+                cells_local,
+                data_skip,
+                sp[].names.value(),
+                sp[].options_ptr[].has_header,
+                sp[].options_ptr[].delimiter,
+                sp[].options_ptr[].quote,
+            )
             var num_rows_local = cells_local.num_rows() - data_skip
             if num_rows_local <= 0:
                 # Empty worker -- batch slot stays None (pre-initialized).
@@ -654,6 +674,10 @@ def read_csv_bytes_to_batch_parallel_impl[
         within any worker's byte slice. The partition is quote-safe
         (`compute_csv_quote_safe_row_ranges`), so this means the input
         itself ends inside a quoted field.
+        Error on a malformed record in any worker's slice (a field count
+        other than the header's, or a byte after a closing quote that is not
+        the delimiter or a line end), numbered from the start of the input
+        (`record_shape`).
     """
     # Stage timing (`stage_timing`). The flag is fixed per public-fn call;
     # all `if _timing` checks below are predicated on this local Bool so
@@ -768,6 +792,9 @@ def read_csv_bytes_to_batch_parallel_impl[
             worker0_prefix_slice, options.delimiter, options.quote
         )
 
+    # Blank lines before the header / first record (`record_shape`); worker
+    # 0 drops the same rows from its own scan below.
+    skip_leading_blank_lines(worker0_cells_prefix)
     if worker0_cells_prefix.num_rows() == 0:
         # Empty worker 0 -- no headers, no inference possible. Defer.
         return read_csv_bytes_to_batch[Q, SCANNER_VARIANT_PHASE_3](bytes, options)
@@ -996,9 +1023,17 @@ def read_csv_bytes_to_batch_parallel_impl[
                 # the twin in the dispatcher-backed worker above.
                 cells_local.enforce_max_row_bytes(options.max_row_bytes)
                 var scan_us_local = (Int(perf_counter_ns() - t_scan0) // 1000) if _timing else 0
+                if w == 0:
+                    skip_leading_blank_lines(cells_local)
                 var data_skip = 0
                 if w == 0 and options.has_header:
                     data_skip = 1
+                # RECORD SHAPE -- see the twin in the dispatcher-backed
+                # worker above.
+                check_csv_record_shape[Q](
+                    bytes, lo, 0, cells_local, data_skip, header_names,
+                    options.has_header, options.delimiter, options.quote,
+                )
                 var num_rows_local = cells_local.num_rows() - data_skip
                 if num_rows_local <= 0:
                     if _timing:

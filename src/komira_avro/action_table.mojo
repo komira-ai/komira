@@ -82,6 +82,7 @@ from .avro_schema import (
 # twice (overflow-safe length guards, a validated cursor constructor) and
 # stays hardened only by memory — for a path that is slower.
 from .varint_decode_scalar import AvroByteReader
+from .json_string import utf8_to_string
 # The arrow.* override-aware Avro->Arrow mapper. The identity read path
 # consults the override table (BEFORE the standard mapping) so a column the
 # writer stamped with an arrow.* annotation (e.g. arrow.date64 over `long`)
@@ -1820,11 +1821,13 @@ struct ActionTableInterpreter(Movable):
                 b.append(sb[i])
             self.accs[oi].push_binary(b^)
         elif promo == PROMOTE_BYTES_TO_STRING:
-            # bytes → string: read raw bytes, reinterpret as a UTF-8/Latin-1 str.
-            var raw = reader.read_bytes()
-            var s = String("")
-            for i in range(len(raw)):
-                s += String(chr(Int(raw[i])))
+            # bytes → string: the Avro spec reads the writer's bytes as UTF-8.
+            # They are copied byte-exact and must be well-formed; widening
+            # each byte through chr() turned C3 BC into "Ã¼".
+            var raw = reader.read_bytes_span()
+            var s = utf8_to_string(
+                raw, "AvroDecodeError.MALFORMED: bytes value promoted to string"
+            )
             self.accs[oi].push_string(s^)
         else:
             raise Error(

@@ -25,9 +25,10 @@
 # types the runtime does not represent. A real answer carries it; the read
 # skips it as it skips any unknown key, and the state is still read.
 #
-# Default-valued body keys are komira_proto_codec's JsonEncoder writing
-# defaults, not the API. Every client is pointed at `localhost`, so no test
-# needs DNS; the default host is test_serviceusage_default_host's.
+# A body omits a plain field left at its default (`disableDependentServices`
+# false), as the proto3 JSON mapping does. Every client is pointed at
+# `localhost`, so no test needs DNS; the default host is
+# test_serviceusage_default_host's.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -205,7 +206,7 @@ def test_disable() raises:
     )
     assert_equal(
         _body(wire),
-        '{"disableDependentServices":false,"checkIfServiceHasUsage":"CHECK"}',
+        '{"checkIfServiceHasUsage":"CHECK"}',
     )
 
 

@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 
 # An embedded MinIO server the test starts itself: the binary is checked
 # against a sha256 pin, the data and a random root credential live in a
@@ -33,4 +33,24 @@ mojo_library(
         "tests/test_embedded_minio.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# What a test action can do where `buck2 test` runs it: spawn and reap a
+# child, loopback TCP, setpriv --pdeathsig and 1 GiB under TEST_TMPDIR are
+# required; the uid drop, egress to the conda host and whether TEST_TMPDIR is
+# outside any checkout are reported. One `FARM-CAPABILITY ...` line per capability
+# (see the file header). Standalone, not in `test_srcs`: it starts processes
+# and touches the network, which a library gate must not. Observed results:
+# docs/ci.md, "What a farm test action can do".
+mojo_test(
+    name = "farm_capability_probe",
+    srcs = ["tests/farm_capability_probe.mojo"],
+    # setpriv, PR_SET_PDEATHSIG and /proc are Linux's; a macOS pool needs a
+    # probe of its own (a kqueue parent watcher in place of the death signal).
+    target_compatible_with = ["prelude//os/constraints:linux"],  # komira-limit:farm-probe-linux
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_core_ffi:komira_core_ffi",
+        "//src/komira_supervisor:komira_supervisor",
+    ],
 )

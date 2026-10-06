@@ -172,19 +172,23 @@ def match_path_template(
 def _split_segments(s: String) -> List[String]:
     """Split `s` on `/` into segments. A single leading `/` (absolute form)
     yields no leading empty segment; an empty string yields an empty list.
-    Operates byte-wise (segment boundaries are ASCII `/`)."""
+    Operates byte-wise (segment boundaries are ASCII `/`) through
+    `as_bytes()`: a field value may be any UTF-8 text (a GCS object name),
+    and indexing `s[byte=i]` asserts on a continuation byte and aborts the
+    process. A cut at an ASCII `/` keeps each segment valid UTF-8."""
     var out = List[String]()
-    var n = s.byte_length()
+    var bytes = s.as_bytes()
+    var n = len(bytes)
     if n == 0:
         return out^
     var cur = List[UInt8]()
     for i in range(n):
-        var b = ord(s[byte=i])
-        if b == ord("/"):
+        var b = bytes[i]
+        if b == UInt8(ord("/")):
             out.append(String(unsafe_from_utf8=Span(cur)))
             cur = List[UInt8]()
         else:
-            cur.append(UInt8(b))
+            cur.append(b)
     out.append(String(unsafe_from_utf8=Span(cur)))
     # Drop a single leading empty segment from an absolute "/a/b" form.
     if len(out) > 0 and out[0].byte_length() == 0:
@@ -205,27 +209,28 @@ def _split_template_segments(s: String) -> List[String]:
     of which contains braces), this is brace-aware so it must only be applied
     to the template. The grammar forbids nested braces, so depth is 0 or 1.
     Leading-empty-segment trimming and the empty-input case match
-    `_split_segments`."""
+    `_split_segments`. Byte-wise through `as_bytes()`, as there."""
     var out = List[String]()
-    var n = s.byte_length()
+    var bytes = s.as_bytes()
+    var n = len(bytes)
     if n == 0:
         return out^
     var cur = List[UInt8]()
     var depth = 0
     for i in range(n):
-        var b = ord(s[byte=i])
-        if b == ord("{"):
+        var b = bytes[i]
+        if b == UInt8(ord("{")):
             depth += 1
-            cur.append(UInt8(b))
-        elif b == ord("}"):
+            cur.append(b)
+        elif b == UInt8(ord("}")):
             if depth > 0:
                 depth -= 1
-            cur.append(UInt8(b))
-        elif b == ord("/") and depth == 0:
+            cur.append(b)
+        elif b == UInt8(ord("/")) and depth == 0:
             out.append(String(unsafe_from_utf8=Span(cur)))
             cur = List[UInt8]()
         else:
-            cur.append(UInt8(b))
+            cur.append(b)
     out.append(String(unsafe_from_utf8=Span(cur)))
     # Drop a single leading empty segment from an absolute "/a/b" form.
     if len(out) > 0 and out[0].byte_length() == 0:
@@ -238,12 +243,13 @@ def _split_template_segments(s: String) -> List[String]:
 
 def _is_named_capture(seg: String) -> Bool:
     """True iff `seg` is a `{name=subpattern}` named-capture segment."""
-    var n = seg.byte_length()
+    var bytes = seg.as_bytes()
+    var n = len(bytes)
     if n < 2:
         return False
-    if ord(seg[byte=0]) != ord("{"):
+    if bytes[0] != UInt8(ord("{")):
         return False
-    if ord(seg[byte=n - 1]) != ord("}"):
+    if bytes[n - 1] != UInt8(ord("}")):
         return False
     return _index_of_eq(seg) >= 0
 
@@ -252,16 +258,18 @@ def _capture_subpattern(seg: String) -> String:
     """Extract the `subpattern` from a `{name=subpattern}` segment — the bytes
     after the first `=`, before the closing `}`."""
     var eq = _index_of_eq(seg)
+    var bytes = seg.as_bytes()
     var inner = List[UInt8]()
-    for i in range(eq + 1, seg.byte_length() - 1):
-        inner.append(UInt8(ord(seg[byte=i])))
+    for i in range(eq + 1, len(bytes) - 1):
+        inner.append(bytes[i])
     return String(unsafe_from_utf8=Span(inner))
 
 
 def _index_of_eq(s: String) -> Int:
     """Byte index of the first `=` in `s`, or -1."""
-    for i in range(s.byte_length()):
-        if ord(s[byte=i]) == ord("="):
+    var bytes = s.as_bytes()
+    for i in range(len(bytes)):
+        if bytes[i] == UInt8(ord("=")):
             return i
     return -1
 
@@ -329,11 +337,15 @@ def _percent_encode(s: String) -> String:
     """RFC 6570 simple-string percent-encoding: escape every byte EXCEPT the
     unreserved set `A-Z a-z 0-9 - . _ ~`. This is the encoding
     `google.api.routing` mandates for the header key+value (the values can
-    contain `/`, which MUST be escaped to `%2F`). Output is ASCII-only."""
+    contain `/`, which MUST be escaped to `%2F`). Output is ASCII-only.
+
+    Per BYTE, through `as_bytes()`: `é` is `%C3%A9`. (Indexing `s[byte=i]`
+    asserts on a UTF-8 continuation byte and aborts the process.)"""
     var out = List[UInt8]()
-    var n = s.byte_length()
+    var bytes = s.as_bytes()
+    var n = len(bytes)
     for i in range(n):
-        var b = ord(s[byte=i])
+        var b = Int(bytes[i])
         if _is_unreserved(b):
             out.append(UInt8(b))
         else:

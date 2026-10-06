@@ -35,7 +35,8 @@ struct MonitoredResource(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "type", self.type)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.type.byte_length() > 0:
+            enc.write_string_field(1, "type", self.type)
         enc.begin_map_field(2, "labels")
         for entry in self.labels.items():
             enc.begin_map_entry()
@@ -92,8 +93,10 @@ struct MonitoredResourceDescriptor(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(5, "name", self.name)
-        enc.write_string_field(1, "type", self.type)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.name.byte_length() > 0:
+            enc.write_string_field(5, "name", self.name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.type.byte_length() > 0:
+            enc.write_string_field(1, "type", self.type)
         enc.begin_list_field(4, "labels")
         for i in range(len(self.labels)):
             enc.write_message_element[LabelDescriptor](4, self.labels[i])
@@ -147,8 +150,10 @@ struct LabelDescriptor(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "key", self.key)
-        enc.write_string_field(3, "description", self.description)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.key.byte_length() > 0:
+            enc.write_string_field(1, "key", self.key)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.description.byte_length() > 0:
+            enc.write_string_field(3, "description", self.description)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
