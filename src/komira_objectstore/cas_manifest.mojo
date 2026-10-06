@@ -135,6 +135,8 @@ from komira_objectstore.path import Path
 # Reclamation never touches a live chunk (at or above `_LOG_START`):
 # decisions + error text, no I/O (cycle-free: imports nothing from here).
 from komira_objectstore.chunk_reclaim_guard import (
+    advance_regress_error,
+    advance_would_regress,
     reap_is_refused,
     reap_refused_error,
     rewrite_target_deleted_error,
@@ -3338,12 +3340,17 @@ struct CasManifestStore[Store: ConditionalWriteStore](
 
     def _read_log_start_seq_inner(self) raises -> Int64:
         # UNLOCKED body of `read_log_start_seq` (the caller holds the gate).
+        return self._read_log_start_body_inner().log_start_seq
+
+    def _read_log_start_body_inner(self) raises -> LogStart:
+        # UNLOCKED one-GET read of `_LOG_START` (no HEAD, so no etag); zero
+        # when absent, raises on any other error. The caller holds the gate.
         try:
             var raw = self._store.get(log_start_key(self._prefix))
-            return decode_log_start(raw, String("")).log_start_seq
+            return decode_log_start(raw, String(""))
         except e:
             if _is_not_found(String(e)):
-                return Int64(0)
+                return LogStart.zero()
             raise e^
 
     def read_log_start(self) raises -> LogStart:
@@ -3383,11 +3390,29 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         empty — the first-ever advance). Returns the new `LogStart` with the
         post-write etag. Raises `precondition` (412) on a stale etag — the
         caller re-reads `read_log_start` and retries (atomic
-        advance). Never moves the pointer BACKWARDS (a stale retry that would
-        regress is a no-op returning the current state)."""
+        advance). Never moves the pointer BACKWARDS: a target whose seq or
+        offset is below the current pointer is refused with a precondition
+        (412) error, so a caller that retries on 412 re-reads and finds the
+        pointer already past its target (chunk_reclaim_guard.mojo). The current
+        pointer is read (one GET) before the If-Match write: if it is newer than
+        `expected_etag`, the write itself is refused."""
         # WRITE verb (If-Match CAS on _LOG_START) -> EXCLUSIVE lock.
         _cas_gate_wrlock()
         try:
+            if expected_etag.byte_length() != 0:
+                var cur = self._read_log_start_body_inner()
+                if advance_would_regress(
+                    cur.log_start_seq,
+                    cur.log_start_offset,
+                    new_log_start_seq,
+                    new_log_start_offset,
+                ):
+                    raise advance_regress_error(
+                        cur.log_start_seq,
+                        cur.log_start_offset,
+                        new_log_start_seq,
+                        new_log_start_offset,
+                    )
             var body = encode_log_start(
                 LogStart(new_log_start_offset, new_log_start_seq, String(""))
             )

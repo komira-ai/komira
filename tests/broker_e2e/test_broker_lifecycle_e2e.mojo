@@ -29,10 +29,9 @@
 #               generations); the new owner produces. Then two late flushes:
 #                 * FENCED: node 3 flushes with its old writer epoch and the
 #                   live generation, which THE TEST reads from the persisted
-#                   assignment and passes in. `BrokerCore.flush` must forward it
-#                   to the manifest fence: refused as `lease_fenced`, no chunk,
-#                   offsets unchanged. The segment PUT happens before the fence,
-#                   so one unreferenced `.seg` is left behind (pinned below).
+#                   assignment and passes in. `BrokerCore.flush` must refuse
+#                   it as `lease_fenced` BEFORE its segment PUT: no chunk,
+#                   offsets unchanged, and no `.seg` left behind.
 #                 * NOT FENCED (pinned residual): node 3 flushes with what its
 #                   own `BrokerNodeState` reports (old, old). No product code
 #                   reads the live generation at flush; cas_manifest documents
@@ -41,7 +40,7 @@
 #                   change fences it, this assertion flips on purpose.
 #   5. RETAIN   On the reassigned partition: time retention retires the oldest
 #               chunk and advances log_start to its successor's base; the
-#               reaper deletes it (and does not sweep the phase-4 orphan); the
+#               reaper deletes it, leaving one segment per live chunk; the
 #               offline `LogCleaner` with zero tombstone grace writes a
 #               survivor sidecar holding the latest offset per key, including a
 #               key whose latest value is empty; a consumer asking for offset 0
@@ -53,8 +52,8 @@
 # What each phase would catch (the planted mutants are in the change notes):
 #   * an assignment that is not persisted, or is read back wrong (phase 1, 3);
 #   * a lost, reordered or altered record across a restart (phase 3);
-#   * a `BrokerCore.flush` that does not forward the caller's current lease
-#     epoch to the manifest fence (phase 4);
+#   * a `BrokerCore.flush` that does not refuse a writer below the caller's
+#     current lease epoch (phase 4);
 #   * a log_start that is not the base of the first live chunk (phase 5);
 #   * a cleaner that keeps a superseded offset, or drops an empty value as if
 #     it were a tombstone (phase 5).
@@ -673,7 +672,7 @@ def phase4_fence(
 
     # (a) FENCED, with the live generation supplied by THE TEST. No product
     # path reads the persisted generation at flush; this proves only that
-    # `BrokerCore.flush` forwards `current_lease_epoch` to the manifest fence.
+    # `BrokerCore.flush` refuses below the `current_lease_epoch` it is given.
     var live_gen = _read_persisted(root).generation_of(victim)
     assert_true(old_writer < live_gen, "the stale lease is below the live one")
     var probe = _consumer(root, victim)
@@ -694,12 +693,12 @@ def phase4_fence(
     assert_equal(check.next_offset(), offsets_before, "offsets unchanged by the fenced append")
     assert_equal(check.num_chunks(), chunks_before, "no chunk committed by the fenced append")
     _ = check^
-    # Pinned, known behaviour: `BrokerCore.flush` PUTs the segment before the
-    # manifest append runs the fence, so the refused flush leaves one
-    # unreferenced `.seg`. A fix that fences before the PUT flips this.
+    # `BrokerCore.flush` refuses a writer below `current_lease_epoch` before
+    # its segment PUT, so the refused flush leaves no `.seg` behind (nothing
+    # would ever delete one: komira-ai/komira#488).
     assert_equal(
-        _segment_objects(root, victim), segs_before + 1,
-        "the fenced flush left one orphan segment (PUT precedes the fence)",
+        _segment_objects(root, victim), segs_before,
+        "the fenced flush PUT no segment (refused before the PUT)",
     )
     _assert_log_equals_model(root, victim, model[victim], "phase 4 fenced")
 
@@ -757,11 +756,11 @@ def phase5_retain_and_compact(
     var index = consumer.resolve_index()
     assert_true(len(index) >= 2, "a cleanable chunk and the active chunk")
     var head_seq = index[len(index) - 1].chunk_seq
-    # Pinned, known behaviour: the reaper deletes tombstoned chunks' segments
-    # only; nothing sweeps the phase-4 orphan, so it is still here.
+    # The reaper deleted the retired chunk's segment, and the refused phase-4
+    # flush PUT none, so exactly the live chunks' segments remain.
     assert_equal(
-        _segment_objects(root, victim), len(index) + 1,
-        "one segment per live chunk, plus the unswept phase-4 orphan",
+        _segment_objects(root, victim), len(index),
+        "one segment per live chunk",
     )
 
     # Compact the cleanable chunks [log_start_seq, head): decode each one.

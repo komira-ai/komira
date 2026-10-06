@@ -580,28 +580,29 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         var first_unmigrated_seq = head.chunk_seq + Int64(1)
         var found_unmigrated = False
         var retired = 0
+        var to_tomb = List[Int64]()
         while seq <= head.chunk_seq:
-            var rc: Int64
-            try:
-                var body_bytes = legacy.read_chunk(seq)
-                var body = ManifestBody.decode(body_bytes)
-                rc = body.record_count
-            except e2:
-                _ = e2
-                seq += Int64(1)
-                continue  # already-reaped chunk
+            # The walk starts AT the log start, so every chunk it reads is
+            # live: ANY read error (not_found included) is raised. Taking it
+            # for a reaped chunk would skip a live chunk's records and
+            # renumber the log. The whole walk runs before any tombstone or
+            # advance, so a failed read changes nothing.
+            var body = ManifestBody.decode(legacy.read_chunk(seq))
+            var rc = body.record_count
             var chunk_hi = running + rc  # exclusive dense end
             # Fully migrated iff the chunk's entire dense range is <= the migrated
             # watermark.
             if chunk_hi <= migrated_through_dense:
                 if not _i64_in(already_tomb, seq):
-                    legacy.schedule_for_delete_at(seq, now_ms)
-                    retired += 1
+                    to_tomb.append(seq)
             elif not found_unmigrated:
                 first_unmigrated_seq = seq
                 found_unmigrated = True
             running = chunk_hi
             seq += Int64(1)
+        for t in range(len(to_tomb)):
+            legacy.schedule_for_delete_at(to_tomb[t], now_ms)
+            retired += 1
         # Advance the durable legacy `_LOG_START` to the migrated watermark (the
         # first un-migrated dense offset, at the first surviving chunk seq).
         # Monotone-forward; a stale 412 is a harmless lose.

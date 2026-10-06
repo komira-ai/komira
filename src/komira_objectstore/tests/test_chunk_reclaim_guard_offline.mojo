@@ -19,13 +19,20 @@
 #       reaps, so the retired chunks are really deleted. Catches: the old
 #       reap-then-advance order (the reap is refused and swallowed, the chunk
 #       leaks, the index forgets it).
-#   (5) A failed advance, tombstone write or reap during `compact` raises and
-#       leaves the in-memory index intact; a retry reclaims everything and
+#   (5) A failed advance, tombstone write or reap during `compact` raises. A
+#       failure before the advance leaves the in-memory index intact; one after
+#       it leaves the index at the durable log start; a retry reclaims everything and
 #       strands no marker, also after a reap that deleted the chunk but not
 #       its marker, and after a restart (`reload_from_base`) that follows a
 #       landed advance. Catches: the old swallow-and-drop; an advance before
 #       the tombstones (chunks below the floor that nothing revisits); a
 #       compact that does not sweep tombstones below the floor.
+#   (6) `advance_log_start` refuses to move `_LOG_START` backwards, and a
+#       compact with a lower watermark after a failure past the advance does
+#       not try to. Catches: no regression check; a stale fold index.
+#   (7) A read error on a LIVE chunk in a log-start walk is raised, never
+#       taken for a reaped chunk (`_retire_folded_source`, `reload_from_base`).
+#       Catches: the old catch-all `except: continue`.
 #
 # Faults are injected by `_FaultStore`, which wraps the shared in-memory store
 # and keeps its rules as marker objects IN that store, so every clone (each
@@ -70,6 +77,9 @@ comptime _Inner = SharedInMemoryConditionalStore
 
 # Rule prefixes; a rule is the marker object `<prefix><target key>`.
 comptime _FAIL_GET = "__fault__/get/"
+# The first GET of the target succeeds and arms `_FAIL_GET` for the rest:
+# a tail recovery reads the chunk, the walk after it then fails.
+comptime _FAIL_GET_AFTER_ONE = "__fault__/get_after_one/"
 comptime _FAIL_HEAD = "__fault__/head/"
 comptime _FAIL_PUT = "__fault__/put/"
 comptime _FAIL_DELETE = "__fault__/delete/"
@@ -145,14 +155,19 @@ struct _FaultStore(
     def coalesce_policy(self) -> CoalescePolicy:
         return self._inner.coalesce_policy()
 
+    def _before_get(self, path: Path) raises:
+        self._fail_if(_FAIL_GET, path)
+        if _take_hook(self._inner, _FAIL_GET_AFTER_ONE, path.raw()):
+            _arm(self._inner, _FAIL_GET, path.raw())
+
     def get_range(
         self, path: Path, start: Int64, length: Int64
     ) raises -> List[UInt8]:
-        self._fail_if(_FAIL_GET, path)
+        self._before_get(path)
         return self._inner.get_range(path, start, length)
 
     def get(self, path: Path) raises -> List[UInt8]:
-        self._fail_if(_FAIL_GET, path)
+        self._before_get(path)
         return self._inner.get(path)
 
     def conditional_put(
@@ -504,6 +519,14 @@ def test_base_fold_failed_advance_keeps_index() raises:
     print("[test_base_fold_failed_advance_keeps_index] PASS")
 
 
+def _assert_index_follows_floor(f: _Fold, what: String) raises:
+    """After a failure PAST the advance: the in-memory index mirrors the
+    durable log start (4), as a restart would rebuild it."""
+    assert_equal(f.live_base_chunk_count(), 2, what + ": index follows the floor")
+    var r = f.resolve_offset(Int64(0))
+    assert_equal(r.payload, REAPED_PAYLOAD_SENTINEL, what + ": 0 reads REAPED")
+
+
 def test_base_fold_failed_reap_keeps_index() raises:
     print("[test_base_fold_failed_reap_keeps_index] starting...")
     var inner = _Inner()
@@ -517,7 +540,7 @@ def test_base_fold_failed_reap_keeps_index() raises:
         raised = True
         assert_true(String(e).find("injected fault") >= 0, String(e))
     assert_true(raised, "a failed reap raises")
-    _assert_index_intact(f, inner, "failed reap")
+    _assert_index_follows_floor(f, "failed reap")
     assert_true(_chunk_present(inner, _base_prefix(), Int64(0)), "chunk 0 kept")
     _disarm(inner, _FAIL_DELETE, ck)
     _ = f.compact(Int64(4))
@@ -540,7 +563,7 @@ def test_base_fold_retry_after_half_reap() raises:
         raised = True
         _ = e
     assert_true(raised, "the half-done reap raises")
-    _assert_index_intact(f, inner, "half reap")
+    _assert_index_follows_floor(f, "half reap")
     assert_false(_chunk_present(inner, _base_prefix(), Int64(0)), "chunk 0 gone")
     _disarm(inner, _FAIL_DELETE, tk)
     # The retry finds chunk 0 already gone, reaps the other three, and sweeps
@@ -624,6 +647,143 @@ def test_base_fold_failed_tombstone_keeps_index() raises:
     print("[test_base_fold_failed_tombstone_keeps_index] PASS")
 
 
+# =============================================================================
+# (6) a failure past the advance never lets _LOG_START move backwards
+# =============================================================================
+
+
+def test_advance_log_start_refuses_to_move_backwards() raises:
+    print("[test_advance_log_start_refuses_to_move_backwards] starting...")
+    var inner = _Inner()
+    var p = String(_PREFIX)
+    var m = _manifest(inner, p)
+    for c in range(3):
+        _ = m.append(_body(c), Int64(10))
+    var ls = m.read_log_start()
+    ls = m.advance_log_start(Int64(2), Int64(20), ls.etag)
+    var cases = List[Int64]()
+    cases.append(Int64(1))  # seq and offset behind
+    cases.append(Int64(2))  # same seq, offset behind
+    for i in range(len(cases)):
+        var raised = False
+        try:
+            _ = m.advance_log_start(cases[i], Int64(15), ls.etag)
+        except e:
+            raised = True
+            var msg = String(e)
+            assert_true(msg.find("backwards") >= 0, msg)
+            assert_true(is_precondition(msg), "reads as a lost race: " + msg)
+        assert_true(raised, "a backwards advance is refused")
+        var cur = m.read_log_start()
+        assert_equal(cur.log_start_seq, Int64(2), "seq did not move")
+        assert_equal(cur.log_start_offset, Int64(20), "offset did not move")
+    # Forward, and to the same point, still work.
+    ls = m.advance_log_start(Int64(2), Int64(20), m.read_log_start().etag)
+    ls = m.advance_log_start(Int64(3), Int64(30), ls.etag)
+    assert_equal(m.read_log_start_seq(), Int64(3), "forward advance lands")
+    _ = m^
+    print("[test_advance_log_start_refuses_to_move_backwards] PASS")
+
+
+def test_base_fold_lower_watermark_after_failed_reap() raises:
+    """The advance to 4 lands and the reap of chunk 1 fails. A compact with
+    a lower watermark (3) must not move `_LOG_START` back to 3."""
+    print("[test_base_fold_lower_watermark_after_failed_reap] starting...")
+    var inner = _Inner()
+    var f = _fold_six(inner)
+    var ck = chunk_key(_base_prefix(), Int64(1)).raw()
+    _arm(inner, _FAIL_DELETE, ck)
+    var raised = False
+    try:
+        _ = f.compact(Int64(4))
+    except e:
+        raised = True
+        _ = e
+    assert_true(raised, "the reap after the advance fails")
+    _disarm(inner, _FAIL_DELETE, ck)
+    var n = f.compact(Int64(3))
+    assert_equal(n, 2, "a lower watermark retires nothing")
+    var m = _manifest(inner, _base_prefix())
+    var ls = m.read_log_start()
+    assert_equal(ls.log_start_seq, Int64(4), "log start seq stays 4")
+    assert_equal(ls.log_start_offset, Int64(4), "log start offset stays 4")
+    _ = m^
+    _assert_compacted(f, inner, "lower watermark after a failed reap")
+    _ = f^
+    print("[test_base_fold_lower_watermark_after_failed_reap] PASS")
+
+
+# =============================================================================
+# (7) a read error on a LIVE chunk is never taken for a reaped one
+# =============================================================================
+
+
+def test_source_retire_raises_on_a_live_chunk_read_error() raises:
+    """`_retire_folded_source` walks a source shard from its log start. A
+    GET error on live chunk 1 must raise before any tombstone or advance; a
+    catch-all would skip it, tombstone chunks 0 and 2 and renumber the log."""
+    print("[test_source_retire_raises_on_a_live_chunk_read_error] starting...")
+    var inner = _Inner()
+    var f = _Fold(_FaultStore(inner.clone()), String(_PART))
+    for k in range(3):
+        _ = f.append_batch(String("a0"), _one(Int64(k)))
+    var sp = sublineage_prefix(String(_PART), String("a0"))
+    var ck = chunk_key(sp, Int64(1)).raw()
+    # The tail recovery reads chunk 1; the walk's read of it then fails.
+    _arm(inner, _FAIL_GET_AFTER_ONE, ck)
+    var raised = False
+    try:
+        f._retire_folded_source(String("a0"), Int64(3))
+    except e:
+        raised = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised, "the read error is raised")
+    _disarm(inner, _FAIL_GET, ck)
+    var s = _manifest(inner, sp)
+    assert_equal(len(s.tombstone_seqs()), 0, "nothing tombstoned")
+    var ls = s.read_log_start()
+    assert_equal(ls.log_start_seq, Int64(0), "log start seq did not move")
+    assert_equal(ls.log_start_offset, Int64(0), "log start offset did not move")
+    _ = s^
+    _ = f^
+    print("[test_source_retire_raises_on_a_live_chunk_read_error] PASS")
+
+
+def test_reload_raises_on_a_live_base_chunk_read_error() raises:
+    """`reload_from_base` rebuilds the index from the log start. A GET error
+    (not absence) on live block 2 must raise: skipping it would shift every
+    later dense base, and a compact over that index retires the wrong
+    blocks."""
+    print("[test_reload_raises_on_a_live_base_chunk_read_error] starting...")
+    var inner = _Inner()
+    var f = _fold_six(inner)
+    var ck = chunk_key(_base_prefix(), Int64(2)).raw()
+    # The tail recovery fails: raised (it used to rebuild an EMPTY index).
+    _arm(inner, _FAIL_GET, ck)
+    var raised0 = False
+    try:
+        f.reload_from_base()
+    except e:
+        raised0 = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised0, "a failed tail recovery is raised")
+    _disarm(inner, _FAIL_GET, ck)
+    # The tail recovery reads block 2; the walk's read of it then fails.
+    _arm(inner, _FAIL_GET_AFTER_ONE, ck)
+    var raised = False
+    try:
+        f.reload_from_base()
+    except e:
+        raised = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised, "the walk's read error is raised")
+    _disarm(inner, _FAIL_GET, ck)
+    f.reload_from_base()
+    _assert_index_intact(f, inner, "reload after the error")
+    _ = f^
+    print("[test_reload_raises_on_a_live_base_chunk_read_error] PASS")
+
+
 def main() raises:
     test_reap_refuses_at_and_above_log_start()
     test_reap_fails_closed_on_log_start_read_error()
@@ -635,4 +795,8 @@ def main() raises:
     test_base_fold_restart_after_advance_reclaims()
     test_base_fold_restart_after_failed_tombstone_reclaims()
     test_base_fold_failed_tombstone_keeps_index()
-    print("[OK] test_chunk_reclaim_guard_offline — 10 cases passed")
+    test_advance_log_start_refuses_to_move_backwards()
+    test_base_fold_lower_watermark_after_failed_reap()
+    test_source_retire_raises_on_a_live_chunk_read_error()
+    test_reload_raises_on_a_live_base_chunk_read_error()
+    print("[OK] test_chunk_reclaim_guard_offline — 14 cases passed")
