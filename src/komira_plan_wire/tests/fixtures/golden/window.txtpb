@@ -28,10 +28,6 @@ plan {
       arrow_type_id: 5
       dtype_code: _DT_INT64
       dict_index_type_id: 4
-      # A LEAD output inherits its input field's metadata: a value shifted
-      # by rows is still the same quantity, so a LEAD of a price-in-cents
-      # column is price-in-cents too. NTILE and SUM produce new quantities
-      # and carry no metadata.
       metadata_keys: "unit"
       metadata_values: "cents"
     }
