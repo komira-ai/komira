@@ -24,7 +24,7 @@
 # within about 93 s, and `fork_join` then reports the server's error. A leg
 # of several such calls can take longer; the happy path takes seconds.
 #
-# The listener binds 127.0.0.1 on an ephemeral port (`fake_port`).
+# The listener binds 127.0.0.1 on an ephemeral port (`FakeServer.port()`).
 # =============================================================================
 
 from std.memory import Pointer

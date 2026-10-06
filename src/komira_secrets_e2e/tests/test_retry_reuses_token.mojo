@@ -8,10 +8,11 @@
 # own sleeps, a real socket.
 #
 #   * PutSecretValue answered 500 BEFORE the write is applied (after a plain
-#     CreateSecret). The resend applies it, once. Here only the byte-equality
-#     assertion can see a token minted per attempt: the first send was never
-#     applied, so a fresh token would be taken as a new version and the call
-#     would succeed. It runs first, so a failure in the other run cannot
+#     CreateSecret). The resend applies it, once. Here only the token
+#     assertions can see a token minted per attempt (the resend's token equals
+#     the first's, and the reported version is the first token): the first
+#     send was never applied, so a fresh token would be taken as a new version
+#     and the call would succeed. It runs first, so a failure in the other run cannot
 #     hide it.
 #   * CreateSecret APPLIED, then answered 500 (the answer lost on its way
 #     back). The resend carries the same token, so the fake answers it from
@@ -174,9 +175,10 @@ def test_a_put_answered_500_before_apply_keeps_its_token() raises:
     assert_equal(puts[0].status, 500)
     assert_equal(puts[1].status, 200)
     _assert_uuid4(puts[0].token)
-    # Byte for byte. Nothing else here can see a token minted per attempt:
-    # the first send was never applied, so a fresh token on the resend is
-    # accepted as a new version and every other assertion passes.
+    # Byte for byte. Only these two assertions can see a token minted per
+    # attempt: the first send was never applied, so a fresh token on the
+    # resend is accepted as a new version (the reported version would then be
+    # the new token) and every other assertion passes.
     assert_equal(puts[1].token, puts[0].token)
     assert_equal(leg.put_version, puts[0].token)
     # Create and put, each applied once; nothing replayed.
