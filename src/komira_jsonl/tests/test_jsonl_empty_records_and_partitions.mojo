@@ -15,6 +15,9 @@
 #     parallel materializer and the streaming reader, whose per-partition
 #     and per-chunk batches are concatenated (the concat summed nothing for
 #     zero-column batches).
+#   - test_zero_column_with_partitions: the with-partitions materializer
+#     over a zero-field schema reads one row per object across its
+#     partitions (the third caller of the same part concat).
 #   - test_with_partitions: `materialize_jsonl_to_batch_parallel_with_partitions`
 #     fed the partitions and per-partition indices of
 #     `infer_jsonl_schema_parallel_into` reads every row in order, and an
@@ -95,17 +98,34 @@ def test_zero_column_parallel_and_streaming() raises:
     assert_true(len(b) > 4 * 1024 * 1024)
     var par = materialize_jsonl_to_batch_parallel(Span(b), _no_fields(), 8)
     assert_equal(par.num_rows(), n, "parallel")
+    assert_equal(par.num_columns(), 0, "parallel")
+    assert_equal(par.schema.num_columns(), 0, "parallel")
     var path = test_tmpdir() + "/zero_cols.jsonl"
     with open(path, "w") as f:
         f.write(_big(1000, -1, String("")))
     var st = read_jsonl_streamed_to_one_batch(path, _no_fields(), 256)
     assert_equal(st.num_rows(), 1000, "streaming")
+    assert_equal(st.num_columns(), 0, "streaming")
 
 
 def _partitions_of(b: List[UInt8], mut schema_out: Schema) raises -> JsonlPartitions:
     var parts = JsonlPartitions(List[Int](), List[Int](), List[StructuralIndex]())
     schema_out = infer_jsonl_schema_parallel_into(Span(b), parts, 8)
     return parts^
+
+
+def test_zero_column_with_partitions() raises:
+    print("T5: zero-column rows survive the with-partitions concat")
+    var n = 150000
+    var b = _bytes_of(_big(n, -1, String("")))
+    var inferred = Schema()
+    var parts = _partitions_of(b, inferred)
+    assert_true(len(parts.indices) > 1, "the input must split into partitions")
+    var batch = materialize_jsonl_to_batch_parallel_with_partitions(
+        Span(b), _no_fields(), parts^
+    )
+    assert_equal(batch.num_columns(), 0)
+    assert_equal(batch.num_rows(), n)
 
 
 def test_with_partitions() raises:
@@ -158,6 +178,11 @@ def main() raises:
         test_with_partitions()
     except e:
         print("FAIL T4:", e)
+        failed += 1
+    try:
+        test_zero_column_with_partitions()
+    except e:
+        print("FAIL T5:", e)
         failed += 1
     if failed > 0:
         raise Error(String(failed) + " test(s) failed")
