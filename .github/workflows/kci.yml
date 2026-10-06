@@ -12,8 +12,8 @@
 # `after`; `id-token: write` only on a job whose stage publishes by trusted
 # publishing or is farm-connected; the farm-connect action exactly on the
 # farm-connected stage; each job runs exactly one `kci run` with
-# `--summary-file`, reading the machine file being checked; a `pull_request`
-# trigger that only the pr stage's job answers (below); the inputs
+# `--summary-file`, reading the machine file being checked; NO `pull_request`
+# trigger (the pull request's check is its own workflow, pr.yml); the inputs
 # `revision`, `reason` and `dry_run`; every action pinned. A job runs its whole
 # stage (a FULL run) unless the stage is SPLIT: gamma is, into `gamma` (its
 # step, `--only step:publish`) and `validate` (its two validations, `--only
@@ -79,18 +79,10 @@
 #          the channel's previous build. TO PAUSE promotion, add a required
 #          reviewer to that environment (docs/ci.md, "Pausing promotion to
 #          prod"); no change here.
-#   pr     the check of a pull request (the check named `kci / pr`), on a
-#          GitHub-hosted runner joined to the build farm's tailnet, in NO
-#          environment, with `contents: read` and the `id-token: write` the
-#          farm connection exchanges, nothing else: it builds bin/kci from
-#          the pull request's merge commit and runs `kci run --stage pr
-#          --affected-by <the pull request's base commit>`, which builds the
-#          units the change reaches (the artifacts of
-#          release/artifacts.textproto and the checks derived from the build
-#          graph when it runs) and ships nothing. It runs only for a pull request from a branch of this
-#          repository: a fork's pull request runs nothing (a fork's run gets
-#          no tailnet credential; a maintainer reads the change and pushes it
-#          to a branch here). A push or a manual run skips it.
+#   (The pull request's check, the machine file's `pr` stage, is NOT in this
+#   file: it is the one job of .github/workflows/pr.yml, so a pull request
+#   never shows a skipped gamma, validate, prod or build job. This file has
+#   no `pull_request` trigger.)
 #
 # Every release job ends with the step `the prod line` (R20), which says in
 # one plain line of the job summary what happens to prod: SKIPPED (and why),
@@ -104,12 +96,11 @@
 #
 # Triggers: a push to main (not one that touches only documentation:
 # `paths-ignore`, R17, the same documentation release_version.sh does not
-# count) and a manual run release; a pull request runs the pr job and NOTHING
-# ELSE. Every release job's `if:` keeps a pull request out
-# (`github.event_name != 'pull_request'`), so no environment, publishing
-# token or release job is reached from a pull request's code; the pr job's
-# own condition keeps a fork's out of the tailnet. The welded test holds both
-# (rule R6 of src/kci_ci_check).
+# count) and a manual run release, and nothing else. A pull request never
+# starts this workflow (pr.yml answers it), so no environment, publishing
+# token or release job is reached from a pull request's code. The welded test
+# holds it (rule R6 of src/kci_ci_check: a `pull_request` trigger here is
+# refused; pr.yml is held to the pull request's check alone).
 #
 # ONE RELEASE AT A TIME (concurrency, R16). A PUSH to main is in the group
 # `kci-release-main`: a running release is NEVER cancelled; GitHub keeps at
@@ -122,8 +113,7 @@
 # the run that releases a commit names it instead (prod's "carried"
 # list). A manual run is never in that group, so it can neither replace a
 # pending release nor be replaced by one: a dry run in `kci-plan-<run id>`,
-# any other manual run in `kci-ref-<ref name>`. A pull request's runs are
-# one group per pull request, a newer push cancelling the older check.
+# any other manual run in `kci-ref-<ref name>`.
 # GitHub compares the group's `github.ref` ignoring case, so a push of a
 # branch `MAIN` would join it too: the repository ruleset that refuses such
 # branches (docs/ci.md) is what keeps them out. A RE-RUN of an old PUSH
@@ -192,8 +182,6 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**.md'
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       revision:
@@ -213,8 +201,8 @@ permissions: {}
 
 concurrency:
   # R16, byte for byte (file header, ONE RELEASE AT A TIME).
-  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: kci-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}
+  cancel-in-progress: false
 
 env:
   # The release machine: its stages, and through them the artifacts, the
@@ -223,8 +211,7 @@ env:
   # only by the step that skips a revision without one. The welded test
   # test_repo_kci_yml holds it equal to kci's default.
   KCI_MACHINE: release/machine.textproto
-  # The commit this run releases (THE REVISION, above); on a pull request, the
-  # merge commit the pr job checks.
+  # The commit this run releases (THE REVISION, above).
   REVISION: ${{ inputs.revision || github.sha }}
   # A push is a real run, validate included; a manual run is a dry run only
   # when it asks (R22: set here and nowhere else). The revision step (R21)
@@ -233,9 +220,7 @@ env:
 
 jobs:
   build:
-    # a release job: never on a pull request (R6); a break_glass stage, so a
-    # manual run of a branch runs it (R15)
-    if: github.event_name != 'pull_request'
+    # a break_glass stage, so a manual run of a branch runs it (R15): no `if:`
     runs-on: ubuntu-24.04
     environment: build
     timeout-minutes: 120
@@ -406,7 +391,7 @@ jobs:
     needs: build
     # a break_glass stage: a manual run publishes here, from the
     # environment gamma-breakglass (R15, R2)
-    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'
+    if: needs.build.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # R2: a push publishes from `gamma` (deployment branches: main); every
@@ -495,7 +480,7 @@ jobs:
   validate:
     needs: [build, gamma]
     # a part of gamma: a break_glass stage (R15)
-    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'
+    if: needs.build.outputs.release == 'true'
     # no farm, no tailnet, no container: the validations install on the runner
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -718,83 +703,3 @@ jobs:
             echo "### $line" >> "$GITHUB_STEP_SUMMARY"
             echo "$line" >&2
           fi
-
-  pr:
-    # A pull request from a branch of this repository, and nothing else: a
-    # fork's pull request runs nothing, and a push or a manual run (no pull
-    # request) skips this job (R6).
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    # No environment: no approval, and no environment secret reaches a pull
-    # request's code.
-    permissions:
-      contents: read
-      # for farm-connect only: the token Tailscale trusts (the stage is
-      # farm-connected; it publishes nothing)
-      id-token: write
-    steps:
-      # The merge commit, with the full history: kci reads the change from
-      # git (`<base>...<revision>`) and refuses a shallow clone.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.REVISION }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/farm-connect
-        with:
-          ts-client-id: ${{ vars.TS_CLIENT_ID }}
-          ts-audience: ${{ vars.TS_AUDIENCE }}
-          farm-address: ${{ vars.FARM_ADDRESS }}
-          farm-instance: ${{ vars.FARM_INSTANCE }}
-          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
-      - name: the buckconfig names the farm
-        run: |
-          for key in linux_x86_64_properties; do
-            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
-              { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
-          done
-      # kci as the build job builds it, from the pull request's code.
-      - name: build kci
-        run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
-      # The build systems name the program `buck2`; the repository's is the
-      # ./buck2 wrapper of this checkout.
-      - name: buck2 on PATH
-        run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          printf '#!/bin/sh\nexec "%s/buck2" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/bin/buck2"
-          chmod +x "$RUNNER_TEMP/bin/buck2"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      # kci first holds this workflow (as committed) to the machine file, then
-      # builds the units the change reaches: the artifacts of
-      # release/artifacts.textproto and the checks its buck2 build system
-      # derives from the live graph (release/ci/derive_checks.py), so every
-      # target of the graph is in some unit. The base is the pull request's
-      # base commit, a full commit id GitHub sets.
-      - name: kci run --stage pr
-        run: |
-          "$RUNNER_TEMP/kci/kci" run --stage pr --affected-by ${{ github.event.pull_request.base.sha }} \
-            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
-            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
-            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --work-dir "$GITHUB_WORKSPACE" --log-dir "$RUNNER_TEMP/kci-logs" \
-            --result-file "$RUNNER_TEMP/kci-result-pr.json" \
-            --summary-file "$GITHUB_STEP_SUMMARY"
-      - name: the build logs
-        if: failure()
-        run: |
-          for f in "$RUNNER_TEMP"/kci-logs/*; do
-            [ -f "$f" ] && { echo "== $f"; cat "$f"; }
-          done
-          true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: kci-result-pr-${{ env.REVISION }}
-          path: ${{ runner.temp }}/kci-result-pr.json
-          if-no-files-found: warn
-          retention-days: 90
-      - name: Stop buck2
-        if: always()
-        run: ./buck2 kill || true

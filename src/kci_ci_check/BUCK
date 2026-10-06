@@ -51,12 +51,16 @@ mojo_library(
         # one stage split over jobs whose --only parts run all of it once
         # (R1 and R9 as amended)
         "tests/test_ci_split_stage.mojo",
-        # R6 as amended: one workflow; on pull_request only the PULL_REQUEST
-        # stage's job runs (no fork, no environment, minimal permissions, the
-        # base commit, the full history), every release job keeps a pull
-        # request out; one mutation per branch
+        # R6 for pr.yml, the pull request's check: the PULL_REQUEST stage as the
+        # ONE job `check` of a workflow of its own (no fork, no environment, no
+        # secret, minimal permissions, the base commit, the full history,
+        # pinned runner and uses, the pull_request trigger alone); one
+        # mutation per branch
         "tests/test_ci_pull_request.mojo",
-        # the repository's own kci.yml held to its own release/machine.textproto
+        # R6 for kci.yml: no pull_request trigger and no job for the
+        # PULL_REQUEST stage; each file refused when read as the other
+        "tests/test_ci_two_workflows.mojo",
+        # the repository's own kci.yml and pr.yml held to their own release/machine.textproto
         "tests/test_repo_kci_yml.mojo",
         # R15-R20 and R4's allow-list: mutations of the repository's own kci.yml
         # and machine file, each ending in its rule's finding
@@ -75,6 +79,7 @@ mojo_library(
         "tests/test_repo_kci_yml.mojo": {
             "channels.textproto": "//release:channels.textproto",
             "kci.yml": "//:kci.yml",
+            "pr.yml": "//:pr.yml",
             "machine.textproto": "//release:machine.textproto",
             "release_version.sh": "//tools/build/package:release_version.sh",
             "pixi_pin.txt": "//tools/build/toolchains:pixi_pin_linux_x86_64",

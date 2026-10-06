@@ -24,10 +24,10 @@ comptime _FINDING: Int = 1
 comptime _CANNOT: Int = 2
 comptime _REFUSED: Int = 3
 
-comptime _GROUP_LINE: String = "  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
-comptime _CANCEL_LINE: String = "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
+comptime _GROUP_LINE: String = "  group: kci-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n"
+comptime _CANCEL_LINE: String = "  cancel-in-progress: false\n"
 comptime _PROD_IF: String = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"
-comptime _GAMMA_IF: String = "    # a break_glass stage: a manual run publishes here, from the\n    # environment gamma-breakglass (R15, R2)\n    if: github.event_name != 'pull_request' && needs.build.outputs.release == 'true'\n"
+comptime _GAMMA_IF: String = "    # a break_glass stage: a manual run publishes here, from the\n    # environment gamma-breakglass (R15, R2)\n    if: needs.build.outputs.release == 'true'\n"
 comptime _PATHS_IGNORE: String = "    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n"
 comptime _PROD_HASH_ENV: String = "      RELEASE_SET_HASH: ${{ needs.validate.outputs.validated_set_hash }}\n"
 comptime _GAMMA_KCI_HASH: String = (
@@ -119,7 +119,7 @@ def _rows() -> List[_Row]:
     r.append(_wf(String("4c the main conjunct on gamma, in another case"), String(_GAMMA_IF), String(_GAMMA_IF).replace(String("== 'true'\n"), String("== 'true' && github.ref == 'REFS/HEADS/MAIN'\n")), _FINDING, String("job 'gamma': R15: stage 'gamma' is break_glass")))
     r.append(_wf(String("4d the push conjunct on gamma, in another case"), String(_GAMMA_IF), String(_GAMMA_IF).replace(String("== 'true'\n"), String("== 'true' && github.event_name == 'Push'\n")), _FINDING, String("job 'gamma': R15: stage 'gamma' is break_glass")))
     r.append(_wf(String("2d prod's main conjunct in another case is the main conjunct"), String(_PROD_IF), String("    if: github.event_name == 'push' && github.ref == 'Refs/Heads/MAIN'\n"), _CLEAN, String("")))
-    r.append(_wf(String("2e prod's push literal in another case: the strict subset cannot read it for R6"), String(_PROD_IF), String("    if: github.event_name == 'PUSH' && github.ref == 'refs/heads/main'\n"), _FINDING, String("job 'prod': R6")))
+    r.append(_wf(String("2e prod's push literal in another case is the push conjunct (R15 reads it ignoring case; R6's release-only reading went with the pull_request trigger)"), String(_PROD_IF), String("    if: github.event_name == 'PUSH' && github.ref == 'refs/heads/main'\n"), _CLEAN, String("")))
     r.append(_m(String("5 machine: prod break_glass"), String(_M_PROD), String(_M_PROD) + String("  break_glass: true\n"), _FINDING, String("job 'prod': R15: stage 'prod' is break_glass")))
     r.append(_m(String("5b machine: gamma not break_glass"), String(_M_GAMMA_BG), String("  after: \"build\"\n"), _FINDING, String("job 'validate': R15: stage 'gamma' runs only on a push to main")))
     r.append(_m(String("5d machine: a break_glass_environment on a stage that is not break_glass"), String(_M_GAMMA_BG), String("  after: \"build\"\n") + String(_M_GAMMA_BG_ENV), _REFUSED, String("stage 'gamma' has break_glass_environment 'gamma-breakglass' and is not break_glass")))
@@ -131,7 +131,7 @@ def _rows() -> List[_Row]:
     r.append(_wf(String("6c a dry run in the release group"), String(_GROUP_LINE), String(_GROUP_LINE).replace(String(" || inputs.dry_run && format('plan-{0}', github.run_id)"), String("")), _FINDING, String("R16: the workflow-level `concurrency:`")))
     r.append(_wf(String("6d the release group's ref in another case"), String(_GROUP_LINE), String(_GROUP_LINE).replace(String("'refs/heads/main'"), String("'refs/heads/MAIN'")), _FINDING, String("R16: the workflow-level `concurrency:`")))
     r.append(_wf(String("7 cancel-in-progress: true"), String(_CANCEL_LINE), String("  cancel-in-progress: true\n"), _FINDING, String("R16: the workflow-level `concurrency:`")))
-    r.append(_wf(String("7b cancel-in-progress: false"), String(_CANCEL_LINE), String("  cancel-in-progress: false\n"), _FINDING, String("R16: the workflow-level `concurrency:`")))
+    r.append(_wf(String("7b cancel-in-progress: the pull request's spelling"), String(_CANCEL_LINE), String("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"), _FINDING, String("R16: the workflow-level `concurrency:`")))
     r.append(_wf(String("8 concurrency: kci (a scalar)"), String("concurrency:\n  # R16, byte for byte (file header, ONE RELEASE AT A TIME).\n") + String(_GROUP_LINE) + String(_CANCEL_LINE), String("concurrency: kci\n"), _FINDING, String("R16: the workflow-level `concurrency:`")))
     r.append(_wf(String("8b no concurrency"), String("concurrency:\n  # R16, byte for byte (file header, ONE RELEASE AT A TIME).\n") + String(_GROUP_LINE) + String(_CANCEL_LINE), String(""), _FINDING, String("R16: the workflow-level `concurrency:`")))
     r.append(_wf(String("8c a job-level concurrency on prod"), String(_PROD_HEAD), String(_PROD_HEAD) + String("    concurrency: prod\n"), _FINDING, String("job 'prod': R16: a job has no `concurrency:` of its own")))
@@ -145,7 +145,7 @@ def _rows() -> List[_Row]:
     r.append(_wf(String("10e a flow list with a glob"), String(_PATHS_IGNORE), String("    paths-ignore: [docs/**]\n"), _CANNOT, String("a flow list item other than plain")))
     r.append(_wf(String("10f plain docs/**"), String("      - 'docs/**'\n"), String("      - docs/**\n"), _FINDING, String("R17: the push trigger is exactly")))
     r.append(_wf(String("10g tags beside branches"), String(_PATHS_IGNORE), String(_PATHS_IGNORE) + String("    tags: [v1]\n"), _FINDING, String("R17: the push trigger is exactly")))
-    r.append(_wf(String("10h paths-ignore under pull_request"), String("  pull_request:\n    branches: [main]\n"), String("  pull_request:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n"), _FINDING, String("R17: `pull_request` has `paths-ignore`")))
+    r.append(_wf(String("10h a pull_request trigger (the pull request's check is pr.yml)"), String("  workflow_dispatch:\n"), String("  pull_request:\n    branches: [main]\n  workflow_dispatch:\n"), _FINDING, String("R6: trigger 'pull_request': the release workflow is triggered by push and workflow_dispatch only")))
     # ---- R18 inputs and no expression in a script ------------------------------------------------
     r.append(_wf(String("12 reason not required"), String("        required: true\n"), String("        required: false\n"), _FINDING, String("`reason` is `required: true`")))
     r.append(_wf(String("12b dry_run default true"), String("        type: boolean\n        default: false\n"), String("        type: boolean\n        default: true\n"), _FINDING, String("`dry_run` is `default: false`")))
