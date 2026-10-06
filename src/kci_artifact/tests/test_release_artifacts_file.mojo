@@ -112,14 +112,14 @@ def test_every_library_builds_stamped_into_its_own_directory() raises:
         assert_equal(_count(argv, String("komira.package_stamp=154")), 1)
         assert_equal(_count(argv, String("komira.package_commit=") + String(_SRC)), 1)
         assert_equal(_count(argv, String("komira.package_timestamp_ms=1790994309000")), 1)
-        # Exactly one `//<package path>:<name>_conda[release]` label: a library
-        # may live outside src/ (komira_runtime_paths is in tools/build/mojo).
-        var want_tail = String(":") + name + String("_conda[release]")
-        var labels = 0
-        for j in range(len(argv)):
-            if argv[j].startswith(String("//")) and argv[j].endswith(want_tail):
-                labels += 1
-        assert_equal(labels, 1, name)
+        # Exactly one release label, and it is the artifact's own target plus
+        # [release]: `//<package path>:<name>_conda[release]`, where the
+        # package path is pinned by the target (a library may live outside
+        # src/: komira_runtime_paths is in tools/build/mojo).
+        assert_equal(len(d.artifacts[i].targets), 1, name)
+        var target = d.artifacts[i].targets[0].copy()
+        assert_true(target.endswith(String(":") + name + String("_conda")), name)
+        assert_equal(_count(argv, target + String("[release]")), 1, name)
         var outs = _flag_values(argv, String("--out"))
         assert_equal(len(outs), 1)
         assert_equal(outs[0], String(_REL) + String("/") + name)
