@@ -223,6 +223,8 @@ def _assert_refused(plan: LogicalPlan, want: String) raises:
         _ = b^
     except e:
         refused = True
+        # The whole message, as komira_plan_wire's plan_wire_codec.mojo
+        # `_udf_not_describable_message(where)` builds it.
         assert_equal(String(e), want)
     assert_true(refused, "a live closure was encoded")
 
