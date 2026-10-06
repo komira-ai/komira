@@ -68,7 +68,10 @@ from komira_gcp_core import GcpTokenSource
 
 from komira_gcp_firestore.firestore_client import FixedBearer
 from komira_gcp_firestore.firestore_listen_proto import ListenEvent
-from komira_gcp_firestore.firestore_listen_client import FirestoreListenClient
+from komira_gcp_firestore.firestore_listen_client import (
+    FirestoreListenClient,
+    listen_end_is_permanent,
+)
 from komira_gcp_firestore.firestore_cdc_cursor import decode_firestore_cursor
 from komira_gcp_firestore.firestore_watch_buffer import (
     WatermarkBuffer,
@@ -259,9 +262,21 @@ struct FirestoreWatchSource[S: GcpTokenSource = FixedBearer](
                 # Stale resume-confirmation: keep polling (fall through to the
                 # wall-budget check below).
             if ended:
-                # The stream dropped without a complete run this drain. Force a
-                # reconnect on the next loop iteration (bounded).
+                # The stream ended. A permanent status (PERMISSION_DENIED,
+                # INVALID_ARGUMENT, NOT_FOUND, ...: `listen_end_is_permanent`)
+                # is raised: reopening would meet the same answer, and the
+                # watch would sit idle with the server's reason thrown away.
+                # Any other end (OK, UNAVAILABLE, a reset, a closed
+                # connection, a missing grpc-status) reconnects from the
+                # committed watermark on the next iteration (bounded).
+                var end_code = self._client.value().terminal_code()
+                var end_text = self._client.value().terminal_error_text()
                 self._client = None
+                if listen_end_is_permanent(end_code):
+                    raise Error(
+                        "FirestoreWatchSource.drain: the Listen stream ended: "
+                        + end_text
+                    )
                 if reconnects >= _MAX_RECONNECTS:
                     # No more reconnects — return empty (a live-but-idle drain);
                     # the generic loop re-derives + re-opens next pass.
@@ -324,13 +339,8 @@ struct FirestoreWatchSource[S: GcpTokenSource = FixedBearer](
                 self._reactor, String(self._db_resource), docs^,
                 _WATCH_TARGET_ID, resume_secs, resume_nanos,
             )
-        var status = Int(client.status())
-        if status != 200:
-            raise Error(
-                "FirestoreWatchSource: Listen returned :status "
-                + String(status)
-                + " (expected 200 — check token scope / project / database)"
-            )
+        # `open` raised if the answer was not an open stream (a non-200
+        # :status, or a trailers-only failure such as grpc-status 3).
         self._client = Optional(client^)
 
     def _poll_client(mut self) raises -> List[ListenEvent]:
