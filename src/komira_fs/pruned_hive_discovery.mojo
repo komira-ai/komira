@@ -11,6 +11,8 @@
 #      the partition cols in PATH ORDER, consume the longest leading run of
 #      EQUALITY constraints into the static list prefix; STOP at the first
 #      unpinned col. `IN (v1..vN)` -> N targeted prefixes (one list per value).
+#      A value komira and Spark spell differently on disk (non-ASCII, space,
+#      `:`, ...) gets a prefix per spelling, so either writer's tree is found.
 #   2. the post-listing `filter_partitions` fold: for non-enumerable
 #      residual predicates (ranges / OR / function-wrapped), parse each
 #      survivor path's partition values and drop non-matching files BEFORE any
@@ -49,8 +51,8 @@ from komira_fs.file_discovery import (
     GlobDiscoveryOptions,
 )
 from komira_fs.partition_codec import (
-    encode_partition_value,
     parse_partition_value,
+    partition_value_spellings,
     parse_key_value_segments,
     probe_partition_type,
 )
@@ -197,7 +199,9 @@ struct PrefixDerivation(Copyable, Movable, Deinitable):
     """The result of `evaluate_partition_prefix`:
       * `prefixes`: the targeted static list prefixes to issue (one for the
         all-equality case; N for an IN fan-out; the cartesian for mixed
-        EQ/IN). Each is `base_prefix + "col=enc/..."` ending in `/`.
+        EQ/IN; times the extra spelling of each value komira and Spark spell
+        differently). Each is `base_prefix + "col=<spelling>/..."` ending in
+        `/`.
       * `residual_cols`: the partition columns NOT pinned into the prefix
         (the stop column + everything after it) — the fold evaluates the
         predicate's constraints on these against each survivor.
@@ -226,12 +230,26 @@ def evaluate_partition_prefix(
     `base_prefix`.
 
     Walks cols in path order, consuming the longest leading run of EQUALITY /
-    `IN` constraints. EQ -> append `col=encode(value)/` (one prefix); `IN` of
-    N -> fan the running prefix set out by N (the cartesian). STOPS at the
+    `IN` constraints. Each pinned col contributes its DISTINCT directory
+    spellings `col=<s>/`, where each value's spellings are
+    `partition_value_spellings(value)`: komira's `encode_partition_value`
+    form, plus Spark's `escapePathName` form when it differs (raw UTF-8,
+    raw space, `%3A` for `:`). The running prefix set fans out by that count
+    (the cartesian). STOPS at the
     first col with no constraint or a non-enumerable constraint; that col and
     all after it become `residual_cols` for the fold. With no enumerable
     leading run the single prefix is `base_prefix` itself (list everything,
     fold filters).
+
+    BOUND. With S_i the distinct spellings of pinned col i (N_i <= S_i <=
+    2 * N_i for N_i values: N_i when every value is spelled alike by both
+    writers), the prefix count is the product of S_i. Versus the single-
+    spelling product of N_i, the factor is at most 2^k, k = the number of
+    pinned cols holding a value the writers spell differently. Every one of
+    those prefixes can hold files (a tree may mix spellings per level), so
+    none is redundant. A value made only of ASCII letters, digits and
+    `- _ . ~` has one spelling, so such predicates derive the prefixes they
+    did before (minus any repeat of a value inside an IN-list).
 
     NO listing happens here — this is pure derivation. The caller issues
     `fs.list` per prefix (concurrently sequentially as the
@@ -262,16 +280,25 @@ def evaluate_partition_prefix(
             stopped = True
             residual.append(String(col))
             continue
-        # Enumerable: EQ (1 value) or IN (N values) -> fan the running set out.
-        var enumerated = c.values.copy()  # 1 for EQ, N for IN
+        # Enumerable: EQ (1 value) or IN (N values) -> fan the running set out
+        # over the column's DISTINCT directory spellings. Each value has one
+        # spelling (komira's == Spark's) or two (they differ: a byte >= 0x80,
+        # a space, `:`, ...); see `partition_value_spellings`. Both are listed
+        # so a tree written by either writer is found. Spellings are deduped
+        # per column in first-seen order, so a repeated value or two values
+        # sharing a spelling never yield the same prefix twice.
+        var segs = List[String]()
+        for vi in range(len(c.values)):
+            var spellings = partition_value_spellings(c.values[vi], col_type)
+            for si in range(len(spellings)):
+                var seg = String(col) + "=" + spellings[si] + "/"
+                if not _contains(segs, seg):
+                    segs.append(seg^)
         var next_running = List[String]()
         for ri in range(len(running)):
             ref base_run = running[ri]
-            for vi in range(len(enumerated)):
-                var seg = String(col) + "=" + encode_partition_value(
-                    enumerated[vi], col_type
-                ) + "/"
-                next_running.append(base_run + seg)
+            for si in range(len(segs)):
+                next_running.append(base_run + segs[si])
         running = next_running^
 
     return PrefixDerivation(prefixes=running^, residual_cols=residual^)
@@ -695,6 +722,14 @@ struct PrunedHiveDiscovery(FileDiscovery, Movable, Deinitable):
 # =============================================================================
 # module-private helpers.
 # =============================================================================
+
+
+def _contains(xs: List[String], x: String) -> Bool:
+    """True iff `x` is an element of `xs`."""
+    for i in range(len(xs)):
+        if xs[i] == x:
+            return True
+    return False
 
 
 def _append_deduped(mut out: List[String], var candidate: String):

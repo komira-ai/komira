@@ -93,10 +93,12 @@
 # -----------------------------------------------------------------------------
 #   * ZERO UnsafePointer in any PUBLIC signature. The byte-write reuses
 # `RawWriteFd` (komira_core.io.posix_io) whose public surface is
-#     String/Span/Int. The readdir + file-read FFI is confined to module-private
-# helpers with `# SAFETY:` blocks (mirroring `komira_fs.local_fs`
-#     — its helpers are private to komira_async, so the FFI shape is
-#     re-derived here against the SAME C shim symbols komira_fs_posix defines).
+#     String/Span/Int. The readdir FFI is confined to module-private helpers
+#     with `# SAFETY:` blocks (mirroring `komira_fs.local_fs` — its helpers are
+#     private to komira_async, so the FFI shape is re-derived here against the
+#     SAME C shim symbols komira_fs_posix defines). The object-file READ and the
+#     presence probe live in `local_fs_file_read.mojo` over this package's own
+#     `_objectstore_shim.c`, so only ENOENT reads as not-found (404).
 #   * ZERO wildcard origins in any field or public signature. The two
 #     readdir/free out-param locals carry the documented kernel/malloc-returned
 #     carve-out (same as `_local_fs_list_recursive`), as LOCALS, never fields.
@@ -110,6 +112,11 @@ from std.time import perf_counter_ns
 
 from komira_core.io.posix_io import RawWriteFd
 
+from komira_objectstore.local_fs_file_read import (
+    _object_file_present,
+    _read_whole_file,
+    _root_is_listable,
+)
 from komira_objectstore.path import Path
 from komira_objectstore.store import (
     CloneableConditionalWriteStore,
@@ -363,58 +370,6 @@ def _is_existing_dir(path: String) -> Bool:
     return rc == 0
 
 
-def _read_whole_file(path: String) raises -> List[UInt8]:
-    """Read the entire file at `path` into an owned `List[UInt8]`, byte-safe
-    (interior NULs survive — parquet object bytes contain them). Raises a
-    not_found-tagged Error if the file is absent (the 404 the protocol's
-    `_is_not_found` classifier matches on the message).
-
-    Uses fopen("rb") + fseek/ftell for the size + a single fread into a sized
-    buffer (mirrors `komira_fs.local_fs._local_fs_*`)."""
-    var p = path
-    var mode = String("rb")
-    # SAFETY: fopen returns a FILE* (Int64 address); held in a local. `p`/`mode`
-    # pin their bytes across the call. No pointer escapes.
-    var fp = external_call["fopen", Int64](
-        p.as_c_string_slice().unsafe_ptr(), mode.as_c_string_slice().unsafe_ptr()
-    )
-    if fp == 0:
-        raise Error(
-            "LocalFsConditionalStore: not_found (404) — no object file at '"
-            + path + "'"
-        )
-    # Size via SEEK_END(2) + ftell, then SEEK_SET(0).
-    var seek_end = external_call["fseek", Int32](fp, Int64(0), Int32(2))
-    if seek_end != 0:
-        _ = external_call["fclose", Int32](fp)
-        raise Error("LocalFsConditionalStore: fseek failed for '" + path + "'")
-    var size = external_call["ftell", Int64](fp)
-    _ = external_call["fseek", Int32](fp, Int64(0), Int32(0))
-    if size < 0:
-        _ = external_call["fclose", Int32](fp)
-        raise Error("LocalFsConditionalStore: ftell failed for '" + path + "'")
-    var n = Int(size)
-    var buf = List[UInt8]()
-    if n == 0:
-        _ = external_call["fclose", Int32](fp)
-        return buf^
-    buf.resize(n, UInt8(0))
-    # SAFETY: `buf` is owned + sized to `n`; fread writes at most `n` bytes into
-    # it (element size 1, count n). The pointer is the local List's backing
-    # memory and does not escape; fread does not retain it. Single synchronous
-    # call.
-    var got = external_call["fread", Int64](
-        buf.unsafe_ptr(), UInt64(1), UInt64(n), fp
-    )
-    _ = external_call["fclose", Int32](fp)
-    if Int(got) != n:
-        raise Error(
-            "LocalFsConditionalStore: short read (" + String(Int(got)) + " < "
-            + String(n) + ") for '" + path + "'"
-        )
-    return buf^
-
-
 def _write_atomic(dir: String, final_path: String, bytes: List[UInt8]) raises:
     """Durably write `bytes` to `final_path` via WRITE-TEMP-THEN-ATOMIC-RENAME.
 
@@ -607,8 +562,9 @@ struct LocalFsConditionalStore(
     # =========================================================================
 
     def head(self, path: Path) raises -> ObjectMeta:
-        """HEAD — size + content-hash etag, no body. Raises not_found (404) if
-        the object file is absent."""
+        """HEAD — size + content-hash etag, no body. Raises not_found (404) iff
+        the object file is absent (ENOENT); any other failure raises an I/O
+        error naming the errno (see `local_fs_file_read`)."""
         var bytes = _read_whole_file(self._path_for_key(path.raw()))
         var etag = _content_etag(bytes)
         return ObjectMeta(
@@ -625,10 +581,10 @@ struct LocalFsConditionalStore(
         `objects`, sorting chunk keys lexically itself)."""
         var p = prefix.raw()
         var objects = List[ObjectMeta]()
-        # An absent root → empty listing (e.g. first read on a fresh KG before
-        # any write). _list_dir_fnames raises only on a hard shim failure; an
-        # opendir-miss yields empty.
-        if not _is_existing_dir(self._root):
+        # An absent root (ENOENT) → empty listing (e.g. first read on a fresh
+        # KG before any write). A root that exists but is not a directory, or
+        # cannot be checked, RAISES: it is a broken store, not an empty one.
+        if not _root_is_listable(self._root):
             return ListResult(objects^, List[String]())
         var fnames = _list_dir_fnames(self._root)
         for i in range(len(fnames)):
@@ -672,7 +628,9 @@ struct LocalFsConditionalStore(
         if precond.is_create():
             # Atomic create-if-absent. O_EXCL → EEXIST iff the key exists. The
             # create IS the linearization point (the slot's create-winner).
-            var existed = _file_exists(fpath)
+            # Presence probe: ENOENT → absent; any other stat failure RAISES
+            # (a key that cannot be checked is not "absent").
+            var existed = _object_file_present(fpath)
             if existed:
                 raise Error(
                     "LocalFsConditionalStore.conditional_put: precondition"
@@ -713,7 +671,7 @@ struct LocalFsConditionalStore(
             )
 
         if precond.is_if_match():
-            var existed = _file_exists(fpath)
+            var existed = _object_file_present(fpath)
             if not existed:
                 raise Error(
                     "LocalFsConditionalStore.conditional_put: precondition"
@@ -768,7 +726,8 @@ struct LocalFsConditionalStore(
         return out^
 
     def get(self, path: Path) raises -> List[UInt8]:
-        """Full-object fetch. Raises not_found (404) if the file is absent."""
+        """Full-object fetch. Raises not_found (404) iff the file is absent
+        (ENOENT); any other failure raises an I/O error naming the errno."""
         return _read_whole_file(self._path_for_key(path.raw()))
 
     def delete(self, path: Path) raises -> None:
@@ -779,21 +738,6 @@ struct LocalFsConditionalStore(
 # =============================================================================
 # Free helpers used by the struct (kept out of the struct body for clarity).
 # =============================================================================
-
-
-def _file_exists(path: String) -> Bool:
-    """True iff a regular file exists at `path` (fopen-probe)."""
-    var p = path
-    var mode = String("rb")
-    # SAFETY: synchronous fopen/fclose; `p`/`mode` pin their bytes; no pointer
-    # escapes.
-    var fp = external_call["fopen", Int64](
-        p.as_c_string_slice().unsafe_ptr(), mode.as_c_string_slice().unsafe_ptr()
-    )
-    if fp != 0:
-        _ = external_call["fclose", Int32](fp)
-        return True
-    return False
 
 
 # Tri-state classification for `_create_exclusive_and_write` — distinguishes a
@@ -843,8 +787,12 @@ def _create_exclusive_and_write(path: String, bytes: List[UInt8]) -> Int:
         # The exclusive create failed. Re-probe: present ⇒ a racing creator won
         # (EEXIST, the true 412); absent ⇒ a real create failure (ENOSPC / EIO /
         # EMFILE / EACCES / …) that must surface as an I/O error, NOT a fake-412.
-        if _file_exists(path):
-            return _CREATE_LOST_EEXIST
+        # A probe that itself fails proves nothing about EEXIST: fail closed.
+        try:
+            if _object_file_present(path):
+                return _CREATE_LOST_EEXIST
+        except:
+            pass
         return _CREATE_IO_ERROR
 
     # Step 2 — the create succeeded; WE own the slot. A write/fsync/close failure
