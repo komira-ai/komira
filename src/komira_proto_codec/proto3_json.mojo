@@ -10,7 +10,12 @@
 #   - int64 / uint64 / fixed64 / sfixed64  -> JSON STRING (JS-number-precision
 #     safety; a 2^53+ int64 loses precision as a JSON number).
 #   - int32 / uint32 / fixed32 / sfixed32  -> JSON number.
-#   - float / double                      -> JSON number.
+#   - double                              -> JSON number.
+#   - float                               -> the shortest float32 JSON
+#                                            number; "NaN" / "Infinity" /
+#                                            "-Infinity" strings; refused on
+#                                            read outside float32 range
+#                                            (`proto3_json_float.mojo`).
 #   - bool                                -> JSON true / false.
 #   - string                              -> JSON string (escaped).
 #   - bytes                               -> base64 STRING (RFC 4648 §4, std
@@ -36,7 +41,9 @@
 #
 # Encode rides the direct-byte `List[UInt8]` writers in `komira_json`
 # (`write_json_string`, `write_i64_dec`, `write_u64_dec`, `write_f64_dtoa`)
-# — no intermediate `String` allocation on the value path; bytes >= 0x80
+# — no intermediate `String` allocation on the value path except a double
+# on `write_f64_dtoa`'s slow path (a float32 is written straight into the
+# buffer by `proto3_json_float.mojo`); bytes >= 0x80
 # are valid JSON content and pass through verbatim. Decode rides the
 # `komira_json.JsonValue` tree (the proto3-JSON decode path is the
 # debuggability format, off the codec hot path).
@@ -61,6 +68,7 @@ from komira_json import (
     write_f64_dtoa,
 )
 
+from .proto3_json_float import read_proto3_json_f32, write_proto3_json_f32
 from .wire_format import (
     FieldKey,
     ProtoEnum,
@@ -245,7 +253,7 @@ struct JsonEncoder(WireEncoder):
         mut self, field_no: Int, json_name: StringSlice, v: Float32
     ) raises:
         self._begin_field(json_name)
-        write_f64_dtoa(self.buf, Float64(v))
+        write_proto3_json_f32(self.buf, v)
         self._end_field()
 
     # -- WIRE-CORRECTNESS: sint / fixed / sfixed ----------
@@ -431,7 +439,7 @@ struct JsonEncoder(WireEncoder):
 
     def write_f32_element(mut self, field_no: Int, v: Float32) raises:
         self._list_sep()
-        write_f64_dtoa(self.buf, Float64(v))
+        write_proto3_json_f32(self.buf, v)
 
     # WIRE-CORRECTNESS: repeated sint / fixed / sfixed —
     # JSON-identical to the same-width plain int element.
@@ -615,7 +623,8 @@ struct JsonDecoder(WireDecoder):
     var _keep_null: List[String]
     """The keys whose `null` `next_field()` yields rather than skips
     (`keep_null_fields`); empty for every message without a
-    `google.protobuf.NullValue` field."""
+    `google.protobuf.NullValue` or singular `google.protobuf.Value`
+    field."""
 
     def __init__(out self, var value: JsonValue):
         """A cursor over `value`, REFUSING unknown keys / enum names.
@@ -706,8 +715,9 @@ struct JsonDecoder(WireDecoder):
             raise Error("JsonError: decode source is not a JSON object")
         # Advance past keys whose value is JSON null (proto3 treats a null
         # field as absent — skip it so the generated body keeps the default),
-        # except a `google.protobuf.NullValue` field's, whose `null` is its
-        # value (`keep_null_fields`).
+        # except a `google.protobuf.NullValue` or singular
+        # `google.protobuf.Value` field's, whose `null` is its value
+        # (`keep_null_fields`).
         self._idx += 1
         while self._idx < len(self.value.obj_keys):
             if not self.value.children[self._idx].is_null() or self._null_is_a_value(
@@ -748,7 +758,7 @@ struct JsonDecoder(WireDecoder):
         return self._cur().as_float64()
 
     def read_f32(mut self) raises -> Float32:
-        return Float32(self._cur().as_float64())
+        return read_proto3_json_f32(self._cur())
 
     # -- WIRE-CORRECTNESS: sint / fixed / sfixed ----------
     # proto3-JSON has no wire types — parse as the same-width plain int.
@@ -886,7 +896,7 @@ struct JsonDecoder(WireDecoder):
     def read_into_repeated_f32(mut self, mut out: List[Float32]) raises:
         var arr = self._cur_array()
         for i in range(len(arr.children)):
-            out.append(Float32(arr.children[i].as_float64()))
+            out.append(read_proto3_json_f32(arr.children[i]))
 
     # WIRE-CORRECTNESS: repeated sint / fixed / sfixed —
     # JSON-identical to the same-width plain int.
@@ -1031,12 +1041,13 @@ struct JsonDecoder(WireDecoder):
                 )
                 out[obj.obj_keys[i]] = V.decode[JsonDecoder](sub_dec)
 
-    # A well-known-type FIELD whose JSON value is `null` never reaches
-    # `read_message`: `next_field()` skips it as ABSENT, which is right for
-    # every WKT but one. The spec reads `null` in a `google.protobuf.Value`
-    # FIELD as NULL_VALUE; here such a field decodes as absent (an open
-    # limit, komira-ai/komira#62). A null INSIDE a Struct, a
-    # ListValue or a map<string, Value> is a NULL_VALUE.
+    # A well-known-type FIELD whose JSON value is `null` reaches
+    # `read_message` only if the generated `decode` named its key to
+    # `keep_null_fields`, which it does for a singular `google.protobuf.Value`
+    # field alone: the spec reads `null` there as NULL_VALUE (Value's
+    # `read_proto3_json` maps it) and in every other WKT field as ABSENT,
+    # which `next_field()` gives by skipping the key. A null INSIDE a Struct,
+    # a ListValue or a map<string, Value> is a NULL_VALUE.
 
     # -- the unknown-token refusals ---------------------------------------
 

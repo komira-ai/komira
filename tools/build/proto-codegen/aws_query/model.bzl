@@ -9,7 +9,7 @@ edited model with a stale digest is refused by the generator.
 
 TINY_QUERY = struct(
     model = "komira//tools/build/proto-codegen/aws_query:tiny_query.json",
-    sha256 = "485983f34c7f0a2e52fd58adde6695c3b501269648b9c19e44f5113b04b14cf0",
+    sha256 = "87209ff5e3cb2615b200d1c96910de79bdce9ea0d87e8fd845e74b204a5bcd62",
 )
 
 TINY_EC2 = struct(

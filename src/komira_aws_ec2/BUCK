@@ -12,7 +12,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # named as botocore's EC2Serializer names it) and response parser (the
 # members of the root element; ec2 has no result wrapper), its endpoint
 # resolved through EC2's published endpoint ruleset and partition table,
-# embedded in the module, and `EC2EC2Client`, which resolves each call's
+# embedded in the module, and `EC2Client`, which resolves each call's
 # endpoint and sends through komira_aws_core's send_sigv4_signed_request
 # (signing name `ec2`) over the komira_http_core Connector it is given.
 # Every EC2 operation is a POST, and a call is retried as botocore's
