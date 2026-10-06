@@ -169,3 +169,21 @@ def _root_is_listable(root: String) raises -> Bool:
             + "': the store root is not a directory (ENOTDIR)"
         )
     return True
+
+
+def _remove_object_file(path: String) raises:
+    """remove(3) the object file at `path`. Success or ENOENT (already gone:
+    an idempotent delete, S3 semantics) returns; any other errno raises
+    `cannot remove '<path>': errno N (NAME)`, with no not-found needle."""
+    var p = path
+    # SAFETY: `p` pins the NUL-terminated path across the synchronous call;
+    # the shim keeps no pointer.
+    var rc = external_call["komira_objstore_remove", Int32](
+        p.as_c_string_slice().unsafe_ptr()
+    )
+    if rc == 0 or rc == _enoent():
+        return
+    raise Error(
+        "LocalFsConditionalStore: cannot remove '" + path + "': errno "
+        + String(Int(rc)) + " (" + _errno_name(rc) + ")"
+    )
