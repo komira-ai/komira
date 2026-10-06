@@ -19,21 +19,39 @@
 #   * open, `:status 503` with an HTML body: `open` raises `[grpc:14]` (the
 #     spec's HTTP-to-gRPC table). Catches: the HTTP status not checked.
 #   * end on trailers carrying `grpc-status: 7`: the stream's terminal status
-#     is 7 with its decoded message, and it is permanent. Catches: a non-OK
-#     status dropped at end of stream.
+#     is 7 with its decoded message. Catches: a non-OK status dropped at end
+#     of stream.
 #   * end on a DATA frame with no trailers: INTERNAL; trailers without a
 #     `grpc-status`: UNKNOWN. Catches: a missing status read as a clean end.
-#   * RST_STREAM(CANCEL): the stream ends at once, CANCELLED. Catches: a reset
-#     stream left waiting for bytes that never come.
-#   * GOAWAY excluding the stream: the stream ends, UNAVAILABLE naming the
-#     GOAWAY. Catches: the same wait on a stream the server will not process.
-#   * the connection closes with no END_STREAM: UNAVAILABLE.
+#   * RST_STREAM(CANCEL) and RST_STREAM(ENHANCE_YOUR_CALM) mid-stream, with
+#     the connection held open: the stream ends at once, CANCELLED and
+#     RESOURCE_EXHAUSTED. Catches: a reset stream left waiting for bytes that
+#     never come, and a reset code read through the wrong row.
+#   * RST_STREAM(REFUSED_STREAM) before the response head: `open` raises
+#     `[grpc:14]` and the client keeps that status after the raise. Catches:
+#     the pre-head end raised without a status.
+#   * GOAWAY excluding the stream, connection held open: the stream ends,
+#     UNAVAILABLE naming the GOAWAY. Catches: the same wait on a stream the
+#     server will not process.
+#   * the connection closes with no END_STREAM: UNAVAILABLE; after a GOAWAY
+#     that did NOT exclude the stream, the same, with the GOAWAY's context.
+#   * DATA before the response head (a malformed response this client
+#     refuses with its own RST_STREAM), and trailers without END_STREAM:
+#     INTERNAL naming the malformation. Catches: a refused stream that never
+#     ends, or ends as "connection closed".
+#   * a trailers-only `grpc-status: 0`: `open` returns, the status is 0, and
+#     the first poll reports the end. Catches: open raising on an OK answer.
+#   * a head then an empty END_STREAM: `open` raises UNKNOWN (no status).
 #   * `grpc-status: 0` after a partial message: INTERNAL. Catches: the tail of
 #     a truncated envelope silently dropped.
-#   * a clean `grpc-status: 0` end is OK and not permanent (the control).
+#   * a clean `grpc-status: 0` end is OK (the control), and polling again
+#     after the end keeps that status.
 #   * a non-ASCII `grpc-message` (raw UTF-8 and an invalid byte) does not
 #     abort the process, and the status code still reads.
-#   * `listen_end_is_permanent`: the Firestore SDKs' table, code by code.
+#
+# The rules on h2 state no script reaches (a reset this client sent, a stream
+# the state does not hold, every RST_STREAM code) are in
+# test_firestore_listen_terminal_rules.mojo.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -50,7 +68,9 @@ from komira_async.runtime.runtime import PerCoreAsyncRuntime
 
 from komira_http_core.codec.h2.frame import (
     H2_ERR_CANCEL,
+    H2_ERR_ENHANCE_YOUR_CALM,
     H2_ERR_NO_ERROR,
+    H2_ERR_REFUSED_STREAM,
     SettingsEntry,
     encode_data_frame,
     encode_goaway_frame,
@@ -91,7 +111,6 @@ from komira_gcp_firestore.firestore_listen_proto import TCT_CURRENT
 from komira_gcp_firestore.firestore_listen_client import (
     FirestoreListenClient,
     encode_grpc_envelope,
-    listen_end_is_permanent,
 )
 
 comptime _RT = PerCoreAsyncRuntime[NoopSink]
@@ -293,7 +312,6 @@ def test_end_on_trailers_with_a_non_ok_status() raises:
         client.terminal_error_text().startswith(String("[grpc:7] ")),
         client.terminal_error_text(),
     )
-    assert_true(listen_end_is_permanent(client.terminal_code()))
 
 
 def test_end_on_data_without_trailers_is_internal() raises:
@@ -362,13 +380,38 @@ def test_goaway_excluding_the_stream_is_unavailable() raises:
     encode_data_frame(_SID, _target_change_envelope(), end_stream=False, out=out)
     var debug = List[UInt8](String("max_age").as_bytes())
     encode_goaway_frame(UInt32(0), H2_ERR_NO_ERROR, debug^, out)
+    # Held open after the GOAWAY: only the GOAWAY can end the stream.
+    var client = _held_open_to_end(out^)
+    assert_equal(client.terminal_code(), Int(GRPC_STATUS_UNAVAILABLE))
+    assert_true(
+        String("sent GOAWAY excluding") in client.terminal_message(),
+        client.terminal_message(),
+    )
+    assert_true(
+        String("goaway_debug='max_age'") in client.terminal_message(),
+        client.terminal_message(),
+    )
+
+
+def test_close_after_a_goaway_that_kept_the_stream() raises:
+    """GOAWAY(last=1) keeps stream 1; the connection then closes."""
+    var out = List[UInt8]()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _settings(out)
+    _grpc_head(hpack, out)
+    encode_data_frame(_SID, _target_change_envelope(), end_stream=False, out=out)
+    var debug = List[UInt8](String("drain").as_bytes())
+    encode_goaway_frame(_SID, H2_ERR_NO_ERROR, debug^, out)
     var client = _run_to_end(out^)
     assert_equal(client.terminal_code(), Int(GRPC_STATUS_UNAVAILABLE))
     assert_true(
-        String("GOAWAY") in client.terminal_message(),
+        String("connection closed") in client.terminal_message(),
         client.terminal_message(),
     )
-    assert_false(listen_end_is_permanent(client.terminal_code()))
+    assert_true(
+        String("goaway_debug='drain'") in client.terminal_message(),
+        client.terminal_message(),
+    )
 
 
 def test_connection_close_without_end_stream_is_unavailable() raises:
@@ -411,9 +454,15 @@ def test_clean_ok_end_is_ok_and_not_permanent() raises:
     _grpc_head(hpack, out)
     encode_data_frame(_SID, _target_change_envelope(), end_stream=False, out=out)
     _status_trailers(hpack, String("0"), String(""), out)
-    var client = _run_to_end(out^)
+    var reactor = _make_reactor()
+    var client = _client(out^)
+    _open(client, reactor)
+    _ = _poll_to_end(client, reactor)
     assert_equal(client.terminal_code(), Int(GRPC_STATUS_OK))
-    assert_false(listen_end_is_permanent(client.terminal_code()))
+    # A poll after the end keeps the status it recorded.
+    _ = client.poll_progress[_RT](reactor, max_wall_us=500_000)
+    assert_true(client.last_poll_ended())
+    assert_equal(client.terminal_code(), Int(GRPC_STATUS_OK))
 
 
 def test_non_ascii_grpc_message_does_not_abort() raises:
@@ -436,33 +485,138 @@ def test_non_ascii_grpc_message_does_not_abort() raises:
     var client = _run_to_end(out^)
     assert_equal(client.terminal_code(), Int(GRPC_STATUS_NOT_FOUND))
     assert_true(client.terminal_message().byte_length() > 0)
-    assert_true(listen_end_is_permanent(client.terminal_code()))
 
 
-def test_permanent_codes_are_the_firestore_sdks() raises:
-    """The Firestore SDKs' `isPermanentError`: these end the watch; the rest
-    restart it (UNAUTHENTICATED with a fresh token)."""
-    assert_false(listen_end_is_permanent(Int(GRPC_STATUS_OK)))
-    assert_false(listen_end_is_permanent(Int(GRPC_STATUS_CANCELLED)))
-    assert_false(listen_end_is_permanent(Int(GRPC_STATUS_UNKNOWN)))
-    assert_false(listen_end_is_permanent(Int(GRPC_STATUS_DEADLINE_EXCEEDED)))
-    assert_false(listen_end_is_permanent(Int(GRPC_STATUS_RESOURCE_EXHAUSTED)))
-    assert_false(listen_end_is_permanent(Int(GRPC_STATUS_INTERNAL)))
-    assert_false(listen_end_is_permanent(Int(GRPC_STATUS_UNAVAILABLE)))
-    assert_false(listen_end_is_permanent(Int(GRPC_STATUS_UNAUTHENTICATED)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_INVALID_ARGUMENT)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_NOT_FOUND)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_ALREADY_EXISTS)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_PERMISSION_DENIED)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_FAILED_PRECONDITION)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_ABORTED)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_OUT_OF_RANGE)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_UNIMPLEMENTED)))
-    assert_true(listen_end_is_permanent(Int(GRPC_STATUS_DATA_LOSS)))
-    # A code outside 0..16 is read as UNKNOWN, which restarts.
-    assert_false(listen_end_is_permanent(99))
-    # -1 is "the stream has not ended": nothing to act on.
-    assert_false(listen_end_is_permanent(-1))
+def _held_open_to_end(var script: List[UInt8]) raises -> FirestoreListenClient[
+    ScriptedStream
+]:
+    """Open over `script` with the connection held open after it (Pending, not
+    EOF), and poll at most three times: only the script can end the stream."""
+    var reactor = _make_reactor()
+    var client = _client(script^, pending_after_script=1_000_000)
+    _open(client, reactor)
+    for _ in range(3):
+        _ = client.poll_progress[_RT](reactor, max_wall_us=500_000)
+        if client.last_poll_ended():
+            return client^
+    raise Error("the stream did not end while the connection stayed open")
+
+
+def _open_error_and_code(
+    var script: List[UInt8], pending_after_script: Int = 0
+) raises -> Tuple[String, Int]:
+    """Open over `script`: the raised text ("" if open returned) and the
+    client's terminal code after it."""
+    var reactor = _make_reactor()
+    var client = _client(script^, pending_after_script=pending_after_script)
+    var err = String("")
+    try:
+        _open(client, reactor)
+    except e:
+        err = String(e)
+    return (err, client.terminal_code())
+
+
+def test_rst_enhance_your_calm_is_resource_exhausted() raises:
+    var out = List[UInt8]()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _settings(out)
+    _grpc_head(hpack, out)
+    encode_data_frame(_SID, _target_change_envelope(), end_stream=False, out=out)
+    encode_rst_stream_frame(_SID, H2_ERR_ENHANCE_YOUR_CALM, out)
+    var client = _held_open_to_end(out^)
+    assert_equal(client.terminal_code(), Int(GRPC_STATUS_RESOURCE_EXHAUSTED))
+    assert_true(
+        String("RST_STREAM(11)") in client.terminal_message(),
+        client.terminal_message(),
+    )
+
+
+def test_refused_before_the_head_raises_and_keeps_the_status() raises:
+    var out = List[UInt8]()
+    _settings(out)
+    encode_rst_stream_frame(_SID, H2_ERR_REFUSED_STREAM, out)
+    var r = _open_error_and_code(out^, pending_after_script=1_000_000)
+    assert_true(
+        String("stream ended before response head: [grpc:14] ") in r[0], r[0]
+    )
+    assert_true(String("RST_STREAM(7)") in r[0], r[0])
+    assert_equal(r[1], Int(GRPC_STATUS_UNAVAILABLE))
+
+
+def test_data_before_the_head_is_refused_as_internal() raises:
+    """DATA before any HEADERS is malformed (RFC 9113 §8.1); h2_client
+    refuses it with its own RST_STREAM(PROTOCOL_ERROR) and records no reset
+    code, only the malformation."""
+    var out = List[UInt8]()
+    _settings(out)
+    encode_data_frame(_SID, _target_change_envelope(), end_stream=False, out=out)
+    var r = _open_error_and_code(out^, pending_after_script=1_000_000)
+    assert_true(String("[grpc:13] ") in r[0], r[0])
+    assert_true(String("malformed") in r[0], r[0])
+    assert_equal(r[1], Int(GRPC_STATUS_INTERNAL))
+
+
+def test_trailers_without_end_stream_are_refused_as_internal() raises:
+    var out = List[UInt8]()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _settings(out)
+    _grpc_head(hpack, out)
+    encode_data_frame(_SID, _target_change_envelope(), end_stream=False, out=out)
+    var t = List[HpackHeader]()
+    t.append(HpackHeader(String("grpc-status"), String("0")))
+    _headers(hpack, t^, False, out)  # a trailer section must end the stream
+    var client = _held_open_to_end(out^)
+    assert_equal(client.terminal_code(), Int(GRPC_STATUS_INTERNAL))
+    assert_true(
+        String("malformed") in client.terminal_message(),
+        client.terminal_message(),
+    )
+
+
+def test_open_trailers_only_ok_does_not_raise() raises:
+    var out = List[UInt8]()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _settings(out)
+    var h = List[HpackHeader]()
+    h.append(HpackHeader(String(":status"), String("200")))
+    h.append(HpackHeader(String("content-type"), String("application/grpc")))
+    h.append(HpackHeader(String("grpc-status"), String("0")))
+    _headers(hpack, h^, True, out)
+    var reactor = _make_reactor()
+    var client = _client(out^)
+    _open(client, reactor)  # an OK answer is not a failure
+    assert_equal(client.terminal_code(), Int(GRPC_STATUS_OK))
+    var events = client.poll_progress[_RT](reactor, max_wall_us=500_000)
+    assert_equal(len(events), 0)
+    assert_true(client.last_poll_ended())
+
+
+def test_open_head_then_empty_end_is_unknown() raises:
+    var out = List[UInt8]()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _settings(out)
+    _grpc_head(hpack, out)
+    encode_data_frame(_SID, List[UInt8](), end_stream=True, out=out)
+    var r = _open_error_and_code(out^)
+    assert_true(r[0].startswith(String("[grpc:2] ")), r[0])
+    assert_true(String("missing grpc-status") in r[0], r[0])
+    assert_equal(r[1], Int(GRPC_STATUS_UNKNOWN))
+
+
+def test_open_http_503_keeps_the_status() raises:
+    """A non-200 head on a stream still open: open raises, and the client's
+    terminal status says the same thing."""
+    var out = List[UInt8]()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _settings(out)
+    var h = List[HpackHeader]()
+    h.append(HpackHeader(String(":status"), String("503")))
+    h.append(HpackHeader(String("content-type"), String("text/html")))
+    _headers(hpack, h^, False, out)
+    var r = _open_error_and_code(out^, pending_after_script=1_000_000)
+    assert_true(r[0].startswith(String("[grpc:14] ")), r[0])
+    assert_equal(r[1], Int(GRPC_STATUS_UNAVAILABLE))
 
 
 def main() raises:
@@ -478,5 +632,12 @@ def main() raises:
     test_partial_message_before_an_ok_status_is_internal()
     test_clean_ok_end_is_ok_and_not_permanent()
     test_non_ascii_grpc_message_does_not_abort()
-    test_permanent_codes_are_the_firestore_sdks()
+    test_close_after_a_goaway_that_kept_the_stream()
+    test_rst_enhance_your_calm_is_resource_exhausted()
+    test_refused_before_the_head_raises_and_keeps_the_status()
+    test_data_before_the_head_is_refused_as_internal()
+    test_trailers_without_end_stream_are_refused_as_internal()
+    test_open_trailers_only_ok_does_not_raise()
+    test_open_head_then_empty_end_is_unknown()
+    test_open_http_503_keeps_the_status()
     print("ALL PASS")

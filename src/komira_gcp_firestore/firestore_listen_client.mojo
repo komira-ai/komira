@@ -72,10 +72,15 @@ from komira_http_client.h2_client import (
     allocate_client_stream_id_or_raise,
     encode_request_data_frame,
     encode_request_headers_to_frames,
+    H2_MALFORMED_SCOPE_HEAD,
+    H2_MALFORMED_SCOPE_NONE,
     extract_trailers_for_stream,
     h2_goaway_context,
     process_received_frames,
     queue_client_preface_and_settings,
+)
+from komira_http_core.codec.h2.response_validation import (
+    h2_malformed_reason_text,
 )
 from komira_http_core.codec.h2.frame import (
     H2_ERR_CANCEL,
@@ -96,19 +101,11 @@ from komira_grpc import (
     grpc_error_from_http_non_200,
     parse_grpc_status_initial_headers,
     parse_grpc_status_trailers,
-    GRPC_STATUS_ABORTED,
-    GRPC_STATUS_ALREADY_EXISTS,
     GRPC_STATUS_CANCELLED,
-    GRPC_STATUS_DATA_LOSS,
-    GRPC_STATUS_FAILED_PRECONDITION,
     GRPC_STATUS_INTERNAL,
-    GRPC_STATUS_INVALID_ARGUMENT,
-    GRPC_STATUS_NOT_FOUND,
-    GRPC_STATUS_OUT_OF_RANGE,
     GRPC_STATUS_PERMISSION_DENIED,
     GRPC_STATUS_RESOURCE_EXHAUSTED,
     GRPC_STATUS_UNAVAILABLE,
-    GRPC_STATUS_UNIMPLEMENTED,
     GRPC_STATUS_UNKNOWN,
 )
 
@@ -169,8 +166,9 @@ struct RecvProgress(Copyable, Movable, Deinitable):
     Fields:
       got_bytes       — new response-body bytes arrived on the awaited stream.
       end_stream_seen — the stream is over: END_STREAM (a DATA frame or
-                        trailers), RST_STREAM, a GOAWAY that excludes it, or
-                        the connection closed (`_stream_over`). It says
+                        trailers), RST_STREAM, a malformed response this
+                        client refused, a GOAWAY that excludes it, or the
+                        connection closed (`_stream_over`). It says
                         nothing about the outcome: the client reads that
                         with `_listen_terminal_status`.
       timed_out       — the wall budget elapsed with no new bytes (a stall — the
@@ -317,7 +315,10 @@ def _goaway_excludes(h2: H2ClientConnectionState, stream_id: UInt32) -> Bool:
 
 def _stream_over(h2: H2ClientConnectionState, stream_id: UInt32) -> Bool:
     """True once no more bytes will come on the awaited stream: the peer sent
-    END_STREAM, the stream was reset (either side), or a GOAWAY excludes it.
+    END_STREAM, the stream was reset (either side), this client refused a
+    malformed response on it (RFC 9113 §8.1.1: h2_client sends its own
+    RST_STREAM(PROTOCOL_ERROR) and records only `malformed_scope`, no reset
+    code), or a GOAWAY excludes it.
 
     A reset does not set `end_stream_seen` (h2_client keeps the two apart, see
     `H2ClientStream.reset_error_code`), so it is checked on its own; without
@@ -329,6 +330,8 @@ def _stream_over(h2: H2ClientConnectionState, stream_id: UInt32) -> Bool:
     if h2.streams[idx].end_stream_seen:
         return True
     if h2.streams[idx].reset_error_code >= Int64(0):
+        return True
+    if h2.streams[idx].malformed_scope != H2_MALFORMED_SCOPE_NONE:
         return True
     return _goaway_excludes(h2, stream_id)
 
@@ -367,9 +370,17 @@ def _take_response_body_bytes(
 
 
 def _grpc_code_for_rst(rst_code: UInt32) -> UInt8:
-    """The gRPC code for an RST_STREAM error code: grpc-go's
-    `http2ErrConvTab` (internal/transport/http_util.go). A code outside the
-    table is UNKNOWN, as there."""
+    """The gRPC code for a reset the PEER sent, by its RST_STREAM error code:
+    grpc-go's `http2ErrConvTab` (internal/transport/http_util.go). A code
+    outside the table is UNKNOWN, as there.
+
+    Not for a reset this client sent: grpc-go closes such a stream with
+    INTERNAL whatever code its own RST_STREAM carried, and so does
+    `_listen_terminal_status`. h2_client marks one of the two kinds it sends
+    (`reset_is_local`, a stream-window overrun); the other (an RST answering
+    a stream-scoped frame error) is recorded like a peer reset, but its code
+    is always one this table maps to INTERNAL already (PROTOCOL_ERROR,
+    FRAME_SIZE_ERROR, ...)."""
     if rst_code == H2_ERR_REFUSED_STREAM:
         return GRPC_STATUS_UNAVAILABLE
     if rst_code == H2_ERR_CANCEL:
@@ -410,15 +421,20 @@ def _listen_terminal_status(
       1. a stated `grpc-status`, trailers first, then a trailers-only head
          (komira_grpc's `_grpc_status_from_sections` order), if not OK;
       2. an HTTP status other than 200: the spec's table;
-      3. a stated OK with a partial gRPC message left over: INTERNAL (the
+      3. a malformed head or trailer section this client refused (RFC 9113
+         §8.1.1): INTERNAL, as grpc-go reports a malformed header;
+      4. a stated OK with a partial gRPC message left over: INTERNAL (the
          message was cut; grpc-java: "Encountered end-of-stream mid-frame");
-      4. a stated OK: OK;
-      5. RST_STREAM: grpc-go's code for the reset code (INTERNAL when this
-         client reset it);
-      6. a GOAWAY that excludes the stream: UNAVAILABLE (not processed);
-      7. no END_STREAM at all, so the connection closed: UNAVAILABLE;
-      8. ended with no status: `grpc_error_for_missing_status` (UNKNOWN
+      5. a stated OK: OK;
+      6. RST_STREAM: INTERNAL when this client sent it (grpc-go), else the
+         peer's code through `_grpc_code_for_rst`;
+      7. a GOAWAY that excludes the stream: UNAVAILABLE (not processed);
+      8. no END_STREAM at all, so the connection closed: UNAVAILABLE (with
+         the GOAWAY's code and debug data if one arrived);
+      9. ended with no status: `grpc_error_for_missing_status` (UNKNOWN
          after trailers, INTERNAL after a body, UNKNOWN with neither).
+
+    A stream id the state does not hold reads INTERNAL.
     """
     var idx = h2.find_stream_idx(stream_id)
     if idx < 0:
@@ -439,6 +455,19 @@ def _listen_terminal_status(
     var http_status = h2.streams[idx].response_status
     if http_status != UInt16(0) and http_status != UInt16(200):
         return grpc_error_from_http_non_200(http_status)
+    var malformed = h2.streams[idx].malformed_scope
+    if malformed != H2_MALFORMED_SCOPE_NONE:
+        var part = String("head")
+        if malformed != H2_MALFORMED_SCOPE_HEAD:
+            part = String("trailer section")
+        return GrpcError.simple(
+            GRPC_STATUS_INTERNAL,
+            String("FirestoreListen: this client refused a malformed response ")
+            + part
+            + String(" on the Listen stream (")
+            + h2_malformed_reason_text(h2.streams[idx].malformed_reason)
+            + String(") and sent RST_STREAM(PROTOCOL_ERROR), RFC 9113 §8.1.1"),
+        )
     if stated.__bool__():
         if partial_message_bytes > 0:
             return GrpcError.simple(
@@ -454,15 +483,23 @@ def _listen_terminal_status(
         return stated.take()
     var rst = h2.streams[idx].reset_error_code
     if rst >= Int64(0):
-        var who = String("the server")
         if h2.streams[idx].reset_is_local:
-            who = String("this client")
+            return GrpcError.simple(
+                GRPC_STATUS_INTERNAL,
+                String("FirestoreListen: this client reset the Listen stream")
+                + String(" with RST_STREAM(")
+                + String(Int(rst))
+                + String(
+                    "): the server sent more DATA than the stream's receive"
+                    " window allowed (RFC 9113 §6.9)"
+                ),
+            )
         return GrpcError.simple(
             _grpc_code_for_rst(UInt32(Int(rst))),
-            who
-            + String(" sent RST_STREAM(")
+            String("FirestoreListen: the Listen stream was reset with")
+            + String(" RST_STREAM(")
             + String(Int(rst))
-            + String(") on the Listen stream before any grpc-status"),
+            + String(") before any grpc-status"),
         )
     if _goaway_excludes(h2, stream_id):
         return GrpcError.simple(
@@ -483,31 +520,6 @@ def _listen_terminal_status(
         return GrpcError.simple(GRPC_STATUS_UNAVAILABLE, why)
     return grpc_error_for_missing_status(
         trailers.len() > 0, body_bytes_seen
-    )
-
-
-def listen_end_is_permanent(code: Int) -> Bool:
-    """True iff a Listen stream that ended with gRPC status `code` must not be
-    reopened: the watch has failed and the caller must be told.
-
-    The table is the Firestore SDKs' own (`isPermanentError`, firebase-js-sdk
-    packages/firestore/src/remote/rpc_error.ts): CANCELLED, UNKNOWN,
-    DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, INTERNAL, UNAVAILABLE and
-    UNAUTHENTICATED restart the stream (the next dial fetches a fresh token);
-    INVALID_ARGUMENT, NOT_FOUND, ALREADY_EXISTS, PERMISSION_DENIED,
-    FAILED_PRECONDITION, ABORTED, OUT_OF_RANGE, UNIMPLEMENTED and DATA_LOSS do
-    not. OK and -1 (not ended) are not failures; a code outside 0..16 reads as
-    UNKNOWN, which restarts."""
-    return (
-        code == Int(GRPC_STATUS_INVALID_ARGUMENT)
-        or code == Int(GRPC_STATUS_NOT_FOUND)
-        or code == Int(GRPC_STATUS_ALREADY_EXISTS)
-        or code == Int(GRPC_STATUS_PERMISSION_DENIED)
-        or code == Int(GRPC_STATUS_FAILED_PRECONDITION)
-        or code == Int(GRPC_STATUS_ABORTED)
-        or code == Int(GRPC_STATUS_OUT_OF_RANGE)
-        or code == Int(GRPC_STATUS_UNIMPLEMENTED)
-        or code == Int(GRPC_STATUS_DATA_LOSS)
     )
 
 
@@ -764,7 +776,9 @@ struct FirestoreListenClient[S: IoStream](Movable, Deinitable):
             var ge = _listen_terminal_status(
                 self._h2, sid, self._bytes_seen, 0
             )
-            raise Error(format_grpc_error_message(ge.code, ge.message))
+            self._terminal_code = Int(ge.code)
+            self._terminal_message = String(ge.message)
+            raise Error(self.terminal_error_text())
 
     def poll[RT: Runtime](
         mut self, mut reactor: Reactor[RT.Sink], max_wall_us: Int64 = 30_000_000
@@ -788,7 +802,8 @@ struct FirestoreListenClient[S: IoStream](Movable, Deinitable):
         When the stream ends, its gRPC status is read and kept
         (`terminal_code` / `terminal_message`): a stream that ends is never
         reported as a clean end unless it stated `grpc-status: 0` after whole
-        messages. Whether to reopen is the caller's (`listen_end_is_permanent`).
+        messages. Whether to reopen is the caller's (FirestoreWatchSource
+        reopens on every end, within its reconnect budget).
 
         (We record the flag on `self` rather than returning a (events, flag)
         struct so the caller can move the returned `List[ListenEvent]` freely —
