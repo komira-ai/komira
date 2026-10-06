@@ -1019,6 +1019,8 @@ def _walk_jsonl_rows(
 
     Raises on:
       * A key the schema reads repeated in one object.
+      * A JSON `null`, or an object without the key, for a NOT NULL field
+        (a nullable field reads both as NULL).
       * Schema column type outside the supported set.
       * Per-value parse errors (overflow, bad bool literal, ...).
     """
@@ -1056,10 +1058,14 @@ def _walk_jsonl_rows(
     # 5=DECIMAL128, 6=LIST, 7=STRUCT, 8=MAP.
     var col_kinds = List[UInt8](capacity=n)
     var field_names = List[String](capacity=n)
+    # A NOT NULL field refuses a JSON `null` and an object without its key
+    # (both read as NULL in a nullable field): it never holds a NULL.
+    var col_nullable = List[Bool](capacity=n)
     for i in range(n):
         var at = schema.field_arrow_type(i)
         var fld = schema.field_at_unchecked(i)
         field_names.append(String(schema.field_name(i)))
+        col_nullable.append(schema.field_nullable(i))
         int_accs.append(_Int64Acc.create())
         bool_accs.append(_BoolAcc.create())
         string_accs.append(_StringAcc.create())
@@ -1379,6 +1385,11 @@ def _walk_jsonl_rows(
                     # Check for explicit "null" first — affects validity.
                     if (s_end - s_start) == 4 and bytes[s_start] == UInt8(0x6E):
                         parse_null(bytes, s_start, s_end)
+                        if not col_nullable[col_idx]:
+                            raise Error(
+                                "NOT NULL field '" + schema.field_name(col_idx)
+                                + "' holds JSON null"
+                            )
                         if kind == UInt8(0):
                             int_accs[col_idx].push_null()
                         elif kind == UInt8(1):
@@ -1444,6 +1455,11 @@ def _walk_jsonl_rows(
         # push null.
         for c in range(n):
             if not per_row_seen[c]:
+                if not col_nullable[c]:
+                    raise Error(
+                        "NOT NULL field '" + schema.field_name(c)
+                        + "' has no key in the object"
+                    )
                 var kind = col_kinds[c]
                 if kind == UInt8(0):
                     int_accs[c].push_null()
