@@ -57,7 +57,8 @@ struct UpdateThingRequest(Serializable, Copyable, Movable):
             enc.write_message_field[Thing](1, "thing", self.thing.value())
         if self.update_mask:
             enc.write_message_field[FieldMask](2, "updateMask", self.update_mask.value())
-        enc.write_bool_field(3, "validateOnly", self.validate_only)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.validate_only:
+            enc.write_bool_field(3, "validateOnly", self.validate_only)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -107,8 +108,10 @@ struct Thing(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "name", self.name)
-        enc.write_string_field(2, "title", self.title)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.name.byte_length() > 0:
+            enc.write_string_field(1, "name", self.name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.title.byte_length() > 0:
+            enc.write_string_field(2, "title", self.title)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:

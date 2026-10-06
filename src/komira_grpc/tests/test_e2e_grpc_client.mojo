@@ -125,12 +125,22 @@ def _server_dispatch(
     )
 
 
-def _http_200_with_body(body: List[UInt8]) -> List[UInt8]:
+def _http_200_with_body(
+    body: List[UInt8], status_headers: String = ""
+) -> List[UInt8]:
     """Wrap a server-produced response BODY into a canned HTTP/1.1 200
     response the ScriptedStream replays. The Content-Length is exact so the
-    RecvRingBody drains a single Data frame + End."""
+    RecvRingBody drains a single Data frame + End.
+
+    `status_headers` (CRLF-terminated lines) carries the classic-gRPC
+    `grpc-status`. HTTP/1.1 surfaces no trailers, so a classic-gRPC case
+    states its status in the head (the trailers-only position); without one
+    GrpcClient raises, as it must for a response that states no status. A
+    Connect case passes none: Connect has no `grpc-status`."""
     var head = _b(
-        String("HTTP/1.1 200 OK\r\nContent-Length: ")
+        String("HTTP/1.1 200 OK\r\n")
+        + status_headers
+        + "Content-Length: "
         + String(len(body))
         + "\r\n\r\n"
     )
@@ -172,8 +182,11 @@ def test_t1_unary_grpc_proto_round_trip() raises:
     var disp = _server_dispatch(String("application/grpc+proto"), req_wire^)
     assert_equal(disp.http_status, UInt16(200), "server HTTP 200")
     assert_equal(disp.grpc_status, GRPC_STATUS_OK, "server gRPC OK")
-    # Wrap the server body into a full HTTP response the ScriptedStream serves.
-    var http_resp = _http_200_with_body(disp.body)
+    # Wrap the server body into a full HTTP response the ScriptedStream serves,
+    # with the status the server dispatch produced.
+    var http_resp = _http_200_with_body(
+        disp.body, String("grpc-status: ") + String(Int(disp.grpc_status)) + "\r\n"
+    )
 
     # Client: drive the production GrpcClient API.
     var client = _make_grpc_client(http_resp^)
@@ -243,7 +256,7 @@ def test_t3_server_stream_round_trip() raises:
     encode_stream_message[ProtocolGrpcProto](body, Span(_b(String("ALPHA"))))
     encode_stream_message[ProtocolGrpcProto](body, Span(_b(String("BETA"))))
     encode_stream_message[ProtocolGrpcProto](body, Span(_b(String("GAMMA"))))
-    var http_resp = _http_200_with_body(body)
+    var http_resp = _http_200_with_body(body, String("grpc-status: 0\r\n"))
 
     var client = _make_grpc_client(http_resp^)
     var reactor = _make_reactor()
@@ -300,7 +313,7 @@ def test_t4_cancellation_aborts_in_flight_read() raises:
     var msg = _b(String("hi"))
     var req_wire = encode_unary_request[ProtocolGrpcProto](Span(msg))
     var disp = _server_dispatch(String("application/grpc+proto"), req_wire^)
-    var http_resp = _http_200_with_body(disp.body)
+    var http_resp = _http_200_with_body(disp.body, String("grpc-status: 0\r\n"))
 
     var client = _make_grpc_client(http_resp^)
     var reactor = _make_reactor()
