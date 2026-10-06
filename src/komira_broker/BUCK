@@ -29,6 +29,7 @@ mojo_library(
         "tests/test_broker_compaction_index_offline.mojo",
         "tests/test_broker_flush_local_head_cache_offline.mojo",
         "tests/test_broker_flush_op_elision_offline.mojo",
+        "tests/test_broker_flush_refuse_before_put_offline.mojo",
         "tests/test_broker_format_firewall_smoke.mojo",
         "tests/test_broker_log_compaction_offline.mojo",
         "tests/test_broker_log_start_advance_consistency_offline.mojo",
