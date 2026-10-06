@@ -1,0 +1,18 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The shared types of the engine's row-hash aggregation: the aggregate-op tags and
+# the per-aggregate descriptor `AggSpec`, the op predicates and the op-to-merge-
+# class map, the merge-cell classes and their widths, the ingest key class, and
+# the key-staging window arithmetic. Every package that describes an aggregation
+# imports these names; none of them needs the hash table itself.
+mojo_library(
+    name = "komira_op_agg_row_api",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_column_format:komira_column_format",
+    ],
+    test_srcs = [
+        "tests/test_agg_row_api_table_cases.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
