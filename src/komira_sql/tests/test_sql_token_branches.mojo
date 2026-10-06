@@ -19,8 +19,10 @@
 #      (mutants caught: `1.` lexed as a float; the past-Int64 float reading
 #      the wrapped bits; the equal-prefix arm removed)
 #   4. Strings: a `''` at the very end of input is an unterminated literal; a
-#      quote that closes mid-input; non-ASCII bytes survive as bytes.
-#      (mutant caught: the bytes rebuilt with chr(), which double-encodes)
+#      quote that closes mid-input; non-ASCII bytes survive as bytes; a lone
+#      quote at the end of input (zero bytes read) is unterminated too.
+#      (mutants caught: the bytes rebuilt with chr(), which double-encodes;
+#      an open literal with no bytes accepted as the empty string)
 #   5. Identifiers: upper case, underscore start, digits after the first.
 #   6. Every single-character punctuation token.
 #   7. Every two- and three-character operator, each also as the last
@@ -141,6 +143,10 @@ def test_strings() raises:
     # An escaped quote as the last two characters leaves the literal open.
     var open_msg = _error_of("'ab''")
     assert_equal(open_msg, "SQL syntax error: unterminated string literal")
+    # A quote as the last character: the literal's byte loop runs zero times
+    # and the empty, open literal is still refused.
+    assert_equal(_error_of("'"), "SQL syntax error: unterminated string literal")
+    assert_equal(_error_of("a '"), "SQL syntax error: unterminated string literal")
     # Non-ASCII bytes come back as the same bytes (C3 9F is U+00DF).
     var nonascii = tokenize("'Straße'")
     assert_equal(nonascii[0].text, "Straße")
