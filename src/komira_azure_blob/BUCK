@@ -40,8 +40,9 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_azure_core:komira_azure_core",
+        "//src/komira_buffer:komira_buffer",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_datetime:komira_datetime",
         "//src/komira_encoding:komira_encoding",
@@ -49,6 +50,7 @@ mojo_library(
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_xml:komira_xml",
     ],
     test_data = {

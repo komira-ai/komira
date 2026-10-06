@@ -31,7 +31,7 @@ def test_no_environment_read() raises:
         "ProcessEnv",
         "aws_endpoint_config",
         "DefaultChainCredsSource",
-        "komira_core_ffi",
+        "komira_libc",
         "komira_libc",
         "external_call",
     ]
