@@ -37,7 +37,7 @@ KiB (`AGG_KBUF_CHUNK_DEFAULT_KIB`) and the rows-per-window arithmetic."""
 # ⚠ THE VALUE IS A BUDGET IN KiB, NOT A ROW COUNT, and that is the point: the
 # staging footprint is `(nk + 1) * rows * 8` bytes, so one budget expresses the
 # same intent for a 1-key table and a 6-key one, where one row count would mean
-# six times the bytes on the second. `_agg_kbuf_chunk_rows` does the division.
+# six times the bytes on the second. `agg_kbuf_chunk_rows` does the division.
 #
 # ⛔ READ AS AN INTEGER, NEVER THROUGH `_env_is_set` — same reason
 # `_agg_merge_tile` states above: `_env_is_set` fires on the string `"0"`, so
@@ -105,13 +105,13 @@ WHAT IT BOUGHT, min-of-6 per arm:
 ⚠ WHY A BUDGET IN KiB AND NOT A ROW COUNT: the staging footprint is
 `(nk + 1) * rows * 8` bytes, so one budget expresses the same intent on a
 1-key table and a 6-key one, where one row count would mean six times the
-bytes on the second. `_agg_kbuf_chunk_rows` does the division — and at 256 KiB
+bytes on the second. `agg_kbuf_chunk_rows` does the division — and at 256 KiB
 it yields 16,384 rows at `nk=1` and 4,681 at `nk=6`, both under the
 122,880-row morsel, which is what makes the default actually engage."""
 
 
 @always_inline
-def _agg_kbuf_chunk_rows(kib: Int, nk: Int, n_rows: Int) -> Int:
+def agg_kbuf_chunk_rows(kib: Int, nk: Int, n_rows: Int) -> Int:
     """Rows per staging window for a `kib`-KiB budget on an `nk`-key table.
 
     Returns `n_rows` — i.e. ONE window, the whole-batch shape — when the lever

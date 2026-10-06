@@ -49,11 +49,11 @@
 #
 # ⛔ WHERE `merge_cell_class` LIVES, AND WHY IT IS NOT HERE. The op-tag ->
 # class MAPPING reads the `AGG_*` aliases, and those are declared in
-# `hash_agg_untyped.mojo`, which imports THIS file. Putting the mapper here
+# `agg_spec.mojo`, which imports THIS file. Putting the mapper here
 # would need the reverse import and close a module cycle; declaring a second
 # copy of the tag values here would be two sources of truth that agree with
 # each other until one is edited. So the mapper sits beside the aliases it
-# reads (`HashAggTable_Untyped`'s file, `_merge_cell_class`), and what lives
+# reads (`agg_spec.mojo`, `merge_cell_class`), and what lives
 # here is the part that depends on NOTHING: the class codes and their widths.
 #
 # ⚠ THIS FILE IS PURE — no table state, no allocation, every function total.

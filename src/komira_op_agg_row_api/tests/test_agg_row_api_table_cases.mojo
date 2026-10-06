@@ -14,7 +14,7 @@ from komira_column_format.column_format_storage import (
     DT_U64,
     DT_I16,
 )
-from komira_op_agg_row_api.agg_chunk_rows import _agg_kbuf_chunk_rows
+from komira_op_agg_row_api.agg_chunk_rows import agg_kbuf_chunk_rows
 from komira_op_agg_row_api.agg_key_class import (
     ingest_key_mono_class,
     IKM_NONE,
@@ -39,7 +39,7 @@ from komira_op_agg_row_api.combine_agg_plan import (
 
 comptime _ROWS: Int = 12_000
 """Rows per batch. ⛔ IT HAS TO CLEAR 4096 BY A WIDE MARGIN.
-`_agg_kbuf_chunk_rows` floors the derived window at 4096 rows — the software
+`agg_kbuf_chunk_rows` floors the derived window at 4096 rows — the software
 prefetch lookahead may not cross a window, so a window near the lookahead
 distance would silently disarm it — and a fixture at or under the floor gets
 ONE window whatever budget is asked for, i.e. the OFF arm measured twice.
@@ -63,7 +63,7 @@ def _tags(t0: UInt8, t1: UInt8) -> List[UInt8]:
 # =============================================================================
 # THE PLAN TABLE — pinned by value, independently of any table.
 #
-# `_merge_cell_class` is not exported (it reads the `AGG_*` aliases and lives
+# `merge_cell_class` is not exported (it reads the `AGG_*` aliases and lives
 # beside them), so what this case pins is the half that IS pure: the class ->
 # width map. A class whose width is wrong makes the monomorphic kernel read
 # across into the NEXT SLOT's state, which merges a neighbouring group's
@@ -189,7 +189,7 @@ def test_keymono_selector_declines_narrow_ints() raises:
 
 def test_chunk_rows_returns_n_rows_verbatim_when_off() raises:
     assert_equal(
-        _agg_kbuf_chunk_rows(0, 6, 122_880),
+        agg_kbuf_chunk_rows(0, 6, 122_880),
         122_880,
         (
             "the KILL SWITCH (`kib == 0`) must return the batch row count"
@@ -200,10 +200,10 @@ def test_chunk_rows_returns_n_rows_verbatim_when_off() raises:
         ),
     )
     assert_equal(
-        _agg_kbuf_chunk_rows(64, 1, 0), 0, "an empty batch stays empty"
+        agg_kbuf_chunk_rows(64, 1, 0), 0, "an empty batch stays empty"
     )
     assert_equal(
-        _agg_kbuf_chunk_rows(64, 0, 512),
+        agg_kbuf_chunk_rows(64, 0, 512),
         512,
         "a key-less table has nothing to stage and must not be windowed",
     )
@@ -212,7 +212,7 @@ def test_chunk_rows_returns_n_rows_verbatim_when_off() raises:
 def test_chunk_rows_returns_n_rows_when_the_batch_already_fits() raises:
     # 1 key, 512 rows -> 8 KiB of staging; a 1 MiB budget covers it whole.
     assert_equal(
-        _agg_kbuf_chunk_rows(1024, 1, 512),
+        agg_kbuf_chunk_rows(1024, 1, 512),
         512,
         "a batch inside the budget must run as ONE window, not as a loop",
     )
@@ -221,7 +221,7 @@ def test_chunk_rows_returns_n_rows_when_the_batch_already_fits() raises:
 def test_chunk_rows_divides_by_the_per_row_staging_bytes() raises:
     # (nk + 1) * 8 bytes per row: 6 keys -> 56 B/row. 256 KiB / 56 = 4681.
     assert_equal(
-        _agg_kbuf_chunk_rows(256, 6, 1_000_000),
+        agg_kbuf_chunk_rows(256, 6, 1_000_000),
         (256 * 1024) // 56,
         (
             "the budget is BYTES, so a 6-key table must get fewer rows per"
@@ -230,15 +230,15 @@ def test_chunk_rows_divides_by_the_per_row_staging_bytes() raises:
         ),
     )
     assert_true(
-        _agg_kbuf_chunk_rows(256, 1, 1_000_000)
-        > _agg_kbuf_chunk_rows(256, 6, 1_000_000),
+        agg_kbuf_chunk_rows(256, 1, 1_000_000)
+        > agg_kbuf_chunk_rows(256, 6, 1_000_000),
         "more key columns must mean fewer rows per window",
     )
 
 
 def test_chunk_rows_floors_at_the_prefetch_safe_window() raises:
     assert_equal(
-        _agg_kbuf_chunk_rows(1, 1, 1_000_000),
+        agg_kbuf_chunk_rows(1, 1, 1_000_000),
         4096,
         (
             "a tiny budget must FLOOR, not produce a window near the software"
@@ -247,7 +247,7 @@ def test_chunk_rows_floors_at_the_prefetch_safe_window() raises:
         ),
     )
     assert_equal(
-        _agg_kbuf_chunk_rows(1, 1, _ROWS),
+        agg_kbuf_chunk_rows(1, 1, _ROWS),
         _WINDOW,
         "the fixture below runs under the floor window",
     )

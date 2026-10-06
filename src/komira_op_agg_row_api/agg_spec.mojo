@@ -188,7 +188,7 @@ keeps `AGG_AVG_F64`: its partial sums stay exact in FLOAT64 below 2^53."""
 
 
 @always_inline
-def _is_exact_sum_op(op_tag: UInt8) -> Bool:
+def is_exact_sum_op(op_tag: UInt8) -> Bool:
     """True iff `op_tag` is one of the two EXACT 128-bit SUM cells.
 
     ⚠ THE ONE PREDICATE EVERY CELL-LEVEL LADDER MUST ASK before it treats a
@@ -198,7 +198,7 @@ def _is_exact_sum_op(op_tag: UInt8) -> Bool:
 
 
 @always_inline
-def _is_minmax_str_op(op_tag: UInt8) -> Bool:
+def is_minmax_str_op(op_tag: UInt8) -> Bool:
     """True iff `op_tag` is a VAR-WIDTH (utf8) MIN/MAX cell.
 
     ⚠ THE ONE PREDICATE EVERY CELL-LEVEL LADDER MUST ASK BEFORE IT TREATS A
@@ -209,7 +209,7 @@ def _is_minmax_str_op(op_tag: UInt8) -> Bool:
 
 
 @always_inline
-def _is_minmax_u64_op(op_tag: UInt8) -> Bool:
+def is_minmax_u64_op(op_tag: UInt8) -> Bool:
     """True iff `op_tag` is one of the two BIASED unsigned MIN/MAX cells.
 
     ⚠ THE ONE PREDICATE EVERY READBACK MUST ASK. A drain that reads a biased
@@ -219,7 +219,7 @@ def _is_minmax_u64_op(op_tag: UInt8) -> Bool:
 
 
 @always_inline
-def _is_minmax_i64_family(op_tag: UInt8) -> Bool:
+def is_minmax_i64_family(op_tag: UInt8) -> Bool:
     """True iff `op_tag` is a SIGNED-CELL MIN/MAX — the I64 pair or its BIASED
     U64 pair. Every cell-level operation (init, compare, merge, spill, byte
     compare) is identical across all four; only ingest and readback differ."""
@@ -230,7 +230,7 @@ def _is_minmax_i64_family(op_tag: UInt8) -> Bool:
 
 
 @always_inline
-def _merge_cell_class(op_tag: UInt8) -> Int:
+def merge_cell_class(op_tag: UInt8) -> Int:
     """AGGCOMBVEC: map an `AGG_*` op tag to its `MC_*` merge-cell class, or
     `MC_NONE` when this op has no monomorphic combine kernel.
 
@@ -256,7 +256,7 @@ def _merge_cell_class(op_tag: UInt8) -> Int:
     """
     if op_tag == AGG_SUM_I64 or op_tag == AGG_COUNT:
         return MC_ADD_U64
-    if _is_exact_sum_op(op_tag):
+    if is_exact_sum_op(op_tag):
         return MC_ADD_I128
     if op_tag == AGG_AVG_I128:
         return MC_AVG_I128
@@ -279,7 +279,7 @@ def _merge_cell_class(op_tag: UInt8) -> Int:
 
 
 @always_inline
-def _dtype_is_integer(dt: DType) -> Bool:
+def dtype_is_integer(dt: DType) -> Bool:
     """AGG-OVER-CODES eligibility helper: True iff `dt` is a fixed-width signed
     or unsigned integer. Used to gate AVG-over-codes to INTEGER aggregands
     (exact int->f64 sum -> order-independent under the dense-then-combine fold
