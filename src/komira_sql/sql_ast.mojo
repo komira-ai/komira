@@ -278,7 +278,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
     nine `regr_*`. They are NOT eleven new kernels: `CorrelationState` already
     carries `[n | mean_x | mean_y | C | Sx | Sy]`, the complete sufficient
     statistics for all of them, and `AGG_CORR` has folded and Chan-merged it
-    all along. Each new name is one FINALIZE over those six numbers.
+    since before this change. Each new name is one FINALIZE over those six numbers.
 
     ⛔ AND EACH ONE HAD ITS `FNK_REFUSED` ROW IN `sql_fn_table.mojo` DELETED IN
     THE SAME COMMIT. A name in BOTH tables breaks the disjointness
@@ -313,7 +313,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
         # family. UNIVARIATE, unlike the eleven above — `_bind_agg_from_sx_call`
         # binds ONE argument for them and there is no swap to get wrong. They
         # are three FINALIZES over the `WelfordState` `stddev_samp` has folded
-        # all along, differing from it only in the divisor.
+        # since before this change, differing from it only in the divisor.
         # ⛔ EACH ONE HAD ITS `FNK_REFUSED` ROW DELETED IN THE SAME COMMIT.
         or name == "var_pop"
         or name == "stddev_pop"
@@ -397,7 +397,7 @@ def sql_call_is_aggregate(name: String) -> Bool:
 # AS A DESIGN ONE. `sql_udf_catalog` is staged in the `.so` shadow facade with
 # a closure of exactly `sql_ast` + `sql_fn_table`; making it import
 # `sql_parser` would REFUSE the `sdk_shadow_facade` genrule and take all 73
-# shipped bundles with it — a measured incident.
+# shipped bundles with it — the measured incident.
 # `sql_ast` is already in that
 # closure, and it is where `sql_call_is_aggregate` already lives for the
 # identical "both sides must agree on the exact set" reason.
