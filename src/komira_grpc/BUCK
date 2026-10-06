@@ -10,16 +10,34 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the server side; komira_clock supplies the monotonic clock behind the re-issue
 # wall budget.
 #
-# Every test is hermetic: a scripted connector stands in for the network.
+# Every test is hermetic. Most use a scripted connector in place of the
+# network; tests/test_e2e_live_socket.mojo runs a real komira_http_server
+# HttpServer with a ConnectService over TLS + h2 on 127.0.0.1 against a real
+# GrpcClient, server and client on two komira_fork_join threads, reading
+# komira_http_core's exported TLS fixtures. Welded tests get no test-only deps,
+# so the packages that test imports are listed here. komira_fork_join and
+# komira_atomic_alias are TEST-ONLY deps: no source outside tests/ imports
+# them, only tests/test_e2e_live_socket.mojo does. komira_http_server is
+# already in the closure through komira_connect.
+
+_TLS_FIXTURES = {
+    "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+}
+
 mojo_library(
     name = "komira_grpc",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_clock:komira_clock",
         "//src/komira_connect:komira_connect",
+        "//src/komira_fork_join:komira_fork_join",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
     ],
     test_srcs = [
         "tests/test_L5_error.mojo",
@@ -32,6 +50,7 @@ mojo_library(
         "tests/test_client_stream_goaway_reissue.mojo",
         "tests/test_e2e_full_loop.mojo",
         "tests/test_e2e_grpc_client.mojo",
+        "tests/test_e2e_live_socket.mojo",
         "tests/test_goaway_unprocessed_retry.mojo",
         "tests/test_grpc_client_trailers_only_and_streams.mojo",
         "tests/test_grpc_status_metadata_conformance.mojo",
@@ -39,5 +58,8 @@ mojo_library(
         "tests/test_retryable_transport_reissue.mojo",
         "tests/test_unary_status_retry.mojo",
     ],
+    test_data = {
+        "tests/test_e2e_live_socket.mojo": _TLS_FIXTURES,
+    },
     visibility = ["PUBLIC"],
 )
