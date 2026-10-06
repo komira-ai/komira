@@ -10,14 +10,16 @@
 # role.
 #
 # RETENTION. A data primitive has a VERSIONED retention default, used while
-# `Resource.retention` is unset (KEEP for a bucket). A type whose default is
+# `Resource.retention` is unset (KEEP for a table and a bucket). A type whose default is
 # `RETENTION_NONE` takes no retention: it is deleted with its resource, and
 # writing `retention` on it is refused at validate. Changing a default is a
 # behaviour change for every stored list, so a default is never edited in
 # place; a new default is a new catalog version.
 #
 # THE PRIMARY ROLE is the role a reference to the resource lands on, on every
-# cloud: `run` for a service or a job, `bucket` for a bucket. A cloud adapter
+# cloud: `run` for a service or a job, `table` for a table, `bucket` for a
+# bucket, `identity` for a service account, `grant` for a grant. A cloud
+# adapter
 # writes a dependency or an input on ANOTHER resource as that resource's id
 # alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
 # an adapter lowers one resource without reading the others.
@@ -49,8 +51,14 @@ comptime FIELD_SERVICE: Int = 10
 """`Resource.body` field number of `service`."""
 comptime FIELD_JOB: Int = 11
 """`Resource.body` field number of `job`."""
+comptime FIELD_TABLE: Int = 13
+"""`Resource.body` field number of `table`."""
 comptime FIELD_BUCKET: Int = 14
 """`Resource.body` field number of `bucket`."""
+comptime FIELD_SERVICE_ACCOUNT: Int = 20
+"""`Resource.body` field number of `service_account`."""
+comptime FIELD_GRANT: Int = 25
+"""`Resource.body` field number of `grant`."""
 
 comptime OUTPUT_URL = "URL"
 comptime OUTPUT_HOST = "HOST"
@@ -60,6 +68,7 @@ comptime ACCESS_CALL = "CALL"
 comptime ACCESS_READ = "READ"
 comptime ACCESS_WRITE = "WRITE"
 comptime ACCESS_READ_WRITE = "READ_WRITE"
+comptime ACCESS_DESCRIBE = "DESCRIBE"
 
 comptime RETENTION_NONE: Int = 0
 """The type takes no retention: deleted with its resource (a catalog row's
@@ -70,7 +79,13 @@ comptime RETENTION_KEEP: Int = 2
 """`kci.resource.v1.KEEP`."""
 
 comptime ROLE_RUN = "run"
+comptime ROLE_TABLE = "table"
 comptime ROLE_BUCKET = "bucket"
+comptime ROLE_IDENTITY = "identity"
+"""The identity role: a service account's one object, and the PRIVATE
+identity every service and job lowers (turned off under `run_as`)."""
+comptime ROLE_GRANT = "grant"
+"""A grant resource's edge."""
 
 
 def retention_word(r: Int) -> String:
@@ -186,8 +201,8 @@ struct Catalog(Copyable, Movable, Deinitable):
 
     @staticmethod
     def v1() raises -> Catalog:
-        """`kci.resource.v1` as declared today: `service`, `job` and
-        `bucket`."""
+        """`kci.resource.v1` as declared today: `service`, `job`, `table`,
+        `bucket`, `service_account` and `grant`."""
         var c = Catalog()
         var svc_out = List[String]()
         svc_out.append(String(OUTPUT_URL))
@@ -199,6 +214,26 @@ struct Catalog(Copyable, Movable, Deinitable):
         )
         # A job exposes nothing; CALL on a job is "may start a run of it".
         c.add(CatalogType(FIELD_JOB, String("job"), PORTABLE, List[String](), call^))
+        # A table exposes its cloud name; its items are read and written, its
+        # definition DESCRIBEd. Kept by default, as a bucket.
+        var table_out = List[String]()
+        table_out.append(String(OUTPUT_NAME))
+        var table_access = List[String]()
+        table_access.append(String(ACCESS_READ))
+        table_access.append(String(ACCESS_WRITE))
+        table_access.append(String(ACCESS_READ_WRITE))
+        table_access.append(String(ACCESS_DESCRIBE))
+        c.add(
+            CatalogType(
+                FIELD_TABLE,
+                String("table"),
+                PORTABLE,
+                table_out^,
+                table_access^,
+                retention_default=RETENTION_KEEP,
+                primary_role=String(ROLE_TABLE),
+            )
+        )
         var bucket_out = List[String]()
         bucket_out.append(String(OUTPUT_NAME))
         bucket_out.append(String(OUTPUT_ADDRESS))
@@ -215,6 +250,33 @@ struct Catalog(Copyable, Movable, Deinitable):
                 data^,
                 retention_default=RETENTION_KEEP,
                 primary_role=String(ROLE_BUCKET),
+            )
+        )
+        # A service account exposes its cloud name and may be DESCRIBEd; it
+        # is deleted with its resource.
+        var acct_out = List[String]()
+        acct_out.append(String(OUTPUT_NAME))
+        var describe = List[String]()
+        describe.append(String(ACCESS_DESCRIBE))
+        c.add(
+            CatalogType(
+                FIELD_SERVICE_ACCOUNT,
+                String("service_account"),
+                PORTABLE,
+                acct_out^,
+                describe^,
+                primary_role=String(ROLE_IDENTITY),
+            )
+        )
+        # A grant is an edge: it exposes nothing and accepts nothing.
+        c.add(
+            CatalogType(
+                FIELD_GRANT,
+                String("grant"),
+                PORTABLE,
+                List[String](),
+                List[String](),
+                primary_role=String(ROLE_GRANT),
             )
         )
         return c^
@@ -236,7 +298,10 @@ def body_arms() -> List[BodyArm]:
     var l = List[BodyArm]()
     l.append(BodyArm(FIELD_SERVICE, String("service")))
     l.append(BodyArm(FIELD_JOB, String("job")))
+    l.append(BodyArm(FIELD_TABLE, String("table")))
     l.append(BodyArm(FIELD_BUCKET, String("bucket")))
+    l.append(BodyArm(FIELD_SERVICE_ACCOUNT, String("service_account")))
+    l.append(BodyArm(FIELD_GRANT, String("grant")))
     return l^
 
 
