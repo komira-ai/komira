@@ -10,6 +10,14 @@ The Parquet format's types and footer metadata, as plain Mojo values.
   (`SchemaElement`), the row groups (`RowGroup` -> `ColumnChunk` ->
   `ColumnMetaData` -> `Statistics`) and the key-value metadata (`KeyValue`);
   `PageHeader` and `SortingColumn` complete the set.
+- `hll_footer`: where a column chunk's HyperLogLog registers
+  (`Statistics.hll_registers`, not part of the Parquet format) live in a
+  footer. They travel in the chunk's `ColumnMetaData.key_value_metadata`
+  under `HLL_REGISTERS_KEY`, one base64-alphabet character per register
+  (`hll_registers_to_key_value`, `hll_registers_from_key_values`).
+  Statistics field 9 is the spec's `nan_count`: a reader decodes it only
+  when its Thrift compact type is i64 (`statistics_field_9_is_nan_count`)
+  and never takes it as registers.
 
 The `types` module also names the ConvertedType values
 (`CONVERTED_TYPE_DECIMAL`, `CONVERTED_TYPE_UTF8`, ...) that
