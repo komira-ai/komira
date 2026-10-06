@@ -78,9 +78,10 @@
 #   * ORC _acc_dbl skipping NaN (a "NaN-aware" min/max/sum): the NaN-first
 #     column's stats become min -1.0, max 1.0 and a non-NaN sum.
 #
-# KNOWN DEFECT held out of the running assertions: IntegerStatistics.sum on
-# int64 overflow. Apache ORC's Java writer (IntegerStatisticsImpl) stops
-# summing at the first overflow and omits `sum`; komira's writer wraps, so
+# KNOWN DEFECT (issue #521) held out of the running assertions:
+# IntegerStatistics.sum on int64 overflow. Apache ORC's Java writer
+# (IntegerStatisticsImpl) stops summing at the first overflow and omits
+# `sum`; komira's writer wraps, so
 # a column (INT64_MAX, 1) carries sum = INT64_MIN (bytes 18 FF FF FF FF FF
 # FF FF FF FF 01) where the reference writes no field 3. The int column
 # above is ordered so its running sum never overflows.

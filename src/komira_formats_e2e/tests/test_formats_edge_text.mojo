@@ -15,13 +15,14 @@
 #     JSONL writer documents NaN/+Inf/-Inf -> `null` (json_writer.mojo,
 #     write_f64_dtoa). That is komira's choice, not the RFC's (which only
 #     forbids the tokens), and it loses data: a NOT NULL FLOAT64 column
-#     reads back with NULLs (pinned below). The reader validates each line
-#     against the RFC 8259 grammar (line_check.mojo, check_jsonl_lines)
-#     before any value parser runs, so `NaN`, `Infinity`, `+1`, `01` and the
-#     like are refused there with "the line is not valid JSON: ..."; each
-#     refusal is asserted by that error text. (parse_float_f64 on its own is
-#     more lenient than its header says -- it takes a leading `+` and
-#     leading zeros -- but the validator keeps those bytes from reaching it.)
+#     reads back with NULLs (pinned below; issue #522). The reader
+#     validates each line against the RFC 8259 grammar (line_check.mojo,
+#     check_jsonl_lines) before any value parser runs, so `NaN`,
+#     `Infinity`, `+1`, `01` and the like are refused there with "the line
+#     is not valid JSON: ..."; each refusal is asserted by that error text.
+#     (parse_float_f64 on its own is more lenient than its header says -- it
+#     takes a leading `+` and leading zeros -- but the validator keeps those
+#     bytes from reaching it.)
 #   CSV (RFC 4180) defines no number syntax. CsvSink documents FLOAT64 as
 #     Mojo `String(f)`, which spells the non-finite values `inf`, `-inf` and
 #     `nan` (every NaN, whatever its sign or payload); asserted here.
@@ -91,10 +92,10 @@
 #   _CSV_NONFINITE_ROWS: CsvSink writes `inf`, `-inf`, `nan`; the reader
 #     parses none of them, so a column declared FLOAT64 reads each as NULL
 #     (asserted) and type inference makes the column STRING (not asserted).
-#   JSONL exponent overflow (parse_float.mojo): the exponent accumulates in
-#     a wrapping Int, so `1e18446744073709551616` (2^64) reads as 1.0, where
-#     the IEEE answer is +Inf. Pinned. (`1e999999999` is not tested: the
-#     power-of-ten loop runs 10^9 iterations.)
+#   JSONL exponent overflow (parse_float.mojo, issue #520): the exponent
+#     accumulates in a wrapping Int, so `1e18446744073709551616` (2^64)
+#     reads as 1.0, where the IEEE answer is +Inf. Pinned. (`1e999999999` is
+#     not tested: the power-of-ten loop runs 10^9 iterations.)
 # =============================================================================
 
 from komira_async.ops.waker_sink import NoopSink
@@ -322,9 +323,12 @@ def test_jsonl_edge_readback() raises:
     var pin = _pin(_jsonl_parse_rows(), _jsonl_parse_observed())
     check_float_column_bits(m, fr, "f64", pin[0], "jsonl KNOWN-DEFECT", pin[1])
 
-    # The writer's own schema: f64 NOT NULL. Observed: the reader keeps the
-    # declared NOT NULL field and still returns NULL for the rows the writer
-    # spelled `null` (NaN, +-Inf), i.e. a NOT NULL column holding NULLs.
+    # KNOWN-DEFECT (issue #522), pinned as observed. The writer's own
+    # schema: f64 NOT NULL. The reader keeps the declared NOT NULL field and
+    # still returns NULL for the rows the writer spelled `null` (NaN, +-Inf),
+    # i.e. a NOT NULL column holding NULLs, with no error. When #522 is fixed
+    # (the write or the read refuses), this assertion goes red: replace it
+    # with the refusal.
     var nn = float_edge_batch().schema.copy()
     var nr = materialize_jsonl_to_batch(Span(fb), nn^)
     m.check(
@@ -409,7 +413,8 @@ def test_jsonl_reader_spellings() raises:
         _expect_refused(m, refused[i], "f64", ArrowType.FLOAT64, why[i])
     _expect_refused(m, "+1", "i64", ArrowType.INT64, String(EXP) + "'+'")
     _expect_refused(m, "01", "i64", ArrowType.INT64, String(UNX))
-    # KNOWN-DEFECT pin: a 2^64 exponent wraps to 0 (IEEE answer: +Inf).
+    # KNOWN-DEFECT pin (issue #520): a 2^64 exponent wraps to 0 (IEEE
+    # answer: +Inf).
     _expect_f64(
         m, "1e18446744073709551616", UInt64(0x3FF0000000000000),
         "jsonl KNOWN-DEFECT",
