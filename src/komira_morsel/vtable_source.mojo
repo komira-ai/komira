@@ -233,7 +233,7 @@ def _vt_null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     """A NULL typed pointer. Mojo removed the null ctor; this is the
     tree's established replacement (`komira_arrow_ipc/c_data_interface.mojo`
     `_null_ptr`), copied here rather than imported so this file's `-I` closure
-    stays exactly `komira_core` + `komira_morsel`.
+    stays the core packages plus `komira_morsel`.
 
     # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the bare
     # pointer and `None` is the all-zero bit pattern. No `unsafe_from_address`.
