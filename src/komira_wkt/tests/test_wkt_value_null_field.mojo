@@ -36,11 +36,10 @@ def test_plain_value_field_null_is_null_value() raises:
 
 
 def test_value_field_null_round_trips() raises:
-    # The generated encoder also writes Holder's plain scalars `s` and `n`
-    # at their defaults, so the canonical text is not `{"v":null}` alone;
-    # what matters is that the `null` is written back and survives again.
+    # Holder's plain scalars `s` and `n` are at their defaults, which the
+    # JSON encoder omits (#349), so `{"v":null}` round-trips exactly.
     var text = encode_json[Holder](decode_json[Holder](String('{"v":null}')))
-    assert_true(text.startswith('{"v":null,'), text)
+    assert_equal(text, String('{"v":null}'))
     assert_equal(encode_json[Holder](decode_json[Holder](text)), text)
 
 
