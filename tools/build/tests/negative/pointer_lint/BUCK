@@ -90,3 +90,12 @@ pointer_lint(
     ffi = POINTER_FFI,
     holds = POINTER_HOLDS,
 )
+
+# Both `tree` and `files`: refused at analysis.
+pointer_lint(
+    name = "both_tree_and_files",
+    ffi = POINTER_FFI,
+    files = POINTER_TREE,
+    holds = POINTER_HOLDS,
+    tree = ":doc_tree",
+)

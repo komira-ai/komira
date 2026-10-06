@@ -1206,6 +1206,7 @@ for want in \
     expect_red "pointer_lint_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
 expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
+expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
 # 37
 pt_rc=0

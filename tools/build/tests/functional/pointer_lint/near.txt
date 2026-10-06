@@ -77,3 +77,10 @@ def _whole_values(mut r: Record, p: UnsafePointer[Record, o], items: List[Record
 def _other(u: UnsafePointer[Record, o]):
     # ... and a different `u` taken in another.
     _ = u.take_pointee()
+
+
+def _single_quoted_docstring():
+    '''A docstring in single quotes may name MutAnyOrigin
+    and unsafe_from_address= as well.
+    '''
+    pass
