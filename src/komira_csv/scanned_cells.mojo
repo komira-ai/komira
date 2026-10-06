@@ -76,6 +76,16 @@ struct ScannedCells(Movable, Deinitable):
     the scanner. The caller owns the source bytes; `ScannedCells` only
     indexes into them via integer ranges.
 
+    The scanner also records the FIRST quote violation it met: a byte after
+    a field's closing quote that is not the delimiter, CR or LF (RFC 4180
+    allows nothing else there). The scanners stay lenient past it (the bytes
+    up to the next delimiter become one more field), so these fields are the
+    only trace of the problem; `record_shape.check_csv_record_shape` turns
+    them into a refusal. `quote_violation_at == -1` means none was seen.
+        quote_violation_at:    byte offset of the offending byte
+        quote_violation_row:   row index (same numbering as `row_starts`)
+        quote_violation_field: 0-based field index of the closed field
+
     NOT Copyable (the backing Lists can be large) -- pass by `^` or `ref`.
     """
 
@@ -83,6 +93,9 @@ struct ScannedCells(Movable, Deinitable):
     var cell_ends: List[Int]
     var cell_flags: List[UInt8]
     var row_starts: List[Int]
+    var quote_violation_at: Int
+    var quote_violation_row: Int
+    var quote_violation_field: Int
 
     def __init__(out self):
         """Empty ScannedCells (zero rows, zero cells)."""
@@ -92,6 +105,9 @@ struct ScannedCells(Movable, Deinitable):
         self.row_starts = List[Int]()
         # Sentinel for the empty-rows case: row_starts has len 1 = [0].
         self.row_starts.append(0)
+        self.quote_violation_at = -1
+        self.quote_violation_row = -1
+        self.quote_violation_field = -1
 
     def __init__(out self, est_cells: Int, est_rows: Int):
         """Construct with reserved capacity (pre-size hint).
@@ -109,9 +125,33 @@ struct ScannedCells(Movable, Deinitable):
         self.cell_flags = List[UInt8](capacity=est_cells)
         self.row_starts = List[Int](capacity=est_rows + 1)
         self.row_starts.append(0)
+        self.quote_violation_at = -1
+        self.quote_violation_row = -1
+        self.quote_violation_field = -1
 
-    # __moveinit__ + __del__ are compiler-synthesized: all 4 fields are
-    # List[POD] which are themselves Movable + Deinitable.
+    # __moveinit__ + __del__ are compiler-synthesized: the 4 Lists are
+    # List[POD] (Movable + Deinitable) and the rest are Ints.
+
+    def note_quote_violation(mut self, byte_pos: Int, field: Int):
+        """Record a byte after a closing quote that is not the delimiter or a
+        line end, unless an earlier one is already recorded.
+
+        Called by the scanners only on that malformed branch, so well-formed
+        input pays nothing. `field` is the 0-based index (within the current
+        row) of the field the quote closed; the row is the one in progress,
+        `len(row_starts) - 1`.
+        """
+        if self.quote_violation_at >= 0:
+            return
+        self.quote_violation_at = byte_pos
+        self.quote_violation_row = len(self.row_starts) - 1
+        self.quote_violation_field = field
+
+    @always_inline
+    def cells_in_open_row(self) -> Int:
+        """Cells appended to the row in progress (not yet closed by a
+        `row_starts` entry)."""
+        return len(self.cell_starts) - self.row_starts[len(self.row_starts) - 1]
 
     @always_inline
     def num_rows(self) -> Int:

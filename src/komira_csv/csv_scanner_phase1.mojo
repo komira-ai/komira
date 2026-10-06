@@ -90,10 +90,12 @@ struct Row(Copyable, Movable, Deinitable):
     """One CSV record: an ordered list of CellRange entries.
 
     Wraps `List[CellRange]` rather than a fixed InlineArray because the
-    column count is data-driven — the toy reader's "all rows same arity"
-    invariant is preserved by the chassis (rows with too few cells are
-    padded with empty cells; rows with too many raise a `CsvSchemaMismatch`
-    at materialize time).
+    column count is data-driven. The scanners emit each record's cells as
+    they find them and do not compare field counts: a `Row` may hold fewer or
+    more cells than the header. The readers (`read_csv_bytes_to_batch`,
+    `read_csv_bytes_to_schema`, the parallel reader) refuse such a record via
+    `record_shape.check_csv_record_shape`, which raises naming the record,
+    line and field, before any column is built.
     """
 
     var cells: List[CellRange]
@@ -1464,6 +1466,14 @@ def scan_csv_phase1_into_cells[
                             pos = pos + 1
                             cell_start = pos
                             continue
+                        # A byte after the closing quote that is not the
+                        # delimiter or a line end: record it (the reader
+                        # refuses the record) and start the next field
+                        # there, as the doubled-quote dialects do.
+                        cells.note_quote_violation(pos, cells.cells_in_open_row() - 1)
+                        cell_start = pos
+                        pos = pos + 1
+                        continue
                     else:
                         cell_start = pos
                         continue
@@ -1498,6 +1508,10 @@ def scan_csv_phase1_into_cells[
                 pos = pos + 1
                 cell_start = pos
                 continue
+            # A byte after the closing quote that is not the delimiter or a
+            # line end: malformed under every dialect. Record it (the reader
+            # refuses the record) and keep the scan going.
+            cells.note_quote_violation(pos, cells.cells_in_open_row() - 1)
             cell_start = pos
             pos = pos + 1
             continue
@@ -1677,6 +1691,14 @@ def scan_csv_phase2_movemask_into_cells[
                             pos = pos + 1
                             cell_start = pos
                             continue
+                        # A byte after the closing quote that is not the
+                        # delimiter or a line end: record it (the reader
+                        # refuses the record) and start the next field
+                        # there, as the doubled-quote dialects do.
+                        cells.note_quote_violation(pos, cells.cells_in_open_row() - 1)
+                        cell_start = pos
+                        pos = pos + 1
+                        continue
                     else:
                         cell_start = pos
                         continue
@@ -1711,6 +1733,10 @@ def scan_csv_phase2_movemask_into_cells[
                 pos = pos + 1
                 cell_start = pos
                 continue
+            # A byte after the closing quote that is not the delimiter or a
+            # line end: malformed under every dialect. Record it (the reader
+            # refuses the record) and keep the scan going.
+            cells.note_quote_violation(pos, cells.cells_in_open_row() - 1)
             cell_start = pos
             pos = pos + 1
             continue
@@ -1972,6 +1998,14 @@ def scan_csv_phase2_movemask_projected[
                             pos = pos + 1
                             cell_start = pos
                             continue
+                        # A byte after the closing quote that is not the
+                        # delimiter or a line end: record it (the reader
+                        # refuses the record) and start the next field
+                        # there, as the doubled-quote dialects do.
+                        cells.note_quote_violation(pos, col_idx)
+                        cell_start = pos
+                        pos = pos + 1
+                        continue
                     else:
                         cell_start = pos
                         continue
@@ -2010,6 +2044,10 @@ def scan_csv_phase2_movemask_projected[
                 pos = pos + 1
                 cell_start = pos
                 continue
+            # A byte after the closing quote that is not the delimiter or a
+            # line end: malformed under every dialect. Record it (the reader
+            # refuses the record) and keep the scan going.
+            cells.note_quote_violation(pos, col_idx)
             cell_start = pos
             pos = pos + 1
             continue
@@ -2274,6 +2312,14 @@ def scan_csv_phase3_pclmulqdq_into_cells[
                             pos = pos + 1
                             cell_start = pos
                             continue
+                        # A byte after the closing quote that is not the
+                        # delimiter or a line end: record it (the reader
+                        # refuses the record) and start the next field
+                        # there, as the doubled-quote dialects do.
+                        cells.note_quote_violation(pos, cells.cells_in_open_row() - 1)
+                        cell_start = pos
+                        pos = pos + 1
+                        continue
                     else:
                         cell_start = pos
                         continue
@@ -2308,6 +2354,10 @@ def scan_csv_phase3_pclmulqdq_into_cells[
                 pos = pos + 1
                 cell_start = pos
                 continue
+            # A byte after the closing quote that is not the delimiter or a
+            # line end: malformed under every dialect. Record it (the reader
+            # refuses the record) and keep the scan going.
+            cells.note_quote_violation(pos, cells.cells_in_open_row() - 1)
             cell_start = pos
             pos = pos + 1
             continue

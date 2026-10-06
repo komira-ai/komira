@@ -75,6 +75,7 @@ from .cell_parsers_simd import (
     fast_parse_iso_date32,
 )
 from .input_limits import check_csv_cell_budget, check_csv_column_count
+from .record_shape import check_csv_record_shape
 from .null_detection import is_null_cell
 from .quote_styles import QuoteStyle, Rfc4180, Excel, Posix
 from .typed_column_builders import dispatch_typed_builder
@@ -160,6 +161,11 @@ def read_csv_bytes_to_batch[
     into a `ScannedCells` flat-buffer struct (4 contiguous Lists)
     instead of `List[Row]`. ~5-8x speedup on the TPC-H lineitem fixture
     (was ~19.9 s ST; target ~2.5-4 s ST).
+
+    Raises (among others) on a malformed record, under every dialect: a
+    field count other than the header's, or a byte after a closing quote
+    that is not the delimiter or a line end. The error names the record
+    number, line, byte offset and field (`record_shape`).
     """
     if len(bytes) == 0:
         var sb_empty = SchemaBuilder()
@@ -226,11 +232,18 @@ def read_csv_bytes_to_batch[
     var num_cols = len(header_names)
     # HOSTILE-INPUT CEILING (holds with assertions compiled out). `num_cols` is
     # the header row's cell count -- entirely input-controlled -- and every
-    # column builder below allocates the FULL row count up front, with short
-    # rows null-padded. Allocation is rows x cols. ONE compare, here, before
+    # column builder below allocates the FULL row count up front.
+    # Allocation is rows x cols. ONE compare, here, before
     # the first builder allocates. (Second site: the schema-sample path,
     # which feeds the same widths into infer_column_types.)
     check_csv_column_count(num_cols)
+    # RECORD SHAPE: refuse a record with a field count other than the
+    # header's, or a byte after a closing quote that is not the delimiter or
+    # a line end, before any builder reads a cell (komira-ai/komira#449).
+    check_csv_record_shape[Q](
+        scan_bytes, 0, scan_start, cells, data_start, header_names,
+        options.has_header, options.delimiter, options.quote,
+    )
     var num_rows = total_rows - data_start
     if num_rows == 0 or num_cols == 0:
         var sb1 = SchemaBuilder()
@@ -447,11 +460,19 @@ def read_csv_bytes_to_schema[
     var num_cols = len(header_names)
     # HOSTILE-INPUT CEILING (holds with assertions compiled out). `num_cols` is
     # the header row's cell count -- entirely input-controlled -- and every
-    # column builder below allocates the FULL row count up front, with short
-    # rows null-padded. Allocation is rows x cols. ONE compare, here, before
+    # column builder below allocates the FULL row count up front.
+    # Allocation is rows x cols. ONE compare, here, before
     # the first builder allocates. (Second site: the schema-sample path,
     # which feeds the same widths into infer_column_types.)
     check_csv_column_count(num_cols)
+    # RECORD SHAPE, as in `read_csv_bytes_to_batch`. When the prefix was cut
+    # at the byte budget the last scanned row may be incomplete, so its field
+    # count is not checked; the full decode checks it.
+    check_csv_record_shape[Q](
+        scan_bytes, 0, scan_start, cells, data_start, header_names,
+        options.has_header, options.delimiter, options.quote,
+        check_last_row=(prefix_end == n),
+    )
     var num_rows = total_rows - data_start
     if num_rows == 0 or num_cols == 0:
         return sb_out.build()
