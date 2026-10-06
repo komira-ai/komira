@@ -76,6 +76,7 @@ _TESTS_LINTS = [
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
+    "//src/komira_job_supervisor_loopback:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
