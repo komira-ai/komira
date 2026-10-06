@@ -9,7 +9,9 @@
 // errno, read IMMEDIATELY after the failing call on the same thread, and the
 // errno CONSTANTS, whose values differ between platforms. Both live here so no
 // errno number is spelled in Mojo and no errno read can be separated from its
-// call by another libc call.
+// call by another libc call. The create-if-absent path needs the same split
+// for link(2): EEXIST (the key exists, a 412) against every other errno (an
+// I/O error).
 //
 // CONTRACT. Every function returns 0 on success or the POSITIVE errno of the
 // failing call. Nothing is allocated; every pointer argument is a caller-owned
@@ -17,13 +19,20 @@
 // The fd returned by `komira_objstore_open_for_read` is owned by the caller
 // until it is passed to `komira_objstore_read_exact_close`, which closes it on
 // every path.
+// `komira_objstore_write_new_file` opens and closes its own fd; no descriptor
+// outlives any call except the one `komira_objstore_open_for_read` returns.
 // =============================================================================
+
+// sigaction/struct sigaction (test seam) under a strict -std.
+#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <signal.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -33,6 +42,10 @@
 #define KOMIRA_OBJSTORE_STAGE_FSTAT 2
 #define KOMIRA_OBJSTORE_STAGE_READ 3
 #define KOMIRA_OBJSTORE_STAGE_STAT 4
+#define KOMIRA_OBJSTORE_STAGE_WRITE 5
+#define KOMIRA_OBJSTORE_STAGE_FSYNC 6
+#define KOMIRA_OBJSTORE_STAGE_CLOSE 7
+#define KOMIRA_OBJSTORE_STAGE_LINK 8
 
 // Path kinds for `komira_objstore_path_kind`.
 #define KOMIRA_OBJSTORE_KIND_REGULAR 1
@@ -41,6 +54,10 @@
 
 // The platform's ENOENT, the one errno that means "no such object".
 int32_t komira_objstore_enoent(void) { return (int32_t)ENOENT; }
+
+// The platform's EEXIST, the one link(2) errno that means "the key exists"
+// (the create-if-absent loser's 412).
+int32_t komira_objstore_eexist(void) { return (int32_t)EEXIST; }
 
 // Open `path` read-only and report its size. On success writes the fd and the
 // size and returns 0. On failure returns the errno and writes the stage that
@@ -119,6 +136,64 @@ int32_t komira_objstore_path_kind(const char *path, int32_t *out_kind) {
     return 0;
 }
 
+// Create `path` exclusively (O_WRONLY|O_CREAT|O_EXCL, mode 0644), write all
+// `n` bytes of `buf` (retrying EINTR and short writes), fsync and close it.
+// Returns 0, or the errno of the failing call and writes its stage (OPEN,
+// WRITE, FSYNC or CLOSE). The fd is closed on every path; a file that was
+// created is LEFT IN PLACE on failure (the caller owns removing it).
+int32_t komira_objstore_write_new_file(const char *path, const uint8_t *buf,
+                                       int64_t n, int32_t *out_stage) {
+    *out_stage = KOMIRA_OBJSTORE_STAGE_OPEN;
+    int fd;
+    do {
+        fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    } while (fd < 0 && errno == EINTR);
+    if (fd < 0) {
+        return (int32_t)errno;
+    }
+    int64_t off = 0;
+    while (off < n) {
+        ssize_t w = write(fd, buf + off, (size_t)(n - off));
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            int e = errno;
+            close(fd);
+            *out_stage = KOMIRA_OBJSTORE_STAGE_WRITE;
+            return (int32_t)e;
+        }
+        if (w == 0) {
+            close(fd);
+            *out_stage = KOMIRA_OBJSTORE_STAGE_WRITE;
+            return (int32_t)EIO;
+        }
+        off += (int64_t)w;
+    }
+    if (fsync(fd) != 0) {
+        int e = errno;
+        close(fd);
+        *out_stage = KOMIRA_OBJSTORE_STAGE_FSYNC;
+        return (int32_t)e;
+    }
+    // close(2) is not retried on EINTR: the descriptor is released either way.
+    if (close(fd) != 0) {
+        *out_stage = KOMIRA_OBJSTORE_STAGE_CLOSE;
+        return (int32_t)errno;
+    }
+    return 0;
+}
+
+// link(2) `existing` to `new_path`. Atomic: `new_path` either appears with
+// the whole inode or not at all, and an existing `new_path` is never replaced
+// (EEXIST). Returns 0, or the errno read immediately after the failing call.
+int32_t komira_objstore_link(const char *existing, const char *new_path) {
+    if (link(existing, new_path) == 0) {
+        return 0;
+    }
+    return (int32_t)errno;
+}
+
 // remove(3) `path`. Returns 0, or the errno read immediately after the
 // failing call.
 int32_t komira_objstore_remove(const char *path) {
@@ -164,6 +239,8 @@ int64_t komira_objstore_errno_name(int32_t e, uint8_t *buf, int64_t cap) {
         KOMIRA_OBJSTORE_NAME(ELOOP)
         KOMIRA_OBJSTORE_NAME(EOVERFLOW)
         KOMIRA_OBJSTORE_NAME(ENOTEMPTY)
+        KOMIRA_OBJSTORE_NAME(EMLINK)
+        KOMIRA_OBJSTORE_NAME(EXDEV)
 #ifdef ESTALE
         KOMIRA_OBJSTORE_NAME(ESTALE)
 #endif
@@ -184,4 +261,67 @@ int64_t komira_objstore_errno_name(int32_t e, uint8_t *buf, int64_t cap) {
     memcpy(buf, name, len);
     buf[len] = 0;
     return (int64_t)len;
+}
+
+// =============================================================================
+// TEST SEAM (tests/test_local_fs_store_create_write_failure.mojo only). Forces
+// a write(2) to fail with EFBIG even when the test runs privileged: root
+// bypasses file modes, but RLIMIT_FSIZE binds root too. SIGXFSZ is ignored for
+// the window, or the kernel would kill the process instead of failing the
+// write. RLIMIT_FSIZE, `struct rlimit` and `struct sigaction` are platform
+// definitions, so they stay in C. The saved state lives in these two statics
+// (one window at a time, single-threaded test use). Not called by library code.
+// =============================================================================
+
+static struct rlimit komira_objstore_test_saved_fsize;
+static struct sigaction komira_objstore_test_saved_sigxfsz;
+static int komira_objstore_test_fsize_window_open = 0;
+
+// Ignore SIGXFSZ and lower the soft RLIMIT_FSIZE to `soft` bytes, saving the
+// previous limit and disposition for `komira_objstore_test_fsize_limit_end`.
+// Returns 0 or the errno (EBUSY if a window is already open); on failure
+// nothing is left changed.
+int32_t komira_objstore_test_fsize_limit_begin(int64_t soft) {
+    if (komira_objstore_test_fsize_window_open) {
+        return (int32_t)EBUSY;
+    }
+    if (getrlimit(RLIMIT_FSIZE, &komira_objstore_test_saved_fsize) != 0) {
+        return (int32_t)errno;
+    }
+    struct sigaction ign;
+    memset(&ign, 0, sizeof(ign));
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    if (sigaction(SIGXFSZ, &ign, &komira_objstore_test_saved_sigxfsz) != 0) {
+        return (int32_t)errno;
+    }
+    struct rlimit rl = komira_objstore_test_saved_fsize;
+    rl.rlim_cur = (rlim_t)soft;
+    if (setrlimit(RLIMIT_FSIZE, &rl) != 0) {
+        int e = errno;
+        sigaction(SIGXFSZ, &komira_objstore_test_saved_sigxfsz, NULL);
+        return (int32_t)e;
+    }
+    komira_objstore_test_fsize_window_open = 1;
+    return 0;
+}
+
+// Restore the RLIMIT_FSIZE and SIGXFSZ disposition saved by
+// `komira_objstore_test_fsize_limit_begin`. Returns 0 or the errno of the
+// first failing restore (EINVAL if no window is open). Both restores are
+// attempted whatever the first one returns.
+int32_t komira_objstore_test_fsize_limit_end(void) {
+    if (!komira_objstore_test_fsize_window_open) {
+        return (int32_t)EINVAL;
+    }
+    int32_t rc = 0;
+    if (setrlimit(RLIMIT_FSIZE, &komira_objstore_test_saved_fsize) != 0) {
+        rc = (int32_t)errno;
+    }
+    if (sigaction(SIGXFSZ, &komira_objstore_test_saved_sigxfsz, NULL) != 0 &&
+        rc == 0) {
+        rc = (int32_t)errno;
+    }
+    komira_objstore_test_fsize_window_open = 0;
+    return rc;
 }
