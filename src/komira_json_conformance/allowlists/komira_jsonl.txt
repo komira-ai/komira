@@ -1,0 +1,290 @@
+# komira_jsonl: the JSONTestSuite y_ and n_ files infer_jsonl_schema + materialize_jsonl_to_batch (komira_jsonl)
+# gets wrong, the verdict it gives every i_ file (ACCEPTS:, REJECTS:,
+# BOUNDARY:, MISREADS:), and the files that abort it (ABORTS:), one per
+# line with the reason (format and gate: gate.mojo). DEFECT in a reason marks
+# a verdict to be fixed in the product, not a choice. Shrink-only: a fix
+# makes its line STALE (or its i_ record CHANGED) and the test red until the
+# line is edited.
+
+i_number_double_huge_neg_exp.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_huge_exp.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_neg_int_huge_exp.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_pos_double_huge_exp.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_real_neg_overflow.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_real_pos_overflow.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_real_underflow.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_too_big_neg_int.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_too_big_pos_int.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_number_very_big_negative_int.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_object_key_lone_2nd_surrogate.json ACCEPTS: one row; the key's lone-surrogate \u escape is not refused
+i_string_1st_surrogate_but_2nd_missing.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_1st_valid_surrogate_2nd_invalid.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_UTF-16LE_with_BOM.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_UTF-8_invalid_sequence.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_UTF8_surrogate_U+D800.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_incomplete_surrogate_and_escape_valid.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_incomplete_surrogate_pair.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_incomplete_surrogates_escape_valid.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_invalid_lonely_surrogate.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_invalid_surrogate.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_invalid_utf-8.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_inverted_surrogates_U+1D11E.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_iso_latin_1.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_lone_second_surrogate.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_lone_utf8_continuation_byte.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_not_in_unicode_range.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_overlong_sequence_2_bytes.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_overlong_sequence_6_bytes.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_overlong_sequence_6_bytes_null.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_truncated-utf-8.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_utf16BE_no_BOM.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_string_utf16LE_no_BOM.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_structure_500_nested_arrays.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+i_structure_UTF-8_BOM_empty_object.json MISREADS: the top level is not an object; 0 rows and no error (the defect of the MISREAD lines above)
+n_array_1_true_without_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_a_invalid_utf8.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_colon_instead_of_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_comma_after_close.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_comma_and_number.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_double_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_double_extra_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_extra_close.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_extra_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_incomplete.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_incomplete_invalid_value.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_inner_array_no_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_invalid_utf8.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_items_separated_by_semicolon.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_just_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_just_minus.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_missing_value.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_newlines_unclosed.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_number_and_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_number_and_several_commas.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_spaces_vertical_tab_formfeed.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_star_inside.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_unclosed.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_unclosed_trailing_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_unclosed_with_new_lines.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_array_unclosed_with_object_inside.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_incomplete_false.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_incomplete_null.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_incomplete_true.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_multidigit_number_then_00.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_++.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_+1.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_+Inf.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_-01.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_-1.0..json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_-2..json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_-NaN.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_.-1.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_.2e-3.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_0.1.2.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_0.3e+.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_0.3e.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_0.e1.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_0_capital_E+.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_0_capital_E.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_0e+.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_0e.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_1.0e+.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_1.0e-.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_1.0e.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_1_000.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_1eE2.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_2.e+3.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_2.e-3.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_2.e3.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_9.e+.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_Inf.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_NaN.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_U+FF11_fullwidth_digit_one.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_expression.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_hex_1_digit.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_hex_2_digits.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_infinity.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_invalid+-.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_invalid-negative-real.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_invalid-utf-8-in-bigger-int.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_invalid-utf-8-in-exponent.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_invalid-utf-8-in-int.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_minus_infinity.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_minus_sign_with_trailing_garbage.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_minus_space_1.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_neg_int_starting_with_zero.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_neg_real_without_int_part.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_neg_with_garbage_at_end.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_real_garbage_after_e.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_real_with_invalid_utf8_after_e.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_real_without_fractional_part.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_starting_with_dot.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_with_alpha.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_with_alpha_char.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_number_with_leading_zero.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_object_bad_value.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_object_emoji.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_object_garbage_at_end.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_lone_continuation_byte_in_key_and_trailing_comma.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_several_trailing_commas.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_trailing_comma.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_trailing_comment.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_trailing_comment_open.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_trailing_comment_slash_open.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_trailing_comment_slash_open_incomplete.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_two_commas_in_a_row.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_object_with_trailing_garbage.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_single_space.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_1_surrogate_then_escape_u.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_1_surrogate_then_escape_u1.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_1_surrogate_then_escape_u1x.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_accentuated_char_no_quotes.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_backslash_00.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_escape_x.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_escaped_ctrl_char_tab.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_escaped_emoji.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_incomplete_escaped_character.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_incomplete_surrogate.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_incomplete_surrogate_escape_invalid.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_invalid-utf-8-in-escape.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_invalid_backslash_esc.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_invalid_unicode_escape.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_invalid_utf8_after_escape.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_leading_uescaped_thinspace.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_no_quotes_with_bad_escape.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_single_quote.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_single_string_no_double_quotes.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_unescaped_ctrl_char.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_unescaped_newline.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_unescaped_tab.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_unicode_CapitalU.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_string_with_trailing_garbage.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_100000_opening_arrays.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_U+2060_word_joined.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_UTF8_BOM_no_data.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_angle_bracket_..json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_angle_bracket_null.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_array_trailing_garbage.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_array_with_extra_array_close.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_ascii-unicode-identifier.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_capitalized_True.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_close_unopened_array.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_comma_instead_of_closing_brace.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_structure_double_array.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_end_array.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_incomplete_UTF8_BOM.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_lone-invalid-utf-8.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_lone-open-bracket.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_no_data.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_null-byte-outside-string.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_number_with_trailing_garbage.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_object_followed_by_closing_object.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_object_with_comment.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_structure_object_with_trailing_garbage.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_structure_open_array_apostrophe.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_open_array_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_open_array_open_object.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_open_array_string.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_open_object.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_open_object_comma.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_open_object_string_with_apostrophes.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_single_eacute.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_single_star.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_trailing_#.json MISREAD: DEFECT: not JSON, and the reader returned 2 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_uescaped_LF_before_string.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_unclosed_array.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_unclosed_array_partial_null.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_unclosed_array_unfinished_false.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_unclosed_array_unfinished_true.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_unclosed_object.json ACCEPTED: DEFECT: not JSON, and read as one row: the reader validates no grammar around an object's members
+n_structure_unicode-identifier.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_whitespace_U+2060_word_joiner.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+n_structure_whitespace_formfeed.json MISREAD: DEFECT: not JSON, and the reader returned 0 rows without an error: it validates no grammar and skips the tape to the next `{`
+y_array_arraysWithSpaces.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_empty-string.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_empty.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_ending_with_newline.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_false.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_heterogeneous.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_null.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_with_1_and_newline.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_with_leading_space.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_with_several_null.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_array_with_trailing_space.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_0e+1.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_0e1.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_after_space.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_double_close_to_zero.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_int_with_exp.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_minus_zero.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_negative_int.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_negative_one.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_negative_zero.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_real_capital_e.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_real_capital_e_neg_exp.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_real_capital_e_pos_exp.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_real_exponent.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_real_fraction_exponent.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_real_neg_exp.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_real_pos_exponent.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_simple_int.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_number_simple_real.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_object_duplicated_key.json MISREAD: DEFECT: one object with a repeated key came back as 2 rows
+y_object_duplicated_key_and_value.json MISREAD: DEFECT: one object with a repeated key came back as 2 rows
+y_object_empty.json MISREAD: DEFECT: the empty object came back as 0 rows; it is one record with no fields
+y_object_long_strings.json REJECTED: schema inference does not infer a nested object or array member ("wide-default inference of LIST / STRUCT / MAP is not supported")
+y_object_simple.json REJECTED: schema inference does not infer a nested object or array member ("wide-default inference of LIST / STRUCT / MAP is not supported")
+y_string_1_2_3_bytes_UTF-8_sequences.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_accepted_surrogate_pair.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_accepted_surrogate_pairs.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_allowed_escapes.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_backslash_and_u_escaped_zero.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_backslash_doublequotes.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_comments.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_double_escape_a.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_double_escape_n.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_escaped_control_character.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_escaped_noncharacter.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_in_array.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_in_array_with_leading_space.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_last_surrogates_1_and_2.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_nbsp_uescaped.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_nonCharacterInUTF-8_U+10FFFF.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_nonCharacterInUTF-8_U+FFFF.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_null_escape.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_one-byte-utf-8.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_pi.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_reservedCharacterInUTF-8_U+1BFFF.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_simple_ascii.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_space.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_surrogates_U+1D11E_MUSICAL_SYMBOL_G_CLEF.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_three-byte-utf-8.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_two-byte-utf-8.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_u+2028_line_sep.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_u+2029_par_sep.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_uEscape.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_uescaped_newline.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unescaped_char_delete.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicodeEscapedBackslash.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode_2.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode_U+10FFFE_nonchar.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode_U+1FFFE_nonchar.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode_U+200B_ZERO_WIDTH_SPACE.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode_U+2064_invisible_plus.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode_U+FDD0_nonchar.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode_U+FFFE_nonchar.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_unicode_escaped_double_quote.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_utf8.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_string_with_del_character.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_lonely_false.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_lonely_int.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_lonely_negative_real.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_lonely_null.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_lonely_string.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_lonely_true.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_string_empty.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_trailing_newline.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_true_in_array.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object
+y_structure_whitespace_array.json MISREAD: DEFECT: the top level is not an object and the reader returned 0 rows without an error: it skips the tape to the next `{` instead of refusing a record that is not an object

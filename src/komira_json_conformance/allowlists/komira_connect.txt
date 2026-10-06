@@ -1,0 +1,13 @@
+# komira_connect: crash-only (testees.mojo): its verdicts are printed, not gated.
+# This file lists only the JSONTestSuite files that abort parse_connect_error_json (komira_connect/codec_connect_json.mojo),
+# as `<file> ABORTS: <text the abort prints> | <note>` (gate.mojo). Each runs
+# in a child process that must still abort with that text; a fix makes the
+# line STALE and the test red until the line goes.
+
+i_string_UTF-8_invalid_sequence.json ABORTS: does not lie on a codepoint boundary | a String byte-index assert from komira_connect/codec_connect_json.mojo _find_byte_sequence, which reads text[byte=i+j] at every byte offset, so a multi-byte character in the body aborts
+i_string_overlong_sequence_6_bytes.json ABORTS: does not lie on a codepoint boundary | a String byte-index assert from komira_connect/codec_connect_json.mojo _find_byte_sequence, which reads text[byte=i+j] at every byte offset, so a multi-byte character in the body aborts
+i_string_overlong_sequence_6_bytes_null.json ABORTS: does not lie on a codepoint boundary | a String byte-index assert from komira_connect/codec_connect_json.mojo _find_byte_sequence, which reads text[byte=i+j] at every byte offset, so a multi-byte character in the body aborts
+n_object_emoji.json ABORTS: does not lie on a codepoint boundary | a String byte-index assert from komira_connect/codec_connect_json.mojo _find_byte_sequence, which reads text[byte=i+j] at every byte offset, so a multi-byte character in the body aborts
+n_object_lone_continuation_byte_in_key_and_trailing_comma.json ABORTS: does not lie on a codepoint boundary | a String byte-index assert from komira_connect/codec_connect_json.mojo _find_byte_sequence, which reads text[byte=i+j] at every byte offset, so a multi-byte character in the body aborts
+y_string_unicode_2.json ABORTS: does not lie on a codepoint boundary | a String byte-index assert from komira_connect/codec_connect_json.mojo _find_byte_sequence, which reads text[byte=i+j] at every byte offset, so a multi-byte character in the body aborts
+y_string_utf8.json ABORTS: does not lie on a codepoint boundary | a String byte-index assert from komira_connect/codec_connect_json.mojo _find_byte_sequence, which reads text[byte=i+j] at every byte offset, so a multi-byte character in the body aborts
