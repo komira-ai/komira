@@ -16,7 +16,7 @@
 
 from std.pathlib import Path
 
-from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow
+from kci_workflow_check import ChannelsFile, channels_paths, check_running_workflow
 from kci_api import (
     ERROR_BREAK_GLASS_REASON,
     ERROR_CANNOT_TELL,

@@ -6,7 +6,7 @@
 # A STAGE is a named list of STEPS that one `kci run --stage <name>` runs, in
 # order. Its name is also the id of the CI job that runs it. `environment` is
 # the GitHub environment that job runs in, and defaults to the stage's name
-# (kci_ci_check holds a workflow to both). `after` names the one stage that
+# (kci_workflow_check holds a workflow to both). `after` names the one stage that
 # must have finished first; it names an EARLIER stage, so the graph has no
 # cycle by construction.
 #
@@ -18,7 +18,7 @@
 # `trigger` says which CI event runs the stage's job: PUSH (the default: a
 # release stage, run on a push or by hand) or PULL_REQUEST (the per-change
 # check of a pull request: `kci run --stage <S> --affected-by <base>`, the
-# one job of the workflow that runs on `pull_request`, as kci_ci_check R6
+# one job of the workflow that runs on `pull_request`, as kci_workflow_check R6
 # holds). A PULL_REQUEST stage runs a pull request's code, so it may hold
 # BUILD steps only (nothing is published or deployed from it), runs in NO
 # GitHub environment (an `environment` field is refused, and none is
@@ -30,7 +30,7 @@
 # run of a branch (BREAK-GLASS: kci.yml's workflow_dispatch from another ref,
 # with a required reason) runs it. A stage without it runs only for a commit
 # on main's history, on a run of `main` (kci_cli's start-up ref check, and
-# kci_ci_check R15 on its job's `if:`). The break-glass stages are a PREFIX
+# kci_workflow_check R15 on its job's `if:`). The break-glass stages are a PREFIX
 # of the release chain: a break_glass stage's `after` is break_glass too, so
 # a run off main stops at the first stage without it and never reaches a
 # later one. A PULL_REQUEST stage is never break_glass (it is no release
