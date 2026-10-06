@@ -105,7 +105,10 @@ _TABLE_CASES = [
     ("a negative size", _edit("linux-arm64", role = "zig", pin_value = pin("zig", "https://example.com/zig", _GOOD_SHA, size = -5)), "row linux-arm64: pin `zig` has no positive `size`: -5"),
     ("a size that is a string", _edit("linux-x86_64", role = "busybox", pin_value = pin("busybox", "https://example.com/busybox", _GOOD_SHA, executable = True, size = "1131168")), "row linux-x86_64: pin `busybox` has no positive `size`: \"1131168\""),
     ("a container base missing a layer size", _edit("linux-x86_64", field = "oci_base", value = _oci_without_last_layer_size()), "row linux-x86_64: pin `oci_base`: `config_size` and each of `layer_sizes` must be a positive size, one per layer"),
-    ("a container base with a config size of 0", _edit("linux-x86_64", field = "oci_base", value = _oci_with_config_size(0)), "row linux-x86_64: pin `oci_base`"),
+    # A config size of 0 is refused as absent (`has no`); a negative or non-int one reaches only the positive-size check.
+    ("a container base with a config size of 0", _edit("linux-x86_64", field = "oci_base", value = _oci_with_config_size(0)), "row linux-x86_64: pin `oci_base` has no `config_size`"),
+    ("a container base with a negative config size", _edit("linux-x86_64", field = "oci_base", value = _oci_with_config_size(-1)), "row linux-x86_64: pin `oci_base`: `config_size` and each of `layer_sizes` must be a positive size, one per layer"),
+    ("a container base with a config size that is not an int", _edit("linux-x86_64", field = "oci_base", value = _oci_with_config_size("1024")), "row linux-x86_64: pin `oci_base`: `config_size` and each of `layer_sizes` must be a positive size, one per layer"),
     ("a row named for another platform", _edit("linux-arm64", field = "cpu", value = "x86_64"), "row linux-arm64: named for neither its os nor its cpu"),
 ]
 
