@@ -17,12 +17,23 @@
 #   4 `recover_last_committed_seq` never reads below `_LOG_START`, where a
 #     refused win carrying the producer's identity was left behind
 #     ............................... the floor removed (a false DUPLICATE)
+#   5 every opt-in site, as built by its real constructor, is opted in, and
+#     the two read-only handles are not ......... each opt-in deleted
+#   6 the LIVE produce path (`BrokerCoalescingProduce` -> the factory-built
+#     spine): a win below `_LOG_START` is not acked; the flush lands at the
+#     live tail ................................ the factory's opt-in deleted
 # All run on the in-memory stores; no network.
 # =============================================================================
 
 from std.memory import ArcPointer
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
+
+from komira_core.arrow.arrow_types import ArrowType
+from komira_core.arrow.column import Column
+from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_core.arrow.record_batch import RecordBatch
+from komira_core.arrow.schema import Schema
 
 from komira_async.ops.waker_sink import NoopSink, WakerSink
 from komira_async.reactor.reactor import (
@@ -35,8 +46,11 @@ from komira_broker.broker_coalescing_produce import (
     BROKER_APPEND_MODE_ESCALATING,
     BROKER_APPEND_MODE_IDEMPOTENT_SINGLETON,
     BrokerBatchAppender,
+    BrokerCoalescingProduce,
     _EosResultCell,
 )
+from komira_broker.sublineage_base_inputs import SegmentBaseInputs
+from komira_broker.sublineage_migration import SubLineageMigration
 from komira_broker.broker_core import BrokerCore
 from komira_broker.manifest_body import encode_manifest_body
 
@@ -62,6 +76,7 @@ from komira_objectstore.shared_in_memory_slow_cas_store import (
 )
 from komira_objectstore.store import (
     AsyncCasStore,
+    CloneableConditionalWriteStore,
     CasOpProgress,
     CasReadResult,
     ConditionalWriteStore,
@@ -100,7 +115,12 @@ def _body(tag: Int) -> List[UInt8]:
 # below the log start, exactly what a win in a reaped slot looks like.
 # -----------------------------------------------------------------------------
 struct _LogStartPassesWin(
-    AsyncCasStore, ConditionalWriteStore, ObjectStore, Movable, Deinitable
+    AsyncCasStore,
+    CloneableConditionalWriteStore,
+    ConditionalWriteStore,
+    ObjectStore,
+    Movable,
+    Deinitable,
 ):
     var inner: _Slow
     var trigger: String
@@ -110,6 +130,9 @@ struct _LogStartPassesWin(
         self.inner = inner^
         self.trigger = trigger^
         self.ls_key = ls_key^
+
+    def clone(self) -> Self:
+        return Self(self.inner.clone(), self.trigger.copy(), self.ls_key.copy())
 
     def _pass(self) raises:
         _ = self.inner.put(
@@ -232,6 +255,19 @@ def test_classify_append_error() raises:
             appender.classify_append_error(unread),
             APPEND_ERR,
             "log_start_unread is terminal even when its cause spells 412",
+        )
+        # A cause spelling the other marker (a topic named slot_reaped in a key
+        # path) must not turn an outcome-unknown win into a re-append.
+        var spelled = String(
+            log_start_unread_error(
+                String("async_append"),
+                String("GET c/_meta/topics/slot_reaped/0/_LOG_START failed"),
+            )
+        )
+        assert_equal(
+            appender.classify_append_error(spelled),
+            APPEND_ERR,
+            "log_start_unread whose cause spells slot_reaped stays terminal",
         )
         var bare = appender.classify_append_error(String("precondition (412)"))
         if UInt8(mode) == BROKER_APPEND_MODE_ESCALATING:
@@ -392,9 +428,119 @@ def test_recover_last_committed_seq_is_floored() raises:
     print("  PASS")
 
 
+# =============================================================================
+# 5. Every opt-in site, as its real constructor builds it. The handles that
+#    append (BrokerCore's manifest and sub-lineage, the `_base` fold lineage in
+#    both the fold inputs and the migration) are opted in; the two that only
+#    read, retire and reap (a fold's shard handle, the migration's legacy
+#    handle) are not. Mutant: any opt-in deleted.
+# =============================================================================
+def test_opt_in_sites() raises:
+    print("[broker reaped-slot] 5. every opt-in site is opted in")
+    var store = _Store()
+    var prefix = String("c/_meta/topics/t/0")
+    var broker = BrokerCore[_Store](
+        segment_store=store.clone(),
+        manifest=CasManifestStore[_Store](store.clone(), prefix.copy()),
+        cluster=String("c"),
+        topic=String("t"),
+        partition=Int64(0),
+        broker_id=String("b"),
+    )
+    assert_true(broker._manifest.reaped_slot_guard_enabled(), "BrokerCore ctor")
+    broker.enable_sublineage_write(
+        String("w0"),
+        CasManifestStore[_Store](
+            store.clone(), broker.sublineage_prefix_for(String("w0"))
+        ),
+    )
+    assert_true(
+        broker._sublineage_manifest.value().reaped_slot_guard_enabled(),
+        "enable_sublineage_write",
+    )
+    var inputs = SegmentBaseInputs[_Store](store.clone(), prefix.copy())
+    assert_true(
+        inputs.base_manifest().reaped_slot_guard_enabled(),
+        "SegmentBaseInputs.base_manifest (the fold appends to _base)",
+    )
+    assert_false(
+        inputs.shard_manifest(String("w0")).reaped_slot_guard_enabled(),
+        "shard_manifest never appends: not opted in",
+    )
+    var mig = SubLineageMigration[_Store](store.clone(), prefix.copy())
+    assert_true(
+        mig._base_manifest().reaped_slot_guard_enabled(),
+        "SubLineageMigration._base_manifest (the migration appends to _base)",
+    )
+    assert_false(
+        mig._legacy_manifest().reaped_slot_guard_enabled(),
+        "_legacy_manifest never appends: not opted in",
+    )
+    print("  PASS")
+
+
+def _make_int64_batch(base_val: Int64, n: Int) raises -> RecordBatch:
+    var schema = Schema(
+        names=[String("val")],
+        arrow_types=[ArrowType.INT64.type_id],
+        dtypes=[DType.int64],
+        nullables=[False],
+    )
+    var arr = PrimitiveArray[DType.int64].allocate(n)
+    var p = arr._typed_ptr_mut()
+    for i in range(n):
+        p.store[width=1](i, base_val + Int64(i))
+    var col = Column.from_primitive[DType.int64](arr^)
+    return RecordBatch.from_typed_columns_1(schema^, col^)
+
+
+# =============================================================================
+# 6. The LIVE produce ack path: `BrokerCoalescingProduce` mints its spine and
+#    WAL through `BrokerProduceSpineFactory.make_spine`. The store moves
+#    `_LOG_START` past slot 0 as soon as slot 0 is won. The flush must not ack
+#    slot 0: it re-drives and acks slot 1 at the log-start offset. Mutant: the
+#    factory's opt-in deleted (the flush acks slot 0, base 0: #486 is back).
+# =============================================================================
+def test_produce_path_does_not_ack_below_log_start() raises:
+    print("[broker reaped-slot] 6. the produce path never acks a reaped slot")
+    var reactor = _new_reactor()
+    var prefix = String("c/_meta/topics/t/0")
+    var store = _LogStartPassesWin(
+        _Slow(slow_ticks=0),
+        prefix + "/manifest/00000000000000000000.chunk",
+        log_start_key(prefix).raw(),
+    )
+    var win = BrokerCoalescingProduce[_LogStartPassesWin](
+        store^, String("c"), String("t"), Int64(0), String("b")
+    )
+    _ = win.produce[NoopSink](_make_int64_batch(Int64(0), 3), Int64(0), reactor)
+    win.reconfigure_at_least_once()
+    _ = win.force[NoopSink](Int64(100), reactor)
+    var guard = 0
+    while win.is_inflight() and guard < 256:
+        var ready = reactor.poll_completions(-1)
+        for k in range(len(ready)):
+            if ready[k].op_id == win.parked_op_id():
+                _ = win.poll[NoopSink](reactor)
+        guard += 1
+    assert_false(win.is_inflight(), "the flush finished")
+    assert_false(win.has_error(), "no error: " + win.err_text())
+    var outcomes = win.take_outcomes()
+    assert_equal(len(outcomes), 1, "one producer batch, one outcome")
+    assert_equal(
+        outcomes[0][1].chunk_seq,
+        Int64(1),
+        "acked at slot 1, the live tail, never at slot 0 below _LOG_START",
+    )
+    assert_equal(outcomes[0][1].base_offset, _RPC, "at the log-start offset")
+    print("  PASS")
+
+
 def main() raises:
     test_classify_append_error()
     test_escalating_refusal_is_lost_slot_then_lands()
     test_eos_refusal_is_err_channel_then_commits()
     test_recover_last_committed_seq_is_floored()
+    test_opt_in_sites()
+    test_produce_path_does_not_ack_below_log_start()
     print("ALL broker reaped-slot tests PASSED")

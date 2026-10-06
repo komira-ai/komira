@@ -702,6 +702,18 @@ def test_refusal_classification() raises:
     assert_true(is_log_start_unread(u), u)
     assert_false(is_slot_reaped(u), u)
     assert_true(u.find("boom") >= 0, "the cause is kept for the operator")
+    # A cause can spell the other marker (a topic named `slot_reaped` in a key
+    # path): only the LEADING sentinel classifies. Mutant: substring match.
+    var spelled = String(
+        log_start_unread_error(
+            String("append"), String("GET t/slot_reaped:/x/_LOG_START status=503")
+        )
+    )
+    assert_true(is_log_start_unread(spelled), spelled)
+    assert_false(is_slot_reaped(spelled), "a cause never makes it slot_reaped")
+    assert_false(
+        is_log_start_unread(String("wrapped: ") + u), "only a leading sentinel"
+    )
     assert_false(is_slot_reaped(String("precondition (412)")), "a 412 is not it")
     print("  PASS")
 

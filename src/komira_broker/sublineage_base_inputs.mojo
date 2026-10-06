@@ -239,14 +239,15 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
         """A `CasManifestStore` bound to a writer sub-lineage's prefix
         (`<base_prefix>/_lineage/<shard_id>`), backed by a clone of the store.
         The SINGLE construction site both callers use — identical key shape.
-        Opted in to the reaped-slot guard (#486)."""
-        var m = CasManifestStore[Self.Store](
+        Not opted in to the reaped-slot guard: the fold and the consume
+        resolver only read, retire and reap a shard through it; the shard's
+        writer appends through its own `BrokerCore` sub-lineage handle, which
+        is opted in."""
+        return CasManifestStore[Self.Store](
             self._store.clone(),
             sublineage_prefix(self._base_prefix, shard_id),
             RetryPolicy.fast_test(),
         )
-        m.enable_reaped_slot_guard()
-        return m^
 
     def fold_view(self) raises -> SubLineageBaseFold[Self.Store]:
         """A `SubLineageBaseFold` view over the SAME partition bucket, used for the

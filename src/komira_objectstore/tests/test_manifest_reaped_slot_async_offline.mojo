@@ -157,6 +157,12 @@ def test_async_op_reaped_slot() raises:
         Int64(0),
         "the refused win never advanced _HEAD to slot 1",
     )
+    assert_equal(
+        wal.read_head().chunk_seq,
+        Int64(0),
+        "the refusal invalidated the head cache (it held chunk 4): read_head"
+        " now returns the durable _HEAD",
+    )
     var raised = False
     try:
         _ = op.take(wal)
@@ -423,6 +429,11 @@ def test_async_op_phase_branches() raises:
     except e:
         reaped = is_slot_reaped(String(e))
     assert_true(reaped, "guarded: a win below the given log start is refused")
+    assert_equal(
+        g.read_head().chunk_seq,
+        Int64(0),
+        "the refusal invalidated the head cache (it held chunk 2)",
+    )
     g.apply_async_append_win(Int64(3), Int64(30), _RPC, String("e"), Int64(2))
     assert_equal(_durable_head_seq(dstore, dprefix), Int64(3), "a live win advances")
     var u = _mk(dstore.clone(), String("rs/b-apply-u"), guard=False)

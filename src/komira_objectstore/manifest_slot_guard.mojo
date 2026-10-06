@@ -79,16 +79,22 @@
 # (`local_fs_conditional_store.mojo`): two processes sharing a root can move
 # `_LOG_START` backward, which breaks the monotonicity rule 1 relies on.
 #
-# THE ERRORS MUST NEVER LOOK LIKE A LOST SLOT OR A FENCE. Classifiers in the tree
-# match by substring: `is_precondition` and the coalescing spines' lost-slot
-# checks match `412`, `precondition`, `If-None-Match`, `If-Match`;
-# `is_lease_fenced` matches `lease_fenced`; `is_retryable_contention` matches
-# `(retryable)` AND `exhausted`; `is_not_found` matches `not_found`,
-# `status=404` and friends. A chunk key spells its sequence number in decimal
-# and a prefix is caller-supplied, so the `slot_reaped` text carries NO digits,
-# NO key and NO prefix. The `log_start_unread` text appends the cause for the
-# operator, so a caller that classifies must test `is_log_start_unread` before
-# any substring classifier (the broker's `classify_append_error` does).
+# THE ERRORS MUST NEVER LOOK LIKE A LOST SLOT OR A FENCE, OR LIKE EACH OTHER.
+# Classifiers in the tree match by substring: `is_precondition` and the
+# coalescing spines' lost-slot checks match `412`, `precondition`,
+# `If-None-Match`, `If-Match`; `is_lease_fenced` matches `lease_fenced`;
+# `is_retryable_contention` matches `(retryable)` AND `exhausted`;
+# `is_not_found` matches `not_found`, `status=404` and friends. A chunk key
+# spells its sequence number in decimal and a prefix is caller-supplied, so the
+# `slot_reaped` text carries NO digits, NO key and NO prefix. The
+# `log_start_unread` text appends the cause for the operator, and a cause can
+# spell anything (a topic named `slot_reaped` in a key path). So each refusal
+# BEGINS with its own sentinel (`slot_reaped:` / `log_start_unread:`), and
+# `is_slot_reaped` / `is_log_start_unread` match ONLY that leading token: text
+# later in a message can never make it one of these. A caller that classifies
+# tests `is_log_start_unread` first and both before any substring classifier
+# (the broker's `classify_append_error` and `produce_error_for` do), so a
+# wrapped cause never reaches the 412 checks.
 #
 # Encapsulation: pure functions over `Int64` and `String`; no store handle, no
 # pointer, no origin, no I/O (so `cas_manifest.mojo` imports it without a cycle).
@@ -97,10 +103,11 @@
 
 # The stable marker every reaped-slot refusal carries. Classify with
 # `is_slot_reaped`, never by matching anything else in the message.
-comptime SLOT_REAPED_MARKER: String = "slot_reaped"
+# Each refusal message BEGINS with its marker followed by `:`.
+comptime SLOT_REAPED_MARKER: String = "slot_reaped:"
 
-# The stable marker of the fail-closed refusal (rule 2).
-comptime LOG_START_UNREAD_MARKER: String = "log_start_unread"
+# The stable marker of the fail-closed refusal (rule 2), same shape.
+comptime LOG_START_UNREAD_MARKER: String = "log_start_unread:"
 
 
 @always_inline
@@ -111,15 +118,19 @@ def is_slot_reaped(msg: String) -> Bool:
     The error is RETRYABLE: the writer's head cache has been invalidated, so a
     retry re-derives the head from the log start and lands at the live tail. It
     is NOT a 412 and NOT a lease fence. Under `append_idempotent` the staged
-    dedup sentinel is released before the error re-raises."""
-    return msg.find(SLOT_REAPED_MARKER) >= 0
+    dedup sentinel is released before the error re-raises.
+
+    Matches only the LEADING sentinel, so a `log_start_unread` whose cause
+    spells `slot_reaped` is never mistaken for this one."""
+    return msg.startswith(SLOT_REAPED_MARKER)
 
 
 @always_inline
 def is_log_start_unread(msg: String) -> Bool:
     """True iff `msg` is the fail-closed refusal: the post-win `_LOG_START` read
-    failed, so the append was not acknowledged and its outcome is unknown."""
-    return msg.find(LOG_START_UNREAD_MARKER) >= 0
+    failed, so the append was not acknowledged and its outcome is unknown.
+    Matches only the LEADING sentinel."""
+    return msg.startswith(LOG_START_UNREAD_MARKER)
 
 
 @always_inline
@@ -149,10 +160,9 @@ def slot_reaped_error(site: String) -> Error:
     call sites pass a fixed literal. The text is free of digits, keys and
     prefixes (module header)."""
     return Error(
-        "CasManifestStore."
+        SLOT_REAPED_MARKER
+        + " CasManifestStore."
         + site
-        + ": "
-        + SLOT_REAPED_MARKER
         + " (retryable): the create won a chunk slot below _LOG_START, a slot"
         + " retention already reaped; the append is NOT committed and was not"
         + " acknowledged. The head cache was invalidated; a retry re-derives"
@@ -165,10 +175,9 @@ def log_start_unread_error(site: String, cause: String) -> Error:
     not be read, so the write is not acknowledged. `cause` is the read error,
     kept for the operator; classify with `is_log_start_unread` first."""
     return Error(
-        "CasManifestStore."
+        LOG_START_UNREAD_MARKER
+        + " CasManifestStore."
         + site
-        + ": "
-        + LOG_START_UNREAD_MARKER
         + ": the create won but _LOG_START could not be read after it, so the"
         + " append was not acknowledged (outcome unknown; retry the write)."
         + " cause: "

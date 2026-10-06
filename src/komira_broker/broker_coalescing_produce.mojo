@@ -863,19 +863,20 @@ struct BrokerBatchAppender[
         return AppendOutcome.lost_slot()
 
     def classify_append_error(self, msg: String) -> UInt8:
-        # The reaped-slot refusals (manifest_slot_guard.mojo) come FIRST: their
-        # text must never reach the substring checks below (`log_start_unread`
-        # carries its cause, which may spell `412`).
+        # The reaped-slot refusals (manifest_slot_guard.mojo) come FIRST, and
+        # `log_start_unread` before `slot_reaped`: its cause may spell anything
+        # (`412`, `slot_reaped`), and an outcome-unknown win must never be
+        # re-appended. Both match only their leading sentinel.
         #   * `slot_reaped`: the win was below `_LOG_START` and NOT committed
         #     (the EOS sentinel was released). A lost slot in both modes: the
         #     spine's 412-loop re-reads the authoritative head (LIST, log-start
         #     aware) and re-appends at the live tail.
         #   * `log_start_unread`: the outcome is unknown (the chunk may be
         #     live), so a re-append could duplicate it. Terminal for the flush.
-        if is_slot_reaped(msg):
-            return APPEND_LOST_SLOT
         if is_log_start_unread(msg):
             return APPEND_ERR
+        if is_slot_reaped(msg):
+            return APPEND_LOST_SLOT
         # ESCALATING: a 412/precondition is a real lost slot -> the spine's LIVE
         # 412-loop (which IS the escalation past the contended slot). The
         # IDEMPOTENT-SINGLETON path never surfaces a bare 412 (the sentinel's own
@@ -926,9 +927,13 @@ struct BrokerBatchAppender[
         except e:
             # A win in a reaped slot (#486): not committed and the sentinel was
             # released. Surface it on the ERR channel so the spine classifies
-            # it as a lost slot and re-drives the append at the live tail.
-            if is_slot_reaped(String(e)):
-                return CasOpProgress.error(String(e))
+            # it as a lost slot and re-drives the append at the live tail. An
+            # outcome-unknown `log_start_unread` is excluded first and raised.
+            # (append_idempotent rarely surfaces it: its phantom scan resolves
+            # a live win as COMMITTED.)
+            var msg = String(e)
+            if not is_log_start_unread(msg) and is_slot_reaped(msg):
+                return CasOpProgress.error(msg)
             raise e^
         if ir.outcome == IDEMPOTENT_COMMITTED:
             self._stamp_eos_cell(
