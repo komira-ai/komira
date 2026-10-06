@@ -56,6 +56,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
@@ -390,6 +391,15 @@ int32_t komira_fs_path_kind(const char *path, int32_t follow,
         *out_kind = KOMIRA_FS_KIND_OTHER;
     }
     return 0;
+}
+
+// remove(3) `path` (unlink for a file, rmdir for an empty directory).
+// Returns 0, or the errno read immediately after the failing call.
+int32_t komira_fs_remove(const char *path) {
+    if (remove(path) == 0) {
+        return 0;
+    }
+    return (int32_t)errno;
 }
 
 // Write the symbolic name of errno `e` ("ENOENT", "EACCES", ...) into `buf`

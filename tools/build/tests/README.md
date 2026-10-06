@@ -906,6 +906,42 @@ for each target above.
 ./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//negative/test_weld:untested   # must fail: .../src/komira_b: 1 .mojo source(s) and no welded test
 ```
 
+## 40. README API coverage
+
+A package's README examples are its smoke tests (test 38), so a public name
+no example uses is a public name nothing smoke-tests.
+[`readme_api_coverage`](../lint/readme_api_coverage.bzl) is a validation
+that counts, per package under `src/`, the public API its `__init__.mojo`
+exports (and the public methods of the structs among it) and which of it the
+README's examples use, reading each README through the tool the gate runs, so
+hidden lines count and prose does not. It writes the census (`[packages]`,
+`[symbols]`, `[report]`) and is report-only today; it fails on its ledger,
+[`tests/readme_api_exceptions.tsv`](../../../tests/readme_api_exceptions.tsv),
+when a row is malformed, repeated, or names a symbol that is not exported or
+that the README now uses (the ledger only shrinks). The rules and today's
+numbers are in [`docs/readme_api_coverage.md`](../../../docs/readme_api_coverage.md).
+[`functional/readme_api_coverage:ok`](functional/readme_api_coverage/BUCK)
+builds a planted tree ([`fixture.bzl`](functional/readme_api_coverage/fixture.bzl):
+an alias, a parenthesised and a backslash-continued import, a self-qualified
+import, a module export, declarations in `__init__.mojo`, overloads, a
+docstring `def`, a struct in `tests/`, a struct header over three lines, a
+same-named struct outside the imported module, a `write_to`, hidden lines, a
+name only in a comment, a string, an import line, a README declaration, a
+`text` fence or prose, a package with no README, one with no example, one
+the readme tool refuses, a `from .x import *`, one with no `__init__.mojo`)
+whose census must equal
+[`expect_packages.tsv`](functional/readme_api_coverage/expect_packages.tsv),
+[`expect_symbols.tsv`](functional/readme_api_coverage/expect_symbols.tsv)
+and [`expect_report.txt`](functional/readme_api_coverage/expect_report.txt)
+byte for byte; each target of
+[`negative/readme_api_coverage`](negative/readme_api_coverage/BUCK) plants one
+defect in the same tree and must fail naming it, `enforce = True` included.
+
+```sh
+./buck2 build //:readme_api_coverage tests//functional/readme_api_coverage:ok
+./buck2 build tests//negative/readme_api_coverage:stale_used   # must fail: komira_a bye: src/komira_a/README.md uses it now
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`

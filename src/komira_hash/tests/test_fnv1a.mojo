@@ -37,7 +37,7 @@ def test_32_known_answers() raises:
     assert_equal(fnv1a_32(String("foo").as_bytes()), UInt32(0xA9F37ED7))
     assert_equal(fnv1a_32(String("foobar").as_bytes()), UInt32(0xBF9CF968))
     assert_equal(
-        fnv1a_32(String("pipeline_manager").as_bytes()), UInt32(0x5EEB7C8B)
+        fnv1a_32(String("sixteen_byte_key").as_bytes()), UInt32(0x1B78B612)
     )
 
 
@@ -48,8 +48,8 @@ def test_64_known_answers() raises:
         fnv1a_64(String("foobar").as_bytes()), UInt64(0x85944171F73967E8)
     )
     assert_equal(
-        fnv1a_64(String("pipeline_manager").as_bytes()),
-        UInt64(0x24437BF9A83F3D6B),
+        fnv1a_64(String("sixteen_byte_key").as_bytes()),
+        UInt64(0x6A4347AEE7EF58D2),
     )
 
 
