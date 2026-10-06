@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 
-# The job supervisor <-> job manager / broker coordinator wire contract
+# The job supervisor <-> coordinator wire contract
 # (`komira/supervisor/v1/supervisor.proto`, package `komira.supervisor.v1`),
 # generated into the Mojo package `komira_supervisor_proto`:
 #
@@ -19,15 +19,19 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # line, which names the broker package. The generator has no option mapping an
 # imported file to its package, and adding one is a change to proto-codegen, not
 # to this library; this stays until that option exists.) The `.proto` sits at its import
-# path so the path matches the proto package.
+# path so the path matches the proto package. `proto_deps` names the broker
+# library's generation half (`_gen`), which carries its `.proto` files.
+# `test_srcs` welds the package to its field-number census, and README.md's
+# examples run as one more welded test.
 mojo_proto_library(
     name = "komira_supervisor_proto",
     srcs = ["komira/supervisor/v1/supervisor.proto"],
     package_name = "komira_broker_proto",
-    proto_deps = ["//src/komira_broker_proto:komira_broker_proto"],
+    proto_deps = ["//src/komira_broker_proto:komira_broker_proto_gen"],
     deps = [
         "//src/komira_broker_proto:komira_broker_proto",
         "//src/komira_proto_codec:komira_proto_codec",
     ],
+    test_srcs = ["tests/test_supervisor_field_numbers.mojo"],
     visibility = ["PUBLIC"],
 )

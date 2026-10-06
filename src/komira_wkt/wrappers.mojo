@@ -38,6 +38,8 @@ from komira_proto_codec import (
     Proto3JsonWkt,
     WireEncoder,
     WireDecoder,
+    read_proto3_json_f32,
+    write_proto3_json_f32,
 )
 from komira_json import (
     JsonValue,
@@ -124,14 +126,16 @@ struct FloatValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
 
     def write_proto3_json(self, mut buf: List[UInt8]) raises:
-        _write_f64_json(buf, Float64(self.value))
+        write_proto3_json_f32(buf, self.value)
 
     @staticmethod
     def read_proto3_json(v: JsonValue) raises -> Self:
-        return Self(Float32(_read_f64_json(v)))
+        return Self(read_proto3_json_f32(v))
 
     def to_proto3_json(self) -> String:
-        return _f64_json_text(Float64(self.value))
+        var buf = List[UInt8]()
+        write_proto3_json_f32(buf, self.value)
+        return String(unsafe_from_utf8=Span(buf))
 
     @staticmethod
     def is_json_string() -> Bool:
@@ -530,7 +534,8 @@ def _parse_f64(text: String) raises -> Float64:
 
 
 # =============================================================================
-# The proto3-JSON double form, shared by DoubleValue / FloatValue.
+# The proto3-JSON double form, used by DoubleValue. (FloatValue uses the
+# codec's float32 form, `write_proto3_json_f32` / `read_proto3_json_f32`.)
 #
 # A finite value is a JSON number, written by the same formatter a plain
 # `double` field uses. The three non-finite values are the spec's STRINGS

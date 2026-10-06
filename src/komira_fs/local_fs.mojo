@@ -44,6 +44,12 @@ from komira_fs.footer_region import (
 # `ShallowDirEntry` is now defined in its own shared module so the cloud
 # FS impls can reach it. Re-exported here so existing
 # `from komira_fs.local_fs import ShallowDirEntry` callers are unbroken.
+from komira_fs.local_fs_probe import (
+    _fs_enoent,
+    _fs_errno_label,
+    _local_fs_is_directory,
+    _local_fs_path_exists,
+)
 from komira_fs.shallow_dir_entry import ShallowDirEntry
 from komira_async.ops.waker_sink import WakerSink
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
@@ -127,71 +133,18 @@ def _local_fs_fileno(fp: Int64) -> Int32:
     return external_call["fileno", Int32](fp)
 
 
-# stat(2) buffer shape — we only need st_mode + st_size. The exact layout
-# of `struct stat` is platform-dependent (Linux x86_64: 144 bytes; macOS
-# arm64: 144 bytes; both put st_mode at a low offset and st_size at a
-# similar position but with different paddings). To stay robust across
-# Linux and macOS without parsing the struct, we use stat's POSIX-mandated
-# semantics through two narrower probes:
-#   - is_dir: open() the path; if open fails with EISDIR (Linux) we know
-#     it's a directory; on macOS open() of a directory is allowed but
-#     fileno gives a non-regular fd. The most portable shape is to use
-#     opendir() — if it succeeds, the path is a directory; if it fails,
-#     it's not. Pair with fopen() success to disambiguate "exists but not
-#     a directory" vs "doesn't exist".
+# `struct stat` is platform-dependent, so Mojo never parses it:
+#   - is_dir / exists: `local_fs_probe.mojo` asks the C shim
+#     (`komira_fs_path_kind`) for a kind or the errno; only ENOENT is absent.
 #   - file_size: fopen+SEEK_END is robust on both OSes (matches the
 #     ParquetFileReader.open shape).
-
-
-def _local_fs_is_directory(var path: String) -> Int:
-    """Return 1 if `path` is a directory, 0 if it's a regular file
-    (or another non-directory entity), -1 on error.
-
-    Uses opendir(3) — if it returns non-NULL, the path is a directory.
-    Otherwise we probe with fopen("rb") to decide between "regular file"
-    (returns 0) and "non-existent" (returns -1).
-    """
-    var c_path = path.as_c_string_slice().unsafe_ptr()
-    var dp = external_call["opendir", Int64](c_path)
-    if dp != 0:
-        _ = external_call["closedir", Int32](dp)
-        return 1
-    # Not a directory; probe with fopen to disambiguate file-vs-missing.
-    var mode_str = String("rb")
-    var c_mode = mode_str.as_c_string_slice().unsafe_ptr()
-    var fp = external_call["fopen", Int64](c_path, c_mode)
-    if fp == 0:
-        return -1
-    _ = external_call["fclose", Int32](fp)
-    return 0
-
-
-def _local_fs_path_exists(var path: String) -> Bool:
-    """Return True iff `path` names an existing filesystem entry (file OR
-    directory). Used by `LocalFs.delete` to disambiguate a `remove(3)`
-    failure between ENOENT (tolerated) and a real error (raised).
-
-    Probes opendir first (directories), then fopen (regular files).
-    """
-    var c_path = path.as_c_string_slice().unsafe_ptr()
-    var dp = external_call["opendir", Int64](c_path)
-    if dp != 0:
-        _ = external_call["closedir", Int32](dp)
-        return True
-    var mode_str = String("rb")
-    var c_mode = mode_str.as_c_string_slice().unsafe_ptr()
-    var fp = external_call["fopen", Int64](c_path, c_mode)
-    if fp != 0:
-        _ = external_call["fclose", Int32](fp)
-        return True
-    return False
 
 
 def _local_fs_remove(var path: String) -> Int32:
     """libc `remove(3)` on `path`. Returns the raw rc (0 on success,
     non-zero on failure). The caller (`LocalFs.delete`) disambiguates a
-    non-zero rc via `_local_fs_path_exists` to stay ENOENT-tolerant
-    without relying on errno being surfaced across the FFI boundary.
+    non-zero rc via `_local_fs_path_exists` (an lstat probe whose errno IS
+    surfaced: only ENOENT reads as "gone", any other probe failure raises).
 
     SAFETY: `path` is held alive across the synchronous syscall by the
     `var` parameter; `as_c_string_slice()` returns a NUL-terminated
@@ -230,8 +183,14 @@ def _local_fs_list_recursive(var root: String) raises -> List[String]:
         Owned absolute file paths under `root` (UNSORTED; the caller — the
         discovery layer — sorts lexically).
 
+    Returns an EMPTY list iff `root` itself does not exist (ENOENT).
+
     Raises:
-        On a hard walk failure (allocation failure inside the shim).
+        On any other failure, naming the path that failed and its errno: an
+        opendir / readdir / lstat failure of the root OR of any entry below it
+        (an unreadable subdirectory is NOT skipped; skipping it would drop its
+        files from the listing silently), or an allocation failure (ENOMEM).
+        An entry removed mid-walk (ENOENT below the root) is skipped.
     """
     # Out-param slots for the C shim: an 8-byte slot for the `char*` buffer
     # pointer and an 8-byte slot for the `unsigned long` length. We hold them
@@ -240,6 +199,7 @@ def _local_fs_list_recursive(var root: String) raises -> List[String]:
     # wildcard-origin local pointer is needed.
     var buf_slot = Array[UInt8, 8](fill=UInt8(0))
     var len_slot = Array[UInt8, 8](fill=UInt8(0))
+    var err_path = Array[UInt8, 4096](fill=UInt8(0))
     var c_root = root.as_c_string_slice().unsafe_ptr()
     # SAFETY: buf_slot / len_slot are stack-local and outlive the syscall (the
     # shim writes-only and returns before this frame destroys them). The
@@ -248,12 +208,26 @@ def _local_fs_list_recursive(var root: String) raises -> List[String]:
     # `var root` parameter across the call. Single-syscall FFI carve-out.
     var buf_pp = UnsafePointer(to=buf_slot).bitcast[UInt8]()
     var len_pp = UnsafePointer(to=len_slot).bitcast[UInt8]()
+    # SAFETY: `err_path` is a stack-local 4096-byte buffer the shim writes a
+    # NUL-terminated (truncated) failing path into; it outlives the call.
+    var err_pp = UnsafePointer(to=err_path).bitcast[UInt8]()
     var rc = external_call["komira_walk_dir_recursive", Int32](
-        c_root, buf_pp, len_pp,
+        c_root, buf_pp, len_pp, err_pp, UInt64(4096),
     )
     if Int(rc) != 0:
+        if rc == _fs_enoent():
+            # ENOENT is only reported for the ROOT (the shim skips entries
+            # removed mid-walk): the root does not exist -> nothing to list.
+            return List[String]()
+        var failed = List[UInt8]()
+        var k = 0
+        while k < 4095 and err_path[k] != UInt8(0):
+            failed.append(err_path[k])
+            k += 1
         raise Error(
-            "LocalFs.list: recursive walk failed for directory: ", root
+            "LocalFs.list: recursive walk of '" + root + "' failed at '"
+            + String(StringSlice(unsafe_from_utf8=Span(failed))) + "': "
+            + _fs_errno_label(rc)
         )
     # Read the written buffer pointer + length back out of the slots. The
     # buffer is a malloc'd `char*` returned by the C shim — its address is an
@@ -321,8 +295,9 @@ def _local_fs_list_dir_shallow(var dir: String) raises -> List[ShallowDirEntry]:
     struct-offset arithmetic happens in Mojo (encapsulation rule); the only
     pointers are the FFI out-param slots, confined to this helper body.
 
-    A non-existent / unreadable `dir` yields an EMPTY list (opendir-failure is
-    treated as empty by the shim — consistent with `_local_fs_list_recursive`).
+    A non-existent `dir` (ENOENT) yields an EMPTY list. Every other failure
+    (opendir / readdir / lstat errno, ENOMEM) RAISES naming `dir` and the
+    errno: a directory that exists but cannot be read is not empty.
 
     SAFETY: `buf_slot` / `len_slot` are stack-local out-param slots the shim
     writes through; the malloc'd buffer's ownership transfers to this frame and
@@ -342,9 +317,11 @@ def _local_fs_list_dir_shallow(var dir: String) raises -> List[ShallowDirEntry]:
         c_dir, buf_pp, len_pp,
     )
     if Int(rc) != 0:
+        if rc == _fs_enoent():
+            return List[ShallowDirEntry]()
         raise Error(
-            "LocalFs.list_dir_shallow: shallow walk failed for directory: ",
-            dir,
+            "LocalFs.list_dir_shallow: listing '" + dir + "' failed: "
+            + _fs_errno_label(rc)
         )
     # SAFETY: `out_buf` is the malloc'd buffer the shim wrote into `buf_slot`.
     # It is typed with the CONCRETE origin of `buf_slot` (never a wildcard
@@ -797,10 +774,13 @@ struct LocalFs[
         metachar, which is a directory in the layouts v1 supports.)
 
         Raises:
-            On a hard walk failure (allocation failure inside the shim).
+            If `prefix` cannot be checked (any stat errno but ENOENT, e.g.
+            ENOTDIR, ELOOP, EACCES on a parent) or the walk fails (see
+            `_local_fs_list_recursive`), naming the path and the errno.
         """
-        # Only walk if `prefix` names an existing directory. opendir-based
-        # probe (reuses the is_dir helper); a non-directory prefix yields [].
+        # Only walk if `prefix` names an existing directory (stat probe). A
+        # missing (ENOENT) or non-directory prefix yields []; any other probe
+        # failure raises.
         if _local_fs_is_directory(prefix.copy()) != 1:
             return List[String]()
         return _local_fs_list_recursive(prefix.copy())
@@ -809,7 +789,8 @@ struct LocalFs[
         """SHALLOW (one-level) listing of `dir`'s immediate children —
         partition-schema probe. NOT recursive: returns only the direct children
         (each tagged dir vs file), never descending into the data leaves. A
-        non-directory / non-existent `dir` yields an empty list. See
+        non-directory / non-existent (ENOENT) `dir` yields an empty list; any
+        other failure raises naming the path and the errno. See
         `_local_fs_list_dir_shallow`."""
         if _local_fs_is_directory(dir) != 1:
             return List[ShallowDirEntry]()
@@ -1026,9 +1007,9 @@ struct LocalFs[
     def is_dir(self, path: String) raises -> Bool:
         """Sync probe — True iff `path` is a directory.
 
-        Body uses opendir/closedir for the directory probe; falls back
-        to fopen for the regular-file probe. Returns False for a regular
-        file; raises on file-not-found.
+        A stat(2) probe (symlinks followed). Returns False for an existing
+        non-directory; raises "path not found" on ENOENT, and raises naming
+        the errno on any other failure (ENOTDIR, ELOOP, EACCES, ...).
         """
         var rc = _local_fs_is_directory(path)
         if rc < 0:
@@ -1279,11 +1260,11 @@ struct LocalFs[
           3. If the path STILL EXISTS after a failing remove, the failure
              was real (EACCES, EBUSY, EIO, EISDIR-on-non-empty-dir, …) →
              raise.
+          4. If the PROBE itself fails with anything but ENOENT (ENOTDIR,
+             ELOOP, EACCES on a parent, …), the probe raises naming the
+             errno: a path that cannot be checked is not "gone".
 
-        Errno is not reliably surfaced across the Mojo FFI boundary here,
-        so we use the existence-probe disambiguation rather than reading
-        errno — this is robust across Linux + macOS and matches the
-        idempotent-unlink shape used by the spill conformers.
+        remove(3)'s own errno is not read here; the lstat probe's is.
         """
         var rc = _local_fs_remove(path)
         if Int(rc) == 0:

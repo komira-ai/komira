@@ -25,6 +25,7 @@ use crate::ir::{IrEnum, IrField, IrMessage, IrMethod, IrType, Label, ScalarKind}
 use crate::lower::{recursion_breaking_edges_under, ContainerInlining};
 use crate::overrides::AwsOverrides;
 
+mod auth;
 pub mod endpoint;
 mod json_codec;
 pub mod proto;
@@ -38,6 +39,7 @@ pub use proto::{
     AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, QUERY_PROTOCOLS, REST_PROTOCOLS,
     XML_BODY_PROTOCOLS, XML_RESPONSE_PROTOCOLS,
 };
+use auth::OperationAuth;
 use proto::{select_protocol, Binding, BodyCodec};
 
 /// Emitter options.
@@ -112,7 +114,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "10";
+pub const AWS_GENERATOR_VERSION: &str = "12";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -629,6 +631,7 @@ pub fn emit_aws_module_with_endpoints(
     }
     check_request_checksums(&lowering.facts, options)?;
     check_modeled_retryable_errors(&lowering.facts, options)?;
+    auth::check_operation_auth(&lowering.service.service, &lowering.facts, options.pure_only)?;
     if selected.protocol == AwsProtocol::RestXml {
         xml_codec::check_rest_xml_features(&lowering.facts)?;
     }
@@ -1119,6 +1122,12 @@ impl<'a> AwsEmitter<'a> {
         if fills_token {
             self.out.push_str(&format!("from {AWS_CORE} import aws_idempotency_token\n"));
         }
+        if self.sends_unsigned()? {
+            self.out.push_str(&format!(
+                "from {AWS_CORE} import (\n    send_unsigned_request,\n    \
+                 send_unsigned_request_with,\n)\n"
+            ));
+        }
         self.blank();
         self.blank();
         Ok(())
@@ -1320,12 +1329,13 @@ impl<'a> AwsEmitter<'a> {
 
         // -- copy ----------------------------------------------------------
         // An explicit copy constructor: the 1.0.0 compiler can report the
-        // synthesized one of a struct with an explicit `__deinit__` as
-        // trivial (it did for S3's `DeletedObject`: three `Optional[String]`
-        // and an `Optional[Bool]`), and `List.copy()` then copies the
-        // elements with memcpy, so two lists share each String buffer and
-        // the first one destroyed frees it under the other. A user-defined
-        // constructor is never trivial.
+        // synthesized one as trivial (it did for S3's `DeletedObject`: three
+        // `Optional[String]` and an `Optional[Bool]`; the trigger is the field
+        // order, https://github.com/modular/modular/issues/7256), and
+        // `List.copy()` then copies the elements with memcpy, so two lists
+        // share each String buffer and the first one destroyed frees it under
+        // the other. A user-defined constructor is never trivial; remove this
+        // once that issue is fixed in the pinned compiler.
         self.line("def __init__(out self, *, copy: Self):");
         self.push();
         self.line("\"\"\"Explicit, never bitwise: a List copies its elements with it.\"\"\"");
@@ -1889,8 +1899,10 @@ impl<'a> AwsEmitter<'a> {
     /// The first half of a client send: the credential, and the headers
     /// split into the content type (the substrate's own argument) and the
     /// rest, the endpoint's own first when `ruleset`.
-    fn emit_send_assembly(&mut self, ruleset: bool) {
-        self.line("var cred = self._creds_source.credentials()");
+    fn emit_send_assembly(&mut self, ruleset: bool, signed: bool) {
+        if signed {
+            self.line("var cred = self._creds_source.credentials()");
+        }
         self.line("var extra = List[Header]()");
         if ruleset {
             self.line("for _i in range(len(target.header_names)):");
@@ -1911,9 +1923,14 @@ impl<'a> AwsEmitter<'a> {
         self.push();
         self.line("# Header names are case-insensitive, and the substrate refuses an");
         self.line("# `extra` Content-Type in any case.");
-        self.line("# The substrate takes the content type as its own argument and");
-        self.line("# puts it in BOTH the signed set and the wire headers. Passing it");
-        self.line("# again here would emit it twice and break the signature.");
+        if signed {
+            self.line("# The substrate takes the content type as its own argument and");
+            self.line("# puts it in BOTH the signed set and the wire headers. Passing it");
+            self.line("# again here would emit it twice and break the signature.");
+        } else {
+            self.line("# The substrate takes the content type as its own argument and");
+            self.line("# puts it in the wire headers; passing it again would send it twice.");
+        }
         self.line("content_type = req.header_values[_i].copy()");
         self.pop();
         self.line("else:");
@@ -1923,18 +1940,24 @@ impl<'a> AwsEmitter<'a> {
         self.pop();
     }
 
-    /// The request arguments both sends pass on, after their transport
-    /// arguments: method, credential, region, service, endpoint, target,
-    /// content type, body and the other headers.
-    fn emit_send_args(&mut self, ruleset: bool, p: &str) {
+    /// The request arguments every send passes on, after their transport
+    /// arguments: method, credential and region (`signed` only), service,
+    /// endpoint, target, content type, body and the other headers.
+    fn emit_send_args(&mut self, ruleset: bool, p: &str, signed: bool) {
         self.line("req.method.copy(),");
-        self.line("cred,");
+        if signed {
+            self.line("cred,");
+        }
         if ruleset {
-            self.line("target.signing_region.copy(),");
+            if signed {
+                self.line("target.signing_region.copy(),");
+            }
             self.line("target.signing_name.copy(),");
             self.line("target.endpoint.copy(),");
         } else {
-            self.line("self._region.copy(),");
+            if signed {
+                self.line("self._region.copy(),");
+            }
             self.line(&format!("String({p}_SERVICE),"));
             self.line(&format!(
                 "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
@@ -1996,6 +2019,22 @@ impl<'a> AwsEmitter<'a> {
         Ok(false)
     }
 
+    /// Whether a client verb sends unsigned ([`auth::operation_auth`]),
+    /// and so whether the client has `send_unsigned` and the module imports
+    /// the core's unsigned send. A pure-mode module has no verb.
+    fn sends_unsigned(&self) -> Result<bool, String> {
+        if self.options.pure_only {
+            return Ok(false);
+        }
+        for m in &self.lowering.model.files[0].services[0].methods {
+            let facts = self.facts.operation_by_ir_method(&m.name)?;
+            if auth::operation_auth(&self.meta.service, facts)? == OperationAuth::Anonymous {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// An operation's request, and with a ruleset the target it resolves
     /// to: `req` and `target`, as both of its verbs send them. A client
     /// verb builds and resolves from a copy of its input whose unset
@@ -2035,11 +2074,17 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_client(&mut self) -> Result<(), String> {
-        let (svc_name, methods) = {
-            let svc = &self.lowering.model.files[0].services[0];
-            (svc.name.clone(), svc.methods.clone())
-        };
-        let cls = format!("{}Client", self.ty_name(&svc_name));
+        let methods = self.lowering.model.files[0].services[0].methods.clone();
+        // The prefix alone names the service: it is the serviceId, which the
+        // IR service name repeats, so `ty_name` of that name would carry it
+        // twice.
+        let cls = format!("{}Client", self.prefix);
+        if self.structs.contains(&cls) {
+            return Err(format!(
+                "emit_aws: REFUSED client-name: the model has a shape named `Client`, \
+                 emitted as `{cls}`, which is the client's own name"
+            ));
+        }
         self.parameterised.push(cls.clone());
         let p = self.prefix.to_uppercase();
 
@@ -2194,13 +2239,13 @@ impl<'a> AwsEmitter<'a> {
         for l in &doc {
             self.line(l);
         }
-        self.emit_send_assembly(ruleset);
+        self.emit_send_assembly(ruleset, true);
         self.line("return send_sigv4_signed_request[Self.C](");
         self.push();
         self.line("self._mk_connector,");
         self.line("self._http_config.copy(),");
         self.line("self._retry_quota,");
-        self.emit_send_args(ruleset, &p);
+        self.emit_send_args(ruleset, &p, true);
         if self.options.s3 {
             self.line("s3_200_error=s3_200_error,");
         }
@@ -2234,14 +2279,14 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
         self.line("    A request carrying `If-Match` or `If-None-Match` is resent only");
         self.line("    when the service cannot have acted on it (`aws_request_is_conditional`).\"\"\"");
-        self.emit_send_assembly(ruleset);
+        self.emit_send_assembly(ruleset, true);
         self.line("return send_sigv4_signed_request_with(");
         self.push();
         self.line("transport,");
         self.line("clock,");
         self.line("retry,");
         self.line("budget,");
-        self.emit_send_args(ruleset, &p);
+        self.emit_send_args(ruleset, &p, true);
         if self.options.s3 {
             self.line("s3_200_error=s3_200_error,");
         }
@@ -2249,6 +2294,11 @@ impl<'a> AwsEmitter<'a> {
         self.line(")");
         self.pop();
         self.blank();
+
+        let unsigned = self.sends_unsigned()?;
+        if unsigned {
+            self.emit_unsigned_sends(ruleset, &p, s3_flag);
+        }
 
         // -- per-operation verbs ------------------------------------------
         for m in &methods {
@@ -2301,11 +2351,17 @@ impl<'a> AwsEmitter<'a> {
             } else {
                 ""
             };
+            // The send this operation's auth names (`auth.rs`): an
+            // anonymous operation is sent unsigned.
+            let send = match auth::operation_auth(&self.meta.service, &facts)? {
+                OperationAuth::SigV4 => "send",
+                OperationAuth::Anonymous => "send_unsigned",
+            };
             self.emit_op_request(m, ruleset, &p)?;
             if ruleset {
-                self.line(&format!("var res = self.send(req^, target{s3_200})"));
+                self.line(&format!("var res = self.{send}(req^, target{s3_200})"));
             } else {
-                self.line(&format!("var res = self.send(req^{s3_200})"));
+                self.line(&format!("var res = self.{send}(req^{s3_200})"));
             }
             self.line("if not aws_is_error_status(res.status):");
             self.push();
@@ -2327,7 +2383,7 @@ impl<'a> AwsEmitter<'a> {
             ));
             self.push();
             self.line(&format!(
-                "\"\"\"`{}` over the given seams (`send_with`): the response, successful",
+                "\"\"\"`{}` over the given seams (`{send}_with`): the response, successful",
                 facts.name
             ));
             self.line(&format!(
@@ -2336,8 +2392,14 @@ impl<'a> AwsEmitter<'a> {
             ));
             self.emit_op_request(m, ruleset, &p)?;
             let tgt = if ruleset { "target, " } else { "" };
+            // The unsigned send reads no clock: nothing is signed.
+            let seam_vals = if send == "send" {
+                "transport, clock, retry, budget"
+            } else {
+                "transport, retry, budget"
+            };
             self.line(&format!(
-                "return self.send_with(req^, {tgt}transport, clock, retry, budget{s3_200})"
+                "return self.{send}_with(req^, {tgt}{seam_vals}{s3_200})"
             ));
             self.pop();
             self.blank();
@@ -2369,7 +2431,7 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("var msg = {msg_expr}"));
         self.line("return Error(");
         self.push();
-        self.line(&format!("String(\"{}.\")", self.ty_name(&svc_name)));
+        self.line(&format!("String(\"{}.\")", self.prefix));
         self.line("+ op");
         self.line("+ String(\" failed: HTTP \")");
         self.line("+ String(res.status)");
@@ -2713,6 +2775,63 @@ mod tests {
         assert!(!src.contains("List[String]"), "{src}");
         assert!(src.contains("aws_ts_to_json("), "{src}");
         assert!(src.contains("aws_ts_from_json("), "{src}");
+    }
+
+    #[test]
+    fn the_service_prefix_names_the_client_and_its_errors_once() {
+        // The type prefix is the serviceId, and so is the IR service name:
+        // the client is `<prefix>Client` and a failed call is raised as
+        // `<prefix>.<Op> failed`, never with the prefix twice.
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(
+            src.contains("\nstruct TinyClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):\n"),
+            "{src}"
+        );
+        assert!(src.contains("        String(\"Tiny.\")\n        + op\n"), "{src}");
+        assert!(!src.contains("TinyTiny"), "{src}");
+    }
+
+    #[test]
+    fn a_shape_named_client_is_refused_in_client_mode() {
+        // With the prefix applied once, a shape named `Client` would be
+        // emitted under the client's own name.
+        let model = crate::json::parse(
+            r#"{"version": "2.0",
+                "metadata": {"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"},
+                "operations": {"Op": {"name": "Op",
+                    "http": {"method": "POST", "requestUri": "/"},
+                    "input": {"shape": "In"}}},
+                "shapes": {"In": {"type": "structure",
+                                  "members": {"C": {"shape": "Client"}}},
+                           "Client": {"type": "structure",
+                                      "members": {"Id": {"shape": "Str"}}},
+                           "Str": {"type": "string"}}}"#,
+        )
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let emit = |pure_only| {
+            let options = AwsEmitOptions {
+                omit_preamble: true,
+                pure_only,
+                ..AwsEmitOptions::default()
+            };
+            emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, None)
+        };
+        let e = emit(false).err().expect("refused");
+        assert!(e.contains("REFUSED client-name"), "{e}");
+        assert!(e.contains("`TinyClient`"), "{e}");
+        // A pure module has no client, and so no collision.
+        assert!(emit(true).is_ok());
     }
 
     #[test]

@@ -37,6 +37,7 @@ from .error import (
     parse_grpc_status_trailers,
     parse_grpc_status_initial_headers,
     grpc_error_from_http_non_200,
+    grpc_error_for_missing_status,
     from_connect_error_envelope,
 )
 

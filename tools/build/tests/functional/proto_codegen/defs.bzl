@@ -2,9 +2,10 @@
 
 `proto_codegen_golden` runs protoc with the toolchain's protoc-gen-mojo (or
 protoc-gen-mojo-db, `plugin = "mojo-db"`) over a
-`.proto` corpus with one option string, then checks the result in a second
-action whose output is the target's default output, so `buck2 build` of the
-target IS the check:
+`.proto` corpus with one option string (searching `import_roots`, such as the
+pinned googleapis protos, after the corpus), then checks the result in a
+second action whose output is the target's default output, so `buck2 build`
+of the target IS the check:
 
   * with `golden`: protoc succeeded and the generated files are exactly the
     golden files (`<name>.mojo.golden` holds `<name>.mojo`), byte for byte;
@@ -40,17 +41,26 @@ PATH="$T/bin"; export PATH
 """
 
 # $1 protoc dir, $2 plugin (protoc knows it as protoc-gen-mojo, whichever
-# binary it is), $3 corpus dir, $4 output dir, $5 options; then
-# the import paths to generate. Always exits 0: the outcome is recorded in
-# the output (files/, stderr, rc) for the check action to judge.
+# binary it is), $3 corpus dir, $4 output dir, $5 options, $6 the count of
+# further import roots; then those roots, then the import paths to generate.
+# protoc searches the corpus first, then the roots in order, then its own
+# well-known types. Always exits 0: the outcome is recorded in the output
+# (files/, stderr, rc) for the check action to judge.
 _GEN = """
-PROTOC="$1"; PLUGIN="$2"; CORPUS="$3"; OUT="$4"; OPT="$5"; shift 5
+PROTOC="$1"; PLUGIN="$2"; CORPUS="$3"; OUT="$4"; OPT="$5"; N="$6"; shift 6
 case "$PLUGIN" in /*) ;; *) PLUGIN="$PWD/$PLUGIN" ;; esac
 mkdir -p "$OUT/files" "$T/tmp"
 TMPDIR="$T/tmp"; HOME="$T"; export TMPDIR HOME
+# Move the roots behind the import paths, as --proto_path flags (protoc reads
+# flags and files in any order; the search order is the flags' order).
+while [ "$N" -gt 0 ]; do
+    r="$1"; shift
+    set -- "$@" "--proto_path=$r"
+    N=$((N - 1))
+done
 rc=0
-"$PROTOC/bin/protoc" "--proto_path=$CORPUS" "--proto_path=$PROTOC/include" \\
-    "--plugin=protoc-gen-mojo=$PLUGIN" "--mojo_out=$OUT/files" "--mojo_opt=$OPT" "$@" \\
+"$PROTOC/bin/protoc" "--proto_path=$CORPUS" "$@" "--proto_path=$PROTOC/include" \\
+    "--plugin=protoc-gen-mojo=$PLUGIN" "--mojo_out=$OUT/files" "--mojo_opt=$OPT" \\
     2> "$OUT/stderr" || rc=$?
 echo "$rc" > "$OUT/rc"
 rm -rf "$T"
@@ -143,6 +153,8 @@ def _proto_codegen_golden_impl(ctx):
             corpus,
             gen.as_output(),
             ctx.attrs.options,
+            str(len(ctx.attrs.import_roots)),
+            ctx.attrs.import_roots,
             ctx.attrs.generate,
         ),
         category = "proto_codegen_gen",
@@ -192,6 +204,10 @@ proto_codegen_golden_rule = rule(
         # Import paths (below corpus/) to generate.
         "generate": attrs.list(attrs.string()),
         "golden": attrs.list(attrs.source(), default = []),
+        # Directories protoc searches after the corpus, in order, each holding
+        # .proto files at their import paths: the pinned googleapis protos a
+        # REST fixture imports (//tools/vendor/googleapis:api_client[tree]).
+        "import_roots": attrs.list(attrs.source(allow_directory = True), default = []),
         # The `--mojo_opt` string, as the Mojo proto rules pass it.
         "options": attrs.string(),
         # The plugin run: protoc-gen-mojo (`mojo`) or protoc-gen-mojo-db

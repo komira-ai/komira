@@ -28,6 +28,7 @@ mojo_library(
         "tests/test_acc_variant_trait_conformance.mojo",
         "tests/test_accumulator_set.mojo",
         "tests/test_accumulator_trait.mojo",
+        "tests/test_agg_fn_acc_null_partition_laws.mojo",
         "tests/test_agg_fn_kernel_fanout.mojo",
         "tests/test_agg_fn_podstate_gate.mojo",
         "tests/test_agg_fn_simd_bridge.mojo",

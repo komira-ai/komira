@@ -308,14 +308,19 @@ def base64_decode_standard(s: String) raises -> List[UInt8]:
 
     ⚠ The alphabet is STANDARD base64 (`+` and `/`), NOT base64url.
     """
+    # `s` is a peer's header value and may hold any byte: it is read through
+    # `as_bytes()` here and in `_b64_decode_segment_into`. (Indexing
+    # `s[byte=i]` asserts on a UTF-8 continuation byte and aborts the
+    # process.) A non-ASCII byte is outside the alphabet and raises.
     var out = List[UInt8]()
-    var n = s.byte_length()
+    var bytes = s.as_bytes()
+    var n = len(bytes)
     if n == 0:
         return out^
     var seg_start = 0
     var i = 0
     while i <= n:
-        if i == n or ord(s[byte=i]) == ord(","):
+        if i == n or bytes[i] == UInt8(ord(",")):
             _b64_decode_segment_into(s, seg_start, i, out)
             seg_start = i + 1
         i = i + 1
@@ -332,14 +337,15 @@ def _b64_decode_segment_into(
     skipped — a header joiner writes `", "`, not `","`.
     """
     # Trim optional whitespace (OWS) on both ends of the segment.
+    var bytes = s.as_bytes()
     var lo = start
     var hi = end
     while lo < hi and (
-        ord(s[byte=lo]) == ord(" ") or ord(s[byte=lo]) == ord("\t")
+        bytes[lo] == UInt8(ord(" ")) or bytes[lo] == UInt8(ord("\t"))
     ):
         lo = lo + 1
     while hi > lo and (
-        ord(s[byte = hi - 1]) == ord(" ") or ord(s[byte = hi - 1]) == ord("\t")
+        bytes[hi - 1] == UInt8(ord(" ")) or bytes[hi - 1] == UInt8(ord("\t"))
     ):
         hi = hi - 1
     if lo >= hi:
@@ -358,7 +364,7 @@ def _b64_decode_segment_into(
     var i = lo
     var pad = 0
     while i < hi:
-        var b = ord(s[byte=i])
+        var b = Int(bytes[i])
         if b == ord("="):
             pad = pad + 1
             if pad > 2:
@@ -460,14 +466,17 @@ def _validate_metadata_key(name: String) raises:
     refusing). Refusing it here would break callers over a spelling that
     cannot reach the wire wrong.
     """
-    var n = name.byte_length()
+    # Read through `as_bytes()`: a non-ASCII byte is refused below, never an
+    # abort (indexing `name[byte=i]` asserts on a UTF-8 continuation byte).
+    var bytes = name.as_bytes()
+    var n = len(bytes)
     if n == 0:
         raise Error(
             "komira_grpc.metadata: empty metadata key -- Header-Name is"
             " 1*( 0-9 / a-z / '_' / '-' / '.' ), one or more"
         )
     for i in range(n):
-        var b = ord(name[byte=i])
+        var b = Int(bytes[i])
         var is_digit = b >= ord("0") and b <= ord("9")
         var is_lower = b >= ord("a") and b <= ord("z")
         var is_upper = b >= ord("A") and b <= ord("Z")
@@ -497,9 +506,12 @@ def _validate_metadata_value(value: String) raises:
     EMPTY value is likewise allowed — HTTP/2 permits one and callers rely on
     it.
     """
-    var n = value.byte_length()
+    # Read through `as_bytes()`: the bytes >= 0x80 tolerated above are UTF-8
+    # continuation bytes, and indexing `value[byte=i]` asserts on one.
+    var bytes = value.as_bytes()
+    var n = len(bytes)
     for i in range(n):
-        var b = ord(value[byte=i])
+        var b = Int(bytes[i])
         if b < 0x20 or b == 0x7F:
             raise Error(
                 "komira_grpc.metadata: control byte "

@@ -1,0 +1,5 @@
+# The machine file of test_kci_process: paths are relative to the directory
+# kci is started in, where the test copies these fixtures.
+schema_version: 1
+stage { name: "build" step { name: "build" kind: BUILD platform: "linux-x86_64" artifacts: "artifacts.textproto" } }
+stage { name: "publish-prod" environment: "prod" step { name: "publish" kind: PUBLISH platform: "linux-x86_64" artifacts: "artifacts.textproto" channels: "channels.textproto" channel: "example-private" } }

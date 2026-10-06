@@ -41,11 +41,13 @@
 # a limit, or a page with `executionErrors` sets `truncated`. Points arrive
 # newest first, so at the point limit a series keeps its NEWEST points.
 #
-# The connector and the token source are type parameters: production binds a
-# TLS connector and a komira_gcp_core token source; the tests bind
-# komira_http_core's ScriptedConnector and a static token. A non-2xx answer
-# raises through komira_gcp_core's `gcp_status_error`, which never quotes the
-# body.
+# Each call goes through komira_gcp_monitoring_client's generated
+# `MetricServiceClient.list_time_series`: time_series_list.mojo builds its
+# request and reads its response. The connector and the token source are
+# type parameters: production binds a TLS connector and a komira_gcp_core
+# token source; the tests bind komira_http_core's ScriptedConnector and a
+# static token. A non-2xx answer raises through komira_gcp_core's
+# `gcp_status_error`, which never quotes the body.
 #
 # Encapsulation: value types and owned type parameters. No pointer. Reads no
 # environment.
@@ -53,11 +55,9 @@
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_gcp_core import GcpTokenSource, gcp_status_error
-from komira_http_client.body import EmptyBody
-from komira_http_client.client import HttpClient, build_get_request
-from komira_http_client.header_map import HeaderMap
-from komira_http_client.url import Url
+from komira_gcp_core import GcpTokenSource
+from komira_gcp_monitoring_client.metric_service import MetricServiceClient
+from komira_http_client.client import HttpClient
 from komira_http_core.transport.io_stream import Connector
 from komira_metrics_reader import (
     MetricsLabel,
@@ -70,19 +70,18 @@ from komira_metrics_reader import (
 
 from komira_gcp_monitoring.time_series_list import (
     LIST_TIME_SERIES_MAX_PAGE_SIZE,
-    LIST_TIME_SERIES_RPC,
     MONITORING_DEFAULT_HOST,
     MONITORING_MIN_ALIGNMENT_S,
     RESOURCE_LABEL_PREFIX,
     MonitoringSeries,
+    TimeSeriesListPage,
     TimeSeriesListRequest,
     group_by_field,
     label_key_refusal,
+    list_time_series_request,
     monitoring_filter,
-    parse_time_series_list_response,
-    rfc3339_of_ns,
-    time_series_list_path,
-    time_series_list_query,
+    time_series_list_name,
+    time_series_list_page,
 )
 
 
@@ -133,12 +132,9 @@ struct CloudMonitoringMetricsReader[C: Connector, T: GcpTokenSource](
     header). It starts at `monitoring.googleapis.com` over TLS;
     `set_host` points it elsewhere."""
 
-    var _client: HttpClient[Self.C]
-    var _tokens: Self.T
+    var _client: MetricServiceClient[Self.C, Self.T]
     var _project: String
     var _host: String
-    var _port: UInt16
-    var _plaintext: Bool
     var _max_pages: Int
     var _rt: BlockingRuntime[NoopSink]
 
@@ -149,13 +145,10 @@ struct CloudMonitoringMetricsReader[C: Connector, T: GcpTokenSource](
         the serving ceiling in a process that has one); `tokens` supplies
         each request's bearer token; `project` is the project id or number
         every read addresses."""
-        _ = time_series_list_path(project)
-        self._client = client^
-        self._tokens = tokens^
+        _ = time_series_list_name(project)
+        self._client = MetricServiceClient[Self.C, Self.T](client^, tokens^)
         self._project = project.copy()
         self._host = String(MONITORING_DEFAULT_HOST)
-        self._port = UInt16(443)
-        self._plaintext = False
         self._max_pages = MONITORING_DEFAULT_MAX_PAGES
         self._rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
 
@@ -164,8 +157,7 @@ struct CloudMonitoringMetricsReader[C: Connector, T: GcpTokenSource](
         `plaintext` is for a local test endpoint only; the bearer token is
         sent either way."""
         self._host = host.copy()
-        self._port = UInt16(port)
-        self._plaintext = plaintext
+        self._client.set_rest_endpoint(host.copy(), UInt16(port), plaintext)
 
     def host(self) -> String:
         """The host each read is sent to."""
@@ -224,8 +216,8 @@ struct CloudMonitoringMetricsReader[C: Connector, T: GcpTokenSource](
         var req = TimeSeriesListRequest(
             self._project.copy(),
             monitoring_filter(q.metric, q.matchers),
-            rfc3339_of_ns(start),
-            rfc3339_of_ns(q.end_ns),
+            start,
+            q.end_ns,
             Int(q.step_ms // Int64(1000)) if aligner.byte_length() > 0 else 0,
             aligner,
             monitoring_reducer(q),
@@ -239,9 +231,8 @@ struct CloudMonitoringMetricsReader[C: Connector, T: GcpTokenSource](
         var truncated = False
         var calls = 0
         while True:
-            var body = self._list(req)
+            var page = self._list(req)
             calls += 1
-            var page = parse_time_series_list_response(body)
             if page.execution_errors > 0:
                 truncated = True
             for i in range(len(page.series)):
@@ -278,32 +269,15 @@ struct CloudMonitoringMetricsReader[C: Connector, T: GcpTokenSource](
                 out[i].samples = kept^
         return MetricsPage(out^, truncated, calls)
 
-    def _list(mut self, req: TimeSeriesListRequest) raises -> String:
-        """One GET; the body of a 2xx answer, else the raised status."""
-        var path = time_series_list_path(req.project)
-        var url: Url
-        if self._plaintext:
-            url = Url.http(self._host.copy(), self._port, path^)
-        else:
-            url = Url.https(self._host.copy(), self._port, path^)
-        url.query = time_series_list_query(req)
-        var headers = HeaderMap()
-        headers.append(
-            String("Authorization"),
-            String("Bearer ") + self._tokens.access_token(),
-        )
-        var http_req = build_get_request(url^, headers^)
+    def _list(mut self, req: TimeSeriesListRequest) raises -> TimeSeriesListPage:
+        """One GET through the generated client; the page of a 2xx answer,
+        else the raised status."""
+        var call = list_time_series_request(req)
         ref reactor = self._rt.reactor()
-        var resp = self._client.send_buffered[BlockingRuntime[NoopSink], EmptyBody](
-            http_req^, reactor
+        var resp = self._client.list_time_series[BlockingRuntime[NoopSink]](
+            call, reactor
         )
-        var status = Int(resp.status)
-        var bytes = resp.body.take_bytes()
-        if status < 200 or status >= 300:
-            raise gcp_status_error(
-                String("GET"), String(LIST_TIME_SERIES_RPC), status, bytes
-            )
-        return String(unsafe_from_utf8=Span(bytes))
+        return time_series_list_page(resp)
 
 
 def _resource_keys_named(q: MetricsQuery) -> List[String]:

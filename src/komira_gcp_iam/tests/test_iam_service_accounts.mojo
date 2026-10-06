@@ -14,10 +14,10 @@
 # email is percent-encoded in the path, which the API reads as the same
 # name.
 #
-# As in komira_gcp_logging's request tests, the default-valued keys of a
-# body (`"name":""`, `"disabled":false`, ...) are komira_proto_codec's
-# JsonEncoder writing defaults, not the API: the server reads each as the
-# field left unset. Every client here is pointed at `localhost` so no test
+# A body holds only the fields the caller set: a plain field left at its
+# default (`name`, `disabled`, ...) is omitted, as the proto3 JSON mapping
+# omits it, and the server reads it as unset. Every client here is pointed
+# at `localhost` so no test
 # needs DNS; that a fresh client starts at iam.googleapis.com is
 # test_iam_default_host's.
 from std.memory import ArcPointer
@@ -245,9 +245,8 @@ def test_create() raises:
     assert_equal(
         _body(wire),
         '{"accountId":"runner",'
-        + '"serviceAccount":{"name":"","projectId":"","uniqueId":"","email":"",'
-        + '"displayName":"Runner","etag":"","description":"runs the nightly jobs",'
-        + '"oauth2ClientId":"","disabled":false}}',
+        + '"serviceAccount":{"displayName":"Runner",'
+        + '"description":"runs the nightly jobs"}}',
     )
     assert_equal(_header(wire, "content-length"), String(_body(wire).byte_length()))
     assert_equal(created.name, _NAME)

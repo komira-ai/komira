@@ -802,6 +802,29 @@ def test_wkt_refusals_name_the_json_path() raises:
     assert_equal(encode_json[StampMapLike](decode_json[StampMapLike](good)), good)
 
 
+def test_float_value_is_float32() raises:
+    """A FloatValue field prints the shortest FLOAT32 decimal (0.1, not the
+    float64 expansion 0.10000000149011612), the spec's non-finite strings,
+    and refuses a value past float32 max instead of reading it as
+    Infinity. Same rules as a plain `float` field."""
+    var m = AllWktLike.new()
+    m.f32 = FloatValue(Float32(0.1))
+    assert_equal(encode_json[AllWktLike](m), String('{"f32":0.1}'))
+    var back = decode_json[AllWktLike](String('{"f32":0.1}'))
+    assert_equal(back.f32.value().value, Float32(0.1))
+    var big = Float32(1.0e30) * Float32(1.0e30)
+    m.f32 = FloatValue(-big)
+    assert_equal(encode_json[AllWktLike](m), String('{"f32":"-Infinity"}'))
+    m.f32 = FloatValue(big - big)
+    assert_equal(encode_json[AllWktLike](m), String('{"f32":"NaN"}'))
+    var max_back = decode_json[AllWktLike](String('{"f32":3.4028235e38}'))
+    assert_true(max_back.f32.value().value < big)
+    with assert_raises(contains="out of float32 range"):
+        _ = decode_json[AllWktLike](String('{"f32":3.4028236e38}'))
+    with assert_raises(contains="out of float32 range"):
+        _ = decode_json[AllWktLike](String('{"f32":"-3.4028236e38"}'))
+
+
 def main() raises:
     test_logentry_encode_json_is_canonical()
     test_logentry_decode_json_roundtrip()
@@ -809,6 +832,7 @@ def main() raises:
     test_server_shaped_logging_response()
     test_all_wkt_json_forms()
     test_wrapper_json_accepts_spec_spellings()
+    test_float_value_is_float32()
     test_any_json_and_binary()
     test_timestamp_json_refusals()
     test_duration_json_refusals()

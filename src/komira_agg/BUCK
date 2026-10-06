@@ -10,6 +10,7 @@ mojo_library(
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
+        "tests/test_agg_combine_laws.mojo",
         "tests/test_agg_fn_agg.mojo",
         "tests/test_minmax_float_nan_order_independence.mojo",
         "tests/test_typed_col_corr_kerneldirect.mojo",

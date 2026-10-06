@@ -16,7 +16,7 @@ from komira_gcp_monitoring import (
     MONITORING_MIN_ALIGNMENT_S,
     monitoring_aligner,
     monitoring_reducer,
-    time_series_list_path,
+    time_series_list_name,
 )
 from komira_metrics_reader import MetricsAggregation, MetricsMatcher, MetricsQuery
 
@@ -54,7 +54,7 @@ def test_service() raises:
         in svc
     )
     assert_true('get: "/v3/{name=projects/*}/timeSeries"' in svc)
-    assert_equal(time_series_list_path(String("p-1")), String("/v3/projects/p-1/timeSeries"))
+    assert_equal(time_series_list_name(String("p-1")), String("projects/p-1"))
     var flat = _flat(_SERVICE)
     assert_equal(LIST_TIME_SERIES_MAX_PAGE_SIZE, 100_000)
     assert_true(
