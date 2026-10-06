@@ -1,0 +1,8 @@
+# The ledger of the test_weld lint (//:test_weld, tools/build/lint/test_weld.bzl): the test files
+# no target welds and the packages with code that weld no test, each with its reason.
+# One row each: <path> TAB <reason>. It only shrinks: the lint fails on a row whose test
+# is welded, or whose package welds a test, so the change that welds it deletes the row.
+src/komira_arrow_ipc/tests/test_large_writes.mojo	on-demand check of writes over 2 GiB, a mojo_binary run by hand (buck2 run :large_writes_check), not a gated test: it needs several GiB of free disk and minutes of I/O (BUCK)
+src/komira_core/tests/test_large_writes.mojo	on-demand check of writes over 2 GiB, a mojo_binary run by hand (buck2 run :large_writes_check), not a gated test: it needs several GiB of free disk and minutes of I/O (BUCK)
+src/komira_job_supervisor/tests/e2e/test_job_supervisor_s3_e2e.mojo	opt-in MinIO end-to-end test, a binary run by hand with --test-minio-binary; under the build it would SKIP (exit 77), which reads as a failure (BUCK)
+src/komira_job_supervisor/tests/e2e/test_job_supervisor_stream_logs_e2e.mojo	opt-in MinIO end-to-end test, a binary run by hand with --test-minio-binary; under the build it would SKIP (exit 77), which reads as a failure (BUCK)

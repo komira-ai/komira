@@ -32,8 +32,8 @@
 #   A. unary Echo over classic gRPC: the echo bytes come back through
 #      `GrpcClient.unary_call`.
 #   B. a failing handler: `[grpc:9]` FAILED_PRECONDITION reaches the caller
-#      with its message intact; the message carries a literal `%` and a TAB,
-#      so it round-trips through percent-encoding.
+#      with its message intact; the message carries non-ASCII text, a
+#      literal `%` and a TAB, so it round-trips through percent-encoding.
 #   C. the server stays usable: Echo again with the same client.
 #   D. server streaming: N messages arrive in order.
 #   E. unary Echo and the failing handler over Connect (application/json),
@@ -50,16 +50,6 @@
 #      (the GrpcClient takes the code from the body, so only this sub-leg
 #      pins the server's status-to-HTTP table on the wire).
 #   G. the server's own counter: exactly one response per RPC sent.
-#
-# NOT COVERED: a NON-ASCII error message. A handler raising
-# `format_connect_error(code, "caf\u00e9 ...")` aborts the whole server process
-# (SIGILL) in `komira_connect.status.parse_connect_error`, which reads the
-# message with `text[byte=i]` one byte at a time: in Mojo 1.0 that index must
-# lie on a code point boundary, and the first UTF-8 continuation byte fails
-# the assertion. `grpc_percent_encode_message` and the Connect-JSON error
-# escaper read their input the same way. Restoring the non-ASCII message in
-# `_FAIL_TEXT` (wire form "caf%C3%A9 %E2%80%94 100%25 sure") is the test of
-# that fix.
 #
 # NOT COVERED: `grpc-timeout`. No layer honours it today: the server's
 # `GrpcDispatch` seam receives (path, content-type, body) and no headers, and
@@ -164,18 +154,18 @@ comptime _ECHO = "/komira.e2e.v1.Probe/Echo"
 comptime _FAIL = "/komira.e2e.v1.Probe/Fail"
 comptime _COUNT = "/komira.e2e.v1.Probe/Count"
 
-# The failing handler's message: a literal percent sign and a control byte
-# (TAB), the two cases of the gRPC percent-encoding an ASCII message can hold.
-# ASCII ON PURPOSE: a non-ASCII message aborts the server today (see the
-# header, NOT COVERED).
-comptime _FAIL_TEXT = "100% sure\tor not"
-# Its percent-encoding per the gRPC HTTP/2 spec, written out by hand: bytes
-# outside 0x20..0x7e and `%` itself become `%XX`.
-comptime _FAIL_TEXT_WIRE = "100%25 sure%09or not"
+# The failing handler's message: non-ASCII text (U+00E9, two UTF-8 bytes, and
+# U+2014, three), a literal percent sign and a control byte (TAB): every case
+# of the gRPC percent-encoding. Before the non-ASCII fix in komira_connect and
+# komira_grpc, this message aborted the server process.
+comptime _FAIL_TEXT = "café — 100% sure\tor not"
+# Its percent-encoding per the gRPC HTTP/2 spec, written out by hand: each
+# UTF-8 byte outside 0x20..0x7e and `%` itself become `%XX`.
+comptime _FAIL_TEXT_WIRE = "caf%C3%A9 %E2%80%94 100%25 sure%09or not"
 
 # The Connect-JSON error body for it, written out by hand: the Connect name
-# of code 9 and the message with its TAB as the JSON escape `\t`.
-comptime _FAIL_JSON_WIRE = '{"code":"failed_precondition","message":"100% sure\\tor not"}'
+# of code 9 and the message as raw UTF-8 with its TAB as the JSON escape `\t`.
+comptime _FAIL_JSON_WIRE = '{"code":"failed_precondition","message":"café — 100% sure\\tor not"}'
 
 comptime _STREAM_N = 12
 
@@ -688,7 +678,8 @@ struct _AllLegs(_ClientLeg):
 
         # F5. Connect-JSON failure: the Connect HTTP status for
         # FAILED_PRECONDITION is 400, the body is the JSON error envelope
-        # (TAB escaped as `\t`), and there is no trailer block.
+        # (non-ASCII as raw UTF-8, TAB escaped as `\t`), and there is no
+        # trailer block.
         var e = _raw_send(
             http,
             self.port,

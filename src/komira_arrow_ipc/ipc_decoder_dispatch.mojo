@@ -4247,20 +4247,17 @@ def decode_record_batch_message_mmap(
             continue
 
         # DICTIONARY: requires dict-aware decode (SDK-layer dispatch).
-        if t == ArrowType.DICTIONARY:
-            raise Error(
-                "decode_record_batch_message_mmap: DICTIONARY columns"
-                + " require dict-aware decode. Caller should use the"
-                + " copy-on-read dict-aware dispatch instead of the"
-                + " mmap path for files containing dict-encoded columns."
-            )
-
+        # The count pass in step 4 is the type guard for this loop:
+        # _node_count_for and _buffer_count_for raise for every type
+        # outside NULL, the fixed-width types, BOOL, the four var-len
+        # types and DICTIONARY. The arms above take all of those but
+        # DICTIONARY, so DICTIONARY is the only type that reaches here.
+        # A type admitted by the count pass needs its own arm above.
         raise Error(
-            "decode_record_batch_message_mmap: ArrowType "
-            + String(Int(t.type_id))
-            + " not supported in the mmap path (primitives + temporal +"
-            + " decimal + bool + var-len are supported; nested types are"
-            + " not)"
+            "decode_record_batch_message_mmap: DICTIONARY columns"
+            + " require dict-aware decode. Caller should use the"
+            + " copy-on-read dict-aware dispatch instead of the"
+            + " mmap path for files containing dict-encoded columns."
         )
 
     # rb_frame is dropped here; its mmap keepalive is independent of the

@@ -87,8 +87,10 @@
 #
 # THE COMMANDS. `derive_checks` (release/ci/derive_checks.py) answers the
 # derived checks, above. `build_targets` (release/ci/build_targets.sh) builds
-# a unit's targets, then runs `buck2 test` over the ones in this cell, as
-# `./buck2 test //...` does. `affected` runs //tools/build/ci:affected
+# a unit's targets, then checks each test_weld lint among them with its BXL
+# script (tools/build/lint/test_weld.bzl says why that is not a build
+# validation; a finding fails the unit), then runs `buck2 test` over the
+# targets in this cell, as `./buck2 test //...` does. `affected` runs //tools/build/ci:affected
 # (tools/build/ci/affected.mojo) over the change's files, with the base commit
 # for the files the change deleted: the units whose targets the change reaches
 # (UNIT lines, then AFFECTED <n>), or WIDENED, every unit, for a file it cannot

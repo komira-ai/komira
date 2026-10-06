@@ -40,7 +40,8 @@ struct ListLogEntriesResponse(Serializable, Copyable, Movable):
         for i in range(len(self.entries)):
             enc.write_message_element[LogEntry](1, self.entries[i])
         enc.end_list_field()
-        enc.write_string_field(2, "nextPageToken", self.next_page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.next_page_token.byte_length() > 0:
+            enc.write_string_field(2, "nextPageToken", self.next_page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:

@@ -53,6 +53,7 @@ mojo_library(
         "tests/test_local_fs_conditional_store.mojo",
         "tests/test_local_fs_read_errno.mojo",
         "tests/test_local_fs_store_list_bytes_non_ascii.mojo",
+        "tests/test_local_fs_store_list_dir_errno.mojo",
         "tests/test_objectstore_bytes_non_ascii.mojo",
         "tests/test_path_uri.mojo",
         "tests/test_sharded_lineage_kernel.mojo",

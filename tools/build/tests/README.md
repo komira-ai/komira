@@ -856,6 +856,56 @@ the same README in a library with `conda = False`, builds.
 ./buck2 build tests//negative/readme_examples/relative_link:relative_link   # must fail: README.md:11: greet.mojo: a relative link
 ```
 
+## 39. Test welding
+
+A test file that no target welds never runs, and nothing else notices.
+[`test_weld`](../lint/test_weld.bzl) is a lint over the packages under
+`src/` (each directory directly under it). It requires every `test_*.mojo`
+under a `tests/` directory to be welded, and every package with a `.mojo`
+source to weld a test. What is welded is read from the build graph, not from
+the text of a BUCK file: the `test_srcs` of every `mojo_library` and the
+`main` of every `mojo_test` under `src/` (its binary runs `main` only), as the
+rules received them. A query of the graph gives the targets; each rule gives
+its test files in a `WeldedTestsInfo` ([`providers.bzl`](../mojo/providers.bzl)),
+and Buck2 says where each file is. So a list a BUCK file computes counts entry
+by entry, an entry left in a comment does not, and an entry naming another
+package's file by label welds that file, not a same-named one.
+The exceptions are the rows of
+[`tests/known_untested.tsv`](../../../tests/known_untested.tsv), each with its
+reason, and that ledger only shrinks: a row whose test is welded, or whose
+package welds a test, is a finding, as is a row naming nothing. `//:test_weld`
+in the root [`BUCK`](../../../BUCK) holds the repository to them.
+
+[`functional/test_weld:ok`](functional/test_weld/BUCK) is a planted tree
+([`fixture.bzl`](functional/test_weld/fixture.bzl): a computed `test_srcs`
+list holding an entry in a comment, a helper under `tests/`, a nested test, a
+test welded by a target of its own, a package with no `.mojo`) whose ledger
+holds it exactly, and each target of
+[`negative/test_weld`](negative/test_weld/BUCK) plants one defect in the same
+tree and must fail naming it; `shrink_computed` is a ledger row for a test
+welded only by the computed list. That tree's welds come from a stand-in rule;
+[`negative/test_weld/real`](negative/test_weld/real/BUCK) runs the lint over a
+real `mojo_library` (a computed `test_srcs` with an entry in a comment and an
+entry naming another package's file by label) and a real `mojo_test` (a
+second `srcs` beside its `main`): `real:ok` holds the three unwelded files in
+its ledger and must pass, `real:red` has no row and must name exactly those
+three. Neither is built: the lint only analyses them.
+
+A rule cannot query the targets of `//src/...` (a query attribute takes
+labels only), so building a `test_weld` target checks nothing: it declares the
+lint, and [`test_weld.bxl`](../lint/test_weld.bxl) checks it, running the
+check as a build action whose inputs are the list of `.mojo` paths, the list
+of welded paths and the ledger. The pull request's check runs it for each
+`test_weld` target of a unit it builds
+([`build_targets.sh`](../../../release/ci/build_targets.sh)); this test runs it
+for each target above.
+
+```sh
+./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld
+./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//functional/test_weld:ok
+./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//negative/test_weld:untested   # must fail: .../src/komira_b: 1 .mojo source(s) and no welded test
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
