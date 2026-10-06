@@ -56,6 +56,7 @@ comptime K_STRUCT1 = 0  # struct<a: int64>
 comptime K_STRUCT2 = 1  # struct<a: int64, b: int64>
 comptime K_LIST = 2  # list<int64>
 comptime K_BVIEW = 3  # binary_view
+comptime K_I64_STRUCT1 = 4  # int64, struct<a: int64>
 
 
 def _node(length: Int, nulls: Int = 0) -> FieldNode:
@@ -105,7 +106,9 @@ def _frame(
 
 def _specs(kind: Int) raises -> Slab[ColumnTypeSpec]:
     var s = Slab[ColumnTypeSpec]()
-    if kind == K_STRUCT1 or kind == K_STRUCT2:
+    if kind == K_I64_STRUCT1:
+        s.append(ColumnTypeSpec.leaf(ArrowType.INT64))
+    if kind == K_STRUCT1 or kind == K_STRUCT2 or kind == K_I64_STRUCT1:
         var kids = Slab[ColumnTypeSpec]()
         var names = List[String]()
         kids.append(ColumnTypeSpec.leaf(ArrowType.INT64))
@@ -169,6 +172,15 @@ def _struct2_buffers() -> List[BufferDescriptor]:
     return out^
 
 
+def _i64_struct1_buffers() -> List[BufferDescriptor]:
+    """INT64 validity and values, then the K_STRUCT1 buffers."""
+    var out = List[BufferDescriptor]()
+    out.append(_b(0, 0))
+    out.append(_b(0, 24))
+    out.extend(_struct1_buffers())
+    return out^
+
+
 def _list_buffers() -> List[BufferDescriptor]:
     """LIST validity, offsets [0, 1], child validity, child values (5)."""
     var out = List[BufferDescriptor]()
@@ -209,11 +221,12 @@ def _missing(path: Int, node: Int, have: Int) -> String:
 
 
 def _child_len(
-    path: Int, child: Int, node: Int, got: Int, want: Int
+    path: Int, struct_node: Int, child: Int, node: Int, got: Int, want: Int
 ) -> String:
     return (
         _per_node(path) + ": field node #" + String(node) + " (child "
-        + String(child) + " of the STRUCT at field node #0) has length "
+        + String(child) + " of the STRUCT at field node #"
+        + String(struct_node) + ") has length "
         + String(got) + " but the STRUCT has length " + String(want)
     )
 
@@ -227,17 +240,23 @@ def _check_struct_child_length(path: Int) raises:
     # A child shorter than its STRUCT.
     assert_equal(
         _err(path, K_STRUCT1, 3, _nodes(3, 2), _struct1_buffers()),
-        _child_len(path, 0, 1, 2, 3),
+        _child_len(path, 0, 0, 1, 2, 3),
     )
     # A child longer than its STRUCT.
     assert_equal(
         _err(path, K_STRUCT1, 2, _nodes(2, 3), _struct1_buffers()),
-        _child_len(path, 0, 1, 3, 2),
+        _child_len(path, 0, 0, 1, 3, 2),
     )
     # The second child: the refusal names child 1 at field node #2.
     assert_equal(
         _err(path, K_STRUCT2, 3, _nodes(3, 3, 2), _struct2_buffers()),
-        _child_len(path, 1, 2, 2, 3),
+        _child_len(path, 0, 1, 2, 2, 3),
+    )
+    # A STRUCT that is the second column, at field node #1: the refusal
+    # names its node, not #0.
+    assert_equal(
+        _err(path, K_I64_STRUCT1, 3, _nodes(3, 3, 2), _i64_struct1_buffers()),
+        _child_len(path, 1, 0, 2, 2, 3),
     )
 
 
@@ -297,6 +316,10 @@ def _check_controls(path: Int) raises:
         _err(path, K_STRUCT2, 3, _nodes(3, 3, 3), _struct2_buffers()), ""
     )
     assert_equal(_err(path, K_LIST, 1, _nodes(1, 1), _list_buffers()), "")
+    assert_equal(
+        _err(path, K_I64_STRUCT1, 3, _nodes(3, 3, 3), _i64_struct1_buffers()),
+        "",
+    )
 
 
 def _check_struct_values(var cols: Slab[Column[HeapRegion]]) raises:

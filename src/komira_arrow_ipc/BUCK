@@ -49,6 +49,7 @@ mojo_library(
         "tests/test_ipc_file_e2e_write.mojo",
         "tests/test_ipc_mmap_buffer_bounds.mojo",
         "tests/test_ipc_nested_buffer_count.mojo",
+        "tests/test_ipc_nested_buffer_table.mojo",
         "tests/test_map_ipc.mojo",
         "tests/test_metadata_cdata.mojo",
         "tests/test_record_batch_compare.mojo",
