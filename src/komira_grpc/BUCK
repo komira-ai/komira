@@ -35,6 +35,7 @@ mojo_library(
         "tests/test_goaway_unprocessed_retry.mojo",
         "tests/test_grpc_client_trailers_only_and_streams.mojo",
         "tests/test_grpc_http_non_200_status.mojo",
+        "tests/test_grpc_header_nonascii.mojo",
         "tests/test_grpc_nonascii_error_message.mojo",
         "tests/test_grpc_status_metadata_conformance.mojo",
         "tests/test_grpc_truncation_and_terminal.mojo",

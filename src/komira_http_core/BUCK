@@ -52,6 +52,7 @@ mojo_library(
         "tests/test_L2_h2_hpack.mojo",
         "tests/test_L2_h2_preface_alpn.mojo",
         "tests/test_L2_h2_stream.mojo",
+        "tests/test_grpc_content_type_nonascii.mojo",
         "tests/test_kernel_tcp_loopback.mojo",
         "tests/test_runtime_seam_monomorphizes.mojo",
         "tests/test_scripted_byte_exchange.mojo",
