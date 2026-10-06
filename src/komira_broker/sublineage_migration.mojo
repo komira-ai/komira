@@ -537,7 +537,13 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         # serves nothing below `expected_dense`). The `_LOG_START` advance is the
         # durable migration cursor (a fold-process restart resumes from it).
         var source_retired = self._retire_migrated_legacy(
-            legacy, expected_dense, now_ms
+            legacy,
+            expected_dense,
+            now_ms,
+            walk_from_seq=(
+                legacy_ls.log_start_seq if legacy_ls.log_start_seq >= Int64(0)
+                else Int64(0)
+            ),
         )
         _ = legacy^
 
@@ -559,6 +565,7 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         mut legacy: CasManifestStore[Self.Store],
         migrated_through_dense: Int64,
         now_ms: Int64,
+        walk_from_seq: Int64 = Int64(-1),
     ) raises -> Int:
         """RETIRE the legacy single-manifest chunks whose records are now FULLY
         established in `_base` (every chunk whose entire dense range is below
@@ -578,6 +585,17 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         reads), and the rewrite makes the grace window count from this
         advance. The return value counts only chunks that carried no marker
         of either kind.
+
+        `walk_from_seq` is the legacy `_LOG_START.log_start_seq` that
+        `migrate_partition` read before it materialized (-1: none, the walk
+        starts at the current log start). A RetentionPass may advance the
+        legacy `_LOG_START` from there to F between materialize and this
+        retire; it leaves chunks [walk_from_seq, F) with plain tombstones
+        only, yet `_base` now references their `.seg` objects. This walk
+        writes a MOVED marker on each of them. One whose key is already gone
+        was reaped below the floor: it is skipped (its `.seg` went with it).
+        Every other error raises, before any marker at or above F is written
+        and before the advance.
 
         That `_LOG_START` pointer IS the durable migration cursor: the legacy
         resolver reads it for `running_base` (so it serves NOTHING below the
@@ -621,6 +639,19 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
                 found_unmigrated = True
             running = chunk_hi
             seq += Int64(1)
+        # Chunks [walk_from_seq, F) the migration materialized but a concurrent
+        # RetentionPass moved below the floor (komira-ai/komira#494).
+        var below = walk_from_seq
+        while below >= Int64(0) and below < cur.log_start_seq:
+            try:
+                legacy.schedule_moved_for_delete_at(below, now_ms)
+                if not _i64_in(already_tomb, below):
+                    retired += 1
+            except e:
+                if not _is_not_found_msg(String(e)):
+                    raise e^
+                # Reaped already: below the floor, the key is gone.
+            below += Int64(1)
         for t in range(len(to_tomb)):
             legacy.schedule_moved_for_delete_at(to_tomb[t], now_ms)
             if not _i64_in(already_tomb, to_tomb[t]):
