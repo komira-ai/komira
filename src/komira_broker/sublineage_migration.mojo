@@ -114,7 +114,7 @@ from komira_objectstore.cas_manifest import (
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_base_fold import BASE_SHARD_ID
 
-from .manifest_body import ManifestBody, MARKER_NONE, encode_manifest_body
+from .manifest_body import ManifestBody, encode_manifest_body
 from .partition_assignment import sublineage_prefix
 
 
@@ -420,9 +420,23 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
             try:
                 var body_bytes = legacy.read_chunk(seq)
                 var body = ManifestBody.decode(body_bytes)
-                # A COMMIT/ABORT marker chunk carries no records — skip it (it is
-                # NOT offset-bearing; the legacy resolver skips it too).
-                if body.marker_type != MARKER_NONE:
+                # A chunk without a segment object (a COMMIT/ABORT marker, 0
+                # records) is skipped (it is NOT offset-bearing; the legacy
+                # resolver skips it too). One that still carries records cannot
+                # be re-recorded (its key is empty) nor dropped (every later
+                # dense offset would shift), so the migration refuses it.
+                if not body.has_segment():
+                    if body.record_count > Int64(0):
+                        _ = base^
+                        _ = legacy^
+                        raise Error(
+                            "SubLineageMigration.migrate_partition: legacy chunk "
+                            + String(seq)
+                            + " has "
+                            + String(body.record_count)
+                            + " records but no segment object (empty"
+                            " object_key); refusing to migrate it"
+                        )
                     seq += Int64(1)
                     continue
                 var rc = body.record_count

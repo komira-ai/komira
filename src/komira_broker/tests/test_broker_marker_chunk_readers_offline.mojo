@@ -15,9 +15,10 @@
 #   (2) a full drain (`ConsumeCore.read_from`) over the same partition: the
 #       markers are absent from the offset index. Catches `resolve_index`
 #       emitting a SegmentRef for a marker.
-#   (3) `ReapWorker` after retention retires a data chunk + both markers:
-#       reaps all 3, and DELETEs exactly the data chunk's `.seg` key — never
-#       the empty key. Catches the reaper deleting `Path.parse("")`.
+#   (3) `ReapWorker` after retention retires two data chunks + both markers:
+#       reaps all 4, DELETEs both data chunks' `.seg` keys, and never the
+#       empty key. Catches the reaper DELETEing `Path.parse("")` (which does
+#       not raise: it is the bucket-root key).
 #   (4) `LogCleaner.run` handed a marker seq: the marker body stays
 #       byte-identical (no compaction sidecar is written onto it). Catches a
 #       cleaner that rewrites a chunk with no segment.

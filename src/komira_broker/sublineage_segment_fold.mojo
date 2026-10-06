@@ -99,7 +99,7 @@ from komira_objectstore.sublineage_base_fold import (
     SubLineageBaseFold,
 )
 
-from .manifest_body import ManifestBody, MARKER_NONE, encode_manifest_body
+from .manifest_body import ManifestBody, encode_manifest_body
 from .sublineage_base_inputs import SegmentBaseInputs
 
 
@@ -379,9 +379,23 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
             try:
                 var body_bytes = shard.read_chunk(seq)
                 var body = ManifestBody.decode(body_bytes)
-                if body.marker_type != MARKER_NONE:
+                # A chunk without a segment object (a marker, 0 records) is
+                # skipped. One that still carries records cannot be re-recorded
+                # (its key is empty) nor dropped (the dense offsets of every
+                # later chunk would shift), so the fold refuses it.
+                if not body.has_segment():
+                    if body.record_count > Int64(0):
+                        _ = shard^
+                        raise Error(
+                            "SegmentBaseFold._materialize_block: source chunk "
+                            + String(seq)
+                            + " has "
+                            + String(body.record_count)
+                            + " records but no segment object (empty"
+                            " object_key); refusing to fold it"
+                        )
                     seq += Int64(1)
-                    continue  # a marker chunk carries no records — skip it
+                    continue
                 var rc = body.record_count
                 var chunk_lo = running
                 var chunk_hi = running + rc  # exclusive source-local end

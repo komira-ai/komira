@@ -686,8 +686,9 @@ struct ReapWorker[Storage: ConditionalWriteStore](
                     var body_bytes = manifest.read_chunk(seq)
                     var body = ManifestBody.decode(body_bytes)
                     # A chunk with no segment object (a txn COMMIT/ABORT
-                    # marker: empty key) has nothing to delete; deleting
-                    # `Path.parse("")` would target the bucket root.
+                    # marker: empty key) has nothing to delete. Without this
+                    # check the reaper DELETEd `Path.parse("")`, which does not
+                    # raise: it is the bucket-root key.
                     if body.has_segment():
                         # delete is idempotent (absent .seg → success).
                         segment_store.delete(Path.parse(body.object_key))
