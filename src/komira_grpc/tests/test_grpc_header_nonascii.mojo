@@ -19,6 +19,10 @@
 #   * Routing values are percent-encoded per BYTE of their UTF-8: `é` is
 #     `%C3%A9`; a non-ASCII segment matches `*` like any other.
 #
+# Invalid UTF-8 on the wire: the HPACK decoder and HeaderMap turn each wire
+# byte into one char (`chr(byte)`), so a lone 0x80, 0xFF and a truncated 0xC3
+# arrive as U+0080, U+00FF and U+00C3; T1 and T2 run those too.
+#
 # Coverage:
 #   T1  base64_decode_standard on `Zm9vé`, `é`, `Zm9v,é`: raises an
 #       invalid-character error; `Zm9v` still decodes (control).
@@ -63,6 +67,10 @@ def test_t1_base64_nonascii() raises:
             "invalid base64 character" in err,
             String("refused, not aborted: ") + v + " -> " + err,
         )
+    for w in [chr(0x80), chr(0xFF), chr(0xC3)]:
+        for v in [String("Zm9v") + w, w.copy(), String("Zm9v,") + w]:
+            var err = _raises_b64(v)
+            assert_true("invalid base64 character" in err, err)
     var ok = base64_decode_standard(String("Zm9v"))
     assert_equal(len(ok), 3)
     assert_equal(ok[0], UInt8(ord("f")))
@@ -81,6 +89,20 @@ def test_t2_metadata_set() raises:
     assert_equal(md.count(), 0)
     md.set(String("x-name"), String("café ✓"))
     assert_equal(md.count(), 1)
+    for w in [chr(0x80), chr(0xFF), chr(0xC3)]:
+        var kerr = String("<no error>")
+        try:
+            md.set(String("k") + w, String("x"))
+        except e:
+            kerr = String(e)
+        # U+0080 is C2 80; U+00FF and U+00C3 start with C3.
+        assert_true(
+            "illegal byte 194 at offset 1" in kerr
+            or "illegal byte 195 at offset 1" in kerr,
+            kerr,
+        )
+        md.set(String("x-w"), String("v") + w)
+    assert_equal(md.count(), 4)
     print("    OK")
 
 
@@ -107,8 +129,10 @@ def test_t4_build_routing_params() raises:
     var pairs = List[Tuple[StaticString, String]]()
     pairs.append((StaticString("bucket"), String("café/x")))
     pairs.append((StaticString("name"), String("✓")))
+    pairs.append((StaticString("w"), chr(0x80) + chr(0xFF)))
     assert_equal(
-        build_routing_params(pairs), String("bucket=caf%C3%A9%2Fx&name=%E2%9C%93")
+        build_routing_params(pairs),
+        String("bucket=caf%C3%A9%2Fx&name=%E2%9C%93&w=%C2%80%C3%BF"),
     )
     print("    OK")
 
