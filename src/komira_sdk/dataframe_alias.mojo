@@ -130,6 +130,7 @@ def with_alias_impl(
     # interpretation (alias=`a` with col=`b.c`, or alias=`a.b` with
     # col=`c`?) is ambiguous downstream.
     var dot_byte = UInt8(ord("."))
+    # SAFETY: reads bytes [0, byte_length()) of `name`, alive for the loop.
     var name_ptr = name.unsafe_ptr()
     for i in range(name.byte_length()):
         if name_ptr[i] == dot_byte:
@@ -186,6 +187,8 @@ def _starts_with(s: String, prefix: String) -> Bool:
     var pn = prefix.byte_length()
     if pn > sn:
         return False
+    # SAFETY: i < pn <= sn, so both reads stay inside `s` and `prefix`, which
+    # outlive the loop.
     var sp = s.unsafe_ptr()
     var pp = prefix.unsafe_ptr()
     for i in range(pn):

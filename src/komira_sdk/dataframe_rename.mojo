@@ -6,8 +6,8 @@
 # A PROJECTION OF EVERY COLUMN, EACH A PLAIN REFERENCE UNDER ITS NEW NAME, in
 # the frame's column order — the plan `select(col("k"), col("v").alias("val"),
 # ...)` builds, and what the SQL door asks as `SELECT k AS key, g, v AS val`.
-# No engine node is new; the carrier had no verb (census row
-# `LazyFrame.rename`, EXPOSE_ONLY / T1).
+# No engine node is new; the carrier had no verb (polars
+# `LazyFrame.rename`).
 #
 # MEASURED against polars 1.44.2 and followed (the same rules the polars
 # skin's `LazyFrame.rename` states):

@@ -196,7 +196,6 @@ def derive_schema[T: AnyType & Copyable & Movable]() -> SchemaDescriptor:
             var amount: Float64
         comptime RowSchema = derive_schema[Row]()   # {id: Int64, amount: Float64}
         ```
-    (LIFT bench/engine/tpch/q1.mojo:54 — LineitemQ1Row(DerivedSchemaRow))
     """
     comptime r = reflect[T]
     comptime ts = r.field_types()
@@ -258,7 +257,6 @@ trait DerivedSchemaRow(Copyable, Movable):
             var l_quantity: Float64
         # LineitemQ1Row.schema() is auto-derived — no hand-written schema_of
         ```
-    (LIFT bench/engine/tpch/q1.mojo:53-62)
     """
 
     @staticmethod

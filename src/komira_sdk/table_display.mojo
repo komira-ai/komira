@@ -150,7 +150,7 @@ def _cell_value(batch: RecordBatch, col_idx: Int, row_idx: Int) raises -> String
         # DICTIONARY under a STRING field keeps its decode: `column_as_string`
         # resolves each ordinal AND the indices validity bitmap, which is how
         # a dict-encoded scan column has always displayed here. Reading its
-        # codes as per-row offsets is the B-5 P0 segfault.
+        # codes as per-row offsets segfaults.
         ref col = batch.column_at(col_idx)
         if col.arrow_type == ArrowType.DICTIONARY:
             var arr = batch.column_as_string(col_idx)
@@ -210,7 +210,7 @@ def _pad_left(s: String, width: Int) -> String:
     everywhere else. It is NOT a full terminal-width model — East-Asian wide
     characters are 2 columns and combining marks are 0, which a wcwidth table
     would be needed to handle. Pinned by
-    tests/sdk/test_display_width_non_ascii.mojo.
+    tests/test_display_width_non_ascii.mojo.
 
     Args:
         s: The string to pad.
@@ -303,7 +303,6 @@ def format_table(batch: RecordBatch, max_rows: Int = 20) raises -> String:
         var batch = ctx.materialize(df^.filter(col("age") > 25)^)
         print(format_table(batch, max_rows=3))
         ```
-    (LIFT tests/sdk/test_display_stats.mojo:83, :145).
     """
     var ncols = batch.num_columns()
     var nrows = batch.num_rows()

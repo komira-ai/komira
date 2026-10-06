@@ -6,8 +6,8 @@
 # `WHERE a IS NOT NULL AND b IS NOT NULL AND ...` over the named columns, or
 # over EVERY column when no subset is given — the predicate the polars skin
 # builds (`pl.py` `LazyFrame.drop_nulls`) and the SQL door asks. No engine node
-# is new; the carrier had no verb (census row `LazyFrame.drop_nulls`,
-# EXPOSE_ONLY / T1). MEASURED against polars 1.44.2 and followed:
+# is new; the carrier had no verb (polars
+# `LazyFrame.drop_nulls`). MEASURED against polars 1.44.2 and followed:
 #   * a NaN is NOT null — its row is KEPT (pandas' `dropna` drops it; that is
 #     the pandas door's own answer, not this one);
 #   * `subset=[]` drops nothing (polars returns the frame unchanged, no node);

@@ -1,5 +1,5 @@
 # =============================================================================
-# test_auto_schema.mojo — E-1-AUTOSCHEMA acceptance test
+# test_auto_schema.mojo — acceptance test
 # =============================================================================
 #
 # Asserts that a `DerivedSchemaRow`-derived `SchemaDescriptor` matches a

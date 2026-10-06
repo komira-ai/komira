@@ -25,15 +25,15 @@
 # The read-time `partition_filter` field carries an
 # OPTIONAL partition predicate (`col("dt") == lit("X")`) so the cloud Hive
 # prune-at-prefix (the marquee cloud win) can be expressed AT READ TIME. The
-# cloud arm inline-materializes (A-erase) so it sees ONLY predicates
+# cloud arm inline-materializes so it sees ONLY predicates
 # present on the plan at the read seam — a chained `.filter()` after the
 # FS-erased DataFrame returns is too late. `partition_filter` supplies that
 # read-time channel: it is wrapped as a `Filter` over the lazy dir-scan plan at
 # plan-build, and the existing `attach_hive_predicate` optimizer pass splits it
-# (G.7 `split_partition_predicate`) into the Tier-1 partition POD (pruned at the
+# (`split_partition_predicate`) into the Tier-1 partition POD (pruned at the
 # LIST prefix) + the Tier-2 DATA residual (a row-group/page Filter). So a
 # `partition_filter` referencing a NON-partition (data) column does NOT error —
-# the G.7 split routes it to the Tier-2 residual (the lenient, composable
+# the split routes it to the Tier-2 residual (the lenient, composable
 # contract: partition cols prune, data cols filter).
 #
 # WHY `Optional[Expr]` (not the POD): the user writes the predicate as an
@@ -60,7 +60,7 @@ struct ParquetReadOptions(Movable, Deinitable):
         [v3 default] For the UNTYPED multi-file path, the result schema is the
         by-name UNION of all surviving footers (a file lacking a union column
         → that column NULL for its rows; cross-file type conflict → ERROR).
-        This is the campaign default (RESOLVED — union-by-name is IN v1,
+        This is the default (RESOLVED — union-by-name is IN v1,
         not an opt-in). Set `False` to request the tighter same-schema-only
         contract (require identical footers across files; raise on any
         name/order/type divergence). The by-name RESOLUTION (the §6.0
@@ -85,13 +85,13 @@ struct ParquetReadOptions(Movable, Deinitable):
         [RFC §5.6 / §7.2, PE recommendation: auto-detect ON] When True
         (default), a Hive-partitioned layout (key=value path segments present)
         is auto-detected: the partition columns are derived from the path and
-        surfaced as output columns (G.5/G.8), and a partition-column filter is
-        pruned at the list prefix (G.5/G.7). When False, the layout is read as
+        surfaced as output columns, and a partition-column filter is
+        pruned at the list prefix. When False, the layout is read as
         a plain multi-file scan (no partition columns, no prune) — the user
         opts out of surprise partition columns.
 
     Recursion is INFERRED from the glob (`**` → recursive); there is no explicit
-    recursion flag. Partition types are inferred by default (the G.5 type-probe
+    recursion flag. Partition types are inferred by default (the type-probe
     DATE→TIMESTAMP→BIGINT→VARCHAR); an explicit `hive_types` override is the
     follow-on (not in v1).
     """
@@ -106,7 +106,7 @@ struct ParquetReadOptions(Movable, Deinitable):
     plan at plan-build; the existing `attach_hive_predicate` optimizer pass
     splits it into the Tier-1 partition POD (pruned at the LIST prefix — the
     marquee cloud win) + the Tier-2 DATA residual (a row-group/page Filter).
-    A predicate referencing a non-partition column is NOT an error — the G.7
+    A predicate referencing a non-partition column is NOT an error — the
     split routes it to the Tier-2 residual. Default `None` (every existing
     caller unchanged; the chained-`.filter()` local prune path is unaffected).
     NOTE: `Expr` is `Movable`/heap-owning (a recursive `OwnedPointer[Expr]`
@@ -116,12 +116,12 @@ struct ParquetReadOptions(Movable, Deinitable):
     """Internal. When True (the UNTYPED default), a detected Hive
     read is lowered LAZILY: an un-enumerated dir-scan `ParquetSource` carrying
     the partition schema + (post-optimize) the Tier-1 prune POD, so the engine
-    ctor lists only the surviving partitions (G.12b `open_pruned`). When False,
+    ctor lists only the surviving partitions (`open_pruned`). When False,
     a detected Hive read is lowered EAGERLY (today's `ParquetSource.partitioned`
     full-path enumeration + `partition_prune_scans` post-list prune). The TYPED
-    `read_parquet[S, ID]` path forces this False until G.12a-typed lands (the
-    typed G.9b all-files validation is gated on the eager full set for now —
-    contract §6.4 / R-3). This is an internal knob, not user-facing."""
+    `read_parquet[S, ID]` path forces this False until typed lazy lowering lands (the
+    typed all-files validation is gated on the eager full set for now).
+    This is an internal knob, not user-facing."""
 
     def __init__(
         out self,
@@ -132,7 +132,7 @@ struct ParquetReadOptions(Movable, Deinitable):
         var partition_filter: Optional[Expr] = None,
     ):
         """Construct the options POD. The first three are user-facing; the
-        fourth (`lazy_hive_lowering`) is an INTERNAL G.12a knob defaulted True
+        fourth (`lazy_hive_lowering`) is an INTERNAL knob defaulted True
         (untyped lazy Hive lowering) — existing 3-arg construction sites are
         UNCHANGED. The fifth (`partition_filter`) is the
         read-time partition predicate, defaulted `None`. The typed path
@@ -160,9 +160,9 @@ struct ParquetReadOptions(Movable, Deinitable):
 
     @staticmethod
     def default() -> ParquetReadOptions:
-        """The campaign-default options (RFC §7.2). Every field at its default
+        """The default options (RFC §7.2). Every field at its default
         reproduces TODAY's behavior for non-Hive single-file / flat-glob reads,
-        and the v1 union-by-name + Hive auto-detect + (G.12a) lazy-Hive-lowering
+        and the v1 union-by-name + Hive auto-detect + lazy-Hive-lowering
         contract for multi-file / Hive reads. `partition_filter` defaults
         `None` (no read-time prune)."""
         return ParquetReadOptions(
@@ -174,10 +174,10 @@ struct ParquetReadOptions(Movable, Deinitable):
         )
 
     def with_eager_hive_lowering(self) -> ParquetReadOptions:
-        """Return a copy with `lazy_hive_lowering` forced OFF (G.12a). The TYPED
+        """Return a copy with `lazy_hive_lowering` forced OFF. The TYPED
         `read_parquet[S, ID]` path calls this so a Hive read stays on the eager
-        `ParquetSource.partitioned` path (the G.9b all-files validation is gated
-        on the eager full set until G.12a-typed). Preserves
+        `ParquetSource.partitioned` path (the all-files validation is gated
+        on the eager full set for now). Preserves
         `partition_filter`."""
         var pf_copy: Optional[Expr] = None
         if self.partition_filter:

@@ -9,7 +9,7 @@
 # group keys. The untyped Mojo door spells it
 # `select([col("v").min().alias("lo"), col("v").max().alias("hi")])`, and
 # `PlanCarrier.select` lowered it to a PROJECT of two aggregate-as-expression
-# nodes: MEASURED (the harness lane's `agg_minmax_expr`), SIX rows of
+# nodes: MEASURED (`agg_minmax_expr`), SIX rows of
 # NULL, null-typed — a silent wrong answer.
 #
 # `select_as_aggregate` recognises the shape — EVERY expression an
@@ -70,7 +70,7 @@
 # StringOp; under a MathFn / CASE it rewrites the plan (round 3) but
 # the in-memory filter gate then declines it, NAMED by the envelope. (Widening that gate answers 0 ROWS over a whole-frame window's
 # output; the finding is in commit "fix(optimizer scalar broadcast + a
-# trunk-red test)".)
+# red test)".)
 #
 # ⛔ The broadcast route's window kernel (`eval_full_partition_agg`) served
 # INT64 / FLOAT64 only, so a hoisted aggregate over an INT32 / FLOAT32 column
@@ -499,7 +499,7 @@ def _with_hidden_windows(
     with no keys.
 
     ⚠ A NODE, NOT A PROJECT OF `EXPR_WINDOW_FN`. MEASURED (LOCAL darwin, this
-    lane's probe): a PROJECT reading `v - __komira_agg_0` over a PROJECT that
+    probe): a PROJECT reading `v - __komira_agg_0` over a PROJECT that
     computes `__komira_agg_0` as a window died with the unnamed
     "PipelineCompiler: unsupported projection expression tag: 13" -- the two
     projections are merged before the window rewrite runs, which leaves the
@@ -622,7 +622,7 @@ def _refuse_narrow_int_compare(pred: Expr, schema: Schema) raises:
     ⛔ The refusal names NO remedy on purpose: the obvious one,
     `with_columns(col("i8").cast(DType.int64).alias("i8"))` first, fails too
     -- MEASURED (LOCAL darwin, fxn.parquet): the hidden window
-    over the cast column is out of the window executor's T14 envelope."""
+    over the cast column is out of the window executor's envelope."""
     var names = List[String]()
     var sink = ordered_name_sink(names)
     walk_expr_column_refs(pred, sink)

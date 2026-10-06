@@ -8,12 +8,12 @@
 #   `ctx.create_view` which is persistent until `drop_view`). This module
 #   holds the storage container for those bindings.
 #
-# Design (mirrors B.j.1's eager-inline shape):
+# Design (mirrors the view registry's eager-inline shape):
 #   * `CteScope` is a small Movable container — a parallel `List[String]`
 #     (names) + `Slab[LogicalPlan]` (plans). `LogicalPlan` is Movable-only
 #     (it has `.copy()` but is not `Copyable`), so a `List[LogicalPlan]`
 #     does not compile — `Slab[LogicalPlan]` is the codebase idiom for a
-#     growable array of Movable-only `LogicalPlan` (cf. B.j.1's
+#     growable array of Movable-only `LogicalPlan` (cf. the
 #     `Slab[Optional[LogicalPlan]]` view registry).
 #   * The scope lives on the `DataFrame` returned by `with_cte`; the
 #     execution entry points (`ctx.materialize` / `materialize_limit` /
@@ -21,12 +21,12 @@
 #     and thread it into `optimize(plan^, ctx, reg, cte_scope^)`, which
 #     consumes it by value — so the binding is "registered for the duration
 #     of `optimize()` only" and dropped when `optimize()` returns.
-#   * B.j.3 ships the storage layer + the `with_cte` API + the threading
+#   * This module ships the storage layer + the `with_cte` API + the threading
 #     hook. The *resolution* step (a `PLAN_VIEW_REF` LogicalPlan variant
 #     that `optimize()` rewrites to the bound plan, enabling
-#     reference-by-name inside `self`) is the B.j.4 follow-up — exactly
-#     parallel to B.j.1, which shipped the view registry + handle but
-#     deferred the `LogicalViewRef` compiler sub-pass to B.j.4.
+#     reference-by-name inside `self`) is the follow-up — exactly
+#     parallel to the view registry work, which shipped the view registry + handle but
+#     deferred the `LogicalViewRef` compiler sub-pass.
 #
 # Encapsulation: no `UnsafePointer` in any signature here. `Slab[LogicalPlan]`
 # encapsulates its own byte-backed storage internally.
@@ -102,7 +102,7 @@ struct CteScope(Movable, Sized):
         callers (e.g. `cte_ref["name"]()` / the `view_resolution_pass`
         compiler sub-pass) must each get an independent plan subtree; the
         scope's master copy stays usable for further resolutions within
-        the same statement (mirrors B.j.1's `ctx.view(handle)`
+        the same statement (mirrors `ctx.view(handle)`
         deep-clone-on-resolve).
         """
         for i in range(len(self._names)):
@@ -120,14 +120,14 @@ struct CteScope(Movable, Sized):
     def names_ref(ref self) -> ref [self._names] List[String]:
         """Return a `ref` to the internal names list.
 
-        Used by `komira_sdk.optimizer.optimize()` to thread the CTE
+        Used by `optimize()` to thread the CTE
         scope's storage into `komira_compiler.view_resolution_pass`
         (which resolves `PLAN_VIEW_REF` nodes against both the ctx view
         registry AND this scope). The pass takes the names list + the
         plans slab by `ref` — both `komira_collections` / stdlib container
         types, so the compiler stays `komira_sdk`-free (the standalone
         `komira_compiler` build still holds, mirroring how
-        B.j.4 threads the view registry's `Slab[Optional[LogicalPlan]]` +
+        the optimizer threads the view registry's `Slab[Optional[LogicalPlan]]` +
         `Dict[String, Int]`).
         """
         return self._names

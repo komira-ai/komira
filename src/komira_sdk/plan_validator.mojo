@@ -175,7 +175,6 @@ def validate_plan(plan: LogicalPlan) raises:
         var projected = LogicalPlan.project(exprs^, scan^)
         validate_plan(projected)     # raises if a column ref is unknown
         ```
-    (LIFT tests/sdk/test_sdk_logical_plan.mojo:440-447).
     """
     var report = validate_plan_report(plan)
     _ = report^

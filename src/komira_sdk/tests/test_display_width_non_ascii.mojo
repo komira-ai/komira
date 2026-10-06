@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/sdk/test_display_width_non_ascii.mojo
+# tests/test_display_width_non_ascii.mojo
 #   `format_table` aligns COLUMNS. A column is a count of characters, not of
 #   UTF-8 bytes — pin that the box stays square when a cell is not ASCII.
 # =============================================================================

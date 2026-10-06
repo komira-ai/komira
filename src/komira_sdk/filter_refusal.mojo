@@ -28,8 +28,8 @@
 # ⛔ A PROJECT UNDER ANOTHER VERB IS PRUNED LIKE ANY UNREAD COLUMN (the
 # untyped round-3 review, a P0 regression of this module's first version).
 # "A PROJECT is never dropped -- it IS the output" was true only while the
-# refusal was the LAST verb: MEASURED (LOCAL darwin, @mojo door, trunk
-# then) `filter(col("nope") > 3).select(col("k"))` answered all 6 rows,
+# refusal was the LAST verb: MEASURED (LOCAL darwin, the Mojo
+# surface) `filter(col("nope") > 3).select(col("k"))` answered all 6 rows,
 # `.select(col("k").count())` 6 and `.group_by(["g"]).count()` 3 groups (the
 # optimized plan: `Project(exprs=[ColRef(k)])`), where the tree before this
 # module RAISED and polars raises ColumnNotFoundError. So every carrier is

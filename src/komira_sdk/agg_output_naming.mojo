@@ -81,7 +81,7 @@
 # `count`: DECLARED != the brand, which is the same class of defect — an output
 # schema that depends on which half of the surface you ask — this module exists
 # to close. It is not a hypothetical: `tests/test_typed_sout_matches_runtime.
-# mojo::test_grouped_agg_sout_matches` was RED ON TRUNK, `comptime 'sum' vs
+# mojo::test_grouped_agg_sout_matches` was RED, `comptime 'sum' vs
 # runtime 'lhs_key_gamma'`. The residual was a HALF-MOVE, and a half-move is
 # worse than either end state.
 #
