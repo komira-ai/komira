@@ -1,0 +1,142 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 2
+plan {
+  output_schema {
+    fields {
+      name: "a"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+      metadata_keys: "unit"
+      metadata_values: "cents"
+    }
+    fields {
+      name: "b"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "s"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  distinct {
+    has_columns: true
+    columns: "a"
+    columns: "s"
+    child {
+      output_schema {
+        fields {
+          name: "a"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+          metadata_keys: "unit"
+          metadata_values: "cents"
+        }
+        fields {
+          name: "b"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      scan {
+        source {
+          binding {
+            kind_id: 1056219456
+            kind_name: "komira.orc"
+            name: "orders"
+            params {
+              key: "has_footer"
+              tag: PARAM_BOOL
+              i: 1
+            }
+            params {
+              key: "path"
+              tag: PARAM_STR
+              s: "/data/orders.orc"
+            }
+            params {
+              key: "stripe_count"
+              tag: PARAM_I64
+              i: 7
+            }
+            schema {
+              fields {
+                name: "a"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+                metadata_keys: "unit"
+                metadata_values: "cents"
+              }
+              fields {
+                name: "b"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "s"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            fingerprint: 3735928559
+            structural_id: 4277009102
+            pushdown_gate {
+              mode: GATE_SHAPED
+              allowed_binary_ops: 63
+              allow_and_recurse: true
+              allow_in_list: true
+              require_stat_friendly_col: true
+            }
+            snapshot_policy: SNAPSHOT_PINNED
+            snapshot_token: 1234567890
+            orientation: SOURCE_KIND_COLUMNAR
+            variant_tag: SOURCE_VARIANT_ORC
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "a"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+            metadata_keys: "unit"
+            metadata_values: "cents"
+          }
+          fields {
+            name: "b"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "s"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+  }
+}
