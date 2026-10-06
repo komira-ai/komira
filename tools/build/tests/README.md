@@ -498,14 +498,34 @@ in [`negative/test_data`](negative/test_data/BUCK), `undeclared` must fail
 with `GATED TEST FAILED` and the test's
 `No such file or directory` for a fixture that exists in the repository but
 was not declared. `buck2 test tests//functional/test_data:mojo_test_data` must pass: a
-`mojo_test` with dict `data` and `env`. Five `bad_*` targets must each fail
+`mojo_test` with dict `data` and `env`. `buck2 test
+tests//functional/test_data:mojo_test_args` must pass: a `mojo_test` whose
+`args` hold a `$(location)` of a build output, one of a source and one
+argument with both, each of which it must open as an absolute path from its
+`share/`, an `$(exe_target)` of a `mojo_binary` that must arrive as an
+absolute path with the runnable directory's `lib/` beside it, plus plain
+arguments that arrive verbatim, in order, and unexported (dropping `args`
+from the test command, their absolute prefix, or the inputs behind the
+`$(location)` paths turns it red). `mojo_test_args_action` runs that same
+`buck2 test` command as a build action and must build: the pull-request
+check builds `tests//functional/...` and runs no `buck2 test`, so this
+target is what gates `args` on a pull request; the `buck2 test` runs of this
+section run only here, in the nightly self-tests. `buck2 test
+tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
+<label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
+and some harnesses, is a failure. On a pull request that rule is checked
+only by `runner_cases` (below), which runs the runner itself; mapping the
+runner's status to a verdict is Buck2's. Five `bad_*` targets must each fail
 at analysis with their own refusal: a `..` destination, a destination that
 is also another's directory, a `test_data` key that is not a test, a
 runner-owned env name, an env name that is not a variable name. The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 `runner_cases` also runs the runner on a stand-in that kills itself: with
-SIGKILL it must exit 137 and with SIGABRT 134, each with no marker.
+SIGKILL it must exit 137 and with SIGABRT 134, each with no marker; one that
+exits 77 must exit 77 with no marker; `--arg` values must reach the
+stand-in in order, unexported, with every `@KOMIRA_ACTION_DIR@` replaced by
+the action's directory; and an `--env` after an `--arg` is refused (exit 2).
 
 ## 30. Optimization levels
 
