@@ -33,6 +33,12 @@
 #     and 1 are written, the file sum is absent. Catches an unchecked merge.
 #   * row-index entries: one stripe of two strides [MAX, 1, 5, 6] — entry 0
 #     has no sum, entry 1 has 11, stripe and file have none.
+#   * nullable column: [MAX, null, 1, null, 5, 6] with stride 4 runs the
+#     null-guarded accumulation loops (stripe stats in `_emit_integer`,
+#     row-index stats in `_compute_chunk_stats`), which are separate code
+#     from the all-valid loops above. Entry 0 (MAX, 1) has no sum, entry 1
+#     (5, 6) has 11, stripe and file have none; lines carry hasNull.
+#     Catches a wrapping add on the nullable paths only.
 # =============================================================================
 
 from std.testing import assert_equal
@@ -102,9 +108,13 @@ def _len_fields(
     return out^
 
 
-def _render(bs: Span[UInt8, _], start: Int, end: Int) raises -> String:
-    """A ColumnStatistics message as "n=.. min=.. max=.. sum=..|absent"."""
+def _render(
+    bs: Span[UInt8, _], start: Int, end: Int, with_has_null: Bool = False
+) raises -> String:
+    """A ColumnStatistics message as "n=.. min=.. max=.. sum=..|absent",
+    followed by " hasNull=<f10 | absent>" when `with_has_null`."""
     var n = -1
+    var hn = String("absent")
     var has_int = False
     var mn = String("absent")
     var mx = String("absent")
@@ -116,6 +126,10 @@ def _render(bs: Span[UInt8, _], start: Int, end: Int) raises -> String:
         if tag.field_number == 1 and tag.wire_type == PB_WIRE_VARINT:
             var v = pb_read_varint(bs, pos)
             n = Int(v.value)
+            pos = v.new_pos
+        elif tag.field_number == 10 and tag.wire_type == PB_WIRE_VARINT:
+            var v = pb_read_varint(bs, pos)
+            hn = String(v.value)
             pos = v.new_pos
         elif tag.field_number == 2 and tag.wire_type == PB_WIRE_LEN:
             var f = pb_read_len_field(bs, pos)
@@ -138,14 +152,18 @@ def _render(bs: Span[UInt8, _], start: Int, end: Int) raises -> String:
             pos = f.new_pos
         else:
             pos = pb_skip_field(bs, pos, tag.wire_type)
+    var suffix = String(" hasNull=") + hn if with_has_null else String("")
     if not has_int:
-        return String("n=") + String(n) + " no-intStatistics"
+        return String("n=") + String(n) + " no-intStatistics" + suffix
     return (
         String("n=") + String(n) + " min=" + mn + " max=" + mx + " sum=" + sm
+        + suffix
     )
 
 
-def _stripe_lines(bytes: List[UInt8]) raises -> List[String]:
+def _stripe_lines(
+    bytes: List[UInt8], with_has_null: Bool = False
+) raises -> List[String]:
     """Column 1's stats in each Metadata.stripeStats entry, in stripe order."""
     var bs = Span(bytes)
     var tail = OrcFileTail.parse(bs)
@@ -153,19 +171,21 @@ def _stripe_lines(bytes: List[UInt8]) raises -> List[String]:
     var stripes = _len_fields(bs, tail.metadata_start, tail.metadata_end, 1)
     for s in range(len(stripes)):
         var cols = _len_fields(bs, stripes[s][0], stripes[s][1], 1)
-        out.append(_render(bs, cols[1][0], cols[1][1]))
+        out.append(_render(bs, cols[1][0], cols[1][1], with_has_null))
     return out^
 
 
-def _file_line(bytes: List[UInt8]) raises -> String:
+def _file_line(bytes: List[UInt8], with_has_null: Bool = False) raises -> String:
     """Column 1's stats in Footer.statistics (field 7)."""
     var bs = Span(bytes)
     var tail = OrcFileTail.parse(bs)
     var cols = _len_fields(bs, tail.footer_start, tail.footer_end, 7)
-    return _render(bs, cols[1][0], cols[1][1])
+    return _render(bs, cols[1][0], cols[1][1], with_has_null)
 
 
-def _row_index_lines(bytes: List[UInt8]) raises -> List[String]:
+def _row_index_lines(
+    bytes: List[UInt8], with_has_null: Bool = False
+) raises -> List[String]:
     """Column 1's RowIndexEntry.statistics in stripe 0's ROW_INDEX stream.
     Streams lie back to back from the stripe offset in stripe-footer order."""
     var bs = Span(bytes)
@@ -181,7 +201,7 @@ def _row_index_lines(bytes: List[UInt8]) raises -> List[String]:
             var entries = _len_fields(bs, off, end, 1)
             for e in range(len(entries)):
                 var st = _len_fields(bs, entries[e][0], entries[e][1], 2)
-                out.append(_render(bs, st[0][0], st[0][1]))
+                out.append(_render(bs, st[0][0], st[0][1], with_has_null))
             return out^
         off += sf.streams[k].length
     raise Error("no ROW_INDEX stream for column 1")
@@ -321,6 +341,49 @@ def test_row_index_entries() raises:
     )
 
 
+def test_nullable_column() raises:
+    # Rows: MAX, null, 1, null, 5, 6. Stride 4, one stripe of 6 rows, so
+    # stride 0 = [MAX, null, 1, null] and stride 1 = [5, 6].
+    var sb = SchemaBuilder()
+    sb.add_field(Field("v", ArrowType.INT64, True))
+    var a = PrimitiveArray[DType.int64].allocate_nullable(6)
+    a.set(0, MAX)
+    a._set_null(1)
+    a.set(2, Int64(1))
+    a._set_null(3)
+    a.set(4, Int64(5))
+    a.set(5, Int64(6))
+    assert_equal(a.null_count, 2, "nullable: null_count")
+    var builder = RecordBatchBuilder.with_capacity(1)
+    builder.add_column(
+        Column.from_primitive_with_arrow_type[DType.int64](a^, ArrowType.INT64)
+    )
+    var batch = builder.build(sb.build())
+    var opts = OrcWriterOptions(ORC_COMPRESSION_NONE, 4, String("UTC"), 6, True)
+    var bytes = write_orc_bytes(batch, opts)
+    var ri = _row_index_lines(bytes, True)
+    assert_equal(len(ri), 2, "nullable: entry count")
+    assert_equal(
+        ri[0], "n=2 min=1 max=9223372036854775807 sum=absent hasNull=1",
+        "nullable: row index entry 0",
+    )
+    assert_equal(
+        ri[1], "n=2 min=5 max=6 sum=11 hasNull=0",
+        "nullable: row index entry 1",
+    )
+    var s = _stripe_lines(bytes, True)
+    assert_equal(len(s), 1, "nullable: stripe count")
+    assert_equal(
+        s[0], "n=4 min=1 max=9223372036854775807 sum=absent hasNull=1",
+        "nullable: stripe",
+    )
+    assert_equal(
+        _file_line(bytes, True),
+        "n=4 min=1 max=9223372036854775807 sum=absent hasNull=1",
+        "nullable: file",
+    )
+
+
 def main() raises:
     test_positive_overflow_omits_sum()
     test_negative_overflow_omits_sum()
@@ -329,4 +392,5 @@ def main() raises:
     test_merge_with_one_overflowed_stripe()
     test_merge_overflows_at_file_level_only()
     test_row_index_entries()
+    test_nullable_column()
     print("test_orc_write_int_sum_overflow: ALL PASS")
