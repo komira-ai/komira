@@ -1,0 +1,238 @@
+from std.os import getenv, listdir, makedirs
+from std.testing import assert_equal, assert_true
+
+from komira_json import JsonValue, parse_json_value
+
+from covcheck.cli import EXIT_GATE, EXIT_INPUT, EXIT_OK, EXIT_USAGE, run
+from covcheck.text import read_text, sort_strings, write_text
+
+# The command line end to end on the e2e fixtures: the summary byte for
+# byte, the check-run files, the result JSON, the proposed ratchet, the
+# gate's entry equal to the report's, and every exit code.
+
+comptime E2E = "tools/build/coverage/tests/fixtures/e2e/"
+comptime SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _tmp(name: String) raises -> String:
+    var d = getenv("TMPDIR") + String("/") + name
+    makedirs(d, exist_ok=True)
+    return d
+
+
+def _repo_files(dir: String) raises -> String:
+    """The fixture repository's `git ls-files -z`, written to `dir`."""
+    var names = List[String]()
+    names.append("BUCK")
+    names.append("docs/x.md")
+    names.append("src/alpha/BUCK")
+    names.append("src/alpha/a.mojo")
+    names.append("src/alpha/tests/test_a.mojo")
+    names.append("src/beta/BUCK")
+    names.append("src/beta/c.mojo")
+    var b = List[UInt8]()
+    for i in range(len(names)):
+        var nb = names[i].as_bytes()
+        for k in range(len(nb)):
+            b.append(nb[k])
+        b.append(UInt8(0))
+    var path = dir + String("/repo_files")
+    write_text(path, String(from_utf8_lossy=b))
+    return path
+
+
+def _common(dir: String) raises -> List[String]:
+    var a = List[String]()
+    a.append("--repo-files")
+    a.append(_repo_files(dir))
+    a.append("--source-root")
+    a.append(String(E2E) + "root")
+    a.append("--cobertura")
+    a.append(String("src/alpha=") + String(E2E) + "cov_alpha.xml")
+    a.append("--cobertura")
+    a.append(String("src/beta=") + String(E2E) + "cov_beta.xml")
+    a.append("--mutants")
+    a.append(String(E2E) + "mutants.tsv")
+    a.append("--ratchet")
+    a.append(String(E2E) + "ratchet.tsv")
+    a.append("--summary-out")
+    a.append(dir + "/summary.md")
+    a.append("--result-out")
+    a.append(dir + "/result.json")
+    return a^
+
+
+def _report(dir: String) raises -> List[String]:
+    var a = List[String]()
+    a.append("report")
+    a.extend(_common(dir))
+    a.append("--diff")
+    a.append(String(E2E) + "diff.txt")
+    a.append("--head-sha")
+    a.append(String(SHA))
+    a.append("--checkrun-dir")
+    a.append(dir + "/checkrun")
+    a.append("--ratchet-out")
+    a.append(dir + "/ratchet.tsv")
+    return a^
+
+
+def _gate(dir: String, mode: String) raises -> List[String]:
+    var a = List[String]()
+    a.append("gate")
+    a.extend(_common(dir))
+    a.append("--package")
+    a.append("src/alpha")
+    a.append("--mode")
+    a.append(mode)
+    return a^
+
+
+def _first_diff(got: String, want: String) -> String:
+    """The first line where `got` and `want` differ, both sides."""
+    var g = got.split("\n")
+    var w = want.split("\n")
+    for i in range(max(len(g), len(w))):
+        var gl = String(g[i]) if i < len(g) else String("<end>")
+        var wl = String(w[i]) if i < len(w) else String("<end>")
+        if gl != wl:
+            return String("line ") + String(i + 1) + String(":\n got: ") + gl + String("\nwant: ") + wl
+    return String("")
+
+
+def test_report_end_to_end() raises:
+    var dir = _tmp(String("report"))
+    assert_equal(run(_report(dir)), EXIT_OK)
+    var got = read_text(dir + "/summary.md")
+    var want = read_text(String(E2E) + "summary.md")
+    assert_true(got == want, _first_diff(got, want))
+    var files = listdir(dir + "/checkrun")
+    sort_strings(files)
+    assert_equal(len(files), 2)
+    assert_equal(files[0], "000.json")
+    assert_equal(files[1], "001.json")
+    var post = parse_json_value(read_text(dir + "/checkrun/000.json"))
+    var anns = post.get(String("output")).get(String("annotations"))
+    assert_equal(anns.array_len(), 5)
+    assert_equal(anns.element_at(0).get(String("path")).as_string(), "src/alpha/a.mojo")
+    assert_equal(Int(anns.element_at(0).get(String("start_line")).as_int64()), 2)
+    assert_equal(Int(anns.element_at(0).get(String("end_line")).as_int64()), 3)
+    assert_equal(anns.element_at(4).get(String("annotation_level")).as_string(), "notice")
+    assert_equal(post.get(String("output")).get(String("summary")).as_string(), want)
+    var last = parse_json_value(read_text(dir + "/checkrun/001.json"))
+    assert_equal(last.get(String("status")).as_string(), "completed")
+    assert_equal(last.get(String("conclusion")).as_string(), "neutral")
+    var result = parse_json_value(read_text(dir + "/result.json"))
+    assert_equal(result.get(String("conclusion")).as_string(), "neutral")
+    assert_equal(Int(result.get(String("total")).get(String("line_found")).as_int64()), 7)
+    assert_equal(Int(result.get(String("diff")).get(String("uncovered")).as_int64()), 2)
+    assert_equal(result.get(String("touched_packages")).element_at(0).as_string(), "src/alpha")
+    assert_equal(result.get(String("findings")).array_len(), 5)
+    assert_equal(read_text(dir + "/ratchet.tsv"), "# floors for the end-to-end test\nsrc/alpha\t4000\t5000\nsrc/beta\t10000\t-\n")
+
+
+def test_gate_entry_is_the_report_entry() raises:
+    var rdir = _tmp(String("gate_report"))
+    assert_equal(run(_report(rdir)), EXIT_OK)
+    var gdir = _tmp(String("gate"))
+    assert_equal(run(_gate(gdir, String("enforce"))), EXIT_GATE)
+    var report = parse_json_value(read_text(rdir + "/result.json"))
+    var gate = parse_json_value(read_text(gdir + "/result.json"))
+    var pkgs = report.get(String("packages"))
+    var found = False
+    for i in range(pkgs.array_len()):
+        var p = pkgs.element_at(i)
+        if p.get(String("package")).as_string() == String("src/alpha"):
+            found = True
+            assert_equal(gate.get(String("package")).serialize(), p.serialize())
+    assert_true(found)
+    assert_equal(gate.get(String("conclusion")).as_string(), "failure")
+    assert_equal(gate.get(String("findings")).array_len(), 4)
+    var ndir = _tmp(String("gate_neutral"))
+    assert_equal(run(_gate(ndir, String("neutral"))), EXIT_OK)
+    assert_true(read_text(ndir + "/summary.md").startswith("## Coverage of `src/alpha`: line 40.00% (2/5)"))
+    # Census: the same findings, labelled, never a failing exit.
+    var cdir = _tmp(String("gate_census"))
+    assert_equal(run(_gate(cdir, String("census"))), EXIT_OK)
+    var census = read_text(cdir + "/summary.md")
+    assert_true(census.find("- **BelowTarget** (census) `src/alpha`: line 40.00%") >= 0, census)
+    assert_equal(parse_json_value(read_text(cdir + "/result.json")).get(String("conclusion")).as_string(), "neutral")
+
+
+def test_report_exit_never_carries_the_conclusion() raises:
+    var dir = _tmp(String("enforce"))
+    var a = _report(dir)
+    a.append("--mode")
+    a.append("enforce")
+    assert_equal(run(a), EXIT_OK)
+    var result = parse_json_value(read_text(dir + "/result.json"))
+    assert_equal(result.get(String("conclusion")).as_string(), "failure")
+    var last = parse_json_value(read_text(dir + "/checkrun/001.json"))
+    assert_equal(last.get(String("conclusion")).as_string(), "failure")
+
+
+def _with(var a: List[String], flag: String, value: String) -> List[String]:
+    a.append(flag)
+    a.append(value)
+    return a^
+
+
+def _without(a: List[String], flag: String) -> List[String]:
+    var out = List[String]()
+    var i = 0
+    while i < len(a):
+        if a[i] == flag:
+            i += 2
+            continue
+        out.append(a[i])
+        i += 1
+    return out^
+
+
+def test_usage_errors_exit_2() raises:
+    var dir = _tmp(String("usage"))
+    assert_equal(run(List[String]()), EXIT_USAGE)
+    var bogus = List[String]()
+    bogus.append("frobnicate")
+    assert_equal(run(bogus), EXIT_USAGE)
+    assert_equal(run(_with(_report(dir), String("--frob"), String("x"))), EXIT_USAGE)
+    assert_equal(run(_without(_report(dir), String("--head-sha"))), EXIT_USAGE)
+    assert_equal(run(_without(_report(dir), String("--source-root"))), EXIT_USAGE)
+    assert_equal(run(_with(_without(_report(dir), String("--head-sha")), String("--head-sha"), String("abc"))), EXIT_USAGE)
+    assert_equal(run(_with(_report(dir), String("--mode"), String("strict"))), EXIT_USAGE)
+    assert_equal(run(_with(_report(dir), String("--target-bp"), String("10001"))), EXIT_USAGE)
+    assert_equal(run(_with(_report(dir), String("--ratchet"), String("again"))), EXIT_USAGE)
+    assert_equal(run(_without(_without(_report(dir), String("--cobertura")), String("--cobertura"))), EXIT_USAGE)
+    assert_equal(run(_with(_gate(dir, String("enforce")), String("--diff"), String(E2E) + "diff.txt")), EXIT_USAGE)
+    assert_equal(run(_without(_gate(dir, String("enforce")), String("--mode"))), EXIT_USAGE)
+    # lcov and Cobertura identify branches differently: never mixed.
+    assert_equal(run(_with(_report(dir), String("--lcov"), String(E2E) + "cov_alpha.xml")), EXIT_USAGE)
+    var dangling = _report(dir)
+    dangling.append("--name")
+    assert_equal(run(dangling), EXIT_USAGE)
+
+
+def test_input_errors_exit_1() raises:
+    var dir = _tmp(String("input"))
+    var bad = dir + "/bad_ratchet.tsv"
+    write_text(bad, String("src/b\t1\t-\nsrc/a\t1\t-\n"))
+    var a = _without(_report(_tmp(String("input_a"))), String("--ratchet"))
+    assert_equal(run(_with(a^, String("--ratchet"), bad)), EXIT_INPUT)
+    var unmapped = dir + "/unmapped.xml"
+    write_text(unmapped, String("<coverage><classes><class filename=\"src/alpha/gone.mojo\"><lines><line number=\"1\" hits=\"1\"/></lines></class></classes></coverage>\n"))
+    assert_equal(run(_with(_report(_tmp(String("input_b"))), String("--cobertura"), unmapped)), EXIT_INPUT)
+    var full = _tmp(String("input_c"))
+    makedirs(full + "/checkrun", exist_ok=True)
+    write_text(full + "/checkrun/stale.json", String("{}"))
+    assert_equal(run(_report(full)), EXIT_INPUT)
+    var nopkg = _without(_gate(_tmp(String("input_d")), String("enforce")), String("--package"))
+    assert_equal(run(_with(nopkg^, String("--package"), String("src/nothere"))), EXIT_INPUT)
+
+
+def main() raises:
+    test_report_end_to_end()
+    test_gate_entry_is_the_report_entry()
+    test_report_exit_never_carries_the_conclusion()
+    test_usage_errors_exit_2()
+    test_input_errors_exit_1()
+    print("test_cli: PASS")

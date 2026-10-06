@@ -1,0 +1,81 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# covcheck: coverage reports (kcov's Cobertura, lcov) to per-package numbers,
+# findings against the policy (target, ratchet floors, surviving mutants,
+# exemptions), a GitHub check run's request bodies, and the per-package build
+# gate. See README.md. The floors are DATA, `ratchet.tsv`; a test reads the
+# shipped file so it can never be left unparseable.
+export_file(
+    name = "ratchet.tsv",
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "covcheck",
+    srcs = glob(["covcheck/*.mojo"]),
+    deps = [
+        "//src/komira_json:komira_json",
+    ],
+    test_srcs = [
+        # the lcov reader: lines, branches ('-' not taken), summary records that
+        # lie are ignored, duplicate SF summed, and every refusal
+        "tests/test_lcov.mojo",
+        # the Cobertura reader: kcov's real shape, no branches from rate
+        # attributes, the XML it accepts, every refusal, and Cobertura == lcov
+        "tests/test_cobertura.mojo",
+        # path mapping in its documented order (strip prefix, buck-out hash,
+        # PKGDIR, outside vs unmapped) and a file's package
+        "tests/test_paths.mojo",
+        # every diff block shape: modified, added, deleted, renames, binary,
+        # mode-only, omitted and zero counts, C-quoted paths
+        "tests/test_diff.mojo",
+        # exemption markers and their near misses, their effect on the counts;
+        # the mutants file format
+        "tests/test_exempt_mutants.mojo",
+        # the ratchet grammar, the shipped ratchet.tsv, every comparison
+        # outcome, and the proposed file
+        "tests/test_ratchet.mojo",
+        # the shared computation: merged reports, test sources both ways,
+        # exemptions, mutants, the target, conclusions per mode, rounding, and
+        # the gate's numbers equal to the report's
+        "tests/test_analyze.mojo",
+        # check-run batching, annotation scope/order/ranges/levels, changed-line
+        # coverage, the summary's size limit, JSON escaping
+        "tests/test_report.mojo",
+        # the command line end to end: the summary golden, check-run files,
+        # result JSON, proposed ratchet, gate == report, every exit code
+        "tests/test_cli.mojo",
+    ],
+    test_data = {
+        "tests/test_lcov.mojo": ["tests/fixtures/basic.info"],
+        "tests/test_cobertura.mojo": [
+            "tests/fixtures/equiv.info",
+            "tests/fixtures/equiv.xml",
+            "tests/fixtures/kcov_trimmed.xml",
+        ],
+        "tests/test_ratchet.mojo": {
+            "tools/build/coverage/ratchet.tsv": ":ratchet.tsv",
+        },
+        "tests/test_cli.mojo": [
+            "tests/fixtures/e2e/cov_alpha.xml",
+            "tests/fixtures/e2e/cov_beta.xml",
+            "tests/fixtures/e2e/diff.txt",
+            "tests/fixtures/e2e/mutants.tsv",
+            "tests/fixtures/e2e/ratchet.tsv",
+            "tests/fixtures/e2e/root/src/alpha/a.mojo",
+            "tests/fixtures/e2e/root/src/beta/c.mojo",
+            "tests/fixtures/e2e/summary.md",
+        ],
+    },
+    visibility = ["PUBLIC"],
+)
+
+mojo_binary(
+    name = "covcheck_bin",
+    srcs = ["main.mojo"],
+    deps = [
+        ":covcheck",
+        "//src/komira_json:komira_json",
+    ],
+    visibility = ["PUBLIC"],
+)
