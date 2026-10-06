@@ -73,6 +73,7 @@ _TESTS_LINTS = [
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
     "//src/komira_aws_lambda_http:deps_lint",
+    "//src/komira_azure_blob_e2e:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_conformance:deps_lint",
     "//src/komira_http_core:deps_lint",
