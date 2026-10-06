@@ -41,7 +41,8 @@
 #     ends, or ends as "connection closed".
 #   * a trailers-only `grpc-status: 0`: `open` returns, the status is 0, and
 #     the first poll reports the end. Catches: open raising on an OK answer.
-#   * a head then an empty END_STREAM: `open` raises UNKNOWN (no status).
+#   * a head then an empty END_STREAM, and a trailers-only head with no
+#     `grpc-status`: `open` raises UNKNOWN (#454's missing-status rule).
 #   * `grpc-status: 0` after a partial message: INTERNAL. Catches: the tail of
 #     a truncated envelope silently dropped.
 #   * a clean `grpc-status: 0` end is OK (the control), and polling again
@@ -447,7 +448,7 @@ def test_partial_message_before_an_ok_status_is_internal() raises:
     )
 
 
-def test_clean_ok_end_is_ok_and_not_permanent() raises:
+def test_clean_ok_end_is_ok() raises:
     var out = List[UInt8]()
     var hpack = HpackEncoder(max_table_size=4096)
     _settings(out)
@@ -592,6 +593,21 @@ def test_open_trailers_only_ok_does_not_raise() raises:
     assert_true(client.last_poll_ended())
 
 
+def test_open_trailers_only_without_a_status_is_unknown() raises:
+    """`:status 200` + END_STREAM in one HEADERS, no grpc-status: UNKNOWN."""
+    var out = List[UInt8]()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _settings(out)
+    var h = List[HpackHeader]()
+    h.append(HpackHeader(String(":status"), String("200")))
+    h.append(HpackHeader(String("content-type"), String("application/grpc")))
+    _headers(hpack, h^, True, out)
+    var r = _open_error_and_code(out^)
+    assert_true(r[0].startswith(String("[grpc:2] ")), r[0])
+    assert_true(String("missing grpc-status") in r[0], r[0])
+    assert_equal(r[1], Int(GRPC_STATUS_UNKNOWN))
+
+
 def test_open_head_then_empty_end_is_unknown() raises:
     var out = List[UInt8]()
     var hpack = HpackEncoder(max_table_size=4096)
@@ -630,7 +646,7 @@ def main() raises:
     test_goaway_excluding_the_stream_is_unavailable()
     test_connection_close_without_end_stream_is_unavailable()
     test_partial_message_before_an_ok_status_is_internal()
-    test_clean_ok_end_is_ok_and_not_permanent()
+    test_clean_ok_end_is_ok()
     test_non_ascii_grpc_message_does_not_abort()
     test_close_after_a_goaway_that_kept_the_stream()
     test_rst_enhance_your_calm_is_resource_exhausted()
@@ -638,6 +654,7 @@ def main() raises:
     test_data_before_the_head_is_refused_as_internal()
     test_trailers_without_end_stream_are_refused_as_internal()
     test_open_trailers_only_ok_does_not_raise()
+    test_open_trailers_only_without_a_status_is_unknown()
     test_open_head_then_empty_end_is_unknown()
     test_open_http_503_keeps_the_status()
     print("ALL PASS")

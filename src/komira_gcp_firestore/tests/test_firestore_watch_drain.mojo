@@ -36,6 +36,8 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
+from komira_grpc import GRPC_STATUS_UNKNOWN
+
 from komira_gcp_firestore.firestore_listen_proto import (
     FsDocument,
     ListenEvent,
@@ -202,7 +204,9 @@ def test_failed_open_code() raises:
     assert_equal(listen_end_code_after_failed_open(14), 14)
     assert_equal(listen_end_code_after_failed_open(3), 3)
     # It raised with none (a stall before the head): UNKNOWN.
-    assert_equal(listen_end_code_after_failed_open(-1), 2)
+    assert_equal(
+        listen_end_code_after_failed_open(-1), Int(GRPC_STATUS_UNKNOWN)
+    )
 
 
 def test_every_open_failing_raises_the_last_status() raises:

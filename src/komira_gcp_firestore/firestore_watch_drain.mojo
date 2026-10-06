@@ -30,6 +30,8 @@ from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
 from komira_http_core.transport.io_stream import IoStream
 
+from komira_grpc import GRPC_STATUS_UNKNOWN
+
 from komira_gcp_firestore.firestore_listen_client import FirestoreListenClient
 from komira_gcp_firestore.firestore_listen_proto import ListenEvent
 from komira_gcp_firestore.firestore_watch_buffer import (
@@ -44,7 +46,6 @@ comptime LISTEN_DRAIN_RAISE: Int = 1
 comptime LISTEN_DRAIN_RETURN_EMPTY: Int = 2
 """`listen_drain_step`: return an empty list (idle drain)."""
 
-comptime _GRPC_UNKNOWN: Int = 2
 comptime _DRAIN_MAX_ITERATIONS: Int = 1_000_000
 
 
@@ -68,7 +69,7 @@ def listen_end_code_after_failed_open(client_terminal_code: Int) -> Int:
     the client recorded before it raised, or UNKNOWN if it raised without one
     (a stall before the response head)."""
     if client_terminal_code < 0:
-        return _GRPC_UNKNOWN
+        return Int(GRPC_STATUS_UNKNOWN)
     return client_terminal_code
 
 

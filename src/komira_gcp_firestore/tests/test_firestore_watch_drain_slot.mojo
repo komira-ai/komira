@@ -41,6 +41,8 @@ from komira_http_core.transport.scripted import ScriptedStream
 
 from komira_protobuf.writer import pb_write_message_field, pb_write_varint_field
 
+from komira_grpc import GRPC_STATUS_UNKNOWN
+
 from komira_gcp_firestore.firestore_listen_proto import TCT_CURRENT
 from komira_gcp_firestore.firestore_listen_client import (
     FirestoreListenClient,
@@ -147,7 +149,7 @@ def test_a_stalled_open_is_unknown() raises:
     var slot = ListenClientSlot[ScriptedStream]()
     _adopt(slot, reactor, _client(out^, pending_after_script=1_000_000))
     assert_false(slot.is_open())
-    assert_equal(slot.last_end_code(), 2)
+    assert_equal(slot.last_end_code(), Int(GRPC_STATUS_UNKNOWN))
     assert_true(
         String("stalled before response head") in slot.last_end_text(),
         slot.last_end_text(),
