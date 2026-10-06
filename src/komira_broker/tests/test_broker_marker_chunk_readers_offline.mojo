@@ -398,7 +398,8 @@ def test_reap_across_markers() raises:
     var seg_store = rec.clone()
     var worker = ReapWorker[_DeleteRecordingStore](Int64(0))
     var reaped = worker.run(seg_store, rec_manifest, Int64(10000))
-    assert_equal(reaped, Int64(4), "all 4 retired chunks reaped")
+    assert_equal(reaped.reaped_count, Int64(4), "all 4 retired chunks reaped")
+    assert_equal(reaped.skipped_live_count, Int64(0), "no live tombstone")
 
     # The segment DELETEs are exactly the two data chunks' keys. The manifest's
     # own chunk/tombstone deletes go through the same store; none may be "".

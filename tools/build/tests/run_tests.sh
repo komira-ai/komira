@@ -301,6 +301,16 @@
 #      row for a welded test or package (the ledger only shrinks; one test is
 #      welded only by a computed list), a row naming nothing, a row with no
 #      reason, and a root with no package.
+#  40. README API coverage (tools/build/lint/readme_api_coverage.bzl;
+#      docs/readme_api_coverage.md): //:readme_api_coverage (the census of
+#      every package under src/, report-only) and
+#      tests//functional/readme_api_coverage:ok (a planted tree whose census
+#      must equal its expected files, counts and statuses exactly) build; each
+#      target of tests//negative/readme_api_coverage fails naming its one
+#      planted finding: a malformed ledger row, a repeated row, a row for a
+#      symbol not exported, a row for a symbol the README uses (the ledger
+#      only shrinks), an undocumented symbol under `enforce = True`, and a
+#      root with no package.
 set -uo pipefail
 
 umbrella=1
@@ -1129,6 +1139,23 @@ else
         fail "$name: named '$tw_named', want '$tw_want' (see $LOG/$name.log)"
     fi
 fi
+
+# 40
+expect_green readme_api_coverage //:readme_api_coverage tests//functional/readme_api_coverage:ok
+L=tests//functional/readme_api_coverage:exceptions.tsv
+N=tests//negative/readme_api_coverage
+for want in \
+    "malformed|$N/ledger_malformed.tsv:2: a row is <package><TAB><symbol><TAB><reason>, with a reason" \
+    "duplicate|$N/ledger_duplicate.tsv:3: komira_a top_level has a row already, on line 1" \
+    "stale_gone|$N/ledger_stale_gone.tsv:2: komira_a Circle: not exported by src/komira_a/__init__.mojo; delete the row" \
+    "stale_used|$N/ledger_stale_used.tsv:3: komira_a bye: src/komira_a/README.md uses it now; delete the row (the ledger only shrinks)" \
+    "enforce|$N:enforce[files]/src/komira_a/greet.mojo:23: komira_a Greeter.wave: exported and used by no README example" \
+    "empty|readme_api_coverage: checked nothing (no package under nosuch)"; do
+    expect_red "readme_api_coverage_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red readme_api_coverage_malformed_symbol "$N/ledger_malformed.tsv:3: a row is" "$N:malformed"
+expect_red readme_api_coverage_stale_private "$N/ledger_stale_gone.tsv:3: komira_a Greeter._secret: not exported" "$N:stale_gone"
+expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enforce"
 
 # 37
 pt_rc=0
