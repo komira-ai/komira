@@ -1,0 +1,29 @@
+"""komira_a: the fixture's package.
+
+A docstring is not read:
+
+    from .hidden import NotAnExport
+"""
+# from .commented import Commented
+from .greet import greet, Greeter, farewell as bye
+from .shapes import (
+    Square,
+    area,  # a comment in the list
+    _private_helper,
+)
+from .shapes import Square
+from .shapes import \
+    Box
+from . import errors
+from komira_other import Foreign
+from komira_a.errors import NOT_FOUND as MISSING
+
+comptime ANSWER = 42
+
+
+def top_level() -> Int:
+    return 1
+
+
+struct _Hidden:
+    pass

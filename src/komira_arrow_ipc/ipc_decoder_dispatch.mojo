@@ -44,6 +44,19 @@ from komira_concurrency.parallel_dispatch import (
     ParallelDispatch,
     NoDispatch,
 )
+from komira_arrow_ipc.ipc_field_node_check import (
+    check_buffer_size,
+    check_field_node,
+    check_node_index,
+    check_record_batch_length,
+    check_top_level_node,
+    check_top_level_nodes,
+    checked_bitmap_bytes,
+    checked_offsets_bytes,
+    checked_size_mul,
+    validity_present,
+    varlen_offsets_bytes,
+)
 from komira_arrow_ipc.ipc_flatbuf import (
     BufferDescriptor,
     FieldNode,
@@ -578,6 +591,9 @@ def _decode_record_batch_message_impl[
         rb.buffers, f.body_pos, working_frame.len(),
         "decode_record_batch_message",
     )
+    # 5c. ROBUSTNESS: every buffer size below is formed from a FieldNode's
+    # length; refuse a negative or inconsistent node before any is formed.
+    check_top_level_nodes("decode_record_batch_message", rb.nodes, row_count)
 
     # 6. Dispatch decode per column. Track positional cursors into
     #    rb.nodes / rb.buffers.
@@ -759,6 +775,7 @@ def _decode_column(
             buffers[buffer_idx + 1], # values buffer
             frame,
             body_pos,
+            node_idx,
         )
         return _ColumnDecodeResult(
             column=col^,
@@ -777,6 +794,7 @@ def _decode_column(
             buffers[buffer_idx + 1], # value bitmap
             frame,
             body_pos,
+            node_idx,
         )
         return _ColumnDecodeResult(
             column=col^,
@@ -801,6 +819,7 @@ def _decode_column(
             buffers[buffer_idx + 2], # data
             frame,
             body_pos,
+            node_idx,
         )
         return _ColumnDecodeResult(
             column=col^,
@@ -1003,12 +1022,20 @@ def expand_dict_indices_to_string(
     # build it in two passes — first pass computes the output's
     # cumulative byte size (so we know how big a buffer to alloc),
     # second pass writes the actual bytes.
+    # `n_rows` is a FieldNode length off the wire. Compare by division, not
+    # `n_rows * idx_byte_width`, which wraps for a huge count (2^62 Int32
+    # indices need 2^64 bytes, 0 in Int) and would pass.
+    if n_rows < 0:
+        raise Error(
+            "expand_dict_indices_to_string: n_rows " + String(n_rows)
+            + " is negative"
+        )
     var indices_n_bytes = indices_buf.len()
-    if indices_n_bytes < n_rows * idx_byte_width:
+    if indices_n_bytes // idx_byte_width < n_rows:
         raise Error(
             "expand_dict_indices_to_string: indices_buf length "
-            + String(indices_n_bytes) + " < n_rows*idx_byte_width = "
-            + String(n_rows * idx_byte_width)
+            + String(indices_n_bytes) + " < n_rows*idx_byte_width ("
+            + String(n_rows) + " x " + String(idx_byte_width) + ")"
         )
 
     # First pass: total bytes + validate indices.
@@ -1291,6 +1318,9 @@ def _decode_record_batch_message_with_dicts_impl[
         rb.buffers, f.body_pos, working_frame.len(),
         "decode_record_batch_message_with_dicts",
     )
+    check_top_level_nodes(
+        "decode_record_batch_message_with_dicts", rb.nodes, row_count
+    )
 
     # Per-column dispatch.
     # The front-drain below takes exactly one slot per column. `Slab.take_at`
@@ -1353,7 +1383,8 @@ def _decode_record_batch_message_with_dicts_impl[
             if widths_provided:
                 idx_bit_width = dict_index_widths[i]
             var validity = _maybe_decode_validity_bitmap(
-                validity_buf, dict_n_rows, working_frame, f.body_pos
+                validity_buf, dict_n_rows, Int(node.null_count), node_idx,
+                working_frame, f.body_pos,
             )
             var indices_bytes = Int(indices_buf_desc.length)
             var indices_buf = OwnedAlignedBuffer(max(indices_bytes, 1))
@@ -1437,25 +1468,20 @@ def _build_fixed_width_column(
     values_buf: BufferDescriptor,
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Construct a fixed-width Column[HeapRegion] by copy-on-read from the IPC body."""
     var validity = _maybe_decode_validity_bitmap(
-        validity_buf, length, frame, body_pos
+        validity_buf, length, null_count, node_index, frame, body_pos
     )
-    var values_bytes_expected = length * bytes_per_element
-    var values_len = Int(values_buf.length)
-    if values_len < values_bytes_expected:
-        raise Error(
-            "_build_fixed_width_column: values buffer too small (have "
-            + String(values_len)
-            + ", expected "
-            + String(values_bytes_expected)
-            + " for "
-            + String(length)
-            + " rows × "
-            + String(bytes_per_element)
-            + " bytes)"
-        )
+    var values_bytes_expected = checked_size_mul(
+        "_build_fixed_width_column", node_index, "values buffer", length,
+        bytes_per_element,
+    )
+    check_buffer_size(
+        "_build_fixed_width_column", node_index, "values",
+        Int(values_buf.length), values_bytes_expected, length,
+    )
     var data = OwnedAlignedBuffer(max(values_bytes_expected, 1))
     # Per-buffer marker for the values
     # buffer (fixed-width primitive copy-on-read path).
@@ -1491,22 +1517,20 @@ def _build_bool_column(
     value_bitmap_buf: BufferDescriptor,
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Construct a BOOL Column[HeapRegion] by copy-on-read. Value buffer is
     LSB-first 1-bit pack, (length+7)/8 bytes."""
     var validity = _maybe_decode_validity_bitmap(
-        validity_buf, length, frame, body_pos
+        validity_buf, length, null_count, node_index, frame, body_pos
     )
-    var expected_bitmap_bytes = (length + 7) // 8
-    var got = Int(value_bitmap_buf.length)
-    if got < expected_bitmap_bytes:
-        raise Error(
-            "_build_bool_column: value bitmap buffer too small (have "
-            + String(got)
-            + ", expected "
-            + String(expected_bitmap_bytes)
-            + ")"
-        )
+    var expected_bitmap_bytes = checked_bitmap_bytes(
+        "_build_bool_column", node_index, "value bitmap buffer", length
+    )
+    check_buffer_size(
+        "_build_bool_column", node_index, "value bitmap",
+        Int(value_bitmap_buf.length), expected_bitmap_bytes, length,
+    )
     var data = OwnedAlignedBuffer(max(expected_bitmap_bytes, 1))
     # Per-buffer marker for the BOOL
     # value-bitmap buffer.
@@ -1542,15 +1566,25 @@ def _build_varlen_column(
     data_buf: BufferDescriptor,
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Construct a String/Binary/LargeString/LargeBinary Column[HeapRegion] by
     copy-on-read."""
     var validity = _maybe_decode_validity_bitmap(
-        validity_buf, length, frame, body_pos
+        validity_buf, length, null_count, node_index, frame, body_pos
     )
 
-    # Copy offsets buffer.
+    # Copy offsets buffer. It must hold the node's `length + 1` offsets (the
+    # offsets' values against the data buffer are a separate check).
     var offsets_bytes = Int(offsets_buf.length)
+    check_buffer_size(
+        "_build_varlen_column", node_index, "offsets", offsets_bytes,
+        varlen_offsets_bytes(
+            "_build_varlen_column", node_index, length,
+            _varlen_offset_width(arrow_type),
+        ),
+        length,
+    )
     var offsets = OwnedAlignedBuffer(max(offsets_bytes, 1))
     # Per-buffer marker for var-len offsets.
     trace_alloc["arrow_ipc.decode_record_batch_copy"](offsets_bytes)
@@ -1595,24 +1629,22 @@ def _build_varlen_column(
 def _maybe_decode_validity_bitmap(
     validity_buf: BufferDescriptor,
     length: Int,
+    null_count: Int,
+    node_index: Int,
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
 ) raises -> Optional[Bitmap[HeapRegion]]:
     """Decode a validity bitmap from the body. Returns None when the
-    Buffer entry's length is 0 (encoder's signal for "all non-null")."""
-    if validity_buf.length == 0:
+    Buffer entry's length is 0 (encoder's signal for "all non-null"),
+    which is refused when the node declares nulls."""
+    if not validity_present(
+        "_maybe_decode_validity_bitmap", node_index,
+        Int(validity_buf.length), length, null_count,
+    ):
         return None
-    var bytes = (length + 7) // 8
-    var got = Int(validity_buf.length)
-    if got < bytes:
-        raise Error(
-            "_maybe_decode_validity_bitmap: bitmap buffer too small "
-            "(have "
-            + String(got)
-            + ", expected "
-            + String(bytes)
-            + ")"
-        )
+    var bytes = checked_bitmap_bytes(
+        "_maybe_decode_validity_bitmap", node_index, "bitmap buffer", length
+    )
     var bm = Bitmap.create(length)
     # Per-buffer marker for the validity
     # bitmap (copy-on-read path).
@@ -1628,6 +1660,17 @@ def _maybe_decode_validity_bitmap(
     bm.buffer.set_length(bytes)
 
     return bm^
+
+
+def _varlen_offset_width(arrow_type: ArrowType) -> Int:
+    """Offset width of a STRING/BINARY (4) or LARGE_STRING/LARGE_BINARY (8)
+    column."""
+    if (
+        arrow_type == ArrowType.LARGE_STRING
+        or arrow_type == ArrowType.LARGE_BINARY
+    ):
+        return 8
+    return 4
 
 
 # =============================================================================
@@ -1885,6 +1928,13 @@ def decode_record_batch_zerocopy[
         rb.buffers, f.body_pos, frame.len(),
         "decode_record_batch_zerocopy",
     )
+    # 2c. ROBUSTNESS: the borrowed columns below are sized from the FieldNode
+    # lengths and nothing is read while they are built, so a node that lies
+    # about its length (or a buffer short of it) yields columns that read
+    # past their buffers. Refuse both before the first borrow.
+    check_top_level_nodes(
+        "decode_record_batch_zerocopy", rb.nodes, Int(rb.length)
+    )
 
     # 3. Per-column dispatch. Each arm constructs a Column via
     #    Column.from_borrowed_* — buffers point into frame's bytes.
@@ -1930,6 +1980,19 @@ def decode_record_batch_zerocopy[
         if fixed_width > 0:
             ref validity_desc = rb.buffers[buf_idx]
             ref values_desc = rb.buffers[buf_idx + 1]
+            check_buffer_size(
+                "decode_record_batch_zerocopy", node_idx, "values",
+                Int(values_desc.length),
+                checked_size_mul(
+                    "decode_record_batch_zerocopy", node_idx, "values buffer",
+                    length, fixed_width,
+                ),
+                length,
+            )
+            _ = validity_present(
+                "decode_record_batch_zerocopy", node_idx,
+                Int(validity_desc.length), length, null_count,
+            )
             var values_view = frame.view_range_ro(
                 f.body_pos + Int(values_desc.offset),
                 Int(values_desc.length),
@@ -1966,6 +2029,19 @@ def decode_record_batch_zerocopy[
             ref validity_desc = rb.buffers[buf_idx]
             ref offsets_desc = rb.buffers[buf_idx + 1]
             ref data_desc = rb.buffers[buf_idx + 2]
+            check_buffer_size(
+                "decode_record_batch_zerocopy", node_idx, "offsets",
+                Int(offsets_desc.length),
+                varlen_offsets_bytes(
+                    "decode_record_batch_zerocopy", node_idx, length,
+                    _varlen_offset_width(t),
+                ),
+                length,
+            )
+            _ = validity_present(
+                "decode_record_batch_zerocopy", node_idx,
+                Int(validity_desc.length), length, null_count,
+            )
             var offsets_view = frame.view_range_ro(
                 f.body_pos + Int(offsets_desc.offset),
                 Int(offsets_desc.length),
@@ -2156,12 +2232,29 @@ def _decode_record_batch_message_nested_impl[
         "decode_record_batch_message_nested",
     )
     var n_cols = len(schema_specs)
+    var rb_length = Int(rb.length)
+    check_record_batch_length("decode_record_batch_message_nested", rb_length)
 
     var columns = Slab[Column[HeapRegion]]()
     var node_idx = 0
     var buf_idx = 0
     var view_col_idx = 0
     for i in range(n_cols):
+        # ROBUSTNESS: a top-level column must have the batch's length; inner
+        # nodes are checked where they are read.
+        check_node_index(
+            "decode_record_batch_message_nested",
+            node_idx,
+            len(rb.nodes),
+        )
+        check_top_level_node(
+            "decode_record_batch_message_nested",
+            i,
+            node_idx,
+            Int(rb.nodes[node_idx].length),
+            Int(rb.nodes[node_idx].null_count),
+            rb_length,
+        )
         var cursor = _decode_column_nested(
             schema_specs[i],
             rb.nodes,
@@ -2202,9 +2295,13 @@ def _decode_column_nested(
     it by 1. Non-view children re-emit the same index.
     """
     var t = spec.arrow_type
+    # ROBUSTNESS: this walk follows the schema, not a node count, and every
+    # buffer size below is formed from this node's length.
+    check_node_index("_decode_column_nested", node_idx, len(nodes))
     ref n = nodes[node_idx]
     var length = Int(n.length)
     var null_count = Int(n.null_count)
+    check_field_node("_decode_column_nested", node_idx, length, null_count)
 
     # Leaf cases (NULL / fixed-width primitive / BOOL / var-len) — delegate
     # to the flat _decode_column helper. Same shape as the flat decoder.
@@ -2248,6 +2345,7 @@ def _decode_column_nested(
             buffers[buffer_idx + 1], # values
             frame,
             body_pos,
+            node_idx,
         )
         col._inner_size = spec.inner_size
         return _NestedDecodeCursor(
@@ -2276,6 +2374,7 @@ def _decode_column_nested(
             buffers[buffer_idx],  # validity (the only buffer)
             frame,
             body_pos,
+            node_idx,
         )
         # _build_struct_column produces arrow_type=STRUCT; fix-up to
         # FIXED_SIZE_LIST + carry _inner_size.
@@ -2294,14 +2393,19 @@ def _decode_column_nested(
         )
         var child_out = Column[HeapRegion]()
         swap(child_cursor.column, child_out)
-        # Validate child row count = length * list_size.
-        if child_out._length != length * spec.inner_size:
+        # Validate child row count = length * list_size, formed without
+        # wrapping (a wrapped product could equal a small child length).
+        var fsl_child_rows = checked_size_mul(
+            "_decode_column_nested FIXED_SIZE_LIST", node_idx, "child rows",
+            length, spec.inner_size,
+        )
+        if child_out._length != fsl_child_rows:
             raise Error(
                 "_decode_column_nested FIXED_SIZE_LIST: decoded child "
                 "length "
                 + String(child_out._length)
                 + " != length * list_size = "
-                + String(length * spec.inner_size)
+                + String(fsl_child_rows)
             )
         col._children.append(child_out^)
         return _NestedDecodeCursor(
@@ -2324,6 +2428,7 @@ def _decode_column_nested(
             buffers[buffer_idx + 1], # offsets
             frame,
             body_pos,
+            node_idx,
         )
         var next_node = node_idx + 1
         var next_buf = buffer_idx + 2
@@ -2362,6 +2467,7 @@ def _decode_column_nested(
             buffers[buffer_idx],  # validity
             frame,
             body_pos,
+            node_idx,
         )
         # Copy field_names into the Column.
         for fn_i in range(len(spec.field_names)):
@@ -2405,6 +2511,7 @@ def _decode_column_nested(
             buffers[buffer_idx + 1],
             frame,
             body_pos,
+            node_idx,
         )
         var next_node = node_idx + 1
         var next_buf = buffer_idx + 2
@@ -2479,6 +2586,7 @@ def _decode_column_nested(
             buffers[buffer_idx + 1], # offsets
             frame,
             body_pos,
+            node_idx,
         )
         var next_node = node_idx + 1
         var next_buf = buffer_idx + 2
@@ -2557,6 +2665,7 @@ def _decode_column_nested(
             variadic_descs,
             frame,
             body_pos,
+            node_idx,
         )
         return _NestedDecodeCursor(
             column=col^,
@@ -2600,6 +2709,7 @@ def _decode_column_nested(
             buffers[buffer_idx + 2], # sizes
             frame,
             body_pos,
+            node_idx,
         )
         # ListView / LargeListView do NOT consume variadic_buffer_counts
         # entries — that field is only populated by BinaryView / Utf8View
@@ -2646,22 +2756,20 @@ def _build_list_column(
     offsets_desc: BufferDescriptor,
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Build a LIST/LARGE_LIST/MAP Column[HeapRegion] (validity + offsets only — child
     is appended by the caller after recursive decode)."""
     var validity = _maybe_decode_validity_bitmap(
-        validity_desc, length, frame, body_pos
+        validity_desc, length, null_count, node_index, frame, body_pos
     )
-    var offsets_bytes = (length + 1) * offset_bytes
-    var got = Int(offsets_desc.length)
-    if got < offsets_bytes:
-        raise Error(
-            "_build_list_column: offsets buffer too small (got "
-            + String(got)
-            + ", expected "
-            + String(offsets_bytes)
-            + ")"
-        )
+    var offsets_bytes = checked_offsets_bytes(
+        "_build_list_column", node_index, "offsets buffer", length, offset_bytes
+    )
+    check_buffer_size(
+        "_build_list_column", node_index, "offsets",
+        Int(offsets_desc.length), offsets_bytes, length,
+    )
     var offsets = OwnedAlignedBuffer(max(offsets_bytes, 1))
     for i in range(offsets_bytes):
         offsets.write_u8_at(
@@ -2686,11 +2794,12 @@ def _build_struct_column(
     validity_desc: BufferDescriptor,
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Build a STRUCT Column[HeapRegion] (validity only — no value/offset buffers;
     children appended by caller)."""
     var validity = _maybe_decode_validity_bitmap(
-        validity_desc, length, frame, body_pos
+        validity_desc, length, null_count, node_index, frame, body_pos
     )
     return Column[HeapRegion](
         arrow_type=ArrowType.STRUCT,
@@ -2747,11 +2856,14 @@ def _build_union_dense_column(
     offsets_desc: BufferDescriptor,
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Build a UNION_DENSE Column[HeapRegion] (Int8 type_ids in _data + Int32 offsets;
     NO validity per Arrow spec)."""
     var type_ids_bytes = length
-    var offsets_bytes = length * 4
+    var offsets_bytes = checked_size_mul(
+        "_build_union_dense_column", node_index, "offsets buffer", length, 4
+    )
     if Int(type_ids_desc.length) < type_ids_bytes:
         raise Error("_build_union_dense_column: type_ids buffer too small")
     if Int(offsets_desc.length) < offsets_bytes:
@@ -2821,6 +2933,7 @@ def _decode_binary_or_utf8_view(
     variadic_descs: List[BufferDescriptor],
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Lossy decode of BinaryView/Utf8View into expanded BINARY/STRING.
 
@@ -2837,10 +2950,12 @@ def _decode_binary_or_utf8_view(
     the most specific identity this decoder can have.
     """
     var validity = _maybe_decode_validity_bitmap(
-        validity_desc, length, frame, body_pos
+        validity_desc, length, null_count, node_index, frame, body_pos
     )
     var view_bytes_total = Int(view_desc.length)
-    var expected_view_bytes = length * 16
+    var expected_view_bytes = checked_size_mul(
+        "_decode_binary_or_utf8_view", node_index, "view buffer", length, 16
+    )
     if view_bytes_total < expected_view_bytes:
         raise Error(
             "_decode_binary_or_utf8_view: view buffer too small (got "
@@ -2983,6 +3098,7 @@ def _decode_list_view(
     sizes_desc: BufferDescriptor,
     frame: SharedAlignedBuffer[HeapRegion],
     body_pos: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Lossy decode of ListView/LargeListView into expanded LIST/LARGE_LIST.
 
@@ -3002,10 +3118,12 @@ def _decode_list_view(
     is dropped.
     """
     var validity = _maybe_decode_validity_bitmap(
-        validity_desc, length, frame, body_pos
+        validity_desc, length, null_count, node_index, frame, body_pos
     )
-    var expected_off_bytes = length * offset_bytes
-    var expected_sz_bytes = length * offset_bytes
+    var expected_off_bytes = checked_size_mul(
+        "_decode_list_view", node_index, "offsets buffer", length, offset_bytes
+    )
+    var expected_sz_bytes = expected_off_bytes
     if Int(offsets_desc.length) < expected_off_bytes:
         raise Error(
             "_decode_list_view: offsets buffer too small (got "
@@ -3224,12 +3342,32 @@ def decode_record_batch_message_nested_zerocopy[
         "decode_record_batch_message_nested_zerocopy",
     )
     var n_cols = len(schema_specs)
+    var rb_length = Int(rb.length)
+    check_record_batch_length(
+        "decode_record_batch_message_nested_zerocopy",
+        rb_length,
+    )
 
     var columns = Slab[Column[HeapRegion]]()
     var node_idx = 0
     var buf_idx = 0
     var view_col_idx = 0
     for i in range(n_cols):
+        # ROBUSTNESS: a top-level column must have the batch's length; inner
+        # nodes are checked where they are read.
+        check_node_index(
+            "decode_record_batch_message_nested_zerocopy",
+            node_idx,
+            len(rb.nodes),
+        )
+        check_top_level_node(
+            "decode_record_batch_message_nested_zerocopy",
+            i,
+            node_idx,
+            Int(rb.nodes[node_idx].length),
+            Int(rb.nodes[node_idx].null_count),
+            rb_length,
+        )
         var cursor = _decode_column_nested_zerocopy[bo](
             schema_specs[i],
             rb.nodes,
@@ -3269,9 +3407,19 @@ def _decode_column_nested_zerocopy[
     decoded child Columns to `_children`.
     """
     var t = spec.arrow_type
+    # ROBUSTNESS: nothing below reads the borrowed bytes, so every size this
+    # node implies is checked here, before the borrow (see
+    # `ipc_field_node_check`).
+    check_node_index("_decode_column_nested_zerocopy", node_idx, len(nodes))
     ref n = nodes[node_idx]
     var length = Int(n.length)
     var null_count = Int(n.null_count)
+    check_field_node(
+        "_decode_column_nested_zerocopy",
+        node_idx,
+        length,
+        null_count,
+    )
 
     # NULL: 0 buffers, all-null sentinel.
     if t == ArrowType.NULL:
@@ -3304,6 +3452,27 @@ def _decode_column_nested_zerocopy[
     if fixed_width > 0:
         ref validity_desc = buffers[buffer_idx]
         ref values_desc = buffers[buffer_idx + 1]
+        check_buffer_size(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "values",
+            Int(values_desc.length),
+            checked_size_mul(
+                "_decode_column_nested_zerocopy",
+                node_idx,
+                "values buffer",
+                length,
+                fixed_width,
+            ),
+            length,
+        )
+        _ = validity_present(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            Int(validity_desc.length),
+            length,
+            null_count,
+        )
         var values_view = frame.view_range_ro(
             body_pos + Int(values_desc.offset),
             Int(values_desc.length),
@@ -3338,6 +3507,26 @@ def _decode_column_nested_zerocopy[
         ref validity_desc = buffers[buffer_idx]
         ref offsets_desc = buffers[buffer_idx + 1]
         ref data_desc = buffers[buffer_idx + 2]
+        check_buffer_size(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "offsets",
+            Int(offsets_desc.length),
+            varlen_offsets_bytes(
+                "_decode_column_nested_zerocopy",
+                node_idx,
+                length,
+                _varlen_offset_width(t),
+            ),
+            length,
+        )
+        _ = validity_present(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            Int(validity_desc.length),
+            length,
+            null_count,
+        )
         var offsets_view = frame.view_range_ro(
             body_pos + Int(offsets_desc.offset),
             Int(offsets_desc.length),
@@ -3380,6 +3569,27 @@ def _decode_column_nested_zerocopy[
             )
         ref validity_desc = buffers[buffer_idx]
         ref values_desc = buffers[buffer_idx + 1]
+        check_buffer_size(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "values",
+            Int(values_desc.length),
+            checked_size_mul(
+                "_decode_column_nested_zerocopy",
+                node_idx,
+                "values buffer",
+                length,
+                spec.inner_size,
+            ),
+            length,
+        )
+        _ = validity_present(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            Int(validity_desc.length),
+            length,
+            null_count,
+        )
         var values_view = frame.view_range_ro(
             body_pos + Int(values_desc.offset),
             Int(values_desc.length),
@@ -3415,6 +3625,13 @@ def _decode_column_nested_zerocopy[
                 "expected 1 child"
             )
         ref validity_desc = buffers[buffer_idx]
+        _ = validity_present(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            Int(validity_desc.length),
+            length,
+            null_count,
+        )
         var validity_view = frame.view_range_ro(
             body_pos + Int(validity_desc.offset),
             Int(validity_desc.length),
@@ -3438,6 +3655,23 @@ def _decode_column_nested_zerocopy[
         )
         var child_out = Column[HeapRegion]()
         swap(child_cursor.column, child_out)
+        # The child must hold length * list_size rows (the copy-on-read
+        # decoder's check); consumers index it at row * list_size.
+        var fsl_child_rows = checked_size_mul(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "FIXED_SIZE_LIST child rows",
+            length,
+            spec.inner_size,
+        )
+        if child_out._length != fsl_child_rows:
+            raise Error(
+                "_decode_column_nested_zerocopy FIXED_SIZE_LIST: decoded"
+                " child length "
+                + String(child_out._length)
+                + " != length * list_size = "
+                + String(fsl_child_rows)
+            )
         col._children.append(child_out^)
         return _NestedDecodeCursor(
             column=col^,
@@ -3455,6 +3689,27 @@ def _decode_column_nested_zerocopy[
             )
         ref validity_desc = buffers[buffer_idx]
         ref offsets_desc = buffers[buffer_idx + 1]
+        check_buffer_size(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "offsets",
+            Int(offsets_desc.length),
+            checked_offsets_bytes(
+                "_decode_column_nested_zerocopy",
+                node_idx,
+                "offsets buffer",
+                length,
+                4 if t == ArrowType.LIST else 8,
+            ),
+            length,
+        )
+        _ = validity_present(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            Int(validity_desc.length),
+            length,
+            null_count,
+        )
         var offsets_view = frame.view_range_ro(
             body_pos + Int(offsets_desc.offset),
             Int(offsets_desc.length),
@@ -3490,6 +3745,13 @@ def _decode_column_nested_zerocopy[
     # STRUCT: validity only + N children.
     if t == ArrowType.STRUCT:
         ref validity_desc = buffers[buffer_idx]
+        _ = validity_present(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            Int(validity_desc.length),
+            length,
+            null_count,
+        )
         var validity_view = frame.view_range_ro(
             body_pos + Int(validity_desc.offset),
             Int(validity_desc.length),
@@ -3536,6 +3798,27 @@ def _decode_column_nested_zerocopy[
             )
         ref validity_desc = buffers[buffer_idx]
         ref offsets_desc = buffers[buffer_idx + 1]
+        check_buffer_size(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "offsets",
+            Int(offsets_desc.length),
+            checked_offsets_bytes(
+                "_decode_column_nested_zerocopy",
+                node_idx,
+                "offsets buffer",
+                length,
+                4,
+            ),
+            length,
+        )
+        _ = validity_present(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            Int(validity_desc.length),
+            length,
+            null_count,
+        )
         var offsets_view = frame.view_range_ro(
             body_pos + Int(offsets_desc.offset),
             Int(offsets_desc.length),
@@ -3575,6 +3858,14 @@ def _decode_column_nested_zerocopy[
     # UNION_SPARSE: type_ids only + N children.
     if t == ArrowType.UNION_SPARSE:
         ref type_ids_desc = buffers[buffer_idx]
+        check_buffer_size(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "type_ids",
+            Int(type_ids_desc.length),
+            length,
+            length,
+        )
         var type_ids_view = frame.view_range_ro(
             body_pos + Int(type_ids_desc.offset),
             Int(type_ids_desc.length),
@@ -3616,6 +3907,28 @@ def _decode_column_nested_zerocopy[
     if t == ArrowType.UNION_DENSE:
         ref type_ids_desc = buffers[buffer_idx]
         ref offsets_desc = buffers[buffer_idx + 1]
+        check_buffer_size(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "offsets",
+            Int(offsets_desc.length),
+            checked_size_mul(
+                "_decode_column_nested_zerocopy",
+                node_idx,
+                "offsets buffer",
+                length,
+                4,
+            ),
+            length,
+        )
+        check_buffer_size(
+            "_decode_column_nested_zerocopy",
+            node_idx,
+            "type_ids",
+            Int(type_ids_desc.length),
+            length,
+            length,
+        )
         var type_ids_view = frame.view_range_ro(
             body_pos + Int(type_ids_desc.offset),
             Int(type_ids_desc.length),
@@ -3832,6 +4145,11 @@ def decode_record_batch_message_mmap(
         rb.buffers, f.body_pos, rb_frame.len(),
         "decode_record_batch_message_mmap",
     )
+    # 4c. ROBUSTNESS: each builder sizes its borrow from the FieldNode
+    #    length; refuse a negative or inconsistent node first.
+    check_top_level_nodes(
+        "decode_record_batch_message_mmap", rb.nodes, Int(rb.length)
+    )
 
     # 5. Per-column dispatch. Each builder constructs a Column whose
     #    buffers are borrow_from_mmap'd into `region` at the absolute
@@ -3876,6 +4194,7 @@ def decode_record_batch_message_mmap(
                 values_desc,
                 region,
                 abs_body_offset,
+                node_idx,
             )
             columns.append(col^)
             node_idx += 1
@@ -3894,6 +4213,7 @@ def decode_record_batch_message_mmap(
                 value_bitmap_desc,
                 region,
                 abs_body_offset,
+                node_idx,
             )
             columns.append(col^)
             node_idx += 1
@@ -3919,6 +4239,7 @@ def decode_record_batch_message_mmap(
                 data_desc,
                 region,
                 abs_body_offset,
+                node_idx,
             )
             columns.append(col^)
             node_idx += 1
@@ -3955,19 +4276,22 @@ def _build_fixed_width_column_mmap(
     values_desc: BufferDescriptor,
     region: ArcPointer[MmapRegion],
     abs_body_offset: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Construct a fixed-width Column[HeapRegion] whose buffers borrow into the mmap
     region (zero-copy + zero-alloc on the per-column path).
     """
-    var values_bytes_expected = length * bytes_per_element
-    var values_len = Int(values_desc.length)
-    if values_len < values_bytes_expected:
-        raise Error(
-            "_build_fixed_width_column_mmap: values buffer too small"
-            + " (have " + String(values_len) + ", expected "
-            + String(values_bytes_expected) + " for " + String(length)
-            + " rows x " + String(bytes_per_element) + " bytes)"
-        )
+    # The borrow below is exactly this size and nothing reads it until a
+    # consumer does, so a wrapped or negative size would hand out a column
+    # whose rows lie past its buffer. Formed checked; no `max(..., 0)`.
+    var values_bytes_expected = checked_size_mul(
+        "_build_fixed_width_column_mmap", node_index, "values buffer",
+        length, bytes_per_element,
+    )
+    check_buffer_size(
+        "_build_fixed_width_column_mmap", node_index, "values",
+        Int(values_desc.length), values_bytes_expected, length,
+    )
 
     #
     # Keeps the mmap path zero-copy instead of
@@ -3981,11 +4305,12 @@ def _build_fixed_width_column_mmap(
     var data = SharedAlignedBuffer.borrow_mmap_erased(
         ArcPointer[MmapRegion](copy=region),
         Int64(abs_body_offset + Int(values_desc.offset)),
-        Int64(max(values_bytes_expected, 0)),
+        Int64(values_bytes_expected),
     )
 
     var validity = _maybe_build_validity_bitmap_mmap(
-        validity_desc, length, region, abs_body_offset
+        validity_desc, length, null_count, node_index, region,
+        abs_body_offset,
     )
     return Column[HeapRegion](
         arrow_type=arrow_type,
@@ -4005,19 +4330,19 @@ def _build_bool_column_mmap(
     value_bitmap_desc: BufferDescriptor,
     region: ArcPointer[MmapRegion],
     abs_body_offset: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """BOOL Column[HeapRegion] with mmap-borrowed validity + value bitmap.
 
     See `_build_fixed_width_column_mmap` for the realign-at-boundary rationale.
     """
-    var expected_bitmap_bytes = (length + 7) // 8
-    var got = Int(value_bitmap_desc.length)
-    if got < expected_bitmap_bytes:
-        raise Error(
-            "_build_bool_column_mmap: value bitmap buffer too small"
-            + " (have " + String(got) + ", expected "
-            + String(expected_bitmap_bytes) + ")"
-        )
+    var expected_bitmap_bytes = checked_bitmap_bytes(
+        "_build_bool_column_mmap", node_index, "value bitmap buffer", length
+    )
+    check_buffer_size(
+        "_build_bool_column_mmap", node_index, "value bitmap",
+        Int(value_bitmap_desc.length), expected_bitmap_bytes, length,
+    )
     # Zero-copy mmap borrow
     # via the type-erased keepalive cookie (see _build_fixed_width_column_mmap).
     var data = SharedAlignedBuffer.borrow_mmap_erased(
@@ -4026,7 +4351,8 @@ def _build_bool_column_mmap(
         Int64(expected_bitmap_bytes),
     )
     var validity = _maybe_build_validity_bitmap_mmap(
-        validity_desc, length, region, abs_body_offset
+        validity_desc, length, null_count, node_index, region,
+        abs_body_offset,
     )
     return Column[HeapRegion](
         arrow_type=ArrowType.BOOL,
@@ -4048,6 +4374,7 @@ def _build_varlen_column_mmap(
     data_desc: BufferDescriptor,
     region: ArcPointer[MmapRegion],
     abs_body_offset: Int,
+    node_index: Int,
 ) raises -> Column[HeapRegion]:
     """Var-len Column[HeapRegion] (STRING/BINARY/LARGE_*) with mmap-borrowed validity
     + offsets + data.
@@ -4055,6 +4382,14 @@ def _build_varlen_column_mmap(
     See `_build_fixed_width_column_mmap` for the realign-at-boundary rationale.
     """
     var offsets_bytes = Int(offsets_desc.length)
+    check_buffer_size(
+        "_build_varlen_column_mmap", node_index, "offsets", offsets_bytes,
+        varlen_offsets_bytes(
+            "_build_varlen_column_mmap", node_index, length,
+            _varlen_offset_width(arrow_type),
+        ),
+        length,
+    )
     # Zero-copy mmap borrow
     # via the type-erased keepalive cookie (see _build_fixed_width_column_mmap).
     var offsets = SharedAlignedBuffer.borrow_mmap_erased(
@@ -4071,7 +4406,8 @@ def _build_varlen_column_mmap(
     )
 
     var validity = _maybe_build_validity_bitmap_mmap(
-        validity_desc, length, region, abs_body_offset
+        validity_desc, length, null_count, node_index, region,
+        abs_body_offset,
     )
     return Column[HeapRegion](
         arrow_type=arrow_type,
@@ -4087,6 +4423,8 @@ def _build_varlen_column_mmap(
 def _maybe_build_validity_bitmap_mmap(
     validity_desc: BufferDescriptor,
     length: Int,
+    null_count: Int,
+    node_index: Int,
     region: ArcPointer[MmapRegion],
     abs_body_offset: Int,
 ) raises -> Optional[Bitmap[HeapRegion]]:
@@ -4104,15 +4442,11 @@ def _maybe_build_validity_bitmap_mmap(
     the validity field region-parametric would restore it for the bitmap
     too, at the cost of a very wide cascade.
     """
-    if validity_desc.length == 0:
+    if not validity_present(
+        "_maybe_build_validity_bitmap_mmap", node_index,
+        Int(validity_desc.length), length, null_count,
+    ):
         return None
-    var bytes = (length + 7) // 8
-    var got = Int(validity_desc.length)
-    if got < bytes:
-        raise Error(
-            "_maybe_build_validity_bitmap_mmap: bitmap buffer too small"
-            + " (have " + String(got) + ", expected " + String(bytes) + ")"
-        )
     # Zero-copy mmap-borrow
     # validity bitmap via the type-erased keepalive cookie. Returns
     # Bitmap[HeapRegion] (the Column._validity field type) aliasing the mmap

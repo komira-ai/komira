@@ -1,0 +1,5 @@
+# Another struct named Square, outside the module the import names (shapes):
+# its method is not Square's.
+struct Square:
+    def volume(self) -> Int:
+        return 0

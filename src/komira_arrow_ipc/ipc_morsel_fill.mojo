@@ -72,6 +72,12 @@ from std.collections import Array
 from std.sys import size_of
 
 from komira_arrow.arrow_types import ArrowType
+from komira_arrow_ipc.ipc_field_node_check import (
+    check_buffer_size,
+    check_top_level_nodes,
+    checked_size_mul,
+    validity_present,
+)
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
 from komira_arrow_ipc.ipc_flatbuf import (
     RecordBatchDescriptor,
@@ -408,6 +414,14 @@ struct IpcMorselFill(Movable):
                     + "-byte message body"
                 )
 
+        # Every column's node must agree with the batch length the reads below
+        # are bounded by (`n_rows`), and every size is formed checked: a
+        # wrapped `rb_length * width` would pass the values-run check below
+        # with a short run. One node per column, so every node is top-level.
+        check_top_level_nodes(
+            "IpcMorselFill.fill_from_frame", rb.nodes, rb_length
+        )
+
         # Descriptor pass -- O(n_cols).
         var node_idx = 0
         var buf_idx = 0
@@ -427,24 +441,28 @@ struct IpcMorselFill(Movable):
                 d.elem_bytes = width
                 d.values_pos = body_pos + Int(vbuf.offset)
                 d.all_valid = nulls == 0
-                if nulls == 0 or Int(vld.length) == 0:
+                # A node that declares nulls must carry a bitmap covering
+                # `rb_length` bits: the validity probe reads it unchecked,
+                # and treating a missing one as all-valid would drop nulls.
+                _ = validity_present(
+                    "IpcMorselFill.fill_from_frame", node_idx,
+                    Int(vld.length), rb_length, nulls,
+                )
+                if nulls == 0:
                     d.validity_pos = -1
                     d.all_valid = True
                 else:
                     d.validity_pos = body_pos + Int(vld.offset)
                 # The values run must actually hold `rb_length` elements.
-                if Int(vbuf.length) < rb_length * width:
-                    raise Error(
-                        "IpcMorselFill.fill_from_frame: column "
-                        + String(i)
-                        + " values buffer is "
-                        + String(Int(vbuf.length))
-                        + " bytes, short of "
-                        + String(rb_length * width)
-                        + " for "
-                        + String(rb_length)
-                        + " rows"
-                    )
+                check_buffer_size(
+                    "IpcMorselFill.fill_from_frame", node_idx, "values",
+                    Int(vbuf.length),
+                    checked_size_mul(
+                        "IpcMorselFill.fill_from_frame", node_idx,
+                        "values buffer", rb_length, width,
+                    ),
+                    rb_length,
+                )
             else:
                 d.kind = IPC_COL_DECLINED
             self.cols[i] = d

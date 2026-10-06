@@ -83,16 +83,21 @@ nothing else:
 
 Sub-targets:
 
-    [release]         the directory, a copy made after [release_check] passed: it
-                      does not exist for an unstamped build, a stamp without its
-                      source commit, a non-positive commit time, or a refused
-                      library. Nested: [release][manifest], [release][metadata]
+    [release]         the directory, a copy made after [release_check] and
+                      [kcov_guard] passed: it does not exist for an unstamped
+                      build, a stamp without its source commit, a
+                      non-positive commit time, a refused library, or a
+                      package holding kcov. Nested: [release][manifest],
+                      [release][metadata]
     [release_check]   the marker of `komira_pack conda-check --require-stamped`
     [default] [manifest] [metadata]
                       DEVELOPMENT outputs, built whether or not stamped (an
                       unstamped one is build number 0, build string
                       `h00000000_0`, claiming a permanent name if uploaded). Never read by an uploader.
     [check]           the marker of `komira_pack conda-check`
+    [kcov_guard]      the marker of the kcov guard (kcov_guard.bzl) over every
+                      file the packer copies in; [default] is also a copy made
+                      after it passed
 
 The bytes are reproducible under one condition (README.md, "Reproducibility"):
 the sha256 is the package's identity. Nothing is uploaded. Design and the reasons
@@ -104,6 +109,7 @@ load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "asset")
+load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
 
 def _compiler_version():
     # The version of the Mojo compiler the toolchain downloads, read from the
@@ -175,6 +181,10 @@ def _conda_package_impl(ctx):
     pack = ctx.attrs._pack[RunInfo]
     stem = "raw/" + ctx.label.name
     raw = ctx.actions.declare_output(stem, dir = True)
+    # Every file the packer copies into the package, at its path there: what
+    # the kcov guard reads (kcov_guard.bzl). The packer adds generated JSON
+    # only, and conda-check refuses any other member of the pkg tar.
+    packed = []
     if refusal != None:
         cmd = cmd_args(pack, "conda", "--name", name, "--refuse", refusal, "--out-dir", raw.as_output())
         payload = None
@@ -185,6 +195,11 @@ def _conda_package_impl(ctx):
         payload = lib[DefaultInfo].default_outputs[0]
         sources = lib[DefaultInfo].sub_targets["src"][DefaultInfo].default_outputs[0]
         deps = [info.direct_conda[d].name for d in info.direct]
+        extra_files = [["info/licenses/LICENSE", ctx.attrs._license_file]]
+        packed.append(["lib/mojo/{}.mojoc".format(info.import_name), payload])
+        packed.extend(extra_files)
+        if info.readme != None:
+            packed.append(["share/doc/{}/README.md".format(name), info.readme])
         cmd = cmd_args(
             pack,
             "conda",
@@ -211,8 +226,7 @@ def _conda_package_impl(ctx):
             payload,
             "--sources",
             sources,
-            "--extra-file",
-            cmd_args(ctx.attrs._license_file, format = "info/licenses/LICENSE={}"),
+            [cmd_args("--extra-file", cmd_args(f, format = dest + "={}")) for dest, f in extra_files],
             "--label",
             str(ctx.label.raw_target()),
             [cmd_args("--dep", d) for d in deps],
@@ -254,19 +268,24 @@ def _conda_package_impl(ctx):
     checked = check(ctx.label.name + ".checked", [])
     release_checked = check(ctx.label.name + ".release_checked", ["--require-stamped", "true"])
 
+    # No packed file is kcov, a build-only GPL-2.0 tool (kcov_guard.bzl).
+    guarded = kcov_guard(ctx, ctx.attrs._kcov_guard, ctx.label.name, packed)
+
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("out", dir = True)
-    _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked])
+    _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded])
 
     # [release]: the same directory, copied only after the RELEASE check passed
     # (stamped, with its source commit and a positive commit time, and not
-    # refused). This is the only thing an uploader reads.
+    # refused) and the kcov guard passed. This is the only thing an uploader
+    # reads.
     rel = ctx.actions.declare_output("release", dir = True)
-    _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked])
+    _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded])
     return [DefaultInfo(
         default_output = out,
         sub_targets = {
             "check": [DefaultInfo(default_output = checked)],
+            "kcov_guard": [DefaultInfo(default_output = guarded)],
             "manifest": [DefaultInfo(default_output = out.project("manifest.json"))],
             "metadata": [DefaultInfo(default_output = out.project("metadata.json"))],
             "release": [DefaultInfo(
@@ -291,6 +310,7 @@ _conda_package = rule(
         "summary": attrs.string(),
         "timestamp_ms": attrs.string(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
         "_license_file": attrs.source(default = "komira//:LICENSE"),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
     },
