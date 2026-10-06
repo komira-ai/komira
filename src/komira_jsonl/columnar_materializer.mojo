@@ -49,7 +49,7 @@
 #     bounds-check overhead in -O3).
 #
 # Cross-references:
-#   - Stage 1 structural index: `komira_jsonl.structural_index`.
+#   - Stage 1 structural index: `komira_json_index.structural_index`.
 #   - Key dispatch: `komira_jsonl.key_dispatch`.
 #   - Value parsers: `komira_jsonl.value_parsers`.
 # =============================================================================
@@ -88,14 +88,14 @@ from komira_core.arrow.string_builder import ArrowStringBuilder
 from komira_core.arrow.struct_array import StructArray
 from komira_core.collections.slab import Slab
 
-from komira_jsonl.input_limits import (
+from komira_json_index.input_limits import (
     check_arrow_string_bytes,
     check_json_column_count,
     max_rows_for_columns,
     raise_json_cell_budget_exceeded,
 )
 from komira_jsonl.key_dispatch import KeyTable
-from komira_jsonl.simd_primitives import (
+from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,
@@ -105,7 +105,7 @@ from komira_jsonl.simd_primitives import (
     TAG_QUOTE_OPEN,
     TAG_QUOTE_CLOSE,
 )
-from komira_jsonl.structural_index import (
+from komira_json_index.structural_index import (
     build_structural_index,
     JsonlPartitions,
     StructuralIndex,
@@ -117,7 +117,7 @@ from komira_jsonl.value_parsers.parse_float import parse_float_f64
 from komira_jsonl.value_parsers.parse_int import parse_int_i64
 from komira_jsonl.value_parsers.parse_list import parse_list_one_value
 from komira_jsonl.value_parsers.parse_map import parse_map_one_value
-from komira_jsonl.value_parsers.parse_string import parse_string_raw, parse_string_with_escapes
+from komira_json_index.parse_string import parse_string_raw, parse_string_with_escapes
 from komira_jsonl.value_parsers.parse_struct import parse_struct_one_value
 
 

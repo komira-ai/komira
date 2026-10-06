@@ -17,9 +17,19 @@
 #      a secret reference with a name, and an image platform written as
 #      `<os>/<cpu>` (empty means `linux/amd64`). And the data rules:
 #      `retention` only on a type that takes one (a service or a job is
-#      deleted with its resource) and only DELETE or KEEP; a bucket's
-#      `object_expiry_days` never an explicit 0; no `uses` on a bucket (it
-#      runs as no identity, so it can be granted to, never grant).
+#      deleted with its resource) and only DELETE or KEEP; and the rules of
+#      the data types (data.mojo): no `uses` on a table or a bucket (it runs
+#      as no identity, so it can be granted to, never grant); a bucket's
+#      `object_expiry_days` never an explicit 0; a table's key, access paths
+#      and fields complete and typed, its index names unique.
+#      And the identity rules (grants.mojo): `run_as` names a
+#      `service_account`; no `uses` on a grant; a `uses` line or a grant
+#      names exactly one of a target and a cell resource, with a verb that
+#      target accepts; a grant's principal is an identity (a service
+#      account, or a service or job with no `run_as`); ONE edge per
+#      (principal, target) pair in the whole list, counting `uses` lines,
+#      grants and the implicit `cell LOGS WRITE` alike; and no two edges of
+#      one resource whose `u-<h>` roles collide.
 #   2. COVERAGE findings: the chosen cloud has no adapter for a type. The
 #      text carries the cloud's typed absence and the built-in clouds
 #      that do host the type.
@@ -59,8 +69,11 @@ from kci_cloud.adapter import (
 from kci_cloud.catalog import (
     Catalog,
     FIELD_BUCKET,
+    FIELD_GRANT,
     FIELD_JOB,
     FIELD_SERVICE,
+    FIELD_SERVICE_ACCOUNT,
+    FIELD_TABLE,
     RETENTION_DELETE,
     RETENTION_KEEP,
     RETENTION_NONE,
@@ -69,6 +82,15 @@ from kci_cloud.catalog import (
 )
 from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
+from kci_cloud.data import data_findings
+from kci_cloud.grants import (
+    GrantEdge,
+    cell_accepted,
+    cell_accepts,
+    cell_name,
+    edges_of,
+    run_as_of,
+)
 from kci_cloud.labels import LABEL_VALUE_MAX, encoded_label_bytes
 
 
@@ -318,6 +340,310 @@ def _check_secret(
         out.append(Finding(FINDING_GRAPH, owner, path, String("a secret reference with no name")))
 
 
+def _type_of(catalog: Catalog, r: Resource) -> String:
+    try:
+        return catalog.name_of(body_field(r))
+    except:
+        return String("resource with no type")
+
+
+def _check_run_as(
+    catalog: Catalog,
+    resources: List[Resource],
+    owner: String,
+    path: String,
+    r: Ref,
+    mut out: List[Finding],
+):
+    """`run_as` names a service account of the list, and no output."""
+    var p = _index_of_id(resources, r.resource)
+    if p < 0:
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path,
+                String("ref to missing resource \"") + r.resource + String("\""),
+            )
+        )
+        return
+    if r._oneof0_case != 0:
+        out.append(
+            Finding(FINDING_GRAPH, owner, path, String("run_as names an identity, not one of its outputs"))
+        )
+        return
+    var field: Int
+    try:
+        field = body_field(resources[p])
+    except:
+        return  # the account's own missing type is reported on it
+    if field != FIELD_SERVICE_ACCOUNT:
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path,
+                String("run_as must name a service_account; \"")
+                + r.resource
+                + String("\" is a ")
+                + catalog.name_of(field),
+            )
+        )
+
+
+def _check_principal(
+    catalog: Catalog,
+    resources: List[Resource],
+    owner: String,
+    r: Ref,
+    mut out: List[Finding],
+):
+    """A grant's principal is an identity: a service account, or a service or
+    a job with no `run_as` (its private identity)."""
+    var path = String("grant.principal")
+    var p = _index_of_id(resources, r.resource)
+    if p < 0:
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path,
+                String("ref to missing resource \"") + r.resource + String("\""),
+            )
+        )
+        return
+    if r._oneof0_case != 0:
+        out.append(
+            Finding(FINDING_GRAPH, owner, path, String("a principal is an identity, not one of its outputs"))
+        )
+        return
+    ref pr = resources[p]
+    var field: Int
+    try:
+        field = body_field(pr)
+    except:
+        return
+    if field == FIELD_SERVICE_ACCOUNT:
+        return
+    if field == FIELD_SERVICE or field == FIELD_JOB:
+        var acct = run_as_of(pr)
+        if acct.byte_length() > 0:
+            out.append(
+                Finding(
+                    FINDING_GRAPH,
+                    owner,
+                    path,
+                    String("\"")
+                    + r.resource
+                    + String("\" runs as \"")
+                    + acct
+                    + String("\" and has no identity of its own; name \"")
+                    + acct
+                    + String("\" as the principal"),
+                )
+            )
+        return
+    out.append(
+        Finding(
+            FINDING_GRAPH,
+            owner,
+            path,
+            String("the principal must be a service_account, or a service or job with")
+            + String(" no run_as; \"")
+            + r.resource
+            + String("\" is a ")
+            + catalog.name_of(field),
+        )
+    )
+
+
+def _check_edge_target(
+    catalog: Catalog,
+    resources: List[Resource],
+    owner: String,
+    path: String,
+    has_target: Bool,
+    target: Ref,
+    cell: Int,
+    access: String,
+    mut out: List[Finding],
+):
+    """A `uses` line's or a grant's target: exactly one of a resource of the
+    list and a cell resource, and a verb that target accepts."""
+    if has_target and cell != 0:
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path,
+                String("names a target and a cell resource; an edge has exactly one"),
+            )
+        )
+        return
+    if not has_target and cell == 0:
+        out.append(Finding(FINDING_GRAPH, owner, path, String("no target")))
+        return
+    if not has_target:
+        var name = cell_name(cell)
+        if name.byte_length() == 0:
+            out.append(
+                Finding(
+                    FINDING_GRAPH,
+                    owner,
+                    path,
+                    String("cell resource ")
+                    + String(cell)
+                    + String(" is not one this kci knows (LOGS, METRICS, ARTIFACTS)"),
+                )
+            )
+        elif not cell_accepts(cell, access):
+            out.append(
+                Finding(
+                    FINDING_GRAPH,
+                    owner,
+                    path,
+                    String("the cell's ")
+                    + name
+                    + String(" does not accept access ")
+                    + access
+                    + String(" (it accepts ")
+                    + cell_accepted(cell)
+                    + String(")"),
+                )
+            )
+        return
+    if target.resource == owner:
+        out.append(Finding(FINDING_GRAPH, owner, path, String("uses itself")))
+        return
+    var p = _index_of_id(resources, target.resource)
+    if p < 0:
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path,
+                String("ref to missing resource \"") + target.resource + String("\""),
+            )
+        )
+        return
+    if target._oneof0_case != 0:
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path,
+                String("access is granted to a resource, not to one of its outputs"),
+            )
+        )
+    var pfield: Int
+    try:
+        pfield = body_field(resources[p])
+    except:
+        return
+    var pt = catalog.index_of(pfield)
+    if pt >= 0 and not catalog.types[pt].accepts_access(access):
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path,
+                catalog.types[pt].name
+                + String(" \"")
+                + target.resource
+                + String("\" does not accept access ")
+                + access,
+            )
+        )
+
+
+def _edge_where(e: GrantEdge, owner: String, index: Int) -> String:
+    """Where an edge came from, for a refusal text."""
+    if e.implicit:
+        return String("the implicit cell LOGS WRITE edge of \"") + owner + String("\"")
+    if e.role == "grant":
+        return String("grant \"") + owner + String("\"")
+    return String("uses[") + String(index) + String("] of \"") + owner + String("\"")
+
+
+def _edge_path(e: GrantEdge, index: Int) -> String:
+    if e.role == "grant":
+        return String("grant")
+    if e.implicit:
+        return String("uses")
+    return String("uses[") + String(index) + String("]")
+
+
+def edge_findings(resources: List[Resource]) -> List[Finding]:
+    """ONE edge per (principal, target) pair in the whole list, and no two
+    edges of one resource whose roles collide. The implicit edges are
+    counted first, so a written edge that repeats one is the one refused."""
+    var out = List[Finding]()
+    var keys = List[String]()
+    var wheres = List[String]()
+    for pass_ in range(2):
+        for i in range(len(resources)):
+            ref r = resources[i]
+            if _index_of_id(resources, r.id) != i:
+                continue  # a duplicate id is a finding of its own
+            var edges: List[GrantEdge]
+            try:
+                edges = edges_of(r)
+            except:
+                continue  # its shape is a finding of its own
+            for k in range(len(edges)):
+                ref e = edges[k]
+                if e.implicit != (pass_ == 0):
+                    continue
+                var key = e.key()
+                var dup = -1
+                for q in range(len(keys)):
+                    if keys[q] == key:
+                        dup = q
+                        break
+                if dup >= 0:
+                    out.append(
+                        Finding(
+                            FINDING_GRAPH,
+                            r.id,
+                            _edge_path(e, k),
+                            String("a second edge from the identity of \"")
+                            + e.principal
+                            + String("\" to ")
+                            + e.target_path()
+                            + String("; the first is ")
+                            + wheres[dup]
+                            + String(" (one edge per principal and target)"),
+                        )
+                    )
+                else:
+                    keys.append(key^)
+                    wheres.append(_edge_where(e, r.id, k))
+    for i in range(len(resources)):
+        ref r = resources[i]
+        var edges: List[GrantEdge]
+        try:
+            edges = edges_of(r)
+        except:
+            continue
+        for k in range(len(edges)):
+            for q in range(k):
+                if edges[q].role == edges[k].role and edges[q].key() != edges[k].key():
+                    out.append(
+                        Finding(
+                            FINDING_GRAPH,
+                            r.id,
+                            _edge_path(edges[k], k),
+                            _edge_where(edges[k], r.id, k)
+                            + String(" and ")
+                            + _edge_where(edges[q], r.id, q)
+                            + String(" lower to one role, ")
+                            + edges[k].role
+                            + String("; write one of them as a grant resource"),
+                        )
+                    )
+    return out^
+
+
 def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]:
     """Every cloud-independent finding of `resources`."""
     var out = List[Finding]()
@@ -384,20 +710,11 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                 )
         if field == FIELD_SERVICE or field == FIELD_JOB:
             _check_image(id, tname + String(".image"), r, out)
-        if field == FIELD_BUCKET:
-            ref bkt = r.bucket.value()
-            if Bool(bkt.object_expiry_days) and bkt.object_expiry_days.value() == 0:
-                out.append(
-                    Finding(
-                        FINDING_GRAPH,
-                        id,
-                        String("bucket.object_expiry_days"),
-                        String(
-                            "0 would expire every object at once; leave it unset"
-                            " to keep objects until they are deleted"
-                        ),
-                    )
-                )
+        if field == FIELD_BUCKET or field == FIELD_TABLE:
+            out.extend(data_findings(field, r))
+            continue
+        if field == FIELD_GRANT:
+            ref g = r.grant.value()
             if len(r.uses) > 0:
                 out.append(
                     Finding(
@@ -405,15 +722,32 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                         id,
                         String("uses"),
                         String(
-                            "a bucket runs as no identity, so it cannot use another"
-                            " resource; write the uses line on the service or job"
-                            " that reads or writes it"
+                            "a grant is one edge and runs as no identity, so it cannot"
+                            " use another resource; write another grant"
                         ),
                     )
                 )
-                continue
+            if not g.principal:
+                out.append(Finding(FINDING_GRAPH, id, String("grant.principal"), String("no principal")))
+            else:
+                _check_principal(catalog, resources, id, g.principal.value(), out)
+            var has = Bool(g.target)
+            _check_edge_target(
+                catalog,
+                resources,
+                id,
+                String("grant"),
+                has,
+                g.target.value().copy() if has else Ref(String(""), 0, None, None),
+                g.cell.value,
+                g.access.json_name(),
+                out,
+            )
+            continue
         if field == FIELD_SERVICE:
             ref svc = r.service.value()
+            if svc.run_as:
+                _check_run_as(catalog, resources, id, String("service.run_as"), svc.run_as.value(), out)
             for entry in svc.env.items():
                 _check_value(
                     catalog,
@@ -433,6 +767,8 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                 )
         if field == FIELD_JOB:
             ref job = r.job.value()
+            if job.run_as:
+                _check_run_as(catalog, resources, id, String("job.run_as"), job.run_as.value(), out)
             for entry in job.env.items():
                 _check_value(
                     catalog,
@@ -451,55 +787,22 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                     out,
                 )
         for u in range(len(r.uses)):
-            var path = String("uses[") + String(u) + String("]")
             ref use = r.uses[u]
-            if not use.target:
-                out.append(Finding(FINDING_GRAPH, id, path, String("no target")))
-                continue
-            ref tgt = use.target.value()
-            if tgt.resource == id:
-                out.append(Finding(FINDING_GRAPH, id, path, String("uses itself")))
-                continue
-            var p = _index_of_id(resources, tgt.resource)
-            if p < 0:
-                out.append(
-                    Finding(
-                        FINDING_GRAPH,
-                        id,
-                        path,
-                        String("ref to missing resource \"") + tgt.resource + String("\""),
-                    )
-                )
-                continue
-            if tgt._oneof0_case != 0:
-                out.append(
-                    Finding(
-                        FINDING_GRAPH,
-                        id,
-                        path,
-                        String("access is granted to a resource, not to one of its outputs"),
-                    )
-                )
-            var access = use.access.json_name()
-            var pfield: Int
-            try:
-                pfield = body_field(resources[p])
-            except:
-                continue
-            var pt = catalog.index_of(pfield)
-            if pt >= 0 and not catalog.types[pt].accepts_access(access):
-                out.append(
-                    Finding(
-                        FINDING_GRAPH,
-                        id,
-                        path,
-                        catalog.types[pt].name
-                        + String(" \"")
-                        + tgt.resource
-                        + String("\" does not accept access ")
-                        + access,
-                    )
-                )
+            var has = Bool(use.target)
+            _check_edge_target(
+                catalog,
+                resources,
+                id,
+                String("uses[") + String(u) + String("]"),
+                has,
+                use.target.value().copy() if has else Ref(String(""), 0, None, None),
+                use.cell.value,
+                use.access.json_name(),
+                out,
+            )
+    var edges = edge_findings(resources)
+    for i in range(len(edges)):
+        out.append(edges[i].copy())
     return out^
 
 

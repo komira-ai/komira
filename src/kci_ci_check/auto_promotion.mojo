@@ -29,9 +29,7 @@
 #       shell step.
 #   R16 ONE RELEASE AT A TIME. The workflow-level `concurrency:` is a
 #       mapping of exactly `group` and `cancel-in-progress`, each the
-#       canonical text below byte for byte: a pull request's runs in a
-#       group per pull request (a newer push cancels the older check); a
-#       PUSH to main in `kci-release-main`, never cancelled in progress (a
+#       canonical text below byte for byte: a PUSH to main in `kci-release-main`, never cancelled in progress (a
 #       newer push replaces only the PENDING one); a manual DRY run in a
 #       group of its own run (`kci-plan-<run id>`: it writes nothing, so it
 #       never waits for or replaces anything); any other run (a manual run,
@@ -43,7 +41,8 @@
 #       exactly `branches: [main]` (a list of one plain item) and
 #       `paths-ignore:`, a BLOCK list of exactly the quoted items 'docs/**'
 #       then '**.md'. No `paths`, `branches-ignore` or `tags`, no other or
-#       reordered item, no flow list; no path filter under `pull_request`.
+#       reordered item, no flow list. (pr.yml's `pull_request` has no path filter either:
+#       `check_pull_request_paths`.)
 #       `documentation_filter_findings` (the welded repository test) holds
 #       release_version.sh's `:(exclude)` set to the same documentation:
 #       its excludes are `docs`, `*.md` and `.github`, and `.github` stays a
@@ -140,15 +139,15 @@ comptime PUSH_EVENT_TERM: String = "github.event_name == 'push'"
 """R15: the other conjunct of a main-only stage's job."""
 
 comptime CONCURRENCY_GROUP: String = (
-    "kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
-    " || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main'"
+    "kci-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main'"
     " || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}"
 )
 """R16: the workflow-level concurrency group, byte for byte."""
 
-comptime CONCURRENCY_CANCEL: String = "${{ github.event_name == 'pull_request' }}"
-"""R16: `cancel-in-progress`, byte for byte: only a pull request's check is
-cancelled in progress."""
+comptime CONCURRENCY_CANCEL: String = "false"
+"""R16: `cancel-in-progress`, byte for byte: a release is never cancelled in
+progress. (A pull request's check, pr.yml, has its own group and does cancel
+in progress: it is not this workflow.)"""
 
 comptime PROD_LINE_STEP: String = "the prod line"
 """R20: the name of every release job's last step."""
@@ -430,6 +429,11 @@ def check_push_filter(doc: WorkflowDoc, on: Int, mut findings: List[String]):
             + String("' in that order: another branch filter, `branches-ignore`, `tags`, `paths` or another")
             + String(" documentation list releases on a push it should not, or skips one it should")
         )
+
+
+def check_pull_request_paths(doc: WorkflowDoc, on: Int, mut findings: List[String]):
+    """R17, for pr.yml: `pull_request` has no path filter: the pull request's
+    check runs on every change it can reach (kci decides what it builds)."""
     var pr = doc.child(on, String("pull_request"))
     for key in [String("paths"), String("paths-ignore")]:
         var p = doc.child(pr, key)
