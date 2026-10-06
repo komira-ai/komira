@@ -130,6 +130,15 @@ dependency order is the order of the rows.
 | [`komira_test_minio`](../src/komira_test_minio/) | an embedded MinIO the test starts itself: pinned by sha256, a private temporary directory, a random root credential in 0600 files, random loopback-only ports, dies with the test. It hands back the endpoint, region and credentials-file path, and `stop()` returns a verdict. |
 | [`komira_test_bucket`](../src/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
 
+### End-to-end test packages
+
+Packages that exist for their welded tests: each runs several libraries
+together, over loopback, inside the build action.
+
+| module | what it is |
+|---|---|
+| [`komira_http_tls_e2e`](../src/komira_http_tls_e2e/) | a real `komira_http_server` `HttpServer` against a real `komira_http_client` `HttpClient` in one process: an HTTP/1.1 GET over TLS checked byte for byte, the ALPN pivot to h2 on both sides, a 4 MiB plaintext response flushed through the server's buffered-write path (the server has no buffered-write path over TLS today), and the client refusing an untrusted root and a wrong server name while the server goes on serving. The library holds the shared TLS fixtures and the runner that steps the server on one thread while the client runs on another. |
+
 ### Third-party code
 
 C and C++ libraries are built from pinned source archives under
