@@ -844,8 +844,8 @@ enum SupervisorMode {
 // Read-only in the plan.
 //
 // Per-attempt runtime binding (attempt id, epoch, lease token) is NOT here: it
-// is minted by the job runner at placement and injected at start. This message
-// is the static shape only.
+// is minted and injected by the job runner when the attempt starts. This
+// message is the static shape only.
 message SupervisorSpec {
   reserved 1, 6;
   reserved "supervisor_image_digest", "report_target";
@@ -1790,8 +1790,8 @@ message ApiEdgeSpec {
   // not offered in every region the backend may run in; the edge routes
   // cross-region to the backend by its full HTTPS URL.
   //
-  // EMPTY (the default) means the conformer's own placement policy. This
-  // field is the OVERRIDE for an operator who must pin the placement.
+  // EMPTY (the default) means the conformer's own region choice. This
+  // field is the OVERRIDE for an operator who must pin the region.
   string gateway_region = 7;
   // The inbound SOURCE ALLOW-LIST the conformer stamps on the served document.
   //
@@ -1910,7 +1910,7 @@ message ScheduledCallSpec {
 //
 // ⛔ THERE IS NO CIDR FIELD, by decision. Every cloud-specific dial (the route
 // table's default-route target, public-IP-on-launch, NAT configuration, which
-// subnets a placement lands on) is DERIVED from `egress` by the conformer, per
+// subnets a workload lands on) is DERIVED from `egress` by the conformer, per
 // cloud. An operator-authored CIDR would make this a mechanism surface rather
 // than an intent one; it can be added additively when a real need forces it.
 message NetworkSpec {

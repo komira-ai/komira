@@ -11,7 +11,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # copied here), in client mode: each operation's request builder and
 # response parser, its endpoint resolved through the service's published
 # endpoint ruleset and partition table, embedded in the module, and
-# `SQSSQSClient`, which resolves each call's endpoint and sends through
+# `SQSClient`, which resolves each call's endpoint and sends through
 # komira_aws_core's send_sigv4_signed_request (signing name `sqs`) over the
 # komira_http_core Connector it is given. Every SQS operation is a POST,
 # and a call is retried as botocore's standard mode retries it: after a

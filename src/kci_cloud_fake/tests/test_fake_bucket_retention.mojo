@@ -5,7 +5,7 @@
 # The bucket primitive and retention, on the fake clouds.
 #
 # 1. THE KIT WITH A BUCKET ON EVERY SHAPE: the kci_cloud conformance kit (all
-#    eleven steps) passes on the generic, aws, gcp, azure and onprem shapes, each under
+#    twelve steps) passes on the generic, aws, gcp, azure and onprem shapes, each under
 #    a random id, on a graph with a bucket (retention DELETE, so the kit's
 #    destroy may remove it), a service that uses it READ_WRITE and reads its
 #    NAME, and a public service; the tampered node is the bucket.
@@ -19,8 +19,9 @@
 # 3. VALUES FLOW FROM A BUCKET: a service reading a bucket's NAME and ADDRESS
 #    is created over the bucket's real values.
 # 4. KEEP IS STAMPED AND DESTROY SKIPS IT: a bucket with no retention written
-#    is KEEP; its object carries `kci_retain=keep` (a legal label, outside
-#    the identity), `list_owned` reports it
+#    is KEEP; its object carries the retention mark `kci-retention=retain`
+#    (a legal label, outside the identity; a service's reads `delete`),
+#    `list_owned` reports it
 #    retained, and destroy deletes everything else and leaves it.
 # 5. THE KEEP GAP: re-using a KEEP bucket's id for a service turns the
 #    bucket's node off. The bucket is LEFT BEHIND (reported in the outcome,
@@ -28,7 +29,8 @@
 #    deletes it, so the path is really reached.
 # 6. A KEEP BUCKET GONE FROM THE FILE is leftover: reported, not deleted.
 # 7. A RETENTION CHANGE IS AN UPDATE: KEEP -> DELETE updates the bucket and
-#    clears its `kci_retain` label in the same call; it is then deletable.
+#    rewrites its `kci-retention` mark to `delete` in the same call (one
+#    mark, never two); it is then deletable.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -39,6 +41,7 @@ from kci_reconciler import (
     CellScope,
     Creds,
     InMemoryStateStore,
+    Label,
     Provenance,
     VERB_CREATE,
     VERB_DELETE,
@@ -49,7 +52,6 @@ from kci_cloud import (
     Catalog,
     CellContext,
     Clouds,
-    LABEL_RETAIN,
     apply_resources,
     describe,
     destroy_resources,
@@ -57,6 +59,7 @@ from kci_cloud import (
     lower_data,
     lowering_json,
     retained_by,
+    retention_label_key,
     run_conformance,
 )
 from kci_resource_proto.resource import Resource, ResourceList
@@ -80,6 +83,20 @@ def _done(outcome: ApplyOutcome) raises -> List[AppliedNode]:
     if outcome.error:
         raise Error(String("the apply stopped: ") + outcome.error.value())
     return outcome.applied.copy()
+
+
+def _mark(labels: List[Label]) raises -> String:
+    """The one `kci-retention` value `labels` carry; raises on two."""
+    var key = retention_label_key()
+    var got = String("(none)")
+    var n = 0
+    for i in range(len(labels)):
+        if labels[i].key == key:
+            got = labels[i].value.copy()
+            n += 1
+    if n > 1:
+        raise Error(String("two retention marks"))
+    return got^
 
 
 def _verb(applied: List[AppliedNode], id: String) -> Int:
@@ -267,14 +284,16 @@ def test_keep_is_stamped_and_destroy_skips_it() raises:
     var store = InMemoryStateStore()
     _ = _done(apply_resources(reg, cloud, _ctx(), _list(_kept_and_api()), Creds.none(), store))
     var kept_labels = cloud.live_labels(String("store/bucket"))
-    assert_true(retained_by(kept_labels), "a KEEP bucket carries kci_retain=keep")
-    assert_equal(len(label_problems(kept_labels)), 0, "kci_retain obeys the standard label rule")
+    assert_true(retained_by(kept_labels), "a KEEP bucket carries kci-retention=retain")
+    assert_equal(_mark(kept_labels), "retain")
+    assert_equal(len(label_problems(kept_labels)), 0, "the mark obeys the standard label rule")
     assert_equal(
         cloud.identity_of(kept_labels),
         _ctx().scope.stamp(String("store"), String("store/bucket")).identity(),
-        "kci_retain is not part of the identity",
+        "the mark is not part of the identity",
     )
     assert_false(retained_by(cloud.live_labels(String("api/run"))), "a service does not")
+    assert_equal(_mark(cloud.live_labels(String("api/run"))), "delete", "a DELETE node's mark")
     var ctx = _ctx()
     var owned = cloud.list_owned(Creds.none(), ctx.scope)
     for k in range(len(owned)):
@@ -360,13 +379,13 @@ def test_a_retention_change_is_an_update() raises:
     var flip = _done(apply_resources(reg, cloud, _ctx(), _list(_bucket(String("DELETE"))), Creds.none(), store))
     assert_equal(_verb(flip, String("store/bucket")), VERB_UPDATE, "KEEP -> DELETE is an update")
     var labels = cloud.live_labels(String("store/bucket"))
-    assert_false(retained_by(labels), "the update cleared kci_retain")
-    for i in range(len(labels)):
-        assert_true(labels[i].key != LABEL_RETAIN, "no kci_retain label at all")
-    assert_equal(len(cloud.live_labels(String("store/bucket"))), 6, "the six identity labels remain")
+    assert_false(retained_by(labels), "the update rewrote the mark")
+    assert_equal(_mark(labels), "delete", "one mark, now delete")
+    assert_equal(len(labels), 7, "the six identity labels and the one mark")
     var back = _done(apply_resources(reg, cloud, _ctx(), _list(_bucket(String("KEEP"))), Creds.none(), store))
     assert_equal(_verb(back, String("store/bucket")), VERB_UPDATE, "DELETE -> KEEP is an update")
-    assert_true(retained_by(cloud.live_labels(String("store/bucket"))), "and stamps kci_retain again")
+    assert_true(retained_by(cloud.live_labels(String("store/bucket"))), "and stamps retain again")
+    assert_equal(_mark(cloud.live_labels(String("store/bucket"))), "retain")
     print("  test_a_retention_change_is_an_update: PASS")
 
 

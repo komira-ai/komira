@@ -440,8 +440,9 @@ def test_generation_survives_draining_and_reaping_a_shard() raises:
     assert_equal(r.shards_reaped, 1, "the drained writer shard is reaped")
     assert_equal(
         _count_under(store, shard_manifest_prefix(_META, shard_id)),
-        2,
-        "only the terminal seal and the log start that points at it remain",
+        3,
+        "only the terminal seal, the log start that points at it and the"
+        " generation counter remain",
     )
     var g3 = generation_across_shards(store, _META, String("logs"))
     assert_true(
@@ -524,8 +525,9 @@ def test_reap_is_fenced_against_a_publish_after_the_drained_check() raises:
     assert_equal(r2.shards_reaped, 1, "the drained shard is reaped")
     assert_equal(
         _count_under(inner, lineage),
-        2,
-        "only the terminal seal and the log start that points at it remain",
+        3,
+        "only the terminal seal, the log start that points at it and the"
+        " generation counter remain",
     )
     assert_equal(
         len(list_live_splits_across_shards(inner, _META, String("logs"))),
@@ -869,7 +871,7 @@ def test_reaping_a_chunk_below_the_top_keeps_cold_reads_whole() raises:
     assert_equal(len(cold_live), 2, "a cold shard read lists 12 and 13")
     assert_true(_has_uuid(cold_live, _uuid(12)), "split 12 is live")
     assert_true(_has_uuid(cold_live, _uuid(13)), "split 13 is live")
-    assert_equal(cold.generation(), Int64(4), "the shard generation is 4")
+    assert_equal(cold._next_slot(), Int64(4), "the shard's next slot is 4")
     var g2 = generation_across_shards(store, _META, String("logs"))
     assert_true(g2 >= g1, "reaping chunk 0 lowered the generation")
 

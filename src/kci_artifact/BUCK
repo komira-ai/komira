@@ -23,7 +23,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # repository's own release/artifacts.textproto through the same reader, so a
 # release file kci would refuse fails this library's build, holds its
 # declared checks to buck2 target patterns, no package in two checks, and
-# its buck2 build system to deriving the rest of the checks from the graph.
+# its buck2 build system to deriving the rest of the checks from the graph,
+# and tools/build/package/release_set.txt (the release set the stamped
+# release check builds) to the file's metapackage.
 mojo_library(
     name = "kci_artifact",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -50,6 +52,9 @@ mojo_library(
         # The repository's own release artifacts (release/BUCK).
         "tests/test_release_artifacts_file.mojo": {
             "artifacts.textproto": "//release:artifacts.textproto",
+            # The release set the stamped release check builds
+            # (tools/build/package/release_set.bzl).
+            "release_set.txt": "//tools/build/package:release_set.txt",
         },
     },
     visibility = ["PUBLIC"],

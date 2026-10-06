@@ -17,7 +17,9 @@
 #   T6   decode_unary_response[ProtocolGrpcProto] — HTTP 200 + enveloped
 #        body returns inner payload span.
 #   T7   decode_unary_response[ProtocolGrpcProto] — HTTP non-200 raises
-#        with [grpc:2] (UNKNOWN).
+#        with the code the spec's HTTP-to-gRPC table gives (502 -> 14
+#        UNAVAILABLE, 404 -> 12 UNIMPLEMENTED, 500 -> 2 UNKNOWN), and the
+#        HTTP status stays in the message.
 #   T8   decode_unary_response[ProtocolConnectProto] — HTTP 2xx + bare
 #        body returns body verbatim.
 #   T9   decode_unary_response[ProtocolConnectProto] — HTTP non-2xx +
@@ -42,6 +44,8 @@ from komira_grpc import (
     decode_unary_response,
     encode_stream_message,
     GRPC_STATUS_NOT_FOUND,
+    GRPC_STATUS_UNAVAILABLE,
+    GRPC_STATUS_UNIMPLEMENTED,
     GRPC_STATUS_UNKNOWN,
     parse_grpc_error_message,
 )
@@ -154,19 +158,47 @@ def test_t6_decode_grpc_proto_200() raises:
     assert_equal(inner[3], UInt8(0xEF), "byte 3")
 
 
-def test_t7_decode_grpc_proto_non_200_raises() raises:
-    """T7 — decode_unary_response[ProtocolGrpcProto] HTTP non-200 → UNKNOWN."""
+def _decode_grpc_proto_non_200(http_status: Int) raises -> String:
+    """The raised message of a classic-gRPC unary decode at `http_status`;
+    raises if the decode does not raise."""
     var body = List[UInt8]()  # empty body; should not matter
-    var raised = False
-    var caught_msg = String("")
     try:
-        var _ = decode_unary_response[ProtocolGrpcProto](Span(body), UInt16(502))
+        var _ = decode_unary_response[ProtocolGrpcProto](
+            Span(body), UInt16(http_status)
+        )
     except e:
-        raised = True
-        caught_msg = String(e)
-    assert_true(raised, "non-200 raises")
-    var parsed = parse_grpc_error_message(caught_msg)
-    assert_equal(parsed[0], GRPC_STATUS_UNKNOWN, "code UNKNOWN (2)")
+        return String(e)
+    raise Error(
+        String("HTTP ") + String(http_status) + " decoded without raising"
+    )
+
+
+def test_t7_decode_grpc_proto_non_200_raises() raises:
+    """T7 — decode_unary_response[ProtocolGrpcProto] HTTP non-200 raises the
+    spec table's code. 502 is a proxy's answer: UNAVAILABLE, the code the
+    idempotent retry policy replays (it was UNKNOWN, never replayed). 500 is
+    NOT in the table and must stay UNKNOWN: it carries no not-processed
+    guarantee."""
+    var m502 = _decode_grpc_proto_non_200(502)
+    assert_equal(
+        parse_grpc_error_message(m502)[0],
+        GRPC_STATUS_UNAVAILABLE,
+        String("502 -> UNAVAILABLE (14). got: ") + m502,
+    )
+    assert_true(String("status=502") in m502, "HTTP status kept in message")
+    var m404 = _decode_grpc_proto_non_200(404)
+    assert_equal(
+        parse_grpc_error_message(m404)[0],
+        GRPC_STATUS_UNIMPLEMENTED,
+        String("404 -> UNIMPLEMENTED (12). got: ") + m404,
+    )
+    var m500 = _decode_grpc_proto_non_200(500)
+    assert_equal(
+        parse_grpc_error_message(m500)[0],
+        GRPC_STATUS_UNKNOWN,
+        String("500 -> UNKNOWN (2). got: ") + m500,
+    )
+    assert_true(m500.startswith(String("[grpc:2] ")), "500 is a typed [grpc:2]")
 
 
 def test_t8_decode_connect_proto_200() raises:

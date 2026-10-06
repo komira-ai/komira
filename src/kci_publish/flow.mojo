@@ -343,11 +343,12 @@ def _base_report(p: PreparedRelease, req: PublishRequest) -> PublishReport:
     return r^
 
 
-def _oidc_credential[U: PkgTransport](
-    var oidc_t: U, var actions: ActionsOidcEnv, host: String, environment: String
-) raises -> GithubOidcCredential[U]:
+def _oidc_credential[U: PkgTransport, W: WorkerSleeper](
+    var oidc_t: U, var sleeper: W, var actions: ActionsOidcEnv, host: String, environment: String
+) raises -> GithubOidcCredential[U, W]:
     """The trusted-publishing credential over `oidc_t`, from the handshake in
-    `actions`, holding the ID token's `environment` claim to `environment`.
+    `actions`, holding the ID token's `environment` claim to `environment`;
+    its ID-token request retries through `sleeper`.
     RAISES naming each handshake variable that is not set."""
     var missing = actions.missing()
     if missing.byte_length() > 0:
@@ -357,13 +358,13 @@ def _oidc_credential[U: PkgTransport](
         )
     var url = actions.request_url.copy()
     var token = actions.take_request_token()
-    var oidc = GithubOidcCredential[U](oidc_t^, url, token^, host.copy(), String(""))
+    var oidc = GithubOidcCredential[U, W](oidc_t^, sleeper^, url, token^, host.copy(), String(""))
     oidc.with_required_environment(environment.copy())
     return oidc^
 
 
-def _probe[U: PkgTransport](
-    var oidc_t: U, var actions: ActionsOidcEnv, host: String, environment: String
+def _probe[U: PkgTransport, W: WorkerSleeper](
+    var oidc_t: U, var sleeper: W, var actions: ActionsOidcEnv, host: String, environment: String
 ) raises -> String:
     """A dry run's probe of an OIDC channel's credential (file header, 5):
     NOT_UNDER_CI when neither handshake variable is set; otherwise one ID
@@ -373,7 +374,7 @@ def _probe[U: PkgTransport](
     exchange is refused: the caller reports FAILED (KCI-E-CREDENTIAL)."""
     if actions.is_absent():
         return String(CREDENTIAL_PROBE_NOT_UNDER_CI)
-    var oidc = _oidc_credential(oidc_t^, actions^, host, environment)
+    var oidc = _oidc_credential(oidc_t^, sleeper^, actions^, host, environment)
     _ = oidc.authorization(SURFACE_PREFIX_DEV, host)
     return String(CREDENTIAL_PROBE_MINTED)
 
@@ -422,7 +423,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
     try:
         if req.plan:
             if is_oidc:
-                base.credential_probe = _probe(oidc_t^, actions^, host, req.github_environment())
+                base.credential_probe = _probe(oidc_t^, sleeper.for_worker(), actions^, host, req.github_environment())
             else:
                 base.credential_probe = String(CREDENTIAL_PROBE_NOT_OIDC)
             if public:
@@ -436,7 +437,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
             var nobody = AnonymousCredential()
             return run_publish(p.targets, registry, nobody, True, opts, sleeper, base.copy(), req.revision_history)
         if is_oidc:
-            var oidc = _oidc_credential(oidc_t^, actions^, host, req.github_environment())
+            var oidc = _oidc_credential(oidc_t^, sleeper.for_worker(), actions^, host, req.github_environment())
             if public:
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, String(""))
             else:

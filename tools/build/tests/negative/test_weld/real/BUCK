@@ -1,0 +1,52 @@
+load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+
+# Test 39 (test_weld) over the real rules: what a mojo_library and a mojo_test
+# give the lint (WeldedTestsInfo, tools/build/mojo/providers.bzl). Never
+# built: the lint only analyses the targets `welds` matches.
+#
+# Under src/komira_real/tests/, by how each test file is (not) welded:
+#   test_listed.mojo     welded: an entry of a computed test_srcs
+#   test_commented.mojo  not welded: named only in a comment of that list
+#   test_main.mojo       welded: the `main` of a mojo_test
+#   test_imported.mojo   not welded: another `srcs` of that mojo_test, which
+#                        its binary compiles but never runs
+#   test_shared.mojo     not welded: test_srcs names komira_other's file of
+#                        that name by label, and that file is the one welded
+
+_OTHER_SHARED = "//negative/test_weld/real/src/komira_other:tests/test_shared.mojo"
+
+mojo_library(
+    name = "komira_real",
+    srcs = ["src/komira_real/__init__.mojo"],
+    test_srcs = ["src/komira_real/tests/test_{}.mojo".format(t) for t in ["listed"]] + [_OTHER_SHARED] + [
+        # "src/komira_real/tests/test_commented.mojo",
+    ],
+    conda = False,
+)
+
+mojo_test(
+    name = "test_main",
+    srcs = [
+        "src/komira_real/tests/test_main.mojo",
+        "src/komira_real/tests/test_imported.mojo",
+    ],
+    main = "src/komira_real/tests/test_main.mojo",
+    deps = [":komira_real"],
+)
+
+# `ok` holds the three unwelded files in its ledger; `red` has no row, so it
+# must name exactly those three. run_tests.sh checks both.
+[
+    test_weld(
+        name = name,
+        files = glob(["src/komira_real/**"]) + [_OTHER_SHARED],
+        known_untested = ledger,
+        root = "negative/test_weld/real/src",
+        welds = "//negative/test_weld/real/...",
+    )
+    for name, ledger in [
+        ("ok", "known_untested.tsv"),
+        ("red", "ledger_empty.tsv"),
+    ]
+]
