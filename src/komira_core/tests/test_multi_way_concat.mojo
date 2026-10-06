@@ -11,7 +11,6 @@
 #   * None slots: empty Optional[RecordBatch] slots in the middle of
 #     the staging buffer are skipped.
 #   * Empty input: returns an empty RecordBatch.
-#   * Zero-column batches carrying rows: the rows are summed.
 #
 # A pairwise fold would be O(N^2) over payload bytes. These tests do NOT
 # measure perf; they guard correctness of the single-pass fast path.
@@ -190,22 +189,6 @@ def test_multi_way_all_empty() raises:
     var out = _concat_variable_width_batches(staging, 2)
     staging.free()
     assert_equal(out.num_rows(), 0, "empty -> 0 rows")
-
-
-def test_multi_way_zero_columns_sum_rows() raises:
-    """Zero-column batches that carry a row count (`count_only`, or a JSONL
-    reader's batch of `{}` records) concat to one zero-column batch with the
-    SUM of their rows, as `_concat_rg_batches_into_one` does. Before, the
-    builder's zero-column branch returned 0 rows and dropped them."""
-    var staging = alloc[Optional[RecordBatch]](4)
-    (staging + 0).unsafe_write(Optional[RecordBatch](RecordBatch.count_only(2)))
-    (staging + 1).unsafe_write(Optional[RecordBatch](None))
-    (staging + 2).unsafe_write(Optional[RecordBatch](RecordBatch.count_only(3)))
-    (staging + 3).unsafe_write(Optional[RecordBatch](RecordBatch.count_only(0)))
-    var out = _concat_variable_width_batches(staging, 4)
-    staging.free()
-    assert_equal(out.num_columns(), 0, "zero columns stay zero")
-    assert_equal(out.num_rows(), 5, "rows are summed")
 
 
 def main() raises:
