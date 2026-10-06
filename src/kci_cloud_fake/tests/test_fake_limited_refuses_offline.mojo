@@ -23,6 +23,9 @@
 #      CLOUD_BOUND and a fake-limited that declares it ABSENT_BY_DESIGN; the same
 #      file is refused, naming the bound type and the cloud that hosts it,
 #      with zero calls served.
+#   7. A BUCKET IS NOT YET ON fake-limited: a file with a bucket is refused
+#      as a NOT_YET coverage gap, naming the cloud that hosts it, with zero
+#      calls served.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -36,10 +39,14 @@ from kci_cloud import (
     Catalog,
     CatalogType,
     CellContext,
+    FIELD_BUCKET,
     FIELD_JOB,
     FIELD_SERVICE,
+    ACCESS_READ,
     OUTPUT_HOST,
+    OUTPUT_NAME,
     OUTPUT_URL,
+    RETENTION_KEEP,
     PORTABLE,
     Clouds,
     apply_resources,
@@ -180,7 +187,7 @@ def test_a_limit_is_refused_the_same_way() raises:
 
 
 def _bound_job_catalog() raises -> Catalog:
-    """v1's two types, with `job` marked CLOUD_BOUND."""
+    """v1's three types, with `job` marked CLOUD_BOUND."""
     var c = Catalog()
     var svc_out = List[String]()
     svc_out.append(String(OUTPUT_URL))
@@ -189,6 +196,21 @@ def _bound_job_catalog() raises -> Catalog:
     call.append(String(ACCESS_CALL))
     c.add(CatalogType(FIELD_SERVICE, String("service"), PORTABLE, svc_out^, call.copy()))
     c.add(CatalogType(FIELD_JOB, String("job"), CLOUD_BOUND, List[String](), call^))
+    var bucket_out = List[String]()
+    bucket_out.append(String(OUTPUT_NAME))
+    var read = List[String]()
+    read.append(String(ACCESS_READ))
+    c.add(
+        CatalogType(
+            FIELD_BUCKET,
+            String("bucket"),
+            PORTABLE,
+            bucket_out^,
+            read^,
+            retention_default=RETENTION_KEEP,
+            primary_role=String("bucket"),
+        )
+    )
     return c^
 
 
@@ -233,6 +255,32 @@ def test_a_cloud_bound_shape_fails_early() raises:
     print("  test_a_cloud_bound_shape_fails_early: PASS")
 
 
+def test_a_bucket_is_not_yet_on_fake_limited() raises:
+    var reg = _clouds()
+    var limited = FakeLimitedCloud()
+    var resources = _list(String('{"resource":[{"id":"store","bucket":{}}]}'))
+    var text = refusal_text(limited.cloud_id(), validate_for(reg, limited, resources))
+    assert_equal(
+        text,
+        String(
+            'kci: cannot apply this graph to cloud "fake-limited". Nothing was created.\n'
+            '  resource "store": bucket (PORTABLE): no adapter in cloud "fake-limited"'
+            " (NOT_YET: fake-limited has no object store)\n"
+            "      clouds built into this kci that implement it: fake"
+        ),
+    )
+    var store = InMemoryStateStore()
+    var raised = False
+    try:
+        _ = apply_resources(reg, limited, _ctx(), resources, Creds.none(), store)
+    except e:
+        raised = True
+        assert_equal(String(e), text)
+    assert_true(raised, "a bucket on fake-limited is refused")
+    assert_equal(len(limited.store[].calls), 0, "before any call is served")
+    print("  test_a_bucket_is_not_yet_on_fake_limited: PASS")
+
+
 def main() raises:
     print("test_fake_limited_refuses_offline")
     test_fake_limited_refuses_before_anything_is_created()
@@ -240,4 +288,5 @@ def main() raises:
     test_fake_limited_hosts_what_it_can()
     test_a_limit_is_refused_the_same_way()
     test_a_cloud_bound_shape_fails_early()
+    test_a_bucket_is_not_yet_on_fake_limited()
     print("ALL kci_cloud_fake OFFLINE REFUSAL TESTS PASSED")

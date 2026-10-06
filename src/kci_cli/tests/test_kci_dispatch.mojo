@@ -41,6 +41,13 @@ from kci_publish import NewNamesReport, PublishRequest
 from kci_validate import ValidateRequest
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+comptime _SET_HASH: String = "5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a"
+
+
+comptime _R19: String = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ env.REVISION }}\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          else\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n          fi\n"
+"""R21: the first two steps of every release job (auto_promotion.mojo)."""
+comptime _R19_MAIN: String = "      - name: only a push to main reaches this job\n        run: |\n          [ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n            { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
+"""R21: the third step of a main-only job."""
 
 
 struct FakeSteps(StageSteps, Movable):
@@ -167,6 +174,16 @@ struct FakeSteps(StageSteps, Movable):
         if self.workflow_fails:
             raise Error(String("fatal: path does not exist"))
         return self.workflow.copy()
+
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        # every revision is on every history here (test_kci_ref_check holds
+        # the ref check)
+        self.reads.append(String("is-ancestor ") + commit + String(" ") + of)
+        return True
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        # the release every gamma run here is handed (`_gamma`)
+        return String(_SET_HASH)
 
     def _next(mut self, name: String, kind: String, platform: String, mut result: KciRunResult) -> StepEnd:
         var end = StepEnd(String(OUTCOME_SUCCEEDED), String(""), String(""))
@@ -535,8 +552,8 @@ def _release_machine(dir: String, validation: Bool = False, env_validation: Bool
     write_whole_file(
         m,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
-        + String("stage { name: \"gamma\" environment: \"gamma\" after: \"build\" step { name: \"publish\" kind: PUBLISH")
+        + String("stage { name: \"build\" break_glass: true step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
+        + String("stage { name: \"gamma\" environment: \"gamma\" after: \"build\" break_glass: true step { name: \"publish\" kind: PUBLISH")
         + String(" platform: \"linux-x86_64\" artifacts: \"d\" channels: \"") + c + String("\" channel: \"gamma\"")
         + v + String(" } }\n")
         + String("stage { name: \"prod\" environment: \"prod\" after: \"gamma\" step { name: \"publish\" kind: PUBLISH")
@@ -546,16 +563,32 @@ def _release_machine(dir: String, validation: Bool = False, env_validation: Bool
 
 
 def _workflow(machine: String) -> String:
-    """A workflow that agrees with `_release_machine` (R1-R12)."""
+    """A workflow that agrees with `_release_machine` without a validation
+    (R1-R21): build and gamma break-glass, prod main only."""
     var run = String("kci run --machine ") + machine + String(" --summary-file \"$GITHUB_STEP_SUMMARY\" --stage ")
+    var hash = String(" --release-set-hash \"$RELEASE_SET_HASH\"")
+    var line = String("      - name: the prod line\n        if: always()\n        run: echo prod line\n")
     return (
-        String("name: kci\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n")
-        + String("      revision:\n        type: string\npermissions: {}\njobs:\n")
-        + String("  build:\n    environment: build\n    steps:\n      - run: ") + run + String("build\n")
+        String("name: kci\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n")
+        + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n")
+        + String("      reason:\n        type: string\n        required: true\n")
+        + String("      dry_run:\n        type: boolean\n        default: false\n")
+        + String("permissions: {}\n")
+        + String("concurrency:\n  group: kci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)")
+        + String(" || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n")
+        + String("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n")
+        + String("env:\n  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n")
+        + String("jobs:\n")
+        + String("  build:\n    environment: build\n    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
+        + String("    steps:\n") + String(_R19) + String("      - run: ") + run + String("build\n") + line
         + String("  gamma:\n    needs: build\n    environment: gamma\n    permissions:\n      id-token: write\n")
-        + String("    steps:\n      - run: ") + run + String("gamma\n")
-        + String("  prod:\n    needs: gamma\n    environment: prod\n    permissions:\n      id-token: write\n")
-        + String("    steps:\n      - run: ") + run + String("prod\n")
+        + String("    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
+        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}\n")
+        + String("    steps:\n") + String(_R19) + String("      - run: ") + run + String("gamma") + hash + String("\n") + line
+        + String("  prod:\n    needs: gamma\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n    environment: prod\n")
+        + String("    permissions:\n      id-token: write\n")
+        + String("    env:\n      RELEASE_SET_HASH: ${{ needs.gamma.outputs.set_hash }}\n")
+        + String("    steps:\n") + String(_R19) + String(_R19_MAIN) + String("      - run: ") + run + String("prod") + hash + String("\n") + line
     )
 
 
@@ -564,13 +597,18 @@ def _under_actions(mut steps: FakeSteps, workflow: String):
     steps.set_env(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
     steps.set_env(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/kci.yml@refs/heads/main"))
     steps.set_env(String("GITHUB_WORKFLOW_SHA"), String(_SHA))
+    # a push to main of the revision (the ref check, test_kci_ref_check)
+    steps.set_env(String("GITHUB_REF"), String("refs/heads/main"))
+    steps.set_env(String("GITHUB_EVENT_NAME"), String("push"))
+    steps.set_env(String("GITHUB_SHA"), String(_REV))
     steps.workflow = workflow.copy()
 
 
 def _gamma(m: String, *extra: String) -> List[String]:
     var a = _run(m, String("gamma"))
-    for s in ["--release-version", "rv"]:
+    for s in ["--release-version", "rv", "--release-set-hash"]:
         a.append(String(s))
+    a.append(String(_SET_HASH))
     for s in extra:
         a.append(String(s))
     return a^
@@ -1028,6 +1066,39 @@ def test_an_unread_later_channel_is_not_none() raises:
     var tail = String(text[byte = at:])
     assert_true(tail.find(String("not read: cannot tell")) >= 0, tail)
     assert_true(tail.find(String("\nnone\n")) < 0, tail)
+
+
+def test_a_run_without_a_release_version_skips_the_lookahead() raises:
+    # the validate job: `--only validation:install`, no --release-version. A
+    # later stage's names cannot be computed without the release version, so
+    # the lookahead is skipped and says so, never "cannot be read" of an
+    # empty path, and never "none"
+    var d = _root(String("ahead_norv"))
+    var m = _release_machine(d, True)
+    var steps = FakeSteps()
+    steps.ahead_names.append(String("komira_all"))
+    var rec = CliRecorder.memory(String(""))
+    var summary = d + String("/summary.md")
+    assert_equal(
+        kci_main_with(_run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--summary-file", summary), steps, rec),
+        0,
+    )
+    for i in range(len(steps.reads)):
+        assert_true(not steps.reads[i].startswith(String("lookahead")), steps.reads[i])
+    assert_equal(len(_last(rec).new_names), 0)
+    var text = Path(summary).read_text()
+    var at = text.find(String("### NEW NAMES on prod"))
+    assert_true(at >= 0, text)
+    var tail = String(text[byte = at:])
+    assert_true(tail.find(String("lookahead skipped: no release version (plan-only or validation-only run)")) >= 0, tail)
+    assert_true(tail.find(String("cannot be read")) < 0, tail)
+    assert_true(tail.find(String("\nnone\n")) < 0, tail)
+    # a plan WITH a release version still reads prod's names
+    var steps2 = FakeSteps()
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_gamma(m, "--plan", "--scratch-dir", "/s"), steps2, rec2), 0)
+    assert_equal(len(steps2.reads), 1)
+    assert_equal(steps2.reads[0], String("lookahead prod env=prod prod plan=True"))
 
 
 def test_no_lookahead_after_a_failure_and_the_last_stage_has_none() raises:

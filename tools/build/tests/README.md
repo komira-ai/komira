@@ -174,6 +174,14 @@ Rust (`rust:prost_roundtrip` and the protobuf plugin,
 `proto-codegen:protoc-gen-mojo`), whose compiles copy their sources into
 buck-out for the same reason (without it, 3 of 55 actions re-ran).
 
+It also builds, in the `./komira` submodule consumer and in the external-cell
+consumer, a package of the consumer's own cell that depends on
+`komira//tools/build/examples:hellopkg`, its gated test, and a binary on it
+whose run check compares stdout; the binary's compile must put both packages on -I.
+buck2 loads the rules once per cell of the BUCK file that loads them, and a
+transitive set of one load refuses children of the other, so before
+`mojo_pkg_children` this failed in analysis.
+
 A fifth consumer, fetched as a git external cell, has no `.buckconfig.local`:
 the remote-execution settings are appended to its root `.buckconfig`, and it
 runs with no user or system buckconfig and `HOME` in the scratch directory.

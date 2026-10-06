@@ -658,5 +658,91 @@ def test_step_inputs() raises:
     )
 
 
+def _chain(build_bg: String, gamma_bg: String, prod_bg: String) -> String:
+    """build -> gamma -> prod, each stage's `break_glass` line as given
+    ("" for none)."""
+    return (
+        String("schema_version: 1\n")
+        + String("stage {\n name: \"build\"\n") + build_bg + String(_BUILD_STEP) + String("}\n")
+        + String("stage {\n name: \"gamma\"\n after: \"build\"\n") + gamma_bg + String(_PUBLISH_STEP) + String("}\n")
+        + String("stage {\n name: \"prod\"\n after: \"gamma\"\n") + prod_bg + String(_PUBLISH_STEP) + String("}\n")
+    )
+
+
+def test_break_glass_defaults_to_false_and_reads_back() raises:
+    var none = parse_machine_file(_chain(String(""), String(""), String("")), String(_SRC))
+    for i in range(len(none.stages)):
+        assert_false(none.stages[i].break_glass)
+    var g = parse_machine_file(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n"), String(" break_glass: false\n")),
+        String(_SRC),
+    )
+    assert_true(g.stage(String("build")).break_glass)
+    assert_true(g.stage(String("gamma")).break_glass)
+    assert_false(g.stage(String("prod")).break_glass)
+
+
+def test_break_glass_refusals() raises:
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n break_glass: yes\n") + String(_BUILD_STEP)),
+        String("line 4: field 'break_glass' of stage 'b' is 'yes'; it is true or false"),
+    )
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n break_glass: true\n break_glass: true\n") + String(_BUILD_STEP)),
+        String("field 'break_glass' is set twice in stage 'b'"),
+    )
+    # break-glass is a PREFIX of the chain: a stage that runs after a
+    # main-only stage cannot run off main
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(""), String(" break_glass: true\n")),
+        String("stage 'prod' is break_glass and runs after 'gamma', which is not"),
+    )
+    _assert_refused(
+        _chain(String(""), String(" break_glass: true\n"), String("")),
+        String("stage 'gamma' is break_glass and runs after 'build', which is not"),
+    )
+    # a pull request's check is no release stage
+    _assert_refused(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n break_glass: true\n") + String(_BUILD_STEP)),
+        String("stage 'pr' is a PULL_REQUEST stage and is break_glass"),
+    )
+
+
+def test_break_glass_environment() raises:
+    var g = parse_machine_file(
+        _chain(
+            String(" break_glass: true\n"),
+            String(" break_glass: true\n break_glass_environment: \"gamma-breakglass\"\n"),
+            String(""),
+        ),
+        String(_SRC),
+    )
+    assert_equal(g.stage(String("gamma")).break_glass_environment, String("gamma-breakglass"))
+    assert_equal(g.stage(String("gamma")).environment, String("gamma"))
+    assert_equal(g.stage(String("build")).break_glass_environment, String(""))
+    # only a break_glass stage has one
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n"), String(" break_glass_environment: \"p-bg\"\n")),
+        String("stage 'prod' has break_glass_environment 'p-bg' and is not break_glass"),
+    )
+    # an environment name, and not the stage's own environment
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n break_glass_environment: \"Gamma_BG\"\n"), String("")),
+        String("stage 'gamma' has break_glass_environment 'Gamma_BG'; an environment name is"),
+    )
+    _assert_refused(
+        _chain(String(" break_glass: true\n"), String(" break_glass: true\n break_glass_environment: \"gamma\"\n"), String("")),
+        String("stage 'gamma' has break_glass_environment 'gamma', the stage's own environment"),
+    )
+    _assert_refused(
+        _chain(
+            String(" break_glass: true\n"),
+            String(" break_glass: true\n break_glass_environment: \"a\"\n break_glass_environment: \"b\"\n"),
+            String(""),
+        ),
+        String("field 'break_glass_environment' is set twice in stage 'gamma'"),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

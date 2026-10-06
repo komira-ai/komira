@@ -41,8 +41,7 @@
 # monotonic reading is comparable only WITHIN ONE PROCESS. The instance
 # identifier a sink posts alongside these endpoints MUST therefore be unique per
 # PROCESS (not merely per container image or per revision), or the server would
-# union two processes' incomparable clocks. `StatusHookConfig` says so again at
-# its own constructor, which is where an operator will actually read it.
+# union two processes' incomparable clocks.
 #
 # WHERE THE PER-REQUEST STATE LIVES, AND WHY IT IS NOT ON `self`
 # --------------------------------------------------------------
@@ -89,8 +88,8 @@ struct RequestMetric(Copyable, ImplicitlyCopyable, Movable, Deinitable):
 
     ⚠ `entry.latency_ns` IS A CONVENIENCE FOR THE CUSTOMER'S OWN DASHBOARDS AND
     MUST NOT BE PUT ON A METERING WIRE. It is `end - start` for THIS request —
-    a scalar, and therefore un-unionable. `StatusHookSink` deliberately omits
-    it from its body, and a test asserts the captured bytes do not contain it.
+    a scalar, and therefore un-unionable. A sink that posts to a metering
+    endpoint omits it from its body.
 
     ⛔ DO NOT "SIMPLIFY" THIS STRUCT BY DROPPING AN ENDPOINT AND KEEPING THE
     DURATION. That is the silent-overbill bug in its entirety: every sequential

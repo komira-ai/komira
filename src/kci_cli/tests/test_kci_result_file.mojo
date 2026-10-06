@@ -64,6 +64,12 @@ struct SpySteps(StageSteps, Movable):
     def committed_file(mut self, commit: String, path: String) raises -> String:
         raise Error(String("no workflow is read here"))
 
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        raise Error(String("no history is read here"))
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        raise Error(String("no release is read here"))
+
 
 def _root(tag: String) raises -> String:
     var base = _read_env("TEST_TMPDIR")
