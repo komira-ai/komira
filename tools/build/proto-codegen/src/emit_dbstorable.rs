@@ -387,7 +387,7 @@ impl<'a> DbEmitter<'a> {
         self.blank();
         self.emit_create_table_ddl_backends(msg, &table, &fields);
         self.blank();
-        self.emit_insert_sql(&fields);
+        self.emit_insert_sql(msg, &fields);
         self.blank();
         self.emit_to_row(&fields);
         self.blank();
@@ -595,12 +595,12 @@ impl<'a> DbEmitter<'a> {
     /// `insert_sql[D: SqlDatabase]()` — the column list + backend-dialect
     /// placeholders (`D.placeholder(i)` — pg `$N`, sqlite `?N`). Bound on
     /// `SqlDatabase` because it reaches the SQL-dialect `D.placeholder(i)`.
-    fn emit_insert_sql(&mut self, fields: &[FieldRow]) {
+    /// The columns are the physical names (after a `(komira.db.column)`
+    /// override), the same ones `column_names()` and the DDL use.
+    fn emit_insert_sql(&mut self, msg: &IrMessage, fields: &[FieldRow]) {
         let cols: Vec<String> = fields
             .iter()
-            .map(|(f, _, _)| {
-                f.name.clone()
-            })
+            .map(|(f, _, _)| self.column_name(msg, f))
             .collect();
         self.line("@staticmethod");
         self.line("def insert_sql[D: SqlDatabase]() -> String:");
@@ -855,6 +855,9 @@ impl<'a> DbEmitter<'a> {
         match logical {
             // A repeated scalar → `List[..]`.
             Logical::TextArray => true,
+            // `bytes` → `List[UInt8]` (or `Optional[List[UInt8]]`), which is
+            // not ImplicitlyCopyable: passed without `^` it does not compile.
+            Logical::Bytes => true,
             // map → `Dict[..]`; repeated message / repeated enum → `List[..]`;
             // a SINGULAR message is the nested struct value (no Dict/List wrap).
             Logical::Jsonb => match &field.ty {
@@ -1432,6 +1435,75 @@ mod mojo_100_deinit_tests {
         assert!(
             !src.contains("_type_is_eq"),
             "`_type_is_eq[A, B]()` is b2; 1.0.0 spells it `(A == B)`; got:\n{src}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod column_override_tests {
+    use super::*;
+    use crate::db_options::{DbFieldOptions, DbTableOptions};
+    use crate::ir::{IrField, IrFile, IrMessage, IrModel, IrType, Label, ScalarKind};
+
+    /// A `(komira.db.column)` override must name the column in every SQL
+    /// output, not only in `column_names()` and the DDL: an INSERT that lists
+    /// the field name fails at run time against the table the DDL created.
+    #[test]
+    fn a_renamed_column_is_renamed_in_the_insert_too() {
+        let field = |name: &str, num: u32| IrField {
+            name: name.to_string(),
+            ty: IrType::Scalar(ScalarKind::String),
+            label: Label::Single,
+            proto_field_number: num,
+            json_name: name.to_string(),
+            oneof_index: None,
+        };
+        let row = IrMessage {
+            name: "Row".to_string(),
+            mojo_name: "Row".to_string(),
+            fq_name: ".db.v1.Row".to_string(),
+            is_map_entry: false,
+            fields: vec![field("id", 1), field("display_name", 2)],
+            oneofs: vec![],
+        };
+        let file = IrFile {
+            proto_path: "db/v1/db.proto".to_string(),
+            proto_package: "db.v1".to_string(),
+            mojo_package: "db_v1".to_string(),
+            messages: vec![row],
+            enums: vec![],
+            services: vec![],
+            imports: vec![],
+        };
+        let mut opts = DbOptionTable::default();
+        opts.insert_table_for_test(
+            ".db.v1.Row",
+            DbTableOptions {
+                table: "rows".to_string(),
+                pk: "id".to_string(),
+                ..DbTableOptions::default()
+            },
+        );
+        opts.insert_field_for_test(
+            ".db.v1.Row",
+            "display_name",
+            DbFieldOptions {
+                column: Some("caption".to_string()),
+                ..DbFieldOptions::default()
+            },
+        );
+        let src = emit_db_model(&IrModel { files: vec![file] }, &opts).remove(0).1;
+        assert!(
+            src.contains("out.append(String(\"caption\"))"),
+            "column_names() carries the override; got:\n{src}"
+        );
+        assert!(
+            src.contains("String(\" (id, caption) VALUES (\")"),
+            "insert_sql lists the overridden column name; got:\n{src}"
+        );
+        assert!(
+            !src.contains("(id, display_name)"),
+            "insert_sql must not list the field name; got:\n{src}"
         );
     }
 }

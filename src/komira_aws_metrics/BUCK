@@ -66,8 +66,7 @@ mojo_library(
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         "//src/komira_metrics_reader:komira_metrics_reader",
-        # The retry loop komira_aws_core builds for each call
-        # (`aws_system_retry_loop`) is a komira_retry type.
+        # Each call's retry loop is komira_retry's `system_retry_loop`.
         "//src/komira_retry:komira_retry",
     ],
     visibility = ["PUBLIC"],

@@ -63,9 +63,9 @@ from komira_aws_core import (
     HttpResult,
     aws_service_endpoint,
     aws_standard_retry_policy,
-    aws_system_retry_loop,
     send_sigv4_signed_request_with,
 )
+from komira_retry import system_retry_loop
 from komira_metrics_reader import (
     MetricsLabel,
     MetricsPage,
@@ -352,7 +352,7 @@ struct CloudWatchMetricsReader[
         var bytes = List[UInt8]()
         bytes.extend(Span(body.as_bytes()))
         var cred = self._creds.credentials()
-        var loop = aws_system_retry_loop(aws_standard_retry_policy())
+        var loop = system_retry_loop(aws_standard_retry_policy())
         return send_sigv4_signed_request_with(
             self._transport,
             self._clock,

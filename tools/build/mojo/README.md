@@ -16,7 +16,7 @@ the compiler sees. Worked uses of each rule are in
 |---|---|---|
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
-| `mojo_test(srcs, deps, main, optimization_level, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
+| `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -161,6 +161,11 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
 - **`buck2 test <mojo_test>`**: runs the test binary remotely through
   [`gate_runner.sh`](gate_runner.sh). `buck2 run` of a `mojo_test` runs its
   binary directly, from the runnable directory.
+- **Exit status.** A test passes only by exiting 0. Every other status fails,
+  77 included: 77 means SKIP to automake and some test harnesses, but here
+  it is a failure (`GATED TEST FAILED: <label> (exit 77)`), so a test cannot
+  skip itself green, whether gated or run by `buck2 test`
+  ([`tests//negative/test_data:skip_77`](../tests/negative/test_data/BUCK)).
 
 ### Outputs and the runnable directory
 
@@ -244,6 +249,7 @@ mojo_test(
     ...
     data = {"golden/out.txt": "fixtures/expected.txt"},  # a dict: {dest: source}
     env = {"READER_MODE": "strict"},
+    args = ["--reader-binary=$(exe_target //tools:reader)", "--golden=$(location :golden)", "--strict"],
 )
 ```
 
@@ -267,6 +273,27 @@ mojo_test(
   own shell, so a name the runner uses internally (`BIN`, `rc`, `MARKER`)
   reaches the test and cannot change the verdict
   ([`tests//functional/test_data:runner_cases`](../tests/functional/test_data/runner_cases.sh)).
+- **`args`** (`mojo_test` only) are the test's command-line arguments under
+  `buck2 test`, in order. Configuration reaches a test as flags, so a test
+  that needs a tool or file is given its path this way rather than through
+  `env`. `$(location <target>)` is the path of the target's default output:
+  use it for a file. `$(exe_target <target>)` is the target's run command
+  (`RunInfo`), built for the test's platform: use it for a program. For a
+  `mojo_binary` that is the binary inside its runnable directory, with lib/
+  beside it; `$(location)` of a `mojo_binary` is the bare executable, which
+  cannot load its runtime libraries. A run command of more than one word is
+  not split: it reaches the test as one argument. (`$(exe <target>)` is the
+  same command built for the execution platform; the two are the same
+  binary only while the test's platform is its execution platform.) What a
+  macro names becomes an input of the test, so it is present on the worker;
+  because the test runs from `root/share`, every such path is absolute (the
+  rule writes it under `@KOMIRA_ACTION_DIR@/` and the runner replaces that
+  with the action's directory, so an argument may not hold that text
+  literally). An argument is never exported, whatever its text.
+  `buck2 run` and `[runnable]` do not pass `args`. A library's `test_srcs`
+  take none: a gated test is a unit test of its package and gets everything
+  it reads through `test_data`
+  ([`tests//functional/test_data:mojo_test_args`](../tests/functional/test_data/BUCK)).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
