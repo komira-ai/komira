@@ -21,6 +21,14 @@
 #       chunk BEFORE it tombstones, so the reaper reclaims the parent; when the
 #       advance fails, nothing is tombstoned and nothing is deleted. Catches:
 #       the old tombstone-only order (the reaper would skip the parent forever).
+#   (4) `compact_split_parent_gen` whose step-5 advance fails after the
+#       collapse CAS landed: a re-run finds the lineage collapsed, finishes
+#       step 5 and the parent is reclaimed (before, the re-run raised "is not a
+#       retired partition" and nothing revisited the parent). A pid that was
+#       never split is still refused. A parent whose prefix retention already
+#       reaped is retired without raising on the missing chunks.
+#   (5) `advance_log_start_monotone` retries a lost CAS and gives up after
+#       its bounded attempts.
 #
 # Faults come from `_FaultStore`, which wraps the shared in-memory store and
 # keeps its rules as marker objects IN that store, so every clone sees them.
@@ -33,12 +41,23 @@ from komira_core.arrow.column import Column
 from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.arrow.record_batch import RecordBatch
 from komira_core.arrow.schema import Schema
+from komira_core.collections.slab import Slab
 
 from komira_broker.broker_core import BrokerCore
 from komira_broker.manifest_body import ManifestBody
-from komira_broker.partition_compaction import _schedule_parent_chunks_for_delete
+from komira_broker.partition_compaction import (
+    _schedule_parent_chunks_for_delete,
+    compact_split_parent_gen,
+)
+from komira_broker.partition_map import (
+    PartitionMap,
+    persist_create_if_absent,
+    prefix_gen_manifest_prefix,
+)
+from komira_broker.partition_split import split_topic
 from komira_broker.retention import (
     ReapResult,
+    advance_log_start_monotone,
     ReapWorker,
     RetentionPass,
     RetentionPolicy,
@@ -70,6 +89,9 @@ from komira_objectstore.types import (
 comptime _Inner = SharedInMemoryConditionalStore
 comptime _FAIL_GET = "__fault__/get/"
 comptime _FAIL_PUT = "__fault__/put/"
+# A conditional PUT to the target loses its precondition: every time, or once.
+comptime _LOSE_CAS = "__fault__/412/"
+comptime _LOSE_CAS_ONCE = "__fault__/412once/"
 comptime _GRACE = Int64(60_000)
 
 
@@ -135,6 +157,12 @@ struct _FaultStore(
         self, path: Path, bytes: List[UInt8], precond: WritePrecondition
     ) raises -> ObjectMeta:
         self._fail_if(_FAIL_PUT, path)
+        var lose = _has(self._inner, _LOSE_CAS + path.raw())
+        if _has(self._inner, _LOSE_CAS_ONCE + path.raw()):
+            _disarm(self._inner, _LOSE_CAS_ONCE, path.raw())
+            lose = True
+        if lose:
+            raise Error("injected: precondition (412) — a concurrent writer won")
         return self._inner.conditional_put(path, bytes, precond)
 
     def compare_and_swap(
@@ -411,10 +439,189 @@ def test_parent_compaction_empty_parent_is_a_noop() raises:
     print("[test_parent_compaction_empty_parent_is_a_noop] PASS")
 
 
+# =============================================================================
+# (4) split-parent compaction resumes after a failed step-5 advance
+# =============================================================================
+
+
+def _core(
+    inner: _Inner, prefix: String, pid: Int
+) raises -> BrokerCore[_FaultStore]:
+    return BrokerCore[_FaultStore](
+        segment_store=_FaultStore(inner.clone()),
+        manifest=CasManifestStore[_FaultStore](
+            store=_FaultStore(inner.clone()),
+            prefix=prefix,
+            retry=RetryPolicy.fast_test(),
+        ),
+        cluster=String(_CLUSTER),
+        topic=String(_TOPIC),
+        partition=Int64(pid),
+        broker_id=String("broker-A"),
+    )
+
+
+def _compact_gen(
+    inner: _Inner, a: Int, b: Int, var batches: Slab[RecordBatch]
+) raises -> Bool:
+    """One `compact_split_parent_gen` run of parent pid 0; its `collapsed`."""
+    var c = String(_CLUSTER)
+    var t = String(_TOPIC)
+    var res = compact_split_parent_gen[_FaultStore](
+        _FaultStore(inner.clone()),
+        c,
+        t,
+        batches^,
+        _core(inner, prefix_gen_manifest_prefix(c, t, a, Int64(0)), a),
+        _core(inner, prefix_gen_manifest_prefix(c, t, b, Int64(0)), b),
+        _manifest(inner, Int64(0)),
+        0,
+        Int64(50_000),
+    )
+    return res.collapsed
+
+
+def test_parent_compaction_resumes_after_failed_advance() raises:
+    print("[test_parent_compaction_resumes_after_failed_advance] starting...")
+    var inner = _Inner()
+    persist_create_if_absent[_FaultStore](
+        _FaultStore(inner.clone()),
+        String(_CLUSTER),
+        String(_TOPIC),
+        PartitionMap.auto_seed(),
+    )
+    _produce_chunks(inner, Int64(0), 3)
+    var segs = _seg_keys(inner, Int64(0), 3)
+    var split = split_topic[_FaultStore](
+        _FaultStore(inner.clone()),
+        String(_CLUSTER),
+        String(_TOPIC),
+        _manifest(inner, Int64(0)),
+        0,
+    )
+    var a = split.child_a_pid
+    var b = split.child_b_pid
+
+    # The collapse CAS lands; the parent's advance (step 5) then fails.
+    var lk = log_start_key(_prefix(Int64(0))).raw()
+    _arm(inner, _FAIL_PUT, lk)
+    var batches = Slab[RecordBatch]()
+    batches.append(_batch(Int64(0), 30))
+    var raised = False
+    try:
+        _ = _compact_gen(inner, a, b, batches^)
+    except e:
+        raised = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised, "step 5 failed after the collapse")
+    var m = _manifest(inner, Int64(0))
+    assert_equal(len(m.tombstone_seqs()), 0, "no parent tombstone yet")
+    _disarm(inner, _FAIL_PUT, lk)
+
+    # The re-run finds the lineage collapsed and finishes step 5.
+    var collapsed = _compact_gen(inner, a, b, Slab[RecordBatch]())
+    assert_true(collapsed, "the re-run reports the collapse")
+    var ls = m.read_log_start()
+    assert_equal(ls.log_start_seq, Int64(3), "parent log start past top (2)")
+    assert_equal(ls.log_start_offset, Int64(30), "at the parent's next offset")
+    assert_equal(len(m.tombstone_seqs()), 3, "all 3 parent chunks marked")
+    var r = _reap(inner, Int64(0), Int64(50_000) + _GRACE)
+    assert_equal(r.reaped_count, Int64(3), "the parent is reclaimed")
+    _assert_reclaimed(inner, Int64(0), segs, 3, "resumed parent")
+
+    # A third run is a no-op that still reports the collapse.
+    assert_true(
+        _compact_gen(inner, a, b, Slab[RecordBatch]()), "idempotent re-run"
+    )
+    _ = m^
+    print("[test_parent_compaction_resumes_after_failed_advance] PASS")
+
+
+def test_parent_compaction_of_a_never_split_pid_raises() raises:
+    print("[test_parent_compaction_of_a_never_split_pid_raises] starting...")
+    var inner = _Inner()
+    persist_create_if_absent[_FaultStore](
+        _FaultStore(inner.clone()),
+        String(_CLUSTER),
+        String(_TOPIC),
+        PartitionMap.auto_seed(),
+    )
+    var raised = False
+    try:
+        _ = _compact_gen(inner, 1, 2, Slab[RecordBatch]())
+    except e:
+        raised = True
+        assert_true(String(e).find("is not a retired partition") >= 0, String(e))
+    assert_true(raised, "a live, never-split pid is refused")
+    print("[test_parent_compaction_of_a_never_split_pid_raises] PASS")
+
+
+def test_parent_with_a_reaped_prefix_is_retired() raises:
+    """Retention already reaped the parent's chunks 0 and 1: tombstoning
+    from seq 0 skips the missing chunks instead of raising."""
+    print("[test_parent_with_a_reaped_prefix_is_retired] starting...")
+    var inner = _Inner()
+    var pid = Int64(5)
+    _produce_chunks(inner, pid, 4)
+    var segs = _seg_keys(inner, pid, 4)
+    var m = _manifest(inner, pid)
+    var rp = RetentionPass[_FaultStore](RetentionPolicy.time_based(Int64(7500)))
+    var res = rp.run(m, Int64(10_000))
+    assert_equal(res.new_log_start_seq, Int64(2), "retention retired 0, 1")
+    assert_equal(_reap(inner, pid, Int64(10_000) + _GRACE).reaped_count, Int64(2))
+    _schedule_parent_chunks_for_delete[_FaultStore](m, Int64(50_000))
+    assert_equal(m.read_log_start_seq(), Int64(4), "parent log start past top")
+    assert_equal(len(m.tombstone_seqs()), 2, "chunks 2, 3 marked")
+    var r = _reap(inner, pid, Int64(50_000) + _GRACE)
+    assert_equal(r.reaped_count, Int64(2), "chunks 2, 3 reclaimed")
+    _assert_reclaimed(inner, pid, segs, 4, "parent with a reaped prefix")
+    _ = m^
+    _ = rp^
+    print("[test_parent_with_a_reaped_prefix_is_retired] PASS")
+
+
+# =============================================================================
+# (5) advance_log_start_monotone: a lost CAS is retried; endless loss raises
+# =============================================================================
+
+
+def test_advance_retries_a_lost_cas_then_gives_up() raises:
+    print("[test_advance_retries_a_lost_cas_then_gives_up] starting...")
+    var inner = _Inner()
+    var pid = Int64(6)
+    _produce_chunks(inner, pid, 3)
+    var m = _manifest(inner, pid)
+    var lk = log_start_key(_prefix(pid)).raw()
+
+    _arm(inner, _LOSE_CAS_ONCE, lk)
+    assert_true(
+        advance_log_start_monotone(m, Int64(1), Int64(10)), "won on the retry"
+    )
+    assert_false(_has(inner, _LOSE_CAS_ONCE + lk), "the first attempt lost")
+    assert_equal(m.read_log_start_seq(), Int64(1), "advanced to 1")
+
+    _arm(inner, _LOSE_CAS, lk)
+    var raised = False
+    try:
+        _ = advance_log_start_monotone(m, Int64(2), Int64(20))
+    except e:
+        raised = True
+        assert_true(String(e).find("exhausted retries") >= 0, String(e))
+    assert_true(raised, "a CAS lost on every attempt gives up")
+    _disarm(inner, _LOSE_CAS, lk)
+    assert_equal(m.read_log_start_seq(), Int64(1), "still at 1")
+    _ = m^
+    print("[test_advance_retries_a_lost_cas_then_gives_up] PASS")
+
+
 def main() raises:
     test_failed_advance_tombstones_are_skipped_then_reclaimed()
     test_unreadable_log_start_reaps_nothing()
     test_parent_compaction_advances_then_reaper_reclaims()
     test_parent_compaction_failed_advance_marks_nothing()
     test_parent_compaction_empty_parent_is_a_noop()
-    print("[OK] test_broker_reap_below_log_start_offline — 5 cases passed")
+    test_parent_compaction_resumes_after_failed_advance()
+    test_parent_compaction_of_a_never_split_pid_raises()
+    test_parent_with_a_reaped_prefix_is_retired()
+    test_advance_retries_a_lost_cas_then_gives_up()
+    print("[OK] test_broker_reap_below_log_start_offline — 9 cases passed")

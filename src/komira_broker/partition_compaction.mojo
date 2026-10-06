@@ -82,7 +82,7 @@ from komira_core.arrow.record_batch import RecordBatch
 from komira_core.arrow.schema import Schema
 from komira_core.collections.slab import Slab
 
-from komira_objectstore.cas_manifest import CasManifestStore
+from komira_objectstore.cas_manifest import CasManifestStore, is_not_found
 from komira_objectstore.store import ConditionalWriteStore
 
 from .broker_core import BrokerCore
@@ -446,6 +446,24 @@ def compact_split_parent_gen[
     var cur = read_partition_map_with_etag[Store](store, cluster, topic)
     var tomb = cur.map.retired_for_pid(parent_pid)
     if not tomb:
+        if _collapsed_by_gen(cur.map, parent_pid):
+            # RESUME: an earlier run's collapse CAS (step 4) landed, but its
+            # step 5 did not finish (a failed advance, a crash). The parent is
+            # no longer a read step, so finish step 5 (idempotent) and stop:
+            # steps 2-4 are done, and re-running step 3 would append the rows
+            # again. The children are not re-derived (-1).
+            _schedule_parent_chunks_for_delete[Store](parent_manifest, now_ms)
+            _ = parent_manifest^
+            return GenCompactionResult(
+                parent_pid=parent_pid,
+                child_a_pid=-1,
+                child_b_pid=-1,
+                prefix_gen_seq=Int64(parent_pid),
+                rows_to_a=0,
+                rows_to_b=0,
+                new_version=cur.map.version,
+                collapsed=True,
+            )
         raise Error(
             "compact_split_parent_gen: pid "
             + String(parent_pid)
@@ -550,6 +568,18 @@ def compact_split_parent_gen[
     )
 
 
+def _collapsed_by_gen(map: PartitionMap, parent_pid: Int) -> Bool:
+    """True iff a gen-model collapse of `parent_pid` already landed: a live
+    range carries `parent_pid`'s generation token as its `prefix_gen_seq`
+    (`collapse_lineage_with_prefix_gen`). A parent whose rows all went to no
+    child (both seqs `NO_PARENT_BASE`) leaves no such mark; its resume raises
+    like a pid that was never split."""
+    for i in range(len(map.ranges)):
+        if map.ranges[i].prefix_gen_seq == Int64(parent_pid):
+            return True
+    return False
+
+
 def _schedule_parent_chunks_for_delete[
     Store: ConditionalWriteStore
 ](mut parent_manifest: CasManifestStore[Store], now_ms: Int64) raises:
@@ -566,7 +596,12 @@ def _schedule_parent_chunks_for_delete[
     skipped forever. The parent has no "sealed" state; a log start one past
     its top chunk (based at its next offset) is how a fully retired lineage is
     recorded, the same state retention leaves once a whole prefix is reaped. A
-    failed advance raises before any tombstone; the caller retries."""
+    failed advance raises before any tombstone; the caller retries
+    (`compact_split_parent_gen` resumes here once its collapse has landed).
+    A chunk already gone is skipped: retention may have reaped the parent's
+    prefix earlier, or the reaper an earlier run's tombstones. After the
+    advance every chunk 0..top is below the log start, so a missing one is
+    reaped, never a torn live lineage."""
     # A correctness consumer of the tail: read_head() prefers the stale-low
     # local cache, so this must LIST the authoritative
     # tail. This runs from a maintenance/cold-cache instance (a fresh
@@ -586,7 +621,11 @@ def _schedule_parent_chunks_for_delete[
     )
     var seq = Int64(0)
     while seq <= top:
-        parent_manifest.schedule_for_delete_at(seq, now_ms)
+        try:
+            parent_manifest.schedule_for_delete_at(seq, now_ms)
+        except e:
+            if not is_not_found(String(e)):
+                raise e^
         seq += Int64(1)
 
 
