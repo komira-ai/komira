@@ -952,7 +952,9 @@ def materialize_jsonl_to_batch(
     included. Keys are compared as the text they spell (escapes decoded).
     Keys the schema does not read are skipped unread with their values,
     repeated or not, at top level and inside a STRUCT. Every error raised
-    while reading a row names the row's line."""
+    while reading a row names the row's line. One empty record per `{}`
+    line: with a schema of no fields (inferred from `{}` lines, or given),
+    the batch has no column and one row per object."""
     var no_prefix = List[UInt8]()
     return _materialize_checked(bytes, schema^, idx, no_prefix, 0)
 
@@ -1471,6 +1473,14 @@ def _walk_jsonl_rows(
     # The rows are read; an error from here on (building the columns)
     # belongs to no row, so it is not labelled with a line.
     row_start = -1
+
+    # No columns (a schema with no fields, e.g. inferred from `{}` lines):
+    # the batch carries the row count alone, one empty record per object.
+    # The builder below would return 0 rows, having no column to count.
+    if n == 0:
+        var empty = RecordBatch.count_only(row_count)
+        empty.schema = schema^
+        return empty^
 
     # Assemble RecordBatch. Build columns by popping accumulators from
     # the front in lockstep across all 9 parallel acc lists (6 scalar +
