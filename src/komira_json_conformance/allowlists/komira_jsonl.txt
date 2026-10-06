@@ -77,6 +77,7 @@ y_object_duplicated_key.json REJECTED: the object repeats a key; the reader refu
 y_object_duplicated_key_and_value.json REJECTED: the object repeats a key; the reader refuses it, naming the line ("duplicate key ... a key the schema reads may appear once"), a choice RFC 8259 allows (names SHOULD be unique)
 y_object_long_strings.json REJECTED: schema inference does not infer a nested object or array member ("wide-default inference of LIST / STRUCT / MAP is not supported")
 y_object_simple.json REJECTED: schema inference does not infer a nested object or array member ("wide-default inference of LIST / STRUCT / MAP is not supported")
+y_object_with_newlines.json REJECTED: the object spans lines; a JSONL record is one line, and the reader refuses the line, naming it (the format's contract)
 y_string_1_2_3_bytes_UTF-8_sequences.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
 y_string_accepted_surrogate_pair.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
 y_string_accepted_surrogate_pairs.json REJECTED: the top level is not an object; a JSONL record is one JSON object, and the reader refuses the line, naming it (the format's contract, as komira_log_query's)
