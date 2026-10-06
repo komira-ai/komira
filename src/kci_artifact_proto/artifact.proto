@@ -135,8 +135,9 @@
 // one run per group of units sharing a build_targets command (a group of
 // one runs that unit's targets alone). A batch that fails is retried unit by
 // unit, in order, to name the failing units, until 3 have failed; a batch
-// that times out is not retried and attributes no unit; a batch that fails
-// while each of its units builds alone is "cannot tell", never a pass. A
+// that times out is not retried and attributes no unit, and a batch killed
+// by a signal is treated as a timed-out one; a batch that fails while each
+// of its units builds alone is "cannot tell", never a pass. A
 // unit counts as built only when a run that covered it succeeded. A
 // non-empty change reaching no unit is refused, and so is an
 // empty change; a tool that fails or prints anything else is "cannot tell",

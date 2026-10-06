@@ -35,8 +35,11 @@
 #    INDETERMINATE (KCI-E-CANNOT-TELL: the units interfere or the build is
 #    flaky, never a pass); else SUCCEEDED, `<head>: N unit(s) built`.
 #    A FAILED message's first line is `BUILD step: F of N unit(s) failed:
-#    a, c`, then one paragraph per failed unit, the units not tried, and the
-#    batch notes.
+#    a, c` (with no failed unit, the first unattributed batch's note), then
+#    one paragraph per failed unit, the units not tried, the failed batches'
+#    notes, the (other) unattributed batches' notes, and the interference
+#    notes. An INDETERMINATE message for a run that could not be started is
+#    that run, then the paragraphs of the units already failed.
 # 5. The lines: `notices`, then `BUILT <unit>` for each proven unit in
 #    decision order, whatever the outcome. A unit is BUILT only when an
 #    exit-0 run covered it.

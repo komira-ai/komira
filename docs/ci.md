@@ -849,16 +849,26 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 
 - **The batch passes:** every unit in it is `BUILT`. Nothing is retried.
 - **The batch fails:** kci builds its units one at a time, in order, to name
-  the failing ones (each logs to `<unit>.stdout` and `.stderr`; the batch
-  already built every target that does not depend on a failure, so the retries
-  run warm). After 3 failed units it
-  stops retrying: the rest are listed as not tried. The step is FAILED
-  (`KCI-E-BUILD-FAILED`); the summary's line is `BUILD step: F of N unit(s)
-  failed: ...`.
-- **The batch times out (or is killed):** it is not retried and no unit of it
-  is attributed: FAILED.
+  the failing ones. Each retry re-runs `sh release/ci/build_targets.sh` over
+  that one unit's targets, with its own `--build-timeout-s`, and logs to
+  `<unit>.stdout` and `.stderr`; the batch already built every target that
+  does not depend on a failure, so the retries run on a warm cache. A failing
+  wide change therefore costs the batch's time plus the retries, up to the
+  cap. A retry that fails, times out or is killed is a failed unit. After 3
+  failed units it stops retrying: the rest are listed as not tried, and a
+  later batch that fails is noted as not attributed (a later batch that
+  passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
+  the summary's line is `BUILD step: F of N unit(s) failed: ...`.
+- **The batch times out (or is killed by a signal):** the batch had the whole
+  `--build-timeout-s` (default 3600 s), not a share per unit. It is not
+  retried and no unit of it is attributed: FAILED.
 - **The batch fails but every unit builds alone:** the units interfere or the
   build is flaky. That is INDETERMINATE (`KCI-E-CANNOT-TELL`), never a pass.
+  FAILED outranks it: if a unit failed or a batch was not attributed anywhere
+  in the step, the step is FAILED and the interference is a note.
+- **A run cannot be started** (a batch, a unit alone or a retry): the step
+  stops at once, nothing after it is started, and the step is INDETERMINATE
+  (`KCI-E-CANNOT-TELL`) even when a unit has already failed.
 
 Whatever the outcome, a `BUILT <unit>` line names exactly the units a
 successful run covered. The result document's `affected_by.units` is the set

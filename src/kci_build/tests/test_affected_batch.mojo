@@ -5,7 +5,8 @@
 #   logs, its argv file), a target two units share given once, a unit alone
 #   built as before, a failed batch retried unit by unit to name each failing
 #   unit, the 3-failure cap, a timed-out or signal-killed batch attributed
-#   to no unit, a run that cannot be started stopping the step,
+#   to no unit, a run that cannot be started stopping the step and
+#   outranking a failed unit,
 #   interference never a pass, the outcome's precedence, and BUILT only for
 #   units an exit-0 run covered. One case runs a real fake build program
 #   through SupervisorRunner.
@@ -451,6 +452,31 @@ def test_t9_a_retry_that_cannot_start_stops_the_step() raises:
     assert_true(o.message.startswith(String("BUILD step: unit 'lib_b': the build could not be started: ")), o.message)
     assert_false(o.message.find(String("interfere")) >= 0, o.message)
     assert_equal(_list(o.lines), String("[BUILT lib_a]"))
+
+
+def test_t9_a_run_that_cannot_start_outranks_a_failed_unit() raises:
+    var root = _fresh(String("t9c"))
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    # the batch fails, lib_a alone fails (a failed unit is named), then
+    # lib_b alone cannot start: the step cannot tell, it is not FAILED, and
+    # lints is never started
+    runner.expect(_build(_argv(_A, _B, _DOCS, _SHELL), exit_code=Int32(1)))
+    runner.expect(_build(_argv(_A), exit_code=Int32(1), stderr=String("test_a FAILED")))
+    var o = _go(req, _argv("lib_a", "lib_b", "lints"), runner)
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_CANNOT_TELL))
+    assert_equal(len(runner.calls), 3)
+    assert_equal(runner.remaining(), 0)
+    assert_true(o.message.startswith(String("BUILD step: unit 'lib_b': the build could not be started: ")), o.message)
+    # the failed unit's paragraph still follows
+    assert_true(
+        o.message.find(String("\nunit 'lib_a': `buck2 build //src/lib_a:lib_a_conda` exit 1 (stderr: ")) >= 0,
+        o.message,
+    )
+    assert_true(o.message.find(String("test_a FAILED")) >= 0, o.message)
+    assert_false(o.message.find(String("unit(s) failed:")) >= 0, o.message)
+    assert_equal(len(o.lines), 0)
 
 
 def test_t10_two_commands_two_batches_in_first_appearance_order() raises:

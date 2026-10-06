@@ -89,7 +89,9 @@
 # derived checks, above. `build_targets` (release/ci/build_targets.sh) builds
 # a unit's targets (both build systems share it, so kci builds every affected
 # unit in ONE run over the union of their targets, and only when that run
-# fails builds them one at a time to name the failing ones), then checks
+# fails builds them one at a time to name the failing ones, stopping once 3
+# units have failed; a run that times out or is killed by a signal is never
+# split into units), then checks
 # each test_weld lint among them with its BXL script
 # (tools/build/lint/test_weld.bzl says why that is not a build validation; a
 # finding fails the unit), then runs `buck2 test` over the
