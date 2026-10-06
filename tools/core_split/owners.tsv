@@ -42,6 +42,7 @@ komira_k8s	origin/lib/komira_k8s
 komira_log	origin/lib/komira_log
 komira_log_query	origin/lib/komira_log_query
 komira_metrics_reader	origin/lib/komira_metrics_reader
+komira_morsel	origin/lib/komira_morsel
 komira_objectstore	origin/lib/komira_objectstore
 komira_obs	origin/lib/komira_obs
 komira_oci	origin/lib/komira_oci
