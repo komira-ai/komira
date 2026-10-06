@@ -149,7 +149,7 @@ fields of a stage carry what the CI workflow must agree with:
 | field | meaning |
 |---|---|
 | `stage.environment` | the GitHub environment the stage's job runs in (default: the stage's name). A trusted-publishing channel's push identity must name it, or kci refuses the publish. |
-| `stage.farm_connected` | the stage's job joins the build farm's tailnet (the `farm-connect` action), which needs the job's ID token. A farm-connected stage may not publish: the job that holds a tailnet node never holds a publishing token. |
+| `stage.farm_connected` | the stage's job joins the build farm's tailnet (the `farm-connect` action), which needs the job's ID token. A farm-connected stage may not publish: the job that holds a farm network node never holds a publishing token. |
 | `step.validation` | a check of what a PUBLISH step published, by kind (`CONDA_INSTALL_SMOKE`: `image` pinned by digest, `install` (repeated), `compiler_channel`, `extra_channel`, `program` under `release/`, `wait_for_index_seconds`). A FULL run runs it after its step; `--only validation:<name>` runs it alone against what is published; `--only step:<name>` runs the step without it. A failure is exit 7, never a skip. |
 
 The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this
