@@ -12,17 +12,12 @@
 # fields' JSON names): `resourceNames` is an array even for one project,
 # `pageToken` is the previous page's `nextPageToken` sent back verbatim.
 #
-# One part of each body is NOT from the reference: the default-valued keys
-# (`"pageToken":""` on a first page, `"filter":""`, `"pageSize":0`). The
-# proto3 JSON mapping omits a default-valued field, and the reference
-# examples do; they are here because komira_proto_codec's JsonEncoder writes
-# defaults today. Those keys pin codec behaviour, not the API: when the
-# encoder omits defaults they are deleted from these bodies, and a first
-# page then carries no `pageToken` key. On the wire either form is the same
-# request: the API reads an empty `pageToken` as no token, a non-positive
-# `pageSize` as its default and an empty `filter` as no filter. Key order
-# follows the message's declaration order (`resourceNames` first) and means
-# nothing to the server.
+# A field left at its default is not in the body, as the proto3 JSON
+# mapping and the reference examples omit it: a first page carries no
+# `pageToken` key, and an empty `filter` or a zero `pageSize` is not sent
+# (the API reads each absence as no token, no filter and its default page
+# size). Key order follows the message's declaration order (`resourceNames`
+# first) and means nothing to the server.
 from std.memory import ArcPointer
 from std.testing import assert_equal
 
@@ -134,7 +129,7 @@ def test_first_page() raises:
     var body = String(
         '{"resourceNames":["projects/demo-project"],'
         + '"filter":"resource.type=\\"cloud_run_job\\" AND severity>=DEFAULT",'
-        + '"orderBy":"timestamp asc","pageSize":200,"pageToken":""}'
+        + '"orderBy":"timestamp asc","pageSize":200}'
     )
     assert_equal(_wire(req), _expected(body))
 
@@ -166,7 +161,7 @@ def test_several_resource_names() raises:
     var body = String(
         '{"resourceNames":["projects/demo-project","folders/123456",'
         + '"projects/demo-project/locations/global/buckets/b1/views/v1"],'
-        + '"filter":"","orderBy":"timestamp asc","pageSize":0,"pageToken":""}'
+        + '"orderBy":"timestamp asc"}'
     )
     assert_equal(_wire(req), _expected(body))
 
@@ -180,8 +175,8 @@ def test_default_headers_come_before_the_bearer() raises:
     var headers = HeaderMap()
     headers.append(String("x-goog-user-project"), String("demo-billing"))
     var body = String(
-        '{"resourceNames":["projects/demo-project"],"filter":"",'
-        + '"orderBy":"timestamp asc","pageSize":10,"pageToken":""}'
+        '{"resourceNames":["projects/demo-project"],'
+        + '"orderBy":"timestamp asc","pageSize":10}'
     )
     assert_equal(
         _wire(req, headers^),

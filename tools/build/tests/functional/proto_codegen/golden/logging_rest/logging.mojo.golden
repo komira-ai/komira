@@ -171,10 +171,14 @@ struct LogEntry(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(12, "logName", self.log_name)
-        enc.write_string_field(3, "textPayload", self.text_payload)
-        enc.write_string_field(4, "insertId", self.insert_id)
-        enc.write_enum_field[LogSeverity](10, "severity", self.severity)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.log_name.byte_length() > 0:
+            enc.write_string_field(12, "logName", self.log_name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.text_payload.byte_length() > 0:
+            enc.write_string_field(3, "textPayload", self.text_payload)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.insert_id.byte_length() > 0:
+            enc.write_string_field(4, "insertId", self.insert_id)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.severity.number() != 0:
+            enc.write_enum_field[LogSeverity](10, "severity", self.severity)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -240,10 +244,14 @@ struct ListLogEntriesRequest(Serializable, Copyable, Movable):
         for i in range(len(self.resource_names)):
             enc.write_string_element(8, self.resource_names[i])
         enc.end_list_field()
-        enc.write_string_field(2, "filter", self.filter)
-        enc.write_string_field(3, "orderBy", self.order_by)
-        enc.write_i32_field(4, "pageSize", self.page_size)
-        enc.write_string_field(5, "pageToken", self.page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.filter.byte_length() > 0:
+            enc.write_string_field(2, "filter", self.filter)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.order_by.byte_length() > 0:
+            enc.write_string_field(3, "orderBy", self.order_by)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_size != 0:
+            enc.write_i32_field(4, "pageSize", self.page_size)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_token.byte_length() > 0:
+            enc.write_string_field(5, "pageToken", self.page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -303,7 +311,8 @@ struct ListLogEntriesResponse(Serializable, Copyable, Movable):
         for i in range(len(self.entries)):
             enc.write_message_element[LogEntry](1, self.entries[i])
         enc.end_list_field()
-        enc.write_string_field(2, "nextPageToken", self.next_page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.next_page_token.byte_length() > 0:
+            enc.write_string_field(2, "nextPageToken", self.next_page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -356,13 +365,16 @@ struct ListLogsRequest(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "parent", self.parent)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.parent.byte_length() > 0:
+            enc.write_string_field(1, "parent", self.parent)
         enc.begin_list_field(8, "resourceNames")
         for i in range(len(self.resource_names)):
             enc.write_string_element(8, self.resource_names[i])
         enc.end_list_field()
-        enc.write_i32_field(2, "pageSize", self.page_size)
-        enc.write_string_field(3, "pageToken", self.page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_size != 0:
+            enc.write_i32_field(2, "pageSize", self.page_size)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.page_token.byte_length() > 0:
+            enc.write_string_field(3, "pageToken", self.page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -419,7 +431,8 @@ struct ListLogsResponse(Serializable, Copyable, Movable):
         for i in range(len(self.log_names)):
             enc.write_string_element(3, self.log_names[i])
         enc.end_list_field()
-        enc.write_string_field(2, "nextPageToken", self.next_page_token)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.next_page_token.byte_length() > 0:
+            enc.write_string_field(2, "nextPageToken", self.next_page_token)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:

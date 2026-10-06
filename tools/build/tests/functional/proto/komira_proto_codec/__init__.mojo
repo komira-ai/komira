@@ -14,6 +14,10 @@ struct FieldKey(Copyable, ImplicitlyCopyable, Movable):
 
 
 trait WireEncoder(Movable):
+    # Whether a generated `encode` skips a plain proto3 field at its default
+    # (komira_proto_codec's own `WireEncoder` says more).
+    comptime OMITS_IMPLICIT_DEFAULTS: Bool
+
     def write_string_field(
         mut self, field_no: Int, json_name: StringSlice, v: String
     ) raises:
@@ -63,6 +67,9 @@ trait Serializable(Copyable, Movable):
 
 struct PbEncoder(WireEncoder):
     """Protobuf binary. Like proto3, omits fields holding their default."""
+
+    # This encoder omits the defaults itself, below.
+    comptime OMITS_IMPLICIT_DEFAULTS = False
 
     var buf: List[UInt8]
 
