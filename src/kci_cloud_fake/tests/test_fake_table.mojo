@@ -26,7 +26,7 @@
 #    plan and an apply asking for another key are refused naming the old and
 #    the new key, and mutate nothing; the stored key again is all NOOP.
 # 6. A KEPT TABLE OUTLIVES A DESTROY: a table with the default retention is
-#    skipped by destroy and keeps its `kci_retain=keep` label.
+#    skipped by destroy and keeps its `kci-retention=retain` mark.
 # 7. GCP REFUSES TWO INDEX NAMES WHOSE ROLES COLLIDE (`ix5155` and `ix8061`
 #    are both `ix-5upe7`) as a limit, before anything is created; aws, whose
 #    indexes are fields, lowers the same file.
@@ -375,9 +375,9 @@ def test_a_kept_table_outlives_a_destroy() raises:
     var labels = cloud.live_labels(String("orders/table"))
     var kept = False
     for i in range(len(labels)):
-        if labels[i].key == "kci_retain" and labels[i].value == "keep":
+        if labels[i].key == "kci-retention" and labels[i].value == "retain":
             kept = True
-    assert_true(kept, "the table is still there, labelled kci_retain=keep")
+    assert_true(kept, "the table is still there, marked kci-retention=retain")
     assert_equal(cloud.live_count(), 1, "everything else was destroyed")
     print("  test_a_kept_table_outlives_a_destroy: PASS")
 

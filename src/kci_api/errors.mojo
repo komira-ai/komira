@@ -50,6 +50,7 @@ comptime ERROR_AFFECTED_VACUOUS: String = "KCI-E-AFFECTED-VACUOUS"
 comptime ERROR_SUPERSEDED: String = "KCI-E-SUPERSEDED"
 comptime ERROR_NOT_ON_MAIN: String = "KCI-E-NOT-ON-MAIN"
 comptime ERROR_BREAK_GLASS_REASON: String = "KCI-E-BREAK-GLASS-REASON"
+comptime ERROR_BREAK_GLASS_REVISION: String = "KCI-E-BREAK-GLASS-REVISION"
 comptime ERROR_PLAN_ON_RELEASE: String = "KCI-E-PLAN-ON-RELEASE"
 
 
@@ -100,7 +101,8 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_AFFECTED_VACUOUS), String("a --affected-by change is empty, or reaches no declared unit")))
     t.append(ErrorRow(String(ERROR_SUPERSEDED), String("the channel already lists a higher build number (any name or version), an equal one of another build, or a newest build this revision does not descend from: a stage that never goes backward refuses")))
     t.append(ErrorRow(String(ERROR_NOT_ON_MAIN), String("a stage that runs only on main was run off main, or for a commit not on main's history")))
-    t.append(ErrorRow(String(ERROR_BREAK_GLASS_REASON), String("a break-glass run off main has no usable reason, or its revision is not on the run's ref")))
+    t.append(ErrorRow(String(ERROR_BREAK_GLASS_REASON), String("a break-glass run has no reason, one that is blank once trimmed, or one over 200 bytes")))
+    t.append(ErrorRow(String(ERROR_BREAK_GLASS_REVISION), String("a break-glass run that can publish names a revision other than the commit it started on, or a dry run names one not on that commit's history")))
     t.append(ErrorRow(String(ERROR_PLAN_ON_RELEASE), String("--plan on a release run (a push to main), which is never a dry run")))
     return t^
 

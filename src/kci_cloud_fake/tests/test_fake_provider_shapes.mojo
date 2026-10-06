@@ -14,7 +14,7 @@
 #    grant: no row); every shape that hosts a table has a `table` row (gcp
 #    also `ix` and `ttl`), and onprem hosts none and declares it NOT_YET
 #    (Q17); the generic shape is the fake's own roles.
-# 2. THE KIT ON EVERY SHAPE: the kci_cloud conformance kit (all eleven steps)
+# 2. THE KIT ON EVERY SHAPE: the kci_cloud conformance kit (all twelve steps)
 #    passes on the aws, gcp, azure and onprem shapes, each registered under a random
 #    id, on the graph of test_fake_conformance (a public service, an internal
 #    service reading its URL and HOST, a scheduled job, two grants).

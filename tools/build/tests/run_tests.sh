@@ -120,7 +120,8 @@
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
-#      and gRPC service clients), protoc-gen-mojo's text goldens, and
+#      and gRPC service clients), protoc-gen-mojo's text goldens,
+#      proto_fixture_check (protoc reading wire fixtures), and
 #      deterministic generation across two uncached
 #      builds (skipped with --no-uncached; about 16 minutes): see
 #      tools/build/tests/proto_tests.sh.
@@ -156,12 +157,17 @@
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
 #      is private, empty and not /tmp in each of two actions; test_env and a
-#      mojo_test's data and env arrive under `buck2 test`; a red test stays
+#      mojo_test's data and env arrive under `buck2 test`, and so do its
+#      args, each $(location) an absolute path the test opens and an
+#      $(exe_target) a binary with its lib/ (also as a build action,
+#      mojo_test_args_action, which is what a pull request builds); a mojo_test
+#      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
 #      the runner itself, run twice in ONE action directory
 #      (tests//functional/test_data:runner_cases), gives each run its own empty
 #      TEST_TMPDIR under that directory and removes it, no --env reaches
-#      the verdict, and a test killed by SIGKILL or SIGABRT fails with its
+#      the verdict, --arg values arrive in order and unexported, exit 77 is
+#      red, and a test killed by SIGKILL or SIGABRT fails with its
 #      own status (137, 134) and no marker; five inadmissible data/env
 #      declarations are refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
@@ -858,6 +864,21 @@ if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_data > "$LOG/
     pass "td_mojo_test: buck2 test of a mojo_test with data and env"
 else
     fail "td_mojo_test: buck2 test tests//functional/test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
+fi
+if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_args > "$LOG/td_mojo_test_args.log" 2>&1; then
+    pass "td_mojo_test_args: buck2 test of a mojo_test with args, \$(location) and \$(exe_target) expanded to files it opens"
+else
+    fail "td_mojo_test_args: buck2 test tests//functional/test_data:mojo_test_args failed (see $LOG/td_mojo_test_args.log)"
+fi
+expect_green td_mojo_test_args_action tests//functional/test_data:mojo_test_args_action
+if timeout 900 "$BUCK2" test tests//negative/test_data:skip_77 > "$LOG/td_skip_77.log" 2>&1; then
+    fail "td_skip_77: buck2 test tests//negative/test_data:skip_77 passed, but its test exits 77 (see $LOG/td_skip_77.log)"
+elif ! grep -qE "GATED TEST FAILED: [a-z]*//([a-z/]*/)?negative/test_data:skip_77 \(exit 77\)" "$LOG/td_skip_77.log"; then
+    fail "td_skip_77: failed without the test's exit 77 (see $LOG/td_skip_77.log)"
+elif ! grep -q "Fail 1" "$LOG/td_skip_77.log"; then
+    fail "td_skip_77: exit 77 was not counted as a test failure (see $LOG/td_skip_77.log)"
+else
+    pass "td_skip_77: a mojo_test exiting 77 (SKIP to some harnesses) fails, counted as Fail"
 fi
 expect_red td_env_bin_lib "GATED TEST FAILED: tests//negative/test_data:env_bin_lib:tests/test_red.mojo" tests//negative/test_data:env_bin_lib
 if timeout 900 "$BUCK2" test tests//negative/test_data:env_bin > "$LOG/td_env_bin.log" 2>&1; then

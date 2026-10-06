@@ -11,7 +11,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # nothing of it is copied here), in client mode: each operation's request
 # builder and response parser, its endpoint resolved through the service's
 # published endpoint ruleset and partition table, embedded in the module,
-# and `ApiGatewayV2ApiGatewayV2Client`, which resolves each call's endpoint
+# and `ApiGatewayV2Client`, which resolves each call's endpoint
 # and sends through komira_aws_core's send_sigv4_signed_request over the
 # komira_http_core Connector it is given.
 #

@@ -306,6 +306,20 @@ def _env_args(where, env):
         args += ["--env", "{}={}".format(name, env[name])]
     return args
 
+# The prefix of every artifact path in a mojo_test's `args`: gate_runner.sh
+# replaces it with the action's directory, because the test runs from its
+# share/, where a path relative to the action's directory reaches nothing.
+_ACTION_DIR_TOKEN = "@KOMIRA_ACTION_DIR@"
+
+def _arg_args(args):
+    """`--arg VALUE` runner arguments for a mojo_test's `args`, each artifact
+    path (from `$(location ...)`, `$(exe_target ...)`) written under _ACTION_DIR_TOKEN.
+    The artifacts are on the command line, so they are inputs of the test."""
+    out = []
+    for a in args:
+        out += ["--arg", cmd_args(a, absolute_prefix = _ACTION_DIR_TOKEN + "/")]
+    return out
+
 def _test_root(ctx, path, exe, data):
     """The staged tree of one test; returns (root, binary inside it)."""
     name = exe.basename
@@ -740,6 +754,7 @@ def _test_impl(ctx):
         staged,
         "/dev/null",
         env_args,
+        _arg_args(ctx.attrs.args),
         hidden = root,
     )
     run_dir, run_command = _runnable(ctx, tc, exe)
@@ -771,6 +786,11 @@ mojo_test_rule = rule(
         "data": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = []),
         # Environment for the test; names the runner sets are refused.
         "env": attrs.dict(attrs.string(), attrs.string(), default = {}),
+        # The test's command-line arguments under `buck2 test`, in order, with
+        # `$(location ...)` / `$(exe_target ...)` expanded to absolute paths
+        # of artifacts that are inputs of the test (see _arg_args). Not given
+        # to `buck2 run` or `[runnable]`.
+        "args": attrs.list(attrs.arg(), default = []),
         "labels": attrs.list(attrs.string(), default = []),
     },
 )

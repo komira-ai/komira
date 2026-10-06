@@ -406,6 +406,40 @@ a selection outside the closure is refused (`roster_bad_selection`).
 `komira_db`, and a declared `outs` file the plugin does not write (a `.proto`
 without a table) fails the generation (`tasks_db_wrong_outs`).
 
+[`proto_fixture_check`](../mojo/README.md#wire-fixtures-proto_fixture_check):
+building [`functional/proto_fixture`](functional/proto_fixture/BUCK) is its
+self-test, so the pull-request check runs it, and with it the check's welded
+`proto_fixture_case` targets
+([`mojo/proto_fixture_testdata`](../mojo/proto_fixture_testdata/BUCK)), which
+every `proto_fixture_check` action takes as an input. `selftest` passes two
+fixtures, one of them a producer's bytes that are not protoc's serialization
+(the fields in reverse order, a packed field unpacked; a `bytes` value holding
+0x00 and 0xff); `selftest_encoded` reads `proto_encode`'s output back as the
+`.hex` (declared in `canonical_producer`, since it checks no producer).
+[`negative/proto_fixture`](negative/proto_fixture/BUCK) builds the welded
+cases' fixtures end to end, one defect per refusal, each a fixture one change
+away from the self-test's, and each must fail naming its leg: `leg0_identical`
+(the `.hex` is protoc's own bytes), `leg0_duplicate` (`id` written twice,
+which the decode shows once), `leg1_value` (the `.txtpb` says `id: 151` where
+the bytes hold 150; its `.canonical.hex` is protoc's encoding of that text, so
+only leg 1 fires), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
+the top level, field 9 inside `inner`, and an empty group 99, which protoc
+prints as `99: 1`, `  9: 1` and `99 {`; the `.txtpb` holds them, so leg 1
+passes, and protoc's text parser refuses the numbers, so leg 3 fires too),
+`leg3_noncanonical` (the `.canonical.hex` is a second non-protoc form of the
+message), `leg4_root` (a `Meters` fixture checked as a `Feet`, the same wire
+and text form), `leg5_enum` (`kind: 99`, a value `Kind` does not declare,
+which protoc decodes and encodes back as a number) and `hex_odd` (a `.hex`
+with three digits). These twins are `expect_red` lines of `proto_tests.sh`,
+so they run only in `build_system_selftests.yml` (nightly and on demand), not
+in the pull-request check; per pull request the same defects are gated by the
+welded cases, through `tests//functional/proto_fixture`.
+
+```sh
+./buck2 build tests//functional/proto_fixture:
+./buck2 build tests//negative/proto_fixture:leg4_root   # must fail: LEG 4: leg4_root.txtpb names example.fixture.v1.Meters ...
+```
+
 Generation is deterministic: two uncached builds (an isolated daemon,
 `komira_tests_det`, its buck-out cleaned, `--no-remote-cache`) of both
 plugins, the generated sources of three packages (one of them
@@ -498,14 +532,34 @@ in [`negative/test_data`](negative/test_data/BUCK), `undeclared` must fail
 with `GATED TEST FAILED` and the test's
 `No such file or directory` for a fixture that exists in the repository but
 was not declared. `buck2 test tests//functional/test_data:mojo_test_data` must pass: a
-`mojo_test` with dict `data` and `env`. Five `bad_*` targets must each fail
+`mojo_test` with dict `data` and `env`. `buck2 test
+tests//functional/test_data:mojo_test_args` must pass: a `mojo_test` whose
+`args` hold a `$(location)` of a build output, one of a source and one
+argument with both, each of which it must open as an absolute path from its
+`share/`, an `$(exe_target)` of a `mojo_binary` that must arrive as an
+absolute path with the runnable directory's `lib/` beside it, plus plain
+arguments that arrive verbatim, in order, and unexported (dropping `args`
+from the test command, their absolute prefix, or the inputs behind the
+`$(location)` paths turns it red). `mojo_test_args_action` runs that same
+`buck2 test` command as a build action and must build: the pull-request
+check builds `tests//functional/...` and runs no `buck2 test`, so this
+target is what gates `args` on a pull request; the `buck2 test` runs of this
+section run only here, in the nightly self-tests. `buck2 test
+tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
+<label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
+and some harnesses, is a failure. On a pull request that rule is checked
+only by `runner_cases` (below), which runs the runner itself; mapping the
+runner's status to a verdict is Buck2's. Five `bad_*` targets must each fail
 at analysis with their own refusal: a `..` destination, a destination that
 is also another's directory, a `test_data` key that is not a test, a
 runner-owned env name, an env name that is not a variable name. The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 `runner_cases` also runs the runner on a stand-in that kills itself: with
-SIGKILL it must exit 137 and with SIGABRT 134, each with no marker.
+SIGKILL it must exit 137 and with SIGABRT 134, each with no marker; one that
+exits 77 must exit 77 with no marker; `--arg` values must reach the
+stand-in in order, unexported, with every `@KOMIRA_ACTION_DIR@` replaced by
+the action's directory; and an `--env` after an `--arg` is refused (exit 2).
 
 ## 30. Optimization levels
 
