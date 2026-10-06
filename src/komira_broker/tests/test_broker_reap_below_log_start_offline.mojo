@@ -29,6 +29,9 @@
 #       reaped is retired without raising on the missing chunks.
 #   (5) `advance_log_start_monotone` retries a lost CAS and gives up after
 #       its bounded attempts.
+#   (6) A read error on a LIVE chunk in the segment fold's and the
+#       migration's retire walks is raised before any tombstone or advance.
+#       Catches: the old catch-all `except: continue  # already-reaped`.
 #
 # Faults come from `_FaultStore`, which wraps the shared in-memory store and
 # keeps its rules as marker objects IN that store, so every clone sees them.
@@ -55,6 +58,9 @@ from komira_broker.partition_map import (
     prefix_gen_manifest_prefix,
 )
 from komira_broker.partition_split import split_topic
+from komira_broker.partition_assignment import sublineage_prefix
+from komira_broker.sublineage_migration import SubLineageMigration
+from komira_broker.sublineage_segment_fold import SegmentBaseFold
 from komira_broker.retention import (
     ReapResult,
     advance_log_start_monotone,
@@ -90,6 +96,9 @@ from komira_objectstore.types import (
 comptime _Inner = SharedInMemoryConditionalStore
 comptime _FAIL_GET = "__fault__/get/"
 comptime _FAIL_PUT = "__fault__/put/"
+# The first GET of the target succeeds and arms `_FAIL_GET` for the rest:
+# a tail recovery reads the chunk, the walk after it then fails.
+comptime _FAIL_GET_AFTER_ONE = "__fault__/get_after_one/"
 # A conditional PUT to the target loses its precondition: every time, or once.
 comptime _LOSE_CAS = "__fault__/412/"
 comptime _LOSE_CAS_ONCE = "__fault__/412once/"
@@ -144,14 +153,20 @@ struct _FaultStore(
     def coalesce_policy(self) -> CoalescePolicy:
         return self._inner.coalesce_policy()
 
+    def _before_get(self, path: Path) raises:
+        self._fail_if(_FAIL_GET, path)
+        if _has(self._inner, _FAIL_GET_AFTER_ONE + path.raw()):
+            _disarm(self._inner, _FAIL_GET_AFTER_ONE, path.raw())
+            _arm(self._inner, _FAIL_GET, path.raw())
+
     def get_range(
         self, path: Path, start: Int64, length: Int64
     ) raises -> List[UInt8]:
-        self._fail_if(_FAIL_GET, path)
+        self._before_get(path)
         return self._inner.get_range(path, start, length)
 
     def get(self, path: Path) raises -> List[UInt8]:
-        self._fail_if(_FAIL_GET, path)
+        self._before_get(path)
         return self._inner.get(path)
 
     def conditional_put(
@@ -213,9 +228,20 @@ def _batch(base_val: Int64, n: Int) raises -> RecordBatch:
 
 def _produce_chunks(inner: _Inner, pid: Int64, n_chunks: Int) raises:
     """`n_chunks` chunks of 10 records, created at ts 1000, 2000, ..."""
+    _produce_at(inner, _prefix(pid), pid, n_chunks)
+
+
+def _produce_at(
+    inner: _Inner, prefix: String, pid: Int64, n_chunks: Int
+) raises:
+    """`_produce_chunks` into the manifest at `prefix`."""
     var broker = BrokerCore[_FaultStore](
         segment_store=_FaultStore(inner.clone()),
-        manifest=_manifest(inner, pid),
+        manifest=CasManifestStore[_FaultStore](
+            store=_FaultStore(inner.clone()),
+            prefix=prefix,
+            retry=RetryPolicy.fast_test(),
+        ),
         cluster=String(_CLUSTER),
         topic=String(_TOPIC),
         partition=pid,
@@ -666,6 +692,77 @@ def test_advance_retries_a_lost_cas_then_gives_up() raises:
     print("[test_advance_retries_a_lost_cas_then_gives_up] PASS")
 
 
+# =============================================================================
+# (6) a read error on a LIVE chunk is never taken for a reaped one
+# =============================================================================
+
+
+def _assert_untouched(inner: _Inner, prefix: String, what: String) raises:
+    var m = CasManifestStore[_FaultStore](
+        store=_FaultStore(inner.clone()),
+        prefix=prefix,
+        retry=RetryPolicy.fast_test(),
+    )
+    assert_equal(len(m.tombstone_seqs()), 0, what + ": nothing tombstoned")
+    var ls = m.read_log_start()
+    assert_equal(ls.log_start_seq, Int64(0), what + ": log start seq unmoved")
+    assert_equal(ls.log_start_offset, Int64(0), what + ": offset unmoved")
+    _ = m^
+
+
+def test_segment_fold_retire_raises_on_a_live_chunk_read_error() raises:
+    """`SegmentBaseFold._retire_folded_source` walks a writer shard from its
+    log start. A GET error on live chunk 1 must raise before any tombstone or
+    advance; the old catch-all skipped it, tombstoned chunks 0 and 2 and
+    advanced the log start to offset 30 with chunk 1's records uncounted."""
+    print("[test_segment_fold_retire_raises_on_a_live_chunk_read_error] starting...")
+    var inner = _Inner()
+    var base_prefix = _prefix(Int64(7))
+    var sp = sublineage_prefix(base_prefix, String("w01"))
+    _produce_at(inner, sp, Int64(7), 3)
+    var ck = chunk_key(sp, Int64(1)).raw()
+    _arm(inner, _FAIL_GET_AFTER_ONE, ck)
+    var fold = SegmentBaseFold[_FaultStore](_FaultStore(inner.clone()), base_prefix)
+    var raised = False
+    try:
+        _ = fold._retire_folded_source(String("w01"), Int64(30), Int64(50_000))
+    except e:
+        raised = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised, "the read error is raised")
+    _disarm(inner, _FAIL_GET, ck)
+    _assert_untouched(inner, sp, "segment fold")
+    _ = fold^
+    print("[test_segment_fold_retire_raises_on_a_live_chunk_read_error] PASS")
+
+
+def test_migration_retire_raises_on_a_live_chunk_read_error() raises:
+    """`SubLineageMigration._retire_migrated_legacy` walks the legacy
+    manifest from its log start: the same rule."""
+    print("[test_migration_retire_raises_on_a_live_chunk_read_error] starting...")
+    var inner = _Inner()
+    var pid = Int64(8)
+    _produce_chunks(inner, pid, 3)
+    var ck = chunk_key(_prefix(pid), Int64(1)).raw()
+    _arm(inner, _FAIL_GET_AFTER_ONE, ck)
+    var mig = SubLineageMigration[_FaultStore](
+        _FaultStore(inner.clone()), _prefix(pid)
+    )
+    var legacy = mig._legacy_manifest()
+    var raised = False
+    try:
+        _ = mig._retire_migrated_legacy(legacy, Int64(30), Int64(50_000))
+    except e:
+        raised = True
+        assert_true(String(e).find("injected fault") >= 0, String(e))
+    assert_true(raised, "the read error is raised")
+    _disarm(inner, _FAIL_GET, ck)
+    _assert_untouched(inner, _prefix(pid), "migration")
+    _ = legacy^
+    _ = mig^
+    print("[test_migration_retire_raises_on_a_live_chunk_read_error] PASS")
+
+
 def main() raises:
     test_failed_advance_tombstones_are_skipped_then_reclaimed()
     test_unreadable_log_start_reaps_nothing()
@@ -677,4 +774,6 @@ def main() raises:
     test_parent_compaction_of_a_never_split_pid_raises()
     test_parent_with_a_reaped_prefix_is_retired()
     test_advance_retries_a_lost_cas_then_gives_up()
-    print("[OK] test_broker_reap_below_log_start_offline — 10 cases passed")
+    test_segment_fold_retire_raises_on_a_live_chunk_read_error()
+    test_migration_retire_raises_on_a_live_chunk_read_error()
+    print("[OK] test_broker_reap_below_log_start_offline — 12 cases passed")

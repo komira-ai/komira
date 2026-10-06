@@ -534,27 +534,28 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
         var first_unfolded_seq = head.chunk_seq + Int64(1)
         var found_unfolded = False
         var retired = 0
+        var to_tomb = List[Int64]()
         while seq <= head.chunk_seq:
-            var rc: Int64
-            try:
-                var body_bytes = s.read_chunk(seq)
-                var body = ManifestBody.decode(body_bytes)
-                rc = body.record_count
-            except e2:
-                _ = e2
-                seq += Int64(1)
-                continue  # already-reaped chunk
+            # The walk starts AT the log start, so every chunk it reads is
+            # live: ANY read error (not_found included) is raised. Taking it
+            # for a reaped chunk would skip a live chunk's records and
+            # renumber the log. The whole walk runs before any tombstone or
+            # advance, so a failed read changes nothing.
+            var body = ManifestBody.decode(s.read_chunk(seq))
+            var rc = body.record_count
             var chunk_hi = running + rc  # exclusive local end
             # Fully folded iff the chunk's entire range is <= the folded watermark.
             if chunk_hi <= folded_through_total:
                 if not _i64_in(already_tomb, seq):
-                    s.schedule_for_delete(seq)
-                    retired += 1
+                    to_tomb.append(seq)
             elif not found_unfolded:
                 first_unfolded_seq = seq
                 found_unfolded = True
             running = chunk_hi
             seq += Int64(1)
+        for t in range(len(to_tomb)):
+            s.schedule_for_delete(to_tomb[t])
+            retired += 1
         # Advance the durable source `_LOG_START` to the folded watermark (the
         # first un-folded local offset == `folded_through_total`, at the first
         # surviving chunk seq). Monotone-forward; a stale 412 is a harmless lose
