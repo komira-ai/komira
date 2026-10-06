@@ -120,7 +120,8 @@
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
-#      and gRPC service clients), protoc-gen-mojo's text goldens, and
+#      and gRPC service clients), protoc-gen-mojo's text goldens,
+#      proto_fixture_check (protoc reading wire fixtures), and
 #      deterministic generation across two uncached
 #      builds (skipped with --no-uncached; about 16 minutes): see
 #      tools/build/tests/proto_tests.sh.
