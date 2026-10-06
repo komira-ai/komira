@@ -5,7 +5,7 @@
 # This is the trait every accumulator of this package conforms to. Its
 # `update_batch` takes borrowed spans, so no raw pointer appears in the public
 # signature. (The older pointer-taking `Accumulator` in `komira_core` /
-# `komira_agg_contract` has no remaining implementer or caller; it is frozen
+# `komira_agg_api` has no remaining implementer or caller; it is frozen
 # with `komira_core` and goes with it.)
 #
 # The trait defines the minimum surface required by the monomorphic kernel
