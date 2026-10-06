@@ -19,6 +19,11 @@
 #     with no deadline (DEADLINE_UNSET_MICROS), as for any malformed value.
 #   * Connect-Timeout-Ms (Connect protocol): `1*10DIGIT`; same treatment.
 #
+# Invalid UTF-8 on the wire: the HPACK decoder and HeaderMap turn each wire
+# byte into one char (`chr(byte)`), so a lone 0x80, 0xFF and a truncated 0xC3
+# arrive here as the chars U+0080, U+00FF and U+00C3. `_W` lists them; every
+# leg runs them as well as `é` / `✓`.
+#
 # Coverage:
 #   T1  codec_id_for_content_type: a non-ASCII parameter keeps the codec; a
 #       non-ASCII base type is UNKNOWN.
@@ -57,8 +62,20 @@ def _echo_handler(codec_id: UInt8, req_body: List[UInt8]) raises -> List[UInt8]:
     return out^
 
 
+def _W() -> List[String]:
+    """Wire bytes 0x80, 0xFF, 0xC3 as the header decoders hand them over."""
+    return [chr(0x80), chr(0xFF), chr(0xC3)]
+
+
 def test_t1_content_type() raises:
     print("  T1 content-type codec...")
+    for w in _W():
+        assert_equal(
+            codec_id_for_content_type(String("application/grpc; q=") + w), CODEC_ID_GRPC
+        )
+        assert_equal(
+            codec_id_for_content_type(String("application/grpc") + w), CODEC_ID_UNKNOWN
+        )
     assert_equal(
         codec_id_for_content_type(String("application/grpc+proto; charset=café")),
         CODEC_ID_GRPC,
@@ -78,6 +95,9 @@ def test_t1_content_type() raises:
 
 def test_t2_grpc_timeout() raises:
     print("  T2 grpc-timeout...")
+    for w in _W():
+        assert_equal(parse_grpc_timeout(String("1M") + w), DEADLINE_UNSET_MICROS)
+        assert_equal(parse_grpc_timeout(w + String("1M")), DEADLINE_UNSET_MICROS)
     assert_equal(parse_grpc_timeout(String("1Mé")), DEADLINE_UNSET_MICROS)
     assert_equal(parse_grpc_timeout(String("é1M")), DEADLINE_UNSET_MICROS)
     assert_equal(parse_grpc_timeout(String("1éM")), DEADLINE_UNSET_MICROS)
@@ -89,6 +109,8 @@ def test_t2_grpc_timeout() raises:
 
 def test_t3_connect_timeout_ms() raises:
     print("  T3 Connect-Timeout-Ms...")
+    for w in _W():
+        assert_equal(parse_connect_timeout_ms(String("10") + w), DEADLINE_UNSET_MICROS)
     assert_equal(parse_connect_timeout_ms(String("10é")), DEADLINE_UNSET_MICROS)
     assert_equal(parse_connect_timeout_ms(String("é10")), DEADLINE_UNSET_MICROS)
     assert_equal(parse_connect_timeout_ms(String("10")), 10_000)

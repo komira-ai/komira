@@ -20,9 +20,10 @@
 #   T1  a non-ASCII parameter on each gRPC base type: still gRPC.
 #   T2  a non-ASCII byte in the base type, with and without `;`: not gRPC.
 #   T3  the value as the real HPACK decoder hands it to the serve loop (a
-#       literal header field): `application/grpc; charset=caf C3 A9` is
-#       gRPC; `application/grpc C3 A9` (no parameter) is not, and must not
-#       abort.
+#       literal header field), for each wire suffix C3 A9 (valid `é`), a
+#       lone 80, FF and a truncated C3 (invalid UTF-8):
+#       `application/grpc; charset=caf` + suffix is gRPC;
+#       `application/grpc` + suffix (no parameter) is not, and must not abort.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -48,16 +49,16 @@ def test_t2_nonascii_base_is_not_grpc() raises:
     print("    OK")
 
 
-def _hpack_content_type(prefix: String) raises -> String:
-    """`prefix` + bytes C3 A9 as the HPACK decoder returns a literal
-    `content-type` field carrying them (RFC 7541 6.2.2: literal without
-    indexing, new name, no Huffman)."""
+def _hpack_content_type(prefix: String, suffix: List[UInt8]) raises -> String:
+    """`prefix` + the `suffix` wire bytes as the HPACK decoder returns a
+    literal `content-type` field carrying them (RFC 7541 6.2.2: literal
+    without indexing, new name, no Huffman)."""
     var name = String("content-type")
     var value = List[UInt8]()
     for b in prefix.as_bytes():
         value.append(b)
-    value.append(UInt8(0xC3))
-    value.append(UInt8(0xA9))
+    for i in range(len(suffix)):
+        value.append(suffix[i])
     var block = List[UInt8]()
     block.append(UInt8(0x00))
     block.append(UInt8(name.byte_length()))
@@ -75,8 +76,20 @@ def _hpack_content_type(prefix: String) raises -> String:
 
 def test_t3_hpack_decoded_value() raises:
     print("  T3 value from the HPACK decoder...")
-    assert_true(is_grpc_content_type(_hpack_content_type(String("application/grpc; charset=caf"))))
-    assert_false(is_grpc_content_type(_hpack_content_type(String("application/grpc"))))
+    var suffixes = List[List[UInt8]]()
+    suffixes.append([UInt8(0xC3), UInt8(0xA9)])
+    suffixes.append([UInt8(0x80)])
+    suffixes.append([UInt8(0xFF)])
+    suffixes.append([UInt8(0xC3)])
+    for i in range(len(suffixes)):
+        assert_true(
+            is_grpc_content_type(
+                _hpack_content_type(String("application/grpc; charset=caf"), suffixes[i])
+            )
+        )
+        assert_false(
+            is_grpc_content_type(_hpack_content_type(String("application/grpc"), suffixes[i]))
+        )
     print("    OK")
 
 
