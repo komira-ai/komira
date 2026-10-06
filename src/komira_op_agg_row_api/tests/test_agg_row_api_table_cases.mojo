@@ -63,9 +63,9 @@ def _tags(t0: UInt8, t1: UInt8) -> List[UInt8]:
 # =============================================================================
 # THE PLAN TABLE — pinned by value, independently of any table.
 #
-# `merge_cell_class` is not exported (it reads the `AGG_*` aliases and lives
-# beside them), so what this case pins is the half that IS pure: the class ->
-# width map. A class whose width is wrong makes the monomorphic kernel read
+# `merge_cell_class` (the op -> class half) is pinned arm for arm by
+# `test_agg_row_api_surface.mojo`; what this case pins is the other half: the
+# class -> width map. A class whose width is wrong makes the monomorphic kernel read
 # across into the NEXT SLOT's state, which merges a neighbouring group's
 # partial and produces a wrong number with no crash. The envelope check in
 # `_combvec_envelope` is the only thing standing between that and the data, and

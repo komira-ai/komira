@@ -12,6 +12,7 @@ mojo_library(
         "//src/komira_column_format:komira_column_format",
     ],
     test_srcs = [
+        "tests/test_agg_row_api_surface.mojo",
         "tests/test_agg_row_api_table_cases.mojo",
     ],
     visibility = ["PUBLIC"],

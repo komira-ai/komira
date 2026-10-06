@@ -241,7 +241,7 @@ def merge_cell_class(op_tag: UInt8) -> Int:
     unchanged checked ladder. A tag added to `_merge_agg_cells` and forgotten
     here declines — the safe direction. A tag mapped to the WRONG class here
     computes a wrong number with no crash, which is why
-    `test_agg_combvec_byte_equiv.mojo` pins the whole table by value.
+    `tests/test_agg_row_api_surface.mojo` pins the whole map by value.
 
     ⚠ IT LIVES HERE, NOT IN `combine_agg_plan.mojo`, BECAUSE OF A MODULE
     CYCLE: it reads the `AGG_*` aliases declared above, and that file is
