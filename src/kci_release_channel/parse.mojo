@@ -24,7 +24,8 @@
 #
 # `schema_version` and `channel` are the only top-level fields; `name`, `visibility` and `repository`
 # (repeated) the only channel fields; `artifact_type`, `location`,
-# `push_identity` and `credential` (at most once) the only repository fields;
+# `push_identity`, `break_glass_push_identity` and `credential` (at most
+# once) the only repository fields;
 # `kind` and `secret_name` the only credential fields. A `:` before a `{` is optional,
 # as in textproto. A scalar may be quoted or bare.
 #
@@ -193,6 +194,8 @@ def _parse_repository(
     var seen_type = False
     var seen_location = False
     var seen_identity = False
+    var break_glass_identity = String("")
+    var seen_break_glass_identity = False
     var credential = Optional[ChannelCredential](None)
     var label = String("a repository of ") + where
     while True:
@@ -217,6 +220,11 @@ def _parse_repository(
                 _refuse_twice(f.line, f.text, label)
             push_identity = _scalar(c, f.text)
             seen_identity = True
+        elif f.text == "break_glass_push_identity":
+            if seen_break_glass_identity:
+                _refuse_twice(f.line, f.text, label)
+            break_glass_identity = _scalar(c, f.text)
+            seen_break_glass_identity = True
         elif f.text == "credential":
             if credential:
                 _refuse_twice(f.line, f.text, label)
@@ -230,11 +238,13 @@ def _parse_repository(
                 + String("' in ")
                 + label
                 + String(" (expected artifact_type, location, push_identity,")
-                + String(" credential)")
+                + String(" break_glass_push_identity, credential)")
             )
-    return ChannelRepository(
+    var repo = ChannelRepository(
         artifact_type^, location^, push_identity^, credential^
     )
+    repo.break_glass_push_identity = break_glass_identity^
+    return repo^
 
 
 def _parse_channel(

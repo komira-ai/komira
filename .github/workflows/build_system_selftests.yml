@@ -2,11 +2,11 @@
 # demand. It tests buck2's own behaviour (where actions ran, cache identity
 # across checkouts, analysis-time refusals, a `buck2 run` from a fresh clone,
 # targets that must fail by design) and is NOT the gate: the gate is the build
-# (ci.yml), where building a target runs the tests welded to it. This workflow
+# (the check kci / pr), where building a target runs the tests welded to it. This workflow
 # has no push or pull_request trigger, so it never holds up a change. See
 # docs/ci.md, "Build-system self-tests".
 #
-# It reaches the farm as ci.yml does, through the local action
+# It reaches the farm as kci.yml's pr job does, through the local action
 # .github/actions/farm-connect, and holds `id-token: write` for that alone.
 name: build-system-selftests
 

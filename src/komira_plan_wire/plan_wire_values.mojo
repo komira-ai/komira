@@ -35,10 +35,10 @@
 # DIFFERENT PROPERTY does not cover this one, and the gap between the two
 # properties is the entire attack surface.
 #
-# ★ THE SAME RULE HOLDS AT THE OTHER UNTRUSTED-INPUT BOUNDARY. `komira_ivp` is
-# FAIL-CLOSED with a six-tag Expr allow-list that DELIBERATELY OMITS
-# `EXPR_COL_IDX`, for exactly this reason. The plan wire is the broader door,
-# so it checks every value instead.
+# ★ THE SAME RULE HOLDS AT THE OTHER UNTRUSTED-INPUT BOUNDARY.
+# `komira_viewport` is FAIL-CLOSED with a six-tag Expr allow-list that
+# DELIBERATELY OMITS `EXPR_COL_IDX`, for exactly this reason. The plan wire is
+# the broader door, so it checks every value instead.
 #
 # ========================= WHAT THIS FILE CHECKS ==============================
 #
@@ -439,7 +439,7 @@ producer is the reason this door checks values at all.
   * the engine's plan validator declines it outright —
     "positional-index validation belongs on the node, not the expr".
   ⚠ AND THE SAME RULE HOLDS AT THE OTHER UNTRUSTED BOUNDARY:
-  `komira_ivp`'s six-tag Expr allow-list DELIBERATELY OMITS `EXPR_COL_IDX`.
+  `komira_viewport`'s six-tag Expr allow-list DELIBERATELY OMITS `EXPR_COL_IDX`.
 
 ★ AND THE FIX IS ONE LINE ON THE PRODUCER, WHICH IS WHY REFUSING IS NOT A TAX.
 A message carrying `col_idx: i` has ALREADY serialized the schema it indexes —
@@ -598,17 +598,18 @@ spellings of the same shape are refused here.
   * BINARY / LARGE_BINARY columns and binary literals, deliberately passed:
     the executor's own binary-vs-string behaviour is a separate question, and
     a refusal written on a guess would be the over-broad kind.
-  * ⛔ THE OTHER UNTRUSTED BOUNDARY — `komira_ivp`. This token guards the
-    PLAN wire and nothing else. A `GridTicket` carries its own `Expr` filter,
-    and the ticket validator checks ticket SIZE, tree DEPTH, total node COUNT
-    and blank names and NEVER the (column, literal) pair, before the filter
-    reaches the same `compiler_eval_predicate`. The IVP scalar codec carries
-    BOOL / INT32 / INT64 / FLOAT32 / FLOAT64 / STRING and its Expr allow-list
-    includes `EXPR_ALIAS`, so every pair enumerated above is spellable in a
-    ticket. ⚠ THE FIX IS NOT A COPY-PASTE: the ticket validator runs before
-    the source is opened, so it has no schema to judge against — the check
-    belongs after the plan is built, where `plan_wire_check_values` is already
-    callable on a `LogicalPlan` for exactly this reason."""
+  * ⛔ THE OTHER UNTRUSTED BOUNDARY — `komira_viewport`. This token guards
+    the PLAN wire and nothing else. A `GridTicket` carries its own `Expr`
+    filter, and the ticket validator checks ticket SIZE, tree DEPTH, total
+    node COUNT and blank names and NEVER the (column, literal) pair, before
+    the filter reaches the same `compiler_eval_predicate`. The viewport scalar
+    codec carries BOOL / INT32 / INT64 / FLOAT32 / FLOAT64 / STRING and its
+    Expr allow-list includes `EXPR_ALIAS`, so every pair enumerated above is
+    spellable in a ticket. ⚠ THE FIX IS NOT A COPY-PASTE: the ticket
+    validator runs before the source is opened, so it has no schema to judge
+    against — the check belongs after the plan is built, where
+    `plan_wire_check_values` is already callable on a `LogicalPlan` for
+    exactly this reason."""
 
 
 def _schema_columns(schema: Schema) raises -> String:

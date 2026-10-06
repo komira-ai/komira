@@ -1,7 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "push_verdicts", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -38,11 +38,6 @@ action_pins(
     srcs = WORKFLOWS + ACTIONS,
 )
 
-push_verdicts(
-    name = "push_verdicts",
-    srcs = WORKFLOWS,
-)
-
 no_endpoint(
     name = "no_endpoint",
     # Every committed buckconfig. The example is not one: it spells the keys, with
@@ -74,7 +69,6 @@ _TESTS_LINTS = [
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
-    "//src/komira_http_status_hook:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(

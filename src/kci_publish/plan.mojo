@@ -31,6 +31,50 @@
 #   file's; the approver of the publishing stage reads the NEW NAMES report
 #   before approving, and a dry run shows the same report.
 #
+# `superseding_files(targets, listed_files)` -- NEVER BACKWARD: every file
+#   the channel lists (`<subdir>/<file>`, step 1's listings), of ANY name and
+#   ANY version, whose build number (the digits after the build string's
+#   last `_`, `h<8 hex>_<N>`; the build string is the file name's last
+#   `-`-separated part) is HIGHER than the release's. The rule this holds:
+#   the number is what a consumer resolving "latest" orders by, so a
+#   never-backward channel (prod) never takes a lower one. It does NOT say
+#   the release descends from what the channel holds: N counts first-parent
+#   commits, and those can go down along main (`backward_files` holds
+#   descent). Across a version bump (a new compiler version re-versions
+#   every package) and for a name the channel never listed, the release is
+#   refused the same way. A listed file with an EQUAL number and ANOTHER
+#   build string (`h<8 hex>` of another commit) supersedes too: a consumer
+#   cannot order two builds of one number. `run.mojo` refuses a run that
+#   would upload when the stage never goes backward and this is not empty
+#   (KCI-E-SUPERSEDED). An equal number with the release's own build string
+#   is not superseding (another name of the same commit, or a re-run that
+#   publishes the same bytes, or NOOP); a build string without a number
+#   after its last `_` is not read as one.
+#
+# `backward_files(targets, listed_files, history)` -- NEVER BACKWARD, the
+#   half numbers cannot hold: the commit each of the channel's NEWEST
+#   builds names (`h<8 hex>` of the listed files with the HIGHEST build
+#   number, any name and version) must be on `history`, the release
+#   revision's history (`RevisionHistory.commits`, `git rev-list
+#   <revision>` from kci_cli), else one line per such file. A newest build
+#   whose build string names no commit is a line too (whether the release
+#   descends from it cannot be told). Why the numbers are not enough: N
+#   counts FIRST-PARENT commits, so when main moves to a merge whose first
+#   parent is a branch, main's new tip can carry a LOWER number than an
+#   older tip it contains, and a late re-run of that older tip would then
+#   be "higher" than what prod holds. Only the newest builds are asked:
+#   every earlier publish was held to the same rule, so they are on the
+#   newest one's history. `run.mojo` refuses the run (KCI-E-SUPERSEDED)
+#   when this is not empty, and cannot tell (exit 5) when the channel lists
+#   a numbered build and `history` is empty (it was not read).
+#
+# `previous_build_number(targets, listed_files)` -- what a never-backward
+#   publish CARRIES: the highest build number the channel lists, of any
+#   name and version, that is LOWER than the release's; -1 when it lists
+#   none. kci_cli reports the
+#   commits between that build and this one (they rode in this release: the
+#   runs that would have published them were replaced or skipped).
+#
 # `approved_names_for(targets)` -- the uploader's last gate
 #   (`kci_pkg_upload.ApprovedNames`): every name of the declared set, so an
 #   undeclared name cannot be uploaded even by a bug above this layer. Never
@@ -368,3 +412,204 @@ def approved_names_for(targets: List[PublishTarget]) raises -> ApprovedNames:
             added.append(n.copy())
             names.approve(n^)
     return names^
+
+
+def _build_number(build: String) -> Int:
+    """The digits after the last `_` of a build string (`h<8 hex>_<N>`), or
+    -1 when there are none (or they are not all digits)."""
+    var at = build.rfind(String("_"))
+    if at < 0:
+        return -1
+    var b = build.as_bytes()
+    if at + 1 >= len(b) or len(b) - at - 1 > 9:
+        return -1
+    var n = 0
+    for i in range(at + 1, len(b)):
+        var c = Int(b[i])
+        if c < 48 or c > 57:
+            return -1
+        n = n * 10 + (c - 48)
+    return n
+
+
+def _build_of(file_name: String, distribution: String, version: String) -> String:
+    """The build string of `file_name` when it is
+    `<distribution>-<version>-<build>.conda` with no `-` in the build; else
+    ""."""
+    var head = distribution + String("-") + version + String("-")
+    var tail = String(".conda")
+    if not file_name.startswith(head) or not file_name.endswith(tail):
+        return String("")
+    var n = file_name.byte_length()
+    if n <= head.byte_length() + tail.byte_length():
+        return String("")
+    var build = String(file_name[byte = head.byte_length() : n - tail.byte_length()])
+    if build.find(String("-")) >= 0:
+        return String("")
+    return build^
+
+
+def _listed_build_number(listed: String) -> Int:
+    """The build number of a listed `<subdir>/<name>-<version>-<build>.conda`
+    (or `.tar.bz2`), whatever its name and version; -1 when it has none."""
+    return _build_number(_listed_build(listed))
+
+
+def _listed_build(listed: String) -> String:
+    """The build string of a listed `<subdir>/<name>-<version>-<build>.conda`
+    (or `.tar.bz2`): its stem's last `-`-separated part; "" when it has
+    none."""
+    var at = listed.rfind(String("/"))
+    var name = String(listed[byte = at + 1 :]) if at >= 0 else listed.copy()
+    var stem: String
+    if name.endswith(String(".conda")):
+        stem = String(name[byte = 0 : name.byte_length() - String(".conda").byte_length()])
+    elif name.endswith(String(".tar.bz2")):
+        stem = String(name[byte = 0 : name.byte_length() - String(".tar.bz2").byte_length()])
+    else:
+        return String("")
+    var dash = stem.rfind(String("-"))
+    if dash < 0:
+        return String("")
+    return String(stem[byte = dash + 1 :])
+
+
+def _release_build_number(targets: List[PublishTarget]) -> Int:
+    """The release's build number: its targets', the first that has one."""
+    for i in range(len(targets)):
+        var n = build_number_of(targets[i])
+        if n >= 0:
+            return n
+    return -1
+
+
+def superseding_files(targets: List[PublishTarget], listed_files: List[String]) -> List[String]:
+    """The file header's NEVER BACKWARD reading: one line per listed file
+    that supersedes the release, naming both."""
+    var out = List[String]()
+    var ours = _release_build_number(targets)
+    if ours < 0:
+        return out^
+    var our_build = _release_build(targets)
+    for k in range(len(listed_files)):
+        ref f = listed_files[k]
+        var theirs = _listed_build_number(f)
+        if theirs > ours:
+            out.append(
+                String("SUPERSEDED ") + targets[0].where() + String(" (build number ") + String(ours)
+                + String(") by ") + f + String(" (build number ") + String(theirs) + String(")")
+            )
+        elif theirs == ours and _listed_build(f) != our_build:
+            out.append(
+                String("SUPERSEDED ") + targets[0].where() + String(" (build ") + our_build + String(") by ") + f
+                + String(" (build ") + _listed_build(f) + String("): an equal build number of another build")
+                + String(" string cannot be ordered")
+            )
+    return out^
+
+
+def _release_build(targets: List[PublishTarget]) -> String:
+    """The release's build string: its targets', the first that has a
+    build number."""
+    for i in range(len(targets)):
+        ref c = targets[i].coordinate
+        var b = _build_of(c.file_name, c.distribution, c.version)
+        if _build_number(b) >= 0:
+            return b^
+    return String("")
+
+
+def newest_listed_build_number(listed_files: List[String]) -> Int:
+    """The highest build number the channel lists, of any name and
+    version; -1 when it lists none."""
+    var best = -1
+    for k in range(len(listed_files)):
+        var n = _listed_build_number(listed_files[k])
+        if n > best:
+            best = n
+    return best
+
+
+def _commit_of_build(build: String) -> String:
+    """The 8 lowercase hex digits of a build string `h<8 hex>_<N>`; ""
+    when it is not of that form."""
+    var at = build.rfind(String("_"))
+    if at != 9:
+        return String("")
+    var b = build.as_bytes()
+    if Int(b[0]) != 104:  # 'h'
+        return String("")
+    for i in range(1, 9):
+        var c = Int(b[i])
+        if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
+            return String("")
+    return String(build[byte = 1:9])
+
+
+struct RevisionHistory(Copyable, Movable):
+    """What a never-backward publish holds the channel's newest build
+    against (the file header's `backward_files`): `commits`, every commit id
+    on the release revision's history (`git rev-list <revision>`, kci_cli),
+    and `unread`, why it was not read ("" when it was).
+
+    Layout: owned values only. No pointer field."""
+
+    var commits: List[String]
+    var unread: String
+
+    def __init__(out self):
+        self.commits = List[String]()
+        self.unread = String("")
+
+
+def backward_files(targets: List[PublishTarget], listed_files: List[String], history: List[String]) -> List[String]:
+    """The file header's `backward_files`: one line per newest listed file
+    whose commit is not on `history`."""
+    var out = List[String]()
+    var newest = newest_listed_build_number(listed_files)
+    if newest < 0 or len(targets) == 0:
+        return out^
+    for k in range(len(listed_files)):
+        ref f = listed_files[k]
+        if _listed_build_number(f) != newest:
+            continue
+        var commit = _commit_of_build(_listed_build(f))
+        if commit.byte_length() == 0:
+            out.append(
+                String("BACKWARD? ") + targets[0].where() + String(": the channel's newest build ") + f
+                + String(" (build number ") + String(newest) + String(") names no commit (`h<8 hex>_<N>`), so")
+                + String(" whether this release descends from it cannot be told")
+            )
+            continue
+        var found = False
+        for i in range(len(history)):
+            if history[i].startswith(commit):
+                found = True
+                break
+        if not found:
+            out.append(
+                String("BACKWARD ") + targets[0].where() + String(": the channel's newest build ") + f
+                + String(" (build number ") + String(newest) + String(") was built from commit ") + commit
+                + String(", which is not on the history of this release's revision")
+            )
+    return out^
+
+
+def build_number_of(target: PublishTarget) -> Int:
+    """The target's own build number (`h<8 hex>_<N>`), -1 when its build
+    string has none."""
+    ref c = target.coordinate
+    return _build_number(_build_of(c.file_name, c.distribution, c.version))
+
+
+def previous_build_number(targets: List[PublishTarget], listed_files: List[String]) -> Int:
+    """The file header's `previous_build_number`."""
+    var best = -1
+    var ours = _release_build_number(targets)
+    if ours < 0:
+        return -1
+    for k in range(len(listed_files)):
+        var theirs = _listed_build_number(listed_files[k])
+        if theirs >= 0 and theirs < ours and theirs > best:
+            best = theirs
+    return best

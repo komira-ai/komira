@@ -1,0 +1,41 @@
+# The rules of //tools/build/ci:affected that are DATA, not code.
+#
+# Three kinds of line, whitespace separated:
+#
+#   widen <pattern> <reason>   a changed file matching the pattern affects
+#                              EVERY target: a change to it cannot be mapped to
+#                              the targets it reaches, so none is left out.
+#   inert <pattern>            a changed file matching the pattern that no
+#                              target owns is not a reason to widen (it builds
+#                              nothing; a change made only of such files
+#                              reaches no target and the tool refuses it).
+#
+#   universe <target pattern>  the targets of the pattern are part of the graph the
+#                              tool answers over: every target a widening
+#                              prints, and the targets a change can reach.
+#                              (Not the toolchains cell: it holds targets that
+#                              exist only configured, and buck2 cannot query
+#                              them unconfigured.)
+#
+# A pattern is a path, `dir/**` (everything under dir), `text*` (a path
+# starting with text) or `*text` (a path ending with text). `widen` wins over
+# `inert`. A file no target owns and no line names widens too, so the
+# list never has to be complete to be safe.
+#
+# This file lives under tools/build/, so changing it widens too.
+
+universe //...
+universe tests//...
+
+widen .buckconfig                      the project configuration is part of every target's configuration
+widen .buckconfig.local.example        the template of the machine's own configuration
+widen buck2                            the wrapper that runs the pinned buck2
+widen tools/buck2*                     the pinned buck2 changes how every action runs
+widen prelude/**                       the rules every target is declared with
+widen tools/build/**                   the Mojo rules, platforms, toolchains and build tooling are loaded by every target
+widen third_party/**                   a pinned third-party source or crate version reaches every target that links it
+
+inert *.md
+inert LICENSE
+inert .gitignore
+inert .github/CODEOWNERS
