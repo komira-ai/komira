@@ -262,6 +262,21 @@ def _concat_variable_width_batches[o: Origin[mut=True]](
 
     var num_cols = (rg_batches + schema_idx)[].value().num_columns()
 
+    # Zero-column batches carry only a row count (`RecordBatch.count_only`,
+    # or a batch of empty records): sum it under the first batch's schema.
+    # The builder below cannot: with no column it has no length to read,
+    # and would return 0 rows.
+    if num_cols == 0:
+        var schema = (rg_batches + schema_idx)[].value().schema.copy()
+        var total_rows = 0
+        for i in range(num_rgs):
+            if (rg_batches + i)[]:
+                total_rows += (rg_batches + i)[].value().num_rows()
+                _ = (rg_batches + i)[].take()
+        var out = RecordBatch.count_only(total_rows)
+        out.schema = schema^
+        return out^
+
     # Classify each column's type. If ANY column is BOOL or DICTIONARY, the
     # multi-way fast path cannot handle it -- fall back to the pair-wise fold
     # for the ENTIRE batch.
