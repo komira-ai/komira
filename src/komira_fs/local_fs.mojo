@@ -48,7 +48,6 @@ from komira_fs.local_fs_probe import (
     _fs_enoent,
     _fs_errno_label,
     _local_fs_is_directory,
-    _local_fs_path_exists,
 )
 from komira_fs.shallow_dir_entry import ShallowDirEntry
 from komira_async.ops.waker_sink import WakerSink
@@ -140,18 +139,19 @@ def _local_fs_fileno(fp: Int64) -> Int32:
 #     ParquetFileReader.open shape).
 
 
-def _local_fs_remove(var path: String) -> Int32:
-    """libc `remove(3)` on `path`. Returns the raw rc (0 on success,
-    non-zero on failure). The caller (`LocalFs.delete`) disambiguates a
-    non-zero rc via `_local_fs_path_exists` (an lstat probe whose errno IS
-    surfaced: only ENOENT reads as "gone", any other probe failure raises).
+def _local_fs_remove(path: String) -> Int32:
+    """remove(3) `path` through the C shim. Returns 0 on success or the errno
+    remove(3) failed with (read in C right after the call).
 
-    SAFETY: `path` is held alive across the synchronous syscall by the
-    `var` parameter; `as_c_string_slice()` returns a NUL-terminated
-    tracked pointer the kernel copies. The pointer does not escape.
+    FFI-BOUNDARY: `komira_fs_remove` in `_fs_shim.c`; it allocates nothing and
+    keeps no pointer.
     """
-    var c_path = path.as_c_string_slice().unsafe_ptr()
-    return external_call["remove", Int32](c_path)
+    var p = path
+    # SAFETY: `p` pins the NUL-terminated path across the synchronous call;
+    # the kernel copies it and the pointer does not escape.
+    return external_call["komira_fs_remove", Int32](
+        p.as_c_string_slice().unsafe_ptr()
+    )
 
 
 def _local_fs_list_recursive(var root: String) raises -> List[String]:
@@ -1250,32 +1250,20 @@ struct LocalFs[
         layer (`FileSystemSpillStorage[LocalFs].release_chunk`) can reclaim
         disk space.
 
-        Body:
-          1. `remove(3)` the path. rc == 0 → done.
-          2. rc != 0 → probe existence via `_local_fs_path_exists`. If the
-             path is now ABSENT (ENOENT — never existed, or a concurrent
-             release already removed it), the delete's post-condition
-             ("path is gone") already holds → return without raising
-             (idempotent / ENOENT-tolerant per the trait contract).
-          3. If the path STILL EXISTS after a failing remove, the failure
-             was real (EACCES, EBUSY, EIO, EISDIR-on-non-empty-dir, …) →
-             raise.
-          4. If the PROBE itself fails with anything but ENOENT (ENOTDIR,
-             ELOOP, EACCES on a parent, …), the probe raises naming the
-             errno: a path that cannot be checked is not "gone".
-
-        remove(3)'s own errno is not read here; the lstat probe's is.
+        remove(3)'s own errno decides (read in C right after the call):
+          * 0 → removed (a file, or an EMPTY directory).
+          * ENOENT → already gone (never existed, or a concurrent release
+            removed it): the post-condition holds, return (idempotent).
+          * anything else (EACCES, EPERM, EBUSY, EROFS, ENOTEMPTY for a
+            non-empty directory, ENOTDIR, ELOOP, EIO, …) → raise
+            `cannot remove '<path>': errno N (NAME)`.
         """
         var rc = _local_fs_remove(path)
-        if Int(rc) == 0:
-            return
-        # remove(3) failed — distinguish ENOENT (tolerate) from a real error.
-        if not _local_fs_path_exists(path):
-            # Path is gone (or never existed). Post-condition holds.
+        if rc == 0 or rc == _fs_enoent():
             return
         raise Error(
-            "LocalFs.delete: remove(3) failed and path still exists "
-            "(rc=" + String(Int(rc)) + "): " + path
+            "LocalFs.delete: cannot remove '" + path + "': "
+            + _fs_errno_label(rc)
         )
 
     # ---- durable-flush barrier ----
@@ -1327,7 +1315,8 @@ struct LocalFs[
         """
         var path = file._path.copy()
         _ = file^
-        # Best-effort: tolerate ENOENT (the file may never have been flushed).
+        # Best-effort by contract (this runs on an error path, and raising
+        # here would mask the caller's original error): the errno is ignored.
         var rc = _local_fs_remove(path)
         _ = rc
 

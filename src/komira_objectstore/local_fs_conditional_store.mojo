@@ -52,7 +52,8 @@
 #     Content-addressed table objects use this; an identical-bytes rewrite is a
 #     harmless idempotent no-op (same content hash → same etag).
 #
-#   * `delete`: idempotent `remove(3)` (an absent key succeeds, S3 semantics).
+#   * `delete`: idempotent `remove(3)` (an absent key, ENOENT, succeeds: S3
+#     semantics); any other remove failure raises naming the errno.
 #
 # THE ETAG. S3's single-part ETag IS the object's content MD5. We mirror that:
 # the etag is a quoted FNV-1a-64 hex of the bytes. This is CRASH-SAFE (no
@@ -115,6 +116,7 @@ from komira_core.io.posix_io import RawWriteFd
 from komira_objectstore.local_fs_file_read import (
     _object_file_present,
     _read_whole_file,
+    _remove_object_file,
     _root_is_listable,
 )
 from komira_objectstore.path import Path
@@ -404,7 +406,9 @@ def _write_atomic(dir: String, final_path: String, bytes: List[UInt8]) raises:
 
 
 def _remove_best_effort(path: String):
-    """libc `remove(3)`, swallowing the rc (idempotent delete)."""
+    """libc `remove(3)`, swallowing the rc. Only for cleaning up a temp file on
+    an error path that is already raising; `delete` uses `_remove_object_file`,
+    which raises on any errno but ENOENT."""
     var p = path
     # SAFETY: `p` pins the path bytes across the synchronous syscall; no pointer
     # escapes. `remove` is fixed-arity.
@@ -748,8 +752,9 @@ struct LocalFsConditionalStore(
         return _read_whole_file(self._path_for_key(path.raw()))
 
     def delete(self, path: Path) raises -> None:
-        """DELETE — idempotent (an absent key succeeds, S3 semantics)."""
-        _remove_best_effort(self._path_for_key(path.raw()))
+        """DELETE — idempotent (an absent key, ENOENT, succeeds: S3
+        semantics). Any other remove(3) failure raises naming the errno."""
+        _remove_object_file(self._path_for_key(path.raw()))
 
 
 # =============================================================================

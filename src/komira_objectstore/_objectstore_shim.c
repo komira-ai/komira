@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -118,6 +119,15 @@ int32_t komira_objstore_path_kind(const char *path, int32_t *out_kind) {
     return 0;
 }
 
+// remove(3) `path`. Returns 0, or the errno read immediately after the
+// failing call.
+int32_t komira_objstore_remove(const char *path) {
+    if (remove(path) == 0) {
+        return 0;
+    }
+    return (int32_t)errno;
+}
+
 // Write the symbolic name of errno `e` ("ENOENT", "EACCES", ...) into `buf`
 // (capacity `cap`, NUL-terminated, truncated to fit) and return its length.
 // An errno this table does not name is written as "E?".
@@ -153,6 +163,7 @@ int64_t komira_objstore_errno_name(int32_t e, uint8_t *buf, int64_t cap) {
         KOMIRA_OBJSTORE_NAME(ENAMETOOLONG)
         KOMIRA_OBJSTORE_NAME(ELOOP)
         KOMIRA_OBJSTORE_NAME(EOVERFLOW)
+        KOMIRA_OBJSTORE_NAME(ENOTEMPTY)
 #ifdef ESTALE
         KOMIRA_OBJSTORE_NAME(ESTALE)
 #endif
