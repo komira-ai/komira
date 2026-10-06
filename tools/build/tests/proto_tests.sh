@@ -93,6 +93,34 @@ expect_red gcp_client_module_names_unrenamed 'would be generated as module `thin
 # REST URL helpers of a generated client compile and pass their welded test.
 expect_green proto_codegen tests//functional/proto_codegen:
 
+# 23, proto_fixture_check (tools/build/mojo/proto_fixture.bzl): protoc reads
+# wire fixtures in a build action. The self-test builds (a producer's
+# non-canonical bytes, and proto_encode's output read back), and with it the
+# welded proto_fixture_case targets (tools/build/mojo/proto_fixture_testdata),
+# which the pull-request check runs. Here, end to end and only in this suite,
+# each planted defect fails with the leg that names it.
+expect_green proto_fixture tests//functional/proto_fixture:
+expect_red proto_fixture_hex_odd "hex_odd: FIXTURE: hex_odd.hex holds an odd number of hex digits (3)" \
+    tests//negative/proto_fixture:hex_odd
+expect_red proto_fixture_leg0_duplicate "leg0_duplicate: LEG 0: leg0_duplicate.hex writes a singular field of example.fixture.v1.Sample more than once" \
+    tests//negative/proto_fixture:leg0_duplicate
+expect_red proto_fixture_leg0_identical "leg0_identical: LEG 0: leg0_identical.hex is byte for byte leg0_identical.canonical.hex" \
+    tests//negative/proto_fixture:leg0_identical
+expect_red proto_fixture_leg1 "leg1_value: LEG 1: protoc's decode of leg1_value.hex as example.fixture.v1.Sample differs from leg1_value.txtpb" \
+    tests//negative/proto_fixture:leg1_value
+expect_red proto_fixture_leg2 "leg2_unknown: LEG 2: leg2_unknown.hex carries field numbers example.fixture.v1.Sample does not declare" \
+    tests//negative/proto_fixture:leg2_unknown
+expect_red proto_fixture_leg2_nested "leg2_nested: LEG 2: leg2_nested.hex carries field numbers example.fixture.v1.Sample does not declare" \
+    tests//negative/proto_fixture:leg2_nested
+expect_red proto_fixture_leg2_group "leg2_group: LEG 2: leg2_group.hex carries field numbers example.fixture.v1.Sample does not declare" \
+    tests//negative/proto_fixture:leg2_group
+expect_red proto_fixture_leg3 "leg3_noncanonical: LEG 3: leg3_noncanonical.canonical.hex is not protoc's encoding of leg3_noncanonical.txtpb" \
+    tests//negative/proto_fixture:leg3_noncanonical
+expect_red proto_fixture_leg4 "leg4_root: LEG 4: leg4_root.txtpb names example.fixture.v1.Meters on its '# proto-message:' line, but the fixture is checked as example.fixture.v1.Feet" \
+    tests//negative/proto_fixture:leg4_root
+expect_red proto_fixture_leg5 "leg5_enum: LEG 5: leg5_enum.hex carries enum values the schema does not name" \
+    tests//negative/proto_fixture:leg5_enum
+
 # 23, determinism. Generation is deterministic: two uncached builds (an
 #     isolated daemon, its buck-out cleaned, --no-remote-cache, so the plugin
 #     is compiled and run again) produce the same bytes for the plugin, the

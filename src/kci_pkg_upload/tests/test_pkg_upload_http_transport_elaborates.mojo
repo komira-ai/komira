@@ -5,14 +5,16 @@
 # =============================================================================
 #
 # WHY A TEST THAT SENDS NOTHING. `HttpPkgTransport[C]`, `RegistrySet[T, C]`
-# and `GithubOidcCredential[T]` are parametric, and `mojo precompile` does not
+# and `GithubOidcCredential[T, S]` are parametric, and `mojo precompile` does not
 # elaborate a parametric body until something instantiates it. Every other
 # test here instantiates the SCRIPTED transport, so without this file the
 # HTTPS arm could be ill-typed and still ship a green `.mojoc`, failing first
 # in the publisher that builds it. This test instantiates the real transport
 # — public-CA TLS over kernel TCP — with each production credential
 # (`StaticTokenCredential`, `GithubOidcCredential` over the same transport,
-# `AnonymousCredential`), and routes every `RegistrySet` method on both arms
+# `AnonymousCredential`; the OIDC credential's retry waits through
+# komira_retry's `RecordingSleeper`, the publisher's own sleeper living in a
+# package above this one), and routes every `RegistrySet` method on both arms
 # through them behind a condition that is false at run time, so the compiler
 # must elaborate each body and nothing dials.
 #
@@ -26,6 +28,7 @@ from std.testing import assert_true
 
 from komira_http_client.tls_connector import TlsConnector, build_public_ca_tls_connector
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
+from komira_retry import RecordingSleeper
 from komira_secret_store import SecretValue
 
 from kci_pkg_upload.approved_names import ApprovedNames
@@ -108,10 +111,11 @@ def test_the_production_types_elaborate() raises:
         _Http(_mk),
         StaticTokenCredential(SURFACE_PREFIX_DEV, String("prefix.dev"), SecretValue.from_string(String("t"))),
     )
-    var oidc_set = RegistrySet[_Http, GithubOidcCredential[_Http]](
+    var oidc_set = RegistrySet[_Http, GithubOidcCredential[_Http, RecordingSleeper]](
         _Http(_mk),
-        GithubOidcCredential[_Http](
+        GithubOidcCredential[_Http, RecordingSleeper](
             _Http(_mk),
+            RecordingSleeper(),
             String("https://token.example.invalid/idtoken?api-version=2.0"),
             SecretValue.from_string(String("r")),
             String("prefix.dev"),
@@ -125,8 +129,8 @@ def test_the_production_types_elaborate() raises:
         _drive(static_set)
         _drive(oidc_set)
         _drive(anon_set)
-        _ = GithubOidcCredential[_Http].from_actions_env(
-            _Http(_mk), String("prefix.dev"), String("")
+        _ = GithubOidcCredential[_Http, RecordingSleeper].from_actions_env(
+            _Http(_mk), RecordingSleeper(), String("prefix.dev"), String("")
         )
         _ = StaticTokenCredential.token_file(
             SURFACE_PREFIX_DEV, String("prefix.dev"), String("/nonexistent")

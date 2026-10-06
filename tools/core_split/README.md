@@ -74,8 +74,9 @@ python3 tools/core_split/repoint_selftest.py                                 # t
   of no row). `deps_selftest.py` seeds each of these cases and fails if one gets the wrong verdict. Not generated: the
   `cxx_library` of the three symbol owners and the two `komira_arrow_ipc` extras (`large_writes_check`, the
   `arrow_types.mojo` data of the census test); the commits that make those packages add them. Added by hand later, not
-  from `komira_core`: `komira_collections`' `hyperloglog.mojo` and `tests/test_hyperloglog.mojo`. A re-run of
-  `gen_build.py` drops that test from the `BUCK` `test_srcs`, and `check.py copy` reports the module as an extra.
+  from `komira_core`: `komira_collections`' `hyperloglog.mojo` and `tests/test_hyperloglog.mojo`, and
+  `komira_plan_stats`' `cardinality_estimator.mojo` and `tests/test_cardinality_estimator.mojo`. A re-run of
+  `gen_build.py` drops those tests from the `BUCK` `test_srcs`, and `check.py copy` reports the modules as extras.
 - **`copy_exact`** (`check.py copy_range`): a commit with a `Core-Split-Copy: <package>` trailer must equal what
   `split.py` generates from the `src/komira_core` of the same commit. A range with no trailered commit is reported
   NOT CHECKED, never GREEN; on events other than a pull request the range is the whole history.

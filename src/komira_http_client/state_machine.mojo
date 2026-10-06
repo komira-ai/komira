@@ -794,6 +794,7 @@ struct OutboundDriver(Movable, Deinitable):
                 stream^,
                 cl_total=self._content_length,
                 pre_body_bytes=pre_body^,
+                max_body_bytes=self._max_response_body_bytes,
             )
         else:
             resp_body = RecvRingBody[S].new_read_until_eof(
@@ -1001,6 +1002,7 @@ struct OutboundDriver(Movable, Deinitable):
                 stream^,
                 cl_total=self._content_length,
                 pre_body_bytes=pre_body^,
+                max_body_bytes=self._max_response_body_bytes,
             )
         else:
             # No CL, no chunked, non-empty status: read-until-EOF.
@@ -1384,6 +1386,7 @@ struct OutboundDriver(Movable, Deinitable):
                 stream^,
                 cl_total=self._content_length,
                 pre_body_bytes=pre_body^,
+                max_body_bytes=self._max_response_body_bytes,
             )
         else:
             resp_body = RecvRingBody[S].new_read_until_eof(

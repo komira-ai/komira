@@ -195,9 +195,6 @@ from .idempotency import aws_idempotency_token
 from .aws_send import (
     AwsConnectorTransport,
     AwsHttpTransport,
-    AwsMonotonicClock,
-    AwsReactorSleeper,
-    aws_system_retry_loop,
     aws_response_error_code,
     send_sigv4_signed_request,
     send_sigv4_signed_request_with,
