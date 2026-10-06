@@ -13,6 +13,8 @@ from .pplan_wire_codec import (
     PPLAN_WIRE_BAD_ENUM,
     PPLAN_WIRE_NEGATIVE_COUNT,
     PPLAN_WIRE_BAD_UTF8,
+    PPLAN_WIRE_OUT_OF_RANGE,
+    PPLAN_WIRE_PROJECT_MISMATCH,
     PhysicalCollectPlan,
     pplan_to_bytes,
     pplan_from_bytes,

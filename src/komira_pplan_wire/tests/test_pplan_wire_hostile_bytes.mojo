@@ -23,15 +23,20 @@
 #   TRUNCATION   empty input; inside the magic, the version, a string length,
 #                a string payload, a scalar's float, the op count; before an
 #                op; inside a nested expression.
-#   LYING LENGTHS a negative string/op/project count, and an INT64_MAX string
-#                length or op count over a short buffer.
+#   LYING LENGTHS a negative string/op/project count, an INT64_MAX string
+#                length or op count over a short buffer, and a PROJECT whose
+#                name count differs from its expression count.
 #   UNKNOWN      op tags, expr tags, dtype codes, column sides, binary/unary
 #                operator codes, fs schemes, scalar kind / time unit / error
 #                code, a bool byte that is neither 0 nor 1, a negative LIMIT or
-#                row window, a non-UTF-8 identifier.
+#                row window, a non-UTF-8 identifier, an Int32 scalar field
+#                (date32, interval months/days) outside Int32.
 #   VERSION GATE version 0 and 2 refused; and refused BEFORE the body is read
 #                (`version_2_truncated_body` names the version, not the
 #                truncation behind it).
+#   ENCODER      the encoder refuses a non-UTF-8 path or column name and a
+#                PROJECT count mismatch with the decoder's own message, so no
+#                plan encodes to bytes the decoder refuses.
 #   CONTROLS     the version-2 fixture with its version byte set back to 1 is
 #                byte-identical to the `scan_full` golden and decodes; a
 #                64-deep expression decodes and a 65-deep one is refused; a
@@ -40,7 +45,13 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_pplan_wire import pplan_from_bytes
+from komira_core.arrow.schema import Field
+from komira_core.collections import Slab
+from komira_core.plan.expr import Expr
+from komira_core.plan.fs_descriptor_pod import FsDescriptorPod
+from komira_core.plan.logical_plan import ExprArray
+from komira_core.plan.physical_plan import MorselOp, ParquetSourceData
+from komira_pplan_wire import pplan_from_bytes, pplan_to_bytes
 
 
 comptime _HOSTILE_DIR: String = "src/komira_pplan_wire/tests/fixtures/hostile/"
@@ -132,15 +143,18 @@ def test_hostile_fixtures_are_refused_by_exact_message() raises:
     # ---- lengths that lie --------------------------------------------------
     _check(
         "string_length_negative",
-        "PPLAN_WIRE_TRUNCATED: negative string length -1",
+        "PPLAN_WIRE_NEGATIVE_COUNT: string length -1",
+        f,
+    )
+    _check("op_count_negative", "PPLAN_WIRE_NEGATIVE_COUNT: op count -1", f)
+    _check(
+        "project_count_negative",
+        "PPLAN_WIRE_NEGATIVE_COUNT: project expr count -1",
         f,
     )
     _check(
-        "op_count_negative", "PPLAN_WIRE_TRUNCATED: negative op count -1", f
-    )
-    _check(
-        "project_count_negative",
-        "PPLAN_WIRE_TRUNCATED: negative project expr count -1",
+        "project_names_fewer_than_exprs",
+        "PPLAN_WIRE_PROJECT_MISMATCH: 2 exprs, 1 names",
         f,
     )
     _check("op_count_int64_max", "PPLAN_WIRE_TRUNCATED: need 1 at 75", f)
@@ -173,6 +187,23 @@ def test_hostile_fixtures_are_refused_by_exact_message() raises:
     _check(
         "scalar_error_code_unknown",
         "PPLAN_WIRE_BAD_ENUM: scalar error code 11",
+        f,
+    )
+    # Int32 fields travel as Int64: a value outside Int32 would narrow to the
+    # same plan as 2^32 other spellings, and would not re-encode to itself.
+    _check(
+        "scalar_date32_out_of_range",
+        "PPLAN_WIRE_OUT_OF_RANGE: scalar date32 2147483648",
+        f,
+    )
+    _check(
+        "scalar_interval_months_out_of_range",
+        "PPLAN_WIRE_OUT_OF_RANGE: scalar interval months -2147483649",
+        f,
+    )
+    _check(
+        "scalar_interval_days_out_of_range",
+        "PPLAN_WIRE_OUT_OF_RANGE: scalar interval days 4294967296",
         f,
     )
     _check("limit_negative", "PPLAN_WIRE_NEGATIVE_COUNT: limit -1", f)
@@ -259,10 +290,94 @@ def test_binary_literal_bytes_are_carried_not_refused() raises:
     assert_equal(b[2], UInt8(0xFE))
 
 
+# =============================================================================
+# THE ENCODER REFUSES what the decoder would refuse: bytes it writes must
+# decode. Each case below names the same error, at the same offset, that the
+# decoder gives for the matching hostile fixture.
+# =============================================================================
+
+
+def _source(path: String) -> ParquetSourceData:
+    return ParquetSourceData(
+        path, None, None, List[Field](), None, FsDescriptorPod.local(), False,
+        List[String](), None, False,
+    )
+
+
+def _not_utf8(prefix: UInt8, rest: String) -> String:
+    """A String whose bytes are NOT UTF-8, built the one way komira code can
+    build one: `unsafe_from_utf8` over bytes nobody validated."""
+    var b = List[UInt8]()
+    b.append(prefix)
+    var r = rest.as_bytes()
+    for i in range(len(r)):
+        b.append(r[i])
+    return String(unsafe_from_utf8=Span(b))
+
+
+def _encode_error(pq: ParquetSourceData, ops: Slab[MorselOp]) -> String:
+    try:
+        _ = pplan_to_bytes(pq, ops)
+    except e:
+        return String(e)
+    return String("<ACCEPTED: encoded>")
+
+
+def test_encoder_refuses_a_non_utf8_path() raises:
+    # The fixture `string_invalid_utf8` is what this plan would encode to.
+    assert_equal(
+        _encode_error(_source(_not_utf8(0xFF, "bare.parquet")), Slab[MorselOp]()),
+        "PPLAN_WIRE_BAD_UTF8: string at 16",
+    )
+
+
+def test_encoder_refuses_a_non_utf8_column_name() raises:
+    var ops = Slab[MorselOp]()
+    ops.append(MorselOp.filter(Expr.col_ref(_not_utf8(0xC3, "("))))
+    assert_equal(
+        _encode_error(_source(String("bare.parquet")), ops),
+        "PPLAN_WIRE_BAD_UTF8: string at 76",
+    )
+
+
+def test_encoder_refuses_a_project_name_count_mismatch() raises:
+    var exprs = ExprArray()
+    exprs.append(Expr.col_ref(String("a")))
+    exprs.append(Expr.col_ref(String("b")))
+    var names = List[String]()
+    names.append(String("a"))
+    var ops = Slab[MorselOp]()
+    ops.append(MorselOp.project(exprs^, names^))
+    assert_equal(
+        _encode_error(_source(String("bare.parquet")), ops),
+        "PPLAN_WIRE_PROJECT_MISMATCH: 2 exprs, 1 names",
+    )
+
+
 def main() raises:
     test_version_2_is_scan_full_with_one_byte_changed()
     test_bool_byte_two_is_scan_bare_with_one_byte_changed()
     test_expression_depth_bound_is_exact()
     test_binary_literal_bytes_are_carried_not_refused()
+    # Encoder cases each report, then the run fails once, so one run shows
+    # every divergence.
+    var failed = List[String]()
+    try:
+        test_encoder_refuses_a_non_utf8_path()
+    except e:
+        print("FAIL encode non-UTF-8 path: " + String(e))
+        failed.append(String("encode_path"))
+    try:
+        test_encoder_refuses_a_non_utf8_column_name()
+    except e:
+        print("FAIL encode non-UTF-8 column name: " + String(e))
+        failed.append(String("encode_column_name"))
+    try:
+        test_encoder_refuses_a_project_name_count_mismatch()
+    except e:
+        print("FAIL encode project mismatch: " + String(e))
+        failed.append(String("encode_project_mismatch"))
     test_hostile_fixtures_are_refused_by_exact_message()
+    if len(failed) != 0:
+        raise Error(String("pplan_wire hostile: ") + String(len(failed)) + " encoder case(s) failed")
     print("ok")
