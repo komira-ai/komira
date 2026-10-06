@@ -61,8 +61,11 @@ from komira_objectstore.sublineage_shard_keys import (
 
 from komira_search_catalog.generation import (
     advance_log_start_to,
-    generation_floor_key,
+    bump_generation,
+    decode_generation_bumps,
     decode_generation_floor,
+    generation_bumps_key,
+    generation_floor_key,
     raise_generation_floor,
     read_retired_shards,
 )
@@ -155,6 +158,8 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
          and the split object stay readable.
       4. `reap_chunk` deletes the chunk once a grace period has passed, so an
          in-flight query that already holds the old split never sees a 404.
+
+    Every one of these moves `generation()`.
     """
 
     var _manifest: CasManifestStore[Self.Storage]
@@ -278,6 +283,11 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
             if _is_seal(below.value()):
                 self._manifest.rewrite_chunk_body(won, List[UInt8]())
                 self._retired = True
+                # The split was visible from the append until the rewrite
+                # (to a reader that does not skip this shard); taking it back
+                # is a catalog change too. Only the bump after it is
+                # possible: the append was the publish's first write.
+                self._bump_generation()
                 raise Error(self._retired_message())
             return
 
@@ -392,23 +402,38 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         return out^
 
     def generation(self) raises -> Int64:
-        """The catalog generation: the number of chunks this lineage has ever
-        committed, max(head.chunk_seq + 1, the generation floor). A query
-        planner folds this into its plan-cache key, so it must change
-        whenever the catalog changes; otherwise a query issued after a
-        publish could be answered from a plan cached before it. It also never
-        goes down: a cold reader finds the head by LISTing chunks, and reaping
-        can delete chunks, so `reap_chunk` first raises the floor to cover
-        the chunk it reaps (see generation.mojo). The floor is read after the
-        head, which is the order that argument needs.
+        """The catalog generation: it changes on every catalog change
+        (`publish`, `retire`, `retire_at`, `reap_chunk`, and the refusal of a
+        publish into a retired shard), and never goes down. A query planner
+        folds it into its plan-cache key, and a scan reads it before and
+        after reading the catalog to tell whether its view stayed current.
+
+        It is `_next_slot()` (the chunks this lineage has ever committed) plus
+        the `_GENERATION_BUMPS` counter, which `retire` and `reap_chunk` bump
+        before and after their change (generation.mojo has the ordering
+        argument). Read in the order head, floor, bumps: every term is read
+        after the live objects it covers. It is not a slot number; the shard
+        reaper, which needs one, reads `_next_slot()`.
+
+        Costs what `_next_slot()` costs plus one GET for the counter."""
+        var slots = self._next_slot()
+        return slots + self._generation_bumps()
+
+    def _next_slot(self) raises -> Int64:
+        """The number of chunks this lineage has ever committed,
+        max(head.chunk_seq + 1, the generation floor): the slot of the next
+        publish. It never goes down: a cold reader finds the head by LISTing
+        chunks, and reaping can delete chunks, so `reap_chunk` first raises
+        the floor to cover the chunk it reaps (see generation.mojo). The
+        floor is read after the head, which is the order that argument needs.
 
         Reads `read_head_fresh()` for the same reason as
         `_replay_live_entries`. `num_chunks()` resolves through `read_head()`
         and, on a cold handle, would return the stale deferred head, so the
-        generation would not move after a publish. On a cold handle this
-        costs a LIST rather than a GET, which the query path already pays in
-        the replay; a writer's warm handle stays at zero requests for the
-        head. The floor costs one GET."""
+        value would not move after a publish. On a cold handle this costs a
+        LIST rather than a GET, which the query path already pays in the
+        replay; a writer's warm handle stays at zero requests for the head.
+        The floor costs one GET."""
         var from_head = self._read_head_settled().chunk_seq + Int64(1)
         var floor = self._generation_floor()
         if floor > from_head:
@@ -428,18 +453,49 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
                 return Int64(0)
             raise e^
 
+    def _generation_bumps(self) raises -> Int64:
+        """This lineage's `_GENERATION_BUMPS` counter, 0 when none was
+        written."""
+        try:
+            return decode_generation_bumps(
+                self._manifest.get_object(
+                    generation_bumps_key(self._manifest.prefix()).raw()
+                )
+            )
+        except e:
+            if is_not_found(String(e)):
+                return Int64(0)
+            raise e^
+
+    def _bump_generation(mut self) raises:
+        """Add one to the `_GENERATION_BUMPS` counter; durable on return."""
+        bump_generation(self._manifest.store_mut(), self._manifest.prefix())
+
     def retire(mut self, chunk_seq: Int64) raises -> None:
         """Tombstone `chunk_seq`, stamped with the current wall clock. The
         chunk leaves the live set immediately, so new queries stop fetching
         its split, but the chunk and the split object stay readable until
         `reap_chunk` deletes them after the grace period. Re-retiring
-        refreshes the timestamp."""
+        refreshes the timestamp. Moves `generation()` (see `retire_at`)."""
+        # ORDER: bump, tombstone, bump. Do not drop or reorder the bumps.
+        self._bump_generation()
         self._manifest.schedule_for_delete(chunk_seq)
+        self._bump_generation()
 
     def retire_at(mut self, chunk_seq: Int64, schedule_ts_ms: Int64) raises -> None:
         """`retire` with an explicit timestamp in milliseconds, for callers
-        and tests that drive their own clock."""
+        and tests that drive their own clock.
+
+        Moves `generation()`: bumps the counter, writes the tombstone, bumps
+        again. The first bump is durable before the tombstone exists, so a
+        reader that sees the split gone reads a generation after its catalog
+        read that differs from any it read before the retire began; the
+        second retires the value a reader between the two may have paired
+        with the old live set (generation.mojo)."""
+        # ORDER: bump, tombstone, bump. Do not drop or reorder the bumps.
+        self._bump_generation()
         self._manifest.schedule_for_delete_at(chunk_seq, schedule_ts_ms)
+        self._bump_generation()
 
     def tombstone_schedule_ts(self, chunk_seq: Int64) raises -> Int64:
         """The timestamp (ms) recorded when `chunk_seq` was retired. The
@@ -485,6 +541,11 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         grace period has not elapsed yet; the caller leaves the tombstone for
         a later run.
 
+        Moves `generation()` when it reaps: the steps below sit between two
+        bumps of the generation counter, for the reason `retire_at` gives. A
+        call that finds nothing to do (not tombstoned, or still in grace)
+        changes nothing and bumps nothing.
+
         Reaping does not delete the chunk. A cold reader recovers the head by
         reading every chunk from the log start up and refuses a missing one
         as a torn lineage, and compaction retires chunks in any order, so a
@@ -519,6 +580,8 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         if now_ms - sched < grace_ms:
             return False  # grace period not over; keep the tombstone.
         var prefix = self._manifest.prefix()
+        # ORDER: bump, steps 1 to 4, bump (generation.mojo).
+        self._bump_generation()
         raise_generation_floor(
             self._manifest.store_mut(), prefix, chunk_seq + Int64(1)
         )
@@ -531,6 +594,7 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
                 raise e^
         self._manifest.store_mut().delete(tombstone_key(prefix, chunk_seq))
         self._advance_past_reaped_prefix()
+        self._bump_generation()
         return True
 
     def _advance_past_reaped_prefix(mut self) raises:
@@ -784,7 +848,9 @@ def generation_across_shards[
     a reaped shard keeps counting its recorded value.
 
     It is not a unique global version. It changes whenever the catalog
-    changes (any publish in any shard raises the sum) and it never goes down
+    changes (a publish, retire or reap in any lineage raises that lineage's
+    `generation()`, so the sum, and `reap_drained_shards` records a shard
+    one above its last live value) and it never goes down
     (see generation.mojo for the argument). The retired-shards record is read
     after every live shard, which is the order that argument needs."""
     var shard_ids = _discover_shard_ids(storage, index_meta_prefix)
