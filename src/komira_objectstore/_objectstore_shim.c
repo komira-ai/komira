@@ -184,10 +184,21 @@ int32_t komira_objstore_write_new_file(const char *path, const uint8_t *buf,
     return 0;
 }
 
+// One-shot injected failures for `komira_objstore_link` and
+// `komira_objstore_remove`, armed only by the TEST SEAM at the end of this file
+// and zero otherwise (zero means "call the real function").
+static int32_t komira_objstore_test_link_fault = 0;
+static int32_t komira_objstore_test_remove_fault = 0;
+
 // link(2) `existing` to `new_path`. Atomic: `new_path` either appears with
 // the whole inode or not at all, and an existing `new_path` is never replaced
 // (EEXIST). Returns 0, or the errno read immediately after the failing call.
 int32_t komira_objstore_link(const char *existing, const char *new_path) {
+    if (komira_objstore_test_link_fault != 0) {
+        int32_t e = komira_objstore_test_link_fault;
+        komira_objstore_test_link_fault = 0;
+        return e;
+    }
     if (link(existing, new_path) == 0) {
         return 0;
     }
@@ -197,6 +208,11 @@ int32_t komira_objstore_link(const char *existing, const char *new_path) {
 // remove(3) `path`. Returns 0, or the errno read immediately after the
 // failing call.
 int32_t komira_objstore_remove(const char *path) {
+    if (komira_objstore_test_remove_fault != 0) {
+        int32_t e = komira_objstore_test_remove_fault;
+        komira_objstore_test_remove_fault = 0;
+        return e;
+    }
     if (remove(path) == 0) {
         return 0;
     }
@@ -324,4 +340,35 @@ int32_t komira_objstore_test_fsize_limit_end(void) {
     }
     komira_objstore_test_fsize_window_open = 0;
     return rc;
+}
+
+// =============================================================================
+// TEST SEAM (tests/test_local_fs_store_create_write_failure.mojo only). Makes
+// the NEXT `komira_objstore_link` fail with EMLINK, or the NEXT
+// `komira_objstore_remove` fail with EBUSY, without calling link(2) or
+// remove(3). Neither failure can be forced on a real filesystem by a test that
+// runs privileged, and both arms decide what the create-if-absent path
+// reports. Each fault is consumed by the one call it fails; unarmed, both
+// functions behave exactly as above. Single-threaded test use; the errno
+// values stay in C. Not called by library code.
+// =============================================================================
+
+int32_t komira_objstore_test_fail_next_link_emlink(void) {
+    komira_objstore_test_link_fault = (int32_t)EMLINK;
+    return 0;
+}
+
+int32_t komira_objstore_test_fail_next_remove_ebusy(void) {
+    komira_objstore_test_remove_fault = (int32_t)EBUSY;
+    return 0;
+}
+
+// Disarm both faults and return how many were still armed (0 when every
+// armed fault was consumed by the call it was meant for).
+int32_t komira_objstore_test_clear_faults(void) {
+    int32_t armed = (komira_objstore_test_link_fault != 0) +
+                    (komira_objstore_test_remove_fault != 0);
+    komira_objstore_test_link_fault = 0;
+    komira_objstore_test_remove_fault = 0;
+    return armed;
 }
