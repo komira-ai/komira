@@ -215,7 +215,7 @@ struct ArgStr(LogArg, Copyable, Movable):
 # `Field` — the explicit key=value structured field. Wraps a key (interned in
 # P2; a plain `String` in P1) + an inner rendered value string. The inner value
 # is pre-rendered at construction so `Field` stays a single concrete type
-# (Mojo 1.0.0b1 can't store a `*LogArg`-erased inner without a second trait
+# (Mojo can't store a `*LogArg`-erased inner without a second trait
 # layer; pre-rendering the value keeps the P1 type simple and the call site
 # `Field("rows", ArgI64(n))` ergonomic). The layout renders `Field` as
 # `key=value`. P2 swaps the pre-rendered value for the raw inner bytes + a

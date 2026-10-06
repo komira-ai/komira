@@ -45,7 +45,7 @@ comptime LEVEL_OFF: UInt8 = 5
 # a `-D` or a per-build constant edit. P1 ships the default-keep-all floor; the
 # mechanism is identical in P2.
 #
-# NOTE: Mojo 1.0.0b1 has no `-D`-style comptime override into a library
+# NOTE: Mojo has no `-D`-style comptime override into a library
 # constant, so the floor is edited here for a release cut. The facade consults
 # THIS symbol so the swap is a one-line change with no call-site churn.
 # -----------------------------------------------------------------------------

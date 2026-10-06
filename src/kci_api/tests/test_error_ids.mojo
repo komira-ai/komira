@@ -57,6 +57,13 @@ def test_one_command_ids() raises:
     assert_true(exit_code_of(String(OUTCOME_VALIDATION_FAILED), String("KCI-E-VALIDATION")) == 7)
 
 
+def test_auto_promotion_ids() raises:
+    # each refuses (3): neither picks its own number
+    for id in ["KCI-E-SUPERSEDED", "KCI-E-NOT-ON-MAIN", "KCI-E-BREAK-GLASS-REASON", "KCI-E-PLAN-ON-RELEASE"]:
+        assert_true(is_error_id(String(id)))
+        assert_true(exit_code_of(String(OUTCOME_REFUSED), String(id)) == 3)
+
+
 def test_unknown_id_refused() raises:
     assert_true(is_error_id(String("KCI-E-STAGE-UNKNOWN")))
     var refused = False
