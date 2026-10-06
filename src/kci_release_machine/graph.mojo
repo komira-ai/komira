@@ -26,6 +26,27 @@
 # request), runs after no stage and no stage runs after it (its job runs on
 # a pull request, where no release job runs). It may be farm-connected.
 #
+# `break_glass: true` declares that the stage may run off `main`: a manual
+# run of a branch (BREAK-GLASS: kci.yml's workflow_dispatch from another ref,
+# with a required reason) runs it. A stage without it runs only for a commit
+# on main's history, on a run of `main` (kci_cli's start-up ref check, and
+# kci_ci_check R15 on its job's `if:`). The break-glass stages are a PREFIX
+# of the release chain: a break_glass stage's `after` is break_glass too, so
+# a run off main stops at the first stage without it and never reaches a
+# later one. A PULL_REQUEST stage is never break_glass (it is no release
+# stage).
+#
+# `break_glass_environment: "<env>"` names the GitHub environment a
+# break_glass stage's job runs in on a BREAK-GLASS run (any run but a push
+# to main), in place of its `environment`. It exists so the stage's own
+# environment can be locked to main (deployment branches: `main`) while a
+# break-glass run goes through an environment of its own, with a required
+# reviewer, whose approval GitHub records. Only a break_glass stage has one,
+# it is an environment name and it is not the stage's `environment`. A
+# break-glass run of a stage that publishes by OIDC trusted publishing
+# without one is refused by kci_publish (the channel's trusted publisher
+# accepts the stage's main environment only).
+#
 # A STEP has a name (unique in its stage), a kind and the inputs of that
 # kind:
 #
@@ -212,8 +233,8 @@ struct Stage(Copyable, Movable):
     """One stage: a name, its GitHub environment (the parser sets it to the
     name when the file does not, except on a PULL_REQUEST stage, which has
     none), the stage it runs after ("" for none), whether it is
-    farm-connected, its trigger (PUSH or PULL_REQUEST) and its steps in file
-    order.
+    farm-connected, its trigger (PUSH or PULL_REQUEST), whether it may run
+    off main (`break_glass`, file header) and its steps in file order.
 
     Layout: owned values only. No pointer field."""
 
@@ -222,6 +243,8 @@ struct Stage(Copyable, Movable):
     var after: String
     var farm_connected: Bool
     var trigger: String
+    var break_glass: Bool
+    var break_glass_environment: String
     var steps: List[StageStep]
     var line: Int
 
@@ -231,6 +254,8 @@ struct Stage(Copyable, Movable):
         self.after = String("")
         self.farm_connected = False
         self.trigger = String(STAGE_TRIGGER_PUSH)
+        self.break_glass = False
+        self.break_glass_environment = String("")
         self.steps = List[StageStep]()
         self.line = line
 
@@ -590,6 +615,8 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                 + String("'; an environment name is [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
                 + String(" bytes, not ending in '-'")
             )
+        if s.break_glass_environment.byte_length() > 0:
+            _check_break_glass_environment(source, s)
         if s.after.byte_length() > 0:
             if s.after == s.name:
                 raise Error(_at(source, s.line) + String("stage '") + s.name + String("' runs after itself"))
@@ -601,6 +628,12 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                 raise Error(
                     _at(source, s.line) + String("stage '") + s.name + String("' runs after '") + s.after
                     + String("', which is not a stage declared above it")
+                )
+            if s.break_glass and not g.stage(s.after).break_glass:
+                raise Error(
+                    _at(source, s.line) + String("stage '") + s.name + String("' is break_glass and runs after '")
+                    + s.after + String("', which is not: the break-glass stages are a prefix of the chain, so a")
+                    + String(" run off main stops at the first stage that runs only on main")
                 )
         if len(s.steps) == 0:
             raise Error(_at(source, s.line) + String("stage '") + s.name + String("' has no step"))
@@ -622,11 +655,35 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
         _check_validation_names_unique(source, s)
 
 
+def _check_break_glass_environment(source: String, s: Stage) raises:
+    """`break_glass_environment` (file header): only on a break_glass
+    stage, an environment name, not the stage's `environment`."""
+    var where = _at(source, s.line) + String("stage '") + s.name + String("' has break_glass_environment '")
+    where += s.break_glass_environment + String("'")
+    if not s.break_glass:
+        raise Error(where + String(" and is not break_glass: only a stage a break-glass run reaches has one"))
+    if not is_stage_or_step_name(s.break_glass_environment):
+        raise Error(
+            where + String("; an environment name is [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
+            + String(" bytes, not ending in '-'")
+        )
+    if s.break_glass_environment == s.environment:
+        raise Error(
+            where + String(", the stage's own environment: a break-glass run goes through an environment of its")
+            + String(" own, so the stage's environment can be locked to main")
+        )
+
+
 def _check_pull_request_stage(source: String, g: ReleaseMachine, i: Int) raises:
     """The rules of a PULL_REQUEST stage (file header): no environment, no
     `after` either way, BUILD steps only."""
     ref s = g.stages[i]
     var where = String("stage '") + s.name + String("' is a PULL_REQUEST stage")
+    if s.break_glass:
+        raise Error(
+            _at(source, s.line) + where + String(" and is break_glass: break-glass is a manual release run off")
+            + String(" main, and a pull request's check is no release stage")
+        )
     if s.environment.byte_length() > 0:
         raise Error(
             _at(source, s.line) + where + String(" and has environment '") + s.environment

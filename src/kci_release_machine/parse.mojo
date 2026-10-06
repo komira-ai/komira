@@ -53,8 +53,10 @@
 # welded golden test). Top level: `schema_version`, `stage`. A stage: `name`,
 # `after`, `environment` (default: the stage's name; none on a PULL_REQUEST
 # stage), `farm_connected` (`true` or `false`, default false), `trigger`
-# (`PUSH` or `PULL_REQUEST`, default PUSH; graph.mojo's header), each at most
-# once, and `step` (repeated). A step: `name`, `kind`, `platform`, `artifacts`, `channels`,
+# (`PUSH` or `PULL_REQUEST`, default PUSH; graph.mojo's header),
+# `break_glass` (`true` or `false`, default false: graph.mojo's header),
+# `break_glass_environment` (graph.mojo's header), each
+# at most once, and `step` (repeated). A step: `name`, `kind`, `platform`, `artifacts`, `channels`,
 # `channel`, each at most once, and `validation` (a block, repeated). A
 # validation: `name`, `kind`, `image`, `compiler_channel`, `program`,
 # `wait_for_index_seconds` (an integer), each at most once, and `install` and
@@ -97,6 +99,8 @@ def machine_field_names() -> List[String]:
     out.append(String("stage.environment"))
     out.append(String("stage.farm_connected"))
     out.append(String("stage.trigger"))
+    out.append(String("stage.break_glass"))
+    out.append(String("stage.break_glass_environment"))
     out.append(String("stage.step"))
     out.append(String("step.name"))
     out.append(String("step.kind"))
@@ -259,6 +263,8 @@ def _parse_stage(mut c: TokenCursor, source: String, ordinal: Int, open_line: In
     var seen_environment = False
     var seen_farm = False
     var seen_trigger = False
+    var seen_break_glass = False
+    var seen_break_glass_environment = False
     while True:
         var where: String
         if st.name.byte_length() > 0:
@@ -305,13 +311,32 @@ def _parse_stage(mut c: TokenCursor, source: String, ordinal: Int, open_line: In
                 _twice(source, f.line, f.text, where)
             st.trigger = _scalar(c, f.text, source)
             seen_trigger = True
+        elif f.text == "break_glass":
+            if seen_break_glass:
+                _twice(source, f.line, f.text, where)
+            var word = _scalar(c, f.text, source)
+            if word == "true":
+                st.break_glass = True
+            elif word == "false":
+                st.break_glass = False
+            else:
+                raise Error(
+                    _at(source, f.line) + String("field 'break_glass' of ") + where + String(" is '") + word
+                    + String("'; it is true or false")
+                )
+            seen_break_glass = True
+        elif f.text == "break_glass_environment":
+            if seen_break_glass_environment:
+                _twice(source, f.line, f.text, where)
+            st.break_glass_environment = _scalar(c, f.text, source)
+            seen_break_glass_environment = True
         elif f.text == "step":
             var line = _open_block(c)
             st.steps.append(_parse_step(c, source, st.name, line))
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
-                + String(" (expected name, after, environment, farm_connected, trigger, step)")
+                + String(" (expected name, after, environment, farm_connected, trigger, break_glass, break_glass_environment, step)")
             )
     if not seen_environment and not st.is_pull_request():
         st.environment = st.name.copy()

@@ -70,10 +70,15 @@ from .plan import (
     FileState,
     PublishTarget,
     approved_names_for,
+    build_number_of,
     is_held,
     new_names,
     plan_from_state,
+    previous_build_number,
+    RevisionHistory,
+    backward_files,
     resolve_targets,
+    superseding_files,
 )
 from .channel_state import read_channel, read_file_state
 from .upload import PublishCredential, RunOptions, upload_members

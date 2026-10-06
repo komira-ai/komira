@@ -49,7 +49,7 @@ comptime AUDIENCE = (
     "//iam.googleapis.com/projects/1234567890/locations/global/"
     "workloadIdentityPools/example-pool/providers/example-aws"
 )
-comptime SA = "delivery@example-project.iam.gserviceaccount.com"
+comptime SA = "signer@example-project.iam.gserviceaccount.com"
 comptime JWT_AUD = "https://ingest.example.com"
 comptime SESSION = "FwoGZXIvYXdzEXAMPLE+SESSION/TOKEN=="
 comptime FEDERATED = "ya29.FEDERATED-FAKE"
@@ -257,7 +257,7 @@ def test_leg1_presents_no_credential_header_of_its_own() raises:
     user-agent}: the subject token in the body IS the credential."""
     var sts_cap = _capture()
     var m = _minter(_armed(_sts_ok(), sts_cap), _armed(_signjwt_ok(), _capture()))
-    _ = m.mint_delivery_jwt(String(SA), String(JWT_AUD))
+    _ = m.mint_jwt(String(SA), String(JWT_AUD))
     var req = _text(sts_cap)
     assert_true(req.startswith("POST /v1/token HTTP/1.1\r\n"), req)
     assert_equal(_header_value(req, String("host")), "sts.googleapis.com")
@@ -275,7 +275,7 @@ def test_leg1_body_is_the_references_form() raises:
     same credential, region, audience and signing time."""
     var sts_cap = _capture()
     var m = _minter(_armed(_sts_ok(), sts_cap), _armed(_signjwt_ok(), _capture()))
-    _ = m.mint_delivery_jwt(String(SA), String(JWT_AUD))
+    _ = m.mint_jwt(String(SA), String(JWT_AUD))
     var body = _body_of(_text(sts_cap))
     assert_equal(
         _joined(_form_fields(body)),
@@ -322,7 +322,7 @@ def test_leg2_presents_exactly_one_credential_and_it_is_leg1s() raises:
     in the path: the bearer authorizes, the path names who signs."""
     var iam_cap = _capture()
     var m = _minter(_armed(_sts_ok(), _capture()), _armed(_signjwt_ok(), iam_cap))
-    _ = m.mint_delivery_jwt(String(SA), String(JWT_AUD))
+    _ = m.mint_jwt(String(SA), String(JWT_AUD))
     var req = _text(iam_cap)
     assert_true(
         req.startswith(
@@ -347,7 +347,7 @@ def test_the_signed_claims_are_iss_sub_aud_iat_exp() raises:
     `exp` would be a token that never expires."""
     var iam_cap = _capture()
     var m = _minter(_armed(_sts_ok(), _capture()), _armed(_signjwt_ok(), iam_cap))
-    _ = m.mint_delivery_jwt(String(SA), String(JWT_AUD))
+    _ = m.mint_jwt(String(SA), String(JWT_AUD))
     assert_equal(SIGNED_JWT_TTL_SECONDS, 600)
     var want = (
         String('{"payload":"{\\"iss\\":\\"') + SA
@@ -365,7 +365,7 @@ def test_the_positive_control_both_legs_dial_and_the_jwt_is_returned() raises:
     var sts_cap = _capture()
     var iam_cap = _capture()
     var m = _minter(_armed(_sts_ok(), sts_cap), _armed(_signjwt_ok(), iam_cap))
-    var jwt = m.mint_delivery_jwt(String(SA), String(JWT_AUD))
+    var jwt = m.mint_jwt(String(SA), String(JWT_AUD))
     assert_equal(jwt, SIGNED)
     assert_true(len(sts_cap[]) > 0)
     assert_true(len(iam_cap[]) > 0)
@@ -400,7 +400,7 @@ def test_a_refused_leg1_never_dials_signjwt() raises:
     )
     var msg = String("")
     try:
-        _ = m.mint_delivery_jwt(String(SA), String(JWT_AUD))
+        _ = m.mint_jwt(String(SA), String(JWT_AUD))
     except e:
         msg = String(e)
     assert_true("federation refused" in msg, msg)
@@ -463,7 +463,7 @@ def test_a_2xx_leg1_with_no_token_never_dials_signjwt() raises:
         _armed(_signjwt_ok(), iam_cap),
     )
     with assert_raises(contains="no access_token"):
-        _ = m.mint_delivery_jwt(String(SA), String(JWT_AUD))
+        _ = m.mint_jwt(String(SA), String(JWT_AUD))
     assert_equal(len(iam_cap[]), 0)
 
 
@@ -496,11 +496,11 @@ def test_a_missing_config_never_dials_at_all() raises:
     var iam_cap = _capture()
     var m = _minter(_armed(_sts_ok(), sts_cap), _armed(_signjwt_ok(), iam_cap))
     with assert_raises(contains="service account is empty"):
-        _ = m.mint_delivery_jwt(String(""), String(JWT_AUD))
+        _ = m.mint_jwt(String(""), String(JWT_AUD))
     with assert_raises(contains="outside"):
-        _ = m.mint_delivery_jwt(String("sa/../x"), String(JWT_AUD))
+        _ = m.mint_jwt(String("sa/../x"), String(JWT_AUD))
     with assert_raises(contains="JWT audience is empty"):
-        _ = m.mint_delivery_jwt(String(SA), String(""))
+        _ = m.mint_jwt(String(SA), String(""))
     assert_equal(len(sts_cap[]), 0)
     assert_equal(len(iam_cap[]), 0)
 
@@ -513,7 +513,7 @@ def test_a_missing_config_never_dials_at_all() raises:
 def _leg2_failure_message(var leg2: List[UInt8]) raises -> String:
     var m = _minter(_armed(_sts_ok(), _capture()), _armed(leg2^, _capture()))
     try:
-        _ = m.mint_delivery_jwt(String(SA), String(JWT_AUD))
+        _ = m.mint_jwt(String(SA), String(JWT_AUD))
     except e:
         return String(e)
     raise Error("leg 2 did not fail")
@@ -572,14 +572,14 @@ def test_the_federated_token_is_cached_then_refreshed() raises:
     iam.arm_next(ScriptedStream.from_read_script_with_capture(_signjwt_ok(), iam_cap))
     var m = _minter(sts^, iam^)
 
-    assert_equal(m.mint_delivery_jwt(String(SA), String(JWT_AUD)), SIGNED)
-    assert_equal(m.mint_delivery_jwt(String(SA), String(JWT_AUD)), SIGNED)
+    assert_equal(m.mint_jwt(String(SA), String(JWT_AUD)), SIGNED)
+    assert_equal(m.mint_jwt(String(SA), String(JWT_AUD)), SIGNED)
     assert_equal(_count(_text(sts_cap), "POST /v1/token "), 1)
     assert_equal(m.tokens().fetches(), 1)
 
     # 3600 s token, 225 s default refresh margin: at 3400 s it is stale.
     m.tokens().clock().advance(3_400_000)
-    assert_equal(m.mint_delivery_jwt(String(SA), String(JWT_AUD)), SIGNED)
+    assert_equal(m.mint_jwt(String(SA), String(JWT_AUD)), SIGNED)
     assert_equal(_count(_text(sts_cap), "POST /v1/token "), 2)
     assert_equal(m.tokens().fetches(), 2)
     assert_equal(_count(_text(iam_cap), ":signJwt "), 3)
@@ -605,7 +605,7 @@ def test_a_host_override_must_be_a_bare_host() raises:
         m.set_iam_host(String("evil.example/x"))
     m.set_iam_host(String("127.0.0.2"))
     m.tokens().fetcher().set_sts_host(String("127.0.0.1"))
-    assert_equal(m.mint_delivery_jwt(String(SA), String(JWT_AUD)), SIGNED)
+    assert_equal(m.mint_jwt(String(SA), String(JWT_AUD)), SIGNED)
     assert_equal(_header_value(_text(sts_cap), String("host")), "127.0.0.1")
     assert_equal(_header_value(_text(iam_cap), String("host")), "127.0.0.2")
 

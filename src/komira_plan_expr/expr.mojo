@@ -314,7 +314,7 @@ comptime EXPR_UDF_CALL: UInt8 = 25
 # one-line addition. MEASURED: **dozens of non-test modules switch on the
 # `BIN_*` op space** — `expr_to_runtime` (numeric opcode compilation),
 # `komira_eval/expr_interpreter`, `expr_kernel_templates`, `builtin_binary_fns`,
-# `ivp_expr_codec`, `row_capability`, `optimizer_expr` among them — and a
+# `viewport_expr_codec`, `row_capability`, `optimizer_expr` among them — and a
 # STRING-PRODUCING member arriving at any of those AS A BINARY OP is a silent
 # mishandling, not a refusal. Nothing measures that space the way the
 # walker-arms lint measures this one. The `EXPR_*`
@@ -728,7 +728,7 @@ comptime UN_IS_NOT_NULL: UInt8 = 3
 # rather than assumed — every non-test module that reads a `UN_*` is an
 # ALLOWLIST: `row_capability._unary_walkable`
 # and `_value_expr_is_bool_output`, the engine's `_translate_unary` mirror,
-# `_arith_node_walkable` (rejects EXPR_UNARY_OP outright), `ivp_expr_codec.
+# `_arith_node_walkable` (rejects EXPR_UNARY_OP outright), `viewport_expr_codec.
 # _is_allowed_unop`, `optimizer_expr`'s template matcher (returns None),
 # `optimizer_filter_selectivity`, `inmem_leaf`, `plan_leaf_servable`,
 # `lower_untyped_expr` and both display ladders. An unknown member is an honest
