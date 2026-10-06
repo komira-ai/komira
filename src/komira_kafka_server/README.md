@@ -17,9 +17,16 @@ connections and dispatches requests will live next to it in this package.
   ListOffsets, the consumer-group APIs, CreateTopics, InitProducerId and the
   transactional APIs.
 
-It works on bytes only: it opens no socket and depends on nothing outside
+`wire` works on bytes only: it opens no socket and depends on nothing outside
 the Mojo standard library. A decoder refuses truncated or inconsistent input
 by raising.
+
+Next to it, `produce_error_for` (in `komira_kafka_server.produce_error`) maps
+the error a partition append raised to its Produce error code, using
+`komira_objectstore`'s error classifiers, the package's one dependency. A win
+in a reaped manifest slot, a fenced writer and exhausted append retries are
+`NOT_LEADER_OR_FOLLOWER` (nothing was written; retry); an append whose outcome
+is unknown is `REQUEST_TIMED_OUT`.
 
 Every example below runs as a test when the package is built, so it cannot
 go stale.

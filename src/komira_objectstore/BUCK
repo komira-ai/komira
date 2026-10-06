@@ -14,8 +14,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # directory from `test_tmpdir()`.
 
 # The errno-surfacing file primitives behind LocalFsConditionalStore's reads
-# (`local_fs_file_read.mojo`): errno is read in C right after the failing call,
-# and the errno constants and names stay out of Mojo.
+# (`local_fs_file_read.mojo`), delete and create-if-absent (temp write +
+# link(2)): errno is read in C right after the failing call, and the errno
+# constants and names stay out of Mojo.
 staged_files(
     name = "objectstore_shim_files",
     srcs = ["_objectstore_shim.c"],
@@ -53,9 +54,12 @@ mojo_library(
         "tests/test_delimiter_listing_byte_faithful.mojo",
         "tests/test_local_fs_conditional_store.mojo",
         "tests/test_local_fs_read_errno.mojo",
+        "tests/test_local_fs_store_create_write_failure.mojo",
         "tests/test_local_fs_store_delete_errno.mojo",
         "tests/test_local_fs_store_list_bytes_non_ascii.mojo",
         "tests/test_local_fs_store_list_dir_errno.mojo",
+        "tests/test_manifest_reaped_slot_async_offline.mojo",
+        "tests/test_manifest_reaped_slot_guard_offline.mojo",
         "tests/test_objectstore_bytes_non_ascii.mojo",
         "tests/test_path_uri.mojo",
         "tests/test_sharded_lineage_kernel.mojo",
