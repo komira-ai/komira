@@ -44,16 +44,14 @@ from komira_clock import now_unix_ms
 from komira_http_client.body import EmptyBody, RequestBody
 from komira_http_client.client import build_get_request
 from komira_http_client.header_map import HeaderMap
-from komira_http_client.response_body import BufferedResponseBody
 from komira_http_client.service import ClientRequest, HttpService
-from komira_http_client.state_machine import ClientResponse
 from komira_http_client.url import Url
 from komira_http_core.transport.io_stream import Connector
 
 from .azure_token import (
     AzureBearerToken,
-    extract_oauth_token_field,
-    parse_oauth_expires_in_str,
+    OAuthTokenResponse,
+    parse_oauth_token_response,
 )
 
 
@@ -199,16 +197,13 @@ struct AzureImdsProvider(Movable, Deinitable):
                 String("AzureImdsProvider: token GET returned status ")
                 + String(status_int)
             )
-        var body = _response_body_string(resp)
-        var access_token = extract_oauth_token_field(
-            body, String("access_token")
-        )
-        if access_token.byte_length() == 0:
-            raise Error(
-                "AzureImdsProvider: missing access_token in response"
-            )
-        # Azure IMDS returns expires_in as a STRING.
-        var expires_in = parse_oauth_expires_in_str(body)
+        var parsed: OAuthTokenResponse
+        try:
+            parsed = parse_oauth_token_response(resp.body.take_bytes())
+        except e:
+            raise Error(String("AzureImdsProvider: ") + String(e))
+        var access_token = parsed.access_token.copy()
+        var expires_in = parsed.expires_in
         var now_ms = now_unix_ms()
         var expiry_ms = now_ms + (expires_in * Int64(1000))
         self._cached_token = AzureBearerToken(access_token^, expiry_ms)
@@ -320,18 +315,3 @@ def _parse_http_endpoint_with_path(
                 "AzureImdsProvider: malformed port in endpoint: " + endpoint
             )
     return Url(scheme=scheme^, host=host^, port=port_val, path=path)
-
-
-def _response_body_string(
-    ref resp: ClientResponse[BufferedResponseBody]
-) -> String:
-    """Copy out the response body bytes as an owned String. Assumes
-    ASCII / UTF-8 content (IMDS emits JSON ASCII)."""
-    ref src = resp.body.bytes_ref()
-    var out = String()
-    var i = 0
-    var n = src.__len__()
-    while i < n:
-        out += chr(Int(src[i]))
-        i += 1
-    return out^

@@ -18,7 +18,7 @@
 # `roles/iam.serviceAccountTokenCreator` on the account), and the account in
 # the PATH is who the token is FROM.
 #
-# ⛔ ORDER IS THE CONTRACT. `mint_delivery_jwt` checks its own inputs, then
+# ⛔ ORDER IS THE CONTRACT. `mint_jwt` checks its own inputs, then
 # asks the token source, then dials IAM Credentials. A token source that
 # raises (leg 1 refused, or answered with no token) stops the mint before
 # anything is sent to IAM Credentials; a test asserts that connector is never
@@ -173,7 +173,7 @@ struct WifTokenMinter[
         """The bearer's source (a caller drops a cached token through it)."""
         return self._tokens
 
-    def mint_delivery_jwt(
+    def mint_jwt(
         mut self, service_account: String, jwt_audience: String
     ) raises -> String:
         """The signed JWT for `jwt_audience`, or a raise. Never "": an empty

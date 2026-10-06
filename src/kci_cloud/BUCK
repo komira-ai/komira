@@ -20,6 +20,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_cloud_catalog_and_clouds.mojo",
+        "tests/test_cloud_data_rules.mojo",
         "tests/test_cloud_validate_and_deploy.mojo",
     ],
     visibility = ["PUBLIC"],

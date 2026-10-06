@@ -88,10 +88,12 @@
 # THE COMMANDS. `derive_checks` (release/ci/derive_checks.py) answers the
 # derived checks, above. `build_targets` (release/ci/build_targets.sh) builds
 # a unit's targets, then runs `buck2 test` over the ones in this cell, as
-# `./buck2 test //...` does. `affected` (release/ci/affected_widened.sh) is
-# the interim answer until the affected tool is wired: WIDENED, every unit,
-# which over-approximates and never misses one. Replacing it changes the two
-# `affected` blocks and nothing else.
+# `./buck2 test //...` does. `affected` runs //tools/build/ci:affected
+# (tools/build/ci/affected.mojo) over the change's files, with the base commit
+# for the files the change deleted: the units whose targets the change reaches
+# (UNIT lines, then AFFECTED <n>), or WIDENED, every unit, for a file it cannot
+# map (what widens is tools/build/ci/rules.txt). A change that reaches no unit
+# is AFFECTED 0, which kci refuses (KCI-E-AFFECTED-VACUOUS): never a pass.
 #
 # The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
@@ -109,9 +111,15 @@ build_systems {
   args: "-c"
   args: "komira.package_timestamp_ms={timestamp_ms}"
   affected {
-    executable: "sh"
-    args: "release/ci/affected_widened.sh"
+    executable: "buck2"
+    args: "run"
+    args: "//tools/build/ci:affected"
+    args: "--"
+    args: "--files"
     args: "{changed_files}"
+    args: "--base"
+    args: "{base_commit}"
+    args: "--units-file"
     args: "{units_file}"
   }
   build_targets {
@@ -132,9 +140,15 @@ build_systems {
   args: "//tools/build/package:komira_pack"
   args: "--"
   affected {
-    executable: "sh"
-    args: "release/ci/affected_widened.sh"
+    executable: "buck2"
+    args: "run"
+    args: "//tools/build/ci:affected"
+    args: "--"
+    args: "--files"
     args: "{changed_files}"
+    args: "--base"
+    args: "{base_commit}"
+    args: "--units-file"
     args: "{units_file}"
   }
   build_targets {
