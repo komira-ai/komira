@@ -24,6 +24,10 @@
 # the absence token `is_not_found` matches, so a caller that tolerates a chunk
 # that is already gone keeps doing so.
 #
+# `CasManifestStore.advance_log_start` never moves `_LOG_START` backwards
+# (`advance_would_regress`): a pointer that went back would make reaped
+# chunks look live again.
+#
 # `CasManifestStore.purge_all` is outside these rules: it reclaims a WHOLE
 # lineage (every chunk and `_LOG_START` itself) once its caller has decided
 # that nothing reads the lineage any more.
@@ -61,4 +65,34 @@ def rewrite_target_deleted_error(chunk_seq: Int64) -> Error:
         "CasManifestStore.rewrite_chunk_body: chunk "
         + String(chunk_seq)
         + " not_found: it was deleted during the rewrite and was not recreated"
+    )
+
+
+@always_inline
+def advance_would_regress(
+    cur_seq: Int64, cur_offset: Int64, new_seq: Int64, new_offset: Int64
+) -> Bool:
+    """True iff advancing `_LOG_START` from (cur_seq, cur_offset) to
+    (new_seq, new_offset) would move either coordinate backwards. A pointer
+    that went back would make reaped chunks look live again."""
+    return new_seq < cur_seq or new_offset < cur_offset
+
+
+def advance_regress_error(
+    cur_seq: Int64, cur_offset: Int64, new_seq: Int64, new_offset: Int64
+) -> Error:
+    """The error `CasManifestStore.advance_log_start` raises for a backwards
+    target. It is precondition-shaped (a stale view lost to a newer pointer),
+    so a caller that retries on a lost CAS re-reads and stops."""
+    return Error(
+        "CasManifestStore.advance_log_start: precondition (412), refusing to"
+        " move _LOG_START backwards from (seq "
+        + String(cur_seq)
+        + ", offset "
+        + String(cur_offset)
+        + ") to (seq "
+        + String(new_seq)
+        + ", offset "
+        + String(new_offset)
+        + ")"
     )
