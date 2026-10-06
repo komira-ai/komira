@@ -28,6 +28,7 @@ mojo_library(
         "tests/test_arrow_ipc_flatbuf_schema_round_trip.mojo",
         "tests/test_arrow_ipc_flatbuf_tensor_round_trip.mojo",
         "tests/test_arrow_ipc_flatbuf_type_arms_fanout.mojo",
+        "tests/test_arrow_ipc_flatbuf_version_field.mojo",
         "tests/test_arrow_ipc_flatbuf_vtable_dedup.mojo",
         "tests/test_arrow_ipc_flatbuf_wire_canonical.mojo",
         "tests/test_arrow_ipc_flatbuf_writer_primitives.mojo",

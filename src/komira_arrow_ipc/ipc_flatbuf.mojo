@@ -2879,18 +2879,37 @@ def read_record_batch[
     )
 
 
+def _read_version_field[
+    bo: Origin[mut=False]
+](reader: FlatbufReader[bo], table_pos: Int) raises -> Int16:
+    """Read the i16 `version` (field 0) of a Message or Footer table; 0 when
+    absent. Reads EXACTLY the field's 2 bytes through the bounds-checked
+    reader: a 4-byte read masked to 16 bits reaches 2 bytes past the field,
+    which is past the payload when the field ends the buffer."""
+    var soffset = reader.read_i32_le(table_pos)
+    var vtable_pos = table_pos - Int(soffset)
+    if vtable_pos < 0:
+        raise Error(
+            "FlatbufReader: invalid vtable position " + String(vtable_pos)
+        )
+    var vtable_size = Int(reader.read_u16_le(vtable_pos))
+    if vtable_size < 6:
+        return Int16(0)  # field 0 beyond the declared slots → default
+    var inline_offset = Int(reader.read_u16_le(vtable_pos + 4))
+    if inline_offset == 0:
+        return Int16(0)  # absent → default
+    return reader.read_u16_le(table_pos + inline_offset).cast[DType.int16]()
+
+
 def read_message[
     bo: Origin[mut=False]
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> MessageDescriptor:
     """Read a Message table.
 
-    WIRE-CANONICAL: version is 2-byte u16; bodyLength is 8-byte i64
+    WIRE-CANONICAL: version is 2-byte i16; bodyLength is 8-byte i64
     inline.
     """
-    var version_u32 = _read_table_field_u32(reader, table_pos, 0)
-    # version is u16 in spec; we wrote 2 bytes; reading u32 includes
-    # 2 high bytes that belong to the next field. Mask to low 16 bits.
-    var version = Int16(Int(version_u32) & 0xFFFF)
+    var version = _read_version_field(reader, table_pos)
     var header_tag = _read_table_field_u8(reader, table_pos, 1)
     var header_pos = _read_table_field_offset(reader, table_pos, 2)
     if header_pos < 0:
@@ -2973,8 +2992,7 @@ def read_footer[
     is 24 bytes inline (8 i64 offset + 4 i32 metaDataLength + 4 pad +
     8 i64 bodyLength) — same shape as `_read_block` reads.
     """
-    var version_u32 = _read_table_field_u32(reader, table_pos, 0)
-    var version = Int16(Int(version_u32) & 0xFFFF)
+    var version = _read_version_field(reader, table_pos)
 
     var schema_pos = _read_table_field_offset(reader, table_pos, 1)
     if schema_pos < 0:
