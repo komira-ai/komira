@@ -119,6 +119,8 @@ struct ShapesMsg(Serializable, Copyable, Movable):
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
         dec.expect_fields("Shapes", "stamps,attrs,payload,v")
+        # As protoc-gen-mojo emits for a singular google.protobuf.Value.
+        dec.keep_null_fields("v")
         var out = Self.new()
         while True:
             var key = dec.next_field()
@@ -252,6 +254,18 @@ def test_null_inside_a_struct_is_a_null_value() raises:
     assert_equal(n.attrs[String("z")].kind, VALUE_KIND_NULL)
 
 
+def test_null_value_field_is_a_null_value() raises:
+    """A singular Value FIELD set to `null` is a NULL_VALUE and round-trips
+    (komira-ai/komira#62); the generated-code form is checked end to end by
+    tests/test_wkt_value_null_field.mojo."""
+    var n = decode_json[ShapesMsg](String('{"v":null}'))
+    assert_true(Bool(n.v))
+    assert_equal(n.v.value().kind, VALUE_KIND_NULL)
+    assert_equal(encode_json[ShapesMsg](n), String('{"v":null}'))
+    # `null` in the map field itself is still an absent map.
+    assert_equal(len(decode_json[ShapesMsg](String('{"attrs":null}')).attrs), 0)
+
+
 # =============================================================================
 # Top-level: the message IS a WKT.
 # =============================================================================
@@ -331,6 +345,7 @@ def main() raises:
     test_plain_arms_binary_golden()
     test_plain_element_and_map_value_are_canonical()
     test_null_inside_a_struct_is_a_null_value()
+    test_null_value_field_is_a_null_value()
     test_top_level_encode_json_is_canonical()
     test_top_level_decode_json_is_canonical()
     test_value_with_no_kind_refuses_to_write()
