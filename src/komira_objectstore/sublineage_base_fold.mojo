@@ -91,6 +91,7 @@ from komira_objectstore.cas_manifest import (
     LogStart,
     ManifestHead,
     RetryPolicy,
+    is_not_found,
     _get_i64_le,
     _put_i64_le,
 )
@@ -1080,6 +1081,10 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         # Advance the durable source `_LOG_START` to the folded watermark (the
         # first un-folded local offset = `folded_through_total`, at the first
         # surviving chunk seq). Monotone-forward; a stale 412 is a harmless lose.
+        # Swallowing ANY failure here is safe: the tombstones above stay on
+        # chunks at or above `_LOG_START`, which `CasManifestStore.reap` refuses
+        # and the broker `ReapWorker` skips (chunk_reclaim_guard.mojo), and the
+        # next fold re-reads `_LOG_START` and re-advances it.
         if folded_through_total > cur.log_start_offset:
             try:
                 _ = s.advance_log_start(
@@ -1098,38 +1103,49 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
 
         `_base` is gapless one-block-per-chunk, so the absolute chunk_seq of the
         live block at ordinal `i` (in `_base_chunks`) is `_base_log_start_seq + i`.
-        Reaping the first K live blocks advances `_base_log_start_seq` by K."""
+        Reaping the first K live blocks advances `_base_log_start_seq` by K.
+
+        ORDER: the durable `_LOG_START` advance comes FIRST, then the tombstones
+        and reaps. `reap` refuses a chunk at or above the log start
+        (chunk_reclaim_guard.mojo), and reaping before the advance would delete
+        live chunks whenever the advance then failed. A failed advance or reap
+        RAISES with the in-memory index unchanged; the next `compact` retries it
+        (the advance rewrites the same pointer, and a chunk an earlier attempt
+        already reaped is skipped)."""
         var base = self._shard_store(BASE_SHARD_ID)
         var keep = List[BaseChunkEntry]()
         var first_keep_off = retain_from_dense
-        var reaped = Int64(0)
+        var retire_n = Int64(0)
         var saw_keep = False
         for i in range(len(self._base_chunks)):
             ref e = self._base_chunks[i]
-            var abs_seq = self._base_log_start_seq + Int64(i)
             if e.dense_base + e.count <= retain_from_dense and not saw_keep:
-                # fully below the watermark — tombstone + reap (idempotent).
-                try:
-                    base.schedule_for_delete(abs_seq)
-                    base.reap(abs_seq)
-                except e3:
-                    _ = e3  # already reaped — idempotent
-                reaped += Int64(1)
+                retire_n += Int64(1)  # fully below the watermark — retired
             else:
                 if not saw_keep:
                     first_keep_off = e.dense_base
                     saw_keep = True
                 keep.append(e.copy())
-        var new_log_start_seq = self._base_log_start_seq + reaped
-        # Advance the durable `_LOG_START` so a restart sees the reaped prefix.
+        var new_log_start_seq = self._base_log_start_seq + retire_n
+        # 1. Advance the durable `_LOG_START` past the retired prefix, so a
+        #    restart sees it and `reap` accepts it. A failure raises here:
+        #    nothing reaped, index unchanged.
         var ls = base.read_log_start()
-        try:
-            _ = base.advance_log_start(
-                new_log_start_seq, first_keep_off, ls.etag
-            )
-        except e4:
-            _ = e4  # a concurrent advance won — the pointer is monotone-forward
+        _ = base.advance_log_start(new_log_start_seq, first_keep_off, ls.etag)
+        # 2. Tombstone + reap the retired prefix, now below the log start.
+        var j = Int64(0)
+        while j < retire_n:
+            var abs_seq = self._base_log_start_seq + j
+            j += Int64(1)
+            try:
+                base.schedule_for_delete(abs_seq)
+            except e3:
+                if not is_not_found(String(e3)):
+                    raise e3^
+                continue  # chunk already gone: an earlier attempt reaped it
+            base.reap(abs_seq)
         _ = base^
+        # 3. Every retired chunk is reaped: only now drop it from the index.
         self._base_chunks = keep^
         self._base_log_start_offset = first_keep_off
         self._base_log_start_seq = new_log_start_seq

@@ -76,6 +76,7 @@ from .manifest_body import (
 # Retention — time/size policy, the pure decision, the pass orchestrator, and
 # the grace-gated reaper.
 from .retention import (
+    ReapResult,
     ReapWorker,
     RetentionPass,
     RetentionPolicy,

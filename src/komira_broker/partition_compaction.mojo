@@ -86,6 +86,7 @@ from komira_objectstore.cas_manifest import CasManifestStore
 from komira_objectstore.store import ConditionalWriteStore
 
 from .broker_core import BrokerCore
+from .retention import advance_log_start_monotone
 from .partition_map import (
     PartitionMap,
     prefix_gen_manifest_prefix,
@@ -552,12 +553,20 @@ def compact_split_parent_gen[
 def _schedule_parent_chunks_for_delete[
     Store: ConditionalWriteStore
 ](mut parent_manifest: CasManifestStore[Store], now_ms: Int64) raises:
-    """Tombstone EVERY committed chunk of the (now-orphaned) parent manifest so
-    the grace-gated `ReapWorker` deletes the parent's segments after `grace_ms`.
-    The
-    tombstone is a metadata marker; the actual `.seg` delete happens in the
-    reaper after the grace window protects any in-flight pre-CAS drain. Idempotent
-    (last-writer-wins on each `<seq>.tomb`)."""
+    """Retire EVERY committed chunk of the (now-orphaned) parent manifest:
+    advance the parent's `_LOG_START` past its top chunk, THEN tombstone each
+    chunk so the grace-gated `ReapWorker` deletes the parent's segments after
+    `grace_ms`. The tombstone is a metadata marker; the actual `.seg` delete
+    happens in the reaper after the grace window protects any in-flight pre-CAS
+    drain. Idempotent (the advance is monotone; last-writer-wins on each
+    `<seq>.tomb`).
+
+    The ADVANCE comes first because the reaper deletes only below `_LOG_START`
+    (chunk_reclaim_guard.mojo): tombstones under an unmoved log start would be
+    skipped forever. The parent has no "sealed" state; a log start one past
+    its top chunk (based at its next offset) is how a fully retired lineage is
+    recorded, the same state retention leaves once a whole prefix is reaped. A
+    failed advance raises before any tombstone; the caller retries."""
     # A correctness consumer of the tail: read_head() prefers the stale-low
     # local cache, so this must LIST the authoritative
     # tail. This runs from a maintenance/cold-cache instance (a fresh
@@ -570,6 +579,11 @@ def _schedule_parent_chunks_for_delete[
     # authoritative tail sees every committed chunk.
     var head = parent_manifest.read_head_authoritative()
     var top = head.chunk_seq  # highest committed seq (-1 == empty)
+    # An empty parent (top == -1) targets (0, 0), where the log start already
+    # is: the advance is a no-op and the loop below runs zero times.
+    _ = advance_log_start_monotone(
+        parent_manifest, top + Int64(1), head.next_offset
+    )
     var seq = Int64(0)
     while seq <= top:
         parent_manifest.schedule_for_delete_at(seq, now_ms)

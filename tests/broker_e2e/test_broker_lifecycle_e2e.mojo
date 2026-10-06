@@ -746,7 +746,10 @@ def phase5_retain_and_compact(
     assert_equal(ret.new_log_start_offset, Int64(first_live), "log_start offset")
     assert_true(ret.advanced_log_start, "log_start advanced")
     var reaped = broker.reap_partition(_RETAIN_AT_MS, grace_ms=Int64(0))
-    assert_equal(reaped, Int64(1), "the retired chunk is reaped")
+    assert_equal(reaped.reaped_count, Int64(1), "the retired chunk is reaped")
+    assert_equal(
+        reaped.skipped_live_count, Int64(0), "no tombstone on a live chunk"
+    )
     _ = broker^
 
     var consumer = _consumer(root, victim)

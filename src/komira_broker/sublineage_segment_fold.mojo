@@ -545,6 +545,10 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
         # first un-folded local offset == `folded_through_total`, at the first
         # surviving chunk seq). Monotone-forward; a stale 412 is a harmless lose
         # (a concurrent advance won — the pointer is monotone-forward).
+        # Swallowing ANY failure here is safe: the tombstones above then sit
+        # on chunks at or above `_LOG_START`, which ReapWorker skips and counts
+        # (`ReapResult.skipped_live_count`) and `CasManifestStore.reap` refuses;
+        # the next call re-reads `_LOG_START` and re-advances it.
         if folded_through_total > cur.log_start_offset:
             try:
                 _ = s.advance_log_start(

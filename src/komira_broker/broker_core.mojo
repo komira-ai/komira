@@ -158,6 +158,7 @@ from .manifest_body import (
 # Retention orchestrators. retention.mojo -> manifest_body (leaf), NOT
 # broker_core, so this import is cycle-free.
 from .retention import (
+    ReapResult,
     ReapWorker,
     RetentionPolicy,
     RetentionResult,
@@ -2035,10 +2036,11 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         mut self,
         now_ms: Int64,
         grace_ms: Int64 = Int64(60_000),
-    ) raises -> Int64:
-        """Reap (delete) every tombstoned chunk whose grace window has elapsed
-        (`now_ms - schedule_ts >= grace_ms`). Idempotent. Returns the count
-        reaped. Deletes the actual `.seg` segment objects (the durable data,
+    ) raises -> ReapResult:
+        """Reap (delete) every tombstoned chunk below the log start whose grace
+        window has elapsed (`now_ms - schedule_ts >= grace_ms`). Idempotent.
+        Returns the `ReapResult` (count reaped, tombstones skipped because their
+        chunk is still live). Deletes the actual `.seg` segment objects (the durable data,
 ) AND the manifest chunks + tombstone markers. (Test/admin
         entrypoint; a deployment runs the ReapWorker on a background cadence).
         """
