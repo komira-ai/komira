@@ -6,8 +6,9 @@ Not generated, added by hand in the commit that makes the package: the cxx_libra
 (komira_libc, komira_concurrency, komira_scan_source) and the arrow_ipc extras (large_writes_check, the
 arrow_types.mojo data of the census test).
 Added by hand later, not from komira_core: komira_collections' hyperloglog.mojo and its test
-tests/test_hyperloglog.mojo. A re-run drops that test from the BUCK test_srcs and check.py copy reports the
-module as an extra; put both back."""
+tests/test_hyperloglog.mojo; komira_plan_stats' cardinality_estimator.mojo, its test
+tests/test_cardinality_estimator.mojo and its komira_arrow and komira_collections deps. A re-run drops those
+tests from the BUCK test_srcs and check.py copy reports the modules as extras; put them back."""
 import os,re,sys,argparse
 sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
 import split as S, deps as D
