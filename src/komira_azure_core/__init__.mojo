@@ -2,7 +2,8 @@
 
   * the credential types: `AzureSharedKey` (account + key), `AzureSas`, and a
     static provider for each;
-  * `AzureBearerToken` and the OAuth2 token-response readers;
+  * `AzureBearerToken`, and `parse_oauth_token_response`, the JSON reader of
+    a token endpoint's answer;
   * `AzureImdsProvider` — managed identity, through the Azure Instance
     Metadata Service;
   * `ServicePrincipalProvider` — the Entra client-credentials grant.
@@ -14,9 +15,8 @@ resource path), so it lives in `komira_azure_blob`, with the store.
 
 from .azure_token import (
     AzureBearerToken,
-    extract_oauth_token_field,
-    parse_oauth_expires_in,
-    parse_oauth_expires_in_str,
+    OAuthTokenResponse,
+    parse_oauth_token_response,
 )
 from .creds_managed_identity import AzureImdsProvider
 from .creds_service_principal import ServicePrincipalProvider

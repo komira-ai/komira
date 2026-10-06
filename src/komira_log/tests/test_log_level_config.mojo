@@ -69,13 +69,13 @@ def test_an_empty_spec_is_the_built_in_default() raises:
 
 
 # =============================================================================
-# §3 — A MALFORMED DIRECTIVE MUST LEAVE EVIDENCE.
+# §2 — A MALFORMED DIRECTIVE MUST LEAVE EVIDENCE.
 # =============================================================================
 def test_malformed_tokens_are_recorded_not_merely_skipped() raises:
     """Still skipped (the process must not crash), but no longer SILENT.
 
-    `boguslevel` is the case that cost the time: an operator types it, the
-    global level does NOT change, and nothing anywhere says why."""
+    A token like `boguslevel` leaves the global level unchanged, so without
+    a report nothing would say why the requested level did not apply."""
     var f = EnvFilter(String("info,,boguslevel,=debug,komira_x=trace,komira_y=verbose"))
 
     # UNCHANGED behaviour — pinned so this cannot regress into a crash or a
@@ -112,7 +112,7 @@ def test_a_wholly_valid_directive_reports_nothing() raises:
 
 
 # =============================================================================
-# §4 — THE STARTUP LINE. One line that says what the logging is doing.
+# §3 — THE STARTUP LINE. One line that says what the logging is doing.
 # =============================================================================
 def test_the_banner_states_level_source_and_spec() raises:
     var f = EnvFilter(String("debug,komira_pg=warn"))

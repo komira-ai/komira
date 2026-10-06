@@ -16,6 +16,17 @@
 #   Response JSON (Entra returns expires_in as a NUMBER):
 #     {"token_type":"Bearer","expires_in":3599,"access_token":"eyJ0..."}
 #
+# The token URL is checked before anything is dialed, at construction and
+# again at every refresh (the fields are public): the scheme is `https`, or
+# `http` for a loopback host only (`localhost`, `127.0.0.1`: an emulator or a
+# test); the host is a non-empty RFC 3986 reg-name of letters, digits, `-`
+# and `.` with no empty label, so no userinfo, port, path, space or
+# percent-escape can ride in it; the port is a UInt16, 0 meaning the
+# scheme's default. The tenant (a GUID or a verified domain name) is the
+# token path's first segment and is held to the same charset, so a `/`, `?`,
+# `#`, `%`, whitespace or `..` cannot rewrite the path the secret is POSTed
+# to.
+#
 # Caller-constructed, NO ambient discovery: the caller explicitly supplies
 # (tenant_id, client_id, client_secret) — typically from a secret store —
 # and drives the refresh. The provider never reads the environment or
@@ -37,16 +48,14 @@ from komira_http_client.body import BytesBody, RequestBody
 from komira_http_client.client import build_request_with_body
 from komira_http_client.header_map import HeaderMap
 from komira_http_client.request_writer import method_post
-from komira_http_client.response_body import BufferedResponseBody
 from komira_http_client.service import ClientRequest, HttpService
-from komira_http_client.state_machine import ClientResponse
 from komira_http_client.url import Url
 from komira_http_core.transport.io_stream import Connector
 
 from .azure_token import (
     AzureBearerToken,
-    extract_oauth_token_field,
-    parse_oauth_expires_in,
+    OAuthTokenResponse,
+    parse_oauth_token_response,
 )
 
 
@@ -79,7 +88,8 @@ struct ServicePrincipalProvider(Movable, Deinitable):
       var scope: String                 — OAuth2 scope (storage .default)
       var login_host: String            — login.microsoftonline.com
                                           (overridable for tests)
-      var login_scheme: String          — "https" (real) / "http" (test)
+      var login_scheme: String          — "https"; "http" only for a
+                                          loopback host
       var login_port: UInt16            — 0 = scheme default
       var refresh_margin_seconds: Int64 — proactive-refresh margin (300)
       var _cached_token: AzureBearerToken
@@ -102,8 +112,11 @@ struct ServicePrincipalProvider(Movable, Deinitable):
         tenant_id: String,
         client_id: String,
         client_secret: String,
-    ) -> ServicePrincipalProvider:
-        """Default config — real Entra endpoint, storage .default scope."""
+    ) raises -> ServicePrincipalProvider:
+        """Default config — real Entra endpoint, storage .default scope.
+        Raises if `tenant_id` is not a GUID or domain name (see the module
+        header)."""
+        _check_tenant_id(tenant_id)
         return ServicePrincipalProvider(
             tenant_id,
             client_id,
@@ -125,9 +138,14 @@ struct ServicePrincipalProvider(Movable, Deinitable):
         login_scheme: String,
         login_host: String,
         login_port: UInt16,
-    ) -> ServicePrincipalProvider:
-        """Custom token endpoint (an emulator, or a test's scripted
-        connector)."""
+    ) raises -> ServicePrincipalProvider:
+        """Custom token endpoint: a sovereign cloud's authority, an
+        emulator, or a test's scripted connector. Raises, before anything
+        is dialed, unless `login_scheme` is `https` (or `http` with a
+        loopback host), `login_host` is a reg-name of `[A-Za-z0-9.-]` with
+        no empty label, and `tenant_id` is held to the same charset."""
+        _check_login_endpoint(login_scheme, login_host)
+        _check_tenant_id(tenant_id)
         return ServicePrincipalProvider(
             tenant_id,
             client_id,
@@ -188,7 +206,11 @@ struct ServicePrincipalProvider(Movable, Deinitable):
     ) raises:
         """Production HTTP-fetch refresh path: POST the client-credentials
         grant to the Entra token endpoint, parse the access_token +
-        expires_in, cache the token."""
+        expires_in, cache the token. The endpoint and tenant are checked
+        again first, so a field changed after construction is refused
+        before the request is built."""
+        _check_login_endpoint(self.login_scheme, self.login_host)
+        _check_tenant_id(self.tenant_id)
         var url = Url(
             scheme=self.login_scheme,
             host=self.login_host,
@@ -213,15 +235,13 @@ struct ServicePrincipalProvider(Movable, Deinitable):
                 )
                 + String(status_int)
             )
-        var resp_body = _response_body_string(resp)
-        var access_token = extract_oauth_token_field(
-            resp_body, String("access_token")
-        )
-        if access_token.byte_length() == 0:
-            raise Error(
-                "ServicePrincipalProvider: missing access_token in response"
-            )
-        var expires_in = parse_oauth_expires_in(resp_body)
+        var parsed: OAuthTokenResponse
+        try:
+            parsed = parse_oauth_token_response(resp.body.take_bytes())
+        except e:
+            raise Error(String("ServicePrincipalProvider: ") + String(e))
+        var access_token = parsed.access_token.copy()
+        var expires_in = parsed.expires_in
         var now_ms = now_unix_ms()
         var expiry_ms = now_ms + (expires_in * Int64(1000))
         self._cached_token = AzureBearerToken(access_token^, expiry_ms)
@@ -236,7 +256,7 @@ struct ServicePrincipalProvider(Movable, Deinitable):
 
 
 # -----------------------------------------------------------------------------
-# Internal helpers — form encoding + body read
+# Internal helpers — form encoding
 # -----------------------------------------------------------------------------
 
 
@@ -276,15 +296,55 @@ def _percent_encode_form_value(s: String) -> String:
     return out^
 
 
-def _response_body_string(
-    ref resp: ClientResponse[BufferedResponseBody]
-) -> String:
-    """Copy out the response body bytes as an owned String (JSON ASCII)."""
-    ref src = resp.body.bytes_ref()
-    var out = String()
-    var i = 0
-    var n = src.__len__()
-    while i < n:
-        out += chr(Int(src[i]))
-        i += 1
-    return out^
+# -----------------------------------------------------------------------------
+# The token URL's checks — every one runs before a request exists
+# -----------------------------------------------------------------------------
+
+
+def _check_dns_name(what: String, s: String) raises:
+    """A non-empty run of `[A-Za-z0-9.-]` with no empty label: an RFC 3986
+    reg-name narrowed to DNS, so it holds no userinfo (`@`), port (`:`),
+    path (`/`), query, fragment, whitespace or percent-escape."""
+    var b = s.as_bytes()
+    if len(b) == 0:
+        raise Error("ServicePrincipalProvider: " + what + " is empty")
+    for i in range(len(b)):
+        var c = b[i]
+        var ok = (
+            (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+            or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+            or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+            or c == UInt8(ord("."))
+            or c == UInt8(ord("-"))
+        )
+        if not ok:
+            raise Error(
+                "ServicePrincipalProvider: " + what + " holds a byte outside"
+                " [A-Za-z0-9.-]"
+            )
+    var dot = UInt8(ord("."))
+    if b[0] == dot or b[len(b) - 1] == dot or s.find("..") >= 0:
+        raise Error("ServicePrincipalProvider: " + what + " has an empty label")
+
+
+def _is_loopback_host(host: String) -> Bool:
+    return host == "localhost" or host == "127.0.0.1"
+
+
+def _check_login_endpoint(scheme: String, host: String) raises:
+    """The login authority the client secret is POSTed to."""
+    _check_dns_name(String("login host"), host)
+    if scheme == "https":
+        return
+    if scheme == "http" and _is_loopback_host(host):
+        return
+    raise Error(
+        "ServicePrincipalProvider: login scheme must be https (http only"
+        " for a loopback host: localhost, 127.0.0.1)"
+    )
+
+
+def _check_tenant_id(tenant_id: String) raises:
+    """The tenant, a GUID or a verified domain name: the token path's first
+    segment."""
+    _check_dns_name(String("tenant_id"), tenant_id)
