@@ -64,8 +64,8 @@ from komira_azure_blob.azure import (
     AZURE_ERR_PERMISSION_DENIED,
     azure_store_error_kind_from_message,
 )
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
 from komira_encoding import base64_encode
 from komira_fs.shallow_dir_entry import ShallowDirEntry
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
