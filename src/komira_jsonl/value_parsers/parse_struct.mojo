@@ -29,6 +29,9 @@
 # Scope:
 #   - Child field arrow_type: INT64 / FLOAT64 / BOOL / STRING / DATE32.
 #   - Child LIST / STRUCT / MAP (recursive nested) RAISES (single-level nesting only).
+#     A nested value under a key the struct does not read is skipped.
+#   - Keys are matched as the text they spell (escapes decoded,
+#     key_unescape.mojo); a child key repeated in one object raises.
 #   - Out-of-order JSON keys handled (key→field lookup in child_names).
 #   - Partial-fields: any field whose key is NOT present in the JSON object
 #     for this row → that field's writer push_null arm fires.
@@ -47,6 +50,7 @@ from komira_json_index.simd_primitives import (
     TAG_QUOTE_CLOSE,
 )
 from komira_json_index.structural_index import StructuralIndex
+from komira_jsonl.key_unescape import key_has_escape, unescape_key
 from komira_jsonl.value_parsers.parse_bool import parse_bool, parse_null
 from komira_jsonl.value_parsers.parse_date import parse_date32
 from komira_jsonl.value_parsers.parse_float import parse_float_f64
@@ -194,7 +198,14 @@ def parse_struct_one_value(
         tape_pos += 1
         var key_start = quote_open + 1
         var key_end = quote_close
-        var field_idx = _child_field_index(child_names, bytes[key_start:key_end])
+        # Looked up as the text the key spells (key_unescape.mojo).
+        var field_idx: Int
+        if key_has_escape(bytes[key_start:key_end]):
+            var key_buf = List[UInt8]()
+            unescape_key(bytes[key_start:key_end], key_buf)
+            field_idx = _child_field_index(child_names, key_buf)
+        else:
+            field_idx = _child_field_index(child_names, bytes[key_start:key_end])
         # A child key repeated in one object would push a second value into
         # the child column and shift every later row: refused (the
         # materializer's duplicate-key rule, columnar_materializer.mojo).
@@ -262,10 +273,22 @@ def parse_struct_one_value(
                         + "' has non-string arrow_type but JSON value is a string"
                     )
         elif value_tag == TAG_OPEN_BRACE or value_tag == TAG_OPEN_BRACKET:
-            raise Error(
-                "parse_struct_one_value: nested LIST/STRUCT/MAP child fields are"
-                " not supported (single-level nesting only)"
-            )
+            if field_idx >= 0:
+                raise Error(
+                    "parse_struct_one_value: nested LIST/STRUCT/MAP child fields are"
+                    " not supported (single-level nesting only)"
+                )
+            # A key the struct does not read: skip its nested value, as the
+            # materializer skips an unread top-level key's.
+            var depth = 1
+            tape_pos += 1
+            while tape_pos < tape_len and depth > 0:
+                var tg = idx.tags[tape_pos]
+                if tg == TAG_OPEN_BRACE or tg == TAG_OPEN_BRACKET:
+                    depth += 1
+                elif tg == TAG_CLOSE_BRACE or tg == TAG_CLOSE_BRACKET:
+                    depth -= 1
+                tape_pos += 1
         else:
             # Interior scalar: bytes between colon_offset+1 and next-structural.
             var next_offset = Int(idx.offsets[tape_pos])

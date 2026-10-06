@@ -97,6 +97,7 @@ from komira_json_index.input_limits import (
     raise_json_cell_budget_exceeded,
 )
 from komira_jsonl.key_dispatch import KeyTable
+from komira_jsonl.key_unescape import key_has_escape, unescape_key
 from komira_jsonl.line_check import (
     build_jsonl_index,
     check_jsonl_lines,
@@ -946,9 +947,12 @@ def materialize_jsonl_to_batch(
     object (RFC 8259); anything else raises `komira_jsonl: line N: ...`
     before any row is built, so the input is read whole or not at all
     (`line_check.mojo`). A key the schema reads may appear once per object:
-    a repeat raises (keys the schema does not read are skipped unread,
-    repeated or not). Every error raised while reading a row names the
-    row's line."""
+    a repeat raises. That covers top-level columns and STRUCT children;
+    keys inside a MAP value are its entries, kept in order, repeats
+    included. Keys are compared as the text they spell (escapes decoded).
+    Keys the schema does not read are skipped unread with their values,
+    repeated or not, at top level and inside a STRUCT. Every error raised
+    while reading a row names the row's line."""
     var no_prefix = List[UInt8]()
     return _materialize_checked(bytes, schema^, idx, no_prefix, 0)
 
@@ -991,7 +995,8 @@ def _walk_jsonl_rows(
 ) raises -> RecordBatch:
     """The row walk of `materialize_jsonl_to_batch`, over a tape
     `check_jsonl_lines` has passed. Sets `row_start` to the byte offset of
-    each row's `{` as it starts the row.
+    each row's `{` as it starts the row, and back to -1 once the rows are
+    read.
 
     Reads `bytes` (a complete JSONL byte stream — one `{...}` per line,
     `\\n`-separated) using the caller-provided `idx` and produces ONE
@@ -1146,6 +1151,8 @@ def _walk_jsonl_rows(
     var per_row_seen = List[Bool](capacity=n)
     for _ in range(n):
         per_row_seen.append(False)
+    # The decoded spelling of a key that holds an escape, reused per key.
+    var key_buf = List[UInt8]()
     while t < tape_len:
         # Find next OPEN_BRACE.
         if idx.tags[t] != TAG_OPEN_BRACE:
@@ -1187,14 +1194,21 @@ def _walk_jsonl_rows(
             var key_start = quote_open_offset + 1
             var key_end = quote_close_offset
             # Walk key bytes — copy into a Span via input[].
-            var col_idx = key_table.lookup(bytes[key_start:key_end])
+            # A key is looked up as the text it spells (key_unescape.mojo):
+            # raw bytes when it has no backslash, decoded otherwise.
+            var col_idx: Int
+            if key_has_escape(bytes[key_start:key_end]):
+                unescape_key(bytes[key_start:key_end], key_buf)
+                col_idx = key_table.lookup(key_buf)
+            else:
+                col_idx = key_table.lookup(bytes[key_start:key_end])
             # DUPLICATE KEY. A key the schema reads, seen twice in one
             # object, would push two values into its column for one row
             # (the column then outgrows the row count and every later row
             # is shifted). Refused, not first- or last-wins: neither value
             # is the record's, and komira_json, which keeps both in order,
             # has no single-value answer to match. Keys are compared as
-            # their raw bytes, as the key table looks them up.
+            # the text they spell (decoded above).
             if col_idx >= 0 and per_row_seen[col_idx]:
                 raise Error(
                     "duplicate key '" + schema.field_name(col_idx)
@@ -1454,6 +1468,9 @@ def _walk_jsonl_rows(
         # row, against a value computed once outside the loop.
         if row_count > max_rows:
             raise_json_cell_budget_exceeded(row_count, n, len(bytes))
+    # The rows are read; an error from here on (building the columns)
+    # belongs to no row, so it is not labelled with a line.
+    row_start = -1
 
     # Assemble RecordBatch. Build columns by popping accumulators from
     # the front in lockstep across all 9 parallel acc lists (6 scalar +

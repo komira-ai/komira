@@ -244,8 +244,11 @@ def _check_string(bytes: Span[UInt8, _], start: Int, end: Int) -> JsonlFault:
     var i = start
     var n_end = end
     # SAFETY: `p` points into `bytes`, which outlives this call; every load
-    # reads 16 bytes at `i` with `i + 16 <= n_end <= len(bytes)`. The pointer
-    # stays in this function.
+    # reads 16 bytes at `i` with `i + 16 <= n_end`, and `n_end <= len(bytes)`
+    # is enforced by the caller: `find_jsonl_fault` passes the offset of a
+    # closing quote only after checking it is past its opening quote and
+    # below `len(bytes)` (an index that does not match `bytes` raises
+    # there). The pointer stays in this function.
     var p = bytes.unsafe_ptr()
     var lo = SIMD[DType.uint8, 16](0x20)
     var hi = SIMD[DType.uint8, 16](0x80)
@@ -296,13 +299,13 @@ def _check_string(bytes: Span[UInt8, _], start: Int, end: Int) -> JsonlFault:
                 if j + 1 >= n_end or bytes[j] != 0x5C or bytes[j + 1] != 0x75:
                     return JsonlFault(
                         i, NOT_VALID_JSON,
-                        "a high surrogate \\u escape not followed by a \\u low surrogate",
+                        "a high surrogate \\u escape not followed by a \\u escape",
                     )
                 var lo_cu = _u_escape(bytes, j + 2, n_end)
                 if lo_cu < 0xDC00 or lo_cu > 0xDFFF:
                     return JsonlFault(
                         i, NOT_VALID_JSON,
-                        "a high surrogate \\u escape not followed by a \\u low surrogate",
+                        "a high surrogate \\u escape followed by a \\u escape that is not a low surrogate",
                     )
                 i += 12
                 continue
@@ -321,14 +324,55 @@ def _check_string(bytes: Span[UInt8, _], start: Int, end: Int) -> JsonlFault:
     return JsonlFault()
 
 
+def _tag_byte(tag: UInt8) -> UInt8:
+    """The byte a Stage 1 tag stands for, or 0 for a tag Stage 1 does not
+    emit."""
+    if tag == TAG_OPEN_BRACE:
+        return 0x7B
+    if tag == TAG_CLOSE_BRACE:
+        return 0x7D
+    if tag == TAG_OPEN_BRACKET:
+        return 0x5B
+    if tag == TAG_CLOSE_BRACKET:
+        return 0x5D
+    if tag == TAG_COLON:
+        return 0x3A
+    if tag == TAG_COMMA:
+        return 0x2C
+    if tag == TAG_QUOTE_OPEN or tag == TAG_QUOTE_CLOSE:
+        return 0x22
+    return 0
+
+
+def _index_mismatch(t: Int, what: String) -> Error:
+    return Error(
+        String("komira_jsonl: the structural index does not match the bytes")
+        + " (tape entry " + String(t) + ": " + what + "); pass the index"
+        + " build_structural_index built over these bytes"
+    )
+
+
 def find_jsonl_fault(
     bytes: Span[UInt8, _], ref idx: StructuralIndex
-) -> JsonlFault:
+) raises -> JsonlFault:
     """The first place where `bytes` (with `idx`, its Stage 1 tape) is not a
     sequence of lines each blank or holding one JSON object (module header).
-    Returns a fault with `offset < 0` when there is none."""
+    Returns a fault with `offset < 0` when there is none.
+
+    Raises when `idx` is not a tape of `bytes`: an offset at or past
+    `len(bytes)`, offsets that do not increase, a tag whose byte is not the
+    one at its offset, or an open quote with no close quote after it. Every
+    byte this walk and the reader read is then inside `bytes`."""
     var tape_len = idx.size()
     var input_len = len(bytes)
+    # O(1): offsets increase (checked per entry below), so the last one
+    # bounds them all.
+    if tape_len > 0 and Int(idx.offsets[tape_len - 1]) >= input_len:
+        raise _index_mismatch(
+            tape_len - 1,
+            String("offset ") + String(Int(idx.offsets[tape_len - 1]))
+            + " is not below the input length " + String(input_len),
+        )
     var stack = List[UInt8](capacity=16)
     var state = _E_RECORD
     # A record closed on the current line, so only whitespace may follow
@@ -342,6 +386,15 @@ def find_jsonl_fault(
         if t < tape_len:
             off = Int(idx.offsets[t])
             tag = idx.tags[t]
+            if off < pos or off >= input_len:
+                raise _index_mismatch(
+                    t, String("offset ") + String(off) + " is out of order or past the input"
+                )
+            if bytes[off] != _tag_byte(tag):
+                raise _index_mismatch(
+                    t, String("tag ") + String(Int(tag)) + " does not match the "
+                    + _byte_text(bytes[off]) + " at offset " + String(off)
+                )
         else:
             off = input_len
             tag = 0  # end of input
@@ -414,8 +467,15 @@ def find_jsonl_fault(
         if tag == TAG_QUOTE_OPEN:
             if state != _E_KEY_OR_CLOSE and state != _E_KEY and state != _E_VALUE and state != _E_VALUE_OR_CLOSE:
                 return JsonlFault(off, NOT_VALID_JSON, "unexpected string")
-            # Stage 1 pairs every open quote with a close quote.
+            # Stage 1 pairs every open quote with the close quote after it.
+            if t >= tape_len or idx.tags[t] != TAG_QUOTE_CLOSE:
+                raise _index_mismatch(t - 1, "an open quote is not followed by a close quote")
             var close = Int(idx.offsets[t])
+            if close <= off or close >= input_len or bytes[close] != 0x22:
+                raise _index_mismatch(
+                    t, String("close quote offset ") + String(close)
+                    + " is not a quote after its open quote"
+                )
             t += 1
             var f = _check_string(bytes, off + 1, close)
             if f.found():
@@ -454,10 +514,16 @@ def find_jsonl_fault(
             var ok_state = state == _E_COMMA_OR_CLOSE or (
                 tag == TAG_CLOSE_BRACE and state == _E_KEY_OR_CLOSE
             ) or (tag == TAG_CLOSE_BRACKET and state == _E_VALUE_OR_CLOSE)
-            if not ok_state or stack[len(stack) - 1] != want:
+            if not ok_state:
                 return JsonlFault(
                     off, NOT_VALID_JSON,
                     String("unexpected ") + _byte_text(bytes[off]),
+                )
+            if stack[len(stack) - 1] != want:
+                return JsonlFault(
+                    off, NOT_VALID_JSON,
+                    _byte_text(bytes[off]) + " closes "
+                    + ("an array" if want == _K_OBJECT else "an object"),
                 )
             _ = stack.pop()
             if len(stack) == 0:
@@ -466,12 +532,13 @@ def find_jsonl_fault(
             else:
                 state = _E_COMMA_OR_CLOSE
             continue
-        # TAG_QUOTE_CLOSE is consumed with its open quote; any other tag is
-        # not one Stage 1 emits.
-        return JsonlFault(off, NOT_VALID_JSON, String("unexpected ") + _byte_text(bytes[off]))
+        # A close quote with no open quote before it (the tag check above
+        # leaves no other tag).
+        raise _index_mismatch(t - 1, "a close quote with no open quote")
     if state != _E_RECORD:
+        # A token was read, so the input is not empty.
         return JsonlFault(
-            input_len - 1 if input_len > 0 else 0, NOT_VALID_JSON,
+            input_len - 1, NOT_VALID_JSON,
             "the object is not closed before the end of the input",
         )
     return JsonlFault()
@@ -518,6 +585,10 @@ def _unterminated_string_offset(bytes: Span[UInt8, _]) -> Int:
         var c = bytes[i]
         if in_string:
             if c == 0x5C:
+                # A backslash escapes the next byte for Stage 1, but a raw
+                # LF can not be escaped in JSON: the string is open at it.
+                if i + 1 < len(bytes) and bytes[i + 1] == 0x0A:
+                    return i + 1
                 i += 2
                 continue
             if c == 0x22:
@@ -527,7 +598,9 @@ def _unterminated_string_offset(bytes: Span[UInt8, _]) -> Int:
         elif c == 0x22:
             in_string = True
         i += 1
-    return len(bytes) - 1 if len(bytes) > 0 else 0
+    # Called only after Stage 1 found a string open at the end of the
+    # input, so the input is not empty.
+    return len(bytes) - 1
 
 
 def build_jsonl_index(

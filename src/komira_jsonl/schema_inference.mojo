@@ -71,6 +71,7 @@ from komira_core.collections.slab import Slab
 from komira_jsonl.columnar_materializer import _compute_jsonl_line_ranges
 from komira_json_index.input_limits import check_json_column_count
 from komira_jsonl.key_dispatch import KeyRegistryBuilder
+from komira_jsonl.key_unescape import key_has_escape, unescape_key
 from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
@@ -752,6 +753,8 @@ def _infer_partial_into(
 
     var tape_len = idx.size()
     var input_len = len(bytes)
+    # The decoded spelling of a key that holds an escape, reused per key.
+    var key_buf = List[UInt8]()
 
     var t: Int = 0
     while t < tape_len:
@@ -863,9 +866,14 @@ def _infer_partial_into(
                 observed = _classify_scalar(bytes, s_start, s_end)
             # Lookup-or-insert by byte span (O(1)
             # avg hash hit; String allocation only on first-seen insert).
-            var ki = builder.lookup_or_insert_bytes(
-                bytes[key_start:key_end]
-            )
+            # The column is named by the text the key spells, as the
+            # reader looks it up (key_unescape.mojo).
+            var ki: Int
+            if key_has_escape(bytes[key_start:key_end]):
+                unescape_key(bytes[key_start:key_end], key_buf)
+                ki = builder.lookup_or_insert_bytes(key_buf)
+            else:
+                ki = builder.lookup_or_insert_bytes(bytes[key_start:key_end])
             # Grow the parallel `column_inferred` list to keep in lockstep
             # with the builder's column count (the builder appended a new
             # column iff ki == len(column_inferred)).
