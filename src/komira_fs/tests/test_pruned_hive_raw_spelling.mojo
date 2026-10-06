@@ -340,13 +340,15 @@ def test_spellings_contract() raises:
     assert_equal(len(n), 1)
     assert_equal(n[0], String("__HIVE_DEFAULT_PARTITION__"))
 
-    # a timestamp: komira keeps `:` and escapes the space; Spark the reverse.
+    # a timestamp: komira keeps `:` and escapes the space; Spark the reverse;
+    # DuckDB/pyarrow (and Windows Spark) escape both.
     var ts = partition_value_spellings(
         String("2026-11-04 03:00:00"), ArrowType.TIMESTAMP
     )
-    assert_equal(len(ts), 2)
+    assert_equal(len(ts), 3)
     assert_equal(ts[0], String("2026-11-04%2003:00:00"))
     assert_equal(ts[1], String("2026-11-04 03%3A00%3A00"))
+    assert_equal(ts[2], String("2026-11-04%2003%3A00%3A00"))
     for i in range(len(ts)):
         assert_equal(
             parse_partition_value(ts[i], ArrowType.TIMESTAMP),
@@ -390,7 +392,10 @@ def test_raw_spelling_escape_set_is_sparks() raises:
     [komira spelling] + [Spark spelling if different], where the Spark
     spelling escapes c iff c is in `charToEscape` above. Killed by: any
     change to the raw spelling's escape set (adding `:`'s exemption, raw
-    `/`, escaping space, ...)."""
+    `/`, escaping space, ...). For a one-byte value the DuckDB/pyarrow and
+    Windows-Spark spellings coincide with one of these two, so the list is
+    still at most two long; each writer's own set is checked byte by byte in
+    `test_pruned_hive_writer_spellings`."""
     for c in range(0, 128):
         var value = String("a") + chr(c) + String("b")
         var komira = encode_partition_value(value, ArrowType.STRING)
