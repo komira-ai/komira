@@ -17,12 +17,9 @@
 # zero value (CONFIG_VIEW_UNSPECIFIED) it is not sent at all, as the proto3
 # JSON mapping omits a default.
 #
-# Part of each create body is NOT from the reference: the default-valued
-# keys (`"name":""` and the `*_UNSPECIFIED` enums). komira_proto_codec's
-# JsonEncoder writes a plain scalar or enum at its default, where the proto3
-# JSON mapping omits it (it does omit an empty list or map); the server
-# reads each as unset, and output-only fields (`state`, `defaultHostname`)
-# are ignored on a create.
+# A create body holds only the fields the caller set: a plain scalar or enum
+# left at its default (`name`, the output-only `state`, the
+# `*_UNSPECIFIED` enums) is omitted, as the proto3 JSON mapping omits it.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -139,8 +136,7 @@ def test_create_api() raises:
     )
     assert_equal(
         _body(capture),
-        '{"name":"","labels":{"app":"orders"},"displayName":"orders",'
-        + '"managedService":"","state":"STATE_UNSPECIFIED"}',
+        '{"labels":{"app":"orders"},"displayName":"orders"}',
     )
     assert_equal(
         op.name, "projects/demo-project/locations/global/operations/operation-9"
@@ -301,11 +297,8 @@ def test_create_gateway() raises:
     )
     assert_equal(
         _body(capture),
-        '{"name":"","displayName":"orders",'
-        + '"apiConfig":"projects/demo-project/locations/global/apis/orders/configs/orders-v1",'
-        + '"state":"STATE_UNSPECIFIED","defaultHostname":"",'
-        + '"streamingMode":"STREAMING_MODE_UNSPECIFIED",'
-        + '"effectiveStreamingMode":"EFFECTIVE_STREAMING_MODE_UNSPECIFIED"}',
+        '{"displayName":"orders",'
+        + '"apiConfig":"projects/demo-project/locations/global/apis/orders/configs/orders-v1"}',
     )
 
 

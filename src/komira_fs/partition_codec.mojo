@@ -21,8 +21,9 @@
 #       the EXACT inverse: URL-unescape, the null sentinel back to "" (the
 #       NULL marker), pass-through of canonical numeric/date text.
 #   * `partition_value_spellings(value, arrow_type) -> List[String]`
-#       read side only: the directory spellings to list for a value, komira's
-#       `encode` form plus Spark's `escapePathName` form when it differs.
+#       read side only: the distinct directory spellings to list for a value
+#       (komira, Spark, DuckDB/pyarrow, Windows Spark), and
+#       `partition_value_spelling_for(value, arrow_type, writer)` for one.
 #   * `parse_key_value_segments(path) -> (keys, values)`
 #       split a discovered path's directory components into the ordered
 #       `(partition_col_name, value_string)` pairs, disqualifying
@@ -234,35 +235,75 @@ def parse_partition_value(segment: String, arrow_type: ArrowType) raises -> Stri
 
 
 # =============================================================================
-# The Spark/Hive spelling of a partition value (read side only).
+# The directory spellings other writers use (read side only).
 # =============================================================================
-# `encode_partition_value` is komira's WRITE spelling and stays as it is. The
-# common writers spell a directory value differently: Spark's
-# `ExternalCatalogUtils.escapePathName` (sql/catalyst/src/main/scala/org/
-# apache/spark/sql/catalyst/catalog/ExternalCatalogUtils.scala, `charToEscape`,
-# itself taken from Hive's `FileUtils.escapePathName`) %-escapes, as uppercase
-# `%XX`, ONLY:
-#     0x01-0x1F   "  #  %  '  *  /  :  =  ?  \  0x7F  {  [  ]  ^
-# (a Windows writer adds space < > |, which this spelling does NOT model).
-# Every other char, including every char >= 0x80, is written raw, so the
-# directory for `Zürich` is `Zürich` (UTF-8 on disk), not `Z%C3%BCrich`, and
-# for `New York` it is `New York`, not `New%20York`.
+# `encode_partition_value` is komira's WRITE spelling and stays as it is. Other
+# writers spell a partition VALUE differently in the `key=value` directory.
+# Each rule below is from the writer's source; each escapes a byte as `%XX`
+# with UPPERCASE hex and copies every other byte verbatim:
 #
-# Because every UTF-8 byte of a non-ASCII char is >= 0x80 and Spark's set is
-# ASCII-only, escaping per BYTE is identical to Spark's per-char rule.
-# One deliberate addition: 0x00 is escaped too. Spark's set omits it, but a
-# NUL cannot occur in a path name, and a raw NUL handed to a C-string FS
-# boundary would truncate the prefix.
+#   KOMIRA (`encode_partition_value`): escapes everything except ASCII
+#     letters, digits and `- _ . ~ :`.
 #
-# The reader lists both spellings (`partition_value_spellings`);
-# `parse_partition_value` decodes either one to the same canonical value.
+#   SPARK (POSIX). `ExternalCatalogUtils.escapePathName`
+#     (sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/catalog/
+#     ExternalCatalogUtils.scala, `charToEscape`, itself taken from Hive's
+#     `FileUtils.escapePathName`) escapes ONLY
+#         0x01-0x1F   "  #  %  '  *  /  :  =  ?  \  0x7F  {  [  ]  ^
+#     and writes every other char raw, including every char >= 0x80. Applied
+#     to the key too (`getPartitionPathString`). `Zürich` -> `Zürich`.
+#
+#   SPARK (Windows). The same `charToEscape` adds space `<` `>` `|` when
+#     `Shell.WINDOWS`. `Zürich Nord` -> `Zürich%20Nord`.
+#
+#   URI: DuckDB and pyarrow, which share one rule.
+#     * DuckDB: `HivePartitioning::EscapeValue` (src/common/
+#       hive_partitioning.cpp) -> `StringUtil::URLEncode` (src/common/
+#       string_util.cpp, `URLEncodeInternal`, `encode_slash` defaults true)
+#       keeps ASCII letters, digits and `_ - ~ .`, escapes everything else.
+#       The key is escaped the same way (`HivePartitioning::Escape`, in
+#       physical_copy_to_file.cpp).
+#     * pyarrow / Arrow C++: `HivePartitioning::FormatValues`
+#       (cpp/src/arrow/dataset/partition.cc) -> `arrow::util::UriEscape`
+#       (cpp/src/arrow/util/uri.cc) -> uriparser `uriEscapeExA` with
+#       spaceToPlus and normalizeBreaks false (src/UriEscape.c): keeps the
+#       RFC 3986 unreserved set (ASCII letters, digits, `- . _ ~`), escapes
+#       everything else. The key is NOT escaped.
+#     This differs from KOMIRA only on `:`: `03:00` -> `03%3A00`.
+#
+# The rules are ASCII-only, so escaping per BYTE is identical to the
+# writers' per-char rules: every UTF-8 byte of a non-ASCII char is >= 0x80.
+#
+# Edge cases deliberately NOT reproduced (documented, not listed):
+#   * 0x00 is escaped in every spelling here. Spark writes it raw and
+#     uriparser stops at it, but a NUL cannot occur in a path name and a raw
+#     NUL handed to a C-string FS boundary would truncate the prefix.
+#   * DuckDB writes a non-NULL value equal (case-insensitively) to
+#     `__HIVE_DEFAULT_PARTITION__` with its first byte escaped (`%5F_HIVE...`).
+#     komira cannot express that value as distinct from NULL today.
+#   * Keys are used as given; a key that one of the writers escapes (any
+#     byte outside its keep-set) is not expanded.
+#
+# The reader lists every distinct spelling (`partition_value_spellings`);
+# `parse_partition_value` decodes each one to the same canonical value.
 # =============================================================================
+
+# The writers, in the order `partition_value_spellings` lists them.
+# komira's own spelling: `encode_partition_value`.
+comptime HIVE_WRITER_KOMIRA: Int = 0
+# Spark / Hive `escapePathName` on a POSIX host.
+comptime HIVE_WRITER_SPARK: Int = 1
+# DuckDB `URLEncode` and pyarrow `UriEscape` (RFC 3986 unreserved kept).
+comptime HIVE_WRITER_URI: Int = 2
+# Spark / Hive `escapePathName` on Windows (adds space `<` `>` `|`).
+comptime HIVE_WRITER_SPARK_WINDOWS: Int = 3
+comptime HIVE_WRITER_COUNT: Int = 4
 
 
 @always_inline
 def _spark_escapes_byte(b: UInt8) -> Bool:
-    """True iff Spark's `escapePathName` %-escapes byte `b` (plus 0x00, see
-    the section header)."""
+    """True iff Spark's POSIX `escapePathName` %-escapes byte `b` (plus 0x00,
+    see the section header)."""
     if b <= 0x1F or b == 0x7F:
         return True
     return (
@@ -284,6 +325,47 @@ def _spark_escapes_byte(b: UInt8) -> Bool:
 
 
 @always_inline
+def _spark_windows_escapes_byte(b: UInt8) -> Bool:
+    """Spark's set plus the `Shell.WINDOWS` additions: space `<` `>` `|`."""
+    return (
+        _spark_escapes_byte(b)
+        or b == UInt8(ord(" "))
+        or b == UInt8(ord("<"))
+        or b == UInt8(ord(">"))
+        or b == UInt8(ord("|"))
+    )
+
+
+@always_inline
+def _uri_escapes_byte(b: UInt8) -> Bool:
+    """True iff DuckDB `URLEncode` / uriparser `uriEscapeExA` escape `b`:
+    everything outside ASCII letters, digits and `- _ . ~`."""
+    if (b >= UInt8(ord("A")) and b <= UInt8(ord("Z"))) or (
+        b >= UInt8(ord("a")) and b <= UInt8(ord("z"))
+    ):
+        return False
+    if b >= UInt8(ord("0")) and b <= UInt8(ord("9")):
+        return False
+    return not (
+        b == UInt8(ord("-"))
+        or b == UInt8(ord("_"))
+        or b == UInt8(ord("."))
+        or b == UInt8(ord("~"))
+    )
+
+
+@always_inline
+def _writer_escapes_byte(writer: Int, b: UInt8) -> Bool:
+    if writer == HIVE_WRITER_SPARK:
+        return _spark_escapes_byte(b)
+    if writer == HIVE_WRITER_SPARK_WINDOWS:
+        return _spark_windows_escapes_byte(b)
+    if writer == HIVE_WRITER_URI:
+        return _uri_escapes_byte(b)
+    return not _is_unreserved(b)  # HIVE_WRITER_KOMIRA
+
+
+@always_inline
 def _hex_digit_byte(nibble: Int) -> UInt8:
     """The UPPERCASE ASCII hex digit byte for a 0..15 nibble."""
     if nibble < 10:
@@ -291,16 +373,15 @@ def _hex_digit_byte(nibble: Int) -> UInt8:
     return UInt8(ord("A") + (nibble - 10))
 
 
-def _spark_escape_path_name(value: String) -> String:
-    """Spark's `escapePathName` over the bytes of `value`: the bytes in
-    `_spark_escapes_byte` become `%XX` (uppercase hex), every other byte is
-    copied verbatim. Accumulates BYTES (a `chr()` per byte would re-encode
-    each byte >= 0x80 into two; see `_url_unescape`)."""
+def _escape_for_writer(value: String, writer: Int) -> String:
+    """`value` with the bytes `writer` escapes as `%XX` (uppercase hex) and
+    every other byte copied verbatim. Accumulates BYTES (a `chr()` per byte
+    would re-encode each byte >= 0x80 into two; see `_url_unescape`)."""
     var bs = value.as_bytes()
     var out = List[UInt8]()
     for i in range(len(bs)):
         var b = bs[i]
-        if _spark_escapes_byte(b):
+        if _writer_escapes_byte(writer, b):
             out.append(UInt8(ord("%")))
             out.append(_hex_digit_byte(Int(b) >> 4))
             out.append(_hex_digit_byte(Int(b) & 0xF))
@@ -312,24 +393,37 @@ def _spark_escape_path_name(value: String) -> String:
     return String(StringSlice(unsafe_from_utf8=Span(out)))
 
 
-def partition_value_spellings(value: String, arrow_type: ArrowType) -> List[String]:
-    """The on-disk directory spellings a READER must try for `value`, in
-    order: `encode_partition_value(value)` (komira's spelling) first, then
-    Spark's `escapePathName` spelling when it differs. One element when they
-    coincide (all-alphanumeric values, the NULL sentinel), else two.
+def partition_value_spelling_for(
+    value: String, arrow_type: ArrowType, writer: Int
+) -> String:
+    """The directory spelling `writer` (a `HIVE_WRITER_*` constant) gives
+    `value`. The NULL value (the empty string) is `__HIVE_DEFAULT_PARTITION__`
+    for every writer. `HIVE_WRITER_KOMIRA` is `encode_partition_value`."""
+    if writer == HIVE_WRITER_KOMIRA or value.byte_length() == 0:
+        return encode_partition_value(value, arrow_type)
+    return _escape_for_writer(value, writer)
 
-    The NULL value (the empty string) is `__HIVE_DEFAULT_PARTITION__` in
-    both writers, so it has one spelling. Writers keep using
-    `encode_partition_value`; this function is for building list prefixes.
+
+def partition_value_spellings(value: String, arrow_type: ArrowType) -> List[String]:
+    """The on-disk directory spellings a READER must try for `value`: one per
+    writer in `HIVE_WRITER_*` order (komira, Spark, DuckDB/pyarrow, Windows
+    Spark), each kept only if no earlier writer produced the same bytes. So
+    1 to 4 elements, komira's spelling always first; values made of ASCII
+    letters, digits and `- _ . ~`, and NULL, have exactly one.
+
+    Writers keep using `encode_partition_value`; this function is for
+    building list prefixes.
     """
     var out = List[String]()
-    var komira = encode_partition_value(value, arrow_type)
-    out.append(komira)
-    if value.byte_length() == 0:
-        return out^
-    var spark = _spark_escape_path_name(value)
-    if spark != komira:
-        out.append(spark^)
+    for w in range(HIVE_WRITER_COUNT):
+        var s = partition_value_spelling_for(value, arrow_type, w)
+        var seen = False
+        for i in range(len(out)):
+            if out[i] == s:
+                seen = True
+                break
+        if not seen:
+            out.append(s^)
     return out^
 
 

@@ -37,6 +37,49 @@ fn map_scalar_write_suffix(t: &IrType) -> &'static str {
     }
 }
 
+/// The `WireEncoder` comptime constant a generated `encode` reads to decide
+/// whether an implicit-presence field at its default is written. The proto3
+/// JSON mapping omits such a field, so `JsonEncoder` sets it; `PbEncoder`
+/// does not, so the binary bytes do not change.
+const OMITS_IMPLICIT_DEFAULTS: &str = "OMITS_IMPLICIT_DEFAULTS";
+
+/// The Mojo condition that `value_expr`, a plain (implicit-presence) proto3
+/// scalar or enum field, is off its default: the test the proto3 JSON
+/// mapping omits a field by, as `emit_rest`'s query parameters do. A float
+/// compares its bits rather than its value, so `-0.0` (whose sign JSON
+/// keeps) is written and only `+0.0` is the default. `None` for a type with
+/// no implicit presence (a message).
+fn implicit_presence_test(ty: &IrType, value_expr: &str) -> Option<String> {
+    use ScalarKind as K;
+    match ty {
+        IrType::Scalar(s) => Some(match s {
+            K::String => format!("{value_expr}.byte_length() > 0"),
+            K::Bytes => format!("len({value_expr}) > 0"),
+            K::Bool => value_expr.to_string(),
+            K::Float => format!("bitcast[DType.uint32]({value_expr}) != 0"),
+            K::Double => format!("bitcast[DType.uint64]({value_expr}) != 0"),
+            K::Int64 | K::Uint64 | K::Int32 | K::Uint32 | K::Sint64 | K::Sint32
+            | K::Fixed64 | K::Fixed32 | K::Sfixed64 | K::Sfixed32 => {
+                format!("{value_expr} != 0")
+            }
+        }),
+        IrType::Enum(_) => Some(format!("{value_expr}.number() != 0")),
+        IrType::Message(_) | IrType::Map(_, _) | IrType::List(_) => None,
+    }
+}
+
+/// Whether a generated `encode` in `file` compares a float's bits (a plain
+/// `float` or `double` field), which takes `bitcast` from `std.memory`.
+fn encode_tests_float_bits(file: &IrFile) -> bool {
+    file.messages.iter().filter(|m| !m.is_map_entry).any(|m| {
+        m.fields.iter().any(|f| {
+            f.oneof_index.is_none()
+                && f.label == Label::Single
+                && matches!(f.ty, IrType::Scalar(ScalarKind::Float | ScalarKind::Double))
+        })
+    })
+}
+
 /// The `read_into_<suffix>_<suffix>_map` component suffix for a map key/value.
 fn map_scalar_read_suffix(t: &IrType) -> &'static str {
     // read/write suffixes coincide for every scalar kind.
@@ -269,6 +312,9 @@ impl<'a> Emitter<'a> {
             self.line("    WireEncoder,");
             self.line("    WireDecoder,");
             self.line(")");
+        }
+        if encode_tests_float_bits(self.file) {
+            self.line("from std.memory import bitcast");
         }
         if !self.file.services.is_empty() {
             if self.protocol == ProtocolMode::Rest {
@@ -758,7 +804,8 @@ impl<'a> Emitter<'a> {
                     ));
                     self.pop_indent();
                 } else {
-                    self.line(&self.write_call(s, field, value_expr));
+                    let write = self.write_call(s, field, value_expr);
+                    self.emit_implicit_presence_write(field, value_expr, &write);
                 }
             }
             IrType::Enum(r) => {
@@ -785,10 +832,11 @@ impl<'a> Emitter<'a> {
                     ));
                     self.pop_indent();
                 } else {
-                    self.line(&format!(
+                    let write = format!(
                         "enc.write_enum_field[{}]({}, \"{}\", {})",
                         en, field.proto_field_number, field.json_name, value_expr
-                    ));
+                    );
+                    self.emit_implicit_presence_write(field, value_expr, &write);
                 }
             }
             IrType::Message(r) => {
@@ -876,6 +924,23 @@ impl<'a> Emitter<'a> {
             }
             IrType::List(_) => unreachable!("{}", crate::ir::LIST_IS_AWS_FRONT_END_ONLY),
         }
+    }
+
+    /// Emit `write`, the `enc.write_*` call of a plain (implicit-presence)
+    /// scalar or enum field, behind its default test: an encoder whose
+    /// `OMITS_IMPLICIT_DEFAULTS` holds (proto3 JSON) skips the field at its
+    /// default, as the JSON mapping omits it; any other (binary) writes it.
+    /// The test is a comptime constant `or` a runtime one, so each
+    /// monomorphized `encode` keeps only its own half.
+    fn emit_implicit_presence_write(&mut self, field: &IrField, value_expr: &str, write: &str) {
+        let Some(test) = implicit_presence_test(&field.ty, value_expr) else {
+            self.line(write);
+            return;
+        };
+        self.line(&format!("if not E.{OMITS_IMPLICIT_DEFAULTS} or {test}:"));
+        self.push_indent();
+        self.line(write);
+        self.pop_indent();
     }
 
     /// Emit the `enc.write_*` call for one oneof arm, guarded by the caller's
@@ -2007,6 +2072,10 @@ pub fn emit_layout_probe_with_names(
     );
     (LAYOUT_PROBE_FILE.to_string(), source)
 }
+
+#[cfg(test)]
+#[path = "emit_presence_tests.rs"]
+mod presence_tests;
 
 #[cfg(test)]
 mod oneof_recursion_box_tests {
