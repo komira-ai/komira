@@ -5,7 +5,7 @@
 The job report wire (`komira.job_report.v1`), as protobuf messages and the
 Mojo structs generated from them. A supervised job's sender reports the job's
 phase while it runs and once more when it ends; the receiver answers each
-report with CONTINUE or CANCEL. A receiver depends on this package alone.
+report with CONTINUE or CANCEL. A receiver depends on this package and its codec, `komira_proto_codec`, not on the supervisor that produces the reports.
 
 - `JobPhase`: `JOB_PHASE_UNSPECIFIED` (never sent), `JOB_PHASE_RUNNING`,
   `JOB_PHASE_COMPLETED`, `JOB_PHASE_FAILED`, `JOB_PHASE_CANCELLED`.
