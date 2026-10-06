@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 10
+#   generator    : aws-client-gen version 11
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -742,9 +742,9 @@ def parse_get_log_events_response(resp: AwsResponse) raises -> CloudWatchLogsGet
 
 
 # ===========================================================================
-# §5 — CloudWatchLogsCloudWatchLogsClient.
+# §5 — CloudWatchLogsClient.
 # ===========================================================================
-struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
+struct CloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
     """The generated Amazon CloudWatch Logs client, parametric over the HTTP connector `C`
         and the credential source `T`.
 
@@ -913,7 +913,7 @@ def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:
     var code = info.code.copy()
     var msg = info.message.copy()
     return Error(
-        String("CloudWatchLogsCloudWatchLogs.")
+        String("CloudWatchLogs.")
         + op
         + String(" failed: HTTP ")
         + String(res.status)

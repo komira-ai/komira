@@ -112,7 +112,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "10";
+pub const AWS_GENERATOR_VERSION: &str = "11";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -2035,11 +2035,17 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_client(&mut self) -> Result<(), String> {
-        let (svc_name, methods) = {
-            let svc = &self.lowering.model.files[0].services[0];
-            (svc.name.clone(), svc.methods.clone())
-        };
-        let cls = format!("{}Client", self.ty_name(&svc_name));
+        let methods = self.lowering.model.files[0].services[0].methods.clone();
+        // The prefix alone names the service: it is the serviceId, which the
+        // IR service name repeats, so `ty_name` of that name would carry it
+        // twice.
+        let cls = format!("{}Client", self.prefix);
+        if self.structs.contains(&cls) {
+            return Err(format!(
+                "emit_aws: REFUSED client-name: the model has a shape named `Client`, \
+                 emitted as `{cls}`, which is the client's own name"
+            ));
+        }
         self.parameterised.push(cls.clone());
         let p = self.prefix.to_uppercase();
 
@@ -2369,7 +2375,7 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("var msg = {msg_expr}"));
         self.line("return Error(");
         self.push();
-        self.line(&format!("String(\"{}.\")", self.ty_name(&svc_name)));
+        self.line(&format!("String(\"{}.\")", self.prefix));
         self.line("+ op");
         self.line("+ String(\" failed: HTTP \")");
         self.line("+ String(res.status)");
@@ -2713,6 +2719,63 @@ mod tests {
         assert!(!src.contains("List[String]"), "{src}");
         assert!(src.contains("aws_ts_to_json("), "{src}");
         assert!(src.contains("aws_ts_from_json("), "{src}");
+    }
+
+    #[test]
+    fn the_service_prefix_names_the_client_and_its_errors_once() {
+        // The type prefix is the serviceId, and so is the IR service name:
+        // the client is `<prefix>Client` and a failed call is raised as
+        // `<prefix>.<Op> failed`, never with the prefix twice.
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(
+            src.contains("\nstruct TinyClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):\n"),
+            "{src}"
+        );
+        assert!(src.contains("        String(\"Tiny.\")\n        + op\n"), "{src}");
+        assert!(!src.contains("TinyTiny"), "{src}");
+    }
+
+    #[test]
+    fn a_shape_named_client_is_refused_in_client_mode() {
+        // With the prefix applied once, a shape named `Client` would be
+        // emitted under the client's own name.
+        let model = crate::json::parse(
+            r#"{"version": "2.0",
+                "metadata": {"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"},
+                "operations": {"Op": {"name": "Op",
+                    "http": {"method": "POST", "requestUri": "/"},
+                    "input": {"shape": "In"}}},
+                "shapes": {"In": {"type": "structure",
+                                  "members": {"C": {"shape": "Client"}}},
+                           "Client": {"type": "structure",
+                                      "members": {"Id": {"shape": "Str"}}},
+                           "Str": {"type": "string"}}}"#,
+        )
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let emit = |pure_only| {
+            let options = AwsEmitOptions {
+                omit_preamble: true,
+                pure_only,
+                ..AwsEmitOptions::default()
+            };
+            emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, None)
+        };
+        let e = emit(false).err().expect("refused");
+        assert!(e.contains("REFUSED client-name"), "{e}");
+        assert!(e.contains("`TinyClient`"), "{e}");
+        // A pure module has no client, and so no collision.
+        assert!(emit(true).is_ok());
     }
 
     #[test]

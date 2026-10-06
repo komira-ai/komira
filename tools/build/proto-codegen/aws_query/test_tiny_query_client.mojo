@@ -1,4 +1,4 @@
-# The generated awsQuery client (`TinyQueryTinyQueryClient`) end to end over
+# The generated awsQuery client (`TinyQueryClient`) end to end over
 # komira_http_client and komira_http_core's ScriptedConnector (no socket): a
 # SendThing answered with its <SendThingResult>, and one answered with an
 # <ErrorResponse>, raised under the error's code and message (a 400 naming
@@ -11,7 +11,7 @@
 from komira_aws_tiny_query_client.komira_aws_tiny_query_client import (
     TinyQueryPingRequest,
     TinyQuerySendThingRequest,
-    TinyQueryTinyQueryClient,
+    TinyQueryClient,
 )
 from komira_aws_core import (
     AWS_ECHO_CODE,
@@ -76,8 +76,8 @@ def _mk_missing() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> TinyQueryTinyQueryClient[C, StaticCredsSource]:
-    return TinyQueryTinyQueryClient[C, StaticCredsSource](
+) raises -> TinyQueryClient[C, StaticCredsSource]:
+    return TinyQueryClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(
@@ -104,7 +104,7 @@ def test_an_error_is_raised_under_its_code() raises:
     var client = _client(_mk_missing)
     with assert_raises(
         contains=(
-            "TinyQueryTinyQuery.SendThing failed: HTTP 400 Tiny.ThingNotFound"
+            "TinyQuery.SendThing failed: HTTP 400 Tiny.ThingNotFound"
             " no such thing"
         )
     ):

@@ -13,7 +13,7 @@
 #   model sha256 : 75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee
 #   operations   : GetThing, PutThing, SetConfig
 #   shapes       : 8 messages, 0 enums
-#   generator    : aws-client-gen version 10
+#   generator    : aws-client-gen version 11
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -934,9 +934,9 @@ def parse_set_config_response(resp: AwsResponse) raises -> TinyRestSetConfigResp
 
 
 # ===========================================================================
-# §5 — TinyRestTinyRestClient.
+# §5 — TinyRestClient.
 # ===========================================================================
-struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
+struct TinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
     """The generated Tiny REST Example Service client, parametric over the HTTP connector `C`
         and the credential source `T`.
 
@@ -1130,7 +1130,7 @@ def _komira_aws_tiny_rest_error(op: String, res: HttpResult) -> Error:
     var code = info.code.copy()
     var msg = info.message.copy()
     return Error(
-        String("TinyRestTinyRest.")
+        String("TinyRest.")
         + op
         + String(" failed: HTTP ")
         + String(res.status)

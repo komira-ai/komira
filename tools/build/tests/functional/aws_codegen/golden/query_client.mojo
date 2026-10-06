@@ -13,7 +13,7 @@
 #   model sha256 : 485983f34c7f0a2e52fd58adde6695c3b501269648b9c19e44f5113b04b14cf0
 #   operations   : Ping, SendThing
 #   shapes       : 7 messages, 0 enums
-#   generator    : aws-client-gen version 10
+#   generator    : aws-client-gen version 11
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -763,9 +763,9 @@ def parse_send_thing_response(resp: AwsResponse) raises -> TinyQuerySendThingRes
 
 
 # ===========================================================================
-# §5 — TinyQueryTinyQueryClient.
+# §5 — TinyQueryClient.
 # ===========================================================================
-struct TinyQueryTinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
+struct TinyQueryClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):
     """The generated Tiny awsQuery Example client, parametric over the HTTP connector `C`
         and the credential source `T`.
 
@@ -945,7 +945,7 @@ def _komira_aws_tiny_query_error(op: String, res: HttpResult) -> Error:
     var code = info.code.copy()
     var msg = info.message.copy()
     return Error(
-        String("TinyQueryTinyQuery.")
+        String("TinyQuery.")
         + op
         + String(" failed: HTTP ")
         + String(res.status)

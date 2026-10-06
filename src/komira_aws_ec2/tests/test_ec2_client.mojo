@@ -1,4 +1,4 @@
-# The generated EC2 client (`EC2EC2Client`) end to end over
+# The generated EC2 client (`EC2Client`) end to end over
 # komira_http_client and komira_http_core's ScriptedConnector (no socket),
 # sent to a custom endpoint: a DescribeInstances answered with its
 # reservations, and a TerminateInstances answered with ec2's
@@ -25,7 +25,7 @@
 from komira_aws_ec2.komira_aws_ec2 import (
     EC2DescribeInstancesRequest,
     EC2DescribeVpcsRequest,
-    EC2EC2Client,
+    EC2Client,
     EC2EndpointConfig,
     EC2RunInstancesRequest,
     EC2TerminateInstancesRequest,
@@ -101,10 +101,10 @@ def _mk_missing() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> EC2EC2Client[C, StaticCredsSource]:
+) raises -> EC2Client[C, StaticCredsSource]:
     var config = EC2EndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return EC2EC2Client[C, StaticCredsSource](
+    return EC2Client[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(
@@ -134,7 +134,7 @@ def test_a_missing_instance_is_raised_under_its_code() raises:
     var ids: List[String] = ["i-0fedcba9876543210"]
     with assert_raises(
         contains=(
-            "EC2EC2.TerminateInstances failed: HTTP 400 InvalidInstanceID.NotFound"
+            "EC2.TerminateInstances failed: HTTP 400 InvalidInstanceID.NotFound"
             " The instance ID 'i-0fedcba9876543210' does not exist"
         )
     ):
@@ -234,7 +234,7 @@ def _loop() raises -> RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng]:
 
 
 def _launch(
-    mut client: EC2EC2Client[ScriptedConnector, StaticCredsSource],
+    mut client: EC2Client[ScriptedConnector, StaticCredsSource],
     input: EC2RunInstancesRequest,
     mut transport: Script,
 ) raises:

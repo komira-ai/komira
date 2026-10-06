@@ -13,7 +13,7 @@
 #   model sha256 : 485983f34c7f0a2e52fd58adde6695c3b501269648b9c19e44f5113b04b14cf0
 #   operations   : Ping, SendThing
 #   shapes       : 7 messages, 0 enums
-#   generator    : aws-client-gen version 10
+#   generator    : aws-client-gen version 11
 #   mode         : pure (no transport)
 #
 # HAND-OVERRIDE SEAM: no overrides are declared for this service.
