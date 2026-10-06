@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_workflow_subset.mojo -- the YAML subset the
+# src/kci_workflow_check/tests/test_workflow_subset.mojo -- the YAML subset the
 #   workflow reader accepts, held by a table: every spelling that has been
 #   found to read one way to kci and another way to GitHub, each of which
 #   must end in "cannot tell" (the reader refuses it) or in the rule's own
@@ -8,7 +8,7 @@
 
 from std.testing import TestSuite, assert_equal
 
-from kci_ci_check import check_workflow
+from kci_workflow_check import check_workflow
 from kci_release_machine import parse_machine_file
 
 

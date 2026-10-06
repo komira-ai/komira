@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/pull_request.mojo -- rule R6 (rules.mojo's header): what
+# src/kci_workflow_check/pull_request.mojo -- rule R6 (rules.mojo's header): what
 #   runs on a pull request, in the one workflow that also runs the release.
 # =============================================================================
 #

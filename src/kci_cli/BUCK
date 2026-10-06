@@ -5,7 +5,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # resolves stage S and runs each of its steps in order through kci_build
 # (BUILD) or kci_publish (PUBLISH). Under GitHub Actions it first holds the
 # workflow it runs under (read at its commit) to the machine file
-# (kci_ci_check, library code: a mismatch is exit 3, unreadable exit 5), then
+# (kci_workflow_check, library code: a mismatch is exit 3, unreadable exit 5), then
 # the ref it runs on (a stage without break_glass runs only on main; a
 # break-glass run needs a reason) and the release set it was handed
 # (--release-set-hash). It
@@ -31,7 +31,7 @@ mojo_library(
     deps = [
         "//src/kci_artifact:kci_artifact",
         "//src/kci_build:kci_build_lib",
-        "//src/kci_ci_check:kci_ci_check",
+        "//src/kci_workflow_check:kci_workflow_check",
         "//src/kci_api:kci_api",
         "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_publish:kci_publish_lib",

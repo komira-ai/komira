@@ -8,7 +8,7 @@
 # .github/workflows/pr.yml, in none. kci holds the workflow it runs under to this
 # file at start-up under GitHub Actions (a run of the pr stage: pr.yml; any other
 # stage: kci.yml), and the welded test
-# src/kci_ci_check/tests/test_repo_kci_yml.mojo does the same on every build, so
+# src/kci_workflow_check/tests/test_repo_kci_yml.mojo does the same on every build, so
 # a drift fails `./buck2 build //...`. This file owns the stages: edit both
 # together.
 #

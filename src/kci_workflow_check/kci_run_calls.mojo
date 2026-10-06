@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/kci_run_calls.mojo -- every `kci run` a `run:` script
+# src/kci_workflow_check/kci_run_calls.mojo -- every `kci run` a `run:` script
 #   invokes, and the flags the workflow check reads from it.
 # =============================================================================
 #

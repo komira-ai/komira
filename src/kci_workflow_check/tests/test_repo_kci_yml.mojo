@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_repo_kci_yml.mojo -- the repository's own
+# src/kci_workflow_check/tests/test_repo_kci_yml.mojo -- the repository's own
 #   two workflows, .github/workflows/kci.yml (the release) and pr.yml (the pull
 #   request's check), each held to the machine file, release/machine.textproto,
 #   by the same check `kci run` makes at start-up (`check_running_workflow`,
@@ -37,7 +37,7 @@
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_ci_check import (
+from kci_workflow_check import (
     FARM_CONNECT_ACTION,
     NODE_SCALAR,
     KciRunCall,
