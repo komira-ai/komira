@@ -87,16 +87,17 @@ def codec_id_for_content_type(ct: String) -> UInt8:
 
 
 def _strip_content_type_params(ct: String) -> String:
-    """Return the base content-type (before any `; param=value` suffix)."""
-    var n = ct.byte_length()
-    for i in range(n):
-        var b = ord(ct[byte=i])
-        if b == ord(";"):
-            # Build substring [0..i)
-            var out = List[UInt8](capacity=i)
-            for j in range(i):
-                out.append(UInt8(ord(ct[byte=j])))
-            return String(unsafe_from_utf8=Span(out))
+    """Return the base content-type (before any `; param=value` suffix).
+
+    `ct` is the peer's header value and may hold any byte, so it is read
+    through `as_bytes()`: indexing `ct[byte=i]` asserts on a UTF-8
+    continuation byte and aborts the process. The cut is at an ASCII `;`, so
+    the prefix of a valid UTF-8 string is valid UTF-8.
+    """
+    var bytes = ct.as_bytes()
+    for i in range(len(bytes)):
+        if bytes[i] == UInt8(ord(";")):
+            return String(StringSlice(unsafe_from_utf8=bytes[:i]))
     return ct
 
 

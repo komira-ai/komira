@@ -1,0 +1,4 @@
+# path	line	status	operator	description
+src/alpha/a.mojo	2	survived	negate	x > 0 -> x <= 0
+src/alpha/a.mojo	5	killed	negate	x < -5 -> x >= -5
+src/beta/c.mojo	1	timeout	delete	drop the return

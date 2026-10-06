@@ -113,15 +113,16 @@ def _format_trailer_block(trailers: GrpcTrailers) -> List[UInt8]:
     grpc-message is omitted when the message string is empty (gRPC spec:
     grpc-message is only required for non-OK responses).
     """
+    # Copied as bytes: the lines are ASCII today (the message is
+    # percent-encoded), but indexing `line[byte=i]` would abort the process on
+    # the first UTF-8 continuation byte if that ever changed.
     var out = List[UInt8]()
     var status_line = String("grpc-status: ") + String(Int(trailers.status_code)) + "\r\n"
-    for i in range(status_line.byte_length()):
-        out.append(UInt8(ord(status_line[byte=i])))
+    out.extend(status_line.as_bytes())
     if trailers.message.byte_length() > 0:
         var encoded = grpc_percent_encode_message(trailers.message)
         var msg_line = String("grpc-message: ") + encoded + "\r\n"
-        for i in range(msg_line.byte_length()):
-            out.append(UInt8(ord(msg_line[byte=i])))
+        out.extend(msg_line.as_bytes())
     return out^
 
 
@@ -288,10 +289,11 @@ def _ascii_lower_span(s: Span[UInt8, _]) -> List[UInt8]:
 
 def _span_equals_str(s: Span[UInt8, _], ref needle: String) -> Bool:
     """Byte-compare `s` against `needle` (ASCII)."""
-    if len(s) != needle.byte_length():
+    var nb = needle.as_bytes()
+    if len(s) != len(nb):
         return False
     for i in range(len(s)):
-        if s[i] != UInt8(ord(needle[byte=i])):
+        if s[i] != nb[i]:
             return False
     return True
 

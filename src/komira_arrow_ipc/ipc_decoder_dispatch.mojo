@@ -143,6 +143,39 @@ def _validate_rb_buffers_in_bounds(
             )
 
 
+def _validate_mmap_frame_in_region(
+    abs_frame_offset: Int,
+    frame_len: Int,
+    region_len: Int,
+    context: StringLiteral,
+) raises:
+    """Raise unless the frame `[abs_frame_offset, abs_frame_offset +
+    frame_len)` lies inside the mapped region `[0, region_len)`.
+
+    The mmap decoder borrows each column buffer from the region at
+    `abs_frame_offset + body_pos + Buffer.offset`. With every Buffer inside
+    the frame's body (`_validate_rb_buffers_in_bounds`) and the frame inside
+    the region (this check), every borrowed byte is inside the mapping. The
+    caller-supplied offset is compared without forming `abs_frame_offset +
+    frame_len`, which can wrap Int.
+    """
+    if (
+        abs_frame_offset < 0
+        or abs_frame_offset > region_len
+        or frame_len > region_len - abs_frame_offset
+    ):
+        raise Error(
+            String(context)
+            + ": frame (offset="
+            + String(abs_frame_offset)
+            + ", length="
+            + String(frame_len)
+            + ") lies outside the mapped region (length="
+            + String(region_len)
+            + ")"
+        )
+
+
 # =============================================================================
 # ColumnTypeSpec — recursive schema spec for nested decode
 # =============================================================================
@@ -2116,6 +2149,12 @@ def _decode_record_batch_message_nested_impl[
         )
 
     var rb = read_record_batch(reader, msg.header_table_pos)
+    # ROBUSTNESS: the same Buffer-descriptor gate as the flat decoders, before
+    # any column reads the body (`view_range_ro` only debug_asserts).
+    _validate_rb_buffers_in_bounds(
+        rb.buffers, f.body_pos, working_frame.len(),
+        "decode_record_batch_message_nested",
+    )
     var n_cols = len(schema_specs)
 
     var columns = Slab[Column[HeapRegion]]()
@@ -3177,6 +3216,13 @@ def decode_record_batch_message_nested_zerocopy[
         )
 
     var rb = read_record_batch(reader, msg.header_table_pos)
+    # ROBUSTNESS: the returned columns borrow `frame`'s bytes at
+    # `body_pos + Buffer.offset`; refuse any Buffer outside the body before a
+    # single borrow is made (same gate as `decode_record_batch_zerocopy`).
+    _validate_rb_buffers_in_bounds(
+        rb.buffers, f.body_pos, frame.len(),
+        "decode_record_batch_message_nested_zerocopy",
+    )
     var n_cols = len(schema_specs)
 
     var columns = Slab[Column[HeapRegion]]()
@@ -3705,6 +3751,9 @@ def decode_record_batch_message_mmap(
         - DICTIONARY columns: dict-aware decode requires the
           IpcDictCache (SDK layer); caller must use the copy path or
           the dict-aware dispatch.
+        - A frame that does not lie inside `region` at
+          `abs_frame_offset_in_mmap`, or a Buffer descriptor outside the
+          message body: refused before any buffer is borrowed.
         - Schema mismatches; standard validation errors.
     """
     trace_alloc["arrow_ipc.decode_record_batch_mmap"](0)
@@ -3768,6 +3817,21 @@ def decode_record_batch_message_mmap(
             " (got " + String(len(rb.buffers)) + ", expected "
             + String(expected_buffer_count) + ")"
         )
+
+    # 4b. ROBUSTNESS: every column buffer below is borrowed from `region` at
+    #    `abs_frame_offset_in_mmap + body_pos + Buffer.offset`, and nothing is
+    #    read until a consumer touches it, so an unchecked descriptor or frame
+    #    offset yields columns that read outside the mapping. Bound the frame
+    #    inside the mapping, then every Buffer inside the frame's body (the
+    #    copy paths' validator and text), BEFORE the first borrow.
+    _validate_mmap_frame_in_region(
+        abs_frame_offset_in_mmap, rb_frame.len(), region[].len(),
+        "decode_record_batch_message_mmap",
+    )
+    _validate_rb_buffers_in_bounds(
+        rb.buffers, f.body_pos, rb_frame.len(),
+        "decode_record_batch_message_mmap",
+    )
 
     # 5. Per-column dispatch. Each builder constructs a Column whose
     #    buffers are borrow_from_mmap'd into `region` at the absolute
@@ -3862,20 +3926,17 @@ def decode_record_batch_message_mmap(
             continue
 
         # DICTIONARY: requires dict-aware decode (SDK-layer dispatch).
-        if t == ArrowType.DICTIONARY:
-            raise Error(
-                "decode_record_batch_message_mmap: DICTIONARY columns"
-                + " require dict-aware decode. Caller should use the"
-                + " copy-on-read dict-aware dispatch instead of the"
-                + " mmap path for files containing dict-encoded columns."
-            )
-
+        # The count pass in step 4 is the type guard for this loop:
+        # _node_count_for and _buffer_count_for raise for every type
+        # outside NULL, the fixed-width types, BOOL, the four var-len
+        # types and DICTIONARY. The arms above take all of those but
+        # DICTIONARY, so DICTIONARY is the only type that reaches here.
+        # A type admitted by the count pass needs its own arm above.
         raise Error(
-            "decode_record_batch_message_mmap: ArrowType "
-            + String(Int(t.type_id))
-            + " not supported in the mmap path (primitives + temporal +"
-            + " decimal + bool + var-len are supported; nested types are"
-            + " not)"
+            "decode_record_batch_message_mmap: DICTIONARY columns"
+            + " require dict-aware decode. Caller should use the"
+            + " copy-on-read dict-aware dispatch instead of the"
+            + " mmap path for files containing dict-encoded columns."
         )
 
     # rb_frame is dropped here; its mmap keepalive is independent of the
