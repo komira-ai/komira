@@ -1,4 +1,0 @@
-mojo_library(
-    name = "komira_c",
-    srcs = ["c.mojo"],
-)

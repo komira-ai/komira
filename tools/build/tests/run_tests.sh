@@ -292,13 +292,15 @@
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
-#  39. Test welding (tools/build/lint/test_weld.bzl): //:test_weld (every
-#      package under src/) and tests//functional/test_weld:ok (a planted tree
-#      with its ledger) build; each target of tests//negative/test_weld fails
-#      naming its one planted finding: an unwelded test file, a package with
-#      no welded test, a ledger row for a welded test or package (the ledger
-#      only shrinks), a row naming nothing, a row with no reason, and a root
-#      with no package.
+#  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
+#      its BXL script: //:test_weld (every package under src/) and
+#      tests//functional/test_weld:ok (a planted tree with its ledger) pass;
+#      each target of tests//negative/test_weld fails
+#      naming its one planted finding: an unwelded test file (named only in a
+#      comment of a test_srcs list), a package with no welded test, a ledger
+#      row for a welded test or package (the ledger only shrinks; one test is
+#      welded only by a computed list), a row naming nothing, a row with no
+#      reason, and a root with no package.
 set -uo pipefail
 
 umbrella=1
@@ -1083,18 +1085,50 @@ expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.m
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
 
 # 39
-expect_green test_weld //:test_weld tests//functional/test_weld:ok
+# A test_weld target only declares its lint; its BXL script checks it
+# (tools/build/lint/test_weld.bzl says why).
+test_weld_check() { # name, lint target: the check's exit status, its log in $LOG
+    "$BUCK2" bxl //tools/build/lint/test_weld.bxl:check -- --lint "$2" > "$LOG/$1.log" 2>&1
+}
+for lint in //:test_weld tests//functional/test_weld:ok tests//negative/test_weld/real:ok; do
+    name="test_weld_green_$(printf '%s' "${lint#*//}" | tr '/:' '__')"
+    if test_weld_check "$name" "$lint"; then pass "$name"; else fail "$name: $lint (see $LOG/$name.log)"; fi
+done
+tw_tree=tests//functional/test_weld/src
 for want in \
-    "unwelded|tests//negative/test_weld:unwelded[files]/src/komira_a/tests/test_dead.mojo: a test file no BUCK file names" \
-    "untested|tests//negative/test_weld:untested[files]/src/komira_b: 1 .mojo source(s) and no welded test" \
+    "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \
+    "untested|$tw_tree/komira_b: 1 .mojo source(s) and no welded test" \
     "shrink_package|src/komira_c: the package welds 1 test(s) now; delete the row (the ledger only shrinks)" \
     "shrink_file|src/komira_c/wire/tests/test_wire.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
+    "shrink_computed|src/komira_a/tests/test_one.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
     "nothing|src/komira_a/tests/test_gone.mojo: names neither a test file nor a package with a .mojo source" \
+    "nothing|src/komira_gen: names neither a test file nor a package with a .mojo source" \
     "malformed|ledger_malformed.tsv:2: a row is <path><TAB><reason>, with a reason" \
     "empty|test_weld: checked nothing (no package under nosuch)"; do
-    expect_red "test_weld_${want%%|*}" "${want#*|}" "tests//negative/test_weld:${want%%|*}"
+    t=${want%%|*} text=${want#*|} name="test_weld_${want%%|*}"
+    if test_weld_check "$name" "tests//negative/test_weld:$t"; then
+        fail "$name: tests//negative/test_weld:$t passed, but it must fail"
+    elif grep -qF -- "$text" "$LOG/$name.log"; then
+        pass "$name"
+    else
+        fail "$name: failed without '$text' (see $LOG/$name.log)"
+    fi
 done
-expect_red test_weld_nothing_package 'src/komira_gen: names neither a test file nor a package with a .mojo source' tests//negative/test_weld:nothing
+# The real rules (negative/test_weld/real/BUCK): with no ledger row, exactly
+# the three unwelded files are named, and none of the welded ones.
+name=test_weld_real_red
+tw_real=tests//negative/test_weld/real/src
+if test_weld_check "$name" tests//negative/test_weld/real:red; then
+    fail "$name: tests//negative/test_weld/real:red passed, but it must fail"
+else
+    tw_named=$(grep -o "^$tw_real/[^:]*: a test file no target welds" "$LOG/$name.log" | sed 's/:.*//' | sort -u | tr '\n' ' ')
+    tw_want="$tw_real/komira_real/tests/test_commented.mojo $tw_real/komira_real/tests/test_imported.mojo $tw_real/komira_real/tests/test_shared.mojo "
+    if [ "$tw_named" = "$tw_want" ]; then
+        pass "$name"
+    else
+        fail "$name: named '$tw_named', want '$tw_want' (see $LOG/$name.log)"
+    fi
+fi
 
 # 37
 pt_rc=0

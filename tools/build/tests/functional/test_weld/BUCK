@@ -1,32 +1,44 @@
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
-load(":fixture.bzl", "TEST_WELD_LEDGER", "TEST_WELD_TREE")
+load(":fixture.bzl", "TEST_WELD_FILES", "TEST_WELD_LEDGER", "TEST_WELD_ROOT", "TEST_WELD_TREE", "TEST_WELD_WELDS", "welded_fixture")
 
 # Test 39 (test_weld), the half that must build: the planted tree of
 # fixture.bzl with a ledger row for each exception. negative/test_weld
-# plants one defect each in the same tree.
+# plants one defect each in the same tree. Exported by reference, so a
+# file's path is its own wherever it is named.
 [
     export_file(
         name = f,
+        mode = "reference",
         visibility = ["tests//negative/test_weld:"],
     )
-    for f in [
-        "a.BUCK.txt",
-        "a_helper.txt",
-        "a_test_dead.txt",
-        "a_test_one.txt",
-        "a_test_two.txt",
-        "b.BUCK.txt",
-        "c.BUCK.txt",
-        "c_test_wire.txt",
-        "c_wire.BUCK.txt",
-        "gen.BUCK.txt",
-        "known_untested.tsv",
-        "src.txt",
-    ]
+    for f in TEST_WELD_TREE + ["known_untested.tsv"]
 ]
+
+# What welds the tree's tests, read from the graph (TEST_WELD_WELDS). komira_a's
+# list is computed, as a BUCK file may compute one: no entry is spelt out, so
+# only the evaluated list can say test_one.mojo and sub/test_two.mojo are
+# welded. test_dead.mojo is named only in a comment, so it is not.
+welded_fixture(
+    name = "komira_a",
+    test_srcs = ["src/komira_a/tests/{}.mojo".format(t) for t in ("test_one", "sub/test_two")] + [
+        # "src/komira_a/tests/test_dead.mojo",
+    ],
+)
+
+welded_fixture(
+    name = "komira_b",
+)
+
+# komira_c's test, welded by a target of its own (as a mojo_test would).
+welded_fixture(
+    name = "komira_c_wire",
+    test_srcs = ["src/komira_c/wire/tests/test_wire.mojo"],
+)
 
 test_weld(
     name = "ok",
-    files = TEST_WELD_TREE,
+    files = TEST_WELD_FILES,
     known_untested = TEST_WELD_LEDGER,
+    root = TEST_WELD_ROOT,
+    welds = TEST_WELD_WELDS,
 )
