@@ -1,7 +1,8 @@
 # =============================================================================
 # komira_search_catalog/generation.mojo
-#   The durable records that keep an index's generation from going down when
-#   the catalog deletes chunks and drained shards.
+#   The durable records that keep an index's generation moving on every
+#   catalog change, and from going down when the catalog deletes chunks and
+#   drained shards.
 # =============================================================================
 #
 # A query planner folds the catalog generation into its plan-cache key, and
@@ -9,15 +10,26 @@
 # that comes back can be answered from a plan cached for a different split
 # set.
 #
-# The generation of one lineage counts the chunks it has ever committed: its
-# highest chunk_seq + 1. A fresh reader finds that by LISTing the manifest,
-# so it only sees chunks that still exist, and reaping deletes chunks. Two
-# durable records keep what a deletion would otherwise erase:
+# The generation of one lineage is
+#
+#     max(listed head + 1, floor) + bumps
+#
+# The first term is the number of chunks the lineage has ever committed (its
+# highest chunk_seq + 1), so every publish moves it. The second counts the
+# catalog changes that commit no chunk: retiring a split and reaping its
+# chunk. The value is not a count of anything a caller can use; it changes
+# on every catalog change and never goes down, and nothing else is promised.
+#
+# A fresh reader finds the head by LISTing the manifest, so it only sees
+# chunks that still exist, and reaping deletes chunks. Durable records keep
+# what a deletion would otherwise erase, and count what adds no chunk:
 #
 #   * `<lineage>/_GENERATION_FLOOR`. Before `SearchMetastore.reap_chunk`
 #     reaps chunk `s` (which lets a later prefix advance delete it), it
-#     raises the floor to at least `s + 1`. The lineage's generation is
-#     max(listed head + 1, floor).
+#     raises the floor to at least `s + 1`.
+#   * `<lineage>/_GENERATION_BUMPS`, the `bumps` term: a counter that only
+#     grows (see "Changes that commit no chunk" below). It is never deleted,
+#     not even when `reap_drained_shards` reaps the shard.
 #   * `<index>/meta/_RETIRED_SHARDS`. Before `reap_drained_shards` deletes a
 #     writer shard's objects, it records that shard's final generation here.
 #     Readers of the live split set skip a shard recorded here. The index
@@ -25,18 +37,46 @@
 #     recorded value of every shard that is gone.
 #
 # Why that is monotone: every deletion is preceded by a durable write of at
-# least the value the deleted object contributed, and both records only grow.
-# A reader reads the live objects first and the records second. If a later
-# reader no longer sees an object an earlier reader counted, the deletion
-# happened before the later reader's LIST, the record before the deletion,
-# and the later reader's record read after both, so it sees the record.
+# least the value the deleted object contributed, and every record only
+# grows. A reader reads the live objects first and the records second. If a
+# later reader no longer sees an object an earlier reader counted, the
+# deletion happened before the later reader's LIST, the record before the
+# deletion, and the later reader's record read after both, so it sees the
+# record. The `bumps` term is a record nothing deletes, so it never goes down
+# on its own, and a sum of terms that each never go down never goes down.
 #
-# Both records are written by compare-and-swap on the object's etag: read
+# Changes that commit no chunk. `retire`/`retire_at` writes a tombstone;
+# `reap_chunk` rewrites a chunk into a reaped stub and drops its tombstone.
+# Neither moves the first term, so each brackets its change with two bumps,
+# one before and one after (`SearchMetastore._bump_generation`). The counter
+# cannot be written in the same request as the change (an object store has
+# no multi-object transaction), so the order carries the argument. Take a
+# scan that reads the generation (g1), then the catalog, then the generation
+# again (g2), and trusts its view only when g1 == g2:
+#
+#   * Bump before the change: a scan whose catalog read sees the change read
+#     it after the first bump landed, and reads g2 after that, so g2 counts
+#     the bump. If g1 was read before the bump, g1 != g2 and the scan sees
+#     the catalog moved; if g1 was read after it, both values already belong
+#     to the changing catalog, not to the one before it.
+#   * Bump after the change: a scan that ran entirely between the two bumps
+#     may hold the view from before the change under the value after the
+#     first bump. The second bump retires that value, so a reader that starts
+#     after the mutation returns never reads it, and cannot be served a plan
+#     cached for it.
+#
+# A mutation that dies between its change and its second bump leaves only
+# the second case open, until the next catalog change; the first bump still
+# landed before the change was visible. A first bump whose change then fails
+# only moves the generation, which is harmless.
+#
+# The records are written by compare-and-swap on the object's etag: read
 # the etag (HEAD) first and the body (GET) second, so a write keyed on that
 # etag can only fail when the object moved on, never overwrite a newer body
 # with one computed from an older one.
 #
-# Cost: one GET per lineage on each generation read, and one GET of the
+# Cost: two GETs per lineage on each generation read (floor and bumps), one
+# compare-and-swap (HEAD, GET, PUT) per bump, and one GET of the
 # retired-shards record per index. That record gains one entry (the shard id
 # and an i64) per reaped writer shard and is never shrunk. Folding entries
 # into one number would break the max(live, recorded) rule for a reader that
@@ -65,6 +105,9 @@ from komira_search_catalog.split_summary import (
 comptime GENERATION_FLOOR_VERSION = UInt8(1)
 """Leading byte of a `_GENERATION_FLOOR` body: [version u8][floor i64 LE]."""
 
+comptime GENERATION_BUMPS_VERSION = UInt8(1)
+"""Leading byte of a `_GENERATION_BUMPS` body: [version u8][count i64 LE]."""
+
 comptime RETIRED_SHARDS_VERSION = UInt8(1)
 """Leading byte of a `_RETIRED_SHARDS` body: [version u8][count i64 LE], then
 per entry [shard id: length-prefixed bytes][generation i64 LE]."""
@@ -76,6 +119,10 @@ lost attempt means another reaper moved the record; each retry re-reads it."""
 
 def generation_floor_key(lineage_prefix: String) raises -> Path:
     return Path.parse(lineage_prefix + "/_GENERATION_FLOOR")
+
+
+def generation_bumps_key(lineage_prefix: String) raises -> Path:
+    return Path.parse(lineage_prefix + "/_GENERATION_BUMPS")
 
 
 def retired_shards_key(index_meta_prefix: String) raises -> Path:
@@ -98,6 +145,21 @@ def decode_generation_floor(bytes: List[UInt8]) raises -> Int64:
     if len(bytes) < 1 or bytes[0] != GENERATION_FLOOR_VERSION:
         raise Error(
             "komira_search_catalog: unknown _GENERATION_FLOOR version (corrupt)"
+        )
+    return _get_i64_le(bytes, 1)
+
+
+def encode_generation_bumps(count: Int64) -> List[UInt8]:
+    var out = List[UInt8]()
+    out.append(GENERATION_BUMPS_VERSION)
+    _put_i64_le(out, count)
+    return out^
+
+
+def decode_generation_bumps(bytes: List[UInt8]) raises -> Int64:
+    if len(bytes) < 1 or bytes[0] != GENERATION_BUMPS_VERSION:
+        raise Error(
+            "komira_search_catalog: unknown _GENERATION_BUMPS version (corrupt)"
         )
     return _get_i64_le(bytes, 1)
 
@@ -261,6 +323,36 @@ def raise_generation_floor[
         try:
             _ = store.conditional_put(
                 key, encode_generation_floor(at_least), _precondition_for(cur)
+            )
+            return
+        except e:
+            if not is_precondition(String(e)):
+                raise e^
+    raise Error(
+        "komira_search_catalog: lost the compare-and-swap on "
+        + key.raw()
+        + " "
+        + String(_CAS_ATTEMPTS)
+        + " times"
+    )
+
+
+def bump_generation[
+    S: ConditionalWriteStore
+](store: S, lineage_prefix: String) raises -> None:
+    """Add one to the lineage's `_GENERATION_BUMPS` counter, creating it at 1.
+    Returns once a write keyed on the value it read has landed, so the new
+    count is durable before the caller goes on (the ordering the block at the
+    top of this file needs)."""
+    var key = generation_bumps_key(lineage_prefix)
+    for _ in range(_CAS_ATTEMPTS):
+        var cur = _read_versioned(store, key)
+        var next = Int64(1)
+        if cur.present:
+            next = decode_generation_bumps(cur.body) + Int64(1)
+        try:
+            _ = store.conditional_put(
+                key, encode_generation_bumps(next), _precondition_for(cur)
             )
             return
         except e:

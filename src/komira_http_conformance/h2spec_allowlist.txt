@@ -1,0 +1,11 @@
+# h2spec cases komira_http_server does not pass, one per line:
+#
+#     <case id> <what the server does instead>       a failing case
+#     <case id> skip: <why h2spec skips it>          a skipped case
+#
+# The case id is h2spec's (`http2/6.5/3`; `h2spec -S <id>` runs that case
+# alone). The run is the whole suite, strict cases included (`-S`).
+# The gate is shrink-only (allowlist.mojo): a case that passes must leave
+# this list, and a new failure or a new skip cannot join it without review.
+#
+# Empty: the server passes all 147 cases of h2spec v2.6.0's strict suite.
