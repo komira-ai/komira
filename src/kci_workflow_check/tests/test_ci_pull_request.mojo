@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_ci_pull_request.mojo -- R6 for pr.yml, the pull
+# src/kci_workflow_check/tests/test_ci_pull_request.mojo -- R6 for pr.yml, the pull
 #   request's check: the machine file's PULL_REQUEST stage as the ONE job of a
 #   workflow of its own (`check_pull_request_workflow`). It is triggered by
 #   `pull_request` alone, for a same-repository pull request only, in no
@@ -12,7 +12,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_ci_check import (
+from kci_workflow_check import (
     NODE_SCALAR,
     ChannelsFile,
     WorkflowDoc,

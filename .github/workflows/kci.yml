@@ -5,7 +5,7 @@
 # stage. kci holds this file to the machine file twice: `kci run` itself, at
 # start-up under GitHub Actions (it reads this file as committed at
 # GITHUB_WORKFLOW_SHA; a mismatch is exit 3, nothing run), and the welded test
-# src/kci_ci_check/tests/test_repo_kci_yml.mojo, so a drift also fails
+# src/kci_workflow_check/tests/test_repo_kci_yml.mojo, so a drift also fails
 # `./buck2 build //...` on every pull request. Edit both together. The rules:
 # each stage has a job whose id is its name and whose GitHub environment is
 # the stage's `environment`; its `needs` is the jobs that run the stage's
@@ -21,7 +21,7 @@
 # together run all of it exactly once; a job
 # that runs only validations has no environment and no identity token and
 # needs the stage's own job. [The split is PENDING A RULING on rules R1 and
-# R9 of the workflow check, src/kci_ci_check.]
+# R9 of the workflow check, src/kci_workflow_check.]
 #
 # ⛔ CONTINUOUS AUTO-PROMOTION. A push to main IS the release: build -> gamma
 # -> validate -> prod, the same bytes at each step, nothing else to do. Every
@@ -99,7 +99,7 @@
 # count) and a manual run release, and nothing else. A pull request never
 # starts this workflow (pr.yml answers it), so no environment, publishing
 # token or release job is reached from a pull request's code. The welded test
-# holds it (rule R6 of src/kci_ci_check: a `pull_request` trigger here is
+# holds it (rule R6 of src/kci_workflow_check: a `pull_request` trigger here is
 # refused; pr.yml is held to the pull request's check alone).
 #
 # ONE RELEASE AT A TIME (concurrency, R16). A PUSH to main is in the group
@@ -496,7 +496,7 @@ jobs:
       RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}
       REASON: ${{ inputs.reason }}
       # The pixi the validations install with: the linux-x86_64 pixi pin of
-      # tools/build/platforms/table.bzl, both values exactly (src/kci_ci_check's
+      # tools/build/platforms/table.bzl, both values exactly (src/kci_workflow_check's
       # test_repo_kci_yml holds them to it).
       PIXI_URL: https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-x86_64-unknown-linux-musl
       PIXI_SHA256: 807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f
