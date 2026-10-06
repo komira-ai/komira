@@ -308,6 +308,7 @@ def _owned(node: String, retained: Bool) -> OwnedRecord:
         node.copy(),
         retained,
         String(""),
+        None,
     )
 
 
@@ -564,6 +565,7 @@ def _owned_table(node: String, key: String) -> OwnedRecord:
         node.copy(),
         True,
         key.copy(),
+        None,
     )
 
 

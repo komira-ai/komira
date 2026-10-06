@@ -19,6 +19,7 @@ from std.pathlib import Path
 from kci_workflow_check import ChannelsFile, channels_paths, check_running_workflow
 from kci_api import (
     ERROR_BREAK_GLASS_REASON,
+    ERROR_BREAK_GLASS_REVISION,
     ERROR_CANNOT_TELL,
     ERROR_NOT_ON_MAIN,
     ERROR_PLAN_ON_RELEASE,
@@ -289,7 +290,7 @@ def check_ref_at_start[S: StageSteps](
     # holds the same before anything built from the revision runs)
     if not cmd.plan and cmd.revision_id != sha:
         return _refuse(
-            String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REASON),
+            String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REVISION),
             String("BREAK-GLASS on ") + ref_value + String(": a run that can publish releases the commit it started on (")
             + String(GITHUB_SHA) + String(" ") + sha + String("), and this run's revision is ") + cmd.revision_id
             + String("; another revision is for a dry run (--plan) only, so nothing is run"),
@@ -305,7 +306,7 @@ def check_ref_at_start[S: StageSteps](
         )
     if not on_history:
         return _refuse(
-            String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REASON),
+            String(OUTCOME_REFUSED), String(ERROR_BREAK_GLASS_REVISION),
             String("BREAK-GLASS on ") + ref_value + String(": the revision ") + cmd.revision_id
             + String(" is not on the history of the commit the run was started on (") + sha
             + String("), so nothing is run"),

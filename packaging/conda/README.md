@@ -158,7 +158,19 @@ LAST makes it the switch for users.
 
 Buck cannot enumerate targets, and does not know which libraries are published.
 So it is **not** a Buck target: the release tool, which has the list, passes the
-members' manifests to the packer.
+members' manifests to the packer. One Buck target builds the same path with a
+fixed test stamp, so a build with no release stamp still runs it:
+`//tools/build/package:release_set_check`
+([`release_set.bzl`](../../tools/build/package/release_set.bzl)) makes `komira_all`
+from the `[release]` manifests of the libraries named in
+[`release_set.txt`](../../tools/build/package/release_set.txt), which a welded test of
+`src/kci_artifact` holds equal to the release set of `release/artifacts.textproto`.
+The libraries are packaged with build number 999999999 and a made-up source commit
+(build string `h7e57c0de_999999999`). The target is red unless that stamp reaches
+every file name, manifest and metadata, and `conda-check --require-stamped`
+accepts the metapackage. No step uploads its output. A PUBLISH step would refuse
+it in any case: it requires each package's source commit to be the commit of the
+release version it publishes, and the test commit is not a real one.
 
 ```sh
 komira_pack conda-meta --name komira --member-manifest <dir>/manifest.json ... \

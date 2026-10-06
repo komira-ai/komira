@@ -14,7 +14,8 @@
 #     an overwrite: that is how a second writer of the same name is seen;
 #   * an update of a name that does not exist is REFUSED (`NOT_FOUND`);
 #   * labels are kept exactly as written and read back exactly; an update
-#     sets or clears the `kci_retain=keep` label in the same call (`keep`).
+#     rewrites the retention mark (`kci-retention`, the label it is handed)
+#     in the same call and leaves every other label as it was.
 #
 # THE FAULTY VARIANT (constructor arguments, each independent):
 #   * `fail_at_call = k` (1-based, 0 = never): the k-th mutating call raises
@@ -34,8 +35,6 @@
 # =============================================================================
 
 from kci_reconciler import Label
-
-comptime _RETAIN_KEY = "kci_retain"
 
 
 struct FakeView(Copyable, Movable, Deinitable):
@@ -237,7 +236,7 @@ struct FakeStore(Movable):
         self._insert(id, kind, digest, url, labels, annotation)
         self.calls.append(String("create ") + id)
 
-    def update(mut self, id: String, digest: String, url: String, keep: Bool = False) raises:
+    def update(mut self, id: String, digest: String, url: String, retention: Label) raises:
         self._admit(String("update"), id)
         var i = self.find(id)
         if i < 0:
@@ -248,10 +247,9 @@ struct FakeStore(Movable):
         self.failed[i] = False
         var kept = List[Label]()
         for k in range(len(self.labels[i])):
-            if self.labels[i][k].key != _RETAIN_KEY:
+            if self.labels[i][k].key != retention.key:
                 kept.append(self.labels[i][k].copy())
-        if keep:
-            kept.append(Label(String(_RETAIN_KEY), String("keep")))
+        kept.append(retention.copy())
         self.labels[i] = kept^
 
     def relabel(mut self, id: String, labels: List[Label], annotation: String) raises:

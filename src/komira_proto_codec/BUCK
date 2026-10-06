@@ -15,6 +15,7 @@ mojo_library(
         "//src/komira_json:komira_json",
     ],
     test_srcs = [
+        "tests/test_proto_codec_json_float32.mojo",
         "tests/test_proto_codec_json_nonascii_roundtrip.mojo",
         "tests/test_proto_codec_proto3_json_conformance.mojo",
         "tests/test_proto_codec_proto3_json_strictness.mojo",
@@ -46,4 +47,14 @@ mojo_test(
         ":komira_proto_codec",
         ":copy_hazard_proto",
     ],
+)
+
+# Exhaustive round trip of the proto3-JSON float32 writer and reader over
+# four whole binades (about 34 million values; see the file header). Too slow
+# for the welded gate above, which samples every binade instead.
+mojo_test(
+    name = "test_float32_json_binades",
+    srcs = ["tests/test_float32_json_binades.mojo"],
+    deps = [":komira_proto_codec"],
+    optimization_level = "3",
 )

@@ -1,8 +1,9 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 
 # Planted defects for the test runtime contract (test 29): a test reading a
-# file it did not declare, env that tries to mute a red test, and every
-# inadmissible data/env declaration. Every target here must fail;
+# file it did not declare, env that tries to mute a red test, a mojo_test
+# that exits 77 (SKIP to some harnesses), and every inadmissible data/env
+# declaration. Every target here must fail;
 # tools/build/tests/run_tests.sh requires the failure written above it. The
 # contract that works is in ../../functional/test_data.
 
@@ -40,6 +41,16 @@ mojo_test(
     name = "env_bin",
     srcs = ["tests/test_red.mojo"],
     env = {"BIN": "true"},
+)
+
+# RED under `buck2 test` (GATED TEST FAILED ... (exit 77)): a test that exits
+# 77, "skipped" to automake and some harnesses, fails; nothing maps 77 to a
+# skip or a pass. Its status comes through `args`, the twin of
+# ../../functional/test_data:mojo_test_args.
+mojo_test(
+    name = "skip_77",
+    srcs = ["tests/test_exit_77.mojo"],
+    args = ["--exit=77"],
 )
 
 # Refused at analysis, each with its own message.

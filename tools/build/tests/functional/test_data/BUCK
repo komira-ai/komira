@@ -1,6 +1,6 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
-load(":runner_cases.bzl", "mojo_gate_runner_cases")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+load(":runner_cases.bzl", "mojo_gate_runner_cases", "mojo_test_command_case")
 
 # The tests of the test runtime contract. They use only the standard library:
 # komira_runtime_paths is exercised by its own gate test in the komira cell,
@@ -41,10 +41,58 @@ mojo_test(
     env = {"TD_MODE": "mojo_test"},
 )
 
+# GREEN under `buck2 test`, and built as an action by mojo_test_args_action:
+# a mojo_test with `args`. Each `$(location ...)`, of a build output
+# (args_copied) and of a source (args_referenced), reaches the test as an
+# absolute path it can open from its share/; `$(exe_target :args_helper)`
+# reaches it as the absolute path of the binary in its runnable directory,
+# lib/ beside it; plain arguments arrive verbatim and in order, and a
+# NAME=VALUE argument is not exported.
+export_file(
+    name = "args_copied",
+    src = "fixtures/declared.txt",
+)
+
+export_file(
+    name = "args_referenced",
+    src = "fixtures/declared.txt",
+    mode = "reference",
+)
+
+mojo_binary(
+    name = "args_helper",
+    srcs = ["args_helper.mojo"],
+)
+
+mojo_test(
+    name = "mojo_test_args",
+    srcs = ["tests/test_mojo_test_args.mojo"],
+    args = [
+        "--copied=$(location :args_copied)",
+        "--referenced=$(location :args_referenced)",
+        "--pair=$(location :args_copied),$(location :args_referenced)",
+        "--helper=$(exe_target :args_helper)",
+        "two words",
+        "TD_ARG=exported",
+    ],
+)
+
+# mojo_test_args's `buck2 test` command (gate runner, staged test, --arg
+# options and the artifacts they name), run as a build action: the pull-request
+# check builds this package and does not run `buck2 test`, so this is what
+# gates `args` there.
+mojo_test_command_case(
+    name = "mojo_test_args_action",
+    script = "test_command_case.sh",
+    test = ":mojo_test_args",
+)
+
 # The runner itself, in one action directory (runner_cases.sh): two runs get
 # two TEST_TMPDIRs, each empty, under the action directory and gone after the
 # run; --env BIN / rc / MARKER cannot turn a red test green; a test killed
-# by a signal is red with its own status.
+# by a signal is red with its own status; --arg values arrive in order,
+# unexported, with @KOMIRA_ACTION_DIR@ replaced; an --env after an --arg is
+# refused; exit 77 is red like any other status.
 mojo_gate_runner_cases(
     name = "runner_cases",
     script = "runner_cases.sh",
@@ -52,6 +100,9 @@ mojo_gate_runner_cases(
 
 shell_lint(
     name = "shell_lint",
-    srcs = ["runner_cases.sh"],
+    srcs = [
+        "runner_cases.sh",
+        "test_command_case.sh",
+    ],
     visibility = ["komira//:tests_lints"],
 )
