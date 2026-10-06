@@ -1,3 +1,8 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * This file is MIT-licensed, not Apache-2.0 like the rest of the repository:
+ * it is compiled into the GPL-2.0 kcov binary, and Apache-2.0 code cannot be
+ * combined into a GPL-2.0 program. See README.md, Licences. */
 /* curl_easy_escape and friends without libcurl (see curl/curl.h).
  *
  * curl_easy_escape percent-encodes every byte that is not an RFC 3986

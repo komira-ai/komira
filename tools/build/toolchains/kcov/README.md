@@ -174,10 +174,23 @@ fixture initialised the preload library.
 
 ## Licences
 
-**PENDING: accepting GPL-2.0 kcov as a build-only tool is awaiting the
-maintainers' decision.** What follows is the proposal the build implements;
-it is not settled. `coverage-linux-x86-64` in
-[limits.tsv](../../platforms/limits.tsv) says the same.
+**Decision.** kcov is accepted as an external, build-only tool of komira's
+Apache-2.0 build system. The repository holds only the recipe: upstream's
+source is fetched by its pinned hash and built on the build's own machines.
+kcov is never vendored, never linked into komira's code, and never shipped
+in a published package (the guard below enforces that). The two shim files
+compiled into it (`shim/curl_shim.c`, `shim/curl/curl.h`) are MIT-licensed,
+not Apache-2.0, because Apache-2.0 code cannot be combined into a GPL-2.0
+program.
+
+If a prebuilt kcov is ever distributed (a public build cache, a toolchain
+bundle), its corresponding source and `COPYING` must ship with it. A remote
+cache that holds `bin/kcov` must therefore stay private to the people who
+build komira; making such a cache readable by others distributes kcov.
+
+kcov's only interface to the rest of the build is the Cobertura report it
+writes, so another tool that writes Cobertura (llvm-cov, for one) can
+replace it without changing what reads the report.
 
 kcov is GPL-2.0, and `bin/kcov` embeds the files of its `data/` (jQuery and
 handlebars, MIT; tablesorter, GPL-2.0 or MIT) and links elfutils' `libdw`
