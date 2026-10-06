@@ -25,7 +25,7 @@ from kci_logs import DEFAULT_RUN_PATH_PREFIX, build_run_logs_url
 
 assert_equal(
     build_run_logs_url("https://runs.example/", DEFAULT_RUN_PATH_PREFIX, "r1", 7, 50),
-    "https://runs.example/pipelines/runs/r1/logs?after=7&limit=50",
+    "https://runs.example/runs/r1/logs?after=7&limit=50",
 )
 ```
 
