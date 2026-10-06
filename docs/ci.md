@@ -331,7 +331,9 @@ channel answers NOOP (exit 0).
   manual run of `main` whose `revision` input names an unmerged commit is
   refused there, before the farm-connect action, `./buck2` or `kci` (all of
   which are that revision's own code, and could leave any in-kci check out)
-  run; kci refuses the same at start-up (`KCI-E-BREAK-GLASS-REASON`). No
+  run; kci refuses the same at start-up (exit 3,
+  `KCI-E-BREAK-GLASS-REVISION`; `KCI-E-BREAK-GLASS-REASON` is for the reason
+  only: missing, blank, or over 200 bytes). No
   release job, and no step of one, has `continue-on-error:` (R21): a failed
   check, publish or validation never reads as a success.
 - **A push is never a dry run.** `DRY_RUN` is set once, in the workflow's
@@ -378,11 +380,15 @@ channel answers NOOP (exit 0).
     `main`. A re-run of a MANUAL run is a manual run, and a re-run of any
     run uses that run's own `kci.yml` and `kci`: see
     [Re-runs of runs from before auto-promotion](#re-runs-of-runs-from-before-auto-promotion-a-ceo-action).
-  - `prod`'s last step says when `main` has moved past what it released
-    (`prod: main is at <tip>, past <revision>: a newer run is pending, or
+  - `prod`'s last step says when `main` has moved past the revision it ran
+    for (`prod: main is at <tip>, past <revision>: a newer run is pending, or
     was replaced or cancelled; if none is queued, re-run the newest
     cancelled run of main`), counting only commits a push would release (not
-    `docs/**` or `**.md`).
+    `docs/**` or `**.md`). It says so on a FAILED job too, after the
+    `prod: FAILED` line: a re-run of an old run that replaced a newer
+    pending release is then refused at `prod` (`KCI-E-SUPERSEDED`), and this
+    line is what names the newer release to re-run (the step has no `exit`,
+    rule R20, and writes neither `GITHUB_ENV` nor `DRY_RUN`, rule R22).
   - ⚠ **A push GitHub does not start a run for is not reported by itself.**
     GitHub's path filter reads at most the first 300 changed files of a
     push; when the files that matter are past them, the workflow may not
@@ -422,8 +428,8 @@ channel answers NOOP (exit 0).
   environment has a required reviewer)`. `prod`'s own `kci run` writes
   `promoted to prod: <names> <build>` or `promoted to prod: nothing new
   (<build> already there)` and the commits it carried; its last step writes
-  `prod: FAILED (...)` when the job failed, and the `main is at ...` line
-  above. Whether `prod` is paused is not read by any job (it would need
+  `prod: FAILED (...)` when the job failed, and, whether it failed or not,
+  the `main is at ...` line above. Whether `prod` is paused is not read by any job (it would need
   `actions: read`, which no job holds); the environment's page says so.
 
 ### Re-runs of runs from before auto-promotion: a CEO action
@@ -523,7 +529,7 @@ R18; nor in a `with: script:`, and no step's or job's `name:` holds any
 expression at all), and kci refuses a break-glass run without one, with
 one that is only whitespace, or with one over 200 bytes once trimmed
 (exit 3, `KCI-E-BREAK-GLASS-REASON`). A break-glass run that can publish
-releases the commit it started on: a `revision` input is for a dry run only, on the history of that commit. Every job's summary of such a run
+releases the commit it started on: a `revision` input is for a dry run only, on the history of that commit (kci refuses any other, exit 3, `KCI-E-BREAK-GLASS-REVISION`). Every job's summary of such a run
 starts `BREAK-GLASS: <ref> <revision> by <actor>: <reason>`.
 
 **What is the lock, and what is not.** A pull request's run uses the
