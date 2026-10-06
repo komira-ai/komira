@@ -47,12 +47,10 @@ from std.memory import unsafe_memcpy
 from komira_collections.slab import Slab
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Schema
-from komira_arrow.streaming_concat import (
-    _concat_two_batches,
-    _concat_variable_width_batches,
-)
+from komira_arrow.streaming_concat import _concat_two_batches
 
 from komira_jsonl.columnar_materializer import _materialize_checked
+from komira_jsonl.part_concat import _concat_jsonl_parts
 from komira_jsonl.line_check import build_jsonl_index
 from komira_json_index.input_limits import (
     MAX_JSONL_LINE_BYTES,
@@ -379,11 +377,9 @@ def read_jsonl_streamed_to_one_batch(
         staged.append(Optional[RecordBatch](b^))
     batches.set_len_unchecked(0)
     _ = batches^
-    var combined = _concat_variable_width_batches(
-        staged._unsafe_ptr(),
-        n,
-    )
-    # `_concat_variable_width_batches` calls `.take()` on each slot, so
+    # Zero-column chunks (a schema with no fields) are joined by row count.
+    var combined = _concat_jsonl_parts(staged, n)
+    # `_concat_jsonl_parts` `.take()`s each slot, so
     # the slab's destructor sees all-empty slots and is a no-op.
     _ = staged^
     return combined^

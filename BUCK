@@ -2,6 +2,7 @@
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
@@ -74,11 +75,13 @@ _TESTS_LINTS = [
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
     "//src/komira_aws_lambda_http:deps_lint",
+    "//src/komira_azure_blob_e2e:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_conformance:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
     "//src/komira_http_tls_e2e:deps_lint",
+    "//src/komira_job_supervisor_loopback:deps_lint",
     "//src/komira_udf_e2e:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
@@ -143,4 +146,20 @@ _TESTS_LINTS = [
     known_untested = "tests/known_untested.tsv",
     tree = ":doc_tree",
     welds = "//src/...",
+) for _ in _TESTS_LINTS[:1]]
+
+# README API coverage (tools/build/lint/readme_api_coverage.bzl; the rules and
+# today's census: docs/readme_api_coverage.md): per package under src/, the
+# public API its __init__.mojo exports and which of it the README's examples
+# (the welded [tests][readme] test) use. `[report]`, `[packages]` and
+# `[symbols]` are the census. The tree is every file of the cell (`:doc_tree`).
+# The ledger, tests/readme_api_exceptions.tsv, only shrinks: a malformed or
+# repeated row, or one for a symbol no longer exported or used by its README
+# now, fails the build. Report-only today: `enforce = True` makes every undocumented symbol
+# without a ledger row a finding.
+[readme_api_coverage(
+    name = "readme_api_coverage",
+    enforce = False,
+    exceptions = "tests/readme_api_exceptions.tsv",
+    tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
