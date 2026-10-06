@@ -20,6 +20,12 @@
 #      generation and the live set, a split in its view is retired, and the
 #      scan's re-check sees a different generation.
 #   5. test_scan_straddling_a_reap_detects_it: the same for a reap.
+#   7. test_refusal_carries_the_marker_when_the_bump_fails: a publish
+#      refused past a seal bumps the counter after rewriting its chunk into a
+#      seal. That bump is best effort: with an unreadable counter the publish
+#      must still raise `[SHARD_RETIRED]` (so the caller moves to a fresh
+#      shard id instead of retrying into the retired one) and the seal must
+#      still be written. Mutant: let the bump error propagate.
 #   6. test_retire_bumps_before_and_after_its_tombstone and
 #      test_reap_bumps_before_and_after_dropping_its_tombstone: the order.
 #      `_SpyStore` reads the generation counter at the moment the change is
@@ -41,6 +47,8 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_objectstore import (
     CasManifestStore,
+    chunk_key,
+    decode_chunk_body,
     CoalescePolicy,
     ListResult,
     ObjectMeta,
@@ -60,10 +68,12 @@ from komira_search_catalog.split_summary import SplitSummary, make_split_summary
 from komira_search_catalog.metastore import (
     SearchMetastore,
     generation_across_shards,
+    is_shard_retired,
     list_live_splits_across_shards,
     make_shard_id,
     shard_manifest_prefix,
 )
+from komira_search_catalog.shard_reaper import reap_drained_shards
 
 
 comptime _META: String = "index/logs/meta"
@@ -446,6 +456,69 @@ def test_reap_bumps_before_and_after_dropping_its_tombstone() raises:
         + String(at_change) + " at the drop, " + String(c1) + " after)",
     )
     _ = inner^
+
+
+# =============================================================================
+# 7. A refused publish always says so, even when its bump fails.
+# =============================================================================
+
+
+def _refusal_error(
+    mut w: SearchMetastore[SharedInMemoryConditionalStore], seed: Int
+) raises -> String:
+    try:
+        _ = w.publish(_summary(seed))
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_refusal_carries_the_marker_when_the_bump_fails() raises:
+    var store = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 7)
+    var lineage = shard_manifest_prefix(_META, shard_id)
+    var w = _shard_meta(store, shard_id)
+    for i in range(2):
+        _ = w.publish(_summary(70 + i))
+    for i in range(2):
+        w.retire_at(Int64(i), Int64(0))
+    for i in range(2):
+        assert_true(
+            w.reap_chunk(Int64(i), _GRACE_MS, _GRACE_MS), "chunk reaped"
+        )
+    var r = reap_drained_shards(store, _META, String("logs"))
+    assert_equal(r.shards_reaped, 1, "the drained shard is retired (seal at 2)")
+
+    # An unreadable counter: every bump on this lineage now raises.
+    var corrupt = List[UInt8]()
+    corrupt.append(UInt8(0xEE))
+    _ = store.put(Path.parse(lineage + "/_GENERATION_BUMPS"), corrupt)
+
+    # The writer's warm handle loses slot 2 to the seal, wins slot 3, finds
+    # the seal below it and is refused.
+    var msg = _refusal_error(w, 72)
+    assert_true(
+        is_shard_retired(msg),
+        "a refused publish whose bump failed raised without the marker: '"
+        + msg + "'",
+    )
+    var body = decode_chunk_body(store.get(chunk_key(lineage, Int64(3))))
+    assert_equal(len(body), 0, "the refused publish's chunk is a seal")
+
+    # A fresh handle is refused the same way.
+    var cold = _shard_meta(store, shard_id)
+    var cold_msg = _refusal_error(cold, 73)
+    assert_true(
+        is_shard_retired(cold_msg),
+        "a cold refused publish whose bump failed raised without the"
+        " marker: '" + cold_msg + "'",
+    )
+    assert_equal(
+        len(list_live_splits_across_shards(store, _META, String("logs"))),
+        0,
+        "nothing the refused publishes wrote is visible",
+    )
+    _ = store^
 
 
 def main() raises:

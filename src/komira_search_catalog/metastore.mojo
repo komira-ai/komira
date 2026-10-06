@@ -287,8 +287,16 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
                 # (to a reader that does not skip this shard); taking it back
                 # is a catalog change too. Only the bump after it is
                 # possible: the append was the publish's first write.
-                self._bump_generation()
-                raise Error(self._retired_message())
+                # The bump is best effort: the refusal must always carry
+                # SHARD_RETIRED_MARKER, or the caller would retry into this
+                # retired shard instead of moving to a fresh shard id.
+                var msg = self._retired_message()
+                try:
+                    self._bump_generation()
+                except e:
+                    msg += "; the generation bump after the seal failed: "
+                    msg += String(e)
+                raise Error(msg)
             return
 
     def _read_body_if_present(self, chunk_seq: Int64) raises -> Optional[List[UInt8]]:
