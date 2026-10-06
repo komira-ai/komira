@@ -207,24 +207,30 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         """A `CasManifestStore` bound to the LEGACY single-manifest prefix (the
         partition base prefix `<base_prefix>` itself — where the pre-migration
         producer + the legacy `ConsumeCore` read/write). This is the dense source
-        lineage the migrate establishes `_base` from."""
-        return CasManifestStore[Self.Store](
+        lineage the migrate establishes `_base` from. Opted in to the
+        reaped-slot guard (#486)."""
+        var m = CasManifestStore[Self.Store](
             self._store.clone(),
             String(self._base_prefix),
             RetryPolicy.fast_test(),
         )
+        m.enable_reaped_slot_guard()
+        return m^
 
     def _base_manifest(self) raises -> CasManifestStore[Self.Store]:
         """A `CasManifestStore` bound to the SEGMENT `_base` fold lineage prefix
         (`<base_prefix>/_lineage/_base`), backed by a clone of the shared store.
         Identical key shape to `SubLineageConsumeResolver._base_manifest` +
         `SegmentBaseFold._base_manifest` — the SAME `_base` the consume resolver
-        reads + the segment fold appends to."""
-        return CasManifestStore[Self.Store](
+        reads + the segment fold appends to. Opted in to the reaped-slot
+        guard (#486)."""
+        var m = CasManifestStore[Self.Store](
             self._store.clone(),
             sublineage_prefix(self._base_prefix, BASE_SHARD_ID),
             RetryPolicy.fast_test(),
         )
+        m.enable_reaped_slot_guard()
+        return m^
 
     # -------------------------------------------------------------------------
     # is_migrated — has this partition been flipped onto sub-lineage already?

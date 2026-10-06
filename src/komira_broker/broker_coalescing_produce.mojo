@@ -98,6 +98,10 @@ from komira_objectstore.cas_manifest import (
     IDEMPOTENT_LEASE_FENCED,
     IDEMPOTENT_RETRYABLE,
 )
+from komira_objectstore.manifest_slot_guard import (
+    is_log_start_unread,
+    is_slot_reaped,
+)
 from komira_objectstore.coalescing_window import (
     APPEND_ERR,
     APPEND_LOST_SLOT,
@@ -859,6 +863,19 @@ struct BrokerBatchAppender[
         return AppendOutcome.lost_slot()
 
     def classify_append_error(self, msg: String) -> UInt8:
+        # The reaped-slot refusals (manifest_slot_guard.mojo) come FIRST: their
+        # text must never reach the substring checks below (`log_start_unread`
+        # carries its cause, which may spell `412`).
+        #   * `slot_reaped`: the win was below `_LOG_START` and NOT committed
+        #     (the EOS sentinel was released). A lost slot in both modes: the
+        #     spine's 412-loop re-reads the authoritative head (LIST, log-start
+        #     aware) and re-appends at the live tail.
+        #   * `log_start_unread`: the outcome is unknown (the chunk may be
+        #     live), so a re-append could duplicate it. Terminal for the flush.
+        if is_slot_reaped(msg):
+            return APPEND_LOST_SLOT
+        if is_log_start_unread(msg):
+            return APPEND_ERR
         # ESCALATING: a 412/precondition is a real lost slot -> the spine's LIVE
         # 412-loop (which IS the escalation past the contended slot). The
         # IDEMPOTENT-SINGLETON path never surfaces a bare 412 (the sentinel's own
@@ -893,17 +910,26 @@ struct BrokerBatchAppender[
         # Drive the exactly-once sentinel (append_idempotent). It reads HEAD
         # authoritatively inside _append_inner + assigns the offset range. Maps the
         # IDEMPOTENT_* outcome to the AppendOutcome + the EOS discriminant.
-        var ir = self._wal.append_idempotent(
-            body^,
-            record_count,
-            self._producer_id,
-            self._producer_epoch,
-            self._first_seq,
-            self._last_seq,
-            self._registered_epoch,
-            self._writer_lease_epoch,
-            self._current_lease_epoch,
-        )
+        var ir: IdempotentAppendResult
+        try:
+            ir = self._wal.append_idempotent(
+                body^,
+                record_count,
+                self._producer_id,
+                self._producer_epoch,
+                self._first_seq,
+                self._last_seq,
+                self._registered_epoch,
+                self._writer_lease_epoch,
+                self._current_lease_epoch,
+            )
+        except e:
+            # A win in a reaped slot (#486): not committed and the sentinel was
+            # released. Surface it on the ERR channel so the spine classifies
+            # it as a lost slot and re-drives the append at the live tail.
+            if is_slot_reaped(String(e)):
+                return CasOpProgress.error(String(e))
+            raise e^
         if ir.outcome == IDEMPOTENT_COMMITTED:
             self._stamp_eos_cell(
                 BPO_EOS_COMMITTED, ir.base_offset, ir.last_offset, ir.chunk_seq
@@ -1193,6 +1219,9 @@ struct BrokerProduceSpineFactory[
         var wal = CasManifestStore[Self.Store_](
             self._store.clone(), self._prefix.copy()
         )
+        # The partition's chunks are reaped below `_LOG_START`: never ack a win
+        # in a reaped slot (#486; the op's check is its own parked phase).
+        wal.enable_reaped_slot_guard()
         var appender = BrokerBatchAppender[Self.Store_](
             wal^,
             self._append_mode,

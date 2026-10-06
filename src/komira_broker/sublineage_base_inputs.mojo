@@ -222,24 +222,31 @@ struct SegmentBaseInputs[Store: CloneableConditionalWriteStore](
     def base_manifest(self) raises -> CasManifestStore[Self.Store]:
         """A `CasManifestStore` bound to the SEGMENT `_base` fold lineage prefix
         (`<base_prefix>/_lineage/_base`), backed by a clone of the shared store.
-        The SINGLE construction site both callers use — identical key shape."""
-        return CasManifestStore[Self.Store](
+        The SINGLE construction site both callers use — identical key shape.
+        Opted in to the reaped-slot guard: `_base` chunks are retired and
+        reaped below its `_LOG_START` (#486)."""
+        var m = CasManifestStore[Self.Store](
             self._store.clone(),
             sublineage_prefix(self._base_prefix, BASE_SHARD_ID),
             RetryPolicy.fast_test(),
         )
+        m.enable_reaped_slot_guard()
+        return m^
 
     def shard_manifest(
         self, shard_id: String
     ) raises -> CasManifestStore[Self.Store]:
         """A `CasManifestStore` bound to a writer sub-lineage's prefix
         (`<base_prefix>/_lineage/<shard_id>`), backed by a clone of the store.
-        The SINGLE construction site both callers use — identical key shape."""
-        return CasManifestStore[Self.Store](
+        The SINGLE construction site both callers use — identical key shape.
+        Opted in to the reaped-slot guard (#486)."""
+        var m = CasManifestStore[Self.Store](
             self._store.clone(),
             sublineage_prefix(self._base_prefix, shard_id),
             RetryPolicy.fast_test(),
         )
+        m.enable_reaped_slot_guard()
+        return m^
 
     def fold_view(self) raises -> SubLineageBaseFold[Self.Store]:
         """A `SubLineageBaseFold` view over the SAME partition bucket, used for the
