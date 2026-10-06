@@ -13,7 +13,7 @@ that strings them into verbs, the sinks, and the package facade come later, so
 | module | what it holds |
 |---|---|
 | `agg_output_naming` | the output name of an unaliased aggregate, by polars' rule: the leftmost column of its argument, `len` for `count(*)` (`author_polars_agg_names`, `polars_root_name`, `polars_agg_out_name`) |
-| `auto_schema` | `derive_schema[T]()`: a `SchemaDescriptor` derived from a row struct's fields by reflection, and the trait that gives a row struct a `schema()` |
+| `auto_schema` | `derive_schema[T]()`: a `SchemaDescriptor` derived from a row struct's fields by reflection, and `DerivedSchemaRow`, the trait that gives a row struct that `schema()` |
 | `cte_binding` | `CteScope`: statement-scoped CTE name to `LogicalPlan` bindings |
 | `parquet_read_options` | `ParquetReadOptions`: union by name, empty globs, Hive partitioning and a read-time partition filter |
 | `plan_validator` | `validate_plan` and `validate_plan_report`: column references checked against each node's input schema, with a report of what could not be checked |
@@ -43,6 +43,25 @@ assert_equal(schema.num_cols(), 2)
 assert_equal(schema.cols[0].name, String("id"))
 assert_equal(schema.cols[0].dtype, TYPE_INT64)
 assert_equal(schema.cols[1].dtype, TYPE_FLOAT64)
+```
+
+A struct that conforms to `DerivedSchemaRow` gets the same descriptor from its
+`schema()`, with no body of its own:
+
+```mojo
+from std.testing import assert_equal
+from komira_sdk.auto_schema import DerivedSchemaRow
+from komira_plan_expr.typed_schema import TYPE_STRING
+
+@fieldwise_init
+struct Order(DerivedSchemaRow):
+    var qty: Int32
+    var note: String
+
+var order_schema = Order.schema()
+assert_equal(order_schema.num_cols(), 2)
+assert_equal(order_schema.cols[1].name, String("note"))
+assert_equal(order_schema.cols[1].dtype, TYPE_STRING)
 ```
 
 ## Naming an unaliased aggregate

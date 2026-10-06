@@ -2,15 +2,15 @@
 # test_auto_schema.mojo — E-1-AUTOSCHEMA acceptance test
 # =============================================================================
 #
-# Asserts that a `ThoriumAutoSchema`-derived `SchemaDescriptor` matches a
+# Asserts that a `DerivedSchemaRow`-derived `SchemaDescriptor` matches a
 # hand-written `schema_of[...]()` descriptor for the TPC-H Lineitem shape
 # (field-name + dtype-tag equality). This is the acceptance gate for the
-# ergonomic auto-schema trait — it proves the additive `ThoriumAutoSchema`
+# ergonomic auto-schema trait — it proves the additive `DerivedSchemaRow`
 # option produces a byte-equivalent schema to the canonical hand-written
 # builder so the two paths are interchangeable for a flat row struct.
 #
 # Coverage:
-#   - ThoriumAutoSchema.schema() field-name + dtype equality vs schema_of
+#   - DerivedSchemaRow.schema() field-name + dtype equality vs schema_of
 #     for the 5-column Q6 Lineitem shape.
 #   - derive_schema[T]() free-function path matches the trait method.
 #   - per-scalar dtype dispatch (I8/I16/I32/I64/U*/F32/F64/Bool/String).
@@ -22,7 +22,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false
 
-from komira_sdk.auto_schema import ThoriumAutoSchema, derive_schema
+from komira_sdk.auto_schema import DerivedSchemaRow, derive_schema
 from komira_plan_expr.typed_schema import (
     SchemaDescriptor,
     schema_of,
@@ -43,7 +43,7 @@ from komira_arrow.arrow_types import ArrowType
 
 
 @fieldwise_init
-struct Lineitem(ThoriumAutoSchema):
+struct Lineitem(DerivedSchemaRow):
     """TPC-H lineitem row — the Q6 column subset."""
     var l_orderkey: Int64
     var l_discount: Float64
@@ -53,7 +53,7 @@ struct Lineitem(ThoriumAutoSchema):
 
 
 @fieldwise_init
-struct AllScalars(ThoriumAutoSchema):
+struct AllScalars(DerivedSchemaRow):
     """Exercises every dtype dispatch branch in `_dtype_tag_for`."""
     var f_int8val: Int8
     var f_int16val: Int16
@@ -70,7 +70,7 @@ struct AllScalars(ThoriumAutoSchema):
 
 
 @fieldwise_init
-struct DecRow(ThoriumAutoSchema):
+struct DecRow(DerivedSchemaRow):
     """The cross-surface corpus fixture shape at `decimal128_12_2` — `k`, `g`
     and a DECIMAL128 `v` (`plan_matrix_corpus.write_fixture`).
 
@@ -85,7 +85,7 @@ struct DecRow(ThoriumAutoSchema):
 
 
 @fieldwise_init
-struct DecNotWidenedRow(ThoriumAutoSchema):
+struct DecNotWidenedRow(DerivedSchemaRow):
     """★ THE CONTROL FOR §5. A `T == Int128` arm written as a loose numeric
     test would swallow these three, and every §5 assertion would still pass —
     a too-wide arm is invisible from the positive side alone."""
@@ -114,7 +114,7 @@ def _assert_schema_eq(
 
 
 def test_lineitem_auto_matches_handwritten() raises:
-    """The headline acceptance assertion: ThoriumAutoSchema.schema() for the
+    """The headline acceptance assertion: DerivedSchemaRow.schema() for the
     Lineitem struct equals the hand-written schema_of[...] descriptor in both
     field name and dtype tag."""
     var auto = Lineitem.schema()

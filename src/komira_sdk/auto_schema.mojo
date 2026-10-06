@@ -1,5 +1,5 @@
 # =============================================================================
-# auto_schema.mojo — ThoriumAutoSchema: comptime-reflected SchemaDescriptor
+# auto_schema.mojo — DerivedSchemaRow: comptime-reflected SchemaDescriptor
 # =============================================================================
 #
 # The ergonomic, ADDITIVE alternative to the
@@ -9,7 +9,7 @@
 # via comptime reflection:
 #
 #     @fieldwise_init
-#     struct Lineitem(ThoriumAutoSchema):
+#     struct Lineitem(DerivedSchemaRow):
 #         var l_orderkey: Int64
 #         var l_discount: Float64
 #         var l_quantity: Float64
@@ -27,7 +27,7 @@
 # hand-written `schema_of` / `schema_of_strict` path remains the canonical way
 # to declare a *subset* schema (declare fewer columns than the file has) or to
 # attach STRUCT / MAP / nullability metadata that a flat struct can't express.
-# `ThoriumAutoSchema` is the ergonomic option for the common case: a row struct
+# `DerivedSchemaRow` is the ergonomic option for the common case: a row struct
 # whose fields ARE the full flat schema.
 #
 # Validated POC: the poc_auto_schema_ergonomics probe (§1, GREEN on Mojo
@@ -73,8 +73,8 @@ from komira_plan_expr.typed_schema import (
 # ⛔ DECIMAL128 IS NO LONGER ON THAT LIST (2026-09-22), AND THE SENTENCE THAT
 # PUT IT THERE WAS COSTING CELLS. It read "Date / Timestamp / Decimal columns
 # ... map to the integer tag here", and three other files quoted it as the
-# reason a decimal column has no admissible declaration on the `ThoriumAutoSchema`
-# path at all: `komira_pplan/dtype_compat.mojo`'s header ("`ThoriumAutoSchema`
+# reason a decimal column has no admissible declaration on the `DerivedSchemaRow`
+# path at all: `komira_pplan/dtype_compat.mojo`'s header ("`DerivedSchemaRow`
 # cannot express DECIMAL128, so a TPC-H `l_extendedprice` stored as a decimal
 # has NO admissible declaration") and `//src/cmd/plan_matrix_typed_rig`'s
 # `_type_absence_reason`, which charged 10 cross-surface corpus cells to this
@@ -196,7 +196,7 @@ def derive_schema[T: AnyType & Copyable & Movable]() -> SchemaDescriptor:
             var amount: Float64
         comptime RowSchema = derive_schema[Row]()   # {id: Int64, amount: Float64}
         ```
-    (LIFT bench/engine/tpch/q1.mojo:54 — LineitemQ1Row(ThoriumAutoSchema))
+    (LIFT bench/engine/tpch/q1.mojo:54 — LineitemQ1Row(DerivedSchemaRow))
     """
     comptime r = reflect[T]
     comptime ts = r.field_types()
@@ -218,13 +218,13 @@ def derive_schema[T: AnyType & Copyable & Movable]() -> SchemaDescriptor:
 
 
 # =============================================================================
-# `ThoriumAutoSchema` trait — the user-facing ergonomic surface.
+# `DerivedSchemaRow` trait — the user-facing ergonomic surface.
 # =============================================================================
 # A row struct whose schema is auto-derived from its declared fields. The
 # conformer adds NO body:
 #
 #     @fieldwise_init
-#     struct Lineitem(ThoriumAutoSchema):
+#     struct Lineitem(DerivedSchemaRow):
 #         var l_orderkey: Int64
 #         ...
 #
@@ -234,13 +234,13 @@ def derive_schema[T: AnyType & Copyable & Movable]() -> SchemaDescriptor:
 # =============================================================================
 
 
-trait ThoriumAutoSchema(Copyable, Movable):
+trait DerivedSchemaRow(Copyable, Movable):
     """A row struct whose `SchemaDescriptor` is auto-derived from its declared
     fields via comptime reflection.
 
     Default-method `schema()` returns a runtime `SchemaDescriptor` mirroring the
     conformer's flat field layout (name + dtype tag, nullable=False, strict=
-    False). Conformers add NO body — `@fieldwise_init struct Foo(ThoriumAutoSchema):
+    False). Conformers add NO body — `@fieldwise_init struct Foo(DerivedSchemaRow):
     var ...` is the full declaration.
 
     This is the ergonomic, additive alternative to the hand-written
@@ -249,10 +249,10 @@ trait ThoriumAutoSchema(Copyable, Movable):
 
     Examples:
         ```mojo
-        from komira_sdk.auto_schema import ThoriumAutoSchema
+        from komira_sdk.auto_schema import DerivedSchemaRow
         # the row struct passed to ctx.read_file_typed[..., Row]
         @fieldwise_init
-        struct LineitemQ1Row(ThoriumAutoSchema):
+        struct LineitemQ1Row(DerivedSchemaRow):
             var l_returnflag: String
             var l_linestatus: String
             var l_quantity: Float64
