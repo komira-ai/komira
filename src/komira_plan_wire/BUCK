@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_case", "proto_fixture_check")
 
 # The logical-plan wire codec: `LogicalPlan` to `komira.plan.v1` protobuf
 # bytes and back. The encoder writes every node, expression and value the
@@ -26,7 +27,10 @@ mojo_library(
     # directory.
     test_data = {
         "tests/test_plan_wire_golden_bytes.mojo": glob(["tests/fixtures/golden/*.hex"]),
-        "tests/test_plan_wire_hostile_values.mojo": glob(["tests/fixtures/hostile/*.hex"]) + [
+        "tests/test_plan_wire_hostile_values.mojo": glob(
+            ["tests/fixtures/hostile/*.hex"],
+            exclude = ["tests/fixtures/hostile/*.canonical.hex"],
+        ) + [
             "tests/fixtures/endpoint/filter_over_parquet.canonical.hex",
         ],
     },
@@ -38,3 +42,148 @@ mojo_library(
 # package so that komira_plan_wire depends on no scan kind.
 export_file(name = "tests/fixtures/golden/index_pinned.hex", visibility = ["//tests/scan_binding_links:"])
 export_file(name = "tests/fixtures/golden/topic_live.hex", visibility = ["//tests/scan_binding_links:"])
+
+# protoc, the reference implementation, reading the plan-wire fixtures
+# (tools/build/mojo/README.md, "Wire fixtures"). The tests above round-trip
+# them through this package's own codec only; these checks hold them to an
+# implementation that never saw it. Each `<stem>.txtpb` is protoc's decode of
+# `<stem>.hex` under `plan.proto`, and each `<stem>.canonical.hex` is protoc's
+# encoding of that text, made by the `<dir>_<stem>_canonical` targets below:
+#   ./buck2 build //src/komira_plan_wire:<dir>_<stem>_canonical \
+#       --out src/komira_plan_wire/tests/fixtures/<dir>/<stem>.canonical.hex
+_PLAN_ROOT = "komira.plan.v1.WirePlanEnvelope"
+
+_PLAN_PROTO = ["//src/komira_plan_proto:komira_plan_proto_gen"]
+
+_GOLDEN = [
+    "aggregate",
+    "asof_join",
+    "correlated_subquery",
+    "distinct",
+    "filter_over_scan",
+    "join",
+    "limit",
+    "project_exprs",
+    "scan",
+    "scan_nested",
+    "sort",
+    "topn",
+    "union",
+    "window",
+]
+
+# window.txtpb gives the output field `lead_with_a_default` the metadata
+# (`unit` = `cents`) of the input column it reads: a LAG/LEAD output field is
+# the input field carried over (`partition_expr_output_field`,
+# src/komira_plan_expr/partition_expr.mojo), metadata included. Those two
+# lines are what protoc decodes from window.hex; do not drop them.
+#
+# Not checked here: golden/index_pinned and golden/topic_live have committed
+# `.hex` and `.canonical.hex` but no `.txtpb`, so protoc does not read them
+# yet. Adding each `.txtpb` (protoc's decode of the `.hex`) and its stem above
+# closes that gap.
+
+_HOSTILE = [
+    "distinct_column_unknown_name",
+    "distinct_has_columns_but_none",
+    "filter_binary_op_undeclared_enum",
+    "filter_colidx_in_range",
+    "filter_colidx_negative",
+    "filter_colidx_out_of_range",
+    "filter_colref_unknown_name",
+    "limit_negative_n",
+    "partition_by_descending_short",
+    "partition_topn_descending_short",
+    "project_colidx_out_of_range",
+    "project_colref_unknown_name",
+    "scan_cloud_path_claims_local_fs",
+    "scan_negative_row_count",
+    "scan_projection_unknown_name",
+    "schema_duplicate_column_names",
+    "schema_struct_column_packed",
+    "sort_descending_count_mismatch",
+    "sort_key_unknown_name",
+    "sort_over_scan_valid",
+    "sort_zero_keys",
+    "topn_negative_n",
+    "topn_zero_keys",
+    "union_output_schema_diverges",
+]
+
+# hostile/filter_binary_op_undeclared_enum carries an `op` that
+# `plan_vocabulary.proto` does not declare, so leg 5 refuses it: it is checked
+# by `plan_wire_hostile_undeclared_enum` below, which requires that refusal.
+_HOSTILE_CHECKED = [s for s in _HOSTILE if s != "filter_binary_op_undeclared_enum"]
+
+# The goldens: `.hex` is this package's encoder's output, which writes scalars
+# at their defaults that protoc omits, so no golden equals its canonical bytes
+# (leg 0 holds without `canonical_producer`).
+proto_fixture_check(
+    name = "plan_wire_golden_fixtures",
+    dir = "tests/fixtures/golden",
+    fixtures = {s: _PLAN_ROOT for s in _GOLDEN},
+    proto_deps = _PLAN_PROTO,
+)
+
+# The hostile corpus: each `.hex` is protoc's encoding of hand-written text,
+# so the `.hex` IS the canonical bytes (`canonical_producer`); the `.txtpb` is
+# that text as protoc prints it. Most fixtures carry one value defect the
+# admit layer must refuse; some are controls (`sort_over_scan_valid` and
+# `schema_struct_column_packed` are packed-encoding plans that must be
+# admitted, `schema_duplicate_column_names` is admitted today). The verdict
+# each one must get is the ledger in tests/test_plan_wire_hostile_values.mojo.
+# This check proves only that protoc reads each as a well-formed
+# WirePlanEnvelope naming declared fields and enum values, so whatever the
+# Mojo decoder decides about it is not a framing matter; it does not observe
+# that verdict.
+proto_fixture_check(
+    name = "plan_wire_hostile_fixtures",
+    canonical_producer = _HOSTILE_CHECKED,
+    dir = "tests/fixtures/hostile",
+    fixtures = {s: _PLAN_ROOT for s in _HOSTILE_CHECKED},
+    proto_deps = _PLAN_PROTO,
+)
+
+# The undeclared enum value, held to the refusal it was written for. Two
+# cases on the same fixture: the first fails unless leg 5 refuses it; the
+# second fails unless the check reports exactly one failure (": 1 failure(s)"
+# does not match "11 failure(s)"). Together they require that leg 5 is the
+# only leg that fails, so legs 0 to 4 still hold this fixture's `.hex`,
+# `.txtpb` and `.canonical.hex` to each other.
+[
+    proto_fixture_case(
+        name = name,
+        canonical_producer = ["filter_binary_op_undeclared_enum"],
+        dir = "tests/fixtures/hostile",
+        expect = expect,
+        fixtures = {"filter_binary_op_undeclared_enum": _PLAN_ROOT},
+        proto_deps = _PLAN_PROTO,
+    )
+    for name, expect in [
+        ("plan_wire_hostile_undeclared_enum", "filter_binary_op_undeclared_enum: LEG 5: filter_binary_op_undeclared_enum.hex carries enum values the schema does not name"),
+        ("plan_wire_hostile_undeclared_enum_only", "proto_fixture: FAILED: 1 failure(s)"),
+    ]
+]
+
+# The endpoint plan: this package commits only its canonical bytes (what a
+# non-Mojo producer writes), so they stand in for the `.hex` and the check
+# covers the reader direction only (`canonical_producer`).
+proto_fixture_check(
+    name = "plan_wire_endpoint_fixtures",
+    canonical_producer = ["filter_over_parquet"],
+    dir = "tests/fixtures/endpoint",
+    fixtures = {"filter_over_parquet": _PLAN_ROOT},
+    hex = {"filter_over_parquet": "tests/fixtures/endpoint/filter_over_parquet.canonical.hex"},
+    proto_deps = _PLAN_PROTO,
+)
+
+[
+    proto_encode(
+        name = "{}_{}_canonical".format(d, s),
+        proto_deps = _PLAN_PROTO,
+        root = _PLAN_ROOT,
+        txtpb = "tests/fixtures/{}/{}.txtpb".format(d, s),
+    )
+    for d, stems in [("golden", _GOLDEN), ("hostile", _HOSTILE), ("endpoint", ["filter_over_parquet"])]
+    for s in stems
+]
