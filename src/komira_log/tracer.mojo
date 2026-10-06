@@ -28,11 +28,11 @@
 # # RAII span scope (deferred)
 #
 # A `SpanScope[origin]` RAII guard (open-on-construct / close-on-`__del__`) was
-# prototyped for `with`-style auto-close. Under Mojo 1.0.0b1, returning a
+# prototyped for `with`-style auto-close. On the pinned toolchain, returning a
 # destructor-bearing struct that owns a `Pointer[SharedEngine, origin]` from the
 # `@always_inline span()` factory hangs the compiler's move/destructor lowering
 # (the same origin-tracking-through-a-returned-guard shape that the obs tracer
-# likewise leaves as a Phase-1.1 follow-up). The explicit `start_span` /
+# likewise leaves as a follow-up). The explicit `start_span` /
 # `end_span` pair is the canonical hot-path form anyway (it is what the obs
 # tracer ships), so P4a exposes that pair only; the RAII sugar is deferred to
 # P4b alongside the `ctx.tracer` accessor. No correctness is lost — a caller

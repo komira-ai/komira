@@ -211,7 +211,7 @@ def get_log_events_body(
 def _json_escape(s: String) -> String:
     """Escape `s` for a JSON string literal. The GCP arm's `json_escape`, kept
     module-private here: a log GROUP name is `/ecs/<family>` and a STREAM name
-    embeds a customer-chosen prefix, so neither is safe to interpolate raw."""
+    embeds a caller-chosen prefix, so neither is safe to interpolate raw."""
     var buf = List[UInt8]()
     var b = s.as_bytes()
     for i in range(len(b)):

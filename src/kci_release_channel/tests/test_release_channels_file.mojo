@@ -3,7 +3,9 @@
 #   The repository's own channels file, release/channels.textproto, read
 #   through the real parser: exactly two channels, `gamma` and `prod`, the
 #   public prefix.dev conda channels komira-ai/gamma and komira-ai/prod, each
-#   pushed to by trusted publishing from its own GitHub environment only.
+#   pushed to by trusted publishing from its own GitHub environment only;
+#   gamma also from the break-glass environment gamma-breakglass, prod from
+#   nothing else.
 # =============================================================================
 #
 # The file is staged as test data at `channels.textproto` (BUCK). A typo in
@@ -18,6 +20,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 from kci_release_channel import (
     ARTIFACT_TYPE_CONDA,
     CREDENTIAL_KIND_OIDC_TRUSTED_PUBLISHING,
+    break_glass_push_identity_environment,
     find_channel,
     parse_channels_file,
     push_identity_environment,
@@ -52,12 +55,21 @@ def _check(name: String) raises:
     assert_equal(push_identity_environment(repo), name)
 
 
+def _break_glass_env(name: String) raises -> String:
+    var ch = find_channel(parse_channels_file(_read()), name)
+    return break_glass_push_identity_environment(ch.repository_for(String(ARTIFACT_TYPE_CONDA)))
+
+
 def test_gamma_is_komira_ai_gamma_by_trusted_publishing_from_environment_gamma() raises:
     _check(String("gamma"))
+    # a break-glass run publishes from its own environment (required reviewer)
+    assert_equal(_break_glass_env(String("gamma")), String("gamma-breakglass"))
 
 
 def test_prod_is_komira_ai_prod_by_trusted_publishing_from_environment_prod() raises:
     _check(String("prod"))
+    # no break-glass run reaches prod: its channel trusts no second environment
+    assert_equal(_break_glass_env(String("prod")), String(""))
 
 
 def main() raises:

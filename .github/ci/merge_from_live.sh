@@ -13,6 +13,6 @@
 #   2. Download each new artifact once and write its size and sha256.
 #   3. Commit on a branch and open one pull request with the GITHUB_TOKEN
 #      (contents: write, pull-requests: write on the job).
-#   4. The pull request's own ci run is the gate: it merges only if green.
+#   4. The pull request's own kci / pr run is the gate: it merges only if green.
 echo "merge_from_live.sh: not implemented yet; see the design in $0" >&2
 exit 1

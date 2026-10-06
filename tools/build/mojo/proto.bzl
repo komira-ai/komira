@@ -39,7 +39,7 @@ the action key.
 """
 
 load(":defs.bzl", "mojo_library")
-load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 MojoProtoToolchainInfo = provider(fields = {
@@ -274,7 +274,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
     gen_dir = generate_proto_dir(ctx, plugin, plugin_name, opt, trees, generate, names, import_name)
 
     # Precompile the generated directory, as mojo_library does.
-    deps = [d[MojoInfo].pkgs for d in ctx.attrs.deps]
+    deps = mojo_pkg_children(ctx, [d[MojoInfo] for d in ctx.attrs.deps])
     pkg = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     ctx.actions.run(
@@ -309,6 +309,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
             direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps]),
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = pkg, children = deps),
+            pkgs_def = MojoPkgTSet,
         ),
     ]
 

@@ -1,0 +1,64 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# affected: the targets a change affects, and the units of the release
+# template it reaches (see affected.mojo). The mapping is `change_map`, a
+# pure function over a `Graph`; its unit tests answer the graph from tables,
+# and are welded: nothing builds against the package while one fails.
+#
+# What the mapping widens on is DATA, `rules.txt`; the test that reads the
+# shipped file holds it to the cases that must never be left out (the build
+# system, the prelude, the pinned buck2, the project configuration).
+export_file(
+    name = "rules.txt",
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "change_map",
+    srcs = [
+        "change_map/__init__.mojo",
+        "change_map/cells.mojo",
+        "change_map/graph.mojo",
+        "change_map/labels.mojo",
+        "change_map/plan.mojo",
+        "change_map/process.mojo",
+        "change_map/report.mojo",
+        "change_map/rules.mojo",
+        "change_map/units.mojo",
+    ],
+    deps = [
+        "//tools/build/inspect:buildtools",
+    ],
+    test_srcs = [
+        # every file shape against a table graph: leaf source, .bzl, BUCK,
+        # deleted, toolchain, ownerless, inert, empty, and every failure
+        "tests/test_plan.mojo",
+        # the patterns, the data file's grammar, the cell table, the labels
+        "tests/test_rules_cells_labels.mojo",
+        # kci's protocol and the JSON and text renderings
+        "tests/test_units_and_report.mojo",
+        # the shipped rules.txt widens on what must never be left out
+        "tests/test_rules_file.mojo",
+        # a real process: streams kept apart, exit code, quoting, a program that is not there
+        "tests/test_process.mojo",
+    ],
+    test_data = {
+        "tests/test_plan.mojo": {
+            "tools/build/ci/rules.txt": ":rules.txt",
+        },
+        "tests/test_rules_file.mojo": {
+            "tools/build/ci/rules.txt": ":rules.txt",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+mojo_binary(
+    name = "affected",
+    srcs = ["affected.mojo"],
+    deps = [
+        ":change_map",
+        "//tools/build/inspect:buildtools",
+    ],
+    visibility = ["PUBLIC"],
+)

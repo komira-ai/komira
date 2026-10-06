@@ -34,7 +34,7 @@ import deps as D
 def load_renames():
     return [tuple(l.rstrip('\n').split('\t')) for l in open(os.path.join(HERE,'renames.tsv')) if l.strip() and not l.startswith('#')]
 RENAMES=load_renames()
-ALWAYS_EXCLUDE=('src/komira_core/','src/komira_core_ffi/','tools/core_split/','.github/workflows/repoint_tool.yml','.git/','buck-out/')
+ALWAYS_EXCLUDE=('src/komira_core/','src/komira_core_ffi/','tools/core_split/','.git/','buck-out/')
 TEXT_EXT=('.mojo','.md','.bzl','.sh','.py','.tsv','.txt','.toml','.yml','.yaml','.textproto','.proto','.c','.h','.inc','.cc','.json')
 CORE=re.compile(r'(?<![A-Za-z0-9_])komira_core(?:_ffi)?(?![A-Za-z0-9_])')
 HARD=re.compile(r'(?m)^[ \t]*(?:from|import)[ \t]+komira_core(?:_ffi)?(?![A-Za-z0-9_])|//src/komira_core(?:_ffi)?:')

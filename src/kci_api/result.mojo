@@ -48,7 +48,10 @@
 #   schema_version      1
 #   scope               FULL or SELECTIVE (selection.mojo): SELECTIVE
 #                       whenever any --only, or --affected-by, is given
-#   set_hash            build: computed; publish: recomputed; else ""
+#   set_hash            build: computed; publish or validation:
+#                       recomputed, never under --plan, and for a run
+#                       that selects validations only when every one
+#                       VALIDATED and SUCCEEDED; else ""
 #   stage               the stage run; "" when unknown
 #   stage_step_kinds    the kinds of the stage's steps, in order
 #   started_at_ms

@@ -22,7 +22,7 @@ staged source directory can never shadow a package.
 """
 
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
-load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 
@@ -72,7 +72,7 @@ def _check_deps(ctx):
             fail("{}: dep {} provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)".format(ctx.label, d.label))
 
 def _dep_closure(ctx):
-    return [d[MojoInfo].pkgs for d in ctx.attrs.deps if MojoInfo in d]
+    return mojo_pkg_children(ctx, [d[MojoInfo] for d in ctx.attrs.deps if MojoInfo in d])
 
 def _c_link(ctx):
     """MergedLinkInfo of every C/C++ library this target's code may call, or None."""
@@ -488,6 +488,7 @@ def _library_impl(ctx):
             },
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
+            pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
         ),
     ]
