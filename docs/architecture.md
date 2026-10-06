@@ -133,7 +133,7 @@ dependency order is the order of the rows.
 ### Third-party code
 
 C and C++ libraries are built from pinned source archives under
-[`third_party/`](../third_party/): aws-lc, s2n-tls and snappy, plus the
+[`third_party/`](../third_party/), among them aws-lc, s2n-tls, snappy and sqlite, plus the
 crates.io crates the Rust rules use. Mojo code calls them through `deps` on
 their targets ([C and C++](../tools/build/mojo/README.md#c-and-c)).
 
