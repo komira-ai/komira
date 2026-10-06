@@ -838,12 +838,11 @@ def test_read_path_refusals() raises:
         assert_equal(String(e), "expand_dict_indices_to_string: index 2 at row 1 out of range [0, 2)")
     assert_true(raised, "an index past the dictionary must raise")
 
-    # A nested type on the mmap path. decode_record_batch_message_mmap ends its
-    # per-column loop with its own "nested types are not" refusal, but no
-    # schema reaches it: the count pass before the loop calls _node_count_for
-    # on every column, which raises for any type outside NULL, BOOL, the four
-    # var-len types, DICTIONARY and the fixed-width types, and the loop has an
-    # arm for each of those. So the refusal pinned here is _node_count_for's
+    # A nested type on the mmap path. decode_record_batch_message_mmap's
+    # per-column loop has no nested arm; its type guard is the count pass
+    # before the loop, which calls _node_count_for on every column and raises
+    # for any type outside NULL, BOOL, the four var-len types, DICTIONARY and
+    # the fixed-width types. So the refusal pinned here is _node_count_for's
     # (type id 20 is LIST), and the frame needs no LIST layout to reach it.
     var list_types = List[ArrowType]()
     list_types.append(ArrowType.LIST)

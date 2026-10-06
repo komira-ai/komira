@@ -519,7 +519,13 @@ def test_dict_delta_stream() raises:
         _ = _decode_pass(1, path, buf, msgs[2], dict_types)
     except e:
         raised = True
-        assert_true("DICTIONARY" in String(e), String(e))
+        assert_equal(
+            String(e),
+            "decode_record_batch_message_mmap: DICTIONARY columns require"
+            " dict-aware decode. Caller should use the copy-on-read dict-aware"
+            " dispatch instead of the mmap path for files containing"
+            " dict-encoded columns.",
+        )
     assert_true(raised)
 
 
