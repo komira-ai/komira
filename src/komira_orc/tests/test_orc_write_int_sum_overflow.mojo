@@ -25,6 +25,10 @@
 #     accumulator narrowed at the end.
 #   * exact boundaries: [MAX-3, 1, 2] writes sum MAX and [MIN+3, -1, -2]
 #     writes sum MIN. Catches an off-by-one overflow test.
+#   * zero sum: [5, -5], [MIN, MAX, 1] and a file-level merge of stripe
+#     sums 7 and -7 all write field 3 as 0. Catches an encoder that skips
+#     a present sum equal to 0 (a sentinel-0 or skip-default write), which
+#     a reader would take as overflow.
 #   * merge, one stripe overflowed (stride 2): [MAX, 1, 5, 6] and
 #     [5, 6, MAX, 1] — the overflowed stripe has no sum, the other has 11,
 #     the file has none, in either order. Catches a merge that drops the
@@ -275,6 +279,28 @@ def test_exact_boundaries_keep_sum() raises:
     )
 
 
+def test_zero_sum_is_written() raises:
+    # A sum that is present and equals 0 must still be written as field 3:
+    # an absent field 3 means "overflowed" to a reader. Java writes sum=0.
+    _check_single_stripe(_l(5, -5), "n=2 min=-5 max=5 sum=0", "[5, -5]")
+    # Running sum passes through the extremes without overflowing:
+    # MIN + MAX = -1, then 0.
+    _check_single_stripe(
+        _l(MIN, MAX, 1),
+        "n=3 min=-9223372036854775808 max=9223372036854775807 sum=0",
+        "[MIN, MAX, 1]",
+    )
+    # Merge: stripe sums 7 and -7 are written, the file sum 0 is written.
+    var m = _write(_l(3, 4, -3, -4), 2)
+    var sm = _stripe_lines(m)
+    assert_equal(len(sm), 2, "zero merge: stripe count")
+    assert_equal(sm[0], "n=2 min=3 max=4 sum=7", "zero merge: stripe 0")
+    assert_equal(sm[1], "n=2 min=-4 max=-3 sum=-7", "zero merge: stripe 1")
+    assert_equal(
+        _file_line(m), "n=4 min=-4 max=4 sum=0", "zero merge: file"
+    )
+
+
 def test_merge_with_one_overflowed_stripe() raises:
     var a = _write(_l(MAX, 1, 5, 6), 2)
     var sa = _stripe_lines(a)
@@ -389,6 +415,7 @@ def main() raises:
     test_negative_overflow_omits_sum()
     test_intermediate_overflow_omits_sum()
     test_exact_boundaries_keep_sum()
+    test_zero_sum_is_written()
     test_merge_with_one_overflowed_stripe()
     test_merge_overflows_at_file_level_only()
     test_row_index_entries()
