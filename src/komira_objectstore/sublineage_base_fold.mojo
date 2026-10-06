@@ -1101,6 +1101,7 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         Reaping the first K live blocks advances `_base_log_start_seq` by K."""
         var base = self._shard_store(BASE_SHARD_ID)
         var keep = List[BaseChunkEntry]()
+        var retired = List[Int64]()
         var first_keep_off = retain_from_dense
         var reaped = Int64(0)
         var saw_keep = False
@@ -1108,12 +1109,9 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
             ref e = self._base_chunks[i]
             var abs_seq = self._base_log_start_seq + Int64(i)
             if e.dense_base + e.count <= retain_from_dense and not saw_keep:
-                # fully below the watermark — tombstone + reap (idempotent).
-                try:
-                    base.schedule_for_delete(abs_seq)
-                    base.reap(abs_seq)
-                except e3:
-                    _ = e3  # already reaped — idempotent
+                # fully below the watermark — retired; tombstoned + reaped
+                # below, once the log start is past it.
+                retired.append(abs_seq)
                 reaped += Int64(1)
             else:
                 if not saw_keep:
@@ -1122,6 +1120,8 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
                 keep.append(e.copy())
         var new_log_start_seq = self._base_log_start_seq + reaped
         # Advance the durable `_LOG_START` so a restart sees the reaped prefix.
+        # It goes FIRST: `CasManifestStore.reap` refuses a chunk at or above
+        # the log start (komira-ai/komira#486).
         var ls = base.read_log_start()
         try:
             _ = base.advance_log_start(
@@ -1129,6 +1129,12 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
             )
         except e4:
             _ = e4  # a concurrent advance won — the pointer is monotone-forward
+        for j in range(len(retired)):
+            try:
+                base.schedule_for_delete(retired[j])
+                base.reap(retired[j])
+            except e3:
+                _ = e3  # already reaped — idempotent
         _ = base^
         self._base_chunks = keep^
         self._base_log_start_offset = first_keep_off

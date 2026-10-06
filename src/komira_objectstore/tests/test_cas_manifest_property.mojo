@@ -207,9 +207,12 @@ def test_lifecycle_fsm() raises:
         )
     assert_true(reap_before_raised, "reap before tombstone must raise")
 
-    # Tombstone (idempotent), then reap removes the object.
+    # Tombstone (idempotent), retire it (advance the log start past it: `reap`
+    # refuses a chunk at or above the log start), then reap removes the object.
     m.schedule_for_delete(seq)
     m.schedule_for_delete(seq)  # idempotent
+    var ls = m.read_log_start()
+    _ = m.advance_log_start(seq + Int64(1), res.last_offset + Int64(1), ls.etag)
     m.reap(seq)
 
     # The chunk is gone — read_chunk now 404s.

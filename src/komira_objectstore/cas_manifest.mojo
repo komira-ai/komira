@@ -22,6 +22,16 @@
 # create-winner of slot K owns slot K — there is exactly one winner, so the
 # sequence is gapless and totally ordered (linearizable append).
 #
+# ONE EXCEPTION, AND HOW IT IS CLOSED: retention DELETEs chunk keys below
+# `_LOG_START` (`reap`), and `If-None-Match` cannot tell a deleted key from one
+# never written, so a writer with a stale head can win a REAPED slot. Such a
+# win is never reported committed: after every winning create the writer GETs
+# `_LOG_START` and, if the won slot is below it, raises the retryable
+# `slot_reaped` error instead of acknowledging (`manifest_slot_guard.mojo`
+# holds the rules and the soundness argument). `reap` refuses any chunk at or
+# above `_LOG_START`, which is what makes that check exact. The refused chunk
+# (and the segment it names) is left behind below `_LOG_START`, unreferenced.
+#
 # WHY ONE TRAIT SERVES BOTH CONSUMERS (the load-bearing shared-foundation
 # decision). The trait surface is the *manifest mechanism*, NOT either
 # consumer's domain payload. Both consumers map onto the same three verbs —
@@ -138,6 +148,18 @@ from komira_objectstore.path import Path
 # never crosses the boundary) and returns a plain `List[String]`. Cycle-free:
 # sublineage_shard_keys imports ONLY {path, store, types}, never cas_manifest.
 from komira_objectstore.sublineage_shard_keys import _discover_shard_ids
+
+# The reaped-slot guard (komira-ai/komira#486): a create that wins a chunk slot
+# below `_LOG_START` is never reported committed. The decisions and the error
+# text live in `manifest_slot_guard`; this file only calls them. Cycle-free:
+# manifest_slot_guard imports nothing from this package.
+from komira_objectstore.manifest_slot_guard import (
+    head_is_below_log_start,
+    reap_is_refused,
+    reap_refused_error,
+    slot_reaped_error,
+    won_slot_is_reaped,
+)
 
 # =============================================================================
 # Process-global CAS-manifest serialization gate — a READ/WRITE lock
@@ -858,7 +880,8 @@ trait MetadataStore(Movable, Deinitable):
         """Remove the underlying object for a `ScheduledForDelete` chunk
         (the reaper verb). Idempotent (deleting an absent object succeeds).
         Raises if the chunk is not in `ScheduledForDelete` (fail-loud — you
-        must tombstone before you reap)."""
+        must tombstone before you reap), and refuses a chunk at or above the
+        log start (advance the log start past a chunk before reaping it)."""
         ...
 
 
@@ -1450,7 +1473,11 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             _ = e
             return String("")
 
-    def _read_head_inner(self, force_authoritative: Bool = False) raises -> ManifestHead:
+    def _read_head_inner(
+        self,
+        force_authoritative: Bool = False,
+        clamp_to_log_start: Bool = False,
+    ) raises -> ManifestHead:
         # Stale-head forward progress: when `force_authoritative` is
         # set (the contended append's escalation after N consecutive 412s), we
         # BYPASS the cached `_HEAD` entirely and go straight to the bucket's
@@ -1472,7 +1499,22 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         try:
             var hk = head_key(self._prefix)
             var raw = self._store.get(hk)
-            return decode_head(raw)
+            var h = decode_head(raw)
+            # REAPED-SLOT CLAMP (#486), WRITE PATH ONLY: the durable `_HEAD` is
+            # advanced only every `_HEAD_ADVANCE_DEFER_CADENCE` warm appends, so
+            # on an idle partition it can sit below `_LOG_START`. A writer that
+            # aimed its create at `h.chunk_seq + 1` would then walk through
+            # reaped slots (each win refused by the post-win guard). When the
+            # head is below the log start, recover it by LIST (log-start aware)
+            # instead. One extra GET of `_LOG_START` on the cold write path;
+            # readers (`read_head`, `read_durable_head`) do not pass the flag,
+            # so their one-GET cost is unchanged — a reader cannot acknowledge.
+            if clamp_to_log_start and head_is_below_log_start(
+                h.chunk_seq,
+                self._read_log_start_inner(with_etag=False).log_start_seq,
+            ):
+                return self._recover_head_by_list()
+            return h^
         except e:
             if _is_not_found(String(e)):
                 # _HEAD absent — recover the true tail by LISTing the
@@ -1481,16 +1523,22 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                 return self._recover_head_by_list()
             raise e^
 
-    def _read_log_start_inner(self) raises -> LogStart:
+    def _read_log_start_inner(self, with_etag: Bool = True) raises -> LogStart:
         """UNLOCKED `_LOG_START` read (the gate is already held by the caller —
         `read_head` rdlock / `append` wrlock). Mirrors the public
         `read_log_start` minus the (non-recursive) gate take, so recovery can
         seed the offset replay from the retention pointer without
         self-deadlocking. Returns `LogStart.zero()` when the object is absent
-        (a never-truncated partition)."""
+        (a never-truncated partition).
+
+        `with_etag=False` skips the HEAD for the etag (the returned etag is
+        empty): the reaped-slot guard only compares `log_start_seq`, so its
+        per-ack cost is the single GET."""
         var lk = log_start_key(self._prefix)
         try:
             var raw = self._store.get(lk)
+            if not with_etag:
+                return decode_log_start(raw, String(""))
             var meta = self._store.head(lk)
             return decode_log_start(raw, meta.etag)
         except e:
@@ -1765,12 +1813,23 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         base_offset: Int64,
         record_count: Int64,
         var won_etag: String,
-    ) -> None:
+    ) raises -> None:
         """Finalize a poll-shaped create-CAS WIN: the same best-effort monotone
         `_HEAD` advance + local-cache invalidate the sync `try_append_at_seq`
         does on its win (so a subsequent cached `read_head` tracks the tail). A
         lost advance is recoverable by LIST; table-store correctness reads always go
-        authoritative. The op passes the slot + base + the won chunk etag."""
+        authoritative. The op passes the slot + base + the won chunk etag.
+
+        REAPED-SLOT GUARD (#486): first GETs `_LOG_START`; a win below it is a
+        reaped slot, NOT a commit — the cache is invalidated, `_HEAD` is not
+        advanced, and the retryable `slot_reaped` error is raised (classify
+        with `manifest_slot_guard.is_slot_reaped`)."""
+        if won_slot_is_reaped(
+            candidate_seq,
+            self._read_log_start_inner(with_etag=False).log_start_seq,
+        ):
+            self._head_cache = _LocalHeadCache.cold()
+            raise slot_reaped_error("apply_async_append_win")
         self._try_advance_head(
             candidate_seq,
             base_offset + record_count,
@@ -2262,47 +2321,68 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # function's return boundary (the same materialization the unwind
         # forced), so no GET transient survives into the PUT. Returns
         # `Some(result)` on WIN, `None` on a 412 (caller re-reads + retries);
-        # re-raises any non-412 error.
+        # re-raises any non-412 error, and raises `slot_reaped` when the win
+        # landed in a reaped slot below `_LOG_START` (not committed).
         var candidate_seq = head.chunk_seq + Int64(1)
         var base = head.next_offset
         var ck = chunk_key(self._prefix, candidate_seq)
         var encoded = encode_chunk(body, record_count)
+        # Only the create sits inside the `try`: a 412 here is a lost slot. The
+        # reaped-slot guard below runs OUTSIDE it, so no error raised after the
+        # win (a `_LOG_START` GET failure whose text names a key spelling `412`,
+        # say) can be mistaken for a lost slot and re-append the same body.
+        var meta: ObjectMeta
         try:
-            var meta = self._store.conditional_put(
+            meta = self._store.conditional_put(
                 ck, encoded, WritePrecondition.if_none_match_star()
-            )
-            # WON the slot — its records occupy [base, last]. Ordering
-            # is now fixed.
-            var meta_etag = meta.etag
-            var last = base + record_count - Int64(1)
-            # Best-effort MONOTONE HEAD advance. The fast path is a ONE-CALL
-            # If-Match on `head_etag` (the `_HEAD` etag this attempt read): it
-            # succeeds only if `_HEAD` is STILL at `candidate_seq-1`, so the
-            # write to `candidate_seq` is strictly forward (monotone). On any
-            # conflict / empty etag it falls back to the read-recheck loop. A
-            # lost advance is recoverable by LIST.
-            # Flush-op reduction: DEFER this off the ack-blocking path on
-            # the hot append (the caller updates its local cache synchronously
-            # instead). The monotone If-Match invariant is preserved for any
-            # advance that DOES run (the OCC path + the contention/cold fall-back
-            # both keep calling `_try_advance_head`, which never writes `_HEAD`
-            # backwards).
-            if not defer_durable_advance:
-                self._try_advance_head(
-                    candidate_seq,
-                    base + record_count,
-                    meta_etag,
-                    head.chunk_seq,
-                    head_etag,
-                )
-            return Optional[AppendResult](
-                AppendResult(candidate_seq, base, last, meta_etag^, attempt)
             )
         except e:
             if not _is_precondition(String(e)):
                 raise e^
             # 412 — another writer won this slot. Signal retry to the caller.
             return Optional[AppendResult](None)
+        # REAPED-SLOT GUARD (#486). The create WON, but `If-None-Match` cannot
+        # tell a slot retention reaped from one never written. GET `_LOG_START`
+        # now, AFTER the win: a chunk is reaped only once `_LOG_START` is
+        # durably past it and `_LOG_START` never moves back, so a win below it
+        # is a reaped slot that no reader will ever read. It is NOT committed:
+        # invalidate the local head cache, do not advance `_HEAD`, and raise the
+        # retryable `slot_reaped` error instead of acknowledging. Cost: one
+        # GET on every ack (the price of DELETE-based reaping; see
+        # `manifest_slot_guard.mojo`).
+        if won_slot_is_reaped(
+            candidate_seq,
+            self._read_log_start_inner(with_etag=False).log_start_seq,
+        ):
+            self._head_cache = _LocalHeadCache.cold()
+            raise slot_reaped_error("append")
+        # WON a live slot — its records occupy [base, last]. Ordering is now
+        # fixed.
+        var meta_etag = meta.etag
+        var last = base + record_count - Int64(1)
+        # Best-effort MONOTONE HEAD advance. The fast path is a ONE-CALL
+        # If-Match on `head_etag` (the `_HEAD` etag this attempt read): it
+        # succeeds only if `_HEAD` is STILL at `candidate_seq-1`, so the
+        # write to `candidate_seq` is strictly forward (monotone). On any
+        # conflict / empty etag it falls back to the read-recheck loop. A
+        # lost advance is recoverable by LIST.
+        # Flush-op reduction: DEFER this off the ack-blocking path on
+        # the hot append (the caller updates its local cache synchronously
+        # instead). The monotone If-Match invariant is preserved for any
+        # advance that DOES run (the OCC path + the contention/cold fall-back
+        # both keep calling `_try_advance_head`, which never writes `_HEAD`
+        # backwards).
+        if not defer_durable_advance:
+            self._try_advance_head(
+                candidate_seq,
+                base + record_count,
+                meta_etag,
+                head.chunk_seq,
+                head_etag,
+            )
+        return Optional[AppendResult](
+            AppendResult(candidate_seq, base, last, meta_etag^, attempt)
+        )
 
     def _append_inner(
         mut self,
@@ -2380,7 +2460,9 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             from_cache = True
         else:
             # UNLOCKED internal read (the gate is already held by `append`).
-            head = self._read_head_inner()
+            # Clamped to `_LOG_START` (#486): a durable `_HEAD` below the log
+            # start is replaced by the LIST-recovered head.
+            head = self._read_head_inner(clamp_to_log_start=True)
             # Capture the `_HEAD` OBJECT etag so the winning append can do a
             # ONE-CALL monotone advance (If-Match on this etag) instead of a
             # GET+HEAD+PUT cycle. Empty when `_HEAD` is absent (LIST-recovered
@@ -2515,13 +2597,10 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                 head = self._escalate_head_incremental(head)
                 head_etag = String("")
                 continue
-            var probed = self._probe_taken_chunk_forward(head, taken_seq)
-            if probed:
-                head = probed.take()
-                head_etag = String("")
-            else:
-                head = self._read_head_inner(force_authoritative=False)
-                head_etag = self._read_head_etag()
+            # The probe always yields a head: the taken chunk's, or (when it
+            # was reaped between the 412 and the GET) the LIST-recovered one.
+            head = self._probe_taken_chunk_forward(head, taken_seq)
+            head_etag = String("")
             continue
 
     def _persist_deferred_head_advance(mut self) -> None:
@@ -2556,31 +2635,35 @@ struct CasManifestStore[Store: ConditionalWriteStore](
 
     def _probe_taken_chunk_forward(
         self, prev_head: ManifestHead, taken_seq: Int64
-    ) raises -> Optional[ManifestHead]:
+    ) raises -> ManifestHead:
         # FORWARD-PROBE re-anchor (exactly-once throughput). The slot `taken_seq` (=
         # prev_head.chunk_seq+1) just 412'd, so SOME writer committed it. Read
         # THAT chunk's record_count (one GET of a known key — far cheaper than a
         # LIST or a stale-_HEAD re-read) and return a head pointing AT `taken_seq`
         # with `next_offset = prev_head.next_offset + record_count`, so the next
-        # attempt tries `taken_seq+1` at the correct running-sum base. Returns
-        # None if the chunk is not yet readable (transient) so the caller falls
-        # back to a cached-_HEAD re-read. This is a forward-progress HINT only —
-        # the slot If-None-Match CAS is the gaplessness oracle. We only advance
-        # ONE slot at a time, so if the other writer is several slots ahead, the
-        # next probe walks forward one more (each a single GET), or the
-        # LIST_ESCALATE_AFTER fallback re-anchors on the true top.
+        # attempt tries `taken_seq+1` at the correct running-sum base. This is
+        # a forward-progress HINT only — the slot If-None-Match CAS is the
+        # gaplessness oracle. We only advance ONE slot at a time, so if the
+        # other writer is several slots ahead, the next probe walks forward one
+        # more (each a single GET), or the LIST_ESCALATE_AFTER fallback
+        # re-anchors on the true top.
+        #
+        # A 404 here means the slot that just 412'd is GONE: retention reaped it
+        # between the create and this GET (stores are read-after-write
+        # consistent, and `reap` deletes only below `_LOG_START`). So the writer
+        # is behind the log start, and the durable `_HEAD` may be too: falling
+        # back to it would aim the next create at another reaped slot (#486).
+        # Recover the head by LIST instead (log-start aware).
         var ck = chunk_key(self._prefix, taken_seq)
         try:
             var c = self._store.get(ck)
             var rc = decode_chunk_record_count(c)
-            return Optional(
-                ManifestHead(
-                    taken_seq, prev_head.next_offset + rc, String("")
-                )
+            return ManifestHead(
+                taken_seq, prev_head.next_offset + rc, String("")
             )
         except e:
             if _is_not_found(String(e)):
-                return Optional[ManifestHead](None)
+                return self._recover_head_by_list()
             raise e^
 
     def _escalate_head_incremental(
@@ -3069,14 +3152,23 @@ struct CasManifestStore[Store: ConditionalWriteStore](
 
         Grace gating lives ABOVE this verb (in the ReapWorker / the
         BrokerCore reap trigger, which reads `tombstone_schedule_ts` and only
-        calls `reap` once `now - schedule_ts >= grace`). This verb itself
-        reaps unconditionally once the tombstone exists."""
+        calls `reap` once `now - schedule_ts >= grace`).
+
+        REFUSES a chunk at or above `_LOG_START` (#486): a chunk is deleted
+        only once the log start is durably past it. The append path's post-win
+        guard relies on exactly that (a create that wins a deleted slot must
+        then read `_LOG_START` above the slot), so advance the log start first,
+        then reap. The log start is read UNLOCKED like `_is_marked` (it only
+        moves forward, so a stale read can only refuse more)."""
         if not self._is_marked(chunk_seq):
             raise Error(
                 "CasManifestStore.reap: chunk "
                 + String(chunk_seq)
                 + " is not ScheduledForDelete — tombstone before reaping"
             )
+        var live_from = self._read_log_start_inner(with_etag=False).log_start_seq
+        if reap_is_refused(chunk_seq, live_from):
+            raise reap_refused_error(chunk_seq, live_from)
         # CAS-GATE: WRITE verb -> EXCLUSIVE lock for the two DELETEs. The
         # `_is_marked` pre-check above STAYS UNLOCKED — wrapping it would
         # create an rdlock-then-wrlock upgrade on one call stack (deadlock).
@@ -3619,7 +3711,9 @@ struct AsyncManifestAppendOp[
         a 412 (someone else owns it — re-read authoritative head + re-OCC before
         re-driving). On a WIN it applies the same best-effort monotone `_HEAD`
         advance + cache-invalidate the sync `try_append_at_seq` does (via
-        `wal.apply_async_append_win`).
+        `wal.apply_async_append_win`), including the reaped-slot guard: a win
+        below `_LOG_START` raises the retryable `slot_reaped` error instead of
+        returning `Some` (#486).
 
         LOW-1 / ABI NOTE — the LIVE lost-slot 412 channel is the ERR `*_start` /
         `*_poll` return, classified by the caller's `_is_lost_slot_412`, NOT this
