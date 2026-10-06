@@ -36,6 +36,7 @@ mojo_library(
         "tests/test_fs_path_bytes_non_ascii.mojo",
         "tests/test_glob_engine.mojo",
         "tests/test_local_fs_clone.mojo",
+        "tests/test_local_fs_errno_not_absent.mojo",
         "tests/test_local_fs_list_dir_shallow.mojo",
         "tests/test_local_fs_list_recursive.mojo",
         "tests/test_local_fs_read_at_mmap.mojo",
