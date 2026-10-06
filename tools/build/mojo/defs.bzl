@@ -25,6 +25,14 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "creat
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_kwargs", "coverage_link_dir")
+load(
+    ":test_runtime.bzl",
+    _arg_args = "arg_args",
+    _data_map = "data_map",
+    _env_args = "env_args",
+    _test_root = "test_root",
+)
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -41,14 +49,16 @@ def _watchdog_flags(tc):
         "--watchdog-sample-secs={}".format(tc.watchdog_sample_secs),
     ]
 
-def _mojo_cmd(tc, args, runpath = None, source_root = None, link_tail = None):
+def _mojo_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None):
+    # `link` replaces the toolchain's link directory: a coverage build's
+    # (coverage.bzl), whose `zig` keeps and relocates the debug info.
     return cmd_args(
         tc.busybox,
         "sh",
         tc.wrapper,
         tc.busybox,
         tc.compiler,
-        tc.link,
+        link or tc.link,
         tc.cc_target,
         ["--runpath=" + runpath] if runpath else [],
         [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
@@ -157,7 +167,7 @@ _OPT_LEVELS = ["0", "1", "2", "3"]
 TEST_OPT_LEVEL = "1"
 SHIPPED_OPT_LEVEL = "3"
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
@@ -173,6 +183,10 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     prefix forced) and the run path is the default `$ORIGIN/lib`.
     `link_extra` is appended to the link tail after the C libraries (the
     force-loaded archives of mojo_shared_lib).
+
+    With `debug_link` (a coverage build's link directory, coverage.bzl), the
+    compile keeps line tables (`--debug-level line-tables`) and links through
+    that directory instead of the toolchain's.
     """
     if opt_level not in _OPT_LEVELS:
         fail("{}: optimization level `{}` is not one of {}".format(ctx.label, opt_level, ", ".join(_OPT_LEVELS)))
@@ -232,11 +246,12 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             opt_level,
             "--target-cpu",
             tc.target_cpu,
+            ["--debug-level", "line-tables"] if debug_link else [],
             closure.project_as_args("include"),
             staged.project(entry),
             "-o",
             exe.as_output(),
-        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = tail),
+        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = tail, link = debug_link),
         category = category,
         identifier = identifier,
     )
@@ -252,82 +267,8 @@ def _test_key(ctx, t):
         p = p[len(pkg) + 1:]
     return p
 
-# ---- the test runtime contract ------------------------------------------
-#
-# A test runs from a staged tree built for it alone:
-#
-#     root/bin/<test>        the test binary (a copy, so /proc/self/exe is here)
-#     root/share/<dest>      each declared data file
-#
-# gate_runner.sh starts the test with root/share as its current directory, so
-# a relative path to a declared file opens and any other relative path names
-# nothing. komira//tools/build/mojo/runtime_paths finds root/share from the
-# executable, the same way a bundle finds its share/.
-
-# Names the runner sets itself; a test may not override them through env.
-_RUNNER_ENV = ["PATH", "LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "TMPDIR", "TEST_TMPDIR", "HOME", "PWD"]
-
-def _data_map(ctx, where, data):
-    """{dest: artifact} for a `data` value: a list of sources (each staged at
-    its path from the cell root) or a dict {dest: source}."""
-    if type(data) == type([]):
-        out = {}
-        pkg = ctx.label.package
-        for a in data:
-            if not a.is_source:
-                fail("{}: {} is a build output; a list entry is staged at its source path, so name a build output in the dict form, {{dest: source}}".format(where, a))
-            # A source's short_path is relative to its package.
-            out[pkg + "/" + a.short_path if pkg else a.short_path] = a
-    else:
-        out = dict(data)
-    prefixes = {}
-    for dest in out:
-        if dest == "" or dest.startswith("/") or dest.endswith("/"):
-            fail("{}: data destination {} must be a relative file path".format(where, repr(dest)))
-        parts = dest.split("/")
-        for part in parts:
-            if part in ("", ".", ".."):
-                fail("{}: data destination {} holds an empty, `.` or `..` segment".format(where, repr(dest)))
-        for i in range(1, len(parts)):
-            prefixes["/".join(parts[:i])] = dest
-    for dest in out:
-        if dest in prefixes:
-            fail("{}: data destination {} is both a file and the directory of {}".format(where, repr(dest), repr(prefixes[dest])))
-    return out
-
-def _env_args(where, env):
-    """`--env NAME=VALUE` runner arguments, after refusing names the runner owns."""
-    args = []
-    for name in sorted(env.keys()):
-        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
-            fail("{}: env name {} is not a shell variable name".format(where, repr(name)))
-        if name in _RUNNER_ENV:
-            fail("{}: env sets {}, which the test runner sets itself (runner-owned: {})".format(where, name, ", ".join(_RUNNER_ENV)))
-        args += ["--env", "{}={}".format(name, env[name])]
-    return args
-
-# The prefix of every artifact path in a mojo_test's `args`: gate_runner.sh
-# replaces it with the action's directory, because the test runs from its
-# share/, where a path relative to the action's directory reaches nothing.
-_ACTION_DIR_TOKEN = "@KOMIRA_ACTION_DIR@"
-
-def _arg_args(args):
-    """`--arg VALUE` runner arguments for a mojo_test's `args`, each artifact
-    path (from `$(location ...)`, `$(exe_target ...)`) written under _ACTION_DIR_TOKEN.
-    The artifacts are on the command line, so they are inputs of the test."""
-    out = []
-    for a in args:
-        out += ["--arg", cmd_args(a, absolute_prefix = _ACTION_DIR_TOKEN + "/")]
-    return out
-
-def _test_root(ctx, path, exe, data):
-    """The staged tree of one test; returns (root, binary inside it)."""
-    name = exe.basename
-    files = {"bin/" + name: exe}
-    for dest, a in data.items():
-        files["share/" + dest] = a
-    root = ctx.actions.copied_dir(path, files)
-    return root, root.project("bin/" + name)
+# The test runtime contract (the staged tree a test runs from, its data,
+# environment and arguments) is in test_runtime.bzl.
 
 def _admit_test_data(ctx):
     """{test_srcs key: {dest: artifact}} for mojo_library's `test_data`."""
@@ -407,6 +348,11 @@ def _library_impl(ctx):
     # The gate: one build + one run per test, against the UNGATED package.
     markers = []
     test_subtargets = {}
+    # A coverage build (coverage.bzl): per test that is a source file, a
+    # second binary at -O0 with line tables, under cov/. None when coverage
+    # is off.
+    cov_link = coverage_link_dir(ctx)
+    cov_bins = {}
     for t in ctx.attrs.test_srcs:
         stem = _stem(t)
         if stem in test_subtargets:
@@ -444,6 +390,8 @@ def _library_impl(ctx):
         )
         test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
         markers.append(marker)
+        if cov_link and t.is_source:
+            cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, [ungated_tset], "0", "mojo_build_cov_test", stem, c_link, debug_link = cov_link)
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether
@@ -488,7 +436,13 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}),
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | ({"coverage": [DefaultInfo(
+                default_outputs = [cov_bins[k] for k in sorted(cov_bins)],
+                sub_targets = {"bin": [DefaultInfo(
+                    default_outputs = [cov_bins[k] for k in sorted(cov_bins)],
+                    sub_targets = {k: [DefaultInfo(default_output = v)] for k, v in cov_bins.items()},
+                )]},
+            )]} if cov_link else {}),
         ),
         MojoInfo(
             c_link = c_link,
@@ -650,7 +604,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -995,6 +949,7 @@ def _mojo_library(**kwargs):
             fail("{}: {} may hold no README.md: every library with a README runs {} on it, so the tool would depend on itself".format(kwargs.get("name", "mojo_library"), _README_TOOL_PACKAGE, _README_TOOL))
         kwargs["readme"] = readme[0]
         kwargs["readme_tool"] = _README_TOOL
+    coverage_kwargs(kwargs)
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):
         name = kwargs["name"]

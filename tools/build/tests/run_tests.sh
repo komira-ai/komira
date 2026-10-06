@@ -292,6 +292,7 @@
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
+#  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
 set -uo pipefail
 
 umbrella=1
@@ -1074,6 +1075,10 @@ expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 check
 expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
 expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
+
+# 41
+# shellcheck source=tools/build/tests/coverage_tests.sh
+. "$ROOT/tools/build/tests/coverage_tests.sh"
 
 # 37
 pt_rc=0
