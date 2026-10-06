@@ -27,6 +27,7 @@ from .codec_grpc import (
 from .codec_grpc_web import (
     GRPC_WEB_CONTENT_TYPE,
     GRPC_WEB_CONTENT_TYPE_PROTO,
+    grpc_web_append_trailers,
     grpc_web_decode_request,
     grpc_web_encode_unary,
 )
@@ -264,8 +265,9 @@ def _make_error_result(
 ) -> DispatchResult:
     """Build a DispatchResult representing an error outcome.
 
-    For Connect-JSON, body is the JSON error envelope. For gRPC and
-    gRPC-Web, body is empty (the caller emits the error in trailers).
+    For Connect-JSON, body is the JSON error envelope. For gRPC, body is
+    empty (the h2 trailer carries the status). For gRPC-Web, body is the
+    trailer frame (`grpc_web_error_body`): gRPC-Web has no HTTP trailers.
     """
     var body = List[UInt8]()
     var http_status = grpc_status_to_http_status(grpc_status)
@@ -275,10 +277,21 @@ def _make_error_result(
         # No body on error; trailers carry status
         http_status = UInt16(200)  # gRPC always 200 OK at HTTP layer
     elif codec_id == CODEC_ID_GRPC_WEB:
-        # gRPC-Web puts trailers in body; for errors we ship an empty
-        # data envelope + trailer envelope with the status. Caller can
-        # use grpc_web_encode_unary(empty, trailers) — but for the
-        # dispatcher's simple return, leave body empty and let the
-        # caller compose. http_status stays 200 (gRPC-Web semantics).
-        http_status = UInt16(200)
+        body = grpc_web_error_body(grpc_status, message)
+        http_status = UInt16(200)  # gRPC-Web: the status is in the body
     return DispatchResult(body^, http_status, grpc_status, message, codec_id)
+
+
+def grpc_web_error_body(grpc_status: UInt8, message: String) -> List[UInt8]:
+    """The body of a failed gRPC-Web unary call: the trailer frame alone.
+
+    gRPC-Web (PROTOCOL-WEB.md) carries no HTTP trailers, so the status is
+    the last length-prefixed frame of the body, flag 0x80, holding
+    `grpc-status: N\r\ngrpc-message: <percent-encoded>\r\n`. No data
+    frame precedes it (a trailers-only response), so a client cannot read
+    the error as an empty message. `message` is the raw UTF-8 text; the
+    trailer writer percent-encodes it.
+    """
+    var body = List[UInt8]()
+    grpc_web_append_trailers(body, GrpcTrailers(grpc_status, message))
+    return body^

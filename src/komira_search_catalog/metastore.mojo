@@ -49,7 +49,7 @@ from komira_objectstore import (
     head_key,
     tombstone_key,
 )
-from komira_objectstore.cas_manifest import is_not_found
+from komira_objectstore.cas_manifest import is_not_found, is_precondition
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_shard_keys import (
     LINEAGE_BASE_SHARD,
@@ -596,9 +596,18 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         try:
             self._manifest.rewrite_chunk_body(chunk_seq, _reaped_stub())
         except e:
-            # Another reaper got there first and the log start has already
-            # moved past the chunk.
-            if not is_not_found(String(e)):
+            var msg = String(e)
+            if is_precondition(msg):
+                # The rewrite is conditional (If-Match on the etag it read):
+                # another write landed in between. A racing reaper writes the
+                # same stub, or has already deleted it; then carry on as if
+                # this write had landed. Anything else is a real conflict.
+                var now = self._read_raw_if_present(chunk_seq)
+                if now and not _is_reaped_stub(decode_chunk_body(now.value())):
+                    raise e^
+            elif not is_not_found(msg):
+                # Not found: another reaper got there first and the log start
+                # has already moved past the chunk.
                 raise e^
         self._manifest.store_mut().delete(tombstone_key(prefix, chunk_seq))
         self._advance_past_reaped_prefix()
