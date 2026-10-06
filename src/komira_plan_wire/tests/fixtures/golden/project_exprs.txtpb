@@ -1,0 +1,339 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 2
+plan {
+  output_schema {
+    fields {
+      name: "a_f"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "is_not_null"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "in_list"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "str_op"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "substring"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "case"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "expr"
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  project {
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "a"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_dtype_code: _DT_FLOAT64
+            target_arrow_type_id: 12
+          }
+        }
+        name: "a_f"
+      }
+    }
+    exprs {
+      unary_op {
+        op: UN_IS_NOT_NULL
+        child {
+          col_ref {
+            name: "b"
+            side: COL_SIDE_NONE
+          }
+        }
+      }
+    }
+    exprs {
+      in_list {
+        child {
+          col_ref {
+            name: "a"
+            side: COL_SIDE_NONE
+          }
+        }
+        values {
+          dtype_code: _DT_INT64
+          int_val: 11
+          kind: SCALAR_KIND_DTYPE
+          time_unit: SCALAR_TIME_UNIT_MICRO
+          error_code: XL_ERR_NONE
+        }
+        values {
+          dtype_code: _DT_INT64
+          int_val: 22
+          kind: SCALAR_KIND_DTYPE
+          time_unit: SCALAR_TIME_UNIT_MICRO
+          error_code: XL_ERR_NONE
+        }
+        values {
+          dtype_code: _DT_INT64
+          int_val: 33
+          kind: SCALAR_KIND_DTYPE
+          time_unit: SCALAR_TIME_UNIT_MICRO
+          error_code: XL_ERR_NONE
+        }
+      }
+    }
+    exprs {
+      string_op {
+        op: STR_ENDS_WITH
+        child {
+          col_ref {
+            name: "s"
+            side: COL_SIDE_NONE
+          }
+        }
+        pattern: "xyz"
+      }
+    }
+    exprs {
+      substring {
+        child {
+          col_ref {
+            name: "s"
+            side: COL_SIDE_NONE
+          }
+        }
+        start: 2
+        length: 4
+      }
+    }
+    exprs {
+      when {
+        cases {
+          condition {
+            binary_op {
+              op: BIN_GT
+              left {
+                col_ref {
+                  name: "a"
+                  side: COL_SIDE_NONE
+                }
+              }
+              right {
+                literal {
+                  dtype_code: _DT_INT64
+                  int_val: 100
+                  kind: SCALAR_KIND_DTYPE
+                  time_unit: SCALAR_TIME_UNIT_MICRO
+                  error_code: XL_ERR_NONE
+                }
+              }
+            }
+          }
+          result {
+            literal {
+              dtype_code: _DT_INT64
+              int_val: 1
+              kind: SCALAR_KIND_DTYPE
+              time_unit: SCALAR_TIME_UNIT_MICRO
+              error_code: XL_ERR_NONE
+            }
+          }
+        }
+        cases {
+          condition {
+            binary_op {
+              op: BIN_LT
+              left {
+                col_ref {
+                  name: "b"
+                  side: COL_SIDE_NONE
+                }
+              }
+              right {
+                literal {
+                  dtype_code: _DT_INT64
+                  kind: SCALAR_KIND_DTYPE
+                  time_unit: SCALAR_TIME_UNIT_MICRO
+                  error_code: XL_ERR_NONE
+                }
+              }
+            }
+          }
+          result {
+            literal {
+              dtype_code: _DT_INT64
+              int_val: 2
+              kind: SCALAR_KIND_DTYPE
+              time_unit: SCALAR_TIME_UNIT_MICRO
+              error_code: XL_ERR_NONE
+            }
+          }
+        }
+        default_expr {
+          literal {
+            dtype_code: _DT_INT64
+            int_val: -1
+            kind: SCALAR_KIND_DTYPE
+            time_unit: SCALAR_TIME_UNIT_MICRO
+            error_code: XL_ERR_NONE
+          }
+        }
+      }
+    }
+    exprs {
+      window_fn {
+        func: PF_LAG
+        arg_col: "a"
+        arg_offset: 3
+        frame {
+          units: FRAME_UNITS_RANGE
+          start_tag: FRAME_BOUND_PRECEDING
+          start_offset: -5
+          end_tag: FRAME_BOUND_FOLLOWING
+          end_offset: 7
+        }
+        partition_by: "a"
+        partition_by: "b"
+        order_by: "s"
+        descending: true
+        descending: false
+        descending: true
+      }
+    }
+    child {
+      output_schema {
+        fields {
+          name: "a"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+          metadata_keys: "unit"
+          metadata_values: "cents"
+        }
+        fields {
+          name: "b"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      scan {
+        source {
+          binding {
+            kind_id: 1056219456
+            kind_name: "komira.orc"
+            name: "orders"
+            params {
+              key: "has_footer"
+              tag: PARAM_BOOL
+              i: 1
+            }
+            params {
+              key: "path"
+              tag: PARAM_STR
+              s: "/data/orders.orc"
+            }
+            params {
+              key: "stripe_count"
+              tag: PARAM_I64
+              i: 7
+            }
+            schema {
+              fields {
+                name: "a"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+                metadata_keys: "unit"
+                metadata_values: "cents"
+              }
+              fields {
+                name: "b"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "s"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            fingerprint: 3735928559
+            structural_id: 4277009102
+            pushdown_gate {
+              mode: GATE_SHAPED
+              allowed_binary_ops: 63
+              allow_and_recurse: true
+              allow_in_list: true
+              require_stat_friendly_col: true
+            }
+            snapshot_policy: SNAPSHOT_PINNED
+            snapshot_token: 1234567890
+            orientation: SOURCE_KIND_COLUMNAR
+            variant_tag: SOURCE_VARIANT_ORC
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "a"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+            metadata_keys: "unit"
+            metadata_values: "cents"
+          }
+          fields {
+            name: "b"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "s"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+  }
+}
