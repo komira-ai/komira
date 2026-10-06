@@ -1,0 +1,438 @@
+# =============================================================================
+# test_proto_codec_json_float32.mojo — a proto3 `float` field in canonical JSON.
+# =============================================================================
+#
+# proto3 JSON prints a `float` as the shortest decimal that parses back to
+# the same float32, and the three non-finite values as the strings "NaN",
+# "Infinity", "-Infinity". A reader refuses a number outside float32 range
+# rather than turning it into an infinity.
+#
+# WHAT EACH LEG PROVES, and the defect it catches:
+#   W1  a scalar `float` field prints the shortest float32 form (0.1 is
+#       `0.1`, not its float64 expansion `0.10000000149011612`), including
+#       the extremes (max, min normal, min subnormal), -0.0 and a value that
+#       needs 8 digits. Catches: widening to Float64 before formatting.
+#   W2  NaN / +Inf / -Inf print as the three spec strings, and read back.
+#       Catches: writing `null` (which a reader takes as "absent", so the
+#       value silently becomes 0.0).
+#   W3  the `repeated float` element writer obeys W1 and W2 too. Catches: a
+#       fix applied to the field writer only.
+#   R1  the reader accepts float32 max (both its 8-digit spelling and its
+#       17-digit float64 value) and its negation, bit-exact. Catches: a range check
+#       that compares against the float64 value of the decimal and refuses
+#       the shortest spelling of max (3.4028235e38 > FLT_MAX as a double).
+#   R2  the reader REFUSES a finite value past float32 max (3.4028236e38,
+#       1e39, a float64 overflow 1e400, the negatives, the string form, and
+#       a repeated element). Catches: narrowing with no range check (the
+#       value becomes inf).
+#   R3  underflow is not an error: a value below the smallest subnormal
+#       rounds to a signed zero, 1e-45 rounds to the smallest subnormal,
+#       and "-0" / "-0.0" read as -0.0. Pins the documented rule (round to
+#       nearest, sign kept), the same as the float64 reader.
+#   R4  only the three spec spellings name a non-finite value: "inf",
+#       "nan", "-inf" are refused. Catches: the lenient `atof` spellings
+#       leaking through.
+#   S1  a strided sweep over float32 bit patterns (about 262000 values,
+#       every exponent): each round-trips bit-exactly through encode_json /
+#       decode_json, has at most 9 significant digits, and no decimal one
+#       digit shorter reads back as the same float32. Catches: a writer that
+#       is not round-trip exact (the standard library's `String(Float32)`
+#       fails ~0.5% of this sweep at small magnitudes), one that prints the
+#       float64 expansion (up to 17 digits), and one that pads to a fixed 9
+#       digits (`%.9g`).
+# =============================================================================
+
+from std.math import isinf, isnan
+from std.memory import bitcast
+from std.testing import assert_equal, assert_true
+
+from komira_proto_codec import (
+    Serializable,
+    WireEncoder,
+    WireDecoder,
+    encode_json,
+    decode_json,
+)
+
+
+@fieldwise_init
+struct F32One(Serializable):
+    """`message F32One { float v = 1; }`."""
+
+    var v: Float32
+
+    def encode[E: WireEncoder](self, mut enc: E) raises:
+        enc.write_f32_field(1, "v", self.v)
+
+    @staticmethod
+    def decode[D: WireDecoder](mut dec: D) raises -> Self:
+        var v = Float32(0)
+        while True:
+            var key = dec.next_field()
+            if key.end:
+                break
+            if key.field_no == 1 or key.json_name == "v":
+                v = dec.read_f32()
+            else:
+                dec.skip()
+        return F32One(v)
+
+
+@fieldwise_init
+struct F32List(Serializable):
+    """`message F32List { repeated float vs = 1; }`."""
+
+    var vs: List[Float32]
+
+    def encode[E: WireEncoder](self, mut enc: E) raises:
+        enc.begin_list_field(1, "vs")
+        for i in range(len(self.vs)):
+            enc.write_f32_element(1, self.vs[i])
+        enc.end_list_field()
+
+    @staticmethod
+    def decode[D: WireDecoder](mut dec: D) raises -> Self:
+        var vs = List[Float32]()
+        while True:
+            var key = dec.next_field()
+            if key.end:
+                break
+            if key.field_no == 1 or key.json_name == "vs":
+                dec.read_into_repeated_f32(vs)
+            else:
+                dec.skip()
+        return F32List(vs^)
+
+
+def _f(bits: UInt32) -> Float32:
+    return bitcast[DType.float32](bits)
+
+
+def _bits(v: Float32) -> UInt32:
+    return bitcast[DType.uint32](v)
+
+
+comptime F32_MAX_BITS = UInt32(0x7F7FFFFF)
+comptime F32_MIN_NORMAL_BITS = UInt32(0x00800000)
+comptime F32_MIN_SUBNORMAL_BITS = UInt32(0x00000001)
+comptime F32_NEG_ZERO_BITS = UInt32(0x80000000)
+comptime F32_POS_INF_BITS = UInt32(0x7F800000)
+comptime F32_NEG_INF_BITS = UInt32(0xFF800000)
+
+
+def _write_one(v: Float32) raises -> String:
+    return encode_json(F32One(v))
+
+
+def _read_one(doc: String) raises -> Float32:
+    return decode_json[F32One](doc).v
+
+
+def _expect_refused(doc: String, needle: String, what: String) raises:
+    var refused = False
+    try:
+        _ = decode_json[F32One](doc)
+    except e:
+        refused = True
+        assert_true(
+            String(e).find(needle) >= 0,
+            what + ": refusal names '" + needle + "', got: " + String(e),
+        )
+    assert_true(refused, what + ": " + doc + " must be refused")
+
+
+def test_w1_shortest_scalar() raises:
+    assert_equal(_write_one(Float32(0.1)), String('{"v":0.1}'), "0.1")
+    assert_equal(_write_one(Float32(1.5)), String('{"v":1.5}'), "1.5")
+    assert_equal(
+        _write_one(Float32(1.0) / Float32(3.0)),
+        String('{"v":0.33333334}'),
+        "1/3 needs 8 digits",
+    )
+    assert_equal(
+        _write_one(_f(F32_MAX_BITS)),
+        String('{"v":3.4028235e+38}'),
+        "float32 max",
+    )
+    assert_equal(
+        _write_one(-_f(F32_MAX_BITS)),
+        String('{"v":-3.4028235e+38}'),
+        "-float32 max",
+    )
+    assert_equal(
+        _write_one(_f(F32_MIN_NORMAL_BITS)),
+        String('{"v":1.1754944e-38}'),
+        "float32 min normal",
+    )
+    assert_equal(
+        _write_one(_f(F32_MIN_SUBNORMAL_BITS)),
+        String('{"v":1e-45}'),
+        "float32 min subnormal",
+    )
+    assert_equal(
+        _write_one(_f(F32_NEG_ZERO_BITS)), String('{"v":-0.0}'), "-0.0"
+    )
+    assert_equal(
+        _write_one(Float32(16777216.0)),
+        String('{"v":16777216.0}'),
+        "2^24",
+    )
+    # Each written value reads back bit-exactly.
+    var probes = List[UInt32]()
+    probes.append(_bits(Float32(0.1)))
+    probes.append(F32_MAX_BITS)
+    probes.append(F32_MAX_BITS | F32_NEG_ZERO_BITS)
+    probes.append(F32_MIN_NORMAL_BITS)
+    probes.append(F32_MIN_SUBNORMAL_BITS)
+    probes.append(F32_NEG_ZERO_BITS)
+    for i in range(len(probes)):
+        var back = _read_one(_write_one(_f(probes[i])))
+        assert_equal(_bits(back), probes[i], "W1 round trip bits")
+    print("  test_w1_shortest_scalar: PASS")
+
+
+def test_w2_non_finite_strings() raises:
+    var nan = _f(UInt32(0x7FC00000))
+    assert_equal(_write_one(nan), String('{"v":"NaN"}'), "NaN")
+    assert_equal(
+        _write_one(_f(F32_POS_INF_BITS)),
+        String('{"v":"Infinity"}'),
+        "+Infinity",
+    )
+    assert_equal(
+        _write_one(_f(F32_NEG_INF_BITS)),
+        String('{"v":"-Infinity"}'),
+        "-Infinity",
+    )
+    assert_true(isnan(_read_one(_write_one(nan))), "NaN reads back NaN")
+    assert_equal(
+        _bits(_read_one(_write_one(_f(F32_POS_INF_BITS)))),
+        F32_POS_INF_BITS,
+        "+Infinity reads back",
+    )
+    assert_equal(
+        _bits(_read_one(_write_one(_f(F32_NEG_INF_BITS)))),
+        F32_NEG_INF_BITS,
+        "-Infinity reads back",
+    )
+    print("  test_w2_non_finite_strings: PASS")
+
+
+def test_w3_repeated() raises:
+    var vs = List[Float32]()
+    vs.append(Float32(0.1))
+    vs.append(_f(UInt32(0x7FC00000)))
+    vs.append(_f(F32_NEG_INF_BITS))
+    vs.append(_f(F32_NEG_ZERO_BITS))
+    vs.append(_f(F32_MAX_BITS))
+    var json = encode_json(F32List(vs.copy()))
+    assert_equal(
+        json,
+        String('{"vs":[0.1,"NaN","-Infinity",-0.0,3.4028235e+38]}'),
+        "repeated float",
+    )
+    var back = decode_json[F32List](json).vs.copy()
+    assert_equal(len(back), 5, "repeated length")
+    assert_equal(_bits(back[0]), _bits(Float32(0.1)), "repeated 0.1")
+    assert_true(isnan(back[1]), "repeated NaN")
+    assert_equal(_bits(back[2]), F32_NEG_INF_BITS, "repeated -inf")
+    assert_equal(_bits(back[3]), F32_NEG_ZERO_BITS, "repeated -0.0")
+    assert_equal(_bits(back[4]), F32_MAX_BITS, "repeated max")
+    print("  test_w3_repeated: PASS")
+
+
+def test_r1_max_accepted() raises:
+    assert_equal(
+        _bits(_read_one('{"v":3.4028235e38}')), F32_MAX_BITS, "max 8 digits"
+    )
+    assert_equal(
+        _bits(_read_one('{"v":3.4028234663852886e38}')),
+        F32_MAX_BITS,
+        "max as its float64 value",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":-3.4028235e38}')),
+        F32_MAX_BITS | F32_NEG_ZERO_BITS,
+        "-max",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":"3.4028235e38"}')),
+        F32_MAX_BITS,
+        "max as a string",
+    )
+    assert_equal(
+        _bits(_read_one('{"v":1.1754944e-38}')),
+        F32_MIN_NORMAL_BITS,
+        "min normal",
+    )
+    print("  test_r1_max_accepted: PASS")
+
+
+def test_r2_past_max_refused() raises:
+    comptime RANGE = "out of float32 range"
+    _expect_refused('{"v":3.4028236e38}', RANGE, "just past max")
+    _expect_refused('{"v":-3.4028236e38}', RANGE, "just past -max")
+    _expect_refused('{"v":1e39}', RANGE, "1e39")
+    _expect_refused('{"v":1e400}', RANGE, "float64 overflow")
+    _expect_refused('{"v":-1e400}', RANGE, "negative float64 overflow")
+    _expect_refused('{"v":"3.4028236e38"}', RANGE, "string past max")
+    var refused = False
+    try:
+        _ = decode_json[F32List]('{"vs":[1.0,3.4028236e38]}')
+    except e:
+        refused = True
+        assert_true(String(e).find(RANGE) >= 0, "repeated: " + String(e))
+    assert_true(refused, "a repeated element past max must be refused")
+    print("  test_r2_past_max_refused: PASS")
+
+
+def test_r3_underflow_rounds() raises:
+    assert_equal(
+        _bits(_read_one('{"v":1e-45}')),
+        F32_MIN_SUBNORMAL_BITS,
+        "1e-45 is the smallest subnormal",
+    )
+    assert_equal(_bits(_read_one('{"v":1e-46}')), UInt32(0), "1e-46 is +0")
+    assert_equal(
+        _bits(_read_one('{"v":-1e-46}')), F32_NEG_ZERO_BITS, "-1e-46 is -0"
+    )
+    assert_equal(_bits(_read_one('{"v":1e-400}')), UInt32(0), "1e-400 is +0")
+    assert_equal(_bits(_read_one('{"v":-0}')), F32_NEG_ZERO_BITS, "-0")
+    assert_equal(_bits(_read_one('{"v":-0.0}')), F32_NEG_ZERO_BITS, "-0.0")
+    print("  test_r3_underflow_rounds: PASS")
+
+
+def test_r4_only_spec_spellings() raises:
+    assert_true(isnan(_read_one('{"v":"NaN"}')), "NaN")
+    assert_equal(
+        _bits(_read_one('{"v":"Infinity"}')), F32_POS_INF_BITS, "Infinity"
+    )
+    assert_equal(
+        _bits(_read_one('{"v":"-Infinity"}')), F32_NEG_INF_BITS, "-Infinity"
+    )
+    assert_equal(_read_one('{"v":"1.5"}'), Float32(1.5), "number as string")
+    comptime BAD = "not a proto3 float"
+    _expect_refused('{"v":"inf"}', BAD, "inf")
+    _expect_refused('{"v":"-inf"}', BAD, "-inf")
+    _expect_refused('{"v":"nan"}', BAD, "nan")
+    _expect_refused('{"v":"infinity"}', BAD, "lowercase infinity")
+    print("  test_r4_only_spec_spellings: PASS")
+
+
+def _significant_digits(json: String) -> Int:
+    """Significant digits in the mantissa of the number in `{"v":<number>}`:
+    from the first nonzero digit to the last nonzero digit, so neither
+    leading zeros (`0.001`) nor the trailing zeros of an integral value
+    (`1000000000000000.0`) count."""
+    var b = json.as_bytes()
+    var first = -1
+    var last = -1
+    var pos = 0
+    for i in range(5, len(b) - 1):
+        var c = b[i]
+        if c == UInt8(ord("e")):
+            break
+        if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
+            if c != UInt8(ord("0")):
+                if first < 0:
+                    first = pos
+                last = pos
+            pos += 1
+    if first < 0:
+        return 0
+    return last - first + 1
+
+
+def _no_shorter_decimal(json: String, v: Float32) raises:
+    """Neither decimal one digit shorter than the number in `{"v":<num>}`
+    (its digits truncated, and truncated plus one in the last place) reads
+    back as `v`. Those are the only two candidates: a shorter decimal inside
+    v's rounding interval would lie between v and the printed one, or be
+    one of them."""
+    var b = json.as_bytes()
+    var neg = False
+    var mant = 0  # the significant digits as an integer
+    var nd = 0
+    var frac_digits = 0
+    var after_dot = False
+    var exp = 0
+    var exp_neg = False
+    var in_exp = False
+    for i in range(5, len(b) - 1):
+        var c = b[i]
+        if c == UInt8(ord("-")):
+            if in_exp:
+                exp_neg = True
+            else:
+                neg = True
+        elif c == UInt8(ord("+")):
+            pass
+        elif c == UInt8(ord(".")):
+            after_dot = True
+        elif c == UInt8(ord("e")):
+            in_exp = True
+        elif in_exp:
+            exp = exp * 10 + Int(c - UInt8(ord("0")))
+        else:
+            var dg = Int(c - UInt8(ord("0")))
+            if nd > 0 or dg != 0:
+                mant = mant * 10 + dg
+                nd += 1
+            if after_dot:
+                frac_digits += 1
+    if exp_neg:
+        exp = -exp
+    exp -= frac_digits  # v ~ mant * 10^exp
+    while nd > 0 and mant % 10 == 0:
+        mant //= 10
+        nd -= 1
+        exp += 1
+    if nd < 2:
+        return
+    var shorter = mant // 10
+    for cand in [shorter, shorter + 1]:
+        var text = String("-") if neg else String("")
+        text += String(cand) + "e" + String(exp + 1)
+        var back = Float32(atof(text))
+        assert_true(
+            _bits(back) != _bits(v),
+            "sweep: " + json + " is not shortest; " + text + " reads back",
+        )
+
+
+def test_s1_sweep_round_trip() raises:
+    var checked = 0
+    var bits = 0
+    while bits < (1 << 32):
+        var v = _f(UInt32(bits))
+        var json = _write_one(v)
+        var back = _read_one(json)
+        if isnan(v):
+            assert_true(isnan(back), "sweep NaN: " + json)
+        else:
+            if _bits(back) != UInt32(bits):
+                assert_equal(_bits(back), UInt32(bits), "sweep bits: " + json)
+            if not isinf(v):
+                # A float32 needs at most 9 significant digits; its
+                # float64 expansion needs up to 17.
+                var d = _significant_digits(json)
+                if d > 9:
+                    assert_true(False, "sweep: too many digits: " + json)
+                _no_shorter_decimal(json, v)
+        checked += 1
+        bits += 16411
+    assert_true(checked > 260000, "sweep covered the space")
+    print("  test_s1_sweep_round_trip: PASS (", checked, "values )")
+
+
+def main() raises:
+    print("test_proto_codec_json_float32 — proto3 JSON float32 gate")
+    test_w1_shortest_scalar()
+    test_w2_non_finite_strings()
+    test_w3_repeated()
+    test_r1_max_accepted()
+    test_r2_past_max_refused()
+    test_r3_underflow_rounds()
+    test_r4_only_spec_spellings()
+    test_s1_sweep_round_trip()
+    print("test_proto_codec_json_float32: ALL PASS")
