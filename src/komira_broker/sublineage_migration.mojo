@@ -59,7 +59,13 @@
 #      chunks with MOVED markers (`schedule_moved_for_delete_at`: the `.seg`
 #      objects stay referenced by `_base`, so the broker `ReapWorker` reclaims
 #      only the legacy chunk keys; `_base`'s own retention reclaims the `.seg`
-#      objects later).
+#      objects later). The MOVED marker of each chunk is written during
+#      materialize, BEFORE the `_base` append that references its `.seg`, so a
+#      RetentionPass running concurrently with the migration can never leave
+#      a `_base`-referenced `.seg` with only a plain tombstone. The retire
+#      re-stamps the markers when it advances. Trade-off: a migration
+#      abandoned after marking leaves those `.seg` objects unreclaimed (a
+#      leak, never a loss).
 #
 #   3. NEW gen=N+1 mints shard_ids + appends to `<part>/_lineage/<shard>` (the
 #      sub-lineage write path). Consume reads `_base` (the old content, dense,
@@ -319,7 +325,8 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
              reaped); for each offset-bearing chunk, re-record its `ManifestBody`
              (REUSING the source `.seg` object_key / record_count / crc32 /
              trailers) into `_base` in dense order via single-writer If-None-Match
-             CAS. ASSERT `_base` base_offset == `expected_dense` (== the old
+             CAS, writing the chunk's MOVED marker on the legacy manifest just
+             before its `_base` append. ASSERT `_base` base_offset == `expected_dense` (== the old
              record's ORIGINAL dense offset) AND last == base+count-1 — a
              divergence is a torn migration and RAISES.
           3. RETIRE: advance the OLD single manifest's `_LOG_START` past the
@@ -423,6 +430,10 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
             except e_seed:
                 _ = e_seed  # a concurrent migrate seeded it — monotone-forward
 
+        # The legacy chunks marked BEFORE this call: the materialize below
+        # marks every chunk it appends, so the retire counts "newly retired"
+        # against this list, not against its own marks.
+        var marked_before = legacy.tombstone_seqs()
         var records_migrated = Int64(0)
         var chunks_appended = 0
         # Walk the legacy chunks in seq order, seeding the running source dense
@@ -495,6 +506,14 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
                     segment_bytes=seg_bytes,
                     creation_ts_ms=created,
                 )
+                # MOVED marker FIRST, then the `_base` append that makes `_base`
+                # reference this `.seg` (komira-ai/komira#494). From here on no
+                # plain tombstone (a RetentionPass running concurrently with this
+                # migration) can let the reaper delete the `.seg`: the reaper
+                # checks MOVED first, and never touches a chunk at or above the
+                # legacy floor. If the migration stops after this mark and never
+                # appends, the `.seg` is kept: a leak, never a loss.
+                legacy.schedule_moved_for_delete_at(seq, now_ms)
                 var r = base.append(base_body^, rc)
                 if r.base_offset != expected_dense:
                     _ = base^
@@ -537,13 +556,7 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         # serves nothing below `expected_dense`). The `_LOG_START` advance is the
         # durable migration cursor (a fold-process restart resumes from it).
         var source_retired = self._retire_migrated_legacy(
-            legacy,
-            expected_dense,
-            now_ms,
-            walk_from_seq=(
-                legacy_ls.log_start_seq if legacy_ls.log_start_seq >= Int64(0)
-                else Int64(0)
-            ),
+            legacy, expected_dense, now_ms, Optional[List[Int64]](marked_before^)
         )
         _ = legacy^
 
@@ -565,7 +578,7 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         mut legacy: CasManifestStore[Self.Store],
         migrated_through_dense: Int64,
         now_ms: Int64,
-        walk_from_seq: Int64 = Int64(-1),
+        var marked_before: Optional[List[Int64]] = None,
     ) raises -> Int:
         """RETIRE the legacy single-manifest chunks whose records are now FULLY
         established in `_base` (every chunk whose entire dense range is below
@@ -584,18 +597,14 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         not enough on its own (the reaper would delete a `.seg` that `_base`
         reads), and the rewrite makes the grace window count from this
         advance. The return value counts only chunks that carried no marker
-        of either kind.
+        of either kind before this `migrate_partition` call (`marked_before`,
+        listed before materialize; when absent, the markers present now).
 
-        `walk_from_seq` is the legacy `_LOG_START.log_start_seq` that
-        `migrate_partition` read before it materialized (-1: none, the walk
-        starts at the current log start). A RetentionPass may advance the
-        legacy `_LOG_START` from there to F between materialize and this
-        retire; it leaves chunks [walk_from_seq, F) with plain tombstones
-        only, yet `_base` now references their `.seg` objects. This walk
-        writes a MOVED marker on each of them. One whose key is already gone
-        was reaped below the floor: it is skipped (its `.seg` went with it).
-        Every other error raises, before any marker at or above F is written
-        and before the advance.
+        The walk starts at the CURRENT legacy log start. A RetentionPass may
+        have advanced it past chunks this migration materialized; those
+        already carry the MOVED marker `migrate_partition` wrote before each
+        `_base` append, so the reaper keeps their `.seg` whether or not this
+        walk reaches them.
 
         That `_LOG_START` pointer IS the durable migration cursor: the legacy
         resolver reads it for `running_base` (so it serves NOTHING below the
@@ -609,9 +618,16 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         try:
             head = legacy.read_head_authoritative()
         except e:
-            _ = e
-            return 0  # already reaped
-        var already_tomb = legacy.tombstone_seqs()
+            if not _is_not_found_msg(String(e)):
+                raise e^
+            return 0  # the legacy manifest is gone: nothing to retire
+        # Count against the markers that predate this migration call when the
+        # caller listed them (its materialize marked the rest).
+        var already_tomb: List[Int64]
+        if marked_before:
+            already_tomb = marked_before.take()
+        else:
+            already_tomb = legacy.tombstone_seqs()
         var cur = legacy.read_log_start()
         var running = cur.log_start_offset
         var seq = (
@@ -639,19 +655,6 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
                 found_unmigrated = True
             running = chunk_hi
             seq += Int64(1)
-        # Chunks [walk_from_seq, F) the migration materialized but a concurrent
-        # RetentionPass moved below the floor (komira-ai/komira#494).
-        var below = walk_from_seq
-        while below >= Int64(0) and below < cur.log_start_seq:
-            try:
-                legacy.schedule_moved_for_delete_at(below, now_ms)
-                if not _i64_in(already_tomb, below):
-                    retired += 1
-            except e:
-                if not _is_not_found_msg(String(e)):
-                    raise e^
-                # Reaped already: below the floor, the key is gone.
-            below += Int64(1)
         for t in range(len(to_tomb)):
             legacy.schedule_moved_for_delete_at(to_tomb[t], now_ms)
             if not _i64_in(already_tomb, to_tomb[t]):

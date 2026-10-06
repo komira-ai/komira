@@ -49,6 +49,10 @@
 #       the cursor at the watermark and re-stamps nothing (the reap at
 #       60000 + grace still reclaims). Catches: a fold that retires only the
 #       shards in its plan.
+#   (9) Two reapers: between this reaper's LIST and its read of chunk 0's
+#       MOVED marker, another reaper reaps chunk 0 (key, then marker). This
+#       pass skips chunk 0 and reaps 1..3. Catches: the plain-tombstone read
+#       raising not_found and aborting the whole pass.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -73,6 +77,7 @@ from komira_objectstore.cas_manifest import (
     RetryPolicy,
     chunk_key,
     log_start_key,
+    moved_tombstone_key,
 )
 from komira_objectstore.path import Path
 from komira_objectstore.shared_in_memory_conditional_store import (
@@ -103,6 +108,9 @@ comptime _RECORDS = 10  # records per chunk
 comptime _FAIL_WRITE_ONCE = "__fault__/write_once/"
 # A GET of the target reads as absent until the first plain tombstone write.
 comptime _STALE_UNTIL_TOMB = "__fault__/stale_until_tomb/"
+# A GET of the target finds it reaped by another reaper: the target is
+# deleted and the GET reads as absent.
+comptime _OTHER_REAPER = "__fault__/other_reaper/"
 
 
 def _inner_has(inner: _Inner, key: String) -> Bool:
@@ -157,6 +165,11 @@ struct _FaultStore(
     def get(self, path: Path) raises -> List[UInt8]:
         if _inner_has(self._inner, String(_STALE_UNTIL_TOMB) + path.raw()):
             raise Error("injected: not_found (404), a stale pre-migration view")
+        var other = String(_OTHER_REAPER) + path.raw()
+        if _inner_has(self._inner, other):
+            self._inner.delete(Path.parse(other))
+            self._inner.delete(path)
+            raise Error("injected: not_found (404), another reaper took it")
         return self._inner.get(path)
 
     def conditional_put(
@@ -626,6 +639,34 @@ def test_fold_rerun_after_failed_advance() raises:
     print("[test_fold_rerun_after_failed_advance] PASS")
 
 
+# =============================================================================
+# (9) a concurrent reaper takes a MOVED-only seq after this pass's LIST
+# =============================================================================
+
+
+def test_concurrent_reaper_took_a_moved_seq() raises:
+    print("[test_concurrent_reaper_took_a_moved_seq] starting...")
+    var store = _new_store()
+    var prefix = _prefix(Int64(8))
+    _produce_at(store, prefix, Int64(8), 4)
+    var keys = _seg_keys(store, prefix, 4)
+    var snap = _seg_bytes(store, keys)
+    assert_equal(_migrate(store, prefix, Int64(50_000)), 4, "4 retired")
+
+    # The other reaper deleted chunk 0's key; its marker goes on our GET.
+    store.delete(chunk_key(prefix, Int64(0)))
+    store.arm(String(_OTHER_REAPER), moved_tombstone_key(prefix, Int64(0)).raw())
+    var r = _reap(store, prefix, Int64(50_000) + _GRACE)
+    assert_equal(r.reaped_count, Int64(3), "chunks 1..3 reaped, 0 skipped")
+    assert_false(
+        _has(store, String(_OTHER_REAPER) + moved_tombstone_key(prefix, Int64(0)).raw()),
+        "the other reaper ran",
+    )
+    _assert_chunk_keys_gone(store, prefix, 0, 4, "two reapers")
+    _assert_segs_kept(store, keys, snap, 0, 4, "two reapers")
+    print("[test_concurrent_reaper_took_a_moved_seq] PASS")
+
+
 def main() raises:
     test_migration_then_reap_keeps_base_segments()
     test_fold_then_reap_keeps_base_segments()
@@ -635,4 +676,5 @@ def main() raises:
     test_plain_and_moved_on_one_chunk_keeps_segment()
     test_migration_rerun_after_failed_advance()
     test_fold_rerun_after_failed_advance()
-    print("[OK] test_broker_moved_payload_reap_offline — 8 cases passed")
+    test_concurrent_reaper_took_a_moved_seq()
+    print("[OK] test_broker_moved_payload_reap_offline — 9 cases passed")

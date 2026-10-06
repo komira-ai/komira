@@ -554,9 +554,10 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
         try:
             head = s.read_head_authoritative()
         except e:
-            _ = e
             _ = s^
-            return 0  # already reaped
+            if not _is_not_found_msg(String(e)):
+                raise e^
+            return 0  # the shard manifest is gone: nothing to retire
         var already_tomb = s.tombstone_seqs()
         var running = cur.log_start_offset
         var seq = cur.log_start_seq if cur.log_start_seq >= Int64(0) else Int64(0)

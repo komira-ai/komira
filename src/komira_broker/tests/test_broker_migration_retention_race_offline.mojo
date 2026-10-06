@@ -1,39 +1,36 @@
 # =============================================================================
 # tests/test_broker_migration_retention_race_offline.mojo
-#   A RetentionPass between a migration's materialize and retire — OFFLINE
+#   A RetentionPass (and a reaper) running during a migration — OFFLINE
 # =============================================================================
 #
-# `migrate_partition` reads the legacy `_LOG_START` (L0), materializes the
-# legacy chunks into `_base` (reusing their `.seg` objects), then retires
-# them. If a RetentionPass advances the legacy `_LOG_START` to F in between,
-# chunks [L0, F) carry only its plain tombstones although `_base` references
-# their `.seg`. The retire walk used to start at a fresh read of
-# `_LOG_START` (F), so no MOVED marker reached them and the reaper deleted
-# their `.seg` (komira-ai/komira#494). The walk now starts at L0, the log
-# start the migration read when it materialized.
+# `migrate_partition` materializes the legacy chunks into `_base`, reusing
+# their `.seg` objects, then retires them. A RetentionPass on the legacy
+# manifest can plain-tombstone those chunks and advance past them at any
+# point in between, and a reaper can run past its grace before the
+# migration's retire. The `.seg` is safe only if the chunk's MOVED marker
+# exists before the reaper can see the chunk below the floor. So the
+# migration writes each chunk's MOVED marker BEFORE that chunk's `_base`
+# append (komira-ai/komira#494). The reaper checks MOVED first and never
+# touches a chunk at or above the floor.
 #
-# `_RaceStore` runs the RetentionPass at the right moment: inside the retire
-# walk's first LIST of `<legacy>/tombstones/` (after materialize, before the
-# walk reads `_LOG_START`). That call runs under the CAS gate lock, and the
-# pass takes the lock again, so `main` switches the gate off
-# (`komira_cas_gate_set_disabled`, the test-only switch; this test is single-
-# threaded).
+# `_RaceStore` injects the interleaving inside a `_base` chunk append (the
+# append path takes no CAS gate lock, so the injected pass and reaper run
+# with the gate on).
 #
-#   (1) The pass retires chunks 0 and 1 (F = 2). The migration still writes
-#       MOVED markers on 0..3; it counts 2 and 3 as new (0 and 1 carry the
-#       pass's tombstones). Reaps after both grace windows keep every `.seg`,
-#       and `_base` serves all 40 records. Catches: a walk that re-reads the
-#       log start (mutant), where chunks 0 and 1 lose their `.seg` at
-#       10000 + grace.
-#   (2) Chunk 0 is reaped before the walk reaches it: the walk skips it
-#       (its key is gone, below the floor) and still marks chunk 1. Catches:
-#       a walk that raises on the reaped chunk.
-#   (3) Reading chunk 1 fails with a transport error: the migration raises,
-#       writes no marker at or above F, and does not advance. Catches: a walk
-#       that skips every error.
+#   (1) After the LAST chunk's `_base` append, a RetentionPass retires chunks
+#       0 and 1. The retire still advances to 4, every `.seg` survives both
+#       grace windows, and `_base` serves all 40 records.
+#   (2) After chunk 1's `_base` append, a RetentionPass retires 0 and 1 AND a
+#       real ReapWorker runs past that pass's grace. It reaps the chunk keys
+#       and keeps both `.seg` objects; `_base` serves all 40 records. Catches:
+#       a MOVED marker written only at retire (the reaper deletes .seg 0 and
+#       1 first), or after the append (it misses chunk 1).
+#   (3) The retire's head read: a transport error raises, not_found means
+#       the manifest is gone (0 retired). The same holds for the segment
+#       fold's retire. Catches: the old catch-all that took any error for
+#       "already reaped" and retired nothing.
 # =============================================================================
 
-from std.ffi import external_call
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_core.arrow.arrow_types import ArrowType
@@ -49,6 +46,7 @@ from komira_broker.partition_assignment import sublineage_prefix
 from komira_broker.retention import ReapResult, ReapWorker, RetentionPass, RetentionPolicy
 from komira_broker.sublineage_consume import SubLineageConsumeResolver
 from komira_broker.sublineage_migration import SubLineageMigration
+from komira_broker.sublineage_segment_fold import SegmentBaseFold
 
 from komira_objectstore.cas_manifest import (
     CasManifestStore,
@@ -78,15 +76,16 @@ comptime _CLUSTER = "migrace"
 comptime _TOPIC = "t"
 comptime _GRACE = Int64(60_000)
 comptime _RECORDS = 10
-comptime _RETENTION_AT = Int64(10_000)
 comptime _MIGRATE_AT = Int64(50_000)
 
-# The race rule: its body is one mode byte.
-comptime _RACE_RULE = "__fault__/race_mode"
+# `<_RACE_ON><key>`: after a successful conditional PUT of `<key>`, run the
+# race; the rule's body is one mode byte.
+comptime _RACE_ON = "__fault__/race_on/"
 comptime _MODE_RETENTION = UInt8(0)
-comptime _MODE_RETENTION_THEN_REAP_0 = UInt8(1)
-comptime _MODE_RETENTION_THEN_FAIL_1 = UInt8(2)
-comptime _FAIL_GET = "__fault__/get/"
+comptime _MODE_RETENTION_THEN_REAP = UInt8(1)
+# `<_LIST_FAIL><prefix>`: a LIST of `<prefix>` fails; body 0 = a transport
+# error, 1 = not_found.
+comptime _LIST_FAIL = "__fault__/list/"
 
 
 def _inner_has(inner: _Inner, key: String) -> Bool:
@@ -104,9 +103,9 @@ struct _RaceStore(
     Movable,
     Deinitable,
 ):
-    """Delegates to a shared in-memory store. While `_RACE_RULE` is armed, the
-    first LIST of `<legacy>/tombstones/` first runs a RetentionPass over the
-    legacy manifest (retiring chunks 0 and 1), then what the mode adds."""
+    """Delegates to a shared in-memory store, applying the rules above. The
+    race runs a RetentionPass over the legacy manifest (retiring chunks 0 and
+    1) and, in `_MODE_RETENTION_THEN_REAP`, a ReapWorker past its grace."""
 
     var _inner: _Inner
     var _legacy: String
@@ -118,43 +117,41 @@ struct _RaceStore(
     def clone(self) -> Self:
         return Self(self._inner.clone(), String(self._legacy))
 
-    def arm_race(self, mode: UInt8) raises:
+    def arm(self, rule: String, target: String, mode: UInt8) raises:
         var body = List[UInt8]()
         body.append(mode)
-        _ = self._inner.put(Path.parse(String(_RACE_RULE)), body)
+        _ = self._inner.put(Path.parse(rule + target), body)
 
-    def _race(self) raises:
-        var mode = self._inner.get(Path.parse(String(_RACE_RULE)))[0]
-        self._inner.delete(Path.parse(String(_RACE_RULE)))
+    def _race(self, mode: UInt8) raises:
         var m = CasManifestStore[_Inner](
             store=self._inner.clone(),
             prefix=String(self._legacy),
             retry=RetryPolicy.fast_test(),
         )
-        # Ages at 10000: 9000, 8000, 7000 (chunk 3 is active): 0 and 1 retire.
-        var rp = RetentionPass[_Inner](RetentionPolicy.time_based(Int64(7500)))
-        var res = rp.run(m, _RETENTION_AT)
+        # Chunks are created at 1000..4000; chunk 3 is active. Each policy
+        # retires exactly 0 and 1.
+        var at = Int64(10_000) if mode == _MODE_RETENTION else Int64(60_000)
+        var keep_ms = Int64(7_500) if mode == _MODE_RETENTION else Int64(57_500)
+        var rp = RetentionPass[_Inner](RetentionPolicy.time_based(keep_ms))
+        var res = rp.run(m, at)
         _ = rp^
-        assert_equal(res.new_log_start_seq, Int64(2), "the pass advanced to F = 2")
-        if mode == _MODE_RETENTION_THEN_REAP_0:
-            m.reap(Int64(0))
-        elif mode == _MODE_RETENTION_THEN_FAIL_1:
-            _ = self._inner.put(
-                Path.parse(
-                    String(_FAIL_GET) + chunk_key(self._legacy, Int64(1)).raw()
-                ),
-                List[UInt8](),
-            )
+        assert_equal(res.new_log_start_seq, Int64(2), "the pass advanced to 2")
+        if mode == _MODE_RETENTION_THEN_REAP:
+            var seg_store = self._inner.clone()
+            var w = ReapWorker[_Inner](_GRACE)
+            _ = w.run(seg_store, m, at + _GRACE)
         _ = m^
 
     def head(self, path: Path) raises -> ObjectMeta:
         return self._inner.head(path)
 
     def list_with_delimiter(self, prefix: Path) raises -> ListResult:
-        if prefix.raw() == self._legacy + "/tombstones/" and _inner_has(
-            self._inner, String(_RACE_RULE)
-        ):
-            self._race()
+        var rule = String(_LIST_FAIL) + prefix.raw()
+        if _inner_has(self._inner, rule):
+            var mode = self._inner.get(Path.parse(rule))[0]
+            if mode == UInt8(0):
+                raise Error("injected fault: transport error status=503")
+            raise Error("injected: not_found (404), the manifest is gone")
         return self._inner.list_with_delimiter(prefix)
 
     def coalesce_policy(self) -> CoalescePolicy:
@@ -166,14 +163,18 @@ struct _RaceStore(
         return self._inner.get_range(path, start, length)
 
     def get(self, path: Path) raises -> List[UInt8]:
-        if _inner_has(self._inner, String(_FAIL_GET) + path.raw()):
-            raise Error("injected fault: transport error status=503")
         return self._inner.get(path)
 
     def conditional_put(
         self, path: Path, bytes: List[UInt8], precond: WritePrecondition
     ) raises -> ObjectMeta:
-        return self._inner.conditional_put(path, bytes, precond)
+        var meta = self._inner.conditional_put(path, bytes, precond)
+        var rule = String(_RACE_ON) + path.raw()
+        if _inner_has(self._inner, rule):
+            var mode = self._inner.get(Path.parse(rule))[0]
+            self._inner.delete(Path.parse(rule))
+            self._race(mode)
+        return meta^
 
     def compare_and_swap(
         self, path: Path, bytes: List[UInt8], expected_version: String
@@ -301,35 +302,45 @@ def _assert_base_serves(
     _ = core^
 
 
+def _base_chunk(prefix: String, seq: Int) raises -> String:
+    return chunk_key(sublineage_prefix(prefix, BASE_SHARD_ID), Int64(seq)).raw()
+
+
+def _migrate_with_race(
+    store: _Store, prefix: String, after_base_chunk: Int, mode: UInt8
+) raises -> Int:
+    store.arm(String(_RACE_ON), _base_chunk(prefix, after_base_chunk), mode)
+    var mig = SubLineageMigration[_Store](store.clone(), prefix)
+    var st = mig.migrate_partition(_MIGRATE_AT)
+    _ = mig^
+    assert_false(
+        _has(store, String(_RACE_ON) + _base_chunk(prefix, after_base_chunk)),
+        "the race ran",
+    )
+    assert_equal(st.records_migrated, Int64(40), "40 records migrated")
+    var m = _manifest(store, prefix)
+    assert_equal(m.read_log_start_seq(), Int64(4), "the migration advanced to 4")
+    _ = m^
+    return st.source_chunks_retired
+
+
 # =============================================================================
-# (1) the race: every `.seg` survives
+# (1) retention after the last `_base` append
 # =============================================================================
 
 
-def test_retention_between_materialize_and_retire() raises:
-    print("[test_retention_between_materialize_and_retire] starting...")
+def test_retention_after_materialize() raises:
+    print("[test_retention_after_materialize] starting...")
     var pid = Int64(0)
     var prefix = _prefix(pid)
     var store = _setup(pid)
     var keys = _seg_keys(store, prefix)
+    _ = _migrate_with_race(store, prefix, 3, _MODE_RETENTION)
 
-    store.arm_race(_MODE_RETENTION)
-    var mig = SubLineageMigration[_Store](store.clone(), prefix)
-    var st = mig.migrate_partition(_MIGRATE_AT)
-    _ = mig^
-    assert_false(_has(store, String(_RACE_RULE)), "the race ran")
-    assert_equal(st.records_migrated, Int64(40), "40 records migrated")
-    assert_equal(st.source_chunks_retired, 2, "2, 3 new; 0, 1 had tombstones")
-
-    var r0 = _reap(store, prefix, _RETENTION_AT + _GRACE)
+    var r0 = _reap(store, prefix, Int64(10_000) + _GRACE)
     for i in range(4):
-        assert_true(_has(store, keys[i]), "after the retention grace: .seg " + String(i) + " kept")
+        assert_true(_has(store, keys[i]), "after the pass's grace: .seg " + String(i) + " kept")
     assert_equal(r0.reaped_count, Int64(0), "grace counts from the MOVED markers")
-    _assert_seqs(
-        _moved(store, prefix),
-        [Int64(0), Int64(1), Int64(2), Int64(3)],
-        "MOVED on every migrated chunk",
-    )
     var r1 = _reap(store, prefix, _MIGRATE_AT + _GRACE)
     assert_equal(r1.reaped_count, Int64(4), "4 chunk keys reaped")
     for i in range(4):
@@ -337,71 +348,94 @@ def test_retention_between_materialize_and_retire() raises:
         assert_false(
             _has(store, chunk_key(prefix, Int64(i)).raw()), "key " + String(i) + " reaped"
         )
-    _assert_base_serves(store, prefix, keys, "race")
-    print("[test_retention_between_materialize_and_retire] PASS")
+    _assert_base_serves(store, prefix, keys, "retention after materialize")
+    print("[test_retention_after_materialize] PASS")
 
 
 # =============================================================================
-# (2) a chunk in [L0, F) already reaped: skipped
+# (2) retention AND a reaper past grace, mid-materialize
 # =============================================================================
 
 
-def test_already_reaped_chunk_below_floor_is_skipped() raises:
-    print("[test_already_reaped_chunk_below_floor_is_skipped] starting...")
+def test_retention_and_reap_mid_materialize() raises:
+    print("[test_retention_and_reap_mid_materialize] starting...")
     var pid = Int64(1)
     var prefix = _prefix(pid)
     var store = _setup(pid)
+    var keys = _seg_keys(store, prefix)
+    _ = _migrate_with_race(store, prefix, 1, _MODE_RETENTION_THEN_REAP)
 
-    store.arm_race(_MODE_RETENTION_THEN_REAP_0)
-    var mig = SubLineageMigration[_Store](store.clone(), prefix)
-    var st = mig.migrate_partition(_MIGRATE_AT)
-    _ = mig^
-    assert_false(_has(store, String(_RACE_RULE)), "the race ran")
-    assert_equal(st.records_migrated, Int64(40), "40 records migrated")
-    assert_false(_has(store, chunk_key(prefix, Int64(0)).raw()), "chunk 0 was reaped")
-    _assert_seqs(
-        _moved(store, prefix),
-        [Int64(1), Int64(2), Int64(3)],
-        "chunk 0 skipped, 1..3 MOVED",
-    )
-    var m = _manifest(store, prefix)
-    assert_equal(m.read_log_start_seq(), Int64(4), "the migration advanced")
-    _ = m^
-    print("[test_already_reaped_chunk_below_floor_is_skipped] PASS")
+    for i in range(4):
+        assert_true(_has(store, keys[i]), "after the injected reap: .seg " + String(i) + " kept")
+    for i in range(2):
+        assert_false(
+            _has(store, chunk_key(prefix, Int64(i)).raw()),
+            "the injected reaper reclaimed key " + String(i),
+        )
+    _assert_base_serves(store, prefix, keys, "reap mid-materialize")
+    var r = _reap(store, prefix, _MIGRATE_AT + _GRACE)
+    assert_equal(r.reaped_count, Int64(2), "chunk keys 2, 3 reaped")
+    for i in range(4):
+        assert_true(_has(store, keys[i]), ".seg " + String(i) + " kept")
+    _assert_base_serves(store, prefix, keys, "reap mid-materialize, after")
+    print("[test_retention_and_reap_mid_materialize] PASS")
 
 
 # =============================================================================
-# (3) any other read error raises before the advance
+# (3) the retire's head read
 # =============================================================================
 
 
-def test_read_error_below_floor_raises() raises:
-    print("[test_read_error_below_floor_raises] starting...")
+def test_retire_head_read_errors() raises:
+    print("[test_retire_head_read_errors] starting...")
     var pid = Int64(2)
     var prefix = _prefix(pid)
     var store = _setup(pid)
-
-    store.arm_race(_MODE_RETENTION_THEN_FAIL_1)
     var mig = SubLineageMigration[_Store](store.clone(), prefix)
+    var legacy = mig._legacy_manifest()
+    var lk = prefix + "/manifest/"
+
+    store.arm(String(_LIST_FAIL), lk, UInt8(0))
     var raised = False
     try:
-        _ = mig.migrate_partition(_MIGRATE_AT)
+        _ = mig._retire_migrated_legacy(legacy, Int64(40), _MIGRATE_AT)
     except e:
         raised = True
         assert_true(String(e).find("503") >= 0, String(e))
+    assert_true(raised, "migration: a transport error is raised")
+    store.arm(String(_LIST_FAIL), lk, UInt8(1))
+    assert_equal(
+        mig._retire_migrated_legacy(legacy, Int64(40), _MIGRATE_AT),
+        0,
+        "migration: not_found = nothing to retire",
+    )
+    assert_equal(len(_moved(store, prefix)), 0, "migration: nothing marked")
+    _ = legacy^
     _ = mig^
-    assert_true(raised, "the transport error is raised")
-    _assert_seqs(_moved(store, prefix), [Int64(0)], "only chunk 0 marked")
-    var m = _manifest(store, prefix)
-    assert_equal(m.read_log_start_seq(), Int64(2), "no advance past F")
-    _ = m^
-    print("[test_read_error_below_floor_raises] PASS")
+
+    var sp = sublineage_prefix(prefix, String("w01"))
+    var fold = SegmentBaseFold[_Store](store.clone(), prefix)
+    var sk = sp + "/manifest/"
+    store.arm(String(_LIST_FAIL), sk, UInt8(0))
+    var raised2 = False
+    try:
+        _ = fold._retire_folded_source(String("w01"), Int64(30), _MIGRATE_AT)
+    except e:
+        raised2 = True
+        assert_true(String(e).find("503") >= 0, String(e))
+    assert_true(raised2, "fold: a transport error is raised")
+    store.arm(String(_LIST_FAIL), sk, UInt8(1))
+    assert_equal(
+        fold._retire_folded_source(String("w01"), Int64(30), _MIGRATE_AT),
+        0,
+        "fold: not_found = nothing to retire",
+    )
+    _ = fold^
+    print("[test_retire_head_read_errors] PASS")
 
 
 def main() raises:
-    # Test-only: the injected RetentionPass runs inside a gated manifest call.
-    external_call["komira_cas_gate_set_disabled", NoneType](Int32(1))
-    test_retention_between_materialize_and_retire()
-    test_already_reaped_chunk_below_floor_is_skipped()
-    test_read_error_below_floor_raises()
+    test_retention_after_materialize()
+    test_retention_and_reap_mid_materialize()
+    test_retire_head_read_errors()
     print("[OK] test_broker_migration_retention_race_offline — 3 cases passed")

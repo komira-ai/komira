@@ -677,7 +677,8 @@ struct ReapWorker[Storage: ConditionalWriteStore](
         is a no-op; a chunk still within grace is skipped (a later run reaps
         it). A chunk body that 404s mid-reap (a concurrent reaper won) is
         skipped (the manifest.reap fail-loud guard already enforces tombstone-
-        before-reap)."""
+        before-reap). A seq whose markers are both gone by the time it is read
+        (a concurrent reaper reaped it after this pass's LIST) is skipped."""
         # Step 0. Raises on a read error: nothing deleted this pass.
         var floor = manifest.read_log_start_seq()
         var seqs = manifest.tombstone_seqs()
@@ -698,7 +699,15 @@ struct ReapWorker[Storage: ConditionalWriteStore](
                     manifest.reap(seq)
                     reaped += Int64(1)
                 continue
-            var schedule_ts = manifest.tombstone_schedule_ts(seq)
+            var schedule_ts: Int64
+            try:
+                schedule_ts = manifest.tombstone_schedule_ts(seq)
+            except e:
+                if not _is_not_found(String(e)):
+                    raise e^
+                # Neither marker is there any more: another reaper reaped this
+                # seq after our LIST. Nothing left to do for it.
+                continue
             if now_ms - schedule_ts >= self._grace_ms:
                 # Delete the .seg segment object first (the durable data). Read
                 # the chunk body for its object_key; if the chunk is already
