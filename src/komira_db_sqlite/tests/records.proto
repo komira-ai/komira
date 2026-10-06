@@ -1,0 +1,72 @@
+// The table test_dbstorable_sqlite_crud.mojo stores through SqliteDatabase.
+// protoc-gen-mojo-db generates its DbStorable implementation (records_db.mojo)
+// at build time; the test hand-writes none of the row shape.
+//
+// One column per column kind the generated code and DbRow can round-trip
+// today, then the nullable (`optional`) form of each scalar kind that has a
+// nullable getter, then a defaulted column, a UNIQUE column, a singular enum
+// (stored as TEXT) and a column renamed with `(komira.db.column)`.
+//
+// Not covered here:
+//   - `double` / `float`: the generated code calls DbRow.get_float8 /
+//     get_float4, which DbRow does not have, so it does not compile.
+//   - a nested message field: the generated nested struct does not conform
+//     to ProtoJsonable, so it does not compile.
+//   - a repeated enum or repeated message (JSONB).
+//   - `serial` / `bigserial` columns.
+//   - oneof members: the generator drops them from the table without a word.
+
+syntax = "proto3";
+
+package example.records.v1;
+
+import "komira/db/options.proto";
+
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  KIND_BATCH = 1;
+  KIND_SERVICE = 2;
+}
+
+message Record {
+  option (komira.db.table) = "records";
+  option (komira.db.pk) = "id";
+  option (komira.db.index) = "owner";
+
+  // UUID, stored as a 16-byte BLOB.
+  string id = 1 [(komira.db.col_type) = "uuid"];
+  // TEXT
+  string owner = 2;
+  // INT4
+  int32 priority = 3;
+  // INT8
+  int64 size_bytes = 4;
+  // BOOL
+  bool done = 5;
+  // BYTES, stored as a BLOB.
+  bytes payload = 6;
+  // TIMESTAMPTZ, stored as INTEGER microseconds.
+  int64 created_at = 7 [(komira.db.col_type) = "timestamptz"];
+  // JSONB (a map, stored as proto3 JSON text).
+  map<string, string> attrs = 8;
+  // TEXT[] (a repeated scalar, stored as the `{a,b}` literal).
+  repeated string tags = 9;
+
+  // The nullable form of each scalar kind.
+  optional string note = 10;
+  optional int32 retries = 11;
+  optional int64 quota = 12;
+  optional bool flagged = 13;
+  optional bytes digest = 14;
+  optional int64 finished_at = 15 [(komira.db.col_type) = "timestamptz"];
+  optional string parent_id = 16 [(komira.db.col_type) = "uuid"];
+
+  // NOT NULL with a SQL DEFAULT: a row that omits the column reads 'NEW'.
+  string state = 17 [(komira.db.default) = "'NEW'"];
+  // A column-level UNIQUE constraint.
+  string slug = 18 [(komira.db.unique) = true];
+  // A singular enum, stored as TEXT.
+  Kind kind = 19;
+  // The column is `caption`, not the field name.
+  string display_name = 20 [(komira.db.column) = "caption"];
+}

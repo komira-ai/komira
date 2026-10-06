@@ -1,5 +1,5 @@
 # The generated DynamoDB Streams client
-# (`DynamoDBStreamsDynamoDBStreamsClient`) end to end over
+# (`DynamoDBStreamsClient`) end to end over
 # komira_http_client and komira_http_core's ScriptedConnector (no socket): a
 # GetShardIterator answered, and a GetRecords whose iterator has expired,
 # raised under its code with the service's message. The error is a 400
@@ -12,7 +12,7 @@
 # SigV4 scope, through the generated client.
 from komira_aws_dynamodbstreams.komira_aws_dynamodbstreams import (
     DynamoDBStreamsDescribeStreamInput,
-    DynamoDBStreamsDynamoDBStreamsClient,
+    DynamoDBStreamsClient,
     DynamoDBStreamsEndpointConfig,
     DynamoDBStreamsGetRecordsInput,
     DynamoDBStreamsGetShardIteratorInput,
@@ -79,10 +79,10 @@ def _mk_err() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> DynamoDBStreamsDynamoDBStreamsClient[C, StaticCredsSource]:
+) raises -> DynamoDBStreamsClient[C, StaticCredsSource]:
     var config = DynamoDBStreamsEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return DynamoDBStreamsDynamoDBStreamsClient[C, StaticCredsSource](
+    return DynamoDBStreamsClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(
@@ -105,7 +105,7 @@ def test_get_shard_iterator() raises:
 
 def test_an_error_is_raised_under_its_code() raises:
     var client = _client(_mk_err)
-    with assert_raises(contains="DynamoDBStreamsDynamoDBStreams.GetRecords failed: HTTP 400 ExpiredIteratorException Iterator expired"):
+    with assert_raises(contains="DynamoDBStreams.GetRecords failed: HTTP 400 ExpiredIteratorException Iterator expired"):
         _ = client.get_records(DynamoDBStreamsGetRecordsInput(String("arn:aws:dynamodb:us-east-1:000000000000:iterator/OLD")))
 
 

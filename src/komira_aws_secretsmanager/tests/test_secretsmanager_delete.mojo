@@ -12,7 +12,7 @@ from komira_aws_secretsmanager.komira_aws_secretsmanager import (
     SecretsManagerDeleteSecretRequest,
     SecretsManagerDeleteSecretResponse,
     SecretsManagerEndpointConfig,
-    SecretsManagerSecretsManagerClient,
+    SecretsManagerClient,
 )
 from komira_aws_secretsmanager.secretsmanager_overrides import (
     delete_secret,
@@ -82,10 +82,10 @@ def _mk_exists() raises -> ScriptedConnector:
 
 def _client[C: Connector](
     mk: def () raises thin -> C,
-) raises -> SecretsManagerSecretsManagerClient[C, StaticCredsSource]:
+) raises -> SecretsManagerClient[C, StaticCredsSource]:
     var config = SecretsManagerEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:4566"))
-    return SecretsManagerSecretsManagerClient[C, StaticCredsSource](
+    return SecretsManagerClient[C, StaticCredsSource](
         mk,
         HttpClientConfig.defaults(),
         StaticCredsSource(

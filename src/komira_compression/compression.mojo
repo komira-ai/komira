@@ -35,7 +35,7 @@
 #     - `Uncompressed`   — no-op identity codec; Parquet codec id 0.
 #     - `Snappy`         — libsnappy FFI; Parquet codec id 1; DEFAULT for Parquet.
 #     - `Zstd[level: Int = 3]` — libzstd FFI; Parquet codec id 6; ".zst".
-#     - `Gzip[level: Int = 6]` — libz FFI (windowBits auto-detect); Parquet codec id 2; ".gz".
+#     - `Gzip[level: Int = 6]` — libz via komira_zlib (windowBits auto-detect); Parquet codec id 2; ".gz".
 #   SCAFFOLD (4) — trait shape lands; bodies raise clear "not yet wired" errors:
 #     - `Lzo`            — legacy; Parquet codec id 3.
 #     - `Brotli[quality: Int = 11]` — text-friendly; Parquet codec id 4.
@@ -184,7 +184,7 @@ trait ArrowIpcCompression(Compression):
     conformers.
 
     The Lz4Frame body calls `liblz4`'s `LZ4F_compressFrame` /
-    `LZ4F_decompress` FFI.
+    `LZ4F_decompress` through komira_lz4's frame API.
 
     `decompress_into[o](src, dst, dst_capacity)` is a zero-extra-copy
     decompress directly into a pre-allocated output region. Saves the
@@ -206,7 +206,7 @@ trait ArrowIpcCompression(Compression):
     prefix scan).
 
     The cached-dctx decompress path:
-      - `create_dctx() -> UnsafePointer[UInt8, MutExternalOrigin]`
+      - `create_dctx() -> UnsafePointer[UInt8, MutUntrackedOrigin]`
         creates one decompression context per worker (mirrors
         arrow-cpp's per-thread dctx cache).
       - `free_dctx(dctx)` releases it (called by `_CodecDctxHandle`'s
@@ -214,7 +214,8 @@ trait ArrowIpcCompression(Compression):
       - `decompress_into_with_dctx[o](dctx, src, dst, dst_capacity)`
         decompresses with a pre-created dctx; calls the codec's reset
         function between buffers to amortize ctor/dtor cost.
-        Lz4Frame: `LZ4F_resetDecompressionContext` + `LZ4F_decompress`.
+        Lz4Frame: `LZ4F_resetDecompressionContext` + `LZ4F_decompress`
+                  (through komira_lz4's `Lz4FrameDecoder`).
         Zstd: `ZSTD_DCtx_reset(ZSTD_reset_session_only)` +
               `ZSTD_decompressDCtx`.
         Uncompressed: memcpy (dctx ignored).
@@ -342,8 +343,8 @@ trait ArrowIpcCompression(Compression):
         `decompress_into_with_dctx`. Returns an opaque, codec-specific
         pointer that MUST be freed via `free_dctx` exactly once.
 
-        For LZ4-Frame: wraps `LZ4F_createDecompressionContext` returning
-        the LZ4F_dctx pointer.
+        For LZ4-Frame: a heap-boxed `komira_lz4.frame.Lz4FrameDecoder`,
+        which owns one `LZ4F_dctx`.
         For Zstd: wraps `ZSTD_createDCtx` returning the ZSTD_DCtx pointer.
         For Uncompressed: returns a null sentinel (memcpy path requires
         no dctx state).

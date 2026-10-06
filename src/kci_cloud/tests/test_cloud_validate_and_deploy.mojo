@@ -391,7 +391,7 @@ struct _Stub(CloudAdapter, Movable):
                 OwnedRecord(
                     String("stub"), id.copy(), String("stub"), String("none"),
                     String(""), String(RUN_UNKNOWN), True, id.copy(), False,
-                    String(""),
+                    String(""), None,
                 )
             )
         return l^

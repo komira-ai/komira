@@ -1,9 +1,9 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The validation-run correlator's tag key and retention mark. It has no deps,
-# and that is load-bearing: both cloud wire layers import it — the ECS
-# `RunTask` body and the Cloud Run job render — and their dep closures are
-# deliberately tight and disjoint. Anything named here is placed upstream of both. Do not add deps.
+# and that is load-bearing: kci_cloud's label rule and the test-resource
+# packages import it, so anything named here is placed upstream of all of
+# them. Do not add deps.
 #
 # Why one key serves both clouds, and why it is spelled the way it is, is in
 # `validation_run_tag.mojo`'s header.
