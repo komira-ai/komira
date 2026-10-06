@@ -496,14 +496,15 @@ struct ServerStreamDecoder[P: Protocol](Movable, Deinitable):
         # Empty `{}` or no "error" substring → success.
         var has_error_key = False
         var needle = String("\"error\"")
+        var nb = needle.as_bytes()
         var hay_len = len(payload)
-        var needle_len = needle.byte_length()
+        var needle_len = len(nb)
         var i = 0
         while i + needle_len <= hay_len:
             var matches = True
             var j = 0
             while j < needle_len:
-                if payload[i + j] != UInt8(ord(needle[byte=j])):
+                if payload[i + j] != nb[j]:
                     matches = False
                     break
                 j = j + 1

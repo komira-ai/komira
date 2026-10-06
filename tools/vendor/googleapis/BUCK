@@ -348,9 +348,10 @@ _SECRETMANAGER_V1_CLOSURE = _SECRETMANAGER_V1_ROOTS + [
     "google/type/expr.proto",
 ]
 
-# Cloud Monitoring v3 MetricService (ListTimeSeries, read by the hand-written
-# komira_gcp_monitoring, whose test_monitoring_protos checks its constants
-# against these files): the root and its import closure, google/protobuf/*
+# Cloud Monitoring v3 MetricService (ListTimeSeries, for the generated
+# komira_gcp_monitoring_client; komira_gcp_monitoring's test_monitoring_protos
+# also checks its constants against these files): the root and its import
+# closure, google/protobuf/*
 # excepted. :monitoring_v3 refuses this list unless it is exactly that
 # closure.
 _MONITORING_V3_ROOTS = [

@@ -22,7 +22,7 @@ staged source directory can never shadow a package.
 """
 
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
-load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo", "welded_tests_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 
@@ -505,6 +505,7 @@ def _library_impl(ctx):
             pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
         ),
+        welded_tests_info(ctx.attrs.test_srcs),
     ]
 
 # ---- README examples ----------------------------------------------------------
@@ -775,6 +776,7 @@ def _test_impl(ctx):
             command = [command],
             labels = ctx.attrs.labels,
         ),
+        welded_tests_info([_main_src(ctx)]),
     ]
 
 mojo_test_rule = rule(

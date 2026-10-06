@@ -134,12 +134,14 @@ struct LogEntry(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(12, "logName", self.log_name)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.log_name.byte_length() > 0:
+            enc.write_string_field(12, "logName", self.log_name)
         if self.resource:
             enc.write_message_field[MonitoredResource](8, "resource", self.resource.value())
         if self.timestamp:
             enc.write_message_field[Timestamp](9, "timestamp", self.timestamp.value())
-        enc.write_enum_field[LogSeverity](10, "severity", self.severity)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.severity.number() != 0:
+            enc.write_enum_field[LogSeverity](10, "severity", self.severity)
         enc.begin_map_field(11, "labels")
         for entry in self.labels.items():
             enc.begin_map_entry()
@@ -231,8 +233,10 @@ struct LogSplit(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         """Encode this message's fields into `enc`."""
-        enc.write_string_field(1, "uid", self.uid)
-        enc.write_i32_field(2, "index", self.index)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.uid.byte_length() > 0:
+            enc.write_string_field(1, "uid", self.uid)
+        if not E.OMITS_IMPLICIT_DEFAULTS or self.index != 0:
+            enc.write_i32_field(2, "index", self.index)
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:

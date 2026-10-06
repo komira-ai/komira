@@ -132,6 +132,16 @@ from komira_metrics.metrics_set import MetricsSet, new_owned_metrics_set
 
 from komira_objectstore.path import Path
 
+# Reclamation never touches a live chunk (at or above `_LOG_START`):
+# decisions + error text, no I/O (cycle-free: imports nothing from here).
+from komira_objectstore.chunk_reclaim_guard import (
+    advance_regress_error,
+    advance_would_regress,
+    reap_is_refused,
+    reap_refused_error,
+    rewrite_target_deleted_error,
+)
+
 # Adaptive index sharding: the neutral shard-id +
 # sub-lineage discovery kernel. `discover_shard_ids` below is the encapsulated
 # passthrough — it LISTs `<index_meta_prefix>/_lineage/` through `_store` (which
@@ -858,7 +868,8 @@ trait MetadataStore(Movable, Deinitable):
         """Remove the underlying object for a `ScheduledForDelete` chunk
         (the reaper verb). Idempotent (deleting an absent object succeeds).
         Raises if the chunk is not in `ScheduledForDelete` (fail-loud — you
-        must tombstone before you reap)."""
+        must tombstone before you reap), or if it is at or above the log start
+        (a live chunk: advance the log start past a chunk before reaping it)."""
         ...
 
 
@@ -2939,11 +2950,20 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         The `_HEAD` cache is NOT touched — it only caches the tail/active chunk,
         which the cleaner never rewrites; downstream offsets are unchanged so the
         cache stays valid.
+
+        The overwrite is CONDITIONAL (If-Match on the etag read before the
+        body), so it never recreates a chunk the reaper deleted between the read
+        and the write (chunk_reclaim_guard.mojo). That raises a `not_found`
+        error; a concurrent rewrite raises the store's precondition error.
+        Cost: one HEAD more than an unconditional overwrite (a cold path).
         """
         # WRITE verb (in-place chunk overwrite) -> EXCLUSIVE lock.
         _cas_gate_wrlock()
         try:
             var ck = chunk_key(self._prefix, chunk_seq)
+            # The etag first, then the body: a rewrite landing between the two
+            # leaves the etag stale, so the If-Match below refuses.
+            var etag = self._store.head(ck).etag
             # Fail-loud existence check + record_count guard.
             var existing = self._store.get(ck)
             var old_rc = decode_chunk_record_count(existing)
@@ -2958,11 +2978,28 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                     " — refusing to renumber chunk "
                     + String(chunk_seq)
                 )
-            _ = self._store.put(ck, new_encoded)
+            try:
+                _ = self._store.conditional_put(
+                    ck, new_encoded, WritePrecondition.if_match(etag)
+                )
+            except e_put:
+                if _is_precondition(String(e_put)) and self._chunk_is_gone(ck):
+                    raise rewrite_target_deleted_error(chunk_seq)
+                raise e_put^
             _cas_gate_unlock()
         except e:
             _cas_gate_unlock()
             raise e^
+
+    def _chunk_is_gone(self, ck: Path) -> Bool:
+        """True iff a HEAD proves `ck` absent. Any other HEAD outcome (present,
+        or an error that is not absence) is False: the caller then reports the
+        original failure."""
+        try:
+            _ = self._store.head(ck)
+            return False
+        except e:
+            return _is_not_found(String(e))
 
     # ---- lifecycle FSM ----
 
@@ -3069,8 +3106,11 @@ struct CasManifestStore[Store: ConditionalWriteStore](
 
         Grace gating lives ABOVE this verb (in the ReapWorker / the
         BrokerCore reap trigger, which reads `tombstone_schedule_ts` and only
-        calls `reap` once `now - schedule_ts >= grace`). This verb itself
-        reaps unconditionally once the tombstone exists."""
+        calls `reap` once `now - schedule_ts >= grace`).
+
+        Refuses a chunk at or above `_LOG_START` (a live chunk carrying a
+        stranded tombstone; chunk_reclaim_guard.mojo), and fails closed when
+        `_LOG_START` cannot be read: nothing is deleted. Cost: one GET."""
         if not self._is_marked(chunk_seq):
             raise Error(
                 "CasManifestStore.reap: chunk "
@@ -3082,6 +3122,9 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # create an rdlock-then-wrlock upgrade on one call stack (deadlock).
         _cas_gate_wrlock()
         try:
+            var floor = self._read_log_start_seq_inner()
+            if reap_is_refused(chunk_seq, floor):
+                raise reap_refused_error(chunk_seq, floor)
             self._store.delete(chunk_key(self._prefix, chunk_seq))
             # Drop the spent marker (idempotent — deleting absent is fine).
             self._store.delete(tombstone_key(self._prefix, chunk_seq))
@@ -3104,6 +3147,12 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         an epoch's `_entries`/`_seal` manifests when EVERY consumer's checkpointed
         cursor has advanced strictly past that epoch). This verb itself purges
         UNCONDITIONALLY — it is a mechanism, not a policy.
+
+        OUTSIDE the live-chunk guarantee `reap` and `rewrite_chunk_body` keep
+        (chunk_reclaim_guard.mojo): this deletes chunks at or above
+        `_LOG_START`, then `_LOG_START` itself (which then reads as zero). Use it
+        only on a lineage nothing reads or appends to any more (the shuffle
+        epoch reaper), never on a broker partition.
 
         Idempotent (S3 delete-of-absent succeeds), and SAFE to call on a fully-
         or partially-purged lineage. Enumerates each known leaf-prefix via
@@ -3166,6 +3215,36 @@ struct CasManifestStore[Store: ConditionalWriteStore](
 
     # ---- log-start pointer ----
 
+    def read_log_start_seq(self) raises -> Int64:
+        """The lowest live chunk seq from `_LOG_START`, in ONE GET (no HEAD:
+        no etag). 0 when the object is absent (never truncated). Raises on any
+        other read error, so a reclaimer that uses it as its floor fails
+        closed."""
+        # READ verb -> SHARED (read) lock.
+        _cas_gate_rdlock()
+        try:
+            var seq = self._read_log_start_seq_inner()
+            _cas_gate_unlock()
+            return seq
+        except e:
+            _cas_gate_unlock()
+            raise e^
+
+    def _read_log_start_seq_inner(self) raises -> Int64:
+        # UNLOCKED body of `read_log_start_seq` (the caller holds the gate).
+        return self._read_log_start_body_inner().log_start_seq
+
+    def _read_log_start_body_inner(self) raises -> LogStart:
+        # UNLOCKED one-GET read of `_LOG_START` (no HEAD, so no etag); zero
+        # when absent, raises on any other error. The caller holds the gate.
+        try:
+            var raw = self._store.get(log_start_key(self._prefix))
+            return decode_log_start(raw, String(""))
+        except e:
+            if _is_not_found(String(e)):
+                return LogStart.zero()
+            raise e^
+
     def read_log_start(self) raises -> LogStart:
         """Read the persisted `<prefix>/_LOG_START` pointer. Returns
         `LogStart.zero()` (offset 0, seq 0, empty etag) if the partition has
@@ -3203,11 +3282,29 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         empty — the first-ever advance). Returns the new `LogStart` with the
         post-write etag. Raises `precondition` (412) on a stale etag — the
         caller re-reads `read_log_start` and retries (atomic
-        advance). Never moves the pointer BACKWARDS (a stale retry that would
-        regress is a no-op returning the current state)."""
+        advance). Never moves the pointer BACKWARDS: a target whose seq or
+        offset is below the current pointer is refused with a precondition
+        (412) error, so a caller that retries on 412 re-reads and finds the
+        pointer already past its target (chunk_reclaim_guard.mojo). The current
+        pointer is read (one GET) before the If-Match write: if it is newer than
+        `expected_etag`, the write itself is refused."""
         # WRITE verb (If-Match CAS on _LOG_START) -> EXCLUSIVE lock.
         _cas_gate_wrlock()
         try:
+            if expected_etag.byte_length() != 0:
+                var cur = self._read_log_start_body_inner()
+                if advance_would_regress(
+                    cur.log_start_seq,
+                    cur.log_start_offset,
+                    new_log_start_seq,
+                    new_log_start_offset,
+                ):
+                    raise advance_regress_error(
+                        cur.log_start_seq,
+                        cur.log_start_offset,
+                        new_log_start_seq,
+                        new_log_start_offset,
+                    )
             var body = encode_log_start(
                 LogStart(new_log_start_offset, new_log_start_seq, String(""))
             )

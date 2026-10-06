@@ -50,8 +50,9 @@
 #      `-?D+(.D+)?([eE][+-]?D+)?` (JSON number syntax, leading zeros
 #      allowed), is rounded STRAIGHT to the nearest float32, ties to even
 #      (`parse_decimal_f32` in `float32_parse.mojo`, exact integer
-#      arithmetic, no length limit). It is not parsed to a Float64 first:
-#      that rounds twice, and is wrong next to every float32 midpoint
+#      arithmetic, no length limit on the digits or the exponent). It is
+#      not parsed to a Float64 first: that rounds twice, and is wrong next
+#      to every float32 midpoint
 #      (1.0000000596046448 would read as 1.0, and the writer's own
 #      `7.038531e-26` for 0x15AE43FD would read back as 0x15AE43FE).
 #      Other text (" 1.5", "+1.5", "1.5f", ".5") is refused.

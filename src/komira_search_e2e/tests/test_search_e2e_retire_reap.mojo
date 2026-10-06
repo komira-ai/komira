@@ -9,10 +9,11 @@
 # directory and a fresh metastore handle.
 #
 #   1. test_retire_then_reap_after_the_grace_period: a query is RESOLVED
-#      for execution through the catalog (it holds the catalog's generation
-#      and the split set recorded for it), then compaction retires split 0's
-#      chunk at t=1000. A cold reader stops listing it at once and the
-#      catalog's generation moves up (the live set changed). A reap at
+#      for execution through the catalog (it holds the catalog's generation,
+#      which is the metastore's, and the split set recorded for it), then
+#      compaction retires split 0's chunk at t=1000. A cold reader stops
+#      listing it at once, and the metastore generation and the catalog's
+#      (still equal) move up (the live set changed). A reap at
 #      t=1000+grace-1 is refused: the chunk and the split object stay, and
 #      the in-flight query, drained only now, returns exactly the pre-retire
 #      rows over all three splits. At t=1000+grace the reap goes through and
@@ -24,7 +25,7 @@
 #      deletes (a chunk above the log start would stay as a stub; see 2).
 #      Defects caught: a reap that runs before the grace period has passed
 #      (it deletes a split a running query still reads), a retire that leaves
-#      the split live, a catalog that serves a running query a different
+#      the split live, a retire that does not move the metastore generation, a catalog that serves a running query a different
 #      split set than it planned, a reap that leaves the split object behind,
 #      a reap that leaves the lineage unreadable cold.
 #   2. test_reap_a_middle_split_and_never_a_live_one: split 1 (a chunk above
@@ -213,6 +214,7 @@ def test_retire_then_reap_after_the_grace_period() raises:
     var g_before = cold_metastore(LocalFsConditionalStore(root), index).generation()
     assert_equal(g_before, Int64(3), "three publishes")
     var c_before = _catalog_generation(root, index)
+    assert_equal(c_before, g_before, "the catalog reports the metastore's")
 
     # In-flight queries resolved before the retire: each holds the catalog
     # generation and will plan and read its splits only later.
@@ -233,8 +235,16 @@ def test_retire_then_reap_after_the_grace_period() raises:
     assert_true(uuid_eq(live[0].split_uuid, split_uuid(1)), "split 1 live")
     assert_true(uuid_eq(live[1].split_uuid, split_uuid(2)), "split 2 live")
     var g_retired = cold.generation()
-    assert_true(g_retired >= g_before, "retire lowered the generation")
+    assert_true(
+        g_retired > g_before,
+        "the metastore generation did not move on the retire ("
+        + String(g_before)
+        + " -> "
+        + String(g_retired)
+        + ")",
+    )
     var c_retired = _catalog_generation(root, index)
+    assert_equal(c_retired, g_retired, "the catalog reports the metastore's")
     assert_true(
         c_retired > c_before,
         "the catalog generation did not move when the live set shrank ("

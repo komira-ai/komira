@@ -9,10 +9,9 @@ This package exists for its tests. Its sources are the shared fixture:
 - `catalog.mojo`: publishing a split through `SearchMetastore` (the split
   object first, then the summary), cold metastore handles, the caller's half
   of a reap (only for a tombstoned chunk), and `MetastoreSearchCatalog`, a
-  `SearchIndexCatalog` over a metastore whose generation token moves on every
-  change of the live set (publish or retire) and which serves each token's
-  recorded split set, so a scan resolved before a retire reads what it
-  planned.
+  `SearchIndexCatalog` that reports `SearchMetastore.generation()` (it moves
+  on every publish, retire and reap) and serves the split set it recorded for
+  each generation, so a scan resolved before a retire reads what it planned.
 - `rows.mojo`: resolving and draining a live scan into rows, and the
   baseline rows `SearchCore` returns for in-memory split bytes.
 

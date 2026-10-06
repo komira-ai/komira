@@ -183,7 +183,7 @@ def test_read_modify_write_sends_back_the_etag_it_read() raises:
         + '{"role":"roles/iam.serviceAccountTokenCreator",'
         + '"members":["group:oncall@example.com"],'
         + '"condition":{"expression":"request.time.getHours(\\"UTC\\") < 18",'
-        + '"title":"business hours","description":"","location":""}}],'
+        + '"title":"business hours"}}],'
         + '"etag":"BwXhqDuVJ8g="}}',
     )
     # The etag text sent is the etag text read.
@@ -191,8 +191,9 @@ def test_read_modify_write_sends_back_the_etag_it_read() raises:
 
 
 def test_set_with_no_etag_sends_none() raises:
-    # A policy built from nothing has no etag, and none is invented: the
-    # write is then unconditional, which the caller chose by not reading.
+    # A policy built from nothing has no etag, and none is invented (the
+    # empty etag is a default, so no key is sent): the write is then
+    # unconditional, which the caller chose by not reading.
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
     var c = _client(capture, String(_READ))
     var rt = _rt()
@@ -204,12 +205,11 @@ def test_set_with_no_etag_sends_none() raises:
     var p = Policy(Int32(1), bindings^, List[AuditConfig](), List[UInt8]())
     _ = c.set_iam_policy[_RT](SetIamPolicyRequest(String(_SA), p^, None), reactor)
     var body = _body(_wire(capture))
-    # No audit configs: the empty list is left out, as proto3 JSON leaves
-    # out every field at its default.
-    assert_true(
-        body.endswith('"members":["user:owner@example.com"]}],"etag":""}}'), body
-    )
+    # No audit configs and no etag: the empty list and the empty etag are
+    # left out, as proto3 JSON leaves out every field at its default.
+    assert_true(body.endswith('"members":["user:owner@example.com"]}]}}'), body)
     assert_equal(body.count("auditConfigs"), 0)
+    assert_equal(body.count("etag"), 0)
 
 
 def main() raises:
