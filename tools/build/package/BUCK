@@ -1,7 +1,9 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
+load(":release_set.bzl", "conda_release_set_check")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
 launcher_level_test(
@@ -50,4 +52,35 @@ config_setting(
         "prelude//cpu/constraints:x86_64",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The stamped release path, before any release runs it (release_set.bzl): each
+# library of the release set packaged with the fixed test stamp of conda.bzl
+# (build number 999999999, build string h7e57c0de_999999999), their [release]
+# manifests given to `komira_pack conda-meta`, and the metapackage read back.
+# Red if a member's [release_check] fails, if a member or the metapackage does
+# not carry the test stamp, if the metapackage does not require a member at
+# that version and build string, if conda-check refuses it, or if `libs` and
+# `metapackage` are not release_set.txt's (which kci_artifact's welded test
+# holds equal to release/artifacts.textproto's metapackage).
+conda_release_set_check(
+    name = "release_set_check",
+    metapackage = "komira_all",
+    libs = ["//src/komira_encoding:komira_encoding"],
+    release_set = "release_set.txt",
+)
+
+# The release set file: kci_artifact's welded test holds it equal to
+# release/artifacts.textproto's metapackage (release_set.txt's header).
+export_file(
+    name = "release_set.txt",
+    src = "release_set.txt",
+    visibility = ["//src/kci_artifact:"],
+)
+
+# The stamped metapackage above, read with kci's own manifest parser
+# (manifest_probe/BUCK): what a PUBLISH step reads.
+conda_manifest_kci(
+    name = "release_set_kci",
+    package = ":release_set_check",
 )

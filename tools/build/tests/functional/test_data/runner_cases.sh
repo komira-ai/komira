@@ -36,6 +36,14 @@ case "\${PROBE_MODE:-}" in
         [ "\${SEEN_VAR:-}" = "a=b c" ] || { echo "probe: SEEN_VAR='\${SEEN_VAR:-}'"; exit 16; }
         [ -n "\${LD_LIBRARY_PATH:-}" ] || { echo "probe: LD_LIBRARY_PATH unset"; exit 17; }
         exit 0 ;;
+    args)
+        [ "\$#" = 3 ] || { echo "probe: \$# arguments"; exit 18; }
+        [ "\$1" = "--pair=\$EXPECT_DIR/a,\$EXPECT_DIR/b" ] || { echo "probe: first argument '\$1'"; exit 19; }
+        [ "\$2" = "two words" ] || { echo "probe: second argument '\$2'"; exit 20; }
+        [ "\$3" = "SEEN_ARG=1" ] || { echo "probe: third argument '\$3'"; exit 21; }
+        [ -z "\${SEEN_ARG:-}" ] || { echo "probe: an argument was exported"; exit 22; }
+        exit 0 ;;
+    skip) exit 77 ;;
     *) echo "probe: PROBE_MODE='\${PROBE_MODE:-}'"; exit 15 ;;
 esac
 PROBE
@@ -112,6 +120,16 @@ run killed "$D/m6" --env PROBE_MODE=killed
 if [ "$rc" = 137 ] && [ ! -e "$D/m6" ]; then ok killed; else bad killed "rc $rc, marker '$("$BB" cat "$D/m6" 2> /dev/null)'"; fi
 run aborted "$D/m7" --env PROBE_MODE=aborted
 if [ "$rc" = 134 ] && [ ! -e "$D/m7" ]; then ok aborted; else bad aborted "rc $rc, marker '$("$BB" cat "$D/m7" 2> /dev/null)'"; fi
+
+# --arg: in order, verbatim but for @KOMIRA_ACTION_DIR@ (every occurrence)
+# becoming the action's directory, and never exported.
+run args "$D/m8" --env PROBE_MODE=args --env "EXPECT_DIR=$PWD" --arg "--pair=@KOMIRA_ACTION_DIR@/a,@KOMIRA_ACTION_DIR@/b" --arg "two words" --arg SEEN_ARG=1
+if [ "$rc" = 0 ] && [ "$("$BB" cat "$D/m8" 2> /dev/null)" = "PASS //x:args" ]; then ok args; else bad args "rc $rc: $("$BB" tail -n 3 "$D/args.log")"; fi
+run args_order "$D/m9" --arg x --env PROBE_MODE=other
+if [ "$rc" = 2 ] && [ ! -e "$D/m9" ]; then ok args_order; else bad args_order "--env after --arg gave rc $rc"; fi
+# Exit 77, "skipped" to automake and some harnesses, is red here like any other status.
+run skip "$D/m10" --env PROBE_MODE=skip
+if [ "$rc" = 77 ] && [ ! -e "$D/m10" ]; then ok skip; else bad skip "rc $rc, marker '$("$BB" cat "$D/m10" 2> /dev/null)'"; fi
 
 "$BB" rm -rf "$D"
 exit "$bad"

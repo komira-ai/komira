@@ -19,11 +19,12 @@ from komira_collections.slab import Slab
 
 
 # =============================================================================
-# Test type: struct with Atomic fields (non-Movable)
+# Test type: struct with Atomic fields (no declared traits)
 # =============================================================================
 
 struct AtomicCounter:
-    """Test struct with Atomic field. Non-Movable in Mojo 0.26.3."""
+    """Test struct with an Atomic field. It declares no traits (the old
+    "Non-Movable" note dated from Mojo 0.26.3)."""
     var value: AtomicI64
     var label: Int
 

@@ -7,7 +7,7 @@ Everything the build needs besides the project configuration
 
 | directory | Buck2 name | what it holds |
 |---|---|---|
-| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_proto_library`, `mojo_db_proto_library`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
+| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_proto_library`, `mojo_db_proto_library`), `proto_fixture_check` and `proto_encode` (protoc reading and writing wire fixtures; their welded self-test is the package `mojo/proto_fixture_testdata`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
 | [`toolchains/`](toolchains/) | package `komira//tools/build/toolchains` | the sha256-pinned downloads and the hermetic Mojo toolchain built from them. [Reference](toolchains/README.md). |
 | [`platforms/`](platforms/) | package `komira//tools/build/platforms` | the target platform, the execution constraints and configurations, and `komira_execution_platforms`; [`platforms/default/`](platforms/default/) registers a standalone checkout's execution platforms: local, or remote when `.buckconfig.local` names a service. [Reference](platforms/README.md). |
 | [`rust/`](rust/) | package `komira//tools/build/rust` | the Rust rules (`rust_library`, `rust_binary`, `crates_io_library`) and the rustc toolchain rule. [Reference](rust/README.md). |
@@ -20,7 +20,7 @@ Everything the build needs besides the project configuration
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
 | `cells/toolchains/` | cell `toolchains` | the Mojo toolchain the rules use, `toolchains//:mojo`, declared by `komira_mojo_toolchains`, the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains`, and the Rust and protobuf toolchains, `toolchains//:rust` and `toolchains//:mojo_proto`, declared by `komira_rust_toolchains` and `komira_proto_toolchains`; one call of `komira_toolchains` declares them all ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
 | [`tests/`](tests/) | cell `tests` | end-to-end tests: `functional/` (behaviour that must work) and `negative/` (planted defects that must go red). A standalone checkout's only, and outside `//...`. [Reference](tests/README.md). |
-| [`third_party/`](../../third_party/) | packages `komira//third_party/...` | C and C++ libraries built from pinned source archives (snappy, aws-lc, s2n-tls), see [C and C++](mojo/README.md#c-and-c); and the crates.io crates of the Rust rules (`third_party/rust`). |
+| [`third_party/`](../../third_party/) | packages `komira//third_party/...` | C and C++ libraries built from pinned source archives (snappy, aws-lc, s2n-tls, sqlite, and others), see [C and C++](mojo/README.md#c-and-c); and the crates.io crates of the Rust rules (`third_party/rust`). |
 | [`consumer.buckconfig`](consumer.buckconfig) | | the `.buckconfig` of a repository using komira ([below](#using-komira-from-another-repository)). |
 
 The repository is one cell, `komira`: the rules, toolchains, platforms and

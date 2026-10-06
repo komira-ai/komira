@@ -5,7 +5,7 @@
 # The FFI BOUNDARY for the sqlite backend.
 # The same pattern as the s2n TLS bindings in `komira_http`:
 # a module of thin `external_call["<symbol>", RetType](args)` wrappers over the
-# system `libsqlite3`, each typing the C args + return for the Mojo type
+# `libsqlite3` C API, each typing the C args + return for the Mojo type
 # checker. Bodies do NOTHING other than the external_call.
 #
 # sqlite's public API is entirely NON-variadic (`sqlite3_open_v2`,
@@ -29,12 +29,11 @@
 #
 # This module MUST NOT be imported by anything other than `sqlite_driver.mojo`.
 #
-# LINKING: `libsqlite3` is a ubiquitous system lib (present on macOS via the
-# dyld shared cache + every Linux). A binary that reaches the sqlite driver
-# links it with `-lsqlite3`. On macOS `ld` resolves `-lsqlite3` from the dyld
-# shared cache (no on-disk `.dylib` needed); on Linux from the system
-# `libsqlite3.so`.
-# No vendored archive, no network fetch — as ubiquitous as `libm`.
+# LINKING: `libsqlite3` comes from //third_party/sqlite:sqlite3, a dep of
+# komira_db_sqlite: the SQLite amalgamation, fetched from a sha256-pinned
+# archive, compiled from source and linked statically into each binary that
+# reaches the driver, with extension loading compiled out. No system
+# libsqlite3 is used at build or run time.
 # =============================================================================
 
 from std.ffi import external_call

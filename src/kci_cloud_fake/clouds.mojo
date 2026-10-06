@@ -45,7 +45,9 @@
 # a table's indexes and TTL policy as nodes of their own. A shape's NOT_YET
 # types (onprem: `table`) are the cloud's absences, and such a cloud is not
 # complete. `list_owned` reports a table object's stored key
-# (`OwnedRecord.key`), read back from the object.
+# (`OwnedRecord.key`) and the validation run that created the object (its
+# `kci-run-id` label, `OwnedRecord.validation_run_id`), both read back from
+# the object.
 # A run node's desired fields are EVERY field the catalog models, with the
 # catalog's default filled in where the author wrote none (kci owns every
 # modelled field: writing a default out is not a change, a console edit of
@@ -53,7 +55,7 @@
 # (`never` when unset), versioning and tier (`STANDARD` when unset); a
 # table's key, indexes and TTL (`none` when unset).
 # Provenance is never a field, and neither is retention: kci sets it on the
-# lowered node, and the node carries it as the `kci_retain` label.
+# lowered node, and the node carries it as the `kci-retention` mark.
 #
 # THE CELL'S SETTINGS (`configure`): `public_mechanism` (`invoker` or
 # `gateway`, default `invoker`; `none` chooses none, and validate then
@@ -115,6 +117,7 @@ from kci_cloud import (
     retained_by,
     standard_identity_of,
     standard_label_rule,
+    validation_run_of,
 )
 from kci_resource_proto.resource import Image, Resource, SecretRef, Size, Value
 
@@ -493,7 +496,7 @@ def _label(labels: List[Label], key: String) -> String:
     return String("")
 
 
-def _owned(store: ArcPointer[FakeStore], scope: CellScope) -> List[OwnedRecord]:
+def _owned(store: ArcPointer[FakeStore], scope: CellScope) raises -> List[OwnedRecord]:
     """Every object whose stamp names this machine and cell (true state: a
     list, not a lagging read)."""
     var out = List[OwnedRecord]()
@@ -524,6 +527,7 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) -> List[OwnedRecord]:
                 node^,
                 retained_by(labels),
                 live_key(s.digests[i]),
+                validation_run_of(labels),
             )
         )
     return out^

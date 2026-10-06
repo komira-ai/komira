@@ -69,8 +69,10 @@
 //
 // Set-level rules (every declared artifact built, versions in lockstep, the
 // one metapackage published after its members, each package's requirements
-// closed over the set) need the built manifests, so they are checked by kci
-// publish over those manifests, not here.
+// closed over the set) need the built manifests, so they are checked over
+// those manifests, not here: kci build refuses a library requirement whose
+// name is not the conda name of another library of the set (the platform
+// guard and the compiler pin aside), and kci publish checks every rule.
 //
 // Deliberately absent: a version, a sha256, a file name, a platform and an
 // artifact type (the built manifest carries them), and where an artifact is

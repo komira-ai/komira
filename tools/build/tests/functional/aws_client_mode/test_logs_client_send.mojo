@@ -28,7 +28,7 @@
 # retry loop and budget. Signing, retries and the conditional-write rule
 # are tested in komira//src/komira_aws_core.
 from komira_aws_logs_client.komira_aws_logs_client import (
-    CloudWatchLogsCloudWatchLogsClient,
+    CloudWatchLogsClient,
     CloudWatchLogsGetLogEventsRequest,
     build_get_log_events_request,
 )
@@ -84,7 +84,7 @@ def _creds(session_token: String = String("")) -> _FixedCreds:
     )
 
 
-comptime _Client = CloudWatchLogsCloudWatchLogsClient[_NoConnector, _FixedCreds]
+comptime _Client = CloudWatchLogsClient[_NoConnector, _FixedCreds]
 
 
 def _defaults() -> HttpClientConfig:
@@ -260,7 +260,7 @@ def test_get_log_events_error_names_code_and_message() raises:
         var err = String(e)
         assert_true(
             err.startswith(
-                "CloudWatchLogsCloudWatchLogs.GetLogEvents failed: HTTP 400"
+                "CloudWatchLogs.GetLogEvents failed: HTTP 400"
             )
         )
         assert_true(err.find("ResourceNotFoundException") >= 0)
@@ -283,7 +283,7 @@ def test_get_log_events_error_takes_the_errortype_header() raises:
         var err = String(e)
         assert_true(
             err.startswith(
-                "CloudWatchLogsCloudWatchLogs.GetLogEvents failed: HTTP 404"
+                "CloudWatchLogs.GetLogEvents failed: HTTP 404"
             )
         )
         assert_true(err.find("ResourceNotFoundException") >= 0)
@@ -305,7 +305,7 @@ def test_get_log_events_error_never_echoes_the_body() raises:
         var err = String(e)
         assert_true(
             err.startswith(
-                "CloudWatchLogsCloudWatchLogs.GetLogEvents failed: HTTP 502"
+                "CloudWatchLogs.GetLogEvents failed: HTTP 502"
             )
         )
         assert_true(err.find("/private/x") < 0)

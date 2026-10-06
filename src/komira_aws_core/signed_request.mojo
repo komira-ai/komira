@@ -50,6 +50,14 @@
 # from the hash it carries (`signed_body_value`), and a caller who passes
 # `.precomputed()` has asked that the hash, not the body, be signed.
 #
+# `build_unsigned_request` is the same request with no signature: what an
+# operation the model marks anonymous (`authtype` `none`, `auth`
+# `smithy.api#noAuth`) sends, through `send_unsigned_request`
+# (aws_send.mojo). It sends the same headers up to Content-Length, and
+# nothing after them. Both builders refuse the same `extra` headers
+# (`_request_headers`): CR/LF, an empty name, a name the signer writes in any
+# case, and Host, Content-Type or Content-Length.
+#
 # The result holds the signature and, for a temporary credential, the session
 # token. It is not `Writable`; `to_wire()` is for the transport and tests.
 # =============================================================================
@@ -64,6 +72,8 @@ from .sigv4 import (
     UNSIGNED_PAYLOAD,
     Header,
     SigV4SigningContext,
+    _is_signer_owned_header,
+    _trim_collapse,
     sigv4_sign_payload_hash,
 )
 from .sources import AwsClock, amz_date_from_unix
@@ -225,23 +235,8 @@ def build_sigv4_signed_request[
     """
     _check_method(method)
     payload.check()
-    if not uri.startswith("/"):
-        raise Error("an AWS request path does not start with '/'")
-    if has_crlf(uri) or has_crlf(content_type):
-        raise Error("an AWS request path or content type holds CR or LF")
+    var headers = _request_headers(endpoint, uri, content_type, extra)
     var target = endpoint.target_for(uri)
-    var headers = List[Header]()
-    headers.append(Header(String("Host"), endpoint.host_header()))
-    if content_type.byte_length() > 0:
-        headers.append(Header(String("Content-Type"), content_type))
-    for i in range(len(extra)):
-        if _is_reserved(extra[i].name):
-            raise Error(
-                "the extra header "
-                + extra[i].name
-                + " is set by the request builder; pass it as its argument"
-            )
-        headers.append(extra[i])
     var is_s3 = is_s3_signing_name(service)
     var ctx = SigV4SigningContext(
         cred,
@@ -255,14 +250,100 @@ def build_sigv4_signed_request[
     var signed = sigv4_sign_payload_hash(
         method, target, headers, payload.payload_hash(body), ctx
     )
+    var req = _request(method, endpoint, target, headers^, body)
+    for i in range(len(signed.headers_to_add)):
+        req.headers.append(signed.headers_to_add[i])
+    return req^
+
+
+def build_unsigned_request(
+    method: String,
+    endpoint: AwsEndpoint,
+    uri: String,
+    content_type: String,
+    body: Span[UInt8, _],
+    extra: List[Header],
+) raises -> CredentialHttpRequest:
+    """The request sent UNSIGNED, as botocore sends an operation its model
+    marks anonymous (`authtype` `none`, `auth` `smithy.api#noAuth`).
+
+    Headers, in send order: Host, Content-Type (when not ""), each of
+    `extra`, and Content-Length, exactly as `build_sigv4_signed_request`
+    sends them before its signature; then nothing: no X-Amz-Date,
+    x-amz-content-sha256, X-Amz-Security-Token or Authorization. `body` is
+    sent as given, byte for byte.
+
+    Refuses the `extra` headers that builder refuses: CR/LF in a name or
+    value, an empty name, a name the signer writes (Authorization,
+    X-Amz-Date, X-Amz-Security-Token, x-amz-content-sha256, in any case)
+    and Host, Content-Type or Content-Length; and a malformed method, a
+    `uri` not starting with '/', and CR/LF in the path or content type.
+    """
+    _check_method(method)
+    var headers = _request_headers(endpoint, uri, content_type, extra)
+    return _request(method, endpoint, endpoint.target_for(uri), headers^, body)
+
+
+def _request_headers(
+    endpoint: AwsEndpoint,
+    uri: String,
+    content_type: String,
+    extra: List[Header],
+) raises -> List[Header]:
+    """The checks of the path, the content type and `extra` both builders
+    make, and the headers both send ahead of Content-Length: Host,
+    Content-Type (when not "") and each of `extra`. An `extra` header is
+    refused for CR/LF in its name or value, an empty name (after trimming
+    spaces and tabs), a name the signer writes, in any case
+    (`_is_signer_owned_header`), and Host, Content-Type or Content-Length,
+    which have their own arguments. The signer refuses the first three too
+    (`_canonical_header_pairs`); here they hold for the unsigned request."""
+    if not uri.startswith("/"):
+        raise Error("an AWS request path does not start with '/'")
+    if has_crlf(uri) or has_crlf(content_type):
+        raise Error("an AWS request path or content type holds CR or LF")
+    var headers = List[Header]()
+    headers.append(Header(String("Host"), endpoint.host_header()))
+    if content_type.byte_length() > 0:
+        headers.append(Header(String("Content-Type"), content_type))
+    for i in range(len(extra)):
+        if has_crlf(extra[i].name) or has_crlf(extra[i].value):
+            raise Error("an AWS request header holds CR or LF")
+        var name = _trim_collapse(ascii_lower(extra[i].name))
+        if name.byte_length() == 0:
+            raise Error("an AWS request header has an empty name")
+        if _is_signer_owned_header(name):
+            raise Error(
+                "the extra header "
+                + extra[i].name
+                + " is a signature header; the signer writes it"
+            )
+        if _is_reserved(extra[i].name):
+            raise Error(
+                "the extra header "
+                + extra[i].name
+                + " is set by the request builder; pass it as its argument"
+            )
+        headers.append(extra[i])
+    return headers^
+
+
+def _request(
+    method: String,
+    endpoint: AwsEndpoint,
+    target: String,
+    var headers: List[Header],
+    body: Span[UInt8, _],
+) -> CredentialHttpRequest:
+    """`headers`, then Content-Length when the request carries a body (and
+    "0" on a body-less POST, PUT or PATCH), and `body`, for `target` at
+    `endpoint`."""
     var req = CredentialHttpRequest(
         method, endpoint.scheme, endpoint.host, endpoint.port, target
     )
     req.headers = headers^
     if _sends_body(method, len(body)):
         req.headers.append(Header(String("Content-Length"), String(len(body))))
-    for i in range(len(signed.headers_to_add)):
-        req.headers.append(signed.headers_to_add[i])
     req.body = List[UInt8](capacity=len(body))
     req.body.extend(body)
     return req^
