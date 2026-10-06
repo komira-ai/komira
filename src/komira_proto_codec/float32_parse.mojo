@@ -22,6 +22,11 @@
 # never below -150, so a value below the normal range keeps the subnormal
 # grid of 2^-149.
 #
+# The exponent part is read exactly up to a cap of the text's length plus
+# 100, past which any value is out of range or a zero whatever the digits
+# (see `parse_decimal_f32`), so there is no length limit on the digits or
+# the exponent.
+#
 # Digits past the 120th significant one are dropped and remembered as a
 # nonzero tail (trailing zeros are stripped first, so a dropped tail is
 # never zero). That decides every comparison exactly: x is within a factor
@@ -52,7 +57,6 @@ from .float32_bignum import (
 
 comptime _PN = 24
 comptime _MAX_DIGITS = 120
-comptime _EXP_CLAMP = 100000
 
 
 def _is_digit(c: UInt8) -> Bool:
@@ -116,9 +120,16 @@ def parse_decimal_f32(text: String) raises -> Float32:
         if i < n and (b[i] == UInt8(ord("+")) or b[i] == UInt8(ord("-"))):
             exp_neg = b[i] == UInt8(ord("-"))
             i += 1
+        # Saturate the exponent at n + 100 (n = the text's byte length).
+        # |q| and nd are each at most n, so an exponent that big puts
+        # lead = nd + q + exp beyond +-100, out of [-45, 39] in the same
+        # direction as the true exponent: the result (out of range, or a
+        # signed zero) is the one the exact exponent gives. Below the cap
+        # the exponent is exact, and it cannot overflow an Int.
+        var exp_cap = n + 100
         var exp_count = 0
         while i < n and _is_digit(b[i]):
-            if exp < _EXP_CLAMP:
+            if exp < exp_cap:
                 exp = exp * 10 + Int(b[i] - UInt8(ord("0")))
             exp_count += 1
             i += 1
