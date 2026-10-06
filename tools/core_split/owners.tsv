@@ -47,6 +47,7 @@ komira_morsel	origin/lib/komira_morsel
 komira_objectstore	origin/lib/komira_objectstore
 komira_obs	origin/lib/komira_obs
 komira_oci	origin/lib/komira_oci
+komira_op_agg_state	origin/lib/komira_op_agg_state
 komira_orc	origin/lib/komira_orc
 komira_placement	origin/lib/komira_placement
 komira_plan_proto	origin/lib/komira_rpc_plan
