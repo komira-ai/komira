@@ -615,7 +615,8 @@ struct JsonDecoder(WireDecoder):
     var _keep_null: List[String]
     """The keys whose `null` `next_field()` yields rather than skips
     (`keep_null_fields`); empty for every message without a
-    `google.protobuf.NullValue` field."""
+    `google.protobuf.NullValue` or singular `google.protobuf.Value`
+    field."""
 
     def __init__(out self, var value: JsonValue):
         """A cursor over `value`, REFUSING unknown keys / enum names.
@@ -706,8 +707,9 @@ struct JsonDecoder(WireDecoder):
             raise Error("JsonError: decode source is not a JSON object")
         # Advance past keys whose value is JSON null (proto3 treats a null
         # field as absent — skip it so the generated body keeps the default),
-        # except a `google.protobuf.NullValue` field's, whose `null` is its
-        # value (`keep_null_fields`).
+        # except a `google.protobuf.NullValue` or singular
+        # `google.protobuf.Value` field's, whose `null` is its value
+        # (`keep_null_fields`).
         self._idx += 1
         while self._idx < len(self.value.obj_keys):
             if not self.value.children[self._idx].is_null() or self._null_is_a_value(
@@ -1031,12 +1033,13 @@ struct JsonDecoder(WireDecoder):
                 )
                 out[obj.obj_keys[i]] = V.decode[JsonDecoder](sub_dec)
 
-    # A well-known-type FIELD whose JSON value is `null` never reaches
-    # `read_message`: `next_field()` skips it as ABSENT, which is right for
-    # every WKT but one. The spec reads `null` in a `google.protobuf.Value`
-    # FIELD as NULL_VALUE; here such a field decodes as absent (an open
-    # limit, komira-ai/komira#62). A null INSIDE a Struct, a
-    # ListValue or a map<string, Value> is a NULL_VALUE.
+    # A well-known-type FIELD whose JSON value is `null` reaches
+    # `read_message` only if the generated `decode` named its key to
+    # `keep_null_fields`, which it does for a singular `google.protobuf.Value`
+    # field alone: the spec reads `null` there as NULL_VALUE (Value's
+    # `read_proto3_json` maps it) and in every other WKT field as ABSENT,
+    # which `next_field()` gives by skipping the key. A null INSIDE a Struct,
+    # a ListValue or a map<string, Value> is a NULL_VALUE.
 
     # -- the unknown-token refusals ---------------------------------------
 
