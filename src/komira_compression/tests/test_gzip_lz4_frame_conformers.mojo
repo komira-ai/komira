@@ -31,6 +31,13 @@ def _read(path: String) raises -> List[UInt8]:
     return Path(path).read_bytes()
 
 
+def _prefix(b: List[UInt8], n: Int) -> List[UInt8]:
+    var out = List[UInt8](capacity=n)
+    for i in range(n):
+        out.append(b[i])
+    return out^
+
+
 def _hello() -> List[UInt8]:
     return [UInt8(0x68), UInt8(0x65), UInt8(0x6C), UInt8(0x6C), UInt8(0x6F)]
 
@@ -150,7 +157,8 @@ def test_lz4_frame_golden_decodes_through_every_entry() raises:
     assert_equal(n, len(text))
     _assert_same(Span(out), Span(text))
 
-    # One context, two frames: the reset between uses must hold.
+    # One context, two complete frames (liblz4 returns a context to its
+    # header stage by itself after a frame ends; the reset is tested below).
     var dctx = Lz4Frame.create_dctx()
     for _ in range(2):
         var again = List[UInt8](length=len(text), fill=UInt8(0x55))
@@ -213,6 +221,94 @@ def test_lz4_frame_refusals() raises:
     except:
         raised = True
     assert_true(raised, "a cached context must refuse a wrong magic too")
+    var n = Lz4Frame.decompress_into_with_dctx(
+        dctx, Span(frame), out.unsafe_ptr(), len(out)
+    )
+    assert_equal(n, len(text))
+    _assert_same(Span(out), Span(text))
+    Lz4Frame.free_dctx(dctx)
+
+
+# --- refusals the switch to komira_zlib / komira_lz4 introduced ------------------
+
+
+def _gzip_refuses_containing(
+    src: Span[UInt8, _], expected_size: Int, needle: String
+) raises:
+    var raised = False
+    try:
+        _ = Gzip.decompress(src, expected_size)
+    except e:
+        raised = True
+        assert_true(needle in String(e), String(e))
+    assert_true(raised, "expected a refusal containing '" + needle + "'")
+
+
+def test_gzip_decompress_refuses_truncated() raises:
+    # Cut 5 bytes off the end: the zlib stream loses its Adler-32 and a byte
+    # of deflate, the gzip member its CRC-32 and ISIZE. The old in-file inflate
+    # returned what it had decoded; komira_zlib refuses.
+    var data = _varied(70000)
+    var z = Gzip.compress(Span(data))
+    _gzip_refuses_containing(Span(z)[0 : len(z) - 5], len(data), "truncated")
+    var gz = Gzip.compress_gzip_file(Span(data))
+    _gzip_refuses_containing(
+        Span(gz)[0 : len(gz) - 5], len(data), "truncated"
+    )
+
+
+def test_gzip_decompress_refuses_output_past_expected_size() raises:
+    var data = _varied(70000)
+    var z = Gzip.compress(Span(data))
+    _gzip_refuses_containing(Span(z), len(data) - 1, "more than")
+    var gz = Gzip.compress_gzip_file(Span(data))
+    _gzip_refuses_containing(Span(gz), len(data) - 1, "more than")
+
+
+def test_lz4_frame_truncated_is_refused() raises:
+    var text = _read(_GOLDEN_TEXT)
+    var frame = _read(_GOLDEN_FRAME)
+    var cuts = [len(frame) - 4, len(frame) // 2]  # no end mark; mid-block
+    var dctx = Lz4Frame.create_dctx()
+    for cut in cuts:
+        var short = _prefix(frame, cut)
+        var raised = False
+        try:
+            _ = Lz4Frame.decompress(Span(short), len(text))
+        except e:
+            raised = True
+            assert_true("frame incomplete" in String(e), String(e))
+        assert_true(raised, "Lz4Frame.decompress: cut at " + String(cut))
+        var out = List[UInt8](length=len(text), fill=UInt8(0))
+        raised = False
+        try:
+            _ = Lz4Frame.decompress_into_with_dctx(
+                dctx, Span(short), out.unsafe_ptr(), len(out)
+            )
+        except e:
+            raised = True
+            assert_true("frame incomplete" in String(e), String(e))
+        assert_true(raised, "decompress_into_with_dctx: cut at " + String(cut))
+    Lz4Frame.free_dctx(dctx)
+
+
+def test_lz4_frame_dctx_left_mid_frame_is_reset() raises:
+    # 100 bytes of room stop the decode inside the block: the cached context
+    # is left mid-frame, and the next frame must still decode cleanly.
+    var text = _read(_GOLDEN_TEXT)
+    var frame = _read(_GOLDEN_FRAME)
+    var dctx = Lz4Frame.create_dctx()
+    var small = List[UInt8](length=100, fill=UInt8(0))
+    var raised = False
+    try:
+        _ = Lz4Frame.decompress_into_with_dctx(
+            dctx, Span(frame), small.unsafe_ptr(), len(small)
+        )
+    except e:
+        raised = True
+        assert_true("incomplete decode" in String(e), String(e))
+    assert_true(raised, "a 100-byte destination cannot hold the frame")
+    var out = List[UInt8](length=len(text), fill=UInt8(0))
     var n = Lz4Frame.decompress_into_with_dctx(
         dctx, Span(frame), out.unsafe_ptr(), len(out)
     )

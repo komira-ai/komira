@@ -26,11 +26,20 @@
 # size in/out slots) stay inside this file; every `handle.call` site carries a
 # `# SAFETY:` comment.
 #
+# FFI-BOUNDARY: liblz4 (dlopen'd once per process by codec.mojo's `_Global`
+# handle, never closed). `Lz4FrameDecoder` owns its `LZ4F_dctx` (liblz4
+# allocates it in LZ4F_createDecompressionContext) and frees it exactly once in
+# `__deinit__` (LZ4F_freeDecompressionContext); a one-shot decode owns a
+# decoder for the length of the call. liblz4 keeps no pointer to any caller
+# buffer past a call.
+#
 # # One-shot decode contract (unchanged from the codec this replaced)
 #
 # A decode is ONE `LZ4F_decompress` call over all of `src`. It is refused when
-# liblz4 reports an error or when it leaves any of `src` unconsumed (`src`
-# holds more than one frame, or `dst` is too small for what `src` decodes to).
+# liblz4 reports an error, when it leaves any of `src` unconsumed (`src` holds
+# more than one frame, or `dst` is too small for what `src` decodes to), or
+# when the frame has not ended where `src` does (a truncated frame: liblz4
+# consumes it all and asks for more input instead of reporting an error).
 # The caller checks the returned byte count against the decoded size it knows
 # out of band (an Arrow IPC buffer records it).
 # =============================================================================
@@ -157,6 +166,15 @@ def _lz4f_decode_once[
             "incomplete decode (consumed=" + String(src_size) + " of "
             + String(n) + " bytes; only one-shot decode is supported, not"
             " multi-call streaming)"
+        )
+    # A nonzero non-error result is liblz4's hint of how many more input bytes
+    # the frame needs: all of `src` was consumed (staged inside the context)
+    # but the frame has not ended. Refuse it rather than return a prefix.
+    if result != 0:
+        raise Error(
+            "frame incomplete (the " + String(n) + "-byte source ends before"
+            " the frame does; liblz4 expects " + String(result)
+            + " more bytes)"
         )
     return dst_size
 

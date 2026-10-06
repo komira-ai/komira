@@ -27,6 +27,13 @@ def _read(path: String) raises -> List[UInt8]:
     return Path(path).read_bytes()
 
 
+def _prefix(b: List[UInt8], n: Int) -> List[UInt8]:
+    var out = List[UInt8](capacity=n)
+    for i in range(n):
+        out.append(b[i])
+    return out^
+
+
 def _filled(n: Int, value: UInt8) -> List[UInt8]:
     return List[UInt8](length=n, fill=value)
 
@@ -160,6 +167,65 @@ def test_a_failed_frame_leaves_the_decoder_usable() raises:
     except:
         raised = True
     assert_true(raised)
+    var n = decoder.decompress_into(Span(out), Span(frame))
+    assert_equal(n, len(text))
+    _assert_same(Span(out), Span(text))
+
+
+# --- truncation and context reset ---------------------------------------------
+
+
+def _decoder_refuses_containing[
+    o: MutOrigin
+](
+    mut decoder: Lz4FrameDecoder,
+    dst: Span[UInt8, o],
+    src: Span[UInt8, _],
+    needle: String,
+) raises:
+    var raised = False
+    try:
+        _ = decoder.decompress_into(dst, src)
+    except e:
+        raised = True
+        assert_true(needle in String(e), String(e))
+    assert_true(raised, "expected a refusal containing '" + needle + "'")
+
+
+def test_truncated_frames_are_refused() raises:
+    # liblz4 consumes all of a cut-short frame into its own staging buffer and
+    # answers with a nonzero "more input expected" hint, not an error: the
+    # decode must still be refused, whether the cut drops the end mark or
+    # falls inside the block.
+    var text = _read(_GOLDEN_TEXT)
+    var frame = _read(_GOLDEN_FRAME)
+    var no_end_mark = _prefix(frame, len(frame) - 4)
+    var mid_block = _prefix(frame, len(frame) // 2)
+    var out = _filled(len(text), 0)
+    _refused_containing(Span(out), Span(no_end_mark), "frame incomplete")
+    _refused_containing(Span(out), Span(mid_block), "frame incomplete")
+    var decoder = Lz4FrameDecoder()
+    _decoder_refuses_containing(
+        decoder, Span(out), Span(no_end_mark), "frame incomplete"
+    )
+    _decoder_refuses_containing(
+        decoder, Span(out), Span(mid_block), "frame incomplete"
+    )
+
+
+def test_a_decoder_left_mid_frame_is_reset_before_the_next() raises:
+    # A 100-byte destination stops the decode inside the block, with the end
+    # mark unread: the context is left mid-frame. The next frame through the
+    # same decoder must decode from a clean context (the reset), not be read as
+    # the continuation of the first.
+    var text = _read(_GOLDEN_TEXT)
+    var frame = _read(_GOLDEN_FRAME)
+    var decoder = Lz4FrameDecoder()
+    var small = _filled(100, 0)
+    _decoder_refuses_containing(
+        decoder, Span(small), Span(frame), "incomplete decode"
+    )
+    var out = _filled(len(text), 0)
     var n = decoder.decompress_into(Span(out), Span(frame))
     assert_equal(n, len(text))
     _assert_same(Span(out), Span(text))
