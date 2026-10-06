@@ -7,20 +7,20 @@ load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
 
-# The release workflow, read by kci_ci_check's welded test, which holds it to
+# The release workflow, read by kci_workflow_check's welded test, which holds it to
 # release/machine.textproto with the check `kci run` makes at start-up, so a
 # drift fails `./buck2 build //...`.
 export_file(
     name = "kci.yml",
     src = ".github/workflows/kci.yml",
-    visibility = ["//src/kci_ci_check:"],
+    visibility = ["//src/kci_workflow_check:"],
 )
 
 # The pull request's check, held to the same machine file by the same welded test.
 export_file(
     name = "pr.yml",
     src = ".github/workflows/pr.yml",
-    visibility = ["//src/kci_ci_check:"],
+    visibility = ["//src/kci_workflow_check:"],
 )
 
 shell_lint(

@@ -14,7 +14,7 @@ komira_arrow_ipc	Arrow IPC framing, encoders and decoders, the C data and stream
 komira_plan_expr	The expression language of a plan (Expr, AggExpr, ScalarValue, ColExpr builder, UDF payloads, ExprId/ExprPool) and the comptime schema descriptor.
 komira_exec_types	The result and error types that cross the operator / scheduler / caller boundary: EngineError, ExecResult, ProcessResult, QueryContext, the byte-budget parser, the PartitionBy output contract.
 komira_column_kernels	Vectorized compute over Arrow columns: arithmetic, comparison, casts, string, regexp, dictionary, union, decimal, case mapping, and the batch helpers that import them.
-komira_plan_stats	Plan-time statistics: the StatsProvider trait, ColumnStats and TableStats, the physical-type tag, the exact/inexact/absent precision lattice, per-source statistics; the HyperLogLog cardinality sketch is added after the copy.
+komira_plan_stats	Plan-time statistics: the StatsProvider trait, ColumnStats and TableStats, the physical-type tag, the exact/inexact/absent precision lattice, per-source statistics, and the group-count and table-statistics estimators built on the HyperLogLog sketch of komira_collections.
 komira_scan_source	What a scan is: SourceLike, ScanBinding identity, scan params, per-format source descriptors, pushdown gate, Sink trait, in-memory registry.
 komira_plan_ir	LogicalPlan and PhysicalPlan trees, their variants, schema propagation, display, the scan-binding bind pass and audits.
 komira_agg_contract	The aggregation accumulator contract: Accumulator trait, plan-time AggLayout, strategy selection, typed column pointers, COUNT(DISTINCT) key.

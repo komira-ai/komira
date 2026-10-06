@@ -34,7 +34,7 @@
 #      names (`<GITHUB_REPOSITORY>/<path>@<ref>`, the path under
 #      .github/workflows/), read as it was COMMITTED at `GITHUB_WORKFLOW_SHA`
 #      (`git show <sha>:<path>`; the checkout may be another revision), and
-#      held to the machine file by kci_ci_check's `check_running_workflow`
+#      held to the machine file by kci_workflow_check's `check_running_workflow`
 #      with every channels file the machine file names: a run of the
 #      PULL_REQUEST stage is held to the pull request's workflow (pr.yml, the
 #      PULL_REQUEST stage alone), a run of any other stage to the release
@@ -161,7 +161,7 @@ from std.pathlib import Path
 from komira_clock import now_unix_ms
 
 from kci_build import BuildRequest
-from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow
+from kci_workflow_check import ChannelsFile, channels_paths, check_running_workflow
 from kci_api import (
     CREDENTIAL_PROBE_NOT_RUN_NOTE,
     CREDENTIAL_PROBE_NOT_UNDER_CI,

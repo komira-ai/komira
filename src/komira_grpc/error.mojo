@@ -218,8 +218,9 @@ def parse_grpc_error_message(text: String) -> Tuple[UInt8, String]:
 # `:status: 200` at the HTTP layer; the gRPC status rides in trailers via
 # the `grpc-status` (decimal-string) + `grpc-message` (percent-encoded)
 # header pair. If the HTTP layer itself surfaces a non-200 BEFORE any
-# gRPC framing (a proxy 502, a TLS reject), the consumer's call shim is
-# expected to map it via `grpc_error_from_http_non_200`.
+# gRPC framing (a proxy 502, a TLS reject), `GrpcClient` maps it via
+# `grpc_error_from_http_non_200` (client.mojo `_raise_if_http_non_200` on all
+# four entry points; wire.mojo `decode_unary_response` for unary).
 # =============================================================================
 
 

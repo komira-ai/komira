@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/auto_promotion.mojo -- rules R15 to R22 (and R4's
+# src/kci_workflow_check/auto_promotion.mojo -- rules R15 to R22 (and R4's
 #   permission allow-list): continuous auto-promotion, where a push to main
 #   IS the release (build -> gamma -> validate -> prod), held to the machine
 #   file.

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_ci_auto_promotion.mojo -- continuous
+# src/kci_workflow_check/tests/test_ci_auto_promotion.mojo -- continuous
 #   auto-promotion (auto_promotion.mojo, R15 to R22, R2's break-glass
 #   environment and R4's allow-list),
 #   held by a table of mutations of the repository's OWN kci.yml and
@@ -16,7 +16,7 @@
 from std.pathlib import Path
 from std.testing import TestSuite
 
-from kci_ci_check import ChannelsFile, check_running_workflow
+from kci_workflow_check import ChannelsFile, check_running_workflow
 from kci_release_machine import parse_machine_file
 
 comptime _CLEAN: Int = 0

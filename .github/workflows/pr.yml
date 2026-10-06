@@ -7,9 +7,9 @@
 # HAND-WRITTEN, and held to the machine file the way kci.yml is: `kci run`
 # itself at start-up under GitHub Actions (it reads this file as committed at
 # GITHUB_WORKFLOW_SHA, for a run of the PULL_REQUEST stage), and the welded test
-# src/kci_ci_check/tests/test_repo_kci_yml.mojo, so a drift also fails
+# src/kci_workflow_check/tests/test_repo_kci_yml.mojo, so a drift also fails
 # `./buck2 build //...`. This file may run the PULL_REQUEST stage and NOTHING
-# else (src/kci_ci_check, rule R6): the `pull_request` trigger alone (no push,
+# else (src/kci_workflow_check, rule R6): the `pull_request` trigger alone (no push,
 # no manual run, no `pull_request_target`, no `workflow_run`); one job `check`,
 # only for a pull request from a branch of this repository (a fork's run gets
 # no tailnet credential; a maintainer reads the change and pushes it to a

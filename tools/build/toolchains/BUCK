@@ -45,7 +45,7 @@ alias(
 
 # The linux pin's URL and sha256 as a file: kci.yml's validate job downloads
 # that URL itself (it has no buck2) and keeps the bytes only at that sha256,
-# and src/kci_ci_check's test_repo_kci_yml holds the job's two values to this
+# and src/kci_workflow_check's test_repo_kci_yml holds the job's two values to this
 # record, so the job runs exactly the table's pin.
 pixi_pin_record(
     name = "pixi_pin_linux_x86_64",

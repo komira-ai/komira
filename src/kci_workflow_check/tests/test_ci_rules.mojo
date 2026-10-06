@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_ci_check/tests/test_ci_rules.mojo -- a workflow held to a machine
+# src/kci_workflow_check/tests/test_ci_rules.mojo -- a workflow held to a machine
 #   file: a fixture that agrees, then one mutation per rule (R1 to R12, R14), each
 #   of which must be reported; the stages that publish by OIDC; and the
 #   start-up entry point `kci run` calls.
@@ -7,7 +7,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow, check_workflow, id_token_stages, kci_run_calls
+from kci_workflow_check import ChannelsFile, channels_paths, check_running_workflow, check_workflow, id_token_stages, kci_run_calls
 from kci_release_machine import parse_machine_file
 
 
