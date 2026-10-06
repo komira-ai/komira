@@ -297,7 +297,7 @@ def test_farm_connected() raises:
     # the job that holds a farm network node must not hold a publishing token
     _assert_refused(
         _one_stage(String(" name: \"p\"\n farm_connected: true\n") + _publish_step(String("gamma"), String(""))),
-        String("line 2: stage 'p' is farm-connected and has PUBLISH step 'publish': a farm-connected stage may not publish"),
+        String("line 2: stage 'p' is farm-connected and has PUBLISH step 'publish': a farm-connected stage may not publish (the job that holds a farm network node must not hold a publishing token)"),
     )
 
 
