@@ -101,7 +101,9 @@ struct RunOptions(Copyable, Movable):
     `upload_attempts` times with a backoff from `retry_initial_ms` to
     `retry_max_ms`; the index check polls up to `index_polls` times
     `index_wait_ms` apart; step 2 runs up to `concurrency` upload workers
-    (`--concurrency`, clamped to 1..16).
+    (`--concurrency`, clamped to 1..16). `never_backward`: the stage never
+    publishes a lower build number than its channel lists for the same name
+    and version (run.mojo, KCI-E-SUPERSEDED).
 
     Layout: Ints. No pointer field."""
 
@@ -114,6 +116,7 @@ struct RunOptions(Copyable, Movable):
     var index_wait_ms: Int64
     var seed: UInt64
     var concurrency: Int
+    var never_backward: Bool
 
     def __init__(
         out self,
@@ -141,6 +144,7 @@ struct RunOptions(Copyable, Movable):
         if n > MAX_CONCURRENCY:
             n = MAX_CONCURRENCY
         self.concurrency = n
+        self.never_backward = False
 
 
 struct PublishCredential(RegistryCredential, Movable):

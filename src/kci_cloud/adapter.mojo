@@ -33,9 +33,15 @@
 #     code, so a lowering is golden-testable (`deploy.lowering_json`). Node
 #     ids are `<resource id>/<role>` and every node's owner is the resource
 #     id. Each type lowers to its COMPLETE fixed set of roles; a role the
-#     file turned off is a node with `wanted` False (the closed world).
-#     `realize` turns one lowered node into the engine node, and must keep
-#     its id, owner and wanted.
+#     file turned off is a node with `wanted` False (the closed world). A
+#     dependency or input on ANOTHER resource is written as that resource's
+#     id alone; kci resolves it to the resource's primary node
+#     (catalog.mojo). `retention` is set by kci from the resource, never by
+#     the adapter. `realize` turns one lowered node into the engine node,
+#     and must keep its id, owner, wanted and retention.
+#   * An object of a node whose retention is KEEP carries the non-identity
+#     label `kci_retain=keep` (labels.mojo), and `list_owned` reports it as
+#     `retained`: kci never deletes it through `list_owned`.
 #
 # THE REST OF THE INTERFACE (internal, not frozen; every built-in cloud
 # provides all of it):
@@ -70,6 +76,8 @@ from kci_reconciler import (
     InputRef,
     Label,
     OwnerStamp,
+    RETAIN_DELETE,
+    RETAIN_KEEP,
 )
 from kci_resource_proto.resource import Resource
 
@@ -240,7 +248,9 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     """One object of this machine and cell the cloud says is kci's (by its
     stamp): its kind, physical id, location, what it bills, when it was
     created, the run that made it (or `RUN_UNKNOWN`), whether kci may delete
-    it, and the engine node that owns it (`<resource>/<role>`)."""
+    it, the engine node that owns it (`<resource>/<role>`), and whether it
+    is RETAINED (it carries `kci_retain=keep`: kci reports it and never
+    deletes it through this list)."""
 
     var kind: String
     var id: String
@@ -250,6 +260,7 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     var run_id: String
     var deletable_by_kci: Bool
     var owner_node: String
+    var retained: Bool
 
 
 @fieldwise_init
@@ -280,11 +291,23 @@ def _json_str(s: String) -> String:
     return out^
 
 
+def retention_name(retention: Int) -> String:
+    """An engine RETAIN_* code as it reads in a lowering: `delete`, `keep`,
+    or the bare number for any other code."""
+    if retention == RETAIN_DELETE:
+        return String("delete")
+    if retention == RETAIN_KEEP:
+        return String("keep")
+    return String(retention)
+
+
 struct LoweredNode(Copyable, Movable, Deinitable):
     """One engine node as DATA: what `lower` returns. `desired` is the node's
     desired state as ordered fields (rendered, never a code object);
     `inputs` are the values it reads from other nodes at apply time;
-    `wanted` is False for a role the file turned off."""
+    `wanted` is False for a role the file turned off; `retention` is the
+    engine's RETAIN_* code, set by kci from the resource (`deploy.lower_data`)
+    and carried to the engine node by `realize`."""
 
     var id: String
     var owner: String
@@ -293,6 +316,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
     var inputs: List[InputRef]
     var desired: List[Setting]
     var wanted: Bool
+    var retention: Int
 
     def __init__(
         out self,
@@ -303,6 +327,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
         var inputs: List[InputRef] = List[InputRef](),
         var desired: List[Setting] = List[Setting](),
         wanted: Bool = True,
+        retention: Int = RETAIN_DELETE,
     ):
         self.id = id
         self.owner = owner
@@ -311,6 +336,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
         self.inputs = inputs^
         self.desired = desired^
         self.wanted = wanted
+        self.retention = retention
 
     def __init__(out self, *, copy: Self):
         self.id = copy.id.copy()
@@ -320,6 +346,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
         self.inputs = copy.inputs.copy()
         self.desired = copy.desired.copy()
         self.wanted = copy.wanted
+        self.retention = copy.retention
 
     def field(self, key: String) -> String:
         """The desired field `key`, or empty."""
@@ -334,6 +361,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
         s += String(",\"owner\":") + _json_str(self.owner)
         s += String(",\"kind\":") + _json_str(self.kind)
         s += String(",\"wanted\":") + (String("true") if self.wanted else String("false"))
+        s += String(",\"retention\":") + _json_str(retention_name(self.retention))
         s += String(",\"depends_on\":[")
         for i in range(len(self.depends_on)):
             if i > 0:

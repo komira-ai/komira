@@ -38,6 +38,25 @@
 #                     in the directory kci runs in; its output goes to
 #                     `$RUNNER_TEMP` (platform-set: the check runs only under
 #                     GitHub Actions), a missing RUNNER_TEMP is a refusal.
+#   is_ancestor    -> `git rev-parse --is-shallow-repository` (anything but
+#                     `false` raises: a shallow clone's history cannot
+#                     tell), then `git merge-base --is-ancestor`: exit 0
+#                     True, 1 False, anything else raises; the same
+#                     RUNNER_TEMP rule.
+#   publish's history -> for a never-backward publish, `git rev-list
+#                     <revision>` (`git_history`, after the same shallow
+#                     check as is_ancestor) is handed to kci_publish
+#                     (`RevisionHistory`): the channel's newest build must
+#                     be on it. Git that cannot answer, or no RUNNER_TEMP,
+#                     leaves it unread, and kci_publish then cannot tell
+#                     (exit 5) whenever the channel lists a numbered build.
+#   publish's carried commits -> for a never-backward publish, `git rev-list
+#                     --first-parent --reverse <revision>` (`git_first_parent`)
+#                     feeds summary.mojo's `carried_markdown`; git that
+#                     cannot answer is said in the summary, never a failure
+#                     of the step.
+#   release_set_hash -> kci_publish.load_release over the artifacts file
+#                     (kci_artifact): the set the members recompute to.
 #
 # Nothing here parses a flag or reads a file: that is args.mojo and
 # dispatch.mojo, and the libraries.
@@ -61,6 +80,7 @@ from kci_api import (
     VALIDATION_VALIDATED,
     ResultValidation,
     ResultValidationCheck,
+    is_full_commit_id,
 )
 from kci_pkg_upload import HttpPkgTransport
 from kci_publish import UsleepSleeper
@@ -75,12 +95,15 @@ from kci_validate import (
     run_install_smoke,
 )
 
-from kci_build import GIT_PROGRAM, BuildRequest, RunSpec, SupervisorRunner, run_build
+from kci_artifact import read_artifacts
+from kci_build import GIT_PROGRAM, BuildRequest, ProcessRunner, RunSpec, SupervisorRunner, run_build
 from kci_build import RunResult as ProcessResult
 from kci_api import RunResult as KciRunResult
 from kci_publish import (
     NewNamesReport,
     PublishRequest,
+    RevisionHistory,
+    load_release,
     lookahead_new_names_https,
     new_names_markdown,
     new_names_of,
@@ -88,8 +111,10 @@ from kci_publish import (
 )
 
 from .args import SecretStoreChoice
-from .dispatch import StageSteps, StepEnd, kci_main_with, recorder_for
+from .dispatch import kci_main_with, recorder_for
+from .seam import StageSteps, StepEnd
 from .recorder import CliRecorder
+from .summary import carried_markdown
 
 
 struct RefusingSecretStore(SecretStore, Movable):
@@ -142,6 +167,103 @@ def _mk_connector(host: String) -> _Conn:
         abort(String("validation: TLS connector for ") + host + String(": ") + String(e))
 
 
+def _git[R: ProcessRunner](mut runner: R, tmp: String, var argv: List[String]) raises -> Tuple[Int, String]:
+    """`git <argv>` in the directory kci runs in, its output under `tmp`:
+    its exit code (0 or 1) and stdout. Raises when it did not run to an exit
+    (a signal, the timeout) or exited with more than 1."""
+    var base = tmp + String("/kci-git-") + String(Int(external_call["getpid", Int32]()))
+    var spec = RunSpec(String(GIT_PROGRAM), argv^, String("."), 60, base + String(".stdout"), base + String(".stderr"))
+    var r: ProcessResult = runner.run(spec)
+    var text = Path(spec.stdout_path).read_text() if exists(spec.stdout_path) else String("")
+    for p in [spec.stdout_path.copy(), spec.stderr_path.copy()]:
+        if exists(p):
+            remove(p)
+    if r.signaled or r.timed_out or Int(r.exit_code) > 1:
+        var why = String("`") + spec.command_line() + String("` ") + r.describe()
+        if r.stderr_tail.byte_length() > 0:
+            why += String(": ") + String(r.stderr_tail.strip())
+        raise Error(why^)
+    return (Int(r.exit_code), text^)
+
+
+def git_is_ancestor[R: ProcessRunner](mut runner: R, tmp: String, commit: String, of: String) raises -> Bool:
+    """`is_ancestor` of the file header over `runner`: a checkout that is
+    shallow (or not a repository) raises; then `git merge-base --is-ancestor
+    <commit> <of>`: exit 0 True, 1 False, anything else raises."""
+    var shallow_argv = List[String]()
+    shallow_argv.append(String("rev-parse"))
+    shallow_argv.append(String("--is-shallow-repository"))
+    var shallow = _git(runner, tmp, shallow_argv^)
+    if shallow[0] != 0 or String(shallow[1].strip()) != String("false"):
+        raise Error(String("the checkout is shallow (or not a git repository): its history cannot tell"))
+    var argv = List[String]()
+    argv.append(String("merge-base"))
+    argv.append(String("--is-ancestor"))
+    argv.append(commit.copy())
+    argv.append(of.copy())
+    # `_git` already raises on any exit above 1; this states the contract
+    # where it is read: 0 True, 1 False, nothing else is an answer.
+    var r = _git(runner, tmp, argv^)
+    if r[0] == 0:
+        return True
+    if r[0] == 1:
+        return False
+    raise Error(String("`git merge-base --is-ancestor` exited ") + String(r[0]) + String(", which is no answer"))
+
+
+def git_first_parent[R: ProcessRunner](mut runner: R, tmp: String, revision: String) raises -> List[String]:
+    """`git rev-list --first-parent --reverse <revision>`: main's first-parent
+    commits up to `revision`, oldest first. Raises when git exits non-zero
+    or a line is not a full commit id."""
+    var argv = List[String]()
+    argv.append(String("rev-list"))
+    argv.append(String("--first-parent"))
+    argv.append(String("--reverse"))
+    argv.append(revision.copy())
+    var r = _git(runner, tmp, argv^)
+    if r[0] != 0:
+        raise Error(String("`git rev-list --first-parent --reverse ") + revision + String("` exited ") + String(r[0]))
+    var out = List[String]()
+    var lines = r[1].split(String("\n"))
+    for i in range(len(lines)):
+        var line = String(String(lines[i]).strip())
+        if line.byte_length() == 0:
+            continue
+        if not is_full_commit_id(line):
+            raise Error(String("`git rev-list` printed '") + line + String("', not a full commit id"))
+        out.append(line^)
+    return out^
+
+
+def git_history[R: ProcessRunner](mut runner: R, tmp: String, revision: String) raises -> List[String]:
+    """`git rev-list <revision>`: every commit on `revision`'s history,
+    newest first. A shallow checkout (or not a repository) raises: it lists
+    part of the history, which would read as "not on it". Raises when git
+    exits non-zero or a line is not a full commit id."""
+    var shallow_argv = List[String]()
+    shallow_argv.append(String("rev-parse"))
+    shallow_argv.append(String("--is-shallow-repository"))
+    var shallow = _git(runner, tmp, shallow_argv^)
+    if shallow[0] != 0 or String(shallow[1].strip()) != String("false"):
+        raise Error(String("the checkout is shallow (or not a git repository): its history cannot tell"))
+    var argv = List[String]()
+    argv.append(String("rev-list"))
+    argv.append(revision.copy())
+    var r = _git(runner, tmp, argv^)
+    if r[0] != 0:
+        raise Error(String("`git rev-list ") + revision + String("` exited ") + String(r[0]))
+    var out = List[String]()
+    var lines = r[1].split(String("\n"))
+    for i in range(len(lines)):
+        var line = String(String(lines[i]).strip())
+        if line.byte_length() == 0:
+            continue
+        if not is_full_commit_id(line):
+            raise Error(String("`git rev-list` printed '") + line + String("', not a full commit id"))
+        out.append(line^)
+    return out^
+
+
 def _failed_row(req: ValidateRequest, why: String) -> ResultValidation:
     """A validation that raised: VALIDATION_FAILED with the reason."""
     var row = ResultValidation(
@@ -170,13 +292,47 @@ struct LibrarySteps(StageSteps, Movable):
         mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
     ) -> StepEnd:
         var composed = ComposedSecretStore(store)
-        var r = publish_release_with_store(req, result, recorder, composed)
+        var held = req.copy()
+        if req.never_backward:
+            held.revision_history = self._history(req.revision_id)
+        var r = publish_release_with_store(held, result, recorder, composed)
         var end = StepEnd(r.outcome(), r.error_id.copy(), String(""))
         end.lines = r.lines.copy()
         end.retry = r.retry()
         end.changed_outside = r.landed()
         end.summary = new_names_markdown(new_names_of(r, req.stage, req.step_name))
+        if req.never_backward and r.build_number >= 0:
+            end.summary += self._carried(req, r.previous_build, r.build_number)
         return end^
+
+    def _history(mut self, revision: String) -> RevisionHistory:
+        """What a never-backward publish holds the channel's newest build
+        against: `git_history` of the revision, or why it was not read
+        (kci_publish then cannot tell, exit 5, when the channel lists a
+        numbered build)."""
+        var h = RevisionHistory()
+        var tmp = self.platform_env(String("RUNNER_TEMP"))
+        if tmp.byte_length() == 0:
+            h.unread = String("RUNNER_TEMP is not set, so there is nowhere to put git's output")
+            return h^
+        var runner = SupervisorRunner()
+        try:
+            h.commits = git_history(runner, tmp, revision)
+        except e:
+            h.unread = String(e)
+        return h^
+
+    def _carried(mut self, req: PublishRequest, previous: Int, ours: Int) -> String:
+        if previous < 0:
+            return carried_markdown(req.stage, previous, ours, List[String]())
+        var tmp = self.platform_env(String("RUNNER_TEMP"))
+        if tmp.byte_length() == 0:
+            return String("#### carried to ") + req.stage + String("\n\nnot listed: RUNNER_TEMP is not set\n\n")
+        var runner = SupervisorRunner()
+        try:
+            return carried_markdown(req.stage, previous, ours, git_first_parent(runner, tmp, req.revision_id))
+        except e:
+            return String("#### carried to ") + req.stage + String("\n\nnot listed: ") + String(e) + String("\n\n")
 
     def validate(mut self, req: ValidateRequest) -> ResultValidation:
         if req.validation.kind == VALIDATION_KIND_CONDA_INSTALL_ENV:
@@ -223,6 +379,17 @@ struct LibrarySteps(StageSteps, Movable):
             return out^
         except:
             return String("")
+
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        var tmp = self.platform_env(String("RUNNER_TEMP"))
+        if tmp.byte_length() == 0:
+            raise Error(String("RUNNER_TEMP is not set, so there is nowhere to put git's output"))
+        var runner = SupervisorRunner()
+        return git_is_ancestor(runner, tmp, commit, of)
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        var arts = read_artifacts(artifacts_file)
+        return load_release(arts, platform_dir).set_hash()
 
     def committed_file(mut self, commit: String, path: String) raises -> String:
         var tmp = self.platform_env(String("RUNNER_TEMP"))

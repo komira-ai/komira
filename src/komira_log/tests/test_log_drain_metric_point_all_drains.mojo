@@ -116,9 +116,9 @@ from komira_log.engine.site_dictionary import SiteDictionary, fnv1a_32
 from komira_log.engine.calibration import CalibrationAnchor, read_raw_ticks
 
 
-comptime _NAME = "w7.requests"
-comptime _MODULE = "komira_w7"
-comptime _FMT = "w7 log {}"
+comptime _NAME = "metric.requests"
+comptime _MODULE = "komira_metric_test"
+comptime _FMT = "metric test log {}"
 
 # The values the round-trip pins. Chosen so no two are equal — a decoder that
 # crosses two fields cannot pass by coincidence.
