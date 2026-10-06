@@ -29,6 +29,7 @@ from komira_zlib import (
     zlib_inflate_into,
     zlib_skip_stream,
 )
+from komira_zlib.zlib_ffi import _zlib_deflate_into_sliced
 
 comptime _TARBALL = "golden/zlib-1.3.1.tar.gz"
 comptime _MEMBER_DIR = "golden/zlib/"
@@ -441,6 +442,38 @@ def test_crc32_matches_the_tarball_trailer() raises:
     var half = len(tar) // 2
     var first = zlib_crc32(Span(tar)[0:half])
     assert_equal(Int(zlib_crc32(Span(tar)[half:], first)), want)
+
+
+# --- sliced deflate (the >4 GiB path) -----------------------------------------
+
+
+def test_deflate_in_slices_is_the_same_stream() raises:
+    # libz's avail_in / avail_out are 32-bit, so a source over 4 GiB is fed in
+    # slices (as libz's own compress2 does). A worker cannot be asked for two
+    # 4 GiB buffers, so the slice size is lowered here: the stream must be the
+    # same bytes however it is sliced, under every framing, and inflate back.
+    for wb in [
+        ZLIB_WINDOW_BITS_ZLIB, ZLIB_WINDOW_BITS_GZIP, ZLIB_WINDOW_BITS_RAW
+    ]:
+        for size_and_slice in [(5000, 1), (5000, 7), (200000, 4096)]:
+            var size = size_and_slice[0]
+            var slice = size_and_slice[1]
+            var data = _varied(size)
+            var bound = zlib_compress_bound(size, wb)
+            var whole = _filled(bound, 0)
+            var a = zlib_deflate_into(
+                Span(whole), Span(data), ZLIB_LEVEL_DEFAULT, wb
+            )
+            var sliced = _filled(bound, 0)
+            var b = _zlib_deflate_into_sliced(
+                Span(sliced), Span(data), ZLIB_LEVEL_DEFAULT, wb, slice
+            )
+            _assert_same(Span(sliced)[0:b], Span(whole)[0:a])
+            var out = _filled(size, 0)
+            assert_equal(
+                zlib_inflate_into(Span(out), Span(sliced)[0:b], wb), size
+            )
+            _assert_same(Span(out), Span(data))
 
 
 def main() raises:

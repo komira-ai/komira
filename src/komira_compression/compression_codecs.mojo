@@ -742,6 +742,8 @@ struct Gzip[level: Int = 6](Compression):
 
     Write path: `compress` (zlib framing) — for a Parquet PAGE.
     File path:  `compress_gzip_file` (RFC 1952 gzip framing) — for a `.gz` FILE.
+    Both take an input of any length, over 4 GiB included (komira_zlib feeds
+    libz in 32-bit slices, as `compress2` did; ISIZE is the length mod 2^32).
     Read path: `decompress`, auto-detecting gzip / zlib framing, so both
     framings read back here. The stream must end inside the input and decode
     to at most `expected_size` bytes; a truncated, oversized or corrupt stream
