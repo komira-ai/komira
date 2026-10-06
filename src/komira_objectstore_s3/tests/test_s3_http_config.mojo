@@ -15,11 +15,12 @@
 # inside 30 s (the defaults' budget is 600 s). Every connector is a
 # ScriptedConnector: no socket.
 #
-# The 206 here is chunked, though S3 answers GetObject with Content-Length:
-# komira_http_client applies the caller's `max_response_body_bytes` to a
-# chunked body and to one read to EOF, but not yet to a Content-Length one
-# (`RecvRingBody.new_content_length` takes no cap). When it does, these rows
-# gain a Content-Length answer.
+# The 206 here is chunked, though S3 answers GetObject with Content-Length.
+# komira_http_client applies the caller's `max_response_body_bytes` to every
+# framing (chunked, read to EOF, Content-Length); the Content-Length case is
+# pinned at the HttpClient level by komira_http_client's
+# `test_content_length_body_cap`. These rows could gain a Content-Length
+# answer; they have not yet.
 #
 # S3Store also hands `http_config` to its generated S3 client, but drives
 # every verb through the client's `<op>_with` sends over its own transport,
@@ -104,8 +105,7 @@ def _capped(max_body: Int) -> HttpClientConfig:
 
 def _mk_one_range() raises -> ScriptedConnector:
     """ONE answer: the 206 for `bytes=0-3` of a 10-byte object, its body
-    chunked (see the header: the HTTP client applies the caller's body cap
-    to a chunked body, not yet to a Content-Length one)."""
+    chunked (see the header)."""
     return ScriptedConnector.with_stream(
         ScriptedStream.from_read_script(
             _bytes(

@@ -1,0 +1,60 @@
+load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_check")
+
+# proto_fixture_check and proto_encode (test 23): building this package is
+# the self-test, so the pull-request check, which builds tests//functional,
+# runs it, and with it proto_fixture_check's welded self-test
+# (tools/build/mojo/proto_fixture_testdata). The same planted defects, end to
+# end, are in ../../negative/proto_fixture (nightly only).
+
+# Two fixtures, the schema staged from `srcs` at `import_prefix`. sample.hex
+# is not protoc's serialization (the fields in reverse order, `values`
+# unpacked): it decodes to sample.txtpb, which encodes to the canonical bytes.
+# length is a Meters, which Feet cannot be told apart from but by its root;
+# its two bytes are protoc's too, declared in `canonical_producer`.
+proto_fixture_check(
+    name = "selftest",
+    srcs = ["v1/selftest.proto"],
+    canonical_producer = ["length"],
+    dir = "fixtures",
+    fixtures = {
+        "length": "example.fixture.v1.Meters",
+        "sample": "example.fixture.v1.Sample",
+    },
+    import_prefix = "example",
+)
+
+# The same schema, as a proto_deps target, for the targets below.
+proto_srcs(
+    name = "selftest_proto",
+    srcs = ["v1/selftest.proto"],
+    import_prefix = "example",
+)
+
+# protoc's encoding of sample.txtpb, in the fixture hex format: how
+# fixtures/<stem>.canonical.hex is regenerated (`./buck2 build <target> --out <file>`).
+proto_encode(
+    name = "sample_canonical",
+    proto_deps = [":selftest_proto"],
+    root = "example.fixture.v1.Sample",
+    txtpb = "fixtures/sample.txtpb",
+)
+
+proto_encode(
+    name = "length_canonical",
+    proto_deps = [":selftest_proto"],
+    root = "example.fixture.v1.Meters",
+    txtpb = "fixtures/length.txtpb",
+)
+
+# proto_encode's output read back as the .hex: its hex format is the one the
+# check reads, and it is the canonical bytes. Both ends are protoc, so it
+# checks the format and no producer (`canonical_producer`).
+proto_fixture_check(
+    name = "selftest_encoded",
+    canonical_producer = ["sample"],
+    dir = "fixtures",
+    fixtures = {"sample": "example.fixture.v1.Sample"},
+    hex = {"sample": ":sample_canonical"},
+    proto_deps = [":selftest_proto"],
+)

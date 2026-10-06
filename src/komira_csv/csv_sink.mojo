@@ -44,10 +44,10 @@
 #   - NULL-typed column:  every cell is the empty field.
 #   - Any other ArrowType:  raises (mirrors `csv_emit._format_column_cells`).
 #
-# `read_csv` does NOT parse RFC-4180 quoting (it `_split_to_strings` on the
-# delimiter), so a CsvSink → read_csv round-trip is byte-clean only for values
-# free of the 4 trigger chars — the
-# round-trip TEST uses trigger-free values, the quoting TESTs assert text.
+# `tests/test_csv_sink_quoting.mojo` pins the exact bytes written for each
+# quoting trigger (delimiter, quote, LF, CR) in the header and in data cells;
+# `komira_csv`'s reader parses that quoting back and refuses a field with bytes
+# after its closing quote.
 #
 # Pointer rules: `_handle: Optional[FileHandle]` (no `OwnedPointer` needed —
 # `FileHandle` is itself an owning handle; the compiler destroys it on `self`'s

@@ -323,7 +323,7 @@ def parse_connect_error(text: String) -> Tuple[UInt8, String]:
     var p_len = prefix.byte_length()
     var close_idx = -1
     for i in range(p_len, text.byte_length()):
-        if ord(text[byte=i]) == ord("]"):
+        if Int(text.as_bytes()[i]) == ord("]"):
             close_idx = i
             break
     if close_idx < 0:
@@ -332,7 +332,7 @@ def parse_connect_error(text: String) -> Tuple[UInt8, String]:
     var code = UInt8(0)
     var any_digit = False
     for i in range(p_len, close_idx):
-        var c = ord(text[byte=i])
+        var c = Int(text.as_bytes()[i])
         if c >= ord("0") and c <= ord("9"):
             code = code * 10 + UInt8(c - ord("0"))
             any_digit = True
@@ -342,10 +342,10 @@ def parse_connect_error(text: String) -> Tuple[UInt8, String]:
         return (GRPC_STATUS_UNKNOWN, text)
     # Skip optional ' ' after the `]`
     var msg_start = close_idx + 1
-    if msg_start < text.byte_length() and ord(text[byte=msg_start]) == ord(" "):
+    if msg_start < text.byte_length() and Int(text.as_bytes()[msg_start]) == ord(" "):
         msg_start += 1
-    # Build the message substring from raw bytes (avoids slicing issues)
-    var msg = String("")
-    for i in range(msg_start, text.byte_length()):
-        msg += text[byte=i]
+    # The message is the bytes after the prefix, copied as bytes: `msg_start`
+    # follows an ASCII byte, so the tail of a valid UTF-8 string is valid
+    # UTF-8. (Indexing `text[byte=i]` asserts on a continuation byte.)
+    var msg = String(StringSlice(unsafe_from_utf8=text.as_bytes()[msg_start:]))
     return (code, msg)

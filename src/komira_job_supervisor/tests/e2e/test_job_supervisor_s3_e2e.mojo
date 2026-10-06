@@ -37,6 +37,8 @@ from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase
 from komira_job_supervisor.boot import download_binary
 from komira_job_supervisor.upload import upload_crash_report, upload_logs
 
+from komira_test_s3_adapter import scratch_root
+
 from job_supervisor_minio_e2e import (
     E2eSupervisor,
     JobSupervisorTestBucket,
@@ -45,7 +47,6 @@ from job_supervisor_minio_e2e import (
     open_job_supervisor_test_bucket,
     point_job_supervisor_at,
     remove_if_present,
-    scratch_root,
     sleep_ms,
     supervisor_store,
     text_of,
