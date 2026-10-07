@@ -5,10 +5,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Bit-Packing Hybrid (rle, with its bit-unpack kernels in rle_bitunpack),
 # DELTA_BINARY_PACKED (delta), DELTA_LENGTH_BYTE_ARRAY and DELTA_BYTE_ARRAY
 # (delta_byte_array) and BYTE_STREAM_SPLIT (byte_stream_split); the DECIMAL to
-# Decimal128 decoders (decimal_decode); and the run-time arms and fire
-# counters of the decode and scan paths (decode_arm_trace, scan_copy_trace,
-# payload_sel_trace, staged_filter_trace). Every public decoder takes Spans;
-# the arms are set by setters, never by the environment.
+# Decimal128 decoders (decimal_decode); the RLE_DICTIONARY decoder
+# (dictionary, with its gathers in dictionary_resolve and dict_gather_fused)
+# and the definition-level bitmap (def_level_bitmap); the Dremel level helpers
+# (nested); the column decoder's type map and array helpers (decode_helpers,
+# null_expand); and the run-time arms and fire counters of the decode and scan
+# paths (decode_arm_trace, scan_copy_trace, payload_sel_trace,
+# staged_filter_trace). Every public decoder takes Spans; the arms are set by
+# setters, never by the environment.
 #
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
@@ -21,12 +25,24 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   hand-encoded pages with known values.
 # - test_int96_decode: INT96 timestamps (Julian day + nanos) to Unix nanos.
 # - test_plain_ba_fused_byte_equiv: the two PLAIN BYTE_ARRAY walks emit the
-#   same bytes and refuse the same pages; the fused walk allocates no more.
+#   same bytes and refuse the same pages; the fused walk allocates no more;
+#   a dictionary page decode reaches the gated walk.
 # - test_plain_ba_raise_outlined: the walks' refusal sentences, byte for byte.
 # - test_flba_decimal_simd_parity: the SIMD FLBA DECIMAL to Float64 decode
-#   against a scalar reference, FLBA(16) and FLBA(8), with tails.
+#   against a scalar reference, FLBA(16) and FLBA(8), with tails, and the
+#   dictionary decoder's FLBA(16) resolve against the same reference.
 # - test_string_share_byte_equiv: Column.from_string_shared against the
 #   copying Column.from_string, and the paired string share counters.
+# - test_dict_gather_simd_parity, test_dictionary_resolve_int32_simd_parity,
+#   test_dictionary_resolve_int64_simd_parity,
+#   test_dictionary_resolve_float64_simd_parity: DictionaryDecoder.resolve_*
+#   against a scalar gather, over dictionary sizes and counts on and off the
+#   SIMD step and the prefetch distance.
+# - test_nested_types: leaf levels of flat, struct, list, map and Dremel-paper
+#   schemas, and struct, list and map columns rebuilt from their levels.
+# - test_flat_read_types_are_never_nested: the type map never yields a nested
+#   Arrow type, swept over every physical type and annotation, and the
+#   read path's column copier refuses a nested column.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -41,6 +57,7 @@ mojo_library(
         "//src/komira_arrow:komira_arrow",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
+        "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_simd:komira_simd",
     ],
     test_data = {
@@ -53,14 +70,27 @@ mojo_library(
         "tests/test_bss_direct.mojo",
         "tests/test_decimal_decode_direct.mojo",
         "tests/test_decode_arm_trace_direct.mojo",
+        "tests/test_decode_helpers_direct.mojo",
+        "tests/test_def_level_bitmap_direct.mojo",
         "tests/test_def_levels_u8.mojo",
         "tests/test_delta_byte_array_direct.mojo",
         "tests/test_delta_direct.mojo",
         "tests/test_delta_resumable.mojo",
+        "tests/test_dict_gather_fused_direct.mojo",
+        "tests/test_dict_gather_simd_parity.mojo",
+        "tests/test_dictionary_direct.mojo",
+        "tests/test_dictionary_resolve_float64_simd_parity.mojo",
+        "tests/test_dictionary_resolve_int32_simd_parity.mojo",
+        "tests/test_dictionary_resolve_int64_simd_parity.mojo",
+        "tests/test_dictionary_strings_flba_direct.mojo",
+        "tests/test_flat_read_types_are_never_nested.mojo",
         "tests/test_flba_decimal_simd_parity.mojo",
         "tests/test_int96_decode.mojo",
         "tests/test_neon_bss_decode.mojo",
+        "tests/test_nested_direct.mojo",
+        "tests/test_nested_types.mojo",
         "tests/test_no_env_reads.mojo",
+        "tests/test_null_expand_direct.mojo",
         "tests/test_parquet_encoding.mojo",
         "tests/test_plain_ba_fused_byte_equiv.mojo",
         "tests/test_plain_ba_raise_outlined.mojo",
