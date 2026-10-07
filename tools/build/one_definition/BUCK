@@ -5,7 +5,8 @@ load(":libraries.bzl", "SRC_C_LIBRARIES", "THIRD_PARTY_C_LIBRARIES")
 # of SRC_C_LIBRARIES and THIRD_PARTY_C_LIBRARIES (libraries.bzl) with
 # --whole-archive, every object of every archive. A global symbol defined in
 # two of them fails the link with `duplicate symbol: <name>`, which a Mojo
-# executable's ordinary static link never reports (libraries.bzl says why).
+# executable's ordinary static link reports only when it pulls in both
+# definitions' objects (libraries.bzl says why).
 #
 # The library is published only if its gate passes: it is dlopened with
 # RTLD_NOW (an object whose reference nothing resolves fails there) and every

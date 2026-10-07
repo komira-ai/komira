@@ -9,7 +9,9 @@ of a name takes precedence over this module.
 
 `cxx_library` also refuses a library of the komira cell under `src/` that the
 one-definition gate's list does not name
-(tools/build/one_definition/libraries.bzl).
+(tools/build/one_definition/libraries.bzl). A library declared without this
+global (a BUCK file's own load of `cxx_library`, or `native.cxx_library` in a
+.bzl macro) is not checked.
 """
 
 load("@komira//tools/build/one_definition:libraries.bzl", "one_definition_listed")

@@ -1,18 +1,22 @@
 """The C libraries the one-definition gate (`:one_definition`, BUCK) links whole.
 
 A Mojo executable links its C libraries as static archives, one after the
-other (tools/build/mojo/defs.bzl, `_link_tail`). The linker takes an archive
-member only to resolve a symbol still undefined, so when two archives define
-the same global symbol the first one wins and the second is silently left
-out: a duplicate definition never fails a Mojo build. The gate links every
-library below with `--whole-archive`, every object of every archive, so a
-symbol defined twice fails its link with `duplicate symbol`.
+other (tools/build/mojo/defs.bzl, `_link_tail`). The linker pulls an
+archive member in only for a symbol that is still undefined, so a second
+definition of a global symbol is reported only if its object is pulled in
+for some other symbol; otherwise the first definition wins silently, and two
+libraries that no executable links together are never compared. The gate
+links every library below with `--whole-archive`, every object of every
+archive, so a symbol defined twice fails its link with `duplicate symbol`.
 
-`SRC_C_LIBRARIES` is every `cxx_library` of the komira cell under `src/`.
-`cxx_library` (tools/build/lint/includes.bzl) refuses to declare one under
-`src/` that this list does not name, so a new C library is in the gate or
-its package does not load; a name here that no BUCK file declares fails the
-gate's build as an unknown target.
+`SRC_C_LIBRARIES` is every `cxx_library` of the komira cell under `src/`
+declared through the BUCK-file global `cxx_library`
+(tools/build/lint/includes.bzl), which refuses to declare one under `src/`
+that this list does not name. That refusal does not see a library declared
+any other way: a .bzl macro calling `native.cxx_library`, or a BUCK file that
+loads `cxx_library` itself (from the prelude), which takes precedence over
+the global. Such a library stays out of the gate. A name here that no BUCK
+file declares fails the gate's build as an unknown target.
 
 `THIRD_PARTY_C_LIBRARIES` are the vendored C libraries a package under `src/`
 links, so a first-party definition of one of their symbols is caught too.
