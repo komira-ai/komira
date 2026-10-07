@@ -48,7 +48,12 @@ komira_retry, komira_xml) and std.sys, each with its submodules. The scan
 reads an import statement (`from X ...`, `import A, B as c`) where a
 statement can start: a line, at any indent, or after a `;` or a `:` (a
 one-line function body), in the file with its comments and string literals
-blanked out. Mojo refuses an import inside a block such as an `if`.
+blanked out and each backslash-ended line joined to the next. A backtick
+identifier is read whole (a quote or `#` in it is part of the name), and a
+backslash pairs with the byte after it in every string, raw ones included
+(Mojo refuses `r"\\"` as unterminated). A file with a t-string is refused:
+its braces hold code with strings of their own, which the scan does not
+lex. Mojo refuses an import inside a block such as an `if`.
 Every variable is refused, the provider-standard `AWS_*` ones included: a
 client takes each input as a parameter, and reading the credential
 variables is komira_aws_core's EnvSource. The scan also checks that it read
@@ -207,9 +212,19 @@ def _read(name: String) raises -> String:
         return f.read()
 
 
-def _code(text: String) -> String:
+def _name_byte(c: Int) -> Bool:
+    return c == 95 or (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+
+
+def _code(name: String, text: String) raises -> String:
     \"\"\"`text` with each comment and each string literal replaced by one space,
-    newlines outside them kept.\"\"\"
+    a backslash that ends a line replaced by one space with that newline (Mojo
+    joins the two lines), and other newlines kept. A backtick identifier is
+    kept whole: a quote or a `#` in it is part of the name. In a string, raw
+    (prefix `r`) or not, a backslash and the byte after it are one pair, so
+    an escaped quote does not end it (Mojo refuses `r"\\\\"` as unterminated).
+    Raises on a t-string (prefix `t`, `rt` or `tr`, any case): its braces hold
+    code with string literals of their own, which this does not lex.\"\"\"
     var b = text.as_bytes()
     var n = len(b)
     var out = String()
@@ -222,13 +237,32 @@ def _code(text: String) -> String:
             while i < n and Int(b[i]) != 10:
                 i += 1
             start = i
+        elif c == 96:  # a backtick identifier, to its closing backtick
+            i += 1
+            while i < n and Int(b[i]) != 96 and Int(b[i]) != 10:
+                i += 1
+            if i < n and Int(b[i]) == 96:
+                i += 1
+        elif c == 92 and i + 1 < n and Int(b[i + 1]) == 10:  # a line joined to the next
+            out += String(text[byte=start:i]) + " "
+            i += 2
+            start = i
         elif c == 34 or c == 39:  # a double or single quote: a string literal
+            var p = i
+            while p > 0 and _name_byte(Int(b[p - 1])):
+                p -= 1
+            var prefix = String(text[byte=p:i]).lower()
+            if prefix == "t" or prefix == "rt" or prefix == "tr":
+                raise Error(
+                    name + " has a t-string, which the environment scan does"
+                    " not read"
+                )
             out += String(text[byte=start:i]) + " "
             var triple = i + 2 < n and Int(b[i + 1]) == c and Int(b[i + 2]) == c
             i += 3 if triple else 1
             while i < n:
                 var d = Int(b[i])
-                if d == 92:  # a backslash: the next byte is escaped
+                if d == 92:  # a backslash: it and the next byte are one pair
                     i += 2
                 elif triple and d == c and i + 2 < n and Int(b[i + 1]) == c and Int(b[i + 2]) == c:
                     i += 3
@@ -248,13 +282,13 @@ def _code(text: String) -> String:
     return out^
 
 
-def _imports(text: String) -> List[String]:
+def _imports(name: String, text: String) raises -> List[String]:
     \"\"\"The module each import statement of `text` names: the `X` of `from X ...`
     and each `A` of `import A, B as c`. A statement is read where it starts:
     a line, at any indent, or after a `;` or a `:`, in `text` without its
     comments and string literals (_code).\"\"\"
     var out = List[String]()
-    var code = _code(text).replace("\\t", " ").replace(";", "\\n").replace(":", "\\n")
+    var code = _code(name, text).replace("\\t", " ").replace(";", "\\n").replace(":", "\\n")
     for raw in code.split("\\n"):
         var line = String(String(raw).strip())
         if line.startswith("from "):
@@ -293,7 +327,7 @@ def test_no_environment_read() raises:
                 files[i] + " names " + banned[j] + "; a mojo_aws_client"
                 " package takes every input as a parameter",
             )
-        var modules = _imports(text)
+        var modules = _imports(files[i], text)
         for j in range(len(modules)):
             assert_true(
                 _allowed(modules[j]),

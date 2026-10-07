@@ -15,6 +15,11 @@ from komira_aws_core import AwsRequest
 
 # Not code: import std.pathlib
 comptime _NOT_AN_IMPORT = "a string; import std.pathlib: from std.pathlib import Path"
+# A backtick identifier is a name, a quote and a `#` in it included; a
+# backslash and the quote after it are one pair in a string, raw or not.
+comptime `q'#` = 0
+comptime _ESCAPED = "\"; import std.pathlib"
+comptime _RAW = r"\"; import std.pathlib"
 
 from .komira_aws_logs_hand import (
     CloudWatchLogsGetLogEventsRequest,

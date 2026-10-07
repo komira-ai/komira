@@ -546,7 +546,8 @@ written for the client at analysis (every file of the package is its data;
 it fails if any names one of the environment reads or FFI routes it lists,
 or has an import statement, read at the start of a line, after a `;` or
 after a `:`, outside comments and string literals, of a module outside an
-allow-list of the runtime the generator imports and std.sys; and it checks
+allow-list of the runtime the generator imports and std.sys, and it refuses
+a file with a t-string, whose braces it does not lex; and it checks
 that it read the whole generated module), then the caller's. `model` and
 `model_sha256` are normally `botocore_model("<service>").model` and
 `.sha256` from [`third_party/botocore`](../../../third_party/botocore/BUCK);

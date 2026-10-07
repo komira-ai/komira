@@ -257,6 +257,103 @@ mojo_aws_client(
     deps = _RUNTIME,
 )
 
+# "env_backtick_quote.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a backtick identifier holds a `'`, which is part of the name, then
+# the import follows after `;`.
+mojo_aws_client(
+    name = "env_read_backtick_quote",
+    hand_srcs = ["hand/env_backtick_quote.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_backtick_quote.json",
+    deps = _RUNTIME,
+)
+
+# "env_backtick_hash.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a backtick identifier holds a `#`, which is part of the name, then
+# the import follows after `;`.
+mojo_aws_client(
+    name = "env_read_backtick_hash",
+    hand_srcs = ["hand/env_backtick_hash.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_backtick_hash.json",
+    deps = _RUNTIME,
+)
+
+# "env_backtick_triple.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is a line of its own between two backtick identifiers
+# that each hold `'''`, which would read as one string round it.
+mojo_aws_client(
+    name = "env_read_backtick_triple",
+    hand_srcs = ["hand/env_backtick_triple.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_backtick_triple.json",
+    deps = _RUNTIME,
+)
+
+# "env_escaped_quote.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a string holds an escaped `\"`, then the import follows after `;`;
+# read as the string's end, the next quote would hide the import.
+mojo_aws_client(
+    name = "env_read_escaped_quote",
+    hand_srcs = ["hand/env_escaped_quote.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_escaped_quote.json",
+    deps = _RUNTIME,
+)
+
+# "env_raw_quote.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a raw string holds `\"`, which Mojo reads as a pair (it refuses
+# `r"\"` as unterminated), then the import follows after `;`.
+mojo_aws_client(
+    name = "env_read_raw_quote",
+    hand_srcs = ["hand/env_raw_quote.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_raw_quote.json",
+    deps = _RUNTIME,
+)
+
+# "env_continuation.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is split after `from` by a backslash at the end of the
+# line.
+mojo_aws_client(
+    name = "env_read_continuation",
+    hand_srcs = ["hand/env_continuation.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_continuation.json",
+    deps = _RUNTIME,
+)
+
+# "env_t_string.mojo has a t-string, which the environment scan does not
+# read", in the build: the braces of a t-string hold code with strings of
+# their own, so the scan cannot say where the t-string ends.
+mojo_aws_client(
+    name = "env_read_t_string",
+    hand_srcs = ["hand/env_t_string.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_t_string.json",
+    deps = _RUNTIME,
+)
+
 # "`test_data` has an entry for `tests/_no_env_reads.mojo`", at analysis:
 # the scan's data is the package, staged by the rule.
 mojo_aws_client(

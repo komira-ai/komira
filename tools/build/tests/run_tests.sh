@@ -1076,6 +1076,13 @@ expect_red aws_client_env_read_semicolon "env_semicolon.mojo imports std.pathlib
 expect_red aws_client_env_read_import_as "env_import_as.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_import_as
 expect_red aws_client_env_read_indented "env_indented.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_indented
 expect_red aws_client_env_read_compound "env_compound.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_compound
+expect_red aws_client_env_read_backtick_quote "env_backtick_quote.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_backtick_quote
+expect_red aws_client_env_read_backtick_hash "env_backtick_hash.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_backtick_hash
+expect_red aws_client_env_read_backtick_triple "env_backtick_triple.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_backtick_triple
+expect_red aws_client_env_read_escaped_quote "env_escaped_quote.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_escaped_quote
+expect_red aws_client_env_read_raw_quote "env_raw_quote.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_raw_quote
+expect_red aws_client_env_read_continuation "env_continuation.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_continuation
+expect_red aws_client_env_read_t_string 'env_t_string.mojo has a t-string, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_t_string
 expect_red aws_client_env_scan_data_given '`test_data` has an entry for `tests/_no_env_reads.mojo`, the generated environment scan' tests//negative/mojo_aws_client:env_scan_data_given
 
 # 9
