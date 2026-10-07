@@ -2,8 +2,9 @@
 # coverage_measure.sh -- the measuring half of .github/workflows/coverage.yml
 # (docs/ci.md, "coverage.yml"; tools/build/coverage/README.md, "The coverage
 # workflow"): the line coverage of the mojo_library targets a pull request
-# touches, as covcheck's report and the request bodies of the check run that
-# the workflow's `post` job sends. It never fails on what it measures.
+# touches, and the branch coverage of those whose gate reads branch records,
+# as covcheck's report and the request bodies of the check run that the
+# workflow's `post` job sends. It never fails on what it measures.
 #
 # usage: coverage_measure.sh --base <sha> --head <sha> --covcheck <path> --out <dir>
 #            [--buck2 <path>] [--git <path>] [--policy <file>] [--ratchet <file>]
@@ -24,21 +25,37 @@
 #     under another cell's directory (the `[cells]` of <buckconfig>: the
 #     tests cell, the toolchains cell) is left out: the tests cell's
 #     libraries are fixtures, some failing by design.
-#  3. The libraries: `buck2 uquery "kind('^mojo_library_rule$', set(//<package>: ...))"`.
+#  3. The libraries, and which of them read branch records: `buck2 uquery
+#     -c komira.coverage=true "kind('^mojo_library_rule$', set(//<package>: ...))"
+#     --output-attribute '^coverage_branch_gate$'`. The attribute is the one
+#     mojo_library sets from COVERAGE_BRANCH_GATE (tools/build/coverage/
+#     policy.bzl) and the gate reads (tools/build/mojo/coverage.bzl), so this
+#     list is the gate's own, not a second reading of the policy's dict.
 #  4. One `buck2 build -c komira.coverage=true --keep-going --build-report
-#     <file> '<library>[coverage][tests]'...` of every library (the farm
-#     builds them in parallel): each test's kcov report and the library's
-#     gate (tools/build/mojo/README.md, "Coverage builds"). Each library's
-#     verdict is its entry of the build report (as buck2 pretty-prints it):
-#     SUCCESS is measured; FAIL with only errors of its OWN gate's action
-#     (`mojo_cov_gate` owned by the library: an enforce finding, or a gate
-#     error) is measured too, since every run built; any other FAIL, or no
-#     entry, leaves it NOT MEASURED (coverage build failed): none of its
-#     reports is used and the summary lists it. The reports are its entry's
-#     `cov/tests/*.xml` paths. A dependency's failed gate fails the
+#     <file> '<library>[coverage][tests]'...` of every library, with
+#     `'<library>[coverage][branch_info]'` after it for a library whose
+#     coverage_branch_gate is true (the farm builds them in parallel; the
+#     gate already waits for those records, so they add no action): each
+#     test's kcov report, the library's gate (tools/build/mojo/README.md,
+#     "Coverage builds") and each test's branch records. Each library's
+#     verdict is its entry of the build report (as buck2 pretty-prints it;
+#     its two sub-targets share it): SUCCESS is measured; FAIL with only
+#     errors of its OWN gate's action (`mojo_cov_gate` owned by the
+#     library: an enforce finding, or a gate error) or of its OWN branch
+#     coverage actions (the categories of BRANCH_CATEGORIES below, owned by
+#     the library) is measured too, since every run built; any other FAIL,
+#     or no entry, leaves it NOT MEASURED (coverage build failed): none of
+#     its reports is used and the summary lists it. The reports are its
+#     entry's `cov/tests/*.xml` paths. A dependency's failed gate fails the
 #     library's runs, so in enforce mode a library below its dependencies'
-#     targets is not measured.
-#  5. `covcheck report` over the reports of the libraries measured, in the
+#     targets is not measured. A library whose records are read and whose
+#     entry is SUCCESS gives its entry's `cov/branch/*.info` paths, one per
+#     report; a measured one whose branch coverage actions or gate failed
+#     gives none and is listed as branch NOT MEASURED: its records did not
+#     all build, or its gate, which reads the same records with covcheck,
+#     failed (so `report` could refuse them too).
+#  5. `covcheck report` over the reports of the libraries measured, and
+#     their branch records (`--branch-lcov`), in the
 #     mode and against the target of <policy>, with the ratchet's rows of
 #     the measured libraries' packages only (every other row would read as
 #     a Regression: nothing of it was measured here). When there is no
@@ -49,14 +66,18 @@
 #
 # Outputs, under <out>/publish (what the workflow uploads): checkrun/ (the
 # request bodies, sorted file order is send order), summary.md, result.json,
-# annotations.json, libraries.txt (the libraries of step 3) and
-# not_measured.txt (those whose coverage build failed). <out> also holds the
+# annotations.json, libraries.txt (the libraries of step 3),
+# branch_libraries.txt (those of them whose gate reads branch records),
+# not_measured.txt (those whose coverage build failed) and
+# branch_not_measured.txt (those measured whose branch records are not read). <out> also holds the
 # inputs, the build log and the build report; it must be empty or absent.
 #
 # Exit: 0 when publish/ is written, whatever was measured or failed to build;
 # 1 when an input or a tool is wrong (a malformed policy, git failing,
 # covcheck refusing its inputs, a build report naming a file that is not on
-# disk, buck2 printing something that is not a label); 2 bad usage.
+# disk, or a library whose records are read with a SUCCESS entry naming not
+# one record per report, buck2's query answer not a library and its
+# attribute per entry, or naming something that is not a label); 2 bad usage.
 set -eu
 LC_ALL=C
 export LC_ALL
@@ -153,9 +174,10 @@ if [ -s "$OUT/other_cells.txt" ]; then
     say "left out, in another cell: $(tr '\n' ' ' <"$OUT/other_cells.txt")"
 fi
 
-# 3. The libraries.
+# 3. The libraries, and whether each one's gate reads branch records.
 SELECT_FAILED=""
 : >"$PUB/libraries.txt"
+: >"$PUB/branch_libraries.txt"
 if [ -s "$OUT/packages.txt" ]; then
     pats=""
     while IFS= read -r d; do
@@ -163,31 +185,61 @@ if [ -s "$OUT/packages.txt" ]; then
         if [ "$d" = . ]; then pats="$pats //:"; else pats="$pats //$d:"; fi
     done <"$OUT/packages.txt"
     query="kind('^mojo_library_rule\$', set($pats ))"
-    say "buck2 uquery \"$query\""
+    say "buck2 uquery \"$query\" --output-attribute '^coverage_branch_gate\$'"
     rc=0
-    "$BUCK2" uquery -c komira.coverage=true "$query" >"$OUT/libraries.raw" 2>"$OUT/logs/uquery.log" </dev/null || rc=$?
+    "$BUCK2" uquery -c komira.coverage=true "$query" --output-attribute '^coverage_branch_gate$' \
+        >"$OUT/libraries.raw" 2>"$OUT/logs/uquery.log" </dev/null || rc=$?
     if [ "$rc" -ne 0 ]; then
         SELECT_FAILED="buck2 uquery exited $rc"
         say "$SELECT_FAILED; its last lines:"
         tail -n 20 "$OUT/logs/uquery.log"
     else
-        while IFS= read -r l; do
-            [ -n "$l" ] || continue
+        # buck2's JSON, pretty-printed: per library a line `  "<label>": {`
+        # and then `    "coverage_branch_gate": true|false`. "lib <value>
+        # <label>" per library; "bad <line>" for any other line, and for a
+        # library with no value.
+        awk '
+            /^\{\}?$/ || /^\}$/ || /^  \},?$/ { next }
+            lab == "" && /^  ".*": \{$/ { lab = $0; sub(/^  "/, "", lab); sub(/": \{$/, "", lab); next }
+            lab != "" && /^    "coverage_branch_gate": (true|false)$/ {
+                v = $0; sub(/^.*: /, "", v); print "lib " v " " lab; lab = ""; next
+            }
+            { if (lab != "") print "bad " lab; print "bad " $0; lab = "" }
+            END { if (lab != "") print "bad " lab }
+        ' "$OUT/libraries.raw" >"$OUT/libraries.tsv"
+        while IFS= read -r a; do
+            case "$a" in
+                "lib true "* | "lib false "*) ;;
+                *) die "buck2 uquery printed '${a#bad }', which is not a library with its coverage_branch_gate" ;;
+            esac
+            l=${a#lib * }
             echo "$l" | grep -qE '^[A-Za-z0-9_]*//[A-Za-z0-9_./+-]*:[A-Za-z0-9_.+-]+$' ||
                 die "buck2 uquery printed '$l', which is not a target label"
             echo "$l" >>"$PUB/libraries.txt"
-        done <"$OUT/libraries.raw"
+            case "$a" in "lib true "*) echo "$l" >>"$PUB/branch_libraries.txt" ;; esac
+        done <"$OUT/libraries.tsv"
     fi
 fi
 
-# 4. One coverage build of every library.
+# 4. One coverage build of every library, with the branch records of those
+# whose gate reads them. BRANCH_CATEGORIES: the categories of the branch
+# coverage actions (tools/build/mojo/coverage_branch.bzl; a case of
+# //:coverage_ci_cases holds this list equal to that file's).
+BRANCH_CATEGORIES="mojo_emit_cov_bc mojo_cov_pgo_link mojo_cov_branch_run mojo_cov_branch_annotate mojo_cov_branch_classify"
 : >"$OUT/reports.txt"
+: >"$OUT/branch_records.txt"
 : >"$OUT/measured.txt"
 : >"$PUB/not_measured.txt"
+: >"$PUB/branch_not_measured.txt"
+: >"$OUT/branch_not_measured.why"
+reads_branch() { grep -qxF -- "$1" "$PUB/branch_libraries.txt"; }
 if [ -s "$PUB/libraries.txt" ]; then
     br="$OUT/logs/build_report.json"
     set --
-    while IFS= read -r lib; do set -- "$@" "${lib}[coverage][tests]"; done <"$PUB/libraries.txt"
+    while IFS= read -r lib; do
+        set -- "$@" "${lib}[coverage][tests]"
+        if reads_branch "$lib"; then set -- "$@" "${lib}[coverage][branch_info]"; fi
+    done <"$PUB/libraries.txt"
     rc=0
     "$BUCK2" build -c komira.coverage=true --keep-going --build-report "$br" "$@" >"$OUT/logs/build.log" 2>&1 </dev/null || rc=$?
     say "buck2 build of $# coverage target(s) exited $rc"
@@ -197,24 +249,26 @@ if [ -s "$PUB/libraries.txt" ]; then
         say "buck2 wrote no build report: no library is measured"
         : >"$OUT/verdicts.txt"
     else
-        # "<label> ok|gate|failed" per entry of `results`, and
-        # "<label> report <path>" per report path in it. An error object is a
-        # line holding `{` alone (no other array of the entry holds objects);
-        # one counts as the library's own gate when its action's category is
-        # mojo_cov_gate and its owner is "<label> (<configuration>)".
-        awk '
+        # "<label> ok|gate|branch|failed" per entry of `results`,
+        # "<label> report <path>" per report path in it and "<label> info
+        # <path>" per branch record path. An error object is a line holding
+        # `{` alone (no other array of the entry holds objects); one counts
+        # as the library's own gate when its action's category is
+        # mojo_cov_gate, and as its own branch coverage when the category is
+        # one of BRANCH_CATEGORIES, and its owner is "<label> (<configuration>)".
+        awk -v cats=" $BRANCH_CATEGORIES " '
             /^  "results": \{$/ { inres = 1; next }
             inres && /^  \}/ { inres = 0; next }
             !inres { next }
             /^    "[^"]*": \{$/ {
                 lab = $0; sub(/^    "/, "", lab); sub(/": \{$/, "", lab)
-                st = ""; ne = 0; ng = 0; cat = ""; next
+                st = ""; ne = 0; ng = 0; nb = 0; cat = ""; next
             }
             /^    \}/ {
                 if (lab != "") {
                     v = "failed"
                     if (st == "SUCCESS") v = "ok"
-                    else if (st == "FAIL" && ne > 0 && ne == ng) v = "gate"
+                    else if (st == "FAIL" && ne > 0 && ne == ng + nb) v = (nb > 0 ? "branch" : "gate")
                     print lab " " v
                 }
                 lab = ""; next
@@ -225,18 +279,33 @@ if [ -s "$PUB/libraries.txt" ]; then
             /^ *"category": "/ { cat = $0; sub(/^ *"category": "/, "", cat); sub(/",?$/, "", cat); next }
             /^ *"owner": "/ {
                 o = $0; sub(/^ *"owner": "/, "", o)
-                if (cat == "mojo_cov_gate" && index(o, lab " (") == 1) ng++
+                if (index(o, lab " (") == 1) {
+                    if (cat == "mojo_cov_gate") ng++
+                    else if (cat != "" && index(cats, " " cat " ") > 0) nb++
+                }
                 next
             }
             /^ *"buck-out\/[^"]*\/cov\/tests\/[^"\/]*\.xml",?$/ {
                 x = $0; sub(/^ *"/, "", x); sub(/",?$/, "", x); print lab " report " x
             }
+            /^ *"buck-out\/[^"]*\/cov\/branch\/[^"\/]*\.info",?$/ {
+                x = $0; sub(/^ *"/, "", x); sub(/",?$/, "", x); print lab " info " x
+            }
         ' "$br" >"$OUT/verdicts.txt"
     fi
+    # paths <lib> report|info: the entry's paths of that kind, each checked.
+    paths() {
+        awk -v l="$1" -v k="$2" '$1 == l && $2 == k { print $3 }' "$OUT/verdicts.txt" | sort -u >"$OUT/logs/paths.one"
+        while IFS= read -r x; do
+            case "$x" in *=*) die "$1: $2 path $x holds '=', which covcheck reads as PKGDIR=" ;; esac
+            [ -f "$x" ] || die "$1: the build report names $x, which is not on disk"
+        done <"$OUT/logs/paths.one"
+        cat "$OUT/logs/paths.one"
+    }
     while IFS= read -r lib; do
-        v=$(awk -v l="$lib" '$1 == l && $2 != "report" { print $2; exit }' "$OUT/verdicts.txt")
+        v=$(awk -v l="$lib" '$1 == l && $2 != "report" && $2 != "info" { print $2; exit }' "$OUT/verdicts.txt")
         case "$v" in
-            ok | gate) ;;
+            ok | gate | branch) ;;
             *)
                 echo "$lib" >>"$PUB/not_measured.txt"
                 if [ -n "$v" ]; then why="its build failed"; else why="it is not in the build report"; fi
@@ -244,15 +313,26 @@ if [ -s "$PUB/libraries.txt" ]; then
                 continue
                 ;;
         esac
-        [ "$v" = ok ] || say "$lib: its own coverage gate failed (an enforce finding or a gate error; the log below says which); its runs built, so it is measured"
-        awk -v l="$lib" '$1 == l && $2 == "report" { print $3 }' "$OUT/verdicts.txt" | sort -u >"$OUT/logs/reports.one"
-        while IFS= read -r x; do
-            case "$x" in *=*) die "$lib: report path $x holds '=', which covcheck reads as PKGDIR=" ;; esac
-            [ -f "$x" ] || die "$lib: the build report names $x, which is not on disk"
-            echo "$x" >>"$OUT/reports.txt"
-        done <"$OUT/logs/reports.one"
+        [ "$v" != gate ] || say "$lib: its own coverage gate failed (an enforce finding or a gate error; the log below says which); its runs built, so it is measured"
+        [ "$v" != branch ] || say "$lib: its own branch coverage actions failed (the log below says which); its runs built, so it is measured"
+        paths "$lib" report >"$OUT/logs/reports.one"
+        cat "$OUT/logs/reports.one" >>"$OUT/reports.txt"
         echo "$lib" >>"$OUT/measured.txt"
-        say "$lib: $(grep -c . "$OUT/logs/reports.one" || true) report(s)"
+        nr=$(grep -c . "$OUT/logs/reports.one" || true)
+        say "$lib: $nr report(s)"
+        reads_branch "$lib" || continue
+        if [ "$v" != ok ]; then
+            echo "$lib" >>"$PUB/branch_not_measured.txt"
+            if [ "$v" = branch ]; then why="its branch records failed to build"; else why="its coverage gate, which reads the same records, failed"; fi
+            echo "$lib $why" >>"$OUT/branch_not_measured.why"
+            say "$lib: branch NOT MEASURED: $why"
+            continue
+        fi
+        paths "$lib" info >"$OUT/logs/infos.one"
+        ni=$(grep -c . "$OUT/logs/infos.one" || true)
+        [ "$ni" -eq "$nr" ] || die "$lib: its gate reads branch records, and its build report entry names $ni branch record file(s) for $nr report(s)"
+        cat "$OUT/logs/infos.one" >>"$OUT/branch_records.txt"
+        say "$lib: $ni branch record file(s)"
     done <"$PUB/libraries.txt"
     if [ "$rc" -ne 0 ]; then
         say "the end of the build's output:"
@@ -281,10 +361,24 @@ not_measured_section() {
     printf 'These libraries the change touches did not build with `-c komira.coverage=true` (a test that fails at -O0 or under kcov, or a dependency that does), so their packages have no numbers here. The job log of `coverage / measure` has the end of each build.\n\n'
     while IFS= read -r l; do printf '%s\n' "- \`$l\`: not measured (coverage build failed)"; done <"$PUB/not_measured.txt"
 }
+# ... and the one for the libraries whose gate reads branch records and whose
+# records this run does not read.
+branch_section() {
+    printf '\n### Not measured: branch\n\n'
+    printf 'The coverage gates of these libraries read their tests'"'"' branch records (`COVERAGE_BRANCH_GATE`, tools/build/coverage/policy.bzl), and this run reads none of them, so their packages show branch coverage not measured here. Their line coverage is measured. The job log of `coverage / measure` has the end of each build.\n\n'
+    while IFS=" " read -r l why; do printf '%s\n' "- \`$l\`: branch not measured ($why)"; done <"$OUT/branch_not_measured.why"
+}
+# Every section the summary gains.
+sections() {
+    if [ "$N_FAILED" -gt 0 ]; then not_measured_section; fi
+    if [ "$N_NOBRANCH" -gt 0 ]; then branch_section; fi
+}
 
 N_LIBS=$(grep -c . "$PUB/libraries.txt" || true)
 N_FAILED=$(grep -c . "$PUB/not_measured.txt" || true)
 N_REPORTS=$(grep -c . "$OUT/reports.txt" || true)
+N_NOBRANCH=$(grep -c . "$PUB/branch_not_measured.txt" || true)
+N_RECORDS=$(grep -c . "$OUT/branch_records.txt" || true)
 
 # 5. The report.
 if [ "$N_REPORTS" -gt 0 ]; then
@@ -293,12 +387,13 @@ if [ "$N_REPORTS" -gt 0 ]; then
         --max-annotations "$MAXANN" --summary-out "$PUB/summary.md" --checkrun-dir "$PUB/checkrun" \
         --result-out "$PUB/result.json" --annotations-out "$PUB/annotations.json"
     while IFS= read -r x; do set -- "$@" --cobertura "$x"; done <"$OUT/reports.txt"
+    while IFS= read -r x; do set -- "$@" --branch-lcov "$x"; done <"$OUT/branch_records.txt"
     rc=0
     "$COVCHECK" "$@" >"$OUT/logs/covcheck.log" 2>&1 || rc=$?
     cat "$OUT/logs/covcheck.log"
     [ "$rc" -eq 0 ] || die "covcheck report exited $rc"
-    if [ "$N_FAILED" -gt 0 ]; then
-        section=$(not_measured_section)
+    if [ "$N_FAILED" -gt 0 ] || [ "$N_NOBRANCH" -gt 0 ]; then
+        section=$(sections)
         json_safe "$section"
         size=$(wc -c <"$PUB/summary.md")
         add=$(printf '%s\n' "$section" | wc -c)
@@ -318,7 +413,7 @@ if [ "$N_REPORTS" -gt 0 ]; then
                 mv "$f.new" "$f"
             done
         else
-            say "the summary is at GitHub's limit: the not-measured list is in summary.md and this log only"
+            say "the summary is at GitHub's limit: the not-measured lists are in summary.md and this log only"
         fi
     fi
 else
@@ -341,7 +436,7 @@ else
             printf '\nLibraries the change touches:\n\n'
             while IFS= read -r l; do printf '%s\n' "- \`$l\`"; done <"$PUB/libraries.txt"
         fi
-        if [ "$N_FAILED" -gt 0 ]; then not_measured_section; fi
+        sections
     } >"$PUB/summary.md"
     text=$(cat "$PUB/summary.md")
     json_safe "$text$title"
@@ -358,4 +453,4 @@ else
     } >"$PUB/result.json"
 fi
 
-say "$N_LIBS librar(y/ies) touched, $((N_LIBS - N_FAILED)) measured, $N_FAILED not measured (coverage build failed), $N_REPORTS report(s); check run bodies: $(ls "$PUB/checkrun" | tr '\n' ' ')"
+say "$N_LIBS librar(y/ies) touched, $((N_LIBS - N_FAILED)) measured, $N_FAILED not measured (coverage build failed), $N_REPORTS report(s), $N_RECORDS branch record file(s), $N_NOBRANCH branch not measured; check run bodies: $(ls "$PUB/checkrun" | tr '\n' ' ')"

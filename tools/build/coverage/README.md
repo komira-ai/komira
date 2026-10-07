@@ -446,11 +446,11 @@ branches measured with none to take. In a package whose branch records are
 read, a file with line records that no branch record file names is
 `BranchUnmeasuredFile`: its branches were not read, so the package's
 branch number would leave it out. The
-pull request check (`coverage_measure.sh`) passes covcheck the kcov reports
-only, so for a library of `COVERAGE_BRANCH_GATE` its summary shows branch
-`not measured` where the gate measures it. Passing the PR check the
-branch records too (or having it say "gate only") is follow-up work, due
-before any library moves to enforce.
+pull request's check run (`coverage_measure.sh`, [The coverage
+workflow](#the-coverage-workflow)) reads the same branch records for the
+same libraries, so for a library of `COVERAGE_BRANCH_GATE` its summary
+shows the branch number the gate measures (unless the records or the gate
+failed to build: then it lists the library as branch not measured).
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage][gate]' -c komira.coverage=true
@@ -553,7 +553,8 @@ finding about a whole file has `line` 0, and `count` is the lines an
 ## The coverage workflow
 
 `.github/workflows/coverage.yml` (workflow `coverage`) shows a pull
-request's line coverage as the check run `coverage`: covcheck's summary and
+request's line coverage, and the branch coverage of the libraries whose
+gate reads branch records, as the check run `coverage`: covcheck's summary and
 its annotations on the lines of the "Files changed" view. It is
 informational. It is not `pr / check`, it is not a required check, and its
 result cannot make `pr / check` red; its conclusion is `neutral` in census
@@ -577,22 +578,41 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    directory holding a BUCK file, leaving out the paths of the other cells'
    directories (the `tests` cell's libraries are fixtures, some failing by
    design);
-3. the `mojo_library` targets of those packages
-   (`buck2 uquery "kind('^mojo_library_rule$', set(//<package>: ...))"`);
+3. the `mojo_library` targets of those packages, each with its
+   `coverage_branch_gate` (`buck2 uquery -c komira.coverage=true
+   "kind('^mojo_library_rule$', set(//<package>: ...))" --output-attribute
+   '^coverage_branch_gate$'`): whether its gate reads its tests' branch
+   records. The attribute is what mojo_library sets from
+   `COVERAGE_BRANCH_GATE` and the gate reads, so the script's list is the
+   gate's own rather than a second parse of `policy.bzl`;
 4. one `buck2 build -c komira.coverage=true --keep-going --build-report F
-   '<library>[coverage][tests]'...` of all of them (the farm builds them in
-   parallel): their tests' reports and their gates. Each library's verdict
-   is its entry in the build report: `SUCCESS`, or `FAIL` with only errors
-   of its own gate's action (`mojo_cov_gate` owned by the library: an
-   enforce finding or a gate error, every run built), is measured, from the
-   entry's `cov/tests/*.xml` paths (`--show-output` prints no path for a
-   sub-target with several outputs; buck2 lists what did build for a failed
-   target too). Any other failure lists the library as `not measured
-   (coverage build failed)`, in the summary and in the check run's summary,
-   and none of its reports is used; the job stays green. A dependency's
-   failed gate fails the library's runs, so in enforce mode a library is
-   measured only when its dependencies pass theirs;
-5. `covcheck report` over the reports of the libraries measured, with the
+   '<library>[coverage][tests]'...` of all of them, with
+   `'<library>[coverage][branch_info]'` beside each library whose gate reads
+   branch records (the farm builds them in parallel; that gate already
+   waits for those records): their tests' reports, their gates and those
+   branch records. Each library's verdict is its entry in the build report
+   (one per library, both sub-targets' outputs in it): `SUCCESS`, or `FAIL`
+   with only errors of its own gate's action (`mojo_cov_gate` owned by the
+   library: an enforce finding or a gate error) or of its own branch
+   coverage actions (`mojo_emit_cov_bc`, `mojo_cov_pgo_link`,
+   `mojo_cov_branch_run`, `mojo_cov_branch_annotate`,
+   `mojo_cov_branch_classify`; the cases hold this list equal to
+   `coverage_branch.bzl`'s), every run built, is measured, from the entry's
+   `cov/tests/*.xml` paths (`--show-output` prints no path for a sub-target
+   with several outputs; buck2 lists what did build for a failed target
+   too). Any other failure lists the library as `not measured (coverage
+   build failed)`, in the summary and in the check run's summary, and none
+   of its reports is used; the job stays green. A dependency's failed gate
+   fails the library's runs, so in enforce mode a library is measured only
+   when its dependencies pass theirs. A measured library whose records are
+   read gives its entry's `cov/branch/*.info` paths when the entry is
+   `SUCCESS` (one per report; another count fails the job, as a tool
+   error). When its branch coverage actions failed, or its gate did (which
+   reads the same records with covcheck, so `report` could refuse them
+   too), none of its records is read and it is listed as `branch not
+   measured`, with the reason, in both summaries; the job stays green;
+5. `covcheck report` over the reports of the libraries measured and their
+   branch records (`--branch-lcov`), with the
    policy's mode and target, `git ls-files -z` as `--repo-files`, the head
    as `--head-sha`, and the ratchet's comment lines and the rows of the
    measured libraries' packages only (`report` compares every row it is
@@ -603,7 +623,8 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
 
 It writes the summary to the job's step summary and uploads the bodies,
 `summary.md`, `result.json`, `annotations.json` (every annotation) and the
-lists of libraries as an artifact, and no build log (a job log is masked for
+lists of libraries (touched, reading branch records, not measured, branch
+not measured) as an artifact, and no build log (a job log is masked for
 the farm's address; an artifact is not).
 
 Job `post` has `checks: write` and nothing else. It checks nothing out and
@@ -631,9 +652,10 @@ What only a run on GitHub shows: the welded cases (`//:coverage_ci_cases`,
 `.github/ci/tests/coverage_ci_cases.sh`) run the poster and the completing
 function against a stand-in `gh` over bodies the real covcheck wrote for 0,
 1, 51 and 120 annotations; the measure script against stand-ins for git
-and buck2 (whose build reports have buck2's shape, and one of which is a
-report buck2 wrote for a library failing in its gate alone) with the real
-covcheck; and they hold the workflow's text for the calls and the artifact
+and buck2 (whose query answers and build reports have buck2's shape; two
+reports are ones buck2 wrote, for a library failing in its gate alone and
+for one whose branch records failed to build beside its built runs) with
+the real covcheck, a listed library's branch records included; and they hold the workflow's text for the calls and the artifact
 name. First seen on a real pull request: GitHub's API answers, the
 artifact's round trip and a re-run of `post` alone, whether the `if:`
 conditions run the completing step after a failure, a cancel or a
