@@ -23,9 +23,10 @@ def decode_json_string(
     """Decode the JSON string literal whose opening quote is `data[start]`
     into `value`; return the index just past its closing quote.
 
-    Raises `AvroSchemaError.MALFORMED_JSON` on an unknown escape, a bad or
-    short `\\u` escape, a lone or mis-ordered surrogate, an unterminated
-    string, or a result that is not well-formed UTF-8.
+    Raises `AvroSchemaError.MALFORMED_JSON` on an unescaped control character
+    (U+0000..U+001F), an unknown escape, a bad or short `\\u` escape, a lone
+    or mis-ordered surrogate, an unterminated string, or a result that is not
+    well-formed UTF-8.
     """
     var n = len(data)
     var pos = start + 1  # past the opening quote
@@ -42,12 +43,23 @@ def decode_json_string(
             value = String(unsafe_from_utf8=Span(out))
             return pos + 1
         if c != UInt8(ord("\\")):
-            # A run of unescaped bytes is copied through byte-exact.
-            var run_end = pos + 1
+            # A run of unescaped bytes is copied through byte-exact. RFC 8259
+            # section 7: U+0000..U+001F must be escaped inside a string.
+            var run_end = pos
             while run_end < n:
                 var d = data[run_end]
                 if d == UInt8(ord('"')) or d == UInt8(ord("\\")):
                     break
+                if d < 0x20:
+                    raise Error(
+                        String(
+                            "AvroSchemaError.MALFORMED_JSON: unescaped control"
+                            " character 0x"
+                        )
+                        + _hex2(d)
+                        + " in a string at byte "
+                        + String(run_end)
+                    )
                 run_end += 1
             for i in range(pos, run_end):
                 out.append(data[i])
@@ -172,6 +184,15 @@ def _read_hex4(data: Span[UInt8, _], at: Int) raises -> Int:
             )
         v = v * 16 + d
     return v
+
+
+def _hex2(b: UInt8) -> String:
+    """`b` as two uppercase hex digits."""
+    var hi = Int(b >> 4)
+    var lo = Int(b & 0x0F)
+    return chr(hi + 48 if hi < 10 else hi + 55) + chr(
+        lo + 48 if lo < 10 else lo + 55
+    )
 
 
 @always_inline

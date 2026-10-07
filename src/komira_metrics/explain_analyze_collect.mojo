@@ -33,7 +33,7 @@
 # global's NAME STRING, inside a `try`/`except` — on the order of 30 ns/call,
 # against the ~2-4 ns a relaxed atomic load costs, on a path every breaker
 # crosses. `tests/test_explain_analyze_disarmed_cost.mojo` holds the disarmed
-# path to a 20 ns/call ceiling.
+# path to at most 20 ns/call over a same-shape baseline in the same binary.
 #
 # THE DISARMED COST IS TWO-TIER:
 #
