@@ -1,4 +1,4 @@
-"""Test 52's planted pandas e2e package: analysed by the matrix lint, never built."""
+"""Test 53's planted pandas e2e package: analysed by the matrix lint, never built."""
 
 
 def answer() -> Int:

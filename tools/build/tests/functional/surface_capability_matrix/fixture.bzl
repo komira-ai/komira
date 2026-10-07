@@ -1,4 +1,4 @@
-"""The planted matrix of test 52 (the surface capability matrix).
+"""The planted matrix of test 53 (the surface capability matrix).
 
 Two surfaces, pandas and polars, whose e2e packages are planted under
 src/tests/e2e/ of this directory (real mojo_library and mojo_test targets,

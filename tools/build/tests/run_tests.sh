@@ -361,7 +361,8 @@
 #      no package. With a module map (`map`; //:src_layout reads
 #      docs/architecture.md): a package with no row, a row naming no package,
 #      a second row for a package, and a row whose name is not its link's.
-#  52. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
+#  46. The coverage gate and what ships waits for it: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
+#  53. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
 #      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
 #      surface and capability of the plan, against tests/surface_capability_matrix.bzl)
 #      and tests//functional/surface_capability_matrix:ok (a planted matrix,
@@ -1336,7 +1337,7 @@ for want in \
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
 
-# 52
+# 53
 expect_green surface_capability_matrix //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
 N=tests//negative/surface_capability_matrix
 E=tests//functional/surface_capability_matrix/src/tests/e2e

@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load(":fixture.bzl", "SCM_CAPABILITIES", "SCM_FILES", "SCM_FLOOR", "SCM_GROUNDING", "SCM_MATRIX", "SCM_NOT_CAPABILITIES", "SCM_ROOT", "SCM_SURFACES")
 
-# Test 52 (the surface capability matrix), the half that must build: the
+# Test 53 (the surface capability matrix), the half that must build: the
 # planted matrix of fixture.bzl, three of its ten cells filled by planted
 # surface e2e targets under src/tests/e2e/, whose census must equal
 # expect_matrix.tsv and expect_report.txt byte for byte.

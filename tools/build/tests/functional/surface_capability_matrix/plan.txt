@@ -1,4 +1,4 @@
-# The planted plan constants of test 52 (fixture.bzl says what each line is for).
+# The planted plan constants of test 53 (fixture.bzl says what each line is for).
 comptime PLAN_SCAN: UInt8 = 0
 comptime PLAN_FILTER: UInt8 = 1
 comptime PLAN_JOIN: UInt8 = 2

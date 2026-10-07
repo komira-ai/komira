@@ -16,7 +16,7 @@ states the same rules), declared once in the root [`BUCK`](../BUCK) as
 `//:surface_capability_matrix`. Its ledger is
 [`tests/surface_capability_matrix.bzl`](../tests/surface_capability_matrix.bzl).
 It is a validation that runs on the farm like the other lints; its tests are
-[test 52](../tools/build/tests/lint_tests.md#52-the-surface-capability-matrix).
+[test 53](../tools/build/tests/lint_tests.md#53-the-surface-capability-matrix).
 
 ```sh
 ./buck2 build //:surface_capability_matrix                               # the census; fails only on a malformed or lying ledger
@@ -233,7 +233,7 @@ Every cell, `yes` when filled and `-` when missing:
 
 ## Tests
 
-[Test 52](../tools/build/tests/lint_tests.md#52-the-surface-capability-matrix):
+[Test 53](../tools/build/tests/lint_tests.md#53-the-surface-capability-matrix):
 `tests//functional/surface_capability_matrix:ok` analyses a planted matrix
 whose census must equal its expected `[matrix]` and `[report]` byte for
 byte, three cells filled by real `mojo_library` and `mojo_test` targets in

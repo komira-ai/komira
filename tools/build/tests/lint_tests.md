@@ -132,7 +132,7 @@ row for a package that is gone, two rows for one package, a misnamed row.
 ./buck2 build tests//negative/src_layout:map_missing_row   # must fail: //src/komira_new: no row in ...
 ```
 
-## 52. The surface capability matrix
+## 53. The surface capability matrix
 
 Product coverage is every capability of the plan exercised through every
 surface by an end-to-end test of that surface.

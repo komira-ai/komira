@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 
-# Test 52 (the surface capability matrix): the planted pandas surface e2e
+# Test 53 (the surface capability matrix): the planted pandas surface e2e
 # package. Never built: the matrix lint only analyses these targets.
 #   pandas_e2e   a mojo_library whose test_srcs weld a test (WeldedTestsInfo),
 #                so a row may name it
