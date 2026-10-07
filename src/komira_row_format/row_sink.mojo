@@ -5,7 +5,7 @@
 #
 # Why the hook lives here and not on the core `Sink` trait: its default body
 # calls `bridge_row_output_to_record_batch`, a `komira_row_format` symbol. On the
-# core `Sink` trait that would force `komira_core.source.sink` to import from
+# core `Sink` trait that would force `komira_scan_source.sink` to import from
 # `komira_row_format` — a `core -> row_format` up-edge, i.e. a dependency cycle. Core never
 # CALLS the hook (only the SDK's `WriteSpec.feed_sinks_with_row_output` does).
 # So the hook lives on this `RowSink(Sink)` refinement in `komira_row_format` (where
@@ -24,7 +24,7 @@
 # value and is moved by `^`.
 # =============================================================================
 
-from komira_core.source.sink import Sink
+from komira_scan_source.sink import Sink
 from komira_row_format.row_output import (
     RowOutput,
     bridge_row_output_to_record_batch,

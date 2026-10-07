@@ -56,7 +56,7 @@ def test_cells() raises:
     )
     assert_equal(c.root, "komira")
     assert_equal(len(c.names), 3)
-    assert_equal(c.package_pattern("src/komira_core"), "komira//src/komira_core:")
+    assert_equal(c.package_pattern("src/komira_collections"), "komira//src/komira_collections:")
     assert_equal(c.package_pattern(""), "komira//:")
     assert_equal(c.package_pattern("tools/build/tests/functional"), "tests//functional:")
     assert_equal(c.package_pattern("tools/build/tests"), "tests//:")

@@ -7,7 +7,7 @@ mojo_library(
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_collections:komira_collections",
-        "//src/komira_scalar_arith:komira_scalar_arith",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
     ],
     test_srcs = [
         "tests/test_agg_expr_children.mojo",

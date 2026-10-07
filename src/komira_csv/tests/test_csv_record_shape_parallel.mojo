@@ -33,7 +33,7 @@ from komira_async.runtime.runtime import (
     PerCoreAsyncRuntime,
 )
 
-from komira_core.arrow.schema import RecordBatch
+from komira_arrow.schema import RecordBatch
 
 from komira_csv import CsvReadOptions, Rfc4180
 from komira_csv.csv_chunk_split import compute_csv_quote_safe_row_ranges

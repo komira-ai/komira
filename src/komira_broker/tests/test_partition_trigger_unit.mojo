@@ -50,11 +50,11 @@ from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
 
 
 comptime _Store = SharedInMemoryConditionalStore

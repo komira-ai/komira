@@ -67,7 +67,7 @@
 # =============================================================================
 
 from .morsel import Morsel
-from komira_core.traits.exec_result import ExecResult
+from komira_exec_types.exec_result import ExecResult
 
 from komira_metrics.metrics_set import MetricsSet, MetricsSnapshot
 

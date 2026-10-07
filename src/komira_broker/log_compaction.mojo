@@ -77,9 +77,9 @@
 #     stored in an OwnedSlab/AtomicSlab with a wildcard cast.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_collections.slab import Slab
 
 from komira_objectstore.cas_manifest import CasManifestStore
 from komira_objectstore.store import ConditionalWriteStore

@@ -83,12 +83,12 @@
 
 from std.bit import count_trailing_zeros
 
-from komira_core.simd.byte_class.movemask import (
+from komira_simd.byte_class.movemask import (
     movemask_to_uint_u8x64,
     byte_eq_to_bytemask_u8x64,
 )
-from komira_core.simd.byte_class.byte_find_any_of import byte_find_eq_4_u8x64
-from komira_core.simd.byte_class.quote_region_mask import quote_region_mask_u64
+from komira_simd.byte_class.byte_find_any_of import byte_find_eq_4_u8x64
+from komira_simd.byte_class.quote_region_mask import quote_region_mask_u64
 
 from .quote_styles import QuoteStyle
 from .csv_scanner_phase1 import _load_u8x64, _cancel_doubled_quotes_u64

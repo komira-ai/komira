@@ -30,7 +30,7 @@
 #   __copyinit__ bumps the reference count instead of deep-copying.
 # =============================================================================
 
-from komira_core.arrow.schema import RecordBatch, Schema
+from komira_arrow.schema import RecordBatch, Schema
 
 
 trait ScalarUdf(Movable, Copyable, Deinitable):

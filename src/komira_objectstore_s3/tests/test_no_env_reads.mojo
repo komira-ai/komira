@@ -42,7 +42,7 @@ def test_no_environment_read() raises:
         "ProcessEnv",
         "DefaultChainCredsSource",
         "aws_endpoint_config",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
     ]
     var files = materialize[_FILES]()

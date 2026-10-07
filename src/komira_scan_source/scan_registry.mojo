@@ -19,7 +19,7 @@
 # still raises by name.
 #
 # =============================================================================
-# WHY THIS IS IN `komira_core` AND NOT IN A NEW TOP PACKAGE
+# WHY THIS IS IN `komira_scan_source` AND NOT IN A NEW TOP PACKAGE
 # =============================================================================
 #
 # A TOP package whose deps name every package that owns a scan kind (mirroring

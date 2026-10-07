@@ -20,7 +20,7 @@
 #
 # WHY THE TRAIT CANNOT NAME `materialize_parquet_collect`:
 #   `materialize_parquet_collect` (`komira_parquet`) takes `LocalDispatcher`,
-#   `CancellationToken` and `ParquetMetadataCache` — ALL ABOVE komira_core. A
+#   `CancellationToken` and `ParquetMetadataCache` — ALL ABOVE the core packages. A
 #   core-resident trait CANNOT spell those types. So the trait carries only the
 #   FS-ERASED, core-expressible IDENTITY-RESOLUTION method (`resolve_scheme`).
 #   The heavy materialize-driving method (sketched in the docstring below)
@@ -40,7 +40,7 @@ trait FsResolver(Movable, Deinitable):
     `[REG: FsResolver = LocalOnlyResolver]`.
 
     This trait defines the FS-erased identity-resolution surface that
-    `komira_core` can express. The heavy materialize-driving method has this
+    the core packages can express. The heavy materialize-driving method has this
     shape:
 
         # NOT in core — it belongs at the spine seam in komira_fs_registry /
@@ -99,7 +99,7 @@ struct LocalOnlyResolver(FsResolver, Movable, Deinitable):
     LocalOnlyResolver]` spine monomorphizes twice (this + `FsRegistry`), not
     4x — the 4-way FS fan-out lives in `FsRegistry`'s conformer, not the spine.
 
-    Lives in `komira_core` (NOT `komira_fs_registry`): it binds the LOCAL
+    Lives in `komira_plan_expr` (NOT `komira_fs_registry`): it binds the LOCAL
     default and names NO cloud FS type, so it is core-expressible. The
     materialize-driving body (binding `LocalFs[NoopSink]`) is added at the spine
     seam where `LocalFs` is reachable; the FS-erased surface here needs no FS

@@ -64,7 +64,7 @@
 #   - The .batch.take() extraction in the driver loop uses Optional.take,
 #     never a partial move via take_pointee.
 #
-# Placement rationale (komira_core, not the engine operators package):
+# Placement rationale (the core packages, not the engine operators package):
 #   - ProcessResult is the trait-method return type on FusedMorselOp. Its
 #     domain is cross-package — both the engine operators (every conformer's
 #     process_batch) and the engine dispatch driver loop consume it. Placing

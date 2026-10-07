@@ -56,7 +56,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 mojo_library(
     name = "komira_spsc_prefix_probe",
     srcs = ["__init__.mojo", "prefix_ring.mojo"],
-    deps = ["//src/komira_core:komira_core", "//src/komira_atomic_alias:komira_atomic_alias"],
+    deps = ["//src/komira_collections:komira_collections", "//src/komira_atomic_alias:komira_atomic_alias"],
 )
 mojo_binary(name = "green", srcs = ["green.mojo"], deps = ["//src/komira_spsc_ring:komira_spsc_ring", "//src/komira_atomic_alias:komira_atomic_alias"])
 mojo_binary(name = "red", srcs = ["red.mojo"], deps = [":komira_spsc_prefix_probe", "//src/komira_spsc_ring:komira_spsc_ring", "//src/komira_atomic_alias:komira_atomic_alias"])

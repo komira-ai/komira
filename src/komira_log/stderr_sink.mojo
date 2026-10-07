@@ -125,7 +125,7 @@ struct StderrSink(Movable):
         transient cases within a bounded budget, gives up at once on a dead fd
         and RETURNS what happened.
 
-        ⛔ IT DOES NOT RAISE, and that is deliberate — the rule `komira_core`'s
+        ⛔ IT DOES NOT RAISE, and that is deliberate — the rule the core packages'
         fd write-all states: "losing a diagnostic beats wedging the process". A logger gives up. What it may not do is give up
         SILENTLY.
         """

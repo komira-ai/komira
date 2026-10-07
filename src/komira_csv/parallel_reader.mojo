@@ -76,32 +76,32 @@ from std.time import perf_counter_ns
 # (`_with_dispatcher` variant) so the borrowed/owned state lives on a
 # per-dispatch value whose lifetime the compiler tracks, not a struct
 # field that outlives the caller.
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.local_dispatcher import LocalDispatcher
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.schema import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
+from komira_arrow.schema import (
     Field,
     RecordBatch,
     RecordBatchBuilder,
     Schema,
     SchemaBuilder,
 )
-from komira_core.collections.slab import Slab
-from komira_core.arrow_helpers.streaming_concat import (
+from komira_collections.slab import Slab
+from komira_arrow.streaming_concat import (
     _concat_two_batches,
     _concat_fixed_columns_multi,
     _concat_string_columns_multi,
 )
-from komira_core.arrow.concat import _concat_columns
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.concat import _concat_columns
+from komira_buffer.heap_region import HeapRegion
 
 from .csv_options import CsvReadOptions, check_declared_column_types
 from .input_limits import check_csv_cell_budget, check_csv_column_count
@@ -1109,7 +1109,7 @@ def read_csv_bytes_to_batch_parallel_impl[
     # column, each runs its own per-column N-way merge in parallel.
     #
     # Uses the existing single-pass multi-way helpers from
-    # `komira_core.arrow_helpers.streaming_concat`:
+    # `komira_arrow.streaming_concat`:
     #   * `_concat_string_columns_multi` for STRING/BINARY columns
     #   * `_concat_fixed_columns_multi` for fixed-width numeric columns
     #   * Pair-wise `_concat_columns` fallback for BOOL / DATE32 (the
@@ -1547,7 +1547,7 @@ def _build_string_column[
 # pair-wise fold Amdahl bottleneck on the parallel reader's driver tail. Spawns one
 # stdlib `parallelize` worker per output column; each worker runs its own
 # multi-way merge for that column index using the canonical single-pass
-# helpers from `komira_core.arrow_helpers.streaming_concat`. BOOL and DATE32
+# helpers from `komira_arrow.streaming_concat`. BOOL and DATE32
 # columns (which the multi-way fast helpers do not handle) fall through to
 # a per-column pair-wise `_concat_columns` fold inside the same worker --
 # parallelism across columns still holds, only the *intra-column* path
@@ -1883,7 +1883,7 @@ def _arrow_type_has_fixed_width_concat(at: ArrowType) -> Bool:
     INT64 + FLOAT64 to the fast multi-way path and BOOL + DATE32 to
     the pair-wise fallback.
 
-    Mirrors `_arrow_type_byte_width` in komira_core's streaming_concat (which
+    Mirrors `_arrow_type_byte_width` in the core packages' streaming_concat (which
     is the authoritative source). Listing all base numeric types here
     instead of importing `_arrow_type_byte_width` keeps the dispatch
     decision colocated with the cascade.

@@ -11,7 +11,7 @@
 # depend on the engine dispatch package. Copying a parser means two
 # definitions of what `8G` means, and the day they disagree is the day a
 # budget silently means something else in one subsystem than in the other.
-# `komira_core` is the lowest common package and this function has no
+# the core packages is the lowest common package and this function has no
 # dependencies at all.
 #
 # PURE -- no FFI, no environment read, no allocation beyond the caller's

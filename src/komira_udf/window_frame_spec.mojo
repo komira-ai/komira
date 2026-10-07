@@ -12,7 +12,7 @@
 # # Why a NEW comptime spec instead of reusing `PartitionFrame`
 #
 # The built-in window track carries `PartitionFrame`
-# (`komira_core.plan.partition_expr`), but that struct uses `def __init__`
+# (`komira_plan_expr.partition_expr`), but that struct uses `def __init__`
 # + `Int64` offset fields and is plumbed as a RUNTIME plan-IR payload. A
 # `WindowFn` needs its frame as a COMPTIME trait member (the engine reads
 # `F.frame.start_tag` / `.start_offset` at comptime to pick the bound decode +
@@ -29,7 +29,7 @@
 #     wildcard origin, NO heap. Comptime-constructible.
 # =============================================================================
 
-from komira_core.plan.partition_expr import (
+from komira_plan_expr.partition_expr import (
     FRAME_UNITS_ROWS,
     FRAME_UNITS_RANGE,
     FRAME_BOUND_UNBOUNDED_PRECEDING,

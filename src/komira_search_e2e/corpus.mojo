@@ -28,12 +28,12 @@
 # the split bodies and in `_source`.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.record_batch import RecordBatchBuilder
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.arrow.string_array import StringArray
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.record_batch import RecordBatchBuilder
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.string_array import StringArray
+from komira_buffer.heap_region import HeapRegion
 
 from komira_search.analyzer import AnalyzerConfig
 from komira_search.sink import SearchSink

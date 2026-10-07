@@ -11,7 +11,7 @@
 # `EnginePlacement()` is every policy off: unpinned workers, no IO lane, no
 # NUMA restriction, no reserved driver CPU.
 #
-# This module imports nothing from `komira_core`, so `runtime` stays a leaf
+# This module imports nothing from the core packages, so `runtime` stays a leaf
 # that `engine_config` can depend on.
 # =============================================================================
 

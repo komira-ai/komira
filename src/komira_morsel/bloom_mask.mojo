@@ -20,12 +20,12 @@
 # all three tiers (previously only Tier 3 was wired).
 # =============================================================================
 
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.collections.bloom_filter import BloomFilter
-from komira_core.collections.in_list_filter import InListFilter
-from komira_core.collections.range_filter import RangeFilter
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.bitmap import Bitmap
+from komira_dynamic_filter.bloom_filter import BloomFilter
+from komira_dynamic_filter.in_list_filter import InListFilter
+from komira_dynamic_filter.range_filter import RangeFilter
 
 from std.sys import simd_width_of
 
@@ -113,7 +113,7 @@ def range_mask_int64(
 
     PERF-CRITICAL: SIMD-vectorized over `simd_width_of[DType.int64]` lanes
     (NEON: W=2; AVX-2: W=4; AVX-512: W=8). Bitmap-packing follows the
-    `_eval_cmp_gt` shape in `komira_core/eval/comparison.mojo` — direct
+    `_eval_cmp_gt` shape in `komira_column_kernels/comparison.mojo` — direct
     bit-packed Bitmap construction so the inner loop is purely
     NEON `cmge.2d` / `cmle.2d` plus an `and.16b` per pair of lanes.
     """
