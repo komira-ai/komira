@@ -361,6 +361,11 @@
 #      no package. With a module map (`map`; //:src_layout reads
 #      docs/architecture.md): a package with no row, a row naming no package,
 #      a second row for a package, and a row whose name is not its link's.
+#  51. Python oracles (tools/build/python/defs.bzl, python_oracle): each
+#      target of tests//negative/python_oracle fails analysis naming the
+#      input an action built outside third_party/ (a komira library's
+#      package as data, a komira binary in srcs, a wheel installed outside
+#      third_party/). What works is in src/tests/helpers/komira_test_python.
 set -uo pipefail
 
 umbrella=1
@@ -1322,6 +1327,13 @@ for want in \
     "empty|src_layout: checked nothing"; do
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
+
+# 51
+N=tests//negative/python_oracle
+F="which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only"
+expect_red python_oracle_komira_data "the oracle's data \"encoding.mojoc\" is built by komira//src/komira_encoding:komira_encoding, $F" "$N:komira_data"
+expect_red python_oracle_komira_srcs "the oracle's srcs entry \"hello\" is built by komira//tools/build/examples:hello, $F" "$N:komira_srcs"
+expect_red python_oracle_local_wheel "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_wheel_dep"
 
 # 37
 pt_rc=0

@@ -28,6 +28,15 @@ No source distribution is built and pip never runs.
 | grpcio | 1.84.0 | typing-extensions | gRPC interop |
 | typing-extensions | 4.16.0 | | grpcio |
 
+protobuf 7.36.2 loads the Python gencode of the repository's protoc (29.1,
+which writes gencode 5.29.1): its runtime check refuses only gencode newer
+than the runtime (or of another domain), not an older major. The test
+`protobuf_gencode` (`src/tests/helpers/komira_test_python`) imports a module
+protoc 29.1 generated and parses with it; with protobuf 5.28.3 pinned instead
+it fails with `VersionError: Detected incompatible Protobuf Gencode/Runtime
+versions when loading gencode_probe.proto: gencode 5.29.1 runtime 5.28.3`.
+A bump of either pin re-runs it.
+
 Not in the closure yet, each for the change that brings its consumer: the
 Google Cloud Storage testbench, kafka-python and opensearch-py (service
 drivers), and anything they require.

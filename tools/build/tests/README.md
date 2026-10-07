@@ -988,6 +988,22 @@ querying its attributes, so narrowing it fails.
 `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
 [the repository lint tests](lint_tests.md#45-the-layout-of-src).
 
+## 51. Python oracles
+
+An oracle (`python_oracle`, [tools/build/python](../python/README.md#oracles))
+computes the answer a komira test compares against, so an input an action
+built must be the output of a target under `third_party/`. Each target of
+[`negative/python_oracle`](negative/python_oracle/BUCK) fails analysis naming
+the input: a komira library's gated package as `data`, a komira binary in
+`srcs`, and a wheel installed by a target outside `third_party/`. The oracles
+that work, the runner's verdicts and a welded Mojo test reading an oracle's
+output are in
+[`src/tests/helpers/komira_test_python`](../../../src/tests/helpers/komira_test_python/README.md).
+
+```sh
+./buck2 build tests//negative/python_oracle:komira_data   # must fail: is built by komira//src/komira_encoding:komira_encoding, which is not under third_party/
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
