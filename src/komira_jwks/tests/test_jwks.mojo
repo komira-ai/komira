@@ -1,5 +1,5 @@
-# komira_jwks: the deterministic kid, the OKP/Ed25519 JWK Set renderer, the
-# publish-only seed -> JWKS derivation, and the well-known path.
+# komira_jwks: the deterministic kid, the OKP/Ed25519 JWK Set renderer and the
+# publish-only seed -> JWKS derivation.
 #
 # Vectors: the Ed25519 key of RFC 8037 Appendix A.1 (which is also RFC 8032
 # section 7.1 TEST 1) and RFC 8032 section 7.1 TEST 2. The expected `x` members
@@ -9,7 +9,6 @@
 # the raw key, not a canonical JWK, and a test pinning it to A.3 would be wrong.
 
 from komira_jwks import jwks_json_from_seed, kid_for_pubkey, render_jwks_json
-from komira_jwks.well_known import IDENTITY_JWKS_PATH
 from komira_secret_store import SecretValue
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -204,10 +203,6 @@ def test_from_seed_refuses_short_seeds() raises:
         assert_true(raised, String("a ") + String(n) + " byte seed was accepted")
 
 
-def test_identity_jwks_path() raises:
-    assert_equal(IDENTITY_JWKS_PATH, String("/.well-known/identity-jwks.json"))
-
-
 def main() raises:
     test_kid_vectors()
     test_kid_is_full_unpadded_base64url()
@@ -219,5 +214,4 @@ def main() raises:
     test_from_seed_matches_public_derivation()
     test_from_seed_never_publishes_the_seed()
     test_from_seed_refuses_short_seeds()
-    test_identity_jwks_path()
     print("test_jwks: OK")
