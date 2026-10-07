@@ -31,10 +31,12 @@
 # 6. A NESTED INSTANCE: of a definition not given, of a version not given
 #    (the given versions are listed), with a digest that is not the
 #    definition's, binding an input not declared, leaving a required input
-#    unbound, a literal for a REF input, a resource with no output for a
-#    STRING input, a REF input passed down as a value, a value naming an
-#    input the enclosing definition does not declare, and `uses`,
-#    `retention` or labels written on it.
+#    unbound, a literal for a REF input, a reference that reads an output
+#    (standard or named) for a REF input, an empty value or a resource
+#    with no output for a STRING input, a REF input passed down as a
+#    value, a value naming an input the enclosing definition does not
+#    declare, and `uses`, `retention`, `physical_name`, labels or `adopt`
+#    written on it.
 # 7. CONTAINMENT CYCLES: A -> A, A -> B -> A (one finding, printed from its
 #    smallest name, whichever definition comes first), A -> B -> C -> A; a
 #    diamond (A holds two instances of B) is not a cycle.
@@ -276,7 +278,13 @@ def test_a_nested_instance() raises:
     or by kind, a binding to an input the enclosing definition does not
     declare left for expansion (an unused definition would load clean;
     mutant: drop the `t_in < 0` check), and `uses`, retention or metadata
-    accepted on an instance (which has no object to hold them)."""
+    accepted on an instance (which has no object to hold them).
+    Mutants each case was seen red on: a REF input bound to a reference
+    with an output (`standard` or `named`) accepted (drop the output test
+    of the REF arm); a STRING input bound to an empty value accepted (drop
+    the `arm == 0` finding); `physical_name` or `adopt` on an instance
+    accepted (drop it from the metadata test, which labels alone would
+    not show)."""
     var web_text = String(
         '{"name":"acme.web","version":"1",'
         '"input":[{"name":"domain","type":"INPUT_STRING","required":true},{"name":"reads","type":"INPUT_REF"}],'
@@ -306,6 +314,15 @@ def test_a_nested_instance() raises:
     cases.append(w + "," + inst + ',"reads":{"literal":"b"}}}}')
     fields.append("component[w].composite.input.reads")
     needles.append("a REF input takes a reference to a resource")
+    cases.append(w + "," + inst + ',"reads":{"ref":{"local":"b","standard":"NAME"}}}}}')
+    fields.append("component[w].composite.input.reads")
+    needles.append("a REF input takes a reference to a resource: ref { ... } with no output")
+    cases.append(w + "," + inst + ',"reads":{"ref":{"local":"b","named":"x"}}}}}')
+    fields.append("component[w].composite.input.reads")
+    needles.append("a REF input takes a reference to a resource: ref { ... } with no output")
+    cases.append(w + ',"composite":{"definition":"acme.web","version":"1","input":{"domain":{}}}}')
+    fields.append("component[w].composite.input.domain")
+    needles.append("has no value")
     cases.append(w + ',"composite":{"definition":"acme.web","version":"1","input":{"domain":{"ref":{"local":"b"}}}}}')
     fields.append("component[w].composite.input.domain")
     needles.append("a STRING input takes a value")
@@ -322,6 +339,12 @@ def test_a_nested_instance() raises:
     fields.append("component[w].retention")
     needles.append("each component of its definition sets its retention")
     cases.append(w + ',"labels":{"team":"a"},' + inst + "}}}")
+    fields.append("component[w].composite")
+    needles.append("physical_name, labels and adopt are written on the components")
+    cases.append(w + ',"physicalName":"p",' + inst + "}}}")
+    fields.append("component[w].composite")
+    needles.append("physical_name, labels and adopt are written on the components")
+    cases.append(w + ',"adopt":true,' + inst + "}}}")
     fields.append("component[w].composite")
     needles.append("physical_name, labels and adopt are written on the components")
     for i in range(len(cases)):

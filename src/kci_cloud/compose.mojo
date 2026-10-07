@@ -671,6 +671,14 @@ struct _Expander(Movable):
                     if ins[k].default:
                         return _Got.of_value(ins[k].default.value())
                     return _Got.dropped()
+            # cov: unreachable once load has no finding, every Value.input
+            # inside definition `def_i` names one of its STRING inputs:
+            # check_component refuses any other on a primitive component, and
+            # check_instance (with `in_def`) on a nested instance's bindings.
+            # resolve_value runs with `def_i` >= 0 only on those sites
+            # (rewrite and bindings_of under instantiate), and expansion runs
+            # only after a load with no finding. Kept as a refusal so a later
+            # caller that skips load fails closed.
             return _Got.refused(self.keys[ctx.def_i] + String(" declares no STRING input ") + _q(name))
         if v._oneof0_case == 3:
             var g = self.resolve_ref(ctx, v.ref_.value())
