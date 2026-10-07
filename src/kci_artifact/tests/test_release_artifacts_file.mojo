@@ -102,6 +102,7 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("komira_validation_run"))
     want.append(String("komira_test_run_id"))
     want.append(String("komira_test_verdict"))
+    want.append(String("komira_kafka_server"))
     want.append(String("komira_all"))
     assert_equal(len(d.artifacts), len(want))
     for i in range(len(want)):
