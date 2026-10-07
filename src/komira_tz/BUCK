@@ -1,0 +1,25 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# IANA time zones: TZif (RFC 8536) files read into zones, the POSIX TZ string
+# of their footers, UTC to local, and local to UTC with gap and fold policies
+# the caller names. No zone data is bundled: a caller passes TZif bytes or
+# names a zoneinfo directory. The conformance goldens against the pinned
+# tz release (third_party/tzdata) are in
+# //src/tests/conformance/komira_tz_conformance.
+#
+# test_tzif feeds files built byte by byte (each refusal by its exact text;
+# a version 1 block that disagrees with the version 2 one); test_posix_tz
+# checks the grammar and the rule dates against a printed calendar;
+# test_resolve checks gaps, folds and each policy on zones from POSIX TZ
+# strings, against instants built with komira_datetime.
+mojo_library(
+    name = "komira_tz",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_datetime:komira_datetime"],
+    test_srcs = [
+        "tests/test_posix_tz.mojo",
+        "tests/test_resolve.mojo",
+        "tests/test_tzif.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
