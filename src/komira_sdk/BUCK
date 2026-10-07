@@ -22,8 +22,6 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_compression:komira_compression",
-        "//src/komira_core:komira_core",
-        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_expr:komira_expr",
