@@ -4,7 +4,8 @@ Static executables for building a test with debug info and running it
 under kcov in a build action, with a coverage report whose bytes depend only
 on the sources and the tests. Each is built from one Zig file with the pinned
 zig (`zig_exe`, `tools/build/mojo/toolchain.bzl`), and runs with no shell,
-PATH or network.
+PATH or network. [`cov_run.sh`](#cov_run), a busybox script, runs one test
+under kcov with them.
 
 | target | what it does |
 |---|---|
@@ -12,6 +13,7 @@ PATH or network.
 | `:cov_normalize` | rewrites one kcov Cobertura report to repository paths, in a canonical form |
 | `:cov_zig` | the `zig` of a coverage build's link directory: keeps a link's debug info and relocates the action's directories out of it |
 | `:cov_link` | that link directory (`cov_link_dir`): `cov_zig`, `debug_relocate` and the Mojo toolchain's zig, what a coverage build of a `mojo_library` links through ([Coverage builds](../../mojo/README.md#coverage-builds)) |
+| `:cov_run` | the directory a coverage run runs from (`cov_run_dir`): [`cov_run.sh`](#cov_run), kcov (`komira//tools/build/toolchains/kcov:kcov`) and `cov_normalize` |
 
 ## Why: the sandbox path in the debug info
 
@@ -44,12 +46,15 @@ The rewrite has to satisfy two things at once:
   followed by `_` characters names nothing, so `realpath` fails and kcov keeps
   it as written.
 
-So a directory of length L becomes `/` and L-1 `_`, and a name under the
-placeholder is mapped with `--replace-src-path='^/_+:<source root>'` (the
-expression matches the placeholder of any length, so no length needs to
-agree between actions); in a Mojo binary that is only the C runtime, whose
-files are excluded, and the Mojo names are relative (see the table below).
-kcov is run with `--configure=cobertura-full-paths=1`. Without the latter kcov writes each file
+So a directory of length L becomes `/` and L-1 `_`. A name under the
+placeholder could be mapped with `--replace-src-path='^/_+:<source root>'`
+(the expression matches the placeholder of any length, so no length needs to
+agree between actions), as kcov's own check 8 does
+([kcov](../../toolchains/kcov/README.md)); in a Mojo binary that is only the
+C runtime, which is not measured, and the Mojo names are relative (see the
+table below), so [cov_run](#cov_run) uses the one replacement kcov allows
+for something else. kcov is run with
+`--configure=cobertura-full-paths=1`. Without the latter kcov writes each file
 name relative to the common prefix of that one report, so a report holding
 only test files would get bare names, and they could not be mapped back to
 the package.
@@ -57,8 +62,7 @@ the package.
 The second `realpath` means the file names in the report are canonical: they
 start with `realpath(<source root>)`, not with the string given to kcov. The
 caller therefore canonicalizes the source root once (`realpath`) and passes
-that same string both to `--replace-src-path` and as the `--map` ABS of
-`cov_normalize`. Otherwise a working directory reached through a symbolic
+that same string to kcov and as the `--map` ABS of `cov_normalize`. Otherwise a working directory reached through a symbolic
 link gives file names no map covers, and `cov_normalize` refuses every one.
 
 ## debug_relocate
@@ -167,14 +171,13 @@ step that runs kcov over it has to map. Read from the binaries of
 |---|---|---|---|
 | the test (`producer: Mojo`) | none | `tests` + `test_<x>.mojo` | the package's `tests/` |
 | the library | none | `buck-out/v2/art/<cell>/<package>/__<target>__/<hash>/src/<import>` + the file, where `<hash>` names the staged source directory | the package's `<import>/` |
-| the Mojo standard library | none | `oss/modular/mojo/stdlib/std/...` | nothing in the repository: excluded |
-| zig's C runtime (`crt1`, `crti`, `crtn`) | the placeholder `/___...` | `buck-out/v2/art/komira/tools/build/coverage/kcov/__cov_link__/<hash>/cov_link/real/lib/libc/...`, where `<hash>` is the configuration of `:cov_link` | nothing in the repository: excluded |
+| the Mojo standard library | none | `oss/modular/mojo/stdlib/std/...` | nothing in the repository: not measured |
+| zig's C runtime (`crt1`, `crti`, `crtn`) | the placeholder `/___...` | `buck-out/v2/art/komira/tools/build/coverage/kcov/__cov_link__/<hash>/cov_link/real/lib/libc/...`, where `<hash>` is the configuration of `:cov_link` | nothing in the repository: not measured |
 
 Every Mojo name is relative and no Mojo unit records a directory, so kcov
-resolves them against its own working directory: the step that runs kcov
-has to start it in a directory where those relative names resolve to the
-sources, or map each form above. The `--replace-src-path` placeholder
-rule matches only the runtime's names. The runtime's `<hash>` is the same in
+resolves them against its own working directory: [cov_run](#cov_run) starts
+it in a directory where the test's and the library's names resolve to copies
+of the sources, and measures only those. The runtime's `<hash>` is the same in
 every checkout whose execution platforms are configured the same (a
 repository that mounts komira as a cell and copies its platforms); no test
 compares a binary across two checkouts.
@@ -238,7 +241,102 @@ failed write leaves no file, partial or temporary.
 
 Exit status, both tools: 0 done, 1 refused, 2 bad usage.
 
+## cov_run
+
+```
+busybox sh <cov_run dir>/cov_run.sh <busybox> <gate_runner> <compiler_dir> <label>
+    <test_binary> <share> <src_dir> <xml_out> <marker_out>
+    <src_repo> <test> <test_repo> <import> [--gen <file>]... [--env NAME=VALUE]...
+```
+
+The action `mojo_cov_run` of a coverage build
+([Coverage builds](../../mojo/README.md#coverage-builds)) runs one test's
+coverage binary under kcov and writes its report in repository paths. The
+header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
+
+0. **Where the binary names the sources.** Every string in the test binary
+   holding `buck-out/` and, inside an artifact (after buck2's `__<target>__/`
+   directory), the path component `src/<import>` (a directory
+   of the library's sources in its line tables, relative or absolute) must
+   be the `[src]` directory the run stages, or the action fails before kcov
+   runs, naming both. kcov would drop sources named elsewhere without an
+   error, and `lost/` (below) only catches names under the staged path.
+1. **A root of copies.** `bin/kcov` and kcov's `lib/` (its `DT_RPATH`
+   `$ORIGIN/../lib` reaches them), `bin/<test>`, and `share/` holding the
+   test's declared data, its source at its path in the package
+   (`tests/test_x.mojo`, the name its line tables use) and the library's
+   staged sources at the path of `[src]` from the action's directory
+   (`buck-out/v2/art/...`, the name the line tables use for them). Copies,
+   never links: kcov resolves each name with `realpath`. A second copy of
+   the same sources, `lost/`, sits beside it.
+2. **kcov as the gate's program.** `gate_runner.sh`, the release gate's
+   runner byte for byte, runs `bin/kcov` (staged where a test binary would
+   be, so `share/` is the working directory) with the test binary and kcov's
+   flags as its arguments. So the test runs with the gate's PATH,
+   LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR, HOME, `test_env` and data, under
+   kcov, and gate_runner reports a failure as for a gated test (what
+   differs is below). The flags:
+   `--cobertura-only --skip-solibs --configure=cobertura-full-paths=1`;
+   `--include-path` of exactly the staged `[src]` directory and the test
+   source, under `share/` and under `lost/` (an `--exclude-path` per
+   generated source); `--replace-src-path='^(?!/):<lost>/'`.
+3. **Exactly one report** (`--cobertura-only` writes `<out>/cov.xml`).
+4. **`cov_normalize`** maps `<share>/<[src] path>/` to the package's
+   directory of those sources (with a repository prefix for a cell that is
+   not its repository's root: `tools/build/tests/` for the tests cell) and
+   the test's directory to the package's, requires the test's own source in
+   the report, and forbids the action's directories in the output. Then the
+   marker.
+
+komira's kcov exits with the test's status, 128+N when signal N killed it,
+as a shell reports it; kcov v42 as released returns the status of the last
+traced process to exit, so a child the test left behind decided it
+([Patches](../../toolchains/kcov/README.md#patches)). A test that fails under
+kcov fails the action (`GATED TEST FAILED`, then `COVERAGE RUN FAILED`),
+although its release gate passed. kcov refused by the executor (a line of
+its own starting `Can't set me as ptraced: `, `Can't set personality: `,
+`Can't get personality: ` or `Can't attach to `) is named as such, and
+kcov's own error (`kcov: error: `) as kcov's, not the test's.
+
+**What differs from the release gate.** The test is traced (TracerPid is
+kcov's) and runs without address randomization (kcov sets
+`ADDR_NO_RANDOMIZE`); its working directory `share/` also holds its own
+source and the library's sources under `buck-out/` (the line tables name
+them relative to it); kcov shares its TMPDIR (kcov writes there only when it
+cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
+kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`);
+and the run ends when every process the test started has exited, since kcov follows each fork, where the gate waits for the test
+alone. Its CPUs are the gate's: kcov v42 pins itself and the test to one
+CPU, and komira's build patches that out (test 42's `covenv` checks it).
+
+**Why `lost/`.** kcov drops a source file it cannot open without any error,
+so sources staged anywhere but where the line tables name them would leave
+the report silently without them; requiring the test's own source does not
+catch a lost library file. A name that resolves from `share/` is absolute
+after kcov's first `realpath`, and the replacement, which matches only a
+relative name, leaves it alone. A name that does not resolve stays relative,
+becomes `<lost>/<name>`, which exists, so kcov keeps it, and the report
+names it under `lost/`, which no `--map` covers: `cov_normalize` refuses it
+as unmapped, naming the file. With `^/_+:<share>` in that one replacement
+slot instead, the same mistake gives a green run whose report has no
+library file (test 42 shows both). The other names a binary holds, the
+standard library's and the C runtime's, are outside `--include-path` and
+never reach the report; were one to, it would be unmapped too. `lost/` holds
+copies at the staged `[src]` path and the test's path only, so it catches a
+mis-staged tree, not a binary naming the sources by another directory: that
+is step 0's check (test 42's `lostdir`). A future Mojo naming them outside
+`buck-out/` would need step 0 extended.
+
 ## Tests
+
+`cov_run.sh` is tested end to end in the tests cell, as test 42
+([tests README](../../tests/README.md#42-coverage-runs),
+[the checks](../../tests/coverage_runs.md)): per-test reports equal to
+golden files, covcheck reading them, the gate's environment (and CPUs)
+under kcov, a traced test failing its run, the test's own exit status
+(not a child's, 128+N for a signal), lost sources refused, sources named
+by another directory refused before kcov runs, and kcov refused by the
+executor named as such.
 
 Each tool's cases run as a build action (`kcov_tool_cases` in
 [defs.bzl](defs.bzl)) that exits non-zero on the first wrong result, and the

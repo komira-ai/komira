@@ -13,6 +13,10 @@ both `kcov_tool` and the cases take it as an `exec_dep`: with the same
 `exec_compatible_with` on both, they resolve the same execution platform, so
 the binary the cases test and the binary `kcov_tool` hands out are one
 configured target, the same bytes.
+
+`cov_link_dir` and `cov_run_dir` are the two directories a coverage build of
+a `mojo_library` uses (tools/build/mojo/coverage.bzl): the one its test
+binaries link through, and the one each test's kcov run runs from.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -94,3 +98,23 @@ _cov_link_dir = rule(
 kcov_tool_cases = declares_docs(_kcov_tool_cases)
 kcov_tool = declares_docs(_kcov_tool)
 cov_link_dir = declares_docs(_cov_link_dir)
+
+def _run_dir_impl(ctx):
+    out = ctx.actions.copied_dir("cov_run", {
+        "cov_normalize": ctx.attrs.normalize[DefaultInfo].default_outputs[0],
+        "cov_run.sh": ctx.attrs.script,
+        "kcov": ctx.attrs.kcov[DefaultInfo].default_outputs[0],
+    })
+    return [DefaultInfo(default_output = out)]
+
+_cov_run_dir = rule(
+    impl = _run_dir_impl,
+    doc = "The directory a coverage run of a mojo_library test runs from (tools/build/mojo/coverage.bzl): `cov_run.sh` (`script`), `kcov/` (the kcov distribution) and `cov_normalize`. The script finds the other two beside itself.",
+    attrs = {
+        "kcov": attrs.exec_dep(default = "komira//tools/build/toolchains/kcov:kcov"),
+        "normalize": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/kcov:cov_normalize"),
+        "script": attrs.source(),
+    },
+)
+
+cov_run_dir = declares_docs(_cov_run_dir)

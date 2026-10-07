@@ -155,7 +155,9 @@ cache eviction would then re-run all of them.
 changed line holds `KOMIRA PATCH`, and the build fails when an expression
 marks another number of lines than expected (a new kcov changed the code
 there), so a patch is never silently lost. Both make a test run under kcov
-as it runs in the release gate:
+as it runs in the release gate (test 42 of the
+[tests README](../../tests/README.md#42-coverage-runs) holds each red on v42
+as released):
 
 1. **No CPU pin.** v42 pins itself and the traced program to the CPU it
    started on (`tie_process_to_cpu` in `engines/ptrace_linux.cc`:
@@ -199,7 +201,11 @@ of an ELF program:
 
 So a run inside a build action's sandbox writes under `<out-dir>` only,
 unless the FIFO cannot be made there; a coverage run should set `TMPDIR` to
-its scratch directory so that the fallback also stays inside it. The other
+its scratch directory so that the fallback also stays inside it.
+[cov_run](../../coverage/kcov/README.md#cov_run) does: it runs kcov through
+`gate_runner.sh`, whose `TMPDIR` is a directory made for that run under the
+action's working directory, and its output directory is in the action's
+scratch directory. The other
 fixed `/tmp` paths of v42 (`/tmp/kcov-system.pipe`, `/tmp/kcov-data/`)
 belong to the system-wide mode (`kcov_system_lib`, `kcov-system-daemon`),
 which the coverage variant does not run. Check 7 requires that the traced

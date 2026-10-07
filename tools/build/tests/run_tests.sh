@@ -312,7 +312,7 @@
 #      only shrinks), an undocumented symbol under `enforce = True`, and a
 #      root with no package.
 
-#  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
+#  41, 42. Coverage builds and runs: see tools/build/tests/coverage_tests.sh.
 set -uo pipefail
 
 umbrella=1

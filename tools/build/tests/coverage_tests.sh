@@ -22,6 +22,9 @@
 #      no-op relocator fails the build
 #      with the wrapper's exit 4 (tests//negative/coverage:noop[coverage]);
 #      and a value other than true or false fails at load.
+#
+#  42. Coverage runs: see tools/build/tests/coverage_run_tests.sh, sourced at
+#      the end.
 
 if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/coverage_keys.sh" "$LOG" > "$LOG/coverage_keys.log" 2>&1; then
     pass "$(grep -o 'PASS  coverage keys: .*' "$LOG/coverage_keys.log" | cut -c 7-)"
@@ -40,3 +43,5 @@ elif grep -qF '[komira] coverage = "yes": it must be `true` or `false`' "$LOG/co
 else
     fail "coverage_switch_yes: failed without naming the value (see $LOG/coverage_switch_yes.log)"
 fi
+# shellcheck source=tools/build/tests/coverage_run_tests.sh
+. "$ROOT/tools/build/tests/coverage_run_tests.sh"
