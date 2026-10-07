@@ -13,9 +13,11 @@
 #      verb the target's type accepts, values that are resolved (a build
 #      output or a release parameter must have been substituted by the deploy
 #      facade before a cloud ever sees the resource) in `env` of a service
-#      AND of a job, a variable set by `env` or by `secret_env` but not both,
-#      a secret reference with a name, and an image platform written as
-#      `<os>/<cpu>` (empty means `linux/amd64`). And the data rules:
+#      AND of a job, and an image platform written as `<os>/<cpu>` (empty
+#      means `linux/amd64`). And the secret rules (secrets.mojo): no `uses`
+#      on a secret; each `secret_env` entry set by it and not also by
+#      `env`, naming one of a `name` and a `secret`, its `secret` a secret
+#      resource read by the identity that receives it. And the data rules:
 #      `retention` only on a type that takes one (a service or a job is
 #      deleted with its resource) and only DELETE or KEEP; and the rules of
 #      the data types (data.mojo): no `uses` on a table or a bucket (it runs
@@ -25,7 +27,11 @@
 #      messaging rules (messaging.mojo): no `uses` on a queue, a topic or a
 #      subscription; a queue's ack deadline and max deliveries in range, its
 #      dead-letter queue a queue, never in a cycle; a subscription's topic
-#      and queue of their types, each pair once.
+#      and queue of their types, each pair once. And the name rules
+#      (dns.mojo): no `uses` on a DNS zone, a DNS record or a certificate;
+#      DNS names of the name grammar, each in its zone; one zone per domain
+#      and one record set per name and type; a record's values of its type;
+#      a certificate's domains from 1 to 10, none twice.
 #      And the identity rules (grants.mojo): `run_as` names a
 #      `service_account`; no `uses` on a grant; a `uses` line or a grant
 #      names exactly one of a target and a cell resource, with a verb that
@@ -73,9 +79,13 @@ from kci_cloud.adapter import (
 from kci_cloud.catalog import (
     Catalog,
     FIELD_BUCKET,
+    FIELD_CERTIFICATE,
+    FIELD_DNS_RECORD,
+    FIELD_DNS_ZONE,
     FIELD_GRANT,
     FIELD_JOB,
     FIELD_QUEUE,
+    FIELD_SECRET,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_SUBSCRIPTION,
@@ -92,6 +102,9 @@ from kci_cloud.clouds import Clouds
 from kci_cloud.data import data_findings
 from kci_cloud.feed import feeds_of
 from kci_cloud.messaging import messaging_findings
+from kci_cloud.secrets import secret_env_findings, secret_findings
+from kci_cloud.dns import dns_findings
+from kci_cloud.values import check_value
 from kci_cloud.grants import (
     GrantEdge,
     cell_accepted,
@@ -108,112 +121,6 @@ def _index_of_id(resources: List[Resource], id: String) -> Int:
         if resources[i].id == id:
             return i
     return -1
-
-
-def _check_value_ref(
-    catalog: Catalog,
-    resources: List[Resource],
-    owner: String,
-    path: String,
-    r: Ref,
-    mut out: List[Finding],
-):
-    """A `Ref` used as a VALUE: it must name another resource of the list and
-    one of the outputs that resource's type exposes."""
-    if r.resource == owner:
-        out.append(
-            Finding(FINDING_GRAPH, owner, path, String("refers to its own resource"))
-        )
-        return
-    var p = _index_of_id(resources, r.resource)
-    if p < 0:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("ref to missing resource \"") + r.resource + String("\""),
-            )
-        )
-        return
-    if r._oneof0_case == 2:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String(
-                    "a named output is only for the escape hatch, which this kci"
-                    " does not have"
-                ),
-            )
-        )
-        return
-    if r._oneof0_case != 1:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("a value ref must name an output of \"")
-                + r.resource
-                + String("\""),
-            )
-        )
-        return
-    var output = r.standard.value().json_name()
-    var field: Int
-    try:
-        field = body_field(resources[p])
-    except:
-        return  # the producer's own missing type is reported on the producer
-    var t = catalog.index_of(field)
-    if t < 0 or not catalog.types[t].exposes_output(output):
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("\"")
-                + r.resource
-                + String("\" (")
-                + catalog.name_of(field)
-                + String(") does not expose ")
-                + output,
-            )
-        )
-
-
-def _check_value(
-    catalog: Catalog,
-    resources: List[Resource],
-    owner: String,
-    path: String,
-    v: Value,
-    mut out: List[Finding],
-):
-    var arm = v._oneof0_case
-    if arm == 1:
-        return
-    if arm == 3:
-        _check_value_ref(catalog, resources, owner, path, v.ref_.value(), out)
-        return
-    if arm == 2:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("release parameter \"")
-                + v.param.value()
-                + String(
-                    "\" is unresolved; parameters are substituted before a cloud"
-                    " sees the graph"
-                ),
-            )
-        )
-        return
-    out.append(Finding(FINDING_GRAPH, owner, path, String("has no value")))
 
 
 comptime ID_MAX_BYTES = 24
@@ -322,31 +229,6 @@ def _check_image(owner: String, path: String, r: Resource, mut out: List[Finding
                 ),
             )
         )
-
-
-def _check_secret(
-    owner: String,
-    path: String,
-    also_in_env: Bool,
-    name: String,
-    mut out: List[Finding],
-):
-    """One `secret_env` entry: a reference with a name, to a variable that
-    `env` does not also set (the container would get one of two values, and
-    which one is the cloud's choice, not the author's)."""
-    if also_in_env:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String(
-                    "the variable is set by env and by secret_env; set it in one"
-                ),
-            )
-        )
-    if name.byte_length() == 0:
-        out.append(Finding(FINDING_GRAPH, owner, path, String("a secret reference with no name")))
 
 
 def _type_of(catalog: Catalog, r: Resource) -> String:
@@ -725,6 +607,12 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
         if field == FIELD_QUEUE or field == FIELD_TOPIC or field == FIELD_SUBSCRIPTION:
             out.extend(messaging_findings(resources, field, r))
             continue
+        if field == FIELD_SECRET:
+            out.extend(secret_findings(field, r))
+            continue
+        if field == FIELD_DNS_ZONE or field == FIELD_DNS_RECORD or field == FIELD_CERTIFICATE:
+            out.extend(dns_findings(catalog, resources, field, r))
+            continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
             if len(r.uses) > 0:
@@ -761,7 +649,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             if svc.run_as:
                 _check_run_as(catalog, resources, id, String("service.run_as"), svc.run_as.value(), out)
             for entry in svc.env.items():
-                _check_value(
+                check_value(
                     catalog,
                     resources,
                     id,
@@ -769,20 +657,12 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                     entry.value,
                     out,
                 )
-            for entry in svc.secret_env.items():
-                _check_secret(
-                    id,
-                    String("service.secret_env.") + entry.key,
-                    entry.key in svc.env,
-                    entry.value.name,
-                    out,
-                )
         if field == FIELD_JOB:
             ref job = r.job.value()
             if job.run_as:
                 _check_run_as(catalog, resources, id, String("job.run_as"), job.run_as.value(), out)
             for entry in job.env.items():
-                _check_value(
+                check_value(
                     catalog,
                     resources,
                     id,
@@ -790,14 +670,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                     entry.value,
                     out,
                 )
-            for entry in job.secret_env.items():
-                _check_secret(
-                    id,
-                    String("job.secret_env.") + entry.key,
-                    entry.key in job.env,
-                    entry.value.name,
-                    out,
-                )
+        out.extend(secret_env_findings(resources, r))
         for u in range(len(r.uses)):
             ref use = r.uses[u]
             var has = Bool(use.target)

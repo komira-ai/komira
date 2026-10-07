@@ -3,8 +3,9 @@
 # =============================================================================
 #
 # HARD GATE for `decode_plain_flba_decimal_to_float64`'s SIMD path
-# (`plain_flba.mojo:_decode_flba16_simd_chunk` / `_decode_flba8_simd_chunk`).
-# The dictionary decoder's sibling path is tested with the dictionary decoder.
+# (`plain_flba.mojo:_decode_flba16_simd_chunk` / `_decode_flba8_simd_chunk`) and
+# the dict-resolve sibling
+# (`dictionary.mojo:DictionaryDecoder.resolve_flba_decimal_to_float64`).
 #
 # Methodology:
 #   1. Generate a deterministic stream of mixed-sign Int64 values covering
@@ -25,9 +26,12 @@
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.primitive_array import PrimitiveArray
+from std.sys import size_of
 from komira_parquet import (
     decode_plain_flba_decimal_to_float64,
+    DictionaryDecoder,
 )
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 
 
 # =============================================================================
@@ -348,7 +352,57 @@ def test_flba16_simd_parity_tail_handling() raises:
 
 
 # =============================================================================
-# Test 7: Bswap correctness on adversarial bit patterns
+# Test 7: Dict-resolve SIMD parity (FLBA(16))
+# =============================================================================
+#
+# Same shape as the PLAIN path but the per-row load is gathered through
+# `idx[i]`. Verifies that `DictionaryDecoder.resolve_flba_decimal_to_float64`
+# produces the byte-identical Float64 output to the scalar reference under
+# a non-trivial index sequence.
+
+
+def test_flba16_dict_simd_parity_scale_2() raises:
+    """Dict-resolve parity test: 16 unique dict values, 200-row index seq."""
+    # Build dict: 16 unique values from the generator stream.
+    var dict_values = _gen_value_set(16, Int64(42))
+    var dict_bytes: List[UInt8] = []
+    for v in dict_values:
+        var bytes = _encode_int_be(v, 16)
+        for b in bytes:
+            dict_bytes.append(b)
+    var decoder = DictionaryDecoder()
+    decoder.init_dict_fixed_len_byte_array(Span(dict_bytes), 16, 16)
+
+    # Build an index sequence -- 200 rows, mod 16 with a +3 step to avoid
+    # trivial pattern-of-1.
+    comptime N: Int = 200
+    comptime i32_size: Int = size_of[Int32]()
+    var idx_buf = OwnedAlignedBuffer(N * i32_size)
+    var idx_typed = idx_buf.view_typed_mut[DType.int32]()
+    for i in range(N):
+        (idx_typed + i).unsafe_write(Int32((i * 3 + 5) % 16))
+    idx_buf.set_length(Int64(N * i32_size))
+
+    var indices = PrimitiveArray[DType.int32](idx_buf^, N, None, 0, 0)
+
+    # Build the expected output by gathering through the same index seq
+    # and running the scalar reference per-row.
+    var expected: List[Float64] = []
+    expected.resize(N, Float64(0.0))
+    var inv_div = Float64(1.0) / Float64(100.0)  # scale=2
+    for i in range(N):
+        var idx = (i * 3 + 5) % 16
+        # Replicate the reference scalar gather through dict_bytes.
+        var slice_start = idx * 16
+        var as_int = _scalar_flba_value_to_int64_be(dict_bytes.unsafe_ptr() + slice_start, 16)
+        expected[i] = Float64(as_int) * inv_div
+
+    var got = decoder.resolve_flba_decimal_to_float64(indices, 2)
+    _assert_lane_equivalent(expected, got, "FLBA16-DICT/scale2")
+
+
+# =============================================================================
+# Test 8: Bswap correctness on adversarial bit patterns
 # =============================================================================
 #
 # Targets the bswap path with values that have asymmetric byte patterns
