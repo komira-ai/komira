@@ -10,9 +10,13 @@ import "komira/chat/v1/chat.proto";
 // that name. Every other method takes the request message as the body. An
 // error reply is an ApiError.
 //
-// A route scoped to a channel answers 404 to a caller who is not a member of
-// that channel, whether or not the channel exists. EraseSubject requires the
-// `admin` action on the space.
+// Who may call a route scoped to a channel: GetChannel and JoinChannel on a
+// PUBLIC channel answer to any caller (ListChannels with `browse` lists those
+// channels), except that JoinChannel on an archived channel is refused, since
+// an archived channel is read-only. Every other route scoped to a channel, and
+// every route on a PRIVATE channel or a DM, answers 404 to a caller who is not
+// a member of that channel, whether or not the channel exists. EraseSubject
+// requires the `admin` action on the space.
 //
 // No code is generated from this file (a generated client would bring a gRPC
 // runtime the chat server does not use); protoc reads it with chat.proto in

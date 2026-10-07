@@ -1,10 +1,13 @@
 # The proto3 canonical JSON of one value of every komira.chat.v1 message, one
 # message per line: the message name, one space, the JSON. Every field of
-# every message is set to a value other than its default, so each field has a
-# key here; the values exercise the codec and need not be ones a server would
-# send together. The same values, written as protoc text, are
-# tests/fixtures/corpus.txtpb (one field of ChatCorpus per message, in the
-# order of this file). tests/test_chat_goldens.mojo reads both.
+# every message has a key here: each is set to a value other than its default,
+# except the `optional` fields `topic` and `archived` of UpdateChannelRequest,
+# which are present at their defaults to show that a present field is written.
+# The values exercise the codec and need not be ones a server would send
+# together. The lines are in the order chat.proto declares the messages. The
+# same values, written as protoc text, are tests/fixtures/corpus.txtpb (one
+# field of ChatCorpus per message, in the order of this file).
+# tests/test_chat_goldens.mojo reads both.
 Subject {"iss":"https://issuer.example.com","sub":"user-0001"}
 User {"userId":"u-ada","subject":{"iss":"https://issuer.example.com","sub":"user-0001"},"displayName":"Ada","email":"ada@example.com"}
 Channel {"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]}

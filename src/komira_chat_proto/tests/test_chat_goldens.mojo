@@ -28,8 +28,11 @@
 #        changed field number (or wire type) leaves protoc's field unread.
 #     4. this package encodes that value to protoc's bytes exactly.
 #   test_every_message_has_a_golden_and_a_corpus_field
-#     the golden file and the corpus each hold exactly the messages
-#     `_check_all` names, in its order.
+#     the golden file names exactly the messages chat.proto declares, in
+#     declaration order, and the corpus has one field per message: a message
+#     added to chat.proto without a golden line (or one moved) is reported by
+#     name. Tests 1-4 then hold `_check_all` to the golden order, so a message
+#     with a golden line but no `_check` call fails there.
 #   test_protoc_accepted_the_corpus
 #     the report of `chat_corpus_fixture` is staged: protoc decoded the
 #     committed bytes to corpus.txtpb and encoded corpus.txtpb to them.
@@ -116,9 +119,13 @@ comptime _CORPUS: String = "src/komira_chat_proto/tests/fixtures/corpus.canonica
 # The report of the package's `chat_corpus_fixture` target (protoc's check of
 # the corpus), staged as test data.
 comptime _PROTOC_REPORT: String = "src/komira_chat_proto/tests/fixtures/corpus_protoc_check.txt"
+# The package's own chat.proto, staged as test data.
+comptime _PROTO: String = "src/komira_chat_proto/chat.proto"
 
-# The number of messages chat.proto declares, and so of golden lines, corpus
-# fields and `_check_all` calls.
+# The number of `_check` calls in `_check_all`. The golden file is held to
+# chat.proto's messages by `test_every_message_has_a_golden_and_a_corpus_field`
+# and `_check_all` is held to the golden file by `_check`, so this is also the
+# number of messages chat.proto declares.
 comptime _MESSAGES: Int = 62
 
 comptime _LEG_JSON: Int = 0
@@ -155,6 +162,29 @@ def _load_goldens() raises -> Goldens:
         g.names.append(String(line[byte=0:sp]))
         g.jsons.append(String(line[byte=sp + 1 : line.byte_length()]))
     return g^
+
+
+def _proto_message_names() raises -> List[String]:
+    """The names of the messages chat.proto declares, in declaration order:
+    every line that starts `message <Name>` at column 0 (chat.proto nests no
+    message)."""
+    var text = _read(_PROTO)
+    var names = List[String]()
+    var b = text.as_bytes()
+    var start = 0
+    for i in range(len(b) + 1):
+        if i < len(b) and b[i] != UInt8(ord("\n")):
+            continue
+        var line = String(text[byte=start:i])
+        start = i + 1
+        if not line.startswith("message "):
+            continue
+        var rest = String(line[byte=8 : line.byte_length()])
+        var end = rest.find(" ")
+        if end <= 0:
+            raise Error("chat.proto: a `message` line without `<Name> {`: " + line)
+        names.append(String(rest[byte=0:end]))
+    return names^
 
 
 def _hex_value(c: UInt8) raises -> UInt8:
@@ -354,6 +384,17 @@ def test_protoc_corpus() raises:
 
 def test_every_message_has_a_golden_and_a_corpus_field() raises:
     var g = _load_goldens()
+    var declared = _proto_message_names()
+    for k in range(min(len(declared), len(g.names))):
+        assert_equal(
+            g.names[k],
+            declared[k],
+            "golden line " + String(k) + " names chat.proto's message " + String(k),
+        )
+    for k in range(len(g.names), len(declared)):
+        raise Error("chat.proto declares " + declared[k] + ", which has no golden line")
+    for k in range(len(declared), len(g.names)):
+        raise Error("golden line names " + g.names[k] + ", which chat.proto does not declare")
     assert_equal(len(g.names), _MESSAGES, "golden lines")
     assert_equal(len(_corpus_fields()), _MESSAGES, "corpus fields")
 
