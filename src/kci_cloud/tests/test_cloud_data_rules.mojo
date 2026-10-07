@@ -85,6 +85,7 @@ from kci_cloud import (
     FIELD_QUEUE,
     FIELD_TOPIC,
     FIELD_SUBSCRIPTION,
+    FIELD_SECRET,
     Feed,
     FIELD_SERVICE,
     FINDING_GRAPH,
@@ -226,6 +227,7 @@ struct _Data(CloudAdapter, Movable):
         l.append(FIELD_QUEUE)
         l.append(FIELD_TOPIC)
         l.append(FIELD_SUBSCRIPTION)
+        l.append(FIELD_SECRET)
         return l^
 
     def absences(self) -> List[Absence]:
