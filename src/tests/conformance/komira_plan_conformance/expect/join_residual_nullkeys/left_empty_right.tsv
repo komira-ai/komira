@@ -4,8 +4,8 @@
 # derivation: the right input is empty (rid < 0 keeps no row, §1.2).
 # §11.6: a LEFT join with an empty right side returns every left row, padded
 # (§3.4): all five, every right column NULL.
-# Types: the left columns then the right, as scanned; every input
-# column is nullable, which §3.4 needs of a padded column.
+# Types: the left columns then the right (§3.13); a padded side is
+# nullable (§3.13), and every input column is nullable already.
 lid:int64?	lk:int64?	lv:int64?	rid:int64?	rk:int64?	rw:int64?
 1	1	10	\N	\N	\N
 2	2	20	\N	\N	\N

@@ -17,10 +17,12 @@
 #   join_left      lid, lk, lv: keys 1, 2, 2, null, 3; lv NULL on lid 3.
 #   join_right     rid, rk, rw: keys 2, 2, null, 4, 1.
 #                  Every column of both join inputs is nullable, the ids
-#                  included: an outer join pads the other side's columns
-#                  with NULL (query semantics §3.4), and a column that holds
-#                  a NULL is nullable. The names differ between the two
-#                  sides, so no output column is renamed.
+#                  included. §3.13 makes a padded side nullable whatever its
+#                  input nullability, but LogicalPlan.join keeps the input's
+#                  nullability today (query semantics, "Code that does not
+#                  follow", item 12); nullable inputs keep these cases off
+#                  that defect. The names differ between the two sides, so
+#                  no output column is renamed (§3.14).
 #   sort_rows      id, a, b, f: a = 3, null, 1, 3, null, 2, 3 (ties and two
 #                  NULLs); b with one NULL; f a float64 holding 0.0 twice,
 #                  -0.0 once (on a larger id than the first 0.0) and a NULL.

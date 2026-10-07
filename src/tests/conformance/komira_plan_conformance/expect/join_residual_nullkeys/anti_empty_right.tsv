@@ -3,7 +3,7 @@
 #  float: ulps=0
 # derivation: the right input is empty (rid < 0 keeps no row, §1.2).
 # §11.6: an ANTI join with an empty right side returns every left row: all
-# five, left columns only (§3.2).
+# five, once each, left columns only (§3.12).
 lid:int64?	lk:int64?	lv:int64?
 1	1	10
 2	2	20

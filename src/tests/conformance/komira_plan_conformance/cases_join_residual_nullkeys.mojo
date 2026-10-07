@@ -3,17 +3,19 @@
 # join_residual_nullkeys.
 # =============================================================================
 #
-# NULLs in joins, query semantics §3.1 to §3.5, §3.9 and §11.6. Over datasets
-# join_left (lk = 1, 2, 2, NULL, 3) and join_right (rk = 2, 2, NULL, 4, 1),
-# joined on lk = rk: a NULL key matches nothing in INNER, LEFT, RIGHT, FULL
-# and SEMI joins (and so is returned by ANTI); the two k = 2 rows on each
-# side give 2 x 2 = 4 pairs; an outer join pads the other side with NULL; a
-# residual `lv < rw` that is NULL drops the pair like FALSE; a join with an
-# empty side follows §11.6. Every expectation is HAND, its derivation in the
-# .tsv. No case's root is a SORT, so every case compares its rows as a
-# multiset (§4.8).
+# NULLs in joins, citing query semantics §1.2, §3.1, §3.2, §3.4, §3.5, §3.9,
+# §3.10 to §3.13 and §11.6. Over datasets join_left (lk = 1, 2, 2, NULL, 3)
+# and join_right (rk = 2, 2, NULL, 4, 1), joined on lk = rk: a NULL key
+# matches nothing in INNER, LEFT, RIGHT, FULL and SEMI joins (and so is
+# returned by ANTI); the two k = 2 rows on each side give 2 x 2 = 4 pairs;
+# an outer join pads the other side with NULL; a residual `lv < rw` that is
+# NULL drops the pair like FALSE; a join with an empty side follows §11.6.
+# Every expectation is HAND, its derivation in the .tsv. No case's root is a
+# SORT, so every case compares its rows as a multiset (§4.8).
 #
-# The defect each case would catch once it executes:
+# The defect each case would catch once a plan executes (nothing executes
+# one here yet, so "catch" means the expected rows differ from the rows the
+# defect would give):
 #   inner_null_keys               NULL = NULL matching (a lid 4 / rid 3 row);
 #                                 a duplicate key matched once, not 2 x 2
 #   inner_null_keys_sort_merge    the same, on the SORT_MERGE kernel (§3.1:
