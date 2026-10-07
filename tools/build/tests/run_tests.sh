@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_tests.sh -- end-to-end tests of the Mojo rules. Each test can fail.
 #
-# usage: tools/build/tests/run_tests.sh [--no-umbrella] [--no-run] [--no-uncached] [--host-check-only]
+# usage: tools/build/tests/run_tests.sh [--no-umbrella] [--no-run] [--no-uncached] [--require-install] [--host-check-only]
 #        (from the repo root; BUCK2 overrides the binary)
 #
 # Where the tests run is where this checkout builds: read from the execution
@@ -169,7 +169,12 @@
 #      the verdict, --arg values arrive in order and unexported, exit 77 is
 #      red, and a test killed by SIGKILL or SIGABRT fails with its
 #      own status (137, 134) and no marker; five inadmissible data/env
-#      declarations are refused at analysis.
+#      declarations are refused at analysis. A library's `test_deps`
+#      (tests//functional/test_deps) reach its welded tests: a test imports a
+#      test-support package the library does not depend on; and nothing else
+#      (tests//negative/test_deps): the library's source and a consumer of
+#      the library importing it fail to compile, and an entry that is not a
+#      mojo_library, or is also in `deps`, is refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
 #      analysis only): mojo_test and a mojo_library's gated tests at -O1,
 #      mojo_binary and the shared libraries of a bundle at -O3, a per-target
@@ -185,13 +190,15 @@
 #       a new library gets its package from the macro with no declaration; the
 #       refusals, as targets that build and releases that do not; the stamp; two
 #       uncached builds, skipped with --no-uncached; a pixi install from a
-#       file:// channel and a Mojo program importing the library, skipped with
-#       --no-install).
+#       file:// channel and a Mojo program importing the library, skipped
+#       without pixi or network, a FAIL instead with --require-install, as the
+#       nightly workflow runs it). tests//functional/install_gate:cases holds
+#       that switch: no pixi on PATH is a SKIP line, and a FAIL line with it.
 #  33b. The conda package set and metapackage: see tools/build/tests/functional/conda_set.sh
 #       (every library's package target builds; the stamped releases; the metapackage
 #       from the members' manifests; kci's own parser over the emitted manifests; the
 #       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
-#       the metapackage alone, skipped with --no-install).
+#       the metapackage alone, skipped or failed as in 33a).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -324,19 +331,23 @@
 #      site in an FFI module, an unlisted marked module) or ledger defect,
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
+#  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
+#  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
 set -uo pipefail
 
 umbrella=1
 run=1
 uncached=1
+require_install=0
 host_only=0
 for a in "$@"; do
     case "$a" in
         --no-umbrella) umbrella=0 ;;
         --no-run) run=0 ;;
         --no-uncached) uncached=0 ;;
+        --require-install) require_install=1 ;;
         --host-check-only) host_only=1 ;;
-        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached] [--host-check-only]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached] [--require-install] [--host-check-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -475,6 +486,7 @@ expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests/
 expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
 expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
 expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
+expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action
@@ -928,6 +940,11 @@ expect_red td_bad_dest "holds an empty, \`.\` or \`..\` segment" tests//negative
 expect_red td_bad_dest_clash "is both a file and the directory of" tests//negative/test_data:bad_dest_clash
 expect_red td_bad_data_entry "test_data[\"tests/test_nope.mojo\"]: not a test_srcs entry" tests//negative/test_data:bad_data_entry
 expect_red td_bad_env_owned "env sets TEST_TMPDIR, which the test runner sets itself" tests//negative/test_data:bad_env_owned
+expect_green td_test_deps tests//functional/test_deps:tdlib
+expect_red td_test_deps_src "unable to locate module 'tdhelper'" tests//negative/test_deps:src_imports_test_dep
+expect_red td_test_deps_consumer "unable to locate module 'tdhelper'" tests//negative/test_deps:consumer_of_test_dep
+expect_red td_test_deps_not_mojo "test_deps entry tests//negative/test_deps:not_a_package is not a Mojo package" tests//negative/test_deps:not_mojo
+expect_red td_test_deps_also_in_deps "is in both deps and test_deps" tests//negative/test_deps:also_in_deps
 expect_red td_bad_env_name "is not a shell variable name" tests//negative/test_data:bad_env_name
 
 # 30
@@ -955,6 +972,8 @@ fi
 # 33a
 conda_args=()
 [ "$uncached" = 1 ] || conda_args+=(--no-uncached)
+[ "$require_install" = 0 ] || conda_args+=(--require-install)
+expect_green install_gate tests//functional/install_gate:cases
 BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
 while IFS= read -r line; do
     case "$line" in
@@ -1213,6 +1232,14 @@ for want in \
 done
 expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
 expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
+
+# 43
+# shellcheck source=tools/build/tests/coverage_run_tests.sh
+. "$ROOT/tools/build/tests/coverage_run_tests.sh"
+
+# 44
+# shellcheck source=tools/build/tests/public_boundary_tests.sh
+. "$ROOT/tools/build/tests/public_boundary_tests.sh"
 
 # 37
 pt_rc=0

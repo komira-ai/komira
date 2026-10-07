@@ -96,6 +96,32 @@ DATA="$T/src/$PREFIX/data"
 G="$T/gen"
 mkdir -p "$G"
 
+# The patches (README.md, "Patches"): kcov_patch <file> <count> <sed expression>
+# rewrites <file> under src/, and must add exactly <count> lines holding
+# KOMIRA PATCH: an expression that matches nothing (a new kcov) fails here.
+kcov_patch() {
+    f="$S/$1"
+    before=$(grep -c -F "KOMIRA PATCH" "$f" || true)
+    sed -e "$3" "$f" >"$f.patched"
+    after=$(grep -c -F "KOMIRA PATCH" "$f.patched" || true)
+    [ "$((after - before))" = "$2" ] || { echo "kcov_build: the patch of $1 marked $((after - before)) line(s), expected $2" >&2; exit 2; }
+    mv "$f.patched" "$f"
+}
+# 1. No CPU pin: kcov pins itself and the test to the CPU it started on
+#    (tie_process_to_cpu: sched_setaffinity to one CPU), so every traced test
+#    ran on one CPU where the release gate gives it all of the worker's.
+kcov_patch engines/ptrace_linux.cc 1 \
+    's|^\([[:space:]]*\)panic_if(sched_setaffinity(pid, CPU_ALLOC_SIZE(max_cpu), set) < 0, "Can.t set CPU affinity. Coincident won.t work");$|\1(void) pid; /* KOMIRA PATCH: no CPU pin */|'
+# 2. The exit status is the test's: kcov set it from the exit of every traced
+#    process, so the last one to exit (a child the test left behind) won,
+#    and from a signal death as the bare signal number.
+kcov_patch collector.cc 1 \
+    '/^[[:space:]]*case ev_exit:$/{n;s|m_exitCode = ev.data;|/* KOMIRA PATCH: not the status of another process */|;}'
+kcov_patch collector.cc 1 \
+    '/^[[:space:]]*case ev_signal_exit:$/,/^[[:space:]]*case ev_exit_first_process:$/s|m_exitCode = ev.data;|m_exitCode = 128 + ev.data; /* KOMIRA PATCH: as a shell reports it */|'
+kcov_patch engines/ptrace.cc 1 \
+    's|^\([[:space:]]*\)if (!childrenLeft())$|\1if (who == m_firstChild) /* KOMIRA PATCH: the test, not another process */|'
+
 # bin-to-c-source.py of kcov, in sh: <out.cc> (<file> <name>)...
 bin2c() {
     o=$1
@@ -188,7 +214,9 @@ cp -L "$C/libgcc/lib/libgcc_s.so.1" "$OUT/lib/libgcc_s.so.1"
 mkdir -p "$OUT/share/licenses/kcov"
 cp "$T/src/$PREFIX/COPYING" "$T/src/$PREFIX/COPYING.externals" "$OUT/share/licenses/kcov/"
 cat >"$OUT/share/licenses/NOTICE" <<'EOF'
-This directory is kcov, built from the source archive of its tag. kcov is
+This directory is kcov, built from the source archive of its tag with the
+changes komira's kcov_build.sh makes (each changed line says KOMIRA PATCH:
+no CPU pin; the exit status is the traced program's). kcov is
 GPL-2.0 (kcov/COPYING); the files of its data/ that bin/kcov embeds are
 listed with their licences in kcov/COPYING.externals.
 

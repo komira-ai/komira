@@ -27,6 +27,12 @@ interface. This package names no cloud:
   * data.mojo        — the rules of the data types (table, bucket): their
                        graph findings, a table's key as text, the index
                        role `ix-<h>`, and the refusal of a changed key.
+  * feed.mojo        — the FEEDS: the list's subscriptions as (subscription,
+                       topic, queue), handed to every adapter's `check` and
+                       `lower`.
+  * messaging.mojo   — the rules of the messaging types (queue, topic,
+                       subscription): their graph findings and the queue's
+                       versioned ack deadline.
   * labels.mojo      — the standard label rule (encode, decode, check), and
                        komira_validation_run's two marks: the retention
                        mark `kci-retention=<retain|delete>` on every object
@@ -68,6 +74,9 @@ from kci_cloud.catalog import (
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
+    FIELD_QUEUE,
+    FIELD_TOPIC,
+    FIELD_SUBSCRIPTION,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -77,6 +86,8 @@ from kci_cloud.catalog import (
     ACCESS_WRITE,
     ACCESS_READ_WRITE,
     ACCESS_DESCRIBE,
+    ACCESS_SEND,
+    ACCESS_RECEIVE,
     RETENTION_NONE,
     RETENTION_DELETE,
     RETENTION_KEEP,
@@ -85,6 +96,9 @@ from kci_cloud.catalog import (
     ROLE_BUCKET,
     ROLE_IDENTITY,
     ROLE_GRANT,
+    ROLE_QUEUE,
+    ROLE_TOPIC,
+    ROLE_SUBSCRIPTION,
     BodyArm,
     body_arms,
     body_field,
@@ -145,6 +159,17 @@ from kci_cloud.data import (
     key_change_findings,
     path_text,
     table_key_text,
+)
+from kci_cloud.feed import Feed, feeds_into, feeds_of, field_of_id
+from kci_cloud.messaging import (
+    ACK_DEADLINE_DEFAULT_SECONDS,
+    ACK_DEADLINE_MAX_SECONDS,
+    ACK_DEADLINE_MIN_SECONDS,
+    MAX_DELIVERIES_MAX,
+    MAX_DELIVERIES_MIN,
+    ack_deadline_seconds,
+    dead_letter_of,
+    messaging_findings,
 )
 from kci_cloud.labels import (
     LABEL_VALUE_MAX,
