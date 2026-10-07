@@ -7,16 +7,25 @@
 #    az://account.blob.core.windows.net/container/...; the Blob service's
 #    https://account.blob.core.windows.net/container/...; an emulator's
 #    path-style http://host:port/account/container/...; the scheme and the
-#    host compared case-insensitively; $web as a container; an empty path.
+#    host compared case-insensitively; $web as a container; an empty path;
+#    DuckDB's abfss://account.dfs.core.windows.net/filesystem/... form.
 #  * parse_azure_url, refused by exact message: another scheme, no scheme,
 #    no container, a container or account name Azure does not allow, an abfs
 #    host that is not an Azure storage host, an https host that is not a
-#    blob host, plaintext http:// to Azure's own host, an http:// URL that is
+#    blob host, plaintext http:// to Azure's own host (in any letter case,
+#    with or without a port), an http:// URL that is
 #    not path-style, and a query (a SAS token pasted into the URL), whose
 #    refusal does not echo the token.
+#  * parse_azure_url, encoded paths: the https:// resource URI's and Hadoop
+#    container@host form's paths are percent-decoded once (year%3D2024 is
+#    year=2024), az:// and DuckDB's host-first form are taken as written,
+#    and a bad escape or a decoded path that is not UTF-8 is refused.
 #  * azure_arm_config_for_url: a URL naming no account or endpoint takes the
-#    configuration's; one naming them uses its own; a different account or
-#    endpoint in the configuration, or no account anywhere, is refused.
+#    configuration's; one naming the configured endpoint (scheme and host
+#    case-insensitive, a trailing / ignored) uses it; a different account,
+#    an endpoint other than the configured one ("" is Azure's own, so a URL
+#    naming an emulator or any plaintext host is refused against it), or no
+#    account anywhere is refused.
 #  * azure_endpoint_is_plaintext and azure_config_for: "" is Azure's own
 #    https endpoint, virtual-hosted; http:// is plaintext and https:// TLS,
 #    case-insensitively; the host and port land in AzureConfig; another
@@ -76,6 +85,43 @@ def test_accepted_urls() raises:
         "devstoreaccount1", "lake", "k.bin", True, "http://127.0.0.1:10000", True,
     )
     _row("az://$web/index.html", "", "$web", "index.html", False, "", False)
+    _row("abfss://myacct.dfs.core.windows.net/lake/x/y", "myacct", "lake", "x/y", True, "", False)
+
+
+def test_encoded_paths() raises:
+    # The https:// resource URI and Hadoop's abfs[s]://container@host are
+    # percent-encoded and decoded once here (komira_azure_blob encodes the
+    # blob name again on the wire); az:// and DuckDB's host-first form are
+    # taken as written.
+    _row(
+        "https://myacct.blob.core.windows.net/lake/year%3D2024/a.parquet",
+        "myacct", "lake", "year=2024/a.parquet", True, "", False,
+    )
+    _row(
+        "abfss://lake@myacct.dfs.core.windows.net/a%20b/%C3%A9.bin",
+        "myacct", "lake", "a b/é.bin", True, "", False,
+    )
+    _row("az://lake/year%3D2024/a", "", "lake", "year%3D2024/a", False, "", False)
+    _row(
+        "az://lake@myacct.blob.core.windows.net/year%3D2024",
+        "myacct", "lake", "year%3D2024", True, "", False,
+    )
+    _row(
+        "abfss://myacct.dfs.core.windows.net/lake/year%3D2024",
+        "myacct", "lake", "year%3D2024", True, "", False,
+    )
+    with assert_raises(
+        contains="fs_registry: an Azure URL's path has a '%' not followed by two hex digits, got 'https://myacct.blob.core.windows.net/lake/a%2'"
+    ):
+        _ = parse_azure_url("https://myacct.blob.core.windows.net/lake/a%2")
+    with assert_raises(
+        contains="fs_registry: an Azure URL's path has a '%' not followed by two hex digits, got 'abfs://lake@myacct.blob.core.windows.net/a%2zb'"
+    ):
+        _ = parse_azure_url("abfs://lake@myacct.blob.core.windows.net/a%2zb")
+    with assert_raises(
+        contains="fs_registry: an Azure URL's decoded path is not UTF-8, got 'https://myacct.blob.core.windows.net/lake/a%FF'"
+    ):
+        _ = parse_azure_url("https://myacct.blob.core.windows.net/lake/a%FF")
 
 
 comptime _SCHEME_MSG = (
@@ -127,6 +173,14 @@ def test_refused_urls() raises:
     ):
         _ = parse_azure_url("http://myacct.blob.core.windows.net/lake/x")
     with assert_raises(
+        contains="fs_registry: an http:// Azure URL names Azure's own endpoint 'MyAcct.Blob.Core.Windows.Net'; plaintext is only for an emulator endpoint, use https://"
+    ):
+        _ = parse_azure_url("http://MyAcct.Blob.Core.Windows.Net/lake/x")
+    with assert_raises(
+        contains="fs_registry: an http:// Azure URL names Azure's own endpoint 'myacct.blob.core.windows.net'; plaintext is only for an emulator endpoint, use https://"
+    ):
+        _ = parse_azure_url("http://myacct.blob.core.windows.net:80/lake/x")
+    with assert_raises(
         contains="fs_registry: an http:// Azure URL is path-style, http://<host>[:<port>]/<account>/<container>/<path>, got 'http://127.0.0.1:10000/devstoreaccount1'"
     ):
         _ = parse_azure_url("http://127.0.0.1:10000/devstoreaccount1")
@@ -162,11 +216,34 @@ def test_arm_config_for_url() raises:
 
     var from_url = azure_arm_config_for_url(
         parse_azure_url("http://127.0.0.1:10000/devstoreaccount1/lake/k"),
-        AzureArmConfig(account=String(""), endpoint=String(""), path_style=False),
+        AzureArmConfig(account=String(""), endpoint=String("HTTP://127.0.0.1:10000/"), path_style=True),
     )
     assert_equal(from_url.account, "devstoreaccount1")
-    assert_equal(from_url.endpoint, "http://127.0.0.1:10000")
+    assert_equal(from_url.endpoint, "HTTP://127.0.0.1:10000/")
     assert_true(from_url.path_style)
+
+    # "" is Azure's own endpoint, never "unset": a URL naming another
+    # endpoint (here plaintext) does not override it, configured account or
+    # not, so the credential never follows the URL to that host.
+    with assert_raises(
+        contains="fs_registry: the Azure URL names endpoint 'http://evil.example:80' and the configured endpoint is 'Azure's own'"
+    ):
+        _ = azure_arm_config_for_url(
+            parse_azure_url("http://evil.example:80/myacct/lake/x"), AzureArmConfig.azure("myacct")
+        )
+    with assert_raises(
+        contains="fs_registry: the Azure URL names endpoint 'http://127.0.0.1:10000' and the configured endpoint is 'Azure's own'"
+    ):
+        _ = azure_arm_config_for_url(
+            parse_azure_url("http://127.0.0.1:10000/devstoreaccount1/lake/k"),
+            AzureArmConfig(account=String(""), endpoint=String(""), path_style=False),
+        )
+    with assert_raises(
+        contains="fs_registry: the Azure URL names endpoint 'http://127.0.0.1:10001' and the configured endpoint is 'http://127.0.0.1:10000'"
+    ):
+        _ = azure_arm_config_for_url(
+            parse_azure_url("http://127.0.0.1:10001/devstoreaccount1/lake/k"), emu
+        )
 
     with assert_raises(
         contains="fs_registry: the Azure URL names account 'myacct' and the configured account is 'otheracct'"
@@ -266,6 +343,7 @@ def test_azure_config_for() raises:
 
 def main() raises:
     test_accepted_urls()
+    test_encoded_paths()
     test_refused_urls()
     test_arm_config_for_url()
     test_endpoint_scheme()

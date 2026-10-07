@@ -15,7 +15,11 @@
 # picks the connector the way the S3 arm's does: plaintext only when the
 # endpoint says `http` (an emulator such as Azurite), TLS otherwise; any
 # other scheme is refused. `path_style` puts the account in the first path
-# segment instead of the host, as Azurite addresses it.
+# segment instead of the host, as Azurite addresses it. The endpoint is
+# configuration only: a URL that names an endpoint must name the configured
+# one (`azure_arm_config_for_url`; "" is Azure's own, never "unset"), so a
+# URL cannot send the caller's credential to a host the configuration does
+# not name.
 #
 # THE URLS `parse_azure_url` accepts (each scheme compared ASCII
 # case-insensitively, RFC 3986 section 3.1):
@@ -36,6 +40,15 @@
 #                                                 resource URI)
 #   http://<host>[:<port>]/<account>/<container>/<path>
 #                                                 (an emulator, path-style)
+#
+# ENCODING. The https:// resource URI and Hadoop's abfs[s]://container@host
+# form are URIs whose path is percent-encoded (RFC 3986 section 2.1; Azure's
+# SDKs build and parse them so): their path is decoded once here, a `%` not
+# followed by two hex digits and a decoded path that is not UTF-8 are
+# refused. az:// in every form and DuckDB's abfs[s]://<account>.<svc>...
+# form are taken as written, as fsspec/adlfs and DuckDB take them. The blob
+# name komira_azure_blob receives is the decoded one, which it encodes on
+# the wire.
 #
 # abfs and abfss are read through the flat Blob API, as AzureFs serves them:
 # the ABFS file system is the container and the file path the blob name; a
@@ -189,6 +202,97 @@ def _account_of_host(host: String, allow_dfs: Bool) raises -> String:
     )
 
 
+def _hex_value(c: UInt8) -> Int:
+    if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
+        return Int(c) - ord("0")
+    if c >= UInt8(ord("A")) and c <= UInt8(ord("F")):
+        return Int(c) - ord("A") + 10
+    if c >= UInt8(ord("a")) and c <= UInt8(ord("f")):
+        return Int(c) - ord("a") + 10
+    return -1
+
+
+def _is_valid_utf8(b: Span[UInt8, _]) -> Bool:
+    """RFC 3629 well-formedness: no overlong form, no surrogate, nothing
+    above U+10FFFF, no truncated sequence."""
+    var i = 0
+    var n = len(b)
+    while i < n:
+        var c = Int(b[i])
+        if c < 0x80:
+            i += 1
+            continue
+        if c < 0xC2 or c > 0xF4:
+            return False
+        var need = 1
+        var lo = 0x80
+        var hi = 0xBF
+        if c == 0xE0:
+            need = 2
+            lo = 0xA0
+        elif c == 0xED:
+            need = 2
+            hi = 0x9F
+        elif c >= 0xE1 and c <= 0xEF:
+            need = 2
+        elif c == 0xF0:
+            need = 3
+            lo = 0x90
+        elif c == 0xF4:
+            need = 3
+            hi = 0x8F
+        elif c >= 0xF1 and c <= 0xF3:
+            need = 3
+        if i + need >= n:
+            return False
+        var c1 = Int(b[i + 1])
+        if c1 < lo or c1 > hi:
+            return False
+        for k in range(2, need + 1):
+            var ck = Int(b[i + k])
+            if ck < 0x80 or ck > 0xBF:
+                return False
+        i += need + 1
+    return True
+
+
+def _percent_decode_path(path: String, url: String) raises -> String:
+    """`path` with each `%XX` decoded once (RFC 3986 section 2.1). Raises
+    for a `%` not followed by two hex digits and for decoded bytes that are
+    not UTF-8, naming `url`."""
+    var bs = path.as_bytes()
+    var n = len(bs)
+    var out = List[UInt8](capacity=n)
+    var i = 0
+    while i < n:
+        var c = bs[i]
+        if c == UInt8(ord("%")):
+            var h = -1
+            var l = -1
+            if i + 2 < n:
+                h = _hex_value(bs[i + 1])
+                l = _hex_value(bs[i + 2])
+            if h < 0 or l < 0:
+                raise Error(
+                    "fs_registry: an Azure URL's path has a '%' not followed by"
+                    " two hex digits, got '"
+                    + url
+                    + "'"
+                )
+            out.append(UInt8(h * 16 + l))
+            i += 3
+            continue
+        out.append(c)
+        i += 1
+    if not _is_valid_utf8(Span(out)):
+        raise Error(
+            "fs_registry: an Azure URL's decoded path is not UTF-8, got '"
+            + url
+            + "'"
+        )
+    return String(unsafe_from_utf8=Span(out))
+
+
 def _split_first(s: String) -> Tuple[String, String]:
     """`s` split at its first `/`: (before, after), after "" when none."""
     var at = s.find("/")
@@ -230,6 +334,8 @@ def parse_azure_url(url: String) raises -> AzureUrl:
                 _slice(authority, at + 1, authority.byte_length()), True
             )
             path = tail
+            if scheme != "az":
+                path = _percent_decode_path(tail, url)
             names_endpoint = True
         elif authority.find(".") >= 0:
             account = _account_of_host(authority, True)
@@ -244,7 +350,7 @@ def parse_azure_url(url: String) raises -> AzureUrl:
         account = _account_of_host(authority, False)
         var p = _split_first(tail)
         container = p[0]
-        path = p[1]
+        path = _percent_decode_path(p[1], url)
         names_endpoint = True
     elif scheme == "http":
         var host = authority
@@ -295,10 +401,30 @@ def parse_azure_url(url: String) raises -> AzureUrl:
     )
 
 
+def _endpoint_key(endpoint: String) -> String:
+    """`endpoint` as compared: ASCII lowercase (scheme and host are
+    case-insensitive, RFC 3986 sections 3.1 and 3.2.2), one trailing `/`
+    dropped."""
+    var k = _ascii_lower(endpoint)
+    if k.endswith("/"):
+        k = _slice(k, 0, k.byte_length() - 1)
+    return k^
+
+
+def _endpoint_name(endpoint: String) -> String:
+    if endpoint.byte_length() == 0:
+        return String("Azure's own")
+    return endpoint
+
+
 def azure_arm_config_for_url(url: AzureUrl, base: AzureArmConfig) raises -> AzureArmConfig:
     """The arm configuration that serves `url`: its account, else `base`'s;
-    the endpoint it names, else `base`'s. Raises when the URL and `base`
-    name different accounts or endpoints, or neither names an account."""
+    always `base`'s endpoint; the path style the URL's form implies when it
+    names an endpoint, else `base`'s. `base.endpoint` "" is Azure's
+    own endpoint, not an unset one: a URL may name an endpoint only to agree
+    with `base`'s, so a URL never sends the caller's credential to a host
+    the configuration does not name. Raises when the URL and `base` name
+    different accounts or endpoints, or neither names an account."""
     var account = url.account
     if account.byte_length() == 0:
         account = base.account
@@ -314,23 +440,21 @@ def azure_arm_config_for_url(url: AzureUrl, base: AzureArmConfig) raises -> Azur
         raise Error(
             "fs_registry: the Azure URL names no account and none is configured"
         )
-    if not url.names_endpoint:
-        return AzureArmConfig(
-            account=account^, endpoint=base.endpoint, path_style=base.path_style
-        )
-    if base.endpoint.byte_length() > 0 and base.endpoint != url.endpoint:
-        var named = url.endpoint
-        if named.byte_length() == 0:
-            named = String("Azure's own")
+    if url.names_endpoint and _endpoint_key(url.endpoint) != _endpoint_key(
+        base.endpoint
+    ):
         raise Error(
             "fs_registry: the Azure URL names endpoint '"
-            + named
+            + _endpoint_name(url.endpoint)
             + "' and the configured endpoint is '"
-            + base.endpoint
+            + _endpoint_name(base.endpoint)
             + "'"
         )
+    var path_style = base.path_style
+    if url.names_endpoint:
+        path_style = url.path_style
     return AzureArmConfig(
-        account=account^, endpoint=url.endpoint, path_style=url.path_style
+        account=account^, endpoint=base.endpoint, path_style=path_style
     )
 
 

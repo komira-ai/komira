@@ -32,8 +32,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # https:// one over the TLS side, any other scheme refused, and the
 # production factory's and the production arm's choice),
 # test_fs_handle_azure_url (parse_azure_url's accepted forms and its
-# refusals by exact message, a URL merged with the configured account and
-# endpoint, and an endpoint into komira_azure_blob's AzureConfig),
+# refusals by exact message, the encoded forms' paths percent-decoded once,
+# a URL merged with the configured account and endpoint (a URL naming any
+# other endpoint refused), and an endpoint into komira_azure_blob's
+# AzureConfig),
 # test_fs_handle_azure_read (the Azure arm read through the handle over a
 # scripted connector that keeps the wire: a SAS token in the query, a Shared
 # Key signing, anonymous, a clone signing as its source does, the endpoint's
