@@ -1865,11 +1865,7 @@ struct ActionTableInterpreter(Movable):
         elif dk == AVRO_DEFAULT_STRING:
             self.accs[oi].push_string(sd.default.str_val)
         elif dk == AVRO_DEFAULT_BYTES:
-            var b = List[UInt8]()
-            var sb = sd.default.str_val.as_bytes()
-            for i in range(len(sb)):
-                b.append(sb[i])
-            self.accs[oi].push_binary(b^)
+            self.accs[oi].push_binary(sd.default.bytes_val.copy())
         else:
             raise Error(
                 "AvroResolutionError.NO_DEFAULT_FOR_MISSING_FIELD: field '"
