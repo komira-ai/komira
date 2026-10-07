@@ -232,6 +232,10 @@ gate is `pr / check`. It runs in its own workflow,
 on a nightly schedule and on demand, never on a push or a pull request, with
 the same farm connection and the same job permissions as `pr / check`. Two runs never
 overlap. It needs a Linux x86_64 client and refuses any other (exit 2).
+The workflow puts the platform table's pinned pixi on `PATH` (built as
+`//tools/build/toolchains:pixi`, so buck2 keeps it only at the pin's sha256)
+and runs the script with `--require-install`: the conda install cases (33a,
+33b) then fail, never skip, when pixi or the network is missing.
 
 Run it by hand on a branch of this repository:
 

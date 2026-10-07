@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_tests.sh -- end-to-end tests of the Mojo rules. Each test can fail.
 #
-# usage: tools/build/tests/run_tests.sh [--no-umbrella] [--no-run] [--no-uncached] [--host-check-only]
+# usage: tools/build/tests/run_tests.sh [--no-umbrella] [--no-run] [--no-uncached] [--require-install] [--host-check-only]
 #        (from the repo root; BUCK2 overrides the binary)
 #
 # Where the tests run is where this checkout builds: read from the execution
@@ -190,13 +190,15 @@
 #       a new library gets its package from the macro with no declaration; the
 #       refusals, as targets that build and releases that do not; the stamp; two
 #       uncached builds, skipped with --no-uncached; a pixi install from a
-#       file:// channel and a Mojo program importing the library, skipped with
-#       --no-install).
+#       file:// channel and a Mojo program importing the library, skipped
+#       without pixi or network, a FAIL instead with --require-install, as the
+#       nightly workflow runs it). tests//functional/install_gate:cases holds
+#       that switch: no pixi on PATH is a SKIP line, and a FAIL line with it.
 #  33b. The conda package set and metapackage: see tools/build/tests/functional/conda_set.sh
 #       (every library's package target builds; the stamped releases; the metapackage
 #       from the members' manifests; kci's own parser over the emitted manifests; the
 #       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
-#       the metapackage alone, skipped with --no-install).
+#       the metapackage alone, skipped or failed as in 33a).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -346,14 +348,16 @@ set -uo pipefail
 umbrella=1
 run=1
 uncached=1
+require_install=0
 host_only=0
 for a in "$@"; do
     case "$a" in
         --no-umbrella) umbrella=0 ;;
         --no-run) run=0 ;;
         --no-uncached) uncached=0 ;;
+        --require-install) require_install=1 ;;
         --host-check-only) host_only=1 ;;
-        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached] [--host-check-only]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached] [--require-install] [--host-check-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -978,6 +982,8 @@ fi
 # 33a
 conda_args=()
 [ "$uncached" = 1 ] || conda_args+=(--no-uncached)
+[ "$require_install" = 0 ] || conda_args+=(--require-install)
+expect_green install_gate tests//functional/install_gate:cases
 BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
 while IFS= read -r line; do
     case "$line" in
