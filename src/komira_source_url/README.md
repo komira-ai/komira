@@ -13,10 +13,18 @@ file system its plan names.
 | a bare path, `file://` | `komira_fs`'s `LocalFs` | `FS_SCHEME_FILE` (0) |
 | `s3://`, `s3a://` | `komira_objectstore_s3`'s `S3Fs` | `FS_SCHEME_S3` (1) |
 | `gs://`, `gcs://` | `komira_objectstore_gcs`'s `GcsFs` | `FS_SCHEME_GCS` (2) |
-| `az://`, `abfs://`, `abfss://`, `https://<account>.blob.core.windows.net`, `https://<account>.dfs.core.windows.net` | `komira_azure_blob`'s `AzureFs` | `FS_SCHEME_AZURE` (3) |
+| `az://`, `abfs://`, `abfss://`, `https://<account>.blob.core.windows.net` | `komira_azure_blob`'s `AzureFs` | `FS_SCHEME_AZURE` (3) |
 
-The scheme is compared without regard to letter case. Every other prefix is
-refused, as is an `https://` URL on any other host and every `http://` URL: a
+The scheme is compared without regard to letter case. The text before the
+first `://` is a scheme only when it is scheme-shaped (a letter, then
+letters, digits, `+`, `-` or `.`); otherwise the whole string is a bare
+path, so `/data/x://y` is a local file. The `https://` row is the Blob
+service's URL as `komira_azure_blob`'s `parse_azure_url` reads it: the host
+alone, with no user information or port. A `.dfs.` host is named through
+`abfs://` or `abfss://`, which `parse_azure_url` reads on either host.
+
+Every other prefix is refused, as is an `https://` URL on any other host
+(a `.dfs.` one included) and every `http://` URL: a
 plaintext endpoint (an S3 or Azure emulator) is not something a prefix can
 name, so the surface that holds that endpoint in its configuration picks the
 source for it. Only the prefix is read here; what follows it is parsed by the

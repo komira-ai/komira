@@ -14,16 +14,26 @@
 # THE PREFIXES (`source_scheme_for_url`; the scheme compared ASCII
 # case-insensitively, RFC 3986 section 3.1):
 #
-#   no "://" (a bare path, relative or absolute)  FS_SCHEME_FILE
+#   a bare path, relative or absolute               FS_SCHEME_FILE
 #   file://                                         FS_SCHEME_FILE
 #   s3://  s3a://                                   FS_SCHEME_S3
 #   gs://  gcs://                                   FS_SCHEME_GCS
 #   az://  abfs://  abfss://                        FS_SCHEME_AZURE
 #   https://<account>.blob.core.windows.net/...     FS_SCHEME_AZURE
-#   https://<account>.dfs.core.windows.net/...      FS_SCHEME_AZURE
+#
+# A scheme is what precedes the first "://" when it is scheme-shaped (RFC
+# 3986 section 3.1: a letter, then letters, digits, '+', '-' or '.'). A
+# string with no "://", or whose text before it is not scheme-shaped
+# ("/data/x://y"), is a bare path. Text before it that is empty is refused.
+#
+# The https:// row is the Blob service's resource URI as komira_azure_blob's
+# `parse_azure_url` reads it: the authority is the host alone, with no user
+# information or port, and the host is a blob one. A `.dfs.` host is named
+# through abfs[s]://, which parse_azure_url reads on either host.
 #
 # Anything else is refused: another scheme, an https:// URL on any other
-# host, and every http:// URL. A plaintext endpoint (an S3 or Azure
+# host (a `.dfs.` one included) or with user information or a port on an
+# Azure Blob host, and every http:// URL. A plaintext endpoint (an S3 or Azure
 # emulator) is not something a prefix can name: the surface that holds that
 # endpoint in its configuration picks the source for it. A refusal names the
 # scheme, or for https:// the host, and never echoes the rest of the URL, so
@@ -55,7 +65,6 @@ from komira_plan_expr.fs_descriptor_pod import (
 
 
 comptime _AZURE_BLOB_SUFFIX = ".blob.core.windows.net"
-comptime _AZURE_DFS_SUFFIX = ".dfs.core.windows.net"
 
 
 def _ascii_lower(s: String) -> String:
@@ -73,42 +82,70 @@ def _slice(s: String, start: Int, end: Int) -> String:
     return String(s[byte=start:end])
 
 
-def _https_host(rest: String) -> String:
-    """The host of an https:// URL's remainder `rest` (what follows `://`):
-    the authority up to the first `/`, `?` or `#`, without its user
-    information (up to the last `@`) or port, ASCII lowercase."""
+def _is_scheme(s: String) -> Bool:
+    """RFC 3986 section 3.1: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )."""
+    var bs = s.as_bytes()
+    if len(bs) == 0:
+        return False
+    for i in range(len(bs)):
+        var c = bs[i]
+        var alpha = (c >= UInt8(ord("a")) and c <= UInt8(ord("z"))) or (
+            c >= UInt8(ord("A")) and c <= UInt8(ord("Z"))
+        )
+        if alpha:
+            continue
+        if i == 0:
+            return False
+        var digit = c >= UInt8(ord("0")) and c <= UInt8(ord("9"))
+        if not (
+            digit
+            or c == UInt8(ord("+"))
+            or c == UInt8(ord("-"))
+            or c == UInt8(ord("."))
+        ):
+            return False
+    return True
+
+
+def _https_authority(rest: String) -> String:
+    """The authority of an https:// URL's remainder `rest` (what follows
+    `://`): everything up to the first `/`, `?` or `#`."""
     var bs = rest.as_bytes()
-    var end = len(bs)
-    var start = 0
     for i in range(len(bs)):
         var c = bs[i]
         if c == UInt8(ord("/")) or c == UInt8(ord("?")) or c == UInt8(ord("#")):
-            end = i
-            break
-        if c == UInt8(ord("@")):
+            return _slice(rest, 0, i)
+    return rest
+
+
+def _host_of(authority: String) -> String:
+    """`authority` without its user information (up to the last `@`) or
+    port, ASCII lowercase."""
+    var bs = authority.as_bytes()
+    var start = 0
+    for i in range(len(bs)):
+        if bs[i] == UInt8(ord("@")):
             start = i + 1
-    var authority = _slice(rest, start, end)
-    var colon = authority.find(":")
+    var host = _slice(authority, start, len(bs))
+    var colon = host.find(":")
     if colon >= 0:
-        authority = _slice(authority, 0, colon)
-    return _ascii_lower(authority)
+        host = _slice(host, 0, colon)
+    return _ascii_lower(host)
 
 
-def _is_azure_host(host: String) -> Bool:
-    """`<label>.blob.core.windows.net` or `<label>.dfs.core.windows.net`, with
-    a non-empty first label."""
-    if host.endswith(_AZURE_BLOB_SUFFIX):
-        return host.byte_length() > _AZURE_BLOB_SUFFIX.byte_length()
-    if host.endswith(_AZURE_DFS_SUFFIX):
-        return host.byte_length() > _AZURE_DFS_SUFFIX.byte_length()
-    return False
+def _is_azure_blob_host(host: String) -> Bool:
+    """`<label>.blob.core.windows.net` with a non-empty first label."""
+    return host.endswith(_AZURE_BLOB_SUFFIX) and (
+        host.byte_length() > _AZURE_BLOB_SUFFIX.byte_length()
+    )
 
 
 def source_scheme_for_url(url: String) raises -> UInt8:
     """The `FS_SCHEME_*` code of the source `url` names, by its prefix
     (module header for the table). Raises `source_url: ...` for an empty URL,
     an empty scheme, and every prefix the table does not list, naming the
-    scheme (or the https:// host) and nothing else of the URL."""
+    scheme (or the https:// host) and nothing else of the URL. Text before
+    "://" that is not scheme-shaped makes `url` a bare path."""
     if url.byte_length() == 0:
         raise Error("source_url: an empty URL names no source")
     var sep = url.find("://")
@@ -116,7 +153,10 @@ def source_scheme_for_url(url: String) raises -> UInt8:
         return FS_SCHEME_FILE
     if sep == 0:
         raise Error("source_url: a URL's scheme is empty")
-    var scheme = _ascii_lower(_slice(url, 0, sep))
+    var prefix = _slice(url, 0, sep)
+    if not _is_scheme(prefix):
+        return FS_SCHEME_FILE
+    var scheme = _ascii_lower(prefix)
     if scheme == "file":
         return FS_SCHEME_FILE
     if scheme == "s3" or scheme == "s3a":
@@ -126,14 +166,21 @@ def source_scheme_for_url(url: String) raises -> UInt8:
     if scheme == "az" or scheme == "abfs" or scheme == "abfss":
         return FS_SCHEME_AZURE
     if scheme == "https":
-        var host = _https_host(_slice(url, sep + 3, url.byte_length()))
-        if _is_azure_host(host):
-            return FS_SCHEME_AZURE
+        var authority = _https_authority(_slice(url, sep + 3, url.byte_length()))
+        var host = _host_of(authority)
+        if _is_azure_blob_host(host):
+            if _ascii_lower(authority) == host:
+                return FS_SCHEME_AZURE
+            raise Error(
+                "source_url: an Azure Blob https:// URL's authority is the host"
+                " alone, <account>.blob.core.windows.net, with no user"
+                " information or port"
+            )
         raise Error(
             "source_url: no source serves https:// URLs on host '"
             + host
-            + "' (an Azure Blob URL's host is <account>.blob.core.windows.net"
-            " or <account>.dfs.core.windows.net)"
+            + "' (an Azure Blob URL's host is <account>.blob.core.windows.net;"
+            " abfs[s]:// names a .dfs. host)"
         )
     if scheme == "http":
         raise Error(
