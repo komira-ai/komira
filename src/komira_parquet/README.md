@@ -70,6 +70,18 @@ page header or engine around it:
   date integers, timestamps, text or binary BYTE_ARRAY), the post-decode
   re-labels, and the scatter of dense values into a nullable array by their
   definition-level bits.
+- `selection_vector`, `gather_common`, `gather_byte_array` and `gather_dict`:
+  reading only the selected rows of a column chunk. `SelectionInterval` is a
+  (skip, select) run of a row filter; `SelectionInterval.from_bool_mask` (or
+  `boolean_to_intervals`) turns a `BooleanArray` mask into the runs, a 64-bit
+  word at a time. The package-private gathers copy the selected rows out of
+  decompressed pages, non-null or nullable: PLAIN BYTE_ARRAY pages by walking
+  the length prefixes and copying only the selected bodies, dictionary-encoded
+  pages by decoding the codes and looking up only the selected ones (a code
+  outside the dictionary gathers 0, or an empty string). Each refuses a
+  `num_selected` that is not the intervals' total, intervals past the last
+  page, and output past the Int32 string offsets; the BYTE_ARRAY walk refuses
+  a malformed length prefix with the PLAIN decode's message.
 
 Every public decoder takes the encoded bytes as a `Span[UInt8]` and writes into
 a `Span` (or a buffer) whose length it respects: a request larger than the
@@ -190,6 +202,24 @@ var col = reconstruct_list_column(def_levels, rep_levels, False, 0, 2)
 var offsets = col._offsets.value().view_ro()
 assert_equal(offsets.read_i32_le_at(4), 3)
 assert_equal(offsets.read_i32_le_at(8), 5)
+```
+
+## Selection intervals
+
+```mojo
+from komira_arrow.boolean_array import BooleanArray
+from komira_parquet.selection_vector import SelectionInterval
+from std.testing import assert_equal
+
+# Rows 2, 3 and 6 of 8 pass a filter: skip 2, select 2, then skip 2, select 1.
+var mask = BooleanArray.allocate(8)
+mask.data.set(2)
+mask.data.set(3)
+mask.data.set(6)
+var runs = SelectionInterval.from_bool_mask(mask)
+assert_equal(len(runs), 2)
+assert_equal(Int(runs[1].skip), 2)
+assert_equal(Int(runs[1].select), 1)
 ```
 
 ## The decode arms

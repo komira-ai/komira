@@ -42,6 +42,9 @@ comptime _FILES: List[String] = [
     "dict_gather_fused.mojo",
     "dictionary.mojo",
     "dictionary_resolve.mojo",
+    "gather_byte_array.mojo",
+    "gather_common.mojo",
+    "gather_dict.mojo",
     "nested.mojo",
     "null_expand.mojo",
     "payload_sel_trace.mojo",
@@ -50,6 +53,7 @@ comptime _FILES: List[String] = [
     "rle.mojo",
     "rle_bitunpack.mojo",
     "scan_copy_trace.mojo",
+    "selection_vector.mojo",
     "staged_filter_trace.mojo",
 ]
 
@@ -184,6 +188,7 @@ def test_imports_only_its_deps() raises:
         "komira_arrow",
         "komira_atomic_alias",
         "komira_buffer",
+        "komira_collections",
         "komira_parquet_api",
         "komira_simd",
     ]
