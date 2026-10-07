@@ -89,7 +89,7 @@ _E2E_DEPS = [
     "//src/komira_crypto:komira_crypto",
     "//src/komira_http_core:komira_http_core",
     "//src/komira_supervisor:komira_supervisor",
-    "//src/komira_test_s3_adapter:komira_test_s3_adapter",
+    "//src/tests/helpers/komira_test_s3_adapter:komira_test_s3_adapter",
 ]
 
 [

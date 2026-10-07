@@ -43,6 +43,7 @@ comptime _FILES: List[String] = [
     "snappy/format.mojo",
     "snappy/snappy_ffi.mojo",
     "snappy/varint.mojo",
+    "text_decompress.mojo",
     "zstd/__init__.mojo",
     "zstd/zstd_ffi.mojo",
 ]
@@ -167,11 +168,11 @@ def test_imports_only_its_deps() raises:
     # makes a new dep a change to the test too, and komira_obs and
     # komira_serde are refused outright.
     var allowed: List[String] = [
+        "komira_arrow_ipc",
         "komira_buffer",
-        "komira_lz4",
+        "komira_compression",
         "komira_parquet_api",
         "komira_parquet_codec",
-        "komira_zlib",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde"]
     var files = materialize[_FILES]()
@@ -195,8 +196,8 @@ def test_imports_only_its_deps() raises:
                 if root == allowed[j]:
                     ok = True
             assert_true(ok, files[i] + " imports " + root + ", not a dep")
-    # Not vacuous: compression.mojo and the snappy modules import komira_zlib,
-    # komira_lz4, komira_parquet_api and komira_buffer.
+    # Not vacuous: compression.mojo and the codec modules import
+    # komira_compression, komira_parquet_api and komira_buffer.
     assert_true(seen >= 4, "found only " + String(seen) + " komira imports")
 
 

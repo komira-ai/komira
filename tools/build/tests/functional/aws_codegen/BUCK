@@ -136,12 +136,13 @@ gen_check(
     ],
 )
 
-# Its layout probe and its caller test are welded into it, and each ran and
-# passed.
+# Its layout probe, its environment scan and its caller test are welded into
+# it, and each ran and passed.
 tests_check(
     name = "tiny_rest_json_pure_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_tiny_rest_json",
     ],
     markers = "komira//tools/build/proto-codegen/aws_rest_json:komira_aws_tiny_rest[tests]",
@@ -231,12 +232,13 @@ gen_check(
     ],
 )
 
-# Its layout probe and its caller test are welded into it, and each ran and
-# passed.
+# Its layout probe, its environment scan and its caller test are welded into
+# it, and each ran and passed.
 tests_check(
     name = "tiny_rest_xml_pure_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_tiny_rest_xml",
     ],
     markers = "komira//tools/build/proto-codegen/aws_rest_xml:komira_aws_tiny_xml[tests]",
@@ -298,12 +300,13 @@ gen_check(
     ],
 )
 
-# Its layout probe and its caller test are welded into it, and each ran and
-# passed.
+# Its layout probe, its environment scan and its caller test are welded into
+# it, and each ran and passed.
 tests_check(
     name = "tiny_query_pure_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_tiny_query",
     ],
     markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query[tests]",
@@ -335,6 +338,7 @@ tests_check(
     name = "tiny_query_client_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_tiny_query_client",
     ],
     markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client[tests]",
@@ -414,12 +418,13 @@ gen_check(
     ],
 )
 
-# Its layout probe and its caller test are welded into it, and each ran and
-# passed.
+# Its layout probe, its environment scan and its caller test are welded into
+# it, and each ran and passed.
 tests_check(
     name = "tiny_ec2_pure_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_tiny_ec2",
     ],
     markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2[tests]",
