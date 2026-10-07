@@ -22,9 +22,12 @@
 # not interpreted here: a verifier matches them against its own pinned
 # algorithm and purpose). A present `kid` is non-empty.
 #
-# Every `Jwk` is valid by construction: the three constructors and the parser
-# run the same checks (`_check_*` below), and the fields are private, read
-# through accessors that return copies.
+# The three constructors and the parser run the same checks (`_check_*`
+# below); `render_jwks_json` builds its keys through `Jwk.ed25519`. The fields
+# sit in `_JwkParts`, read through accessors that return copies. The leading
+# underscore is a naming convention the compiler does not enforce: code that
+# imports `_JwkParts` can build a `Jwk` without the checks, so a verifier must
+# not treat these checks as a security property.
 #
 # Rendering is canonical: members in the order kty, crv, alg, use, kid, then
 # x, y (OKP, EC) or n, e (RSA); optional members only when present; string
@@ -165,13 +168,14 @@ struct _JwkParts(Copyable, Movable):
 struct Jwk(Copyable, Movable):
     """One public JWK of a supported signature key type (see the file
     header). Build one with `Jwk.ed25519`, `Jwk.ec_p256`, `Jwk.rsa` or the
-    parser; each runs the same checks, so every value is a valid key."""
+    parser; each runs the same checks."""
 
     var _p: _JwkParts
 
     def __init__(out self, *, var _parts: _JwkParts):
-        """Takes checked parts. The parts type is private: callers use
-        `ed25519`, `ec_p256`, `rsa` or the parser, which check first."""
+        """Takes parts as given and runs no check. The parts type is private
+        by naming convention only: callers use `ed25519`, `ec_p256`, `rsa` or
+        the parser, which check first."""
         self._p = _parts^
 
     @staticmethod

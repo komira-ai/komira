@@ -119,6 +119,19 @@ def test_render_empty_set() raises:
     assert_equal(render_jwks_json(keys), String('{"keys":[]}'))
 
 
+def test_render_refuses_empty_kid() raises:
+    # Defect: an empty kid rendered as `"kid":""` publishes a document this
+    # package's own parser refuses, and builds a `Jwk` whose `kid()` is empty.
+    var keys = List[Tuple[String, Array[UInt8, 32]]]()
+    keys.append((String(""), Array[UInt8, 32](fill=7)))
+    var got = String("")
+    try:
+        _ = render_jwks_json(keys)
+    except e:
+        got = String(e)
+    assert_equal(got, "JwksError: member \"kid\" is empty")
+
+
 def test_render_one_key_rfc8037_x() raises:
     var keys = List[Tuple[String, Array[UInt8, 32]]]()
     keys.append((String(KID_1), _key(PUB_1)))
@@ -208,6 +221,7 @@ def main() raises:
     test_kid_is_full_unpadded_base64url()
     test_kid_deterministic_and_bit_sensitive()
     test_render_empty_set()
+    test_render_refuses_empty_kid()
     test_render_one_key_rfc8037_x()
     test_render_two_keys_in_order()
     test_from_seed_rfc8037_vector()

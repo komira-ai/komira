@@ -40,7 +40,7 @@ def test_duplicate_reports_the_second_members_line() raises:
 
 
 def test_escaped_spelling_is_the_same_name() raises:
-    # "a" unescapes to "a": a byte comparison of the source would miss it.
+    # "\u0061" unescapes to "a": a byte comparison of the source would miss it.
     assert_equal(
         _err_of('{"a":1,"\\u0061":2}'),
         "JsonError: duplicate object key 'a' at line 1",

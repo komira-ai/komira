@@ -1,6 +1,6 @@
 # =============================================================================
 # test_no_product_vocabulary.mojo: the JWK library names no product concept and
-# carries no date before the open-source cut.
+# carries no date in the first eight months of the opening year.
 # =============================================================================
 #
 # This package is general-purpose and open source: the authorization model of

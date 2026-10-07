@@ -20,7 +20,7 @@
 #      distinct keys could then share a kid, and the verifier could select the
 #      wrong one), and it buys nothing (43 base64url chars is a fine header field).
 #
-#   2. `render_jwks_json(keys) -> String` — the RFC 7517 JWK Set document for the
+#   2. `render_jwks_json(keys) raises -> String` — the RFC 7517 JWK Set document for the
 #      ACTIVE public-key set, as an OKP (RFC 8037) Ed25519 JWK array:
 #          {"keys":[{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig",
 #                    "kid":"<kid>","x":"<base64url_nopad(pubkey)>"}, ...]}
@@ -49,13 +49,7 @@
 from komira_crypto import sha256
 from komira_encoding import base64_url_encode_nopad
 
-from komira_jwks.jwk import (
-    JWK_CRV_ED25519,
-    JWK_KTY_OKP,
-    Jwk,
-    _JwkParts,
-    render_jwk_set,
-)
+from komira_jwks.jwk import Jwk, render_jwk_set
 
 
 # =============================================================================
@@ -91,7 +85,9 @@ def kid_for_pubkey(pubkey: Span[UInt8, _]) -> String:
 #      {"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":..,"x":..}.
 #      PUBLIC-key only — NEVER a `d` member (the seed).
 # =============================================================================
-def render_jwks_json(keys: List[Tuple[String, Array[UInt8, 32]]]) -> String:
+def render_jwks_json(
+    keys: List[Tuple[String, Array[UInt8, 32]]]
+) raises -> String:
     """Render the RFC 7517 JWK Set for the ACTIVE public-key set as an OKP/Ed25519
     JWK array: `{"keys":[<jwk>, <jwk>, ...]}`, each element
     `{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":"<kid>",
@@ -112,29 +108,22 @@ def render_jwks_json(keys: List[Tuple[String, Array[UInt8, 32]]]) -> String:
 
     Returns:
         The JWKS JSON document string.
+
+    Raises:
+        `JwksError: member "kid" is empty` if a `kid` is the empty string.
     """
     var jwks = List[Jwk](capacity=len(keys))
     for i in range(len(keys)):
         # `ref`, not a copy: the renderer only READS both halves.
         ref kid = keys[i][0]
         ref pubkey = keys[i][1]
-        var x = List[UInt8](capacity=32)
-        x.extend(Span[UInt8, origin_of(pubkey)](pubkey))
-        # The key is 32 bytes by type, so the Ed25519 check cannot fail; the
-        # parts are built directly rather than through a raising constructor.
+        # The key is 32 bytes by type, so only the kid check can fail here.
         jwks.append(
-            Jwk(
-                _parts=_JwkParts(
-                    kty=JWK_KTY_OKP,
-                    crv=JWK_CRV_ED25519,
-                    x=x^,
-                    y=List[UInt8](),
-                    n=List[UInt8](),
-                    e=List[UInt8](),
-                    kid=Optional[String](kid.copy()),
-                    alg=Optional[String](String("EdDSA")),
-                    key_use=Optional[String](String("sig")),
-                )
+            Jwk.ed25519(
+                Span[UInt8, origin_of(pubkey)](pubkey),
+                kid=Optional[String](kid.copy()),
+                alg=Optional[String](String("EdDSA")),
+                key_use=Optional[String](String("sig")),
             )
         )
     return render_jwk_set(jwks)

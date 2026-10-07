@@ -168,6 +168,22 @@ def test_duplicate_kid_refused() raises:
         _err_of_set(_set(_okp("same") + "," + _okp("other") + "," + _okp("same"))),
         "JwksError: kid \"same\" names two keys",
     )
+    # Keys of different types under one kid are just as ambiguous: the
+    # check compares kids across the whole set, not within one key type.
+    var ec_k = (
+        String('{"kty":"EC","crv":"P-256","kid":"k","x":"')
+        + _b64(32, 1)
+        + '","y":"'
+        + _b64(32, 2)
+        + '"}'
+    )
+    var rsa_k = (
+        String('{"kty":"RSA","kid":"k","n":"') + _b64(256, 0xC5) + '","e":"AQAB"}'
+    )
+    assert_equal(
+        _err_of_set(_set(ec_k + "," + rsa_k)),
+        "JwksError: kid \"k\" names two keys",
+    )
 
 
 def test_structure_refused() raises:
@@ -375,6 +391,26 @@ def test_constructors_check() raises:
     got = String("")
     try:
         _ = Jwk.ed25519(Span(ok), kid=Optional[String](String("")))
+    except e:
+        got = String(e)
+    assert_equal(got, "JwksError: member \"kid\" is empty")
+    got = String("")
+    try:
+        var ok_y = ok.copy()
+        _ = Jwk.ec_p256(Span(ok), Span(ok_y), kid=Optional[String](String("")))
+    except e:
+        got = String(e)
+    assert_equal(got, "JwksError: member \"kid\" is empty")
+    var n2048 = List[UInt8]()
+    for _ in range(256):
+        n2048.append(0xC5)
+    var e3 = List[UInt8]()
+    e3.append(1)
+    e3.append(0)
+    e3.append(1)
+    got = String("")
+    try:
+        _ = Jwk.rsa(Span(n2048), Span(e3), kid=Optional[String](String("")))
     except e:
         got = String(e)
     assert_equal(got, "JwksError: member \"kid\" is empty")

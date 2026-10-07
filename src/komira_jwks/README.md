@@ -27,7 +27,8 @@ fetches to learn which keys sign tokens.
 - `render_jwks_json(keys)` renders `{"keys":[...]}` from a list of
   `(kid, pubkey)` Ed25519 pairs, one
   `{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":...,"x":...}`
-  per key in list order; an empty list renders `{"keys":[]}`.
+  per key in list order; an empty list renders `{"keys":[]}`, and an empty
+  kid raises.
 - `jwks_json_from_seed(seed)` derives the public key from a 32-byte Ed25519
   seed, held in a zeroizing `komira_secret_store.SecretValue` that it
   consumes, and renders the one-key set. It raises on a seed shorter than 32
@@ -81,7 +82,7 @@ skipped with its reason, and the canonical form reads back to the same keys:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
-from komira_jwks import JWK_KTY_EC, parse_jwk_set
+from komira_jwks import JWK_KTY_EC, JwkSet, parse_jwk_set
 
 var doc = (
     String('{"keys":[{"kty":"EC","crv":"P-256",')
@@ -89,7 +90,7 @@ var doc = (
     + '"y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM","use":"enc","kid":"1"},'
     + '{"kty":"EC","crv":"P-384","x":"AA","y":"AA"}]}'
 )
-var keys = parse_jwk_set(doc)
+var keys: JwkSet = parse_jwk_set(doc)
 assert_equal(len(keys.keys), 1)
 assert_equal(keys.keys[0].kty(), JWK_KTY_EC)
 assert_equal(keys.keys[0].kid().value(), "1")
@@ -162,4 +163,7 @@ assert_equal(JWK_RSA_MAX_MODULUS_BYTES, 512)
 var keys = List[Jwk]()
 keys.append(ed^)
 assert_equal(render_jwk_set(keys), String('{"keys":[') + render_jwk(keys[0]) + "]}")
+var buf = List[UInt8]()
+keys[0].write_json(buf)
+assert_equal(String(unsafe_from_utf8=Span(buf)), render_jwk(keys[0]))
 ```
