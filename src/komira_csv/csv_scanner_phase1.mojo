@@ -23,16 +23,16 @@
 
 from std.bit import count_trailing_zeros
 
-from komira_core.simd.byte_class.byte_find_any_of import (
+from komira_simd.byte_class.byte_find_any_of import (
     byte_find_eq_4_u8x32,
     byte_find_eq_4_u8x64,
 )
-from komira_core.simd.byte_class.movemask import (
+from komira_simd.byte_class.movemask import (
     movemask_to_uint_u8x32,
     movemask_to_uint_u8x64,
     byte_eq_to_bytemask_u8x64,
 )
-from komira_core.simd.byte_class.quote_region_mask import (
+from komira_simd.byte_class.quote_region_mask import (
     quote_region_mask_u64,
 )
 

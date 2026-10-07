@@ -57,7 +57,7 @@ comptime _SOCK_NONBLOCK_LINUX: Int32 = Int32(0o4000)
 #
 # all fcntl call sites in this module
 # now route through the non-variadic C shim
-# (komira_core's native POSIX wrappers plus `_posix_shim.c`). The shims
+# (the core packages' native POSIX wrappers plus `_posix_shim.c`). The shims
 # are statically linked into every binary that links this library.
 # The aliases below
 # are retained as DOCUMENTATION ONLY — do not call `external_call`

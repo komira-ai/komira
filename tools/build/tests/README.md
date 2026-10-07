@@ -898,10 +898,44 @@ tools/build/tests/functional/coverage_keys.sh
 ./buck2 build tests//functional/coverage:covlib -c komira.coverage=yes   # must fail at load
 ```
 
-## 42. The layout of src/
+## 42. Pointer lint
+
+[`pointer_lint`](../lint/defs.bzl) is a validation over every `.mojo` file of
+a tree that enforces the pointer rules of
+[`docs/design/mojo_safety_and_idioms.md`](../../../docs/design/mojo_safety_and_idioms.md):
+no wildcard origin outside an FFI module, no `unsafe_from_address=`, no
+partial move through a pointer, no `parallelize[`, no second declaration of
+libc `read` or `open`, and no public function of a library file taking or
+returning a pointer. Its reader is [`pointer_lint.awk`](../lint/pointer_lint.awk),
+its action [`lint.sh`](../lint/lint.sh) (kind `pointer_lint`), which holds
+the sites against two ledgers: the FFI modules
+([`tests/pointer_lint_ffi.tsv`](../../../tests/pointer_lint_ffi.tsv) for
+`//:pointer_lint`) and the holds, per rule and file at an exact count
+([`tests/pointer_lint_holds.tsv`](../../../tests/pointer_lint_holds.tsv)),
+which only shrink. [`functional/pointer_lint:ok`](functional/pointer_lint/BUCK)
+builds a planted tree ([`fixture.bzl`](functional/pointer_lint/fixture.bzl))
+whose `held.mojo` holds every rule's sites in each form a statement takes
+(one line, several lines, type parameters, the two-statement partial move, a
+dunder, a trait method, a return type), held at their exact counts, so a
+site the reader missed would fail the build; and whose `near.mojo` names
+every banned spelling where it is not a site (docstrings, comments, strings,
+longer identifiers, private and nested functions, whole-value moves, a
+rebound name). Each target of [`negative/pointer_lint`](negative/pointer_lint/BUCK)
+plants one site of a rule in the same tree, or one defect in a ledger (a
+malformed, repeated, unknown-rule, zero-count or reasonless row, a row for
+no file, a count above the sites, a row for an FFI module's origins, an FFI
+row with no `# FFI-BOUNDARY:` comment line or no wildcard origin), or empties
+the tree, and must fail naming it.
+
+```sh
+./buck2 build //:pointer_lint tests//functional/pointer_lint:ok
+./buck2 build tests//negative/pointer_lint:partial_move_two   # must fail: plant.mojo:4: partial_move
+```
+
+## 43. The layout of src/
 
 `src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`. The test is in
-[the repository lint tests](lint_tests.md#42-the-layout-of-src).
+[the repository lint tests](lint_tests.md#43-the-layout-of-src).
 
 ## Diagnostics
 

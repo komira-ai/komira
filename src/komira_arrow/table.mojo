@@ -741,7 +741,7 @@ struct Table(Movable):
         `Column.as_primitive` accepts.
 
         ★ THIS IS THE ONLY PARAMETRIC METHOD ON `Table`, AND THAT IS A BUDGET,
-        NOT AN ACCIDENT. `table.mojo` lives in `komira_core`, which is reached
+        NOT AN ACCIDENT. `table.mojo` lives in `komira_arrow`, which is reached
         by nearly every target, so every extra instantiation here is paid for
         in compile time across the whole build. So the dtypes
         this repo actually reads get HAND-WRITTEN monomorphic siblings below
@@ -750,13 +750,13 @@ struct Table(Movable):
 
         ⚠ AND THE SIBLINGS DELEGATE TO `RecordBatch`'s ALREADY-MONOMORPHIC
         ACCESSORS, NOT TO THIS METHOD. `column_as_primitive_int64` and friends
-        are instantiated inside `komira_core` already, so routing through them
+        are instantiated inside the core packages already, so routing through them
         adds ZERO new instantiations to the library; routing through this
         parametric would add one thin wrapper per dtype for no behavioural
         difference. This method exists for the widths the repo does NOT
         currently read (i8/i16/u*/f32, and the temporal aliases
         `Column.as_primitive` admits) and is instantiated only by a caller that
-        asks for one -- in that caller's TU, not in `komira_core`'s.
+        asks for one -- in that caller's TU, not in the core packages'.
 
         Parameters:
             dtype: The storage DType to read the column as.
@@ -1157,8 +1157,8 @@ struct Table(Movable):
         (`komira_engine_runtime`'s `concat_record_batches_column_parallel`)
         needs a `Pointer[LocalDispatcher[NoopSink]]` + a `CancellationToken`,
         both from `komira_engine_runtime` -- a package DOWNSTREAM of
-        `komira_core`. A method here taking them would put engine-runtime in
-        `komira_core`'s `deps`, which must stay empty: core is reached by
+        the core packages. A method here taking them would put engine-runtime in
+        the core packages' `deps`, which must stay empty: core is reached by
         nearly every target. A caller that wants the parallel form drives it
         from the engine layer over `take_chunks()`, where the dispatcher
         already is. The column-parallel fan admits BOOL and DICTIONARY (they

@@ -20,14 +20,15 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import PrimitiveArray, BooleanArray
-from komira_core.eval import (
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_column_kernels.comparison import (
     eval_ne, eval_le, eval_ge,
     eval_eq, eval_lt, eval_gt,
     eval_col_ne, eval_col_le, eval_col_ge,
     eval_col_eq, eval_col_lt, eval_col_gt,
 )
-from komira_core.eval.arithmetic import eval_not
+from komira_column_kernels.arithmetic import eval_not
 
 
 # =============================================================================

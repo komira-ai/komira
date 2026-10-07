@@ -2,7 +2,7 @@
 # ScanParams — the kind-agnostic configuration map on a `ScanBinding`.
 # =============================================================================
 #
-# THE FIELD THAT DECIDES WHETHER A NEW SOURCE KIND MUST EDIT `komira_core`.
+# THE FIELD THAT DECIDES WHETHER A NEW SOURCE KIND MUST EDIT the core packages.
 # Three shapes were considered; two lost:
 #
 #   * a TYPED VARIANT (`ParamsVariant` with a per-kind arm) — this is the

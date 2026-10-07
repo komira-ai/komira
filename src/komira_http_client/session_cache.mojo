@@ -43,7 +43,7 @@
 
 from std.memory import OwnedPointer
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_client.pool import PoolKey
 

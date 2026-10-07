@@ -41,11 +41,11 @@
 # nullable fixtures (all-null / none-null / scattered / empty).
 # =============================================================================
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.bitmap import Bitmap, bytes_for_bits
-from komira_core.io.heap_region import HeapRegion
-from komira_core.eval.comparison import (
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.bitmap import Bitmap, bytes_for_bits
+from komira_buffer.heap_region import HeapRegion
+from komira_column_kernels.comparison import (
     eval_col_gt, eval_col_lt, eval_col_eq,
     eval_col_ne, eval_col_le, eval_col_ge,
 )
@@ -163,7 +163,7 @@ def _validity_byte(
     Bits past the operand's logical length may be garbage; `merge_cmp_validity`
     masks the final byte's trailing bits to canonical 0.
 
-    Mirrors `komira_core.eval.comparison._read_validity_byte_pa` but reads
+    Mirrors `komira_column_kernels.comparison._read_validity_byte_pa` but reads
     off a raw `Optional[Bitmap]` so this mechanism is DType-free (serves the
     decimal helpers, the primitive helpers, and any future surface identically).
     """

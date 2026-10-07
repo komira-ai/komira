@@ -52,11 +52,11 @@
 
 from std.math import sqrt, sin, cos, asin, atan2, pi
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.collections.batch_view import BatchView, batch_view_over
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.eval.decimal_arith import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.batch_view import BatchView, batch_view_over
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_scalar_arithmetic.decimal_arith import (
     decimal_add_i128,
     decimal_add_result_ps,
     decimal_div_i128,
@@ -72,17 +72,17 @@ from komira_core.eval.decimal_arith import (
 # (`regexp_functions.eval_regexp_like` / `regexp_like_scalar`) uses. The
 # per-cell EXPR_REGEXP walker arm reuses `regexp_like_scalar(text, prog)` so the
 # row path is value-identical to the column oracle, NOT a reimplementation.
-from komira_core.eval.regexp_nfa import RegexProgram
-from komira_core.eval.regexp_functions import regexp_like_scalar
-from komira_core.eval.string_comparison import like_match_string
+from komira_column_kernels.regexp_nfa import RegexProgram
+from komira_column_kernels.regexp_functions import regexp_like_scalar
+from komira_column_kernels.string_comparison import like_match_string
 # ⛔ `EXPR_POW_F64` GOES THROUGH `libm_pow`, NEVER THROUGH `**`. Mojo's `**` on
 # a binary64 pair is an approximate exp2/log2 kernel — measured ~196,000 ulps
 # off libm, where DuckDB matches libm to the last bit. The three arms below and
-# the column kernel in `komira_core.eval.scalar_math` are FOUR evaluators
+# the column kernel in `komira_column_kernels.scalar_math` are FOUR evaluators
 # of ONE SQL op, so they share one named kernel rather than four spellings that
 # can drift; the full measurement lives on `libm_pow`.
-from komira_core.eval.scalar_math import libm_pow, _apply_unary
-from komira_core.eval.int_overflow import checked_add, checked_sub, checked_mul
+from komira_column_kernels.scalar_math import libm_pow, _apply_unary
+from komira_scalar_arithmetic.int_overflow import checked_add, checked_sub, checked_mul
 from komira_kernels.runtime_expr import (
     EXPR_ADD_DECIMAL128,
     EXPR_ADD_F64,
@@ -217,8 +217,8 @@ from komira_kernels.sel_kernels import (
     binary_select_col_col,
     binary_select_col_lit,
 )
-from komira_core.eval.selection_vector_row import RowSelectionVector
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.selection_vector_row import RowSelectionVector
+from komira_buffer.heap_region import HeapRegion
 from komira_row_format.cell_source import CellSource
 
 
@@ -399,7 +399,7 @@ def _string_like_match(imm text: String, imm pattern: String) -> Bool:
     """SQL LIKE: `%` any run of characters, `_` ONE CHARACTER (a UTF-8 code
     point), everything else literal.
 
-    ⭐ DELEGATES to `komira_core.eval.string_comparison.like_match_string`, the
+    ⭐ DELEGATES to `komira_column_kernels.string_comparison.like_match_string`, the
     one matcher the columnar kernel also runs, so the row and
     columnar paths cannot disagree. A byte-at-a-time copy of that
     loop ("`_` (one byte)") would answer `'é' LIKE '_'` false over a
@@ -607,7 +607,7 @@ struct ExpressionExecutor(Movable, Deinitable):
     # List[List[ScalarValue]] uses the same Movable handle layout as the
     # sibling pools; the inner List[ScalarValue] is itself slab-safe
     # (ScalarValue is Movable+ImplicitlyCopyable POD per
-    # `komira_core.plan.scalar_value`). The struct as a whole
+    # `komira_plan_expr.scalar_value`). The struct as a whole
     # remains Movable+Deinitable (bytewise move of the
     # outer List handle; heap content at stable address). NOT stored
     # inside any byte-slab. slab-safe.
@@ -2675,7 +2675,7 @@ struct ExpressionExecutor(Movable, Deinitable):
         # in a `while k < n_sel` loop. The EXPR_COL leaf of that scalar walker
         # calls `batch.column_as_primitive_int64(idx)` which COPIES THE ENTIRE
         # COLUMN via `OwnedAlignedBuffer` allocation + `memcpy` (see
-        # `komira_core.arrow.column`). For TPC-H Q6 at SF1
+        # `komira_arrow.column`). For TPC-H Q6 at SF1
         # (6M rows, ~114K survivors, 2 cols per binary op) this produces
         # ~10+ TB of allocations per `process_batch` call, triggering tcmalloc
         # freelist corruption and a ~200x perf regression.

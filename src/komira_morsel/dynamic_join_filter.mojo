@@ -29,10 +29,10 @@
 #     The bloom filter inside is read-only after construction.
 # =============================================================================
 
-from komira_core.collections.bloom_filter import BloomFilter
-from komira_core.collections.constant_filter import ConstantFilter
-from komira_core.collections.in_list_filter import InListFilter
-from komira_core.collections.range_filter import RangeFilter
+from komira_dynamic_filter.bloom_filter import BloomFilter
+from komira_dynamic_filter.constant_filter import ConstantFilter
+from komira_dynamic_filter.in_list_filter import InListFilter
+from komira_dynamic_filter.range_filter import RangeFilter
 
 
 # v0.3 source: morsel_join.rs:468 (BLOOM_FILTER_THRESHOLD).

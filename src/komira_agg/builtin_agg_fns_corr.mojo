@@ -54,7 +54,7 @@
 
 from std.math import sqrt
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 from komira_agg.aggregator import Aggregator
 
 

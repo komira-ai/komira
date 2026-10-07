@@ -46,8 +46,8 @@
 # =============================================================================
 
 
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema
+from komira_arrow.arrow_types import ArrowType
 
 
 struct ColumnResolver(Movable, Copyable, Deinitable):

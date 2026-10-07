@@ -10,7 +10,7 @@
 # SOURCED in `komira_scan_planning`, next to `komira_fs`, because (a) its OUTPUT type
 # `PartitionPredicate` + the `PrunedHiveDiscovery.open_pruned` it feeds both
 # live here, and (b) housing it in the compiler package would make the
-# compiler import these async predicate types. The one import the split needs (`komira_core.plan.expr.Expr`) is
+# compiler import these async predicate types. The one import the split needs (`komira_plan_expr.expr.Expr`) is
 # already a dependency of this package (see `reader_factory.mojo`), so this
 # placement is acyclic. The split function is the public seam the SDK scan-
 # construction calls; it does not change which pkg "owns" the optimizer logic.
@@ -62,9 +62,9 @@
 #     wildcard-origin or `List`-inside-byte-slab shape.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.collections.slab import Slab
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import (
     Expr,
     EXPR_BINARY_OP,
     EXPR_COL_REF,
@@ -79,8 +79,8 @@ from komira_core.plan.expr import (
     BIN_GT,
     BIN_GE,
 )
-from komira_core.plan.expr_helpers import flatten_and_conjuncts
-from komira_core.plan.scalar_value import ScalarValue
+from komira_plan_expr.expr_helpers import flatten_and_conjuncts
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_fs.pruned_hive_discovery import (
     PartitionPredicate,
     PartitionConstraint,
@@ -162,7 +162,7 @@ def split_partition_predicate(
     pushdown (Tier-2).
     """
     # Step 1 — flatten the AND-tree. Reuses the canonical AND-flattener
-    # (`komira_core.plan.expr_helpers.flatten_and_conjuncts`) which returns a
+    # (`komira_plan_expr.expr_helpers.flatten_and_conjuncts`) which returns a
     # `Slab[Expr]` of the non-AND leaf conjuncts (deep copies). `Expr` is
     # Movable-only — it owns `OwnedPointer` children — so the codebase stores
     # it in a `Slab`, never a `List` (which requires `Copyable`).

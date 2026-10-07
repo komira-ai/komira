@@ -5,7 +5,7 @@
 # ⚠ READ THIS BEFORE ADDING AN ARM. Do NOT add a tenth concrete arm: build a
 # `ScanBinding` in your own package and pass it to
 # `SourceVariant.from_binding(...)`. A concrete arm here for a source defined
-# above the engine (e.g. a broker) would force komira_core to depend on that
+# above the engine (e.g. a broker) would force the core packages to depend on that
 # source's object-store and HTTP stack, INVERTING THE BUILD DAG.
 #
 # THE HYBRID STATE:

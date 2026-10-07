@@ -21,7 +21,7 @@
 # SIMD via `PrimitiveArray.load[width=W]` / `store[width=W]` (which delegate
 # to `OwnedAlignedBuffer.load_simd[T, W]` / `store_simd[T, W]`) — the same shape
 # the existing `eval_add` / `eval_sub` / `eval_mul` primitives use in
-# `komira_core.eval.arithmetic`. The W = `simd_width_of[T]()`
+# `komira_column_kernels.arithmetic`. The W = `simd_width_of[T]()`
 # comptime constant tunes per dtype (4 lanes for Int64 on NEON, 8 lanes for
 # Int32, 2 lanes for Float64 on the host arm64). Ragged tails are handled
 # with width=1 lane-by-lane.
@@ -51,8 +51,8 @@
 
 from std.sys import simd_width_of
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.plan.expr import BIN_ADD, BIN_SUB, BIN_MUL
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_plan_expr.expr import BIN_ADD, BIN_SUB, BIN_MUL
 
 from .binary_fn import BinaryFn
 

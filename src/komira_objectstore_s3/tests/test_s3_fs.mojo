@@ -53,10 +53,10 @@ from std.testing import assert_equal, assert_false, assert_raises, assert_true
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
-from komira_core.plan.fs_descriptor_pod import FS_SCHEME_S3
+from komira_arrow.arrow_types import ArrowType
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
+from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_S3
 from komira_fs.file_discovery import GlobDiscoveryOptions
 from komira_fs.file_system import WriteMode
 from komira_fs.pruned_hive_discovery import (

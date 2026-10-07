@@ -24,7 +24,7 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.cancellation.token import CancellationToken
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 def test_drop_children_lifo() raises:

@@ -21,16 +21,15 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import (
-    SharedAlignedBuffer,
-    BooleanArray,
-    Decimal128Array,
-    PrimitiveArray,
-)
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
-from komira_core.eval import eval_gt, eval_lt, eval_eq, filter_to_indices, SelectionVector
-from komira_core.eval import eval_and, eval_or, eval_not
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
+from komira_column_kernels.comparison import eval_gt, eval_lt, eval_eq, filter_to_indices
+from komira_arrow.selection_vector import SelectionVector
+from komira_column_kernels.arithmetic import eval_and, eval_or, eval_not
 
 
 # =============================================================================

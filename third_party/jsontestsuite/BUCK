@@ -18,17 +18,19 @@ load(":test_parsing.bzl", "TEST_PARSING")
 # as third_party/pierrec-lz4 pins its three, would be 318 pins. The download
 # is a pinned input like any other: fetched once, then a cache hit.
 #
-# A newer pin is `_COMMIT` and `_SHA256` here, the list in test_parsing.bzl
-# (its names and counts), the counts in
+# A newer pin is `_COMMIT`, `_SHA256` and `_SIZE` here, the list in
+# test_parsing.bzl (its names and counts), the counts in
 # src/tests/conformance/komira_json_conformance/suite.mojo, and a re-read of that package's
 # allowlists against the new files.
 _COMMIT = "1ef36fa01286573e846ac449e8683f8833c5b26a"
 _SHA256 = "32ab2fb37cc26679dbd9164dbb7053bcef10134643d53cb0cef45de7680dcdcc"
+_SIZE = 63179698
 
 pinned_file(
     name = "JSONTestSuite.tar.gz",
     url = "https://github.com/nst/JSONTestSuite/archive/{}.tar.gz".format(_COMMIT),
     sha256 = _SHA256,
+    size_bytes = _SIZE,
 )
 
 # One directory: LICENSE and test_parsing/<name> for every name in

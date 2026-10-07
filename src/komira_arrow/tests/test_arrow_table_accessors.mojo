@@ -522,7 +522,7 @@ def _assert_every_cell(table: Table, where: String) raises:
         )
 
         # The ONE parametric method. Exercising it here is what instantiates
-        # it at all -- the library deliberately does not, so that `komira_core`
+        # it at all -- the library deliberately does not, so that the core packages
         # pays no compile for widths nobody reads.
         assert_equal(
             Int(table.value_primitive[DType.int64](C_I64, r)),

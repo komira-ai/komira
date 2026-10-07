@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
 # the wire bytes `komira_plan_wire` froze for it.
 #
 # komira_plan_wire's golden test freezes `topic_live` and `index_pinned` from
-# bindings it RESTATES out of komira_core primitives, because the codec may not
+# bindings it RESTATES out of the core packages primitives, because the codec may not
 # import the kinds. Nothing there notices a kind drifting away from that
 # restatement. This test encodes what the kinds themselves build, through the
 # real codec, and requires the checked-in bytes.
@@ -19,10 +19,12 @@ mojo_test(
     name = "test_scan_binding_links",
     srcs = ["test_scan_binding_links.mojo"],
     deps = [
+        "//src/komira_arrow:komira_arrow",
         "//src/komira_broker:komira_broker",
-        "//src/komira_core:komira_core",
         "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_plan_wire:komira_plan_wire",
+        "//src/komira_scan_source:komira_scan_source",
         "//src/komira_search_scan:komira_search_scan",
     ],
     # Staged at their repository paths, the same paths komira_plan_wire's own

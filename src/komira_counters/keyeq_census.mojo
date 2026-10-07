@@ -107,7 +107,7 @@ comptime KEYEQ_SLAB_STRIDE16: Int = 23         # CTL  slab_storage stride==16 2x
 
 
 comptime _KEYEQ_COUNTERS = GlobalCounterTable[
-    "komira_core_instr_keyeq_census_counters",
+    "komira_counters_instr_keyeq_census_counters",
     KEYEQ_N_SITES * KEYEQ_SLOT_STRIDE,
 ]
 

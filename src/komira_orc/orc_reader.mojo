@@ -23,15 +23,15 @@
 from komira_async.runtime.sched_trace import SITE_FORMAT_READ
 from std.memory import UnsafePointer
 from std.sys import num_physical_cores
-from komira_core.collections.slab import Slab
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_collections.slab import Slab
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_async.runtime.local_dispatcher import LocalDispatcher
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.cancellation.token import CancellationToken
-from komira_core.arrow.column import Column
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.column import Column
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
 
 from .footer import (
     OrcFileTail,
@@ -1173,7 +1173,7 @@ def read_orc_file(path: String) raises -> RecordBatch:
     # Invalid argument"` (or silently truncates) on files >2 GB due to an
     # Int32 count overflow inside `FileHandle.read*`. Mmap returns a memory
     # region directly. `read_orc_bytes` is Span-poly; `.view_range_ro(0, length).into_span()` bridges.
-    from komira_core.io.chunked_read import read_chunked
+    from komira_arrow_ipc.chunked_read import read_chunked
 
     var src_buf = read_chunked(path)
     return read_orc_bytes(
@@ -1184,7 +1184,7 @@ def read_orc_file(path: String) raises -> RecordBatch:
 def read_orc_file_opts(path: String, with_acid_columns: Bool) raises -> RecordBatch:
     """`read_orc_file` with the `with_acid_columns` ACID-exposure toggle."""
     # mmap-backed whole-file slurp — same reason as `read_orc_file` above.
-    from komira_core.io.chunked_read import read_chunked
+    from komira_arrow_ipc.chunked_read import read_chunked
 
     var src_buf = read_chunked(path)
     return read_orc_bytes_opts(
@@ -1203,7 +1203,7 @@ def read_orc_file_with_dispatcher[
     """Dispatcher-aware sibling of `read_orc_file` — mmap-slurp the file then
     decode columns in parallel via the caller-owned `LocalDispatcher`.
     Byte-identical output to `read_orc_file`."""
-    from komira_core.io.chunked_read import read_chunked
+    from komira_arrow_ipc.chunked_read import read_chunked
 
     var src_buf = read_chunked(path)
     return read_orc_bytes_with_dispatcher[disp_o=disp_o](

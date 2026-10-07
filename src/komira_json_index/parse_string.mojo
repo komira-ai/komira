@@ -48,7 +48,7 @@ def _string_from_bytes(b: List[UInt8]) raises -> String:
     scratch.append(UInt8(0))
     # SAFETY: `scratch` is alive through the ctor call; the ptr it
     # passes is a NUL-terminated buffer that String copies out
-    # immediately. Mirrors `StringArray.get` in `komira_core.arrow`.
+    # immediately. Mirrors `StringArray.get` in the core packages.
     return String(unsafe_from_utf8_ptr=scratch.unsafe_ptr())
 
 

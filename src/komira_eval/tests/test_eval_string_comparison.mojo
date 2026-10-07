@@ -4,11 +4,13 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import StringArray, LargeStringArray, BooleanArray
-from komira_core.eval import eval_string_eq, eval_string_ne, eval_string_gt, eval_string_lt, eval_string_ge, eval_string_le
+from komira_arrow.string_array import StringArray
+from komira_arrow.large_string_array import LargeStringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_column_kernels.string_comparison import eval_string_eq, eval_string_ne, eval_string_gt, eval_string_lt, eval_string_ge, eval_string_le
 
 # ★ THE EIGHT PATTERN ENTRY POINTS. Imported from
-# `komira_core.eval.string_comparison` rather than from the `komira_eval`
+# `komira_column_kernels.string_comparison` rather than from the `komira_eval`
 # facade because the facade re-exports the four Int32 spellings only, and the
 # four Int64 (LARGE_STRING) siblings are HALF of what this file now gates.
 #
@@ -24,13 +26,13 @@ from komira_core.eval import eval_string_eq, eval_string_ne, eval_string_gt, eva
 # gap, which a new reader could close, and not by a naming gap, which would
 # make this file the only possible gate forever. The other four ARE swept
 # end-to-end there; that gate is not LIKE-only.
-from komira_core.eval.string_comparison import (
+from komira_column_kernels.string_comparison import (
     eval_string_contains, eval_string_starts_with, eval_string_ends_with,
     eval_string_like,
     eval_large_string_contains, eval_large_string_starts_with,
     eval_large_string_ends_with, eval_large_string_like,
 )
-from komira_core.eval.arithmetic import eval_not
+from komira_column_kernels.arithmetic import eval_not
 
 
 # =============================================================================

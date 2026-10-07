@@ -33,8 +33,8 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_runtime_paths import test_tmpdir
 from komira_fs.local_fs import LocalFile, LocalFs
 from komira_async.ops.waker_sink import NoopSink
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
 
 
 # ---------------------------------------------------------------------------

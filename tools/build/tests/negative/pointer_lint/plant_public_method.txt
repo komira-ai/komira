@@ -1,0 +1,4 @@
+# A planted site: no row holds it (a method of a public struct).
+struct Box:
+    def get(self) -> UnsafePointer[UInt8, o]:
+        ...

@@ -49,7 +49,7 @@
 #   B6: block first-terms are STRICTLY lexicographically ascending (the
 #       upper_bound-minus-1 binary-search precondition).
 #   B7: TermInfo stays pure-POD (guard comment on the struct).
-#   B8: write_uleb128 is imported from komira_core.collections.byte_buffer.
+#   B8: write_uleb128 is imported from komira_buffer.byte_buffer.
 #
 # -----------------------------------------------------------------------------
 # ENCAPSULATION / SAFETY (owner re-audit)
@@ -64,7 +64,7 @@
 #     the same idiom as FinalizedIndex.
 # =============================================================================
 
-from komira_core.collections.byte_buffer import ByteBuffer, write_uleb128
+from komira_buffer.byte_buffer import ByteBuffer, write_uleb128
 
 from .inverted import FinalizedIndex
 

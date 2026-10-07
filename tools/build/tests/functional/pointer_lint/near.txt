@@ -1,0 +1,86 @@
+"""Near misses: nothing here is a site.
+
+A docstring may name MutAnyOrigin, unsafe_from_address=, parallelize[w](n),
+external_call["read", Int] and UnsafePointer(to=x.f).take_pointee().
+"""
+# So may a comment: MutUntrackedOrigin, unsafe_from_address=1, parallelize[w](n).
+comptime NOTE = "UnsafePointer(to=self.f).take_pointee() and MutExternalOrigin"
+comptime NOTE2 = 'external_call["open", Int] and ImmutAnyOrigin'
+
+
+# Identifiers that hold a banned name are other identifiers.
+struct MutAnyOriginal:
+    var unsafe_from_address_count: Int
+    # A field typed with a pointer is not a signature.
+    var p: UnsafePointer[UInt8, o]
+
+    def count(self) -> Int:
+        return self.unsafe_from_address_count
+
+    # A private method of a public struct.
+    def _raw(self) -> UnsafePointer[UInt8, o]:
+        return self.p
+
+    # A field's address bound in one method ...
+    def _bind(self, mut r: Record):
+        var w = UnsafePointer(to=r.name)
+
+    # ... and a different `w` taken in the next.
+    def _take(self, w: UnsafePointer[Record, o]):
+        _ = w.take_pointee()
+
+
+# Every method of a private struct.
+struct _Impl:
+    def get(self) -> UnsafePointer[UInt8, o]:
+        ...
+
+
+# A private function.
+def _private(p: UnsafePointer[UInt8, o]) -> Int:
+    return 0
+
+
+def public_value(x: Int) -> Int:
+    # A nested function is not public.
+    def inner(p: UnsafePointer[UInt8, o]) -> Int:
+        return 0
+    my_parallelize[_worker](x)
+    _ = external_call["write", Int](1, 0, 0)
+    _ = external_call["readlink", Int](0, 0, 0)
+    _ = external_call["openat", Int](0, 0, 0)
+    # A call whose trailing comment names a banned call: the comment is not read.
+    _ = external_call["write", Int](1, 0, 0)  # not external_call["read", Int]
+    # A `#` and an escaped quote inside a string are not a comment's start.
+    _ = external_call["write", Int](1, "\"#", 0)  # not external_call["open", Int]
+    x = 1  # a """ in a comment opens no docstring
+    return x
+
+
+def _whole_values(mut r: Record, p: UnsafePointer[Record, o], items: List[Record]):
+    # A pointer to a whole value, not a field.
+    var a = UnsafePointer(to=r).take_pointee()
+    var b = UnsafePointer(to=p[]).take_pointee()
+    # A subscript is not a field (a limit of the reader).
+    var c = UnsafePointer(to=items[0]).take_pointee()
+    # A field's address that is never taken from.
+    var q = UnsafePointer(to=r.name)
+    _ = q[]
+    # A name bound to a field's address, then to something else, then taken.
+    var t = UnsafePointer(to=r.name)
+    t = UnsafePointer(to=r)
+    _ = t.take_pointee()
+    # Bound in this function ...
+    var u = UnsafePointer(to=r.name)
+
+
+def _other(u: UnsafePointer[Record, o]):
+    # ... and a different `u` taken in another.
+    _ = u.take_pointee()
+
+
+def _single_quoted_docstring():
+    '''A docstring in single quotes may name MutAnyOrigin
+    and unsafe_from_address= as well.
+    '''
+    pass

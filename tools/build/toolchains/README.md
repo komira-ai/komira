@@ -88,11 +88,14 @@ fails the checks.
 
 ## Updating a pin
 
-A `pinned_file` has a `url` and a `sha256`; the download fails unless the
-bytes match. To move to a new release:
+A `pinned_file` has a `url`, a `sha256` and a `size_bytes`; the download
+fails unless the bytes match. The size lets buck2 skip any request to the URL
+while the remote cache holds the file. To move to a new release:
 
-1. Download the new file and compute its sha256 (`sha256sum`).
-2. Change `url` and `sha256` together in [`BUCK`](BUCK). The names of the
+1. Download the new file and compute its sha256 (`sha256sum`) and size
+   (`stat -c %s`).
+2. Change `url`, `sha256` and `size` of its `pin(...)` together in the
+   platform table, [`table.bzl`](../platforms/table.bzl). The names of the
    `.conda` and zig targets carry their version; if you rename one, update
    the targets that name it (`conda_closure(package = ..., libs = ...)`,
    `zig_dist(archive = ..., strip_prefix = ...)`).
