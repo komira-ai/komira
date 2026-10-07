@@ -23,9 +23,9 @@
 #    READ_WRITE and DESCRIBE (not CALL), retention default KEEP, primary
 #    role `table`; it is the third body arm, field 13.
 # 7. THE MESSAGING ROWS: a queue (field 15, the fifth arm) and a topic (21,
-#    the seventh) are PORTABLE, expose NAME and ADDRESS, take retention with
+#    the eighth) are PORTABLE, expose NAME and ADDRESS, take retention with
 #    the default DELETE, and land on `queue` / `topic`; a queue accepts SEND
-#    and RECEIVE, a topic SEND only. A subscription (28, the ninth) exposes
+#    and RECEIVE, a topic SEND only. A subscription (28, the tenth) exposes
 #    and accepts nothing, takes no retention, and lands on `sub` (a role
 #    word is 8 bytes at most).
 #    SEND and RECEIVE are values of the generated `Access`.
@@ -98,8 +98,8 @@ def test_catalog_arms_match_the_wire() raises:
     var c = Catalog.v1()
     assert_equal(
         len(c.types),
-        9,
-        "v1 declares service, job, table, bucket, queue, service_account, topic, grant and subscription",
+        10,
+        "v1 declares service, job, table, bucket, queue, secret, service_account, topic, grant and subscription",
     )
     for i in range(len(c.types)):
         var field = c.types[i].field
@@ -189,8 +189,9 @@ def _ints(
     a: Int, b: Int = -1, c: Int = -1, d: Int = -1, e: Int = -1, f: Int = -1
 ) -> List[Int]:
     """The fields given, then the messaging fields (15 queue, 21 topic, 28
-    subscription), which every entry in these tests implements."""
-    var l: List[Int] = [15, 21, 28]
+    subscription) and 16 secret, which every entry in these tests
+    implements."""
+    var l: List[Int] = [15, 21, 28, 16]
     l.append(a)
     if b >= 0:
         l.append(b)
@@ -444,7 +445,7 @@ def test_the_messaging_rows() raises:
     var arms = body_arms()
     var fields = [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]
     var names = ["queue", "topic", "subscription"]
-    var positions = [4, 6, 8]
+    var positions = [4, 7, 9]
     for i in range(3):
         ref t = c.types[c.index_of(fields[i])]
         assert_equal(t.name, String(names[i]))
