@@ -29,10 +29,12 @@ What it checks, and the defect each check catches (README.md has the table):
    {true, false, NULL} pairs, the keys of the join pair. Catches a generator
    change that drops the cases a shard relies on; the checks above cannot,
    because they compare the generator with itself.
-6. Structure the readers rely on: an LZ4 or ZSTD IPC file holds compressed
-   frames of that codec, and datasets larger than formats.CHUNK_ROWS cross
-   Parquet row groups and IPC record batches. Catches a codec option that is
-   silently ignored.
+6. Structure the readers rely on, against values written out here (CODECS,
+   CHUNK_ROWS), not read from formats.py: an LZ4 or ZSTD IPC file holds
+   compressed frames of that codec and an uncompressed one holds neither,
+   and Parquet row groups and IPC record batches are of 100 rows, so a
+   dataset larger than that crosses a boundary. Catches a codec option that
+   is silently ignored, and one large chunk where several were promised.
 
 Every mismatch is collected and reported, not only the first.
 """
@@ -76,6 +78,19 @@ LEFT_OUT = {
         "parquet": ["ts_s", "ts_s_tz"],
         "jsonl": ["f32_special", "f64_special", "bin_raw"],
     },
+}
+
+# The formats whose files keep each field's nullability (Parquet's REQUIRED,
+# Arrow's field flag); ORC, CSV and JSON Lines read every column back as
+# nullable, so for them a non-nullable column is held to having no NULL.
+KEEPS_NULLABILITY = {
+    "parquet",
+    "arrow_file",
+    "arrow_file_lz4",
+    "arrow_file_zstd",
+    "arrow_stream",
+    "arrow_stream_lz4",
+    "arrow_stream_zstd",
 }
 
 failures = []
@@ -185,7 +200,7 @@ def check_decoded(out, built):
                 if got_field.type != want_field.type:
                     fail("%s: column %s is %s, want %s" % (file, want_field.name, got_field.type, want_field.type))
                     continue
-                if fmt in formats.KEEPS_NULLABILITY and got_field.nullable != want_field.nullable:
+                if fmt in KEEPS_NULLABILITY and got_field.nullable != want_field.nullable:
                     fail("%s: column %s nullable=%s, want %s" % (file, want_field.name, got_field.nullable, want_field.nullable))
                 a, b = keys(expected.column(want_field.name)), keys(got.column(want_field.name))
                 bad = [i for i in range(len(a)) if a[i] != b[i]]
@@ -261,30 +276,46 @@ def check_anchors(built):
 
 _MAGIC = {"lz4": b"\x04\x22\x4d\x18", "zstd": b"\x28\xb5\x2f\xfd"}
 
+# The body compression each IPC format promises, written out here rather than
+# read from formats.py, whose table is what this check holds to it.
+CODECS = {
+    "arrow_file": None,
+    "arrow_file_lz4": "lz4",
+    "arrow_file_zstd": "zstd",
+    "arrow_stream": None,
+    "arrow_stream_lz4": "lz4",
+    "arrow_stream_zstd": "zstd",
+}
+
+
+# Rows per Parquet row group and IPC record batch, as the README promises.
+CHUNK_ROWS = 100
+
 
 def check_structure(out, built):
+    ipc_formats = sorted(f for f in datasets.FORMATS if f.startswith("arrow_"))
+    if ipc_formats != sorted(CODECS):
+        fail("the IPC formats are %s, CODECS lists %s" % (ipc_formats, sorted(CODECS)))
     for name in datasets.NAMES:
-        chunks = -(-ROWS[name] // formats.CHUNK_ROWS)
+        chunks = -(-ROWS[name] // CHUNK_ROWS)
         groups = pq.ParquetFile(os.path.join(out, name + ".parquet")).metadata.num_row_groups
         if groups != chunks:
             fail("%s.parquet: %d row groups, want %d" % (name, groups, chunks))
-        for fmt in datasets.FORMATS:
-            if not fmt.startswith("arrow_"):
-                continue
-            path = os.path.join(out, name + "." + formats.SUFFIX[fmt])
+        for fmt in sorted(CODECS):
+            file = name + "." + formats.SUFFIX[fmt]
+            path = os.path.join(out, file)
             if fmt.startswith("arrow_file"):
                 batches = ipc.open_file(path).num_record_batches
             else:
                 batches = sum(1 for _ in ipc.open_stream(path))
             if batches != chunks:
-                fail("%s: %d record batches, want %d" % (path, batches, chunks))
+                fail("%s: %d record batches, want %d" % (file, batches, chunks))
             with open(path, "rb") as f:
                 body = f.read()
-            codec = formats.ipc_codec(fmt)
-            for c, magic in _MAGIC.items():
-                if (c == codec) != (magic in body):
-                    fail("%s: written with %s, %s frames %s" % (
-                        os.path.basename(path), codec, c, "found" if magic in body else "not found"))
+            for c, magic in sorted(_MAGIC.items()):
+                if (c == CODECS[fmt]) != (magic in body):
+                    fail("%s: promises %s bodies, but %s frames are %s" % (
+                        file, CODECS[fmt], c, "found" if magic in body else "not found"))
 
 
 def main(out):

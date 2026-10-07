@@ -45,9 +45,6 @@ SUFFIX = {
     "arrow_stream_zstd": "zstd.arrows",
 }
 
-# The formats whose files keep each field's nullability.
-KEEPS_NULLABILITY = {f for f in SUFFIX if f == "parquet" or f.startswith("arrow_")}
-
 # Rows per Parquet row group and per IPC record batch, so a reader of a
 # dataset larger than this crosses a boundary.
 CHUNK_ROWS = 100
@@ -168,11 +165,6 @@ def write(fmt, table, path):
                 w.write_batch(batch)
     else:
         raise ValueError("unknown format %s" % fmt)
-
-
-def ipc_codec(fmt):
-    """The body compression an IPC format is written with (None, lz4, zstd)."""
-    return _IPC[fmt][1]
 
 
 def read(fmt, path, schema):
