@@ -36,9 +36,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_connect ConnectService stub of GetObject over TLS + h2 on 127.0.0.1
 # (komira_http_core's exported fixture leaf), server and client on two
 # komira_fork_join threads: the default connector (`build_gcs_tls_connector`)
-# refuses the fixture root, and `build_gcs_tls_connector_with_config` over
-# `gcs_tls_config_trusting_only(root_ca.pem)` completes the handshake and one
-# GetObject. komira_atomic_alias, komira_connect, komira_fork_join and
+# refuses the fixture root, `build_gcs_tls_connector_trusting(root_ca.pem,
+# "localhost")` completes the handshake and one GetObject, and the same root
+# under a name the leaf does not carry is refused. komira_atomic_alias, komira_connect, komira_fork_join and
 # komira_http_server are declared below for that test alone (the library
 # imports none of them).
 # test_env_source_only scans the package's own sources, staged as its data,

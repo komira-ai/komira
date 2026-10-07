@@ -1,7 +1,7 @@
 # =============================================================================
 # test_gcs_grpc_trust.mojo — which server certificates a StorageGrpcBackend
-#   accepts: the default trusts public roots only; the caller's TlsConfig
-#   reaches a private one.
+#   accepts: the default trusts public roots only; the trusting connector
+#   reaches one private root and still checks the certificate's name.
 # =============================================================================
 #
 # A real `HttpServer[ConnectService]` on 127.0.0.1:0 holds komira_http_core's
@@ -9,38 +9,49 @@
 # and `127.0.0.1`; ALPN `h2`, `http/1.1`) and answers
 # `/google.storage.v2.Storage/GetObject` with an Object built from the request
 # it decoded. On the other thread a real `StorageGrpcBackend` dials it,
-# `https://127.0.0.1:<port>`, SNI `localhost`.
+# `https://127.0.0.1:<port>`, with the SNI its connector pins.
 #
 #   1. test_default_connector_refuses_a_private_root: over
 #      `build_gcs_tls_connector("localhost")`, the default, GetObject raises
-#      `StoreError[TRANSPORT] ... detail=TlsConnector.connect`: the TLS
-#      handshake failed, so the chain was refused (no public root signs the
-#      fixture leaf). Nothing reached the handler (its counter stays 0).
+#      exactly `_REFUSED`: a TRANSPORT StoreError whose class is
+#      `TlsConnector.connect` (the TLS handshake failed; no public root signs
+#      the fixture leaf). Nothing reached the handler (its counter stays 0).
 #   2. test_trusting_connector_accepts_its_root: over
-#      `build_gcs_tls_connector_with_config(gcs_tls_config_trusting_only(
-#      root_ca.pem), "localhost")`, the handshake completes, ALPN selects h2,
-#      and one unary GetObject round-trips: the handler saw the bucket's
-#      resource name and the key, and the backend maps the handler's Object
-#      (generation 7, size 3, etag) onto ObjectMetaRaw. The handler ran once.
+#      `build_gcs_tls_connector_trusting(root_ca.pem, "localhost")`, the
+#      handshake completes, ALPN selects h2, and one unary GetObject
+#      round-trips: the handler saw the bucket's resource name and the key,
+#      and the backend maps the handler's Object (generation 7, size 3, etag)
+#      onto ObjectMetaRaw. The handler ran once.
+#   3. test_trusting_connector_refuses_another_name: the same trusted root,
+#      SNI `gcs-emulator.invalid`, a name the leaf does not carry: GetObject
+#      raises exactly `_REFUSED` and nothing reaches the handler.
+#      The chain verifies, so this refusal is the name check's.
+#   4. test_trusting_connector_construction: the connector is VERIFY_PEER with
+#      SNI pinned to the server name; an empty server name and a root that is
+#      not a PEM certificate are refused when it is built, each by its exact
+#      message.
 #
-# The two tests run the same server set-up and differ only in the client's
-# connector, so test 2 is the control that the set-up can succeed: test 1
-# fails for its trust, not for the harness. The detail class in test 1 says
-# the TCP connection was made and the TLS handshake is what failed (or timed
-# out: the deadline error carries the same class); the backend drops s2n's
-# text, so "verification" as the cause rests on test 2, where the same server
-# with the root trusted completes the handshake.
+# The three dialing tests run the same server set-up and differ only in the
+# client's connector, so test 2 is the control that the set-up can succeed:
+# tests 1 and 3 fail for their trust, not for the harness. The backend keeps
+# only the error's class and the length of s2n's text, never the text, and the
+# two refusals measured the same length, so they read the same: what tells them apart is the connector, test 2's
+# control (same root, the leaf's own name, accepted) and the SNI mutant below.
 #
 # WHAT IS NOT PROVEN HERE: a server stream (ReadObject) or a client stream
 # (WriteObject) over this connection; test_gcs_grpc_backend covers both verbs'
-# wire over a scripted connector. Which text s2n gives for the refusal (the
-# backend keeps only the error's class).
+# wire over a scripted connector. That the trusting connector drops the
+# public roots: no server here holds a publicly signed certificate.
 #
 # MUTANTS (product code, each alone, reverted):
-#   * build_gcs_tls_connector disables verification: test 1 reds ("the
-#     default connector must refuse a certificate no public root signs").
-#   * build_gcs_tls_connector_with_config drops its config and returns the
-#     public-CA connector: test 2 reds on the handshake.
+#   * build_gcs_tls_connector disables verification: test 1 reds.
+#   * build_gcs_tls_connector_trusting disables verification: test 3 reds
+#     (the wrong name is accepted).
+#   * build_gcs_tls_connector_trusting skips `add_trust_pem`: test 2 reds.
+#   * build_gcs_tls_connector_trusting does not pin SNI: test 3 reds (the
+#     client then checks the URL host 127.0.0.1, which the leaf carries).
+#   * build_gcs_tls_connector_trusting drops its empty-name check: test 4
+#     reds.
 #
 # THE THREADS: the backend blocks its thread for a call and the server only
 # progresses when stepped, so the server is stepped on thread 0 of a
@@ -63,6 +74,7 @@ from komira_connect import ConnectService
 from komira_gcp_core import StaticTokenSource
 from komira_gcp_storage.storage import GetObjectRequest, Object
 from komira_http_client.client import HttpClientConfig
+from komira_http_client.pool import VERIFY_PEER
 from komira_http_core.tls import TlsConfig, tls_init
 from komira_http_server.routing import Router
 from komira_http_server.server import HttpServer, HttpServerConfig
@@ -73,8 +85,7 @@ from komira_objectstore_gcs import (
     GcsTlsConnector,
     StorageGrpcBackend,
     build_gcs_tls_connector,
-    build_gcs_tls_connector_with_config,
-    gcs_tls_config_trusting_only,
+    build_gcs_tls_connector_trusting,
 )
 
 comptime _Backend = StorageGrpcBackend[GcsTlsConnector, StaticTokenSource, SystemClock]
@@ -88,6 +99,14 @@ comptime _LEAF_KEY = "src/komira_http_core/tests/fixtures/tls/leaf_key.pem"
 comptime _ROOT_CA = "src/komira_http_core/tests/fixtures/tls/root_ca.pem"
 
 comptime _SERVER_NAME = "localhost"
+comptime _OTHER_NAME = "gcs-emulator.invalid"
+# Both refusals: the backend keeps the class of the client's error and the
+# length of its text; the untrusted chain and the host-name mismatch measured
+# the same length.
+comptime _REFUSED = (
+    "StoreError[TRANSPORT] GetObject gs://trust-probe/logs/a.parquet"
+    " status=500 detail=TlsConnector.connect, error text 259 bytes"
+)
 comptime _HANDSHAKE_DEADLINE_US: Int64 = 10_000_000
 comptime _REQUEST_TIMEOUT_US = 10_000_000
 comptime _SERVE_POLL_TIMEOUT_US: Int32 = 5_000
@@ -246,18 +265,30 @@ def _serve_while[C: _ClientLeg](mut server: _ServeLoop, mut client: C) raises:
 # =============================================================================
 
 
-struct _DefaultRefuses(_ClientLeg):
+struct _Refused(_ClientLeg):
+    """One GetObject over the connector `run` builds: the default
+    (`trusting` False) or the one trusting `root_ca.pem` under `name`."""
+
     var port: UInt16
+    var trusting: Bool
+    var name: String
     var raised: String
     var answered: Bool
 
-    def __init__(out self, port: UInt16):
+    def __init__(out self, port: UInt16, trusting: Bool, name: String):
         self.port = port
+        self.trusting = trusting
+        self.name = name
         self.raised = String("")
         self.answered = False
 
     def run(mut self) raises:
-        var backend = _backend(build_gcs_tls_connector(String(_SERVER_NAME)), self.port)
+        var connector: GcsTlsConnector
+        if self.trusting:
+            connector = build_gcs_tls_connector_trusting(_read_fixture(_ROOT_CA), self.name)
+        else:
+            connector = build_gcs_tls_connector(self.name)
+        var backend = _backend(connector^, self.port)
         try:
             _ = backend.get_object(String(_BUCKET), String(_KEY))
             self.answered = True
@@ -280,8 +311,9 @@ struct _TrustingAccepts(_ClientLeg):
         self.etag = String("")
 
     def run(mut self) raises:
-        var config = gcs_tls_config_trusting_only(_read_fixture(_ROOT_CA))
-        var connector = build_gcs_tls_connector_with_config(config^, String(_SERVER_NAME))
+        var connector = build_gcs_tls_connector_trusting(
+            _read_fixture(_ROOT_CA), String(_SERVER_NAME)
+        )
         var backend = _backend(connector^, self.port)
         var meta = backend.get_object(String(_BUCKET), String(_KEY))
         self.key = meta.key
@@ -297,22 +329,14 @@ struct _TrustingAccepts(_ClientLeg):
 
 def test_default_connector_refuses_a_private_root() raises:
     var loop = _ServeLoop(_server())
-    var leg = _DefaultRefuses(loop.server.local_port())
+    var leg = _Refused(loop.server.local_port(), False, String(_SERVER_NAME))
     _serve_while(loop, leg)
     var stats = loop.server.serve_for_iterations(0, Int32(0))
-    print("  default connector raised: " + leg.raised)
     assert_true(
         not leg.answered,
         "the default connector must refuse a certificate no public root signs",
     )
-    assert_true(
-        leg.raised.startswith(String("StoreError[TRANSPORT] GetObject gs://") + _BUCKET + "/" + _KEY),
-        String("the refusal is a TRANSPORT StoreError, raised: ") + leg.raised,
-    )
-    assert_true(
-        String(" detail=TlsConnector.connect, ") in leg.raised,
-        String("the refusal is the TLS handshake's, raised: ") + leg.raised,
-    )
+    assert_equal(leg.raised, String(_REFUSED))
     assert_equal(Int(stats.reqs_handled), 0, "no RPC may reach the handler")
     print("  default connector refuses the private root PASS")
 
@@ -330,8 +354,62 @@ def test_trusting_connector_accepts_its_root() raises:
     print("  trusting connector: handshake + GetObject round trip PASS")
 
 
+def test_trusting_connector_refuses_another_name() raises:
+    var loop = _ServeLoop(_server())
+    var leg = _Refused(loop.server.local_port(), True, String(_OTHER_NAME))
+    _serve_while(loop, leg)
+    var stats = loop.server.serve_for_iterations(0, Int32(0))
+    assert_true(
+        not leg.answered,
+        "a trusted chain under a name the leaf does not carry must be refused",
+    )
+    assert_equal(leg.raised, String(_REFUSED))
+    assert_equal(Int(stats.reqs_handled), 0, "no RPC may reach the handler")
+    print("  trusting connector refuses another name PASS")
+
+
+def test_trusting_connector_construction() raises:
+    var connector = build_gcs_tls_connector_trusting(
+        _read_fixture(_ROOT_CA), String(_SERVER_NAME)
+    )
+    assert_equal(Int(connector.verify_mode()), Int(VERIFY_PEER), "VERIFY_PEER")
+    assert_equal(connector.server_name(), String(_SERVER_NAME), "the SNI")
+    assert_true(connector.sni_is_pinned(), "the SNI is pinned")
+
+    var empty_name = String("")
+    try:
+        _ = build_gcs_tls_connector_trusting(_read_fixture(_ROOT_CA), String(""))
+    except e:
+        empty_name = String(e)
+    assert_equal(
+        empty_name,
+        String(
+            "build_gcs_tls_connector_trusting: server_name is empty; the"
+            " peer's certificate is checked against it"
+        ),
+    )
+
+    var bad_root = String("")
+    try:
+        _ = build_gcs_tls_connector_trusting(
+            String("not a certificate"), String(_SERVER_NAME)
+        )
+    except e:
+        bad_root = String(e)
+    assert_equal(
+        bad_root,
+        String(
+            "TlsConfig.add_trust_pem: s2n_config_add_pem_to_trust_store"
+            " failed (rc=-1, errno=402653201)"
+        ),
+    )
+    print("  trusting connector construction PASS")
+
+
 def main() raises:
     tls_init()
+    test_trusting_connector_construction()
     test_default_connector_refuses_a_private_root()
     test_trusting_connector_accepts_its_root()
+    test_trusting_connector_refuses_another_name()
     print("PASS komira_objectstore_gcs test_gcs_grpc_trust")

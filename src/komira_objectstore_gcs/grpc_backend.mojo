@@ -44,9 +44,9 @@
 # service speaks gRPC over HTTP/2 over TLS only, and the backend always dials
 # `https://`. That default is the only trust the production endpoint needs.
 # A peer behind a private CA (an emulator behind TLS, an in-process fake) is
-# reached over `build_gcs_tls_connector_with_config(config, server_name)`,
-# whose `TlsConfig` the caller builds, `gcs_tls_config_trusting_only(root_pem)`
-# for one private root; nothing selects it but that call. There is no
+# reached over `build_gcs_tls_connector_trusting(root_pem, server_name)`,
+# which trusts `root_pem` alone and still verifies the chain and the name;
+# nothing selects it but that call. There is no
 # plaintext (h2c) route: komira_grpc routes only unary calls over h2c, so
 # WriteObject and ReadObject could not use one. A test drives the backend over
 # a scripted connector instead.
@@ -193,7 +193,7 @@ this keeps each message within the service's limit, it does not stream."""
 comptime GcsTlsConnector = TlsConnector[KernelTcpConnector]
 """The connector type of every TLS dial: TLS over kernel TCP, ALPN h2. Its
 trust is its `TlsConfig`'s: the system CA store from `build_gcs_tls_connector`,
-the caller's from `build_gcs_tls_connector_with_config`."""
+the caller's root alone from `build_gcs_tls_connector_trusting`."""
 
 comptime _RT = PerCoreAsyncRuntime[NoopSink]
 
@@ -208,44 +208,37 @@ def build_gcs_tls_connector(
 
     The default, and the only connector the production endpoint needs. A peer
     whose certificate chains to no public root (an emulator, a loopback fake)
-    fails the handshake: reach one with `build_gcs_tls_connector_with_config`.
+    fails the handshake: reach one with `build_gcs_tls_connector_trusting`.
     """
     return build_public_ca_tls_connector(host, alpn_h2=True)
 
 
-def gcs_tls_config_trusting_only(root_pem: String) raises -> TlsConfig:
-    """A client `TlsConfig` whose trust store is exactly `root_pem` (one or
-    more PEM certificates): the OS's public roots are wiped first, and
-    verification stays on. TLS 1.3 preferences and ALPN `h2`, `http/1.1`, as
-    `build_gcs_tls_connector` offers.
+def build_gcs_tls_connector_trusting(
+    root_pem: String, server_name: String
+) raises -> GcsTlsConnector:
+    """A TLS connector for a gRPC endpoint whose certificate a private CA
+    signed (a storage emulator behind TLS, an in-process fake): the trust
+    store is exactly `root_pem` (one or more PEM certificates; the OS's
+    public roots are wiped first), SNI is pinned to `server_name`, and the
+    connector is `VERIFY_PEER`, so the handshake checks the peer's chain
+    against `root_pem` and its name against `server_name`. TLS 1.3
+    preferences and ALPN `h2`, `http/1.1`, as `build_gcs_tls_connector`
+    offers. The backend's `host` may then be an address (the SNI and the
+    name checked stay `server_name`).
 
-    For a peer whose certificate is signed by a private CA (a storage
-    emulator behind TLS, an in-process fake): pass the result to
-    `build_gcs_tls_connector_with_config`. Raises when `root_pem` holds no
-    certificate s2n can parse."""
+    It takes the root, not a `TlsConfig`: verification cannot be turned off
+    through it. Raises when `server_name` is empty (there would be no name to
+    check) and when `root_pem` holds no certificate s2n can parse."""
+    if server_name.byte_length() == 0:
+        raise Error(
+            "build_gcs_tls_connector_trusting: server_name is empty; the"
+            " peer's certificate is checked against it"
+        )
     var config = TlsConfig()
     config.set_cipher_preferences(String("default_tls13"))
     config.wipe_trust()
     config.add_trust_pem(root_pem)
     config.enable_verify_default()
-    config.set_alpn_protocols(_gcs_alpn())
-    return config^
-
-
-def build_gcs_tls_connector_with_config(
-    var config: TlsConfig, server_name: String
-) raises -> GcsTlsConnector:
-    """A TLS connector for a gRPC endpoint whose trust the caller chose:
-    `config` as given (its trust store, its verification, its cipher
-    preferences) with its ALPN list set to `h2`, `http/1.1` (the service speaks
-    gRPC over h2 only), and SNI pinned to `server_name`, the name the peer's
-    certificate must carry. The backend's `host` may then be an address (the
-    SNI stays `server_name`).
-
-    The connector is built `VERIFY_PEER`, so its TLS sessions share no cache
-    bucket with a connector that skips verification; a `config` on which
-    `disable_verify()` was called is not what this is for. Build the config
-    with `gcs_tls_config_trusting_only` for a private root, or by hand."""
     config.set_alpn_protocols(_gcs_alpn())
     var connector = GcsTlsConnector(
         config^, KernelTcpConnector.new(), VERIFY_PEER
