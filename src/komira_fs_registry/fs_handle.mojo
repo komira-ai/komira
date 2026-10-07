@@ -17,21 +17,21 @@
 #   tag 0  FS_SCHEME_FILE   LocalArm   komira_fs's LocalFs[NoopSink]
 #   tag 1  FS_SCHEME_S3     S3Arm[C, T] komira_objectstore_s3's S3Fs
 #   tag 2  FS_SCHEME_GCS    (reserved: no arm in this build)
-#   tag 3  FS_SCHEME_AZURE  (reserved: no arm in this build)
+#   tag 3  FS_SCHEME_AZURE  AzureArm[C] komira_azure_blob's AzureFs
 #
-# THE TAGS. `FS_LOCAL` and `FS_S3` are komira_plan_expr's `FS_SCHEME_FILE` and
-# `FS_SCHEME_S3`: that package's `FsDescriptorPod` is the one a plan node
-# carries. The scheme codes are also written down twice more, and those are
+# THE TAGS. `FS_LOCAL`, `FS_S3` and `FS_AZURE` are komira_plan_expr's
+# `FS_SCHEME_FILE`, `FS_SCHEME_S3` and `FS_SCHEME_AZURE`: that package's
+# `FsDescriptorPod` is the one a plan node carries. The scheme codes are also written down twice more, and those are
 # COPIES, not the same names: the core packages' `FS_SCHEME_*` (which `S3Fs.SCHEME`
-# and the plan wire codec use) and `LocalFs.SCHEME`, a literal. The tests pin
+# and the plan wire codec use) and `LocalFs.SCHEME`, a literal; `AzureFs.SCHEME`
+# is komira_plan_expr's. The tests pin
 # all three to these tags (test_fs_handle_arms), so a drift reds the build.
 # `fs_arm_tag_for_scheme` takes the bare code, so a caller holding either
 # package's descriptor can resolve it; `fs_arm_tag_for_descriptor` is the
 # komira_plan_expr form.
 #
-# The GCS and Azure codes stay reserved. A descriptor carrying one of them is
-# refused with an error that names the missing arm ("no GCS arm in this
-# build"), so a plan that needs an arm this build does not have fails where
+# The GCS code stays reserved. A descriptor carrying it is refused with an
+# error that names the missing arm ("no GCS arm in this build"), so a plan that needs an arm this build does not have fails where
 # the descriptor is first resolved, not in a dispatch ladder that silently
 # falls through to the local arm.
 #
@@ -59,9 +59,17 @@
 # directly over a factory dials what that factory makes: a TLS connector
 # refuses an http:// endpoint on the first request (`HttpError[URL_INVALID]`).
 #
+# THE AZURE ARM. `AzureArm[C]` is komira_azure_blob's `AzureFs[C]` over the
+# handle's connector `C`, so the production handle's Azure arm dials the
+# same plaintext-or-TLS connector, chosen by its endpoint's scheme
+# (`azure_prod_arm`, azure_arm.mojo). Its endpoint, account and credential
+# (a Shared Key, a SAS token, or anonymous) live in the arm's
+# `AzureClientSpec`, which a clone copies, so a clone signs as its source
+# does; the arm builds its client on its first verb.
+#
 # A test drives the same handle over komira_http_core's ScriptedConnector
-# (`FsHandleOver[ScriptedConnector]`), so the S3 arm is read through without a
-# socket.
+# (`FsHandleOver[ScriptedConnector]`), so the S3 and Azure arms are read
+# through without a socket.
 #
 # WRAPPING A TYPED FILE SYSTEM. `FsHandleOver[C].from_typed_fs[FS]` (and, for
 # the production handle, `fs_handle_from_typed_fs[FS]`) wraps a file system
@@ -73,8 +81,9 @@
 # MOVED into the arm (`rebind_var`), so an S3 store it has already built
 # (`S3Fs.built`) and that store's connections are kept.
 #
-# Constructing a handle dials nothing: `S3Fs` builds its store on the first
-# verb, and `clone()` gives the clone a store of its own, not yet built.
+# Constructing a handle dials nothing: `S3Fs` builds its store, and an
+# `AzureFs` from `azure_arm` its client, on the first verb, and `clone()`
+# gives the clone a store or client of its own, not yet built.
 #
 # No UnsafePointer, no wildcard origin; every arm is a value field.
 # =============================================================================
@@ -83,6 +92,7 @@ from std.builtin.rebind import rebind_var
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_aws_core import AwsCredsSource, ProcessCredsSource, SystemAwsClock
+from komira_azure_blob import AzureFs
 from komira_fs.file_system import FileSystem
 from komira_fs.local_fs import LocalFs
 from komira_http_core.transport.io_stream import Connector
@@ -108,8 +118,11 @@ comptime S3Arm[
     C: Connector, T: AwsCredsSource & Copyable = ProcessCredsSource
 ] = S3Fs[C, T, SystemAwsClock]
 
-# The production handle: its S3 arm dials plaintext or TLS as its endpoint
-# says (`s3_prod_arm`).
+# The Azure arm over connector `C`.
+comptime AzureArm[C: Connector] = AzureFs[C]
+
+# The production handle: its S3 and Azure arms dial plaintext or TLS as
+# their endpoints say (`s3_prod_arm`, `azure_prod_arm`).
 comptime FsHandle = FsHandleOver[S3ProdConnector]
 
 
@@ -127,24 +140,18 @@ def fs_arm_tag_for_scheme(scheme: UInt8, bucket: String, node_id: Int) raises ->
     the code itself, when this build has that arm. `bucket` and `node_id`
     only name the descriptor in the error.
 
-    Raises `fs_registry: no GCS arm in this build ...` for `FS_SCHEME_GCS`,
-    `fs_registry: no Azure arm in this build ...` for `FS_SCHEME_AZURE`, and
-    `fs_registry: unknown file system scheme ...` for any other code."""
+    Raises `fs_registry: no GCS arm in this build ...` for `FS_SCHEME_GCS`
+    and `fs_registry: unknown file system scheme ...` for any other code
+    this build has no arm for."""
     if scheme == FS_SCHEME_FILE:
         return FS_SCHEME_FILE
     if scheme == FS_SCHEME_S3:
         return FS_SCHEME_S3
+    if scheme == FS_SCHEME_AZURE:
+        return FS_SCHEME_AZURE
     if scheme == FS_SCHEME_GCS:
         raise Error(
             "fs_registry: no GCS arm in this build (descriptor scheme "
-            + String(Int(scheme))
-            + ", "
-            + _where(bucket, node_id)
-            + ")"
-        )
-    if scheme == FS_SCHEME_AZURE:
-        raise Error(
-            "fs_registry: no Azure arm in this build (descriptor scheme "
             + String(Int(scheme))
             + ", "
             + _where(bucket, node_id)
@@ -178,22 +185,33 @@ struct FsHandleOver[
 
     comptime FS_LOCAL: UInt8 = FS_SCHEME_FILE
     comptime FS_S3: UInt8 = FS_SCHEME_S3
+    comptime FS_AZURE: UInt8 = FS_SCHEME_AZURE
 
     var _tag: UInt8
     var _local: Optional[LocalArm]
     var _s3: Optional[S3Arm[Self.C, Self.T]]
+    var _azure: Optional[AzureArm[Self.C]]
 
     def __init__(out self, *, var local: LocalArm):
         """The local arm, `tag() == FS_LOCAL`."""
         self._tag = Self.FS_LOCAL
         self._local = Optional[LocalArm](local^)
         self._s3 = None
+        self._azure = None
 
     def __init__(out self, *, var s3: S3Arm[Self.C, Self.T]):
         """The S3 arm, `tag() == FS_S3`. Dials nothing."""
         self._tag = Self.FS_S3
         self._local = None
         self._s3 = Optional[S3Arm[Self.C, Self.T]](s3^)
+        self._azure = None
+
+    def __init__(out self, *, var azure: AzureArm[Self.C]):
+        """The Azure arm, `tag() == FS_AZURE`. Dials nothing."""
+        self._tag = Self.FS_AZURE
+        self._local = None
+        self._s3 = None
+        self._azure = Optional[AzureArm[Self.C]](azure^)
 
     @staticmethod
     def from_local(var fs: LocalArm) -> Self:
@@ -206,12 +224,19 @@ struct FsHandleOver[
         return Self(s3=fs^)
 
     @staticmethod
+    def from_azure(var fs: AzureArm[Self.C]) -> Self:
+        """The Azure arm, `tag() == FS_AZURE`. Dials nothing."""
+        return Self(azure=fs^)
+
+    @staticmethod
     def is_arm_type[FS: FileSystem]() -> Bool:
         """True iff `FS` is exactly one of this handle's arm types
-        (`LocalArm`, `S3Arm[C]`)."""
+        (`LocalArm`, `S3Arm[C, T]`, `AzureArm[C]`)."""
         comptime if (FS == LocalArm):
             return True
         elif (FS == S3Arm[Self.C, Self.T]):
+            return True
+        elif (FS == AzureArm[Self.C]):
             return True
         else:
             return False
@@ -227,23 +252,27 @@ struct FsHandleOver[
             return Optional[Self](Self(local=rebind_var[LocalArm](fs^)))
         elif (FS == S3Arm[Self.C, Self.T]):
             return Optional[Self](Self(s3=rebind_var[S3Arm[Self.C, Self.T]](fs^)))
+        elif (FS == AzureArm[Self.C]):
+            return Optional[Self](Self(azure=rebind_var[AzureArm[Self.C]](fs^)))
         else:
             _ = fs^
             return Optional[Self](None)
 
     def clone(self) -> Self:
         """A handle on a clone of the set arm, with the same tag. A cloned
-        S3 arm builds its own store on its first verb; nothing is dialed
-        here."""
+        S3 arm builds its own store, and a cloned Azure arm its own client,
+        on its first verb; nothing is dialed here."""
         if self._tag == Self.FS_S3:
             return Self(s3=self._s3.value().clone())
-        # FS_LOCAL: both constructors set the arm their tag names, and the tag
-        # is private, so a handle's tag is one of the two.
+        if self._tag == Self.FS_AZURE:
+            return Self(azure=self._azure.value().clone())
+        # FS_LOCAL: every constructor sets the arm its tag names, and the tag
+        # is private, so a handle's tag is one of the three.
         return Self(local=self._local.value().clone())
 
     @always_inline
     def tag(self) -> UInt8:
-        """The set arm's tag: `FS_LOCAL` or `FS_S3`."""
+        """The set arm's tag: `FS_LOCAL`, `FS_S3` or `FS_AZURE`."""
         return self._tag
 
     @always_inline
@@ -253,6 +282,10 @@ struct FsHandleOver[
     @always_inline
     def is_s3(self) -> Bool:
         return self._tag == Self.FS_S3
+
+    @always_inline
+    def is_azure(self) -> Bool:
+        return self._tag == Self.FS_AZURE
 
     # The accessors borrow the whole Optional field: `Optional.value()`
     # returns a ref rooted at Optional's private storage, which cannot be
@@ -266,10 +299,15 @@ struct FsHandleOver[
         """The S3 arm's Optional; set iff `is_s3()`."""
         return self._s3
 
+    def azure_ref(self) -> ref [self._azure] Optional[AzureArm[Self.C]]:
+        """The Azure arm's Optional; set iff `is_azure()`."""
+        return self._azure
+
 
 def fs_is_registry_arm[FS: FileSystem]() -> Bool:
     """True iff `FS` is exactly one of the production handle's arm types
-    (`LocalArm`, `S3Arm[S3ProdConnector]`): the test `fs_handle_from_typed_fs`
+    (`LocalArm`, `S3Arm[S3ProdConnector]`, `AzureArm[S3ProdConnector]`): the
+    test `fs_handle_from_typed_fs`
     wraps by, without building a handle."""
     return FsHandle.is_arm_type[FS]()
 
