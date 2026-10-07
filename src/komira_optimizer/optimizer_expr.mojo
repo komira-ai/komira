@@ -1,5 +1,5 @@
 # =============================================================================
-# Optimizer expression rules — constant folding + predicate simplification
+# Optimizer expression rules
 # =============================================================================
 #
 # Rule 5: Constant folding — evaluate expressions with no column references
@@ -8,8 +8,17 @@
 # Rule 9: Predicate simplification — simplify boolean expressions
 #   (x AND TRUE -> x, NOT NOT x -> x, etc.)
 #
-# Rule 18: Common subexpression elimination (CSE) — stub
-# Rule 21: IN clause rewrite — stub
+# Rule 18: Common subexpression elimination (CSE) — hoist a subtree repeated
+#   within one Project's outputs, one Filter's AND-conjuncts or one
+#   Aggregate's aggregate-function arguments into a synthetic Project below
+#   the node, and reference it by column
+#   (`eliminate_common_subexpressions`)
+#
+# Rule 21: IN clause rewrite — collapse an OR chain of equalities on one
+#   column (col = 1 OR col = 2) into one IN list (`rewrite_in_clauses`)
+#
+# Also here: the matcher from an Expr to a kernel template id
+# (`_match_expr_to_kernel_template`).
 # =============================================================================
 
 from std.collections import Dict, Set
