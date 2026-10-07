@@ -5,10 +5,12 @@
 # The generated client blocks its thread until its call completes, and
 # `HttpServer` only makes progress when something steps it, so the two run
 # on two `komira_fork_join` threads (the shape of komira_http_tls_e2e's
-# duet, for a plaintext server whose requests reach `FakeSecretsManager`):
+# duet). The server side is any `ServeStep`: `FakeServer` here, a plaintext
+# server whose requests reach `FakeSecretsManager`, or `GcpFakeServer`
+# (gcp_server.mojo), the GCP fake behind its TLS front.
 #
-#   thread 0  steps the server (`serve_one_iteration_dispatch`) until the
-#             client is done, so every parsed request reaches the fake;
+#   thread 0  steps the server (`ServeStep.step`) until the client is done,
+#             so every parsed request reaches the fake;
 #   thread 1  runs the client leg once, then raises the stop flag, whether
 #             the leg returned or raised.
 #
@@ -48,6 +50,13 @@ comptime SERVE_POLL_TIMEOUT_US: Int32 = 5_000
 comptime SERVE_DEADLINE_NS: UInt64 = 120_000_000_000
 
 
+trait ServeStep(Movable):
+    """A server the duet can step: one bounded poll cycle per call."""
+
+    def step(mut self) raises:
+        ...
+
+
 trait ClientLeg(Movable):
     """The client half of a duet: run once, to completion, on its own
     thread."""
@@ -56,7 +65,7 @@ trait ClientLeg(Movable):
         ...
 
 
-struct FakeServer(Movable):
+struct FakeServer(ServeStep):
     """A plaintext `HttpServer` on 127.0.0.1 whose every request is answered
     by `fake`."""
 
@@ -88,6 +97,7 @@ struct _StopFlag(Movable):
 
 
 struct _Duet[
+    S: ServeStep,
     C: ClientLeg,
     so: MutOrigin,
     co: MutOrigin,
@@ -103,13 +113,13 @@ struct _Duet[
     # pointee outlives every dereference. Thread 0 alone dereferences
     # `server`, thread 1 alone `client`; `flag` is read and written only
     # through its atomic (`load`, `fetch_add`), from both threads.
-    var server: Pointer[FakeServer, Self.so]
+    var server: Pointer[Self.S, Self.so]
     var client: Pointer[Self.C, Self.co]
     var flag: Pointer[_StopFlag, Self.fo]
 
     def __init__(
         out self,
-        server: Pointer[FakeServer, Self.so],
+        server: Pointer[Self.S, Self.so],
         client: Pointer[Self.C, Self.co],
         flag: Pointer[_StopFlag, Self.fo],
     ):
@@ -135,7 +145,9 @@ struct _Duet[
             _ = self.flag[].stop.fetch_add(Int64(1))
 
 
-def serve_while[C: ClientLeg](mut server: FakeServer, mut client: C) raises:
+def serve_while[
+    S: ServeStep, C: ClientLeg
+](mut server: S, mut client: C) raises:
     """Step `server` on one thread while `client.run()` runs on another;
     return when both have finished. Rethrows the server's error if its step
     raised, otherwise the client's."""
