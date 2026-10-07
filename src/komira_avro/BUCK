@@ -4,10 +4,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Canonical Form and fingerprint, the Avro <-> Arrow type lattice (including
 # the arrow.* logical-type round-trip), OCF header and block decode, the block
 # codecs, the serial and block-parallel readers with full schema resolution,
-# and the OCF writer. Snappy comes statically linked through the core packages;
-# deflate, zstandard, bzip2 and xz are opened from the system libraries at
-# first use. komira_runtime_paths is declared because a test takes its scratch
-# directory from `test_tmpdir()`.
+# and the OCF writer. The block codecs are komira_compression's codec API
+# (snappy statically linked; deflate, zstandard, bzip2 and xz opened from the
+# system libraries at first use); this package declares no codec FFI, and the
+# snappy library reaches its binaries through komira_compression's deps.
+# komira_runtime_paths is declared because a test takes its scratch directory
+# from `test_tmpdir()`.
 mojo_library(
     name = "komira_avro",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -17,10 +19,10 @@ mojo_library(
         "//src/komira_async_api:komira_async_api",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
         "//src/komira_fs:komira_fs",
         "//src/komira_row_format:komira_row_format",
         "//src/komira_simd:komira_simd",
-        "//third_party/snappy:snappy",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
@@ -31,6 +33,7 @@ mojo_library(
         "tests/test_avro_block_parallel_decode.mojo",
         "tests/test_avro_bytes_fixed_defaults.mojo",
         "tests/test_avro_codec_matrix.mojo",
+        "tests/test_avro_codec_owner_equivalence.mojo",
         "tests/test_avro_comptime_shape_kind_decode.mojo",
         "tests/test_avro_data_level_decode.mojo",
         "tests/test_avro_hostile_input_regressions.mojo",

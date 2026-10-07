@@ -26,12 +26,12 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # against the DynamoDB Streams API reference (no upstream test body is
 # copied): test_dynamodbstreams_requests (the request each operation
 # builds, exactly, and the model's bounds), test_dynamodbstreams_responses
-# (each result decoded, stream records and their attribute values
-# included, and the error forms read through komira_aws_core and the
-# modeled error shapes), test_dynamodbstreams_endpoints (botocore's
-# endpoint cases for dynamodbstreams through every operation's resolver,
-# and the regional, FIPS, dual-stack and custom endpoints),
-# test_no_env_reads (the generated module reads no environment) and
+# (each result decoded, stream records and their attribute values included,
+# and the error forms read through komira_aws_core and the modeled error
+# shapes), test_dynamodbstreams_endpoints (botocore's endpoint cases for
+# dynamodbstreams through every operation's resolver, and the regional,
+# FIPS, dual-stack and custom endpoints), _no_env_reads (written by
+# mojo_aws_client: the package reads no environment) and
 # test_dynamodbstreams_client (the generated client over a scripted
 # connector: a call answered, an expired iterator raised under its code,
 # and a request as it reached the wire, through komira_aws_core's
@@ -59,17 +59,12 @@ mojo_aws_client(
         "tests/test_dynamodbstreams_endpoints.mojo": {
             _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
         },
-        "tests/test_no_env_reads.mojo": {
-            "gen/" + f: ":komira_aws_dynamodbstreams_gen[{}]".format(f)
-            for f in ["__init__.mojo", "_layout_probe.mojo", "komira_aws_dynamodbstreams.mojo"]
-        },
     },
     test_srcs = [
         "tests/test_dynamodbstreams_client.mojo",
         "tests/test_dynamodbstreams_endpoints.mojo",
         "tests/test_dynamodbstreams_requests.mojo",
         "tests/test_dynamodbstreams_responses.mojo",
-        "tests/test_no_env_reads.mojo",
     ],
     visibility = ["PUBLIC"],
     deps = [

@@ -79,7 +79,7 @@ no_endpoint(
 
 # The layout of src/ (tools/build/lint/defs.bzl, src_layout): src/<name> holds
 # what komira ships; a package that exists only to test others is
-# src/tests/<kind>/<name> (e2e, conformance, support; docs/architecture.md
+# src/tests/<kind>/<name> (e2e, conformance, helpers; docs/architecture.md
 # says which). So a *_e2e, *_loopback or *_conformance package directly
 # under src/ fails the build, and so does a komira_test_* one `shipped` does
 # not name. The packages are read from the build graph (every BUCK file under
@@ -88,7 +88,7 @@ no_endpoint(
 src_layout(
     name = "src_layout",
     # The test libraries komira ships, directly under src/ (the harnesses
-    # under src/tests/support build on them).
+    # under src/tests/helpers build on them).
     shipped = [
         "komira_test_run_id",
         "komira_test_verdict",
@@ -110,6 +110,7 @@ _TESTS_LINTS = [
     "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
     "tests//functional/install_gate:shell_lint",
+    "tests//functional/mem_cap:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
     "tests//functional/watchdog:shell_lint",
@@ -231,8 +232,13 @@ _TESTS_LINTS = [
 # home directory naming a person, a private or written-out network address, a
 # URL host outside the reserved example names and
 # tests/public_boundary_hosts.tsv, an email address outside the reserved
-# example domains, or a commit id in prose.
-# Binary data and upstream bytes are not read. The findings a file must keep
+# example domains, or a commit id in prose, in its contents or (dates, home
+# directories, deny-list words) its path. Binary data is not read; its path
+# is. Nothing committed is upstream bytes (upstream sources are pinned
+# downloads), so third_party/ is read whole. Not read: the toolchains cell's
+# one BUCK file, the template a consuming repository copies byte for byte
+# (test 7 pins its targets equal to a consumer's copy), which so cannot export
+# itself to this target; review holds it. The findings a file must keep
 # (fixtures, test vectors, planted defects) are held, per rule and file at an
 # exact count, in tests/public_boundary_holds.tsv, which only shrinks.
 # A repository that keeps words of its own out of this one passes a list of
@@ -245,6 +251,8 @@ _TESTS_LINTS = [
     deny = read_root_config("komira_lint", "public_boundary_deny", None),
     holds = "tests/public_boundary_holds.tsv",
     hosts = "tests/public_boundary_hosts.tsv",
+    # The tests cell's dotfile, which its doc_tree's glob skips.
+    paths = {"tools/build/tests/.buckconfig": "tests//:buckconfig"},
     # The public history starts on this day. Dates before 2025 in this tree
     # are data (epochs, certificates, standards), so the window starts there.
     public_from = "2026-09-01",
