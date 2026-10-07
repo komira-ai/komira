@@ -34,7 +34,12 @@
 #      (dns.mojo): no `uses` on a DNS zone, a DNS record or a certificate;
 #      DNS names of the name grammar, each in its zone; one zone per domain
 #      and one record set per name and type; a record's values of its type;
-#      a certificate's domains from 1 to 10, none twice.
+#      a certificate's domains from 1 to 10, none twice. And the trigger
+#      rules (triggers.mojo): no `uses` on a schedule or an event trigger; a
+#      cron of the portable form, a time zone of an IANA name's shape, a
+#      schedule's target a container job or a service; an event trigger's
+#      source a bucket, its event known, its target a service, each
+#      (source, event, target) once.
 #      And the identity rules (grants.mojo): no `uses` on a grant; a `uses`
 #      line or a grant names exactly one of a target and a cell resource,
 #      with a verb that target accepts; a grant's principal is an identity
@@ -84,8 +89,10 @@ from kci_cloud.catalog import (
     FIELD_CERTIFICATE,
     FIELD_DNS_RECORD,
     FIELD_DNS_ZONE,
+    FIELD_EVENT_TRIGGER,
     FIELD_GRANT,
     FIELD_QUEUE,
+    FIELD_SCHEDULE,
     FIELD_SECRET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_SUBSCRIPTION,
@@ -105,6 +112,8 @@ from kci_cloud.feed import feeds_of
 from kci_cloud.messaging import messaging_findings
 from kci_cloud.secrets import secret_env_findings, secret_findings
 from kci_cloud.dns import dns_findings
+from kci_cloud.firing import firings_of
+from kci_cloud.triggers import trigger_findings
 from kci_cloud.workload import is_workload, workload_of
 from kci_cloud.grants import (
     GrantEdge,
@@ -333,8 +342,10 @@ def _check_edge_target(
 
 def _edge_where(e: GrantEdge, owner: String, index: Int) -> String:
     """Where an edge came from, for a refusal text."""
-    if e.implicit:
+    if e.implicit and e.on_cell():
         return String("the implicit cell LOGS WRITE edge of \"") + owner + String("\"")
+    if e.implicit:
+        return String("the implicit CALL edge of trigger \"") + owner + String("\"")
     if e.role == "grant":
         return String("grant \"") + owner + String("\"")
     return String("uses[") + String(index) + String("] of \"") + owner + String("\"")
@@ -495,6 +506,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
         if field == FIELD_DNS_ZONE or field == FIELD_DNS_RECORD or field == FIELD_CERTIFICATE:
             out.extend(dns_findings(catalog, resources, field, r))
             continue
+        if field == FIELD_SCHEDULE or field == FIELD_EVENT_TRIGGER:
+            out.extend(trigger_findings(resources, field, r))
+            continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
             if len(r.uses) > 0:
@@ -593,6 +607,7 @@ def validate_for[
     ref entry = clouds.entries[e]
     var out = graph_findings(clouds.catalog, resources)
     var feeds = feeds_of(resources)
+    var firings = firings_of(resources)
     for i in range(len(resources)):
         ref r = resources[i]
         var field: Int
@@ -604,7 +619,7 @@ def validate_for[
         if t < 0:
             continue
         if entry.implements(field):
-            var limits = cloud.check(r, feeds)
+            var limits = cloud.check(r, feeds, firings)
             var public_refused = False
             for k in range(len(limits)):
                 if limits[k].field_path == "service.public":
