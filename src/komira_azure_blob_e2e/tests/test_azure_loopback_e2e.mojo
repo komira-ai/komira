@@ -43,12 +43,20 @@
 #   test_errors_over_loopback -- a missing blob on HEAD and on GET (404, read
 #     as NOT_FOUND; the GET carries azure_code=BlobNotFound), a range starting
 #     at EOF (416, read as MALFORMED), a missing container (404
-#     ContainerNotFound, NOT_FOUND). Catches: the status taxonomy mis-mapped.
+#     ContainerNotFound, NOT_FOUND). Catches: the status taxonomy mis-mapped,
+#     and any change to the message AzureStore._mk_error builds (verb, the
+#     az:// path, status, the service's Code and Message): each error is
+#     compared whole, as is the short read's.
 #   test_wrong_key_is_refused -- the same account with another key: HEAD,
 #     GET and List Blobs are each refused 403 AuthenticationFailed, read as
 #     PERMISSION_DENIED. Proves the fake's check can fail (a check that
 #     accepts anything would pass every test above) and catches a
-#     403 mapped to anything else.
+#     403 mapped to anything else. The GET and List messages carry the
+#     service's string-to-sign, which holds the request's x-ms-date (a
+#     timestamp); the expected message takes that string from the fake's
+#     record of what it signed, so the whole message is still compared
+#     exactly, and a message that carried the key or the signature would
+#     differ from it.
 #
 # Not asserted: the ContainerName of a List Blobs result. azure_xml cannot
 # read XML attributes, so it is always empty today (komira issue #356); the
@@ -180,11 +188,22 @@ def _error_of_list(fs: _Fs, prefix: String) -> String:
     return String("")
 
 
-def _assert_kind(msg: String, kind: UInt8, what: String) raises:
+def _assert_error(msg: String, kind: UInt8, want: String, what: String) raises:
+    """`msg` is exactly `want`, and the taxonomy reads it back as `kind`."""
     assert_true(msg.byte_length() > 0, what + ": no error raised")
+    assert_equal(msg, want, what)
     assert_equal(
         Int(azure_store_error_kind_from_message(msg)), Int(kind), what + ": " + msg
     )
+
+
+# The 403 message the fake (like the service) sends, around the string it
+# signed. Written from fake_blob_service.mojo's AuthenticationFailed answer.
+comptime _AUTH_FAILED_MESSAGE = (
+    "Server failed to authenticate the request. The MAC signature found in"
+    " the HTTP request is not the same as any computed signature. Server used"
+    " following string to sign: '"
+)
 
 
 def _sorted_entries(xs: List[ShallowDirEntry]) -> List[String]:
@@ -227,11 +246,19 @@ struct _Leg(ClientLeg):
     var port: UInt16
     var scenario: Int
     var key_b64: String
+    # The wrong-key scenario's three errors, for the test to read after the
+    # join (empty if the call did not raise).
+    var head403: String
+    var get403: String
+    var list403: String
 
     def __init__(out self, port: UInt16, scenario: Int, var key_b64: String):
         self.port = port
         self.scenario = scenario
         self.key_b64 = key_b64^
+        self.head403 = String("")
+        self.get403 = String("")
+        self.list403 = String("")
 
     def run(mut self) raises:
         var fs = _Fs(
@@ -257,8 +284,14 @@ struct _Leg(ClientLeg):
         # 990+20 runs 10 bytes past the end: the service answers 206 with the
         # 10 bytes that exist, and AzureFs refuses the short body.
         var short = _error_of_read(fs, String(_EVENTS), 990, 20)
-        assert_true(short.find("short read") >= 0, "short read at EOF: " + short)
-        assert_true(short.find("got 10") >= 0, "short read at EOF: " + short)
+        assert_equal(
+            short,
+            String(
+                "AzureFs.read_at: short read — requested 20 bytes, got 10"
+                " (blob key: data/events.bin)"
+            ),
+            "short read at EOF",
+        )
 
         assert_equal(fs.file_size(String(_EVENTS)), _EVENTS_SIZE, "file_size")
 
@@ -334,39 +367,61 @@ struct _Leg(ClientLeg):
         assert_false(fs.is_dir(String("nothing")), "is_dir on nothing")
 
     def _errors(self, fs: _Fs) raises:
-        _assert_kind(
+        # HEAD has no body, so no azure_code: the service's code arrives
+        # only in the x-ms-error-code header, which AzureStore.head does not
+        # read today.
+        _assert_error(
             _error_of_file_size(fs, String("data/missing.bin")),
-            AZURE_ERR_NOT_FOUND, "HEAD of a missing blob",
+            AZURE_ERR_NOT_FOUND,
+            String("StoreError[NOT_FOUND] HEAD az://lake/data/missing.bin status=404"),
+            "HEAD of a missing blob",
         )
-        var get404 = _error_of_read(fs, String("data/missing.bin"), 0, 4)
-        _assert_kind(get404, AZURE_ERR_NOT_FOUND, "GET of a missing blob")
-        assert_true(get404.find("azure_code=BlobNotFound") >= 0, get404)
-
-        var at_eof = _error_of_read(fs, String(_EVENTS), _EVENTS_SIZE, 4)
-        _assert_kind(at_eof, AZURE_ERR_MALFORMED, "a range starting at EOF")
-        assert_true(at_eof.find("status=416") >= 0, at_eof)
+        _assert_error(
+            _error_of_read(fs, String("data/missing.bin"), 0, 4),
+            AZURE_ERR_NOT_FOUND,
+            String(
+                "StoreError[NOT_FOUND] GET az://lake/data/missing.bin status=404"
+                " azure_code=BlobNotFound"
+                " azure_message=The specified blob does not exist."
+            ),
+            "GET of a missing blob",
+        )
+        _assert_error(
+            _error_of_read(fs, String(_EVENTS), _EVENTS_SIZE, 4),
+            AZURE_ERR_MALFORMED,
+            String(
+                "StoreError[MALFORMED] GET az://lake/data/events.bin status=416"
+                " azure_code=InvalidRange"
+                " azure_message=The range specified is invalid for the current"
+                " size of the resource."
+            ),
+            "a range starting at EOF",
+        )
 
         var other = _Fs(
             container=String("nocontainer"),
             client=_client(self.port, self.key_b64),
             mk_client=_no_factory,
         )
-        var no_container = _error_of_list(other, String(""))
-        _assert_kind(no_container, AZURE_ERR_NOT_FOUND, "a missing container")
-        assert_true(no_container.find("azure_code=ContainerNotFound") >= 0, no_container)
+        # A List Blobs error names the prefix where a blob would go: the
+        # container root here, so the path ends in `/`.
+        _assert_error(
+            _error_of_list(other, String("")),
+            AZURE_ERR_NOT_FOUND,
+            String(
+                "StoreError[NOT_FOUND] GET az://nocontainer/ status=404"
+                " azure_code=ContainerNotFound"
+                " azure_message=The specified container does not exist."
+            ),
+            "a missing container",
+        )
 
-    def _wrong_key(self, fs: _Fs) raises:
-        _assert_kind(
-            _error_of_file_size(fs, String(_EVENTS)),
-            AZURE_ERR_PERMISSION_DENIED, "HEAD under the wrong key",
-        )
-        var get403 = _error_of_read(fs, String(_EVENTS), 0, 4)
-        _assert_kind(get403, AZURE_ERR_PERMISSION_DENIED, "GET under the wrong key")
-        assert_true(get403.find("azure_code=AuthenticationFailed") >= 0, get403)
-        _assert_kind(
-            _error_of_list(fs, String("data/")),
-            AZURE_ERR_PERMISSION_DENIED, "List Blobs under the wrong key",
-        )
+    def _wrong_key(mut self, fs: _Fs) raises:
+        # Kept, not asserted here: the GET and List messages are compared
+        # after the join with the strings the fake signed.
+        self.head403 = _error_of_file_size(fs, String(_EVENTS))
+        self.get403 = _error_of_read(fs, String(_EVENTS), 0, 4)
+        self.list403 = _error_of_list(fs, String("data/"))
 
 
 def _run(scenario: Int, var key_b64: String) raises -> BlobServeLoop:
@@ -380,8 +435,12 @@ def _run(scenario: Int, var key_b64: String) raises -> BlobServeLoop:
 def _signed_ok(loop: BlobServeLoop) raises:
     assert_equal(
         loop.service.auth_failures, 0,
-        "requests the fake refused; it signed: "
-        + loop.service.last_refused_string_to_sign,
+        "requests the fake refused; the first it signed: "
+        + (
+            loop.service.refused_strings_to_sign[0]
+            if len(loop.service.refused_strings_to_sign) > 0
+            else String("")
+        ),
     )
 
 
@@ -464,10 +523,41 @@ def test_errors_over_loopback() raises:
 
 
 def test_wrong_key_is_refused() raises:
-    var loop = _run(_SCENARIO_WRONG_KEY, _wrong_key())
+    var loop = BlobServeLoop(_fixture())
+    var leg = _Leg(loop.port(), _SCENARIO_WRONG_KEY, _wrong_key())
+    serve_while(loop, leg)
     assert_equal(loop.service.auth_failures, 3, "requests refused 403")
     for i in range(len(loop.service.log)):
         assert_equal(loop.service.log[i].status, 403, "status under the wrong key")
+    ref signed = loop.service.refused_strings_to_sign
+    assert_equal(len(signed), 3, "strings the fake signed and refused")
+    # HEAD: no body, so no code and no message (see _errors).
+    _assert_error(
+        leg.head403,
+        AZURE_ERR_PERMISSION_DENIED,
+        String("StoreError[PERMISSION_DENIED] HEAD az://lake/data/events.bin status=403"),
+        "HEAD under the wrong key",
+    )
+    _assert_error(
+        leg.get403,
+        AZURE_ERR_PERMISSION_DENIED,
+        String(
+            "StoreError[PERMISSION_DENIED] GET az://lake/data/events.bin status=403"
+            " azure_code=AuthenticationFailed azure_message="
+        )
+        + _AUTH_FAILED_MESSAGE + signed[1] + "'.",
+        "GET under the wrong key",
+    )
+    _assert_error(
+        leg.list403,
+        AZURE_ERR_PERMISSION_DENIED,
+        String(
+            "StoreError[PERMISSION_DENIED] GET az://lake/data/ status=403"
+            " azure_code=AuthenticationFailed azure_message="
+        )
+        + _AUTH_FAILED_MESSAGE + signed[2] + "'.",
+        "List Blobs under the wrong key",
+    )
     print("  test_wrong_key_is_refused PASS")
 
 

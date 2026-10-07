@@ -12,7 +12,7 @@
 #
 # `farm_connected: true` declares that the stage's job joins the private
 # network the build farm is on. Such a job holds a network credential, so a
-# farm-connected stage may hold no PUBLISH step: the job that holds a tailnet
+# farm-connected stage may hold no PUBLISH step: the job that holds a farm network
 # node must not hold a publishing token.
 #
 # `trigger` says which CI event runs the stage's job: PUSH (the default: a
@@ -649,7 +649,7 @@ def validate_release_machine(g: ReleaseMachine, source: String) raises:
                 raise Error(
                     _at(source, s.line) + String("stage '") + s.name + String("' is farm-connected and has PUBLISH step '")
                     + s.steps[k].name + String("': a farm-connected stage may not publish (the job that holds a")
-                    + String(" tailnet node must not hold a publishing token)")
+                    + String(" farm network node must not hold a publishing token)")
                 )
             _check_step_validations(source, s, s.steps[k])
         _check_validation_names_unique(source, s)

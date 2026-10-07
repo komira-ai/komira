@@ -5,6 +5,8 @@
 # Exits 1 on the first wrong result, naming it; writes the validation result
 # and exits 0 when every case holds. The paths are made up.
 set -eu
+# shellcheck disable=SC3040 # busybox sh (ash) has pipefail
+set -o pipefail
 
 abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
 BB=$(abs "$1")
@@ -210,6 +212,139 @@ RC=$?
 set -e
 [ "$RC" -eq 1 ] || red "failed stdout: exit $RC, want 1"
 same "$W/f" "$W/want" "failed stdout (must be untouched)"
+pass
+
+# The next cases are ELF files, written byte by byte: a 64-byte ELF64
+# little-endian header, then .shstrtab, then one section holding "$D" and a
+# NUL, then three section headers (null, .shstrtab, .debug_line).
+# le <bytes> <value>: <value> as <bytes> little-endian bytes.
+le() {
+    _n=$1 _v=$2
+    while [ "$_n" -gt 0 ]; do
+        # shellcheck disable=SC2059 # the format is the computed octal escape
+        printf "\\$(printf '%03o' $((_v & 255)))"
+        _v=$((_v >> 8))
+        _n=$((_n - 1))
+    done
+}
+[ "$(le 2 16961)" = AB ] || red "le cannot write little-endian bytes"
+zeros() { _z=$1; while [ "$_z" -gt 0 ]; do nul; _z=$((_z - 1)); done; }
+# shdr <name> <type> <flags> <offset> <size>: one ELF64 section header.
+shdr() { le 4 "$1"; le 4 "$2"; le 8 "$3"; le 8 0; le 8 "$4"; le 8 "$5"; le 4 0; le 4 0; le 8 1; le 8 0; }
+# elf64 <flags of .debug_line> [<e_shoff>]: the file on stdout; e_shoff
+# defaults to where the headers really are.
+elf64() {
+    _strtab_len=23 # "\0.shstrtab\0.debug_line\0"
+    _data_len=$((${#D} + 1))
+    _shoff=$((64 + _strtab_len + _data_len))
+    printf '\177ELF'; le 1 2; le 1 1; le 1 1; zeros 9
+    le 2 1; le 2 62; le 4 1; le 8 0; le 8 0; le 8 "${2:-$_shoff}"
+    le 4 0; le 2 64; le 2 0; le 2 0; le 2 64; le 2 3; le 2 1
+    nul; printf '.shstrtab'; nul; printf '.debug_line'; nul
+    printf '%s' "$D"; nul
+    zeros 64
+    shdr 1 3 0 64 "$_strtab_len"
+    shdr 11 1 "$1" $((64 + _strtab_len)) "$_data_len"
+}
+
+# 13. An ELF file with a section whose flags hold SHF_COMPRESSED (0x800) is
+# refused (exit 1) and left untouched, although "$D" followed by NUL is in it:
+# a compressed section's bytes are not the strings they hold, so a byte search
+# can miss the directory there, and a count would claim a clean file.
+elf64 2048 >"$W/f"
+cp "$W/f" "$W/want"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 1 ] || red "compressed section: exit $RC, want 1"
+grep -q "section 2 is compressed (SHF_COMPRESSED" "$W/err" || red "compressed section: the message does not name section 2 and SHF_COMPRESSED"
+[ ! -s "$W/out" ] || red "compressed section: counts were printed"
+same "$W/f" "$W/want" "compressed section (must be untouched)"
+pass
+
+# 14. The same ELF file with that flag clear (0x2, SHF_ALLOC, beside it) is
+# relocated as any file is: the refusal is the flag's, not the format's.
+elf64 2 >"$W/f"
+[ "$(wc -c <"$W/f")" -eq $((64 + 23 + ${#D} + 1 + 3 * 64)) ] || red "uncompressed ELF: the fixture is $(wc -c <"$W/f") bytes"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 0 ] || red "uncompressed ELF: exit $RC, want 0"
+[ "$(cat "$W/out")" = "1 $D" ] || red "uncompressed ELF: stdout '$(cat "$W/out")', want '1 $D'"
+grep -qF "$P" "$W/f" || red "uncompressed ELF: the placeholder is not in the file"
+! grep -qF "$D" "$W/f" || red "uncompressed ELF: the directory is still in the file"
+pass
+
+# 15. Relocating is idempotent: the relocated file again, with the same
+# directory, is 0 rewrites, exit 0, the same bytes and the same inode (not
+# written). The placeholder never holds the directory it replaced.
+cp "$W/f" "$W/want"
+ino=$(stat -c %i "$W/f")
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 0 ] || red "idempotent: exit $RC, want 0"
+[ "$(cat "$W/out")" = "0 $D" ] || red "idempotent: stdout '$(cat "$W/out")', want '0 $D'"
+same "$W/f" "$W/want" "idempotent"
+[ "$(stat -c %i "$W/f")" = "$ino" ] || red "idempotent: the file was replaced (inode $ino -> $(stat -c %i "$W/f"))"
+pass
+
+# 16. An ELF file whose section headers lie past its end cannot be shown free
+# of compressed sections: refused (exit 1), untouched.
+elf64 2 4096 >"$W/f"
+cp "$W/f" "$W/want"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 1 ] || red "section headers past the end: exit $RC, want 1"
+grep -q "section headers" "$W/err" || red "section headers past the end: the message does not name the section headers"
+same "$W/f" "$W/want" "section headers past the end (must be untouched)"
+pass
+
+# 17. More than 0xff00 sections: e_shnum is 0 and section 0's sh_size holds
+# the count (3). The compressed section is found through that count.
+elf64_many() {
+    _strtab_len=23
+    _data_len=$((${#D} + 1))
+    printf '\177ELF'; le 1 2; le 1 1; le 1 1; zeros 9
+    le 2 1; le 2 62; le 4 1; le 8 0; le 8 0; le 8 $((64 + _strtab_len + _data_len))
+    le 4 0; le 2 64; le 2 0; le 2 0; le 2 64; le 2 0; le 2 1
+    nul; printf '.shstrtab'; nul; printf '.debug_line'; nul
+    printf '%s' "$D"; nul
+    shdr 0 0 0 0 3
+    shdr 1 3 0 64 "$_strtab_len"
+    shdr 11 1 "$1" $((64 + _strtab_len)) "$_data_len"
+}
+elf64_many 2048 >"$W/f"
+cp "$W/f" "$W/want"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 1 ] || red "compressed section, e_shnum 0: exit $RC, want 1"
+grep -q "section 2 is compressed (SHF_COMPRESSED" "$W/err" || red "compressed section, e_shnum 0: the message does not name section 2"
+same "$W/f" "$W/want" "compressed section, e_shnum 0 (must be untouched)"
+elf64_many 2 >"$W/f"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 0 ] || red "uncompressed, e_shnum 0: exit $RC, want 0"
+pass
+
+# 18. An ELF32 file (40-byte section headers, 32-bit sh_flags) with a
+# compressed section: refused the same way, untouched.
+# shdr32 <name> <type> <flags> <offset> <size>: one ELF32 section header.
+shdr32() { le 4 "$1"; le 4 "$2"; le 4 "$3"; le 4 0; le 4 "$4"; le 4 "$5"; le 4 0; le 4 0; le 4 1; le 4 0; }
+elf32() {
+    _strtab_len=23
+    _data_len=$((${#D} + 1))
+    printf '\177ELF'; le 1 1; le 1 1; le 1 1; zeros 9
+    le 2 1; le 2 3; le 4 1; le 4 0; le 4 0; le 4 $((52 + _strtab_len + _data_len))
+    le 4 0; le 2 52; le 2 0; le 2 0; le 2 40; le 2 3; le 2 1
+    nul; printf '.shstrtab'; nul; printf '.debug_line'; nul
+    printf '%s' "$D"; nul
+    zeros 40
+    shdr32 1 3 0 52 "$_strtab_len"
+    shdr32 11 1 "$1" $((52 + _strtab_len)) "$_data_len"
+}
+elf32 2048 >"$W/f"
+[ "$(wc -c <"$W/f")" -eq $((52 + 23 + ${#D} + 1 + 3 * 40)) ] || red "ELF32: the fixture is $(wc -c <"$W/f") bytes"
+cp "$W/f" "$W/want"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 1 ] || red "compressed section, ELF32: exit $RC, want 1"
+grep -q "section 2 is compressed (SHF_COMPRESSED" "$W/err" || red "compressed section, ELF32: the message does not name section 2"
+same "$W/f" "$W/want" "compressed section, ELF32 (must be untouched)"
+elf32 2 >"$W/f"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 0 ] || red "uncompressed, ELF32: exit $RC, want 0"
+[ "$(cat "$W/out")" = "1 $D" ] || red "uncompressed, ELF32: stdout '$(cat "$W/out")', want '1 $D'"
 pass
 
 rm -rf "$T"
