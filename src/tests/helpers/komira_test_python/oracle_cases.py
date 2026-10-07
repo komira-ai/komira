@@ -12,7 +12,11 @@ exits 4 only in the second run), is killed or ends with a raw exit status
 other than 0 or 1 in either run (`killed.py` dies in the first run,
 `killed_second.py` only in the second, `exit_second.py` calls `os._exit(5)`
 only in the second), writes nothing, or writes other files than `outs` names. `writes_tree` passes only because the runner fixes the hash
-seed: its `set.txt` is a set of 64 strings in iteration order.
+seed: its `set.txt` is a set of 64 strings in iteration order. `tz.py` pins
+the zone setup each run gets: run with a relative `TZDIR`, the child sees it
+absolute, as `zoneinfo`'s only path, with `TZ=UTC0`; run with none, the path
+is empty (never the interpreter's built-in one, which names the worker's
+/usr/share/zoneinfo).
 """
 
 import os
@@ -32,23 +36,29 @@ def files(root):
     return sorted(out)
 
 
-def run(script, outs):
+def run(script, outs, env=None, text=None):
     work = tempfile.mkdtemp()
     out, tmp, data = (os.path.join(work, d) for d in ("out", "tmp", "data"))
     os.makedirs(data)
+    os.makedirs(os.path.join(work, "zones"))
     with open(os.path.join(data, "in.txt"), "w") as f:
         f.write("from the data directory\n")
     cmd = [sys.executable, "-I", "-S", RUNNER, "--out", out, "--tmpdir", tmp, "--data", data]
     for p in outs:
         cmd += ["--outs", p]
     cmd += ["--", os.path.join(CASES, script)]
-    p = subprocess.run(cmd, capture_output=True, text=True, env={})
+    # From `work`, so a relative TZDIR ("zones") names work/zones.
+    p = subprocess.run(cmd, capture_output=True, text=True, env=env or {}, cwd=work)
     last = p.stderr.rstrip("\n").rsplit("\n", 1)[-1] if p.stderr else ""
     if p.returncode == 0:
         assert os.listdir(tmp) == [], "{}: --tmpdir not emptied: {}".format(script, os.listdir(tmp))
     if p.returncode == 0 and script == "writes_tree.py":
         with open(os.path.join(out, "copy.txt")) as f:
             assert f.read() == "from the data directory\n", "{}: copy.txt is not the data file".format(script)
+    if p.returncode == 0 and text is not None:
+        with open(os.path.join(out, "tz.txt")) as f:
+            got = f.read()
+        assert got == text, "{}: tz.txt is {!r}, want {!r}".format(script, got, text)
     return p.returncode, last, files(out) if os.path.isdir(out) else None
 
 
@@ -74,7 +84,22 @@ CASES_TABLE = [
     ("exit_second", "exit_second.py", [], (1, "python_oracle: the second run of exit_second.py exited 5", ["always.txt"])),
 ]
 
+# (name, environment, what tz.py writes)
+TZ_TABLE = [
+    ("tz_with_tzdir", {"TZDIR": "zones"}, "TZDIR zones\n"),
+    ("tz_without_tzdir", {}, "no TZDIR\n"),
+]
+
 bad = []
+for name, env, text in TZ_TABLE:
+    try:
+        got = run("tz.py", [], env, text)
+    except AssertionError as e:
+        got = str(e)
+    if got != (0, "", ["tz.txt"]):
+        bad.append("{}: got {!r}, want {!r}".format(name, got, (0, "", ["tz.txt"])))
+    else:
+        print("ok", name)
 for name, script, outs, want in CASES_TABLE:
     got = run(script, outs)
     if got != want:

@@ -23,8 +23,17 @@ py_test(
     src = "oracle_demo.py",
     deps = [
         "//third_party/python:duckdb",
+        "//third_party/python:pandas",
+        "//third_party/python:polars",
         "//third_party/python:pyarrow",
     ],
+)
+
+py_test(
+    name = "timezones",
+    src = "timezones.py",
+    # No tzdata here: py_test adds the wheel its `tzdata` names.
+    deps = ["//third_party/python:pyarrow"],
 )
 
 py_test(
@@ -101,6 +110,17 @@ py_test(
         "$(location :golden_sums)",
         "$(location :golden_sums_twin)",
     ],
+)
+
+# An oracle that needs the zone database: pyarrow writes an ORC timestamp
+# column (ORC reads its writer's zone, GMT, from TZDIR) and the script asserts
+# the zone setup the rule gives each run; it builds only if both runs wrote
+# the same bytes.
+python_oracle(
+    name = "orc_timestamps",
+    src = "orc_timestamps.py",
+    outs = ["ts.orc"],
+    deps = ["//third_party/python:pyarrow"],
 )
 
 py_test(

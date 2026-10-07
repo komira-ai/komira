@@ -23,12 +23,17 @@ the wheels' extension modules link beyond glibc (the dist's `preload`, from
 its `native_libs` directory) are loaded by path before the script runs, so
 an extension module needing one finds that copy, not the worker's: the
 loader resolves a needed name to an object already loaded under that soname.
-Each action's environment is `LC_ALL=C` and nothing else the rule sets. An
-oracle's script runs in a child interpreter `oracle_run.py` starts with
-`-s -S -P` instead (no user site directory, no `site`, no script directory
-put first by the interpreter) and the environment `LC_ALL=C PYTHONHASHSEED=0`
-and nothing else, so that string hashes are the same in every run; `-I`
-would ignore `PYTHONHASHSEED`.
+The environment of the `python_wheel`, `py_test` and `python_oracle` actions
+is `LC_ALL=C` and `TZ=UTC0` (a POSIX rule: local time is UTC and the C
+library reads no zone file for it); a `py_test`'s and a `python_oracle`'s
+also has `TZDIR`, the `zoneinfo` directory of its `tzdata` wheel, which
+`pyrun.py` and `oracle_run.py` make Python's only zone path, so no zone is
+read from the worker. An oracle's script runs in a child interpreter
+`oracle_run.py` starts with `-s -S -P` instead (no user site directory, no
+`site`, no script directory put first by the interpreter) and the
+environment `LC_ALL=C PYTHONHASHSEED=0 TZ=UTC0 TZDIR=<absolute>` and nothing
+else, so that string hashes are the same in every run; `-I` would ignore
+`PYTHONHASHSEED`.
 
 The rules are linux x86_64 only: the macros set `exec_compatible_with` to
 the linux x86_64 execution platform.
@@ -152,8 +157,10 @@ _python_dist = rule(
 
 # The C locale, set so that the interpreter does not coerce it to C.UTF-8
 # (PEP 538), which would load the worker's locale files; with it, the
-# interpreter is in UTF-8 mode (PEP 540) and reads no locale file.
-_ENV = {"LC_ALL": "C"}
+# interpreter is in UTF-8 mode (PEP 540) and reads no locale file. TZ is a
+# POSIX rule rather than a zone name, so the C library's local time is UTC
+# and comes from no zone file (an unset TZ reads the worker's /etc/localtime).
+_ENV = {"LC_ALL": "C", "TZ": "UTC0"}
 
 def _python(dist):
     return cmd_args(dist.root, format = "{}/" + dist.exe)
@@ -215,7 +222,7 @@ def _py_test_impl(ctx):
         srcs[s.short_path] = s
     staged = ctx.actions.copied_dir("srcs", srcs)
     closure = {}
-    for d in ctx.attrs.deps:
+    for d in ctx.attrs.deps + [ctx.attrs.tzdata]:
         for k, v in d[PythonWheelInfo].closure.items():
             if k in closure and closure[k][0] != v[0]:
                 fail("{}: {} is pinned at {} and at {} in its deps".format(ctx.label, k, closure[k][0], v[0]))
@@ -230,12 +237,17 @@ def _py_test_impl(ctx):
     if ctx.attrs.expect_error != None:
         cmd.add("--expect-error", ctx.attrs.expect_error)
     cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), ctx.attrs.args)
-    ctx.actions.run(cmd, env = _ENV, category = "py_test")
+    # The zone database every reader takes: the C library and ORC read TZDIR,
+    # and pyrun.py makes it Python's only zoneinfo path.
+    tzdata = ctx.attrs.tzdata[PythonWheelInfo].closure[ctx.attrs.tzdata[PythonWheelInfo].name][1]
+    env = dict(_ENV)
+    env["TZDIR"] = cmd_args(tzdata, format = "{}/tzdata/zoneinfo")
+    ctx.actions.run(cmd, env = env, category = "py_test")
     return [DefaultInfo(default_output = out, other_outputs = [tmp])]
 
 _py_test = rule(
     impl = _py_test_impl,
-    doc = "Runs `src` with the hermetic interpreter (`python`) as a build action; the output exists only if it passed (exit 0, or, with `expect_error`, an exception whose last traceback line is exactly that string). `srcs` are staged next to `src` and importable from it; `deps` are wheels (`python_wheel`), each with its own deps; `args` are the script's arguments.",
+    doc = "Runs `src` with the hermetic interpreter (`python`) as a build action; the output exists only if it passed (exit 0, or, with `expect_error`, an exception whose last traceback line is exactly that string). `srcs` are staged next to `src` and importable from it; `deps` are wheels (`python_wheel`), each with its own deps; `args` are the script's arguments. `tzdata` is the wheel whose `tzdata/zoneinfo` directory is the action's `TZDIR` and Python's only zone path.",
     attrs = {
         "args": attrs.list(attrs.arg(), default = []),
         "deps": attrs.list(attrs.exec_dep(providers = [PythonWheelInfo]), default = []),
@@ -243,6 +255,7 @@ _py_test = rule(
         "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
         "src": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
+        "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
         "_runner": attrs.source(default = "komira//tools/build/python:pyrun.py"),
     },
 )
@@ -297,7 +310,7 @@ def _python_oracle_impl(ctx):
             fail("{}: {} is listed twice".format(ctx.label, s.short_path))
         srcs[s.short_path] = s
     closure = {}
-    for d in ctx.attrs.deps:
+    for d in ctx.attrs.deps + [ctx.attrs.tzdata]:
         for k, v in d[PythonWheelInfo].closure.items():
             _check_independent(ctx, "wheel {}".format(k), v[1])
             if k in closure and closure[k][0] != v[0]:
@@ -320,7 +333,12 @@ def _python_oracle_impl(ctx):
     for p in ctx.attrs.outs:
         cmd.add("--outs", p)
     cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), ctx.attrs.args)
-    ctx.actions.run(cmd, env = _ENV, category = "python_oracle")
+    # The zone database, as in a py_test: oracle_run.py passes TZDIR (made
+    # absolute) and TZ=UTC0 to each run and makes TZDIR zoneinfo's only path.
+    tzdata = ctx.attrs.tzdata[PythonWheelInfo].closure[ctx.attrs.tzdata[PythonWheelInfo].name][1]
+    env = dict(_ENV)
+    env["TZDIR"] = cmd_args(tzdata, format = "{}/tzdata/zoneinfo")
+    ctx.actions.run(cmd, env = env, category = "python_oracle")
     return [DefaultInfo(
         default_output = out,
         other_outputs = [tmp],
@@ -329,7 +347,7 @@ def _python_oracle_impl(ctx):
 
 _python_oracle = rule(
     impl = _python_oracle_impl,
-    doc = "Runs `src` twice with the hermetic interpreter (`oracle_run.py`) and outputs the directory the first run wrote, only if both runs wrote the same tree; each `outs` path is a sub-target `[<path>]`. The script gets `sys.argv = [src, <output directory>, <data directory>, *args]`; `data` ({dest: source}, or sources staged at their paths) is staged in the data directory, `srcs` next to `src`. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under third_party/.",
+    doc = "Runs `src` twice with the hermetic interpreter (`oracle_run.py`) and outputs the directory the first run wrote, only if both runs wrote the same tree; each `outs` path is a sub-target `[<path>]`. The script gets `sys.argv = [src, <output directory>, <data directory>, *args]`; `data` ({dest: source}, or sources staged at their paths) is staged in the data directory, `srcs` next to `src`. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under third_party/. `tzdata` is the wheel whose `tzdata/zoneinfo` directory is each run's `TZDIR` and Python's only zone path; it is in the closure.",
     attrs = {
         "args": attrs.list(attrs.string(), default = []),
         "data": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = {}),
@@ -338,6 +356,7 @@ _python_oracle = rule(
         "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
         "src": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
+        "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
         "_runner": attrs.source(default = "komira//tools/build/python:oracle_run.py"),
     },
 )

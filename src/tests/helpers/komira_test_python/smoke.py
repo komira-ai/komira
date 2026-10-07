@@ -26,6 +26,7 @@ MODULES = {
     "python-dateutil": ("dateutil", True),
     "six": ("six", True),
     "typing-extensions": ("typing_extensions", False),
+    "tzdata": ("tzdata", True),
 }
 
 # distribution -> its native module, where importing the module above does not

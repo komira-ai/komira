@@ -9,6 +9,11 @@ puts the script's directory first on `sys.path` and each `--site` directory
 after the standard library, points `tempfile` at `--tmpdir`, and runs the
 script as `__main__` with `sys.argv` set to the script and its arguments.
 
+Time zones: `zoneinfo` looks for a zone only in `TZDIR` (made absolute in the
+environment, for the script's children and the native libraries that read
+it), or, with no `TZDIR`, only in an importable `tzdata` package: never in
+the interpreter's built-in path, which names the worker's /usr/share/zoneinfo.
+
 The script passes when it returns or exits with status 0. With
 `--expect-error`, it passes only if it raises an exception whose last
 traceback line (`Type: message`) is exactly the given line. On a pass,
@@ -23,6 +28,7 @@ import shutil
 import sys
 import tempfile
 import traceback
+import zoneinfo
 
 
 def _usage(msg):
@@ -72,6 +78,13 @@ def main():
     tmpdir = os.path.abspath(opts["tmpdir"])
     os.makedirs(tmpdir, exist_ok=True)
     tempfile.tempdir = tmpdir
+    tzdir = os.environ.get("TZDIR")
+    if tzdir:
+        tzdir = os.path.abspath(tzdir)
+        os.environ["TZDIR"] = tzdir
+        zoneinfo.reset_tzpath([tzdir])
+    else:
+        zoneinfo.reset_tzpath([])
     script = os.path.abspath(script)
     sys.path[:] = (
         [os.path.dirname(script)]

@@ -66,21 +66,23 @@ WHEELS = [
         "BSD-3-Clause",
         deps = ["numpy", "python-dateutil"],
     ),
+    # polars 1.44.2, the version komira's Python surface implements; polars 2
+    # is a later change.
     _wheel(
         "polars",
-        "2.0.0",
-        "https://files.pythonhosted.org/packages/ac/09/cc33bbd5463749c116b62c204d88bed6c02a6cb901eac7adab0d38651b07/polars-2.0.0-py3-none-any.whl",
-        "35d62f3541b7a6d4c360a2e2f07fccc0c2bcbd33b0ea51c83a25417a47a3f3ad",
-        876611,
+        "1.44.2",
+        "https://files.pythonhosted.org/packages/51/6d/3014112c7f717d1253223faa13b6db3ac3a64ed00ab2a3bc1b942bc9cdd4/polars-1.44.2-py3-none-any.whl",
+        "1bb331f17a40d9d931101533dcd33637b66edc61eb377b07020dac16a0f0377b",
+        865768,
         "MIT",
         deps = ["polars-runtime-32"],
     ),
     _wheel(
         "polars-runtime-32",
-        "2.0.0",
-        "https://files.pythonhosted.org/packages/83/88/e9fecfd49159da92f54ff2445883577a0f1bc195da53ecc9535c458d55dd/polars_runtime_32-2.0.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
-        "0d6ac584ea2b38913784db943879412380d92e28ab9cb88e20a77ba71ba3f911",
-        54475036,
+        "1.44.2",
+        "https://files.pythonhosted.org/packages/e9/24/ed9982657c446dd5491b089370eea196725673570cfc61f7225a9fdd7ef0/polars_runtime_32-1.44.2-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "a1bafb441e99199a62c63bf1bbdc0ea09ee9776dbac2bf31452b5000fb1df2f7",
+        49912258,
         "MIT",
     ),
     _wheel(
@@ -123,5 +125,15 @@ WHEELS = [
         "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
         45571,
         "PSF-2.0",
+    ),
+    # The IANA time-zone database (2026e) as a wheel: a py_test's TZDIR and
+    # zoneinfo path (tools/build/python/README.md, Time zones).
+    _wheel(
+        "tzdata",
+        "2026.5",
+        "https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10e7ed03ab25e006cd741092b718/tzdata-2026.5-py2.py3-none-any.whl",
+        "b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac",
+        347996,
+        "Apache-2.0",
     ),
 ]

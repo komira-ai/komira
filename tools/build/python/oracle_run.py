@@ -5,9 +5,13 @@
         -- <script> [<arg>]...
 
 Runs the script in two child interpreters, one after the other. Each child is
-`python3.<minor> -s -S -P` with the environment `LC_ALL=C` and
-`PYTHONHASHSEED=0` and nothing else, so `str` and `bytes` hashes, and with
-them the iteration order of a set of strings, are the same in every run. A
+`python3.<minor> -s -S -P` with the environment `LC_ALL=C`,
+`PYTHONHASHSEED=0`, `TZ=UTC0` and, if this process has one, `TZDIR` made
+absolute, and nothing else, so `str` and `bytes` hashes, and with them the
+iteration order of a set of strings, are the same in every run. A child
+makes `TZDIR` `zoneinfo`'s only search path (with no `TZDIR`, the path is
+empty and only an importable `tzdata` package is read): never the
+interpreter's built-in path, which names the worker's /usr/share/zoneinfo. A
 child loads each `--preload` library by path (RTLD_GLOBAL, in the order
 given), puts the script's directory first on `sys.path` and each `--site`
 directory after the standard library, points `tempfile` at a directory of
@@ -44,9 +48,11 @@ import subprocess
 import sys
 import tempfile
 import traceback
+import zoneinfo
 
 _CHILD = "--child"
-_ENV = {"LC_ALL": "C", "PYTHONHASHSEED": "0"}
+# TZ is a POSIX rule, so the C library's local time is UTC from no file.
+_ENV = {"LC_ALL": "C", "PYTHONHASHSEED": "0", "TZ": "UTC0"}
 
 
 def _usage(msg):
@@ -95,6 +101,8 @@ def _child(argv):
         sys.exit(1)
     for lib in preload:
         ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+    tzdir = os.environ.get("TZDIR")
+    zoneinfo.reset_tzpath([tzdir] if tzdir else [])
     tempfile.tempdir = tmp
     os.chdir(tmp)
     sys.path[:] = [os.path.dirname(script)] + [p for p in sys.path if p] + sites
@@ -205,11 +213,15 @@ def main():
     preload = [os.path.abspath(p) for p in opts["preload"]]
     sites = [os.path.abspath(s) for s in opts["site"]]
     python = os.path.abspath(sys.executable)
+    env = dict(_ENV)
+    tzdir = os.environ.get("TZDIR")
+    if tzdir:
+        env["TZDIR"] = os.path.abspath(tzdir)
     for run, out in (("first", first), ("second", second)):
         run_tmp = os.path.join(tmp, run, "tmp")
         os.makedirs(run_tmp)
         argv = [python, "-s", "-S", "-P", os.path.abspath(__file__), _CHILD, out, run_tmp, data, script, str(len(preload))]
-        code = subprocess.call(argv + preload + sites + ["--"] + args, env=dict(_ENV))
+        code = subprocess.call(argv + preload + sites + ["--"] + args, env=dict(env))
         if code != 0:
             # A child that exits 1 has printed its own line.
             if code != 1:
