@@ -111,7 +111,7 @@ cov_gate_dir(
     visibility = ["PUBLIC"],
 )
 
-# For planted defects (the tests cell copies it with one fault: test 45).
+# For planted defects (the tests cell copies it with one fault: test 46).
 export_file(
     name = "cov_gate.sh",
     visibility = ["PUBLIC"],

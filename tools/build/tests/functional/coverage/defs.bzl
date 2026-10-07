@@ -98,7 +98,7 @@ def _report_impl(ctx):
 # action (report.sh): `golden`, each report is its golden file byte for byte;
 # `census`, covcheck's build gate in census mode reads the reports over the
 # package's sources (`files`, {repository path: source}) and its result JSON
-# holds each `expect` string; `result` (test 45), the result JSON of a
+# holds each `expect` string; `result` (test 46), the result JSON of a
 # library's own gate (its [coverage][gate][result], the one `reports` entry)
 # holds each `expect` string.
 cov_report_check = rule(

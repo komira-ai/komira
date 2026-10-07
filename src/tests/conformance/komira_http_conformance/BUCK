@@ -50,7 +50,7 @@ mojo_library(
     test_data = {
         "tests/test_h2spec_conformance.mojo": _TLS_FIXTURES | {
             "h2spec": "//third_party/h2spec:h2spec[h2spec]",
-            "src/komira_http_conformance/h2spec_allowlist.txt": "h2spec_allowlist.txt",
+            "src/tests/conformance/komira_http_conformance/h2spec_allowlist.txt": "h2spec_allowlist.txt",
         },
     },
     visibility = ["PUBLIC"],

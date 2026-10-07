@@ -295,7 +295,7 @@ mojo_library(
     test_srcs = ["tests/test_lingers.mojo"],
 )
 
-# ---- Test 45: the coverage gate and the join ------------------------------
+# ---- Test 46: the coverage gate and the join ------------------------------
 #
 # Each library below has coverage builds and the gate whatever the switch
 # says (coverage_debug and coverage_gate, which a tests-cell fixture may
@@ -386,7 +386,7 @@ _RESULTS = {
     for name, expect in _RESULTS.items()
 ]
 
-# Test 45. A library whose welded tests are outside its package's tests/:
+# Test 46. A library whose welded tests are outside its package's tests/:
 # one in another tests/ directory (elsewhere/tests/, as komira_db_postgres's
 # wire/tests/) and one at the package's top (as a cloud SDK client's). With
 # coverage it analyzes, and its gate names both tests to covcheck
@@ -421,7 +421,7 @@ cov_report_check(
     script = "//functional/coverage:report.sh",
 )
 
-# Test 45. A census gate over a malformed ratchet: covcheck exits 1, which
+# Test 46. A census gate over a malformed ratchet: covcheck exits 1, which
 # fails the gate in every mode (census never fails on a finding, but does on
 # an input covcheck refuses). RED: tests//negative/coverage:covbad
 cov_gate_dir(
@@ -444,7 +444,7 @@ mojo_library(
     test_srcs = ["tests/test_full.mojo"],
 )
 
-# Test 45. A test that passes in the release gate and fails under kcov (the
+# Test 46. A test that passes in the release gate and fails under kcov (the
 # tracer test above), in a library with no coverage attribute of its own: with
 # -c komira.coverage=true its package waits for that coverage run, so the
 # build is RED ("COVERAGE RUN FAILED"); without the switch it is GREEN.
