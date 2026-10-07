@@ -34,15 +34,22 @@
 #
 # Import direction (the driver produces, the library consumes):
 #   The driver builds a stream of two chunks with its own private_data and
-#   release callbacks, one counter per struct (stream, root schema, each child
+#   release callbacks, one record per struct (stream, root schema, each child
 #   schema, the dictionary schema, each chunk's root array, each child array,
-#   each dictionary array). `probe_import_stream` drains it. Afterwards every
-#   counter must be exactly 1: the consumer calls a base structure's release
-#   once and the base structure's release releases its children (C Data
-#   Interface "Release callback semantics -- for consumers": consumers MUST
-#   NOT call a child's or a dictionary's release callback). The checksum the
-#   library returns must equal the one computed here from the source values
-#   (the function is described in arrow_c_abi_probe.mojo).
+#   each dictionary array). `probe_import_stream` drains it. Afterwards:
+#   - every struct's release ran exactly once;
+#   - no child or dictionary was released by the consumer in place. C Data
+#     Interface "Release callback semantics -- for consumers": consumers MUST
+#     NOT call a child's release callback, including the dictionary's. The
+#     call count alone cannot see this: a parent's release skips a child whose
+#     release is already NULL, so a direct child release followed by the root
+#     release still counts 1 per struct. So each parent marks a child just
+#     before it calls the child's release, and a release that runs at the
+#     address the driver built the struct at without that mark is counted as
+#     a direct release. A child the consumer moved ("Moving child arrays")
+#     and then released runs at the consumer's address and is not counted.
+#   The checksum the library returns must equal the one computed here from
+#   the source values (the function is described in arrow_c_abi_probe.mojo).
 # =============================================================================
 
 from std.ffi import OwnedDLHandle
@@ -526,10 +533,12 @@ def _export_direction(lib: OwnedDLHandle) raises:
 
 #
 # The stream's private_data is a state block of _P_WORDS slots. Each schema
-# and array the driver produces has its own counter as private_data; its
-# release callback adds 1, releases its children and dictionary the first
-# time only, and sets its own release member to NULL. Nothing is freed by a
-# release callback: the arena frees everything after the drain.
+# and array the driver produces has its own record of _R_WORDS slots as
+# private_data. Its release callback adds 1 to the call count, adds 1 to the
+# direct count if it runs at the struct's home address without the parent's
+# mark, releases its children and dictionary the first time only (marking
+# each before the call), and sets its own release member to NULL. Nothing is
+# freed by a release callback: the arena frees everything after the drain.
 
 comptime _P_WORDS = 6
 comptime _P_NEXT = 0
@@ -537,36 +546,49 @@ comptime _P_SCHEMA = 1
 comptime _P_CHUNK0 = 2
 comptime _P_STREAM_RELEASES = 4
 comptime _P_SCHEMA_CALLS = 5
-comptime _MAX_COUNTERS = 64
+
+# A struct's record (its private_data).
+comptime _R_WORDS = 4
+comptime _R_CALLS = 0
+comptime _R_DIRECT = 1
+comptime _R_BY_PARENT = 2
+comptime _R_HOME = 3
 
 
-def _bump(c: Void) -> Int64:
-    var p = c.bitcast[Int64]()
-    p[] = p[] + 1
-    return p[]
+def _enter_release(s: Words, private_slot: Int) -> Bool:
+    """Record one call of `s`'s release; True on the first call."""
+    var r = _words_at(_ptr(s, private_slot))
+    if Int(s) == Int(_ptr(r, _R_HOME)) and _i64(r, _R_BY_PARENT) == 0:
+        _set_i64(r, _R_DIRECT, _i64(r, _R_DIRECT) + 1)
+    _set_i64(r, _R_CALLS, _i64(r, _R_CALLS) + 1)
+    return _i64(r, _R_CALLS) == 1
+
+
+def _release_kid(kid: Words, release_slot: Int, private_slot: Int):
+    """A parent's release of one child or dictionary: mark it, then call it.
+    A NULL release means the consumer moved it out; it is skipped."""
+    if not _is_null(_ptr(kid, release_slot)):
+        _set_i64(_words_at(_ptr(kid, private_slot)), _R_BY_PARENT, 1)
+        _as_release(_ptr(kid, release_slot))(kid)
 
 
 def _drv_release_schema(s: Words) abi("C") -> None:
-    if _bump(_ptr(s, S_PRIVATE)) == 1:
+    if _enter_release(s, S_PRIVATE):
         for k in range(Int(_i64(s, S_N_CHILDREN))):
-            var kid = _slot_list(_ptr(s, S_CHILDREN), k)
-            if not _is_null(_ptr(kid, S_RELEASE)):
-                _as_release(_ptr(kid, S_RELEASE))(kid)
+            _release_kid(_slot_list(_ptr(s, S_CHILDREN), k), S_RELEASE, S_PRIVATE)
         var d = _ptr(s, S_DICTIONARY)
-        if not _is_null(d) and not _is_null(_ptr(_words_at(d), S_RELEASE)):
-            _as_release(_ptr(_words_at(d), S_RELEASE))(_words_at(d))
+        if not _is_null(d):
+            _release_kid(_words_at(d), S_RELEASE, S_PRIVATE)
     _set_ptr(s, S_RELEASE, _null())
 
 
 def _drv_release_array(a: Words) abi("C") -> None:
-    if _bump(_ptr(a, A_PRIVATE)) == 1:
+    if _enter_release(a, A_PRIVATE):
         for k in range(Int(_i64(a, A_N_CHILDREN))):
-            var kid = _slot_list(_ptr(a, A_CHILDREN), k)
-            if not _is_null(_ptr(kid, A_RELEASE)):
-                _as_release(_ptr(kid, A_RELEASE))(kid)
+            _release_kid(_slot_list(_ptr(a, A_CHILDREN), k), A_RELEASE, A_PRIVATE)
         var d = _ptr(a, A_DICTIONARY)
-        if not _is_null(d) and not _is_null(_ptr(_words_at(d), A_RELEASE)):
-            _as_release(_ptr(_words_at(d), A_RELEASE))(_words_at(d))
+        if not _is_null(d):
+            _release_kid(_words_at(d), A_RELEASE, A_PRIVATE)
     _set_ptr(a, A_RELEASE, _null())
 
 
@@ -614,21 +636,27 @@ def _drv_get_last_error(st: Words) abi("C") -> Bytes:
 
 struct _Producer(Movable):
     var arena: _Arena
-    var counters: Words
+    var records: List[Words]
     var names: List[String]
 
     def __init__(out self):
         self.arena = _Arena()
-        self.counters = self.arena.words(_MAX_COUNTERS)
+        self.records = List[Words]()
         self.names = List[String]()
 
-    def counter(mut self, name: String) -> Void:
-        var k = len(self.names)
+    def record(mut self, name: String, home: Words) -> Void:
+        """A zeroed record for the struct built at `home`."""
+        var r = self.arena.words(_R_WORDS)
+        _set_ptr(r, _R_HOME, home.bitcast[NoneType]())
+        self.records.append(r)
         self.names.append(name)
-        return (self.counters.bitcast[Int64]() + k).bitcast[NoneType]()
+        return r.bitcast[NoneType]()
 
-    def count(self, k: Int) -> Int64:
-        return (self.counters.bitcast[Int64]() + k)[]
+    def calls(self, k: Int) -> Int64:
+        return _i64(self.records[k], _R_CALLS)
+
+    def direct(self, k: Int) -> Int64:
+        return _i64(self.records[k], _R_DIRECT)
 
 
 def _schema_struct(
@@ -646,7 +674,7 @@ def _schema_struct(
         _set_ptr(s, S_CHILDREN, kids.bitcast[NoneType]())
     _set_ptr(s, S_DICTIONARY, dictionary)
     _set_ptr(s, S_RELEASE, _release_word(_drv_release_schema))
-    _set_ptr(s, S_PRIVATE, p.counter(label))
+    _set_ptr(s, S_PRIVATE, p.record(label, s))
     return s
 
 
@@ -669,7 +697,7 @@ def _array_struct(
         _set_ptr(a, A_CHILDREN, kids.bitcast[NoneType]())
     _set_ptr(a, A_DICTIONARY, dictionary)
     _set_ptr(a, A_RELEASE, _release_word(_drv_release_array))
-    _set_ptr(a, A_PRIVATE, p.counter(label))
+    _set_ptr(a, A_PRIVATE, p.record(label, a))
     return a
 
 
@@ -930,9 +958,11 @@ def _import_direction(lib: OwnedDLHandle) raises:
     if not _is_null(_ptr(st, ST_RELEASE)):
         _fail("imported stream: release is not NULL after the drain")
     for k in range(len(p.names)):
-        var c = p.count(k)
+        var c = p.calls(k)
         if c != 1:
             _fail("release of " + p.names[k] + " ran " + String(c) + " times, expected exactly 1")
+        if p.direct(k) != 0:
+            _fail("release of " + p.names[k] + " was called by the consumer in place, not by its parent's release")
     var h = _Fnv()
     _hash_src(h, src0)
     _hash_src(h, src1)
@@ -940,7 +970,7 @@ def _import_direction(lib: OwnedDLHandle) raises:
         _fail("probe_import_stream checksum is " + String(sum_box[]) + ", expected " + String(h.h))
     var structs = len(p.names)
     p.arena.free_all()
-    print("import: " + String(structs) + " structs each released exactly once, checksum " + String(h.h))
+    print("import: " + String(structs) + " structs each released once, none in place, checksum " + String(h.h))
 
 
 def main() raises:
