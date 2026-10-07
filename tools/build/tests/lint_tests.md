@@ -109,15 +109,24 @@ not name, a `shipped` name that is no package there, and any package not at
 one of the two places. `//:src_layout` in the root [`BUCK`](../../../BUCK)
 reads the packages from the build graph (the root package's subpackages, the
 nearest directories holding a BUCK file), so it is declared in every checkout
-and a new package is checked with no edit.
+and a new package is checked with no edit to a BUCK file. Given a `map` (the
+root target names [docs/architecture.md](../../../docs/architecture.md#the-module-map)),
+it also reads the module map's table rows, so a new package needs its row
+there: every package under `src/` has
+exactly one row whose link is its directory and whose name is the
+directory's, and no row links a directory under `src/` that is not a
+package.
 [`functional/src_layout:ok`](functional/src_layout/BUCK) is a planted list
 ([`fixture.bzl`](functional/src_layout/fixture.bzl): a package of each kind,
 a `*_loopback` under `e2e`, a shipped `komira_test_*`, a name holding `e2e`
 without ending in it, and an `*_e2e` package outside `src/`) that must pass;
 each target of [`negative/src_layout`](negative/src_layout/BUCK) adds one
-defect to it and must fail naming it.
+defect to it and must fail naming it; the `map_*` ones plant a defect in the
+map ([`map.txt`](functional/src_layout/map.txt)): a package with no row, a
+row for a package that is gone, two rows for one package, a misnamed row.
 
 ```sh
 ./buck2 build //:src_layout tests//functional/src_layout:ok
 ./buck2 build tests//negative/src_layout:top_e2e   # must fail: //src/komira_foo_e2e: a test-only package directly under src/
+./buck2 build tests//negative/src_layout:map_missing_row   # must fail: //src/komira_new: no row in ...
 ```

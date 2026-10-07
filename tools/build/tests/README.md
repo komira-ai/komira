@@ -937,7 +937,8 @@ the tree, and must fail naming it.
 
 ## 43. The layout of src/
 
-`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`. The test is in
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in
+`docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
 [the repository lint tests](lint_tests.md#43-the-layout-of-src).
 
 ## Diagnostics
