@@ -40,7 +40,7 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Schema
 from komira_json import parse_json_value
 from komira_plan_harness import CanonText, parse_canon
-from komira_plan_harness.render import arrow_type_name, schema_entry
+from komira_plan_harness.type_text import arrow_type_name, schema_entry_of_field
 from komira_plan_ir.logical_plan import LogicalPlan
 from komira_plan_wire import (
     plan_from_bytes,
@@ -69,7 +69,7 @@ def schema_entries(schema: Schema) raises -> List[String]:
     """The canonical-text schema entries (`name:type[?]`) of `schema`."""
     var res = List[String]()
     for i in range(schema.num_columns()):
-        res.append(schema_entry(schema.field_at(i)))
+        res.append(schema_entry_of_field(schema.field_at(i)))
     return res^
 
 

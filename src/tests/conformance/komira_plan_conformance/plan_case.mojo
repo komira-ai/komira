@@ -29,7 +29,7 @@
 from komira_arrow.schema import Schema
 from komira_plan_harness import CanonPolicy
 from komira_plan_ir.logical_plan import LogicalPlan
-from komira_plan_harness.render import schema_entry
+from komira_plan_harness.type_text import schema_entry_of_field
 
 comptime EXPECT_HAND: Int = 0
 comptime EXPECT_ORACLE: Int = 1
@@ -129,7 +129,7 @@ struct Dataset(Copyable, Movable):
         for i in range(self.schema.num_columns()):
             if i > 0:
                 s += "\t"
-            s += schema_entry(self.schema.field_at(i))
+            s += schema_entry_of_field(self.schema.field_at(i))
         return s^
 
 
