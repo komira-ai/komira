@@ -5,9 +5,9 @@
 # avro_codec.mojo calls komira_compression's codec API and declares no codec
 # FFI of its own. This pins what that must not change:
 #
-#   * compress_block, for every codec and for four inputs (empty, 4 KiB of
-#     incompressible bytes, ~600 bytes of repetitive text, 64 KiB of
-#     log-like lines from _words), is byte-equal to komira_compression's
+#   * compress_block, for every codec and for five inputs (empty, 4 KiB of
+#     incompressible bytes, 920 bytes of repetitive text, 64 KiB and
+#     256 KiB of log-like lines from _words), is byte-equal to komira_compression's
 #     codec called directly with the parameters the Avro writer has always
 #     used: raw deflate at level 6, snappy plus the BE4 CRC-32 of the
 #     uncompressed bytes, zstd level 3, bzip2 with 900k blocks and work
@@ -15,8 +15,8 @@
 #     test_compress_block_is_byte_equal_to_the_codec_api over the first
 #     three inputs, run against the avro_codec.mojo that declared its own
 #     FFI, passes too, so the old and the new writer emit the same bytes
-#     there; the _words input was added later and has not been run against
-#     the old file.
+#     there; the two _words inputs were added later and have not been run
+#     against the old file.
 #   * decompress_block of each of those blocks returns the input.
 #   * a corrupt block of each codec is refused with the exact message: the
 #     AvroCodecError code, then komira_compression's account of the failure
@@ -27,10 +27,11 @@
 # a block size, a preset), a lost or misplaced CRC trailer, an output cut to
 # the wrong length, and an error that drops the library's code or the sizes.
 # On the first three inputs deflate 9 and zstd 4 emit the same bytes as
-# deflate 6 and zstd 3; the _words input is the one that separates them.
-# Each of these mutants in avro_codec.mojo turns the byte-equality test red:
-# deflate 6 to 5 or 9, zstd 3 to 4, xz preset 6 to 5, bzip2 900k to 800k
-# blocks.
+# deflate 6 and zstd 3; the 64 KiB _words input separates those, and only
+# the 256 KiB one separates deflate 7 from 6. Each of these mutants in
+# avro_codec.mojo turns the byte-equality test red: deflate 6 to 5, 7 or 9,
+# zstd 3 to 4, xz preset 6 to 5, bzip2 900k to 800k blocks. Deflate 8 has
+# not been tried.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal
@@ -67,7 +68,8 @@ def _words(n: Int, seed: UInt32) -> List[UInt8]:
     repeat at many distances) and a 0-99999 number. Repeats of 20 to 90
     bytes that overlap other phrases are what separate nearby levels:
     with seed 0x41C64E6D, deflate 5, 6 and 9 and zstd 3 and 4 emit
-    different bytes for it, where short periodic text and noise compress
+    different bytes for 64 KiB of it, and deflate 6 and 7 for 256 KiB
+    (not for 64 KiB), where short periodic text and noise compress
     identically. Not every seed does: 0x5DEECE66 gave deflate 6 and 9 the
     same bytes."""
     var state = seed
@@ -122,6 +124,7 @@ def _corpus() -> List[List[UInt8]]:
             text.append(b)
     out.append(text^)
     out.append(_words(64 * 1024, UInt32(0x41C64E6D)))
+    out.append(_words(256 * 1024, UInt32(0x41C64E6D)))
     return out^
 
 

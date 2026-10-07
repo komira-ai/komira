@@ -5,10 +5,10 @@
 # orc_codec.mojo calls komira_compression's codec API and declares no codec
 # FFI of its own. This pins what that must not change:
 #
-#   * compress_stream, for ZLIB, SNAPPY, LZ4 and ZSTD and for five inputs
-#     (empty, 4 KiB of incompressible bytes, ~600 bytes of repetitive text,
-#     300 KiB of text, which is two chunks, and 64 KiB of log-like lines
-#     from _words), is byte-equal to the stream built here from
+#   * compress_stream, for ZLIB, SNAPPY, LZ4 and ZSTD and for six inputs
+#     (empty, 4 KiB of incompressible bytes, 600 bytes of repetitive text,
+#     300 KiB of text, which is two chunks, and 64 KiB and 256 KiB (one
+#     full chunk) of log-like lines from _words), is byte-equal to the stream built here from
 #     komira_compression's codecs with the parameters the ORC writer has
 #     always used: 256 KiB chunks, each behind the 3-byte header and stored
 #     verbatim when compressing does not shrink it, raw deflate at level 6,
@@ -16,8 +16,8 @@
 #     test_compress_stream_is_byte_equal_to_the_codec_api over the first
 #     four inputs, run against the orc_codec.mojo that declared its own FFI,
 #     passes too, so the old and the new writer emit the same bytes there;
-#     the _words input was added later and has not been run against the old
-#     file.
+#     the two _words inputs were added later and have not been run against
+#     the old file.
 #   * decompress_stream of each of those streams returns the input.
 #   * a corrupt snappy chunk and a truncated zstd chunk are refused with the
 #     exact message: the OrcCodecError code, then komira_compression's
@@ -26,9 +26,10 @@
 # What it catches: a codec parameter changed in the move, a chunk boundary
 # or header moved, the verbatim-chunk rule lost, an output cut to the wrong
 # length, and an error that drops the library's code or the sizes. On the
-# first four inputs zlib 5 and 9 emit the same bytes as zlib 6; the _words
-# input is the one that separates them. Each of these mutants in orc_codec.mojo
-# turns the byte-equality test red: zlib 6 to 5 or 9, zstd 3 to 4.
+# first four inputs zlib 5 and 9 emit the same bytes as zlib 6; the 64 KiB
+# _words input separates those, and only the 256 KiB one separates zlib 7
+# from 6. Each of these mutants in orc_codec.mojo turns the byte-equality
+# test red: zlib 6 to 5, 7 or 9, zstd 3 to 4. Zlib 8 has not been tried.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal
@@ -75,7 +76,8 @@ def _words(n: Int, seed: UInt32) -> List[UInt8]:
     repeat at many distances) and a 0-99999 number. Repeats of 20 to 90
     bytes that overlap other phrases are what separate nearby levels:
     with seed 0x41C64E6D, deflate 5, 6 and 9 and zstd 3 and 4 emit
-    different bytes for it, where short periodic text and noise compress
+    different bytes for 64 KiB of it, and deflate 6 and 7 for 256 KiB
+    (not for 64 KiB), where short periodic text and noise compress
     identically. Not every seed does: 0x5DEECE66 gave deflate 6 and 9 the
     same bytes."""
     var state = seed
@@ -126,6 +128,7 @@ def _corpus() -> List[List[UInt8]]:
     out.append(_text(600))
     out.append(_text(300 * 1024))
     out.append(_words(64 * 1024, UInt32(0x41C64E6D)))
+    out.append(_words(_CHUNK, UInt32(0x41C64E6D)))
     return out^
 
 
