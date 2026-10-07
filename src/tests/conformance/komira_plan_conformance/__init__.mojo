@@ -27,6 +27,7 @@ from .plan_case import (
     parse_err,
 )
 from .corpus import (
+    check_cells,
     check_corpus,
     check_dataset,
     check_dataset_files,

@@ -17,11 +17,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                       the same structural hash and root output schema, and
 #                       its expectation's schema equals the plan's root output
 #                       schema (the expectation is the authority on types; a
-#                       mismatch names both sides). Every case has exactly one
+#                       mismatch names both sides), and every cell is a value
+#                       of its column's type. Every case has exactly one
 #                       expectation file and every file one case; every case
 #                       is in exactly one shard; every dataset matches its
 #                       schema. Every problem is reported, not only the first.
-#   test_corpus_checks  each of those checks, fed a planted defect, reports it.
+#   test_corpus_checks  the checks fed planted defects (README.md lists them,
+#                       and the three wire legs only a broken codec can trip).
 #
 # expect/ and datasets/ are staged at those paths under the test's working
 # directory, by glob, so an orphan file reaches the test and is refused.
