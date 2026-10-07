@@ -4,7 +4,8 @@ replaced them. It can be run on a tree again and again, on main or on an open br
 rewrite is not touched, and a second run changes nothing.
 
   repoint.py [--tree DIR] [--core-root DIR | --core-rev REV] [--only PREFIX]... [--exclude PREFIX]...
-             [--dry-run] [--report FILE] [--strict] [--renames]
+             [--dry-run] [--report FILE] [--strict] [--renames] [--reword-prose]
+  repoint.py --check          # write nothing; exit 1 if any file outside tools/core_split names komira_core
 
 What it does to each file outside the frozen packages:
   * `.mojo`: every `from komira_core.<module> import <names>` is rewritten to the package that now defines the module.
@@ -25,7 +26,7 @@ The frozen komira_core is read from --core-root (a directory holding komira_core
 src/komira_core still exists, or, once it is deleted, from the parent of the commit that deleted it (--core-rev
 overrides that). Exit 0 when done (or, with --dry-run, always); with --strict exit 1 if an imported name could not be
 resolved or an import of komira_core is left. Pure python3 stdlib, deterministic."""
-import os,re,sys,subprocess,tempfile,argparse,shutil,collections
+import os,re,sys,subprocess,tempfile,argparse,shutil,collections,shlex
 HERE=os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0,HERE)
 import split as S
 import deps as D
@@ -33,10 +34,11 @@ import deps as D
 def load_renames():
     return [tuple(l.rstrip('\n').split('\t')) for l in open(os.path.join(HERE,'renames.tsv')) if l.strip() and not l.startswith('#')]
 RENAMES=load_renames()
-ALWAYS_EXCLUDE=('src/komira_core/','src/komira_core_ffi/','tools/core_split/','.github/workflows/core_split.yml','.git/','buck-out/')
+ALWAYS_EXCLUDE=('src/komira_core/','src/komira_core_ffi/','tools/core_split/','.git/','buck-out/')
 TEXT_EXT=('.mojo','.md','.bzl','.sh','.py','.tsv','.txt','.toml','.yml','.yaml','.textproto','.proto','.c','.h','.inc','.cc','.json')
 CORE=re.compile(r'(?<![A-Za-z0-9_])komira_core(?:_ffi)?(?![A-Za-z0-9_])')
 HARD=re.compile(r'(?m)^[ \t]*(?:from|import)[ \t]+komira_core(?:_ffi)?(?![A-Za-z0-9_])|//src/komira_core(?:_ffi)?:')
+KEY=re.compile(r'"komira_core_(?!ffi\b|posix\b)[a-z0-9_]+')  # a counter or metric key still spelled under the deleted package's name
 def word(n): return re.compile(r'(?<![A-Za-z0-9_])'+re.escape(n)+r'(?![A-Za-z0-9_])')
 def git(tree,*a): return subprocess.run(['git','-C',tree]+list(a),capture_output=True,text=True)
 def frozen_root(a):
@@ -48,7 +50,7 @@ def frozen_root(a):
         r=git(a.tree,'log','--diff-filter=D','--format=%H','-n','1','--','src/komira_core/BUCK')
         if not r.stdout.strip(): sys.exit('repoint: src/komira_core is gone and no commit that deleted it was found; pass --core-rev or --core-root')
         rev=r.stdout.strip()+'^'
-    tmp=tempfile.mkdtemp(prefix='repoint_core.'); p=subprocess.run('git -C %s archive %s src/komira_core src/komira_core_ffi | tar -x -C %s'%(a.tree,rev,tmp),shell=True,capture_output=True,text=True)
+    tmp=tempfile.mkdtemp(prefix='repoint_core.'); p=subprocess.run('git -C %s archive %s src/komira_core | tar -x -C %s'%(shlex.quote(a.tree),shlex.quote(rev),shlex.quote(tmp)),shell=True,capture_output=True,text=True)
     if p.returncode: sys.exit('repoint: git archive of %s failed: %s'%(rev,p.stderr.strip()))
     return os.path.join(tmp,'src'),tmp
 def tracked(tree):
@@ -194,7 +196,19 @@ def add_test_srcs(text,tests):
         lines.insert(pos,item)
     return text[:m.start()]+'%stest_srcs = [\n%s\n%s]'%(ind,'\n'.join(lines),ind)+text[m.end():]
 # ---- main -----------------------------------------------------------------------------------------------------
+def check(a):
+    """No file outside tools/core_split names komira_core or komira_core_ffi (as a word), or spells a string key "komira_core_<name>". Exit 1 and list them if one does."""
+    tree=os.path.abspath(a.tree); hits=[]
+    for f in tracked(tree):
+        if under(f,ALWAYS_EXCLUDE) or under(f,a.exclude) or (a.only and not under(f,a.only)): continue
+        t=read(os.path.join(tree,f))
+        if t is None: continue
+        for i,l in enumerate(t.split('\n')):
+            if CORE.search(l) or KEY.search(l): hits.append('%s:%d: %s'%(f,i+1,l.strip()[:140]))
+    print('\n'.join(hits)); print('repoint --check: %d lines name komira_core or komira_core_ffi'%len(hits))
+    return 1 if hits else 0
 def run(a):
+    if a.check: return check(a)
     if a.renames_only: a.renames=True
     tree=os.path.abspath(a.tree); croot,cleanup=frozen_root(a)
     rows=S.load_map(os.path.join(HERE,'split_map.tsv')) if not a.map else S.load_map(a.map)
@@ -280,6 +294,6 @@ def run(a):
 def main():
     ap=argparse.ArgumentParser(description=__doc__.split('\n')[0]); ap.add_argument('--tree',default='.'); ap.add_argument('--core-root'); ap.add_argument('--core-rev')
     ap.add_argument('--map'); ap.add_argument('--only',action='append',default=[]); ap.add_argument('--exclude',action='append',default=[])
-    ap.add_argument('--dry-run',action='store_true'); ap.add_argument('--report'); ap.add_argument('--strict',action='store_true'); ap.add_argument('--renames',action='store_true'); ap.add_argument('--reword-prose',action='store_true',help='also reword the comments and documents that still name komira_core'); ap.add_argument('--renames-only',action='store_true',help='do the renames and nothing else (implies --renames)')
+    ap.add_argument('--dry-run',action='store_true'); ap.add_argument('--report'); ap.add_argument('--strict',action='store_true'); ap.add_argument('--renames',action='store_true'); ap.add_argument('--reword-prose',action='store_true',help='also reword the comments and documents that still name komira_core'); ap.add_argument('--check',action='store_true',help='write nothing; exit 1 if a file still names komira_core or komira_core_ffi'); ap.add_argument('--renames-only',action='store_true',help='do the renames and nothing else (implies --renames)')
     return run(ap.parse_args())
 if __name__=='__main__': sys.exit(main())

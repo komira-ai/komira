@@ -472,7 +472,7 @@ def _init_thp_probe_counter() -> OwnedPointer[Int]:
 
 
 comptime _THP_PROBE_COUNTER = _Global[
-    "komira_core_runtime_thp_probe_count",
+    "komira_host_runtime_thp_probe_count",
     _init_thp_probe_counter,
 ]
 
@@ -523,7 +523,7 @@ def _init_thp_snapshot() -> OwnedPointer[_ThpSnapshot]:
 
 
 comptime _THP_SNAPSHOT = _Global[
-    "komira_core_runtime_thp_policy_snapshot",
+    "komira_host_runtime_thp_policy_snapshot",
     _init_thp_snapshot,
 ]
 

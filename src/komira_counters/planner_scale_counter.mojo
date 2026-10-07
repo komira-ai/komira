@@ -120,37 +120,37 @@ from komira_counters.global_counter import GlobalCounter
 
 
 comptime _PS_INLINE_SCANS = GlobalCounter[
-    "komira_core_planner_scale_inline_scans"
+    "komira_counters_planner_scale_inline_scans"
 ]
 comptime _PS_INLINE_COPY_BYTES = GlobalCounter[
-    "komira_core_planner_scale_inline_copy_bytes"
+    "komira_counters_planner_scale_inline_copy_bytes"
 ]
 comptime _PS_INLINE_SHARE_BYTES = GlobalCounter[
-    "komira_core_planner_scale_inline_share_bytes"
+    "komira_counters_planner_scale_inline_share_bytes"
 ]
 comptime _PS_AGG_CSE_CALLS = GlobalCounter[
-    "komira_core_planner_scale_agg_cse_calls"
+    "komira_counters_planner_scale_agg_cse_calls"
 ]
 comptime _PS_AGG_CSE_GROUPED_NODES = GlobalCounter[
-    "komira_core_planner_scale_agg_cse_grouped_nodes"
+    "komira_counters_planner_scale_agg_cse_grouped_nodes"
 ]
 comptime _PS_AGG_CSE_GATE_SKIPS = GlobalCounter[
-    "komira_core_planner_scale_agg_cse_gate_skips"
+    "komira_counters_planner_scale_agg_cse_gate_skips"
 ]
 comptime _PS_AGG_CSE_HASH_CALLS = GlobalCounter[
-    "komira_core_planner_scale_agg_cse_hash_calls"
+    "komira_counters_planner_scale_agg_cse_hash_calls"
 ]
 comptime _PS_AGG_CSE_CHEAP_CALLS = GlobalCounter[
-    "komira_core_planner_scale_agg_cse_cheap_calls"
+    "komira_counters_planner_scale_agg_cse_cheap_calls"
 ]
 comptime _PS_AGG_CSE_FOLDS = GlobalCounter[
-    "komira_core_planner_scale_agg_cse_folds"
+    "komira_counters_planner_scale_agg_cse_folds"
 ]
 comptime _PS_AGG_CSE_HASH_BYTES = GlobalCounter[
-    "komira_core_planner_scale_agg_cse_hash_bytes"
+    "komira_counters_planner_scale_agg_cse_hash_bytes"
 ]
 comptime _PS_CONTENT_HASH_BYTES = GlobalCounter[
-    "komira_core_planner_scale_content_hash_bytes"
+    "komira_counters_planner_scale_content_hash_bytes"
 ]
 
 

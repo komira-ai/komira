@@ -11,7 +11,7 @@
 #   enumerate  tools/build/package/list_conda_targets.sh prints a package target for every library
 #              of //src with no declaration anywhere; every one of them builds (a refusal is a
 #              value, not a build failure), and the libraries that cannot be packaged say why
-#              (the core packages: native code). The rest are the set the later checks use.
+#              (komira_libc: native code). The rest are the set the later checks use.
 #   contract   the manifest of every package of the set, and of the metapackage, is read by
 #              kci's own parser (src/kci_artifact_manifest, run as the probe
 #              //tools/build/package/manifest_probe:parse_manifest) and rendered again by kci's
@@ -105,12 +105,12 @@ while read -r target path; do
 done < "$W/all.out"
 problems=""
 [ "$((${#OK[@]} + ${#REFUSED[@]}))" = "${#TARGETS[@]}" ] || problems="$problems targets-without-output"
-printf '%s\n' "${REFUSED[@]}" | grep -qx komira_core || problems="$problems komira_core-not-refused"
-grep -q 'links native code' "$K/dev/komira_core/REFUSED" 2> /dev/null || problems="$problems komira_core-reason:[$(cat "$K/dev/komira_core/REFUSED" 2> /dev/null)]"
+printf '%s\n' "${REFUSED[@]}" | grep -qx komira_libc || problems="$problems komira_libc-not-refused"
+grep -q 'links native code' "$K/dev/komira_libc/REFUSED" 2> /dev/null || problems="$problems komira_libc-reason:[$(cat "$K/dev/komira_libc/REFUSED" 2> /dev/null)]"
 printf '%s\n' "${OK[@]}" | grep -qx komira_encoding || problems="$problems komira_encoding-refused"
 for r in "${REFUSED[@]}"; do [ -s "$K/dev/$r/REFUSED" ] || problems="$problems $r-has-no-reason"; done
 if [ -n "$problems" ]; then fail "enumerate:$problems (see $W)"; else
-    pass "enumerate: ${#TARGETS[@]} package targets, one per library of //src (and of komira_runtime_paths, which a package requires), none declared anywhere; all build; ${#REFUSED[@]} are refused with a reason (komira_core: native code) and ${#OK[@]} make a package"
+    pass "enumerate: ${#TARGETS[@]} package targets, one per library of //src (and of komira_runtime_paths, which a package requires), none declared anywhere; all build; ${#REFUSED[@]} are refused with a reason (komira_libc: native code) and ${#OK[@]} make a package"
 fi
 
 # The release tool's completeness rule, played here: every requirement of a package of the set is
