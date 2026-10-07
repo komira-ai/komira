@@ -65,7 +65,9 @@
 # edge or a byte no package name holds: a `<channel>::` prefix, a bracket,
 # another case all count; `komira_native_extra` does not). Its shape is
 # then exact: single spaces, no tab or other control byte, three words, the
-# first the name itself in lowercase.
+# first the name itself in lowercase. A library requirement whose name (its
+# first word) holds `*`, `?`, `^` or `$` RAISES: a solver may match a glob or
+# regex name against the native package, and no token names it.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -434,6 +436,23 @@ def _native_named(release: LoadedRelease, req: String) -> String:
     return String("")
 
 
+def _name_is_pattern(req: String) -> Bool:
+    """True when the first word of `req` (past any leading whitespace, up to
+    the next whitespace or control byte) holds `*`, `?`, `^` or `$`: a glob
+    or regex name a solver may match against any package, the native one
+    included, holding no token of its name."""
+    var b = req.as_bytes()
+    var i = 0
+    while i < len(b) and b[i] <= UInt8(0x20):
+        i += 1
+    while i < len(b) and b[i] > UInt8(0x20):
+        var c = b[i]
+        if c == UInt8(ord("*")) or c == UInt8(ord("?")) or c == UInt8(ord("^")) or c == UInt8(ord("$")):
+            return True
+        i += 1
+    return False
+
+
 def _only_spaces(req: String) -> Bool:
     """True when every whitespace or control byte of `req` is a plain space."""
     var b = req.as_bytes()
@@ -449,7 +468,8 @@ def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[I
     requires it at another version or build, or in another shape: a
     requirement naming the native package anywhere, in any case (a token,
     `_native_named`), must be exactly `<native> ==<version> <build>`, single
-    spaces, nothing else."""
+    spaces, nothing else. A requirement whose name is a glob or regex
+    pattern RAISES too: it may match the native package without naming it."""
     var out = pins.copy()
     for i in range(len(pins)):
         if not pins[i].is_library:
@@ -461,6 +481,11 @@ def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[I
                 continue
             for d in range(len(mem.conda.depends)):
                 ref req = mem.conda.depends[d]
+                if _name_is_pattern(req):
+                    raise Error(
+                        who + String(" requires '") + req
+                        + String("', whose name is a pattern (`*`, `?`, `^` or `$`): kci cannot tell what it installs")
+                    )
                 var name = _native_named(release, req)
                 if name.byte_length() == 0:
                     continue

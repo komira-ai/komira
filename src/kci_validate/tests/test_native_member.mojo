@@ -15,9 +15,10 @@
 #       another build or another version, or in another shape (another
 #       operator, a fourth word, no build, a tab, a leading space, the
 #       name in another case, a bracket glued to the name, a channel
-#       prefix); a package whose name only starts with komira_native is
-#       another package, not checked as it; a
-#       metapackage that does not require komira_native
+#       prefix, also after a non-token occurrence); a requirement whose
+#       name is a glob or regex pattern; a metapackage that does not
+#       require komira_native. A package whose name only starts with
+#       komira_native is another package, not checked as it
 #     ENV, komira_native alone: no library, so no README runs: a FAIL, never
 #       a pass (and never "not a metapackage")
 #     SMOKE, a library requiring komira_native: pinned, served, read back,
@@ -399,6 +400,13 @@ def _shape(req: String) -> String:
     )
 
 
+def _pattern(req: String) -> String:
+    return (
+        String("'") + req
+        + String("', whose name is a pattern (`*`, `?`, `^` or `$`): kci cannot tell what it installs")
+    )
+
+
 def test_env_a_native_requirement_of_another_shape_is_refused() raises:
     # each row would reach the version and build check, or pass it, if the
     # shape were not read first
@@ -467,6 +475,26 @@ def test_env_a_native_requirement_behind_a_channel_prefix_is_refused() raises:
     _refused_requirement(
         String("chan_subdir_prefix"), String("conda-forge/linux-64::") + n + String(" ==1.0.0 ") + b,
         _shape(String("conda-forge/linux-64::") + n + String(" ==1.0.0 ") + b),
+    )
+    # a non-token occurrence first: every occurrence is read, not the first
+    _refused_requirement(
+        String("chan_nontoken_first"), n + String("_x::") + n + String(" ==1.0.0 ") + b,
+        _shape(n + String("_x::") + n + String(" ==1.0.0 ") + b),
+    )
+
+
+def test_env_a_requirement_whose_name_is_a_pattern_is_refused() raises:
+    # a glob or regex name holds no token of komira_native, yet a solver
+    # matching names by pattern could bring it: kci cannot tell what it
+    # installs, so any pattern name is refused
+    var b = ExampleRelease().build()
+    _refused_requirement(
+        String("pattern_glob"), String("komira_nativ* ==1.0.0 ") + b,
+        _pattern(String("komira_nativ* ==1.0.0 ") + b),
+    )
+    _refused_requirement(
+        String("pattern_regex"), String("^komira_nat.*$ ==1.0.0 ") + b,
+        _pattern(String("^komira_nat.*$ ==1.0.0 ") + b),
     )
 
 
