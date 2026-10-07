@@ -70,13 +70,13 @@ comptime _REFUSAL_TEXT: String = (
     " EXAMPLE_STORE_ROOT to a bucket URL"
 )
 
-# The raise text. Carries an injection payload AND a tenant email so the two
+# The raise text. Carries an injection payload AND a user email so the two
 # disclosure invariants are tested against bytes that would be visible if they
 # leaked: the response must not echo ANY of it, and the LOG must redact the
 # address while keeping the diagnosis.
 comptime _FAULT_TEXT: String = (
-    "firestore: missing composite index for tenant_secrets"
-    " <script>pwn</script> Key (email)=(alice@customer.example)"
+    "firestore: missing composite index for account_secrets"
+    " <script>pwn</script> Key (email)=(alice@users.example)"
 )
 
 
@@ -370,13 +370,13 @@ def test_socket_fault_carries_code_and_incident() raises:
 
     # DISCLOSURE INVARIANT survives on the wire: no part of the raise text.
     assert_false(
-        _contains(wire, String("tenant_secrets")),
+        _contains(wire, String("account_secrets")),
         String("the raise text leaked onto the wire"),
     )
     assert_false(_contains(wire, String("<script>")))
     assert_false(
-        _contains(wire, String("alice@customer.example")),
-        String("a tenant email leaked onto the wire"),
+        _contains(wire, String("alice@users.example")),
+        String("a user email leaked onto the wire"),
     )
     _ = server^
     _ = d^
@@ -474,8 +474,8 @@ def test_socket_both_arms_emit_their_log_line() raises:
     )
     # Redaction holds on the deployed path too.
     assert_false(
-        _contains(captured, String("alice@customer.example")),
-        String("a tenant email reached the log: ") + captured,
+        _contains(captured, String("alice@users.example")),
+        String("a user email reached the log: ") + captured,
     )
 
     # --- the REFUSAL arm reached the log, marked as RETURNED ---
@@ -500,7 +500,7 @@ def test_socket_both_arms_emit_their_log_line() raises:
 def test_socket_success_is_untouched_and_unlogged() raises:
     """ANTI-VACUITY. If every response were stamped and every response logged,
     §A and §C would pass while saying nothing. A 200 must come back clean and
-    must NOT appear at ERROR severity — a 2xx body is customer content and has
+    must NOT appear at ERROR severity — a 2xx body is user content and has
     no business in a retained log."""
     var server = _make_server()
     var d = _FaultDispatcher.new()

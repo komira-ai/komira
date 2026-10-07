@@ -2,7 +2,7 @@
 # komira_anomaly.edivisive — E-DIVISIVE CHANGE POINT DETECTION.
 # =============================================================================
 #
-# The PRIMARY detector (Matteson & James 2014, "A Nonparametric Approach for
+# The PRIMARY detector (Matteson & James, "A Nonparametric Approach for
 # Multiple Change Point Analysis of Multivariate Data"). Distribution-free:
 # it assumes no Gaussianity, no variance homogeneity and no uniform spacing on
 # the X axis — three assumptions real benchmark measurements violate.

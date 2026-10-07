@@ -3,7 +3,8 @@
 // =============================================================================
 //
 // The C half of komira_supervisor: spawn with two capture pipes, optional
-// env/cwd, waitpid decode, and the per-platform exit-monitor primitives.
+// env/cwd, waitpid decode, the non-reaping waitid child probe, and the
+// per-platform exit-monitor primitives.
 //
 // Why a C shim (the same pattern as komira_async's reactor shim):
 //   - posix_spawn() / posix_spawn_file_actions_* take POINTER-ARRAY args
@@ -461,6 +462,42 @@ int komira_proc_reap(int pid, int nohang,
         // model (we never WUNTRACED). Report as not-collected.
         return 0;
     }
+    return 1;
+}
+
+// -----------------------------------------------------------------------------
+// komira_proc_probe_children
+//   "Does this process have any child?", asked WITHOUT reaping one:
+//     waitid(P_ALL, 0, &info, WEXITED | WNOHANG | WNOWAIT)
+//   WNOWAIT leaves an exited child a zombie, so whoever owns it still collects
+//   its status with waitpid(pid). (waitpid(-1, WNOHANG) would reap it.) The
+//   constants stay here; the Mojo side sees only scalars.
+//   Return value:
+//   "Child" means one that reports its exit with SIGCHLD (every posix_spawn
+//   child does): without __WALL, Linux waitid skips __WCLONE children.
+//      1 -> at least one child exists. *out_exited_pid is the pid of a child
+//           that has exited and is still unreaped (left as it was), or 0 when
+//           no child has exited (all running or stopped).
+//      0 -> no child at all (ECHILD).
+//     -1 -> any other failure; *out_errno = errno.
+//   POSIX says a WNOHANG waitid with nothing waitable zeroes si_pid; `info`
+//   is zeroed first anyway so a libc that leaves it untouched still reads 0.
+// -----------------------------------------------------------------------------
+int komira_proc_probe_children(int *out_exited_pid, int *out_errno) {
+    siginfo_t info;
+    int r;
+    for (;;) {
+        memset(&info, 0, sizeof(info));
+        r = waitid(P_ALL, 0, &info, WEXITED | WNOHANG | WNOWAIT);
+        if (r < 0 && errno == EINTR) continue;
+        break;
+    }
+    if (r < 0) {
+        if (errno == ECHILD) return 0;
+        *out_errno = errno;
+        return -1;
+    }
+    *out_exited_pid = (int)info.si_pid;
     return 1;
 }
 

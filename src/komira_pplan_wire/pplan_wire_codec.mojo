@@ -59,10 +59,35 @@
 #   Every one of the 20 fields, unconditionally. `ScalarValue` is flat POD +
 #   one String, so there is no shape to refuse — encoding all of it is both
 #   cheaper than a per-kind case analysis and total by construction.
+#
+# --- CODES AND COUNTS: checked on BOTH sides ----------------------------------
+#   A byte that names a member of a closed vocabulary is checked against it,
+#   by the encoder and the decoder alike, and refused as PPLAN_WIRE_BAD_ENUM:
+#   a bool byte (0 or 1), a binary operator (BIN_ADD..BIN_MOD, BIN_EQ..BIN_GE,
+#   BIN_AND, BIN_OR), a unary operator (UN_NOT..UN_BIT_COUNT), an fs scheme
+#   (FS_SCHEME_FILE..FS_SCHEME_AZURE), a scalar kind (..SCALAR_KIND_ERROR),
+#   time unit (..SCALAR_TIME_UNIT_NANO) and error code (..XL_ERR_CIRCULAR).
+#   A negative count (LIMIT, row-window offset/length, and on decode a string,
+#   list, op or project length) is PPLAN_WIRE_NEGATIVE_COUNT. A PROJECT whose
+#   name count differs from its expression count is
+#   PPLAN_WIRE_PROJECT_MISMATCH. Every identifier string (paths, names,
+#   bucket) must be UTF-8 or the encode/decode is PPLAN_WIRE_BAD_UTF8; a
+#   scalar's `string_val` is exempt, because a BINARY scalar carries opaque
+#   bytes there. A scalar's Int32 fields (date32, interval months/days)
+#   travel as Int64 and a decoded value outside Int32 is
+#   PPLAN_WIRE_OUT_OF_RANGE.
+#   NOT checked: whether a ScalarValue's fields are coherent with its kind.
+#   That is value admission, which lives with the plan's consumers.
 # =============================================================================
 
 from komira_plan_expr.expr import (
     Expr,
+    BIN_MOD,
+    BIN_EQ,
+    BIN_GE,
+    BIN_AND,
+    BIN_OR,
+    UN_BIT_COUNT,
     COL_SIDE_LEFT,
     COL_SIDE_RIGHT,
     EXPR_COL_REF,
@@ -72,7 +97,12 @@ from komira_plan_expr.expr import (
     EXPR_ALIAS,
     COL_SIDE_NONE,
 )
-from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.scalar_value import (
+    ScalarValue,
+    SCALAR_KIND_ERROR,
+    SCALAR_TIME_UNIT_NANO,
+)
+from komira_plan_expr.excel_error_code import XL_ERR_CIRCULAR
 from komira_plan_ir.logical_plan import ExprArray
 from komira_plan_ir.physical_plan import (
     ParquetSourceData,
@@ -82,7 +112,7 @@ from komira_plan_ir.physical_plan import (
     OP_PROJECT,
     OP_LIMIT,
 )
-from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod
+from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_AZURE
 from komira_collections.slab import Slab
 from komira_arrow.schema import Field
 from std.memory import bitcast
@@ -110,6 +140,11 @@ comptime PPLAN_WIRE_UNSUPPORTED_OP_TAG: String = "PPLAN_WIRE_UNSUPPORTED_OP_TAG"
 comptime PPLAN_WIRE_UNSUPPORTED_EXPR_TAG: String = "PPLAN_WIRE_UNSUPPORTED_EXPR_TAG"
 comptime PPLAN_WIRE_UNSUPPORTED_DTYPE: String = "PPLAN_WIRE_UNSUPPORTED_DTYPE"
 comptime PPLAN_WIRE_UNSUPPORTED_COL_SIDE: String = "PPLAN_WIRE_UNSUPPORTED_COL_SIDE"
+comptime PPLAN_WIRE_BAD_ENUM: String = "PPLAN_WIRE_BAD_ENUM"
+comptime PPLAN_WIRE_NEGATIVE_COUNT: String = "PPLAN_WIRE_NEGATIVE_COUNT"
+comptime PPLAN_WIRE_BAD_UTF8: String = "PPLAN_WIRE_BAD_UTF8"
+comptime PPLAN_WIRE_OUT_OF_RANGE: String = "PPLAN_WIRE_OUT_OF_RANGE"
+comptime PPLAN_WIRE_PROJECT_MISMATCH: String = "PPLAN_WIRE_PROJECT_MISMATCH"
 
 # Recursion bound on the Expr tree. The logical codec learned this the hard way
 # (a 901-byte nest SIGSEGV'd `decode_proto` before any refusal could fire), and
@@ -154,7 +189,10 @@ struct _Cursor(Movable):
         self.pos = 0
 
     def _need(mut self, n: Int) raises:
-        if self.pos + n > len(self.buf):
+        # ⚠ `n > len - pos`, NEVER `pos + n > len`: `n` can come off the wire
+        # (a string length), and `pos + INT64_MAX` wraps negative, passes the
+        # check, and the copy loop then reads past the buffer.
+        if n < 0 or n > len(self.buf) - self.pos:
             raise Error(PPLAN_WIRE_TRUNCATED, ": need ", n, " at ", self.pos)
 
 
@@ -174,7 +212,12 @@ def _put_bool(mut out: List[UInt8], v: Bool):
 
 
 def _get_bool(mut c: _Cursor) raises -> Bool:
-    return _get_u8(c) != 0
+    # Only the two bytes `_put_bool` writes. "Non-zero is True" would accept
+    # 254 spellings of every plan.
+    var v = _get_u8(c)
+    if v > 1:
+        raise Error(PPLAN_WIRE_BAD_ENUM, ": bool byte ", Int(v), " at ", c.pos - 1)
+    return v == 1
 
 
 def _put_i64(mut out: List[UInt8], v: Int64):
@@ -225,27 +268,82 @@ def _get_f64(mut c: _Cursor) raises -> Float64:
     return bitcast[DType.float64](UInt64(Int(bits)))
 
 
-def _put_str(mut out: List[UInt8], s: String):
+def _put_str(mut out: List[UInt8], s: String, utf8: Bool = True) raises:
+    """The encoder twin of `_get_str`: an identifier that is not UTF-8 (a
+    String built with `unsafe_from_utf8` over unchecked bytes) is refused
+    here, at the offset its payload would occupy, rather than written as
+    bytes the decoder refuses."""
     var b = s.as_bytes()
+    if utf8 and not _is_utf8(b):
+        raise Error(PPLAN_WIRE_BAD_UTF8, ": string at ", len(out) + 8)
     _put_int(out, len(b))
     for i in range(len(b)):
         out.append(b[i])
 
 
-def _get_str(mut c: _Cursor) raises -> String:
+def _is_utf8(b: Span[UInt8, _]) -> Bool:
+    """RFC 3629 well-formedness of `b`: no overlong form, no surrogate,
+    nothing above U+10FFFF, no truncated sequence."""
+    var n = len(b)
+    var i = 0
+    while i < n:
+        var c0 = Int(b[i])
+        if c0 < 0x80:
+            i += 1
+            continue
+        if c0 < 0xC2 or c0 > 0xF4:
+            return False
+        var need = 1
+        var lo = 0x80
+        var hi = 0xBF
+        if c0 == 0xE0:
+            need = 2
+            lo = 0xA0
+        elif c0 == 0xED:
+            need = 2
+            hi = 0x9F
+        elif c0 >= 0xE1 and c0 <= 0xEF:
+            need = 2
+        elif c0 == 0xF0:
+            need = 3
+            lo = 0x90
+        elif c0 == 0xF4:
+            need = 3
+            hi = 0x8F
+        elif c0 >= 0xF1 and c0 <= 0xF3:
+            need = 3
+        if i + need >= n:
+            return False
+        var c1 = Int(b[i + 1])
+        if c1 < lo or c1 > hi:
+            return False
+        for k in range(2, need + 1):
+            var ck = Int(b[i + k])
+            if ck < 0x80 or ck > 0xBF:
+                return False
+        i += need + 1
+    return True
+
+
+def _get_str(mut c: _Cursor, utf8: Bool = True) raises -> String:
+    """A length-prefixed string. `utf8=True` (every identifier) refuses
+    bytes that are not UTF-8; only a scalar's `string_val`, which carries a
+    BINARY value's opaque bytes, reads with `utf8=False`."""
     var n = _get_int(c)
-    if n < 0:
-        raise Error(PPLAN_WIRE_TRUNCATED, ": negative string length ", n)
+    _check_count("string length", n)
     c._need(n)
+    var start = c.pos
     var bytes = List[UInt8]()
     for i in range(n):
         bytes.append(c.buf[c.pos + i])
     c.pos += n
+    if utf8 and not _is_utf8(Span(bytes)):
+        raise Error(PPLAN_WIRE_BAD_UTF8, ": string at ", start)
     bytes.append(UInt8(0))
     return String(StringSlice(unsafe_from_utf8=Span(bytes)[0:n]))
 
 
-def _put_strs(mut out: List[UInt8], s: List[String]):
+def _put_strs(mut out: List[UInt8], s: List[String]) raises:
     _put_int(out, len(s))
     for i in range(len(s)):
         _put_str(out, s[i])
@@ -253,8 +351,7 @@ def _put_strs(mut out: List[UInt8], s: List[String]):
 
 def _get_strs(mut c: _Cursor) raises -> List[String]:
     var n = _get_int(c)
-    if n < 0:
-        raise Error(PPLAN_WIRE_TRUNCATED, ": negative list length ", n)
+    _check_count("list length", n)
     var res = List[String]()
     for _ in range(n):
         res.append(_get_str(c))
@@ -347,15 +444,64 @@ def _dtype_from_wire(w: UInt32) raises -> DType:
 
 
 # =============================================================================
+# Closed vocabularies — checked by the encoder AND the decoder
+# =============================================================================
+
+
+def _check_code(what: String, v: UInt8, valid: Bool) raises:
+    if not valid:
+        raise Error(PPLAN_WIRE_BAD_ENUM, ": ", what, " ", Int(v))
+
+
+def _check_bin_op(op: UInt8) raises:
+    _check_code(
+        "binary op", op,
+        op <= BIN_MOD or (op >= BIN_EQ and op <= BIN_GE) or op == BIN_AND
+        or op == BIN_OR,
+    )
+
+
+def _check_un_op(op: UInt8) raises:
+    _check_code("unary op", op, op <= UN_BIT_COUNT)
+
+
+def _check_fs_scheme(s: UInt8) raises:
+    _check_code("fs scheme", s, s <= FS_SCHEME_AZURE)
+
+
+def _check_scalar_codes(v: ScalarValue) raises:
+    _check_code("scalar kind", v._kind, v._kind <= SCALAR_KIND_ERROR)
+    _check_code(
+        "scalar time unit", v.time_unit, v.time_unit <= SCALAR_TIME_UNIT_NANO
+    )
+    _check_code("scalar error code", v.error_code, v.error_code <= XL_ERR_CIRCULAR)
+
+
+def _check_count(what: String, n: Int) raises:
+    if n < 0:
+        raise Error(PPLAN_WIRE_NEGATIVE_COUNT, ": ", what, " ", n)
+
+
+def _check_project_arity(n_exprs: Int, n_names: Int) raises:
+    """One output name per PROJECT expression, on both sides."""
+    if n_exprs != n_names:
+        raise Error(
+            PPLAN_WIRE_PROJECT_MISMATCH, ": ", n_exprs, " exprs, ", n_names,
+            " names",
+        )
+
+
+# =============================================================================
 # ScalarValue — every field, unconditionally
 # =============================================================================
 
 
 def _put_scalar(mut out: List[UInt8], v: ScalarValue) raises:
+    _check_scalar_codes(v)
     _put_u32(out, _dtype_to_wire(v.dtype))
     _put_i64(out, v.int_val)
     _put_f64(out, v.float_val)
-    _put_str(out, v.string_val)
+    _put_str(out, v.string_val, utf8=False)
     _put_bool(out, v.bool_val)
     _put_u8(out, v._kind)
     _put_i64(out, v.dec128_high)
@@ -374,28 +520,39 @@ def _put_scalar(mut out: List[UInt8], v: ScalarValue) raises:
     _put_u8(out, v.error_code)
 
 
+def _get_i32(mut c: _Cursor, what: String) raises -> Int32:
+    """An Int32 field, which travels as Int64. A value outside Int32 is
+    REFUSED: narrowing it would map 2^32 spellings onto one plan, and the
+    plan would not re-encode to the bytes it came from."""
+    var v = _get_i64(c)
+    if v < Int64(-2147483648) or v > Int64(2147483647):
+        raise Error(PPLAN_WIRE_OUT_OF_RANGE, ": scalar ", what, " ", v)
+    return Int32(Int(v))
+
+
 def _get_scalar(mut c: _Cursor) raises -> ScalarValue:
     var s = ScalarValue()
     s.dtype = _dtype_from_wire(_get_u32(c))
     s.int_val = _get_i64(c)
     s.float_val = _get_f64(c)
-    s.string_val = _get_str(c)
+    s.string_val = _get_str(c, utf8=False)
     s.bool_val = _get_bool(c)
     s._kind = _get_u8(c)
     s.dec128_high = _get_i64(c)
     s.dec128_low = _get_i64(c)
     s.dec128_precision = _get_int(c)
     s.dec128_scale = _get_int(c)
-    s.date32_val = Int32(Int(_get_i64(c)))
+    s.date32_val = _get_i32(c, "date32")
     s.ts_micros = _get_i64(c)
     s.null_dtype = _dtype_from_wire(_get_u32(c))
-    s.iv_months = Int32(Int(_get_i64(c)))
-    s.iv_days = Int32(Int(_get_i64(c)))
+    s.iv_months = _get_i32(c, "interval months")
+    s.iv_days = _get_i32(c, "interval days")
     s.iv_nanos = _get_i64(c)
     s.time_unit = _get_u8(c)
     s.dec256_high_lo = _get_i64(c)
     s.dec256_high_hi = _get_i64(c)
     s.error_code = _get_u8(c)
+    _check_scalar_codes(s)
     return s^
 
 
@@ -416,11 +573,13 @@ def _put_expr(mut out: List[UInt8], e: Expr, depth: Int) raises:
         _put_scalar(out, e.literal_value())
     elif e.is_binary():
         _put_u8(out, EXPR_BINARY_OP)
+        _check_bin_op(e.binary_op())
         _put_u8(out, e.binary_op())
         _put_expr(out, e.binary_left_ref(), depth + 1)
         _put_expr(out, e.binary_right_ref(), depth + 1)
     elif e.is_unary():
         _put_u8(out, EXPR_UNARY_OP)
+        _check_un_op(e.unary_op())
         _put_u8(out, e.unary_op())
         _put_expr(out, e.unary_child_ref(), depth + 1)
     elif e.is_alias():
@@ -454,11 +613,13 @@ def _get_expr(mut c: _Cursor, depth: Int) raises -> Expr:
         return Expr.literal(_get_scalar(c))
     elif tag == EXPR_BINARY_OP:
         var op = _get_u8(c)
+        _check_bin_op(op)
         var l = _get_expr(c, depth + 1)
         var r = _get_expr(c, depth + 1)
         return Expr.binary(op, l^, r^)
     elif tag == EXPR_UNARY_OP:
         var op2 = _get_u8(c)
+        _check_un_op(op2)
         var ch = _get_expr(c, depth + 1)
         return Expr.unary(op2, ch^)
     elif tag == EXPR_ALIAS:
@@ -498,12 +659,14 @@ def _put_op(mut out: List[UInt8], op: MorselOp) raises:
         if not op.project_exprs or not op.project_names:
             raise Error(PPLAN_WIRE_UNSUPPORTED_OP_TAG, ": OP_PROJECT with no exprs/names")
         ref exprs = op.project_exprs.value()
+        _check_project_arity(len(exprs), len(op.project_names.value()))
         _put_int(out, len(exprs))
         for i in range(len(exprs)):
             _put_expr(out, exprs[i], 0)
         _put_strs(out, op.project_names.value())
         _put_bool(out, op.project_reorders_only)
     elif op.tag == OP_LIMIT:
+        _check_count("limit", op.limit_count)
         _put_int(out, op.limit_count)
     else:
         raise Error(PPLAN_WIRE_UNSUPPORTED_OP_TAG, ": tag ", Int(op.tag))
@@ -515,18 +678,20 @@ def _get_op(mut c: _Cursor) raises -> MorselOp:
         return MorselOp.filter(_get_expr(c, 0))
     elif tag == OP_PROJECT:
         var n = _get_int(c)
-        if n < 0:
-            raise Error(PPLAN_WIRE_TRUNCATED, ": negative project expr count ", n)
+        _check_count("project expr count", n)
         var exprs = ExprArray()
         for _ in range(n):
             exprs.append(_get_expr(c, 0))
         var names = _get_strs(c)
+        _check_project_arity(n, len(names))
         var reorders = _get_bool(c)
         var op = MorselOp.project(exprs^, names^)
         op.project_reorders_only = reorders
         return op^
     elif tag == OP_LIMIT:
-        return MorselOp.limit(_get_int(c))
+        var n_lim = _get_int(c)
+        _check_count("limit", n_lim)
+        return MorselOp.limit(n_lim)
     else:
         raise Error(PPLAN_WIRE_UNSUPPORTED_OP_TAG, ": tag ", Int(tag))
 
@@ -567,12 +732,15 @@ def pplan_to_bytes(
     else:
         _put_bool(out, False)
     _put_opt_expr(out, pq_data.pushed_filter)
+    _check_fs_scheme(pq_data.fs_descriptor.scheme)
     _put_u8(out, pq_data.fs_descriptor.scheme)
     _put_str(out, pq_data.fs_descriptor.bucket)
     _put_int(out, pq_data.fs_descriptor.node_id)
     _put_bool(out, pq_data.preserve_numeric_dict)
     _put_strs(out, pq_data.explicit_paths)
     if pq_data.row_window:
+        _check_count("row window offset", pq_data.row_window.value().offset)
+        _check_count("row window length", pq_data.row_window.value().length)
         _put_bool(out, True)
         _put_int(out, pq_data.row_window.value().offset)
         _put_int(out, pq_data.row_window.value().length)
@@ -589,7 +757,9 @@ def pplan_to_bytes(
 
 def pplan_from_bytes(var raw: List[UInt8]) raises -> PhysicalCollectPlan:
     """Decode a physical collect plan. Refuses by name on bad magic, an
-    unsupported version, truncation, trailing bytes, or any refused shape.
+    unsupported version, truncation, trailing bytes, any refused shape, a code
+    outside its vocabulary, a negative count or a non-UTF-8 identifier (the
+    coverage ledger at the top of this file).
 
     ⚠ TRAILING BYTES ARE A REFUSAL, NOT AN IGNORE. The logical codec's prescan
     was beaten by ONE APPENDED BYTE; a decoder that stops when it has what it
@@ -613,6 +783,7 @@ def pplan_from_bytes(var raw: List[UInt8]) raises -> PhysicalCollectPlan:
         projection = Optional[List[String]](_get_strs(c))
     var pushed = _get_opt_expr(c)
     var scheme = _get_u8(c)
+    _check_fs_scheme(scheme)
     var bucket = _get_str(c)
     var node_id = _get_int(c)
     var preserve_numeric = _get_bool(c)
@@ -620,13 +791,14 @@ def pplan_from_bytes(var raw: List[UInt8]) raises -> PhysicalCollectPlan:
     var row_window: Optional[ParquetRowWindow] = None
     if _get_bool(c):
         var off = _get_int(c)
+        _check_count("row window offset", off)
         var ln = _get_int(c)
+        _check_count("row window length", ln)
         row_window = Optional[ParquetRowWindow](ParquetRowWindow(off, ln))
     var preserve_string = _get_bool(c)
 
     var n_ops = _get_int(c)
-    if n_ops < 0:
-        raise Error(PPLAN_WIRE_TRUNCATED, ": negative op count ", n_ops)
+    _check_count("op count", n_ops)
     var ops = Slab[MorselOp]()
     for _ in range(n_ops):
         ops.append(_get_op(c))

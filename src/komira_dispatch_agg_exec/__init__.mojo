@@ -1,0 +1,1 @@
+"""Aggregate execution support: the conform that gives a min, max, first, last or any_value column its input column's type, the reachability counters of two aggregate routes, and the plan-time group-count estimate with the provenance of its weakest signal."""

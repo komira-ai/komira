@@ -7,15 +7,17 @@ load(":proto_check.bzl", "proto_check", "proto_check_case")
 # googleapis, Apache-2.0 (LICENSE in the archive), at one pinned commit of its
 # default branch. Nothing of it is committed here: the archive is fetched at
 # build time, checked against its sha256, and the files below extracted from
-# it. Bumping is these two lines (README.md); upstream_version.sh reports how
+# it. Bumping is these three lines (README.md); upstream_version.sh reports how
 # far the pin is behind upstream.
 _COMMIT = "b29d17037e889281b718bfffdeea534aed00d36f"
 _SHA256 = "737d608b0666e083fa8301bf7524875508addc13c929e592ed0ce47c2d692f58"
+_SIZE = 13375615
 
 pinned_file(
     name = "googleapis.tar.gz",
     url = "https://github.com/googleapis/googleapis/archive/{}.tar.gz".format(_COMMIT),
     sha256 = _SHA256,
+    size_bytes = _SIZE,
 )
 
 # Cloud Logging v2 (ListLogEntries, for the generated komira_gcp_logging): the

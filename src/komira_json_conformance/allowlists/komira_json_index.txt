@@ -1,0 +1,6 @@
+# komira_json_index: crash-only (testees.mojo): its verdicts are printed, not gated.
+# This file lists only the JSONTestSuite files that abort extract_column and the string unescaper (komira_json_index),
+# as `<file> ABORTS: <text the abort prints> | <note>` (gate.mojo). Each runs
+# in a child process that must still abort with that text; a fix makes the
+# line STALE and the test red until the line goes.
+

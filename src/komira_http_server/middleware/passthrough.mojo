@@ -4,10 +4,10 @@
 # =============================================================================
 #
 # WHY THIS EXISTS. `serve_one_iteration_dispatch_chained[D, M, RT]` takes ONE
-# user-`Middleware` `M` at the innermost position — the slot an app usually
-# fills with a grant-verifying middleware, whose `before` resolves the
-# grant or short-circuits 401. Some apps do NOT authorize there: they
-# authorize inside their DISPATCHER (a fail-closed gate per route, or per
+# user-`Middleware` `M` at the innermost position — the slot an embedder usually
+# fills with an authentication middleware, whose `before` resolves the caller
+# or short-circuits 401. Some embedders do NOT check access there: they check
+# inside their DISPATCHER (a fail-closed gate per route, or per
 # arm of a composite dispatcher). Without this type such an app is
 # stuck on the UNCHAINED `serve_one_iteration_dispatch`, which runs no
 # middleware at all — so it neither stamps `Access-Control-Allow-Origin` nor
@@ -21,7 +21,7 @@
 # ⛔ IT AUTHORIZES NOTHING AND REFUSES NOTHING, AND THAT IS THE WHOLE POINT —
 # WHICH MAKES IT THE ONE MIDDLEWARE THAT IS DANGEROUS TO REACH FOR BY DEFAULT.
 # It is CORRECT only where the dispatcher it fronts is itself the gate. Putting
-# it in front of a dispatcher that expects `ctx.authed_user` to have been
+# it in front of a dispatcher that expects `ctx.principal` to have been
 # resolved upstream produces a server that serves every request unauthenticated,
 # and it produces it SILENTLY: the chain still runs, the responses still carry
 # CORS headers, and nothing anywhere returns 401. If you are reaching for this
@@ -66,7 +66,7 @@ struct PassthroughMiddleware(Movable, Deinitable, Middleware):
         """Never short-circuits: `None` always, so the request proceeds to the
         dispatcher — which is where this app's authorization lives.
 
-        `ctx.authed_user` is left UNSET on purpose. A dispatcher fronted by this
+        `ctx.principal` is left UNSET on purpose. A dispatcher fronted by this
         middleware resolves its own principal; an identity synthesized here
         would be an identity nothing verified."""
         _ = req

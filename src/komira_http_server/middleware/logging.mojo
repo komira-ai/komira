@@ -67,8 +67,8 @@ struct LogEntry(
       short_circuit — True iff the response did NOT come from a handler
 
     ⚠ THIS TYPE IS ALSO THE `MetricsSink` PAYLOAD (`metrics.mojo`), so it is
-    now part of an OPEN-SOURCE API embedded in customer code: a field added
-    here can land on a customer's metrics wire, and a field removed here breaks
+    now part of an OPEN-SOURCE API embedded in other programs: a field added
+    here can land on an embedder's metrics wire, and a field removed here breaks
     their sink. Change it deliberately.
 
     ⛔ AND `latency_ns` IS NOT A METERING QUANTITY. It is a per-request scalar,
