@@ -37,6 +37,9 @@
 #      test checks the slot is present on the wire.
 #   5. A table whose soffset points before the buffer raises from the u8 and
 #      u32 readers rather than being read as absent.
+#   6. A Field with no name: Schema.fbs says "Name is not required (e.g., in
+#      a List)", and Arrow C++ reads a missing name as "". read_field returns
+#      "" and the rest of the Field, instead of refusing it.
 # =============================================================================
 
 from std.io import FileHandle
@@ -60,6 +63,14 @@ from komira_arrow_ipc.ipc_flatbuf import (
     read_type_time,
     read_type_timestamp,
     read_type_union,
+    read_field,
+    read_type_int,
+    write_type_int,
+    start_table,
+    add_field_u8,
+    add_field_offset,
+    end_table,
+    TYPE_INT,
     write_type_date,
     write_type_duration,
     write_type_time,
@@ -489,6 +500,32 @@ def test_soffset_before_buffer_start_raises() raises:
         _ = read_type_decimal(r, t)
 
 
+# ---------------------------------------------------------------------------
+# 6. Field.name is optional
+# ---------------------------------------------------------------------------
+
+
+def test_field_without_name_reads_empty_name() raises:
+    """A Field table with no name slot (an Int32 list item as writers may
+    emit it) reads as name "", with its type intact."""
+    var w = FlatbufWriter(1024)
+    var int_pos = write_type_int(w, 32, True)
+    var tb = start_table()
+    add_field_u8(tb, 2, TYPE_INT)
+    add_field_offset(tb, 3, int_pos)
+    var field_pos = end_table(w, tb^)
+    var buf = w^.finalize(field_pos)
+    var r = flatbuf_reader_over(buf)
+    var t = r.read_root_offset()
+    assert_true(_absent(r, t, 0), "the table carries no name slot")
+    var fd = read_field(r, t)
+    assert_equal(fd.name, "")
+    assert_equal(fd.type_tag, TYPE_INT)
+    var it = read_type_int(r, fd.type_table_pos)
+    assert_equal(it.bit_width, 32)
+    assert_true(it.is_signed)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_pyarrow_schema_omitted_fields_read_as_declared_defaults]()
@@ -503,4 +540,5 @@ def main() raises:
     suite.test[test_written_bit_widths_read_as_written]()
     suite.test[test_writer_writes_default_units_explicitly]()
     suite.test[test_soffset_before_buffer_start_raises]()
+    suite.test[test_field_without_name_reads_empty_name]()
     suite^.run()

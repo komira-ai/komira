@@ -2,8 +2,8 @@
 #
 # The default: each of Run's services (`Services`, `Revisions`, `Jobs`,
 # `Executions`) declares `option (google.api.default_host) =
-# "run.googleapis.com"`, and operations_mixin.proto states the same for the
-# operations client, so a client whose caller names no host starts there
+# "run.googleapis.com"`, and the operations client starts at run_v2.yaml's
+# `name`, the same host, so a client whose caller names no host starts there
 # and its bearer token goes to the service it was minted for. Run Admin v2
 # is served at that one global host; a resource's region is in its name
 # (`projects/*/locations/*/...`). The default is read off fresh clients
@@ -22,7 +22,7 @@ from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_gcp_core import StaticTokenSource
 from komira_gcp_run.execution import ExecutionsClient
 from komira_gcp_run.job import GetJobRequest, JobsClient
-from komira_gcp_run.operations_mixin import OperationsClient
+from komira_gcp_run.operations import OperationsClient
 from komira_gcp_run.revision import RevisionsClient
 from komira_gcp_run.service import ServicesClient
 from komira_http_client.client import HttpClient

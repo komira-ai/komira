@@ -11,15 +11,13 @@
 #   - test_codec_snappy_be4_crc32_trailer — strip-and-validate (regression guard).
 #
 # Fixtures: no Java DataFileWriter is needed: each compressed
-# fixture is built IN-TEST by calling the SAME C library's compress entry
-# through a local OwnedDLHandle (the codec FFI carve-out). This exercises both
-# directions (compress in-test, decompress through decompress_block).
+# fixture is built IN-TEST by calling the same C library's compress entry
+# through komira_compression's codec API, not through avro's compress_block.
+# This exercises both directions (compress in-test, decompress through
+# decompress_block).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
-from std.memory import alloc, unsafe_memset
-from std.ffi import OwnedDLHandle, external_call
-from std.sys.info import CompilationTarget
 
 from komira_avro import (
     decompress_block,
@@ -32,36 +30,19 @@ from komira_avro import (
     AVRO_CODEC_ZSTANDARD,
     crc32_ieee,
 )
-
-
-# -- Per-OS sonames (match avro_codec.mojo; snappy is statically linked). --
-comptime _LIBZ: StaticString = (
-    "libz.dylib" if CompilationTarget.is_macos() else "libz.so.1"
+from komira_compression.bzip2_buffer import bzip2_compress_into
+from komira_compression.xz_buffer import (
+    XZ_CHECK_CRC64,
+    XZ_PRESET_DEFAULT,
+    xz_compress_into,
 )
-comptime _LIBZSTD: StaticString = (
-    "libzstd.dylib" if CompilationTarget.is_macos() else "libzstd.so.1"
+from komira_compression.zlib import (
+    ZLIB_WINDOW_BITS_RAW,
+    ZLIB_WINDOW_BITS_ZLIB,
+    zlib_compress_bound,
+    zlib_deflate_into,
 )
-comptime _LIBBZ2: StaticString = (
-    "libbz2.dylib" if CompilationTarget.is_macos() else "libbz2.so.1.0"
-)
-comptime _LIBLZMA: StaticString = (
-    "liblzma.dylib" if CompilationTarget.is_macos() else "liblzma.so.5"
-)
-
-
-@always_inline
-def _null_ffi_byte() -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    """A raw NULL FFI byte pointer (Mojo has no null `UnsafePointer`
-    constructor, and `unsafe_from_address=0` is banned).
-
-    # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the bare
-    # pointer (the Mojo non-null-pointer layout guarantee); `None` is the all-zero
-    # (NULL) bit pattern. Used only for the liblzma allocator = NULL arg.
-    """
-    var none: Optional[UnsafePointer[UInt8, MutUntrackedOrigin]] = None
-    return UnsafePointer(to=none).bitcast[
-        UnsafePointer[UInt8, MutUntrackedOrigin]
-    ]()[]
+from komira_compression.zstd_frame import zstd_compress_bound, zstd_compress_into
 
 
 def _sample_payload() -> List[UInt8]:
@@ -165,96 +146,26 @@ def test_codec_snappy_be4_crc32_trailer() raises:
 
 
 # =============================================================================
-# deflate — RAW RFC-1951 (compress in-test via libz deflateInit2(-15)).
+# deflate — RAW RFC-1951 (compress in-test, level 6, windowBits -15).
 # =============================================================================
-comptime _Z_STREAM_SIZE: Int = 112
-comptime _Z_OK: Int = 0
-comptime _Z_FINISH: Int = 4
-comptime _Z_STREAM_END: Int = 1
-comptime _Z_DEFLATED: Int32 = 8
-comptime _Z_DEFAULT_STRATEGY: Int32 = 0
+
+
+def _deflate(raw: List[UInt8], window_bits: Int32) raises -> List[UInt8]:
+    var out = List[UInt8](length=zlib_compress_bound(len(raw), window_bits), fill=0)
+    var n = zlib_deflate_into(Span(out), Span(raw), Int32(6), window_bits)
+    out.resize(unsafe_uninit_length=n)
+    return out^
 
 
 def _deflate_raw_compress(raw: List[UInt8]) raises -> List[UInt8]:
-    """RAW RFC-1951 deflate of `raw` via libz deflateInit2 windowBits=-15."""
-    var handle = OwnedDLHandle(_LIBZ)
-    var version = handle.call[
-        "zlibVersion", UnsafePointer[UInt8, MutUntrackedOrigin]
-    ]()
-    var in_len = len(raw)
-    var in_buf = alloc[UInt8](max(in_len, 1))
-    for i in range(in_len):
-        in_buf[i] = raw[i]
-    var cap = in_len + in_len // 2 + 128
-    var out_buf = alloc[UInt8](cap)
-
-    var strm = alloc[UInt8](_Z_STREAM_SIZE)
-    unsafe_memset(strm, 0, _Z_STREAM_SIZE)
-    (strm.bitcast[UInt64]() + 0)[] = UInt64(Int(in_buf))
-    (strm.bitcast[UInt32]() + 2)[] = UInt32(in_len)
-    (strm.bitcast[UInt64]() + 3)[] = UInt64(Int(out_buf))
-    (strm.bitcast[UInt32]() + 8)[] = UInt32(cap)
-
-    # deflateInit2_(strm, level=6, method=Z_DEFLATED, windowBits=-15,
-    #               memLevel=8, strategy=0, version, stream_size)
-    var init_rc = handle.call["deflateInit2_", Int32](
-        strm,
-        Int32(6),
-        _Z_DEFLATED,
-        Int32(-15),
-        Int32(8),
-        _Z_DEFAULT_STRATEGY,
-        version,
-        Int32(_Z_STREAM_SIZE),
-    )
-    if Int(init_rc) != _Z_OK:
-        raise Error("test deflateInit2_ failed rc " + String(Int(init_rc)))
-    var rc = handle.call["deflate", Int32](strm, Int32(_Z_FINISH))
-    var total_out = Int((strm.bitcast[UInt64]() + 5)[])
-    _ = handle.call["deflateEnd", Int32](strm)
-    if Int(rc) != _Z_STREAM_END:
-        raise Error("test deflate did not finish rc " + String(Int(rc)))
-    var out = List[UInt8]()
-    for i in range(total_out):
-        out.append(out_buf[i])
-    strm.free()
-    in_buf.free()
-    out_buf.free()
-    _ = handle^
-    return out^
+    """RAW RFC-1951 deflate of `raw` (windowBits -15)."""
+    return _deflate(raw, ZLIB_WINDOW_BITS_RAW)
 
 
 def _zlib_wrapped_compress(raw: List[UInt8]) raises -> List[UInt8]:
     """ZLIB-WRAPPED deflate (windowBits=+15) — has 0x78 header + ADLER32. Used
     by the negative-case wire-detail test to prove the reader is raw-only."""
-    var handle = OwnedDLHandle(_LIBZ)
-    var in_len = len(raw)
-    var in_buf = alloc[UInt8](max(in_len, 1))
-    for i in range(in_len):
-        in_buf[i] = raw[i]
-    var cap = in_len + in_len // 2 + 128
-    var out_buf = alloc[UInt8](cap)
-    var len_buf = alloc[Int64](1)
-    len_buf[0] = Int64(cap)
-    # compress2(dest, destLen, source, sourceLen, level) => zlib framing.
-    var rc = handle.call["compress2", Int32](
-        out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        len_buf,
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        Int64(in_len),
-        Int32(6),
-    )
-    if Int(rc) != _Z_OK:
-        raise Error("test compress2 failed rc " + String(Int(rc)))
-    var written = Int(len_buf[0])
-    var out = List[UInt8]()
-    for i in range(written):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
-    len_buf.free()
-    _ = handle^
-    return out^
+    return _deflate(raw, ZLIB_WINDOW_BITS_ZLIB)
 
 
 def test_codec_deflate_roundtrip() raises:
@@ -299,34 +210,12 @@ def test_codec_deflate_raw_rfc1951_not_zlib_wrapped() raises:
 
 
 # =============================================================================
-# zstandard — libzstd ZSTD_compress (compress in-test).
+# zstandard — libzstd ZSTD_compress (compress in-test, level 3).
 # =============================================================================
 def _zstd_compress(raw: List[UInt8]) raises -> List[UInt8]:
-    var handle = OwnedDLHandle(_LIBZSTD)
-    var in_len = len(raw)
-    var in_buf = alloc[UInt8](max(in_len, 1))
-    for i in range(in_len):
-        in_buf[i] = raw[i]
-    var cap = Int(
-        handle.call["ZSTD_compressBound", Int](in_len)
-    )
-    var out_buf = alloc[UInt8](max(cap, 1))
-    var result = handle.call["ZSTD_compress", Int](
-        out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        cap,
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        in_len,
-        Int32(3),
-    )
-    var is_err = handle.call["ZSTD_isError", Int](result)
-    if is_err != 0:
-        raise Error("test ZSTD_compress failed result " + String(result))
-    var out = List[UInt8]()
-    for i in range(Int(result)):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
-    _ = handle^
+    var out = List[UInt8](length=zstd_compress_bound(len(raw)), fill=0)
+    var n = zstd_compress_into(Span(out), Span(raw), Int32(3))
+    out.resize(unsafe_uninit_length=n)
     return out^
 
 
@@ -354,37 +243,10 @@ def test_codec_zstd_wire_name_zstandard() raises:
 # bzip2 — libbz2 BZ2_bzBuffToBuffCompress (compress in-test).
 # =============================================================================
 def _bzip2_compress(raw: List[UInt8]) raises -> List[UInt8]:
-    var handle = OwnedDLHandle(_LIBBZ2)
-    var in_len = len(raw)
-    var in_buf = alloc[UInt8](max(in_len, 1))
-    for i in range(in_len):
-        in_buf[i] = raw[i]
     # bzip2 worst case: source + 1% + 600 bytes.
-    var cap = in_len + in_len // 100 + 600
-    var out_buf = alloc[UInt8](cap)
-    var len_buf = alloc[UInt32](1)
-    len_buf[0] = UInt32(cap)
-    # BZ2_bzBuffToBuffCompress(dest, destLen, source, sourceLen,
-    #                          blockSize100k, verbosity, workFactor)
-    var rc = handle.call["BZ2_bzBuffToBuffCompress", Int32](
-        out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        len_buf,
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        UInt32(in_len),
-        Int32(9),
-        Int32(0),
-        Int32(0),
-    )
-    if Int(rc) != 0:
-        raise Error("test BZ2 compress failed rc " + String(Int(rc)))
-    var written = Int(len_buf[0])
-    var out = List[UInt8]()
-    for i in range(written):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
-    len_buf.free()
-    _ = handle^
+    var out = List[UInt8](length=len(raw) + len(raw) // 100 + 600, fill=0)
+    var n = bzip2_compress_into(Span(out), Span(raw), Int32(9), Int32(0))
+    out.resize(unsafe_uninit_length=n)
     return out^
 
 
@@ -399,39 +261,11 @@ def test_codec_bzip2_roundtrip() raises:
 # xz — liblzma lzma_easy_buffer_encode (compress in-test).
 # =============================================================================
 def _xz_compress(raw: List[UInt8]) raises -> List[UInt8]:
-    var handle = OwnedDLHandle(_LIBLZMA)
-    var in_len = len(raw)
-    var in_buf = alloc[UInt8](max(in_len, 1))
-    for i in range(in_len):
-        in_buf[i] = raw[i]
-    var cap = Int(handle.call["lzma_stream_buffer_bound", Int64](Int64(in_len)))
-    var out_buf = alloc[UInt8](max(cap, 1))
-    var out_pos = alloc[Int64](1)
-    out_pos[0] = Int64(0)
-    var null_allocator = _null_ffi_byte()
-    # lzma_easy_buffer_encode(preset, check, allocator, in, in_size,
-    #                         out, out_pos, out_size)
-    # preset=6, check=LZMA_CHECK_CRC64(4).
-    var rc = handle.call["lzma_easy_buffer_encode", Int32](
-        UInt32(6),
-        Int32(4),
-        null_allocator,
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        Int64(in_len),
-        out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        out_pos,
-        Int64(cap),
+    var out = List[UInt8](length=len(raw) + len(raw) // 3 + 1024, fill=0)
+    var n = xz_compress_into(
+        Span(out), Span(raw), XZ_PRESET_DEFAULT, XZ_CHECK_CRC64
     )
-    if Int(rc) != 0:
-        raise Error("test lzma encode failed rc " + String(Int(rc)))
-    var written = Int(out_pos[0])
-    var out = List[UInt8]()
-    for i in range(written):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
-    out_pos.free()
-    _ = handle^
+    out.resize(unsafe_uninit_length=n)
     return out^
 
 

@@ -30,17 +30,17 @@
 //     field is the provider's own language, or one provider object would be
 //     shared by several owners).
 //
-// V1 DECLARES SIX PRIMITIVES: `service` 10, `job` 11, `table` 13, `bucket`
-// 14, `service_account` 20 and `grant` 25. Every other number below is HELD:
+// V1 DECLARES THIRTEEN PRIMITIVES: `service` 10, `job` 11, `table` 13,
+// `bucket` 14, `queue` 15, `secret` 16, `dns_zone` 18, `service_account` 20,
+// `topic` 21, `grant` 25, `dns_record` 26, `certificate` 27 and
+// `subscription` 28. Every other number below is HELD:
 // not declared, so it decodes as an unknown field today, and declaring it
 // later is an addition, never a renumber. The welded tests pin each held
 // number as undeclared.
-//   * `Resource.body` 12, 15 to 19, 21 to 24 and 26 to 36: the later
-//     neutral primitives (12 worker, 15 queue, 16 secret, 17 and
-//     19 unused, 18 DNS zone, 21 topic, 22 schedule, 23 network, 24 registry,
-//     26 DNS record, 27 certificate, 28 subscription, 29 subnet, 30 IP
-//     address, 31 event trigger, 32 mail domain, 33 parameter, 34 encryption
-//     key, 35 function, 36 virtual machine).
+//   * `Resource.body` 12, 17, 19, 22 to 24 and 29 to 36: the later neutral
+//     primitives (12 worker, 17 and 19 unused, 22 schedule, 23 network, 24
+//     registry, 29 subnet, 30 IP address, 31 event trigger, 32 mail domain,
+//     33 parameter, 34 encryption key, 35 function, 36 virtual machine).
 //   * `Resource.body` 80: a composite instance.
 //   * `Resource.body` 90: the `raw` escape hatch, specified separately.
 //   * `Resource.body` 100-299, 300-499, 500-699 and 700-899: provider
@@ -51,7 +51,7 @@
 // test `test_held_numbers_are_unused` reads: no field of the named message may
 // use a held number, and no message may reuse a `reserved` number. A held
 // number leaves this list in the same change that declares it.
-// held-numbers: Resource 5 6 12 15-19 21-24 26-36 80 90 100-299 300-499 500-699 700-899
+// held-numbers: Resource 5 6 12 17 19 22-24 29-36 80 90 100-299 300-499 500-699 700-899
 // held-numbers: Value 4
 // held-numbers: Image 4
 // held-numbers: Uses 3
@@ -61,6 +61,13 @@
 // held-numbers: Bucket 50-53
 // held-numbers: ServiceAccount 50-53
 // held-numbers: Grant 50-53
+// held-numbers: Queue 50-53
+// held-numbers: Topic 50-53
+// held-numbers: Subscription 50-53
+// held-numbers: Secret 50-53
+// held-numbers: DnsZone 50-53
+// held-numbers: DnsRecord 50-53
+// held-numbers: Certificate 50-53
 // The list of clouds is data (a cloud is a value checked against the
 // built-in clouds); the four ranges and the four extension numbers are held
 // for the four built-in clouds, never named by a type here.
@@ -99,21 +106,25 @@
 //
 // WHAT IS NOT HERE YET, ON PURPOSE
 //   * Permission sets, raw provider role bindings, federation, networks,
-//     gateways, load balancers and DNS records as resources of their own.
+//     gateways, load balancers and mail domains as resources of their own.
 //     Each is a later primitive at a held number above (or a provider
 //     primitive).
 //   * Stage names. A stage's list of resources lives in the release machine
 //     file; no resource carries the name of a stage.
-//   * A secret RESOURCE, and secret values. A service or a job receives a
-//     secret that already exists BY NAME (`SecretRef`); kci never reads,
-//     writes or stores the value. No `Value` ever carries a secret: `Value`
-//     field 4 stays held.
+//   * Secret VALUES. A `secret` resource is the CONTAINER only. A service or
+//     a job receives a secret BY REFERENCE (`SecretRef`: the name of one
+//     that already exists, or a `secret` resource of the list); kci never
+//     reads, writes or stores the value. No `Value` ever carries a secret:
+//     `Value` field 4 stays held.
 //
 // RETENTION (`Resource.retention`) says whether a resource's objects are
 // deleted when the resource leaves the file or the graph is destroyed. It
-// is for DATA primitives only (v1: `table` and `bucket`); each such type has
-// a versioned default (KEEP for both) that applies while the field is unset. A
-// service, a job, a service account or a grant is always deleted with its
+// is for the primitives that hold data, messages, secrets or names (v1:
+// `table`, `bucket`, `queue`, `topic`, `secret`, `dns_zone`, `dns_record` and
+// `certificate`); each such type has a versioned default (KEEP for a table, a
+// bucket and a secret, DELETE for a queue, a topic, a DNS zone, a DNS record
+// and a certificate) that applies while the field is unset. A service, a job,
+// a service account, a grant or a subscription is always deleted with its
 // resource, and setting retention on one is refused when the graph is
 // validated. A third answer,
 // "kci cannot delete this", is a capability of a cloud object, not a policy
@@ -127,7 +138,8 @@
 // REVISION (the cloud's own revision of a service, not kci's revision id).
 // `Table` 4 an analytics replica (its meaning differs per cloud, so it waits
 // for a decision). Per-cloud extensions 50 to 53 are held on `Table`,
-// `Bucket`, `ServiceAccount` and `Grant` as on every primitive.
+// `Bucket`, `ServiceAccount`, `Grant`, `Queue`, `Topic`, `Subscription`,
+// `Secret`, `DnsZone`, `DnsRecord` and `Certificate` as on every primitive.
 //
 // "PLATFORM" MEANS OS + CPU AND NOTHING ELSE (`Image.platform`). The deploy
 // target is the cloud, which this file never names.
@@ -156,7 +168,8 @@ enum Portability {
 
 extend google.protobuf.MessageOptions {
   // Marks each resource type message below (v1: `Service`, `Job`, `Table`,
-  // `Bucket`, `ServiceAccount`, `Grant`).
+  // `Bucket`, `Queue`, `Secret`, `DnsZone`, `ServiceAccount`, `Topic`,
+  // `Grant`, `DnsRecord`, `Certificate`, `Subscription`).
   Portability portability = 50001;
   // The outputs a type exposes to a `Ref`. A `Ref` asking a type for an
   // output it does not expose is refused when the graph is loaded.
@@ -191,11 +204,13 @@ message Ref {
 }
 
 // What a consumer may do to a resource. CALL is accepted by a service and a
-// job; READ, WRITE and READ_WRITE by a table and a bucket; DESCRIBE by a
-// table (read its definition, never its items) and by a service account
-// (read what the identity is, never act as it). 5 and 6 are held for
-// SEND and RECEIVE (messaging); 7 is held for ACT_AS (one identity acting as
-// another) and 9 for MANAGE (changing a resource's own configuration), both
+// job; READ, WRITE and READ_WRITE by a table, a bucket and a secret (on a
+// secret: READ its value, WRITE a new version of it); SEND (put a
+// message in) by a queue and a topic; RECEIVE (take a message out and
+// acknowledge it) by a queue; DESCRIBE by a table (read its definition,
+// never its items) and by a service account (read what the identity is,
+// never act as it). 7 is held for ACT_AS (one identity acting as another)
+// and 9 for MANAGE (changing a resource's own configuration), both
 // undeclared until their rules are decided.
 enum Access {
   ACCESS_UNSET = 0;
@@ -203,6 +218,8 @@ enum Access {
   READ = 2;
   WRITE = 3;
   READ_WRITE = 4;
+  SEND = 5;
+  RECEIVE = 6;
   DESCRIBE = 8;
 }
 
@@ -276,21 +293,26 @@ message Image {
   string platform = 3;
 }
 
-// A secret that already exists in the cell's secret store, named, never
-// valued. kci passes the REFERENCE to the cloud adapter, which makes the
-// secret's value available to the container at run time; the value is never
-// in this file, in kci's state or in kci's memory. Creating the secret's
-// container is bootstrap's job; there is no secret resource in v1. The map
-// key of a `secret_env` field is the environment variable the container
-// reads it from.
+// A secret, referenced, never valued: EITHER one that already exists in the
+// cell's secret store, by `name`, OR a `secret` resource of this list, by
+// `secret` (exactly one of the two; validate refuses both and neither).
+// kci passes the REFERENCE to the cloud adapter, which makes the secret's
+// value available to the container at run time; the value is never in this
+// file, in kci's state or in kci's memory. The map key of a `secret_env`
+// field is the environment variable the container reads it from.
 //
-// `store` names the secret store (unset: the cell's default store);
-// `version` pins one version of the value (unset: the latest). Both have
-// presence, so "not written" is never confused with a written empty string.
+// `store` names the secret store of a `name` (unset: the cell's default
+// store); a `secret` resource is in the store its cloud puts it in, so
+// `store` beside `secret` is refused. `version` pins one version of the
+// value (unset: the latest). Both have presence, so "not written" is never
+// confused with a written empty string. `secret` names the resource itself
+// (its `output` unset), and the identity the service or job runs as must
+// hold READ (or READ_WRITE) on it: the reference is not a grant.
 message SecretRef {
   string name = 1;
   optional string store = 2;
   optional string version = 3;
+  Ref secret = 4;
 }
 
 // ---- one entry of a deploy step's list ----------------------------------------
@@ -307,17 +329,24 @@ message Resource {
   reserved "only_in";
   // 5 is held for a typed per-cloud settings map, 6 for `physical_name`.
 
-  // Typed and closed. Held, not declared (see the file header): 12,
-  // 15 to 19, 21 to 24 and 26 to 36 the later neutral primitives, 80 a
-  // composite instance, 90 the escape hatch, 100-299 / 300-499 / 500-699 /
+  // Typed and closed. Held, not declared (see the file header): 12, 17,
+  // 19, 22 to 24 and 29 to 36 the later neutral primitives, 80
+  // a composite instance, 90 the escape hatch, 100-299 / 300-499 / 500-699 /
   // 700-899 the provider primitives of four clouds.
   oneof body {
     Service service = 10;
     Job job = 11;
     Table table = 13;
     Bucket bucket = 14;
+    Queue queue = 15;
+    Secret secret = 16;
+    DnsZone dns_zone = 18;
     ServiceAccount service_account = 20;
+    Topic topic = 21;
     Grant grant = 25;
+    DnsRecord dns_record = 26;
+    Certificate certificate = 27;
+    Subscription subscription = 28;
   }
 }
 
@@ -520,4 +549,142 @@ message Grant {
   Ref target = 2;
   Access access = 3;
   CellResource cell = 4;
+}
+
+// ---- messaging: queue, topic and subscription ------------------------------------
+
+// A queue of messages that receivers PULL: a received message is hidden from
+// every other receiver until it is acknowledged or its `ack_deadline`
+// passes, and then it is delivered again. A message delivered
+// `max_deliveries` times without an acknowledgement moves to the
+// `dead_letter` queue. Messages reach a queue by a direct SEND, or from a
+// topic through a `subscription`. Its retention default is DELETE.
+message Queue {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+  option (exposes) = ADDRESS;
+
+  // How long a received message stays hidden before it is delivered again,
+  // in whole seconds from 10 to 300 (the range every built-in cloud honours).
+  // Unset: the versioned default, 30 seconds.
+  google.protobuf.Duration ack_deadline = 1;
+  // The `queue` a message moves to after `max_deliveries` deliveries. Set
+  // together with `max_deliveries`, or neither: with no dead-letter queue a
+  // message is delivered until it is acknowledged.
+  Ref dead_letter = 2;
+  // From 5 to 100 (the range every built-in cloud honours). Presence: an
+  // explicit 0 is told apart from "not written".
+  optional uint32 max_deliveries = 3;
+  // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// A fan-out point: every message SENT to a topic is delivered to every
+// queue a `subscription` connects to it. A topic holds no receivers of its
+// own. Its retention default is DELETE. No field yet; 50 to 53 are held for
+// the per-cloud extensions (file header).
+message Topic {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+  option (exposes) = ADDRESS;
+}
+
+// One edge of fan-out: every message sent to `topic` is delivered to
+// `queue`. Both are required, each names a resource of its own type, and a
+// (topic, queue) pair is connected once. A subscription exposes nothing and
+// accepts nothing, and is deleted with its resource. 50 to 53 are held for
+// the per-cloud extensions (file header).
+message Subscription {
+  option (portability) = PORTABLE;
+
+  Ref topic = 1;
+  Ref queue = 2;
+}
+
+// ---- secrets: secret ------------------------------------------------------------
+
+// The CONTAINER of a secret value: the provider's secret object, created with
+// no value, so kci still writes none. Its value is written by an identity
+// granted WRITE on it (or by a person, out of band), and read by an identity
+// granted READ, which a service or a job names in `secret_env` through
+// `SecretRef.secret`. Its NAME is the cloud's name for it. Deleting it deletes
+// every version of its value, so its retention default is KEEP: removing a
+// secret from the file leaves it in the cloud unless `retention: DELETE` is
+// written. No field yet; 50 to 53 are held for the per-cloud extensions (file
+// header).
+message Secret {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+}
+
+// ---- names: DNS zone, DNS record and certificate ------------------------------------
+
+// A PUBLIC DNS zone: the servers that answer for `name` and every name below
+// it that no other zone holds. A private zone (one answered only inside a
+// network) is not this type. Its NAME is the cloud's name for the zone
+// object, not the domain. kci creates the zone; pointing the domain's
+// registrar at the zone's servers is the domain owner's step, outside kci.
+// A zone re-created after a delete may be answered by other servers, which
+// is the domain owner's step again. Its retention default is DELETE. 50 to
+// 53 are held for the per-cloud extensions (file header).
+message DnsZone {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // The domain, lowercase, with no trailing dot ("example.com"): at least
+  // two labels, each of letters, digits and inner hyphens. One zone per
+  // domain in a list.
+  string name = 1;
+}
+
+// What a DNS record set holds. Only the types every built-in cloud hosts
+// with one meaning: A (IPv4 addresses), AAAA (IPv6 addresses), CNAME
+// (another name: one value, never at a zone's own name), TXT (text) and MX
+// (mail servers, each "<preference> <host>").
+enum RecordType {
+  RECORD_TYPE_UNSET = 0;
+  A = 1;
+  AAAA = 2;
+  CNAME = 3;
+  TXT = 4;
+  MX = 5;
+}
+
+// One record set: every value of one `type` at one `name`, in one `zone`
+// of the list. Its HOST is `name`. A value is a literal, or (for a CNAME
+// only) a `Ref` to the HOST another resource exposes, so the record follows
+// the service it names. Its retention default is DELETE. 50 to 53 are held
+// for the per-cloud extensions (file header).
+message DnsRecord {
+  option (portability) = PORTABLE;
+  option (exposes) = HOST;
+
+  // The full name, lowercase, with no trailing dot: the zone's own name or
+  // a name below it. A first label `*` is a wildcard.
+  string name = 1;
+  // The `dns_zone` the record is in (the resource itself, no output).
+  Ref zone = 2;
+  RecordType type = 3;
+  // At least one, in order; a CNAME has exactly one.
+  repeated Value values = 4;
+  // Whole seconds from 60 to 86400. Unset: the versioned default, 300
+  // seconds.
+  google.protobuf.Duration ttl = 5;
+}
+
+// A MANAGED, DOMAIN-VALIDATED certificate, publicly trusted: the cloud
+// obtains it, proves control of each domain with records in `zone`, and
+// renews it. kci never holds its private key. This version means a publicly
+// trusted certificate only; whether private-CA certificates join this type
+// (a new field) or another type is open. Its NAME is the cloud's name for
+// it. Its retention default is DELETE. 50 to 53 are held for the per-cloud extensions (file header).
+message Certificate {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // From 1 to 10 names, each the zone's own name or below it; a first label
+  // `*` is a wildcard. The first is the certificate's subject.
+  repeated string domains = 1;
+  // The `dns_zone` the validation records go in (the resource itself, no
+  // output).
+  Ref zone = 2;
 }
