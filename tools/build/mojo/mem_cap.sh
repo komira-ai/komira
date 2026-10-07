@@ -16,13 +16,18 @@
 # directory it makes (and removes) under the working directory.
 #
 # The command leads a session (and process group) of its own, which the test
-# and every child it starts join unless they leave it. Where the tree cannot
-# be read (three readings in a row fail, or do not show this script itself),
-# and on SIGHUP, SIGINT or SIGTERM, this script kills that whole group, which
-# needs no /proc. SIGKILL cannot be caught: a tether in the command's session
-# blocks reading a FIFO whose only writer is this script (fd 9), and when this
-# script exits, however it exits, the read returns and the tether kills the
-# session's process group (what is left of it once the command has exited).
+# and every child it starts join unless they leave it. Once the command has
+# exited (normally or after the cap's kill), where the tree cannot be read
+# (three readings in a row fail, or do not show this script itself), and on
+# SIGHUP, SIGINT or SIGTERM, this script kills that whole group, which needs
+# no /proc; that reaches a child reparented out of the command's process tree
+# that the cap's kill (by parent pid) missed. SIGKILL cannot be caught: a
+# tether in the command's session blocks reading a FIFO whose only writer is
+# this script (fd 9), and when this script exits the read returns and the
+# tether kills the session's process group. The tether is itself a
+# descendant of the command, so the cap's kill kills it too: if this script
+# is SIGKILLed between the cap's kill and its own group kill, a reparented
+# child is left alive.
 #
 # Resident memory, not address space: the Mojo runtime's allocator (tcmalloc)
 # reserves address space in aligned 1 GiB regions at start, so an
@@ -140,6 +145,9 @@ while :; do
 done
 rc=0
 wait "$pid" || rc=$?
+# The command has been reaped; what is left in its group is a child that
+# left its process tree, and (unless the cap killed it) the tether.
+kill -s KILL "-$pid" 2> /dev/null || true
 trap - HUP INT TERM
 if [ -n "$killed" ]; then
     echo "MEMORY CAP: killed $LABEL at $killed MiB resident, over its cap of $CAP MiB" >&2

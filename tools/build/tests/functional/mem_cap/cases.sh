@@ -1,12 +1,15 @@
 # cases.sh -- runs tools/build/mojo/mem_cap.sh against a stand-in for
 # gate_runner.sh and requires each verdict where the process tree cannot be
-# read or the cap itself is signalled. Writes one line per case to <report>
+# read, the cap itself is signalled, or a child left the runner's process
+# tree. Writes one line per case to <report>
 # ("ok <case>" or "BAD <case>: <why>"); exits 1 if any case is BAD.
 #
 # usage: busybox sh cases.sh <busybox> <mem_cap.sh> <report>
 #
 # The stand-in `runner` writes its pid to runner.pid, starts a child that
-# sleeps (the test) and writes its pid to child.pid, and waits for it. A case
+# sleeps (the test) and writes its pid to child.pid, and waits for it; in its
+# daemon modes the sleeping child is reparented out of the runner's process
+# tree (and daemon_hog then waits on a second child over the cap). A case
 # whose verdict is a kill requires that neither is alive (a zombie has
 # exited) within 5 s of the cap's exit. Every case runs under `timeout`, so a
 # cap that leaves the stand-in running makes a BAD case, not a hung action.
@@ -21,6 +24,16 @@ cat > "$D/runner" <<RUNNER
 case "\$1" in
     exit7) exit 7 ;;
     hang) echo \$\$ > runner.pid; "$BB" sleep 600 & echo \$! > child.pid; wait \$! ;;
+    daemon | daemon_hog)
+        echo \$\$ > runner.pid
+        # The subshell exits at once: its sleep is reparented out of the
+        # runner's process tree but stays in the runner's session.
+        ( "$BB" sleep 600 & echo \$! > child.pid )
+        [ "\$1" = daemon ] && exit 0
+        # A child holding 40 MB resident, over an 8 MiB cap.
+        "$BB" sh -c 'x=\$("$BB" head -c 40000000 /dev/zero | "$BB" tr "\\\\0" a); "$BB" sleep 600' &
+        wait \$!
+        ;;
 esac
 RUNNER
 # A busybox whose cat of a /proc path fails, writing nothing, from its 11th
@@ -79,20 +92,20 @@ verdict() {
     fi
 }
 
-# expect <case> <busybox for the cap> <want rc> <want text or -> <runner mode>
+# expect <case> <busybox for the cap> <want rc> <want text or -> <runner mode> [cap MiB]
 expect() {
-    name=$1 capbb=$2 want=$3 text=$4 mode=$5
+    name=$1 capbb=$2 want=$3 text=$4 mode=$5 cap=${6:-4096}
     c=$D/$name
     "$BB" mkdir -p "$c"
     rc=0
     echo "mem_cap case: $name" >&2
-    (cd "$c" && "$BB" timeout 60 "$BB" sh "$MEMCAP" "$capbb" 4096 "$LABEL" -- "$BB" sh "$D/runner" "$mode") > "$c/log" 2>&1 || rc=$?
+    (cd "$c" && "$BB" timeout 60 "$BB" sh "$MEMCAP" "$capbb" "$cap" "$LABEL" -- "$BB" sh "$D/runner" "$mode") > "$c/log" 2>&1 || rc=$?
     why=""
     [ "$rc" = "$want" ] || why="exit $rc, want $want"
     if [ -z "$why" ] && [ "$text" != - ] && ! "$BB" grep -qF -- "$text" "$c/log"; then
         why="no '$text' in output"
     fi
-    if [ -z "$why" ] && [ "$mode" = hang ] && { [ ! -s "$c/runner.pid" ] || [ ! -s "$c/child.pid" ]; }; then
+    if [ -z "$why" ] && [ "$mode" != exit7 ] && { [ ! -s "$c/runner.pid" ] || [ ! -s "$c/child.pid" ]; }; then
         why="the stand-in did not start its child"
     fi
     verdict "$name" "$why"
@@ -103,6 +116,12 @@ expect status "$BB" 7 - exit7
 # /proc stops being readable: the cap ends the run (exit 2) and kills the
 # runner and its child; it does not wait for them uncapped.
 expect unreadable "$D/bb_noproc" 2 "mem_cap: cannot read the process tree of $LABEL from /proc; killed it rather than run it uncapped" hang
+# The runner leaves a child that was reparented out of its process tree but
+# not out of its session. On a normal exit, and when the cap kills the
+# runner's memory-hungry child (which is the runner's to report: rc 137 from
+# its wait), the cap kills the session's group before it exits.
+expect daemon_normal "$BB" 0 - daemon
+expect daemon_capped "$BB" 137 "MEMORY CAP: killed $LABEL at " daemon_hog 8
 
 # killed <case> <signal> <want rc>: the cap is signalled while the runner and
 # its child hang. A caught signal kills them before the cap exits (rc 128 +

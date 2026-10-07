@@ -11,7 +11,8 @@
 #      (tools/build/tests/functional/assert_level.sh: aquery, with and
 #      without komira.coverage=true, and a mojo_test's buck2-test command);
 #      mem_cap.sh on a stand-in leaves nothing alive when /proc stops being
-#      readable or it is signalled (tests//functional/mem_cap:cases);
+#      readable, it is signalled, or a child left the stand-in's process tree
+#      (tests//functional/mem_cap:cases);
 #      tests//functional/assert_level and tests//functional/mem_cap build (a
 #      library's debug_asserts are off in its test at ASSERT=none, an
 #      assert_mode=none one is off at the default level, a define reaches the
@@ -39,7 +40,7 @@ else
     if grep -q '^BAD ' "$report" || [ "$ok" -lt 4 ]; then
         fail "mem_cap cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
     else
-        pass "mem_cap cases: $ok stand-in runs; an unreadable /proc and a signalled cap leave nothing of the run alive"
+        pass "mem_cap cases: $ok stand-in runs; an unreadable /proc, a signalled cap and a child reparented out of the tree leave nothing of the run alive"
     fi
 fi
 expect_green assert_level_run_check 'tests//functional/assert_level:bin_none[run_check]'
