@@ -3,7 +3,8 @@
 # =============================================================================
 #
 # Object reads are range GETs against the Azure Blob REST API, the same
-# shape as S3 and GCS, with these Azure divergences:
+# shape as S3 and GCS, and a write is one Put Blob (a block blob, the bytes
+# in the body), with these Azure divergences:
 #
 #   1. Auth is `Authorization: SharedKey <account>:<sig>` (handled by the
 #      `komira_azure_blob.azure_signing.SharedKeySigningLayer` wrapping
@@ -43,9 +44,14 @@
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_http_client.body import EmptyBody
-from komira_http_client.client import build_get_request, build_head_request
+from komira_http_client.body import BytesBody, EmptyBody
+from komira_http_client.client import (
+    build_get_request,
+    build_head_request,
+    build_request_with_body,
+)
 from komira_http_client.header_map import HeaderMap, sab_to_string
+from komira_http_client.request_writer import method_put
 from komira_http_client.response_body import BufferedResponseBody
 from komira_http_client.service import ClientRequest, HttpService
 from komira_http_client.state_machine import ClientResponse
@@ -66,6 +72,7 @@ from .azure_xml import (
 
 comptime AZURE_BLOB_DNS_SUFFIX: StaticString = "blob.core.windows.net"
 comptime AZURE_DEFAULT_API_VERSION: StaticString = "2021-08-06"
+comptime AZURE_BLOB_TYPE_BLOCK: StaticString = "BlockBlob"
 
 
 # -----------------------------------------------------------------------------
@@ -463,6 +470,53 @@ struct AzureStore[Http: HttpService](Movable, Deinitable):
         return self.get_range[RT, C](
             container, blob, Int64(0), Int64(-1), connector, reactor,
         )
+
+    # ----- Put Blob (one request, block blob) -----
+
+    def put_blob[RT: Runtime, C: Connector](
+        mut self,
+        container: String,
+        blob: String,
+        var data: List[UInt8],
+        content_type: String,
+        mut connector: C,
+        mut reactor: Reactor[RT.Sink],
+    ) raises -> AzureBlobMeta:
+        """Put Blob: write `data` as the block blob `blob`, replacing any
+        blob of that name (https://learn.microsoft.com/en-us/rest/api/storageservices/put-blob).
+
+        `PUT /<container>/<blob>` with `x-ms-blob-type: BlockBlob`, the
+        x-ms-version, `Content-Type: content_type` when it is non-empty,
+        and the bytes as the body with their Content-Length. Returns the
+        size written and the ETag of the 201 response. On a status of 300
+        or more, raises Error(...) carrying the StoreError taxonomy. An
+        empty `blob` is refused before any request: it would address the
+        container."""
+        if blob.byte_length() == 0:
+            raise Error("azure store: refusing to put an empty blob name")
+        var size = Int64(len(data))
+        var url = self.build_blob_url(container, blob)
+        var headers = self._base_headers()
+        headers.append(String("x-ms-blob-type"), String(AZURE_BLOB_TYPE_BLOCK))
+        if content_type.byte_length() > 0:
+            headers.append(String("Content-Type"), content_type)
+        var req = build_request_with_body[BytesBody](
+            method_put(), url^, headers^, BytesBody.from_bytes(data^)
+        )
+        var resp = self._http.call[RT, C, BytesBody](
+            req^, connector, reactor,
+        )
+        var status_int = Int(resp.status)
+        if status_int >= 300:
+            var body_str = self._copy_response_body_as_string(resp)
+            raise self._mk_error(
+                status_int, String("PUT"), container, blob, body_str^
+            )
+        var etag = String("")
+        var etag_opt = resp.headers.get_view(String("etag"))
+        if etag_opt.__bool__():
+            etag = sab_to_string(etag_opt.value())
+        return AzureBlobMeta(size=size, etag=etag^)
 
     # ----- Listing (single page) -----
 
