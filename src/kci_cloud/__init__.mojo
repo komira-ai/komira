@@ -37,6 +37,12 @@ interface. This package names no cloud:
                        references to it: their graph findings (one of a
                        name and a secret; a secret resource read by the
                        identity that receives it).
+  * values.mojo      — the checks of a configuration value (a literal, a
+                       parameter, a reference to another resource's
+                       output), shared by `env` and a DNS record's values.
+  * dns.mojo         — the rules of the name types (DNS zone, DNS record,
+                       certificate): their graph findings, the DNS name
+                       grammar, and the record's versioned TTL.
   * labels.mojo      — the standard label rule (encode, decode, check), and
                        komira_validation_run's two marks: the retention
                        mark `kci-retention=<retain|delete>` on every object
@@ -80,7 +86,10 @@ from kci_cloud.catalog import (
     FIELD_GRANT,
     FIELD_QUEUE,
     FIELD_SECRET,
+    FIELD_DNS_ZONE,
     FIELD_TOPIC,
+    FIELD_DNS_RECORD,
+    FIELD_CERTIFICATE,
     FIELD_SUBSCRIPTION,
     OUTPUT_URL,
     OUTPUT_HOST,
@@ -105,6 +114,9 @@ from kci_cloud.catalog import (
     ROLE_SECRET,
     ROLE_TOPIC,
     ROLE_SUBSCRIPTION,
+    ROLE_ZONE,
+    ROLE_RECORD,
+    ROLE_CERT,
     BodyArm,
     body_arms,
     body_field,
@@ -168,6 +180,19 @@ from kci_cloud.data import (
 )
 from kci_cloud.feed import Feed, feeds_into, feeds_of, field_of_id
 from kci_cloud.secrets import secret_env_findings, secret_findings, secret_of
+from kci_cloud.values import check_value, check_value_ref
+from kci_cloud.dns import (
+    CERTIFICATE_DOMAINS_MAX,
+    TTL_DEFAULT_SECONDS,
+    TTL_MAX_SECONDS,
+    TTL_MIN_SECONDS,
+    dns_findings,
+    dns_name_problem,
+    in_zone,
+    record_type_word,
+    ttl_seconds,
+    zone_name_of,
+)
 from kci_cloud.messaging import (
     ACK_DEADLINE_DEFAULT_SECONDS,
     ACK_DEADLINE_MAX_SECONDS,

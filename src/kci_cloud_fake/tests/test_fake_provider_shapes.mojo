@@ -141,8 +141,9 @@ def test_the_shape_table() raises:
     var g = ProviderShape.generic()
     assert_equal(
         len(g.rows),
-        13,
-        "generic: identity, run, public; identity, run, schedule; table; bucket; identity; queue; topic; sub; secret",
+        16,
+        "generic: identity, run, public; identity, run, schedule; table; bucket; identity; queue; topic; sub; secret;"
+        + " zone; record; cert",
     )
     # The table: one `table` row where it is hosted (gcp adds its index and
     # TTL objects), a grant row to it, and NOT_YET on onprem.
@@ -151,7 +152,9 @@ def test_the_shape_table() raises:
         if shape.name == "onprem":
             assert_equal(len(shape.roles_of(FIELD_TABLE)), 0, "onprem: no table row")
             assert_true(not shape.hosts(FIELD_TABLE), "onprem: a table is NOT_YET")
-            assert_equal(len(shape.not_yet), 4, "onprem: table, queue, topic, subscription")
+            assert_equal(
+                len(shape.not_yet), 7, "onprem: table, queue, topic, subscription, dns_zone, dns_record, certificate"
+            )
             assert_true(shape.not_yet[0].reason.find("Q17") >= 0, shape.not_yet[0].reason)
             continue
         assert_true(shape.hosts(FIELD_TABLE), shape.name + ": hosts a table")
