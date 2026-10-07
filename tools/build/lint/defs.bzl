@@ -315,11 +315,15 @@ def tar_member(**kwargs):
 # root package's subpackages: a directory holding a BUCK file, the nearest
 # below the root (src/ and src/tests/ hold none, so src/<name> and
 # src/tests/<kind>/<name> are listed, and so is any other package a missing
-# BUCK file leaves nearest). A fixture names `packages` instead.
+# BUCK file leaves nearest). That call must name `map`, the module map, so
+# the map check cannot be dropped by deleting one line. A fixture names
+# `packages` instead, and `map` only when it tests the map.
 def src_layout(**kwargs):
     if "packages" not in kwargs:
         if package_name():
             fail("src_layout {}: without `packages` it lists the root package's subpackages, so it belongs in the cell's root BUCK".format(kwargs.get("name", "")))
+        if not kwargs.get("map"):
+            fail("src_layout {}: the cell's src_layout must name `map`, the module map (docs/architecture.md), which must list every package under src/".format(kwargs.get("name", "")))
         root = kwargs.get("root", "src")
         kwargs["packages"] = sorted([p for p in __internal__.sub_packages() if p.startswith(root + "/")])
     src_layout_rule(**_linux(kwargs))

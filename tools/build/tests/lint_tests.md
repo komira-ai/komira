@@ -115,7 +115,8 @@ it also reads the module map's table rows, so a new package needs its row
 there: every package under `src/` has
 exactly one row whose link is its directory and whose name is the
 directory's, and no row links a directory under `src/` that is not a
-package.
+package. The root call must name `map`: without it the
+macro fails at load, so the map check cannot be dropped silently.
 [`functional/src_layout:ok`](functional/src_layout/BUCK) is a planted list
 ([`fixture.bzl`](functional/src_layout/fixture.bzl): a package of each kind,
 a `*_loopback` under `e2e`, a shipped `komira_test_*`, a name holding `e2e`
