@@ -114,6 +114,9 @@
 #   with fewer is missed: for random ids about 14% of 7-hex ones, 9% of 8,
 #   6% of 9, 4% of 10, 1.4% of 12, and none of 40.
 # - A date before FROM is not read; Y-M with a one-digit month is not read.
+# - A home directory written as `~name/` (the shell's shorthand) is not read:
+#   `~` before a word is as common in code, patterns and prose as in paths,
+#   so it is left to review and the deny list.
 # - "Only shrinks" is held by exact counts: a site more or one fewer fails.
 #   A row added or a count raised in the same change as the site passes the
 #   build, so review of the ledger's diff is the other half of the rule.
@@ -145,7 +148,7 @@ function find_date(s,    rest, off, pos, y, pre, post, m, tail, a, b, sfx, mm, d
         if (pre ~ "[0-9]") continue
         if (match(post, "^[-_/.][0-9][0-9]?[-_/.][0-9][0-9]?([^0-9]|$)")) {
             # Y-M-D: two-digit month and day with any separator, or one-digit
-            # ones between `-` or `/` (a dotted 2026.1.5 is a version).
+            # ones between `-` or `/` (a dotted 2031.1.5 is a version).
             mm = substr(post, 2); sub("[^0-9].*", "", mm)
             dd = substr(post, length(mm) + 3); sub("[^0-9].*", "", dd)
             sep = substr(post, 1, 1)
