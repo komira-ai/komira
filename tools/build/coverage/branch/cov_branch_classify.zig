@@ -274,6 +274,14 @@ fn branch(st: *State, kind: Kind, arms: usize, cond: []const u8, text: []const u
     const code = std.mem.trim(u8, src, " ");
     const c = if (in_file) classify(st.alloc, at.file.lines, @intCast(at.line - 1), at.col) else classify(st.alloc, &.{""}, 0, at.col);
     const w = st.weightsOf(prof, arms, where);
+    // A token that cannot be read (a call's name behind a triple-quoted
+    // string) is refused before any rule, a String's shapes included: the
+    // call may be of a nodebug function.
+    if (c.refusal.len > 0) {
+        st.counts[@intFromEnum(Class.unknown)] += 1;
+        st.err("{s}: a {s} at '{s}': {s}: {s}", .{ where, @tagName(kind), c.token, c.refusal, code });
+        return .{ .weights = w };
+    }
     // A call of a measured nodebug function: its own code carries the
     // call's location, whatever its shape.
     if (c.class == .call) {

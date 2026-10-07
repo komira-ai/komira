@@ -266,8 +266,10 @@ fn closing(s: []const u8, i: usize) ?usize {
     return null;
 }
 
-/// Whether `s[j]` is inside a string literal or the comment of line `s`
-/// (read from the line's start: a literal does not run over lines).
+/// Whether `s[j]` is inside a string literal or the comment of line `s`,
+/// read from the line's start, where a quote opens a literal that ends at
+/// the same quote on the same line. A triple-quoted string, which can run
+/// over lines, is not read here: openingBack refuses a span holding one.
 fn inLiteral(s: []const u8, j: usize) bool {
     var k: usize = 0;
     while (k <= j) {
@@ -284,10 +286,23 @@ fn inLiteral(s: []const u8, j: usize) bool {
     return false;
 }
 
+const Opening = union(enum) {
+    /// The opening bracket, at `lines[line][pos]`.
+    at: struct { line: usize, pos: usize },
+    /// None on the lines read.
+    none,
+    /// The span read back holds a `"""` or `'''` opening or closing a
+    /// triple-quoted string on this 0-based line: its brackets cannot be
+    /// told from the code's line by line, so nothing is found.
+    triple_quoted: usize,
+};
+
 /// The `[`, `(` or `{` opening the bracket closing at `lines[idx][i]`,
-/// on that line or up to 64 lines before it; brackets in string literals
-/// and comments are skipped (`gn["a[b"](v)` is a call of `gn`, not `a`).
-fn openingBack(lines: []const []const u8, idx: usize, i: usize) ?struct { line: usize, pos: usize } {
+/// on that line or up to 64 lines before it; brackets in one-line string
+/// literals and comments are skipped (`gn["a[b"](v)` is a call of `gn`, not
+/// `a`). A `"""` or `'''` anywhere between the two brackets, comments
+/// included, ends the search as `.triple_quoted`.
+fn openingBack(lines: []const []const u8, idx: usize, i: usize) Opening {
     var depth: usize = 0;
     var ln = idx;
     var j = i + 1;
@@ -295,17 +310,19 @@ fn openingBack(lines: []const []const u8, idx: usize, i: usize) ?struct { line: 
         const s = lines[ln];
         while (j > 0) {
             j -= 1;
+            if (j + 2 < s.len and (s[j] == '"' or s[j] == '\'') and s[j + 1] == s[j] and s[j + 2] == s[j])
+                return .{ .triple_quoted = ln };
             if (inLiteral(s, j)) continue;
             switch (s[j]) {
                 ')', ']', '}' => depth += 1,
                 '(', '[', '{' => {
                     depth -= 1;
-                    if (depth == 0) return .{ .line = ln, .pos = j };
+                    if (depth == 0) return .{ .at = .{ .line = ln, .pos = j } };
                 },
                 else => {},
             }
         }
-        if (ln == 0 or idx - ln >= 64) return null;
+        if (ln == 0 or idx - ln >= 64) return .none;
         ln -= 1;
         j = lines[ln].len;
     }
@@ -456,7 +473,9 @@ pub fn headerSpan(lines: []const []const u8, line: u64, col: u64) ?Span {
     return null;
 }
 
-pub const Token = struct { class: Class, token: []const u8, callee: []const u8 = "" };
+/// A token's class, its text, the callee of a call, and when the token
+/// cannot be read at all (`refusal` non-empty) why.
+pub const Token = struct { class: Class, token: []const u8, callee: []const u8 = "", refusal: []const u8 = "" };
 
 /// The class of the token at 1-based byte column `col` of `lines[idx]`, the
 /// token as it reads there (for a message), and for a call the callee's
@@ -499,7 +518,15 @@ pub fn classify(alloc: Alloc, lines: []const []const u8, idx: usize, col: u64) T
             var nl = line;
             var name_end = i;
             if (i > 0 and line[i - 1] == ']') {
-                const o = openingBack(lines, idx, i - 1) orelse return .{ .class = .unknown, .token = snippet };
+                const o = switch (openingBack(lines, idx, i - 1)) {
+                    .at => |a| a,
+                    .none => return .{ .class = .unknown, .token = snippet },
+                    .triple_quoted => |q| return .{
+                        .class = .unknown,
+                        .token = snippet,
+                        .refusal = std.fmt.allocPrint(alloc, "the name of the call whose parameters close here is not read: line {d} holds a triple-quoted string's quotes between them, and such a string can run over lines", .{q + 1}) catch oom(),
+                    },
+                };
                 nl = lines[o.line];
                 name_end = o.pos;
             }

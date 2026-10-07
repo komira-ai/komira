@@ -69,7 +69,7 @@ COVERAGE_NO_GATE = {
 # means covcheck's refusal of two tests' records that give one location a
 # different number of decisions (branch_lcov.mojo, DecisionShapes) fails
 # the gate in every mode: a new test instantiating one of the library's
-# generic functions with another specialisation can turn its coverage build
+# generic functions with another specialisation can turn its coverage gate
 # red in census mode. A fixture of the tests cell reads its branch records
 # unless it passes `coverage_branch_gate = False` (coverage.bzl). A library
 # not on the list keeps BranchNotMeasured.

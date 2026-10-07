@@ -496,6 +496,16 @@ for e in '67s/^        Int,$/        Int, "a[b",/' '67s/^        Int,$/        I
     ! cmp -s "$W/$SRC/d.mojo" "$DIR/fixtures/d.src" || red "variant '$e' does not change d.mojo"
     refused "bracket in a literal: $e" "src/pkg/d.mojo:68:6: a br at 'gn[' may be a decision of gn" "$W/v.ll"
 done
+# A triple-quoted string running over lines in its parameters refuses the
+# branch: read line by line, `gn["""` then `x[""", Int,` names the call `x`
+# (no nodebug function), and the br would be taken as a call's. Kills: the
+# refusal dropped (a `"""` or `'''` read as one-line literals).
+for q in '"""' "'''"; do
+    sed -e "66s/^    v += gn\[\$/    v += gn[$q/" -e "67s/^        Int,\$/        x[$q, Int,/" "$DIR/fixtures/d.src" >"$W/$SRC/d.mojo"
+    [ "$(sed -n 66,67p "$W/$SRC/d.mojo")" = "    v += gn[$q
+        x[$q, Int," ] || red "triple quote $q: d.mojo lines 66-67 not changed"
+    refused "triple-quoted string over lines: $q" "src/pkg/d.mojo:68:6: a br at '(v)': the name of the call whose parameters close here is not read: line 67 holds a triple-quoted string's quotes" "$W/v.ll"
+done
 cp "$DIR/fixtures/d.src" "$W/$SRC/d.mojo"
 rvariant 's/^  %21 = select i1 %19, i1 true, i1 %20, !dbg !316, !prof !292/  %21 = select i1 %19, i1 true, i1 %20, !dbg !316, !prof !293/'
 refused "select, other weights than the br" "src/pkg/d.mojo:69:17: a select at 'overflows(' that is not on a raising call's error flag" "$W/v.ll"
