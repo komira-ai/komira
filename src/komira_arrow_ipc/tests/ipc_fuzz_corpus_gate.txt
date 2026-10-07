@@ -11,8 +11,8 @@
 # NAMED <mode> <file>|<text>
 #   The file declares a buffer or metadata length of 1 GiB or more. The
 #   (mode, file) must raise with an error containing <text>, the check that
-#   compares the declared length with the bytes present and names it, so the
-#   length was refused before anything that size was allocated.
+#   compares the declared length with the bytes present and names it. This
+#   shows that check raised first, not that nothing was allocated before it.
 
 ACCEPTED nested arrow-ipc-file/clusterfuzz-testcase-minimized-arrow-ipc-file-fuzz-5707423356813312: a well-formed Footer that lists no RecordBatch (List<Decimal128(32, 8192)>, List<List<Int32>>, LargeList<Int32>); the damage is in the leading magic and the stream bytes, which a Footer reader (this one, like Arrow C++) does not read
 ACCEPTED nested arrow-ipc-file/clusterfuzz-testcase-minimized-arrow-ipc-file-fuzz-6088759971217408: a valid file (apache/arrow GH-49448): its Footer Schema names a child f3 where the leading Schema message says f2, which tripped Arrow C++'s differential fuzzer, not its reader; the one ZSTD RecordBatch is in range, its list offsets monotonic and bounded, its null counts equal to its bitmaps (checked by hand)

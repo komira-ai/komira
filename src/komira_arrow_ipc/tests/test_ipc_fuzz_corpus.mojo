@@ -31,13 +31,13 @@
 #   (a change of who refuses, or of whether the library is reached, fails);
 #   every A is listed ACCEPTED with a reason in ipc_fuzz_corpus_gate.txt
 #   (shrink-only: a listed pair that now raises is STALE); each NAMED file,
-#   declaring a length of 1 GiB or more, raises naming that length, i.e. at
-#   the check, before an allocation of that size; the directories hold the
-#   pinned counts. A crash, abort or hang fails the build action; one line
-#   per file prints as it lands, so the log ends at the file before it.
+#   declaring a length of 1 GiB or more, raises naming that length (this
+#   check raised first; not proof that nothing was allocated); the dirs
+#   hold the pinned counts. A crash, abort or hang fails the build action;
+#   one line per file prints as it lands, so a crash log ends at its file.
 # test_decode_errors_repeat_50: the corpus, every mode, 50 times in one
-#   process with the same verdicts each pass: an error path that frees twice
-#   or leaks corrupts the allocator and changes a later verdict or crashes.
+#   process with the same verdicts each pass: a double free that corrupts
+#   the heap crashes or changes a later verdict (a small leak is not seen).
 # Both: no file grows the peak resident size by `_HWM_CEILING_KIB` or the
 #   peak virtual size by `_VM_PEAK_CEILING_KIB`, in every pass.
 # =============================================================================
