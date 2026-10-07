@@ -221,5 +221,69 @@ def test_cursor_reads_and_refuses() raises:
     )
 
 
+def test_is_kind_is_false_for_every_other_kind_and_at_end() raises:
+    # is_kind must answer for the kind asked, not just "a token exists":
+    # each position is True for its own kind and False for the other five,
+    # and False for every kind once the input is used up.
+    var kinds = List[Int]()
+    kinds.append(TOKEN_WORD)
+    kinds.append(TOKEN_LBRACE)
+    kinds.append(TOKEN_RBRACE)
+    kinds.append(TOKEN_COLON)
+    kinds.append(TOKEN_STRING)
+    kinds.append(TOKEN_NUMBER)
+    var c = TokenCursor(lex(String("name { k: \"v\" 7 }")))
+    var expected = List[Int]()
+    expected.append(TOKEN_WORD)
+    expected.append(TOKEN_LBRACE)
+    expected.append(TOKEN_WORD)
+    expected.append(TOKEN_COLON)
+    expected.append(TOKEN_STRING)
+    expected.append(TOKEN_NUMBER)
+    expected.append(TOKEN_RBRACE)
+    for i in range(len(expected)):
+        for j in range(len(kinds)):
+            var want = kinds[j] == expected[i]
+            assert_equal(
+                c.is_kind(kinds[j]),
+                want,
+                String("token ") + String(i) + String(" kind ") + String(j),
+            )
+        _ = c.next(String("a token"))
+    assert_true(c.at_end())
+    for j in range(len(kinds)):
+        assert_false(c.is_kind(kinds[j]), String("at end, kind ") + String(j))
+
+
+def _parse_fields(mut c: TokenCursor, depth: Int) raises -> String:
+    # A hand-written reader of the shape the cursor is for: it branches on
+    # is_kind to stop at a closing brace and to tell a nested message from a
+    # scalar value. It renders what it read as `name=value` / `name{...}`.
+    var out = String("")
+    while not c.at_end() and not c.is_kind(TOKEN_RBRACE):
+        var name = c.expect(TOKEN_WORD).text.copy()
+        if c.is_kind(TOKEN_LBRACE):
+            _ = c.expect(TOKEN_LBRACE)
+            out += name + String("{") + _parse_fields(c, depth + 1)
+            _ = c.expect(TOKEN_RBRACE)
+            out += String("}")
+        else:
+            _ = c.expect(TOKEN_COLON)
+            var v = c.next(String("a value"))
+            out += name + String("=") + v.text
+        out += String(";")
+    if depth == 0 and not c.at_end():
+        raise Error(String("trailing tokens"))
+    return out^
+
+
+def test_a_parser_branching_on_is_kind_reads_nested_messages() raises:
+    var c = TokenCursor(
+        lex(String("a: 1\nm { b: \"x\" n { } }\nc: word"))
+    )
+    assert_equal(_parse_fields(c, 0), String("a=1;m{b=x;n{};};c=word;"))
+    assert_true(c.at_end())
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

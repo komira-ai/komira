@@ -13,9 +13,10 @@
 #   JSON (RFC 8259 section 6): "Numeric values that cannot be represented in
 #     the grammar below (such as Infinity and NaN) are not permitted." The
 #     JSONL writer documents NaN/+Inf/-Inf -> `null` (json_writer.mojo,
-#     write_f64_dtoa). That is komira's choice, not the RFC's (which only
-#     forbids the tokens), and it loses data: a NOT NULL FLOAT64 column
-#     reads back with NULLs (pinned below). The reader validates each line
+#     write_f64_dtoa) in a nullable column. That is komira's choice, not the
+#     RFC's (which only forbids the tokens). In a NOT NULL column the writer
+#     refuses them instead, and the reader refuses `null` in a NOT NULL
+#     field (both asserted below). The reader validates each line
 #     against the RFC 8259 grammar (line_check.mojo, check_jsonl_lines)
 #     before any value parser runs, so `NaN`, `Infinity`, `+1`, `01` and the
 #     like are refused there with "the line is not valid JSON: ..."; each
@@ -30,14 +31,17 @@
 #   * test_jsonl_edge_bytes -- the exact JSONL lines: INT64_MIN/MAX and
 #     +-(2^53+1) as integers (no exponent, no `.0`), -0.0 with its sign, the
 #     subnormals and DBL_MAX in exponent form, 17 significant digits where
-#     they are needed, `null` for every NaN and both infinities. Catches a
+#     they are needed, `null` for every NaN and both infinities (the column
+#     declared nullable). The same values in the dataset's NOT NULL column
+#     are refused at row 8 (+Inf), with the writer's message. Catches a
 #     formatter that drops the 17th digit (planted, seen red), drops the sign
-#     of -0.0, or writes `NaN`/`Infinity` (not JSON).
+#     of -0.0, writes `NaN`/`Infinity` (not JSON), or writes `null` into a
+#     NOT NULL column.
 #   * test_jsonl_edge_readback -- materialize_jsonl_to_batch returns every
-#     integer exactly (2^53+1 does not go through a double) and the finite
-#     floats it can parse bit-exactly; the non-finite rows come back NULL,
-#     with the column declared nullable AND with the writer's own NOT NULL
-#     schema (the reader does not refuse a `null` in a NOT NULL column).
+#     integer exactly (2^53+1 does not go through a double) and every finite
+#     float bit-exactly; the non-finite rows come back NULL with the column
+#     declared nullable, and reading the same lines with the column NOT NULL
+#     is refused at line 9 (the first `null`) with the reader's message.
 #   * test_jsonl_reader_spellings -- hand-written JSON the writer never
 #     produces. Refused by the line validator, each with its message:
 #     `NaN`, `Infinity`, `-Infinity`, `nan`, `.5`, `5.`, `1e`, `-`, `+1`,
@@ -45,9 +49,11 @@
 #     `01`, `-01.5` (FLOAT64) and `01` (INT64) as "unexpected '1'". A line
 #     that is accepted, or refused with another message, is a mismatch.
 #     Read exactly: `-0` and `-0.0` as -0.0,
-#     `1E2`, `1e+2`, `5e-1`, two 17-digit values, `1e400` as +Inf and
-#     `1e-400` as +0.0 (the round-to-nearest results; RFC 8259 section 9
-#     lets a parser limit range, and these are the IEEE answers).
+#     `1E2`, `1e+2`, `5e-1`, two 17-digit values, `4.9e-324` as the smallest
+#     subnormal, DBL_MAX, `1e400`, `1e18446744073709551616` (2^64) and
+#     `1e999999999` as +Inf, and `1e-400` as +0.0 (the round-to-nearest
+#     results; RFC 8259 section 9 lets a parser limit range, and these are
+#     the IEEE answers).
 #   * test_csv_edge_bytes -- the exact CsvSink lines for the same values.
 #   * test_csv_edge_readback -- read_csv_bytes_to_batch, column declared
 #     FLOAT64, returns the finite floats it can parse bit-exactly (including
@@ -82,25 +88,22 @@
 #     round-half-even it reads back as 2^54+8. The shortest round-trip text
 #     is `1.8014398509481988e+16`. Pinned: the line text, and the read-back
 #     bits (JSONL 0x4350000000000002, CSV 0x4350000000000003).
-#   _JSONL_PARSE_ROWS: parse_float_f64 scales by an iterated power of ten:
-#     5e-324 reads as 0.0, the largest subnormal as 0x0010000000000001,
-#     DBL_MIN as 0x0010000000000002, DBL_MAX as 0x7FEFFFFFFFFFFFFD. Pinned.
+#   _JSONL_PARSE_ROWS: only the midpoint row above (its text is the
+#     writer's defect; parse_float_f64 rounds it correctly). Pinned.
 #   _CSV_PARSE_ROWS: _try_parse_float64 does the same with a per-digit
 #     fraction sum: the largest subnormal and DBL_MIN read as
 #     0x0010000000000003, DBL_MAX as 0x7FEFFFFFFFFFFFF9. Pinned.
 #   _CSV_NONFINITE_ROWS: CsvSink writes `inf`, `-inf`, `nan`; the reader
 #     parses none of them, so a column declared FLOAT64 reads each as NULL
 #     (asserted) and type inference makes the column STRING (not asserted).
-#   JSONL exponent overflow (parse_float.mojo): the exponent accumulates in
-#     a wrapping Int, so `1e18446744073709551616` (2^64) reads as 1.0, where
-#     the IEEE answer is +Inf. Pinned. (`1e999999999` is not tested: the
-#     power-of-ten loop runs 10^9 iterations.)
 # =============================================================================
 
 from komira_async.ops.waker_sink import NoopSink
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Field, SchemaBuilder
+from komira_core.arrow.arrow_types import ArrowType
+from komira_core.arrow.column import Column
+from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_core.arrow.schema import Field, SchemaBuilder
 from komira_csv import CsvReadOptions, Rfc4180
 from komira_csv.csv_sink import CsvSink
 from komira_csv.reader import read_csv_bytes_to_batch
@@ -122,6 +125,7 @@ from komira_formats_e2e import (
     check_int_column,
     float_edge_batch,
     float_edge_bits,
+    f64_of,
     float_edge_text,
     hex_u64,
     int32_edge_text,
@@ -140,7 +144,7 @@ def _fmt_midpoint_rows() -> List[Int]:
 
 
 def _jsonl_parse_rows() -> List[Int]:
-    return [2, 3, 4, 5, 6, 7, 15]
+    return [15]
 
 
 def _csv_parse_rows() -> List[Int]:
@@ -173,15 +177,7 @@ comptime _MIDPOINT_TEXT = "1.801439850948199e+16"
 
 def _jsonl_parse_observed() -> List[UInt64]:
     """What the JSONL reader returns for _jsonl_parse_rows (same order)."""
-    return [
-        UInt64(0x0000000000000000),
-        UInt64(0x8000000000000000),
-        UInt64(0x0010000000000001),
-        UInt64(0x0010000000000002),
-        UInt64(0x7FEFFFFFFFFFFFFD),
-        UInt64(0xFFEFFFFFFFFFFFFD),
-        UInt64(0x4350000000000002),
-    ]
+    return [UInt64(0x4350000000000002)]
 
 
 def _csv_parse_observed() -> List[UInt64]:
@@ -261,6 +257,30 @@ def _check_lines(
 # =============================================================================
 
 
+def _nullable_float_edge_batch() raises -> RecordBatch:
+    """The `float_edge_bits` rows in a NULLABLE FLOAT64 column `f64` (no
+    NULL cell): the JSONL writer spells NaN/+-Inf `null` only there."""
+    var bits = float_edge_bits()
+    var f = PrimitiveArray[DType.float64].allocate_nullable(len(bits))
+    for r in range(len(bits)):
+        f.set(r, f64_of(bits[r]))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("f64", ArrowType.FLOAT64, True))
+    var builder = RecordBatchBuilder.with_capacity(1)
+    builder.add_column(Column.from_primitive[DType.float64](f^))
+    return builder.build(sb.build())
+
+
+comptime _NOT_NULL_WRITE_ERR = (
+    "json_writer: column 'f64' is NOT NULL and row 8 holds +Inf, which JSON"
+    " cannot spell (RFC 8259 section 6); only a nullable column writes it as"
+    " null"
+)
+comptime _NOT_NULL_READ_ERR = (
+    "komira_jsonl: line 9: NOT NULL field 'f64' holds JSON null"
+)
+
+
 def _jsonl_int_want() -> List[String]:
     var a = int64_edge_text()
     var b = int32_edge_text()
@@ -285,7 +305,7 @@ def test_jsonl_edge_bytes() raises:
     write_batch_jsonl_direct(ib, int_edge_batch())
     _check_lines(m, Span(ib), _jsonl_int_want(), List[Int](), "jsonl int")
     var fb = List[UInt8]()
-    write_batch_jsonl_direct(fb, float_edge_batch())
+    write_batch_jsonl_direct(fb, _nullable_float_edge_batch())
     _check_lines(m, Span(fb), _jsonl_float_want(), _fmt_midpoint_rows(), "jsonl f64")
     # KNOWN-DEFECT pin: the midpoint row as written today.
     var pinned = _jsonl_float_want()
@@ -297,6 +317,15 @@ def test_jsonl_edge_bytes() raises:
         else:
             others.append(r)
     _check_lines(m, Span(fb), pinned, others, "jsonl f64 KNOWN-DEFECT")
+    # The dataset's own NOT NULL column: refused at the first non-finite row.
+    var nb = List[UInt8]()
+    var err = String("")
+    try:
+        write_batch_jsonl_direct(nb, float_edge_batch())
+    except e:
+        err = String(e)
+    if err != String(_NOT_NULL_WRITE_ERR):
+        m.add("jsonl NOT NULL write: got error '" + err + "', want '" + String(_NOT_NULL_WRITE_ERR) + "'")
     m.raise_if_any("test_jsonl_edge_bytes")
 
 
@@ -312,7 +341,7 @@ def test_jsonl_edge_readback() raises:
     check_int_column(m, ir, "i32", _int32_as_int64(), "jsonl")
 
     var fb = List[UInt8]()
-    write_batch_jsonl_direct(fb, float_edge_batch())
+    write_batch_jsonl_direct(fb, _nullable_float_edge_batch())
     var fsb = SchemaBuilder()
     fsb.add_field(Field("f64", ArrowType.FLOAT64, True))
     var fr = materialize_jsonl_to_batch(Span(fb), fsb.build())
@@ -322,18 +351,22 @@ def test_jsonl_edge_readback() raises:
     var pin = _pin(_jsonl_parse_rows(), _jsonl_parse_observed())
     check_float_column_bits(m, fr, "f64", pin[0], "jsonl KNOWN-DEFECT", pin[1])
 
-    # The writer's own schema: f64 NOT NULL. Observed: the reader keeps the
-    # declared NOT NULL field and still returns NULL for the rows the writer
-    # spelled `null` (NaN, +-Inf), i.e. a NOT NULL column holding NULLs.
+    # The same lines read with the dataset's schema (f64 NOT NULL): the
+    # first `null` (row 8, line 9) is refused, so no NOT NULL column comes
+    # back holding NULLs.
     var nn = float_edge_batch().schema.copy()
-    var nr = materialize_jsonl_to_batch(Span(fb), nn^)
-    m.check(
-        not nr.schema.field_nullable(0),
-        "jsonl NOT NULL read: field became nullable",
-    )
-    check_float_column_bits(
-        m, nr, "f64", _finite_or_null(), "jsonl NOT NULL", _jsonl_parse_rows()
-    )
+    var err = String("")
+    var rows = -1
+    try:
+        var nr = materialize_jsonl_to_batch(Span(fb), nn^)
+        rows = nr.num_rows()
+    except e:
+        err = String(e)
+    if err != String(_NOT_NULL_READ_ERR):
+        m.add(
+            "jsonl NOT NULL read: got error '" + err + "' (" + String(rows)
+            + " rows), want '" + String(_NOT_NULL_READ_ERR) + "'"
+        )
     m.raise_if_any("test_jsonl_edge_readback")
 
 
@@ -409,14 +442,7 @@ def test_jsonl_reader_spellings() raises:
         _expect_refused(m, refused[i], "f64", ArrowType.FLOAT64, why[i])
     _expect_refused(m, "+1", "i64", ArrowType.INT64, String(EXP) + "'+'")
     _expect_refused(m, "01", "i64", ArrowType.INT64, String(UNX))
-    # KNOWN-DEFECT pin: a 2^64 exponent wraps to 0 (IEEE answer: +Inf).
-    _expect_f64(
-        m, "1e18446744073709551616", UInt64(0x3FF0000000000000),
-        "jsonl KNOWN-DEFECT",
-    )
-
-    # Spellings with an exactly known double. (4.9e-324, DBL_MIN and DBL_MAX
-    # spellings are read wrong: see _JSONL_PARSE_ROWS in the header.)
+    # Spellings with an exactly known double.
     var spellings = [
         String("-0"),
         String("-0.0"),
@@ -425,9 +451,13 @@ def test_jsonl_reader_spellings() raises:
         String("5e-1"),
         String("0.30000000000000004"),
         String("1.0000000000000002"),
+        String("4.9e-324"),
+        String("1.7976931348623157e308"),
         String("1e400"),
         String("-1e400"),
         String("1e-400"),
+        String("1e18446744073709551616"),
+        String("1e999999999"),
     ]
     var want = [
         UInt64(0x8000000000000000),
@@ -437,9 +467,13 @@ def test_jsonl_reader_spellings() raises:
         UInt64(0x3FE0000000000000),
         UInt64(0x3FD3333333333334),
         UInt64(0x3FF0000000000001),
+        UInt64(0x0000000000000001),
+        UInt64(0x7FEFFFFFFFFFFFFF),
         UInt64(0x7FF0000000000000),
         UInt64(0xFFF0000000000000),
         UInt64(0x0000000000000000),
+        UInt64(0x7FF0000000000000),
+        UInt64(0x7FF0000000000000),
     ]
     for i in range(len(spellings)):
         _expect_f64(m, spellings[i], want[i], "jsonl")

@@ -1,0 +1,27 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Aggregate execution support: the conform that gives a min, max, first, last or any_value column its input column's type, the reachability counters of two aggregate routes, and the plan-time group-count estimate with the provenance of its weakest signal.
+mojo_library(
+    name = "komira_dispatch_agg_exec",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+    ],
+    test_srcs = [
+        # the conform of pick columns: the closed set of steps, what the plan
+        # declares, narrowing, retagging and moving, and every checked refusal
+        "tests/test_agg_pick_output_conform.mojo",
+        # the group-count estimate's headline rules (welded from the source)
+        "tests/test_plan_group_estimate.mojo",
+        # every arm of the estimate's walk the welded test does not reach
+        "tests/test_plan_group_estimate_walks.mojo",
+        # the two route counters: counting, reset, a fresh slot, no sharing
+        "tests/test_route_counters.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

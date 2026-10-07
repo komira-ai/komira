@@ -298,7 +298,7 @@ def _sha256_of(digest):
         fail("`{}` is not a sha256:<64 hex> digest".format(digest))
     return digest[len("sha256:"):]
 
-def oci_base(name, registry, repository, manifest, manifest_file, config, layers, visibility = None):
+def oci_base(name, registry, repository, manifest, manifest_file, config, config_size, layers, layer_sizes, visibility = None):
     """A base image pinned by digest: the manifest in the repo, one pinned download per blob.
 
     `manifest` is the digest of the single-platform (linux/amd64) image
@@ -308,14 +308,20 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, layers
     `manifest`. `config` and `layers` are the digests the manifest names, in
     order; each URL names its digest and each download is checked against it,
     so the base cannot change without this declaration changing. komira_pack
-    also refuses unless the manifest names exactly these blobs.
+    also refuses unless the manifest names exactly these blobs. `config_size`
+    and `layer_sizes` are the blobs' sizes in bytes, as the manifest states
+    them, so the downloads need no request to the registry while the remote
+    cache holds them.
     """
+    if len(layer_sizes) != len(layers):
+        fail("oci_base {}: {} layers but {} layer_sizes".format(name, len(layers), len(layer_sizes)))
     base_url = "https://{}/v2/{}/".format(registry, repository)
     _sha256_of(manifest)
     pinned_file(
         name = name + "_config",
         url = base_url + "blobs/" + config,
         sha256 = _sha256_of(config),
+        size_bytes = config_size,
     )
     layer_targets = []
     for i, d in enumerate(layers):
@@ -323,6 +329,7 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, layers
             name = "{}_layer_{}".format(name, i),
             url = base_url + "blobs/" + d,
             sha256 = _sha256_of(d),
+            size_bytes = layer_sizes[i],
         )
         layer_targets.append(":{}_layer_{}".format(name, i))
     _oci_base(

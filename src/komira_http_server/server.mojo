@@ -1112,7 +1112,7 @@ struct HttpServer[
         EWOULDBLOCK-buffer machinery, but the per-request leaf runs
         `serve_read_round_dispatch_chained[D, M, RT]` — the chain's `before`
         legs (CORS / Tracing / Logging, then `auth_mw` which resolves
-        `ctx.authed_user` or short-circuits 401) run BEFORE the dispatcher, and
+        `ctx.principal` or short-circuits 401) run BEFORE the dispatcher, and
         a 401 short-circuit means the dispatcher / handler is never reached.
 
         Backward-compat: this is ADDITIVE. Chain-less callers (JobDispatcher,

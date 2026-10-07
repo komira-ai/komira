@@ -25,6 +25,7 @@ pinned_file(
     name = "botocore-1.43.70.tar.gz",
     url = "https://github.com/boto/botocore/archive/refs/tags/1.43.70.tar.gz",
     sha256 = "f045625da1309eff88a2631d9e449d1d03cfa7af14a81aec22d57987b41c3a27",
+    size_bytes = 16949701,
 )
 
 archive_files(

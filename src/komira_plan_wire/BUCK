@@ -67,12 +67,14 @@ _GOLDEN = [
     "correlated_subquery",
     "distinct",
     "filter_over_scan",
+    "index_pinned",
     "join",
     "limit",
     "project_exprs",
     "scan",
     "scan_nested",
     "sort",
+    "topic_live",
     "topn",
     "union",
     "window",
@@ -85,11 +87,6 @@ _GOLDEN = [
 # right answer, not only the code's: a value shifted by rows is the same
 # quantity, so a LEAD of a price-in-cents column is price-in-cents. Those two
 # lines are what protoc decodes from window.hex; do not drop them.
-#
-# Not checked here: golden/index_pinned and golden/topic_live have committed
-# `.hex` and `.canonical.hex` but no `.txtpb`, so protoc does not read them
-# yet. Adding each `.txtpb` (protoc's decode of the `.hex`) and its stem above
-# closes that gap.
 
 _HOSTILE = [
     "distinct_column_unknown_name",

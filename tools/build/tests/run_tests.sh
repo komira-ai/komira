@@ -311,6 +311,8 @@
 #      symbol not exported, a row for a symbol the README uses (the ledger
 #      only shrinks), an undocumented symbol under `enforce = True`, and a
 #      root with no package.
+
+#  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
 set -uo pipefail
 
 umbrella=1
@@ -1156,6 +1158,10 @@ done
 expect_red readme_api_coverage_malformed_symbol "$N/ledger_malformed.tsv:3: a row is" "$N:malformed"
 expect_red readme_api_coverage_stale_private "$N/ledger_stale_gone.tsv:3: komira_a Greeter._secret: not exported" "$N:stale_gone"
 expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enforce"
+
+# 41
+# shellcheck source=tools/build/tests/coverage_tests.sh
+. "$ROOT/tools/build/tests/coverage_tests.sh"
 
 # 37
 pt_rc=0

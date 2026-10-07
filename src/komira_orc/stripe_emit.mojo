@@ -86,6 +86,7 @@ from .footer import (
     ORC_COMPRESSION_NONE,
 )
 from .bloom_filter import OrcBloomFilter, make_orc_bloom_filter
+from .int_stats_sum import add_to_int_sum
 from std.memory import bitcast
 
 
@@ -240,7 +241,7 @@ struct ColumnStats(Copyable, Movable):
     var is_string: Bool
     var int_min: Int64
     var int_max: Int64
-    var int_sum: Int64
+    var int_sum: Optional[Int64]  # None once the running sum overflowed
     var dbl_min: Float64
     var dbl_max: Float64
     var dbl_sum: Float64
@@ -252,7 +253,7 @@ struct ColumnStats(Copyable, Movable):
     def empty() -> ColumnStats:
         return ColumnStats(
             0, False, False, False, False,
-            Int64(0), Int64(0), Int64(0),
+            Int64(0), Int64(0), Optional[Int64](Int64(0)),
             Float64(0), Float64(0), Float64(0),
             String(""), String(""), Int64(0),
         )
@@ -1345,7 +1346,7 @@ def _acc_int(mut st: ColumnStats, v: Int64, first: Bool):
             st.int_min = v
         if v > st.int_max:
             st.int_max = v
-    st.int_sum += v
+    add_to_int_sum(st.int_sum, v)
 
 
 def _emit_float32(
