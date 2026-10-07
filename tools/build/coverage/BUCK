@@ -1,4 +1,7 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "cov_gate_dir")
 
 # covcheck: coverage reports (kcov's Cobertura, lcov) to per-package numbers,
 # findings against the policy (target, ratchet floors, surviving mutants,
@@ -7,6 +10,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # shipped file so it can never be left unparseable.
 export_file(
     name = "ratchet.tsv",
+    visibility = ["PUBLIC"],
+)
+
+# The policy, as data for the coverage workflow's cases (the root BUCK's
+# coverage_ci_cases), which parse it the way .github/ci/coverage_measure.sh does.
+export_file(
+    name = "policy.bzl",
     visibility = ["PUBLIC"],
 )
 
@@ -88,4 +98,26 @@ mojo_binary(
         "//src/komira_json:komira_json",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The directory every mojo_library's coverage gate runs from
+# (tools/build/mojo/coverage.bzl; README.md, "The build gate"): cov_gate.sh,
+# covcheck_bin and ratchet.tsv. The Mojo libraries covcheck_bin depends on
+# cannot have it as a dependency (a gate of their own): they are the ledger
+# COVERAGE_NO_GATE of policy.bzl, held equal to that closure by no_gate.bxl.
+cov_gate_dir(
+    name = "cov_gate",
+    exec_compatible_with = LINUX_X86_64,
+    visibility = ["PUBLIC"],
+)
+
+# For planted defects (the tests cell copies it with one fault: test 46).
+export_file(
+    name = "cov_gate.sh",
+    visibility = ["PUBLIC"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["cov_gate.sh"],
 )
