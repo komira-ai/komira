@@ -18,3 +18,17 @@ shell_lint(
     },
     visibility = ["komira//:tests_lints"],
 )
+
+# The conda scripts, for tests//functional/install_gate:cases, which runs
+# their argument check.
+[
+    export_file(
+        name = name,
+        src = "functional/" + name,
+        visibility = ["//functional/install_gate:"],
+    )
+    for name in [
+        "conda.sh",
+        "conda_set.sh",
+    ]
+]
