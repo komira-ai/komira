@@ -71,7 +71,7 @@ is NotMeasured in its gate.
 """
 
 load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_BRANCH_GATE", "COVERAGE_MODE", "COVERAGE_NO_GATE", "COVERAGE_TARGET_BP")
-load(":coverage_branch.bzl", "coverage_branch_sub_targets")
+load(":coverage_branch.bzl", "coverage_branch", "coverage_branch_sub_targets")
 load(":providers.bzl", "MojoToolchainInfo")
 
 # The link directory of every coverage build (cov_link_dir, kcov/defs.bzl):
@@ -257,6 +257,17 @@ def coverage_sources(ctx, root):
                 rel = rel[len(root) + 1:]
             gen.append(rel)
     return src_repo, gen
+
+def coverage_branch_of(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, root):
+    """The branch coverage actions of test source `t` (coverage_branch.bzl),
+    as {stem: their outputs}, with `coverage_branch` set; {} otherwise. The
+    arguments are coverage_branch's, but `root`, the package directory [src]
+    stages (_package_root), from which its measured sources are found
+    (coverage_sources)."""
+    if not ctx.attrs.coverage_branch:
+        return {}
+    src_repo, gen = coverage_sources(ctx, root)
+    return {stem: coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, src_repo, gen)}
 
 def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, env_args):
     """Declares the `mojo_cov_run` action of test source `t`: its coverage
