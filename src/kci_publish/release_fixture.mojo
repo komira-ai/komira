@@ -11,6 +11,12 @@
 #   komira_beta    library, requires komira_alpha
 #   komira         the metapackage of both
 #
+# `add_native(requiring)` adds `komira_native`, the native package (the
+# packer's `--kind native` shape: `lib_files` holding libkomira_native.so.1
+# and its link name, `depends` the guard and `__glibc >=2.34`, no Mojo),
+# declared after every library and before the metapackage, a member of the
+# metapackage, and required by the library `requiring`.
+#
 # all at `version` / `build` / `build_number` / `commit` (the shapes of the
 # packer's `metadata.json`, the compiler-version form: build `h<8 hex>_<N>`,
 # pins `<name> ==<version> <build>`), each member directory holding exactly
@@ -143,6 +149,20 @@ struct ExampleRelease(Copyable, Movable):
         self._edit_key.append(key^)
         self._edit_raw.append(raw_json^)
 
+    def add_native(mut self, requiring: String):
+        """Add `komira_native` (file header) after the libraries, required by
+        the library `requiring`."""
+        var at = len(self.members)
+        for i in range(len(self.members)):
+            if self.members[i].kind == String("metapackage"):
+                at = i
+                break
+            if self.members[i].name == requiring:
+                self.members[i].internal.append(String("komira_native"))
+        self.members.insert(
+            at, FixtureMember(String("komira_native"), String("native"), String("native conda bytes"))
+        )
+
     def _pin(self, name: String) -> String:
         return name + String(" ==") + self.version + String(" ") + self.build()
 
@@ -154,7 +174,7 @@ struct ExampleRelease(Copyable, Movable):
             var rows = JsonValue.empty_array()
             for i in range(len(self.members)):
                 ref o = self.members[i]
-                if o.kind != String("library"):
+                if o.kind == String("metapackage"):
                     continue
                 depends.push(JsonValue.from_string(self._pin(o.name)))
                 var row = JsonValue.empty_object()
@@ -170,6 +190,24 @@ struct ExampleRelease(Copyable, Movable):
             doc.set_member(String("kind"), JsonValue.from_string(String("metapackage")))
             doc.set_member(String("label"), JsonValue.from_string(String("komira//tools/build/package:komira_pack conda-meta")))
             doc.set_member(String("members"), rows^)
+        elif m.kind == String("native"):
+            depends.push(JsonValue.from_string(String("__glibc >=2.34")))
+            var link = JsonValue.empty_object()
+            link.set_member(String("path"), JsonValue.from_string(String("lib/libkomira_native.so")))
+            link.set_member(String("target"), JsonValue.from_string(String("libkomira_native.so.1")))
+            var so = JsonValue.empty_object()
+            so.set_member(String("path"), JsonValue.from_string(String("lib/libkomira_native.so.1")))
+            so.set_member(String("sha256"), JsonValue.from_string(content_identity_of(m.name.as_bytes()).sha256_hex))
+            var libs = JsonValue.empty_array()
+            libs.push(link^)
+            libs.push(so^)
+            doc.set_member(String("build"), JsonValue.from_string(self.build()))
+            doc.set_member(String("build_number"), JsonValue.from_i64(Int64(self.build_number)))
+            doc.set_member(String("depends"), depends^)
+            doc.set_member(String("file_name"), JsonValue.from_string(self.file_name(m.name)))
+            doc.set_member(String("kind"), JsonValue.from_string(String("native")))
+            doc.set_member(String("label"), JsonValue.from_string(String("komira//tools/build/native:komira_native_conda")))
+            doc.set_member(String("lib_files"), libs^)
         else:
             depends.push(JsonValue.from_string(String("mojo-compiler ==") + self.version))
             for d in range(len(m.internal)):
@@ -183,7 +221,7 @@ struct ExampleRelease(Copyable, Movable):
             doc.set_member(String("label"), JsonValue.from_string(String("komira//src/") + m.name + String(":") + m.name + String("_conda")))
             doc.set_member(String("mojo_pin"), JsonValue.from_string(self.version.copy()))
         doc.set_member(String("name"), JsonValue.from_string(m.name.copy()))
-        if m.kind != String("metapackage"):
+        if m.kind == String("library"):
             doc.set_member(String("payload_path"), JsonValue.from_string(String("lib/mojo/") + m.name + String(".mojoc")))
             doc.set_member(String("payload_sha256"), JsonValue.from_string(content_identity_of(m.name.as_bytes()).sha256_hex))
         doc.set_member(String("format"), JsonValue.from_string(String("kci.conda_metadata")))

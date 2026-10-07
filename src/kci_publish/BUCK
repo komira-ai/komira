@@ -85,6 +85,10 @@ mojo_library(
         # the subdir is the platform's; an OIDC channel publishes only from its
         # stage's environment
         "tests/test_publish_platform.mojo",
+        # the native package (komira_native, kind native): step 0 reads it, its
+        # requirements are the guard and one glibc floor, it is uploaded before the
+        # library that requires it, and NEW NAMES lists it the first time
+        "tests/test_publish_native_package.mojo",
     ],
     visibility = ["PUBLIC"],
 )

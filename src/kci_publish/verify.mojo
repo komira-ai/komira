@@ -17,11 +17,15 @@
 #   subdir (`GUARD_BY_SUBDIR`; a subdir with no row is refused), V the set's
 #   version and B its build:
 #   * a LIBRARY's `depends` is exactly: G, `mojo-compiler ==V`, and
-#     `<n> ==V B` for set libraries `n` (each at most once, never itself).
-#     Anything else (an outside package, another version or build, a pin on
-#     the metapackage) is refused naming the entry;
+#     `<n> ==V B` for set libraries or the set's native package `n` (each at
+#     most once, never itself). Anything else (an outside package, another
+#     version or build, a pin on the metapackage) is refused naming the
+#     entry;
+#   * the NATIVE package's (libkomira_native.so.1, no Mojo) `depends` is
+#     exactly G and one `__glibc >=<floor>`: no compiler pin, nothing else;
 #   * the set holds EXACTLY ONE metapackage, and its `members` are exactly
-#     every library of the set: each row a set library at V and B whose
+#     every library and native package of the set: each row one of them at
+#     V and B whose
 #     `sha256` equals that library's manifest sha256 (the bytes being
 #     published), no row twice, no row a metapackage. Its `depends` is
 #     exactly G plus `<m> ==V B` for every row.
@@ -40,7 +44,7 @@
 # =============================================================================
 
 from kci_release_channel import ARTIFACT_TYPE_CONDA
-from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE
+from kci_release_set.conda_metadata import KIND_METAPACKAGE, KIND_NATIVE, CondaMetadata, is_member_kind
 from kci_release_set.closure import MOJO_COMPILER_PACKAGE
 from kci_release_set.member import ReleaseMember
 
@@ -141,11 +145,48 @@ def _pin(name: String, version: String, build: String) -> String:
     return name + String(" ==") + version + String(" ") + build
 
 
-def _library_index(members: List[ReleaseMember], name: String) -> Int:
+comptime GLIBC_FLOOR_PREFIX: String = "__glibc >="
+"""The native package's glibc requirement, `__glibc >=<floor>`."""
+
+
+def _member_index(members: List[ReleaseMember], name: String) -> Int:
+    """The index of the library or native package `name`; -1 when none."""
     for i in range(len(members)):
-        if members[i].conda.kind == KIND_LIBRARY and members[i].conda.name == name:
+        if is_member_kind(members[i].conda.kind) and members[i].conda.name == name:
             return i
     return -1
+
+
+def _native_depends(c: CondaMetadata, who: String, guard: String, mut refusals: List[String]):
+    """The native package's `depends`: G and one `__glibc >=<floor>`."""
+    var floors = 0
+    for d in range(len(c.depends)):
+        ref dep = c.depends[d]
+        if _count(c.depends, dep) > 1:
+            refusals.append(who + String("requirement '") + dep + String("' is listed twice"))
+            continue
+        if dep == guard:
+            continue
+        if dep.startswith(GLIBC_FLOOR_PREFIX) and dep.byte_length() > GLIBC_FLOOR_PREFIX.byte_length():
+            floors += 1
+            continue
+        refusals.append(
+            who
+            + String("requirement '")
+            + dep
+            + String("' is not the guard '")
+            + guard
+            + String("' or '")
+            + GLIBC_FLOOR_PREFIX
+            + String("<floor>': the native package holds no Mojo and requires nothing else")
+        )
+    if _count(c.depends, guard) != 1:
+        refusals.append(who + String("does not require the platform guard '") + guard + String("'"))
+    if floors != 1:
+        refusals.append(
+            who + String("requires ") + String(floors) + String(" '") + GLIBC_FLOOR_PREFIX
+            + String("<floor>'; the native package requires exactly one")
+        )
 
 
 def _count(items: List[String], x: String) -> Int:
@@ -180,6 +221,9 @@ def require_closure(members: List[ReleaseMember]) raises:
         if c.kind == KIND_METAPACKAGE:
             metas.append(i)
             continue
+        if c.kind == KIND_NATIVE:
+            _native_depends(c, who, guard, refusals)
+            continue
         for d in range(len(c.depends)):
             var dep = c.depends[d].copy()
             if _count(c.depends, dep) > 1:
@@ -191,7 +235,7 @@ def require_closure(members: List[ReleaseMember]) raises:
             var ok = False
             if sp > 0:
                 var n = String(dep[byte=:sp])
-                var j = _library_index(members, n)
+                var j = _member_index(members, n)
                 if j >= 0 and j != i and dep == _pin(n, version, build):
                     ok = True
             if not ok:
@@ -232,7 +276,7 @@ def require_closure(members: List[ReleaseMember]) raises:
             refusals.append(who + String("member '") + row.name + String("' is listed twice"))
             continue
         rows_seen.append(row.name.copy())
-        var j = _library_index(members, row.name)
+        var j = _member_index(members, row.name)
         if j < 0:
             refusals.append(
                 who + String("member '") + row.name + String("' is not a library of this set")
@@ -265,10 +309,11 @@ def require_closure(members: List[ReleaseMember]) raises:
             )
         want.append(_pin(row.name, version, build))
     for i in range(len(members)):
-        if members[i].conda.kind == KIND_LIBRARY and _count(rows_seen, members[i].conda.name) == 0:
+        if is_member_kind(members[i].conda.kind) and _count(rows_seen, members[i].conda.name) == 0:
             refusals.append(
                 who
-                + String("library '")
+                + members[i].conda.kind
+                + String(" '")
                 + members[i].conda.name
                 + String("' of this set is not a member: the metapackage would not install it")
             )

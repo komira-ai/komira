@@ -576,7 +576,7 @@ def conda_native_package(**kwargs):
 # ---- the gate between the packer and kci ------------------------------------
 
 _KCI_CHECK = """
-BB="$1"; OUT="$2"; DIR="$3"; shift 3
+BB="$1"; OUT="$2"; DIR="$3"; KIND="$4"; shift 4
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
 case "$DIR" in /*) ;; *) DIR="$PWD/$DIR" ;; esac
 # Private scratch, as every busybox action here (defs.bzl `_PRELUDE`).
@@ -605,6 +605,14 @@ case "$line" in
     "OK CONDA "*"$want") ;;
     *) no "kci reads $DIR/manifest.json as [$line]; it must be one OK CONDA line ending [$want]" ;;
 esac
+# The kind kci's conda metadata reader read, when the target states one.
+case "$KIND" in
+    -) ;;
+    *) case "$line" in
+        *" kind=$KIND metadata="*) ;;
+        *) no "kci reads $DIR/metadata.json as [$line]; its kind must be $KIND" ;;
+    esac ;;
+esac
 printf '%s\\n' "$line" | sed "s|$DIR/||" > "$OUT"
 rm -rf "$T"
 """
@@ -614,7 +622,7 @@ def _conda_manifest_kci_impl(ctx):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output(ctx.label.name + ".parsed")
     ctx.actions.run(
-        busybox_sh(bb, _KCI_CHECK, out.as_output(), pkg, ctx.attrs._probe[RunInfo]),
+        busybox_sh(bb, _KCI_CHECK, out.as_output(), pkg, ctx.attrs.kind or "-", ctx.attrs._probe[RunInfo]),
         category = "conda_manifest_kci",
     )
     return [DefaultInfo(default_output = out)]
@@ -622,6 +630,7 @@ def _conda_manifest_kci_impl(ctx):
 _conda_manifest_kci = rule(
     impl = _conda_manifest_kci_impl,
     attrs = {
+        "kind": attrs.option(attrs.string(), default = None),
         "package": attrs.dep(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_probe": attrs.exec_dep(default = "komira//tools/build/package/manifest_probe:parse_manifest", providers = [RunInfo]),
@@ -634,9 +643,11 @@ def conda_manifest_kci(**kwargs):
     Fails the build unless the package's directory holds exactly the `.conda`,
     `manifest.json` and `metadata.json`, kci's `parse_artifact_manifest`
     (`//tools/build/package/manifest_probe:parse_manifest`) accepts the
-    manifest, kci's writer renders it back to the same bytes, and its
-    `metadata_path` is the `metadata.json` next to it. The output is the
-    probe's line. It reads the default directory, not `[release]`: `[release]`
+    manifest, kci's writer renders it back to the same bytes, its
+    `metadata_path` is the `metadata.json` next to it, and kci's conda
+    metadata reader (`kci_release_set.read_conda_metadata`) accepts that file
+    (of `kind`, when given: `library`, `native` or `metapackage`). The output
+    is the probe's line. It reads the default directory, not `[release]`: `[release]`
     exists only in a stamped build, and is a copy of the same `komira_pack`
     output.
     """

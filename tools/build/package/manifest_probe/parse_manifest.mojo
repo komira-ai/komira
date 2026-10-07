@@ -3,15 +3,18 @@
 usage: parse_manifest <manifest.json>...
 
 For each path: `read_artifact_manifest` (the parser the PUBLISH step uses), then
-`render_artifact_manifest` (the writer the BUILD step uses); prints one line
+`render_artifact_manifest` (the writer the BUILD step uses), then, for a CONDA
+manifest, `read_conda_metadata` (kci_release_set: the reader both steps use)
+over the `metadata.json` it names; prints one line
 
-    OK <type> <name> <version> <subdir> <file> <sha256> metadata=<metadata> metadata_path=<metadata_path> render-identical=<yes|no>
+    OK <type> <name> <version> <subdir> <file> <sha256> kind=<kind> metadata=<metadata> metadata_path=<metadata_path> render-identical=<yes|no>
 
-where `metadata` is the key as written, `metadata_path` the parser's
-resolution of it against the manifest's directory, and render-identical says
-the rendered text is the file's bytes exactly. A manifest the parser refuses
-prints `REFUSED <the parser's message>` and the program exits 1 after the last
-path. Run by tools/build/tests/functional/conda_set.sh and by the build gate
+where `kind` is the metadata's (`library`, `native` or `metapackage`; `-` for
+a manifest that is not CONDA), `metadata` is the key as written,
+`metadata_path` the parser's resolution of it against the manifest's
+directory, and render-identical says the rendered text is the file's bytes
+exactly. A manifest or a metadata.json the parsers refuse prints
+`REFUSED <the parser's message>` and the program exits 1 after the last path. Run by tools/build/tests/functional/conda_set.sh and by the build gate
 `:conda_manifest_kci` (BUCK); never published.
 """
 
@@ -19,6 +22,8 @@ from std.pathlib import Path
 from std.sys import argv, exit
 
 from kci_artifact_manifest import read_artifact_manifest, render_artifact_manifest
+from kci_release_channel import ARTIFACT_TYPE_CONDA
+from kci_release_set import read_conda_metadata
 
 
 def main() raises:
@@ -34,6 +39,9 @@ def main() raises:
             var text = Path(path).read_text()
             var again = render_artifact_manifest(m)
             var same = String("yes") if again == text else String("no")
+            var kind = String("-")
+            if m.artifact_type == ARTIFACT_TYPE_CONDA:
+                kind = read_conda_metadata(m.metadata_path).kind.copy()
             print(
                 "OK",
                 m.artifact_type,
@@ -42,6 +50,7 @@ def main() raises:
                 m.subdir,
                 m.file,
                 m.sha256_hex,
+                "kind=" + kind,
                 "metadata=" + m.metadata,
                 "metadata_path=" + m.metadata_path,
                 "render-identical=" + same,

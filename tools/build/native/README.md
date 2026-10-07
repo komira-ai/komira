@@ -182,7 +182,8 @@ Planted, red: the requirement dropped from every library package
 (`conda.bzl` `_native_deps`) leaves the packages' own `[check]` green (it is
 given the same list) and fails R1 (`Symbols not found: [ komira_awslc_SHA256,
 ... ]`) and B1 (`unable to find dynamic system library 'komira_native'`).
-`:komira_native_conda_kci` reads the package's manifest with kci's parser.
+`:komira_native_conda_kci` reads the package's manifest and its `metadata.json`
+with kci's parsers, and fails unless kci reads the metadata as kind `native`.
 
 ### The link and the checks
 

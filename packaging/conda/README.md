@@ -99,13 +99,16 @@ of each documentation file the package installs, `[]` when none),
 each shared library it opens at run time, `[]` when none); for the native
 package `lib_files` (its shared object `{path, sha256}` and the link name
 `{path, target}`); for a metapackage `members` (name, version, build, sha256
-each). kci's metadata reader does not know the `native` kind yet, so the
-native package's metadata is not read by kci today. The manifest's `version` is the compiler
+each). kci's metadata reader (`src/kci_release_set`) reads all three kinds;
+a release set's metapackage lists the native package as a member, and a
+library's pin on it is part of the set's requirement closure. The manifest's `version` is the compiler
 version; the build number, build string and source commit are metadata (kci's
 manifest has no key for them).
 `tools/build/package/manifest_probe` runs kci's parser and writer over a
-manifest: the build gate `//tools/build/package/manifest_probe:conda_manifest_kci`
-runs it over one real package on every `buck2 build //...`, and
+manifest and kci's metadata reader over the `metadata.json` it names: the
+build gates `//tools/build/package/manifest_probe:conda_manifest_kci` (a
+library) and `//tools/build/native:komira_native_conda_kci` (the native
+package) run it over real packages on every `buck2 build //...`, and
 `tools/build/tests/functional/conda_set.sh` runs it over every manifest the
 build emits.
 
@@ -420,7 +423,9 @@ rule, when it is written:
   architecture guard);
 - libraries linking C that libkomira_native.so.1 does not hold (the vendored
   sqlite and brotli: refused by name rather than published incompletely);
-- kci reading the native package's metadata (kind `native`) and publishing it;
+- declaring the native package in the release set (`release/artifacts.textproto`
+  and `tools/build/package/release_set.txt`), so a release builds and
+  publishes it;
 - the native package for linux-aarch64 and macOS;
 - the upload step and the release tool's list (kci's; the files it reads are
   above);

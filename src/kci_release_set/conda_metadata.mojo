@@ -8,7 +8,7 @@
 # compact, with
 #
 #   every package   format ("kci.conda_metadata"), schema_version (integer,
-#                   kci_api's format table), kind ("library" |
+#                   kci_api's format table), kind ("library" | "native" |
 #                   "metapackage"),
 #                   name, version, subdir, build, build_number (integer >= 0),
 #                   file_name, size (integer > 0), depends (array of
@@ -17,7 +17,12 @@
 #   a library       import_name, mojo_pin, payload_path, payload_sha256;
 #                   optionally doc_files: an array of {path, sha256} objects,
 #                   the documentation the package installs, each path under
-#                   share/doc/<name>/ and given once
+#                   share/doc/<name>/ and given once; optionally lib_files
+#                   (below)
+#   native          lib_files: the package of libkomira_native.so.1
+#                   (`komira_pack conda --kind native`), which holds no Mojo:
+#                   no import_name, mojo_pin, payload or doc_files. Its
+#                   `lib_files` holds at least one file row
 #   a metapackage   members: an array of {name, version, sha256} objects,
 #                   each optionally with build
 #
@@ -26,6 +31,14 @@
 # `build`; the reader accepts both and records whether it was there
 # (`MetaMember.has_build`). Whether a release may ship a row without it is
 # the PUBLISH step's rule, not the reader's.
+#
+# `lib_files` is an array of rows, each `{path, sha256}` (a file) or
+# `{path, target}` (a symbolic link): `path` under lib/ with no empty, '.'
+# or '..' component and given once; `target` a bare file name in the
+# link's own directory that a FILE row of the array installs. A library
+# carries it (the packer writes [] when it ships no archive), a package
+# written before the packer shipped lib files has none; the reader records
+# whether it was there (`CondaMetadata.has_lib_files`).
 #
 # `doc_files` is optional because a package the packer wrote before it
 # shipped docs has none; the reader records whether it was there
@@ -42,7 +55,8 @@
 # twice, a key of the other kind, a missing key, a value of the wrong JSON
 # type, an empty string (only `source_commit` of an unstamped package may be
 # empty: the packer writes "" when no commit was given), a sha256 that is not
-# 64 lowercase hex characters, an unknown `kind`.
+# 64 lowercase hex characters, an unknown `kind`, a malformed `lib_files`
+# row, a native package with no file in `lib_files`.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -64,6 +78,17 @@ from kci_api import FORMAT_CONDA_METADATA, produced_header
 
 comptime KIND_LIBRARY: String = "library"
 comptime KIND_METAPACKAGE: String = "metapackage"
+comptime KIND_NATIVE: String = "native"
+"""The package of libkomira_native.so.1: one shared object and its link name,
+no Mojo. Libraries that call komira's C require it at the release's version
+and build."""
+
+
+def is_member_kind(kind: String) -> Bool:
+    """Whether a package of `kind` is a member of a release set's metapackage
+    and may be required by a library of the set: a library or the native
+    package."""
+    return kind == KIND_LIBRARY or kind == KIND_NATIVE
 
 
 struct MetaMember(Copyable, Movable):
@@ -100,9 +125,29 @@ struct DocFile(Copyable, Movable):
         self.sha256_hex = String("")
 
 
+struct LibFile(Copyable, Movable):
+    """One row of `lib_files`: a file under lib/ (`sha256_hex` set, `target`
+    "") or a symbolic link (`target` set, `sha256_hex` "").
+
+    Layout: owned values only. No pointer field."""
+
+    var path: String
+    var sha256_hex: String
+    var target: String
+
+    def __init__(out self):
+        self.path = String("")
+        self.sha256_hex = String("")
+        self.target = String("")
+
+    def is_link(self) -> Bool:
+        return self.target.byte_length() > 0
+
+
 struct CondaMetadata(Copyable, Movable):
     """A parsed `metadata.json`. The library-only fields are "" on a
-    metapackage and `members` is empty on a library. `source` names the file
+    metapackage or a native package, `members` is empty on a library or a
+    native package, and `lib_files` is empty on a metapackage. `source` names the file
     in every refusal.
 
     Layout: owned values only. No pointer field."""
@@ -131,6 +176,10 @@ struct CondaMetadata(Copyable, Movable):
     # is absent (a package written before the packer shipped docs).
     var doc_files: List[DocFile]
     var has_doc_files: Bool
+    # The files under lib/ (a native package's shared object and link, a
+    # library's archives); `has_lib_files` is False when the key is absent.
+    var lib_files: List[LibFile]
+    var has_lib_files: Bool
     # Set by the parser only: keys of a known major it ignored (file header).
     var ignored_keys: List[String]
 
@@ -157,10 +206,15 @@ struct CondaMetadata(Copyable, Movable):
         self.members = List[MetaMember]()
         self.doc_files = List[DocFile]()
         self.has_doc_files = False
+        self.lib_files = List[LibFile]()
+        self.has_lib_files = False
         self.ignored_keys = List[String]()
 
     def is_metapackage(self) -> Bool:
         return self.kind == KIND_METAPACKAGE
+
+    def is_native(self) -> Bool:
+        return self.kind == KIND_NATIVE
 
 
 def _refuse(source: String, why: String) raises:
@@ -199,6 +253,12 @@ def _library_keys() -> List[String]:
 def _library_optional_keys() -> List[String]:
     var k = List[String]()
     k.append(String("doc_files"))
+    return k^
+
+
+def _lib_files_key() -> List[String]:
+    var k = List[String]()
+    k.append(String("lib_files"))
     return k^
 
 
@@ -325,6 +385,86 @@ def _doc_row(
     return d^
 
 
+def _lib_row(row: JsonValue, index: Int, seen: List[LibFile], source: String, mut ignored: List[String]) raises -> LibFile:
+    var what = String("lib_files[") + String(index) + String("]: ")
+    if row.kind_tag() != JSON_OBJECT:
+        _refuse(source, what + String("not an object"))
+    var known = List[String]()
+    known.append(String("path"))
+    known.append(String("sha256"))
+    known.append(String("target"))
+    _no_twice_note_unknown(
+        row, known, source, what, String("lib_files[") + String(index) + String("]."), ignored
+    )
+    var f = LibFile()
+    f.path = _string(row, String("path"), source, what)
+    var under = String("lib/")
+    var ok = f.path.startswith(under) and f.path.byte_length() > under.byte_length()
+    if ok:
+        var rest = String(f.path[byte = under.byte_length() :])
+        for part in rest.split("/"):
+            if part == "" or part == "." or part == "..":
+                ok = False
+    if not ok:
+        _refuse(
+            source,
+            what + String("'path' ") + f.path + String(" is not under lib/ with no empty, '.' or '..' component"),
+        )
+    for i in range(len(seen)):
+        if seen[i].path == f.path:
+            _refuse(source, what + String("'path' ") + f.path + String(" is given twice"))
+    var has_sha = row.has(String("sha256"))
+    var has_target = row.has(String("target"))
+    if has_sha and has_target:
+        _refuse(source, what + String("has both 'sha256' (a file) and 'target' (a link)"))
+    if not has_sha and not has_target:
+        _refuse(source, what + String("missing 'sha256' (a file) or 'target' (a link)"))
+    if has_sha:
+        f.sha256_hex = _hex(row, String("sha256"), source, what)
+    else:
+        f.target = _string(row, String("target"), source, what)
+        if f.target.find(String("/")) >= 0 or f.target == String(".") or f.target == String(".."):
+            _refuse(
+                source,
+                what + String("'target' ") + f.target + String(" is not a file name in the link's directory"),
+            )
+    return f^
+
+
+def _read_lib_files(doc: JsonValue, mut md: CondaMetadata, source: String) raises:
+    """`lib_files` into `md` (file header): every row checked, then every
+    link's target a file row of the array."""
+    md.has_lib_files = True
+    var rows = doc.get(String("lib_files"))
+    if rows.kind_tag() != JSON_ARRAY:
+        _refuse(source, String("'lib_files' is not an array"))
+    for i in range(rows.array_len()):
+        var f = _lib_row(rows.element_at(i), i, md.lib_files, source, md.ignored_keys)
+        md.lib_files.append(f^)
+    for i in range(len(md.lib_files)):
+        ref f = md.lib_files[i]
+        if not f.is_link():
+            continue
+        var slash = f.path.rfind(String("/"))
+        var want = String(f.path[byte = : slash + 1]) + f.target
+        var found = False
+        for j in range(len(md.lib_files)):
+            if md.lib_files[j].path == want and not md.lib_files[j].is_link():
+                found = True
+        if not found:
+            _refuse(
+                source,
+                String("lib_files[")
+                + String(i)
+                + String("]: link ")
+                + f.path
+                + String(" -> ")
+                + f.target
+                + String(": no file row of 'lib_files' is ")
+                + want,
+            )
+
+
 def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
     """Parse one `metadata.json`'s text; `source` names it in refusals."""
     var doc: JsonValue
@@ -339,9 +479,11 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
     var library = _library_keys()
     var optional = _library_optional_keys()
     var meta = _metapackage_keys()
+    var lib_files = _lib_files_key()
     var all_keys = common.copy()
     all_keys.extend(library.copy())
     all_keys.extend(optional.copy())
+    all_keys.extend(lib_files.copy())
     all_keys.extend(meta.copy())
     var md = CondaMetadata(source.copy())
     _no_twice_note_unknown(doc, all_keys, source, String(""), String(""), md.ignored_keys)
@@ -357,14 +499,20 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
     if md.kind == KIND_LIBRARY:
         own = library.copy()
         other = meta.copy()
+    elif md.kind == KIND_NATIVE:
+        own = lib_files.copy()
+        other = library.copy()
+        other.extend(optional.copy())
+        other.extend(meta.copy())
     elif md.kind == KIND_METAPACKAGE:
         own = meta.copy()
         other = library.copy()
         other.extend(optional.copy())
+        other.extend(lib_files.copy())
     else:
         _refuse(
             source,
-            String("kind '") + md.kind + String("' is neither 'library' nor 'metapackage'"),
+            String("kind '") + md.kind + String("' is not 'library', 'native' or 'metapackage'"),
         )
         return md^
     for i in range(doc.num_members()):
@@ -424,6 +572,16 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
             for i in range(docs.array_len()):
                 var d = _doc_row(docs.element_at(i), i, under, md.doc_files, source, md.ignored_keys)
                 md.doc_files.append(d^)
+        if doc.has(String("lib_files")):
+            _read_lib_files(doc, md, source)
+    elif md.kind == KIND_NATIVE:
+        _read_lib_files(doc, md, source)
+        var files = 0
+        for i in range(len(md.lib_files)):
+            if not md.lib_files[i].is_link():
+                files += 1
+        if files == 0:
+            _refuse(source, String("a native package's 'lib_files' holds no file"))
     else:
         var rows = doc.get(String("members"))
         if rows.kind_tag() != JSON_ARRAY:

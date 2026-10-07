@@ -4,14 +4,17 @@
 # =============================================================================
 #
 # `undeclared_requirements(members)` returns one line per requirement of a
-# CONDA library member whose package name is not the conda name of ANOTHER
-# library member. Skipped: virtual packages (a name starting `__`: the
+# CONDA library or native member whose package name is not the conda name of
+# ANOTHER library or native member (`is_member_kind`: a library that calls
+# komira's C requires `komira_native ==<version> <build>`). Skipped: virtual packages (a name starting `__`: the
 # platform guard, `__linux` / `__osx`) and the compiler pin
 # (`MOJO_COMPILER_PACKAGE`). A requirement's name is the text before its
 # first space (`komira_hash ==1.0.0 h0_7` names `komira_hash`). A library
 # requiring itself, or requiring the metapackage, is listed: neither is
-# another library. Only libraries are read: the metapackage's requirements
-# are its members, and PUBLISH checks those rows; a non-CONDA member has none.
+# another library. Only libraries and the native package are read: the
+# metapackage's requirements are its members, and PUBLISH checks those rows;
+# a non-CONDA member has none. (The native package's own requirements are
+# virtual: `__linux`, `__glibc >=<floor>`.)
 #
 # Why BUILD needs it: the package rule writes a library's direct
 # dependencies into its `depends`, and a release set is a hand-written list.
@@ -24,7 +27,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_release_set.conda_metadata import KIND_LIBRARY
+from kci_release_set.conda_metadata import is_member_kind
 from kci_release_set.member import ReleaseMember
 
 
@@ -46,7 +49,7 @@ def _is_other_library(members: List[ReleaseMember], name: String, own: Int) -> B
         if j == own:
             continue
         ref m = members[j]
-        if m.has_conda and m.conda.kind == KIND_LIBRARY and m.conda.name == name:
+        if m.has_conda and is_member_kind(m.conda.kind) and m.conda.name == name:
             return True
     return False
 
@@ -57,7 +60,7 @@ def undeclared_requirements(members: List[ReleaseMember]) -> List[String]:
     var out = List[String]()
     for i in range(len(members)):
         ref m = members[i]
-        if not m.has_conda or m.conda.kind != KIND_LIBRARY:
+        if not m.has_conda or not is_member_kind(m.conda.kind):
             continue
         for d in range(len(m.conda.depends)):
             ref dep = m.conda.depends[d]

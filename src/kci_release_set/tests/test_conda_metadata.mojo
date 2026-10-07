@@ -8,7 +8,10 @@
 # (stamped 7, commit 0123..., timestamp 86400000, as
 # tools/build/tests/functional/conda_set.sh stamps them): a library with a
 # set dependency (komira_name_registry), one without (komira_hash), and the
-# metapackage `conda-meta` made of the two. Each refusal case changes ONE key
+# metapackage `conda-meta` made of the two; and the native package
+# (`komira_pack conda --kind native`, komira_native: libkomira_native.so.1
+# and its link name, unstamped, as //tools/build/native:komira_native_conda
+# writes it). Each refusal case changes ONE key
 # of a real file (through komira_json, so the rest stays byte-identical in
 # meaning) and asserts the message.
 # =============================================================================
@@ -29,6 +32,7 @@ comptime _DATA = "src/kci_release_set/tests/data/"
 comptime _LIB = "src/kci_release_set/tests/data/library.metadata.json"
 comptime _LIB0 = "src/kci_release_set/tests/data/library_nodeps.metadata.json"
 comptime _META = "src/kci_release_set/tests/data/komira/metadata.json"
+comptime _NATIVE = "src/kci_release_set/tests/data/native.metadata.json"
 comptime _SRC = "m.json"
 comptime _PFX = "conda metadata 'm.json': "
 
@@ -212,7 +216,11 @@ def test_refuses_a_key_of_the_other_kind() raises:
 def test_refuses_an_unknown_kind() raises:
     _expect(
         _edit(String(_LIB), String("kind"), String('"binary"')),
-        String("kind 'binary' is neither 'library' nor 'metapackage'"),
+        String("kind 'binary' is not 'library', 'native' or 'metapackage'"),
+    )
+    _expect(
+        _edit(String(_NATIVE), String("kind"), String('"Native"')),
+        String("kind 'Native' is not 'library', 'native' or 'metapackage'"),
     )
 
 

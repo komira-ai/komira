@@ -6,9 +6,14 @@
 # `resolve_targets(channel, members)` -- each member to its coordinate on the
 #   channel's CONDA repository (`kci_release_channel`; a channel declaring
 #   none is refused naming it). The file must be `.conda` and be
-#   `<name>-<version>-<build>.conda` of its metadata. Order: libraries first,
-#   by how many set-internal requirements each has (fewer first; a stable
-#   sort key, never a correctness rule), the metapackage LAST.
+#   `<name>-<version>-<build>.conda` of its metadata. Order: libraries and
+#   the native package first, by how many set-internal requirements each has
+#   (fewer first; a stable sort key), the metapackage LAST. The native
+#   package requires nothing of the set (`require_closure`: the guard and a
+#   glibc floor only), so it comes before every library that requires it
+#   whatever the artifacts file's order. Uploads run on up to
+#   `--concurrency` workers, so this order is not a correctness rule; the
+#   metapackage's last place is.
 #
 # `plan_from_state(targets, channel_read)` -- contract step 1's verdict, in
 #   this order:

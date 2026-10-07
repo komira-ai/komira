@@ -2,14 +2,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load("@komira//tools/build/package:conda.bzl", "conda_doc_check", "conda_manifest_kci")
 
 # Reads each artifact manifest named on the command line with kci's own parser
-# (src/kci_artifact_manifest), renders it again with kci's writer, and says
-# whether the bytes are the same. tools/build/tests/functional/conda_set.sh runs
+# (src/kci_artifact_manifest), renders it again with kci's writer, says
+# whether the bytes are the same, and reads a CONDA manifest's metadata.json
+# with kci's conda metadata reader (src/kci_release_set), printing its kind. tools/build/tests/functional/conda_set.sh runs
 # it over the manifests the conda packages emit: the proof that what the build
 # writes is what the PUBLISH step reads. Nothing publishes it.
 mojo_binary(
     name = "parse_manifest",
     srcs = ["parse_manifest.mojo"],
-    deps = ["//src/kci_artifact_manifest:kci_artifact_manifest"],
+    deps = [
+        "//src/kci_artifact_manifest:kci_artifact_manifest",
+        "//src/kci_release_channel:kci_release_channel",
+        "//src/kci_release_set:kci_release_set",
+    ],
     visibility = ["PUBLIC"],
 )
 
@@ -17,12 +22,14 @@ mojo_binary(
 # (komira_hash, no dependencies, one test) and reads its manifest.json with
 # kci's parser through the probe above. The build fails unless kci accepts the
 # manifest komira_pack wrote, renders it back to the same bytes, and resolves
-# its `metadata` to the metadata.json next to it (tools/build/package/conda.bzl,
+# its `metadata` to the metadata.json next to it, which kci's conda metadata
+# reader reads as a library (tools/build/package/conda.bzl,
 # `conda_manifest_kci`). The packer and kci drifted apart once (#132 made
 # `metadata` required; komira_pack still left it out); this makes that a red
 # `buck2 build //...`.
 conda_manifest_kci(
     name = "conda_manifest_kci",
+    kind = "library",
     package = "//src/komira_hash:komira_hash_conda",
 )
 

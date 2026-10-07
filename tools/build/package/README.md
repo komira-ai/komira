@@ -218,8 +218,9 @@ requires the package [`system_libs.bzl`](system_libs.bzl) names for its soname.
 make an environment from packages by their run requirements, for a build
 action to run programs in.
 `conda_manifest_kci` ([`manifest_probe/BUCK`](manifest_probe/BUCK)) is the build
-gate between the two: it builds one real package and reads its manifest with
-kci's parser, so `buck2 build //...` fails if the packer and kci disagree.
+gate between the two: it builds one real package and reads its manifest and
+its `metadata.json` with kci's parsers (of the kind the target states), so
+`buck2 build //...` fails if the packer and kci disagree.
 `conda_release_set_check` ([`release_set.bzl`](release_set.bzl); the target
 `:release_set_check` in [`BUCK`](BUCK)) builds the stamped release path without a
 release's `-c komira.package_*`, in any build that includes it (`buck2 build //...`

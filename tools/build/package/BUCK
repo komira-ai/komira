@@ -149,5 +149,6 @@ export_file(
 # (manifest_probe/BUCK): what a PUBLISH step reads.
 conda_manifest_kci(
     name = "release_set_kci",
+    kind = "metapackage",
     package = ":release_set_check",
 )

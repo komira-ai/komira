@@ -8,8 +8,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # release is approved under. Runs no process and opens no socket.
 #
 # The welded tests: every metadata refusal by its message, over the real
-# shapes komira_pack writes (a library's and a metapackage's metadata.json,
-# and one real metapackage directory, staged as test data); every
+# shapes komira_pack writes (a library's, the native package's and a
+# metapackage's metadata.json, and one real metapackage directory, staged as
+# test data); every
 # verify_member refusal over directories written under TEST_TMPDIR;
 # release.json (major 2: revision, platform, produced_by) rendered
 # byte-exact, round-tripped and refused; the set hash against a golden vector.
@@ -27,6 +28,8 @@ mojo_library(
     test_srcs = [
         # every metadata.json refusal by its message; the real library and metapackage shapes
         "tests/test_conda_metadata.mojo",
+        # kind native (komira_native's real metadata.json) and every lib_files refusal
+        "tests/test_conda_metadata_native.mojo",
         # every verify_member refusal, one changed thing per case
         "tests/test_verify_member.mojo",
         # release.json: byte-exact render, parse(render(x)) == x, every refusal
@@ -38,6 +41,7 @@ mojo_library(
     ],
     test_data = {
         "tests/test_conda_metadata.mojo": glob(["tests/data/*.json", "tests/data/komira/metadata.json"]),
+        "tests/test_conda_metadata_native.mojo": glob(["tests/data/*.json", "tests/data/komira/metadata.json"]),
         "tests/test_verify_member.mojo": glob(["tests/data/komira/*"]) + ["tests/data/library.metadata.json"],
     },
     visibility = ["PUBLIC"],

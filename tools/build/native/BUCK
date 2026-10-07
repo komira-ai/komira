@@ -203,9 +203,12 @@ komira_native_run_test(
     ],
 )
 
-# The native package's manifest, read with kci's artifact-manifest parser
-# (tools/build/package/manifest_probe): what a PUBLISH step reads.
+# The native package's manifest and metadata.json, read with kci's
+# artifact-manifest parser and conda metadata reader
+# (tools/build/package/manifest_probe): what a PUBLISH step reads. Red unless
+# kci reads the metadata as kind `native`.
 conda_manifest_kci(
     name = "komira_native_conda_kci",
+    kind = "native",
     package = ":komira_native_conda",
 )

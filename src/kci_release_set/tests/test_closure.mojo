@@ -12,7 +12,11 @@
 #       conda name has `_` (names compare exactly); the metapackage; itself;
 #       a member that is not CONDA (it has no conda name);
 #   (3) skipped: every `__` virtual package and the compiler at any pin;
-#   (4) a non-library member's requirements are never read.
+#   (4) a metapackage's requirements are never read;
+#   (5) the native package: a library's pin on it is closed when it is a
+#       member and open when it is not; its own requirements are read (the
+#       guard and the glibc floor are virtual, so closed), and one that
+#       names no member is listed.
 # =============================================================================
 
 from std.testing import assert_equal
@@ -21,6 +25,7 @@ from kci_artifact_manifest import ArtifactManifest
 from kci_release_set import (
     KIND_LIBRARY,
     KIND_METAPACKAGE,
+    KIND_NATIVE,
     CondaMetadata,
     ReleaseMember,
     requirement_name,
@@ -142,10 +147,29 @@ def test_a_metapackage_is_not_read() raises:
     print("  test_a_metapackage_is_not_read: PASS")
 
 
+def _with_native() -> List[ReleaseMember]:
+    var s = _closed()
+    s[1].conda.depends.append(String("komira_native ==1.0.0 h0_1"))
+    s.append(_member(String("komira_native"), String(KIND_NATIVE), _l("__linux", "__glibc >=2.34")))
+    return s^
+
+
+def test_the_native_package_closes_a_library_that_requires_it() raises:
+    assert_equal(len(undeclared_requirements(_with_native())), 0)
+    var s = _with_native()
+    _ = s.pop(3)
+    _one(s^, _line(String("komira_beta"), String("komira_native ==1.0.0 h0_1"), String("komira_native")))
+    s = _with_native()
+    s[3].conda.depends.append(String("openssl >=3"))
+    _one(s^, _line(String("komira_native"), String("openssl >=3"), String("openssl")))
+    print("  test_the_native_package_closes_a_library_that_requires_it: PASS")
+
+
 def main() raises:
     test_a_closed_set_is_empty()
     test_requirement_name()
     test_open_requirements_are_listed()
     test_the_guard_and_the_compiler_are_skipped()
     test_a_metapackage_is_not_read()
+    test_the_native_package_closes_a_library_that_requires_it()
     print("test_closure: ALL PASS")
