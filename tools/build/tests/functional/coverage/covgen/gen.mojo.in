@@ -1,0 +1,4 @@
+# The template of covgen/gen.mojo, which BUCK generates (test 43): a generated
+# library source, which a coverage run does not measure.
+def twice(x: Int) -> Int:
+    return x * @FACTOR@
