@@ -84,6 +84,7 @@ _TESTS_LINTS = [
     "//src/komira_http_tls_e2e:deps_lint",
     "//src/komira_secrets_e2e:deps_lint",
     "//src/komira_job_supervisor_loopback:deps_lint",
+    "//src/komira_json_conformance:deps_lint",
     "//src/komira_udf_e2e:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
