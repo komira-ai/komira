@@ -39,7 +39,7 @@ to the local file system for an unbound node, a benign default that a missing
 secret does not have.
 
 Dependencies: `komira_secret_store` (the `SecretStore` trait and `SecretValue`)
-and `komira_core` (`Slab` and the bindings table). Nothing from the engine,
+and the core packages (`Slab` and the bindings table). Nothing from the engine,
 the compiler or the file formats enters this closure.
 
 A resolve cache is deliberately absent: resolve-on-demand is the tightest

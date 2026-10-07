@@ -12,9 +12,9 @@
 # stage 4 of EVERY `ORDER BY` (and of filter / join-output assembly). Running
 # its parallel waves on Mojo's stdlib `parallelize(...)` pool would mean a
 # second worker-class thread pool the topology scheduler cannot see, pin, or
-# govern. `komira_core` is the foundational leaf that `komira_async` DEPENDS
+# govern. The core packages is the foundational leaf that `komira_async` DEPENDS
 # ON, so the gather cannot import an async-side driver; the driver therefore
-# lives here, generic over the `ParallelDispatch` trait `komira_core` owns.
+# lives here, generic over the `ParallelDispatch` trait the core packages owns.
 # The alternative — a second hand-rolled State/Task/driver inside core — would
 # be a duplicate fork-join substrate. There is ONE disjoint-write fork-join,
 # shared by the sort phases and the sort GATHER.

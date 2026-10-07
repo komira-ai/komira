@@ -49,7 +49,7 @@ def _names() raises -> ApprovedNames:
     """The list under test: two exact names."""
     var p = ApprovedNames()
     p.approve(String("komira_probe"))
-    p.approve(String("komira_core"))
+    p.approve(String("komira_arrow"))
     return p^
 
 
@@ -167,13 +167,13 @@ def test_the_list_refuses_a_statement_that_says_more_than_it_means() raises:
 
 def test_refusal_is_empty_exactly_for_an_approved_name() raises:
     var names = _names()
-    assert_equal(names.refusal(String("komira_core"), SUBSTRATE_PUBLIC_PYPI), String(""))
-    assert_equal(names.refusal(String("komira-core"), SUBSTRATE_PUBLIC_PYPI), String(""))
-    assert_equal(names.refusal(String("komira_core"), _NOT_PYTHON), String(""))
-    assert_equal(names.refusal(String("KOMIRA_CORE"), _NOT_PYTHON), String(""))
+    assert_equal(names.refusal(String("komira_arrow"), SUBSTRATE_PUBLIC_PYPI), String(""))
+    assert_equal(names.refusal(String("komira-arrow"), SUBSTRATE_PUBLIC_PYPI), String(""))
+    assert_equal(names.refusal(String("komira_arrow"), _NOT_PYTHON), String(""))
+    assert_equal(names.refusal(String("KOMIRA_ARROW"), _NOT_PYTHON), String(""))
     # Off a python index `-` and `_` are distinct names.
-    var other = names.refusal(String("komira-core"), _NOT_PYTHON)
-    assert_true(other.find(String("'komira-core'")) >= 0, other)
+    var other = names.refusal(String("komira-arrow"), _NOT_PYTHON)
+    assert_true(other.find(String("'komira-arrow'")) >= 0, other)
     assert_true(other.find(String("SUBSTRATE(99)")) >= 0, other)
     var why = names.refusal(String("authz_port"), SUBSTRATE_PUBLIC_PYPI)
     assert_true(why.find(String("'authz_port'")) >= 0, why)

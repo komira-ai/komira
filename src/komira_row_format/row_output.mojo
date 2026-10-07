@@ -17,7 +17,7 @@
 #                 `_bridge_to_record_batch` reads off `_out_layout`. It is a
 #                 standalone value (no `RowLayout` dependency in the public sig)
 #                 so the trait surface stays a self-contained
-#                 `komira_core`-reachable carrier.
+#                 the core packages-reachable carrier.
 #   * `schema`  — the output Arrow schema (column names + types).
 #
 # `bridge_row_output_to_record_batch` is the SHARED bridge — it is BYTE-IDENTICAL

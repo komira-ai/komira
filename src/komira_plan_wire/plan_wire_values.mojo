@@ -593,7 +593,7 @@ spellings of the same shape are refused here.
     ITSELF, which this token guards at the plan-wire boundary and NOWHERE
     ELSE. Its `else: # Default: create a zero int64 column` tail is reachable
     by the SQL route (no door in front of it), by a literal PROJECTION, and by
-    a CASE arm. Fixing it there is a change to `komira_core`, not to this
+    a CASE arm. Fixing it there is a change to the core packages, not to this
     package.
   * BINARY / LARGE_BINARY columns and binary literals, deliberately passed:
     the executor's own binary-vs-string behaviour is a separate question, and
@@ -1027,7 +1027,7 @@ def _literal_under_aliases(e: Expr) -> ScalarValue:
 # ⚠ AND IT IS NARROWER THAN THE MECHANISM, STATED RATHER THAN HIDDEN. The root
 # is `broadcast_scalar` itself, which is reached by the SQL route and by literal
 # PROJECTIONS with no door in front of them at all. This check governs the
-# PLAN-WIRE route only. Fixing the root is a change to `komira_core`, not to
+# PLAN-WIRE route only. Fixing the root is a change to the core packages, not to
 # this package.
 
 

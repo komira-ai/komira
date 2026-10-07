@@ -1,5 +1,5 @@
 # =============================================================================
-# Tests for comparison eval — imports from komira_arrow and komira_core.eval
+# Tests for comparison eval — imports from komira_arrow and the core packages
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false

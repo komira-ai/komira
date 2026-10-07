@@ -70,9 +70,9 @@
 # ---------------------------------------------------------------------------
 #
 # A segment is `Schema, RecordBatch*, EOS` written by `BrokerCore` with
-# `komira_core`'s IPC encoder (no dictionary batches). The broker leaf may not
+# the core packages' IPC encoder (no dictionary batches). The broker leaf may not
 # import the engine's stream reader, so this file decodes the RecordBatch
-# frames with `komira_core`'s `decode_record_batch_message` against the topic
+# frames with the core packages' `decode_record_batch_message` against the topic
 # CONFIG's schema (the binding's topic columns are checked against it first,
 # `check_topic_schema`). A dictionary frame is refused by name.
 #
@@ -632,7 +632,7 @@ def _decode_segment_stream(
     var bytes: List[UInt8], topic_schema: Schema
 ) raises -> Slab[RecordBatch]:
     """Schema-directed decode of one segment's Arrow IPC stream
-    (`Schema, RecordBatch*, EOS`) with `komira_core`'s record-batch decoder.
+    (`Schema, RecordBatch*, EOS`) with the core packages' record-batch decoder.
     The Schema frame is skipped: `topic_schema` is the topic's durable config
     schema (`check_topic_schema` returns it), which is the authority, and a
     frame whose column count disagrees with it is refused by the core decoder's

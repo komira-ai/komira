@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The async runtime: the per-core reactor (epoll on Linux, kqueue on macOS),
 # the worker pool and fork-join dispatcher, channels, timers, cancellation,
 # and async sync primitives. It
-# depends on komira_core (collections, Arrow types, the POSIX wrappers),
+# depends on the core packages (collections, Arrow types, the POSIX wrappers),
 # komira_atomic_alias and komira_log (the worker loop drains its per-core log
 # ring). komira_runtime_paths is declared because several tests take their
 # scratch directory from `test_tmpdir()`.

@@ -6,7 +6,7 @@
 # Hot path. This module hosts the JSON-specific SIMD primitives the
 # Stage 1 structural indexer (`structural_index.mojo`) consumes. The
 # primitives belong to `komira_json_index` and are NOT part of the general
-# `komira_core.simd.` surface — they encode JSON-shaped semantics (16-byte
+# `komira_simd.` surface — they encode JSON-shaped semantics (16-byte
 # chunk width, 16-bit movemask, 9-tag char-class table, escape state-machine)
 # that would invite mis-use if generalized.
 #
@@ -52,7 +52,7 @@ from std.sys.intrinsics import llvm_intrinsic
 from komira_simd.horizontal_add import hadd_u8x16, hadd_widening_u8x16
 
 # The five JSON-private SIMD helpers below delegate to the canonical
-# implementations in `komira_core.simd.byte_class` (shared with the CSV
+# implementations in `komira_simd.byte_class` (shared with the CSV
 # reader). JSON consumers import from `komira_json_index.simd_primitives`; the
 # local wrappers are thin pass-throughs.
 from komira_simd.byte_class.byte_mask_ops import bytemask_or as _byte_class_bytemask_or

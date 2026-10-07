@@ -1327,7 +1327,7 @@ struct LocalFs[
     # mmap-wrap site in the tree.
     #
     # Why both this facade AND read_chunked exist:
-    #   * `read_chunked(path)` lives in `komira_core/io/` so downstream
+    #   * `read_chunked(path)` lives in the core packages so downstream
     #     reader packages (`komira_orc`, `komira_csv`, `komira_json`,
     #     `komira_sdk`) can import it without an upward layering hop
     #     into `komira_async`.

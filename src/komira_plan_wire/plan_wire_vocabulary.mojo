@@ -24,7 +24,7 @@ impossible to write by accident.
 `*_is_declared` tests membership over the MAXIMAL CONSECUTIVE RUNS
 of the declared engine values. It is exact — a run only ever
 covers values the engine declares — and it is why this file is
-small enough to live in `komira_core`.
+small enough to live in `komira_plan_wire`.
 
 ⚠ THE LADDER SHAPE IS LOAD-BEARING — EVERY ARM *WRITES*, IT DOES
 NOT *RETURN*. `write_<space>_wire_name[W: Writer](mut writer, wire)`

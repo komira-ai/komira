@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Apache ORC v1 reader and writer: the metadata codec (PostScript / Footer /
 # Metadata / StripeFooter over komira_protobuf), the integer / byte / boolean
 # RLE families, the compression codecs (zstd / zlib / lz4 by dlopen, snappy
-# statically linked through komira_core, LZO read-only in native Mojo), the
+# statically linked through the core packages, LZO read-only in native Mojo), the
 # flat and nested column decoders, the stripe writer with per-stride
 # statistics and bloom filters, and statistics-driven stripe / stride
 # pruning. komira_async supplies the dispatcher the parallel column decode and

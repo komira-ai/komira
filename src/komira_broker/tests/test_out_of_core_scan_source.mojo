@@ -1,8 +1,8 @@
 # =============================================================================
-# THE SEAM DEMONSTRATION — a plan scans a source defined OUTSIDE komira_core.
+# THE SEAM DEMONSTRATION — a plan scans a source defined OUTSIDE the core packages.
 # =============================================================================
 #
-# A plan source defined outside komira_core must be a first-class plan source.
+# A plan source defined outside the core packages must be a first-class plan source.
 #
 # ---------------------------------------------------------------------------
 # WHAT IS BEING SHOWN, AND WHY THIS PARTICULAR SOURCE
@@ -11,14 +11,14 @@
 # The source under test is `komira_broker.broker_scan_binding` — chosen
 # because a broker source is the hard case:
 #
-#   * adding a broker arm to the closed `SourceVariant` union in komira_core
-#     would force `komira_core -> komira_broker -> ...`, INVERTING THE BUILD
+#   * adding a broker arm to the closed `SourceVariant` union in the core packages
+#     would force `the core packages -> komira_broker -> ...`, INVERTING THE BUILD
 #     DAG;
 #   * `ConsumeCore` is Movable-only, so the plan needs a Copyable backend
 #     HANDLE (a cheap identity token the plan builder copies, the heavy
 #     network substrate constructed at execute time) — see consumer_source.
 #
-# `komira_broker` depends on `komira_core`. `komira_core` does not depend on
+# `komira_broker` depends on the core packages. The core packages does not depend on
 # `komira_broker`. The behavioural form of that claim is
 # `test_core_ships_knowing_nothing_about_this_kind` below.
 #
@@ -68,7 +68,7 @@ from komira_scan_source.source_variant import (
 )
 
 # ⚠ THE IMPORT THAT IS THE WHOLE POINT: a test that reaches a plan reaches
-# ACROSS a package boundary for its source. Nothing under `komira_core/`
+# ACROSS a package boundary for its source. Nothing under the core packages
 # names `komira_broker`.
 from komira_broker.broker_scan_binding import (
     BROKER_SCAN_KIND_NAME,
@@ -153,7 +153,7 @@ def _plan() raises -> LogicalPlan:
 
 
 def test_core_ships_knowing_nothing_about_this_kind() raises:
-    """The behavioural form of "no komira_core edit was needed".
+    """The behavioural form of "no the core packages edit was needed".
 
     A freshly constructed core registry does not describe the broker kind. It
     learns of it ONLY when the broker's own package hands over a descriptor —

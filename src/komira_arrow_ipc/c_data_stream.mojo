@@ -734,7 +734,7 @@ comptime _StreamReleaseFn = def (
 # fn-ptr and call THROUGH it, so our own tests exercise the same indirection a
 # C consumer does — SEGFAULTS THE MOJO 1.0.0b2 COMPILER. Not the built binary:
 # the compiler, during `MojoCompileExecutable` of any test that imports this
-# module from the precompiled `komira_core` package (`(Segmentation fault)`, no diagnostic).
+# module from the precompiled the core packages (`(Segmentation fault)`, no diagnostic).
 # It is specifically an indirect call through a bitcast `def (T) thin -> None`
 # made from a function elaborated OUT OF A precompiled package; the identical call
 # compiles fine in test-local source. So `release_c_*` below calls the release
@@ -890,7 +890,7 @@ def release_c_stream(stream_ptr: UnsafePointer[CArrowArrayStream, MutUntrackedOr
 # a pure refactor, whose only benefit was that our own tests would exercise the
 # indirection. This is not that. For a struct we did not produce there is no
 # other callable: the producer's release address is reachable ONLY through the
-# slot. It compiles and runs from inside the precompiled `komira_core` package; if a future compiler regresses it, the fallback is
+# slot. It compiles and runs from inside the precompiled the core packages; if a future compiler regresses it, the fallback is
 # to leak the foreign allocation, never to guess at its shape.
 
 

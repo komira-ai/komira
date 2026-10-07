@@ -14,7 +14,7 @@
 # layout such as `<sha256>/binary`). A key with neither is fetched unverified.
 #
 # The bytes are an owned List[UInt8]; the file is written through
-# komira_core's `RawWriteFd`. The one local FFI is `chmod(2)`, a fixed-arity
+# komira_libc's `RawWriteFd`. The one local FFI is `chmod(2)`, a fixed-arity
 # libc call bounded inside `_chmod`. No pointer type crosses a boundary.
 # =============================================================================
 

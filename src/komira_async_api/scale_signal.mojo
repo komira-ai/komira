@@ -22,7 +22,7 @@
 # moved module carries its own imports, so it would land outside the engine
 # and still *reach* it. Splitting the trait out is what severs the edge.
 #
-# THIS FILE MUST STAY IMPORT-FREE. `komira_core` has no package dependencies
+# THIS FILE MUST STAY IMPORT-FREE. The core packages has no package dependencies
 # beyond the standard library and `komira_libc`, and that is load-bearing
 # (core is upstream of nearly everything). A trait that names another
 # package's type would have to move back out.

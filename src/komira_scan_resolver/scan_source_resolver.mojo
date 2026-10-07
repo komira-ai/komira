@@ -18,7 +18,7 @@
 #   resolve_drained(...)   what a bounded read reports back, given where each
 #                          split stopped (a default keeps the plan's own).
 #
-# This library depends on `komira_core` only, so a package that implements a
+# This library depends on the core packages only, so a package that implements a
 # scan kind (a message log, a search index, a log store) can conform to the
 # trait without depending on the engine that executes it.
 #

@@ -3,7 +3,7 @@
 # =============================================================================
 # The real CancellationToken + _AtomicSlot + Cancellable live in
 # `komira_async_api.token` (a clean std-only leaf). Living in
-# `komira_core` avoids a `komira_core` (arrow IPC) -> `komira_async` up-edge:
+# the core packages avoids a core-package (arrow IPC) -> `komira_async` up-edge:
 # the arrow IPC dispatch entries need CancellationToken in their signatures.
 #
 # This module is a re-export so existing

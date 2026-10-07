@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # komira_plan_wire's `test_plan_wire_golden_bytes.mojo` freezes `topic_live`
-# and `index_pinned` from bindings it RESTATES out of komira_core primitives:
+# and `index_pinned` from bindings it RESTATES out of the core packages primitives:
 # the codec may not import a scan kind. So nothing there can notice a kind
 # drifting away from the restatement. A changed identity fold, param set or
 # canonical order, gate, orientation, schema or appended `__partition` column

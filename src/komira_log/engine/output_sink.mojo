@@ -32,7 +32,7 @@
 # critical path. A reactor-async append would keep even the off-hot-path drain
 # from parking on EAGAIN, but wiring the reactor into the engine requires
 # threading a `Reactor` handle through the forever-root → engine → drain chain,
-# and `komira_log` depends only on komira_core, komira_trace, komira_metrics and the small leaf packages: adding
+# and `komira_log` depends only on the core packages, komira_trace, komira_metrics and the small leaf packages: adding
 # `komira_async` would invert the dependency graph (`komira_async` depends on
 # `komira_log`). So the sink uses a buffered blocking write via
 # `RawWriteFd.write_bytes`. A reactor-async upgrade needs that edge inverted or
@@ -321,7 +321,7 @@ struct LogSink(Movable):
         it. Two copies of one loop is how fixing one fixes nothing; both CALL
         `komira_log.log_write`.
 
-        ⛔ IT DOES NOT RAISE. `komira_core`'s fd write-all rules that "losing a
+        ⛔ IT DOES NOT RAISE. The core packages' fd write-all rules that "losing a
         diagnostic beats wedging the process", and that stands. Giving up is
         bounded, classified and counted."""
         var outcome = write_log_line(fd, s)

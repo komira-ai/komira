@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The row-mode expression executor over komira_core: the expression executor,
+# The row-mode expression executor over the core packages: the expression executor,
 # its typed conformers to the komira_expr traits, the adaptive filter state and
 # the sum-of-expression aggregand. Everything else the old evaluation layer held
 # lives in komira_row_format, komira_kernels, komira_udf, komira_expr and
@@ -17,7 +17,6 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_column_kernels:komira_column_kernels",
-        "//src/komira_counters:komira_counters",
         "//src/komira_expr:komira_expr",
         "//src/komira_kernels:komira_kernels",
         "//src/komira_plan_expr:komira_plan_expr",

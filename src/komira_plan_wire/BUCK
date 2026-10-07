@@ -6,7 +6,7 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixtu
 # engine can plan; the decoder admits only a plan that is structurally and
 # semantically valid (`plan_wire_admit`, `plan_wire_values`) and refuses
 # hostile bytes with an error rather than building a plan the engine cannot
-# run. It sits above `komira_core`, whose types it closes over.
+# run. It sits above the core packages, whose types it closes over.
 mojo_library(
     name = "komira_plan_wire",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # owns a `SecretStore` by value, and the `CredentialConsumer` seam a connector
 # receives the revealed bytes through. Its closure is the store trait and the
 # value type (`komira_secret_store`) plus `Slab` and the plan's flat bindings
-# table (`komira_core`); nothing from the engine or the file formats.
+# table (the core packages); nothing from the engine or the file formats.
 #
 # The gate test runs over the in-memory `StaticSecretStore`: no sockets, no
 # files, no cloud.

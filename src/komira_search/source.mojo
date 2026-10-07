@@ -8,7 +8,7 @@
 # The `komira.search.index` scan kind (its binding, split plan and split
 # reader, implementing the komira_scan_resolver contract) lives in the HIGHER
 # `komira_search_scan` package, which keeps komira_search on the light
-# komira_core edge.
+# the core packages edge.
 #
 # -----------------------------------------------------------------------------
 # WHAT THIS MODULE OWNS (PURE, S3-FREE, unit-testable on the core edge)

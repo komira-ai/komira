@@ -1170,7 +1170,7 @@ def _check_bulk_fill_extent(n_vals: Int, capacity: Int, what: StringSlice) raise
 
     `_bulk_fill_int` / `_bulk_fill_same` loop to `len(vals)` and write through
     `PrimitiveArray.store[W]`, which — unlike `PrimitiveArray.set` — performs
-    NO bounds check at ANY assert level (komira_core's `PrimitiveArray.store`
+    NO bounds check at ANY assert level (the core packages' `PrimitiveArray.store`
     is a bare `store_simd` on a computed byte offset). The destination is
     allocated to `ColumnAcc.n_rows`. Without this check, the ONLY thing keeping
     these writes in bounds would be the informal invariant

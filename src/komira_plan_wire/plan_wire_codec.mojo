@@ -14,7 +14,7 @@
 #
 # WHERE THIS LIVES, AND WHY NOT IN CORE
 # -------------------------------------
-# `komira_core`'s deps stay minimal and that is load-bearing — almost every
+# the core packages' deps stay minimal and that is load-bearing — almost every
 # package depends on it, so anything added to its deps goes upstream of nearly
 # everything. The codec needs `komira_proto_codec` and the generated `komira_plan_proto`
 # messages, so it lives in its own package ABOVE core. Same shape as
@@ -593,7 +593,7 @@ from komira_plan_wire.plan_wire_vocabulary import (
     snapshot_policy_from_wire,
     # THE WRITE ENVELOPE. Declared in `komira_arrow/write_target.mojo` —
     # DOWN in core rather than in the SQL frontend, because a wire vocabulary
-    # outside this codec's `komira_core` import closure is one a vocabulary
+    # outside this codec's the core packages import closure is one a vocabulary
     # completeness check over core structurally cannot see.
     write_format_to_wire,
     write_format_from_wire,
@@ -2845,7 +2845,7 @@ def _source_to_wire(s: SourceVariant) raises -> WireScanSource:
     if s.tag == SOURCE_VARIANT_PARQUET:
         # `SourceVariant` publishes `binding_ref()` for the open arm but has
         # NO accessor for the two concrete ones; `_parquet.value()` is the
-        # established read (`komira_core`'s own logical-plan derivation ladder
+        # established read (the core packages' own logical-plan derivation ladder
         # does exactly this). It disappears with the arm.
         return WireScanSource(
             1, Optional(_parquet_to_wire(s._parquet.value())), None

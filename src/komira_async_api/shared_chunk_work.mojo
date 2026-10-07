@@ -2,7 +2,7 @@
 # SharedChunkWork — the per-chunk work-unit trait for
 # `parallel_fork_join_shared`.
 #
-# This is a CLEAN LEAF — it has ZERO imports — and it lives in `komira_core`
+# This is a CLEAN LEAF — it has ZERO imports — and it lives in `komira_async_api`
 # because the shared-payload fork-join DRIVER lives in
 # `komira_async_api/fork_join_shared.mojo`, so that
 # `komira_column_kernels/compiler_helpers.mojo.gather_batch` — the stage-4 gather of

@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The metrics model: the per-operator MetricsSet, attribute-set interning, the
 # per-worker series and histogram tables with their export sweep, and the
-# EXPLAIN ANALYZE collector and renderer. It depends on komira_core (for
+# EXPLAIN ANALYZE collector and renderer. It depends on the core packages (for
 # `Slab[T]`), komira_name_registry and komira_hash (name ids and the FNV-1a
 # constants), komira_clock, komira_fork_join (its tests fork real threads) and
 # komira_atomic_alias (the atomic counters). It must NOT depend on engine

@@ -373,7 +373,7 @@ def _assert_matches_nodes(
 
 
 # =============================================================================
-# Reading a segment back: the Arrow IPC stream decoded with komira_core.
+# Reading a segment back: the Arrow IPC stream decoded with komira_arrow_ipc.
 # =============================================================================
 
 

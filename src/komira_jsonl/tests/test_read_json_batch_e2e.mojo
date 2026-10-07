@@ -10,7 +10,7 @@
 #       that ctx.read_json_batch routes through internally).
 #
 # NOTE: the EngineContext-level driver `ctx.read_json_batch(path, schema)`
-# is exercised by the SDK suite; this test focuses on the komira_core
+# is exercised by the SDK suite; this test focuses on the core packages
 # source + komira_jsonl surfaces. Splitting the coverage two-way keeps each
 # test under the compile-time template-instantiation budget while still
 # covering the contract (JsonSource conforms to SourceLike; SourceVariant JSON arm

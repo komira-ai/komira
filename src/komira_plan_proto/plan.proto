@@ -784,7 +784,7 @@ message WireStringFnN {
 //
 // ⛔ THE THUNK IS NOT HERE AND MUST NOT BECOME A FIELD, for the three reasons
 // `UdfCallData`'s own header gives: a wildcard-origin fn pointer in a plan-IR
-// field, a `komira_core` -> `komira_engine_operators` package CYCLE, and an
+// field, a core-package -> `komira_engine_operators` package CYCLE, and an
 // unserializable value in a wire type.
 //
 // ⛔ THERE IS NO `call_site_salt` / `operator_factory_id` ANALOGUE. Those are

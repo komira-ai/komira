@@ -103,7 +103,7 @@ comptime SITE_RADIX_UNTYPED_COMBINE: UInt32 = 39  # radix_hash_agg_untyped parti
 # re-exported here so the registry stays one ordered list.
 #
 # `gather_batch` (stage 4 of every ORDER BY, plus filter / join-output assembly)
-# lives in `komira_core`, BELOW this module, so it cannot import from here — it
+# lives in the core packages, BELOW this module, so it cannot import from here — it
 # names its own three ids in core. They are re-exported so an id collision is
 # visible in this file and so async-side readers (the tests, the dump) can use
 # the same names. Every one MUST mirror `_sched_site_name` in `_posix_shim.c`.
@@ -113,7 +113,7 @@ from komira_async_api.sched_sites import (
     SITE_GATHER_STR_LEN,
     SITE_GATHER_STR_SCATTER,
     # id 44 — declared in core for the same reason as 40-42 (the join chunk
-    # pricing wave forks from komira_core). Listed here so the registry stays
+    # pricing wave forks from the core packages). Listed here so the registry stays
     # one ordered list and an id collision is visible. It is OUT of numeric
     # order relative to 43 below only because 43 is declared in this file; the
     # ids themselves do not collide.

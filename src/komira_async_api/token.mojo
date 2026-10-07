@@ -2,7 +2,7 @@
 # komira_async_api.token — CancellationToken + Cancellable
 # =============================================================================
 # A CLEAN LEAF — it imports only `std.memory` + `std.atomic` — so it
-# belongs in `komira_core`: the arrow IPC dispatch entries need
+# belongs in the core packages: the arrow IPC dispatch entries need
 # `CancellationToken` in their signatures, and keeping the token here lets
 # them reach it without depending on the async runtime.
 #

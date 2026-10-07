@@ -25,7 +25,25 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 
 | module | what it is |
 |---|---|
-| [`komira_core`](../src/komira_core/) | the Arrow-native core types the rest is built on: the columnar primitives (Column, Buffer, RecordBatch and the Arrow value types), the SIMD helpers operators vectorize over, and the shared plan IR (LogicalPlan, Expr, ScalarValue, AggExpr). Its [README](../src/komira_core/README.md) lists what lives in each subpackage. |
+| [`komira_simd`](../src/komira_simd/) | SIMD byte-class, mask, copy, gather and bit-unpack primitives. |
+| [`komira_collections`](../src/komira_collections/) | The typed slab, a type-erased inline value, a variadic pack: generic containers with no dependencies. |
+| [`komira_async_api`](../src/komira_async_api/) | Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter. |
+| [`komira_counters`](../src/komira_counters/) | Process-global census and falsifier counters plus the build-gated runtime introspection probe. |
+| [`komira_compression`](../src/komira_compression/) | Byte-stream codec trait and the eight codec implementations. |
+| [`komira_host`](../src/komira_host/) | What the host looks like: cgroup-aware CPU topology, memory and hugepage probes, worker placement. |
+| [`komira_scalar_arithmetic`](../src/komira_scalar_arithmetic/) | Scalar 128 and 256-bit decimal arithmetic, casts, comparison and the overflow predicate. |
+| [`komira_buffer`](../src/komira_buffer/) | Aligned, shared and memory-mapped byte buffers and the region trait that columns sit on. |
+| [`komira_arrow`](../src/komira_arrow/) | Arrow-compatible columnar types: arrays of every kind, Column, Schema, RecordBatch, Table, bitmap, builders, typed views, selection vectors. |
+| [`komira_dynamic_filter`](../src/komira_dynamic_filter/) | Bloom, range, IN-list and constant filters and the selectivity tracker. |
+| [`komira_arrow_ipc`](../src/komira_arrow_ipc/) | Arrow IPC framing, encoders and decoders, the C data and stream interfaces, tensor columns, file chunk reads. |
+| [`komira_plan_expr`](../src/komira_plan_expr/) | The expression language of a plan (Expr, AggExpr, ScalarValue, ColExpr builder, UDF payloads, ExprId/ExprPool) and the comptime schema descriptor. |
+| [`komira_exec_types`](../src/komira_exec_types/) | The result and error types that cross the operator / scheduler / caller boundary: EngineError, ExecResult, ProcessResult, QueryContext, the byte-budget parser, the PartitionBy output contract. |
+| [`komira_column_kernels`](../src/komira_column_kernels/) | Vectorized compute over Arrow columns: arithmetic, comparison, casts, string, regexp, dictionary, union, decimal, case mapping, and the batch helpers that import them. |
+| [`komira_plan_stats`](../src/komira_plan_stats/) | Plan-time statistics: the StatsProvider trait, ColumnStats and TableStats, the physical-type tag, the exact/inexact/absent precision lattice, per-source statistics; the HyperLogLog cardinality sketch is added after the copy. |
+| [`komira_scan_source`](../src/komira_scan_source/) | What a scan is: SourceLike, ScanBinding identity, scan params, per-format source descriptors, pushdown gate, Sink trait, in-memory registry. |
+| [`komira_plan_ir`](../src/komira_plan_ir/) | LogicalPlan and PhysicalPlan trees, their variants, schema propagation, display, the scan-binding bind pass and audits. |
+| [`komira_agg_api`](../src/komira_agg_api/) | The aggregation accumulator contract: Accumulator trait, plan-time AggLayout, strategy selection, typed column pointers, COUNT(DISTINCT) key. |
+| [`komira_join_assembly`](../src/komira_join_assembly/) | Join result assembly: gather-index planning, chunked parallel gather, join-key common-subexpression. |
 | [`komira_libc`](../src/komira_libc/) | the canonical libc / POSIX FFI declarations: one declaration per C symbol, so two packages in one link unit never declare the same symbol with conflicting signatures. |
 | [`komira_atomic_alias`](../src/komira_atomic_alias/) | the one place the repository spells `Atomic[...]`; it imports only `std.atomic`, so any package may depend on it. |
 | [`komira_rowcell`](../src/komira_rowcell/) | the typed table-cell value model: one `RowCell` struct, its six scalar type tags, typed constructors and value equality. A leaf that imports only the Mojo standard library. |
@@ -104,7 +122,7 @@ The dependency order is the order of the rows.
 
 | module | what it is |
 |---|---|
-| [`komira_search`](../src/komira_search/) | the full-text search engine core: the per-field analyzer (lowercase, ASCII fold of Latin diacritics, stopwords; index and query time share one normalizer), the in-memory inverted index builder, the two-stage term dictionary, the immutable split file (postings, an LZ4 `_source` doc store, fast fields), BM25 scoring, the reducers that merge per-split results, and `SearchCore`, which answers a `match` query over one text field of one split with top-k hit rows (`_score`, `_id`, `_source`), sorts and aggregations. Depends on `komira_core`, `komira_hash` and `komira_lz4` only. |
+| [`komira_search`](../src/komira_search/) | the full-text search engine core: the per-field analyzer (lowercase, ASCII fold of Latin diacritics, stopwords; index and query time share one normalizer), the in-memory inverted index builder, the two-stage term dictionary, the immutable split file (postings, an LZ4 `_source` doc store, fast fields), BM25 scoring, the reducers that merge per-split results, and `SearchCore`, which answers a `match` query over one text field of one split with top-k hit rows (`_score`, `_id`, `_source`), sorts and aggregations. Depends on `komira_arrow`, `komira_buffer`, `komira_collections`, `komira_plan_expr`, `komira_scan_source`, `komira_hash` and `komira_lz4` only. |
 | [`komira_search_scan`](../src/komira_search_scan/) | the `komira.search.index` scan kind: a search index read as a relation of hit rows, one per matching live document. Its binding builder and identity corpus, `SearchIndexCatalog` (the store seam, with an in-memory catalog), the split reader and fast-field pushdown gate, and `SearchScanResolver`, the `komira_scan_resolver` resolver an engine executes (one split per split object live at the resolved generation). Neither it nor `komira_search` depends on an engine. |
 | [`komira_search_catalog`](../src/komira_search_catalog/) | the durable split catalog of a search index: the `SplitSummary` record and its binary codec, and `SearchMetastore`, which publishes, lists, retires and reaps splits on one append-only manifest lineage, reads across per-writer sub-lineages, retires drained writer shards, and keeps durable records so the generation never goes down. Generic over `komira_objectstore`'s conditional-write stores; it names no cloud client. It is the store behind the `SearchIndexCatalog` seam, but the adapter between them is not a library today (`komira_search_e2e` writes one for its tests). |
 

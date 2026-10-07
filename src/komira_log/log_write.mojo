@@ -36,13 +36,13 @@
 # argument `fd_write_all` makes for itself — a call site gets the policy by
 # CALLING, not by remembering.
 #
-# # Why `komira_log` and not `komira_core`
+# # Why `komira_log` and not the core packages
 #
 # It has to be reachable from BOTH `komira_log` and `komira_http`, and
-# `komira_log` is the package `komira_http` already depends on for logging. `komira_core`
+# `komira_log` is the package `komira_http` already depends on for logging. The core packages
 # would also work and is the more obvious home for an io helper, but nearly
 # every package depends on it and this does not need to be upstream of
-# everything to do its job. This module imports only `komira_core`, so the
+# everything to do its job. This module imports only the core packages, so the
 # edge is acyclic and the blast radius is the logging consumers — exactly the
 # population that cares.
 #
@@ -80,7 +80,7 @@
 # choice `fd_write_all` made and for its reason: a bare `write` declaration
 # collides with the stdlib's own reserved one once a link unit's closure also
 # pulls in `std.os`'s, and `komira_log` sits in large closures. The shim is
-# `komira_core`'s C wrapper library, and it is a direct `return write(...)`
+# the core packages' C wrapper library, and it is a direct `return write(...)`
 # with no intervening libc call — so errno survives the extra C frame. The
 # syscall arms of the test assert exactly that against a real kernel.
 #

@@ -1883,7 +1883,7 @@ def _arrow_type_has_fixed_width_concat(at: ArrowType) -> Bool:
     INT64 + FLOAT64 to the fast multi-way path and BOOL + DATE32 to
     the pair-wise fallback.
 
-    Mirrors `_arrow_type_byte_width` in komira_core's streaming_concat (which
+    Mirrors `_arrow_type_byte_width` in the core packages' streaming_concat (which
     is the authoritative source). Listing all base numeric types here
     instead of importing `_arrow_type_byte_width` keeps the dispatch
     decision colocated with the cascade.

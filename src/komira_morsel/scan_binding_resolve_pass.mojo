@@ -239,7 +239,7 @@ struct ResolvedScanSnapshot(Copyable, Movable, Deinitable):
         """One line, every field: `<kind_name> <name> policy=<p> token=<t>
         rows=<n> resolved={<k=v, ...>}`, the side channel in sorted-key order
         (`ScanParams.render`). What a consumer that cannot name this type — a
-        `komira.so` linker at the `komira_core`-only floor — reads it as."""
+        `komira.so` linker that sees only the core packages — reads it as."""
         return (
             self.kind_name
             + String(" ")

@@ -11,7 +11,7 @@
 #
 # This mirrors `komira_sdk.typed_schema`'s `ColDescriptor` /
 # `SchemaDescriptor`, but lives in `komira_udf` because the traits do
-# (`komira_udf` deps only `komira_core` — it cannot see `komira_sdk`).
+# (`komira_udf` deps only the core packages — it cannot see `komira_sdk`).
 # `komira_sdk` may re-export these for the typed-DF surface.
 #
 # Comptime-member idioms: set a `SchemaDescriptor` trait member via
