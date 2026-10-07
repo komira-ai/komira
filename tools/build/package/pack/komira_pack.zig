@@ -1736,7 +1736,7 @@ fn sortedNames(alloc: Alloc, dir_path: []const u8) ![][]const u8 {
 ///   library:     --import-name I --mojo-pin V --payload F.mojoc [--dep NAME]...
 ///                [--doc-file REL=FILE]...
 ///                [--lib-file lib/REL=FILE]...
-///   native:      --mojo-pin V --glibc G --lib-file lib/REL=FILE...
+///   native:      --mojo-pin V --expect-depend REQ... --lib-file lib/REL=FILE...
 ///                [--lib-link lib/REL=TARGET]...
 ///   metapackage: --member-manifest M.json... [--mojo-pin V]
 ///
@@ -1760,12 +1760,21 @@ fn sortedNames(alloc: Alloc, dir_path: []const u8) ![][]const u8 {
 /// paths.json (a link as `softlink`) and in metadata.json's `lib_files`. A
 /// native package holds those alone.
 ///
+/// A native package's run requirements are the --expect-depend values, in
+/// order, exactly: the caller derives them (conda.bzl, from the platform
+/// table), and this check never asks nativeRequirements, so a requirement
+/// the packer drops or changes is refused here.
+///
 /// A directory holding only REFUSED (the package could not be made) is a valid
 /// refusal and writes MARKER saying so, except under --require-stamped, where
 /// it is the failure, naming the reason: that is what asking for a release
-/// of a library with no package does.
+/// of a library with no package does. It is also the failure when the caller
+/// states a --payload: the build found no reason to refuse the library, so
+/// the packer's own refusal (a source opening a shared library its `dlopen`
+/// does not declare, or a declaration no source uses) is drift between the
+/// declaration and the code, and breaks the plain build.
 fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--dir", "--kind", "--expect-subdir", "--import-name", "--mojo-pin", "--payload", "--dep", "--doc-file", "--member-manifest", "--require-stamped", "--lib-file", "--lib-link", "--glibc", "--dlopen" });
+    allow(a, &.{ "--dir", "--kind", "--expect-subdir", "--import-name", "--mojo-pin", "--payload", "--dep", "--doc-file", "--member-manifest", "--require-stamped", "--lib-file", "--lib-link", "--expect-depend", "--dlopen" });
     const dir = need(one(a, "--dir"), "--dir");
     const name = need(a.name, "--name");
     const kind = need(one(a, "--kind"), "--kind");
@@ -1776,7 +1785,8 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         for ([_][]const u8{ "--import-name", "--payload", "--dep", "--doc-file", "--member-manifest", "--dlopen" }) |f| {
             if ((try all(alloc, a, f)).len != 0) fail("{s} is not for --kind native", .{f});
         }
-    }
+        if ((try all(alloc, a, "--expect-depend")).len == 0) fail("--kind native needs its run requirements as --expect-depend", .{});
+    } else if ((try all(alloc, a, "--expect-depend")).len != 0) fail("--expect-depend is for --kind native", .{});
     const subdir = need(one(a, "--expect-subdir"), "--expect-subdir");
     const require_stamped = one(a, "--require-stamped") != null;
     const listing = try sortedNames(alloc, dir);
@@ -1785,6 +1795,7 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         const why = std.mem.trim(u8, readAll(alloc, try std.fmt.allocPrint(alloc, "{s}/REFUSED", .{dir})), " \t\r\n");
         if (why.len == 0) fail("{s}/REFUSED holds no reason", .{dir});
         if (require_stamped) fail("{s} has no package, so there is nothing to release: {s}", .{ name, why });
+        if (one(a, "--payload") != null) fail("{s}: the build found no reason to refuse it and states its payload, but the packer refused it: {s}", .{ name, why });
         std.debug.print("komira_pack conda-check: {s} is refused: {s}\n", .{ name, why });
         try writeFile(std.fs.cwd(), need(a.out, "--out"), "refused\n");
         return;
@@ -1881,11 +1892,11 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     const want = if (is_meta)
         try metaRequirements(alloc, subdir, members)
     else if (is_native)
-        try nativeRequirements(alloc, subdir, need(one(a, "--glibc"), "--glibc"))
+        try all(alloc, a, "--expect-depend")
     else
         try runRequirements(alloc, subdir, need(one(a, "--mojo-pin"), "--mojo-pin"), version, build, try all(alloc, a, "--dep"), dl);
     const depends = member(index, "depends", "index");
-    if (depends != .array or depends.array.items.len != want.len) fail("index depends has {d} entries, must be {d} (the platform guard{s} and each requirement at its version)", .{ if (depends == .array) depends.array.items.len else 0, want.len, @as([]const u8, if (is_meta) "" else ", the exact compiler pin") });
+    if (depends != .array or depends.array.items.len != want.len) fail("index depends has {d} entries, must be {d} ({s})", .{ if (depends == .array) depends.array.items.len else 0, want.len, @as([]const u8, if (is_meta) "the platform guard and each member at its version" else if (is_native) "exactly the stated --expect-depend: the platform guard and the glibc floor" else "the platform guard, the exact compiler pin and each requirement at its version") });
     for (depends.array.items, want) |got, w| {
         if (got != .string) fail("index depends holds a non-string", .{});
         expectEq("requirement", got.string, w);

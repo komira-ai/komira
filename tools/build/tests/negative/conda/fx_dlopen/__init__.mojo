@@ -1,4 +1,4 @@
-"""fx_dlopen: names a shared library at run time, a fixture of tests//negative/conda."""
+"""fx_dlopen: opens a shared library no conda package ships, a fixture of tests//negative/conda."""
 
 from std.ffi import OwnedDLHandle
 
@@ -9,4 +9,4 @@ def fx_dlopen_value() -> Int:
 
 
 def fx_dlopen_open() raises -> OwnedDLHandle:
-    return OwnedDLHandle("libz.so.1")
+    return OwnedDLHandle("libfx_dlopen.so.1")

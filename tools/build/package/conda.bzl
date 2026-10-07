@@ -57,16 +57,21 @@ library:
     timestamp.
 
 A library that CANNOT be packaged (it links C that libkomira_native.so.1 does not
-hold, has no tests, depends on a library with no package, opens a shared library at
-run time by a soname it does not declare, or its name is not a conda name) keeps
+hold, has no tests, depends on a library with no package, declares in `dlopen` a
+soname system_libs.bzl does not name, or its name is not a conda name) keeps
 its package target, and the target builds: it is a
 directory holding one file, `REFUSED`, with the reason. Refusing by failing would
 make `buck2 build //...` fail on every such library. What refuses is asking for
 the RELEASE: `[release]`, `[release][manifest]` and `[release_check]` fail naming
-the reason. The package's dependents are refused the same way when the reason is
-known to the build; a library whose sources open a library it does not declare is
-found only when its package is made, so the release tool must also check that every
-dependency of a declared package is declared.
+the reason. The package's dependents are refused the same way: every one of these
+reasons is known when the library is analysed.
+
+A library whose sources open a shared library at run time by a soname its `dlopen`
+does not declare (or that declares sonames no source opens) is found only when
+its package is made, and it FAILS the package target, the plain build: the
+packer writes REFUSED with the reason, and the check, told the payload the build
+expected, refuses a refusal. That is drift between the declaration and the code,
+fixed by correcting the declaration, never a property of the library.
 
 `conda_native_package` is libkomira_native.so.1 as the package `komira_native`
 (lib/libkomira_native.so.1 and the link lib/libkomira_native.so), stamped the
@@ -435,6 +440,17 @@ def _glibc_floor():
 # The glibc floor of the native package's run requirements (`__glibc >=<it>`).
 NATIVE_GLIBC = _glibc_floor()
 
+def _native_requirements(subdir):
+    # The native package's run requirements, in order, as its check expects
+    # them (`--expect-depend`): the platform guard of the subdir and
+    # `__glibc >=<NATIVE_GLIBC>`. Derived here, from the platform table, and
+    # not by the packer, whose list (nativeRequirements) the check compares
+    # against this one: a requirement the packer drops or changes is red.
+    guard = {"linux-64": "__linux"}
+    if subdir not in guard:
+        fail("no platform guard for conda subdir `{}`".format(subdir))
+    return [guard[subdir], "__glibc >=" + NATIVE_GLIBC]
+
 def _conda_native_package_impl(ctx):
     lib = ctx.attrs.lib[DefaultInfo]
     so = lib.default_outputs[0]
@@ -504,8 +520,7 @@ def _conda_native_package_impl(ctx):
                 subdir or "linux-64",
                 "--mojo-pin",
                 MOJO_COMPILER_VERSION,
-                "--glibc",
-                NATIVE_GLIBC,
+                [cmd_args("--expect-depend", r) for r in _native_requirements(subdir or "linux-64")],
                 files,
                 extra,
                 "--out",

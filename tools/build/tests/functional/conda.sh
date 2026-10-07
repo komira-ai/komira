@@ -41,9 +41,12 @@
 #   refusals   a library that cannot be packaged keeps a target that BUILDS (so
 #              `buck2 build //...` stays green), holding a REFUSED file with the
 #              reason, and its [release] fails naming it: no tests, C outside libkomira_native.so.1,
-#              a run-time shared library, a name that is not a conda name, a
-#              dependency with no package (opted out, or itself refused). The
-#              libraries still build.
+#              a run-time shared library no conda package ships, a name that
+#              is not a conda name, a dependency with no package (opted out, or
+#              itself refused). The libraries still build. A library whose
+#              sources open a soname its `dlopen` does not declare is not a
+#              refusal: its package target fails (tests//negative/conda_dlopen),
+#              and the library still builds.
 #   packer     komira_pack run directly gives the same bytes as the rule; its
 #              check refuses a different payload, name, subdir or dependency
 #              list, a doc file it was not told of, a missing one, one that
@@ -515,7 +518,7 @@ fi
 
 # ---- refusals: a target that builds, and a release that does not ------------
 refused refuse_no_tests "has no tests, so its package would not be gated by any" "$FX:fx_notests_conda"
-refused refuse_dlopen "opens a shared library at run time (OwnedDLHandle)" "$FX:fx_dlopen_conda"
+refused refuse_dlopen "for which tools/build/package/system_libs.bzl names no conda package" "$FX:fx_dlopen_conda"
 refused refuse_bad_name "is not a conda name" "$FX:fx_badname_conda"
 refused refuse_native "links C that libkomira_native.so.1 does not hold" komira//tools/build/examples/cshim:cadd_conda
 refused refuse_dep_opted_out "which has no conda package (\`conda = False\`" "$FX:fx_optout_user_conda"
@@ -525,6 +528,14 @@ if "$BUCK2" build "$FX:fx_notests" "$FX:fx_dlopen" "$FX:fx_badname" "$FX:fx_opto
     pass "libraries: every library a package was refused for still builds"
 else
     fail "libraries: a library with a refused package does not build (see $W/libs_build.log)"
+fi
+# A source opening a soname the library does not declare is drift, not a
+# refusal: the package target fails, naming the packer's reason; the library builds.
+red dlopen_drift "the build found no reason to refuse it and states its payload, but the packer refused it" tests//negative/conda_dlopen:fx_dlopen_drift_conda
+if "$BUCK2" build tests//negative/conda_dlopen:fx_dlopen_drift > "$W/drift_lib.log" 2>&1; then
+    pass "dlopen_drift: the library itself builds"
+else
+    fail "dlopen_drift: the library does not build (see $W/drift_lib.log)"
 fi
 # Building every package of the fixtures at once is green: a refusal is data.
 if "$BUCK2" build "$FX:" > "$W/fx_all.log" 2>&1; then

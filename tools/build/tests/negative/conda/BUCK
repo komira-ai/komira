@@ -70,6 +70,9 @@ mojo_library(
     name = "fx_dlopen",
     srcs = ["fx_dlopen/__init__.mojo"],
     test_srcs = ["fx_dlopen/tests/test_fx_dlopen.mojo"],
+    # Declared and opened alike, but system_libs.bzl names no conda package
+    # for it: refused when the library is analysed.
+    dlopen = ["libfx_dlopen.so.1"],
     visibility = ["PUBLIC"],
 )
 

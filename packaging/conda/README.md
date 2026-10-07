@@ -143,17 +143,18 @@ reason. The reasons:
 - it depends on a library with no package (`conda = False`, or itself refused);
 - its name is not a conda name;
 - it declares a soname in `dlopen` that
-  [`system_libs.bzl`](../../tools/build/package/system_libs.bzl) does not name;
-- its sources open a shared library at run time (`OwnedDLHandle`) by sonames
-  other than those it declares, or it declares sonames and no source opens a
-  library.
+  [`system_libs.bzl`](../../tools/build/package/system_libs.bzl) does not name.
 
-All but the last are known to the build when it analyses the library, so a
-dependent of such a library is refused too. The last is found only when the
-package is made (the tool reads the sources), so **a dependent of a library
-whose declaration disagrees with its sources is not refused by the build**;
-the release tool must therefore check that every dependency of a declared
-package is itself declared and has a `[release]` (below).
+All are known to the build when it analyses the library, so a dependent of
+such a library is refused too.
+
+A library whose sources open a shared library at run time (`OwnedDLHandle`)
+by sonames other than those it declares, or that declares sonames and no
+source opens a library, is not refused: its package target **fails**, so the
+plain build is red. This is found only when the package is made (the tool
+reads the sources); the build had found no reason to refuse the library, so
+`conda-check`, which is told the payload the build expected, refuses the
+packer's `REFUSED` naming both lists. The fix is the declaration.
 
 ### Native code: libkomira_native.so.1
 
@@ -430,7 +431,6 @@ rule, when it is written:
   `-o`), or ask the compiler for a path-remapping option; then the gate in
   "Reproducibility" can be a test (two isolation directories, one sha256)
   instead of a rule for the release job;
-- the build does not refuse a dependent of a library that dlopens (above).
 
 How it is tested: [`conda.sh`](../../tools/build/tests/functional/conda.sh) (one
 package, the generated targets, the refusals, the packer and its check, the

@@ -4,7 +4,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_binary", "mojo_test")
 ```
 
-The rules are in [`defs.bzl`](defs.bzl); their providers in
+The rules are in [`defs.bzl`](defs.bzl) (what a library's C and `dlopen` are to
+its conda package in [`native_facts.bzl`](native_facts.bzl)); their providers in
 [`providers.bzl`](providers.bzl). Every action runs the hermetic toolchain
 ([`toolchains//:mojo`](../toolchains/README.md)) through
 [`mojo_wrapper.sh`](mojo_wrapper.sh), which is where to read the environment
@@ -54,7 +55,9 @@ mojo_library(
 - **`dlopen`** lists the sonames the package opens at run time
   (`OwnedDLHandle("libz.so.1")`), each named in
   [`system_libs.bzl`](../package/system_libs.bzl); its conda package requires
-  the package that ships each ([Packaging](../package/README.md)).
+  the package that ships each ([Packaging](../package/README.md)). A source
+  that opens a soname the list does not hold, or a soname no source opens,
+  fails the library's conda package target.
 - **The gate.** Each file in `test_srcs` is built from that one file against
   the ungated package (at `test_optimization_level`, default `-O1`; see [Optimization levels](#optimization-levels)) and run;
   a failing test prints `GATED TEST FAILED: <label> (exit N)`. The public

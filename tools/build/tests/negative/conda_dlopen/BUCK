@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A fixture of tools/build/tests/functional/conda.sh that must FAIL: its
+# sources open libz.so.1 at run time and its `dlopen` declares nothing, so
+# `fx_dlopen_drift_conda` is red (the packer refuses and the check, told the
+# payload the build expected, refuses that refusal). Its own package, so that
+# `buck2 build tests//negative/conda:` stays green.
+
+mojo_library(
+    name = "fx_dlopen_drift",
+    srcs = ["fx_dlopen_drift/__init__.mojo"],
+    test_srcs = ["fx_dlopen_drift/tests/test_fx_dlopen_drift.mojo"],
+    visibility = ["PUBLIC"],
+)
