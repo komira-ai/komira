@@ -1,15 +1,18 @@
-# The operations client's paths are Cloud Run's, as the pinned service
-# configuration states them.
+# The operations client is generated with Cloud Run's paths, as the pinned
+# service configuration states them.
 #
-# operations_mixin.proto restates two `http.rules` of
-# google/cloud/run/v2/run_v2.yaml (the Run API's service configuration,
-# extracted from the googleapis archive at the pin and staged here as
-# run_v2.yaml) so the generator can generate them: GetOperation and
-# WaitOperation of google.longrunning.Operations. This test reads each rule
-# out of that file once, then fails unless operations_mixin.proto (staged
-# here) states the same rule and the generated client (staged whole at gen/)
-# was generated with it, so a bump of the pin that moves Run's operations
-# cannot leave the client polling the old path.
+# BUCK gives the generator google/cloud/run/v2/run_v2.yaml (the Run API's
+# service configuration, extracted from the googleapis archive at the pin
+# and staged here as run_v2.yaml) as `service_config`. Its `http.rules` bind
+# GetOperation and WaitOperation of the google.longrunning.Operations mixin
+# to Run's paths, and its `name` is the host the client starts at; the
+# generated package is staged whole at gen/.
+#
+# operations_client.golden is the client the generator writes into
+# operations.mojo, from its `# REST/JSON client for` line to the end of the
+# file, byte for byte. The tests below also read each rule out of
+# run_v2.yaml and hold the generated client to it, so a bump of the pin that
+# moves Run's operations fails here until the golden follows.
 from std.testing import assert_equal, assert_true
 
 
@@ -38,6 +41,7 @@ def _value_after(hay: String, anchor: String, close: String) raises -> String:
 
 comptime _GET = "  - selector: google.longrunning.Operations.GetOperation\n    get: '"
 comptime _WAIT = "  - selector: google.longrunning.Operations.WaitOperation\n    post: '"
+comptime _CLIENT = "# REST/JSON client for `google.longrunning.Operations`.\n"
 
 
 def _yaml() raises -> String:
@@ -65,37 +69,33 @@ def test_the_service_configuration_binds_the_mixin_to_runs_paths() raises:
     assert_equal(_count(yaml, String(_WAIT) + wait + "'\n    body: '*'\n"), 1)
 
 
-def test_the_restated_rules_are_the_service_configurations() raises:
-    var yaml = _yaml()
-    var proto = _read("operations_mixin.proto")
-    var get = _value_after(yaml, _GET, "'\n")
-    var wait = _value_after(yaml, _WAIT, "'\n")
-    assert_equal(_value_after(proto, "      get: \"", "\"\n"), get)
-    assert_equal(_value_after(proto, "      post: \"", "\"\n"), wait)
-    assert_equal(_value_after(proto, "      body: \"", "\"\n"), "*")
-    assert_equal(
-        _value_after(proto, "option (google.api.default_host) = \"", "\";\n"),
-        _value_after(yaml, "\nname: ", "\n"),
-    )
-    # Exactly the two rules: no third binding of the mixin rides along.
-    assert_equal(_count(proto, "option (google.api.http)"), 2)
-    assert_equal(_count(proto, "  rpc "), 2)
+def test_the_generated_client_is_the_golden() raises:
+    var module = _read("gen/operations.mojo")
+    assert_equal(_count(module, _CLIENT), 1, "operations.mojo holds no operations client")
+    var at = module.find(_CLIENT)
+    var client = String(module[byte=at : module.byte_length()])
+    var golden = _read("operations_client.golden")
+    assert_true(golden.startswith(_CLIENT), "the golden is not an operations client")
+    assert_equal(client, golden)
 
 
 def test_the_client_is_generated_with_those_paths() raises:
     var yaml = _yaml()
-    var client = _read("gen/operations_mixin.mojo")
+    var client = _read("gen/operations.mojo")
     var get = _value_after(yaml, _GET, "'\n")
     var wait = _value_after(yaml, _WAIT, "'\n")
     assert_equal(_count(client, String('"""GET `') + get + "`"), 1)
     assert_equal(_count(client, String('"""POST `') + wait + "`"), 1)
+    # operations.proto's own binding is not generated.
+    assert_equal(_count(client, "operations/**"), 0)
     var host = _value_after(yaml, "\nname: ", "\n")
     assert_equal(_count(client, String('self._rest_host = String("') + host + '")'), 2)
+    assert_equal(_count(client, "longrunning.googleapis.com"), 0)
     assert_equal(_count(client, "[RT: Runtime]("), 2)
 
 
 def main() raises:
     test_the_service_configuration_binds_the_mixin_to_runs_paths()
-    test_the_restated_rules_are_the_service_configurations()
+    test_the_generated_client_is_the_golden()
     test_the_client_is_generated_with_those_paths()
     print("OK")
