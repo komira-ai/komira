@@ -62,10 +62,14 @@ no_endpoint(
 # says which). So a *_e2e, *_loopback or *_conformance package directly
 # under src/ fails the build, and so does a komira_test_* one `shipped` does
 # not name. The packages are read from the build graph (every BUCK file under
-# src/), so a new one is checked with no edit here. Declared in every
-# checkout, so a repository using komira as a cell builds it by name.
+# src/), so a new one is checked with no edit here. `map` is the module map:
+# every one of those packages has exactly one row there, and no row names a
+# directory that is not a package, so a new, moved or deleted package fails
+# here until the map says so. Declared in every checkout, so a repository
+# using komira as a cell builds it by name.
 src_layout(
     name = "src_layout",
+    map = "docs/architecture.md",
     # The test libraries komira ships, directly under src/ (the harnesses
     # under src/tests/helpers build on them).
     shipped = [
@@ -99,11 +103,14 @@ _TESTS_LINTS = [
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
+    "//src/tests/conformance/komira_connect_conformance:deps_lint",
     "//src/tests/conformance/komira_http_conformance:deps_lint",
     "//src/tests/conformance/komira_json_conformance:deps_lint",
     "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
+    "//src/tests/e2e/komira_formats_e2e:deps_lint",
     "//src/tests/e2e/komira_http_tls_e2e:deps_lint",
     "//src/tests/e2e/komira_job_supervisor_loopback:deps_lint",
+    "//src/tests/e2e/komira_pandas_door_e2e:deps_lint",
     "//src/tests/e2e/komira_secrets_e2e:deps_lint",
     "//src/tests/e2e/komira_tls_interop_e2e:deps_lint",
     "//src/tests/e2e/komira_udf_e2e:deps_lint",

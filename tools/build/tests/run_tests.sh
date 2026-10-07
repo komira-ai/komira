@@ -358,7 +358,9 @@
 #      unshipped komira_test_* there, a stale `shipped` name, a package nested
 #      where none is, a src/tests kind it does not hold or a package not at
 #      src/tests/<kind>/<name>, a package under the wrong kind, and a root with
-#      no package.
+#      no package. With a module map (`map`; //:src_layout reads
+#      docs/architecture.md): a package with no row, a row naming no package,
+#      a second row for a package, and a row whose name is not its link's.
 set -uo pipefail
 
 umbrella=1
@@ -1313,6 +1315,10 @@ for want in \
     "conformance_in_e2e|this one belongs in src/tests/conformance/komira_v_conformance" \
     "e2e_in_helpers|this one belongs in src/tests/e2e/komira_u_loopback" \
     "harness_in_e2e|this one belongs in src/tests/helpers/komira_t" \
+    "map_missing_row|//src/komira_new: no row in" \
+    "map_stale_row|: a row for src/komira_a, which is no package" \
+    "map_duplicate_row|: a second row for src/komira_a" \
+    "map_misnamed_row|: the row names komira_b but links src/komira_a; name it komira_a" \
     "empty|src_layout: checked nothing"; do
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
