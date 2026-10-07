@@ -304,7 +304,8 @@ _RUN_V2_CLOSURE = _RUN_V2_ROOTS + [
 # Cloud Run Admin v2's service configuration. Its `http.rules` bind the
 # google.longrunning.Operations mixin to Run's own paths
 # (`/v2/{name=projects/*/locations/*/operations/*}`), which no .proto
-# states; komira_gcp_run's tests hold its operations client to them.
+# states; komira_gcp_run generates its operations client from them
+# (mojo_gcp_client's `service_config`).
 _RUN_V2_SERVICE_CONFIG = ["google/cloud/run/v2/run_v2.yaml"]
 
 # Cloud Scheduler v1 (jobs, for the generated komira_gcp_cloudscheduler): the

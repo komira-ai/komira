@@ -364,7 +364,11 @@ without it (`test_source_paths`). C compiles and archives
 and the Mojo targets using them resolve to `linux-x86_64`. The
 snappy test binary, which links C++ with zig's static libc++, carries
 libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose
-on the `libstdc++.so.6` the Mojo runtime loads.
+on the `libstdc++.so.6` the Mojo runtime loads. An unconfigured query, `buck2
+uquery 'deps(//tools/build/examples/cshim:cadd_user)'`, answers and reaches
+`toolchains//:cxx_no_default_deps`: the prelude's C/C++ toolchain select names
+that target on a branch no configured build takes, and the query fails with
+`Unknown target` if the toolchains cell does not declare it.
 
 ## 21. Location path
 
@@ -990,6 +994,52 @@ the tree, and must fail naming it.
 Each test's coverage binary also runs under kcov through the release gate's runner
 ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
 [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+
+## 44. Public boundary
+
+[`public_boundary`](../lint/defs.bzl) is a validation over every file of the
+repository (`//:public_boundary`: the cell's files, the dotfiles a glob skips,
+and this cell's files) for what a public repository may not hold: a date
+before the public history (2026-09-01; the window read starts with 2025,
+because earlier dates in this tree are data), a home directory naming a
+person, a private, shared or link-local address or any address written with
+a port, a URL host that is neither a reserved example name nor under a domain
+of [`tests/public_boundary_hosts.tsv`](../../../tests/public_boundary_hosts.tsv),
+an email address outside the reserved example domains, and a commit id in
+prose. Binary data and upstream bytes are not read. Its reader is
+[`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
+matches and what it cannot see (vocabulary is no shape); its action is
+[`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
+keep are held per rule and file at an exact count in
+[`tests/public_boundary_holds.tsv`](../../../tests/public_boundary_holds.tsv),
+which only shrinks, and every row of the hosts list must be used. A
+repository that keeps words of its own out of this one passes them as a list
+kept outside it (`-c komira_lint.public_boundary_deny=<target or path>`,
+`.public_boundary_deny` being gitignored for it): a finding no row can hold.
+
+[`functional/public_boundary:ok`](functional/public_boundary/BUCK) builds a
+planted tree ([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose
+`held.mojo` and `shim.c` hold every rule in each spelling the reader knows,
+held at exact counts, so a spelling the reader missed would fail the build;
+whose near misses (dates outside the window, placeholders, loopback and
+documentation addresses, reserved hosts, templates, digests, UUIDs, hex in
+code) must find nothing; and whose upstream and binary files hold findings
+that must not be read. The planted tree's window is 2030 up to 2031-09-01,
+so none of its files holds a date the root target refuses. Each target of
+[`negative/public_boundary`](negative/public_boundary/BUCK) plants one finding
+(each spelling of each rule, a date in a `third_party/` BUCK file, one over a
+hold, a deny-list word) or one ledger defect (malformed, repeated,
+unknown-rule, zero-count or reasonless rows, a row for a missing file, binary
+data or upstream bytes, a count above the findings, a row for no finding, a
+row holding a deny-list word, a hosts row that is reserved or unused), sets
+a window that does not end on the first day of a month, or empties the tree,
+and must fail naming it.
+[`public_boundary_tests.sh`](public_boundary_tests.sh) lists them.
+
+```sh
+./buck2 build //:public_boundary tests//functional/public_boundary:ok
+./buck2 build tests//negative/public_boundary:host_single   # must fail: docs/plant.md:1: host: builder
+```
 
 ## Diagnostics
 

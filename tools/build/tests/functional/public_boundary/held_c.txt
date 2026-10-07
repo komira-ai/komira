@@ -1,0 +1,5 @@
+// see 1a2b3c4d5e in a line comment
+/* a block comment
+ * 9f8e7d6c5b on a line of it
+ */
+int y = 2; // trailing 4e5f6a7b8c
