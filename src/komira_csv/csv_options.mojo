@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Read-side options live in this struct. `CsvOptions` in
-# `komira_core.arrow.serde_format_options` is the WRITE-side options surface
+# `komira_arrow.serde_format_options` is the WRITE-side options surface
 # (delimiter / quote / header — three byte-typed POD fields).
 #
 # `CsvReadOptions` adds the reader-specific knobs the toy reader lacked:
@@ -31,7 +31,7 @@
 # site-specific tokens. Caller passing >8 strings raises typed
 # `CsvReadOptionsTooManyNullStrings` at construction.
 comptime MAX_NULL_STRINGS: Int = 8
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 comptime MAX_TRUE_FALSE_STRINGS: Int = 8
 
@@ -59,7 +59,7 @@ comptime DEFAULT_MAX_ROW_BYTES: Int = 1 * 1024 * 1024
 # branch at runtime.
 #
 # Tag IDs are explicitly chosen to match the conformer order in
-# `komira_core.arrow.quote_styles` (Rfc4180 / Excel / Posix).
+# `komira_arrow.quote_styles` (Rfc4180 / Excel / Posix).
 # Future conformers extend at the next free tag.
 # =============================================================================
 

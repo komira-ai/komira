@@ -83,7 +83,7 @@ def _build_dict() raises -> SiteDictionary:
     d.register["scanned {} rows, {} bytes", "komira_engine"]()
     d.register["opened file {}", "komira_parquet"]()
     d.register["ratio {} over baseline {}", "komira_bench"]()
-    d.register["no args here", "komira_core"]()
+    d.register["no args here", "komira_arrow"]()
     d.register["t={} name={} f={}", "komira_engine"]()
     d.register["retry {}", "komira_job_supervisor"]()
     return d^
@@ -108,7 +108,7 @@ def test_core_round_trip() raises:
     _ = emit_record["ratio {} over baseline {}", "komira_bench"](
         ring, LEVEL_INFO, UInt64(0), ArgF64(0.988), ArgF64(1.0)
     )
-    _ = emit_record["no args here", "komira_core"](
+    _ = emit_record["no args here", "komira_arrow"](
         ring, LEVEL_WARN, UInt64(0)
     )
     _ = emit_record["t={} name={} f={}", "komira_engine"](
@@ -140,7 +140,7 @@ def test_core_round_trip() raises:
         _suffix(lines[3]),
         String("INFO [komira_bench] ratio 0.988 over baseline 1.0"),
     )
-    assert_equal(_suffix(lines[4]), String("WARN [komira_core] no args here"))
+    assert_equal(_suffix(lines[4]), String("WARN [komira_arrow] no args here"))
     assert_equal(
         _suffix(lines[5]),
         String("INFO [komira_engine] t=7 name=q1 f=3.5"),

@@ -15,14 +15,14 @@ from std.testing import TestSuite, assert_equal, assert_true, assert_false
 from std.memory import alloc, unsafe_memcpy, unsafe_memset
 from std.sys import size_of
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.collections.byte_view import ByteView
-from komira_core.eval.selection_vector import SelectionVector
-from komira_core.eval.selective_decode import (
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.byte_view import ByteView
+from komira_arrow.selection_vector import SelectionVector
+from komira_column_kernels.selective_decode import (
     selective_decode_fixed,
     selective_decode_string,
     selective_decode_boolean,

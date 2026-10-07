@@ -123,11 +123,11 @@
 from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections import Slab
-from komira_core.plan.agg_expr import AggExpr, AGG_SUM
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_collections.slab import Slab
+from komira_plan_expr.agg_expr import AggExpr, AGG_SUM
+from komira_plan_expr.expr import (
     Expr,
     WhenCaseData,
     BIN_AND,
@@ -136,7 +136,7 @@ from komira_core.plan.expr import (
     UN_IS_NOT_NULL,
     STR_ENDS_WITH,
 )
-from komira_core.plan.logical_plan import (
+from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
     AggExprArray,
@@ -146,7 +146,7 @@ from komira_core.plan.logical_plan import (
     JOIN_INNER,
     JOIN_ALGO_AUTO,
 )
-from komira_core.plan.partition_expr import (
+from komira_plan_expr.partition_expr import (
     PartitionExpr,
     PartitionFrame,
     PF_LAG,
@@ -157,17 +157,17 @@ from komira_core.plan.partition_expr import (
     FRAME_BOUND_PRECEDING,
     FRAME_BOUND_FOLLOWING,
 )
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     scan_kind_id,
     SNAPSHOT_PINNED,
     SCAN_ORIENTATION_COLUMNAR,
     SNAPSHOT_LIVE,
 )
-from komira_core.source.scan_params import ScanParams, param_hash_string
-from komira_core.source.source_variant import SourceVariant, SOURCE_VARIANT_ORC
+from komira_scan_source.scan_params import ScanParams, param_hash_string
+from komira_scan_source.source_variant import SourceVariant, SOURCE_VARIANT_ORC
 
 from komira_plan_wire import plan_to_bytes, plan_from_bytes
 
@@ -870,7 +870,7 @@ def _corpus_aggregate() raises -> LogicalPlan:
 # itself — kind name, params, identity, gate, policy and the LIVE token.
 #
 # ⚠ BUILT HERE, NOT BY THE KINDS' OWN CONSTRUCTORS, AND THAT IS A LAYERING
-# CHOICE. `komira_plan_wire` sits directly above `komira_core`; importing
+# CHOICE. `komira_plan_wire` sits directly above the core packages; importing
 # `komira_broker` / `komira_search_runtime` into its welded test would put both
 # kinds' closures under the codec's gate. So each case restates, from core
 # primitives alone, exactly what the kind's SHIPPING constructor returns for

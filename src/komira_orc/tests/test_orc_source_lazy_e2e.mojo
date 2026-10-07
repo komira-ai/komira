@@ -34,13 +34,13 @@ from std.testing import assert_equal, assert_true
 from std.os import remove
 from std.io import FileHandle
 
-from komira_core.arrow.schema import Schema
-from komira_core.source.orc_source import OrcSource
-from komira_core.source.source_variant import (
+from komira_arrow.schema import Schema
+from komira_scan_source.orc_source import OrcSource
+from komira_scan_source.source_variant import (
     SourceVariant,
     SOURCE_VARIANT_ORC,
 )
-from komira_core.plan.logical_plan import LogicalPlan, SOURCE_ORC
+from komira_plan_ir.logical_plan import LogicalPlan, SOURCE_ORC
 
 from komira_orc import (
     ORC_COMPRESSION_NONE,

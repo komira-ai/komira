@@ -32,7 +32,7 @@ def test_no_environment_read() raises:
         "EnvSource",
         "ProcessEnv",
         "GOOGLE_",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
         # Generated code encodes with komira_proto_codec and logs nothing.
         "komira_serde",

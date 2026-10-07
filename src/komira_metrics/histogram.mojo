@@ -84,7 +84,7 @@
 
 from std.sys import size_of
 
-from komira_core.collections import Slab
+from komira_collections.slab import Slab
 
 from komira_metrics.metric_point import METRIC_HISTOGRAM
 from komira_metrics.metrics_set import MAX_WORKERS

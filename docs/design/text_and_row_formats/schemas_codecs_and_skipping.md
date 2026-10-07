@@ -30,7 +30,7 @@ A snappy block is the raw snappy bytes followed by a big-endian CRC32 of the unc
 
 ### How does the ORC reader skip data?
 
-`src/komira_orc/orc_stride_skip.mojo` has a four-level cascade, with predicates expressed as `komira_core` `Expr` values, reached through two entry points:
+`src/komira_orc/orc_stride_skip.mojo` has a four-level cascade, with predicates expressed as `komira_plan_expr` `Expr` values, reached through two entry points:
 
 1. Column projection: `read_orc_bytes_pruned` takes a list of output-column indices and decodes only those columns.
 2. Stripe statistics: also `read_orc_bytes_pruned`. A stripe whose min and max are disjoint from the predicate is never decoded.

@@ -64,12 +64,12 @@
 from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, SchemaBuilder
-from komira_core.plan.expr import Expr
-from komira_core.plan.logical_plan import ExprArray, LogicalPlan, SOURCE_PARQUET
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.udf_data import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_plan_expr.expr import Expr
+from komira_plan_ir.logical_plan import ExprArray, LogicalPlan, SOURCE_PARQUET
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.udf_data import (
     UDF_KIND_FILTER,
     UDF_KIND_MAP,
     UDF_NULL_PROPAGATE,

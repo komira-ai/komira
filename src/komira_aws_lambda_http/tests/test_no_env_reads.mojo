@@ -46,7 +46,7 @@ def test_no_environment_read() raises:
         "import_module",
         "EnvSource",
         "ProcessEnv",
-        "komira_core_ffi",
+        "komira_libc",
         "komira_libc",
         "external_call",
     ]

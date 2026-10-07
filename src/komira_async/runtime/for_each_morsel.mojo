@@ -62,7 +62,7 @@ from std.memory import OwnedPointer, UnsafePointer
 from komira_async.cancellation.token import CancellationToken
 from komira_async.morsel.morsel_pool import MorselPool
 from komira_async.runtime.nested_borrow_bundle import NestedBorrowBundle
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 
 # =============================================================================

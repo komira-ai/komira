@@ -21,14 +21,14 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.binary_array import BinaryArray
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.column import Column
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.collections.batch_view import BatchView, batch_view_over
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.binary_array import BinaryArray
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.column import Column
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_arrow.batch_view import BatchView, batch_view_over
+from komira_buffer.heap_region import HeapRegion
 from komira_eval.expression_executor import ExpressionExecutor
 from komira_kernels.runtime_expr import (
     RuntimeExpr,
@@ -36,7 +36,7 @@ from komira_kernels.runtime_expr import (
     make_col_binary,
     make_lit_i64,
 )
-from komira_core.eval.selection_vector_row import RowSelectionVector
+from komira_arrow.selection_vector_row import RowSelectionVector
 
 
 # -----------------------------------------------------------------------------

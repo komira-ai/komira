@@ -48,7 +48,7 @@ from komira_csv import (
     infer_column_types_wide,
     ScannedCells,
 )
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 
 def _bytes(s: String) -> List[UInt8]:

@@ -35,7 +35,7 @@
 # SAFETY.
 # =============================================================================
 
-from komira_core.plan.expr import Expr
+from komira_plan_expr.expr import Expr
 from komira_scan_resolver.scan_split import SplitPoll, SplitPosition, SplitReader
 
 from komira_search.analyzer import AnalyzerConfig

@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_plan_expr.partition_pred_pod — the komira_core POD mirror of the
+# komira_plan_expr.partition_pred_pod — the core packages POD mirror of the
 # komira_async partition predicate.
 # =============================================================================
 #
@@ -9,9 +9,9 @@
 #   reaches the materialize site — `ParquetSourceData`
 #   (`komira_plan_ir.physical_plan`) — carries the predicate by value
 #   (the dir-scan-Hive discriminant). But `komira_async` DEPENDS ON
-#   `komira_core`, so `ParquetSourceData` CANNOT carry a `komira_async` type
+#   the core packages, so `ParquetSourceData` CANNOT carry a `komira_async` type
 #   (that would invert / cycle the dep graph). We therefore need a
-#   `komira_core`-resident STRUCTURAL mirror of the predicate. The
+#   the core packages-resident STRUCTURAL mirror of the predicate. The
 #   `PartitionPredicatePod <-> PartitionPredicate` bridge lives in
 #   `komira_parquet` (which deps BOTH core and async) — see its
 #   `partition_pred_bridge` module.
@@ -54,7 +54,7 @@ comptime PART_OP_OTHER: UInt8 = 7
 
 @fieldwise_init
 struct PartitionConstraintPod(Copyable, Movable, Deinitable):
-    """The `komira_core` mirror of komira_async `PartitionConstraint`
+    """The core packages mirror of komira_async `PartitionConstraint`
     (`pruned_hive_discovery`), field-for-field.
 
     Owns only `String` + `UInt8` + `List[String]` + `ArrowType`.
@@ -129,7 +129,7 @@ struct PartitionConstraintPod(Copyable, Movable, Deinitable):
 
 @fieldwise_init
 struct PartitionPredicatePod(Copyable, Movable, Deinitable):
-    """The `komira_core` mirror of komira_async `PartitionPredicate`
+    """The core packages mirror of komira_async `PartitionPredicate`
     (`pruned_hive_discovery`) — a conjunction (AND) of per-column
     constraints.
 

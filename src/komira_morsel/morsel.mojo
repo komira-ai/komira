@@ -43,17 +43,17 @@ from std.memory import alloc, unsafe_memcpy, OwnedPointer
 from std.sys import size_of
 from std.time import perf_counter_ns
 
-from komira_core.arrow.schema import RecordBatch, RecordBatchBuilder, Schema, SchemaBuilder, Field
-from komira_core.arrow.column import Column
-from komira_core.arrow.arrow_types import ArrowType, arrow_fixed_byte_width
-from komira_core.arrow.varlen_width_guard import check_fixed_width_dispatch
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.bitmap import Bitmap, copy_bits_aligned_buffer
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.io.heap_region import HeapRegion
-from komira_core.collections.slab import Slab
+from komira_arrow.schema import RecordBatch, RecordBatchBuilder, Schema, SchemaBuilder, Field
+from komira_arrow.column import Column
+from komira_arrow.arrow_types import ArrowType, arrow_fixed_byte_width
+from komira_arrow.varlen_width_guard import check_fixed_width_dispatch
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.bitmap import Bitmap, copy_bits_aligned_buffer
+from komira_arrow.boolean_array import BooleanArray
+from komira_buffer.heap_region import HeapRegion
+from komira_collections.slab import Slab
 
-from komira_core.batch_format import BatchFormat, FormatKind
+from komira_arrow.batch_format import BatchFormat, FormatKind
 
 from .bypass_ref import ParquetBypassRef
 from .varlen_slice import (

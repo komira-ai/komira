@@ -24,7 +24,7 @@ Modules:
     OCF writer.
 
 Dependency direction (cycle-free, like komira_csv / komira_json):
-  komira_avro -> komira_core (ArrowType lattice; byte_class SIMD)
+  komira_avro -> the core packages (ArrowType lattice; byte_class SIMD)
   NOT komira_avro -> komira_parquet / komira_compiler / komira_sdk
   (those packages consume komira_avro).
 """
@@ -49,6 +49,13 @@ from .avro_schema import (
     AVRO_KIND_MAP,
     AVRO_KIND_UNION,
     AVRO_KIND_FIXED,
+    AVRO_DEFAULT_NONE,
+    AVRO_DEFAULT_NULL,
+    AVRO_DEFAULT_BOOL,
+    AVRO_DEFAULT_INT,
+    AVRO_DEFAULT_DOUBLE,
+    AVRO_DEFAULT_STRING,
+    AVRO_DEFAULT_BYTES,
 )
 from .ocf_header import (
     OcfHeader,

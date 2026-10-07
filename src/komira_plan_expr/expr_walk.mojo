@@ -5,7 +5,7 @@
 # ⛔ WHY THIS MODULE EXISTS — READ BEFORE ADDING A WALK ANYWHERE ELSE.
 #
 # An `Expr` walk that exists TWICE (say a "complete" copy under
-# `komira_core/plan/` and a second in `komira_core/helpers/
+# the core packages and a second in `the core packages
 # compiler_helpers.mojo`) drifts: a new `EXPR_*` tag gets armed in one copy
 # and not the other, and the miss is SILENT until it is fatal. Each shape
 # below is a real failure of that kind:
@@ -56,7 +56,7 @@ from komira_arrow.arrow_types import ArrowType
 # presentation of that rule would make this whole walk `raises`, and the walk
 # MUST be non-raising — see `walk_expr_field`'s docstring. The rule itself is
 # stated once, in `decimal_arith.mojo`.
-from komira_scalar_arith.decimal_arith import (
+from komira_scalar_arithmetic.decimal_arith import (
     decimal_add_result_ps,
     decimal_mul_result_ps_checked,
 )

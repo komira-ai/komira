@@ -90,7 +90,7 @@
 #      without re-plumbing credentials.
 # =============================================================================
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # =============================================================================

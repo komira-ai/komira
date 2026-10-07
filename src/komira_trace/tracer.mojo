@@ -37,7 +37,7 @@
 
 from komira_atomic_alias import AtomicU64
 
-from komira_core.collections import Slab
+from komira_collections.slab import Slab
 
 from komira_clock import now_ns as _platform_now_ns
 

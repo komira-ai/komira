@@ -46,15 +46,15 @@
 #   - All BatchView references threaded via `BatchView[bo: Origin[mut=False]]`.
 #
 # Cross-references:
-#   - komira_core.collections.batch_view — BatchView + ColView surfaces.
+#   - komira_arrow.batch_view — BatchView + ColView surfaces.
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.multi_column_builder import (
+from komira_arrow.batch_view import BatchView
+from komira_arrow.multi_column_builder import (
     MultiColumnSink,
     SinkKind,
 )
-from komira_core.plan.expr import Expr
+from komira_plan_expr.expr import Expr
 
 from komira_udf.column_resolver import ColumnResolver
 from komira_udf.predicate import Predicate
