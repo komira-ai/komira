@@ -1036,7 +1036,8 @@ the `external_call[` line, on the next, prefixed, single- and triple-quoted;
 each soname as `.so`, one as `.dylib`, one single-quoted, one with a trailing
 comment; each import shape (`from x import`, `from x.m import`, a
 parenthesised import, `import x.m`, `import x as y`, `import a, x`,
-`import x, a`, `import a,x`, `import x,a`, `import a, x, b`, `import a, x as y`, an indented
+`import x, a`, `import a,x`, `import x,a`, `import a, x, b`, `import a, b, x`,
+`import a, x.m`, `import a, x as y`, an indented
 `from x import` and an indented `import a, x`); a directory whose name only starts with an owner's. Two
 more drop an owner file (the snappy owner, the libz layer) and must fail
 naming the unmet check; an empty tree fails as checking nothing, and a target

@@ -1256,6 +1256,8 @@ for want in \
     "import_list_nospace|$S:2: import os,komira_zlib$F" \
     "import_list_first_nospace|$S:2: import komira_lz4,os$F" \
     "import_list_middle|$S:2: import os, komira_zlib, sys$F" \
+    "import_list_last|$S:2: import os, sys, komira_zlib$F" \
+    "import_list_module|$S:2: import os, komira_zlib.inflate$F" \
     "import_list_as|$S:2: import os, komira_lz4 as l$F" \
     "import_list_indented|$S:3: import os, komira_zlib$F" \
     "import_indented|$S:3: from komira_zlib import deflate$F" \

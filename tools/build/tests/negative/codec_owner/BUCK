@@ -43,6 +43,8 @@ load("//functional/codec_owner:fixture.bzl", "CODEC_OWNERS", "CODEC_TREE")
         ("import_list_nospace", "src/komira_avro/plant.mojo", None),
         ("import_list_first_nospace", "src/komira_avro/plant.mojo", None),
         ("import_list_middle", "src/komira_avro/plant.mojo", None),
+        ("import_list_last", "src/komira_avro/plant.mojo", None),
+        ("import_list_module", "src/komira_avro/plant.mojo", None),
         ("import_list_as", "src/komira_avro/plant.mojo", None),
         ("import_list_indented", "src/komira_avro/plant.mojo", None),
         ("import_indented", "src/komira_avro/plant.mojo", None),
