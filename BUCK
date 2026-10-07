@@ -99,6 +99,7 @@ _TESTS_LINTS = [
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
+    "//src/tests/conformance/komira_connect_conformance:deps_lint",
     "//src/tests/conformance/komira_http_conformance:deps_lint",
     "//src/tests/conformance/komira_json_conformance:deps_lint",
     "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
