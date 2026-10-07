@@ -30,8 +30,8 @@ def test_what_must_widen_widens() raises:
 def test_what_is_ordinary_does_not_widen() raises:
     var r = read_rules(RULES_FILE)
     var ordinary = List[String]()
-    ordinary.append("src/komira_core/BUCK")
-    ordinary.append("src/komira_core/core.mojo")
+    ordinary.append("src/komira_collections/BUCK")
+    ordinary.append("src/komira_collections/slab.mojo")
     ordinary.append("docs/ci.md")
     ordinary.append("release/artifacts.textproto")
     ordinary.append(".github/workflows/ci.yml")

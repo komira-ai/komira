@@ -39,7 +39,7 @@
 #     lifetime is bound by `origin`; it cannot outlive the borrowed batch.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.record_batch import RecordBatch
 
 from komira_udf.partition_row_view import MAX_PARTITION_UDF_ARITY
 

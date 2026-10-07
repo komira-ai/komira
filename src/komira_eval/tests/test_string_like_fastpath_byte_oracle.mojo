@@ -24,9 +24,9 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.eval.string_comparison import eval_string_like
+from komira_arrow.string_array import StringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_column_kernels.string_comparison import eval_string_like
 
 
 # -----------------------------------------------------------------------------

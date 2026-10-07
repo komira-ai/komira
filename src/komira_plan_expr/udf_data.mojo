@@ -40,10 +40,10 @@
 #     sharing execution across two call sites is wrong even when the type is
 #     identical — there is no plan-level CSE for UDFs).
 #
-# This struct lives in `komira_core/plan/` (the leaf pkg) and stores only
+# This struct lives in `komira_plan_expr`/plan/` (the leaf pkg) and stores only
 # `String` / `List` / `UInt8` / `UInt32` / `Bool` — no dependency on
 # `komira_eval`'s typed `NullHandling` / `StatefulContract` (which would be
-# a layering inversion: `komira_eval -> komira_core`, not the reverse). The
+# a layering inversion: `komira_eval -> the core packages`, not the reverse). The
 # `.tag` snapshot is the only thing the IR needs.
 #
 # Mojo discipline: zero `UnsafePointer` anywhere (the struct is plain
@@ -65,8 +65,8 @@ from komira_arrow.arrow_types import ArrowType
 # `UdfData.input_columns` / `.output_columns` store these as the column dtype
 # (snapshotted from `F.InputSchema` / `F.OutputSchema`'s `ColDescriptor.dtype`,
 # which is itself one of `komira_eval`'s `DT_*` Int constants). They live here
-# AS WELL (not just in `komira_eval`) because `komira_core` is the leaf pkg
-# and cannot import `komira_eval` (`komira_eval -> komira_core`, not the
+# AS WELL (not just in `komira_eval`) because the core packages is the leaf pkg
+# and cannot import `komira_eval` (`komira_eval -> the core packages`, not the
 # reverse) — same documented-sync-mirror discipline as `UDF_NULL_*` above /
 # below. Numeric values are kept in lockstep with
 # `komira_eval/schema_descriptor.mojo`.

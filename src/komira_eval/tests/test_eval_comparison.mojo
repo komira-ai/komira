@@ -1,12 +1,13 @@
 # =============================================================================
-# Tests for comparison eval — imports from komira_arrow and komira_core.eval
+# Tests for comparison eval — imports from komira_arrow and the core packages
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 
-from komira_core.arrow import PrimitiveArray, BooleanArray
-from komira_core.eval import eval_gt, eval_lt, eval_eq, filter_to_indices
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_column_kernels.comparison import eval_gt, eval_lt, eval_eq, filter_to_indices
 
 
 def test_eval_gt_basic() raises:

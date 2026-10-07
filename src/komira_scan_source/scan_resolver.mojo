@@ -1,10 +1,10 @@
 # =============================================================================
-# ScanResolver — the EXECUTION-TIME registry, tier 1. Lives in `komira_core`.
+# ScanResolver — the EXECUTION-TIME registry, tier 1. Lives in `komira_scan_source`.
 # =============================================================================
 #
 # TWO TIERS, AND WHY. A core-resident trait CANNOT SPELL a type that lives
 # above core (see `komira_plan_expr/fs_resolver.mojo`). `MorselSourceImpl`
-# lives in `komira_morsel`, which depends on `komira_core`. So the
+# lives in `komira_morsel`, which depends on the core packages. So the
 # execution-time surface splits:
 #
 #   TIER 1 (here, in core)  — identity and freshness. `epoch`, `is_bound`,
@@ -102,7 +102,7 @@ trait ScanPayloadResolver(ScanResolver):
     ⚠ AND WHY IT IS NOT TIER 2 EITHER. Tier 2 puts the payload-handing surface
     in `komira_morsel` because `MorselSourceImpl` lives above core. That reason
     does NOT apply here: `ArcPointer[Slab[RecordBatch]]` is `std.memory` +
-    `komira_core.collections` + `komira_core.arrow`, every one a type core
+    the core packages + the core packages, every one a type core
     already spells — the same reasoning that puts `ScanRegistry` itself in
     core. A kind whose payload is a core type needs no package above core;
     this trait is that rule given a name. Tier 2 (`ScanMorselResolver`) is

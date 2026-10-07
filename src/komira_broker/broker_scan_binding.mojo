@@ -1,15 +1,15 @@
 # =============================================================================
-# broker_scan_binding — a PLAN SOURCE, defined OUTSIDE `komira_core`.
+# broker_scan_binding — a PLAN SOURCE, defined OUTSIDE the core packages.
 # =============================================================================
 #
-# A broker source is a plan source even though it lives outside komira_core.
+# A broker source is a plan source even though it lives outside the core packages.
 #
 # ---------------------------------------------------------------------------
 # WHY THIS FILE EXISTS
 # ---------------------------------------------------------------------------
 #
 # A broker source cannot be an arm of the closed `SourceVariant` union in
-# komira_core: that would force `komira_core -> komira_broker ->
+# the core packages: that would force `the core packages -> komira_broker ->
 # {objectstore, ...}`, inverting the build DAG. And `MessageBrokerConsumer` is
 # Movable-only (see consumer_source), so it cannot be the Copyable value a
 # plan carries. The clean resolution is a Copyable backend HANDLE (a cheap
@@ -17,7 +17,7 @@
 # constructed at execute time).
 #
 # That handle is `ScanBinding`, and this file builds one. `komira_broker`
-# depends on `komira_core`; `komira_core` does not and never needs to depend
+# depends on the core packages; the core packages does not and never needs to depend
 # on `komira_broker`. The DAG is not inverted, and the plan can be rooted at a
 # broker scan.
 #
@@ -56,17 +56,17 @@
 # is a broker concept core cannot spell.
 # =============================================================================
 
-from komira_core.arrow.schema import Schema
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_arrow.schema import Schema
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     scan_kind_id,
     SCAN_ORIENTATION_COLUMNAR,
     SNAPSHOT_LIVE,
 )
-from komira_core.source.scan_identity_audit import ScanIdentityCorpus
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import (
+from komira_scan_source.scan_identity_audit import ScanIdentityCorpus
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import (
     ScanParams,
     param_hash_string,
     PARAM_I64,

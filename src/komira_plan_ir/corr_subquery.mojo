@@ -6,7 +6,7 @@
 #
 # `plan/expr.mojo` may not name `LogicalPlan` — that import would be the single
 # edge holding `Expr` inside a large strongly-connected component and pulling
-# most of `komira_core` into its translation-unit closure. The payload
+# most of the core packages into its translation-unit closure. The payload
 # therefore holds the plan in an `ErasedBox` (`corr_subquery_data.mojo`), and
 # THIS module — which is downstream of both `expr` and `logical_plan`, so it may
 # name either — is where the type comes back.

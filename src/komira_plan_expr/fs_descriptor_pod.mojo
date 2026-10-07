@@ -1,11 +1,11 @@
 # =============================================================================
-# komira_plan_expr.fs_descriptor_pod — the komira_core identity POD for a
+# komira_plan_expr.fs_descriptor_pod — the core packages identity POD for a
 # per-source filesystem, type-erased from the concrete FS type.
 # =============================================================================
 #
 # WHY A POD (the layering rule):
 #   The plan node that must carry FS identity — `ParquetSourceData`
-#   (`komira_plan_ir.physical_plan`) — lives in `komira_core`, the package
+#   (`komira_plan_ir.physical_plan`) — lives in `komira_plan_expr`, the package
 #   every FS package DEPENDS ON. Core therefore CANNOT name a concrete FS type
 #   (`LocalFs` / `S3Fs[C]` / `GcsFs[C]` / `AzureFs[C]`) without inverting the
 #   dependency graph. So the plan node carries an FS-DESCRIPTOR POD: a pure
@@ -39,7 +39,7 @@ comptime FS_SCHEME_AZURE: UInt8 = 3  # Azure Blob ("az://" / "abfss://")
 
 @fieldwise_init
 struct FsDescriptorPod(Copyable, Movable, Deinitable):
-    """The `komira_core` identity POD for a per-source filesystem.
+    """The core packages identity POD for a per-source filesystem.
 
     A pure identity value carried on the plan node (`ParquetSourceData`). It
     names NO concrete FS type — the live `FsHandle` lives in the upper-layer

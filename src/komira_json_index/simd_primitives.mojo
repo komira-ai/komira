@@ -6,13 +6,13 @@
 # Hot path. This module hosts the JSON-specific SIMD primitives the
 # Stage 1 structural indexer (`structural_index.mojo`) consumes. The
 # primitives belong to `komira_json_index` and are NOT part of the general
-# `komira_core.simd.` surface — they encode JSON-shaped semantics (16-byte
+# `komira_simd.` surface — they encode JSON-shaped semantics (16-byte
 # chunk width, 16-bit movemask, 9-tag char-class table, escape state-machine)
 # that would invite mis-use if generalized.
 #
 # Cross-arch dispatch follows the same `comptime if CompilationTarget.is_x86()`
-# shape as `komira_core.simd.horizontal_add` (the
-# `llvm.aarch64.neon.uaddv` direct intrinsic) and `komira_core.simd.compress`
+# shape as `komira_simd.horizontal_add` (the
+# `llvm.aarch64.neon.uaddv` direct intrinsic) and `komira_simd.compress`
 # (AVX-512 intrinsic dispatch). On osx-arm64 the NEON path is the default; on
 # x86_64 it falls through to a scalar/SWAR pattern (correctness-first; an
 # AVX-512 / AVX2 arm is possible future work).
@@ -49,18 +49,18 @@ from std.bit import count_trailing_zeros
 from std.sys.info import CompilationTarget
 from std.sys.intrinsics import llvm_intrinsic
 
-from komira_core.simd.horizontal_add import hadd_u8x16, hadd_widening_u8x16
+from komira_simd.horizontal_add import hadd_u8x16, hadd_widening_u8x16
 
 # The five JSON-private SIMD helpers below delegate to the canonical
-# implementations in `komira_core.simd.byte_class` (shared with the CSV
+# implementations in `komira_simd.byte_class` (shared with the CSV
 # reader). JSON consumers import from `komira_json_index.simd_primitives`; the
 # local wrappers are thin pass-throughs.
-from komira_core.simd.byte_class.byte_mask_ops import bytemask_or as _byte_class_bytemask_or
-from komira_core.simd.byte_class.movemask import (
+from komira_simd.byte_class.byte_mask_ops import bytemask_or as _byte_class_bytemask_or
+from komira_simd.byte_class.movemask import (
     byte_eq_to_bytemask_u8x16 as _byte_class_byte_eq_to_bytemask_u8x16,
     movemask_to_uint_u8x16 as _byte_class_movemask_to_uint_u8x16,
 )
-from komira_core.simd.byte_class.prefix_xor import (
+from komira_simd.byte_class.prefix_xor import (
     prefix_xor_u16 as _byte_class_prefix_xor_u16,
 )
 
@@ -159,7 +159,7 @@ def movemask_to_uint_u8x16(byte_mask: SIMD[DType.uint8, 16]) -> UInt32:
 
     Bit k of the result is 1 iff `byte_mask[k] == 0xFF`.
 
-    Implemented by `komira_core.simd.byte_class.movemask.
+    Implemented by `komira_simd.byte_class.movemask.
     movemask_to_uint_u8x16`; this local wrapper is a thin pass-through.
 
     NEON lowering (about 1.9× faster than a per-lane shift-and-OR
@@ -318,7 +318,7 @@ def prefix_xor_u16(bits: UInt32, mut carry: Bool) -> UInt32:
 
     Result bit k = `carry_in XOR (bits[0] XOR bits[1] XOR ... XOR bits[k])`.
 
-    Implemented by `komira_core.simd.byte_class.prefix_xor.
+    Implemented by `komira_simd.byte_class.prefix_xor.
     prefix_xor_u16`; this local wrapper is a thin pass-through.
     """
     return _byte_class_prefix_xor_u16(bits, carry)
@@ -345,7 +345,7 @@ def _byte_eq_u8x16_to_bytemask(
 ) -> SIMD[DType.uint8, 16]:
     """chunk[k] == target → 0xFF, else 0x00.
 
-    Implemented by `komira_core.simd.byte_class.movemask.
+    Implemented by `komira_simd.byte_class.movemask.
     byte_eq_to_bytemask_u8x16`; thin pass-through.
     """
     return _byte_class_byte_eq_to_bytemask_u8x16(chunk, target)
@@ -358,7 +358,7 @@ def _bytemask_or(
     """OR two byte-masks (each lane 0xFF or 0x00). Equivalent to
     `a | b` since both lanes are 0xFF/0x00 in shape.
 
-    Implemented by `komira_core.simd.byte_class.byte_mask_ops.
+    Implemented by `komira_simd.byte_class.byte_mask_ops.
     bytemask_or[16]`; thin pass-through.
     """
     return _byte_class_bytemask_or[16](a, b)

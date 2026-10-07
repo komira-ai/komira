@@ -30,7 +30,7 @@ from std.memory import ArcPointer
 from std.os.path import exists
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 from komira_crypto.hex import hex_lower_array_32
 from komira_crypto.sha256 import sha256
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream

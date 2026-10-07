@@ -150,7 +150,7 @@ diagnostic into a crash is one nobody dares to use.
 #
 # ⚠ THE MAP DELIBERATELY DOES NOT LIVE HERE. Here it would have to spell the
 # `PLAN_*` values as integer literals to avoid a `komira_metrics ->
-# komira_core.plan` import — a mirror, and a mirror of a tag table drifts
+# the core packages` import — a mirror, and a mirror of a tag table drifts
 # silently. It lives beside the ONE call site, in a module that already
 # imports the real `PLAN_*` constants, so there is nothing to keep in sync.
 # -----------------------------------------------------------------------------

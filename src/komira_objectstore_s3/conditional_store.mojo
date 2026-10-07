@@ -36,7 +36,7 @@
 from std.memory import ArcPointer
 
 from komira_aws_core import AwsClock, AwsCredsSource
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_objectstore.path import Path

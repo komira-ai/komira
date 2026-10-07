@@ -44,7 +44,7 @@ from komira_column_kernels.regexp_nfa import (
 from komira_column_kernels.string_comparison import eval_string_like
 from komira_dynamic_filter.bloom_filter import xxhash64
 from komira_simd.byte_class.byte_equal import bytes_equal
-from komira_counters.rxcensus import (
+from komira_column_kernels.rxcensus import (
     RXCENSUS_ROWS_ENABLED,
     RXC_REPLACE_CALLS,
     RXC_REPLACE_ROWS,

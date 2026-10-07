@@ -76,7 +76,7 @@ def _hash_combine(a: UInt64, b: UInt64) -> UInt64:
 # =============================================================================
 #
 # ⚠ DECLARED HERE AND MIRRORED IN `komira_csv.csv_options.CsvReadOptions`, NOT
-# imported from it. `komira_core` cannot depend on `komira_csv` (the chassis
+# imported from it. The core packages cannot depend on `komira_csv` (the chassis
 # depends on core, not the reverse), so the two spellings of "the default CSV
 # dialect" are structurally separate. A test at the SDK layer, which can
 # import both, pins them equal. A core default that drifted from the chassis

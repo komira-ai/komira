@@ -24,7 +24,7 @@
 
 from std.memory import UnsafePointer
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink

@@ -18,7 +18,8 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_libc:komira_libc",
         "//third_party/s2n-tls:s2n",
     ],
     test_srcs = [

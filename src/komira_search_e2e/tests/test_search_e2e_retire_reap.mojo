@@ -91,7 +91,7 @@ from komira_objectstore.store import (
     ObjectStore,
 )
 
-from komira_core.source.scan_binding import ScanBinding
+from komira_scan_source.scan_binding import ScanBinding
 
 from komira_search_scan.search_scan_kind import SearchScanResolver
 

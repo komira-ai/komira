@@ -43,7 +43,7 @@ from komira_async.runtime.parallel_steal import (
 )
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_async.runtime.steal_work import StealWork
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # -----------------------------------------------------------------------------

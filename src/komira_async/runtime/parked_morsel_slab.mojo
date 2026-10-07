@@ -57,7 +57,7 @@
 # =============================================================================
 
 from komira_async.runtime.op_id_index_map import OpIdIndexMap
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 struct ParkedMorselSlab[

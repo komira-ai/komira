@@ -33,7 +33,7 @@ def test_no_environment_read() raises:
         "EnvSource",
         "ProcessEnv",
         "aws_endpoint_config",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
         # Not a read: komira_aws_core's endpoint path for a client with no
         # ruleset (an override, else https://<host>), whose override a

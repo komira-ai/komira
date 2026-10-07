@@ -200,12 +200,12 @@
 from komira_atomic_alias import AtomicI8, AtomicI64
 from std.memory import alloc, UnsafePointer
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column, HeapRegion
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column, HeapRegion
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_plan_expr.expr import (
     BIN_EQ,
     BIN_GE,
     BIN_GT,
@@ -215,9 +215,9 @@ from komira_core.plan.expr import (
     EXPR_COL_IDX,
     EXPR_LITERAL,
 )
-from komira_core.plan.expr_pool import ExprPool
-from komira_core.traits.expr_id import ExprId
-from komira_core.traits.source_capabilities import SourceCapabilities
+from komira_plan_expr.expr_pool import ExprPool
+from komira_plan_expr.expr_id import ExprId
+from komira_scan_source.source_capabilities import SourceCapabilities
 
 from .morsel import Morsel
 from .morsel_source import MorselSourceImpl
@@ -231,9 +231,9 @@ from .morsel_source import MorselSourceImpl
 @always_inline
 def _vt_null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     """A NULL typed pointer. Mojo removed the null ctor; this is the
-    tree's established replacement (`komira_core/arrow/c_data_interface.mojo`
+    tree's established replacement (`komira_arrow_ipc/c_data_interface.mojo`
     `_null_ptr`), copied here rather than imported so this file's `-I` closure
-    stays exactly `komira_core` + `komira_morsel`.
+    stays the core packages plus `komira_morsel`.
 
     # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the bare
     # pointer and `None` is the all-zero bit pattern. No `unsafe_from_address`.

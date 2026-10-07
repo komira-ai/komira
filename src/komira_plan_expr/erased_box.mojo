@@ -8,7 +8,7 @@
 # `WHERE x > (SELECT max(y) FROM t2)` genuinely nests a plan inside an
 # expression, so `Expr` tag 14 (`EXPR_CORRELATED_SUBQUERY`) carries a whole
 # `LogicalPlan`. Naming that type in the field would put `plan/expr.mojo`
-# inside a large strongly-connected component and pull most of `komira_core`
+# inside a large strongly-connected component and pull most of the core packages
 # into its translation-unit closure — and `Expr` could not be a foundation
 # type.
 #

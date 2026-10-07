@@ -28,10 +28,10 @@ from std.testing import (
     assert_almost_equal,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import (
     Field, SchemaBuilder, RecordBatch, RecordBatchBuilder,
 )
 from komira_udf.agg_fn import AggFn
@@ -60,7 +60,7 @@ from komira_agg.builtin_agg_fns_bool import AnyBool, AllBool, CountBool
 from komira_agg.builtin_agg_fns_vec import (
     SumI64Vec, SumF64Vec, MinI64Vec, MaxI64Vec, CountI64Vec, AvgF64Vec,
 )
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 # =============================================================================
