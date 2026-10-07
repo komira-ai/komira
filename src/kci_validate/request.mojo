@@ -61,8 +61,9 @@
 # version and build, or it RAISES naming the library: the solver would
 # bring a build nobody validated. A requirement is the native package's when
 # its name, past any leading whitespace and up to the first byte no package
-# name holds, is; its shape is then exact: single spaces, no tab or other
-# control byte, three words.
+# name holds, lowercased as a conda solver does, is; its shape is then exact:
+# single spaces, no tab or other control byte, three words, the first the
+# name itself in lowercase.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -400,8 +401,10 @@ def _is_name_byte(b: UInt8) -> Bool:
 
 def _requirement_name(req: String) -> String:
     """The name a requirement is about, as the solver reads it: past any
-    leading whitespace, the run of name bytes. A tab, a leading space or a
-    glued operator after the name does not hide it from `with_native`."""
+    leading whitespace, the run of name bytes, lowercased (a conda solver
+    lowercases a package name before matching it, CEP 29). A tab, a leading
+    space, another case or a glued operator or bracket after the name does
+    not hide it from `with_native`."""
     var b = req.as_bytes()
     var start = 0
     while start < len(b) and b[start] <= UInt8(0x20):
@@ -409,7 +412,8 @@ def _requirement_name(req: String) -> String:
     var end = start
     while end < len(b) and _is_name_byte(b[end]):
         end += 1
-    return String(req[byte=start:end])
+    # name bytes are ASCII, so lowering them is the solver's lowering
+    return String(req[byte=start:end]).lower()
 
 
 def _only_spaces(req: String) -> Bool:
@@ -447,6 +451,12 @@ def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[I
                 if not native:
                     continue
                 var words = req.split(String(" "))
+                # The three-word split, the bare lowercase name as the first
+                # word and the `==` prefix decide the shape. `_only_spaces` and
+                # the two length guards refuse nothing the version and build
+                # comparison below would let through when release.json holds
+                # the name; they make a tab, an empty version or an empty build
+                # a shape refusal naming the requirement, not a mismatch.
                 if (
                     not _only_spaces(req)
                     or len(words) != 3

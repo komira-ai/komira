@@ -13,7 +13,8 @@
 #       without it FAILS by name
 #     ENV refusals, before anything runs: a library pinning komira_native at
 #       another build or another version, or in another shape (another
-#       operator, a fourth word, no build, a tab, a leading space); a
+#       operator, a fourth word, no build, a tab, a leading space, the
+#       name in another case, a bracket glued to the name); a
 #       metapackage that does not require komira_native
 #     ENV, komira_native alone: no library, so no README runs: a FAIL, never
 #       a pass (and never "not a metapackage")
@@ -427,6 +428,28 @@ def test_env_a_native_requirement_with_a_leading_space_is_refused() raises:
     var n = String(NATIVE)
     _refused_requirement(
         String("shape_lead"), String(" ") + n + String(" ==1.0.0 ") + b, _shape(String(" ") + n + String(" ==1.0.0 ") + b)
+    )
+
+
+def test_env_a_native_requirement_in_another_case_is_refused() raises:
+    # the solver lowercases a package name before matching it (CEP 29), so
+    # `KOMIRA_NATIVE` brings komira_native: never taken for another package
+    var b = ExampleRelease().build()
+    _refused_requirement(
+        String("case_upper"), String("KOMIRA_NATIVE ==1.0.0 ") + b, _shape(String("KOMIRA_NATIVE ==1.0.0 ") + b)
+    )
+    _refused_requirement(
+        String("case_mixed"), String("Komira_Native ==1.0.0 ") + b, _shape(String("Komira_Native ==1.0.0 ") + b)
+    )
+
+
+def test_env_a_native_requirement_with_bytes_glued_to_the_name_is_refused() raises:
+    # a MatchSpec bracket after the name: the version and build words would
+    # pass, so only the first word being the bare name refuses it
+    var b = ExampleRelease().build()
+    var n = String(NATIVE)
+    _refused_requirement(
+        String("glued_bracket"), n + String("[build=x] ==1.0.0 ") + b, _shape(n + String("[build=x] ==1.0.0 ") + b)
     )
 
 
