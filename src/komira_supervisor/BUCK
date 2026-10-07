@@ -8,7 +8,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # kqueue / epoll subsystems.
 
 # The C side: posix_spawnp with two pipes, the environment reader, the
-# waitpid decode and the per-platform exit-wait primitives.
+# waitpid decode, the non-reaping waitid child probe and the per-platform
+# exit-wait primitives.
 staged_files(
     name = "proc_shim_files",
     srcs = ["_proc_shim.c"],
@@ -29,6 +30,7 @@ mojo_library(
         "//src/komira_async:komira_async",
     ],
     test_srcs = [
+        "tests/test_child_probe.mojo",
         "tests/test_supervisor_scenarios.mojo",
     ],
     visibility = ["PUBLIC"],

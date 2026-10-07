@@ -1154,6 +1154,10 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         explicitly via `enable_sublineage_write`."""
         self._segment_store = segment_store^
         self._manifest = manifest^
+        # A broker partition's chunks are reaped below `_LOG_START`, so its
+        # writer must never acknowledge a win in a reaped slot (#486): opt in to
+        # the manifest's reaped-slot guard (one GET per acknowledged append).
+        self._manifest.enable_reaped_slot_guard()
         self._cluster = cluster^
         self._topic = topic^
         self._partition = partition
@@ -1260,6 +1264,9 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
                 "BrokerCore.enable_sublineage_write: shard_id must be non-empty"
                 " (mint it via partition_assignment.mint_shard_id)"
             )
+        # Sub-lineage chunks are retired and reaped too: same opt-in as the
+        # consolidated manifest (#486).
+        sublineage_manifest.enable_reaped_slot_guard()
         self._sublineage_manifest = Optional[CasManifestStore[Self.Storage]](
             sublineage_manifest^
         )
@@ -2114,8 +2121,12 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         # Scan TOP-DOWN, early-exit on the first chunk for this producer (its
         # latest commit is near the tail → O(1)-ish, avoiding the O(N) full
         # replay per produce). Seed the in-process cache on a hit.
+        # FLOORED at `_LOG_START` (one GET): a chunk below it is retired, or a
+        # refused reaped-slot win (#486) that was never committed, so a producer
+        # match there would be a false DUPLICATE.
+        var floor = self._manifest.read_log_start_seq()
         var seq = head.chunk_seq
-        while seq >= Int64(0):
+        while seq >= floor:
             var raw = self._manifest.read_chunk(seq)
             var mb = ManifestBody.decode(raw)
             if mb.producer_id == producer_id:

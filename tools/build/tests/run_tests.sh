@@ -311,7 +311,9 @@
 #      symbol not exported, a row for a symbol the README uses (the ledger
 #      only shrinks), an undocumented symbol under `enforce = True`, and a
 #      root with no package.
-#  41. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
+
+#  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
+#  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
 #      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
 #      file of the cell, against tests/pointer_lint_ffi.tsv and
 #      tests/pointer_lint_holds.tsv) and tests//functional/pointer_lint:ok (a
@@ -1169,6 +1171,10 @@ expect_red readme_api_coverage_stale_private "$N/ledger_stale_gone.tsv:3: komira
 expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enforce"
 
 # 41
+# shellcheck source=tools/build/tests/coverage_tests.sh
+. "$ROOT/tools/build/tests/coverage_tests.sh"
+
+# 42
 expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
 N=tests//negative/pointer_lint
 S="$N/src/komira_a/plant.mojo"

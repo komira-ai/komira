@@ -5,13 +5,9 @@
 # Ordered request/response interceptors.
 #
 # Submodules:
-#   - middleware.mojo      — Middleware trait + RequestContext
-#   - key_constraint.mojo  — KeyConstraint: the credential ATTENUATION carrier.
-#                            May only SUBTRACT from membership-derived
-#                            authority. Lives here for the SAME layering reason
-#                            AuthedUser does: the credential resolver and the
-#                            authorization decider are siblings, and
-#                            komira_http is the one package both depend on.
+#   - middleware.mojo      — Middleware trait, RequestContext, and the opaque
+#                            Principal / Claims an embedder's own middleware
+#                            attaches (this library gives them no meaning)
 #   - chain.mojo           — MiddlewareChain driver
 #   - logging.mojo         — LoggingMiddleware
 #   - tracing.mojo         — TracingMiddleware
@@ -21,9 +17,12 @@
 #                            detail on stdout under that same id)
 #   - cors.mojo            — CorsMiddleware (Origin / Methods / preflight)
 #   - passthrough.mojo     — PassthroughMiddleware: the INERT innermost slot,
-#                            for an app whose authorization lives inside its
-#                            DISPATCHER (per-route or per-arm gates).
+#                            for an embedder whose access checks live inside
+#                            its DISPATCHER (per-route or per-arm gates).
 #                            Authorizes nothing; see its banner.
+#   - metrics.mojo         — MetricsMiddleware + MetricsSink, and
+#                            PairMiddleware, which composes two middleware
+#                            into one slot (nest it to compose more)
 #
 # Mojo 1.0.0b1 trait constraints (no HKT, no `impl Trait`) drive the
 # composition-over-polymorphism chain shape: the chain holds the 4
@@ -50,18 +49,7 @@ from .fault_report import (
     response_body_text,
     trace_header_of,
 )
-from .key_constraint import (
-    KEY_MASK_UNCONSTRAINED,
-    KeyConstraint,
-    mask_allows_ordinal,
-)
 from .logging import LogEntry, LoggingMiddleware
 from .passthrough import PassthroughMiddleware
-from .middleware import (
-    AuthedUser,
-    GrantClaim,
-    GRANT_CLAIM_CTX_REF_LEN,
-    Middleware,
-    RequestContext,
-)
+from .middleware import Claims, Middleware, Principal, RequestContext
 from .tracing import TracingMiddleware

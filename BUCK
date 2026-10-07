@@ -68,6 +68,7 @@ _TESTS_LINTS = [
     "tests//:shell_lint",
     "tests//functional/aws_codegen:shell_lint",
     "tests//functional/bundle_parity:shell_lint",
+    "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
@@ -75,12 +76,15 @@ _TESTS_LINTS = [
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
     "//src/komira_aws_lambda_http:deps_lint",
+    "//src/komira_azure_blob_e2e:deps_lint",
     "//src/komira_http_client:deps_lint",
     "//src/komira_http_conformance:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
     "//src/komira_http_tls_e2e:deps_lint",
+    "//src/komira_secrets_e2e:deps_lint",
     "//src/komira_job_supervisor_loopback:deps_lint",
+    "//src/komira_json_conformance:deps_lint",
     "//src/komira_udf_e2e:deps_lint",
 ] if read_root_config("cells", "tests") else []
 

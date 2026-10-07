@@ -136,7 +136,7 @@ Entry points:
 
 ## How is it tested?
 
-The spelling rules are tested by compiling the tree: `./buck2 build //...` fails on an old spelling. The pointer lint is test 41 of `tools/build/tests` (`tests//functional/pointer_lint:ok` builds a planted tree holding every rule's sites at their exact counts beside near misses; each target of `tests//negative/pointer_lint` fails naming one planted site or ledger defect).
+The spelling rules are tested by compiling the tree: `./buck2 build //...` fails on an old spelling. The pointer lint is test 42 of `tools/build/tests` (`tests//functional/pointer_lint:ok` builds a planted tree holding every rule's sites at their exact counts beside near misses; each target of `tests//negative/pointer_lint` fails naming one planted site or ledger defect).
 
 ## What are its limits and open questions?
 

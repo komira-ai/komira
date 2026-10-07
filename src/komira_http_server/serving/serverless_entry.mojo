@@ -241,7 +241,7 @@ def serve_one_iteration_chained_over[
     The CHAINED twin of `serve_one_iteration_over` — this IS the body of
     `GcpServerlessEntry.serve_chained`'s infinite loop, extracted so a unit test
     can step it deterministically. It forwards to the server's
-    `serve_one_iteration_dispatch_chained[R, M, RT]`, the same seam a managed-app
+    `serve_one_iteration_dispatch_chained[R, M, RT]`, the same seam an embedding
     binary can drive directly."""
     return server.serve_one_iteration_dispatch_chained[R, M, RT](
         chain, auth_mw, dispatcher, timeout_us
@@ -342,17 +342,17 @@ struct GcpServerlessEntry(ServerlessEntry, Movable, Deinitable):
         ★ THE CHAINED SIBLING OF `serve`, AND THE REASON IT EXISTS: `serve` runs
         NO middleware, so an app on it stamps no `Access-Control-Allow-Origin` and
         answers no browser preflight — it cannot be dialled by a browser at all.
-        An app that wants CORS (every managed app a SPA talks to) serves here
+        An app that wants CORS (any app a browser page talks to) serves here
         instead. Nothing else differs: same port, same 0.0.0.0
         bind, same `SERVERLESS_LISTENING` announce token (with one extra field
         naming the chain), same infinite loop.
 
         ⚠ `M` IS NOT NECESSARILY AN AUTH MIDDLEWARE. It is the chain's innermost
-        slot. An app whose auth lives in a middleware passes
-        `VerifyingGrantMiddleware`; an app that authorizes INSIDE its dispatcher
-        (the CRM's `CrmAuthGate`) passes `PassthroughMiddleware` and keeps gating
-        itself. Naming the type at the call site is what keeps which of the two it
-        is visible in the app's own source.
+        slot. An app whose authentication lives in a middleware passes its own
+        `Middleware` conformer; an app that checks access INSIDE its dispatcher
+        passes `PassthroughMiddleware` and keeps gating itself. Naming the type
+        at the call site is what keeps which of the two it is visible in the
+        app's own source.
 
         `chain`, `auth_mw` and `router` are all moved in and owned for the serve
         lifetime. `serve_chained` normally NEVER RETURNS (the platform tears the

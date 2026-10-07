@@ -36,6 +36,10 @@ comptime _STAGE_OPEN: Int32 = 1
 comptime _STAGE_FSTAT: Int32 = 2
 comptime _STAGE_READ: Int32 = 3
 comptime _STAGE_STAT: Int32 = 4
+comptime _STAGE_WRITE: Int32 = 5
+comptime _STAGE_FSYNC: Int32 = 6
+comptime _STAGE_CLOSE: Int32 = 7
+comptime _STAGE_LINK: Int32 = 8
 
 # Mirrors KOMIRA_OBJSTORE_KIND_* in _objectstore_shim.c.
 comptime _KIND_DIRECTORY: Int32 = 2
@@ -45,6 +49,12 @@ comptime _KIND_DIRECTORY: Int32 = 2
 def _enoent() -> Int32:
     """The platform's ENOENT, from the C shim (never spelled in Mojo)."""
     return external_call["komira_objstore_enoent", Int32]()
+
+
+@always_inline
+def _eexist() -> Int32:
+    """The platform's EEXIST, from the C shim (never spelled in Mojo)."""
+    return external_call["komira_objstore_eexist", Int32]()
 
 
 def _errno_name(e: Int32) -> String:
@@ -69,6 +79,14 @@ def _stage_name(stage: Int32) -> String:
         return String("fstat")
     if stage == _STAGE_READ:
         return String("read")
+    if stage == _STAGE_WRITE:
+        return String("write")
+    if stage == _STAGE_FSYNC:
+        return String("fsync")
+    if stage == _STAGE_CLOSE:
+        return String("close")
+    if stage == _STAGE_LINK:
+        return String("link")
     return String("stat")
 
 

@@ -588,6 +588,15 @@ def _scan_scalar(b: Span[UInt8, _], i: Int) -> Int:
     return _scan_number(b, i)
 
 
+def is_json_object_text(s: String) -> Bool:
+    """True iff `s` is exactly one well-formed RFC 8259 JSON object with only
+    whitespace around it: the check the route makes before it embeds a hit's
+    `source_json` verbatim (`_render_hit`). It validates grammar and builds
+    no value; a `\\u` escape is checked for four hex digits only, so an
+    escaped lone surrogate passes."""
+    return _is_json_object(s)
+
+
 def _is_json_object(s: String) -> Bool:
     """True iff `s` is EXACTLY ONE well-formed JSON object, with nothing but
     whitespace before and after it.

@@ -327,7 +327,7 @@ trait RequestDispatcher(Movable, Deinitable):
     mapper; an uncaught raise becomes a 500 by the round's catch).
 
     The single method takes `mut self` so a stateful dispatcher (e.g. one
-    owning a `JobManager` that mutates a DB) can drive its state on each
+    owning a database handle) can drive its state on each
     request.
 
     `dispatch` is `[RT: Runtime]`-parametric and
@@ -357,12 +357,12 @@ trait RequestDispatcher(Movable, Deinitable):
 # the plain `RequestDispatcher`
 # above receives ONLY `(reactor, req)` — so a `RequestDispatcher` that needs an
 # identity had to resolve the `Authorization: Bearer` token
-# ITSELF inside `dispatch`, duplicating what an `AuthMiddleware` already does.
+# ITSELF inside `dispatch`, duplicating what an authentication middleware already does.
 # That is the gap this trait closes: a `CtxRequestDispatcher` ADDITIONALLY
 # accepts the per-request `RequestContext` the middleware chain has already
-# populated (`ctx.authed_user` set by an auth middleware's `before`, or a 401
+# populated (`ctx.principal` set by an auth middleware's `before`, or a 401
 # short-circuit that means `dispatch_with_ctx` is never reached at all). The
-# dispatcher then READS `ctx.authed_user` instead of re-resolving the token.
+# dispatcher then READS `ctx.principal` instead of re-resolving the token.
 #
 # It REFINES `RequestDispatcher` (a `CtxRequestDispatcher` IS a
 # `RequestDispatcher`), so a conformer that opts into the middleware path
@@ -373,23 +373,23 @@ trait RequestDispatcher(Movable, Deinitable):
 # on plain `RequestDispatcher` and are completely untouched — this is purely
 # additive, no existing conformer changes.
 #
-# ENCAPSULATION: `ctx` is a value-typed `RequestContext` (a POD — scalars +
-# an `Optional[AuthedUser]`, itself two inline `Uuid`s; no heap, no pointer). It
-# is passed by `read` (immutable borrow) — the dispatcher reads the identity but
-# does not own or mutate the chain's context.
+# ENCAPSULATION: `ctx` is a value-typed `RequestContext` (scalars, an
+# `Optional[Principal]` and a string attribute map; no pointer). It is passed
+# by `read` (immutable borrow) — the dispatcher reads the identity but does not
+# own or mutate the chain's context.
 
 
 trait CtxRequestDispatcher(RequestDispatcher):
     """A `RequestDispatcher` that ALSO accepts the middleware-populated
     `RequestContext` (the identity the auth middleware resolved). Conform to
     this (instead of bare `RequestDispatcher`) when the dispatcher's handlers
-    read `ctx.authed_user` rather than resolving the bearer themselves.
+    read `ctx.principal` rather than resolving the bearer themselves.
 
     A conformer implements BOTH:
       * `dispatch[RT](reactor, req)` — the chain-less path (RequestDispatcher).
       * `dispatch_with_ctx[RT](reactor, req, ctx)` — the chained path: the
         middleware chain has already run its `before` legs (auth resolved
-        `ctx.authed_user` or short-circuited 401 before this is reached), so
+        `ctx.principal` or short-circuited 401 before this is reached), so
         the dispatcher reads the identity off `ctx` instead of re-resolving.
 
     The two are usually trivially related — `dispatch` builds an empty/anon
@@ -745,7 +745,7 @@ def serve_read_round_dispatch[
 #
 # `_drive_chain_dispatch[D, M, RT]` is the leaf that wires the chain in:
 # the middleware chain's `before` legs run (CORS / Tracing / Logging, then the
-# auth middleware which resolves `ctx.authed_user` OR short-circuits 401), and
+# auth middleware which resolves `ctx.principal` OR short-circuits 401), and
 # ONLY IF NOT short-circuited does the `CtxRequestDispatcher` run — with the
 # populated `ctx` handed to it. Then the `after` legs run in reverse. The whole
 # thing is wrapped in the chain's ErrorMapper try (an uncaught raise from any
@@ -777,7 +777,7 @@ def _drive_chain_dispatch[
             → (dispatcher, only if no short-circuit)
             → auth.after → Logging.after → Tracing.after → CORS.after
 
-    The auth middleware's `before` either attaches `ctx.authed_user` (continue
+    The auth middleware's `before` either attaches `ctx.principal` (continue
     → the dispatcher runs and reads the identity off `ctx`) or short-circuits
     `Some(401)` (the dispatcher is NEVER reached). ALWAYS returns a response.
     """
@@ -799,7 +799,7 @@ def _drive_chain_dispatch[
             response = sc.take()
         else:
             # Not short-circuited — run the dispatcher WITH the populated ctx
-            # (auth attached `ctx.authed_user`; the dispatcher reads it). `req`
+            # (auth attached `ctx.principal`; the dispatcher reads it). `req`
             # is a MUT BORROW here (not consumed) so it stays alive for the
             # `after` legs below.
             response = dispatcher.dispatch_with_ctx[RT](reactor, req, ctx)
@@ -998,7 +998,7 @@ def serve_read_round_dispatch_chained[
                     break
 
             # The middleware-in-path leaf: run the chain `before` legs (auth
-            # resolves `ctx.authed_user` or short-circuits 401), then — only if
+            # resolves `ctx.principal` or short-circuits 401), then — only if
             # not short-circuited — the dispatcher WITH the populated ctx, then
             # the `after` legs. `_drive_chain_dispatch` ALWAYS returns a
             # response (the ErrorMapper turns any raise into a 500).
