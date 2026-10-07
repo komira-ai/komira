@@ -3,7 +3,9 @@
 # anything.
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
+load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -192,6 +194,35 @@ _TESTS_LINTS = [
     name = "readme_api_coverage",
     enforce = False,
     exceptions = "tests/readme_api_exceptions.tsv",
+    tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# The surface x capability matrix (tools/build/lint/surface_capability_matrix.bzl;
+# the rules and today's census: docs/surface_capability_matrix.md): for every
+# surface and every capability of the plan, the surface e2e test target that
+# exercises it end to end (in src/tests/e2e/<surface>_e2e/), or `-`. The
+# ledger is tests/surface_capability_matrix.bzl, Starlark so the build graph
+# resolves each named target (one that does not exist fails the build). It
+# fails on a malformed or lying row (a duplicate pair, an unknown name, a
+# target outside its surface's package or no test), on a capability not
+# grounded in the plan constants of the files `grounding` names (or a
+# constant of those families no capability or NOT_CAPABILITIES row names),
+# and on fewer filled cells than `floor`, which only rises: raise it to the
+# new count in the change that fills a cell. A missing cell is never a
+# finding: `[report]` and `[matrix]` are the census.
+[surface_capability_matrix(
+    name = "surface_capability_matrix",
+    capabilities = CAPABILITIES,
+    floor = 0,
+    grounding = {
+        "src/komira_plan_expr/expr.mojo": [],
+        "src/komira_plan_expr/fs_descriptor_pod.mojo": ["FS_SCHEME_"],
+        "src/komira_plan_expr/udf_data.mojo": ["UDF_KIND_"],
+        "src/komira_plan_ir/logical_plan.mojo": ["PLAN_", "SOURCE_", "JOIN_"],
+    },
+    not_capabilities = NOT_CAPABILITIES,
+    rows = MATRIX,
+    surfaces = SURFACES,
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 

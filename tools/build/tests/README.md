@@ -988,6 +988,12 @@ querying its attributes, so narrowing it fails.
 `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
 [the repository lint tests](lint_tests.md#45-the-layout-of-src).
 
+## 52. Surface capability matrix
+
+`surface_capability_matrix`: for every surface and every capability of the plan, the surface e2e test that exercises
+it, and the census. The test is in
+[the repository lint tests](lint_tests.md#52-the-surface-capability-matrix).
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`

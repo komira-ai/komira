@@ -361,6 +361,19 @@
 #      no package. With a module map (`map`; //:src_layout reads
 #      docs/architecture.md): a package with no row, a row naming no package,
 #      a second row for a package, and a row whose name is not its link's.
+#  52. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
+#      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
+#      surface and capability of the plan, against tests/surface_capability_matrix.bzl)
+#      and tests//functional/surface_capability_matrix:ok (a planted matrix,
+#      three cells filled by planted surface e2e targets, whose census must
+#      equal its expected files) build; each target of
+#      tests//negative/surface_capability_matrix fails naming its one planted
+#      defect: a target that does not exist, a repeated pair, an unknown
+#      capability or surface, a target in another surface's package or outside
+#      src/tests/e2e, a target that is no test, a pair with no row, an empty
+#      field, a capability grounded in no declared constant, a family constant
+#      no capability names, a repeated capability, fewer filled cells than the
+#      floor, and no surface.
 set -uo pipefail
 
 umbrella=1
@@ -1321,6 +1334,28 @@ for want in \
     "map_misnamed_row|: the row names komira_b but links src/komira_a; name it komira_a" \
     "empty|src_layout: checked nothing"; do
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+
+# 52
+expect_green surface_capability_matrix //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
+N=tests//negative/surface_capability_matrix
+E=tests//functional/surface_capability_matrix/src/tests/e2e
+for want in \
+    "dangling|Unknown target \`test_join_left\` from package \`$E/polars_e2e\`" \
+    "duplicate|matrix row 11 (pandas, filter): a second row for the pair, first at row 2" \
+    "unknown_capability|matrix row 11 (pandas, window): unknown capability \`window\`" \
+    "unknown_surface|matrix row 11 (spark, filter): unknown surface \`spark\`" \
+    "other_surface|matrix row 7 (polars, filter): $E/pandas_e2e:test_filter is in $E/pandas_e2e, not $E/polars_e2e, the surface's own package" \
+    "outside_e2e|matrix row 5 (pandas, errors): tests//functional/surface_capability_matrix:plan.txt is in tests//functional/surface_capability_matrix, not $E/pandas_e2e" \
+    "not_test|matrix row 5 (pandas, errors): $E/pandas_e2e:data.csv is no test" \
+    "missing_pair|matrix: no row for (polars, errors)" \
+    "empty_field|matrix row 10 (polars, errors): an empty field" \
+    "ungrounded|capability window: grounding \`PLAN_WINDOW\` is declared by no grounding file" \
+    "unclaimed|src/plan/plan.mojo:5: PLAN_CSE_REF is a plan constant that no capability and no not_capabilities row names" \
+    "vocabulary_duplicate|capabilities: filter is listed twice" \
+    "floor|floor: 3 cell(s) are filled and the floor is 4" \
+    "empty|surface_capability_matrix: checked nothing (no surface or no capability)"; do
+    expect_red "surface_capability_matrix_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
 
 # 37
