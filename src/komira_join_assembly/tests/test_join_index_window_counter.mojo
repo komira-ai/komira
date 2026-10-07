@@ -3,7 +3,7 @@
 
 from std.testing import TestSuite, assert_equal
 
-from komira_counters.join_index_window_counter import (
+from komira_join_assembly.join_index_window_counter import (
     join_index_window_aliased_rows,
     join_index_window_calls,
     join_index_window_copy_bytes,

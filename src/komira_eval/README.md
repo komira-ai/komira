@@ -38,7 +38,7 @@ There are no root re-exports: import each name from the module that defines it.
 ```
 komira_eval -> komira_row_format, komira_kernels, komira_expr, komira_udf,
                komira_agg, komira_arrow, komira_buffer, komira_collections,
-               komira_column_kernels, komira_counters, komira_plan_expr,
+               komira_column_kernels, komira_plan_expr,
                komira_scalar_arithmetic, komira_simd
 ```
 

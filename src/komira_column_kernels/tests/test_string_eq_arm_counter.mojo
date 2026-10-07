@@ -3,7 +3,7 @@
 
 from std.testing import TestSuite, assert_equal
 
-from komira_counters.string_eq_arm_counter import (
+from komira_column_kernels.string_eq_arm_counter import (
     reset_string_eq_ladder_call_count,
     string_eq_ladder_call_count,
     string_eq_ladder_counter_incr,

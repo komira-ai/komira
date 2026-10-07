@@ -61,11 +61,11 @@ from komira_column_kernels.compiler_helpers import (
     _gather_nw,
     GATHER_PARALLEL_MIN_ROWS,
 )
-from komira_counters.gather_width_counter import (
+from komira_column_kernels.gather_width_counter import (
     gather_note_narrow_typed,
     gather_note_width_fallback,
 )
-from komira_counters.join_index_window_counter import join_index_window_note_gather
+from komira_join_assembly.join_index_window_counter import join_index_window_note_gather
 from komira_join_assembly.join_key_cse import (
     JoinKeyAliasMap,
     join_key_cse_note_gathers,

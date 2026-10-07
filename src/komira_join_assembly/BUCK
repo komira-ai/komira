@@ -21,6 +21,7 @@ mojo_library(
         "tests/test_g4_bool_carried_join_gather.mojo",
         "tests/test_gather_narrow_widths_core.mojo",
         "tests/test_join_chunk_plan_byte_budget.mojo",
+        "tests/test_join_index_window_counter.mojo",
     ],
     visibility = ["PUBLIC"],
 )

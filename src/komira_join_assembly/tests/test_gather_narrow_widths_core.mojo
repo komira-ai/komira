@@ -75,7 +75,7 @@ from komira_column_kernels.compiler_helpers import gather_batch
 from komira_join_assembly.compiler_join_assembly import (
     emit_gather_column_projected,
 )
-from komira_counters.gather_width_counter import (
+from komira_column_kernels.gather_width_counter import (
     gather_narrow_fallback_colrows,
     gather_narrow_typed_colrows,
     gather_wide_fallback_colrows,
