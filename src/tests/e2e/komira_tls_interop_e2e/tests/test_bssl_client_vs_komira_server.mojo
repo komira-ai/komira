@@ -30,12 +30,12 @@ from komira_tls_interop_e2e import (
     local_port,
     parse_report,
     read_until,
+    scratch_file,
     send_all,
     server_tls_config,
     standard_cipher_name,
     tls_version_name,
 )
-from komira_runtime_paths import test_tmpdir
 
 comptime _STEP_MS = 10_000
 comptime _PING = "ping from bssl\n"
@@ -95,9 +95,7 @@ def main() raises:
     tls_init()
     var bssl = flag(String("bssl"))
     var busybox = flag(String("busybox"))
-    var stdin_file = test_tmpdir() + "/ping.txt"
-    with open(stdin_file, "w") as f:
-        f.write(String(_PING))
+    var stdin_file = scratch_file(String("ping.txt"), String(_PING))
     _case(bssl, busybox, stdin_file, String("tls1.3"), True)
     _case(bssl, busybox, stdin_file, String("tls1.3"), False)
     _case(bssl, busybox, stdin_file, String("tls1.2"), True)

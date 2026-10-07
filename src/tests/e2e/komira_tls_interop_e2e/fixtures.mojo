@@ -23,6 +23,7 @@ from std.sys import argv
 
 from komira_http_client.tls_connector import default_client_tls_config
 from komira_http_core.tls import TlsConfig
+from komira_runtime_paths import test_tmpdir
 
 
 comptime LEAF_CERT_PATH = "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem"
@@ -52,6 +53,15 @@ def flag(name: String) raises -> String:
             if v.byte_length() > 0:
                 return v^
     raise Error("missing flag " + want + "<value> (the mojo_test's args in BUCK give it)")
+
+
+def scratch_file(name: String, text: String) raises -> String:
+    """Write `text` to `name` in the test's own scratch directory
+    (TEST_TMPDIR, made by the test runner for this run); returns its path."""
+    var path = test_tmpdir() + "/" + name
+    with open(path, "w") as f:
+        f.write(text)
+    return path^
 
 
 def server_tls_config() raises -> TlsConfig:

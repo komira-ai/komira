@@ -26,6 +26,7 @@ from .fixtures import (
     client_tls_config,
     flag,
     read_fixture,
+    scratch_file,
     server_tls_config,
 )
 from .tls_io import (

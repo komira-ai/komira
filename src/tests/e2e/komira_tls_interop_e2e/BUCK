@@ -32,6 +32,7 @@ mojo_library(
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_supervisor:komira_supervisor",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
         "tests/test_bssl_report.mojo",
