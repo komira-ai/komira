@@ -11,8 +11,9 @@
 #     reads as +Inf and -1e-18446744073709551616 as -0.0. Catches an
 #     exponent accumulated in a wrapping Int (2^64 wraps to 0 and the value
 #     reads as 1.0). 1e30800 -> +Inf, 1(19 zeros)e-3300 -> +0.0 and
-#     9e-3240 -> +0.0 pin the constant margin of the cap (the exponent is
-#     held at the input length plus the margin). 1e30800 catches a margin
+#     9e-3240 -> +0.0 pin the constant margin of the cap (the exponent
+#     stops accumulating at the first prefix of its digits that reaches
+#     the input length plus the margin). 1e30800 catches a margin
 #     of 301 or less, 1(19 zeros)e-3300 one of 304 or less, and 9e-3240
 #     one of 317 or less (it is held at 9e-324, a nonzero subnormal). A
 #     margin of 318 is the smallest correct one: the shortest input that
@@ -125,14 +126,15 @@ def test_exponent_saturates() raises:
     # Leading zeros in the exponent are not magnitude: 1e(99 zeros)1 is 10.
     _check("1e" + _zeros(99) + "1", 0x4024000000000000)
     _check("1e-" + _zeros(99) + "1", 0x3FB999999999999A)
-    # The constant part of the cap: the exponent is held at the input
-    # length plus a margin, and that margin must carry the value past
-    # +-1000 (beyond DBL_MAX and below half the smallest subnormal). With
-    # a margin of 300 the first two exponents are held inside the double
-    # range and read as finite values (1e30800 as 1e308, 1(19 zeros)e-3300
-    # as a subnormal); they must read as +Inf and +0.0. With any margin
-    # from 305 to 317 both of those still read correctly, but 9e-3240
-    # (7 bytes) is held at 9e-(7 + margin), at least 9e-324, a nonzero
+    # The constant part of the cap: the exponent stops accumulating at the
+    # first prefix of its digits that reaches the input length plus a
+    # margin, and that margin must carry the value past +-1000 (beyond
+    # DBL_MAX and below half the smallest subnormal). With a margin of 300
+    # the first two exponents are held inside the double range and read as
+    # finite values (1e30800 as 1e308, 1(19 zeros)e-3300 as a subnormal);
+    # they must read as +Inf and +0.0. With any margin from 305 to 317 both
+    # of those still read correctly, but 9e-3240 (7 bytes) is held at
+    # 9e-324 (the prefix 324) for every margin of 317 or less, a nonzero
     # subnormal; it must read as +0.0.
     _check("1e30800", POS_INF)
     _check("1" + _zeros(19) + "e-3300", POS_ZERO)
