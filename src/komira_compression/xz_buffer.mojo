@@ -18,14 +18,20 @@
 #                                      size_t in_size, uint8_t* out,
 #                                      size_t* out_pos, size_t out_size);
 #
-# Both return LZMA_OK (0), LZMA_BUF_ERROR (10) when the output space ran out
-# (or, decoding, the input ended first: liblzma does not tell the two apart),
-# or another code.
+# Both return LZMA_OK (0), LZMA_BUF_ERROR (10) when the output space ran out,
+# or another code. Decoding a stream that has not ended, liblzma's
+# stream_buffer_decoder.c (xz 5.2 through 5.8) means to answer LZMA_DATA_ERROR
+# (9) when the input was all consumed and LZMA_BUF_ERROR otherwise, but it
+# restores `*in_pos` to its starting value before that test. So the test sees
+# the start, not the consumed position: a non-empty input cut short comes
+# back LZMA_BUF_ERROR, the same as a short destination, and LZMA_DATA_ERROR
+# only when the input is empty.
 #
 # Public entries (no pointer in a signature):
 #   * `xz_compress_into(dst, src, preset, check) -> Int`
 #   * `xz_decompress_into(dst, src, memlimit) -> Optional[Int]`: None on
-#     LZMA_BUF_ERROR (a caller grows and retries)
+#     LZMA_BUF_ERROR (a short destination, or a truncated stream: a caller
+#     that grows and retries bounds its growth)
 #   * `XZ_PRESET_DEFAULT` (6), `XZ_CHECK_CRC64` (4), `XZ_DEFAULT_MEMLIMIT`
 #     (16 GiB)
 # =============================================================================
@@ -124,13 +130,15 @@ def xz_decompress_into[
     dst: Span[UInt8, dori], src: Span[UInt8, _], memlimit: UInt64
 ) raises -> Optional[Int]:
     """Decode the .xz stream `src` into `dst`, with at most `memlimit` bytes
-    of decoder memory; return the bytes written, or None on LZMA_BUF_ERROR
-    (the stream decodes to more than `len(dst)`, or `src` ends before the
-    stream does). liblzma writes no byte past `len(dst)`.
+    of decoder memory; return the bytes written, or None on LZMA_BUF_ERROR.
+    None means the stream decodes to more than `len(dst)` or a non-empty
+    `src` ends before the stream does: liblzma does not tell the two apart
+    (see the header), so a caller that grows `dst` and retries on None must
+    bound its growth. liblzma writes no byte past `len(dst)`.
 
     Raises `lzma_stream_buffer_decode failed (rc=R, input_len=N,
-    output_cap=C)` for any other failure (a corrupt stream, a memory limit
-    too low).
+    output_cap=C)` for any other failure: an empty `src` (rc=9,
+    LZMA_DATA_ERROR), a corrupt stream, a memory limit too low.
     """
     var n = len(src)
     var cap = len(dst)

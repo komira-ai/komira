@@ -389,6 +389,41 @@ def test_xz_corrupt_stream_names_rc() raises:
     )
 
 
+def test_xz_truncated_stream_is_buf_error_and_empty_is_data_error() raises:
+    # liblzma (xz 5.2 to 5.8) restores `*in_pos` before it tests whether all
+    # input was consumed, so a non-empty stream cut short comes back
+    # LZMA_BUF_ERROR (None, like a short destination), not LZMA_DATA_ERROR.
+    # Only an empty input is LZMA_DATA_ERROR (9), which raises.
+    var data = _incompressible(4096)
+    var packed = _xz_compress(data)
+    var cuts = List[Int]()
+    cuts.append(len(packed) - 1)  # only the stream footer's last byte gone
+    cuts.append(len(packed) // 2)  # mid-block
+    cuts.append(1)  # inside the magic
+    for c in range(len(cuts)):
+        var cut = cuts[c]
+        var dst = _guarded(8192)
+        var got = xz_decompress_into(
+            Span(dst)[0:8192], Span(packed)[0:cut], XZ_DEFAULT_MEMLIMIT
+        )
+        assert_false(got, "a truncated .xz is LZMA_BUF_ERROR (cut " + String(cut) + ")")
+        _assert_pad_untouched(dst, 8192, "xz truncated stream")
+
+    var empty = List[UInt8]()
+    var dst = _guarded(64)
+    var msg = String("")
+    try:
+        var got = xz_decompress_into(Span(dst)[0:64], Span(empty), XZ_DEFAULT_MEMLIMIT)
+        msg = "returned " + (String(got.value()) if got else String("None"))
+    except e:
+        msg = String(e)
+    # LZMA_DATA_ERROR is 9.
+    assert_equal(
+        msg,
+        "lzma_stream_buffer_decode failed (rc=9, input_len=0, output_cap=64)",
+    )
+
+
 # -----------------------------------------------------------------------------
 # zlib (komira_zlib through this package)
 # -----------------------------------------------------------------------------
