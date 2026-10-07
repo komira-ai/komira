@@ -1,0 +1,104 @@
+# kci_build
+
+One BUILD step of a kci stage (`kci run --stage S`). `run_build` checks the
+release identity (`--revision-id` must be a full commit id that is the
+checkout's `HEAD`, in a full-history clone with no modified tracked files,
+on the one platform kci releases), records the run's RUNNING result before
+the first effect, derives the release stamp from git, then builds each
+artifact of the artifacts file (read by `kci_artifact`) in file order, one at
+a time, into an EMPTY directory under `<release_dir>/<platform>/`, and checks
+what each build left. When every artifact passed it writes `release.json`
+last, as the commit marker. With `BuildRequest.plan` it resolves and renders
+each artifact's argv and builds nothing; with `BuildRequest.affected_by` it
+is the per-change check (`run_affected`): the artifacts file's `affected`
+command decides which units a change reaches, and only those are built.
+
+Every process (git and the build systems) starts through the
+`ProcessRunner` trait: `SupervisorRunner` runs real processes,
+`ScriptedRunner` answers from a script, for tests. kci names no build tool:
+the program, its args and where it builds are the artifacts file's. The
+outcome is a `kci_api` outcome word and error id; this package spells no
+exit number. The Buck2 target is `//src/kci_build:kci_build_lib`; the import
+name is `kci_build`.
+
+## Examples
+
+A `RunSpec` is one process to run. Its child inherits the environment
+unless `set_env` gives an explicit one, which must hold `PATH` and name each
+variable once:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+```mojo
+from kci_build import RunResult, RunSpec, check_child_env, env_entry_name
+
+var spec = RunSpec("buck2", ["build", "//src/komira_hash:komira_hash"], "/work", 600, "/logs/out", "/logs/err")
+assert_equal(spec.command_line(), "buck2 build //src/komira_hash:komira_hash")
+assert_false(Bool(spec.env))  # inherits
+spec.set_env(["PATH=/usr/bin:/bin", "TMPDIR=/var/tmp"])
+assert_equal(len(spec.env.value()), 2)
+assert_equal(env_entry_name("TMPDIR=/var/tmp"), "TMPDIR")
+
+var message = String()
+try:
+    check_child_env(["TMPDIR=/var/tmp"])
+except e:
+    message = String(e)
+assert_equal(message, "an explicit child environment holds no PATH")
+
+assert_true(RunResult(Int32(0)).ok())
+assert_equal(RunResult(Int32(2)).describe(), "exit 2")
+assert_equal(RunResult(Int32(0), timed_out=True).describe(), "timed out")
+```
+
+The release stamp comes from six git commands run through the
+`ProcessRunner`. Here a `ScriptedRunner` stands in for git (each step must
+match the argv kci runs exactly, and writes the step's stdout to the run's
+log file, under a temporary directory):
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from std.tempfile import TemporaryDirectory
+from kci_api import OUTCOME_REFUSED, RunIdentity
+from kci_build import BuildRequest, ScriptedRunner, ScriptedStep, derive_release_stamp
+
+comptime REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+comptime SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
+
+def git_answers(shallow: String) -> ScriptedRunner:
+    var g = ScriptedRunner()
+    g.expect(ScriptedStep(["rev-parse", "--is-shallow-repository"], stdout_text=shallow))
+    g.expect(ScriptedStep(["rev-parse", "--verify", "HEAD"], stdout_text=String(REV) + "\n"))
+    g.expect(ScriptedStep(["status", "--porcelain", "--untracked-files=no"]))
+    g.expect(ScriptedStep(
+        ["log", "-1", "--first-parent", "--format=%H", REV, "--", ".",
+         ":(exclude)docs", ":(exclude)*.md", ":(exclude).github"],
+        stdout_text=String(SRC) + "\n",
+    ))
+    g.expect(ScriptedStep(["rev-list", "--count", "--first-parent", SRC], stdout_text="154\n"))
+    g.expect(ScriptedStep(["log", "-1", "--format=%ct", SRC], stdout_text="1790994309\n"))
+    return g^
+
+with TemporaryDirectory() as tmp:
+    var req = BuildRequest(RunIdentity("gh-1", 1))
+    req.work_dir = tmp
+    req.log_dir = tmp
+    req.revision_id = REV
+    req.platform = "linux-x86_64"
+
+    var git = git_answers("false\n")
+    var r = derive_release_stamp(req, git)
+    assert_equal(r.outcome, "SUCCEEDED", r.message)
+    assert_equal(git.remaining(), 0)
+    var stamp = r.stamp.value().copy()
+    assert_equal(stamp.source_commit, SRC)  # the newest non-documentation commit
+    assert_equal(stamp.build_number, 154)
+    assert_equal(stamp.timestamp_ms, 1790994309000)
+
+    # A shallow clone would count the clone's depth: refused, and git is
+    # asked nothing more.
+    var shallow = git_answers("true\n")
+    var refused = derive_release_stamp(req, shallow)
+    assert_equal(refused.outcome, OUTCOME_REFUSED)
+    assert_equal(refused.error_id, "KCI-E-REVISION")
+    assert_equal(len(shallow.calls), 1)
+```
