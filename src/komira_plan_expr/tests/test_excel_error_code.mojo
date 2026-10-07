@@ -12,8 +12,8 @@
 #
 # THE EXPECTED SPELLINGS ARE EXCEL'S, NOT THE CODE'S. Microsoft documents
 # `#NULL!`, `#DIV/0!`, `#VALUE!`, `#REF!`, `#NAME?`, `#NUM!`, `#N/A` (and
-# `#GETTING_DATA`) as the ERROR.TYPE values, the same set OpenFormula defines;
-# `#SPILL!` and `#CALC!` are the dynamic-array errors. Each is written below as
+# `#GETTING_DATA`) as the ERROR.TYPE values; OpenFormula defines the first
+# seven only. `#SPILL!` and `#CALC!` are the dynamic-array errors. Each is written below as
 # a literal, so changing a spelling in the code is a change to this table.
 #
 # TWO CODES HAVE NO EXCEL LITERAL, and the table says so rather than skipping
