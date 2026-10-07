@@ -85,6 +85,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 7. **Sample statistics of one row answer NaN (§2.11).** `src/komira_agg/builtin_agg_fns_stddev.mojo:15-18` and `:67-79` answer NaN for `stddev_samp` and `var_samp` over one row and call it DuckDB's NULL convention; DuckDB answers NULL.
 8. **Regex flags (§7.10).** `parse_flags_string` (`src/komira_column_kernels/regexp_nfa.mojo:217-234`) reads `m` as multi-line anchors and accepts `x`; DuckDB reads `m` as "`.` does not match a newline" and refuses `x`. It refuses `c` and `l`, which DuckDB accepts.
 9. **DECIMAL modulo is typed with the left operand's precision and scale (§5.10).** `src/komira_plan_expr/expr_walk.mojo:896-901`; the rule is DuckDB's DECIMAL(max(p1 - s1, p2 - s2) + max(s1, s2), max(s1, s2)), DOUBLE above 38.
+10. **The float-to-integer window for an unsigned target is empty (§6.3).** `eval_cast_float_to_int` (`src/komira_column_kernels/cast_null.mojo`, around line 277) builds its window as `[MIN, -MIN)`, which is `[0, 0)` for an unsigned target and would refuse every value; the rule's window is `[0, MAX + 1)`. Latent today: every caller instantiates a signed target.
 
 ## 1. Three-valued logic
 
@@ -451,7 +452,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 - **Rule.** `BIN_MOD` of DECIMAL(p1, s1) and DECIMAL(p2, s2) is DECIMAL(max(p1 - s1, p2 - s2) + max(s1, s2), max(s1, s2)); if that precision exceeds 38, both operands are cast to DOUBLE and the result is DOUBLE (§5.9). A zero divisor answers NULL for that row, as §5.3 does for integers. DECIMAL `/` is FLOAT64 (§8.13), so its zero divisor follows §5.6.
 - **DuckDB.** `BindDecimalModulo` computes that type through `BindDecimalArithmetic` with no `+ 1`, falls back to DOUBLE when it does not fit, and executes through `GetBinaryFunctionIgnoreZero`, which answers NULL for a zero divisor (`src/function/scalar/operator/arithmetic.cpp:193-245` and `:1118-1132` at v1.5.6).
-- **Current behaviour.** The plan types DECIMAL `%` with the **left** operand's precision and scale (`src/komira_plan_expr/expr_walk.mojo:896-901`), which cannot hold `5.0 % 0.30` = `0.20` at scale 1; no DECIMAL `%` kernel is here ("Code that does not follow", item 9).
+- **Current behaviour.** The plan types DECIMAL `%` with the **left** operand's precision and scale (`src/komira_plan_expr/expr_walk.mojo:896-901`), which cannot hold `5.0 % 0.33` = `0.05` (5.0 − 15 × 0.33) at scale 1; no DECIMAL `%` kernel is here ("Code that does not follow", item 9).
 - **Mark.** MATCHES.
 
 ## 6. Casts
@@ -475,7 +476,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 - **Rule.** A FLOAT or DOUBLE casts to an integer in two steps. First the **unrounded** value must lie in `[MIN, MAX + 1)` of the target type, otherwise the cast is an error; NaN and ±inf are errors. Then it rounds **half to even** (2.5 to 2, 3.5 to 4, -2.5 to -2). So `CAST(-2147483648.4 AS INTEGER)` is an error although it would round to INT32_MIN, and `CAST(-0.4 AS UTINYINT)` is an error although it would round to 0.
 - **DuckDB.** "Casting from FLOAT and DOUBLE to integers of any size: round to the nearest integer, with ties (halfs) rounded to the nearest even number" ([numeric types](https://duckdb.org/docs/current/sql/data_types/numeric.html)). `TryCastWithOverflowCheckFloat` checks `value >= min && value < max` on the unrounded value and then calls `nearbyint` (`src/include/duckdb/common/operator/numeric_cast.hpp:75-85` at v1.5.6). A bare literal such as `2.5` is a DECIMAL in DuckDB and follows §6.4, so oracle SQL casts it to DOUBLE first (§8.19). **pyarrow.** A safe cast refuses a non-integral float; it is not the oracle.
 - **Oracle cases exclude one band.** A value in `[MAX + 0.5, MAX + 1)` passes the check and rounds to `MAX + 1`, which DuckDB's `static_cast` leaves undefined (its answer differs by platform). Cases do not use that band. The lower edge is defined: values below MIN are errors in both engines.
-- **Current behaviour.** `src/komira_column_kernels/cast_null.mojo:217-290` checks the unrounded value against the same window before rounding, as DuckDB does, and clamps the undefined band to MAX (`:257-270`). One other path truncates ("Code that does not follow", item 3).
+- **Current behaviour.** `src/komira_column_kernels/cast_null.mojo:217-290` checks the unrounded value against the same window before rounding, as DuckDB does, for signed targets (its window for an unsigned target is empty; see "Code that does not follow"), and clamps the undefined band to MAX (`:257-270`). One other path truncates ("Code that does not follow", item 3).
 - **Mark.** MATCHES.
 
 ### 6.4 Decimal to integer, and float to decimal
