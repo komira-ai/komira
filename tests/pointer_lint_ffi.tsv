@@ -7,6 +7,9 @@
 # row fails the build. The other pointer rules hold here as anywhere.
 src/komira_arrow_ipc/c_data_interface.mojo	the Arrow C Data Interface: the C structs exchanged with a foreign producer or consumer
 src/komira_arrow_ipc/c_data_stream.mojo	the Arrow C Stream Interface (ArrowArrayStream)
+src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe
+src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_error_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe, on the error paths
+src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_probe.mojo	the C ABI (ArrowArrayStream pointers) of the arrow_c_abi_probe shared library
 src/komira_buffer/mmap_region.mojo	mmap and the komira_open_ro C shim
 src/komira_compression/bzip2_buffer.mojo	libbz2's buffer-to-buffer calls
 src/komira_compression/codec_libraries.mojo	the process-lifetime handles of libzstd, libbz2 and liblzma
