@@ -18,6 +18,10 @@ three things apart that are easy to blur:
 grammar and the two validation kinds; [ci.md](../ci.md) for the workflows and
 the build farm. This document cites them and does not repeat them.
 
+Where it names an open pull request, it describes that pull request's head
+at the time of writing, not `main`. Those sentences go stale as the pull
+requests merge; issue #779 tracks updating them.
+
 ## What constrains gamma?
 
 - **No production cloud.** No gamma check may create, read or depend on a
@@ -81,10 +85,12 @@ Three properties of this check shape everything below:
    `komira_kafka_server`, the protobuf, textproto and XML codecs
    (`komira_protobuf`, `komira_textproto`, `komira_wkt`, `komira_proto_codec`,
    `komira_xml`), core utilities, and the test-support libraries
-   (`komira_validation_run`, `komira_test_run_id`, `komira_test_verdict`); the
-   full list is under "Formats, engine, runtime and core utilities". No AWS, GCP, Azure, HTTP, gRPC, TLS, database or object-store library
-   is released; most wait on the native package (`komira_native`) and the
-   release of their closure (open pull requests #672, #704, #761, #763).
+   (`komira_validation_run`, `komira_test_run_id`, `komira_test_verdict`);
+   the full list is under "Formats, engine, runtime and core utilities". No
+   AWS, GCP, Azure, HTTP, gRPC, TLS, database or object-store library is
+   released; most wait on the native package (`komira_native`) and the
+   release of their closure (the native stack of open pull requests, #672
+   at its base up to #763 at its top).
    Two open pull requests declare more: #755 adds `komira_collections`,
    `komira_broker_proto`, `komira_supervisor_proto` and `komira_plan_proto`;
    #761 adds those four and `komira_native`, `komira_libc`, `komira_buffer`,
@@ -123,10 +129,11 @@ farm, as welded `test_srcs` or as standalone tests under `src/tests/e2e` and
 - The release's `build` stage is one BUILD step over
   `release/artifacts.textproto` (`release/machine.textproto`). It builds the
   released `<lib>_conda[release]` targets and, through them, those libraries'
-  welded `test_srcs`, and nothing else. It does not run `src/tests/e2e`,
-  `src/tests/conformance` (h2spec, Connect), `komira_secrets_e2e`,
-  `komira_azure_blob_e2e`, `broker_e2e` or the standalone tests of unreleased
-  packages. Those ran, if at all, on the pull requests whose changes reached
+  welded `test_srcs` (a conda package's payload is the library's gated
+  `.mojoc`, `tools/build/package/conda.bzl`), and nothing else. It does not
+  run `src/tests/e2e`, `src/tests/conformance` (h2spec, Connect),
+  `komira_secrets_e2e`, `komira_azure_blob_e2e`, `broker_e2e` or the
+  standalone tests of unreleased packages. Those ran, if at all, on the pull requests whose changes reached
   them (see "Gaps").
 
 These checks test the source build, not the installed package. Gamma tests
@@ -134,19 +141,22 @@ the installed package. That split is the main decision of this document:
 
 > **Protocol and service behaviour is proven at build time on the farm**
 > (today on the pull requests that reach it; on the release revision only
-> once kci runs every derived check there, item 6 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)).
+> once kci runs every derived check there, item 6 of
+> [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)).
 > **Gamma proves that what a consumer installs from the channel links, loads
 > and runs its README.** A service in gamma is added only where installed
 > bytes against a service would catch a defect the build cannot, and only
-> as an explicit decision (see [Open decisions](gamma_validation_decisions.md#open-decisions-for-the-project-owner)).
+> as an explicit decision (see
+> [Open decisions](gamma_validation_decisions.md#open-decisions-for-the-project-owner)).
 
 ## AWS
 
 Packages: `komira_aws_core` (hand-written SigV4, credential chain, endpoint
-rules, retry); 16 clients generated at build time from pinned botocore
-models (`mojo_aws_client` in `tools/build/cloud/aws.bzl`: s3, sqs, sns,
-dynamodb, dynamodbstreams, lambda, iam, ec2, ecr, ecs, logs, route53,
-scheduler, secretsmanager, sesv2, apigatewayv2); the hand-written CloudWatch
+rules, retry); 16 clients `komira_aws_<service>` generated at build time
+from pinned botocore models (`mojo_aws_client` in
+`tools/build/cloud/aws.bzl`), for s3, sqs, sns, dynamodb, dynamodbstreams,
+lambda, iam, ec2, ecr, ecs, logs, route53, scheduler, secretsmanager, sesv2
+and apigatewayv2; the hand-written CloudWatch
 client `komira_aws_metrics` (its BUCK: "Hand-written, not generated", and
 not FIPS); the hand-written API Gateway/Lambda adapter
 `komira_aws_lambda_http`; and `komira_objectstore_s3`, which also mints
@@ -167,8 +177,9 @@ behind `komira_objectstore`'s `ObjectUrlSigner`). None is released.
 
 `komira_objectstore_s3` has no README, so the README check would refuse it
 (`src/kci_validate/readme_installed.mojo`); it needs one before it can be
-released. LocalStack is discussed under [Open decisions](gamma_validation_decisions.md#open-decisions-for-the-project-owner): it is not proposed
-here.
+released. LocalStack is discussed under
+[Open decisions](gamma_validation_decisions.md#open-decisions-for-the-project-owner):
+it is not proposed here.
 
 ## GCP
 
@@ -176,12 +187,14 @@ Packages: `komira_gcp_core` (tokens, ADC, retry, pagination),
 `komira_gcp_storage` (gRPC `google.storage.v2`, `protocol = "grpc"` in its
 BUCK), `komira_objectstore_gcs` (which reaches GCS two ways: the gRPC v2
 backend, and V4 signed URLs, GOOG4-RSA-SHA256, minted by `GcsV4Signer` in
-`src/komira_objectstore_gcs/signer.mojo` on `src/komira_gcp_core/v4_sign.mojo`;
-a signed URL is a plain HTTPS URL to `storage.googleapis.com`, the XML API), `komira_gcp_firestore` (REST v1 and a gRPC
-listen client), `komira_gcp_firestore_db`, `komira_gcp_logging`,
+`src/komira_objectstore_gcs/signer.mojo` on
+`src/komira_gcp_core/v4_sign.mojo`; a signed URL is a plain HTTPS URL to
+`storage.googleapis.com`, the XML API), `komira_gcp_firestore` (REST v1 and
+a gRPC listen client), `komira_gcp_firestore_db`, `komira_gcp_logging`,
 `komira_gcp_monitoring_client`, `komira_gcp_monitoring`, the generated REST
-clients (iam, run, secretmanager, compute, artifactregistry, apigateway,
-cloudscheduler, cloudresourcemanager, serviceusage) and `komira_gcp_wif`.
+clients `komira_gcp_<name>` for iam, run, secretmanager, compute,
+artifactregistry, apigateway, cloudscheduler, cloudresourcemanager and
+serviceusage, and `komira_gcp_wif`.
 None is released. **There is no Pub/Sub, Bigtable, Spanner or Datastore
 client** in `src/`.
 
@@ -190,7 +203,7 @@ client** in `src/`.
 | `komira_objectstore_gcs` | EXISTS: `FakeGcsStorageBackend` (`src/komira_objectstore_gcs/fake_backend.mojo`); a `GetObject` stub over TLS and h2 (`test_gcs_grpc_trust`) | in-process; loopback in one action | the backend seam's precondition logic; the TLS trust path | real v2 message semantics |
 | `komira_objectstore_gcs` signed URLs | EXISTS: Google's published V4 signing conformance vectors (`test_v4_sign_conformance` in `komira_gcp_core`, from the sha256-pinned `third_party/googleapis_conformance_tests`); `test_gcs_presign_portability` | in-process, build time | a wrong canonical request, string to sign, encoding or expiry, against Google's own vectors | whether a server accepts the URL: no test transfers against one. PROPOSED: one presigned PUT and GET round trip against storage-testbench's XML endpoint or fake-gcs-server (whether either verifies the signature needs a probe with a corrupted-signature mutant) |
 | `komira_gcp_firestore`, `komira_gcp_firestore_db` | EXISTS: `ScriptedFirestore` and `ExchangeConnector` (`src/komira_gcp_firestore/firestore_scripted.mojo`, `firestore_fake.mojo`); every `komira_gcp_firestore_db` test runs on `MockFirestore` | in-process | request and response encoding; `komira_db` conformance against the mock (open PR #679) | Firestore's real precondition, query and transaction behaviour |
-| `komira_gcp_secretmanager` | EXISTS: a Secret Manager fake behind a TLS front in `komira_secrets_e2e` | loopback in one action | transport, TLS, request shape | fake-vs-service divergence |
+| `komira_gcp_secretmanager` | EXISTS: a stateful Secret Manager fake behind a TLS front in `komira_secrets_e2e` (`src/tests/e2e/komira_secrets_e2e/gcp_fake.mojo`): on every request it checks the bearer token's value (401 `UNAUTHENTICATED` for a missing or empty token and for any token other than the fake's), then the path, the global or regional host, and each method's preconditions (409 on a taken id, 400 on a bad CRC32C); `test_gcp_refusals` asserts both 401s and the exact request log, bearer tokens included | loopback in one action | transport and TLS; a missing, empty or wrong bearer token; request shape and endpoint choice; CRC32C | fake-vs-service divergence; token validity as Google judges it (scopes, expiry): a bearer token has no signature for the fake to recompute, so this is a value comparison, not an independent signature check like the AWS and Azure fakes' |
 | `komira_gcp_storage`, `komira_objectstore_gcs` | PROPOSED: Google's storage-testbench (Apache-2.0), which serves the gRPC v2 API Google's own client libraries test against, including per-request fault injection | per-test service process (needs a pinned Python with grpcio, open PR #767) or container | v2 preconditions, resumable and bidi write framing, ranges, error details, the retry classifier against Google's fault scripts | real auth (any bearer is accepted), IAM, TLS to the real service |
 | `komira_gcp_firestore`, `komira_gcp_firestore_db` | PROPOSED: Google's Firestore emulator; the client already supports a plaintext endpoint and the emulator bearer (`FIRESTORE_EMULATOR_BEARER` in `src/komira_gcp_firestore/firestore_client.mojo`); PR #679's suite as a third target | per-test service container (Java, from Google's CLI image) | real preconditions, queries, commit and listen framing against Google's implementation | IAM, security rules, index requirements, quotas |
 | every released GCP library | PROPOSED (mechanism EXISTS): README examples, which use scripted connectors and open no socket | gamma, installed package | packaging and link defects; README-vs-API drift | any service behaviour |
@@ -200,8 +213,9 @@ Not proposed for the gRPC path: **fake-gcs-server**. It serves the JSON and
 XML REST APIs and a gRPC interface of the older v1 proto, not
 `google.storage.v2`, so it cannot test `komira_gcp_storage`. Its XML path
 could carry the signed-URL round trip above, but it does not verify
-signatures, so that run would prove transfer framing, not the signature. **The Pub/Sub, Bigtable, Spanner and Datastore
-emulators**: there is no client for them to test. Each is adopted in the
+signatures, so that run would prove transfer framing, not the signature.
+**The Pub/Sub, Bigtable, Spanner and Datastore emulators**: there is no
+client for them to test. Each is adopted in the
 pull request that adds its client, or not at all.
 
 No emulator exists for the generated management-API clients (IAM, Run,
@@ -287,19 +301,33 @@ real-server test should pin both settings.
 
 ## Formats, engine, runtime and core utilities
 
-Packages: the formats (`komira_parquet*`, `komira_arrow`,
-`komira_arrow_ipc`, `komira_avro`, `komira_orc`, `komira_csv`, `komira_json*`,
-`komira_jsonl`, `komira_compression`, `komira_lz4`, `komira_zlib`), the
-engine (`komira_plan_*`, `komira_sql`, `komira_optimizer`, `komira_eval`,
-`komira_agg*`, `komira_kernels`, `komira_shuffle*`, `komira_dispatch_*`,
-`komira_join_assembly`), the runtime (`komira_async*`, `komira_fs`,
-`komira_log`, `komira_metrics*`, `komira_trace`, `komira_sync`,
-`komira_spsc_ring`) and the core utilities (`komira_hash`, `komira_simd`,
-`komira_clock`, `komira_host`, `komira_encoding`, ...), the protobuf,
-textproto and XML codecs (`komira_protobuf`, `komira_textproto`,
-`komira_wkt`, `komira_proto_codec`, `komira_xml`) and the test-support
-libraries (`komira_validation_run`, `komira_test_run_id`,
-`komira_test_verdict`).
+Packages:
+
+- the formats: `komira_parquet`, `komira_parquet_api`,
+  `komira_parquet_codec`, `komira_arrow`, `komira_arrow_ipc`, `komira_avro`,
+  `komira_orc`, `komira_csv`, `komira_json_index`, `komira_jsonl`,
+  `komira_compression`, `komira_lz4`, `komira_zlib` (`komira_json`, a JSON
+  reader and writer, is released and listed with the core utilities below);
+- the engine: `komira_plan_expr`, `komira_plan_ir`, `komira_plan_proto`,
+  `komira_plan_stats`, `komira_plan_wire`, `komira_pplan_wire`, `komira_sql`,
+  `komira_optimizer`, `komira_eval`, `komira_expr`, `komira_agg`,
+  `komira_agg_api`, `komira_op_agg_row_api`, `komira_op_agg_state`,
+  `komira_kernels`, `komira_column_kernels`, `komira_column_format`,
+  `komira_row_format`, `komira_rowcell`, `komira_morsel`,
+  `komira_exec_types`, `komira_scan_planning`, `komira_scan_resolver`,
+  `komira_scan_source`, `komira_shuffle`, `komira_shuffle_streaming`,
+  `komira_dispatch_agg_exec`, `komira_dispatch_agg_folds`,
+  `komira_dispatch_join_kernels`, `komira_dispatch_scan`,
+  `komira_join_assembly`, `komira_dynamic_filter`;
+- the runtime: `komira_async`, `komira_async_api`, `komira_fs`,
+  `komira_log`, `komira_metrics`, `komira_metrics_reader`, `komira_trace`,
+  `komira_sync`, `komira_spsc_ring`;
+- the core utilities: the released ones listed below, and the unreleased
+  `komira_collections`, `komira_buffer` and `komira_libc` (next paragraph);
+- the protobuf, textproto and XML codecs (`komira_protobuf`,
+  `komira_textproto`, `komira_wkt`, `komira_proto_codec`, `komira_xml`);
+- the test-support libraries (`komira_validation_run`, `komira_test_run_id`,
+  `komira_test_verdict`).
 
 Released (`release/artifacts.textproto`), apart from the ten kci libraries
 and `komira_kafka_server`: the codecs `komira_protobuf`, `komira_textproto`,
@@ -309,22 +337,23 @@ and `komira_kafka_server`: the codecs `komira_protobuf`, `komira_textproto`,
 `komira_counters`, `komira_fork_join`, `komira_host`,
 `komira_job_report_proto`, `komira_name_registry`, `komira_parquet_api`,
 `komira_runtime_paths`, `komira_resources`, `komira_scalar_arithmetic` and
-`komira_simd`; and the three test-support libraries. At this revision no
-format reader or writer other than `komira_parquet_api`, no engine and no
-runtime package is released.
+`komira_simd`; and the three test-support libraries. Two of these read and
+write a format: `komira_json` (JSON) and `komira_parquet_api`. No other
+format reader or writer, no engine package and no runtime package is
+released.
 
-**Declared by open pull requests.** #755 and #761 would add
-`komira_collections`, `komira_buffer`, `komira_libc` (FFI to libc), the
-proto packages `komira_broker_proto`, `komira_supervisor_proto` and
-`komira_plan_proto`, the runtime interface `komira_async_api`, the engine
-package `komira_dynamic_filter`, and `komira_native`, a new package kind (one
-shared library, not a Mojo library). Once #761 merges, the previous sentence
-is no longer true. Every one of these except `komira_native` is checked only
-by the "every released library" row below (README examples in
-`install-set`); no family-specific row is proposed for them. The same holds
-for packages in no family list above (`komira_sdk`, `komira_udf`,
-`komira_table_store`, `komira_viewport`, `komira_authz_api`, `komira_uuid`)
-if they are released. `komira_native` has its own row.
+**Declared by open pull requests.** At the time of writing, #755 and #761
+would add `komira_collections`, `komira_buffer`, `komira_libc` (FFI to
+libc), the proto packages `komira_broker_proto`, `komira_supervisor_proto`
+and `komira_plan_proto`, the runtime interface `komira_async_api`, the
+engine package `komira_dynamic_filter`, and `komira_native`, a new package
+kind (one shared library, not a Mojo library). Every one of these except
+`komira_native` is checked only by the "every released library" row below
+(README examples in `install-set`); no family-specific row is proposed for
+them. The same holds for the packages in no family list of this document
+(`komira_sdk`, `komira_udf`, `komira_table_store`, `komira_viewport`,
+`komira_authz_api`, `komira_uuid`) if they are released. `komira_native`
+has its own row.
 
 This family needs no service, no secret and no cloud. The questions here are
 about the installed package itself.
@@ -335,10 +364,10 @@ about the installed package itself.
 | `komira_protobuf`, `komira_textproto`, `komira_wkt`, `komira_proto_codec`, `komira_xml` (released) | EXISTS: `komira_protobuf` decodes wire goldens generated once by prost 0.13 (`test_protobuf_prost_crosscheck`); `komira_proto_codec` byte-diffs its proto3-JSON output against hand-checked reference strings, one per mapping rule (`test_proto_codec_proto3_json_conformance`); `komira_xml` checks rows that each cite an XML 1.0 or Namespaces rule (`test_xml_strict`); round trips; README examples in `install-set` | in-process, build time; gamma for the README | wire-level decode compatibility with one independent encoder; mapping-rule regressions; well-formedness refusals | no upstream conformance corpus is pinned for any of them (not protobuf's conformance suite, not the W3C XML test suite), so each oracle is prost's output once or our reading of the spec; the encode direction against an independent decoder. PROPOSED: pin the protobuf conformance runner's test list and run the binary and proto3-JSON cases at build time |
 | `komira_validation_run`, `komira_test_run_id`, `komira_test_verdict` (released test support) | EXISTS: welded tests; README examples in `install-set` | in-process, build time; gamma for the README | label legality, id format, verdict parsing as their tests state them | nothing beyond the strings: they are used by tests and kci, not against a service |
 | every released library | EXISTS: `install-set` README examples | gamma, installed package | layout and metadata errors, closure errors, README drift, a metapackage whose members drift from the release set | anything a README does not touch |
-| `komira_native` (declared by open PR #761) | On the PR #763 branch, EXISTS at build time: `tools/build/native/native_check.sh` fails the build unless every exported symbol of the built `libkomira_native.so.1` starts with `komira_` and the exports are exactly the generated list, NEEDED is only glibc's libraries, there is no run path, and it was linked `-Bsymbolic`. PROPOSED: the same check run on the `.so` installed from the channel, plus loading it with `dlopen` together with a second libcrypto (the environment's OpenSSL) and one call through each side, and a check that its highest `GLIBC_` symbol version is within the declared `__glibc` floor | build time (EXISTS on the branch); gamma, installed package (PROPOSED) | an unprefixed aws-lc, s2n or snappy symbol that would clash with another libcrypto in the same process (the reason for #672); a packaging step that ships a different `.so` from the checked one; a glibc requirement above the floor | symbol interposition by a library loaded later in a real application; other platforms |
-| libraries requiring `komira_native` | PROPOSED, in flight: the README run gains `-Xlinker -L<env>/lib -Xlinker -lkomira_native`, with link names taken from the native package's `lib/lib<x>.so` rows (open PR #763) | gamma, installed package | a library that stopped requiring `komira_native`; a malformed link name; the glibc floor | per-library static archives (next row) |
-| `komira_log` and every library above it | PROPOSED: a build-mode README check: `mojo build` with run path `$ORIGIN/../lib` and `-l` for each per-library `.a` row of each installed package, then run the binary. On the PR #763 branch, `komira_log`'s package ships `lib/libkomira_log_holder.a`, and `tools/build/native/README.md` states that `mojo run` does not link a static archive | gamma, installed package | a per-library archive missing from its package or misnamed; a run-path or NEEDED mistake only a built binary shows | interop; it costs a full compile per README |
-| `komira_compression`, `komira_lz4`, `komira_zlib` and the formats above them | PROPOSED: a codec load-origin check: compress and decompress one frame per codec, then fail unless each loaded codec library lies under the installed environment's `lib/` | gamma, installed package | a wrong or missing conda-forge requirement: the codecs are opened by bare soname at first use (`src/komira_compression/codec_libraries.mojo`), and the runner image ships its own copies, so today such a requirement would pass gamma | codec correctness (build time) |
+| `komira_native` (declared by open PR #761) | EXISTS at build time on the native stack's branches (from #695 up; #763 carries it): `tools/build/native/native_check.sh` fails the build unless every exported symbol of the built `libkomira_native.so.1` starts with `komira_` and the exports are exactly the generated list, NEEDED is only glibc's libraries, there is no run path, and it was linked `-Bsymbolic`. PROPOSED, with no mechanism today: (a) the same checks, plus its highest `GLIBC_` symbol version against the declared `__glibc` floor, run on the `.so` installed from the channel; (b) loading it with `dlopen` together with a second libcrypto (OpenSSL) and one call through each side. Neither runs today: `CONDA_INSTALL_ENV`'s only `smoke` word runs README examples, which cannot read a symbol table; a `CONDA_INSTALL_SMOKE` program could, but needs `komira_native` installable as a release member (`kci_validate` carries the native kind only from #704 up), an ELF dynamic-symbol reader in Mojo (none in `src/`), a digest-pinned image with pixi, and an entry in the `validate` job's `--only` list. (a) is item 8 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma); (b) also needs item 3, because OpenSSL is not a release member and `install` names members only | build time (EXISTS on the branches); gamma, installed package (PROPOSED) | an unprefixed aws-lc, s2n or snappy symbol that would clash with another libcrypto in the same process (the reason for #672); a packaging step that ships a different `.so` from the checked one; a glibc requirement above the floor | symbol interposition by a library loaded later in a real application; other platforms |
+| libraries requiring `komira_native` | PROPOSED, in flight: the README run gains `-Xlinker -L<env>/lib -Xlinker -lkomira_native`, with link names taken from the native package's `lib/lib<x>.so` rows (`src/kci_validate` on #763, the top of the native stack; on `main` and on #761 the README run passes no link flag) | gamma, installed package | a library that stopped requiring `komira_native`; a malformed link name; the glibc floor | per-library static archives (next row) |
+| `komira_log` and every library above it | PROPOSED: a build-mode README check (item 4 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)): `mojo build` with run path `$ORIGIN/../lib` and `-l` for each per-library `.a` row of each installed package, then run the binary. On the native stack's branches (from #672 up), `komira_log`'s package ships `lib/libkomira_log_holder.a`, and `tools/build/native/README.md` (from #695 up) states that `mojo run` does not link a static archive | gamma, installed package | a per-library archive missing from its package or misnamed; a run-path or NEEDED mistake only a built binary shows | interop; it costs a full compile per README |
+| `komira_compression`, `komira_lz4`, `komira_zlib` and the formats above them | PROPOSED, on an existing kind: a `CONDA_INSTALL_SMOKE` validation on gamma's PUBLISH step installing `komira_compression`, whose `program` (a `.mojo` file under `release/`) compresses and decompresses one frame per codec, then reads `/proc/self/maps` and fails unless each loaded codec library lies under the installed environment's `lib/` (`.pixi/envs/default` under `/work`, `src/kci_validate/container.mojo`). It cannot run today: `komira_compression` is not released (its README has no ` ```mojo ` block, which `install-set` would refuse); no image is pinned for the kind; and the `validate` job's `--only` list must name it (rule R9, item 7 of [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)), with its 900 s pull and 2700 s run inside that job's hour or in a part job of its own | gamma, installed package | a wrong or missing conda-forge requirement: the codecs are opened by bare soname at first use (`src/komira_compression/codec_libraries.mojo`), and the runner image ships its own copies, so today such a requirement would pass gamma | codec correctness (build time) |
 | `komira_parquet`, `komira_arrow_ipc`, `komira_orc`, `komira_avro`, `komira_csv`, `komira_jsonl` | PROPOSED: an interop leg: pyarrow (Apache-2.0) and fastavro (MIT) pinned exactly from conda-forge in the same environment read what the installed komira wrote, and komira reads what they wrote | gamma, installed package; or build time with pinned downloads | the write direction; C Data Interface export into a real pyarrow process; komira's native library coexisting with pyarrow's in one process | breadth (one dataset per format); other platforms |
 
 The interop leg needs a grammar change: `install` must name release members
@@ -355,8 +384,14 @@ The released kci libraries (`kci_api`, `kci_release_channel`,
 `kci_artifact_manifest`, `kci_logs`, `kci_params`, `kci_release_machine`,
 `kci_resource_proto`, `kci_validator_rows`, `kci_validator_report`,
 `kci_workflow_check`) are checked by their README examples in `install-set`
-(EXISTS). The deploy side is checked at build time against `kci_cloud_fake`,
-the in-memory clouds that model kci's resource model (EXISTS). Neither
+(EXISTS). The other kci packages (`kci_artifact`, `kci_artifact_proto`,
+`kci_build`, `kci_cli`, `kci_cloud`, `kci_cloud_fake`,
+`kci_deploy_model_proto`, `kci_manifest_proto`, `kci_pkg_upload`,
+`kci_publish`, `kci_publish_oci`, `kci_reconciler`, `kci_release_set`,
+`kci_secret_writer`, `kci_validate`) are not released and are checked at
+build time only. The deploy side is checked at build time against
+`kci_cloud_fake`, the in-memory clouds that model kci's resource model
+(EXISTS). Neither
 `kci_cloud_fake` nor any other kci library is an emulator of a cloud SDK API;
 it cannot validate the AWS, GCP or Azure clients.
 
@@ -436,7 +471,14 @@ validation run id is not `komira_test_run_id`, which names one test process.
 
 - `validate` job: 60 minutes for both validations together, each of which
   may wait up to `wait_for_index_seconds` (1800 by default, 3600 at most,
-  `src/kci_release_machine/graph.mojo`) for the channel index.
+  `src/kci_release_machine/graph.mojo`) for the channel index. Measured: in
+  five consecutive successful `kci.yml` runs on `main` on 2026-10-07 (run
+  37688200088 the latest), the whole `validate` job took 151 to 208 s
+  (GitHub's `startedAt` to `completedAt` for the job: checkout, the release
+  artifact's download, pixi, both validations with their index waits,
+  installs and README runs over the 37 libraries, and the hand-off steps).
+  GitHub reports no per-step times for these runs, so the installs and
+  README runs are not measured apart from the waits.
 - `CONDA_INSTALL_SMOKE`: 900 s to pull, 2700 s to run
   (`src/kci_validate/container.mojo`).
 - Build-time tests run under the remote action limit (the Connect
@@ -448,13 +490,21 @@ validation run id is not `komira_test_run_id`, which names one test process.
   `komira_encoding`'s files but not the rest of the set, the second
   validation can wait up to another 1800 s. The two waits alone then fill
   the job's 60 minutes, and GitHub cancels the job before kci reports a
-  verdict. This is a gap; [Open decision 11](gamma_validation_decisions.md#open-decisions-for-the-project-owner) proposes a fix.
+  verdict. This is a gap;
+  [Open decision 11](gamma_validation_decisions.md#open-decisions-for-the-project-owner)
+  proposes a fix.
 - A build-time service (the Java Firestore emulator, moto, PostgreSQL's
   initdb) must start, run its cases and stop inside one remote action. Each
   proposal above needs a measured start-up time and a per-action budget, as
   the Connect conformance run has, before it is welded.
 - A service validation in gamma therefore needs its own job and timeout; it
-  must not share the `validate` job's hour.
+  must not share the `validate` job's hour. Inside `kci.yml` that job is a
+  part job of gamma under rule R9 of `src/kci_workflow_check/rules.mojo`: no
+  environment, no identity token, and prod needs it (R2, R4, R3). A job
+  that needs an environment or a token, or must not block prod, collides
+  with those rules; item 7 of
+  [What kci must add](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)
+  lists the amendments.
 
 ## Gaps
 
@@ -463,18 +513,21 @@ validation run id is not `komira_test_run_id`, which names one test process.
   that says "gamma" is PROPOSED.
 - Libraries without a README cannot be released: `komira_objectstore`,
   `komira_objectstore_s3`, `komira_job_supervisor`, `komira_supervisor`,
-  the eight runtime packages, most GCP clients (open PR #757 adds eight), and
-  most kci libraries; `komira_secret_env` and `komira_compression` have a
-  README with no ` ```mojo ` block, which `src/kci_validate/readme_installed.mojo`
-  refuses in the same way.
+  the eight runtime packages, most GCP clients (open PR #757 adds eight),
+  and most kci libraries; `komira_secret_env` and `komira_compression` have
+  a README with no ` ```mojo ` block, which
+  `src/kci_validate/readme_installed.mojo` refuses in the same way.
 - No validation kind can start a service, and the network check declares only
   channel hosts.
 - Service tests never run against installed bytes: a defect that appears only
   in the conda layout is caught only if a README example touches it.
 - Only AWS Secrets Manager and Azure Blob have an over-the-socket test
-  against a fake that verifies the signature; GCP Secret Manager has a TLS
-  fake that checks transport and request shape, not credentials. The other
-  AWS clients are checked only against recorded bytes and canned responses.
+  against a fake that recomputes the request's signature. GCP Secret
+  Manager's TLS fake compares the bearer token with its own and answers 401
+  to a missing, empty or other token, but a bearer token carries no
+  signature to recompute, so nothing checks a token as Google would. The
+  other AWS clients are checked only against recorded bytes and canned
+  responses.
 - `komira_db_postgres` has never run against a real PostgreSQL.
 - There is no shared contract suite for `ConditionalWriteStore`.
 - The MinIO tests are opt-in and run by no gate; the MinIO pin is frozen
@@ -487,12 +540,15 @@ validation run id is not `komira_test_run_id`, which names one test process.
 - A README example of any library that links `komira_log` (none is released
   or has a README yet) could not pass gamma's current `mojo run` check, while
   the same example as a welded test would pass, because the build links the
-  per-library archive. This is a fact of the PR #763 branch, not of `main`:
-  `lib/libkomira_log_holder.a` and `tools/build/native/README.md` (which
-  states that `mojo run` does not link a static archive) exist only there.
+  per-library archive. This is a fact of the native stack's branches, not
+  of `main`: `lib/libkomira_log_holder.a` (from #672 up) and the line of
+  `tools/build/native/README.md` stating that `mojo run` does not link a
+  static archive (from #695 up) exist only there.
 - Nothing checks the installed `komira_native` library: its export check
-  runs on the built `.so` at build time (on the PR #763 branch), not on what
-  the channel serves, and nothing loads it beside a second libcrypto.
+  runs on the built `.so` at build time (on the native stack's branches),
+  not on what the channel serves, and nothing loads it beside a second
+  libcrypto. No validation kind can do either today (item 8 of the kci
+  work).
 - Lambda Invoke cannot be validated end to end by moto without a Docker
   socket; ECS run-task and Scheduler firing cannot be validated end to end by
   moto at all (it starts no task container and fires no target).
