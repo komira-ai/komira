@@ -12,12 +12,14 @@
 #   U2  stray continuation byte 0x80
 #   U3  truncated 3-byte sequence at the end of the span
 #   U4  lead byte followed by a non-continuation byte, at continuation
-#       position 1 (C3 41), 2 (E2 82 41) and 3 (F0 9F 98 41)
-#   U5  overlong encoding: 2-byte leads C0 and C1, 3-byte (E0 80 AF) and
-#       4-byte (F0 8F BF BF)
+#       position 1 (C3 41, C3 C3), 2 (E2 82 41, E2 82 C3) and 3
+#       (F0 9F 98 41, F0 9F 98 FF): bytes below AND above 80..BF
+#   U5  overlong encoding: 2-byte leads C0 and C1, 3-byte (E0 80 AF, and
+#       E0 9F BF, the highest E0 overlong) and 4-byte (F0 8F BF BF)
 #   U6  UTF-16 surrogate encoded in UTF-8 (ED A0 80)
 #   U7  code point above U+10FFFF (F4 90 80 80, and lead F5)
-#   U8  well-formed 2/3/4-byte text accepted byte for byte
+#   U8  well-formed 2/3/4-byte text accepted byte for byte, including
+#       E0 A0 80 (U+0800, the lowest 3-byte code point)
 #   U9  parse_string_with_escapes refuses ill-formed raw bytes
 #   U10 escaped surrogates: lone high, lone low, high + non-low refused;
 #       a pair decodes to the 4-byte sequence
@@ -134,6 +136,22 @@ def test_lead_followed_by_non_continuation() raises:
         "parse_string_raw: invalid UTF-8 at byte 0: lead byte 0xF0 is followed"
         " by 0x41, which is not a continuation byte",
     )
+    # A byte ABOVE the continuation range, at positions 1, 2 and 3.
+    assert_equal(
+        _raw_error(_with("", 0xC3, 0xC3)),
+        "parse_string_raw: invalid UTF-8 at byte 0: lead byte 0xC3 is followed"
+        " by 0xC3, which is not a continuation byte",
+    )
+    assert_equal(
+        _raw_error(_with("", 0xE2, 0x82, 0xC3)),
+        "parse_string_raw: invalid UTF-8 at byte 0: lead byte 0xE2 is followed"
+        " by 0xC3, which is not a continuation byte",
+    )
+    assert_equal(
+        _raw_error(_with("", 0xF0, 0x9F, 0x98, 0xFF)),
+        "parse_string_raw: invalid UTF-8 at byte 0: lead byte 0xF0 is followed"
+        " by 0xFF, which is not a continuation byte",
+    )
 
 
 def test_overlong_encodings() raises:
@@ -154,6 +172,11 @@ def test_overlong_encodings() raises:
     assert_equal(
         _raw_error(_with("", 0xF0, 0x8F, 0xBF, 0xBF)),
         "parse_string_raw: invalid UTF-8 at byte 0: overlong encoding: 0xF0 0x8F",
+    )
+    # E0 9F BF is the overlong form of U+07FF: E0 must be followed by A0..BF.
+    assert_equal(
+        _raw_error(_with("", 0xE0, 0x9F, 0xBF)),
+        "parse_string_raw: invalid UTF-8 at byte 0: overlong encoding: 0xE0 0x9F",
     )
 
 
@@ -180,11 +203,12 @@ def test_code_point_above_max() raises:
 
 def test_well_formed_multibyte_accepted() raises:
     # U+00E9 (2 bytes), U+20AC (3), U+1F600 (4), and the edges U+D7FF,
-    # U+E000, U+10FFFF that sit next to the refused ranges.
+    # U+E000, U+10FFFF, U+0800 that sit next to the refused ranges.
     var b = List[UInt8]()
     for x in [
         0x61, 0xC3, 0xA9, 0xE2, 0x82, 0xAC, 0xF0, 0x9F, 0x98, 0x80,
         0xED, 0x9F, 0xBF, 0xEE, 0x80, 0x80, 0xF4, 0x8F, 0xBF, 0xBF,
+        0xE0, 0xA0, 0x80,
     ]:
         b.append(UInt8(x))
     var s = parse_string_raw(Span(b), 0, len(b))

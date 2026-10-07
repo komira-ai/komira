@@ -16,13 +16,17 @@
 #   J1  invalid lead byte 0xFF                         -> 1 x U+FFFD
 #   J2  stray continuation byte 0x80                   -> 1 x U+FFFD
 #   J3  truncated 3-byte sequence before the quote     -> 1 x U+FFFD
-#   J4  overlong C0 AF -> 2, C1 BF -> 2, E0 80 AF -> 3, F0 8F BF BF -> 4
+#   J4  overlong C0 AF -> 2, C1 BF -> 2, E0 80 AF -> 3, F0 8F BF BF -> 4,
+#       and E0 9F BF -> 3 (the highest E0 overlong; pins the A0 bound)
 #   J5  surrogate encoded in UTF-8, ED A0 80           -> 3 x U+FFFD
 #   J6  above U+10FFFF, F4 90 80 80 -> 4, lead F5 -> 1 each
-#   J7  well-formed 2/3/4-byte text is kept byte for byte
+#   J7  well-formed 2/3/4-byte text is kept byte for byte, including
+#       E0 A0 80 (U+0800, the lowest 3-byte code point)
 #   J8  a bad byte after an escape is repaired; the escape still decodes
 #   J9  a non-continuation byte at continuation position 3 (F0 9F 98 41)
 #       ends a 3-byte subpart and is kept: U+FFFD then `A`
+#   J10 a byte ABOVE the continuation range at position 2 (E2 82 C3 A9)
+#       or 3 (F0 9F 98 FF) ends the subpart; a following lead byte is kept
 #   Every case also asserts the scan ends just after the closing quote.
 # =============================================================================
 
@@ -82,6 +86,8 @@ def test_overlong_encodings() raises:
     assert_equal(
         _scan(_quoted("", 0xF0, 0x8F, 0xBF, 0xBF)), String(R) + R + R + R + "z"
     )
+    # E0 9F BF is the overlong form of U+07FF: E0 must be followed by A0..BF.
+    assert_equal(_scan(_quoted("", 0xE0, 0x9F, 0xBF)), String(R) + R + R + "z")
 
 
 def test_surrogate_encoded_in_utf8() raises:
@@ -96,11 +102,12 @@ def test_code_point_above_max() raises:
 
 
 def test_well_formed_multibyte_kept() raises:
-    # U+00E9, U+20AC, U+1F600 and the edges U+D7FF, U+E000, U+10FFFF.
+    # U+00E9, U+20AC, U+1F600 and the edges U+D7FF, U+E000, U+10FFFF, U+0800.
     var b = _quoted(
         "",
         0xC3, 0xA9, 0xE2, 0x82, 0xAC, 0xF0, 0x9F, 0x98, 0x80,
         0xED, 0x9F, 0xBF, 0xEE, 0x80, 0x80, 0xF4, 0x8F, 0xBF, 0xBF,
+        0xE0, 0xA0, 0x80,
     )
     var s = _scan(b)
     assert_equal(s.byte_length(), len(b) - 2)
@@ -118,6 +125,18 @@ def test_escape_then_bad_byte() raises:
 
 def test_non_continuation_at_position_3() raises:
     assert_equal(_scan(_quoted("", 0xF0, 0x9F, 0x98, 0x41)), String(R) + "Az")
+
+
+def test_above_range_continuation() raises:
+    # C3 is above the continuation range at position 2: E2 82 is one subpart,
+    # and C3 A9 (U+00E9) after it is kept.
+    assert_equal(
+        _scan(_quoted("", 0xE2, 0x82, 0xC3, 0xA9)), String(R) + "éz"
+    )
+    # FF at position 3: F0 9F 98 is one subpart, FF is another.
+    assert_equal(
+        _scan(_quoted("", 0xF0, 0x9F, 0x98, 0xFF)), String(R) + R + "z"
+    )
 
 
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
@@ -142,6 +161,7 @@ def main() raises:
     _run("test_well_formed_multibyte_kept", test_well_formed_multibyte_kept, failed)
     _run("test_escape_then_bad_byte", test_escape_then_bad_byte, failed)
     _run("test_non_continuation_at_position_3", test_non_continuation_at_position_3, failed)
+    _run("test_above_range_continuation", test_above_range_continuation, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
-    print("test_json_scan_utf8: ALL 9 CASES PASS")
+    print("test_json_scan_utf8: ALL 10 CASES PASS")
