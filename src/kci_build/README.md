@@ -80,6 +80,17 @@ def git_answers(shallow: String) -> ScriptedRunner:
     g.expect(ScriptedStep(["log", "-1", "--format=%ct", SRC], stdout_text="1790994309\n"))
     return g^
 
+# TemporaryDirectory.__exit__ swallows an error raised in its body, so the
+# block only collects results; the checks run after it closes.
+var outcome = String()
+var message = String()
+var left = -1
+var source_commit = String()
+var build_number = -1
+var timestamp_ms = -1
+var refused_outcome = String()
+var refused_error = String()
+var shallow_calls = -1
 with TemporaryDirectory() as tmp:
     var req = BuildRequest(RunIdentity("gh-1", 1))
     req.work_dir = tmp
@@ -89,18 +100,29 @@ with TemporaryDirectory() as tmp:
 
     var git = git_answers("false\n")
     var r = derive_release_stamp(req, git)
-    assert_equal(r.outcome, "SUCCEEDED", r.message)
-    assert_equal(git.remaining(), 0)
-    var stamp = r.stamp.value().copy()
-    assert_equal(stamp.source_commit, SRC)  # the newest non-documentation commit
-    assert_equal(stamp.build_number, 154)
-    assert_equal(stamp.timestamp_ms, 1790994309000)
+    outcome = r.outcome
+    message = r.message
+    left = git.remaining()
+    if r.stamp:
+        var stamp = r.stamp.value().copy()
+        source_commit = stamp.source_commit
+        build_number = stamp.build_number
+        timestamp_ms = stamp.timestamp_ms
 
     # A shallow clone would count the clone's depth: refused, and git is
     # asked nothing more.
     var shallow = git_answers("true\n")
     var refused = derive_release_stamp(req, shallow)
-    assert_equal(refused.outcome, OUTCOME_REFUSED)
-    assert_equal(refused.error_id, "KCI-E-REVISION")
-    assert_equal(len(shallow.calls), 1)
+    refused_outcome = refused.outcome
+    refused_error = refused.error_id
+    shallow_calls = len(shallow.calls)
+
+assert_equal(outcome, "SUCCEEDED", message)
+assert_equal(left, 0)
+assert_equal(source_commit, SRC)  # the newest non-documentation commit
+assert_equal(build_number, 154)
+assert_equal(timestamp_ms, 1790994309000)
+assert_equal(refused_outcome, OUTCOME_REFUSED)
+assert_equal(refused_error, "KCI-E-REVISION")
+assert_equal(shallow_calls, 1)
 ```
