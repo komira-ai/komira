@@ -160,8 +160,8 @@ comptime JOIN_PAY_MAX_COLS: Int = 1
 # Runtime configuration -- set ONCE per process from a flag, never per call
 # -----------------------------------------------------------------------------
 #
-# ⛔ A FLAG, NOT AN ENVIRONMENT VARIABLE. The binary's flag parser calls
-# `join_payload_inline_configure` once at startup; nothing in this module reads
+# ⛔ A FLAG, NOT AN ENVIRONMENT VARIABLE. `join_payload_inline_configure` sets
+# it, once per process at startup; nothing in this module reads
 # the environment. The arming decision is made per BUILD, and this module's gate
 # is also consulted from the probe side's accounting, so the setting lives in a
 # process-global and every read is one relaxed load.
@@ -196,7 +196,7 @@ def join_payload_inline_enabled() raises -> Bool:
     Set once per process by `join_payload_inline_configure`; an unconfigured
     process reads OFF. See the block comment above.
     """
-    # SAFETY: §6 FFI carve-out -- `_Global.get_or_create_ptr` targets
+    # SAFETY: FFI carve-out -- `_Global.get_or_create_ptr` targets
     # KGEN-runtime static storage (process lifetime); the wildcard origin is the
     # stdlib API's own return type and is confined to this function.
     var gp = _PAY_CFG.get_or_create_ptr()
@@ -209,20 +209,20 @@ def join_payload_inline_enabled() raises -> Bool:
 def join_payload_inline_configure(on: Bool) raises:
     """Set the payload-inline flag for this process. DEFAULT-OFF.
 
-    Call once at startup from the binary's flag parser, before any join builds.
+    Meant to be called once at startup, before any join builds.
     """
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     _PAY_CFG.get_or_create_ptr()[][].store(Scalar[DType.int64](1 if on else -1))
 
 
 def join_payload_inline_reset_config() raises:
     """Return the payload-inline flag to its default (OFF, unconfigured).
 
-    TEST-ONLY. Production resolves once and never changes; a test that drives
+    TEST-ONLY. Production sets the flag once at startup; a test that drives
     the gate from BOTH sides has to be able to move it between cases in ONE
-    process. Mirrors `join_phase_split_reset_config`.
+    process.
     """
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     _PAY_CFG.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
 
 
@@ -311,7 +311,7 @@ def join_payload_inline_admits(
     if pay_nullable:
         _record_declined()
         return False
-    if join_payload_entry_bytes(True) > JOIN_PAY_MAX_ENTRY_BYTES:
+    if join_payload_entry_bytes(True) > JOIN_PAY_MAX_ENTRY_BYTES:  # cov: unreachable the true arm needs an entry over 32 B; the shipped entry is exactly 32 B
         _record_declined()  # cov: unreachable the shipped entry is exactly 32 B
         return False  # cov: unreachable the shipped entry is exactly 32 B
     return True
@@ -323,7 +323,7 @@ def join_payload_inline_admits(
 
 
 def _record_declined() raises:
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     var gp = _PAY_DECLINED.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(1))
 
@@ -356,7 +356,7 @@ def join_payload_inline_record_build(rows: Int, pay_build_col: Int) raises:
     whether it goes -- so an A/B harness grepping for the witness still finds
     it, on the channel diagnostics belong on.
     """
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     var gp = _PAY_FIRED.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(1))
     print(
@@ -386,26 +386,26 @@ def join_payload_inline_record_probe() raises:
     entered the specialised loop. Counted every time (it is off the per-row
     path -- once per chunk call, not once per row).
     """
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     var gp = _PAY_PROBED.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(1))
 
 
 def join_payload_inline_fired_count() raises -> Int:
     """Builds that produced the payload-inline layout, process-wide."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     return Int(_PAY_FIRED.get_or_create_ptr()[][].load())
 
 
 def join_payload_inline_declined_count() raises -> Int:
     """Times the gate REFUSED, process-wide."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     return Int(_PAY_DECLINED.get_or_create_ptr()[][].load())
 
 
 def join_payload_inline_probed_count() raises -> Int:
     """Probe-kernel entries that carried an inlined payload, process-wide."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     return Int(_PAY_PROBED.get_or_create_ptr()[][].load())
 
 
@@ -425,20 +425,20 @@ def join_payload_inline_note_served(columns: Int) raises:
     `join_key_cse_note_shares`, and zero-guarded by its caller so an assemble
     that serves nothing touches no atomic at all.
     """
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     var gp = _PAY_SERVED.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(columns))
 
 
 def join_payload_inline_served_count() raises -> Int:
     """Output columns served from an inlined payload, process-wide."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     return Int(_PAY_SERVED.get_or_create_ptr()[][].load())
 
 
 def reset_join_payload_inline_counters() raises:
     """TEST-ONLY: zero all four witnesses."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     _PAY_FIRED.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
     _PAY_DECLINED.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
     _PAY_PROBED.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
@@ -511,7 +511,7 @@ def join_pay_subst_enabled() raises -> Bool:
     A/B-able against this one; this gate is INERT unless payload-inline armed
     the index, because there is no payload to substitute with otherwise.
     """
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     var gp = _SUBST_CFG.get_or_create_ptr()
     var cur = Int(gp[][].load())
     if cur != 0:
@@ -522,20 +522,20 @@ def join_pay_subst_enabled() raises -> Bool:
 def join_pay_subst_configure(on: Bool) raises:
     """Set the pay-subst flag for this process. DEFAULT-OFF. See
     `join_payload_inline_configure`."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     _SUBST_CFG.get_or_create_ptr()[][].store(Scalar[DType.int64](1 if on else -1))
 
 
 def join_pay_subst_reset_config() raises:
-    """TEST-ONLY: drop the cached configuration. See
-    `join_payload_inline_reset_config`."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    """TEST-ONLY: return the pay-subst flag to its default (OFF, unconfigured).
+    See `join_payload_inline_reset_config`."""
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     _SUBST_CFG.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
 
 
 def join_pay_subst_note_elided() raises:
     """One deferred record that DROPPED its build match index."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     var gp = _SUBST_ELIDED.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(1))
 
@@ -551,7 +551,7 @@ def join_pay_subst_note_kept() raises:
     whose index actually carried a payload reach either counter, so
     `elided + kept` is the population the lever could ever have acted on.
     """
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     var gp = _SUBST_KEPT.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(1))
 
@@ -566,32 +566,32 @@ def join_pay_subst_note_fallback() raises:
     fallback has never once executed", which is what a code-reading review
     cannot tell apart.
     """
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     var gp = _SUBST_FALLBACK.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(1))
 
 
 def join_pay_subst_elided_count() raises -> Int:
     """Deferred records that dropped the build match index, process-wide."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     return Int(_SUBST_ELIDED.get_or_create_ptr()[][].load())
 
 
 def join_pay_subst_kept_count() raises -> Int:
     """Payload-carrying deferred records that kept the build match index."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     return Int(_SUBST_KEPT.get_or_create_ptr()[][].load())
 
 
 def join_pay_subst_fallback_count() raises -> Int:
     """Assembly slices served by the per-record probe-side alias gather."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     return Int(_SUBST_FALLBACK.get_or_create_ptr()[][].load())
 
 
 def reset_join_pay_subst_counters() raises:
     """TEST-ONLY: zero the three witnesses."""
-    # SAFETY: §6 FFI carve-out (see `join_payload_inline_enabled`).
+    # SAFETY: FFI carve-out (see `join_payload_inline_enabled`).
     _SUBST_ELIDED.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
     _SUBST_KEPT.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
     _SUBST_FALLBACK.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
@@ -652,8 +652,10 @@ def join_pay_subst_alias(
     out_alias.clear()
     if pay_col < 0 or pay_col >= build_ncols:
         return False
-    if build_ncols <= 0 or probe_ncols <= 0:
+    if probe_ncols <= 0:
         return False
+    if build_ncols <= 0:  # cov: unreachable the pay_col refusal above already requires build_ncols >= 1
+        return False  # cov: unreachable the pay_col refusal above already requires build_ncols >= 1
     # The map is built per BUILD column; one shorter than the build batch
     # cannot answer for the columns past its end, and `alias_of` reports those
     # as -1 (= gather) rather than raising -- so the LENGTH is checked here and
