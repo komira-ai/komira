@@ -14,7 +14,7 @@ SRC_LAYOUT_PACKAGES = [
     "src/tests/conformance/komira_b_conformance",
     "src/tests/e2e/komira_c_e2e",
     "src/tests/e2e/komira_d_loopback",
-    "src/tests/support/komira_test_harness",
+    "src/tests/helpers/komira_test_harness",
     "tools/komira_tool_e2e",
 ]
 

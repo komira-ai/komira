@@ -1,5 +1,5 @@
 # =============================================================================
-# test_join_payload_narrow_exec -- PAYLOAD-NARROW's delivery half
+# test_join_payload_narrow_exec -- the delivery half of join payload narrowing
 # =============================================================================
 #
 # WHAT IS UNDER TEST. `join_payload_narrow_exec.mojo` (the build-side narrow +
