@@ -10,10 +10,14 @@ expression arm it does not render, so a door plan that grows a new node or
 expression cannot compare equal by omission.
 
 What it compares:
-- SORT, JOIN and AGGREGATE: every payload field.
+- SORT and JOIN: every payload field.
+- AGGREGATE: every payload field, with `udf` and `group_topk` compared as
+  set or unset only.
 - SCAN: the source, `source_path`, `source_type`, `schema`, `projection`,
   `filter`, `row_count`, whether `table_stats` is set, `source_kind`.
-- A binding-backed source: every carried field of its `ScanBinding`.
+- A binding-backed source: every carried field of its `ScanBinding`, with
+  `stats` as set or unset only; `handle` and `registry_epoch` are
+  process-local and not compared.
 - Every schema: per field, name, Arrow type, dtype, nullability, decimal
   precision and scale, time zone, dictionary index type, flags, union type
   ids, children; the field's metadata by count only (`Field` publishes no
@@ -27,7 +31,10 @@ What it does not compare, and why:
   column NAMES. The parquet arm itself is private, so the rest of what the
   wire carries for it is not compared: the `name` (`WireParquetSource` fields
   3 and 4), the partition columns' types (field 6) and the partition values
-  (field 7). The door's parquet fixtures set none of them.
+  (field 7). Fields 8 to 10 (`hive_dir_scan`, `has_hive_predicate`,
+  `fs_is_local`) are not compared either; the decoder refuses a hive scan and
+  a non-local file system, so a decoded plan holds only their defaults. The
+  door's parquet fixtures set none of them.
 - `ScanData.payload_narrow`: an optimizer annotation that the wire does not
   carry, so a decoded plan always has it empty.
 
