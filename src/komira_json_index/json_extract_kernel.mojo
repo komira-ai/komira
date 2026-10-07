@@ -59,6 +59,7 @@ from komira_json_index.parse_string import (
     parse_string_raw,
     parse_string_with_escapes,
 )
+from komira_json_index.utf8_check import check_utf8
 
 
 # =============================================================================
@@ -122,7 +123,8 @@ def extract_column(
 
     Returns a STRING Column with `parent.length()` rows. Rows where the
     path is missing OR where the row's parent value is null are emitted
-    as null (validity bit clear).
+    as null (validity bit clear). So is a row whose extracted value is not
+    well-formed UTF-8 (`utf8_check`), the same as a row that is not JSON.
 
     ⚠ AND, WHEN `preserve_extension_metadata` IS FALSE (`->>`), rows whose
     extracted value is the JSON literal `null` — see the scalar arm of
@@ -179,8 +181,15 @@ def extract_column(
         # Trivial path: zero segments = whole-document extract.
         # Return the whole payload verbatim.
         if len(path_segments) == 0:
-            found = True
-            value_str = payload.copy()
+            # The whole payload is the value, so it is checked whole; a row
+            # that is not well-formed UTF-8 is nulled like malformed JSON.
+            try:
+                check_utf8(payload_bytes, 0, len(payload_bytes), "extract_column")
+                found = True
+                value_str = payload.copy()
+            except:
+                found = False
+                value_str = String("")
         else:
             # Build Stage 1 structural index for this row's payload.
             # Per mechanism (a), this is bounded by the payload
@@ -601,16 +610,20 @@ def _find_close_for(idx: StructuralIndex, open_t: Int, input_len: Int) -> Int:
 
 def _slice_to_string(bytes: Span[UInt8, _], start: Int, end: Int) raises -> String:
     """Build a String from bytes[start..end). Mirrors
-    parse_string._string_from_bytes pattern — NUL-terminate + ctor."""
+    parse_string._string_from_bytes pattern — NUL-terminate + ctor.
+    Raises `_slice_to_string: invalid UTF-8 at byte <i>: <reason>` when the
+    range is not well-formed UTF-8."""
     if end < start:
         raise Error("_slice_to_string: end < start")
+    check_utf8(bytes, start, end, "_slice_to_string")
     var n = end - start
     var buf = List[UInt8](capacity=n + 1)
     for i in range(start, end):
         buf.append(bytes[i])
     buf.append(UInt8(0))
     # SAFETY: buf is alive through the ctor call; the ptr it passes is
-    # a NUL-terminated UTF-8 buffer that String copies out immediately.
+    # a NUL-terminated buffer, checked well-formed UTF-8 above, that String
+    # copies out immediately.
     return String(unsafe_from_utf8_ptr=buf.unsafe_ptr())
 
 
