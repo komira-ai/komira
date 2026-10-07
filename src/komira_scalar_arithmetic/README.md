@@ -18,7 +18,7 @@ Add and divide Decimal128 values at different scales:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
-from komira_scalar_arith.decimal_arith import I128, decimal_add_i128, decimal_add_result_ps, decimal_div_i128
+from komira_scalar_arithmetic.decimal_arith import I128, decimal_add_i128, decimal_add_result_ps, decimal_div_i128
 
 # 123.45 (DECIMAL(5,2)) + 6.789 (DECIMAL(4,3))
 var ps = decimal_add_result_ps(5, 2, 4, 3)
@@ -35,9 +35,9 @@ Parse, format and compare decimals:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
-from komira_scalar_arith.decimal_arith import I128
-from komira_scalar_arith.decimal_cast import decimal_to_string, string_to_decimal_i128
-from komira_scalar_arith.decimal_compare import DEC_CMP_EQ, DEC_CMP_LT, decimal_cmp_i128
+from komira_scalar_arithmetic.decimal_arith import I128
+from komira_scalar_arithmetic.decimal_cast import decimal_to_string, string_to_decimal_i128
+from komira_scalar_arithmetic.decimal_compare import DEC_CMP_EQ, DEC_CMP_LT, decimal_cmp_i128
 
 var v = string_to_decimal_i128(" -1.255 ", 10, 2)
 assert_equal(v, I128(-126))
@@ -52,7 +52,7 @@ Integer `+` raises instead of wrapping:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
 ```mojo
-from komira_scalar_arith.int_overflow import add_overflows, checked_add, is_int_overflow_error
+from komira_scalar_arithmetic.int_overflow import add_overflows, checked_add, is_int_overflow_error
 
 assert_true(add_overflows[DType.int64](Int64.MAX, Int64(1)))
 assert_false(add_overflows[DType.int64](Int64(2), Int64(3)))
@@ -70,7 +70,7 @@ Decimal256 multiplication raises when the product leaves 76 digits:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
-from komira_scalar_arith.decimal256_arith import I256, decimal256_mul_i256, max_dec256_i256
+from komira_scalar_arithmetic.decimal256_arith import I256, decimal256_mul_i256, max_dec256_i256
 
 assert_equal(decimal256_mul_i256(I256(-25), I256(4)), I256(-100))
 var refused = False
