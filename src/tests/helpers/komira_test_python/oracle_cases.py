@@ -7,8 +7,9 @@ status, the last stderr line and the files left in `--out` to what is
 expected; on a pass it also requires `--tmpdir` to be empty. They pin what
 makes an oracle's output deterministic: a script whose two runs write
 different bytes, files, file kinds or modes is red, and so is one that writes
-a symlink, fails (raises, or exits non-zero), is killed, writes nothing, or writes other files than
-`outs` names. `writes_tree` passes only because the runner fixes the hash
+a symlink, fails (raises, or exits non-zero, in either run: `second_fails.py`
+exits 4 only in the second run), is killed, writes nothing, or writes other
+files than `outs` names. `writes_tree` passes only because the runner fixes the hash
 seed: its `set.txt` is a set of 64 strings in iteration order.
 """
 
@@ -64,6 +65,7 @@ CASES_TABLE = [
     ("symlink", "symlink.py", [], (1, "python_oracle: symlink.py wrote a symlink at link", ["a.txt", "link"])),
     ("raises", "raises.py", [], (1, "python_oracle: raises.py failed: ValueError: planted: 7", [])),
     ("exits", "exits.py", [], (1, "python_oracle: exits.py failed: SystemExit: 3", [])),
+    ("second_fails", "second_fails.py", [], (1, "python_oracle: second_fails.py failed: SystemExit: 4", ["always.txt"])),
     ("kind", "kind.py", [], (1, "python_oracle: two runs of kind.py differ at x: a dir in the first run, a file in the second", ["always.txt"])),
     ("killed", "killed.py", [], (1, "python_oracle: the first run of killed.py exited -9", [])),
 ]
