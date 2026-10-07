@@ -58,7 +58,7 @@ no_endpoint(
 
 # The layout of src/ (tools/build/lint/defs.bzl, src_layout): src/<name> holds
 # what komira ships; a package that exists only to test others is
-# src/tests/<kind>/<name> (e2e, conformance, support; docs/architecture.md
+# src/tests/<kind>/<name> (e2e, conformance, helpers; docs/architecture.md
 # says which). So a *_e2e, *_loopback or *_conformance package directly
 # under src/ fails the build, and so does a komira_test_* one `shipped` does
 # not name. The packages are read from the build graph (every BUCK file under
@@ -67,7 +67,7 @@ no_endpoint(
 src_layout(
     name = "src_layout",
     # The test libraries komira ships, directly under src/ (the harnesses
-    # under src/tests/support build on them).
+    # under src/tests/helpers build on them).
     shipped = [
         "komira_test_run_id",
         "komira_test_verdict",
@@ -89,6 +89,7 @@ _TESTS_LINTS = [
     "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
     "tests//functional/install_gate:shell_lint",
+    "tests//functional/mem_cap:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
     "tests//functional/watchdog:shell_lint",
