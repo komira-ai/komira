@@ -55,8 +55,8 @@
 #      traced) fails this action, with the test's output from gate_runner
 #      but not its banner (which says the release gate's test failed: that
 #      one passed; this action's own message says what failed). With
-#      coverage on, the library's package waits for this action too
-#      (tools/build/mojo/coverage.bzl). kcov refused by the executor
+#      coverage on, the conda package (<name>_conda) waits for this action
+#      too, the library does not (tools/build/mojo/coverage.bzl). kcov refused by the executor
 #      (ptrace, personality) is reported as that.
 #      The run is bounded: gate_runner runs in a session of its own (setsid),
 #      and when it has not exited after <limit> seconds, every process of
