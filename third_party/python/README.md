@@ -22,11 +22,21 @@ No source distribution is built and pip never runs.
 | pandas | 3.0.6 | numpy, python-dateutil | dataframe oracles |
 | python-dateutil | 2.9.0.post0 | six | pandas |
 | six | 1.17.0 | | python-dateutil |
-| polars | 2.0.0 | polars-runtime-32 | dataframe oracles |
-| polars-runtime-32 | 2.0.0 | | polars (its compiled engine) |
+| polars | 1.44.2 | polars-runtime-32 | dataframe oracles |
+| polars-runtime-32 | 1.44.2 | | polars (its compiled engine) |
 | protobuf | 7.36.2 | | protobuf interop |
 | grpcio | 1.84.0 | typing-extensions | gRPC interop |
 | typing-extensions | 4.16.0 | | grpcio |
+| tzdata | 2026.5 | | the time-zone database of every `py_test` (IANA 2026e) |
+
+polars is pinned at 1.44.2, the version komira's Python surface implements;
+moving to polars 2 is a later change. pandas 3.0.6 is the version the
+surface implements.
+
+tzdata is in every `py_test`'s closure whether or not its `deps` name it:
+its `tzdata/zoneinfo` directory is the action's `TZDIR` and Python's only
+zone path ([tools/build/python](../../tools/build/python/README.md#time-zones)),
+so a zone is never read from the worker.
 
 Not in the closure yet, each for the change that brings its consumer: the
 Google Cloud Storage testbench, kafka-python and opensearch-py (service
@@ -47,6 +57,7 @@ drivers), and anything they require.
 | protobuf | BSD-3-Clause | |
 | grpcio | Apache-2.0 | its licence file adds BSD-3-Clause (build files) and MPL-2.0 (`etc/roots.pem`, the root certificates) |
 | typing-extensions | PSF-2.0 | |
+| tzdata | Apache-2.0 | the IANA time-zone database, which is in the public domain |
 | libgcc_s, libstdc++ | GPL-3.0-or-later WITH GCC-exception-3.1 | |
 | zlib | Zlib | |
 
