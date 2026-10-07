@@ -78,7 +78,9 @@ def timestamp_text(value, unit, tz):
 
 def _python_values(column):
     """The column's values as Python objects; temporal values as integers
-    (to_pylist would need a time-zone database for a zoned timestamp)."""
+    in their unit, which the text writers format themselves (to_pylist would
+    give datetimes in the column's zone, and refuses a nanosecond value that
+    is not a whole microsecond without pandas)."""
     t = column.type
     if pa.types.is_timestamp(t):
         return column.cast(pa.int64()).to_pylist()

@@ -52,7 +52,8 @@ FORMATS = [
 # Why a format leaves a column out. Each was seen with the pinned pyarrow on
 # the farm.
 NO_UNSIGNED_ORC = "ORC has no unsigned integer type (pyarrow: Unknown or unsupported Arrow type: uint8)"
-NO_TIMESTAMP_ORC = "pyarrow's ORC writer needs /usr/share/zoneinfo for any timestamp, which the farm's workers do not have"
+NO_UNIT_ORC = "pyarrow reads every ORC timestamp back as timestamp[ns], so a seconds, milliseconds or microseconds column comes back in another unit, and its instants before 1677 out of range"
+NO_ZONE_ORC = "an ORC instant column holds no zone name; pyarrow reads a zoned column back with tz=UTC"
 NO_SECONDS_PARQUET = "Parquet has no seconds unit; pyarrow writes timestamp[s] as milliseconds and reads back timestamp[ms]"
 NO_NAN_JSON = "JSON has no NaN or infinity"
 NO_RAW_BYTES_JSON = "a JSON string holds Unicode text, not bytes that are not UTF-8"
@@ -217,7 +218,11 @@ def _types():
         lambda r: r.randint(_days(1900, 1, 1), _days(2100, 1, 1)), n, 0.125)))
     for unit in ("s", "ms", "us", "ns"):
         for tz in (None, "UTC" if unit in ("s", "ms") else "+05:30"):
-            excluded = {"orc": NO_TIMESTAMP_ORC}
+            excluded = {}
+            if unit != "ns":
+                excluded["orc"] = NO_UNIT_ORC
+            elif tz:
+                excluded["orc"] = NO_ZONE_ORC
             if unit == "s":
                 excluded["parquet"] = NO_SECONDS_PARQUET
             cols.append(_timestamp_column(rng, n, unit, tz, excluded))

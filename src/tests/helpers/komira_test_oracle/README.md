@@ -50,7 +50,7 @@ every format.
 
 | format | leaves out of `types` | because |
 |---|---|---|
-| ORC | `u8` to `u64`, every timestamp | ORC has no unsigned type; pyarrow's ORC writer reads `/usr/share/zoneinfo` for any timestamp, and the farm's workers have none |
+| ORC | `u8` to `u64`; every timestamp but `ts_ns` | ORC has no unsigned type; pyarrow reads every ORC timestamp back as `timestamp[ns]` (another unit, and instants before 1677 out of range), and an ORC instant holds no zone name, so `ts_ns_tz` comes back with `tz=UTC` |
 | Parquet | `ts_s`, `ts_s_tz` | Parquet has no seconds unit: pyarrow writes milliseconds and reads back `timestamp[ms]` |
 | JSON Lines | `f32_special`, `f64_special`, `bin_raw` | JSON has no NaN or infinity, and a JSON string is text, not bytes |
 

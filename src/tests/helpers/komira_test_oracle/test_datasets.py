@@ -74,7 +74,8 @@ SIDECARS = {
 _TS = ["ts_s", "ts_s_tz", "ts_ms", "ts_ms_tz", "ts_us", "ts_us_tz", "ts_ns", "ts_ns_tz"]
 LEFT_OUT = {
     "types": {
-        "orc": ["u8", "u16", "u32", "u64"] + _TS,
+        # Of the timestamps, ORC carries naive nanoseconds only.
+        "orc": ["u8", "u16", "u32", "u64"] + [c for c in _TS if c != "ts_ns"],
         "parquet": ["ts_s", "ts_s_tz"],
         "jsonl": ["f32_special", "f64_special", "bin_raw"],
     },
