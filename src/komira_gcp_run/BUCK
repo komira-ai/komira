@@ -26,22 +26,24 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # The operations client. Run serves the google.longrunning.Operations
 # mixin at its own paths (`/v2/{name=projects/*/locations/*/operations/*}`),
 # which only the API's service configuration states (run_v2.yaml), not a
-# .proto; operations.proto's own bindings (`/v1/{name=operations/**}`) are
-# not Run's. operations_mixin.proto restates the two rules a poller needs on
-# operations.proto's messages, and test_run_operations_mixin reads both
-# rules and the default host out of run_v2.yaml at the pin and holds the
-# proto and the generated client to them. This is the one restated piece of
-# upstream data here: it goes when the generator applies a service
-# configuration's `http.rules` itself.
+# .proto; operations.proto's own bindings (`/v1/{name=operations/**}`) and
+# host (longrunning.googleapis.com) are not Run's. `service_config` gives the
+# generator run_v2.yaml at the pin: its `http.rules` bind GetOperation and
+# WaitOperation of google.longrunning.Operations (bundled operations.proto)
+# to Run's paths, and its `name`, run.googleapis.com, is the host the
+# operations client starts at (the client says so in place of naming
+# operations.proto's annotation). test_run_operations_rules holds the
+# generated client to a golden and to run_v2.yaml's rules.
 #
 # `bundle_only` is the part of the run_v2 closure those methods reach.
 # `module_names` gives two files their modules: `k8s.min.proto` (its stem
 # is not a module name) and Run's own `status.proto`, beside
 # google/rpc/status.proto (an operation's error) in the one flat package.
 #
-# The clients start at run.googleapis.com, the `google.api.default_host`
-# of the pinned protos, Run Admin v2's one endpoint; a resource's region is
-# part of its name.
+# The clients start at run.googleapis.com, Run Admin v2's one endpoint; a
+# resource's region is part of its name. Run's four services declare it as
+# their `google.api.default_host`; the operations client starts at
+# run_v2.yaml's `name`, the same host (test_run_endpoint).
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the Cloud Run Admin v2 REST reference (no upstream test body is
@@ -55,8 +57,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # a name outside Run's binding refused), test_run_errors (one
 # google.rpc.Status envelope per method mapped to its code, the body never
 # quoted), test_run_endpoint (every client's default host read without
-# sending, an override dialled), test_run_operations_mixin (the operations
-# bindings are run_v2.yaml's) and test_no_env_reads (no generated module
+# sending, an override dialled), test_run_operations_rules (the operations
+# client is its golden, with run_v2.yaml's bindings) and test_no_env_reads (no generated module
 # reads the environment, and only the methods above are generated).
 #
 # No test here talks to the service.
@@ -89,9 +91,9 @@ mojo_gcp_client(
         "Jobs.ListJobs",
         "Jobs.RunJob",
         "Jobs.UpdateJob",
-        # Qualified: google.longrunning.Operations declares the same names.
-        ".komira.gcp.run.v2.Operations.GetOperation",
-        ".komira.gcp.run.v2.Operations.WaitOperation",
+        # Qualified: the mixin, bound by run_v2.yaml's http.rules.
+        ".google.longrunning.Operations.GetOperation",
+        ".google.longrunning.Operations.WaitOperation",
         "Revisions.DeleteRevision",
         "Revisions.ListRevisions",
         "Services.CreateService",
@@ -106,14 +108,15 @@ mojo_gcp_client(
     },
     proto_deps = ["//tools/vendor/googleapis:run_v2"],
     protocol = "rest",
-    protos = ["operations_mixin.proto"],
+    protos = [],
+    service_config = "//tools/vendor/googleapis:googleapis[google/cloud/run/v2/run_v2.yaml]",
     test_data = {
         # The whole generated package, so the scan covers every file the
         # generator writes with no second list of them to drift.
         "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_run_gen"},
-        "tests/test_run_operations_mixin.mojo": {
+        "tests/test_run_operations_rules.mojo": {
             "gen": ":komira_gcp_run_gen",
-            "operations_mixin.proto": "operations_mixin.proto",
+            "operations_client.golden": "tests/operations_client.golden",
             "run_v2.yaml": "//tools/vendor/googleapis:googleapis[google/cloud/run/v2/run_v2.yaml]",
         },
     },
@@ -123,7 +126,7 @@ mojo_gcp_client(
         "tests/test_run_errors.mojo",
         "tests/test_run_jobs.mojo",
         "tests/test_run_operations.mojo",
-        "tests/test_run_operations_mixin.mojo",
+        "tests/test_run_operations_rules.mojo",
         "tests/test_run_services.mojo",
     ],
     visibility = ["PUBLIC"],

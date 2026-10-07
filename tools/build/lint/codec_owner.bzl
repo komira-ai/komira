@@ -13,7 +13,7 @@ implementation layers. A name built from pieces (adjacent literals, `+`) is
 not seen. The owners must hold a snappy declaration (`"snappy_uncompress"`,
 either spelling) and the five sonames, so the snappy and soname patterns
 cannot stop matching unnoticed; the import pattern and libsnappy have no such
-check and are pinned by tests//negative/codec_owner (test 44).
+check and are pinned by tests//negative/codec_owner (test 48).
 codec_owner.sh says each pattern; a target with no `owners`, or with both or
 neither of `tree` and `files`, fails at analysis.
 """

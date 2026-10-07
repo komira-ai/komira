@@ -5,21 +5,33 @@
 # avro_codec.mojo calls komira_compression's codec API and declares no codec
 # FFI of its own. This pins what that must not change:
 #
-#   * compress_block, for every codec and for three inputs (empty, 4 KiB of
-#     incompressible bytes, ~600 bytes of repetitive text), is byte-equal to
-#     komira_compression's codec called directly with the parameters the Avro
-#     writer has always used: raw deflate at level 6, snappy plus the BE4
-#     CRC-32 of the uncompressed bytes, zstd level 3, bzip2 with 900k blocks
-#     and work factor 0, xz preset 6 with a CRC-64 check. The same file run
-#     against the avro_codec.mojo that declared its own FFI passes too, so
-#     the old and the new writer emit the same bytes.
+#   * compress_block, for every codec and for five inputs (empty, 4 KiB of
+#     incompressible bytes, 920 bytes of repetitive text, 64 KiB and
+#     256 KiB of log-like lines from _words), is byte-equal to komira_compression's
+#     codec called directly with the parameters the Avro writer has always
+#     used: raw deflate at level 6, snappy plus the BE4 CRC-32 of the
+#     uncompressed bytes, zstd level 3, bzip2 with 900k blocks and work
+#     factor 0, xz preset 6 with a CRC-64 check.
+#     test_compress_block_is_byte_equal_to_the_codec_api over the first
+#     three inputs, run against the avro_codec.mojo that declared its own
+#     FFI, passes too, so the old and the new writer emit the same bytes
+#     there; the two _words inputs were added later and have not been run
+#     against the old file.
 #   * decompress_block of each of those blocks returns the input.
 #   * a corrupt block of each codec is refused with the exact message: the
-#     AvroCodecError code, then komira_compression's account of the failure.
+#     AvroCodecError code, then komira_compression's account of the failure
+#     for snappy, zstd, bzip2 and xz; deflate's carries the inflate rc, and
+#     SNAPPY_LENGTH_FAILED (no length preamble) carries no text.
 #
 # What it catches: a codec parameter changed in the move (a level, a window,
-# a block size), a lost or misplaced CRC trailer, an output cut to the wrong
-# length, and an error that drops the library's code or the sizes.
+# a block size, a preset), a lost or misplaced CRC trailer, an output cut to
+# the wrong length, and an error that drops the library's code or the sizes.
+# On the first three inputs deflate 9 and zstd 4 emit the same bytes as
+# deflate 6 and zstd 3; the 64 KiB _words input separates those, and only
+# the 256 KiB one separates deflate 7 from 6. Each of these mutants in
+# avro_codec.mojo turns the byte-equality test red: deflate 6 to 5, 7 or 9,
+# zstd 3 to 4, xz preset 6 to 5, bzip2 900k to 800k blocks. Deflate 8 has
+# not been tried.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal
@@ -49,6 +61,53 @@ from komira_compression.zlib import (
 from komira_compression.zstd_frame import zstd_compress_bound, zstd_compress_into
 
 
+def _words(n: Int, seed: UInt32) -> List[UInt8]:
+    """`n` bytes of log-like lines. An LCG spells a vocabulary of 300
+    words of 2 to 9 letters, builds 400 phrases of 3 to 10 of them, then
+    writes lines of a phrase (skewed toward the first ones, so phrases
+    repeat at many distances) and a 0-99999 number. Repeats of 20 to 90
+    bytes that overlap other phrases are what separate nearby levels:
+    with seed 0x41C64E6D, deflate 5, 6 and 9 and zstd 3 and 4 emit
+    different bytes for 64 KiB of it, and deflate 6 and 7 for 256 KiB
+    (not for 64 KiB), where short periodic text and noise compress
+    identically. Not every seed does: 0x5DEECE66 gave deflate 6 and 9 the
+    same bytes."""
+    var state = seed
+    var vocab = List[List[UInt8]](capacity=300)
+    for _ in range(300):
+        state = state * UInt32(1103515245) + UInt32(12345)
+        var length = 2 + Int((state >> 16) % 8)
+        var word = List[UInt8](capacity=length)
+        for _ in range(length):
+            state = state * UInt32(1103515245) + UInt32(12345)
+            word.append(UInt8(97 + Int((state >> 16) % 26)))
+        vocab.append(word^)
+    var phrases = List[List[UInt8]](capacity=400)
+    for _ in range(400):
+        state = state * UInt32(1103515245) + UInt32(12345)
+        var count = 3 + Int((state >> 16) % 8)
+        var phrase = List[UInt8]()
+        for _ in range(count):
+            state = state * UInt32(1103515245) + UInt32(12345)
+            phrase.extend(Span(vocab[Int((state >> 16) % 300)]))
+            phrase.append(32)
+        phrases.append(phrase^)
+    var out = List[UInt8](capacity=n)
+    while len(out) < n:
+        state = state * UInt32(1103515245) + UInt32(12345)
+        var a = Int((state >> 16) % 400)
+        state = state * UInt32(1103515245) + UInt32(12345)
+        var b = Int((state >> 16) % 400)
+        var line = phrases[min(a, b)].copy()
+        state = state * UInt32(1103515245) + UInt32(12345)
+        for c in (String(Int((state >> 8) % 100000)) + "\n").as_bytes():
+            line.append(c)
+        for c in line:
+            if len(out) < n:
+                out.append(c)
+    return out^
+
+
 def _corpus() -> List[List[UInt8]]:
     var out = List[List[UInt8]]()
     out.append(List[UInt8]())
@@ -64,6 +123,8 @@ def _corpus() -> List[List[UInt8]]:
         for b in row.as_bytes():
             text.append(b)
     out.append(text^)
+    out.append(_words(64 * 1024, UInt32(0x41C64E6D)))
+    out.append(_words(256 * 1024, UInt32(0x41C64E6D)))
     return out^
 
 

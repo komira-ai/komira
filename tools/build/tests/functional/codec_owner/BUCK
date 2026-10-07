@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:codec_owner.bzl", "codec_owner")
 load(":fixture.bzl", "CODEC_OWNERS", "CODEC_TREE")
 
-# Test 44 (the codec owner lint), the half that must build: the planted tree
+# Test 48 (the codec owner lint), the half that must build: the planted tree
 # of fixture.bzl, whose owners hold every codec declaration, soname and
 # layer import, beside near misses outside them. negative/codec_owner plants
 # one defect each in the same tree.

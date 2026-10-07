@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:codec_owner.bzl", "codec_owner")
 load("//functional/codec_owner:fixture.bzl", "CODEC_OWNERS", "CODEC_TREE")
 
-# Test 44 (the codec owner lint), the half that must go red: one planted
+# Test 48 (the codec owner lint), the half that must go red: one planted
 # defect per target, in the tree of functional/codec_owner (whose `ok`
 # builds). run_tests.sh requires each to fail naming its finding.
 
