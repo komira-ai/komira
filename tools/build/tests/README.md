@@ -952,10 +952,6 @@ defect in the same tree and must fail naming it, `enforce = True` included.
 [Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
 binary with line tables per `test_srcs` entry and leave every release action as it is; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
-## 45. Assert level, defines and memory cap
-
-[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
-
 ## 42. Pointer lint
 
 [`pointer_lint`](../lint/defs.bzl) is a validation over every `.mojo` file of
@@ -1047,3 +1043,7 @@ and must fail naming it.
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
 records what a remote worker provides, the evidence behind the
 [host floor](../toolchains/README.md#host-floor).
+
+## 45. Assert level, defines and memory cap
+
+[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
