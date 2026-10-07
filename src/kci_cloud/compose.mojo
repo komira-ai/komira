@@ -585,6 +585,14 @@ struct _Expander(Movable):
             return _Got.of_ref(r)  # validate refuses a reference to nothing
         var target: String
         if ctx.def_i >= 0:
+            # cov: unreachable: the three refusals below (a resource base, an
+            # unknown local, an undeclared or STRING input used as a ref) are
+            # refused first by load: check_component runs static_ref on every
+            # ref and Value.ref site of a definition, compose_refs' walk covers
+            # a nested instance's bindings, and check_output requires `from`
+            # to name an existing local. Expansion runs only after a load with
+            # no finding. Kept as refusals so a caller that skips load is
+            # refused rather than accepted.
             if has_res:
                 return _Got.refused(self.static_ref(ctx.def_i, r))
             if r.local:
