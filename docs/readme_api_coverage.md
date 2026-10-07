@@ -125,18 +125,16 @@ flipping it, document the symbols or seed the ledger from `[symbols]` (its
 ## Census
 
 The census of 2026-10-06, `./buck2 build //:readme_api_coverage` on the farm
-over the tree this file landed with, less the ten test-only packages it
-counted that moved under `src/tests/` the same day (which the census now
-skips): their rows are removed and the totals are that census's less
-theirs. Rebuild `[report]` for today's numbers.
+over the tree this file lands with (test-only packages under `src/tests/`
+are not counted). Rebuild `[report]` for today's numbers.
 
-**Totals.** 177 packages; 6838 public symbols exported (3658 names, 3180
-methods); 379 used by a README example, **5.5%** (names 215, 5.9%; methods
-164, 5.2%); 0 excepted; 6459 undocumented.
+**Totals.** 175 packages; 6758 public symbols exported (3610 names, 3148
+methods); 379 used by a README example, **5.6%** (names 215, 6.0%; methods
+164, 5.2%); 0 excepted; 6379 undocumented.
 
-- 90 packages export something. 29 of them have README examples, 1 have a
+- 88 packages export something. 29 of them have README examples, 1 have a
   README with no `mojo` example (`komira_secret_env`),
-  and **60 have no README** (0%; 5410 of the 6459 undocumented symbols).
+  and **58 have no README** (0%; 5330 of the 6379 undocumented symbols).
 - 51 packages have an `__init__.mojo` that exports nothing (their API is
   their submodules, which v1 does not count): `komira_agg` (no-example), `komira_agg_api` (no-example), `komira_arrow` (no-example), `komira_arrow_ipc` (no-example), `komira_async`, `komira_async_api` (no-example), `komira_buffer` (no-example), `komira_collections` (examples:4), `komira_column_format`, `komira_column_kernels` (no-example), `komira_compression` (no-example), `komira_counters` (examples:2), `komira_dispatch_agg_exec` (no-example), `komira_dynamic_filter` (no-example), `komira_eval` (no-example), `komira_exec_types` (no-example), `komira_expr` (no-example), `komira_fs`, `komira_gcp_firestore`, `komira_host` (examples:3), `komira_http_core`, `komira_http_server`, `komira_join_assembly` (no-example), `komira_json_index` (no-example), `komira_kafka_server` (examples:3), `komira_kernels`, `komira_libc` (no-example), `komira_lz4`, `komira_metrics`, `komira_morsel`, `komira_net`, `komira_op_agg_row_api`, `komira_op_agg_state`, `komira_plan_expr` (no-example), `komira_plan_ir` (no-example), `komira_plan_stats` (no-example), `komira_row_format`, `komira_scalar_arithmetic` (examples:4), `komira_scan_planning`, `komira_scan_resolver`, `komira_scan_source` (no-example), `komira_sdk` (examples:3), `komira_shuffle`, `komira_simd` (examples:4), `komira_snapshotter`, `komira_spsc_ring`, `komira_sql` (examples:2), `komira_table_store` (no-example), `komira_trace`, `komira_udf` (no-example), `komira_validation_run` (examples:3).
 - 36 packages have no `__init__.mojo` (generated clients and protobuf
