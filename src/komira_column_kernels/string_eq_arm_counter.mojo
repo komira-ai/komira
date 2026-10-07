@@ -41,7 +41,7 @@ from komira_counters.global_counter import GlobalCounter
 
 
 comptime _STRING_EQ_LADDER_COUNTER = GlobalCounter[
-    "komira_core_string_eq_runtime_ladder_calls"
+    "komira_column_kernels_string_eq_runtime_ladder_calls"
 ]
 
 

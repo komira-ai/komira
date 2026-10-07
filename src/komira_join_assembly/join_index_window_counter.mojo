@@ -55,13 +55,17 @@
 from komira_counters.global_counter import GlobalCounter
 
 
-comptime _JIW_CALLS = GlobalCounter["komira_core_join_index_window_calls"]
-comptime _JIW_WINDOWED = GlobalCounter["komira_core_join_index_window_windowed"]
+comptime _JIW_CALLS = GlobalCounter[
+    "komira_join_assembly_join_index_window_calls"
+]
+comptime _JIW_WINDOWED = GlobalCounter[
+    "komira_join_assembly_join_index_window_windowed"
+]
 comptime _JIW_ALIASED = GlobalCounter[
-    "komira_core_join_index_window_aliased_rows"
+    "komira_join_assembly_join_index_window_aliased_rows"
 ]
 comptime _JIW_COPY_BYTES = GlobalCounter[
-    "komira_core_join_index_window_copy_bytes"
+    "komira_join_assembly_join_index_window_copy_bytes"
 ]
 
 

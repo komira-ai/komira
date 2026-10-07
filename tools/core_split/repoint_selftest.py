@@ -109,6 +109,9 @@ def main():
     open(os.path.join(tree,'src/imp/leftover.mojo'),'w').write('# lives in komira_core\n'); sh('git','add','.',cwd=tree)
     r=sh(sys.executable,os.path.join(a.tool,'repoint.py'),'--tree',tree,'--check'); check('--check is red for a file that names komira_core',r.returncode==1 and 'leftover.mojo' in r.stdout,r.stdout)
     os.remove(os.path.join(tree,'src/imp/leftover.mojo')); sh('git','rm','-q','-f','--cached','src/imp/leftover.mojo',cwd=tree)
+    open(os.path.join(tree,'src/imp/key.mojo'),'w').write('comptime C = GlobalCounter["komira_core_old_key"]\n'); sh('git','add','.',cwd=tree)
+    r=sh(sys.executable,os.path.join(a.tool,'repoint.py'),'--tree',tree,'--check'); check('--check is red for a counter key spelled komira_core_<name>',r.returncode==1 and 'key.mojo' in r.stdout,r.stdout)
+    os.remove(os.path.join(tree,'src/imp/key.mojo')); sh('git','rm','-q','-f','--cached','src/imp/key.mojo',cwd=tree)
     r=sh(sys.executable,os.path.join(a.tool,'repoint.py'),'--tree',tree,'--check'); check('--check is green when none does',r.returncode==0,r.stdout)
     # after src/komira_core is deleted the tool reads it from the parent of the commit that deleted it
     h=os.path.join(root,'hist'); os.makedirs(h); env=dict(os.environ,GIT_AUTHOR_NAME='t',GIT_AUTHOR_EMAIL='t@t',GIT_COMMITTER_NAME='t',GIT_COMMITTER_EMAIL='t@t')

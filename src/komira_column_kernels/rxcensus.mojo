@@ -63,7 +63,7 @@ comptime RXC_DICTMAT_BYTES: Int = 10   # bytes those densifications produced
 
 
 comptime _RXCENSUS_COUNTERS = GlobalCounterTable[
-    "komira_core_instr_rxcensus_counters", RXC_N_SLOTS
+    "komira_column_kernels_instr_rxcensus_counters", RXC_N_SLOTS
 ]
 
 
