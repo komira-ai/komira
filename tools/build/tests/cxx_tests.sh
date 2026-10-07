@@ -17,7 +17,10 @@
 #      - a binary linking C++ (snappy, with zig's static libc++) exports no
 #        dynamic symbol, so its C++ runtime cannot interpose on the
 #        libstdc++.so.6 the Mojo runtime loads, and the libc++ it carries is
-#        really in it (the check is not vacuous).
+#        really in it (the check is not vacuous);
+#      - an unconfigured query over a C/C++ library answers: the prelude's
+#        C/C++ toolchain select names toolchains//:cxx_no_default_deps on
+#        the branch no configured build takes, and uquery follows it.
 
 expect_green c_dep_linked "tests//functional/c_deps:c_linked" "tests//functional/c_deps:c_linked[run_check]"
 expect_red c_dep_missing "undefined symbol: komira_example_add" tests//negative/c_deps:c_missing
@@ -28,6 +31,18 @@ expect_red c_dep_kind "provides neither MojoInfo" tests//negative/c_deps:bad_dep
 # -strip-file-prefix in mojo_wrapper.sh both fail with exit 4 on the worker's
 # absolute path (test_hellopkg does not record one).
 expect_green test_source_paths //tools/build/examples/cshim:cadd //tools/build/examples/cshim:test_add_direct
+
+# Unconfigured queries follow every select branch, including the prelude's
+# never-taken `toolchains//:cxx_no_default_deps`; without that target in the
+# toolchains cell this fails with `Unknown target `cxx_no_default_deps``. The
+# label must be in the answer, or the query did not traverse the select.
+if ! "$BUCK2" uquery 'deps(//tools/build/examples/cshim:cadd_user)' > "$LOG/cxx_uquery.txt" 2> "$LOG/cxx_uquery.log"; then
+    fail "C unconfigured query: uquery deps(cshim:cadd_user) failed: $(grep -m 1 -o 'Unknown target .*' "$LOG/cxx_uquery.log") (see $LOG/cxx_uquery.log)"
+elif ! grep -qx 'toolchains//:cxx_no_default_deps' "$LOG/cxx_uquery.txt"; then
+    fail "C unconfigured query: deps(cshim:cadd_user) does not reach toolchains//:cxx_no_default_deps (see $LOG/cxx_uquery.txt)"
+else
+    pass "C unconfigured query: uquery deps of a C/C++ user answers, through toolchains//:cxx_no_default_deps"
+fi
 
 C_PLATFORMS="
 komira//tools/build/examples/cshim:add komira//tools/build/platforms:linux-x86_64

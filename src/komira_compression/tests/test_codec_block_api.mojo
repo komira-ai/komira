@@ -12,10 +12,18 @@
 #
 # What it catches: a capacity passed to the C library that is not `len(dst)`
 # (the sentinels change, or the short destination is accepted), a status
-# code read as success, an empty Span handed to C as a null pointer, the
-# Optional "destination full" answers of bzip2 / xz swapped with a raise,
-# and an error message that drops the code, the input length or the
-# capacity.
+# code read as success, a zlib_inflate_once with an empty destination that
+# drops the source instead of handing it to libz, the Optional "destination
+# full" answers of bzip2 / xz swapped with a raise, and an error message that
+# drops the code, the input length or the capacity.
+#
+# What it cannot catch: an empty Span handed to C as a null pointer. Spans
+# and Lists built in Mojo carry a dangling, non-null pointer when empty, so
+# no test here can hand C a null, and removing the empty-Span scratch
+# branches leaves these tests green. snappy, libzstd and liblzma accept a
+# null pointer at length 0 anyway; libbz2 refuses it (BZ_PARAM_ERROR, -2,
+# whatever the length), so the scratch branch in bzip2_buffer is what keeps
+# an empty Span built from a null pointer working.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -381,6 +389,58 @@ def test_xz_corrupt_stream_names_rc() raises:
     )
 
 
+def test_xz_truncated_stream_is_none_or_data_error_and_empty_is_data_error() raises:
+    # What liblzma returns for a non-empty stream cut short depends on its
+    # version (liblzma.so.5 is the system's): before xz 5.8.4 (and the same
+    # fix on the v5.2, v5.4 and v5.6 branches) LZMA_BUF_ERROR, so None, the
+    # same as a short destination; from 5.8.4 on LZMA_DATA_ERROR (9), which
+    # raises. Either is accepted, but nothing else: no byte count, no other
+    # rc, no write past the destination. An empty input is LZMA_DATA_ERROR
+    # in every version.
+    var data = _incompressible(4096)
+    var packed = _xz_compress(data)
+    var cuts = List[Int]()
+    cuts.append(len(packed) - 1)  # only the stream footer's last byte gone
+    cuts.append(len(packed) // 2)  # mid-block
+    cuts.append(1)  # inside the magic
+    for c in range(len(cuts)):
+        var cut = cuts[c]
+        var dst = _guarded(8192)
+        var outcome = String("")
+        try:
+            var got = xz_decompress_into(
+                Span(dst)[0:8192], Span(packed)[0:cut], XZ_DEFAULT_MEMLIMIT
+            )
+            outcome = "returned " + (String(got.value()) if got else String("None"))
+        except e:
+            outcome = String(e)
+        var as_data_error = (
+            "lzma_stream_buffer_decode failed (rc=9, input_len=" + String(cut)
+            + ", output_cap=8192)"
+        )
+        if outcome != as_data_error:
+            assert_equal(
+                outcome,
+                "returned None",
+                "a truncated .xz is None or rc=9 (cut " + String(cut) + ")",
+            )
+        _assert_pad_untouched(dst, 8192, "xz truncated stream")
+
+    var empty = List[UInt8]()
+    var dst = _guarded(64)
+    var msg = String("")
+    try:
+        var got = xz_decompress_into(Span(dst)[0:64], Span(empty), XZ_DEFAULT_MEMLIMIT)
+        msg = "returned " + (String(got.value()) if got else String("None"))
+    except e:
+        msg = String(e)
+    # LZMA_DATA_ERROR is 9.
+    assert_equal(
+        msg,
+        "lzma_stream_buffer_decode failed (rc=9, input_len=0, output_cap=64)",
+    )
+
+
 # -----------------------------------------------------------------------------
 # zlib (komira_zlib through this package)
 # -----------------------------------------------------------------------------
@@ -422,6 +482,15 @@ def test_zlib_inflate_once_hands_back_libz_state() raises:
     var none = zlib_inflate_once(Span(big)[0:16], Span(empty), ZLIB_WINDOW_BITS_RAW)
     assert_equal(none.rc, Z_BUF_ERROR)
     assert_equal(none.written, 0)
+
+    # Empty destination: libz still reads the stored block's 5-byte header
+    # and stops at the first output byte; progress made, so Z_OK.
+    var no_room = List[UInt8]()
+    var stuck = zlib_inflate_once(Span(no_room), Span(stream), ZLIB_WINDOW_BITS_RAW)
+    assert_equal(stuck.rc, Z_OK)
+    assert_equal(stuck.written, 0)
+    assert_equal(stuck.unwritten, 0)
+    assert_equal(stuck.unread, len(stream) - 5)
 
 
 # -----------------------------------------------------------------------------
