@@ -16,7 +16,8 @@
 # `0.1` is not): the bits are then derived from it, never rounded. A decimal
 # given WITH bits must round to those bits (it lies between the midpoints to
 # the two neighbouring floats), or the cell is refused: a file whose decimal a
-# reviewer reads must not disagree with the bits the compare uses. Both
+# reviewer reads must not disagree with the bits the compare uses (ties go
+# to the even mantissa, as IEEE round-to-nearest does). Both
 # decisions are made in exact integer arithmetic (_bignat.mojo), not by a
 # float parser.
 #
@@ -302,8 +303,9 @@ def exact_float_bits(dec: ParsedDecimal, width: Int) raises -> UInt64:
 
 
 def decimal_rounds_to(dec: ParsedDecimal, bits: UInt64, width: Int) -> Bool:
-    """True iff `dec` lies between the midpoints from the finite float `bits`
-    to its two neighbours (closed at both ends), with the same sign; a zero
+    """True iff `dec` rounds to the finite float `bits` (round half to even):
+    it lies between the midpoints to the two neighbours, a midpoint itself
+    only when `bits` has an even mantissa; with the same sign; a zero
     float requires a zero decimal of the same sign."""
     var neg = _is_negative(bits, width)
     if float_is_zero(bits, width):
@@ -333,9 +335,14 @@ def decimal_rounds_to(dec: ParsedDecimal, bits: UInt64, width: Int) -> Bool:
     else:
         lo = BigNat.from_u64(2 * m - 1)
         glo = f - 1
-    if cmp_dec_dyadic(dec.digits, dec.exp10, lo, glo) < 0:
+    # Round half to even: a decimal exactly on a midpoint rounds to the float
+    # whose mantissa is even, so the ends are closed only for an even one.
+    var even = (m & 1) == 0
+    var c_lo = cmp_dec_dyadic(dec.digits, dec.exp10, lo, glo)
+    if c_lo < 0 or (c_lo == 0 and not even):
         return False
-    return cmp_dec_dyadic(dec.digits, dec.exp10, hi, f - 1) <= 0
+    var c_hi = cmp_dec_dyadic(dec.digits, dec.exp10, hi, f - 1)
+    return c_hi < 0 or (c_hi == 0 and even)
 
 
 # ---------------------------------------------------------------------------

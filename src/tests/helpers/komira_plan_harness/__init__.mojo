@@ -26,4 +26,5 @@ from .float_text import (
     ulp_distance,
 )
 from .parse import parse_canon
-from .render import arrow_type_name, render_batch, render_column, render_table
+from .render import render_batch, render_column, render_table
+from .type_text import arrow_type_name

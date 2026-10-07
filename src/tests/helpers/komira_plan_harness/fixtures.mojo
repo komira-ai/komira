@@ -261,6 +261,14 @@ def union_column(
     return col^
 
 
+def sliced(var col: Column[HeapRegion], offset: Int) -> Column[HeapRegion]:
+    """The same buffers seen from physical row `offset` on: a slice offset,
+    as an imported Arrow array may carry one on any layout."""
+    col._offset += offset
+    col._length -= offset
+    return col^
+
+
 struct BatchBuilder(Movable):
     """Fields and columns added in order, then one RecordBatch."""
 

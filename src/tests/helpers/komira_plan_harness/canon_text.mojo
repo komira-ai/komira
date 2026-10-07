@@ -23,6 +23,27 @@
 # The order and float lines are the case's comparison policy. Both are
 # always written, and a parsed file must carry both. compare uses the
 # EXPECTED side's policy.
+#
+# NaN. The bits of a NaN a computation produces depend on the machine (x86
+# makes 0/0 the negative quiet NaN 0xFFF8..., ARM and numpy the positive
+# 0x7FF8...). So an expected file writes bare `NaN`, which matches ANY NaN:
+# that is the oracle's default. `NaN|0x<bits>` opts in to one exact NaN, for
+# a case that pins a payload. The actual side always carries its bits; a NaN
+# inside a nested value is written bare `NaN` on both sides (render.mojo), so
+# a NaN payload is not compared there.
+#
+# Floats. A top-level float column (and a dictionary of floats) compares by
+# bits within its tolerance; the decimal half of a cell is never compared.
+# A float inside a nested value is written as its bits alone, `0x<bits>` (or
+# `NaN`), and nested values compare as text, so they compare bit-exact with
+# no tolerance; a hand file writes such a float as its bits.
+#
+# Row order, two known limits of the multiset compare (compare.mojo): under
+# a tolerance or bare NaN two rows that both match one expected row may pair
+# the wrong way in the sorted walk; the rows left unpaired are then matched
+# by a search, which is greedy (first fit), not a maximum matching. And
+# `order: keys=` compares the key projection positionally, so one missing
+# row reports a key mismatch at every later row (it does not resynchronise).
 # =============================================================================
 
 from .escape import escape_name

@@ -2,10 +2,10 @@
 # komira_plan_harness/fixtures_every_type.mojo -- one batch of every type.
 # =============================================================================
 #
-# Three rows, one column per type canon renders. In every column but the
-# unions (which have no validity of their own) row 1 is NULL, and the value
-# stored under that NULL is a real, renderable value, so a renderer that
-# ignores validity prints it. EVERY_TYPE_CELLS (in the tests) spells what
+# Three rows, one column per type canon renders. Every column but the
+# unions (which have no validity of their own) holds a NULL, and the value
+# stored under it is a real, renderable value, so a renderer that ignores
+# validity prints it. EVERY_TYPE_CELLS (in the tests) spells what
 # canon must print for each cell.
 # =============================================================================
 
@@ -313,10 +313,11 @@ def every_type_batch() raises -> RecordBatch:
             mid,
         ),
     )
-    # map<string, int64>: {b: 2, a: 1} (rendered sorted), NULL (over {c: NULL}), {}
+    # map<string, int64>: {b: 2, a: NULL} (rendered sorted), NULL (over
+    # {c: 7}), {}
     var mk: List[String] = ["b", "a", "c"]
-    var mv: List[Int] = [2, 1, 99]
-    var mvalid: List[Bool] = [True, True, False]
+    var mv: List[Int] = [2, 99, 7]
+    var mvalid: List[Bool] = [True, False, True]
     var moff: List[Int] = [0, 2, 3, 3]
     var mpf = Field("mp", ArrowType.MAP, True)
     mpf.add_child("entries", ArrowType.STRUCT, False)

@@ -12,8 +12,14 @@
 # escaped in leaf strings: `\,` `\:` `\[` `\]` `\{` `\}` `\(` `\)`. A NULL
 # inside a nested value is the token `\N`.
 #
-# Names (in the schema line, `order: keys=` and `float[<name>]:`) escape the
-# same control bytes plus `\:` `\,` `\<` `\>` `\[` `\]`.
+# Names (in the schema line, inside the type tree, as struct keys inside a
+# nested cell, in `order: keys=` and `float[<name>]:`) escape the same control
+# bytes plus `\:` `\,` `\<` `\>` `\[` `\]` `\{` `\}` `\(` `\)`, and a
+# LEADING `#` as `\#` (a schema line must not read as a comment line).
+#
+# `\xHH` is lower-case hex, and only for a byte canon escapes that way: a
+# control byte other than TAB/LF/CR, DEL, or a byte >= 0x80. The parser
+# refuses any other escape, in scalar cells and in nested cells alike.
 # =============================================================================
 
 
@@ -82,8 +88,11 @@ def _is_struct_byte(b: UInt8) -> Bool:
 
 
 def _is_name_struct_byte(b: UInt8) -> Bool:
-    # : , < > [ ]
-    return b == 58 or b == 44 or b == 60 or b == 62 or b == 91 or b == 93
+    # : , < > [ ] { } ( )
+    return (
+        b == 58 or b == 44 or b == 60 or b == 62 or b == 91 or b == 93
+        or b == 123 or b == 125 or b == 40 or b == 41
+    )
 
 
 comptime ESC_SCALAR: Int = 0
@@ -118,7 +127,7 @@ def escape_bytes_into(mut res: List[UInt8], bs: Span[UInt8, _], mode: Int):
             _push_hex_escape(res, b)
             i += 1
         elif (mode == ESC_NESTED and _is_struct_byte(b)) or (
-            mode == ESC_NAME and _is_name_struct_byte(b)
+            mode == ESC_NAME and (_is_name_struct_byte(b) or (i == 0 and b == 35))
         ):
             res.append(92)
             res.append(b)
@@ -137,7 +146,7 @@ def escape_bytes_into(mut res: List[UInt8], bs: Span[UInt8, _], mode: Int):
                 i += k
 
 
-def bytes_to_string(res: List[UInt8]) -> String:
+def _bytes_to_string(res: List[UInt8]) -> String:
     """`res` holds escaped text only: ASCII plus well-formed UTF-8."""
     return String(unsafe_from_utf8=Span(res))
 
@@ -145,7 +154,7 @@ def bytes_to_string(res: List[UInt8]) -> String:
 def escape_string(s: String, nested: Bool) -> String:
     var res = List[UInt8]()
     escape_bytes_into(res, s.as_bytes(), ESC_NESTED if nested else ESC_SCALAR)
-    return bytes_to_string(res)
+    return _bytes_to_string(res)
 
 
 def escape_name(s: String) -> String:
@@ -154,17 +163,113 @@ def escape_name(s: String) -> String:
     unescapes them."""
     var res = List[UInt8]()
     escape_bytes_into(res, s.as_bytes(), ESC_NAME)
-    return bytes_to_string(res)
+    return _bytes_to_string(res)
 
 
 def _hex_val(b: UInt8) -> Int:
+    """A LOWER-case hex digit's value, else -1."""
     if b >= 48 and b <= 57:
         return Int(b) - 48
     if b >= 97 and b <= 102:
         return Int(b) - 87
-    if b >= 65 and b <= 70:
-        return Int(b) - 55
     return -1
+
+
+def _canon_hex_escape(bs: Span[UInt8, _], i: Int) -> Bool:
+    """Is `\\xHH` at `i` one canon writes: lower-case hex, for a control
+    byte other than TAB/LF/CR, DEL, or a byte >= 0x80?"""
+    if i + 3 >= len(bs):
+        return False
+    var h = _hex_val(bs[i + 2])
+    var l = _hex_val(bs[i + 3])
+    if h < 0 or l < 0:
+        return False
+    var v = h * 16 + l
+    if v == 9 or v == 10 or v == 13:
+        return False
+    return v < 32 or v == 127 or v >= 128
+
+
+def _is_open(b: UInt8) -> Bool:
+    return b == 91 or b == 123 or b == 40
+
+
+def _closer_of(b: UInt8) -> UInt8:
+    if b == 91:
+        return 93
+    if b == 123:
+        return 125
+    return 41
+
+
+def _null_left_ok(prev: UInt8) -> Bool:
+    # start of a value: after an opener, `,` or `:`
+    return prev == 0 or _is_open(prev) or prev == 44 or prev == 58
+
+
+def _null_right_ok(nb: UInt8) -> Bool:
+    return nb == 0 or nb == 44 or nb == 58 or nb == 93 or nb == 125 or nb == 41
+
+
+def check_nested_cell(cell: String) raises:
+    """Refuse a nested cell canon would not write: unbalanced or mismatched
+    brackets, text outside the outer brackets, an escape canon does not write,
+    or `\\N` that is not a whole value."""
+    if cell == "\\N":
+        return
+    var bs = cell.as_bytes()
+    var n = len(bs)
+    if n == 0 or not _is_open(bs[0]):
+        raise Error("canon: nested cell '" + cell + "' is not \\N or a bracketed value")
+    var stack = List[UInt8]()
+    var prev: UInt8 = 0  # the last unescaped structural byte, 0 at the start
+    var i = 0
+    while i < n:
+        var b = bs[i]
+        if len(stack) == 0 and i > 0:
+            raise Error("canon: nested cell '" + cell + "' has text after its value")
+        if b == 92:
+            if i + 1 >= n:
+                raise Error("canon: nested cell '" + cell + "' ends inside an escape")
+            var c = bs[i + 1]
+            if c == 78:  # \N: a NULL value, whole
+                var nxt: UInt8 = 0
+                if i + 2 < n:
+                    nxt = bs[i + 2]
+                if not (_null_left_ok(prev) and _null_right_ok(nxt)):
+                    raise Error("canon: nested cell '" + cell + "' holds \\N inside a value")
+                prev = 78
+                i += 2
+                continue
+            if c == 120:
+                if not _canon_hex_escape(bs, i):
+                    raise Error("canon: nested cell '" + cell + "' has a \\x escape canon does not write")
+                prev = 1
+                i += 4
+                continue
+            if not (
+                c == 92 or c == 116 or c == 110 or c == 114 or c == 35
+                or _is_name_struct_byte(c)
+            ):
+                raise Error("canon: nested cell '" + cell + "' has an unknown escape")
+            prev = 1  # an escaped byte is value text
+            i += 2
+            continue
+        if _is_open(b):
+            stack.append(_closer_of(b))
+            prev = b
+        elif b == 93 or b == 125 or b == 41:
+            if len(stack) == 0 or stack[len(stack) - 1] != b:
+                raise Error("canon: nested cell '" + cell + "' has a mismatched bracket")
+            _ = stack.pop()
+            prev = b
+        elif b == 44 or b == 58:
+            prev = b
+        else:
+            prev = b
+        i += 1
+    if len(stack) != 0:
+        raise Error("canon: nested cell '" + cell + "' has an unclosed bracket")
 
 
 def check_scalar_cell(cell: String) raises:
@@ -185,8 +290,8 @@ def check_scalar_cell(cell: String) raises:
         if c == 92 or c == 116 or c == 110 or c == 114:
             i += 2
         elif c == 120:
-            if i + 3 >= n or _hex_val(bs[i + 2]) < 0 or _hex_val(bs[i + 3]) < 0:
-                raise Error("canon: cell '" + cell + "' has a bad \\x escape")
+            if not _canon_hex_escape(bs, i):
+                raise Error("canon: cell '" + cell + "' has a \\x escape canon does not write")
             i += 4
         elif c == 78:
             raise Error(

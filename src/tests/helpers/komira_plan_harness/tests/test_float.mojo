@@ -85,6 +85,20 @@ def test_a_decimal_must_round_to_its_bits() raises:
         _ = parse_float_cell("1.0|0x3FF0", 64)
 
 
+def test_a_midpoint_rounds_to_the_even_mantissa() raises:
+    # 65520 is half way from float16's largest finite (65504, 0x7BFF, odd
+    # mantissa) to 65536: it rounds to the even side (infinity), so it does
+    # not round to 0x7BFF.
+    with assert_raises(contains="does not round to the bits"):
+        _ = parse_float_cell("65520|0x7BFF", 16)
+    assert_equal(_bits("65504|0x7BFF", 16), 0x7BFF)
+    # 1 + 2^-53 is half way between 1.0 (even) and the next float (odd).
+    var mid = String("1.00000000000000011102230246251565404236316680908203125")
+    assert_equal(_bits(mid + "|0x3FF0000000000000", 64), 0x3FF0000000000000)
+    with assert_raises(contains="does not round to the bits"):
+        _ = parse_float_cell(mid + "|0x3FF0000000000001", 64)
+
+
 def test_canonical_text() raises:
     assert_equal(float_cell_text(0x3FF8000000000000, 64), "1.5|0x3FF8000000000000")
     assert_equal(float_cell_text(0x8000000000000000, 64), "-0.0|0x8000000000000000")

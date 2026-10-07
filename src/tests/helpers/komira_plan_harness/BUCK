@@ -15,12 +15,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                     every type; the string `\N` against NULL; a type canon
 #                     cannot render refused by name.
 #   test_float        decimal-only floats accepted only when exact; a decimal
-#                     that disagrees with its bits refused; NaN and -0.0
+#                     that disagrees with its bits refused (ties to even);
+#                     NaN and -0.0
 #                     compared by bits; ulps and rel tolerances.
 #   test_compare      order total / keys / none; every mismatch reported, not
-#                     only the first; schema and row-count mismatches.
+#                     only the first; schema and row-count mismatches; the
+#                     escapes and nested cells a parser refuses.
 #   test_round_trip   render -> text -> parse -> compare is equal, and the
 #                     text is a fixed point, for a batch of every type.
+#   test_types_and_slices
+#                     the full type tree (cells that read alike never share a
+#                     schema line); floats in nested values as bits and in
+#                     dictionaries as floats; a leading `#` in a name; slice
+#                     offsets on every layout; a dense union by type code.
 mojo_library(
     name = "komira_plan_harness",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -34,6 +41,7 @@ mojo_library(
         "tests/test_float.mojo",
         "tests/test_render.mojo",
         "tests/test_round_trip.mojo",
+        "tests/test_types_and_slices.mojo",
     ],
     visibility = ["PUBLIC"],
 )

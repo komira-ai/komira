@@ -18,7 +18,11 @@
 # EVERY mismatch is reported, never only the first: each differing cell (row,
 # column, expected, actual), each row only one side holds, and the row counts
 # when they differ. A multiset compare sorts both sides into one total order
-# and walks them together, so one missing row is one report, not a cascade.
+# and walks them together, so one missing row is one report, not a cascade;
+# rows the walk leaves unpaired are then paired by a first-fit search (a
+# tolerance or a bare NaN can defeat the sort order). `keys=` compares the
+# key projection positionally and does not resynchronise after a missing
+# row (canon_text.mojo states both limits).
 # =============================================================================
 
 from .canon_text import ORDER_KEYS, ORDER_NONE, ORDER_TOTAL, CanonText
@@ -139,14 +143,21 @@ def _cell_order(x: String, y: String, width: Int) raises -> Int:
 
 
 struct _Cols(Movable):
-    """Per-column widths and tolerances of the expected side."""
+    """Per-column widths and tolerances of the expected side. A column is
+    compared as floats only when BOTH sides hold floats of the same width;
+    otherwise (already a schema mismatch) its cells compare as text."""
 
     var widths: List[Int]
     var tols: List[FloatTolerance]
     var names: List[String]
 
-    def __init__(out self, expected: CanonText):
-        self.widths = expected.float_widths.copy()
+    def __init__(out self, expected: CanonText, actual: CanonText):
+        self.widths = List[Int]()
+        for c in range(len(expected.float_widths)):
+            var w = expected.float_widths[c]
+            if c >= len(actual.float_widths) or actual.float_widths[c] != w:
+                w = 0
+            self.widths.append(w)
         self.names = expected.names.copy()
         self.tols = List[FloatTolerance]()
         for c in range(len(expected.names)):
@@ -214,6 +225,8 @@ def _multiset_diff(
 ) raises:
     var es = _sort_rows(e, e_rows^, cols)
     var as_ = _sort_rows(a, a_rows^, cols)
+    var missing = List[Int]()
+    var extra = List[Int]()
     var i = 0
     var j = 0
     while i < len(es) and j < len(as_):
@@ -223,17 +236,37 @@ def _multiset_diff(
             continue
         var o = _row_order(e, es[i], a, as_[j], cols)
         if o <= 0:
-            report.add(Mismatch("missing_row", es[i], -1, "", e.row_text(es[i]), ""))
+            missing.append(es[i])
             i += 1
         if o >= 0:
-            report.add(Mismatch("extra_row", -1, as_[j], "", "", a.row_text(as_[j])))
+            extra.append(as_[j])
             j += 1
     while i < len(es):
-        report.add(Mismatch("missing_row", es[i], -1, "", e.row_text(es[i]), ""))
+        missing.append(es[i])
         i += 1
     while j < len(as_):
-        report.add(Mismatch("extra_row", -1, as_[j], "", "", a.row_text(as_[j])))
+        extra.append(as_[j])
         j += 1
+    # The sorted walk pairs rows by exact sort order; under a tolerance or a
+    # bare NaN, a row it left unpaired may still match one on the other side.
+    # Pair those by search (first fit) before reporting.
+    var used = List[Bool](capacity=len(extra))
+    for _ in range(len(extra)):
+        used.append(False)
+    for mi in range(len(missing)):
+        var found = False
+        for xi in range(len(extra)):
+            if not used[xi] and _rows_match(e, missing[mi], a, extra[xi], cols):
+                used[xi] = True
+                found = True
+                break
+        if not found:
+            report.add(
+                Mismatch("missing_row", missing[mi], -1, "", e.row_text(missing[mi]), "")
+            )
+    for xi in range(len(extra)):
+        if not used[xi]:
+            report.add(Mismatch("extra_row", -1, extra[xi], "", "", a.row_text(extra[xi])))
 
 
 def _range(start: Int, end: Int) -> List[Int]:
@@ -276,7 +309,7 @@ def compare_canon(expected: CanonText, actual: CanonText) raises -> CompareRepor
     if ne != na:
         report.add(Mismatch("row_count", -1, -1, "", String(ne), String(na)))
 
-    var cols = _Cols(expected)
+    var cols = _Cols(expected, actual)
     var m = min(ne, na)
     var order = expected.policy.order
 
