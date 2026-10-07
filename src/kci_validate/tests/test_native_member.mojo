@@ -14,7 +14,9 @@
 #     ENV refusals, before anything runs: a library pinning komira_native at
 #       another build or another version, or in another shape (another
 #       operator, a fourth word, no build, a tab, a leading space, the
-#       name in another case, a bracket glued to the name); a
+#       name in another case, a bracket glued to the name, a channel
+#       prefix); a package whose name only starts with komira_native is
+#       another package, not checked as it; a
 #       metapackage that does not require komira_native
 #     ENV, komira_native alone: no library, so no README runs: a FAIL, never
 #       a pass (and never "not a metapackage")
@@ -451,6 +453,44 @@ def test_env_a_native_requirement_with_bytes_glued_to_the_name_is_refused() rais
     _refused_requirement(
         String("glued_bracket"), n + String("[build=x] ==1.0.0 ") + b, _shape(n + String("[build=x] ==1.0.0 ") + b)
     )
+
+
+def test_env_a_native_requirement_behind_a_channel_prefix_is_refused() raises:
+    # MatchSpec's `<channel>::<name>`: the solver reads komira_native, so a
+    # name read up to the first `:` would take the requirement for `chan`'s
+    var b = ExampleRelease().build()
+    var n = String(NATIVE)
+    _refused_requirement(
+        String("chan_prefix"), String("chan::") + n + String(" ==1.0.0 ") + b,
+        _shape(String("chan::") + n + String(" ==1.0.0 ") + b),
+    )
+    _refused_requirement(
+        String("chan_subdir_prefix"), String("conda-forge/linux-64::") + n + String(" ==1.0.0 ") + b,
+        _shape(String("conda-forge/linux-64::") + n + String(" ==1.0.0 ") + b),
+    )
+
+
+def test_env_another_package_named_like_the_native_one_is_not_checked_as_it() raises:
+    # `komira_native_extra` is another package: the name is a token only
+    # between bytes no package name holds, so this library still validates
+    var b = ExampleRelease().build()
+    var depends = (
+        String('["__linux","mojo-compiler ==1.0.0","') + String(NATIVE) + String(" ==1.0.0 ") + b
+        + String('","komira_native_extra >=2"]')
+    )
+    var fx = Fixture(
+        String("extraname"), String(VALIDATION_KIND_CONDA_INSTALL_ENV), _names(String("komira_alpha")),
+        String("komira_alpha"), String("komira_alpha"), String("depends"), depends,
+    )
+    var pins = _names(String("komira_alpha"), String(NATIVE))
+    var runner = ScriptedRunner()
+    runner.expect(_env_install(fx, pins, _names(String("komira_alpha"))))
+    _expect_readme_run(runner, fx, String("komira_alpha"))
+    var t = _channel(fx, pins, True)
+    var row = _env(runner, t, fx)
+    assert_equal(_failed(row), String(""))
+    assert_equal(row.outcome, String(OUTCOME_SUCCEEDED))
+    assert_equal(row.checks[0].got, _release_row(fx, pins))
 
 
 def test_env_a_native_requirement_at_another_version_is_refused() raises:

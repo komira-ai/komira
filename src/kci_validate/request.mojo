@@ -59,11 +59,13 @@
 # it through the library's requirement, never through pixi.toml. The
 # requirement must be `<native> ==<version> <build>` at release.json's
 # version and build, or it RAISES naming the library: the solver would
-# bring a build nobody validated. A requirement is the native package's when
-# its name, past any leading whitespace and up to the first byte no package
-# name holds, lowercased as a conda solver does, is; its shape is then exact:
-# single spaces, no tab or other control byte, three words, the first the
-# name itself in lowercase.
+# bring a build nobody validated. FAIL-CLOSED: a requirement is held to
+# that shape when, lowercased as a conda solver lowercases a name (CEP 29),
+# it holds the native package's name ANYWHERE as a token (bounded by the
+# edge or a byte no package name holds: a `<channel>::` prefix, a bracket,
+# another case all count; `komira_native_extra` does not). Its shape is
+# then exact: single spaces, no tab or other control byte, three words, the
+# first the name itself in lowercase.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -399,21 +401,37 @@ def _is_name_byte(b: UInt8) -> Bool:
     )
 
 
-def _requirement_name(req: String) -> String:
-    """The name a requirement is about, as the solver reads it: past any
-    leading whitespace, the run of name bytes, lowercased (a conda solver
-    lowercases a package name before matching it, CEP 29). A tab, a leading
-    space, another case or a glued operator or bracket after the name does
-    not hide it from `with_native`."""
-    var b = req.as_bytes()
-    var start = 0
-    while start < len(b) and b[start] <= UInt8(0x20):
-        start += 1
-    var end = start
-    while end < len(b) and _is_name_byte(b[end]):
-        end += 1
-    # name bytes are ASCII, so lowering them is the solver's lowering
-    return String(req[byte=start:end]).lower()
+def _holds_token(text: String, token: String) -> Bool:
+    """True when `token` occurs in `text` bounded on each side by the edge of
+    `text` or a byte no package name holds: `komira_native` is a token of
+    `chan::komira_native ==1` and of `KOMIRA_NATIVE[build=x]` lowercased,
+    never of `komira_native_extra`."""
+    var b = text.as_bytes()
+    var n = token.byte_length()
+    if n == 0:
+        return False
+    var at = text.find(token)
+    while at >= 0:
+        var before_ok = at == 0 or not _is_name_byte(b[at - 1])
+        var after_ok = at + n == len(b) or not _is_name_byte(b[at + n])
+        if before_ok and after_ok:
+            return True
+        at = text.find(token, at + 1)
+    return False
+
+
+def _native_named(release: LoadedRelease, req: String) -> String:
+    """The native member of the set `req` names anywhere, "" for none. The
+    requirement is lowercased (ASCII) first, as a conda solver lowercases a
+    name (CEP 29), and the name may sit anywhere (a `<channel>::` prefix, a
+    bracket, another case): FAIL-CLOSED, whatever spelling names the native
+    package, `with_native` then requires its one exact shape."""
+    var lower = req.lower()
+    for n in range(len(release.members)):
+        ref other = release.members[n]
+        if other.has_conda and other.conda.is_native() and _holds_token(lower, other.conda.name):
+            return other.conda.name.copy()
+    return String("")
 
 
 def _only_spaces(req: String) -> Bool:
@@ -429,8 +447,9 @@ def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[I
     """`pins`, then the native package of the set each LIBRARY pin requires,
     when it is not already a pin (file header). RAISES naming a library that
     requires it at another version or build, or in another shape: a
-    requirement whose name, past any whitespace, is the native package must
-    be exactly `<native> ==<version> <build>`, single spaces, nothing else."""
+    requirement naming the native package anywhere, in any case (a token,
+    `_native_named`), must be exactly `<native> ==<version> <build>`, single
+    spaces, nothing else."""
     var out = pins.copy()
     for i in range(len(pins)):
         if not pins[i].is_library:
@@ -442,21 +461,17 @@ def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[I
                 continue
             for d in range(len(mem.conda.depends)):
                 ref req = mem.conda.depends[d]
-                var name = _requirement_name(req)
-                var native = False
-                for n in range(len(release.members)):
-                    ref other = release.members[n]
-                    if other.has_conda and other.conda.name == name and other.conda.is_native():
-                        native = True
-                if not native:
+                var name = _native_named(release, req)
+                if name.byte_length() == 0:
                     continue
                 var words = req.split(String(" "))
-                # The three-word split, the bare lowercase name as the first
+                # The three-word split, the native name itself as the first
                 # word and the `==` prefix decide the shape. `_only_spaces` and
-                # the two length guards refuse nothing the version and build
-                # comparison below would let through when release.json holds
-                # the name; they make a tab, an empty version or an empty build
-                # a shape refusal naming the requirement, not a mismatch.
+                # the two length guards refuse nothing that those shape checks
+                # and the version and build comparison below would let through
+                # when release.json holds the name; they make a tab, an empty
+                # version or an empty build a shape refusal naming the
+                # requirement, not a mismatch.
                 if (
                     not _only_spaces(req)
                     or len(words) != 3
