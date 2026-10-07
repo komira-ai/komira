@@ -134,13 +134,16 @@ gRPC-Web Unexpected Requests/**/unexpected-uri
 Connect Unexpected Requests/**/unexpected-codec
 Unexpected Requests/**/unexpected-content-type
 
-# A malformed request body loses its status code: komira_connect's gRPC
-# decoder raises `[grpc:13] ...` / `[grpc:12] ...`, but the dispatcher parses
-# only the `[connect:N]` prefix (parse_connect_error), so the call ends
-# UNKNOWN with the raw prefix in grpc-message; the gRPC-Web decoder raises
-# with no code at all. The suite expects UNIMPLEMENTED for a unary call with
-# no or several request messages and INTERNAL for a compressed message on a
-# call that negotiated no compression.
+# A malformed request body is always UNKNOWN: when decoding the request
+# fails, komira_connect's dispatch (dispatch.mojo, the decode `except`) and
+# its streaming path (service.mojo, dispatch_grpc_stream's decode `except`)
+# return GRPC_STATUS_UNKNOWN with the decoder's text as the message, so the
+# `[grpc:13]` / `[grpc:12]` code the gRPC decoder names is dropped (and
+# shows up in grpc-message); the gRPC-Web decoder's errors
+# (codec_grpc_web.mojo) carry no code, and an empty gRPC-Web body is
+# answered UNKNOWN directly. The suite expects UNIMPLEMENTED for a unary call
+# with no or several request messages and INTERNAL for a compressed message
+# on a call that negotiated no compression.
 gRPC Unexpected Requests/**/unary/multiple-requests
 gRPC Unexpected Requests/**/unary/no-request
 gRPC Unexpected Requests/**/unexpected-compressed-message
