@@ -39,8 +39,8 @@ from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
 from komira_collections.slab import Slab
 from komira_compression.compression import ArrowIpcCompression
 from komira_compression.compression_codecs import Lz4Frame, Zstd
-from komira_concurrency.parallel_dispatch import NoDispatch
-from komira_concurrency.token import CancellationToken
+from komira_async_api.parallel_dispatch import NoDispatch
+from komira_async_api.token import CancellationToken
 from komira_arrow_ipc.ipc_body_compression import (
     _compress_buffers_into,
     decompress_all_rbs_into_with_dispatcher,
