@@ -622,8 +622,13 @@ tools, `nm`, `objcopy` and `strip` are not provided; the features using them
 (dependency files, header maps, thin LTO, stripping) are off, and reaching one
 fails with `cxx toolchain: <tool> is not provided`.
 `toolchains//:python_bootstrap` exists only because configuring a
-`cxx_library` names it; it has no interpreter. A repository with its own
-C/C++ toolchain keeps it and passes `omit = ["cxx"]` to `komira_toolchains`.
+`cxx_library` names it; it has no interpreter.
+`toolchains//:cxx_no_default_deps` is an alias of `:cxx`: the prelude's C/C++
+rules take their toolchain from a select whose other branch names it, which no
+configured build takes but an unconfigured query (`buck2 uquery deps(...)`)
+follows; `:cxx` adds no default deps, so the variant without them is `:cxx`.
+A repository with its own C/C++ toolchain keeps it, declares its own
+`:cxx_no_default_deps`, and passes `omit = ["cxx"]` to `komira_toolchains`.
 
 A Mojo target lists C/C++ libraries in `deps` next to Mojo packages. A dep
 providing `MergedLinkInfo` (any `cxx_library`) is linked, statically, into
