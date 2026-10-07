@@ -82,6 +82,10 @@ from kci_cloud import (
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
     FIELD_JOB,
+    FIELD_QUEUE,
+    FIELD_TOPIC,
+    FIELD_SUBSCRIPTION,
+    Feed,
     FIELD_SERVICE,
     FINDING_GRAPH,
     KEY_FIELD,
@@ -219,6 +223,9 @@ struct _Data(CloudAdapter, Movable):
         l.append(FIELD_BUCKET)
         l.append(FIELD_SERVICE_ACCOUNT)
         l.append(FIELD_GRANT)
+        l.append(FIELD_QUEUE)
+        l.append(FIELD_TOPIC)
+        l.append(FIELD_SUBSCRIPTION)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -230,13 +237,13 @@ struct _Data(CloudAdapter, Movable):
     def public_mechanism(self) -> String:
         return String("edge")
 
-    def check(self, r: Resource) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
         return List[Finding]()
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
         if Bool(r.bucket):
             out.append(LoweredNode(r.id + String("/bucket"), r.id, String("bucket")))

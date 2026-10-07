@@ -61,6 +61,7 @@ from komira_proto_codec import (
     Proto3JsonWkt,
     WireEncoder,
     WireDecoder,
+    read_proto3_json_f64,
 )
 from komira_json import JsonValue, parse_json_value
 from komira_json import write_json_string, write_i64_dec, write_f64_dtoa
@@ -585,7 +586,10 @@ def _value_from_json(jv: JsonValue) raises -> Value:
     elif kind == JSON_BOOL:
         return Value.boolean(jv.as_bool())
     elif kind == JSON_NUMBER:
-        return Value.number(jv.as_float64())
+        # Correctly rounded at any length; a number past the double range
+        # is refused here, so a decoded Value never holds an infinity that
+        # `_write_number` would refuse to write.
+        return Value.number(read_proto3_json_f64(jv))
     elif kind == JSON_STRING:
         return Value.string(jv.as_string())
     elif kind == JSON_OBJECT:

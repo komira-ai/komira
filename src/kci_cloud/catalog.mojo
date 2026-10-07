@@ -10,7 +10,8 @@
 # role.
 #
 # RETENTION. A data primitive has a VERSIONED retention default, used while
-# `Resource.retention` is unset (KEEP for a table and a bucket). A type whose default is
+# `Resource.retention` is unset (KEEP for a table and a bucket, DELETE for a
+# queue and a topic). A type whose default is
 # `RETENTION_NONE` takes no retention: it is deleted with its resource, and
 # writing `retention` on it is refused at validate. Changing a default is a
 # behaviour change for every stored list, so a default is never edited in
@@ -18,8 +19,9 @@
 #
 # THE PRIMARY ROLE is the role a reference to the resource lands on, on every
 # cloud: `run` for a service or a job, `table` for a table, `bucket` for a
-# bucket, `identity` for a service account, `grant` for a grant. A cloud
-# adapter
+# bucket, `queue` for a queue, `topic` for a topic, `sub` for a
+# subscription, `identity` for a service account, `grant` for a grant. A
+# cloud adapter
 # writes a dependency or an input on ANOTHER resource as that resource's id
 # alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
 # an adapter lowers one resource without reading the others.
@@ -55,10 +57,16 @@ comptime FIELD_TABLE: Int = 13
 """`Resource.body` field number of `table`."""
 comptime FIELD_BUCKET: Int = 14
 """`Resource.body` field number of `bucket`."""
+comptime FIELD_QUEUE: Int = 15
+"""`Resource.body` field number of `queue`."""
 comptime FIELD_SERVICE_ACCOUNT: Int = 20
 """`Resource.body` field number of `service_account`."""
+comptime FIELD_TOPIC: Int = 21
+"""`Resource.body` field number of `topic`."""
 comptime FIELD_GRANT: Int = 25
 """`Resource.body` field number of `grant`."""
+comptime FIELD_SUBSCRIPTION: Int = 28
+"""`Resource.body` field number of `subscription`."""
 
 comptime OUTPUT_URL = "URL"
 comptime OUTPUT_HOST = "HOST"
@@ -68,6 +76,8 @@ comptime ACCESS_CALL = "CALL"
 comptime ACCESS_READ = "READ"
 comptime ACCESS_WRITE = "WRITE"
 comptime ACCESS_READ_WRITE = "READ_WRITE"
+comptime ACCESS_SEND = "SEND"
+comptime ACCESS_RECEIVE = "RECEIVE"
 comptime ACCESS_DESCRIBE = "DESCRIBE"
 
 comptime RETENTION_NONE: Int = 0
@@ -81,6 +91,10 @@ comptime RETENTION_KEEP: Int = 2
 comptime ROLE_RUN = "run"
 comptime ROLE_TABLE = "table"
 comptime ROLE_BUCKET = "bucket"
+comptime ROLE_QUEUE = "queue"
+comptime ROLE_TOPIC = "topic"
+comptime ROLE_SUBSCRIPTION = "sub"
+"""A subscription's role (8 bytes at most, like every role word)."""
 comptime ROLE_IDENTITY = "identity"
 """The identity role: a service account's one object, and the PRIVATE
 identity every service and job lowers (turned off under `run_as`)."""
@@ -202,7 +216,8 @@ struct Catalog(Copyable, Movable, Deinitable):
     @staticmethod
     def v1() raises -> Catalog:
         """`kci.resource.v1` as declared today: `service`, `job`, `table`,
-        `bucket`, `service_account` and `grant`."""
+        `bucket`, `queue`, `service_account`, `topic`, `grant` and
+        `subscription`."""
         var c = Catalog()
         var svc_out = List[String]()
         svc_out.append(String(OUTPUT_URL))
@@ -279,6 +294,51 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_GRANT),
             )
         )
+        # Messaging. A queue and a topic expose their cloud name and address
+        # and hold messages, so they take retention (DELETE by default). A
+        # queue is sent to and received from; a topic is only sent to (its
+        # messages are received from the queues subscribed to it). A
+        # subscription is an edge, like a grant: it exposes and accepts
+        # nothing, and is deleted with its resource.
+        var addressed = List[String]()
+        addressed.append(String(OUTPUT_NAME))
+        addressed.append(String(OUTPUT_ADDRESS))
+        var send = List[String]()
+        send.append(String(ACCESS_SEND))
+        var send_receive = send.copy()
+        send_receive.append(String(ACCESS_RECEIVE))
+        c.add(
+            CatalogType(
+                FIELD_QUEUE,
+                String("queue"),
+                PORTABLE,
+                addressed.copy(),
+                send_receive^,
+                retention_default=RETENTION_DELETE,
+                primary_role=String(ROLE_QUEUE),
+            )
+        )
+        c.add(
+            CatalogType(
+                FIELD_TOPIC,
+                String("topic"),
+                PORTABLE,
+                addressed^,
+                send^,
+                retention_default=RETENTION_DELETE,
+                primary_role=String(ROLE_TOPIC),
+            )
+        )
+        c.add(
+            CatalogType(
+                FIELD_SUBSCRIPTION,
+                String("subscription"),
+                PORTABLE,
+                List[String](),
+                List[String](),
+                primary_role=String(ROLE_SUBSCRIPTION),
+            )
+        )
         return c^
 
 
@@ -300,8 +360,11 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_JOB, String("job")))
     l.append(BodyArm(FIELD_TABLE, String("table")))
     l.append(BodyArm(FIELD_BUCKET, String("bucket")))
+    l.append(BodyArm(FIELD_QUEUE, String("queue")))
     l.append(BodyArm(FIELD_SERVICE_ACCOUNT, String("service_account")))
+    l.append(BodyArm(FIELD_TOPIC, String("topic")))
     l.append(BodyArm(FIELD_GRANT, String("grant")))
+    l.append(BodyArm(FIELD_SUBSCRIPTION, String("subscription")))
     return l^
 
 
