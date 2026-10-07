@@ -673,22 +673,40 @@ assembly lists are generated but not built yet.
 
 ## Coverage builds
 
-`-c komira.coverage=true` (default `false`) gives every `mojo_library` one
-more binary per `test_srcs` entry: the test compiled at `-O0` with
-`--debug-level line-tables`, against
-the same ungated package its gated test uses, for a coverage tool (kcov) to
-map what ran to source lines. They are `[coverage][bin][<test>]`
-(`cov/tests/<test>/<test>`, action category `mojo_build_cov_test`), and
+`-c komira.coverage=true` (default `false`) gives every `mojo_library`, per
+`test_srcs` entry:
+
+- one more binary: the test compiled at `-O0` with
+  `--debug-level line-tables`, against the same ungated package its gated
+  test uses, for kcov to map what ran to source lines:
+  `[coverage][bin][<test>]` (`cov/tests/<test>/<test>`, action category
+  `mojo_build_cov_test`);
+- one run of that binary under kcov, with the gated test's environment and
+  data (it goes through the same `gate_runner.sh`), whose Cobertura report
+  in repository paths is `[coverage][tests][<test>]` (`cov/tests/<test>.xml`
+  and the marker `cov/tests/<test>.passed`, action category `mojo_cov_run`;
+  [cov_run](../coverage/kcov/README.md#cov_run)). What differs: the test is
+  traced without address randomization, its working directory also holds
+  its source and the library's, and the run waits for every process the
+  test started, so it is bounded: after 450 s every process of the run is
+  killed and the action fails, saying the test left processes running or
+  did not finish. komira's kcov exits with the test's status (128+N for
+  signal N), so a test that fails at `-O0` or traced fails this action,
+  whatever its gated run did.
+
 `[coverage]` is all of them. Nothing depends on them yet: the package, its
-tests and their markers are what they are without the switch.
+tests and their markers are what they are without the switch; nothing reads
+the reports into a gate yet.
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
 ```
 
 The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
-and does one thing: it sets the attribute `coverage_debug` to
-`komira//tools/build/coverage/kcov:cov_link`. A buckconfig value is not part
+and does one thing: it sets the attributes `coverage_debug` to
+`komira//tools/build/coverage/kcov:cov_link` and `coverage_run` to
+`komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and
+cov_normalize). A buckconfig value is not part
 of the configuration, so no output path moves; with the switch off the
 attribute is absent and analysis is what it was without coverage builds. With
 it on, the release actions (`mojo_precompile`, `mojo_build_test`,
@@ -722,26 +740,32 @@ happen fails there ([test 41](../tests/README.md#41-coverage-builds)).
 
 Scope, for now:
 
-- linux-x86_64. On another target platform the attribute is None (a
+- linux-x86_64. On another target platform the attributes are None (a
   `select`) and the library builds as with the switch off: it has no
   `[coverage]` sub-target, so asking for one is an "unknown subtarget" error,
   not an empty result. Whatever collects coverage asks only on linux-x86_64.
 - A library's `test_srcs` that are source files. A README's examples,
   `mojo_test`, the drivers of `mojo_shared_lib` and generated test sources
-  (a `test_srcs` entry that is a build output) get no coverage binary.
-- Nothing runs the binaries yet: running them under kcov and reading the
-  reports comes next.
+  (a `test_srcs` entry that is a build output) get no coverage binary, and
+  the library's generated sources are not measured.
+- A test's data may not be staged at its own source's path or under
+  `buck-out/`: a coverage run stages the sources there (analysis fails,
+  naming the destination).
+- Nothing reads the reports yet: the per-package gate over them comes next.
 
 A library in the `tests` cell may pass `coverage_debug` itself (a
-`cov_link_dir`): it then has coverage binaries whatever the switch says, which
-is how test 41 builds them, and plants a defective relocator, without `-c`.
-Anywhere else passing it is refused.
+`cov_link_dir`), and with it `coverage_run` (a `cov_run_dir`; the default one
+when not given): it then has coverage binaries and runs whatever the switch
+says, which is how tests 41 and 43 build them and plant a defective
+relocator or run script, without `-c`. Anywhere else passing either is
+refused.
 
 ## Errors
 
 | message | from | meaning |
 |---|---|---|
 | `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
+| `COVERAGE RUN FAILED: <label> [coverage]` | [`cov_run.sh`](../coverage/kcov/cov_run.sh) | a coverage run failed: the test failed under kcov (with its exit status, after its output), it left processes running or did not finish within the run's limit (450 s), kcov could not trace it or failed itself, the binary names the library's sources by another directory than the run stages, or its report was missing or refused by `cov_normalize` ([cov_run](../coverage/kcov/README.md#cov_run)) |
 | `<target>: tests_known_failing was removed: every welded test must pass` | [`defs.bzl`](defs.bzl) | a `mojo_library` call names `tests_known_failing`; delete it and make the test pass |
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
 | `<target>: ... data destination <d> ...` | [`test_runtime.bzl`](test_runtime.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |

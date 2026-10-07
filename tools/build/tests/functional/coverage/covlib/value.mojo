@@ -9,4 +9,6 @@ def clamp(x: Int, lo: Int, hi: Int) -> Int:
 def describe(x: Int) -> String:
     if x == 0:
         return "zero"
-    return "nonzero"
+    if x > 0:
+        return "positive"
+    return "negative"  # cov: unreachable a fixture line (test 43): the tests describe 0 only

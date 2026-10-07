@@ -42,8 +42,8 @@ from komira_avro import (
     read_avro_bytes_parallel,
     read_avro_bytes_resolved,
 )
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
 
 from komira_formats_e2e import Mismatches
 
