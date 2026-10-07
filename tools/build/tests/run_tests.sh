@@ -325,7 +325,8 @@
 #      site in an FFI module, an unlisted marked module) or ledger defect,
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
-#  43. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
+#  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
+#  44. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
 #      (every package under src/, read from the build graph) and
 #      tests//functional/src_layout:ok (a planted list) build; each target of
 #      tests//negative/src_layout fails naming its one planted finding: an
@@ -1227,6 +1228,10 @@ expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \
 expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
 # 43
+# shellcheck source=tools/build/tests/coverage_run_tests.sh
+. "$ROOT/tools/build/tests/coverage_run_tests.sh"
+
+# 44
 expect_green src_layout //:src_layout tests//functional/src_layout:ok
 N=tests//negative/src_layout
 F="a test-only package directly under src/, which holds what komira ships; move it to"

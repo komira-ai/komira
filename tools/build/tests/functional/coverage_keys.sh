@@ -10,14 +10,16 @@
 #     taken from the action graph, one level down) and the same execution
 #     attributes (executor preference and configuration, cache upload,
 #     weight, dep files: "exec" below);
-#   - with it off, no coverage action (category mojo_build_cov_test, or an
-#     output under cov/);
+#   - with it off, no coverage action (category mojo_build_cov_test or
+#     mojo_cov_run, or an output under cov/);
 #   - with it on, every new action is a coverage action, and there is one
-#     mojo_build_cov_test per test (the count in the table);
+#     mojo_build_cov_test and one mojo_cov_run per test (the count in the
+#     table);
 #   - with it unset (`-c komira.coverage=`, which clears a global value), every
 #     fact is the one of `=false`: the default is off;
-#   - on darwin-arm64 with it on, no target has the `coverage_debug`
-#     attribute (cquery): another platform builds as with coverage off.
+#   - on darwin-arm64 with it on, no target has the `coverage_debug` or the
+#     `coverage_run` attribute (cquery): another platform builds as with
+#     coverage off.
 #
 # The inputs of a library's mojo_gate_join are read only for a library with no
 # README: a README's marker comes from a dynamic action, which aquery cannot
@@ -142,18 +144,20 @@ cmp -s "$LOG/coverage_keys_false.facts" "$LOG/coverage_keys_unset.facts" ||
     fail "with komira.coverage unset (the default), $(diff "$LOG/coverage_keys_false.facts" "$LOG/coverage_keys_unset.facts" | grep -c '^[<>]') fact line(s) differ from komira.coverage=false (see $LOG/coverage_keys_false.facts and _unset.facts)"
 
 # Another platform behaves as coverage off: on darwin-arm64, with the switch
-# on, no target has the coverage attribute (the select in coverage.bzl), so
+# on, no target has a coverage attribute (the select in coverage.bzl), so
 # its library declares no coverage action.
 DARWIN=komira//tools/build/platforms:darwin-arm64
 nt=$(printf '%s\n' "$labels" | grep -c .)
 # shellcheck disable=SC2086 # one label per word
-"$BUCK2" cquery "set($(printf '%s ' $labels))" --target-platforms "$DARWIN" -c komira.coverage=true -a '^coverage_debug$' --json > "$LOG/coverage_keys_darwin.json" 2> "$LOG/coverage_keys_darwin.err" ||
+"$BUCK2" cquery "set($(printf '%s ' $labels))" --target-platforms "$DARWIN" -c komira.coverage=true -a '^coverage_(debug|run)$' --json > "$LOG/coverage_keys_darwin.json" 2> "$LOG/coverage_keys_darwin.err" ||
     fail "cquery on $DARWIN failed (see $LOG/coverage_keys_darwin.err)"
 inspect_tool json "$LOG/coverage_keys_darwin.json" > "$LOG/coverage_keys_darwin.tsv" ||
     fail "inspect cannot read $LOG/coverage_keys_darwin.json"
-nd=$(awk -F '\t' '$2 == "coverage_debug" && $3 == "null"' "$LOG/coverage_keys_darwin.tsv" | wc -l)
-[ "$nd" -eq "$nt" ] ||
-    fail "on $DARWIN with komira.coverage=true, $nd of $nt targets have coverage_debug null: $(awk -F '\t' '$2 == "coverage_debug" && $3 != "null" { print $1 " = " $3 }' "$LOG/coverage_keys_darwin.tsv" | head -n 3 | paste -sd ';' -)"
+for attr in coverage_debug coverage_run; do
+    nd=$(awk -F '\t' -v A="$attr" '$2 == A && $3 == "null"' "$LOG/coverage_keys_darwin.tsv" | wc -l)
+    [ "$nd" -eq "$nt" ] ||
+        fail "on $DARWIN with komira.coverage=true, $nd of $nt targets have $attr null: $(awk -F '\t' -v A="$attr" '$2 == A && $3 != "null" { print $1 " = " $3 }' "$LOG/coverage_keys_darwin.tsv" | head -n 3 | paste -sd ';' -)"
+done
 
 # A README's actions are declared by a dynamic action, which aquery cannot
 # traverse, so they are compared by building (cache hits): each target with a
@@ -188,7 +192,7 @@ moved=$(LC_ALL=C comm -13 "$LOG/coverage_keys_ran_false.tsv" "$LOG/coverage_keys
 nr=$(grep -c . "$LOG/coverage_keys_ran_true.tsv")
 
 awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" '
-    function cov(k,    p) { split(k, p, "|"); return p[2] == "mojo_build_cov_test" || index(p[3], "cov/") == 1 }
+    function cov(k,    p) { split(k, p, "|"); return p[2] == "mojo_build_cov_test" || p[2] == "mojo_cov_run" || index(p[3], "cov/") == 1 }
     function tgt(k) { return substr(k, 1, index(k, "|") - 1) }
     # same(k, t): whether fact t (cmd or in) of release action k is the same
     # with the switch off and on, absence included.
@@ -214,6 +218,7 @@ awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" '
             if (k ~ /\|target$/) { bad = bad "; " k " has an execution platform only with coverage on"; continue }
             if (!cov(k)) bad = bad "; " k " is new with coverage on and is not a coverage action"
             else if (index(k, "|mojo_build_cov_test|")) builds[tgt(k)]++
+            else if (index(k, "|mojo_cov_run|")) runs[tgt(k)]++
             else other++
         }
         m = split(TARGETS, ls, "\n")
@@ -221,9 +226,11 @@ awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" '
             if (split(ls[i], f, " ") != 3) continue
             nt++
             if (builds[f[1]] + 0 != f[2]) bad = bad "; " f[1] " has " (builds[f[1]] + 0) " mojo_build_cov_test action(s) with coverage on, expected " f[2]
+            if (runs[f[1]] + 0 != f[2]) bad = bad "; " f[1] " has " (runs[f[1]] + 0) " mojo_cov_run action(s) with coverage on, expected " f[2]
             nb += builds[f[1]]
+            nr += runs[f[1]]
         }
         if (plats != nt) bad = bad "; the execution platform of " plats " of " nt " targets was compared"
         if (bad != "") { print "FAIL  coverage keys: " substr(bad, 3); exit 1 }
-        print "PASS  coverage keys: with -c komira.coverage=true, the " plats " targets keep their execution platform, and the " rel " release actions are all there, " cmds " command lines, " ins " input sets and " execs " sets of execution attributes unchanged; the " nb " mojo_build_cov_test and " other " other coverage actions exist only with it; unset is false; on darwin-arm64 none of the " ND " targets has the coverage attribute; a build with it on after one with it off ran " NRAN " action(s) of the README targets again, each under the digest it had"
+        print "PASS  coverage keys: with -c komira.coverage=true, the " plats " targets keep their execution platform, and the " rel " release actions are all there, " cmds " command lines, " ins " input sets and " execs " sets of execution attributes unchanged; the " nb " mojo_build_cov_test, " nr " mojo_cov_run and " other " other coverage actions exist only with it; unset is false; on darwin-arm64 none of the " ND " targets has a coverage attribute; a build with it on after one with it off ran " NRAN " action(s) of the README targets again, each under the digest it had"
     }' "$LOG/coverage_keys_false.facts" "$LOG/coverage_keys_true.facts"
