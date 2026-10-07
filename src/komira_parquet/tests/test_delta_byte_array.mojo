@@ -189,9 +189,7 @@ def _encode_delta_length_byte_array(strings: List[String]) -> List[UInt8]:
     for i in range(len(strings)):
         var s = strings[i]
         # SAFETY: transient pointer to copy String bytes; s is alive this iteration.
-        var src_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
-            unsafe_from_address=Int(s.as_c_string_slice().unsafe_ptr())
-        )
+        var src_ptr = s.unsafe_ptr()
         for j in range(s.byte_length()):
             output.append((src_ptr + j)[])
 
@@ -219,12 +217,8 @@ def _encode_delta_byte_array(strings: List[String]) -> List[UInt8]:
         var plen = 0
         var max_common = min(prev.byte_length(), cur.byte_length())
         # SAFETY: transient pointers to compare bytes; both strings alive this iteration.
-        var prev_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
-            unsafe_from_address=Int(prev.as_c_string_slice().unsafe_ptr())
-        )
-        var cur_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
-            unsafe_from_address=Int(cur.as_c_string_slice().unsafe_ptr())
-        )
+        var prev_ptr = prev.unsafe_ptr()
+        var cur_ptr = cur.unsafe_ptr()
         while plen < max_common:
             if (prev_ptr + plen)[] != (cur_ptr + plen)[]:
                 break
