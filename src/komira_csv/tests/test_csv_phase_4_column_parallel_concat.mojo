@@ -5,7 +5,7 @@
 # The parallel reader's driver tail concatenates per-worker batches
 # column-parallel: one worker per output column. Each worker runs its own
 # N-way merge for that column index using the canonical single-pass
-# helpers from `komira_core.arrow_helpers.streaming_concat`.
+# helpers from `komira_arrow.streaming_concat`.
 #
 # This module tests the concat path explicitly:
 #   T1  wide-schema multi-column scan: a 6-column INT64/FLOAT64/STRING
@@ -32,10 +32,10 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import RecordBatch
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import RecordBatch
 
 from komira_csv import (
     CsvReadOptions,

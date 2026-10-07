@@ -35,7 +35,7 @@ from komira_avro import (
     SHAPE_KIND_UNKNOWN,
 )
 from komira_avro.avro_schema import AvroSchema
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.record_batch import RecordBatch
 
 
 # -----------------------------------------------------------------------------

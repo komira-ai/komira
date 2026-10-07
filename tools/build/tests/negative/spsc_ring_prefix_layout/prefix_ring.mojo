@@ -43,7 +43,7 @@ from std.memory import OwnedPointer, alloc
 
 from komira_atomic_alias import AtomicI64
 
-from komira_core.collections import Slab
+from komira_collections.slab import Slab
 
 
 # Stride between independently-written counters. 128 bytes covers the

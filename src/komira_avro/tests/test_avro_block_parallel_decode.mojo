@@ -29,7 +29,7 @@ from komira_avro import (
     read_avro_bytes_parallel,
     OCF_SYNC_LEN,
 )
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.record_batch import RecordBatch
 
 
 # -----------------------------------------------------------------------------

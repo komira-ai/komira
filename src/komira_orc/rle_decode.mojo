@@ -39,7 +39,7 @@
 from std.memory import bitcast
 from std.sys.info import simd_width_of
 
-from komira_core.simd.bit_unpack import simd_unpack_bits
+from komira_simd.bit_unpack import simd_unpack_bits
 
 
 # =============================================================================
@@ -519,7 +519,7 @@ def _unpack_bits_into[
         var n_bytes = (bits * count + 7) // 8
         if reader.remaining() >= n_bytes:
             # Build borrowed/mutable Span views so no raw pointer crosses into
-            # komira_core.simd. `src_span` covers EXACTLY the packed run bytes;
+            # the core packages. `src_span` covers EXACTLY the packed run bytes;
             # the +16 SIMD overread headroom is guaranteed by the reader's
             # remaining() >= n_bytes check ONLY when there are >= 16 trailing
             # bytes, so we pad the span length by the available remainder.

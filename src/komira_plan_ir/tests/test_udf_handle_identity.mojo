@@ -44,7 +44,7 @@ from komira_plan_expr.udf_data import (
 
 
 # The registry's packing, restated here ON PURPOSE rather than imported.
-# `komira_core` is a LOWER layer than `komira_engine_operators`, so it cannot
+# the core packages is a LOWER layer than `komira_engine_operators`, so it cannot
 # import `udf_registry`. Restating it means a divergence between the two shows
 # up as a failing assertion below instead of as a silent mis-decode — and the
 # constants are a wire-shape fact, not an implementation detail.

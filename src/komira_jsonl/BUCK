@@ -11,10 +11,15 @@ mojo_library(
     name = "komira_jsonl",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_arrow:komira_arrow",
         "//src/komira_async:komira_async",
-        "//src/komira_core:komira_core",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_json_index:komira_json_index",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_row_format:komira_row_format",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [

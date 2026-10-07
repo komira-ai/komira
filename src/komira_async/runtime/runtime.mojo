@@ -76,8 +76,8 @@ from komira_async.runtime.idle_hook import _IdleHookSlot
 from komira_async.runtime.shared_erasure import ErasedHandle
 from komira_async.runtime.worker import Worker
 from komira_async.spawner.local_spawner import LocalSpawner
-from komira_core.collections.slab import Slab
-from komira_core.runtime.engine_placement import EnginePlacement
+from komira_collections.slab import Slab
+from komira_host.engine_placement import EnginePlacement
 
 
 # Default per-worker MPSC channel capacity. Power of 2 (Vyukov ring index

@@ -40,8 +40,8 @@
 # No UnsafePointer, no pointer arithmetic.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field
 
 from .orc_schema import (
     OrcSchema,

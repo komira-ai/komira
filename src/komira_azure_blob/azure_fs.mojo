@@ -48,11 +48,11 @@ from komira_fs.shallow_dir_entry import (
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
-from komira_core.plan.fs_descriptor_pod import FS_SCHEME_AZURE
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
+from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_AZURE
 
 from komira_http_core.transport.io_stream import Connector
 

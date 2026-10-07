@@ -499,12 +499,12 @@ def test_sentinel_constants() raises:
 # rows against the schema-ordered tuple compare.
 
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.batch_view import BatchView
 
 
 def _build_batch_2col_i64_i64(

@@ -44,7 +44,7 @@ from komira_async.runtime.runtime import (
     PLACEMENT_FIXED,
     PerCoreAsyncRuntime,
 )
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # -----------------------------------------------------------------------------

@@ -39,7 +39,7 @@ from komira_async.runtime.runtime import (
     PLACEMENT_MAX_SPREAD,
     PerCoreAsyncRuntime,
 )
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 
 # -----------------------------------------------------------------------------

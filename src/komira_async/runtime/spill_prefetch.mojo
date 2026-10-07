@@ -28,7 +28,7 @@
 # `SpillPrefetchWork`. ZERO `UnsafePointer` in any public signature. The IO
 # senders are held as the encapsulated `Slab[OwnedPointer[MpscSender[...]]]`
 # (the safe across destroy-recreate shape the dispatcher uses); the page-cache prime FFI is fully
-# confined to `prefetch_file_into_page_cache` (komira_core/io/posix_io.mojo).
+# confined to `prefetch_file_into_page_cache` (komira_libc/posix_io.mojo).
 #
 # ── LIFECYCLE ─────────────────────────────────────────────────────────
 # `SpillPrefetchWork` is a per-task heap-boxed payload (via `make_erased`), NOT
@@ -52,8 +52,8 @@ from komira_async.runtime.shared_erasure import (
     make_erased,
 )
 
-from komira_core.collections.slab import Slab
-from komira_core.io.posix_io import prefetch_file_into_page_cache
+from komira_collections.slab import Slab
+from komira_libc.posix_io import prefetch_file_into_page_cache
 
 
 # =============================================================================

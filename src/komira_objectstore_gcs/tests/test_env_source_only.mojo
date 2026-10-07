@@ -6,7 +6,7 @@
 # service account, the endpoint, the token source and the clocks are all
 # parameters. Every library source of the package is staged as test data
 # (src/komira_objectstore_gcs/*.mojo); the test reads each one and fails if
-# any names getenv, setenv, `_read_env`, komira_core_ffi or an
+# any names getenv, setenv, `_read_env`, komira_libc or an
 # `external_call`. There is no exempt file. The scan is
 # not vacuous: it must see the signer, the gRPC backend and every other source
 # the package has.
@@ -40,7 +40,7 @@ def test_scan() raises:
         "getenv",
         "setenv",
         "_read_env",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
     ]
     for i in range(len(names)):

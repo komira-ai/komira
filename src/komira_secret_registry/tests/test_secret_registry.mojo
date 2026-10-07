@@ -5,7 +5,7 @@
 #
 # This test imports nothing outside the registry's own dependency closure:
 # `komira_secret_store` (the `SecretStore` trait, `StaticSecretStore`,
-# `SecretValue`), `komira_crypto` (the zeroize helper), and `komira_core` (the
+# `SecretValue`), `komira_crypto` (the zeroize helper), and the core packages (the
 # store-less `SecretBindings` table). The test declares no extra dependencies,
 # so a new import of a package outside that closure fails to COMPILE here. It
 # does not pass by reaching further.
@@ -42,7 +42,7 @@ from std.testing import assert_equal, assert_true, assert_false, assert_raises
 
 from komira_crypto import zeroize_inline_array
 
-from komira_core.plan.secret_bindings import SecretBindings
+from komira_secret_registry.secret_bindings import SecretBindings
 
 from komira_secret_store.secret_store import StaticSecretStore
 from komira_secret_store.secret_value import MAX_SECRET_LEN

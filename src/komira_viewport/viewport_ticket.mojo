@@ -27,8 +27,8 @@
 # crosses the boundary. Mojo 1.0.0b2 (def-only).
 # =============================================================================
 
-from komira_core.collections import Slab
-from komira_core.plan.expr import Expr
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import Expr
 
 from .viewport_bytes import ViewportWriter, ViewportReader
 from .viewport_expr_codec import encode_expr, decode_expr

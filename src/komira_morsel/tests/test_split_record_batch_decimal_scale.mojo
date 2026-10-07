@@ -33,18 +33,18 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.schema import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.schema import (
     Field,
     RecordBatch,
     RecordBatchBuilder,
     Schema,
     SchemaBuilder,
 )
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 from komira_morsel.morsel import MorselArray, split_record_batch
 
 
