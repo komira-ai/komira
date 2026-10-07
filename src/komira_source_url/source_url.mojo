@@ -134,10 +134,14 @@ def _host_of(authority: String) -> String:
 
 
 def _is_azure_blob_host(host: String) -> Bool:
-    """`<label>.blob.core.windows.net` with a non-empty first label."""
-    return host.endswith(_AZURE_BLOB_SUFFIX) and (
-        host.byte_length() > _AZURE_BLOB_SUFFIX.byte_length()
-    )
+    """`<account>.blob.core.windows.net`: one non-empty account label with no
+    dot before the suffix, the only host parse_azure_url reads over https."""
+    if not host.endswith(_AZURE_BLOB_SUFFIX):
+        return False
+    var n = host.byte_length() - _AZURE_BLOB_SUFFIX.byte_length()
+    if n <= 0:
+        return False
+    return host.find(".") == n
 
 
 def source_scheme_for_url(url: String) raises -> UInt8:

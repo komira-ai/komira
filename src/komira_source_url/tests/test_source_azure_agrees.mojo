@@ -57,6 +57,7 @@ def test_the_mapping_and_the_parser_agree() raises:
         "HTTPS://MyAcct.DFS.Core.Windows.Net/lake/a.parquet",
         "https://myacct.blob.core.windows.net:443/lake/a.parquet",
         "https://u@myacct.blob.core.windows.net/lake/a.parquet",
+        "https://a.b.blob.core.windows.net/lake/a.parquet",
         "https://myacct.dfs.core.windows.net:443/lake/a.parquet",
         "https://example.com/lake/a.parquet",
         "https://blob.core.windows.net/lake/a.parquet",
