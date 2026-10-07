@@ -6,7 +6,7 @@
 # The physical plan must not carry a logical one: that is the precondition for
 # shipping the optimizer and the engine as separate binaries.
 # `SegmentDescPod` can reach a whole `LogicalPlan` through
-# `Expr._corr_subq -> CorrelatedSubqueryData.inner_plan`. Without this gate the
+# `Expr._corr_subq -> CorrelatedSubqueryData._plan`. Without this gate the
 # property rests on a dynamic invariant (`flatten_dependent_joins` leaves zero
 # `EXPR_CORRELATED_SUBQUERY` nodes) that an unchecked `@extern` seam cannot
 # carry.
@@ -187,7 +187,8 @@ def test_walker_has_an_arm_for_every_expr_tag() raises:
     the whole point — a hole in a safety check must be loud — and this test is
     what makes it loud AT DEVELOPMENT TIME instead of on a customer's plan.
 
-    Goes red the moment tag 24 is added to `expr.mojo` without an arm here."""
+    Goes red the moment `EXPR_TAG_COUNT` grows past 27 for a new tag in
+    `expr.mojo` that has no arm here."""
     for t in range(EXPR_TAG_COUNT):
         var e = Expr(UInt8(t))
         var got = _walk(e)
@@ -260,8 +261,8 @@ def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() ra
         "WHEN *default* must be descended",
     )
 
-    # EXPR_SUBSTRING / EXPR_REGEXP / EXPR_EXTRACT / EXPR_MATH_FN — one-child
-    # containers the fail-open walk has no arm for at all.
+    # EXPR_SUBSTRING / EXPR_REGEXP / EXPR_EXTRACT — one-child containers the
+    # fail-open walk has no arm for at all.
     assert_equal(
         _walk(Expr.substring(_corr(), 1, 2)), String("T"), "SUBSTRING child"
     )
