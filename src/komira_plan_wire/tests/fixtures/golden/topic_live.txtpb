@@ -1,0 +1,122 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 2
+plan {
+  output_schema {
+    fields {
+      name: "order_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "amount"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "note"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "__partition"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+  }
+  scan {
+    source {
+      binding {
+        kind_id: 2705777722
+        kind_name: "komira.broker.topic"
+        name: "orders"
+        params {
+          key: "partitions"
+          tag: PARAM_STR
+          s: "0,3"
+        }
+        params {
+          key: "start_offset"
+          tag: PARAM_I64
+          i: 1000
+        }
+        params {
+          key: "topic"
+          tag: PARAM_STR
+          s: "orders"
+        }
+        schema {
+          fields {
+            name: "order_id"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "amount"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "note"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "__partition"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+        }
+        fingerprint: 9196912900501576254
+        structural_id: 9196912900501576254
+        pushdown_gate {
+          mode: GATE_SHAPED
+          allowed_binary_ops: 63
+          allow_and_recurse: true
+          allow_in_list: true
+        }
+        snapshot_policy: SNAPSHOT_LIVE
+        orientation: SOURCE_KIND_COLUMNAR
+        variant_tag: SOURCE_VARIANT_BINDING
+      }
+    }
+    has_schema: true
+    schema {
+      fields {
+        name: "order_id"
+        arrow_type_id: 5
+        dtype_code: _DT_INT64
+        dict_index_type_id: 4
+      }
+      fields {
+        name: "amount"
+        arrow_type_id: 5
+        dtype_code: _DT_INT64
+        nullable: true
+        dict_index_type_id: 4
+      }
+      fields {
+        name: "note"
+        arrow_type_id: 13
+        nullable: true
+        dict_index_type_id: 4
+      }
+      fields {
+        name: "__partition"
+        arrow_type_id: 5
+        dtype_code: _DT_INT64
+        dict_index_type_id: 4
+      }
+    }
+    source_kind: SOURCE_KIND_COLUMNAR
+  }
+}

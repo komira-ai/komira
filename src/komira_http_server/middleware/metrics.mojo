@@ -1,47 +1,43 @@
 # =============================================================================
 # src/komira_http_server/middleware/metrics.mojo — THE CONFIGURABLE METRICS
-#   SEAM. A user plugs in THEIR OWN sink and gets their own request metrics out.
+#   SEAM. An embedder plugs in ITS OWN sink and gets its own request metrics out.
 # =============================================================================
 #
-# ★ THIS IS A PRODUCT SURFACE, NOT AN INTERNAL SEAM. It ships in an open-source
-# library and is embedded in CUSTOMER CODE. Logic put here cannot be changed
-# without every customer redeploying. That single fact governs every judgement
-# call in this file:
+# ★ THIS IS A PUBLIC SURFACE. It ships in an open-source library and is
+# embedded in other people's programs, so logic put here cannot be changed
+# without every embedder rebuilding. That governs every judgement call here:
 #
-#   ⛔ NOTHING IN THIS FILE ACCUMULATES, UNIONS, SUMS, OR BILLS.
+#   ⛔ NOTHING IN THIS FILE ACCUMULATES, UNIONS OR SUMS.
 #
 # The middleware takes a start timestamp and an end timestamp and hands them to
-# a sink. It computes no totals, keeps no counters across requests, and knows
-# nothing about vCPU allocation or money. Every bit of that arithmetic belongs
-# to the collector the sink reports to, which is ONE service. If you find yourself adding a counter
-# here, stop — you are putting a number in every customer binary that you
-# then cannot correct.
+# a sink. It computes no totals and keeps no counters across requests. Any
+# arithmetic over many requests belongs to whatever the sink reports to, which
+# can be fixed without touching every embedder. If you find yourself adding a
+# counter here, stop.
 #
-# WHY TWO ENDPOINTS AND NEVER A DURATION
-# --------------------------------------
-# The billable quantity is the wall time during which AT LEAST ONE request was
-# in flight on an instance — the UNION of the request intervals, not their sum:
+# WHY TWO ENDPOINTS AND NEVER ONLY A DURATION
+# -------------------------------------------
+# The time during which AT LEAST ONE request was in flight is the UNION of the
+# request intervals, not their sum:
 #
-#     80 requests, 1s each, fully overlapping  -> union =  1s  ✅
-#     80 requests, 1s each, sequential         -> union = 80s  ✅
-#     ...summed, the first case reports 80s — an 80x overbill.
+#     80 requests, 1s each, fully overlapping  -> union =  1s
+#     80 requests, 1s each, sequential         -> union = 80s
+#     ...summed, the first case reports 80s.
 #
 # A union is computable ONLY from intervals. A payload carrying a scalar
 # duration per request (`latency_ns` alone) forecloses it at the client and
-# leaves the server no choice but to sum — a bug that is INVISIBLE under
-# sequential traffic and silently overbills under concurrency. So
-# `RequestMetric` carries `start_mono_ns` AND `end_mono_ns` as separate fields,
-# and the two are never subtracted on their way to a sink.
+# leaves the collector no choice but to sum — a bug that is INVISIBLE under
+# sequential traffic and wrong under concurrency. So `RequestMetric` carries
+# `start_mono_ns` AND `end_mono_ns` as separate fields, and the two are never
+# subtracted on their way to a sink.
 #
 # ⚠ THE ENDPOINTS ARE MONOTONIC (`komira_clock.now_ns`) — the same clock
 # `LoggingMiddleware.before` already stamps into `ctx.start_ns`. Monotonic,
-# because a union taken over wall-clock stamps is corrupted by an NTP step, and
-# a step is exactly the event a billing system must not be sensitive to.
-# CONSEQUENCE, AND IT IS A CONTRACT ON THE CONFIGURATOR, NOT ON THIS CODE: a
-# monotonic reading is comparable only WITHIN ONE PROCESS. The instance
-# identifier a sink posts alongside these endpoints MUST therefore be unique per
-# PROCESS (not merely per container image or per revision), or the server would
-# union two processes' incomparable clocks.
+# because a union taken over wall-clock stamps is corrupted by a clock step.
+# CONSEQUENCE, AND IT IS A CONTRACT ON THE SINK'S CONFIGURATOR, NOT ON THIS
+# CODE: a monotonic reading is comparable only WITHIN ONE PROCESS. Any instance
+# identifier a sink posts alongside these endpoints MUST be unique per PROCESS,
+# or a collector would union two processes' incomparable clocks.
 #
 # WHERE THE PER-REQUEST STATE LIVES, AND WHY IT IS NOT ON `self`
 # --------------------------------------------------------------
@@ -78,7 +74,7 @@ struct RequestMetric(Copyable, ImplicitlyCopyable, Movable, Deinitable):
       `entry`          — the EXISTING `LogEntry`
                          (`method`/`path`/`status`/`latency_ns`/`span_id`/
                          `short_circuit`), unchanged and reused rather than
-                         duplicated. This is the CUSTOMER's metrics payload:
+                         duplicated. This is the embedder's metrics payload:
                          whatever they already wanted out of request logging,
                          they now get through their own writer.
 
@@ -86,14 +82,14 @@ struct RequestMetric(Copyable, ImplicitlyCopyable, Movable, Deinitable):
       `end_mono_ns`      SEPARATE fields. This is the METERING payload. They are
                          never subtracted here; see the banner.
 
-    ⚠ `entry.latency_ns` IS A CONVENIENCE FOR THE CUSTOMER'S OWN DASHBOARDS AND
+    ⚠ `entry.latency_ns` IS A CONVENIENCE FOR THE EMBEDDER'S OWN DASHBOARDS AND
     MUST NOT BE PUT ON A METERING WIRE. It is `end - start` for THIS request —
     a scalar, and therefore un-unionable. A sink that posts to a metering
     endpoint omits it from its body.
 
     ⛔ DO NOT "SIMPLIFY" THIS STRUCT BY DROPPING AN ENDPOINT AND KEEPING THE
-    DURATION. That is the silent-overbill bug in its entirety: every sequential
-    test still passes, and production overbills by the concurrency factor.
+    DURATION. That is the silent over-count bug in its entirety: every sequential
+    test still passes, and production over-counts by the concurrency factor.
     """
 
     var entry: LogEntry
@@ -133,7 +129,7 @@ trait MetricsSink(Movable, Deinitable):
         `MetricsMiddleware.after` for why that is deliberate and not an
         oversight.
       * `record` MAY raise. The middleware catches it. A sink that throws
-        never fails the customer's request — a metrics pipeline is not
+        never fails the request — a metrics pipeline is not
         allowed to take down the thing it is measuring. What a raise COSTS
         is one lost observation, and nothing else.
       * `record` SHOULD be fast. Whatever it does is on the request's
@@ -166,9 +162,9 @@ struct NullSink(MetricsSink, Movable, Deinitable):
 struct CapturingSink(MetricsSink, Movable, Deinitable):
     """Holds observations in memory, oldest-first, for readback.
 
-    A PRODUCT SURFACE, not a test fixture — a customer exposing their own
+    A PUBLIC SURFACE, not a test fixture — an embedder exposing its own
     `/metrics` handler reads it exactly the way a test does. It is UNBOUNDED on
-    purpose: bounding it would mean choosing a drop policy on a customer's
+    purpose: bounding it would mean choosing a drop policy on an embedder's
     behalf inside a library they cannot patch. Use it where something drains
     it; for a long-lived server that drains nothing, write a sink that
     forwards.
@@ -258,7 +254,7 @@ struct MetricsMiddleware[S: MetricsSink](Middleware, Movable, Deinitable):
         """Stamp the request's START endpoint onto the per-request context.
 
         NEVER short-circuits — a metrics middleware that could reject a request
-        is a metrics middleware that can take a customer's site down.
+        is a metrics middleware that can take a site down.
 
         ⚠ IT WRITES `ctx.start_ns` ONLY IF IT IS STILL ZERO. `LoggingMiddleware`
         is an OUTER leg of the standard chain and normally stamps it first; this
@@ -299,7 +295,7 @@ struct MetricsMiddleware[S: MetricsSink](Middleware, Movable, Deinitable):
         FAILURE POLICY — STATED, AND ASSERTED BY TEST: a raising sink is
         SWALLOWED. The cost is ONE LOST OBSERVATION and nothing else — bounded
         to the single request, never compounding, and for a metering sink it
-        under-reports, i.e. it errs in the customer's favour and never in ours.
+        under-reports, i.e. it errs toward under-reporting.
         The alternative — letting it propagate — converts a metrics outage into
         a 500 for a request that had already succeeded.
         """
@@ -307,8 +303,8 @@ struct MetricsMiddleware[S: MetricsSink](Middleware, Movable, Deinitable):
             return
         var end_mono_ns = _now_ns()
         var start_mono_ns = ctx.start_ns
-        # `latency_ns` is the CUSTOMER-FACING scalar and is computed exactly as
-        # `LoggingMiddleware.after` computes it, so a customer switching from
+        # `latency_ns` is the EMBEDDER-FACING scalar and is computed exactly as
+        # `LoggingMiddleware.after` computes it, so an embedder switching from
         # the log buffer to their own writer sees the same number. It is NOT
         # the metering quantity; the endpoints above are. A metering sink must
         # ignore it (see `RequestMetric`).
@@ -335,7 +331,7 @@ struct MetricsMiddleware[S: MetricsSink](Middleware, Movable, Deinitable):
             _ = e
 
     def sink_ref(ref self) -> ref [self._sink] Self.S:
-        """Borrow the configured sink for readback (a customer's `/metrics`
+        """Borrow the configured sink for readback (an embedder's `/metrics`
         handler; a test's assertions)."""
         return self._sink
 

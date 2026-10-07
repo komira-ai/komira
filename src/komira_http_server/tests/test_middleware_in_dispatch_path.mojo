@@ -11,7 +11,7 @@
 #
 #   1. a probe `Middleware` stamps a marker on the per-
 #      request context in `before`; the dispatcher (reached on a non-short-
-#      circuit request) observes the marker via `ctx.authed_user` — proving the
+#      circuit request) observes the marker via `ctx.principal` — proving the
 #      chain's `before` leg ran BEFORE the dispatcher.
 #   2. a probe middleware that short-
 #      circuits with a 401 means a dispatcher that would otherwise 200 is NEVER
@@ -33,17 +33,15 @@ from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_uuid.uuid import Uuid
-
 from komira_http_core.codec.types import (
     HttpRequest,
     HttpResponse,
     HttpMethod,
 )
 from komira_http_server.middleware import (
-    AuthedUser,
     Middleware,
     MiddlewareChain,
+    Principal,
     RequestContext,
 )
 from komira_http_server.dispatch import (
@@ -60,21 +58,17 @@ def _rt() raises -> _Rt:
     return _Rt.new(NoopSink(_placeholder=UInt8(0)))
 
 
-# A non-zero marker UUID the probe middleware stamps so the dispatcher can
-# observe that the chain's `before` leg ran and populated the ctx.
-def _marker_uuid() -> Uuid:
-    var b = Array[UInt8, 16](fill=UInt8(0))
-    b[0] = UInt8(0xAB)
-    b[15] = UInt8(0xCD)
-    return Uuid(b)
+# A marker subject the probe middleware stamps so the dispatcher can observe
+# that the chain's `before` leg ran and populated the ctx.
+comptime _MARKER_SUBJECT = "probe-subject"
 
 
 # =============================================================================
-# Probe middleware — stamps a marker AuthedUser on `before`, OR short-circuits.
+# Probe middleware — stamps a marker Principal on `before`, OR short-circuits.
 # =============================================================================
 struct _ProbeMiddleware(Movable, Deinitable, Middleware):
     """A `Middleware` conformer for the test. When `_short_circuit` is False, its
-    `before` stamps a marker `AuthedUser` on the ctx (proving the chain ran
+    `before` stamps a marker `Principal` on the ctx (proving the chain ran
     before the dispatcher) and returns None (continue). When True, it short-
     circuits with a 401 (proving the dispatcher is never reached)."""
 
@@ -92,11 +86,9 @@ struct _ProbeMiddleware(Movable, Deinitable, Middleware):
             var r = HttpResponse(status=Int32(401))
             r.headers[String("content-length")] = String("0")
             return Optional[HttpResponse](r^)
-        # Stamp the marker identity onto the ctx (the seam the auth middleware
-        # uses for the real AuthedUser).
-        ctx.authed_user = Optional[AuthedUser](
-            AuthedUser(_marker_uuid(), _marker_uuid())
-        )
+        # Stamp the marker identity onto the ctx (the seam an authentication
+        # middleware uses).
+        ctx.principal = Optional[Principal](Principal(String(_MARKER_SUBJECT)))
         return Optional[HttpResponse]()
 
     def after(
@@ -114,7 +106,7 @@ struct _ProbeMiddleware(Movable, Deinitable, Middleware):
 struct _ProbeDispatcher(Movable, RequestDispatcher, CtxRequestDispatcher):
     """A `CtxRequestDispatcher` for the test. `dispatch_with_ctx` flips
     `_reached` (so a short-circuit that skips it is observable), reads the
-    marker `AuthedUser` off the ctx (proving the chain ran first), and returns
+    marker `Principal` off the ctx (proving the chain ran first), and returns
     200 (with the marker's presence reflected in the status path)."""
 
     var _reached: Bool
@@ -143,8 +135,9 @@ struct _ProbeDispatcher(Movable, RequestDispatcher, CtxRequestDispatcher):
         ctx: RequestContext,
     ) raises -> HttpResponse:
         self._reached = True
-        if ctx.authed_user:
-            self._saw_marker = True
+        if ctx.principal:
+            if ctx.principal.value().subject == String(_MARKER_SUBJECT):
+                self._saw_marker = True
         return HttpResponse.ok(String('{"ok":true}'))
 
 

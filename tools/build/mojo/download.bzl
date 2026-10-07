@@ -2,11 +2,24 @@
 
 The download runs on the client and the bytes are uploaded to the remote CAS
 like any other input; it is the only client-side operation in this repo.
+
+With the sha256 and the size (`size_bytes`) both stated, the download is
+deferred: buck2 contacts the URL only when the remote CAS lacks the blob or
+the file is written to local disk. Without a size, buck2 would send a HEAD
+request on every fresh daemon to learn it (and a GET when the server sends no
+Content-Length), so an upstream outage would fail builds whose outputs are
+cached; the size is therefore required, and a size that is not positive is
+refused at analysis. A wrong size is never silent, and fails one of two ways:
+a remote action that reads the file finds no blob of that (sha256, size) in
+the remote cache (the worker reports the blob not found), or, where the
+download runs, it fails (`DownloadSizeMismatch`).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _pinned_file_impl(ctx):
+    if ctx.attrs.size_bytes <= 0:
+        fail("pinned_file {}: `size_bytes` must be the file's positive length in bytes, got {}".format(ctx.label, ctx.attrs.size_bytes))
     # A fixed path, stated: buck2 may otherwise give a download a
     # content-based path, which it can only compute before downloading from a
     # sha1 and a Content-Length, and GitHub's archive downloads send no
@@ -16,6 +29,7 @@ def _pinned_file_impl(ctx):
         out.as_output(),
         ctx.attrs.url,
         sha256 = ctx.attrs.sha256,
+        size_bytes = ctx.attrs.size_bytes,
         is_executable = ctx.attrs.executable,
     )
     if ctx.attrs.executable:
@@ -29,6 +43,8 @@ pinned_file_rule = rule(
         "executable": attrs.bool(default = False),
         "out": attrs.option(attrs.string(), default = None),
         "sha256": attrs.string(),
+        # The file's length in bytes, required: see the module docstring.
+        "size_bytes": attrs.int(),
         "url": attrs.string(),
     },
 )

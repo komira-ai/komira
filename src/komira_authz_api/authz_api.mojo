@@ -11,7 +11,7 @@
 #
 # This is a NEUTRAL LEAF package — it names ONLY the transport primitives the
 # seam shape requires (`Reactor` / `Runtime` for the RT-parametric async-park
-# contract + `AuthedUser` for the principal) and carries no permission-model
+# contract + `Principal` for the caller) and carries no permission-model
 # vocabulary (no scopes, capabilities or roles, no database id type). The
 # action + resource are POD value types built from Strings only, so a host can
 # depend on the port without dragging in an RBAC engine.
@@ -30,7 +30,7 @@
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_http_server.middleware import AuthedUser
+from komira_http_server.middleware import Principal
 
 
 # =============================================================================
@@ -185,7 +185,7 @@ trait AuthzPort(Movable, Deinitable):
     ](
         mut self,
         mut reactor: Reactor[RT.Sink],
-        principal: AuthedUser,
+        principal: Principal,
         action: AuthzAction,
         resource: AuthzResource,
     ) raises -> Bool:
@@ -205,21 +205,21 @@ trait AuthzPort(Movable, Deinitable):
 # instead of a database-backed conformer it cannot build.
 #
 # NEITHER is a substitute for authentication. `AllowAuthenticatedAuthz` grants to
-# any principal that carries a NON-NIL user id — which is only meaningful because
+# any principal that carries a NON-EMPTY subject — which is only meaningful because
 # the identity reaching a dispatcher is the one an upstream verifier STAMPED
 # from a verified credential. Bind it only behind such a verifier, or behind an equivalent
 # ingress-level authentication; bind `DenyAllAuthz` when a surface must be off.
 # =============================================================================
 struct AllowAuthenticatedAuthz(AuthzPort):
     """An `AuthzPort` that grants any action to any AUTHENTICATED principal — i.e.
-    one whose `user_id` is not the nil UUID — and denies an unauthenticated one.
+    one whose `subject` is non-empty — and denies an unauthenticated one.
 
-    The DB-free single-tenant default: it delegates the whole authorization
-    decision to whatever authenticated the caller (a verified grant token names a
-    user, an org and a workspace; a host that has already fenced the request to its
-    own tenant has nothing left to look up without a membership store). A host with
-    a membership store should bind a conformer backed by it instead; a host with
-    per-repo ACLs should bind one that reads `resource.resource_id`."""
+    The DB-free default: it delegates the whole authorization decision to
+    whatever authenticated the caller (a host that has already verified the
+    caller's credential has nothing left to look up without a membership store).
+    A host with a membership store should bind a conformer backed by it
+    instead; a host with per-repo ACLs should bind one that reads
+    `resource.resource_id`."""
 
     def __init__(out self):
         pass
@@ -229,17 +229,13 @@ struct AllowAuthenticatedAuthz(AuthzPort):
     ](
         mut self,
         mut reactor: Reactor[RT.Sink],
-        principal: AuthedUser,
+        principal: Principal,
         action: AuthzAction,
         resource: AuthzResource,
     ) raises -> Bool:
-        """True iff `principal` carries a non-nil user id. `action` / `resource`
-        are ignored (there is no store to scope them against). The nil test is a
-        raw 16-byte scan so this leaf needs no `Uuid` import."""
-        for i in range(16):
-            if principal.user_id.byte_at(i) != UInt8(0):
-                return True
-        return False
+        """True iff `principal` carries a non-empty subject. `action` /
+        `resource` are ignored (there is no store to scope them against)."""
+        return principal.subject.byte_length() > 0
 
 
 struct DenyAllAuthz(AuthzPort):
@@ -255,7 +251,7 @@ struct DenyAllAuthz(AuthzPort):
     ](
         mut self,
         mut reactor: Reactor[RT.Sink],
-        principal: AuthedUser,
+        principal: Principal,
         action: AuthzAction,
         resource: AuthzResource,
     ) raises -> Bool:

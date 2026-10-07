@@ -1,0 +1,108 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 2
+plan {
+  output_schema {
+    fields {
+      name: "_score"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "_source"
+      arrow_type_id: 13
+      dict_index_type_id: 4
+    }
+  }
+  scan {
+    source {
+      binding {
+        kind_id: 1401054652
+        kind_name: "komira.search.index"
+        name: "docs"
+        params {
+          key: "analyzer_fp"
+          tag: PARAM_U64
+          i: 6202052
+        }
+        params {
+          key: "field"
+          tag: PARAM_STR
+          s: "body"
+        }
+        params {
+          key: "generation"
+          tag: PARAM_I64
+          i: 42
+        }
+        params {
+          key: "index"
+          tag: PARAM_STR
+          s: "docs"
+        }
+        params {
+          key: "query"
+          tag: PARAM_STR
+          s: "error timeout"
+        }
+        schema {
+          fields {
+            name: "_score"
+            arrow_type_id: 12
+            dtype_code: _DT_FLOAT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "_id"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "_source"
+            arrow_type_id: 13
+            dict_index_type_id: 4
+          }
+        }
+        fingerprint: 4612476887641222328
+        structural_id: 4612476887641222328
+        pushdown_gate {
+          mode: GATE_SHAPED
+          allowed_binary_ops: 63
+          allow_and_recurse: true
+          allow_in_list: true
+        }
+        snapshot_policy: SNAPSHOT_LIVE
+        orientation: SOURCE_KIND_COLUMNAR
+        variant_tag: SOURCE_VARIANT_BINDING
+      }
+    }
+    has_schema: true
+    schema {
+      fields {
+        name: "_score"
+        arrow_type_id: 12
+        dtype_code: _DT_FLOAT64
+        dict_index_type_id: 4
+      }
+      fields {
+        name: "_id"
+        arrow_type_id: 5
+        dtype_code: _DT_INT64
+        dict_index_type_id: 4
+      }
+      fields {
+        name: "_source"
+        arrow_type_id: 13
+        dict_index_type_id: 4
+      }
+    }
+    source_kind: SOURCE_KIND_COLUMNAR
+  }
+}

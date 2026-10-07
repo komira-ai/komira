@@ -13,9 +13,10 @@ loop against a stateful heartbeat receiver served by komira_http_server, over
 
 from .heartbeat_receiver import (
     BEAT_PATH,
-    CHILDREN_COLLECTED,
+    CHILDREN_EXITED,
     CHILDREN_NONE,
     CHILDREN_NOT_PROBED,
+    CHILDREN_PROBE_FAILED,
     CHILDREN_RUNNING,
     HeartbeatReceiver,
     RECEIVER_ASSIGNED,

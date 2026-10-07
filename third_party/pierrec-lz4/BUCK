@@ -24,6 +24,7 @@ pinned_file(
     name = "LICENSE",
     url = _URL + "LICENSE",
     sha256 = "6a358d2540ca14048f02d366f23787c0a480157e58f058113f0e27168dd4e447",
+    size_bytes = 1477,
     visibility = ["PUBLIC"],
 )
 
@@ -31,6 +32,7 @@ pinned_file(
     name = "gettysburg.txt",
     url = _URL + "testdata/gettysburg.txt",
     sha256 = "40878db5ff73f384fc64e02bac26a80371fb4fe83acac5ebe390a54280582aee",
+    size_bytes = 1548,
     visibility = ["PUBLIC"],
 )
 
@@ -38,5 +40,6 @@ pinned_file(
     name = "gettysburg.txt.lz4",
     url = _URL + "testdata/gettysburg.txt.lz4",
     sha256 = "390ee60baadcd59446c591ef33e587801d472ce6eed7198d0011a9351ea674dd",
+    size_bytes = 1234,
     visibility = ["PUBLIC"],
 )
