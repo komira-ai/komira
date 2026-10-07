@@ -44,9 +44,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # refused writes and the inherited delete default), test_azure_store_put
 # (AzureStore.put_blob through the signing layer: the signed request and its
 # body on the wire, a zero-byte blob, a 403, an empty blob name),
-# test_azure_presign (the service SAS against independent goldens, its
+# test_azure_store_body (response bodies read as UTF-8: a List Blobs or error
+# body that starts with Azure's byte order mark, a multi-byte blob name, and
+# bodies that are not UTF-8), test_azure_presign (the service SAS against independent goldens, its
 # sixteen-field string-to-sign, its refusals, and a clock read at each mint
-# so an advancing clock gives a new window per URL) and test_no_env_reads
+# so an advancing clock gives a new window per URL, and the production clock
+# reading whole wall-clock seconds) and test_no_env_reads
 # (the package's sources read no environment). The same verbs over a real socket, against a fake service
 # that checks each signature itself, are komira_azure_blob_e2e's test.
 mojo_library(
@@ -79,6 +82,7 @@ mojo_library(
         "tests/test_azure_signing.mojo",
         "tests/test_azure_signing_body.mojo",
         "tests/test_azure_signing_layer.mojo",
+        "tests/test_azure_store_body.mojo",
         "tests/test_azure_store_fs.mojo",
         "tests/test_azure_store_put.mojo",
         "tests/test_azure_xml.mojo",

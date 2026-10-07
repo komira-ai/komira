@@ -13,7 +13,10 @@
 # refuses rather than clamps; the same inputs sign the same; a key path
 # is signed as given, never normalized; the clock is read at each mint, once,
 # so a clock that advances 600 s between two mints gives two SAS windows,
-# each equal to its golden; and a clock that reads 0 is refused.
+# each equal to its golden; a clock that reads 0 is refused; and the
+# production clock, SystemAzureSasClock, reads whole Unix seconds of the wall
+# clock (bracketed by komira_clock's reads before and after), so a signer on
+# it reports an expiry TTL seconds after an instant inside that bracket.
 #
 # Goldens, by Python, key = base64.b64decode(_AZURE_KEY):
 #   sts = "\n".join([sp, "2026-10-01T12:00:00Z", "2026-10-01T12:05:00Z",
@@ -34,10 +37,12 @@ from komira_azure_blob import (
     AzureSasClock,
     AzureSasSigner,
     FixedAzureSasClock,
+    SystemAzureSasClock,
     azure_blob_service_sas,
     azure_sas_canonicalized_resource,
     azure_sas_iso8601_utc,
 )
+from komira_clock import now_unix_ms
 from komira_objectstore.presign import (
     PRESIGN_MAX_TTL_SECONDS,
     ObjectUrlSigner,
@@ -261,6 +266,34 @@ def test_unreadable_clock_is_refused() raises:
         _ = az.presign_download(String(_KEY), _TTL)
 
 
+def test_system_clock_reads_unix_seconds() raises:
+    var before = Int(now_unix_ms() // 1000)
+    var clock = SystemAzureSasClock()
+    var v = clock.now_unix_seconds()
+    var after = Int(now_unix_ms() // 1000)
+    assert_true(before > 0, String(before))
+    assert_true(before <= v and v <= after, String(before) + " <= " + String(v) + " <= " + String(after))
+
+
+def test_system_clock_signer_expires_ttl_after_now() raises:
+    var az = AzureSasSigner[SystemAzureSasClock](
+        String("myaccount"),
+        String("repo-container"),
+        String(_AZURE_KEY),
+        SystemAzureSasClock(),
+    )
+    var before = Int64(now_unix_ms() // 1000)
+    var got = az.presign_download(String(_KEY), _TTL)
+    var after = Int64(now_unix_ms() // 1000)
+    var signed_at = got.expires_unix_seconds - Int64(_TTL)
+    assert_true(
+        before <= signed_at and signed_at <= after,
+        String(before) + " <= " + String(signed_at) + " <= " + String(after),
+    )
+    var st = String("&st=") + azure_sas_iso8601_utc(signed_at).replace(":", "%3A") + "&"
+    assert_true(got.url.find(st) > 0, got.url)
+
+
 def main() raises:
     test_generic_mint_matches_the_goldens()
     test_string_to_sign_is_sixteen_positional_fields()
@@ -270,4 +303,6 @@ def main() raises:
     test_clock_is_read_at_each_mint()
     test_upload_at_an_advanced_clock_matches_its_golden()
     test_unreadable_clock_is_refused()
+    test_system_clock_reads_unix_seconds()
+    test_system_clock_signer_expires_ttl_after_now()
     print("OK")

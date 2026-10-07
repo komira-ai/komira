@@ -552,14 +552,13 @@ struct AzureStore[Http: HttpService](Movable, Deinitable):
     def _copy_response_body_as_string(
         self, ref resp: ClientResponse[BufferedResponseBody]
     ) -> String:
-        ref src = resp.body.bytes_ref()
-        var out = String()
-        var i = 0
-        var n = src.__len__()
-        while i < n:
-            out += chr(Int(src[i]))
-            i += 1
-        return out^
+        """An error response's body as UTF-8 text, a leading byte order
+        mark kept for komira_xml to step over; "" when the body is not
+        UTF-8 (the error then carries no azure_code)."""
+        try:
+            return self._response_body_as_string(resp)
+        except:
+            return String("")
 
     def _copy_response_body(
         self, ref resp: ClientResponse[BufferedResponseBody]
@@ -575,15 +574,17 @@ struct AzureStore[Http: HttpService](Movable, Deinitable):
 
     def _response_body_as_string(
         self, ref resp: ClientResponse[BufferedResponseBody]
-    ) -> String:
+    ) raises -> String:
+        """The body's bytes as a String, validated as UTF-8. Azure starts
+        its XML bodies with a UTF-8 byte order mark; the bytes are kept as
+        they are, so komira_xml sees and steps over it, and a multi-byte
+        blob name reads as its code points. Raises when the bytes are not
+        UTF-8."""
         ref src = resp.body.bytes_ref()
-        var out = String()
-        var i = 0
-        var n = src.__len__()
-        while i < n:
-            out += chr(Int(src[i]))
-            i += 1
-        return out^
+        try:
+            return String(StringSlice(from_utf8=Span(src)))
+        except:
+            raise Error("azure store: response body is not UTF-8")
 
     def _mk_error(
         self,
