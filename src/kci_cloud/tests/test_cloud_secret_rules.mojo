@@ -121,7 +121,8 @@ def test_every_secret_refusal_in_one_pass() raises:
     """Catches: any one rule dropped (its line is missing), a rule that fires
     on the wrong resource or path, a reference accepted without a READ edge
     (or with WRITE taken for READ), a `run_as` account's edges not counted
-    for a job, and a rule that fires on a good entry (the total)."""
+    for a job, a READ finding about a `run_as` identity missing from the
+    list (the total), and a rule that fires on a good entry (the total)."""
     var g = _list(
         String('{"resource":[')
         + String('{"id":"db","secret":{}},')
@@ -144,6 +145,8 @@ def test_every_secret_refusal_in_one_pass() raises:
         + String('{"id":"wr","serviceAccount":{},"uses":[{"target":{"resource":"other"},"access":"WRITE"}]},')
         + String('{"id":"cron","job":{') + String(IMG) + String(',"onDemand":{},"runAs":{"resource":"wr"},')
         + String('"secretEnv":{"K":{"secret":{"resource":"other"}}}}},')
+        + String('{"id":"lost","job":{') + String(IMG) + String(',"onDemand":{},"runAs":{"resource":"nobody"},')
+        + String('"secretEnv":{"K":{"secret":{"resource":"db"}}}}},')
         + String('{"id":"g-describe","grant":{"principal":{"resource":"wr"},"target":{"resource":"db"},')
         + String('"access":"DESCRIBE"}}')
         + String("]}")
@@ -166,7 +169,10 @@ def test_every_secret_refusal_in_one_pass() raises:
     _expect(l, "api|uses[1]|", 'secret "other" does not accept access CALL')
     _expect(l, "cron|job.secret_env.K.secret|", 'identity "wr" may not READ secret "other"')
     _expect(l, "g-describe|grant|", 'secret "db" does not accept access DESCRIBE')
-    assert_equal(len(l), 13, "no other finding")
+    # a `run_as` naming no resource is refused once, on run_as; the READ rule
+    # does not add a second finding about an identity that does not exist
+    _expect(l, "lost|job.run_as|", 'ref to missing resource "nobody"')
+    assert_equal(len(l), 14, "no other finding")
     print("  test_every_secret_refusal_in_one_pass: PASS")
 
 
