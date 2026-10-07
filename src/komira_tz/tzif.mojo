@@ -1,11 +1,12 @@
 # =============================================================================
-# tzif.mojo -- the TZif reader (RFC 8536)
+# tzif.mojo -- the TZif reader (RFC 9636, which obsoletes RFC 8536)
 # =============================================================================
 #
 # A TZif file is a 44-byte header, a data block, and from version 2 on a
 # second header, a second data block with 64-bit times, and a footer:
 #
-#   header  "TZif", version (0, '2', '3' or '4'), 15 reserved bytes, then six
+#   header  "TZif", version (0, '2', '3' or '4': RFC 8536 defines 1 to 3,
+#           RFC 9636 adds 4), 15 reserved bytes, then six
 #           big-endian 32-bit counts: isutcnt, isstdcnt, leapcnt, timecnt,
 #           typecnt, charcnt
 #   block   timecnt transition times (4 bytes in version 1, 8 after), timecnt
@@ -26,8 +27,12 @@
 # index past typecnt, an isdst other than 0 or 1, a UTC offset outside
 # -26..+26 hours, an abbreviation index past charcnt or with no NUL after it,
 # an abbreviation byte other than a letter, digit, `+` or `-`, an
-# unparseable footer, and leap-second records (a "right/" zone counts TAI
-# seconds, which epoch seconds do not).
+# unparseable footer, a footer that gives another type at the last
+# transition than the file does (RFC 9636 section 3.3: the string MUST be
+# consistent with the last transition), and leap-second records (a "right/"
+# zone counts TAI seconds, which epoch seconds do not). Version 4 differs
+# from 3 only in what its leap-second records may say, so with those refused
+# a version 4 file reads as a version 3 one.
 #
 # The standard/wall and UT/local indicators are read past and not kept: they
 # only matter to a POSIX TZ string given without rules, which a TZif footer
@@ -70,6 +75,13 @@ struct _Counts(Copyable, ImplicitlyCopyable, Movable):
             + self.isstdcnt
             + self.isutcnt
         )
+
+
+def _describe(t: ZoneOffset) -> String:
+    return (
+        t.abbreviation + " (utoff " + String(t.utc_offset) + ", isdst "
+        + String(Int(t.is_dst)) + ")"
+    )
 
 
 def _fail(name: String, what: String) -> Error:
@@ -282,6 +294,18 @@ def parse_tzif(data: Span[UInt8, _], name: String) raises -> Zone:
         if tz.byte_length() > 0:
             footer = parse_posix_tz(tz)
             has_footer = True
+            if c.timecnt > 0:
+                var last = times[c.timecnt - 1]
+                var from_footer = footer.offset_at(last)
+                ref from_file = types[type_index[c.timecnt - 1]]
+                if from_footer != from_file:
+                    raise _fail(
+                        name,
+                        "the footer \"" + tz + "\" gives "
+                        + _describe(from_footer) + " at the last transition "
+                        + String(last) + "; the file gives "
+                        + _describe(from_file),
+                    )
     elif at != len(data):
         raise _fail(
             name, String(len(data) - at) + " bytes follow the version 1 data block"

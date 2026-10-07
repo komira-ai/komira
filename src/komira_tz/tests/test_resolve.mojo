@@ -10,7 +10,7 @@
 # built with seconds_from_fields (komira_datetime), not with this package.
 # =============================================================================
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from komira_datetime import seconds_from_fields
 from komira_tz import (
@@ -146,6 +146,24 @@ def test_utc() raises:
     assert_true(not z.next_transition(0))
 
 
+def test_dst_all_year_zone() raises:
+    # RFC 8536 section 3.3.1: DST all year (-4h, EDT). Every rule edge
+    # changes nothing, so next_transition must find none and return, and
+    # resolve and to_utc, which walk next_transition, must return too.
+    var z = posix_zone("x", "EST5EDT4,0/0,J365/25")
+    assert_false(Bool(z.next_transition(seconds_from_fields(2040, 1, 1))))
+    var l = local_seconds(2040, 1, 1, 0, 30)
+    var r = z.resolve(l)
+    assert_true(r.kind == LocalKind.UNIQUE)
+    assert_equal(r.earlier, seconds_from_fields(2040, 1, 1, 4, 30))
+    assert_equal(r.later, r.earlier)
+    assert_equal(z.offset_at(r.earlier).abbreviation, "EDT")
+    assert_equal(
+        z.to_utc(l, GapPolicy.REFUSE, FoldPolicy.REFUSE),
+        seconds_from_fields(2040, 1, 1, 4, 30),
+    )
+
+
 def test_format_local_and_fields() raises:
     assert_equal(format_local(local_seconds(2030, 3, 10, 2, 30)), "2030-03-10T02:30:00")
     assert_equal(format_local(local_seconds(1883, 11, 18, 12, 3, 58)), "1883-11-18T12:03:58")
@@ -163,5 +181,6 @@ def main() raises:
     test_unique_ignores_the_policies()
     test_half_hour_gap_and_fold()
     test_utc()
+    test_dst_all_year_zone()
     test_format_local_and_fields()
     print("all resolve tests passed")

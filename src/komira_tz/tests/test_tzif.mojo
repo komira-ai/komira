@@ -2,7 +2,7 @@
 # test_tzif.mojo -- the TZif reader on files built byte by byte here
 # =============================================================================
 #
-# `_File` writes a TZif file from parts (RFC 8536 section 3), so each test
+# `_File` writes a TZif file from parts (RFC 9636 section 3), so each test
 # states the bytes it feeds and a fault is one changed field. The version 2
 # files carry a version 1 block that DISAGREES with the version 2 block (a
 # different offset and abbreviation), so a reader that takes the 32-bit block
@@ -11,6 +11,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
+from komira_datetime import seconds_from_fields
 from komira_tz import parse_tzif
 
 
@@ -172,12 +173,21 @@ def test_versions_3_and_4_read_like_2() raises:
 
 
 def test_footer_after_the_last_transition() raises:
-    var z = parse_tzif(Span(_v2(_decoy_v1(), _two_types(), "CCC-2")), "t")
-    assert_equal(z.footer(), "CCC-2")
-    # At the last transition the file's type; after it the footer's.
+    # The footer agrees with the file at the last transition (2^33, 16 March
+    # 2242: AAA, standard) and changes the type after it: 27 March 2242 is
+    # the last Sunday of the month, so DST (CCC, +2h) starts at 02:00 UTC.
+    var z = parse_tzif(
+        Span(_v2(_decoy_v1(), _two_types(), "AAA0CCC-2,M3.5.0,M10.5.0/3")), "t"
+    )
+    assert_equal(z.footer(), "AAA0CCC-2,M3.5.0,M10.5.0/3")
     assert_equal(z.offset_at(1 << 33).abbreviation, "AAA")
-    assert_equal(z.offset_at((1 << 33) + 1).abbreviation, "CCC")
-    assert_equal(z.offset_at((1 << 33) + 1).utc_offset, 7200)
+    assert_equal(z.offset_at((1 << 33) + 1).abbreviation, "AAA")
+    var t = z.next_transition(1 << 33)
+    assert_equal(t.value().at, seconds_from_fields(2242, 3, 27, 2))
+    assert_equal(t.value().before.abbreviation, "AAA")
+    assert_equal(t.value().after.abbreviation, "CCC")
+    assert_equal(t.value().after.utc_offset, 7200)
+    assert_equal(z.offset_at(seconds_from_fields(2242, 7, 1)).abbreviation, "CCC")
 
 
 def test_v1_only_file() raises:
@@ -315,6 +325,19 @@ def test_refusals() raises:
     _refused(
         _v2(_decoy_v1(), _two_types(), "EST\t5"),
         "TZif t: footer byte 9 is not printable ASCII",
+    )
+    # RFC 9636 section 3.3: the footer MUST be consistent with the last
+    # transition. The file's last type is AAA (+0, standard).
+    _refused(
+        _v2(_decoy_v1(), _two_types(), "CCC-2"),
+        'TZif t: the footer "CCC-2" gives CCC (utoff 7200, isdst 0) at the'
+        " last transition 8589934592; the file gives AAA (utoff 0, isdst 0)",
+    )
+    # Same offset and flag, another abbreviation: still another type.
+    _refused(
+        _v2(_decoy_v1(), _two_types(), "ZZZ0"),
+        'TZif t: the footer "ZZZ0" gives ZZZ (utoff 0, isdst 0) at the'
+        " last transition 8589934592; the file gives AAA (utoff 0, isdst 0)",
     )
 
 
