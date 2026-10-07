@@ -27,7 +27,8 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Why the build is shaped this way: pinned tools as action inputs, the compiler wrapper and its watchdog, the fixed target CPU, whole-closure deps, vendored C and C++ libraries, one execution platform per OS | [design/mojo_rules_and_toolchain.md](design/mojo_rules_and_toolchain.md) |
 | Why the build is the gate: a library's test_srcs gate its published package, the staged test environment, and the build lints as validations (shell, workflows, action pins, endpoints, doc links) | [design/gates_test_welding_and_lints.md](design/gates_test_welding_and_lints.md) |
 | Release machines: bundles, tarballs and OCI images of a program, the CPU-level launcher, reproducible outputs, komira's release stages and validations | [design/release_machine.md](design/release_machine.md) |
-| Gamma validation per package family: what checks a release before prod, where each check runs (in-process, loopback, per-test service, the installed package), what it catches and misses, and the open decisions on emulators and real cloud projects | [design/gamma_validation.md](design/gamma_validation.md) |
+| Gamma validation per package family: what checks a release before prod, where each check runs (in-process, loopback, per-test service, the installed package), what it catches and misses, and its gaps | [design/gamma_validation.md](design/gamma_validation.md) |
+| What kci must add before gamma can run a service validation, and the open decisions on gamma validation, each with a recommendation | [design/gamma_validation_decisions.md](design/gamma_validation_decisions.md) |
 
 ## Design docs
 
