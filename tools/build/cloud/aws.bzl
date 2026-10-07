@@ -53,9 +53,10 @@ identifier is read whole (a quote or `#` in it is part of the name), and a
 backslash pairs with the byte after it in every string, raw ones included
 (Mojo refuses `r"\\"` as unterminated). A file with a t-string is refused:
 its braces hold code with strings of their own, which the scan does not
-lex. So is a file with a carriage return: Mojo ends a line at a lone one,
-and the scan reads only line feeds. Mojo refuses an import inside a block
-such as an `if`.
+lex. So is a file with an ASCII control byte other than a tab or a line
+feed: Mojo ends a line at a lone carriage return, a vertical tab and a form
+feed, and the scan reads only line feeds. Mojo refuses an import inside a
+block such as an `if`.
 Every variable is refused, the provider-standard `AWS_*` ones included: a
 client takes each input as a parameter, and reading the credential
 variables is komira_aws_core's EnvSource. The scan also checks that it read
@@ -218,6 +219,32 @@ def _name_byte(c: Int) -> Bool:
     return c == 95 or (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
 
 
+def _control_byte(name: String, text: String) raises:
+    \"\"\"Raises, naming the byte, if `text` has an ASCII control byte (below
+    0x20) other than a tab or a line feed. Mojo ends a line at a lone carriage
+    return, at a vertical tab and at a form feed, and joins a backslash before
+    a carriage return and line feed; _code reads only line feeds, so an import
+    after one of these would not be read. The other control bytes are refused
+    too (fail closed), whatever Mojo makes of them.\"\"\"
+    var b = text.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c < 32 and c != 9 and c != 10:
+            var digits = String("0123456789ABCDEF")
+            var what = String()
+            if c == 11:
+                what = " (vertical tab)"
+            elif c == 12:
+                what = " (form feed)"
+            elif c == 13:
+                what = " (carriage return)"
+            raise Error(
+                name + " has the control byte 0x" + String(digits[byte=c // 16:c // 16 + 1])
+                + String(digits[byte=c % 16:c % 16 + 1]) + what
+                + ", which the environment scan does not read"
+            )
+
+
 def _code(name: String, text: String) raises -> String:
     \"\"\"`text` with each comment and each string literal replaced by one space,
     a backslash that ends a line replaced by one space with that newline (Mojo
@@ -227,13 +254,8 @@ def _code(name: String, text: String) raises -> String:
     an escaped quote does not end it (Mojo refuses `r"\\\\"` as unterminated).
     Raises on a t-string (prefix `t`, `rt` or `tr`, any case): its braces hold
     code with string literals of their own, which this does not lex. Raises
-    on a carriage return: Mojo ends a line at a lone one and joins a backslash
-    before one and a line feed, and this reads only line feeds.\"\"\"
-    if text.find("\\r") >= 0:
-        raise Error(
-            name + " has a carriage return, which the environment scan does"
-            " not read"
-        )
+    on an ASCII control byte other than a tab or a line feed (_control_byte).\"\"\"
+    _control_byte(name, text)
     var b = text.as_bytes()
     var n = len(b)
     var out = String()

@@ -283,7 +283,9 @@
 #      after a backtick name holding a quote or `#`, after a string (one or
 #      three quotes, raw or not) holding an escaped quote, and joined after a
 #      backslash-ended line; a file with a t-string (prefix `t`, `T`, `tr`,
-#      `Rt`) or a carriage return (lone, or after a backslash) is refused;
+#      `Rt`) or an ASCII control byte other than a tab or a line feed (a
+#      carriage return, lone or after a backslash, a vertical tab or a form
+#      feed after an import) is refused;
 #      the same text in a docstring, a comment or a string is not an import
 #      (the hand_srcs client of tests//functional/mojo_aws_client builds).
 #  37. The platform table (tools/build/platforms/table.bzl, one row per
@@ -1091,8 +1093,10 @@ expect_red aws_client_env_read_t_upper 'env_t_upper.mojo has a t-string, which t
 expect_red aws_client_env_read_t_tr 'env_t_tr.mojo has a t-string, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_t_tr
 expect_red aws_client_env_read_t_rt 'env_t_rt.mojo has a t-string, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_t_rt
 expect_red aws_client_env_read_triple_escape "env_triple_escape.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_triple_escape
-expect_red aws_client_env_read_cr 'env_cr.mojo has a carriage return, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_cr
-expect_red aws_client_env_read_crlf_continuation 'env_crlf_continuation.mojo has a carriage return, which the environment scan does not read' tests//negative/mojo_aws_client:env_read_crlf_continuation
+expect_red aws_client_env_read_cr 'env_cr.mojo has the control byte 0x0D (carriage return), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_cr
+expect_red aws_client_env_read_crlf_continuation 'env_crlf_continuation.mojo has the control byte 0x0D (carriage return), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_crlf_continuation
+expect_red aws_client_env_read_ff 'env_ff.mojo has the control byte 0x0C (form feed), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_ff
+expect_red aws_client_env_read_vt 'env_vt.mojo has the control byte 0x0B (vertical tab), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_vt
 expect_red aws_client_env_scan_data_given '`test_data` has an entry for `tests/_no_env_reads.mojo`, the generated environment scan' tests//negative/mojo_aws_client:env_scan_data_given
 
 # 9

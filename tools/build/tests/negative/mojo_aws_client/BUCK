@@ -411,8 +411,8 @@ mojo_aws_client(
     deps = _RUNTIME,
 )
 
-# "env_cr.mojo has a carriage return, which the environment scan does not
-# read", in the build: the import follows a lone carriage return, which Mojo
+# "env_cr.mojo has the control byte 0x0D (carriage return), which the
+# environment scan does not read", in the build: the import follows a lone carriage return, which Mojo
 # reads as a line end.
 mojo_aws_client(
     name = "env_read_cr",
@@ -424,8 +424,8 @@ mojo_aws_client(
     deps = _RUNTIME,
 )
 
-# "env_crlf_continuation.mojo has a carriage return, which the environment scan does not
-# read", in the build: the import is split after `from` by a
+# "env_crlf_continuation.mojo has the control byte 0x0D (carriage return),
+# which the environment scan does not read", in the build: the import is split after `from` by a
 # backslash before a carriage return and line feed, which Mojo joins.
 mojo_aws_client(
     name = "env_read_crlf_continuation",
@@ -434,6 +434,32 @@ mojo_aws_client(
     model_sha256 = _LOGS.sha256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_crlf_continuation.json",
+    deps = _RUNTIME,
+)
+
+# "env_ff.mojo has the control byte 0x0C (form feed), which the environment
+# scan does not read", in the build: the import follows a form feed on the line
+# of another import, which Mojo reads as a line end.
+mojo_aws_client(
+    name = "env_read_ff",
+    hand_srcs = ["hand/env_ff.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_ff.json",
+    deps = _RUNTIME,
+)
+
+# "env_vt.mojo has the control byte 0x0B (vertical tab), which the environment
+# scan does not read", in the build: the import follows a vertical tab on the line
+# of another import, which Mojo reads as a line end.
+mojo_aws_client(
+    name = "env_read_vt",
+    hand_srcs = ["hand/env_vt.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_vt.json",
     deps = _RUNTIME,
 )
 
