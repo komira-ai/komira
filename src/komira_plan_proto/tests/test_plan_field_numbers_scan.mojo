@@ -30,8 +30,16 @@
 #   2. it encodes the decoded message and compares with the hand-written
 #      records (canonical form, see `_same`): a field moved to an unused
 #      number is dropped, a changed wire type re-encodes differently.
-# A message with two or more bool fields is also written once per bool, with
-# only that bool true, since two true bools that swap numbers look the same.
+# BOOLS. A message with two or more singular (non-repeated) bools lists them
+# in a `ONE_HOT` row (end of file) and is also written once per bool with only
+# that bool true, since two true bools that swap numbers look the same; a
+# message with one singular bool sets it in its main stream. Repeated bools
+# are pinned by distinct patterns and lengths ([true, false] against
+# [false, true, true]), read back by name.
+# ONEOFS. Three: WireScanSource.payload (1 parquet, 2 binding; each written
+# with a full payload, here), WireExpr.node (25 arms, 2 to 26) and
+# WirePlan.node (16 arms, 4 to 19); each arm of the last two is written empty
+# and checked by arm name, oneof position and re-encoded tag (parts 2, 3).
 # A message field holds a non-empty sub-message; when its type is pinned in
 # another file that payload is written with raw numbers (`_raw_*`), as a
 # value, not as a pin. `check_all_hit` fails on a ledger row no test wrote.
@@ -180,7 +188,9 @@ def _hex(b: List[UInt8]) -> String:
 # (recursively), each level's records sorted stably by field number (a
 # repeated field keeps its order). Every value this census writes is non-zero
 # except false elements of repeated bools and the zero value of each enum,
-# which the named assertions hold instead.
+# which the named assertions hold instead. A zero-length record is dropped
+# too, so whether an absent message field writes nothing is held in exact
+# bytes by `test_envelope_presence` (test_plan_field_numbers_plan.mojo).
 
 
 def _read_varint(b: List[UInt8], mut pos: Int, mut ok: Bool) -> UInt64:
@@ -298,10 +308,24 @@ def _strs(got: List[String], want: String, what: String) raises:
         assert_equal(got[i], w[i], what + "[" + String(i) + "]")
 
 
-def _one_hot(got: List[Bool], hot: Int, what: String) raises:
-    """Exactly `got[hot]` is true: the one bool written landed on its name."""
+def _one_hot(got: List[Bool], names: List[String], hot: Int, what: String) raises:
+    """Exactly `got[hot]` is true: the one bool written landed on its name.
+    `got` reads every bool of the message's ONE_HOT row, in its order."""
+    assert_equal(len(got), len(names), what + ": the test reads every bool of its ONE_HOT row")
     for i in range(len(got)):
         assert_equal(got[i], i == hot, what + ": bool " + String(i) + " of the message")
+
+def _one_hot_row(message: String) raises -> List[String]:
+    """The single bools of `message`, from its `ONE_HOT` row."""
+    for raw in String(ONE_HOT).split("\n"):
+        var w = _names(String(raw))
+        if len(w) > 0 and w[0] == message:
+            var out = List[String]()
+            for i in range(1, len(w)):
+                out.append(w[i])
+            return out^
+    raise Error("no ONE_HOT row for " + message)
+
 
 
 def _first_tag(b: List[UInt8]) -> String:
@@ -496,7 +520,7 @@ def test_pushdown_gate(mut L: _Ledger) raises:
     assert_equal(m.mode.number(), 2, "WirePushdownGate: m.mode.number()")
     assert_equal(m.allowed_binary_ops, UInt32(60), "WirePushdownGate: m.allowed_binary_ops")
     _same(encode_proto(m), b, "WirePushdownGate")
-    var bools = _names("allow_and_recurse allow_in_list require_stat_friendly_col")
+    var bools = _one_hot_row("WirePushdownGate")
     for k in range(len(bools)):
         var q = "WirePushdownGate." + bools[k]
         var h = List[UInt8]()
@@ -506,7 +530,7 @@ def test_pushdown_gate(mut L: _Ledger) raises:
         got.append(g.allow_and_recurse)
         got.append(g.allow_in_list)
         got.append(g.require_stat_friendly_col)
-        _one_hot(got, k, q)
+        _one_hot(got, bools, k, q)
         _same(encode_proto(g), h, q)
 
 
@@ -555,7 +579,7 @@ def test_scan_binding(mut L: _Ledger) raises:
     assert_equal(m.legacy_source_type.number(), 4, "WireScanBinding: m.legacy_source_type.number()")
     assert_equal(m.variant_tag.number(), 5, "WireScanBinding: m.variant_tag.number()")
     _same(encode_proto(m), b, "WireScanBinding")
-    var bools = _names("has_legacy_source_type has_stats")
+    var bools = _one_hot_row("WireScanBinding")
     for k in range(len(bools)):
         var q = "WireScanBinding." + bools[k]
         var h = List[UInt8]()
@@ -564,7 +588,7 @@ def test_scan_binding(mut L: _Ledger) raises:
         var got = List[Bool]()
         got.append(g.has_legacy_source_type)
         got.append(g.has_stats)
-        _one_hot(got, k, q)
+        _one_hot(got, bools, k, q)
         _same(encode_proto(g), h, q)
 
 
@@ -601,7 +625,7 @@ def test_parquet_source(mut L: _Ledger) raises:
     _strs(m.partition_values[0].values, "2024", "partition_values[0]")
     _strs(m.partition_values[1].values, "2025", "partition_values[1]")
     _same(encode_proto(m), b, "WireParquetSource")
-    var bools = _names("has_name hive_dir_scan has_hive_predicate fs_is_local")
+    var bools = _one_hot_row("WireParquetSource")
     for k in range(len(bools)):
         var q = "WireParquetSource." + bools[k]
         var h = List[UInt8]()
@@ -612,7 +636,7 @@ def test_parquet_source(mut L: _Ledger) raises:
         got.append(g.hive_dir_scan)
         got.append(g.has_hive_predicate)
         got.append(g.fs_is_local)
-        _one_hot(got, k, q)
+        _one_hot(got, bools, k, q)
         _same(encode_proto(g), h, q)
 
 
@@ -666,7 +690,7 @@ def test_scan_node(mut L: _Ledger) raises:
     assert_equal(m.row_count, Int64(999), "WireScanNode: m.row_count")
     assert_equal(m.source_kind.number(), 2, "WireScanNode: m.source_kind.number()")
     _same(encode_proto(m), b, "WireScanNode")
-    var bools = _names("has_schema has_projection has_filter has_row_count has_table_stats")
+    var bools = _one_hot_row("WireScanNode")
     for k in range(len(bools)):
         var q = "WireScanNode." + bools[k]
         var h = List[UInt8]()
@@ -678,7 +702,7 @@ def test_scan_node(mut L: _Ledger) raises:
         got.append(g.has_filter)
         got.append(g.has_row_count)
         got.append(g.has_table_stats)
-        _one_hot(got, k, q)
+        _one_hot(got, bools, k, q)
         _same(encode_proto(g), h, q)
 
 
@@ -861,4 +885,18 @@ WireUdf.order_keys 9
 WireUdf.has_vector_path 10
 WireUdf.operator_factory_id 11
 WireUdf.call_site_salt 12
+"""
+
+
+# ---- THE ONE-HOT ROWS: each message with two or more single (non-repeated)
+# bools, and those bools in the order its test reads them. Two true bools that
+# swap numbers look the same in one stream, so each is written alone.
+# test_plan_census_complete.mojo requires these rows to be exactly the
+# messages and bools protoc declares.
+
+comptime ONE_HOT = """
+WirePushdownGate allow_and_recurse allow_in_list require_stat_friendly_col
+WireScanBinding has_legacy_source_type has_stats
+WireParquetSource has_name hive_dir_scan has_hive_predicate fs_is_local
+WireScanNode has_schema has_projection has_filter has_row_count has_table_stats
 """

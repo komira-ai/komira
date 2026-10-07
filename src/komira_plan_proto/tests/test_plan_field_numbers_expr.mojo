@@ -173,7 +173,9 @@ def _hex(b: List[UInt8]) -> String:
 # (recursively), each level's records sorted stably by field number (a
 # repeated field keeps its order). Every value this census writes is non-zero
 # except false elements of repeated bools and the zero value of each enum,
-# which the named assertions hold instead.
+# which the named assertions hold instead. A zero-length record is dropped
+# too, so whether an absent message field writes nothing is held in exact
+# bytes by `test_envelope_presence` (test_plan_field_numbers_plan.mojo).
 
 
 def _read_varint(b: List[UInt8], mut pos: Int, mut ok: Bool) -> UInt64:
@@ -291,10 +293,24 @@ def _strs(got: List[String], want: String, what: String) raises:
         assert_equal(got[i], w[i], what + "[" + String(i) + "]")
 
 
-def _one_hot(got: List[Bool], hot: Int, what: String) raises:
-    """Exactly `got[hot]` is true: the one bool written landed on its name."""
+def _one_hot(got: List[Bool], names: List[String], hot: Int, what: String) raises:
+    """Exactly `got[hot]` is true: the one bool written landed on its name.
+    `got` reads every bool of the message's ONE_HOT row, in its order."""
+    assert_equal(len(got), len(names), what + ": the test reads every bool of its ONE_HOT row")
     for i in range(len(got)):
         assert_equal(got[i], i == hot, what + ": bool " + String(i) + " of the message")
+
+def _one_hot_row(message: String) raises -> List[String]:
+    """The single bools of `message`, from its `ONE_HOT` row."""
+    for raw in String(ONE_HOT).split("\n"):
+        var w = _names(String(raw))
+        if len(w) > 0 and w[0] == message:
+            var out = List[String]()
+            for i in range(1, len(w)):
+                out.append(w[i])
+            return out^
+    raise Error("no ONE_HOT row for " + message)
+
 
 
 def _first_tag(b: List[UInt8]) -> String:
@@ -781,7 +797,7 @@ def test_agg_expr(mut L: _Ledger) raises:
     assert_equal(_idx(m.child3[0]), 53, "WireAggExpr: _idx(m.child3[0])")
     assert_equal(m.alias_name, "agg", "WireAggExpr: m.alias_name")
     _same(encode_proto(m), b, "WireAggExpr")
-    var bools = _names("has_child0 has_child1 has_child2 has_child3 has_alias_name")
+    var bools = _one_hot_row("WireAggExpr")
     for k in range(len(bools)):
         var q = "WireAggExpr." + bools[k]
         var h = List[UInt8]()
@@ -793,7 +809,7 @@ def test_agg_expr(mut L: _Ledger) raises:
         got.append(g.has_child2)
         got.append(g.has_child3)
         got.append(g.has_alias_name)
-        _one_hot(got, k, q)
+        _one_hot(got, bools, k, q)
         _same(encode_proto(g), h, q)
 
 
@@ -942,4 +958,15 @@ WireAggExpr.has_child3 8
 WireAggExpr.child3 9
 WireAggExpr.has_alias_name 10
 WireAggExpr.alias_name 11
+"""
+
+
+# ---- THE ONE-HOT ROWS: each message with two or more single (non-repeated)
+# bools, and those bools in the order its test reads them. Two true bools that
+# swap numbers look the same in one stream, so each is written alone.
+# test_plan_census_complete.mojo requires these rows to be exactly the
+# messages and bools protoc declares.
+
+comptime ONE_HOT = """
+WireAggExpr has_child0 has_child1 has_child2 has_child3 has_alias_name
 """

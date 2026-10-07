@@ -40,20 +40,24 @@ _CENSUS = [
     "tests/test_plan_enum_numbers_functions.mojo",
 ]
 
+_PROTOS = [
+    "plan.proto",
+    "plan_vocabulary.proto",
+]
+
 mojo_proto_library(
     name = "komira_plan_proto",
-    srcs = [
-        "plan.proto",
-        "plan_vocabulary.proto",
-    ],
+    srcs = _PROTOS,
     import_prefix = "komira/plan/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
     test_srcs = _CENSUS + ["tests/test_plan_census_complete.mojo"],
     test_data = {
-        "tests/test_plan_census_complete.mojo": {
-            "plan.proto": "plan.proto",
-            "plan_vocabulary.proto": "plan_vocabulary.proto",
-        } | {"census/" + t.removeprefix("tests/"): t for t in _CENSUS},
+        # Every .proto of `srcs` is staged under protos/, and the test scans
+        # every file there, so a .proto added to `srcs` cannot be skipped.
+        "tests/test_plan_census_complete.mojo": {"protos/" + p: p for p in _PROTOS} | {
+            "census/" + t.removeprefix("tests/"): t
+            for t in _CENSUS
+        },
     },
     visibility = ["PUBLIC"],
 )

@@ -165,7 +165,9 @@ def _hex(b: List[UInt8]) -> String:
 # (recursively), each level's records sorted stably by field number (a
 # repeated field keeps its order). Every value this census writes is non-zero
 # except false elements of repeated bools and the zero value of each enum,
-# which the named assertions hold instead.
+# which the named assertions hold instead. A zero-length record is dropped
+# too, so whether an absent message field writes nothing is held in exact
+# bytes by `test_envelope_presence` (test_plan_field_numbers_plan.mojo).
 
 
 def _read_varint(b: List[UInt8], mut pos: Int, mut ok: Bool) -> UInt64:
@@ -283,10 +285,24 @@ def _strs(got: List[String], want: String, what: String) raises:
         assert_equal(got[i], w[i], what + "[" + String(i) + "]")
 
 
-def _one_hot(got: List[Bool], hot: Int, what: String) raises:
-    """Exactly `got[hot]` is true: the one bool written landed on its name."""
+def _one_hot(got: List[Bool], names: List[String], hot: Int, what: String) raises:
+    """Exactly `got[hot]` is true: the one bool written landed on its name.
+    `got` reads every bool of the message's ONE_HOT row, in its order."""
+    assert_equal(len(got), len(names), what + ": the test reads every bool of its ONE_HOT row")
     for i in range(len(got)):
         assert_equal(got[i], i == hot, what + ": bool " + String(i) + " of the message")
+
+def _one_hot_row(message: String) raises -> List[String]:
+    """The single bools of `message`, from its `ONE_HOT` row."""
+    for raw in String(ONE_HOT).split("\n"):
+        var w = _names(String(raw))
+        if len(w) > 0 and w[0] == message:
+            var out = List[String]()
+            for i in range(1, len(w)):
+                out.append(w[i])
+            return out^
+    raise Error("no ONE_HOT row for " + message)
+
 
 
 def _first_tag(b: List[UInt8]) -> String:
@@ -375,7 +391,7 @@ def test_project_node(mut L: _Ledger) raises:
     assert_equal(_hash(m.child[0]), 9, "WireProjectNode: _hash(m.child[0])")
     assert_equal(m.udf.value().name, "u2", "WireProjectNode: m.udf.value().name")
     _same(encode_proto(m), b, "WireProjectNode")
-    var bools = _names("is_cse_introduced has_udf")
+    var bools = _one_hot_row("WireProjectNode")
     for k in range(len(bools)):
         var q = "WireProjectNode." + bools[k]
         var h = List[UInt8]()
@@ -384,7 +400,7 @@ def test_project_node(mut L: _Ledger) raises:
         var got = List[Bool]()
         got.append(g.is_cse_introduced)
         got.append(g.has_udf)
-        _one_hot(got, k, q)
+        _one_hot(got, bools, k, q)
         _same(encode_proto(g), h, q)
 
 
@@ -405,7 +421,7 @@ def test_aggregate_node(mut L: _Ledger) raises:
     assert_equal(m.estimated_groups, Int64(500), "WireAggregateNode: m.estimated_groups")
     assert_equal(m.udf.value().name, "u3", "WireAggregateNode: m.udf.value().name")
     _same(encode_proto(m), b, "WireAggregateNode")
-    var bools = _names("has_estimated_groups has_udf")
+    var bools = _one_hot_row("WireAggregateNode")
     for k in range(len(bools)):
         var q = "WireAggregateNode." + bools[k]
         var h = List[UInt8]()
@@ -414,7 +430,7 @@ def test_aggregate_node(mut L: _Ledger) raises:
         var got = List[Bool]()
         got.append(g.has_estimated_groups)
         got.append(g.has_udf)
-        _one_hot(got, k, q)
+        _one_hot(got, bools, k, q)
         _same(encode_proto(g), h, q)
 
 
@@ -456,7 +472,7 @@ def test_sort_limit_distinct_topn(mut L: _Ledger) raises:
     assert_equal(_hash(dn.child[0]), 17, "WireDistinctNode: _hash(dn.child[0])")
     assert_equal(dn.estimated_groups, Int64(40), "WireDistinctNode: dn.estimated_groups")
     _same(encode_proto(dn), d, "WireDistinctNode")
-    var bools = _names("has_columns has_estimated_groups")
+    var bools = _one_hot_row("WireDistinctNode")
     for k in range(len(bools)):
         var q = "WireDistinctNode." + bools[k]
         var h = List[UInt8]()
@@ -465,7 +481,7 @@ def test_sort_limit_distinct_topn(mut L: _Ledger) raises:
         var got = List[Bool]()
         got.append(g.has_columns)
         got.append(g.has_estimated_groups)
-        _one_hot(got, k, q)
+        _one_hot(got, bools, k, q)
         _same(encode_proto(g), h, q)
 
     var t = List[UInt8]()
@@ -760,6 +776,25 @@ def test_write_target_and_envelope(mut L: _Ledger) raises:
     _same(encode_proto(e), b, "WirePlanEnvelope")
 
 
+def test_envelope_presence(mut L: _Ledger) raises:
+    """Message-field presence, in EXACT bytes (`_same` drops empty records, so
+    it cannot see this): an absent `plan` or `write_target` writes no record,
+    and a present empty `plan` writes its tag and a zero length."""
+    var b = List[UInt8]()
+    _u(L, b, "WirePlanEnvelope.format_version", 3)
+    var e = decode_proto[WirePlanEnvelope](b.copy())
+    assert_true(not Bool(e.plan), "WirePlanEnvelope: plan absent decodes unset")
+    assert_true(not Bool(e.write_target), "WirePlanEnvelope: write_target absent decodes unset")
+    assert_equal(_hex(encode_proto(e)), _hex(b), "WirePlanEnvelope: an absent message field writes no record")
+
+    var p = b.copy()
+    _m(L, p, "WirePlanEnvelope.plan", List[UInt8]())
+    var ep = decode_proto[WirePlanEnvelope](p.copy())
+    assert_true(Bool(ep.plan), "WirePlanEnvelope: an empty plan record decodes set")
+    assert_true(not Bool(ep.write_target), "WirePlanEnvelope: write_target still unset")
+    assert_equal(_hex(encode_proto(ep)), _hex(p), "WirePlanEnvelope: a present empty plan writes its tag and 00")
+
+
 def main() raises:
     print("test_plan_field_numbers_plan: the plan-node and envelope census")
     var L = _Ledger(LEDGER)
@@ -773,6 +808,7 @@ def main() raises:
     test_leaf_nodes(L)
     test_plan(L)
     test_write_target_and_envelope(L)
+    test_envelope_presence(L)
     L.check_all_hit()
     print("ALL komira.plan.v1 PLAN FIELD NUMBERS PINNED:", len(L.names), "fields")
 
@@ -886,4 +922,17 @@ WireWriteTarget.codec 3
 WirePlanEnvelope.format_version 1
 WirePlanEnvelope.plan 2
 WirePlanEnvelope.write_target 3
+"""
+
+
+# ---- THE ONE-HOT ROWS: each message with two or more single (non-repeated)
+# bools, and those bools in the order its test reads them. Two true bools that
+# swap numbers look the same in one stream, so each is written alone.
+# test_plan_census_complete.mojo requires these rows to be exactly the
+# messages and bools protoc declares.
+
+comptime ONE_HOT = """
+WireProjectNode is_cse_introduced has_udf
+WireAggregateNode has_estimated_groups has_udf
+WireDistinctNode has_columns has_estimated_groups
 """
