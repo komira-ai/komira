@@ -1,9 +1,9 @@
 # shellcheck shell=bash
 # coverage_run_tests.sh -- tests of coverage runs (tools/build/coverage/kcov/README.md#cov_run).
-# Sourced by tools/build/tests/coverage_tests.sh (uses run_tests.sh's BUCK2,
-# LOG, pass, fail, expect_green and expect_red); not run on its own.
+# Sourced by tools/build/tests/run_tests.sh (uses its BUCK2, LOG, pass, fail,
+# expect_green and expect_red); not run on its own.
 #
-#  42. Coverage runs: each test's coverage binary runs under kcov through the
+#  43. Coverage runs: each test's coverage binary runs under kcov through the
 #      release gate's runner, and its report is in repository paths.
 #      tests//functional/coverage:numbers (each per-test report of
 #      covlib_forced equals its golden file: a covered function, an arm no

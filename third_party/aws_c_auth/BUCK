@@ -14,6 +14,7 @@ pinned_file(
     name = "aws-c-auth-c4bc791ac6985eedb503e882cd450cc5b344c2f2.tar.gz",
     url = "https://github.com/awslabs/aws-c-auth/archive/c4bc791ac6985eedb503e882cd450cc5b344c2f2.tar.gz",
     sha256 = "57a7da85a15351bfff7ff0a9eb541664757bf30da92667a170b962f2c1cd1b69",
+    size_bytes = 288336,
 )
 
 # One directory, so the suite's test can list its cases; the sub-target

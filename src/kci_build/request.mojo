@@ -55,7 +55,9 @@ from kci_api import (
 )
 
 comptime DEFAULT_BUILD_TIMEOUT_S: Int = 3600
-"""Per artifact, when the command line gives no `--build-timeout-s`."""
+"""Seconds each build run may take, when the command line gives no
+`--build-timeout-s`: one artifact on the release path; one unit or one
+whole batch of units in the per-change check."""
 
 
 struct BuildRequest(Copyable, Movable):

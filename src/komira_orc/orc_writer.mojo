@@ -56,6 +56,7 @@ from .stripe_emit import (
     ColumnStats,
     build_col_encoders,
 )
+from .int_stats_sum import merge_int_sum
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
@@ -298,7 +299,7 @@ def _merge_stats(mut acc: ColumnStats, s: ColumnStats):
                 acc.int_min = s.int_min
             if s.int_max > acc.int_max:
                 acc.int_max = s.int_max
-        acc.int_sum += s.int_sum
+        merge_int_sum(acc.int_sum, s.int_sum)
     elif s.is_double:
         acc.is_double = True
         if acc.number_of_values == 0:

@@ -11,4 +11,4 @@ def describe(x: Int) -> String:
         return "zero"
     if x > 0:
         return "positive"
-    return "negative"  # cov: unreachable a fixture line (test 42): the tests describe 0 only
+    return "negative"  # cov: unreachable a fixture line (test 43): the tests describe 0 only

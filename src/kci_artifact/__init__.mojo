@@ -21,7 +21,8 @@
 #                  left (exactly one manifest; its `name` the artifact's)
 #   render.mojo    `render_build_argv`: the argv for one artifact (pure)
 #   affected.mojo  the per-change check: the units (artifacts, then checks),
-#                  `{units_file}`, the affected and build_targets argvs, and
+#                  `{units_file}`, the affected and build_targets argvs (one
+#                  unit, or one batch per shared build_targets command), and
 #                  the grammar of an affected command's answer (pure)
 #   derive.mojo    the checks a build system derives from its graph at run
 #                  time: its argv, the grammar of its answer, adding them
@@ -85,8 +86,10 @@ from kci_artifact.affected import (
     VERDICT_WIDENED,
     AffectedAnswer,
     Unit,
+    batch_groups,
     parse_affected_answer,
     render_affected_argv,
+    render_batch_argv,
     render_targets_argv,
     unit_names_of,
     units_file_text,

@@ -155,8 +155,8 @@ cache eviction would then re-run all of them.
 changed line holds `KOMIRA PATCH`, and the build fails when an expression
 marks another number of lines than expected (a new kcov changed the code
 there), so a patch is never silently lost. Both make a test run under kcov
-as it runs in the release gate (test 42 of the
-[tests README](../../tests/README.md#42-coverage-runs) holds each red on v42
+as it runs in the release gate (test 43 of the
+[tests README](../../tests/README.md#43-coverage-runs) holds each red on v42
 as released):
 
 1. **No CPU pin.** v42 pins itself and the traced program to the CPU it

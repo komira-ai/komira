@@ -28,6 +28,7 @@ pinned_file(
     name = "aws-lc-1.39.0.tar.gz",
     url = "https://github.com/aws/aws-lc/archive/refs/tags/v1.39.0.tar.gz",
     sha256 = "37f5a379081b97adba3e1316017e09484d6c4ed6dc336d57fae6f0b7b27472fc",
+    size_bytes = 114622205,
 )
 
 # srcs.bzl against the archive: :srcs_gen writes it, :srcs_drift (a test)

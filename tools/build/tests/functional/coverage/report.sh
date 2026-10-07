@@ -1,5 +1,5 @@
 #!/bin/sh
-# report.sh -- checks of the per-test reports of coverage runs (test 42), run
+# report.sh -- checks of the per-test reports of coverage runs (test 43), run
 # as a build action by cov_report_check (defs.bzl):
 #   sh report.sh <busybox> <out> golden (--golden <golden> <report>)...
 #   sh report.sh <busybox> <out> census --covcheck <covcheck...> --package <dir>

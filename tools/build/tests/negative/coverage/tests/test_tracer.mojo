@@ -1,5 +1,5 @@
 # Fails when a tracer is attached (TracerPid in /proc/self/status is not 0):
-# green in the release gate, red when kcov runs it (test 42). The red shows
+# green in the release gate, red when kcov runs it (test 43). The red shows
 # that kcov traced the test and passed its exit status on.
 from tracer import one
 from std.testing import assert_equal

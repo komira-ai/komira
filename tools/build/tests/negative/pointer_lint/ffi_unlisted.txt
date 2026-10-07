@@ -1,0 +1,9 @@
+# FFI-BOUNDARY: libc write; the caller owns `buf`.
+# Marked, with no wildcard origin, so the FFI ledger does not list it.
+def _write(fd: Int, n: Int) -> Int:
+    return n
+
+
+def _wild(p: UnsafePointer[UInt8, MutAnyOrigin]):
+    # Marked FFI-BOUNDARY, but the FFI ledger does not list this module.
+    pass

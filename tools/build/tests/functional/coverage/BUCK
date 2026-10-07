@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load(":defs.bzl", "cov_debug_check", "cov_plant", "cov_report_check", "cov_set_check")
 
 # Coverage builds and runs (tools/build/mojo/README.md, "Coverage builds";
-# tests 41 and 42 of tools/build/tests/run_tests.sh).
+# tests 41 and 43 of tools/build/tests/run_tests.sh).
 
 # A library with two tests and no README, coverage by the switch: with
 # `-c komira.coverage=true` it has [coverage]; without it, none.
@@ -91,7 +91,7 @@ cov_set_check(
     members = _BINS + _REPORTS,
 )
 
-# Test 42: each test's report from its kcov run is its golden file byte for
+# Test 43: each test's report from its kcov run is its golden file byte for
 # byte. In covlib/value.mojo, test_value covers clamp and test_describe
 # calls describe(0) only: the arm `if x > 0: return "positive"` (lines 12
 # and 13) is never taken, and line 14 carries `# cov: unreachable`, uncovered
@@ -116,7 +116,7 @@ cov_report_check(
     script = "report.sh",
 )
 
-# Test 42: a library with a generated source. covgen/gen.mojo is made from
+# Test 43: a library with a generated source. covgen/gen.mojo is made from
 # covgen/gen.mojo.in (cov_plant used as a generator); test_gen calls a
 # function of each. Its golden report has covgen/plain.mojo and the test, and
 # no gen.mojo: a generated source is not measured (cov_run.sh --gen).
@@ -139,7 +139,7 @@ mojo_library(
     test_srcs = ["tests/test_gen.mojo"],
 )
 
-# Test 42: a test of the gate's runtime contract (test_env, declared data
+# Test 43: a test of the gate's runtime contract (test_env, declared data
 # reached from the working directory, the runner's PATH, LD_LIBRARY_PATH,
 # HOME and TMPDIR, no LD_PRELOAD), green in the release gate and, with
 # [coverage][tests][test_env], in its kcov run: the run has the gate's
@@ -161,7 +161,7 @@ mojo_library(
     test_srcs = ["tests/test_env.mojo"],
 )
 
-# Test 42: covcheck's build gate reads those reports (census mode), over the
+# Test 43: covcheck's build gate reads those reports (census mode), over the
 # package's sources: its numbers are the reports' (value.mojo's lines, the
 # exempted line out of them) and the tests are set aside.
 cov_report_check(
@@ -174,7 +174,7 @@ cov_report_check(
         '"conclusion":"neutral","mode":"census"',
         '"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":7,"line_found":9,"line_bp":7777,',
         '"exempt_lines":1,',
-        '"exemptions":[{"path":"tools/build/tests/functional/coverage/covlib/value.mojo","line":14,"reason":"a fixture line (test 42): the tests describe 0 only","status":"exempt"}]',
+        '"exemptions":[{"path":"tools/build/tests/functional/coverage/covlib/value.mojo","line":14,"reason":"a fixture line (test 43): the tests describe 0 only","status":"exempt"}]',
         '"excluded_test_files":2,',
     ],
     files = {

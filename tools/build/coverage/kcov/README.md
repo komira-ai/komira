@@ -307,7 +307,7 @@ cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
 kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`);
 and the run ends when every process the test started has exited, since kcov follows each fork, where the gate waits for the test
 alone. Its CPUs are the gate's: kcov v42 pins itself and the test to one
-CPU, and komira's build patches that out (test 42's `covenv` checks it).
+CPU, and komira's build patches that out (test 43's `covenv` checks it).
 
 **Why `lost/`.** kcov drops a source file it cannot open without any error,
 so sources staged anywhere but where the line tables name them would leave
@@ -319,18 +319,18 @@ becomes `<lost>/<name>`, which exists, so kcov keeps it, and the report
 names it under `lost/`, which no `--map` covers: `cov_normalize` refuses it
 as unmapped, naming the file. With `^/_+:<share>` in that one replacement
 slot instead, the same mistake gives a green run whose report has no
-library file (test 42 shows both). The other names a binary holds, the
+library file (test 43 shows both). The other names a binary holds, the
 standard library's and the C runtime's, are outside `--include-path` and
 never reach the report; were one to, it would be unmapped too. `lost/` holds
 copies at the staged `[src]` path and the test's path only, so it catches a
 mis-staged tree, not a binary naming the sources by another directory: that
-is step 0's check (test 42's `lostdir`). A future Mojo naming them outside
+is step 0's check (test 43's `lostdir`). A future Mojo naming them outside
 `buck-out/` would need step 0 extended.
 
 ## Tests
 
-`cov_run.sh` is tested end to end in the tests cell, as test 42
-([tests README](../../tests/README.md#42-coverage-runs),
+`cov_run.sh` is tested end to end in the tests cell, as test 43
+([tests README](../../tests/README.md#43-coverage-runs),
 [the checks](../../tests/coverage_runs.md)): per-test reports equal to
 golden files, covcheck reading them, the gate's environment (and CPUs)
 under kcov, a traced test failing its run, the test's own exit status

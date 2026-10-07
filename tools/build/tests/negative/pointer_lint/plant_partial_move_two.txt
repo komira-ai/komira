@@ -1,0 +1,4 @@
+# A planted site: no row holds it (the two-statement form).
+def _f(mut r: Record):
+    var p = UnsafePointer(to=r.name)
+    var v = p.take_pointee()

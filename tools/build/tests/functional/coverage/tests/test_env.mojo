@@ -1,5 +1,5 @@
 # The release gate's runtime contract, checked from inside the test: green
-# in the release gate and in its coverage run (test 42), which runs the test
+# in the release gate and in its coverage run (test 43), which runs the test
 # under kcov through the same runner, so it sees the same environment, data
 # and working directory, and may run on as many CPUs as the processes that
 # started it (kcov v42 as released pins itself and the test to one CPU;

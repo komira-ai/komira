@@ -1,4 +1,4 @@
-"""exits: the library of the tests of a coverage run's exit status (test 42)."""
+"""exits: the library of the tests of a coverage run's exit status (test 43)."""
 
 from std.ffi import external_call
 

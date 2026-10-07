@@ -1,0 +1,32 @@
+load("@komira//tools/build/lint:defs.bzl", "pointer_lint")
+load(":fixture.bzl", "POINTER_FFI", "POINTER_HOLDS", "POINTER_TREE")
+
+# Test 41 (the pointer lint), the half that must build: the planted tree of
+# fixture.bzl, every site of held.mojo held at its exact count, nothing in
+# the near misses found, the FFI module's wildcard origins not sites.
+# negative/pointer_lint plants one defect each in the same tree.
+[
+    export_file(
+        name = f,
+        visibility = ["tests//negative/pointer_lint:"],
+    )
+    for f in [
+        "ffi.tsv",
+        "ffi.txt",
+        "ffi_clean.txt",
+        "held.txt",
+        "holds.tsv",
+        "init.txt",
+        "near.txt",
+        "private_module.txt",
+        "test_file.txt",
+        "tool.txt",
+    ]
+]
+
+pointer_lint(
+    name = "ok",
+    ffi = POINTER_FFI,
+    files = POINTER_TREE,
+    holds = POINTER_HOLDS,
+)

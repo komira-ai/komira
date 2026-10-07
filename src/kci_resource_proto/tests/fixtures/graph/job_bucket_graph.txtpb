@@ -1,0 +1,166 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "nightly-runner"
+  retention: DELETE
+  service_account {
+  }
+}
+resource {
+  id: "exports"
+  retention: KEEP
+  bucket {
+    object_expiry_days: 400
+    versioning: true
+    tier: INFREQUENT
+  }
+}
+resource {
+  id: "events"
+  retention: KEEP
+  table {
+    key {
+      name: "by_tenant"
+      partition {
+        name: "tenant"
+        type: STRING
+      }
+      order {
+        name: "at"
+        type: NUMBER
+      }
+    }
+    indexes {
+      name: "by_digest"
+      partition {
+        name: "digest"
+        type: BYTES
+      }
+      order {
+        name: "seq"
+        type: NUMBER
+      }
+    }
+    ttl_field: "expires_at"
+  }
+}
+resource {
+  id: "nightly"
+  uses {
+    target {
+      resource: "exports"
+      standard: NAME
+    }
+    access: READ_WRITE
+  }
+  uses {
+    target {
+      resource: "events"
+      standard: ADDRESS
+    }
+    access: READ
+  }
+  uses {
+    access: READ
+    cell: ARTIFACTS
+  }
+  retention: DELETE
+  job {
+    image {
+      digest: "sha256:9e27b4aa"
+      platform: "linux/arm64"
+    }
+    args: "export"
+    args: "--since=24h"
+    size {
+      cpu_millis: 4000
+      memory_mb: 8192
+    }
+    max_retries: 3
+    timeout {
+      seconds: 5400
+    }
+    env {
+      key: "BUCKET"
+      value {
+        ref {
+          resource: "exports"
+          standard: ADDRESS
+        }
+      }
+    }
+    env {
+      key: "TENANT"
+      value {
+        param: "tenant"
+      }
+    }
+    secret_env {
+      key: "EXPORT_TOKEN"
+      value {
+        name: "export-token"
+        version: "3"
+      }
+    }
+    schedule {
+      cron: "0 3 * * *"
+      timezone: "Europe/Berlin"
+    }
+    run_as {
+      resource: "nightly-runner"
+    }
+  }
+}
+resource {
+  id: "reindex"
+  retention: DELETE
+  job {
+    image {
+      output {
+        step: "build-reindex"
+        name: "oci"
+      }
+    }
+    max_retries: 0
+    on_demand {
+    }
+    run_as {
+      resource: "nightly-runner"
+    }
+  }
+}
+resource {
+  id: "nightly-writes-exports"
+  grant {
+    principal {
+      resource: "nightly-runner"
+    }
+    target {
+      resource: "exports"
+      named: "bucket-uri"
+    }
+    access: WRITE
+  }
+}
+resource {
+  id: "nightly-reads-events"
+  grant {
+    principal {
+      resource: "nightly-runner"
+    }
+    target {
+      resource: "events"
+      standard: NAME
+    }
+    access: READ
+  }
+}
+resource {
+  id: "nightly-writes-logs"
+  grant {
+    principal {
+      resource: "nightly-runner"
+    }
+    access: WRITE
+    cell: LOGS
+  }
+}

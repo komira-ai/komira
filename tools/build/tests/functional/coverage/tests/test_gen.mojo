@@ -1,6 +1,6 @@
 # Calls a function of a written source (plain.mojo) and one of a generated
 # source (gen.mojo): the coverage run's report has the first and not the
-# second (test 42).
+# second (test 43).
 from covgen import half, twice
 from std.testing import assert_equal
 

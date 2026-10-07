@@ -754,7 +754,7 @@ Scope, for now:
 A library in the `tests` cell may pass `coverage_debug` itself (a
 `cov_link_dir`), and with it `coverage_run` (a `cov_run_dir`; the default one
 when not given): it then has coverage binaries and runs whatever the switch
-says, which is how tests 41 and 42 build them and plant a defective
+says, which is how tests 41 and 43 build them and plant a defective
 relocator or run script, without `-c`. Anywhere else passing either is
 refused.
 

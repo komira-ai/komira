@@ -1,8 +1,8 @@
 """Checks of coverage builds, as build actions: check.sh over the binaries
 (test 41), with debug_relocate, which refuses a file holding a compressed
-section; report.sh over the per-test reports of the coverage runs (test 42);
+section; report.sh over the per-test reports of the coverage runs (test 43);
 and cov_plant, a copy of a script with one planted defect, and kcov_stub_dir,
-a kcov distribution whose bin/kcov is a stand-in (test 42)."""
+a kcov distribution whose bin/kcov is a stand-in (test 43)."""
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 
@@ -90,7 +90,7 @@ def _report_impl(ctx):
     )
     return [DefaultInfo(default_output = out)]
 
-# Checks of the per-test reports of a coverage run (test 42), as a build
+# Checks of the per-test reports of a coverage run (test 43), as a build
 # action (report.sh): `golden`, each report is its golden file byte for byte;
 # `census`, covcheck's build gate in census mode reads the reports over the
 # package's sources (`files`, {repository path: source}) and its result JSON

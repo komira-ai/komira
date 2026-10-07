@@ -121,11 +121,9 @@ address, and the address is one reachable only from inside the tailnet, so
 printing it would still disclose nothing usable. `//:no_endpoint` keeps an
 endpoint out of every committed buckconfig, workflow and local action.
 
-To check the connection without a build, run the manual workflow
-[`tailnet-probe`](../.github/workflows/tailnet-probe.yml) (the same join and the
-same port check, which also prints how the path runs, direct or relayed, and
-that the ports a CI node must not reach are blocked) from a branch of this
-repository.
+The connection is checked on every farm-connected run: the action's
+`refuse unless the farm answers` step fails the job before any build when the
+farm's port does not answer.
 
 Give CI its own remote-execution instance name, a sub-instance such as
 `<prefix>/ci`, so its action-cache entries are kept apart from developers' on a
@@ -835,6 +833,45 @@ non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
 history, so the base commit is there.
 
+**How the reached units are built:** units whose `build_targets` commands are
+identical (both build systems of `release/artifacts.textproto` share
+`sh release/ci/build_targets.sh`) are built in ONE run over the union of their
+targets, so a `build_targets` command must be correct on such a union.
+`release/ci/build_targets.sh` builds with `--keep-going`, then checks the lints
+and runs the tests among all the targets (a failed build stops before the lints
+and tests). The per-run timeout (`--build-timeout-s`, default 3600 s) bounds the
+whole batch, not each unit in it. The run's output is in
+`<log dir>/_batch_<k>.stdout` and `.stderr`, and its full argv, one argument per
+line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
+`<unit>.stdout` and `.stderr`).
+
+- **The batch passes:** every unit in it is `BUILT`. Nothing is retried.
+- **The batch fails:** kci builds its units one at a time, in order, to name
+  the failing ones. Each retry re-runs `sh release/ci/build_targets.sh` over
+  that one unit's targets, with its own `--build-timeout-s`, and logs to
+  `<unit>.stdout` and `.stderr`; the batch already built every target that
+  does not depend on a failure, so the retries run on a warm cache. A failing
+  wide change therefore costs the batch's time plus the retries, up to the
+  cap. A retry that fails, times out or is killed is a failed unit. After 3
+  failed units it stops retrying: the rest are listed as not tried, and a
+  later batch that fails is noted as not attributed (a later batch that
+  passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
+  the summary's line is `BUILD step: F of N unit(s) failed: ...`.
+- **The batch times out (or is killed by a signal):** the batch had the whole
+  `--build-timeout-s` (default 3600 s), not a share per unit. It is not
+  retried and no unit of it is attributed: FAILED.
+- **The batch fails but every unit builds alone:** the units interfere or the
+  build is flaky. That is INDETERMINATE (`KCI-E-CANNOT-TELL`), never a pass.
+  FAILED outranks it: if a unit failed or a batch was not attributed anywhere
+  in the step, the step is FAILED and the interference is a note.
+- **A run cannot be started** (a batch, a unit alone or a retry): the step
+  stops at once, nothing after it is started, and the step is INDETERMINATE
+  (`KCI-E-CANNOT-TELL`) even when a unit has already failed.
+
+Whatever the outcome, a `BUILT <unit>` line names exactly the units a
+successful run covered. The result document's `affected_by.units` is the set
+the change reached, not the set that built.
+
 To see the units a change would build, with nothing built:
 
 ```sh
@@ -897,7 +934,7 @@ to the release workflow's), and the welded test
 | job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.

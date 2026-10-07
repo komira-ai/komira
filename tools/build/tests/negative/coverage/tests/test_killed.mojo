@@ -1,4 +1,4 @@
-# Killed by SIGKILL (test 42). Its coverage run must be red with the status
+# Killed by SIGKILL (test 43). Its coverage run must be red with the status
 # a shell gives a process killed by signal 9, exit 137, as the release gate
 # reports it (kcov v42 as released returns the signal number, 9).
 from exits import one

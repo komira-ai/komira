@@ -39,7 +39,7 @@ names. At the top of this directory are the driver,
 [`tool_lib.sh`](tool_lib.sh), and the sections the driver sources
 ([`cxx_tests.sh`](cxx_tests.sh), [`rust_tests.sh`](rust_tests.sh),
 [`proto_tests.sh`](proto_tests.sh), [`c_libs_tests.sh`](c_libs_tests.sh),
-[`coverage_tests.sh`](coverage_tests.sh) and the [`coverage_run_tests.sh`](coverage_run_tests.sh) it sources).
+[`coverage_tests.sh`](coverage_tests.sh), [`coverage_run_tests.sh`](coverage_run_tests.sh)).
 
 The tests run where the checkout builds, read from the execution platforms
 buck2 registers, and the first line of output names it:
@@ -945,42 +945,49 @@ defect in the same tree and must fail naming it, `enforce = True` included.
 
 ## 41. Coverage builds
 
-[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`)
-add one -O0 binary with line tables per `test_srcs` entry and must leave
-every release action as it is. [`coverage_tests.sh`](coverage_tests.sh) runs
-these checks:
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
+binary with line tables per `test_srcs` entry and leave every release action as it is;
+[`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
-| check | what it proves | the defect planted to see it go red |
-|---|---|---|
-| [`coverage_keys.sh`](functional/coverage_keys.sh) | over [`covlib`](functional/coverage/BUCK) and `//src/komira_retry`, read from `buck2 aquery` and `cquery` (analysis only) with the switch off and on: each target keeps its execution platform, and every release action keeps its command line, the actions that make its inputs (a README's gate join: its command line only, since aquery cannot traverse the README's dynamic actions) and its execution attributes (executor preference and configuration, cache upload, weight, dep files); with it off there is no coverage action; with it on every new action is one (`mojo_build_cov_test`, `mojo_cov_run`, or an output under `cov/`), one build and one run per test; with it unset (`-c komira.coverage=`, which clears a global value) every fact is the one of `=false`; on `darwin-arm64` with it on no target has the `coverage_debug` or `coverage_run` attribute (cquery). A README's build and run, which aquery cannot see, are compared by building `//src/komira_retry` with the switch off, then on, in one daemon: every action of it the second build runs (`buck2 log what-ran`) must have run in the first under the same digest (cache hits only). Not seen: an action's environment (aquery prints none; a planted `env` passes) and a hidden source-file input | the release test build given the debug link directory when coverage is on (command lines differ); the coverage binaries added to the gate join's inputs (inputs differ); `prefer_local` on the release test build when coverage is on (execution attributes differ; the test before them passed it); the switch's default `true` (unset differs from `=false`); the platform `select` giving every platform the link directory (the darwin cquery fails); the README's build at -O0 when coverage is on (its build and run run again under new digests) |
-| [`:aggregates`, `:aggregates_tests`, `:aggregates_all`](functional/coverage/BUCK) | `covlib_forced[coverage][bin]` has exactly the binaries `[coverage][bin][<test>]` of its two tests as default outputs, `[coverage][tests]` exactly their reports (test 42) and `[coverage]` both (checked at analysis) | the list missing its first binary |
-| [`:hermetic`](functional/coverage/BUCK) | each binary of `covlib_forced[coverage][bin]` has a `.debug_line` section and the string `value.mojo`, the library source both tests call, which only the compile's line tables put there (zig's C runtime has line tables of its own, and without `--debug-level` an -O0 binary still names the test's own file, its compile unit, but no library file), names its sources by relative directories, as the pinned Mojo writes them (whole strings `tests` and `buck-out/.../__covlib_forced__/<hash>/src/covlib`; Mojo records no compilation directory), holds a placeholder `/___...` (the compilation directory of zig's C runtime units, the only ones that record one, relocated), holds no placeholder followed by `/` and no whole string that is an absolute path other than the placeholder and the ELF interpreter (whatever the executor's directory layout), and has no compressed section (debug_relocate, which refuses one, runs over a copy) | the coverage compile without `--debug-level line-tables` (the binary still has `.debug_line` and its own file name, but not `value.mojo`); planted strings, `tests//negative/coverage:abs_relocated` (a relocated absolute Mojo path), `:abs_other` (an absolute path of another build directory) and `:no_reldir` (no `tests` directory), each fail with its message |
-| [`tests//negative/coverage:noop[coverage]`](negative/coverage/BUCK) | must fail with `contains this action's working directory`: a relocator that rewrites nothing and claims it did (`noop_relocate.zig`) gets past `cov_zig`, and mojo_wrapper.sh's exit 4 stops it, so the wrapper's check stays on for coverage builds | it is the planted defect |
-| [`:reproducible`](functional/coverage/BUCK) | `repro_a` and `repro_b` build one test (it imports only their common dependency) in two actions with different keys, so two sandboxes: the binaries have one sha256. No `--no-remote-cache` | `-Wl,--build-id=uuid` in cov_zig (the binaries differ) |
-| `-c komira.coverage=yes` | fails at load, naming the value | |
+## 42. Pointer lint
 
-The library fixtures in the tests cell may name their link directory (`coverage_debug`, and the run directory
-`coverage_run`), which gives them coverage binaries and runs whatever the switch says; that is how
-`:hermetic`, `:reproducible`, test 42 and the negative builds build without `-c`.
+[`pointer_lint`](../lint/defs.bzl) is a validation over every `.mojo` file of
+a tree that enforces the pointer rules of
+[`docs/design/mojo_safety_and_idioms.md`](../../../docs/design/mojo_safety_and_idioms.md):
+no wildcard origin outside an FFI module, no `unsafe_from_address=`, no
+partial move through a pointer, no `parallelize[`, no second declaration of
+libc `read` or `open`, and no public function of a library file taking or
+returning a pointer. Its reader is [`pointer_lint.awk`](../lint/pointer_lint.awk),
+its action [`lint.sh`](../lint/lint.sh) (kind `pointer_lint`), which holds
+the sites against two ledgers: the FFI modules
+([`tests/pointer_lint_ffi.tsv`](../../../tests/pointer_lint_ffi.tsv) for
+`//:pointer_lint`) and the holds, per rule and file at an exact count
+([`tests/pointer_lint_holds.tsv`](../../../tests/pointer_lint_holds.tsv)),
+which only shrink. [`functional/pointer_lint:ok`](functional/pointer_lint/BUCK)
+builds a planted tree ([`fixture.bzl`](functional/pointer_lint/fixture.bzl))
+whose `held.mojo` holds every rule's sites in each form a statement takes
+(one line, several lines, type parameters, the two-statement partial move, a
+dunder, a trait method, a return type), held at their exact counts, so a
+site the reader missed would fail the build; and whose `near.mojo` names
+every banned spelling where it is not a site (docstrings, comments, strings,
+longer identifiers, private and nested functions, whole-value moves, a
+rebound name). Each target of [`negative/pointer_lint`](negative/pointer_lint/BUCK)
+plants one site of a rule in the same tree, or one defect in a ledger (a
+malformed, repeated, unknown-rule, zero-count or reasonless row, a row for
+no file, a count above the sites, a row for an FFI module's origins, an FFI
+row with no `# FFI-BOUNDARY:` comment line or no wildcard origin), or empties
+the tree, and must fail naming it.
 
 ```sh
-tools/build/tests/functional/coverage_keys.sh
-./buck2 build tests//functional/coverage/...
-./buck2 build 'tests//negative/coverage:noop[coverage]'   # must fail: contains this action's working directory
-./buck2 build tests//negative/coverage:abs_relocated   # must fail: holds an absolute path under the working directory
-./buck2 build tests//negative/coverage:abs_other       # must fail: holds an absolute path (/var/build/...
-./buck2 build tests//negative/coverage:no_reldir       # must fail: no relative directory matching 'tests'
-./buck2 build tests//functional/coverage:covlib -c komira.coverage=yes   # must fail at load
+./buck2 build //:pointer_lint tests//functional/pointer_lint:ok
+./buck2 build tests//negative/pointer_lint:partial_move_two   # must fail: plant.mojo:4: partial_move
 ```
 
-## 42. Coverage runs
+## 43. Coverage runs
 
-With coverage on, each test's coverage binary also runs under kcov through the
-release gate's runner ([cov_run](../coverage/kcov/README.md#cov_run)), giving
-`[coverage][tests][<test>]`, its Cobertura report in repository paths.
-[`coverage_run_tests.sh`](coverage_run_tests.sh) runs the checks; what each
-proves and the defect planted to see it go red are in
-[coverage_runs.md](coverage_runs.md).
+Each test's coverage binary also runs under kcov through the release gate's runner
+([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
+[`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
 
 ## Diagnostics
 

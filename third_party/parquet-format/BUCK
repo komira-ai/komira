@@ -9,6 +9,7 @@ pinned_file(
     name = "parquet-format-2.14.0.tar.gz",
     url = "https://github.com/apache/parquet-format/archive/refs/tags/apache-parquet-format-2.14.0.tar.gz",
     sha256 = "e5b28a999b58fde4f790b2c6c5a017e728c20cecdab11591acb925ef8e6573be",
+    size_bytes = 565551,
 )
 
 # Test data of //src/komira_parquet_api: parquet.thrift, the format's own
