@@ -1,16 +1,16 @@
-# Tests 41, 43, 45 and 46: coverage builds, runs, the gate and branch coverage
+# Tests 41, 43, 46 and 47: coverage builds, runs, the gate and branch coverage
 
 The checks of [test 41](README.md#41-coverage-builds),
 [test 43](README.md#43-coverage-runs),
-[test 45](README.md#45-coverage-gate) and
-[test 46](README.md#46-branch-coverage-runs) of the [tests README](README.md).
+[test 46](README.md#46-coverage-gate) and
+[test 47](README.md#47-branch-coverage-runs) of the [tests README](README.md).
 
 ## Test 41: coverage builds
 
 [Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`)
 add one -O0 binary with line tables per `test_srcs` entry and must leave
 every release action as it is, but the package's join, which also waits for
-the coverage runs and the gate (test 45). [`coverage_tests.sh`](coverage_tests.sh)
+the coverage runs and the gate (test 46). [`coverage_tests.sh`](coverage_tests.sh)
 runs these checks:
 
 | check | what it proves | the defect planted to see it go red |
@@ -45,7 +45,7 @@ With coverage on, each test's coverage binary also runs under kcov through the r
 | [`:numbers`](functional/coverage/BUCK) | each report of `covlib_forced` is its golden file in `functional/coverage/golden/` byte for byte: a library in the tests cell with its sources in `covlib/` mapped to `tools/build/tests/functional/coverage/covlib/value.mojo`, a covered function, an arm no test takes (lines 12 and 13 at 0), a `# cov: unreachable` line at 0; and `covgen`'s report (`golden/test_gen.xml`): its test calls a function of `covgen/plain.mojo` and one of `covgen/gen.mojo`, generated from `gen.mojo.in`, and the report has the first and not the second | the map of `[src]` without the package root `covlib/` (the paths differ); kcov without `cobertura-full-paths=1` (bare names, refused as unmapped); no `--gen` for a generated source (gen.mojo in covgen's report) |
 | [`:census`](functional/coverage/BUCK) | `covcheck gate --mode census` reads those reports over the package's sources and its result holds value.mojo's numbers: 7 of 9 lines hit, line 14 exempt, the two tests set aside, conclusion neutral | the same map without `covlib/` (covcheck exits 1: unmapped) |
 | [`covenv`, `covenv[coverage]`](functional/coverage/BUCK) | a test checking the gate's contract from inside (its `test_env` variable, its data file reached from the working directory, PATH, HOME and TMPDIR as `bin/`, `home/` and `tmp/` of one run directory, LD_LIBRARY_PATH, no LD_PRELOAD, and a CPU affinity no narrower than its parent's and grandparent's) passes in the release gate and under kcov; a second data file sits at `oss/modular/mojo/stdlib/std/testing/testing.mojo`, the name the binary's line tables give a standard library source, which kcov could open from the working directory, so the run is green only while `--include-path` keeps it out of the report | the run without the test's `--env` (COVENV missing); kcov run outside `gate_runner.sh` (HOME is not the runner's); kcov v42 as released, which pins the test to one CPU (red: `the test may run on CPUs 22, its ancestor ... on 22-43,66-87`); kcov given `TMPDIR=/tmp` (`TMPDIR beside PATH's bin/`); no `--skip-solibs` (kcov preloads its `libkcov_sowrapper.so`: `LD_PRELOAD is unset`); no `--include-path`, or one of all of `share/` (the decoy is refused as unmapped) |
-| [`:branchlib[coverage][tests][test_gate_env]`](functional/coverage/BUCK) | `test_gate_env` (test 46's fixture) asserts `LC_ALL` is unset: it passes in the release gate, and must pass under kcov, whose `cov_run.sh` gives its own tools `LC_ALL=C` per command before the test and exports it only after | `cov_run.sh` exporting `LC_ALL=C` before the runner, as it first did (`LC_ALL is set, which the release gate does not set`) |
+| [`:branchlib[coverage][tests][test_gate_env]`](functional/coverage/BUCK) | `test_gate_env` (test 47's fixture) asserts `LC_ALL` is unset: it passes in the release gate, and must pass under kcov, whose `cov_run.sh` gives its own tools `LC_ALL=C` per command before the test and exports it only after | `cov_run.sh` exporting `LC_ALL=C` before the runner, as it first did (`LC_ALL is set, which the release gate does not set`) |
 | [`tests//negative/coverage:tracer`](negative/coverage/BUCK) | builds (the release gate runs `test_tracer` untraced); its `[coverage][tests][test_tracer]` must fail with `test_tracer: traced, TracerPid`: kcov traced the test and passed its exit status on | cov_run.sh ignoring the runner's status (the run goes green) |
 | [`tests//negative/coverage:orphan`, `orphan[coverage]`](negative/coverage/BUCK) | `test_orphan_late` passes, leaving a child that exits 3 half a second later: the release gate and the coverage run are green, the run's status is the test's | kcov v42 as released (it returns the status of the last traced process to exit: red, exit 3) |
 | [`tests//negative/coverage:exits[coverage][tests][test_parent_fails]`](negative/coverage/BUCK), [`...[test_killed]`](negative/coverage/BUCK) | must fail with `The test failed under kcov (exit 1)` (the test fails, its child exits 0 later) and `(exit 137)` (SIGKILL, as a shell reports it); the release gate of `:exits` is red by design and nothing builds it. The first one's output (`coverage_run_banner`) holds neither `GATED TEST FAILED` nor `package is not produced`: gate_runner's banner is left out, since it would say the release gate's test failed | kcov v42 as released (`test_parent_fails` builds green; `test_killed` says exit 9); cov_run.sh printing gate_runner's output whole (the banner check is red) |
@@ -70,7 +70,7 @@ With coverage on, each test's coverage binary also runs under kcov through the r
 ./buck2 build 'tests//negative/coverage:linger[coverage][tests][test_lingers]'  # must fail: did not finish within 20 s
 ```
 
-## Test 45: the coverage gate
+## Test 46: the coverage gate
 
 With coverage on, each library also has a gate, `covcheck gate` over its
 tests' reports and its sources ([The build gate](../coverage/README.md#the-build-gate)),
@@ -124,7 +124,7 @@ accepted).
 ./buck2 bxl //tools/build/coverage/no_gate.bxl:check -c komira.coverage=true
 ```
 
-## Test 46: branch coverage runs
+## Test 47: branch coverage runs
 
 With coverage on, each test is also emitted as LLVM bitcode, instrumented
 with IR profile counters by the Mojo package's lld, linked with the LLVM

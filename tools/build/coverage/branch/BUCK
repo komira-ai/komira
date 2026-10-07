@@ -14,7 +14,7 @@ cov_branch_dir(
 )
 
 # The scripts, for cov_branch_dir's defaults and for planted defects (the
-# tests cell copies them with one fault: test 46).
+# tests cell copies them with one fault: test 47).
 export_file(
     name = "cov_branch_link.sh",
     visibility = ["PUBLIC"],

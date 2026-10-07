@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # coverage_keys.sh -- the coverage switch moves no release action but the
-# package's join (tests 41 and 45).
+# package's join (tests 41 and 46).
 # For each target below, reads its actions from `buck2 aquery` (analysis
 # only) with `-c komira.coverage=false`, `=true` and unset, and requires:
 #

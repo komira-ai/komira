@@ -1,4 +1,4 @@
-# Test 46: some arms of classify_score, never "invalid" (its counter stays
+# Test 47: some arms of classify_score, never "invalid" (its counter stays
 # 0 in the profile of the branch coverage run).
 from branchlib import classify_score
 from std.testing import assert_equal

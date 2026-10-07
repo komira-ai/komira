@@ -1,4 +1,4 @@
-"""branchtdsup: the test-support package of branchtd's test (test 46),
+"""branchtdsup: the test-support package of branchtd's test (test 47),
 reaching it only through branchtd's `test_deps`. It calls into C
 (komira_example_add, of komira//tools/build/examples/cshim:add), so the
 test's link needs that C library too."""

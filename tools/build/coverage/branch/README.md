@@ -22,7 +22,7 @@ asked for:
 | target | what |
 |---|---|
 | `:cov_branch` | the two directories every library's branch coverage links and runs from (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, [`cov_branch_run.sh`](cov_branch_run.sh) with `llvm/` (`llvm-profdata`) and `raw_version`, the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)). Two, as `cov_link` and `cov_run` are two: an edit of the run script re-keys no link. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
-| `:cov_branch_link.sh`, `:cov_branch_run.sh` | the scripts, exported so a fixture of the tests cell can plant a defect in a copy (test 46) |
+| `:cov_branch_link.sh`, `:cov_branch_run.sh` | the scripts, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
 
 Per `test_srcs` entry that is a source file, three actions, each a
 sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
@@ -53,7 +53,7 @@ waits for them).
    `libKGENCompilerRTShared.so`, `--gc-sections`, `-lm`; the shim's
    `--strip-debug` and the one run path `$ORIGIN/lib`; then the C libraries
    of the closure, `test_deps` included), with `llvm/runtime/libclang_rt.profile-x86_64.a` as a
-   whole archive. Test 46's `link_line` records the line zig is given by
+   whole archive. Test 47's `link_line` records the line zig is given by
    both links (a stand-in zig) and fails when they differ by more than the
    profile runtime, so a Mojo release that links with another library, or
    another flag, is caught there.
@@ -112,7 +112,7 @@ and checked once, by `toolchains/llvm_branch`.
 
 ## Tests
 
-[Test 46](../../tests/coverage_runs.md#test-46-branch-coverage-runs) of
+[Test 47](../../tests/coverage_runs.md#test-47-branch-coverage-runs) of
 the tests cell: a fixture library whose test takes some arms of an
 `if`/`elif`/`or`/`and` function, whose profile must hold that function's
 counters; the link line check; a test that the run gives no `LC_ALL`; a

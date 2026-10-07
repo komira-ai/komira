@@ -1,4 +1,4 @@
-# Test 46: a test of branchtd that imports branchtdsup, a package only its
+# Test 47: a test of branchtd that imports branchtdsup, a package only its
 # `test_deps` gives it, which calls into C; two of sign's three arms.
 from std.testing import assert_equal
 

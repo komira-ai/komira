@@ -1,4 +1,4 @@
-"""covuser: a library that depends on covlib (test 45): its compile reads
+"""covuser: a library that depends on covlib (test 46): its compile reads
 covlib's package, so it shows whether the coverage switch changed it."""
 
 from covlib import clamp

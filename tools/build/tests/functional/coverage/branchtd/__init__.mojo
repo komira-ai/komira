@@ -1,4 +1,4 @@
-"""branchtd: a library of the branch coverage tests (test 46) whose test
+"""branchtd: a library of the branch coverage tests (test 47) whose test
 needs a test-only package (branchtdsup, in its `test_deps`)."""
 
 
