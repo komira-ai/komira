@@ -141,7 +141,7 @@ _TESTS_LINTS = [
 # komira_ prefix) or a codec library soname in a string literal (either
 # quote), or imports komira_zlib / komira_lz4. The other packages call
 # komira_compression's codec API. The tree is every file of the cell
-# (`:doc_tree`). Test 43 (tests//functional/codec_owner,
+# (`:doc_tree`). Test 44 (tests//functional/codec_owner,
 # tests//negative/codec_owner) plants each form.
 [codec_owner(
     name = "codec_owner",

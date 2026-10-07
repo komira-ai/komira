@@ -1008,7 +1008,7 @@ the tree, and must fail naming it.
 ./buck2 build tests//negative/pointer_lint:partial_move_two   # must fail: plant.mojo:4: partial_move
 ```
 
-## 43. Codec owner lint
+## 44. Codec owner lint
 
 [`codec_owner`](../lint/codec_owner.bzl) is a validation over every `.mojo`
 file under `src/` of a tree: outside its owner directories (for

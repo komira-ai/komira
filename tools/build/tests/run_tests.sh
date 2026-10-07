@@ -324,7 +324,7 @@
 #      site in an FFI module, an unlisted marked module) or ledger defect,
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
-#  43. The codec owner lint (tools/build/lint/codec_owner.bzl):
+#  44. The codec owner lint (tools/build/lint/codec_owner.bzl):
 #      //:codec_owner (every .mojo file under src/) and
 #      tests//functional/codec_owner:ok (owners holding every codec
 #      declaration, soname and layer import, beside near misses) and
@@ -1226,7 +1226,7 @@ done
 expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
 expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
-# 43
+# 44
 expect_green codec_owner //:codec_owner tests//functional/codec_owner:ok tests//functional/codec_owner:ok_prefixed
 N=tests//negative/codec_owner
 S="$N:src/komira_avro/plant.mojo"

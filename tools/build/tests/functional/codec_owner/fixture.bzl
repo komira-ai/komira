@@ -1,4 +1,4 @@
-"""The planted tree of test 43 (the codec owner lint), as {path in the tree: file}.
+"""The planted tree of test 44 (the codec owner lint), as {path in the tree: file}.
 
 The owners are the three directories of the root BUCK's `//:codec_owner`.
 snappy_block.mojo declares `"snappy_uncompress"` and
