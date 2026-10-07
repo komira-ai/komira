@@ -10,7 +10,8 @@ each name from its module:
   with one distinct key: one equality compare per row.
 - `komira_dynamic_filter.in_list_filter`: `InListFilter`, an exact set of at
   most `IN_LIST_THRESHOLD` (128) distinct `Int64` keys; `try_from_int64`
-  returns `None` for an empty or a larger key list.
+  returns `None` for an empty key list or one with more than 128 distinct
+  keys.
 - `komira_dynamic_filter.range_filter`: `RangeFilter`, an inclusive
   `[min, max]` over `Int64` keys.
 - `komira_dynamic_filter.bloom_filter`: `BloomFilter`, a Parquet split block
@@ -74,7 +75,9 @@ var false_positives = 0
 for k in range(1000):
     if evens.might_contain_int64(Int64(1_000_000 + k)):
         false_positives += 1
-assert_true(false_positives < 20)  # possible, and rare at this size
+# A false positive is possible; with 100 keys in 1024 bytes none of these
+# 1000 absent keys is one.
+assert_equal(false_positives, 0)
 
 var odds = BloomFilter.create(1000)
 for k in range(100):

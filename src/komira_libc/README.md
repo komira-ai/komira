@@ -2,9 +2,10 @@
 
 The libc and POSIX layer every package shares: one getenv, the access probes and pthread_self, file and memory-map syscall wrappers with the C shim symbols they call, chunked large writes, RAII file descriptor.
 
-Each C symbol the packages call is declared once, here, so a program never
-links two conflicting declarations of it. The package root re-exports
-nothing; import each name from its module:
+`getenv` is declared here and nowhere else, so a program never links two
+conflicting declarations of it, and the `komira_*` C shim symbols are defined
+only in this package's C file. The package root re-exports nothing; import
+each name from its module:
 
 - `komira_libc.posix_io`: `RawWriteFd`, an owning handle for a write-only file
   descriptor (`open_truncate`, `open_existing_append`,
@@ -28,62 +29,58 @@ nothing; import each name from its module:
 
 ## Examples
 
-Write a file through a raw descriptor in a temporary directory: a positional
-write leaves the descriptor's offset alone, a second descriptor opened to
-append starts at the end, and an exclusive create of an existing path is
-refused:
+Write a file through a raw descriptor in a temporary directory, which the
+example removes even if a step fails: a positional write leaves the
+descriptor's offset alone, a second descriptor opened to append starts at the
+end, and an exclusive create of an existing path is refused:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
 from std.os import remove, rmdir
+from std.os.path import exists
 from std.tempfile import mkdtemp
 from komira_libc.chunked_write import write_chunked_string
 from komira_libc.posix_io import RawWriteFd, fsync_dir, fsync_path
 
 var dir = mkdtemp()
 var path = dir + "/data.txt"
-
-var fd = RawWriteFd.open_truncate(path)
-fd.write_bytes("hello, world".as_bytes())
-fd.pwrite_at(7, "WORLD".as_bytes())  # the offset stays at 12
-fd.write_bytes("!".as_bytes())
-fd.close()
-fd.close()  # closing twice is a no-op
-var closed = fd.is_closed()
-
-var appender = RawWriteFd.open_existing_append(path)
-var end = appender.seek_to_end()  # the file's size
-appender.write_bytes(" bye".as_bytes())
-appender.ftruncate_size(15)  # cut back to 15 bytes
-appender.close()
-fsync_path(path)
-fsync_dir(dir)
-
-var refused = False
-try:
-    _ = RawWriteFd.open_create_exclusive(path)
-except:
-    refused = True
-
 var notes = dir + "/notes.txt"
-with open(notes, "w") as handle:
-    write_chunked_string(handle, "one write, at most 64 MiB a piece")
+try:
+    var fd = RawWriteFd.open_truncate(path)
+    fd.write_bytes("hello, world".as_bytes())
+    fd.pwrite_at(7, "WORLD".as_bytes())  # the offset stays at 12
+    fd.write_bytes("!".as_bytes())
+    fd.close()
+    fd.close()  # closing twice is a no-op
+    assert_true(fd.is_closed())
 
-var text = String()
-with open(path, "r") as f:
-    text = f.read()
-var notes_text = String()
-with open(notes, "r") as f:
-    notes_text = f.read()
-remove(path)
-remove(notes)
-rmdir(dir)
+    var appender = RawWriteFd.open_existing_append(path)
+    assert_equal(appender.seek_to_end(), 13)  # the file's size
+    appender.write_bytes(" bye".as_bytes())
+    appender.ftruncate_size(15)  # cut back to 15 bytes
+    appender.close()
+    fsync_path(path)
+    fsync_dir(dir)
+    with open(path, "r") as f:
+        assert_equal(f.read(), "hello, WORLD! b")
 
-assert_true(closed)
-assert_equal(end, 13)
-assert_equal(text, "hello, WORLD! b")
-assert_true(refused)
-assert_equal(notes_text, "one write, at most 64 MiB a piece")
+    var refused = False
+    try:
+        _ = RawWriteFd.open_create_exclusive(path)
+    except:
+        refused = True
+    assert_true(refused)
+
+    with open(notes, "w") as handle:
+        write_chunked_string(handle, "one write, at most 64 MiB a piece")
+    with open(notes, "r") as f:
+        assert_equal(f.read(), "one write, at most 64 MiB a piece")
+finally:
+    if exists(path):
+        remove(path)
+    if exists(notes):
+        remove(notes)
+    rmdir(dir)
 ```
 
 `write_all_fd` issues no system call for an empty span, refuses a clamp that

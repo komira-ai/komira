@@ -102,40 +102,38 @@ assert_equal(message, "ByteBuffer: read_byte past end of buffer")
 
 Map a file read-only and read it in place; then `FileIdentity` tells that a
 rewrite changed the file. The example works in a temporary directory it
-removes:
+removes even if a step fails:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
 ```mojo
 from std.os import remove, rmdir
+from std.os.path import exists
 from std.tempfile import mkdtemp
 from komira_buffer.file_identity import FileIdentity
 from komira_buffer.mmap_region import MmapRegion
 
 var dir = mkdtemp()
 var path = dir + "/mapped.txt"
-with open(path, "w") as f:
-    f.write("komira!")
+try:
+    with open(path, "w") as f:
+        f.write("komira!")
 
-var region = MmapRegion.open_readonly(path)
-var view = region.data()
-var size = view.len()
-var first = view.read_u8_at(0)
-var text = String(unsafe_from_utf8=view.into_span())
-_ = region^  # unmapped here
+    var region = MmapRegion.open_readonly(path)
+    var view = region.data()
+    assert_equal(view.len(), 7)
+    assert_equal(view.read_u8_at(0), UInt8(ord("k")))
+    assert_equal(String(from_utf8=view.into_span()), "komira!")
+    _ = region^  # unmapped here
 
-var before = FileIdentity.stat_path(path)
-var same = before.same_file_as(FileIdentity.stat_path(path))
-with open(path, "w") as f:
-    f.write("komira, rewritten")
-var changed = not before.same_file_as(FileIdentity.stat_path(path))
-remove(path)
-var gone = not FileIdentity.stat_path(path).valid
-rmdir(dir)
-
-assert_equal(size, 7)
-assert_equal(first, UInt8(ord("k")))
-assert_equal(text, "komira!")
-assert_true(same)
-assert_true(changed)  # the size changed
-assert_true(gone)
+    var before = FileIdentity.stat_path(path)
+    assert_true(before.same_file_as(FileIdentity.stat_path(path)))
+    with open(path, "w") as f:
+        f.write("komira, rewritten")
+    assert_false(before.same_file_as(FileIdentity.stat_path(path)))  # the size changed
+    remove(path)
+    assert_false(FileIdentity.stat_path(path).valid)  # gone
+finally:
+    if exists(path):
+        remove(path)
+    rmdir(dir)
 ```
