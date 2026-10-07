@@ -13,7 +13,8 @@ The client sends through a komira_http_client `HttpClient` over whatever
 komira_http_core `Connector` it is given, asks a komira_gcp_core
 `GcpTokenSource` for one bearer token per request, and raises a non-2xx
 answer as an error naming the verb, the RPC, the HTTP status and the
-canonical code, never a byte of the body. It starts at the service's
+canonical code (plus the envelope's `reason` when it is a bare machine
+token, and byte counts), never the body's free text. It starts at the service's
 declared host, `logging.googleapis.com`; `set_rest_host` points it
 elsewhere. It reads no environment.
 

@@ -7,8 +7,8 @@ Azure Blob Storage, hand-written:
   parameters included) and signs it with the account key (HMAC-SHA256);
   `SharedKeySigningLayer` is an `HttpService` layer that stamps `x-ms-date`
   and adds `Authorization: SharedKey <account>:<signature>` to each request.
-- **The store**: `AzureStore` does HEAD, range GET, List Blobs (following
-  `NextMarker`, at most `AZURE_LIST_MAX_PAGES` pages) and Put Blob (a block
+- **The store**: `AzureStore` does HEAD, range GET, List Blobs (one page
+  per call; the caller passes the marker) and Put Blob (a block
   blob in one request) over any komira_http_client `HttpService`, addressing
   real Azure (virtual-hosted, `<account>.blob.core.windows.net`) or the
   Azurite emulator (path-style); `parse_azure_list_blobs_result` and
@@ -19,7 +19,8 @@ Azure Blob Storage, hand-written:
   `AzureCredential` (a Shared Key, a SAS token, or anonymous; a key and a
   token together are refused) and the connector factory a client is built
   from.
-- **`AzureFs`**: komira_fs's `FileSystem` over one container, read-only.
+- **`AzureFs`**: komira_fs's `FileSystem` over one container, read-only;
+  its `list` follows `NextMarker` for at most `AZURE_LIST_MAX_PAGES` pages.
 - **`AzureSasSigner`**: komira_objectstore's `ObjectUrlSigner`, minting
   blob service SAS URLs signed at the instant its `AzureSasClock` reports.
 

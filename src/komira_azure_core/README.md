@@ -80,12 +80,12 @@ assert_equal(principal.login_host, "login.microsoftonline.com")
 assert_equal(principal.scope, "https://storage.azure.com/.default")
 assert_false(principal.has_credential())
 
-with assert_raises():
+with assert_raises(contains="login scheme must be https"):
     _ = ServicePrincipalProvider.with_login_endpoint(
         String("contoso.example"), String("app-id"), String("app-secret"),
         String("http"), String("login.microsoftonline.com"), UInt16(0),
     )
-with assert_raises():
+with assert_raises(contains="outside [A-Za-z0-9.-]"):
     _ = ServicePrincipalProvider.with_login_endpoint(
         String("contoso.example"), String("app-id"), String("app-secret"),
         String("https"), String("login.microsoftonline.com@evil.example"), UInt16(0),

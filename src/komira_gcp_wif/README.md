@@ -117,10 +117,10 @@ answer read:
 ```mojo
 from komira_gcp_wif import parse_sign_jwt_response, sign_jwt_claims, sign_jwt_path, sign_jwt_request_body
 
-comptime ACCOUNT = "minter@demo-project.iam.gserviceaccount.com"
+comptime ACCOUNT = "minter@demo-project.example"
 assert_equal(
     sign_jwt_path(String(ACCOUNT)),
-    "/v1/projects/-/serviceAccounts/minter@demo-project.iam.gserviceaccount.com:signJwt",
+    "/v1/projects/-/serviceAccounts/minter@demo-project.example:signJwt",
 )
 var claims = sign_jwt_claims(String(ACCOUNT), String("https://example.com"), 1790769600)
 assert_equal(
