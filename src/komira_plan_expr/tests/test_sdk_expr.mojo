@@ -572,7 +572,7 @@ def test_scalar_error_expr_roundtrip() raises:
 
 def test_excel_error_code_space() raises:
     """the status-lane constants. The code space's text and literal helpers
-    are held for all eleven codes by `test_excel_error_code.mojo`."""
+    are held for all ten codes by `test_excel_error_code.mojo`."""
     # Status lane constants are distinct (VALID / NULL / ERROR).
     assert_true(STATUS_VALID != STATUS_NULL)
     assert_true(STATUS_NULL != STATUS_ERROR)

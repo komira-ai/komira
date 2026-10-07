@@ -426,11 +426,11 @@ def _corpus() raises -> List[_Case]:
         ),
     ))
 
-    # ---- an Excel error literal whose code is outside the 11 ----------------
-    # `ExcelErrorCode` declares wire 1..11 (XL_ERR_NONE..XL_ERR_CIRCULAR). Both
+    # ---- an Excel error literal whose code is outside the 10 ----------------
+    # `ExcelErrorCode` declares wire 1..10 (XL_ERR_NONE..XL_ERR_CALC). Both
     # fixtures are a filter `name > <error literal>` whose ONLY defect is the
     # literal's `error_code`; the exact refusal text is pinned by
-    # `test_an_error_literal_outside_the_eleven_codes_is_refused_by_name`.
+    # `test_an_error_literal_outside_the_ten_codes_is_refused_by_name`.
     c.append(_Case(
         String("filter_error_code_unspecified"),
         _REFUSED_UNTOKENED,
@@ -445,10 +445,11 @@ def _corpus() raises -> List[_Case]:
         String("filter_error_code_undeclared"),
         _REFUSED_UNTOKENED,
         String(
-            "`error_code: 12`, one past XL_ERR_CIRCULAR: what a producer with a"
-            " newer code space (`#GETTING_DATA`, `#BLOCKED!`) sends. Taken"
-            " verbatim it becomes engine code 11, a DIFFERENT error to every"
-            " later reader; the membership check refuses it"
+            "`error_code: 11`, one past XL_ERR_CALC: what a producer with a"
+            " wider code space (`#GETTING_DATA`, `#BLOCKED!`) sends, and the"
+            " number `plan_vocabulary.proto` reserves. Taken verbatim it becomes"
+            " engine code 10, a DIFFERENT error to every later reader; the"
+            " membership check refuses it"
         ),
     ))
 
@@ -728,7 +729,7 @@ def _refusal_text(name: String) raises -> String:
     raise Error(name + ": decoded without a refusal")
 
 
-def test_an_error_literal_outside_the_eleven_codes_is_refused_by_name() raises:
+def test_an_error_literal_outside_the_ten_codes_is_refused_by_name() raises:
     """★ THE EXACT TEXT, NOT ONLY "IT RAISED". The ledger records these two as
     untokened refusals; this pins the message a producer gets, which names the
     space and the wire value, so a refusal that moved to some other check (or a
@@ -743,7 +744,7 @@ def test_an_error_literal_outside_the_eleven_codes_is_refused_by_name() raises:
     )
     assert_equal(
         _refusal_text(String("filter_error_code_undeclared")),
-        String("ExcelErrorCode: wire value 12 is unknown to this reader"),
+        String("ExcelErrorCode: wire value 11 is unknown to this reader"),
     )
 
 

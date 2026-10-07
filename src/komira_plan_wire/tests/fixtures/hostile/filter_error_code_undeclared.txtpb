@@ -34,7 +34,7 @@ plan {
           literal {
             kind: SCALAR_KIND_ERROR
             time_unit: SCALAR_TIME_UNIT_MICRO
-            error_code: 12
+            error_code: 11
           }
         }
       }

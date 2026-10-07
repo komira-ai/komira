@@ -721,7 +721,12 @@ enum ExcelErrorCode {
   XL_ERR_NULL = 8;
   XL_ERR_SPILL = 9;
   XL_ERR_CALC = 10;
-  XL_ERR_CIRCULAR = 11;
+  // 11 was a circular-reference code. Excel reports a circular reference as
+  // a warning, not as an error value, and Microsoft documents no literal for
+  // it, so the code was removed. The number and the name stay reserved: a
+  // reader built before the removal decodes 11 as that code.
+  reserved 11;
+  reserved "XL_ERR_CIRCULAR";
 }
 
 // ----------------------------------------------------------------------

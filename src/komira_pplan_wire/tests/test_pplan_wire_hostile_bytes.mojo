@@ -40,14 +40,18 @@
 #   CONTROLS     the version-2 fixture with its version byte set back to 1 is
 #                byte-identical to the `scan_full` golden and decodes; a
 #                64-deep expression decodes and a 65-deep one is refused; a
-#                BINARY literal's non-UTF-8 bytes are carried, not refused.
+#                BINARY literal's non-UTF-8 bytes are carried, not refused;
+#                error code 9 (XL_ERR_CALC, the last code) decodes and 10, one
+#                past it, is refused.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
 
 from komira_arrow.schema import Field
 from komira_collections.slab import Slab
+from komira_plan_expr.excel_error_code import EXCEL_ERROR_CODE_LAST, XL_ERR_CALC
 from komira_plan_expr.expr import Expr
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod
 from komira_plan_ir.logical_plan import ExprArray
 from komira_plan_ir.physical_plan import MorselOp, ParquetSourceData
@@ -189,6 +193,14 @@ def test_hostile_fixtures_are_refused_by_exact_message() raises:
         "PPLAN_WIRE_BAD_ENUM: scalar error code 11",
         f,
     )
+    # One past XL_ERR_CALC, the last code: 10 was a circular-reference code
+    # and is not a code any more. `scalar_error_code_last_accepted` (9) is its
+    # control, so a bound off by one either way fails one of the two.
+    _check(
+        "scalar_error_code_one_past_last",
+        "PPLAN_WIRE_BAD_ENUM: scalar error code 10",
+        f,
+    )
     # Int32 fields travel as Int64: a value outside Int32 would narrow to the
     # same plan as 2^32 other spellings, and would not re-encode to itself.
     _check(
@@ -277,6 +289,26 @@ def test_expression_depth_bound_is_exact() raises:
     assert_equal(len(back.ops), 1)
 
 
+def test_error_code_bound_is_exact() raises:
+    """`scalar_error_code_last_accepted` is `literal_every_field` with its
+    error code set to 9, XL_ERR_CALC, the last code, and it decodes;
+    `scalar_error_code_one_past_last` (10) is refused above. The two fixtures
+    differ in that byte only."""
+    assert_equal(Int(EXCEL_ERROR_CODE_LAST), Int(XL_ERR_CALC))
+    var accepted = _hostile(String("scalar_error_code_last_accepted"))
+    var refused = _hostile(String("scalar_error_code_one_past_last"))
+    assert_equal(len(accepted), len(refused))
+    for i in range(len(accepted)):
+        if i == len(accepted) - 1:
+            assert_equal(accepted[i], UInt8(9))
+            assert_equal(refused[i], UInt8(10))
+        else:
+            assert_equal(accepted[i], refused[i], "byte " + String(i))
+    var back = pplan_from_bytes(accepted^)
+    var lit = back.ops[0].filter_predicate.value().binary_right_ref().literal_value()
+    assert_equal(Int(lit.error_code), Int(XL_ERR_CALC))
+
+
 def test_binary_literal_bytes_are_carried_not_refused() raises:
     """`string_val` of a BINARY scalar holds opaque bytes, so the UTF-8 check
     on identifiers must NOT apply to it: these bytes are not UTF-8 and decode."""
@@ -354,11 +386,22 @@ def test_encoder_refuses_a_project_name_count_mismatch() raises:
     )
 
 
+def test_encoder_refuses_an_error_code_past_the_last() raises:
+    # The fixture `scalar_error_code_one_past_last` carries the same code.
+    var ops = Slab[MorselOp]()
+    ops.append(MorselOp.filter(Expr.literal(ScalarValue.from_error(UInt8(10)))))
+    assert_equal(
+        _encode_error(_source(String("bare.parquet")), ops),
+        "PPLAN_WIRE_BAD_ENUM: scalar error code 10",
+    )
+
+
 def main() raises:
     test_version_2_is_scan_full_with_one_byte_changed()
     test_bool_byte_two_is_scan_bare_with_one_byte_changed()
     test_expression_depth_bound_is_exact()
     test_binary_literal_bytes_are_carried_not_refused()
+    test_error_code_bound_is_exact()
     # Encoder cases each report, then the run fails once, so one run shows
     # every divergence.
     var failed = List[String]()
@@ -377,6 +420,11 @@ def main() raises:
     except e:
         print("FAIL encode project mismatch: " + String(e))
         failed.append(String("encode_project_mismatch"))
+    try:
+        test_encoder_refuses_an_error_code_past_the_last()
+    except e:
+        print("FAIL encode error code 10: " + String(e))
+        failed.append(String("encode_error_code"))
     test_hostile_fixtures_are_refused_by_exact_message()
     if len(failed) != 0:
         raise Error(String("pplan_wire hostile: ") + String(len(failed)) + " encoder case(s) failed")

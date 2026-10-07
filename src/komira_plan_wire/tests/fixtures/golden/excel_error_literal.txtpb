@@ -65,13 +65,6 @@ plan {
       nullable: true
       dict_index_type_id: 4
     }
-    fields {
-      name: "circular"
-      arrow_type_id: 1
-      dtype_code: _DT_BOOL
-      nullable: true
-      dict_index_type_id: 4
-    }
   }
   project {
     exprs {
@@ -279,29 +272,6 @@ plan {
           }
         }
         name: "calc"
-      }
-    }
-    exprs {
-      alias {
-        child {
-          binary_op {
-            op: BIN_GT
-            left {
-              col_ref {
-                name: "s"
-                side: COL_SIDE_NONE
-              }
-            }
-            right {
-              literal {
-                kind: SCALAR_KIND_ERROR
-                time_unit: SCALAR_TIME_UNIT_MICRO
-                error_code: XL_ERR_CIRCULAR
-              }
-            }
-          }
-        }
-        name: "circular"
       }
     }
     child {

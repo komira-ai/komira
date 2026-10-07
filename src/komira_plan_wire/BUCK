@@ -122,8 +122,8 @@ _HOSTILE = [
 
 # Two hostile fixtures carry an enum value `plan_vocabulary.proto` does not
 # declare, so leg 5 refuses them: filter_binary_op_undeclared_enum (an `op`)
-# and filter_error_code_undeclared (an `ExcelErrorCode` of 12, one past
-# XL_ERR_CIRCULAR). Each is checked by the `proto_fixture_case` pair below,
+# and filter_error_code_undeclared (an `ExcelErrorCode` of 11, one past
+# XL_ERR_CALC and reserved). Each is checked by the `proto_fixture_case` pair below,
 # which requires that refusal.
 _HOSTILE_UNDECLARED_ENUM = {
     "filter_binary_op_undeclared_enum": "plan_wire_hostile_undeclared_enum",

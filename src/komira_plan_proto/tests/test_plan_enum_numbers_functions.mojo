@@ -665,7 +665,6 @@ ExcelErrorCode.XL_ERR_NUM 7
 ExcelErrorCode.XL_ERR_NULL 8
 ExcelErrorCode.XL_ERR_SPILL 9
 ExcelErrorCode.XL_ERR_CALC 10
-ExcelErrorCode.XL_ERR_CIRCULAR 11
 ParamTag.PARAM_WIRE_UNSPECIFIED 0
 ParamTag.PARAM_STR 1
 ParamTag.PARAM_I64 2

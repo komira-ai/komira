@@ -19,8 +19,14 @@
 #       number has the same name in the Mojo vocabulary and in the generated
 #       proto enum. A renumbered or renamed member in any one copy is red.
 #
+#   test_wire_11_is_refused_by_name
+#       Wire 11 is reserved in `plan_vocabulary.proto` (it was a
+#       circular-reference code, removed because Excel has no such error
+#       value). The Mojo decoder refuses it with the unknown-value message,
+#       and neither copy names it.
+#
 #   test_excel_error_literal_bytes_are_frozen
-#       A plan whose expressions carry all ten error codes as literals,
+#       A plan whose expressions carry all nine error codes as literals,
 #       frozen as `tests/fixtures/golden/excel_error_literal.hex`, with the
 #       legs of `test_plan_wire_golden_bytes.mojo`: the encoder's bytes equal
 #       the fixture (A), the fixture decodes to this plan (B), it is not an
@@ -30,7 +36,7 @@
 #       its proto NAME, so the `.txtpb` is the proto copy's half of the
 #       agreement as read by an implementation that never saw this package.
 #
-# The two codes OUTSIDE the space (wire 0 and wire 12 inside a literal) are
+# The two codes OUTSIDE the space (wire 0 and wire 11 inside a literal) are
 # hostile fixtures, refused by name in `test_plan_wire_hostile_values.mojo`.
 #
 # HOW TO REGOLD: as in `test_plan_wire_golden_bytes.mojo`. The test prints a
@@ -55,7 +61,6 @@ from komira_plan_expr.excel_error_code import (
     XL_ERR_NULL,
     XL_ERR_SPILL,
     XL_ERR_CALC,
-    XL_ERR_CIRCULAR,
 )
 from komira_plan_expr.expr import Expr, BIN_GT
 from komira_plan_expr.scalar_value import ScalarValue
@@ -107,13 +112,12 @@ def _members() -> List[_Member]:
     m.append(_Member(XL_ERR_NULL, String("XL_ERR_NULL")))
     m.append(_Member(XL_ERR_SPILL, String("XL_ERR_SPILL")))
     m.append(_Member(XL_ERR_CALC, String("XL_ERR_CALC")))
-    m.append(_Member(XL_ERR_CIRCULAR, String("XL_ERR_CIRCULAR")))
     return m^
 
 
 def test_the_three_copies_agree() raises:
     """Engine constant -> wire number -> name, in the Mojo vocabulary and in
-    the generated proto enum, for all eleven members; and back."""
+    the generated proto enum, for all ten members; and back."""
     var m = _members()
     assert_equal(
         len(m), EXCEL_ERROR_CODE_WIRE_MEMBERS,
@@ -147,8 +151,36 @@ def test_the_three_copies_agree() raises:
     # The edges: wire 0 is the proto3 zero and names no code; one past the
     # last code is not declared by either side.
     assert_equal(ExcelErrorCode(0).json_name(), "XL_ERR_WIRE_UNSPECIFIED")
-    assert_equal(Int(EXCEL_ERROR_CODE_WIRE_MAX), Int(XL_ERR_CIRCULAR) + 1)
-    assert_false(excel_error_code_is_declared(XL_ERR_CIRCULAR + 1))
+    assert_equal(Int(EXCEL_ERROR_CODE_WIRE_MAX), Int(XL_ERR_CALC) + 1)
+    assert_false(excel_error_code_is_declared(XL_ERR_CALC + 1))
+
+
+def test_wire_11_is_refused_by_name() raises:
+    """Wire 11, one past XL_ERR_CALC, is the number `plan_vocabulary.proto`
+    reserves. A reader built before its code was removed would decode it as
+    that code, so this reader must refuse it, by this exact message, and must
+    not name it; and the encoder must refuse engine code 10, so no writer of
+    this package can produce it."""
+    var refused = String("")
+    try:
+        _ = excel_error_code_from_wire(Int32(11))
+    except e:
+        refused = String(e)
+    assert_equal(
+        refused, String("ExcelErrorCode: wire value 11 is unknown to this reader"),
+        "wire 11 must be refused as an unknown value",
+    )
+    assert_equal(excel_error_code_wire_name(Int32(11)), String("ExcelErrorCode#11"))
+    var encode_refused = String("")
+    try:
+        _ = excel_error_code_to_wire(UInt8(10))
+    except e:
+        encode_refused = String(e)
+    assert_equal(
+        encode_refused,
+        String("ExcelErrorCode: engine tag 10 is not in the plan wire vocabulary"),
+        "engine code 10 must be refused on encode",
+    )
 
 
 # =============================================================================
@@ -253,9 +285,9 @@ def _scan() raises -> LogicalPlan:
 
 
 def _corpus_excel_error_literal() raises -> LogicalPlan:
-    """A project of ten comparisons `s > <error literal>`, one per error code
+    """A project of nine comparisons `s > <error literal>`, one per error code
     in code order and each named for its code, so the `.txtpb` lists every
-    `ExcelErrorCode` from XL_ERR_DIV0 (wire 2) to XL_ERR_CIRCULAR (wire 11)
+    `ExcelErrorCode` from XL_ERR_DIV0 (wire 2) to XL_ERR_CALC (wire 10)
     beside a column name saying which it should be. A codec that wrote one
     code for all of them, or shifted them by one, is a diff in that list.
     XL_ERR_NONE (wire 1) is on every non-error literal in the other goldens.
@@ -267,7 +299,7 @@ def _corpus_excel_error_literal() raises -> LogicalPlan:
     var names: List[String] = [
         String("div0"), String("na"), String("value"), String("ref"),
         String("name"), String("num"), String("null"), String("spill"),
-        String("calc"), String("circular"),
+        String("calc"),
     ]
     var m = _members()
     var xs = ExprArray()

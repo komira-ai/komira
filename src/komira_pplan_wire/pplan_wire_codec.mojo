@@ -66,7 +66,7 @@
 #   a bool byte (0 or 1), a binary operator (BIN_ADD..BIN_MOD, BIN_EQ..BIN_GE,
 #   BIN_AND, BIN_OR), a unary operator (UN_NOT..UN_BIT_COUNT), an fs scheme
 #   (FS_SCHEME_FILE..FS_SCHEME_AZURE), a scalar kind (..SCALAR_KIND_ERROR),
-#   time unit (..SCALAR_TIME_UNIT_NANO) and error code (..XL_ERR_CIRCULAR).
+#   time unit (..SCALAR_TIME_UNIT_NANO) and error code (..EXCEL_ERROR_CODE_LAST).
 #   A negative count (LIMIT, row-window offset/length, and on decode a string,
 #   list, op or project length) is PPLAN_WIRE_NEGATIVE_COUNT. A PROJECT whose
 #   name count differs from its expression count is
@@ -102,7 +102,7 @@ from komira_plan_expr.scalar_value import (
     SCALAR_KIND_ERROR,
     SCALAR_TIME_UNIT_NANO,
 )
-from komira_plan_expr.excel_error_code import XL_ERR_CIRCULAR
+from komira_plan_expr.excel_error_code import EXCEL_ERROR_CODE_LAST
 from komira_plan_ir.logical_plan import ExprArray
 from komira_plan_ir.physical_plan import (
     ParquetSourceData,
@@ -474,7 +474,9 @@ def _check_scalar_codes(v: ScalarValue) raises:
     _check_code(
         "scalar time unit", v.time_unit, v.time_unit <= SCALAR_TIME_UNIT_NANO
     )
-    _check_code("scalar error code", v.error_code, v.error_code <= XL_ERR_CIRCULAR)
+    _check_code(
+        "scalar error code", v.error_code, v.error_code <= EXCEL_ERROR_CODE_LAST
+    )
 
 
 def _check_count(what: String, n: Int) raises:

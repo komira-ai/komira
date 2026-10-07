@@ -5998,7 +5998,7 @@ def _wire_enum_members() -> List[String]:
     r.append(String("ColSide|0,1,2,3"))
     r.append(String("CorrelatedKind|0,1,2,3,4"))
     r.append(String("DTypeCode|0,1,2,3,4,5,6,7,8,9,10,11,12"))
-    r.append(String("ExcelErrorCode|0,1,2,3,4,5,6,7,8,9,10,11"))
+    r.append(String("ExcelErrorCode|0,1,2,3,4,5,6,7,8,9,10"))
     r.append(String("ExtractField|0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,17,18,19,20,21,22,23,24,25,26"))
     r.append(String("FrameBound|0,1,2,3,4,5"))
     r.append(String("FrameUnits|0,1,2"))

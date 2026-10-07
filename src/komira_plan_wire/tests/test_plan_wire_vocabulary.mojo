@@ -159,7 +159,7 @@ def test_countless_space_totals_are_pinned() raises:
     # or this library's build goes red. If this line collides in a merge,
     # ⛔ DO NOT PICK A SIDE — both sides' numbers are wrong; re-run the
     # generator over the MERGED sources and read the constant.
-    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 365, "total published members")
+    assert_equal(PLAN_WIRE_VOCABULARY_MEMBERS, 364, "total published members")
     assert_equal(AGG_FN_WIRE_MEMBERS, 37, "AGG_* has no engine count constant")
     assert_equal(PLAN_WIRE_SPACE_COUNT, 33, "enumerated tag spaces")
     # ArrowType has no engine count constant either, and it is the space LEG 2

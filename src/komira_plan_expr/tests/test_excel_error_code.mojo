@@ -2,8 +2,8 @@
 # test_excel_error_code.mojo: the Excel error-code space, every member.
 # =============================================================================
 #
-# `excel_error_code.mojo` declares eleven codes (`XL_ERR_NONE` = 0 through
-# `XL_ERR_CIRCULAR` = 10), and the plan wire publishes the same eleven
+# `excel_error_code.mojo` declares ten codes (`XL_ERR_NONE` = 0 through
+# `XL_ERR_CALC` = 9), and the plan wire publishes the same ten
 # (`ExcelErrorCode`, wire = code + 1). This file holds both helpers that turn a
 # code into what a user sees and back, for every member:
 #
@@ -16,16 +16,13 @@
 # seven only. `#SPILL!` and `#CALC!` are the dynamic-array errors. Each is written below as
 # a literal, so changing a spelling in the code is a change to this table.
 #
-# TWO CODES HAVE NO EXCEL LITERAL, and the table says so rather than skipping
-# them:
-#   XL_ERR_NONE      is "not an error". It renders as the unrecognised-code
-#                    fallback `#ERR?`, which parses back as `#NAME?`.
-#   XL_ERR_CIRCULAR  is engine-internal: Excel reports a circular reference as
-#                    a warning, not as an error value, so there is no literal
-#                    for it. Its display text `#CIRCULAR!` is not something a
-#                    formula can carry, and it parses back as `#NAME?` (an
-#                    unknown `#token`). The round trip below excludes it on
-#                    purpose and pins what it does instead.
+# ONE CODE HAS NO EXCEL LITERAL, and the table says so rather than skipping
+# it: XL_ERR_NONE is "not an error". It renders as the unrecognised-code
+# fallback `#ERR?`, which parses back as `#NAME?`. The round trip below
+# excludes it on purpose and pins what it does instead.
+#
+# EVERY OTHER CODE IS ONE OF MICROSOFT'S. There is no circular-reference code:
+# Excel reports a circular reference as a warning, not as an error value.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -41,7 +38,7 @@ from komira_plan_expr.excel_error_code import (
     XL_ERR_NULL,
     XL_ERR_SPILL,
     XL_ERR_CALC,
-    XL_ERR_CIRCULAR,
+    EXCEL_ERROR_CODE_LAST,
     excel_error_text,
     excel_error_code_from_literal,
 )
@@ -56,7 +53,7 @@ struct _Row(Copyable, Movable, ImplicitlyCopyable):
 
 
 def _table() -> List[_Row]:
-    """The eleven codes, in code order, each with the spelling Excel uses."""
+    """The ten codes, in code order, each with the spelling Excel uses."""
     var t = List[_Row]()
     t.append(_Row(XL_ERR_NONE, String("XL_ERR_NONE"), String("#ERR?"), False))
     t.append(_Row(XL_ERR_DIV0, String("XL_ERR_DIV0"), String("#DIV/0!"), True))
@@ -68,16 +65,20 @@ def _table() -> List[_Row]:
     t.append(_Row(XL_ERR_NULL, String("XL_ERR_NULL"), String("#NULL!"), True))
     t.append(_Row(XL_ERR_SPILL, String("XL_ERR_SPILL"), String("#SPILL!"), True))
     t.append(_Row(XL_ERR_CALC, String("XL_ERR_CALC"), String("#CALC!"), True))
-    t.append(_Row(XL_ERR_CIRCULAR, String("XL_ERR_CIRCULAR"), String("#CIRCULAR!"), False))
     return t^
 
 
 def test_the_table_is_the_whole_space_in_code_order() raises:
-    """The table holds eleven rows and row i is code i, so every test below
-    walks every code. Without this, a table that skipped a code would leave it
-    untested and every assertion would still pass."""
+    """The table holds ten rows and row i is code i, so every test below
+    walks every code; and the last row is `EXCEL_ERROR_CODE_LAST`, the bound
+    the pplan codec range-checks against. Without this, a table that skipped a
+    code would leave it untested and every assertion would still pass."""
     var t = _table()
-    assert_equal(len(t), 11, "the space has eleven codes, NONE through CIRCULAR")
+    assert_equal(len(t), 10, "the space has ten codes, NONE through CALC")
+    assert_equal(
+        Int(EXCEL_ERROR_CODE_LAST), len(t) - 1,
+        "EXCEL_ERROR_CODE_LAST is not the last code of the space",
+    )
     for i in range(len(t)):
         assert_equal(
             Int(t[i].code), i,
@@ -87,7 +88,7 @@ def test_the_table_is_the_whole_space_in_code_order() raises:
 
 
 def test_every_code_renders_its_excel_spelling() raises:
-    """`excel_error_text` for each of the eleven codes. Catches a swapped or
+    """`excel_error_text` for each of the ten codes. Catches a swapped or
     misspelled arm (`#DIV/0` without `!`, `#NAME!` for `#NAME?`)."""
     var t = _table()
     for i in range(len(t)):
@@ -98,8 +99,10 @@ def test_every_code_renders_its_excel_spelling() raises:
 
 
 def test_codes_outside_the_space_render_the_fallback() raises:
-    """One past CIRCULAR, and the top of a UInt8, are not codes; both render
-    the fallback rather than some member's text."""
+    """One past CALC (10, which was a circular-reference code and is not one
+    any more), 11, and the top of a UInt8 are not codes; all render the
+    fallback rather than some member's text."""
+    assert_equal(excel_error_text(UInt8(10)), "#ERR?")
     assert_equal(excel_error_text(UInt8(11)), "#ERR?")
     assert_equal(excel_error_text(UInt8(255)), "#ERR?")
 
@@ -150,16 +153,12 @@ def test_literal_to_code_to_text_round_trips() raises:
         )
 
 
-def test_the_two_codes_without_a_literal_parse_as_name() raises:
-    """NONE and CIRCULAR render text that is not an Excel literal, so parsing
-    that text gives `#NAME?`, the code for an unknown `#token`. Pinned so that
-    giving either one a literal is a deliberate change to this test."""
+def test_the_code_without_a_literal_parses_as_name() raises:
+    """NONE renders text that is not an Excel literal, so parsing that text
+    gives `#NAME?`, the code for an unknown `#token`. Pinned so that giving it
+    a literal is a deliberate change to this test."""
     assert_equal(
         Int(excel_error_code_from_literal(excel_error_text(XL_ERR_NONE))),
-        Int(XL_ERR_NAME),
-    )
-    assert_equal(
-        Int(excel_error_code_from_literal(excel_error_text(XL_ERR_CIRCULAR))),
         Int(XL_ERR_NAME),
     )
 
@@ -181,6 +180,6 @@ def main() raises:
     suite.test[test_the_spellings_are_distinct]()
     suite.test[test_every_excel_literal_parses_to_its_code]()
     suite.test[test_literal_to_code_to_text_round_trips]()
-    suite.test[test_the_two_codes_without_a_literal_parse_as_name]()
+    suite.test[test_the_code_without_a_literal_parses_as_name]()
     suite.test[test_unknown_tokens_parse_as_name]()
     suite^.run()

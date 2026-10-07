@@ -35,7 +35,12 @@ comptime XL_ERR_NUM: UInt8 = 6        # #NUM!
 comptime XL_ERR_NULL: UInt8 = 7       # #NULL!
 comptime XL_ERR_SPILL: UInt8 = 8      # #SPILL!   (dynamic-array collision)
 comptime XL_ERR_CALC: UInt8 = 9       # #CALC!    (empty dynamic array)
-comptime XL_ERR_CIRCULAR: UInt8 = 10  # circular reference (recalc layer — deferred)
+
+# The last code of the space: every code is `<= EXCEL_ERROR_CODE_LAST`, so a
+# range check against it is a membership check. Not `XL_ERR_`-prefixed on
+# purpose: it names a bound, not a member, and `XL_ERR_` is the engine prefix
+# the plan wire vocabulary (`ExcelErrorCode`) maps member by member.
+comptime EXCEL_ERROR_CODE_LAST: UInt8 = XL_ERR_CALC
 
 
 # --- The columnar 3-state STATUS lane. ---
@@ -84,9 +89,6 @@ def _write_excel_error_text[W: Writer](mut writer: W, code: UInt8):
     if code == XL_ERR_CALC:
         writer.write(String("#CALC!"))
         return
-    if code == XL_ERR_CIRCULAR:
-        writer.write(String("#CIRCULAR!"))
-        return
     writer.write(String("#ERR?"))
     return
 
@@ -106,8 +108,7 @@ def excel_error_text(code: UInt8) -> String:
 def excel_error_code_from_literal(text: String) -> UInt8:
     """Map an error LITERAL as written in a formula (`#DIV/0!`, `#N/A`, ...) to
     its code. Every code with an Excel literal has an arm (nine: all but
-    XL_ERR_NONE and XL_ERR_CIRCULAR), so literal -> code -> text is the
-    identity. Returns XL_ERR_NAME for an unrecognized `#...` token (Excel treats
+    XL_ERR_NONE), so literal -> code -> text is the identity. Returns XL_ERR_NAME for an unrecognized `#...` token (Excel treats
     an unknown `#name` as a name error)."""
     if text == String("#DIV/0!"):
         return XL_ERR_DIV0
@@ -127,8 +128,6 @@ def excel_error_code_from_literal(text: String) -> UInt8:
         return XL_ERR_SPILL
     if text == String("#CALC!"):
         return XL_ERR_CALC
-    # XL_ERR_CIRCULAR has no literal: Excel reports a circular reference as a
-    # warning, not as an error value a formula can carry.
     return XL_ERR_NAME
 
 

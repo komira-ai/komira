@@ -56,7 +56,7 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 365
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 364
 """Total published members across all 33 spaces. A drift tripwire a test can pin."""
 
 comptime PLAN_WIRE_SPACE_COUNT: Int = 33
@@ -3604,19 +3604,19 @@ def scalar_time_unit_wire_name(wire: Int32) -> String:
 # Declared in: src/komira_plan_expr/excel_error_code.mojo
 # ==========================================================================
 
-comptime EXCEL_ERROR_CODE_WIRE_MEMBERS: Int = 11
+comptime EXCEL_ERROR_CODE_WIRE_MEMBERS: Int = 10
 comptime EXCEL_ERROR_CODE_ENGINE_MIN: UInt8 = 0
-comptime EXCEL_ERROR_CODE_ENGINE_MAX: UInt8 = 10
+comptime EXCEL_ERROR_CODE_ENGINE_MAX: UInt8 = 9
 comptime EXCEL_ERROR_CODE_WIRE_MIN: Int32 = 1
-comptime EXCEL_ERROR_CODE_WIRE_MAX: Int32 = 11
+comptime EXCEL_ERROR_CODE_WIRE_MAX: Int32 = 10
 
 
 def excel_error_code_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this ExcelErrorCode value?
 
-    Runs: [(0, 10)]. Total, never raising.
+    Runs: [(0, 9)]. Total, never raising.
     """
-    return engine_tag <= 10
+    return engine_tag <= 9
 
 
 def excel_error_code_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -3693,9 +3693,6 @@ def write_excel_error_code_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 10:
         writer.write("XL_ERR_CALC")
-        return
-    if wire == 11:
-        writer.write("XL_ERR_CIRCULAR")
         return
     writer.write("ExcelErrorCode#", Int(wire))
 
@@ -4243,7 +4240,7 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
     if space == 28:
         return 4
     if space == 29:
-        return 11
+        return 10
     if space == 30:
         return 6
     if space == 31:
@@ -4314,7 +4311,7 @@ def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     if space == 28:
         return 3
     if space == 29:
-        return 10
+        return 9
     if space == 30:
         return 5
     if space == 31:
