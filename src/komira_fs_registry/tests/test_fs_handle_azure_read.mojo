@@ -211,9 +211,9 @@ def test_the_production_arm() raises:
     )
     assert_false(_prod_is_tls(_emulator(EMULATOR)), "an http:// endpoint dials TLS")
     with assert_raises(
-        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'ftp://x'"
+        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'ftp://x.test'"
     ):
-        _ = _prod_is_tls(_emulator("ftp://x"))
+        _ = _prod_is_tls(_emulator("ftp://x.test"))
     with assert_raises(contains="fs_registry: 'Lake' is not an Azure container name"):
         _ = azure_prod_arm("Lake", AzureArmConfig.azure("myacct"), AzureCredential.anonymous())
     with assert_raises(
