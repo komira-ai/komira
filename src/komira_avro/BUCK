@@ -24,6 +24,7 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_avro_accumulator_growth.mojo",
         "tests/test_avro_all_primitive_types_decode.mojo",
         "tests/test_avro_arrow_logical_round_trip.mojo",
         "tests/test_avro_binary_builder_micro_ab.mojo",
@@ -32,6 +33,7 @@ mojo_library(
         "tests/test_avro_codec_matrix.mojo",
         "tests/test_avro_comptime_shape_kind_decode.mojo",
         "tests/test_avro_data_level_decode.mojo",
+        "tests/test_avro_hostile_input_regressions.mojo",
         "tests/test_avro_json_string_branches.mojo",
         "tests/test_avro_lineitem_decode_roundtrip.mojo",
         "tests/test_avro_logical_types_decode.mojo",
