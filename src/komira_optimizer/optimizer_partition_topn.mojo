@@ -252,6 +252,11 @@ def _collect_unsafe_window_cols(
             new_ancestor.add(key)
         for key in plan._join.value()[].right_on:
             new_ancestor.add(key)
+        # A residual predicate reads columns of either side.
+        if plan._join.value()[].residual:
+            _collect_expr_columns(
+                plan._join.value()[].residual.value()[], new_ancestor
+            )
         _collect_unsafe_window_cols(
             plan._join.value()[].left[], new_ancestor, unsafe_cols
         )

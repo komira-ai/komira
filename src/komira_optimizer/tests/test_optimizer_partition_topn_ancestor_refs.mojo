@@ -11,17 +11,21 @@
 # Every plan is built in memory; no file is read.
 # =============================================================================
 
+from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal
 
 from komira_arrow.schema import SchemaBuilder, Field
 from komira_arrow.arrow_types import ArrowType
 
-from komira_plan_expr.expr import Expr, BIN_LE, BIN_GE
+from komira_plan_expr.expr import Expr, BIN_LE, BIN_GE, BIN_GT
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
+    JOIN_INNER,
+    JOIN_ALGO_AUTO,
     PLAN_FILTER,
+    PLAN_JOIN,
     PLAN_PARTITION_BY,
     PLAN_PARTITION_TOPN,
 )
@@ -179,6 +183,58 @@ def test_outer_partition_topn_sorted_on_the_rank_emits_it() raises:
     var out = fuse_partition_topn(plan^)
     assert_equal(Int(out.tag), Int(PLAN_PARTITION_TOPN))
     _assert_emits(out._partition_topn.value()[].child[], rk, "topn sort key")
+
+
+# =============================================================================
+# A Join whose residual predicate reads the window column
+# =============================================================================
+
+
+def _other_side() raises -> LogicalPlan:
+    """An in-memory Scan(q INT64, w INT64)."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("q", ArrowType.INT64, False))
+    sb.add_field(Field("w", ArrowType.INT64, False))
+    return LogicalPlan.scan(String("__other"), UInt8(3), sb.build())
+
+
+def _residual(rk: String) -> Optional[OwnedPointer[Expr]]:
+    """`rk > w`."""
+    return Optional(
+        OwnedPointer(Expr.binary(BIN_GT, Expr.col_ref(rk), Expr.col_ref("w")))
+    )
+
+
+def test_join_residual_on_the_rank_left_emits_it() raises:
+    """`Join(on pid = q, residual rk > w)` with the fusable Filter on the
+    left. Catches the Join arm adding only `left_on` / `right_on`."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var lo: List[String] = ["pid"]
+    var ro: List[String] = ["q"]
+    var plan = LogicalPlan.join(
+        _fusable(rk, pb^), _other_side(), lo^, ro^, JOIN_INNER,
+        JOIN_ALGO_AUTO, _residual(rk),
+    )
+    var out = fuse_partition_topn(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_JOIN))
+    _assert_emits(out._join.value()[].left[], rk, "join left")
+
+
+def test_join_residual_on_the_rank_right_emits_it() raises:
+    """The same Join with the fusable Filter on the right. Catches a
+    residual's columns reaching one side only."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var lo: List[String] = ["q"]
+    var ro: List[String] = ["pid"]
+    var plan = LogicalPlan.join(
+        _other_side(), _fusable(rk, pb^), lo^, ro^, JOIN_INNER,
+        JOIN_ALGO_AUTO, _residual(rk),
+    )
+    var out = fuse_partition_topn(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_JOIN))
+    _assert_emits(out._join.value()[].right[], rk, "join right")
 
 
 def main() raises:
