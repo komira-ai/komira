@@ -9,6 +9,7 @@ tools/build/tests/run_tests.sh                 # all tests
 tools/build/tests/run_tests.sh --no-umbrella   # skip test 7 (four scratch checkouts)
 tools/build/tests/run_tests.sh --no-run        # skip test 9 (a scratch clone)
 tools/build/tests/run_tests.sh --no-uncached   # skip the uncached half of test 15
+tools/build/tests/run_tests.sh --require-install   # 33a/33b install cases FAIL, not SKIP, without pixi or network
 ```
 
 It prints one `PASS`, `FAIL` or `SKIP` line per test, then the directory
@@ -646,8 +647,16 @@ isolation directory (skipped with `--no-uncached`); and a `pixi` project whose
 channel is the built file served from `file://` installs it, with the compiler
 from Modular's `max` channel, and `mojo run` of a program importing it prints
 the right bytes, while the same project without it cannot (skipped with
-`--no-install`, without `pixi`, or without network). See
-[packaging/conda](../../../packaging/conda/README.md).
+`--no-install`, without `pixi`, or without network; with `--require-install`,
+the nightly workflow's flag, a missing `pixi` or network is a FAIL line). The
+switch is [`install_gate.sh`](functional/install_gate/install_gate.sh), and
+`tests//functional/install_gate:cases` holds it, on PATHs it makes: no `pixi`
+gives `SKIP  conda install (no pixi)`, and with the flag
+`FAIL  conda install: --require-install, but it cannot run (no pixi)`. Each
+script calls the gate before any build, so the target also runs conda.sh and
+conda_set.sh themselves with no `pixi` and no `curl` on PATH: with the flag each
+prints its own FAIL line and exits 1, without it its first line is its SKIP
+line. See [packaging/conda](../../../packaging/conda/README.md).
 
 ## 33b. Conda package set and metapackage
 
@@ -673,7 +682,7 @@ sha256 for every file of every package and of the metapackage made from each
 run (`--no-uncached` skips); and `pixi` installs ONLY the metapackage from a
 `file://` channel of the set, the solver brings every library and the compiler,
 and a program importing two libraries prints the right bytes (`--no-install`, no
-`pixi` or no network skips). See
+`pixi` or no network skips; a FAIL with `--require-install`, as in 33a). See
 [packaging/conda](../../../packaging/conda/README.md).
 
 ## 33. Client
@@ -930,8 +939,10 @@ because earlier dates in this tree are data), a home directory naming a
 person, a private, shared or link-local address or any address written with
 a port, a URL host that is neither a reserved example name nor under a domain
 of [`tests/public_boundary_hosts.tsv`](../../../tests/public_boundary_hosts.tsv),
-an email address outside the reserved example domains, and a commit id in
-prose. Binary data and upstream bytes are not read. Its reader is
+an email address outside the reserved example domains (the user of a URL
+right after `://` is none when its host is under a domain of the hosts ledger,
+such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
+host it is read), and a commit id in prose. Binary data and upstream bytes are not read. Its reader is
 [`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
 matches and what it cannot see (vocabulary is no shape); its action is
 [`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must

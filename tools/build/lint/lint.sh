@@ -56,11 +56,11 @@
 #       the cell, as Buck2 lists the root package's subpackages) is
 #       <root>/<name>, or a test-only package <root>/tests/<kind>/<name> with
 #       <kind> e2e (a <name> ending _e2e or _loopback), conformance (ending
-#       _conformance) or support (neither). So a *_e2e, *_loopback or
+#       _conformance) or helpers (neither). So a *_e2e, *_loopback or
 #       *_conformance package anywhere else under <root> is a finding, and
 #       so is a komira_test_* package directly under <root> that <shipped>
 #       (`-` or a comma-separated list of names) does not name: a test
-#       harness komira does not ship is under <root>/tests/support. A
+#       harness komira does not ship is under <root>/tests/helpers. A
 #       <shipped> name that is no package directly under <root> is a finding
 #       too. Findings name a package <cell prefix><package>. Checks nothing,
 #       so fails, when no <package> is under <root>.
@@ -259,7 +259,7 @@ src_layout)
         function kind(name) {
             if (name ~ /_(e2e|loopback)$/) return "e2e"
             if (name ~ /_conformance$/) return "conformance"
-            return "support"
+            return "helpers"
         }
         BEGIN { split(shipped_list, a, ","); for (i in a) if (a[i] != "-") ship[a[i]] = 1 }
         index($0, root "/") != 1 { next }
@@ -268,8 +268,8 @@ src_layout)
             at = pre $0
             n = split(substr($0, length(root) + 2), p, "/")
             if (p[1] == "tests") {
-                if (n != 3 || (p[2] != "e2e" && p[2] != "conformance" && p[2] != "support"))
-                    print at ": " root "/tests holds packages only at " root "/tests/<kind>/<name>, <kind> e2e, conformance or support"
+                if (n != 3 || (p[2] != "e2e" && p[2] != "conformance" && p[2] != "helpers"))
+                    print at ": " root "/tests holds packages only at " root "/tests/<kind>/<name>, <kind> e2e, conformance or helpers"
                 else if (kind(p[3]) != p[2])
                     print at ": a package under " root "/tests/" p[2] " is " (p[2] == "e2e" ? "named *_e2e or *_loopback" : p[2] == "conformance" ? "named *_conformance" : "a harness, not named *_e2e, *_loopback or *_conformance") "; this one belongs in " root "/tests/" kind(p[3]) "/" p[3]
                 next
@@ -279,10 +279,10 @@ src_layout)
                 next
             }
             top[p[1]] = 1
-            if (kind(p[1]) != "support")
+            if (kind(p[1]) != "helpers")
                 print at ": a test-only package directly under " root "/, which holds what komira ships; move it to " root "/tests/" kind(p[1]) "/" p[1]
             else if (p[1] ~ /^komira_test_/ && !(p[1] in ship))
-                print at ": a test library directly under " root "/ that `shipped` does not name; a harness komira does not ship is " root "/tests/support/" p[1]
+                print at ": a test library directly under " root "/ that `shipped` does not name; a harness komira does not ship is " root "/tests/helpers/" p[1]
         }
         END {
             for (s in ship) if (!(s in top)) print "shipped names " s ", which is no package directly under " root "/; delete it"

@@ -59,7 +59,12 @@ email	tools/build/tests/functional/public_boundary/held_mojo.txt	3	a planted fin
 email	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/negative/public_boundary/held_plus.txt	3	a planted finding of test 44 (the public boundary lint)
 email	tools/build/tests/negative/public_boundary/plant_email.txt	1	a planted finding of test 44 (the public boundary lint)
-email	tools/build/tests/public_boundary_tests.sh	1	the findings test 44 expects, spelled out
+email	tools/build/tests/negative/public_boundary/plant_email_after_url.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_git_ssh_user.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_mailto.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_s3_user.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_url_path.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/public_boundary_tests.sh	6	the findings test 44 expects, spelled out
 home_path	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/functional/public_boundary/held_mojo.txt	4	a planted finding of test 44 (the public boundary lint)
 home_path	tools/build/tests/functional/public_boundary/upstream_c.txt	1	a planted finding of test 44 (the public boundary lint)
