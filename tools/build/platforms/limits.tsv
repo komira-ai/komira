@@ -8,7 +8,7 @@
 # needs a reason that starts `product:`. Delete a row in the PR that deletes its marker. Columns are tab-separated.
 id	retired_by	reason
 aws-lc-x86-64-linux	native-pr:8a	third_party/aws-lc/BUCK: the assembly lists are x86_64 ELF; aarch64 and Mach-O lists come with the spike
-coverage-linux-x86-64	never	product: coverage is a property of the source, not of a platform: tools/build/toolchains/kcov/BUCK and the kcov_* pins of tools/build/platforms/table.bzl: line coverage of the sources is measured once, on linux-x86_64, by kcov (ptrace and ELF/DWARF); another platform's builds are not measured
+coverage-linux-x86-64	never	product: coverage is a property of the source, not of a platform: tools/build/toolchains/kcov/BUCK and the kcov_* pins of tools/build/platforms/table.bzl: line coverage of the sources is measured once, on linux-x86_64, by kcov (ptrace and ELF/DWARF); tools/build/toolchains/llvm_branch/BUCK and the llvm_branch_* pins: branch coverage's LLVM pieces exist on linux-x86_64 only; another platform's builds are not measured
 cxx-toolchain-x86-64	native-pr:4	tools/build/toolchains/defs.bzl: the C/C++ toolchain is the linux-x86_64 one; one per row
 darwin-gate-runner	native-pr:2b	tools/build/toolchains/darwin/BUCK: the macOS gate runner is unpacked by a linux x86_64 tool
 darwin-host-census-test	native-pr:12	tools/build/tests/functional/darwin/BUCK: tests host identity, which PR 12 deletes
