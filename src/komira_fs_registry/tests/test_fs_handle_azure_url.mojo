@@ -198,6 +198,16 @@ def test_utf8_bounds() raises:
     _accepts("%7F", [0x7F])  # U+007F, DEL
     _refuses("%80")  # lone continuation byte, bottom of 80..BF
     _refuses("%BF")  # lone continuation byte, top of 80..BF
+    # The two rows above end the path, so the truncation check alone could
+    # refuse them. A stray continuation byte with more bytes after it must be
+    # refused too: at the start of a segment, in its middle, after a complete
+    # two-byte character, and followed by another continuation byte (a lead
+    # check that takes 80..BF as a two-byte lead accepts only that last one).
+    _refuses("%80abc")  # start of a segment
+    _refuses("a%BFb")  # middle of a segment
+    _refuses("%C3%A9%80x")  # after U+00E9, a complete two-byte character
+    _refuses("%80%80")
+    _refuses("%BF%80")
     # Lead bytes: C2 is the lowest two-byte lead (C0 and C1 only make
     # overlong forms), F4 the highest four-byte lead.
     _accepts("%C2%80", [0xC2, 0x80])  # U+0080
