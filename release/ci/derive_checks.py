@@ -29,7 +29,9 @@ THE DERIVATION. Every target of the universe that no declared target names
 (an exact label) or matches (a pattern `<cell>//<path>/...` or
 `<cell>//<path>:`) is put in its path group, and each group with such a target
 is a derived check naming the group's pattern: one check per library package
-`//src/<p>/...` (named `<p>`), `repo_root` (`//:`), `tools_<t>` for each
+`//src/<p>/...` (named `<p>`) and per test-only package
+`//src/tests/<kind>/<p>/...` (named `<p>`: src/tests is not a package but
+holds them by kind), `repo_root` (`//:`), `tools_<t>` for each
 `//tools/<t>/...`, `<d>` for any other top directory `//<d>/...`, and
 `functional_tests` (`tests//functional/...`). A name is one kci accepts,
 `[a-z][a-z0-9_]*`, whatever the directory is called: upper case becomes lower,
@@ -125,7 +127,9 @@ def check_name(label, taken=frozenset()):
     parts = pkg.split("/")
     if parts == [""]:
         return "repo_root"
-    if parts[0] == "src" and len(parts) > 1:
+    if parts[:2] == ["src", "tests"] and len(parts) > 3:
+        name = parts[3]
+    elif parts[0] == "src" and len(parts) > 1:
         name = parts[1]
     elif parts[0] == "tools" and len(parts) > 1:
         name = "tools_" + parts[1]
@@ -150,6 +154,11 @@ def group_pattern(label):
     parts = pkg.split("/")
     if parts == [""]:
         return "//:"
+    if parts[:2] == ["src", "tests"]:
+        # src/tests holds the test-only packages by kind: one group each.
+        if len(parts) > 3:
+            return "//src/tests/%s/%s/..." % (parts[2], parts[3])
+        return "//%s:" % "/".join(parts)
     if parts[0] in ("src", "tools"):
         if len(parts) == 1:
             return "//%s:" % parts[0]
@@ -241,6 +250,10 @@ SELFTEST = [
     ("//tools/Foo:t", [], "tools_foo"),
     ("//tools/9z:t", [], "tools_9z"),
     ("//src:t", [], "src"),
+    ("//src/tests/e2e/komira_x_e2e:t", [], "komira_x_e2e"),
+    ("//src/tests/support/komira_y/sub:t", [], "komira_y"),
+    ("//src/tests/e2e:t", [], "tests"),
+    ("//src/tests:t", [], "tests"),
     ("//:t", [], "repo_root"),
     ("tests//functional/x:t", [], "functional_tests"),
     ("//src/Komira_Up:t", ["komira_up"], "komira_up_package"),

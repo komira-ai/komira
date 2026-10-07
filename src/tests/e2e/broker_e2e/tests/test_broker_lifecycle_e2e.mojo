@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/broker_e2e/test_broker_lifecycle_e2e.mojo
+# src/tests/e2e/broker_e2e/tests/test_broker_lifecycle_e2e.mojo
 #   The broker lifecycle over a real on-disk store, phase by phase.
 # =============================================================================
 #

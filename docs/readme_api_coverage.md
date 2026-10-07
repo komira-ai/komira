@@ -23,7 +23,9 @@ that runs on the farm like the other lints; its tests are
 
 ## The rules
 
-**Public API.** A package is a directory directly under `src/`. Its public
+**Public API.** A package is a directory directly under `src/`, other than
+`src/tests/`, which holds the test-only packages: they publish no API, so the
+census skips them. Its public
 API is read from `src/<package>/__init__.mojo` only:
 
 - every name bound at column 0 by an import of the package's own modules:
@@ -123,15 +125,19 @@ flipping it, document the symbols or seed the ledger from `[symbols]` (its
 ## Census
 
 The census of 2026-10-06, `./buck2 build //:readme_api_coverage` on the farm
-over the tree this file lands with. Rebuild `[report]` for today's numbers.
+over the tree this file landed with, less the four test-only packages it
+counted that moved under `src/tests/` the same day (`komira_test_bucket`,
+`komira_test_minio`, `komira_test_s3_adapter`, `komira_http_tls_e2e`, which
+the census now skips): their rows are removed and the totals are that
+census's less theirs. Rebuild `[report]` for today's numbers.
 
-**Totals.** 178 packages; 6900 public symbols exported (3701 names, 3199
-methods); 228 used by a README example, **3.3%** (names 106, 2.9%; methods
-122, 3.8%); 0 excepted; 6672 undocumented.
+**Totals.** 174 packages; 6756 public symbols exported (3614 names, 3142
+methods); 228 used by a README example, **3.4%** (names 106, 2.9%; methods
+122, 3.9%); 0 excepted; 6528 undocumented.
 
-- 94 packages export something. 17 of them have README examples, 2 have a
+- 90 packages export something. 17 of them have README examples, 2 have a
   README with no `mojo` example (`komira_core`, `komira_secret_env`),
-  and **75 have no README** (0%; 6162 of the 6672 undocumented symbols).
+  and **71 have no README** (0%; 6018 of the 6528 undocumented symbols).
 - 49 packages have an `__init__.mojo` that exports nothing (their API is
   their submodules, which v1 does not count): `komira_agg` (no-example), `komira_agg_contract` (no-example), `komira_arrow` (no-example), `komira_arrow_ipc` (no-example), `komira_async`, `komira_buffer` (no-example), `komira_collections` (examples:4), `komira_column_format`, `komira_column_kernels` (no-example), `komira_compression` (no-example), `komira_concurrency` (no-example), `komira_core_ffi`, `komira_counters` (examples:2), `komira_dynamic_filter` (no-example), `komira_eval` (no-example), `komira_exec_types` (no-example), `komira_expr` (no-example), `komira_fs`, `komira_gcp_firestore`, `komira_host` (examples:3), `komira_http_core`, `komira_http_server`, `komira_join_assembly` (no-example), `komira_json_index` (no-example), `komira_kafka_server` (examples:3), `komira_kernels`, `komira_libc` (no-example), `komira_lz4`, `komira_metrics`, `komira_morsel`, `komira_net`, `komira_op_agg_row_api`, `komira_op_agg_state`, `komira_plan_expr` (no-example), `komira_plan_ir` (no-example), `komira_plan_stats` (no-example), `komira_row_format`, `komira_scalar_arith` (no-example), `komira_scan_planning`, `komira_scan_resolver`, `komira_scan_source` (no-example), `komira_shuffle`, `komira_simd` (examples:4), `komira_snapshotter`, `komira_spsc_ring`, `komira_table_store` (no-example), `komira_trace`, `komira_udf` (no-example), `komira_validation_run`.
 - 35 packages have no `__init__.mojo` (generated clients and protobuf
@@ -201,7 +207,6 @@ undocumented count:
 | `komira_csv` | none | 75 | 0 | 0.0% | 0/58 | 0/17 | 75 |
 | `komira_job_supervisor` | none | 73 | 0 | 0.0% | 0/34 | 0/39 | 73 |
 | `kci_cli` | none | 63 | 0 | 0.0% | 0/46 | 0/17 | 63 |
-| `komira_test_bucket` | none | 63 | 0 | 0.0% | 0/33 | 0/30 | 63 |
 | `komira_metrics_reader` | none | 62 | 0 | 0.0% | 0/31 | 0/31 | 62 |
 | `komira_viewport` | none | 59 | 0 | 0.0% | 0/33 | 0/26 | 59 |
 | `komira_plan_wire` | none | 57 | 0 | 0.0% | 0/52 | 0/5 | 57 |
@@ -216,7 +221,6 @@ undocumented count:
 | `komira_supervisor` | none | 38 | 0 | 0.0% | 0/13 | 0/25 | 38 |
 | `kci_params` | none | 37 | 0 | 0.0% | 0/32 | 0/5 | 37 |
 | `komira_service_registry` | none | 37 | 0 | 0.0% | 0/18 | 0/19 | 37 |
-| `komira_test_minio` | none | 37 | 0 | 0.0% | 0/21 | 0/16 | 37 |
 | `komira_gcp_wif` | none | 36 | 0 | 0.0% | 0/27 | 0/9 | 36 |
 | `kci_release_set` | none | 35 | 0 | 0.0% | 0/30 | 0/5 | 35 |
 | `komira_aws_lambda_http` | none | 35 | 0 | 0.0% | 0/29 | 0/6 | 35 |
@@ -226,7 +230,6 @@ undocumented count:
 | `komira_azure_core` | none | 31 | 0 | 0.0% | 0/9 | 0/22 | 31 |
 | `kci_release_channel` | none | 28 | 0 | 0.0% | 0/23 | 0/5 | 28 |
 | `komira_gcp_monitoring` | none | 28 | 0 | 0.0% | 0/23 | 0/5 | 28 |
-| `komira_test_s3_adapter` | none | 27 | 0 | 0.0% | 0/18 | 0/9 | 27 |
 | `komira_db_sqlite` | none | 23 | 0 | 0.0% | 0/1 | 0/22 | 23 |
 | `komira_log_query` | none | 22 | 0 | 0.0% | 0/17 | 0/5 | 22 |
 | `komira_aws_metrics` | none | 21 | 0 | 0.0% | 0/18 | 0/3 | 21 |
@@ -235,7 +238,6 @@ undocumented count:
 | `komira_fs_registry` | none | 19 | 0 | 0.0% | 0/9 | 0/10 | 19 |
 | `komira_pplan_wire` | none | 19 | 0 | 0.0% | 0/19 | 0/0 | 19 |
 | `komira_authz_api` | none | 17 | 0 | 0.0% | 0/5 | 0/12 | 17 |
-| `komira_http_tls_e2e` | none | 17 | 0 | 0.0% | 0/15 | 0/2 | 17 |
 | `kci_secret_writer` | none | 15 | 0 | 0.0% | 0/2 | 0/13 | 15 |
 | `komira_secret_env` | no-example | 14 | 0 | 0.0% | 0/7 | 0/7 | 14 |
 | `komira_secret_store` | none | 14 | 0 | 0.0% | 0/5 | 0/9 | 14 |

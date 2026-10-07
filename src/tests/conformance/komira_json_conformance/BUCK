@@ -80,7 +80,7 @@ mojo_library(
     ] + ["tests/test_{}.mojo".format(p) for p in _PARSERS],
     test_data = {
         "tests/test_{}.mojo".format(p): _SUITE | {
-            "src/komira_json_conformance/allowlists/{}.txt".format(p): "allowlists/{}.txt".format(p),
+            "src/tests/conformance/komira_json_conformance/allowlists/{}.txt".format(p): "allowlists/{}.txt".format(p),
         }
         for p in _PARSERS
     } | {"tests/test_abort_path.mojo": _SUITE},

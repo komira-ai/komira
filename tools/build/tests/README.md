@@ -861,7 +861,8 @@ the same README in a library with `conda = False`, builds.
 
 A test file that no target welds never runs, and nothing else notices.
 [`test_weld`](../lint/test_weld.bzl) is a lint over the packages under
-`src/` (each directory directly under it). It requires every `test_*.mojo`
+`src/` (each directory directly under it, and each `src/tests/<kind>/<name>`:
+`src/tests` holds the test-only packages and is not one itself). It requires every `test_*.mojo`
 under a `tests/` directory to be welded, and every package with a `.mojo`
 source to weld a test. What is welded is read from the build graph, not from
 the text of a BUCK file: the `test_srcs` of every `mojo_library` and the
@@ -880,7 +881,9 @@ in the root [`BUCK`](../../../BUCK) holds the repository to them.
 [`functional/test_weld:ok`](functional/test_weld/BUCK) is a planted tree
 ([`fixture.bzl`](functional/test_weld/fixture.bzl): a computed `test_srcs`
 list holding an entry in a comment, a helper under `tests/`, a nested test, a
-test welded by a target of its own, a package with no `.mojo`) whose ledger
+test welded by a target of its own, a package with no `.mojo`, and under
+`src/tests/` a test-only package that welds its test and one that has a
+ledger row by its path, `src/tests/support/komira_e`) whose ledger
 holds it exactly, and each target of
 [`negative/test_weld`](negative/test_weld/BUCK) plants one defect in the same
 tree and must fail naming it; `shrink_computed` is a ledger row for a test
@@ -912,7 +915,8 @@ for each target above.
 A package's README examples are its smoke tests (test 38), so a public name
 no example uses is a public name nothing smoke-tests.
 [`readme_api_coverage`](../lint/readme_api_coverage.bzl) is a validation
-that counts, per package under `src/`, the public API its `__init__.mojo`
+that counts, per package under `src/` (not the test-only ones under
+`src/tests/`, which publish no API), the public API its `__init__.mojo`
 exports (and the public methods of the structs among it) and which of it the
 README's examples use, reading each README through the tool the gate runs, so
 hidden lines count and prose does not. It writes the census (`[packages]`,
@@ -972,6 +976,33 @@ tools/build/tests/functional/coverage_keys.sh
 ./buck2 build tests//negative/coverage:abs_other       # must fail: holds an absolute path (/var/build/...
 ./buck2 build tests//negative/coverage:no_reldir       # must fail: no relative directory matching 'tests'
 ./buck2 build tests//functional/coverage:covlib -c komira.coverage=yes   # must fail at load
+```
+
+## 42. The layout of src/
+
+`src/` holds what komira ships, one package per directory; a package that
+exists only to test others is under `src/tests/`, by kind
+([architecture](../../../docs/architecture.md#end-to-end-tests)).
+[`src_layout`](../lint/defs.bzl) is a validation over the packages under
+`src/`: each is `src/<name>`, or `src/tests/<kind>/<name>` with kind `e2e`
+(named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `support`
+(neither). An `*_e2e`, `*_loopback` or `*_conformance` package directly under
+`src/` is a finding, and so is a `komira_test_*` one its `shipped` list does
+not name, a `shipped` name that is no package there, and any package not at
+one of the two places. `//:src_layout` in the root [`BUCK`](../../../BUCK)
+reads the packages from the build graph (the root package's subpackages, the
+nearest directories holding a BUCK file), so it is declared in every checkout
+and a new package is checked with no edit.
+[`functional/src_layout:ok`](functional/src_layout/BUCK) is a planted list
+([`fixture.bzl`](functional/src_layout/fixture.bzl): a package of each kind,
+a `*_loopback` under `e2e`, a shipped `komira_test_*`, a name holding `e2e`
+without ending in it, and an `*_e2e` package outside `src/`) that must pass;
+each target of [`negative/src_layout`](negative/src_layout/BUCK) adds one
+defect to it and must fail naming it.
+
+```sh
+./buck2 build //:src_layout tests//functional/src_layout:ok
+./buck2 build tests//negative/src_layout:top_e2e   # must fail: //src/komira_foo_e2e: a test-only package directly under src/
 ```
 
 ## Diagnostics

@@ -51,6 +51,19 @@
 #       that carries no YYYY-MM-DD date: a retired name survives only in a
 #       dated history note. Checks nothing, so fails, when the tree holds no
 #       file.
+#   kind "src_layout", args <root> <shipped> <cell prefix> <package>...
+#       <root> (src) holds what komira ships: each <package> (a package path in
+#       the cell, as Buck2 lists the root package's subpackages) is
+#       <root>/<name>, or a test-only package <root>/tests/<kind>/<name> with
+#       <kind> e2e (a <name> ending _e2e or _loopback), conformance (ending
+#       _conformance) or support (neither). So a *_e2e, *_loopback or
+#       *_conformance package anywhere else under <root> is a finding, and
+#       so is a komira_test_* package directly under <root> that <shipped>
+#       (`-` or a comma-separated list of names) does not name: a test
+#       harness komira does not ship is under <root>/tests/support. A
+#       <shipped> name that is no package directly under <root> is a finding
+#       too. Findings name a package <cell prefix><package>. Checks nothing,
+#       so fails, when no <package> is under <root>.
 #   kind "doc_links", tools <inspect runnable dir>, args <tree> <unchecked> [<path> <tree>]...
 #       Every relative link and #anchor in every .md file under <tree> resolves
 #       to a file, directory or heading under <tree>, with each further tree
@@ -199,6 +212,45 @@ retired_names)
     done
     grep -vE '[0-9]{4}-[0-9]{2}-[0-9]{2}' "$T/rn.txt" |
         sed 's#$# -- a retired name; only a dated history note may keep it#' >> "$REPORT" || true
+    ;;
+src_layout)
+    [ "$1" = -- ] && shift
+    root=$1 shipped=$2 cell=$3
+    shift 3
+    printf '%s\n' "$@" | awk -v root="$root" -v pre="$cell" -v shipped_list="$shipped" -v out="$T/sl_checked" '
+        function kind(name) {
+            if (name ~ /_(e2e|loopback)$/) return "e2e"
+            if (name ~ /_conformance$/) return "conformance"
+            return "support"
+        }
+        BEGIN { split(shipped_list, a, ","); for (i in a) if (a[i] != "-") ship[a[i]] = 1 }
+        index($0, root "/") != 1 { next }
+        {
+            checked++
+            at = pre $0
+            n = split(substr($0, length(root) + 2), p, "/")
+            if (p[1] == "tests") {
+                if (n != 3 || (p[2] != "e2e" && p[2] != "conformance" && p[2] != "support"))
+                    print at ": " root "/tests holds packages only at " root "/tests/<kind>/<name>, <kind> e2e, conformance or support"
+                else if (kind(p[3]) != p[2])
+                    print at ": a package under " root "/tests/" p[2] " is " (p[2] == "e2e" ? "named *_e2e or *_loopback" : p[2] == "conformance" ? "named *_conformance" : "a harness, not named *_e2e, *_loopback or *_conformance") "; this one belongs in " root "/tests/" kind(p[3]) "/" p[3]
+                next
+            }
+            if (n != 1) {
+                print at ": a package is " root "/<name> (what komira ships) or " root "/tests/<kind>/<name> (test-only)"
+                next
+            }
+            top[p[1]] = 1
+            if (kind(p[1]) != "support")
+                print at ": a test-only package directly under " root "/, which holds what komira ships; move it to " root "/tests/" kind(p[1]) "/" p[1]
+            else if (p[1] ~ /^komira_test_/ && !(p[1] in ship))
+                print at ": a test library directly under " root "/ that `shipped` does not name; a harness komira does not ship is " root "/tests/support/" p[1]
+        }
+        END {
+            for (s in ship) if (!(s in top)) print "shipped names " s ", which is no package directly under " root "/; delete it"
+            print checked + 0 > out
+        }' >> "$REPORT"
+    checked=$(cat "$T/sl_checked")
     ;;
 doc_links)
     INSPECT=$(abs "$1"); shift
