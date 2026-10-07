@@ -7,7 +7,9 @@ environment overlaid on this process's own, and a working directory) with
 `drain_pipe` reads one to end of file, `wait_exit` reaps the child into an
 `ExitInfo` (exit code, signal, and the shell's `128 + signal` code), and
 `terminate(grace_ms)` sends SIGTERM, waits up to the grace period, then
-sends SIGKILL. A reaped child leaves no zombie, and a second `terminate`
+sends SIGKILL. Signals go to the child's pid, not to a process group, so a
+grandchild the child spawned itself is not signalled (with a shell command,
+`exec` the last command to make it the signalled process). A reaped child leaves no zombie, and a second `terminate`
 returns the cached result. `watch_process_exit` makes a child's exit a
 reactor event (`pidfd` on Linux, `EVFILT_PROC` on macOS) instead of a SIGCHLD
 handler; `spawn_detached` starts a long-lived child that
@@ -66,7 +68,7 @@ Stop a long-running child:
 from komira_supervisor import ChildSpec, SIGTERM, Supervisor
 
 var sup = Supervisor()
-assert_true(sup.spawn(ChildSpec.shell("sleep 30")) > 0)
+assert_true(sup.spawn(ChildSpec.shell("exec sleep 30")) > 0)
 var info = sup.terminate(2000)  # SIGTERM; SIGKILL only if still alive after 2 s
 assert_equal(info.signal, SIGTERM)
 assert_equal(info.shell_code, 143)  # 128 + SIGTERM

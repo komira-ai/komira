@@ -16,7 +16,11 @@ The metrics model for code that runs on a fixed set of worker threads.
   delta export sweep, and the EXPLAIN ANALYZE collector and text renderer.
 
 It does not export anything over a network and holds no process-global
-registry: the embedder constructs a `MetricsSet` and hands it on by reference.
+metric registry: the embedder constructs a `MetricsSet` and hands it on by
+reference. The one piece of process-global state is the EXPLAIN ANALYZE
+collector (`explain_analyze_collect`): a slot table plus an armed flag kept
+in a small C file. It records only while a caller has armed it around one
+query, and costs one relaxed atomic load per instrumented point otherwise.
 `MetricsSet` is not movable (its slots hold atomics); put one behind an
 `OwnedPointer` with `new_owned_metrics_set` to store it in a field.
 

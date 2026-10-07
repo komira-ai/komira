@@ -65,13 +65,27 @@ assert_true("<redacted>" in text)
 assert_false('"empty"' in text)
 ```
 
-The facade, before any engine is installed, writes one line to stderr. This
-example only shows the calls; it does not check the line written:
+The facade, before any engine is installed, writes one line to stderr. The
+line is the format string with each `{}` replaced by the next positional
+argument, then every `Field` as `key=value`, after a timestamp, the level
+and the module. `interpolate` and `render_line` are the two functions the
+facade assembles it with, so the example checks the exact text the second
+call writes (with a fixed timestamp in place of the clock):
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 import komira_log as log
-from komira_log import ArgI64, ArgStr, Field
+from komira_log import ArgI64, ArgStr, Field, LEVEL_WARN
+from komira_log.pattern_layout import interpolate, render_line
 
 log.info["readme example {} started", "readme"](ArgStr("job-7"))
 log.warn["upload failed", "readme"](Field("attempt", ArgI64(3)))
+
+var message = interpolate("readme example {} started", [ArgStr("job-7").render()])
+assert_equal(message, "readme example job-7 started")
+var line = render_line(
+    Int64(1790812800000), LEVEL_WARN, "readme", "upload failed",
+    [Field("attempt", ArgI64(3)).render()],
+)
+assert_equal(line, "2026-10-01T00:00:00.000Z WARN [readme] upload failed attempt=3")
 ```

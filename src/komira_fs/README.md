@@ -70,18 +70,46 @@ assert_equal(encode_partition_value("", ArrowType.STRING), "__HIVE_DEFAULT_PARTI
 assert_equal(parse_partition_value("__HIVE_DEFAULT_PARTITION__", ArrowType.STRING), "")
 ```
 
-The local file system's synchronous probes:
+The local file system, in a temporary directory the example creates: write a
+file, probe it, read a range back, list the directory, then delete:
 
-<!-- mojo-hidden from std.testing import assert_true -->
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
 ```mojo
+from std.tempfile import mkdtemp
 from komira_async.ops.waker_sink import NoopSink
+from komira_fs.file_system import WriteMode
 from komira_fs.local_fs import LocalFs
 
 var fs = LocalFs[NoopSink].new()
-assert_true(fs.is_dir("/"))
+var root = mkdtemp(prefix="komira_fs_readme_")
+var path = root + "/hello.txt"
+
+var wf = fs.open_write(path, WriteMode.create_truncate())
+assert_equal(fs.write_at(wf, "hello, komira".as_bytes()), Int64(13))
+fs.close_write(wf^)
+
+assert_true(fs.is_dir(root))
+assert_false(fs.is_dir(path))
+assert_equal(fs.file_size(path), 13)
+
+var file = fs.open(path)
+var buf = fs.read_at(file, Int64(7), Int64(6))  # bytes [7, 13)
+assert_equal(buf.len(), 6)
+var view = buf.view_range_ro(0, 6)
+var got = view.into_span()
+var want = "komira".as_bytes()
+for i in range(6):
+    assert_equal(got[i], want[i])
+
+var listed = fs.list(root)
+assert_equal(len(listed), 1)
+assert_true(listed[0].endswith("hello.txt"))
+
+fs.delete(path)
+fs.delete(root)  # remove(3) takes an empty directory too
 var message = String()
 try:
-    _ = fs.is_dir("/komira-readme-no-such-dir")
+    _ = fs.is_dir(root)
 except e:
     message = String(e)
 assert_true("path not found" in message)
