@@ -3,11 +3,11 @@
 # refused by name.
 #
 # Rows: the local descriptor and a file descriptor map to FsHandle.FS_LOCAL;
-# an S3 descriptor maps to FsHandle.FS_S3; a GCS descriptor raises "no GCS arm
-# in this build" and an Azure one "no Azure arm in this build", each naming
-# the bucket; any other scheme code raises "unknown file system scheme";
-# fs_arm_tag_for_scheme resolves a core-package descriptor (the wire codec's
-# type) the same way.
+# an S3 descriptor maps to FsHandle.FS_S3 and an Azure one to
+# FsHandle.FS_AZURE; a GCS descriptor raises "no GCS arm in this build",
+# naming the bucket; any other scheme code raises "unknown file system
+# scheme"; fs_arm_tag_for_scheme resolves a core-package descriptor (the wire
+# codec's type) the same way.
 from std.testing import assert_equal, assert_raises
 
 from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod as CoreFsDescriptorPod
@@ -44,11 +44,12 @@ def test_gcs_descriptor_names_the_missing_arm() raises:
         _ = fs_arm_tag_for_descriptor(FsDescriptorPod.cloud(FS_SCHEME_GCS, "gbucket", 2))
 
 
-def test_azure_descriptor_names_the_missing_arm() raises:
-    with assert_raises(contains="no Azure arm in this build"):
-        _ = fs_arm_tag_for_descriptor(FsDescriptorPod.cloud(FS_SCHEME_AZURE, "box", 4))
-    with assert_raises(contains="bucket 'box', node 4"):
-        _ = fs_arm_tag_for_descriptor(FsDescriptorPod.cloud(FS_SCHEME_AZURE, "box", 4))
+def test_azure_descriptor_resolves_to_the_azure_arm() raises:
+    assert_equal(
+        fs_arm_tag_for_descriptor(FsDescriptorPod.cloud(FS_SCHEME_AZURE, "box", 4)),
+        FsHandle.FS_AZURE,
+    )
+    assert_equal(Int(FsHandle.FS_AZURE), 3)
 
 
 def test_unknown_scheme() raises:
@@ -63,6 +64,10 @@ def test_a_core_descriptor_resolves_by_its_scheme_code() raises:
     assert_equal(
         fs_arm_tag_for_scheme(local.scheme, local.bucket, local.node_id), FsHandle.FS_LOCAL
     )
+    var azure = CoreFsDescriptorPod.cloud(UInt8(3), "box", 6)
+    assert_equal(
+        fs_arm_tag_for_scheme(azure.scheme, azure.bucket, azure.node_id), FsHandle.FS_AZURE
+    )
     var gcs = CoreFsDescriptorPod.cloud(UInt8(2), "gbucket", 5)
     with assert_raises(contains="no GCS arm in this build (descriptor scheme 2, bucket 'gbucket', node 5)"):
         _ = fs_arm_tag_for_scheme(gcs.scheme, gcs.bucket, gcs.node_id)
@@ -71,7 +76,7 @@ def test_a_core_descriptor_resolves_by_its_scheme_code() raises:
 def main() raises:
     test_local_and_s3_descriptors()
     test_gcs_descriptor_names_the_missing_arm()
-    test_azure_descriptor_names_the_missing_arm()
+    test_azure_descriptor_resolves_to_the_azure_arm()
     test_unknown_scheme()
     test_a_core_descriptor_resolves_by_its_scheme_code()
     print("OK")

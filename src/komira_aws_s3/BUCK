@@ -27,8 +27,8 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # rows in the tests below; an operation joins the list with its tests. Of
 # S3's other operations, the generator refuses by name those reading
 # `Grantee`'s XML attribute (`xml-attribute`: GetBucketAcl,
-# GetBucketLogging, GetObjectAcl, RestoreObject), SelectObjectContent
-# (`eventstream`) and WriteGetObjectResponse (`host-prefix`).
+# GetBucketLogging, GetObjectAcl, RestoreObject) and SelectObjectContent
+# (`eventstream`).
 #
 # Left to the caller, which botocore does for S3 in handlers beyond the
 # model: SSE-C (`SSECustomerKey` is sent as given, so a caller passes it

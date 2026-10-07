@@ -23,8 +23,10 @@ pub mod path_template;
 pub mod plugin;
 pub mod retry_policy;
 pub mod routing_options;
+pub mod service_config;
 pub mod service_options;
 pub mod xml_equiv;
+pub mod yaml_subset;
 
 pub const FEATURE_PROTO3_OPTIONAL: u64 = 1;
 
@@ -83,6 +85,11 @@ pub struct PluginParameters {
     /// `.proto` is written as, in place of its basename's stem
     /// ([`lower::ModuleNames`]).
     pub module_names: lower::ModuleNames,
+    /// `service_config=<path>`: a service configuration YAML whose
+    /// `http.rules` and `name` are overlaid on the lowered model
+    /// ([`service_config::ServiceConfig::apply`]). `default_protocol=rest`
+    /// only.
+    pub service_config: Option<String>,
 }
 
 impl Default for PluginParameters {
@@ -95,6 +102,7 @@ impl Default for PluginParameters {
             layout_probe: false,
             gcp: false,
             module_names: lower::ModuleNames::new(),
+            service_config: None,
         }
     }
 }
@@ -139,11 +147,13 @@ impl PluginParameters {
                 "layout_probe" => p.layout_probe = parse_bool(k, v)?,
                 "gcp" => p.gcp = parse_bool(k, v)?,
                 "module_names" => p.module_names = parse_module_names(k, v)?,
+                "service_config" => p.service_config = Some(v.to_string()),
                 other => {
                     return Err(format!(
                         "unknown option `{other}` — expected one of: default_wire, \
                          default_protocol, package_prefix, roots, methods, \
-                         messages_only, omit_fields, layout_probe, gcp, module_names"
+                         messages_only, omit_fields, layout_probe, gcp, module_names, \
+                         service_config"
                     ))
                 }
             }
@@ -164,6 +174,9 @@ impl PluginParameters {
         }
         if !self.module_names.is_empty() {
             return Err(format!("{plugin} does not implement module_names"));
+        }
+        if self.service_config.is_some() {
+            return Err(format!("{plugin} does not implement service_config"));
         }
         Ok(())
     }
@@ -280,6 +293,21 @@ fn generate_scoped(
         );
     }
     check_module_names(&request.file_to_generate, &params.module_names)?;
+    let config_overlay = match &params.service_config {
+        Some(_) if mode != ProtocolMode::Rest => {
+            return Err(
+                "option `service_config` binds REST methods: it is read with \
+                 `default_protocol=rest` only"
+                    .to_string(),
+            )
+        }
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("option `service_config`: cannot read `{path}`: {e}"))?;
+            Some(service_config::ServiceConfig::parse(&text, path)?)
+        }
+        None => None,
+    };
     let mut model = lower::lower_scoped(
         &request.proto_file,
         &request.file_to_generate,
@@ -295,6 +323,10 @@ fn generate_scoped(
                 .host_for(&file.proto_package, &svc.name)
                 .map(str::to_string);
         }
+    }
+    // After the scope: a rule binds only what is generated.
+    if let Some(config) = &config_overlay {
+        config.apply(&mut model)?;
     }
     if mode == ProtocolMode::Rest {
         // Pre-validate every kept service so a streaming method, a missing
@@ -497,6 +529,39 @@ mod tests {
         assert_eq!(p.module_names.get("b/status.proto").map(String::as_str), Some("run_status"));
         assert_eq!(lower::module_stem("b/status.proto", &p.module_names), "run_status");
         assert_eq!(lower::module_stem("c/status.proto", &p.module_names), "status");
+    }
+
+    #[test]
+    fn service_config_is_a_path_only_protoc_gen_mojo_reads() {
+        let p = PluginParameters::parse("package_prefix=x,service_config=a/run_v2.yaml").unwrap();
+        assert_eq!(p.service_config.as_deref(), Some("a/run_v2.yaml"));
+        assert_eq!(
+            p.require_only_package_prefix("protoc-gen-mojo-db").unwrap_err(),
+            "protoc-gen-mojo-db does not implement service_config"
+        );
+        assert_eq!(PluginParameters::parse("package_prefix=x").unwrap().service_config, None);
+    }
+
+    #[test]
+    fn service_config_is_refused_outside_rest_and_unreadable() {
+        let request = |opt: &str| plugin::CodeGeneratorRequest {
+            file_to_generate: vec![],
+            parameter: Some(opt.to_string()),
+            proto_file: vec![],
+            compiler_version: None,
+        };
+        let err = generate(&request("default_protocol=grpc,service_config=a.yaml")).unwrap_err();
+        assert_eq!(
+            err,
+            "option `service_config` binds REST methods: it is read with \
+             `default_protocol=rest` only"
+        );
+        let err = generate(&request("default_protocol=rest,service_config=no/such.yaml"))
+            .unwrap_err();
+        assert!(
+            err.starts_with("option `service_config`: cannot read `no/such.yaml`: "),
+            "{err}"
+        );
     }
 
     #[test]
