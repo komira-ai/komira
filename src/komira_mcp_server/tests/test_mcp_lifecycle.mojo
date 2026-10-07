@@ -243,6 +243,19 @@ def test_request_id_rules() raises:
         '{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"Invalid Request"}}',
         "number params",
     )
+    # A null params is present and not structured, so it is refused too.
+    _expect(
+        s.handle('{"jsonrpc":"2.0","id":3,"method":"ping","params":null}'),
+        '{"jsonrpc":"2.0","id":3,"error":{"code":-32600,"message":"Invalid Request"}}',
+        "null params",
+    )
+    # The rule holds for a notification as well: scalar params make it an
+    # invalid request, answered with a null id.
+    _expect(
+        s.handle('{"jsonrpc":"2.0","method":"notifications/initialized","params":"bar"}'),
+        invalid,
+        "notification with string params",
+    )
     # Integer and string ids are echoed with their type.
     _expect(s.handle('{"jsonrpc":"2.0","id":-12,"method":"ping"}'), '{"jsonrpc":"2.0","id":-12,"result":{}}', "negative integer id")
     _expect(s.handle('{"jsonrpc":"2.0","id":"12","method":"ping"}'), '{"jsonrpc":"2.0","id":"12","result":{}}', "string id")

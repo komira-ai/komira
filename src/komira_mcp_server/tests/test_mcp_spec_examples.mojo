@@ -18,6 +18,10 @@
 #     is written here with id 5;
 #   - resources/templates/list answers an empty list rather than the
 #     example's one template, since there is no template seam.
+#   - initialize: the reply is checked member by member, and its
+#     capabilities are {"tools": {}, "resources": {}} (what this server
+#     serves) rather than the example's logging, prompts, resource
+#     subscribe/listChanged, tools listChanged and tasks.
 
 from std.testing import assert_equal, assert_true, assert_false
 
