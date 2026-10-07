@@ -6,9 +6,10 @@
 #     Timeout      -> "grpc-timeout" TimeoutValue TimeoutUnit
 #     TimeoutValue -> {positive integer as ASCII string of at most 8 digits}
 #     TimeoutUnit  -> "H" / "M" / "S" / "m" / "u" / "n"
-# Reject rules and reason texts follow grpc-go's `decodeTimeout`
+# The reject rules follow grpc-go's `decodeTimeout`
 # (internal/transport/http_util.go): shorter than 2 bytes, longer than 9, an
-# unknown unit, a non-digit value.
+# unknown unit, a non-digit value. The reason texts are komira's own; unlike
+# grpc-go's they do not echo the peer's value.
 #
 # What each case catches:
 #   units         a wrong multiplier for any of the six units.
@@ -16,7 +17,9 @@
 #   zero          a legal zero read as "no deadline" (it is already expired).
 #   malformed     each reject arm, with its exact reason, and that a
 #                 malformed value is never ABSENT (absent = unbounded call).
-#   find          absent header -> ABSENT; several fields -> the last.
+#   find          absent header -> ABSENT; several valid fields -> the last;
+#                 any malformed field -> MALFORMED even when a valid one
+#                 follows (grpc-go's operateHeaders keeps the error).
 #   content-type  only application/grpc and application/grpc+* are subject.
 #   deadline      arrival + timeout, expiry at `now >= deadline`, and
 #                 saturation for 99999999H (a wrap would expire at once).
@@ -118,6 +121,26 @@ def test_find() raises:
     var last_bad = find_grpc_timeout(_req([String("5S"), String("7x")]))
     assert_equal(
         Int(last_bad.state), Int(GRPC_TIMEOUT_MALFORMED), "last wins: malformed"
+    )
+    var bad_first = find_grpc_timeout(_req([String("7x"), String("5S")]))
+    assert_equal(
+        Int(bad_first.state),
+        Int(GRPC_TIMEOUT_MALFORMED),
+        "a malformed field wins over a later valid one",
+    )
+    assert_equal(
+        bad_first.error,
+        String("timeout unit is not recognized"),
+        "malformed then valid: reason",
+    )
+    assert_equal(bad_first.micros, 0, "malformed then valid: no duration")
+    var two_bad = find_grpc_timeout(
+        _req([String("S"), String("5S"), String("7x")])
+    )
+    assert_equal(
+        two_bad.error,
+        String("timeout unit is not recognized"),
+        "several malformed fields: the last one's reason",
     )
 
 

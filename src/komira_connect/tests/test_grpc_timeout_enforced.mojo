@@ -29,7 +29,9 @@
 #   T4  0S: DEADLINE_EXCEEDED, the handler does not run. Catches a zero
 #       read as "no deadline".
 #   T5  malformed values: 400 / 13 / exact reason, handler not run. Catches
-#       a malformed value treated as absent (an unbounded call).
+#       a malformed value treated as absent (an unbounded call). Two fields
+#       ["7x", "5S"]: still 400 / 13, as in grpc-go, where a malformed field
+#       sets an error a later valid field does not clear. Catches last-wins.
 #   T6  HEADERS with 100m at t0, body arrives 150ms later: DEADLINE_EXCEEDED,
 #       handler not run. Catches a deadline computed at dispatch instead of
 #       at arrival.
@@ -37,7 +39,15 @@
 #       no DATA. Catches enforcement on the unary path only.
 #   T8  gRPC-Web with 0S: not enforced (handler runs). Pins the scope.
 #   T9  ConnectService, default clock: 0S -> DEADLINE_EXCEEDED without the
-#       handler; 1H -> OK. Catches a clock hook the real conformer bypasses.
+#       handler; 1H -> OK; and `grpc_now_ns()` read between two
+#       `komira_clock.now_ns()` readings lies between them. Catches a default
+#       clock that is constant or in the wrong unit (production would then
+#       never time out a slow call).
+#   T10 HEADERS with END_STREAM and no DATA (dispatched at once, not deferred
+#       for a body): 0S -> DEADLINE_EXCEEDED, handler not run; "1s" -> 400 /
+#       13; a client-streaming handler slower than 1S -> DEADLINE_EXCEEDED;
+#       no header -> OK. Catches the immediate-dispatch path dropping the
+#       deadline.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -58,7 +68,9 @@ from komira_http_core.codec.h2.hpack import (
     HpackEncoder,
     HpackHeader,
 )
+from komira_clock import now_ns
 from komira_http_core.transport.grpc_emit import (
+    GRPC_KIND_CLIENT_STREAM,
     GRPC_KIND_SERVER_STREAM,
     GRPC_KIND_UNARY,
     GrpcDispatch,
@@ -74,6 +86,7 @@ from komira_connect import ConnectService, grpc_encode_unary
 
 comptime UNARY_PATH = "/test.Svc/Echo"
 comptime STREAM_PATH = "/test.Svc/Stream"
+comptime CLIENT_STREAM_PATH = "/test.Svc/Upload"
 comptime MS: UInt64 = 1_000_000
 comptime GRPC_CT = "application/grpc+proto"
 comptime DEADLINE_MSG = "context deadline exceeded"
@@ -132,6 +145,8 @@ struct _ClockedEcho(GrpcDispatch, GrpcStreamDispatch):
     def grpc_stream_kind(self, path: String) -> UInt8:
         if path == STREAM_PATH:
             return GRPC_KIND_SERVER_STREAM
+        if path == CLIENT_STREAM_PATH:
+            return GRPC_KIND_CLIENT_STREAM
         return GRPC_KIND_UNARY
 
 
@@ -197,6 +212,16 @@ struct _Conn[G: GrpcDispatch & GrpcStreamDispatch](Movable):
     def _block(
         mut self, path: String, ct: String, timeout: Optional[String]
     ) -> List[UInt8]:
+        var ts = List[String]()
+        if timeout:
+            ts.append(timeout.value())
+        return self._block_fields(path, ct, ts)
+
+    def _block_fields(
+        mut self, path: String, ct: String, timeouts: List[String]
+    ) -> List[UInt8]:
+        """A request header block with one grpc-timeout field per entry of
+        `timeouts`, in order."""
         var hs = List[HpackHeader]()
         hs.append(HpackHeader(String(":method"), String("POST")))
         hs.append(HpackHeader(String(":scheme"), String("https")))
@@ -204,8 +229,8 @@ struct _Conn[G: GrpcDispatch & GrpcStreamDispatch](Movable):
         hs.append(HpackHeader(String(":authority"), String("localhost")))
         hs.append(HpackHeader(String("content-type"), ct))
         hs.append(HpackHeader(String("te"), String("trailers")))
-        if timeout:
-            hs.append(HpackHeader(String("grpc-timeout"), timeout.value()))
+        for i in range(len(timeouts)):
+            hs.append(HpackHeader(String("grpc-timeout"), timeouts[i]))
         return self.enc.encode_block(hs^)
 
     def _pump(mut self) raises:
@@ -225,6 +250,33 @@ struct _Conn[G: GrpcDispatch & GrpcStreamDispatch](Movable):
         self.h2.append_recv_bytes(Span(wire))
         self._pump()
         return sid
+
+    def call_fields(
+        mut self, path: String, ct: String, timeouts: List[String]
+    ) raises -> _Answer:
+        """HEADERS (one grpc-timeout field per entry) then the body."""
+        var sid = self.next_sid
+        self.next_sid += 2
+        var wire = List[UInt8]()
+        encode_headers_frame(
+            sid, self._block_fields(path, ct, timeouts), False, True, wire
+        )
+        self.h2.append_recv_bytes(Span(wire))
+        self._pump()
+        return self.send_body(sid)
+
+    def call_headers_only(
+        mut self, path: String, ct: String, timeout: Optional[String]
+    ) raises -> _Answer:
+        """HEADERS with END_STREAM and no DATA: the serve loop dispatches the
+        call with an empty body as soon as the block completes."""
+        var sid = self.next_sid
+        self.next_sid += 2
+        var wire = List[UInt8]()
+        encode_headers_frame(sid, self._block(path, ct, timeout), True, True, wire)
+        self.h2.append_recv_bytes(Span(wire))
+        self._pump()
+        return self._read(sid)
 
     def send_body(mut self, sid: UInt32) raises -> _Answer:
         var wire = List[UInt8]()
@@ -371,6 +423,11 @@ def test_t5_malformed() raises:
         String("timeout value is not a decimal number"),
         "T5 negative",
     )
+    _assert_malformed(
+        c.call_fields(UNARY_PATH, GRPC_CT, [String("7x"), String("5S")]),
+        String("timeout unit is not recognized"),
+        "T5 malformed field then a valid one",
+    )
     assert_equal(c.svc.unary_calls, 0, "T5 handler not run")
 
 
@@ -410,6 +467,40 @@ def test_t9_connect_service_default_clock() raises:
     _assert_deadline_exceeded(cs.call(UNARY_PATH, GRPC_CT, String("0S")), "T9 0S")
     _assert_ok(cs.call(UNARY_PATH, GRPC_CT, String("1H")), "T9 1H")
     _assert_ok(cs.call(UNARY_PATH, GRPC_CT, None), "T9 no header")
+    var t0 = now_ns()
+    var x = cs.svc.grpc_now_ns()
+    var t1 = now_ns()
+    assert_true(
+        t0 <= x and x <= t1,
+        String("T9 default clock is komira_clock.now_ns: ")
+        + String(t0) + " <= " + String(x) + " <= " + String(t1),
+    )
+
+
+def test_t10_headers_end_stream() raises:
+    var c = _clocked()
+    _assert_deadline_exceeded(
+        c.call_headers_only(UNARY_PATH, GRPC_CT, String("0S")), "T10 0S"
+    )
+    assert_equal(c.svc.unary_calls, 0, "T10 0S handler not run")
+    _assert_malformed(
+        c.call_headers_only(UNARY_PATH, GRPC_CT, String("1s")),
+        String("timeout unit is not recognized"),
+        "T10 malformed",
+    )
+    assert_equal(c.svc.unary_calls, 0, "T10 malformed handler not run")
+    c.svc.cost_ns = UInt64(2_000) * MS
+    _assert_deadline_exceeded(
+        c.call_headers_only(CLIENT_STREAM_PATH, GRPC_CT, String("1S")),
+        "T10 slow client stream",
+    )
+    assert_equal(c.svc.stream_calls, 1, "T10 client-stream handler ran once")
+    var ok = c.call_headers_only(CLIENT_STREAM_PATH, GRPC_CT, None)
+    assert_false(ok.saw_reset_or_goaway, "T10 no header: no RST / GOAWAY")
+    assert_equal(ok.status, String("200"), "T10 no header: :status")
+    assert_equal(ok.grpc_status, String("0"), "T10 no header: grpc-status")
+    assert_true(ok.closed, "T10 no header: stream closed")
+    assert_equal(c.svc.stream_calls, 2, "T10 no header: handler ran")
 
 
 def main() raises:
@@ -452,8 +543,12 @@ def main() raises:
         test_t9_connect_service_default_clock()
     except e:
         failed.append(String("T9 -- ") + String(e))
+    try:
+        test_t10_headers_end_stream()
+    except e:
+        failed.append(String("T10 -- ") + String(e))
     for i in range(len(failed)):
         print("FAILED " + failed[i])
     if len(failed) > 0:
-        raise Error(String(len(failed)) + " of 9 legs failed")
-    print("test_grpc_timeout_enforced: PASSED (9 legs)")
+        raise Error(String(len(failed)) + " of 10 legs failed")
+    print("test_grpc_timeout_enforced: PASSED (10 legs)")

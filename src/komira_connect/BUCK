@@ -11,6 +11,7 @@ mojo_library(
     name = "komira_connect",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_clock:komira_clock",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_http_server:komira_http_server",
     ],

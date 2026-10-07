@@ -22,21 +22,28 @@
 #   3. `emit_grpc_deadline_exceeded` / `emit_grpc_malformed_timeout`: the two
 #      responses the serve loop sends in place of the handler's.
 #
-# Behaviour follows grpc-go's server transport
+# Where this follows grpc-go's server transport
 # (`internal/transport/http2_server.go`, `operateHeaders`, and
 # `internal/transport/http_util.go`, `decodeTimeout`):
 #   * a value shorter than 2 bytes, longer than 9 bytes (8 digits + unit),
 #     with an unknown unit byte, or with a non-digit in the value is
 #     malformed; the call is answered `:status 400`, `grpc-status 13`
 #     (INTERNAL), `grpc-message: malformed grpc-timeout: <reason>`, as a
-#     trailers-only response, and the handler is not run;
-#   * a deadline that has passed when the call is dispatched (a zero value, or
-#     one that ran out while the request body arrived) is answered
-#     `:status 200`, `grpc-status 4` (DEADLINE_EXCEEDED),
+#     trailers-only response, and the handler is not run. The reject rules
+#     are decodeTimeout's; the reason texts are this file's own;
+#   * with several grpc-timeout fields, a malformed one makes the call
+#     malformed even when a valid field follows (grpc-go sets an error that
+#     no later field clears); otherwise the last field is used;
+#   * a deadline already passed when the HEADERS block completes (a zero
+#     value) is answered `:status 200`, `grpc-status 4` (DEADLINE_EXCEEDED),
 #     `grpc-message: context deadline exceeded`, trailers-only, and the
-#     handler is not run;
-#   * when there are several grpc-timeout fields the last one is used (grpc-go
-#     overwrites as it walks the header list).
+#     handler is not run.
+# Where it does not: grpc-go arms a timer at HEADERS time and, when it fires
+# later, resets the stream with RST_STREAM(CANCEL). This serve loop has no
+# per-stream timer; it checks the deadline when the call is dispatched (so a
+# deadline that ran out while the body arrived is also answered grpc-status
+# 4 without running the handler) and again after the handler returns
+# (answering grpc-status 4 in place of the handler's response).
 #
 # Only classic gRPC content-types (`application/grpc`, `application/grpc+*`)
 # are subject to it. gRPC-Web carries its status in the body and Connect uses
@@ -150,11 +157,20 @@ def parse_grpc_timeout_value(value: String) -> GrpcTimeout:
 
 def find_grpc_timeout(headers: List[HpackHeader]) -> GrpcTimeout:
     """The grpc-timeout of a decoded request header list: ABSENT when no
-    field is named `grpc-timeout`, else the parse of the LAST such field."""
+    field is named `grpc-timeout`; MALFORMED (with the last malformed
+    field's reason) when any such field is malformed; else the parse of the
+    LAST such field."""
     var out = GrpcTimeout.absent()
+    var bad = GrpcTimeout.absent()
     for i in range(len(headers)):
         if headers[i].name == GRPC_TIMEOUT_HEADER:
-            out = parse_grpc_timeout_value(headers[i].value)
+            var t = parse_grpc_timeout_value(headers[i].value)
+            if t.state == GRPC_TIMEOUT_MALFORMED:
+                bad = t^
+            else:
+                out = t^
+    if bad.state == GRPC_TIMEOUT_MALFORMED:
+        return bad^
     return out^
 
 
