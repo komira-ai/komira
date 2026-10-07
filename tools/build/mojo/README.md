@@ -224,6 +224,64 @@ anything else is refused at analysis. Test 30
 ([`tests/functional/opt_level.sh`](../tests/functional/opt_level.sh)) reads the levels from the
 compile commands.
 
+## Assert level, defines and memory cap
+
+```python
+mojo_library(
+    ...
+    test_srcs = ["tests/test_hostile_input.mojo"],
+    test_assert_level = "none",       # -D ASSERT=none for each test_srcs build
+    test_defines = ["KOMIRA_X=1"],     # -D KOMIRA_X=1 for each test_srcs build
+    test_memory_cap_mib = 2048,       # default at ASSERT=none: 4096; 0: no cap
+)
+
+mojo_test(..., assert_level = "all", defines = ["KOMIRA_X"], memory_cap_mib = 1024)
+mojo_binary(..., assert_level = "none", defines = ["KOMIRA_X=1"])
+```
+
+The attributes are in [`defines.bzl`](defines.bzl). An unset one writes
+nothing, so a target that sets none of them has the commands, and the action
+keys, it had before they existed.
+
+- **Assert level** (`test_assert_level` on `mojo_library`, `assert_level`
+  on `mojo_test` and `mojo_binary`) is `-D ASSERT=<level>` on `mojo build`,
+  the define Mojo's `debug_assert` reads: `none` turns every `debug_assert`
+  off, `safe` (the compiler's default) keeps the ones declared
+  `assert_mode="safe"`, `all` turns every one on, and `warn` turns every one on
+  and prints a failure instead of aborting. Any other value is refused at
+  analysis. It reaches the code of every package compiled into the program,
+  not only the program's own file: a `.mojoc` holds no machine code, so its
+  `debug_assert`s are settled in the `mojo build` that generates the code
+  ([`tests//functional/assert_level`](../tests/functional/assert_level/BUCK):
+  a library's asserts are off in its test at `none`; the twins in
+  [`tests//negative/assert_level`](../tests/negative/assert_level/BUCK) fail
+  at `all` and at the default level).
+- **Defines** (`test_defines`, `defines`) are `-D <entry>` each, in order,
+  after the assert level: `NAME` or `NAME=VALUE`, `NAME` an identifier, none
+  twice, and never `ASSERT` (set the assert level instead). A define read in a
+  function body (`std.sys.defines.get_defined_string`) sees the value in the
+  program's file and in a package's code alike.
+- **Memory cap** (`test_memory_cap_mib`, `memory_cap_mib` on `mojo_test`): the
+  test runs under [`mem_cap.sh`](mem_cap.sh), which sums the resident memory
+  of the test's process tree from `/proc` every 0.1 s and, past the cap,
+  kills the test; the gate runner then reports it (`GATED TEST FAILED: <label>
+  (exit 137)`) and `mem_cap.sh` adds `MEMORY CAP: killed <label> at <n> MiB
+  resident, over its cap of <cap> MiB`. A test that allocates without bound
+  therefore fails instead of exhausting the worker. Unset, a test at
+  `ASSERT=none` (a hostile-input test, whose bounds checks are off) is capped
+  at 4096 MiB and any other test is not; `0` turns the cap off. The cap is
+  sampled: a test can pass it by what it touches in one interval. It caps
+  resident memory, not address space: the Mojo runtime's allocator reserves
+  address space in 1 GiB regions when it starts, and a test under an
+  address-space limit of a few GiB (`ulimit -v`) aborts before its first line.
+  Linux only: on macOS a capped test is refused.
+
+The `mojo_library` attributes apply to each `test_srcs` build and run (and to
+its coverage build), not to the package's `mojo precompile` and not to the
+README's examples. `mojo_binary`'s apply to its `[shared]` library too.
+Test 45 ([`tests/README.md`](../tests/README.md#45-assert-level-defines-and-memory-cap))
+reads the commands and runs the fixtures.
+
 ## Test data, environment and scratch
 
 Every test, a `test_srcs` test of a `mojo_library` or a `mojo_test` run by
@@ -755,6 +813,11 @@ Anywhere else passing it is refused.
 | `cov_zig: a link with the optimization level <level> is refused` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link at a release level, where lld would merge string tails the relocation cannot see |
 | `cov_zig: debug_relocate refused <output>` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | the relocation refused a coverage link's output (a longer name starting with the directory, a compressed section); its own message follows |
 | `run_check: stdout of <binary> differs from <expected>` | [`run_check.sh`](run_check.sh) | `[run_check]` output did not match `expected_stdout` |
+| ``<target>: test_assert_level `<v>` is not one of none, warn, safe, all`` (or `assert_level`) | [`defines.bzl`](defines.bzl) | an assert level Mojo's `debug_assert` does not read |
+| ``<target>: test_defines sets ASSERT; set `test_assert_level` instead`` (or `defines`, `assert_level`) | [`defines.bzl`](defines.bzl) | the assert level is its own attribute |
+| `<target>: defines entry "<e>" is not NAME or NAME=VALUE with NAME an identifier`, `... sets <NAME> twice` | [`defines.bzl`](defines.bzl) | a define the compiler would misread, or two values for one name |
+| `<target>: test_memory_cap_mib is <n>; it must be a number of MiB, or 0 for no cap` | [`defines.bzl`](defines.bzl) | a negative cap |
+| `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`mem_cap.sh`](mem_cap.sh) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
 | `unable to locate module '<pkg>'` | the compiler | the importing target does not list that package in `deps` |
@@ -762,6 +825,7 @@ Anywhere else passing it is refused.
 ## Not yet supported
 
 Test helper modules or test-only deps (each gated
-test is built from its one file against the library); extra compile flags, defines, or include roots; shared C libraries (C
+test is built from its one file against the library); extra compile flags or include roots; defines and an
+assert level on `mojo_shared_lib`, on a package's `mojo precompile` or on a README's examples; shared C libraries (C
 deps link statically); choosing the package root (the shallowest `__init__.mojo`
 in `srcs` is the root).
