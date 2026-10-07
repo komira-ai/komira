@@ -25,8 +25,11 @@
 # detail of a send with no answer keeps only komira_http_client's
 # `HttpError[<KIND>]` when the failure names one, else says `transport
 # error`; the failure's own text (an address, an errno) is not kept. What
-# raises is an input refused before sending, and a token that could not be
-# minted.
+# raises is an input refused before sending, a token that could not be
+# minted, and a request komira_http_client refuses as `HttpError[URL_INVALID]`
+# (an https endpoint over a plaintext connector, an http one over a TLS
+# connector): that is the client's configuration, the same for every token,
+# so it is not a TRANSIENT outcome a caller would retry.
 #
 # THE ENDPOINT. `FcmEndpoint.public()` is https to fcm.googleapis.com:443.
 # `FcmEndpoint.https(host, port)` is another TLS host (a proxy in front of
@@ -49,8 +52,13 @@ from komira_gcp_core import (
     CachingTokenSource,
     GcpConnectorTransport,
     GcpTokenSource,
+    EnvSource,
+    FileSource,
+    ProcessEnv,
+    ProcessFiles,
     SystemWallClock,
-    application_default_token_source,
+    WallClock,
+    application_default_token_source_from,
 )
 from komira_http_client.body import BytesBody
 from komira_http_client.client import (
@@ -62,7 +70,7 @@ from komira_http_client.header_map import HeaderMap
 from komira_http_client.url import Url
 from komira_http_core.codec.types import HttpMethod
 from komira_http_core.transport.io_stream import Connector
-from komira_retry import SystemClock
+from komira_retry import MonotonicClock, SystemClock
 
 from .message import FCM_HOST, FcmWake, fcm_adc_options, fcm_message_json, fcm_send_path
 from .outcome import FCM_TRANSIENT, FcmOutcome, classify_fcm_response
@@ -71,6 +79,7 @@ from .outcome import FCM_TRANSIENT, FcmOutcome, classify_fcm_response
 comptime FCM_PORT: UInt16 = 443
 comptime JSON_CONTENT_TYPE: String = "application/json; charset=utf-8"
 comptime LOOPBACK_HOST: String = "127.0.0.1"
+comptime URL_INVALID_KIND: String = "HttpError[URL_INVALID]"
 
 
 def _check_host(host: String) raises:
@@ -262,15 +271,57 @@ struct FcmClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
                 Int(resp.status), retry_after, resp.body.take_bytes()
             )
         except e:
+            var kind = _transport_kind(String(e))
+            if kind == String(URL_INVALID_KIND):
+                raise Error(
+                    "komira_gcp_fcm: komira_http_client refused the request"
+                    " URL (HttpError[URL_INVALID]: the endpoint's scheme and"
+                    " the connector disagree); nothing was sent"
+                )
             return FcmOutcome(
                 FCM_TRANSIENT,
                 0,
                 String(),
                 String(),
                 -1,
-                String("POST FirebaseMessaging.SendMessage: no answer, ")
-                + _transport_kind(String(e)),
+                String("POST FirebaseMessaging.SendMessage: no answer, ") + kind,
             )
+
+
+def fcm_application_default_token_source_from[
+    E: EnvSource,
+    F: FileSource,
+    P: Connector,
+    T: Connector,
+    W: WallClock,
+    K: MonotonicClock,
+](
+    mut env: E,
+    mut files: F,
+    http_config: HttpClientConfig,
+    mk_plain: def () raises thin -> P,
+    mk_tls: def () raises thin -> T,
+    var clock: W,
+    var monotonic: K,
+) raises -> CachingTokenSource[
+    AdcFetcher[GcpConnectorTransport[P], GcpConnectorTransport[T], W], K
+]:
+    """komira_gcp_core's `application_default_token_source_from` asking for
+    `FCM_SCOPE` (`fcm_adc_options()`), over the env, file and clock seams
+    the caller gives. `fcm_application_default_token_source` is this over
+    the process's own; this is the one place the FCM token's options are
+    chosen."""
+    return application_default_token_source_from(
+        env,
+        files,
+        http_config,
+        mk_plain,
+        mk_tls,
+        clock^,
+        monotonic^,
+        fcm_adc_options(),
+        False,
+    )
 
 
 def fcm_application_default_token_source[P: Connector, T: Connector](
@@ -281,8 +332,19 @@ def fcm_application_default_token_source[P: Connector, T: Connector](
     AdcFetcher[GcpConnectorTransport[P], GcpConnectorTransport[T], SystemWallClock],
     SystemClock,
 ]:
-    """komira_gcp_core's `application_default_token_source` asking for
-    `FCM_SCOPE` (`fcm_adc_options()`); its connectors as it documents."""
-    return application_default_token_source(
-        http_config, mk_plain, mk_tls, fcm_adc_options()
+    """`fcm_application_default_token_source_from` over the process
+    environment and filesystem and the system clocks; its connectors as
+    komira_gcp_core's `application_default_token_source` documents."""
+    var env = ProcessEnv()
+    var files = ProcessFiles()
+    # Mojo builds no Windows target, so the search runs its non-Windows arm,
+    # as komira_gcp_core's `application_default_token_source` does.
+    return fcm_application_default_token_source_from(
+        env,
+        files,
+        http_config,
+        mk_plain,
+        mk_tls,
+        SystemWallClock(),
+        SystemClock(),
     )

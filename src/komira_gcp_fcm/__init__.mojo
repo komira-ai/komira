@@ -10,7 +10,8 @@ content-blind wake of one device.
                 server's retry delay; never body text.
   client.mojo   `FcmClient[C: Connector, T: GcpTokenSource]` and its
                 `send_one`, `FcmEndpoint`, and
-                `fcm_application_default_token_source` (komira_gcp_core's
+                `fcm_application_default_token_source` and its seamed
+                `fcm_application_default_token_source_from` (komira_gcp_core's
                 Application Default Credentials with `FCM_SCOPE`).
 
 The package reads no environment itself; the Application Default
@@ -45,6 +46,8 @@ from .client import (
     LOOPBACK_HOST,
     FcmClient,
     FcmEndpoint,
+    URL_INVALID_KIND,
     fcm_application_default_token_source,
+    fcm_application_default_token_source_from,
     token_mint_error,
 )

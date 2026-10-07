@@ -17,10 +17,14 @@
 #   * test_escaping: a `"` and `\` in every value round-trip through a JSON
 #     parse; a builder that concatenated raw strings would break the body.
 #   * test_refusals: an empty token or wake field, and a project id that
-#     could leave its path segment, each refused with its exact message.
-#   * test_adc_scope_on_the_wire: ADC over a scripted metadata server asks
-#     for exactly the firebase.messaging scope (the token request target,
-#     whole); a scope list with cloud-platform, or none, fails it.
+#     could leave its path segment (a `/`, `?`, upper case, or a `.`/`..`
+#     dot segment a normalising server would remove), each refused with its
+#     exact message.
+#   * test_adc_scope_on_the_wire: `fcm_adc_options()` given to
+#     komira_gcp_core's ADC over a scripted metadata server asks for exactly
+#     the firebase.messaging scope (the token request target, whole); a
+#     scope list with cloud-platform, or none, fails it. That the production
+#     entry passes these options is test_fcm_loopback's step 5.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -165,6 +169,14 @@ def test_refusals() raises:
     assert_equal(_refusal_of_path(String("p/../other")), outside)
     assert_equal(_refusal_of_path(String("p?x=1")), outside)
     assert_equal(_refusal_of_path(String("Project")), outside)
+    # A dot segment: every byte is allowed, so only the first-byte rule
+    # refuses it.
+    var start = String(
+        "komira_gcp_fcm: the project id does not start with [a-z0-9]"
+    )
+    assert_equal(_refusal_of_path(String("..")), start)
+    assert_equal(_refusal_of_path(String(".")), start)
+    assert_equal(_refusal_of_path(String("-p")), start)
     print("  test_refusals PASS")
 
 

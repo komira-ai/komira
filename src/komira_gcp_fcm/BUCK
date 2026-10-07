@@ -22,8 +22,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   test_fcm_loopback  `FcmClient` over a real KernelTcpConnector against a
 #                      fake FCM served by komira_http_server on 127.0.0.1:
 #                      the request as it arrived, each answer's outcome, a
-#                      closed port as TRANSIENT, and a token-mint failure that
-#                      raises naming only the status and sends nothing.
+#                      closed port as TRANSIENT, a token-mint failure that
+#                      raises naming only the status and sends nothing, an
+#                      https endpoint over a plaintext connector that raises,
+#                      and the production ADC entry's metadata request
+#                      carrying exactly the firebase.messaging scope.
 mojo_library(
     name = "komira_gcp_fcm",
     srcs = glob(["*.mojo"]),

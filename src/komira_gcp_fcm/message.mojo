@@ -54,9 +54,12 @@ def _require(what: String, value: String) raises:
 
 
 def check_project_id(project_id: String) raises:
-    """A project id: non-empty, and only `[a-z0-9.:-]` (a project id, or a
-    legacy domain-scoped `example.com:project`). It is spliced into the
-    request path, so a `/`, `?` or `#` would send the request elsewhere."""
+    """A project id: non-empty, only `[a-z0-9.:-]` (a project id, or a
+    legacy domain-scoped `example.com:project`), and starting with
+    `[a-z0-9]`. It is spliced into the request path, so a `/`, `?` or `#`
+    would send the request elsewhere, and a `.` or `..` segment would be
+    removed by a server that normalises dot segments (RFC 3986 section
+    6.2.2.3), sending the request to `/v1/messages:send`."""
     var b = project_id.as_bytes()
     if len(b) == 0:
         raise Error("komira_gcp_fcm: the project id is empty")
@@ -74,6 +77,14 @@ def check_project_id(project_id: String) raises:
                 "komira_gcp_fcm: the project id holds a byte outside"
                 " [a-z0-9.:-]"
             )
+    var first = b[0]
+    if not (
+        (first >= UInt8(ord("a")) and first <= UInt8(ord("z")))
+        or (first >= UInt8(ord("0")) and first <= UInt8(ord("9")))
+    ):
+        raise Error(
+            "komira_gcp_fcm: the project id does not start with [a-z0-9]"
+        )
 
 
 def fcm_send_path(project_id: String) raises -> String:

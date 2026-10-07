@@ -16,6 +16,10 @@
 #   tok-bad          400 INVALID_ARGUMENT
 #   any request whose bearer is not `_BEARER`: 401 UNAUTHENTICATED
 #
+# and a GET is answered as a metadata server's token request: its target
+# (path and query) and its `Metadata-Flavor` header are recorded, and the
+# answer is `{"access_token":"<_BEARER>","expires_in":3599}`.
+#
 # The client leg runs on its own thread (komira_http_tls_e2e's
 # `serve_while`) with a real `KernelTcpConnector`, in order:
 #   1. a client whose token source is Application Default Credentials over a
@@ -25,7 +29,11 @@
 #      step 2 are its positive control);
 #   2. a client with the right bearer sends one wake to each token above;
 #   3. a client with another bearer sends to tok-ok;
-#   4. a client pointed at a port nothing listens on sends to tok-ok.
+#   4. a client pointed at a port nothing listens on sends to tok-ok;
+#   5. a client whose token source is `fcm_application_default_token_source_from`
+#      (the function `fcm_application_default_token_source` calls), with
+#      GCE_METADATA_HOST naming the fake, sends to tok-ok: one metadata
+#      token request, then one send with the token it answered.
 #
 # What each assertion proves, and the defect it catches:
 #   * the six recorded requests: POST to /v1/projects/<p>/messages:send,
@@ -40,6 +48,14 @@
 #     dialled FCM without a token);
 #   * the closed port: TRANSIENT with status 0, not a raise (one dead
 #     endpoint would otherwise abort a caller's loop over many tokens).
+#   * step 5: the metadata request target, whole, carries exactly the
+#     firebase.messaging scope, with `Metadata-Flavor: Google`, and the
+#     seventh send carries the token it answered and is ACCEPTED. Catches
+#     the production ADC entry asking for another scope, or none (a mutant
+#     passing `AdcOptions()` there sends no `?scopes=`).
+#   * test_endpoint_refusals: an https endpoint over a plaintext connector
+#     raises with its exact message instead of returning a TRANSIENT outcome
+#     a caller would retry for every token.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -51,6 +67,7 @@ from komira_gcp_core import (
     AdcFetcher,
     CachingTokenSource,
     FixedWallClock,
+    GcpConnectorTransport,
     GcpHttpTransport,
     MapEnv,
     MapFiles,
@@ -59,7 +76,7 @@ from komira_gcp_core import (
     TokenHttpResponse,
     application_default_token_source_with,
 )
-from komira_http_client.client import HttpClient
+from komira_http_client.client import HttpClient, HttpClientConfig
 from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_http_server.dispatch import RequestDispatcher
@@ -80,6 +97,7 @@ from komira_gcp_fcm import (
     FcmOutcome,
     FcmWake,
     fcm_adc_options,
+    fcm_application_default_token_source_from,
     fcm_message_json,
     fcm_outcome_name,
     token_mint_error,
@@ -97,6 +115,17 @@ comptime _Adc = CachingTokenSource[
 ]
 comptime _MintingClient = FcmClient[KernelTcpConnector, _Adc]
 comptime _StaticClient = FcmClient[KernelTcpConnector, StaticTokenSource]
+comptime _FcmAdcClient = FcmClient[
+    KernelTcpConnector,
+    CachingTokenSource[
+        AdcFetcher[
+            GcpConnectorTransport[KernelTcpConnector],
+            GcpConnectorTransport[KernelTcpConnector],
+            FixedWallClock,
+        ],
+        ManualClock,
+    ],
+]
 
 
 def _tokens() -> List[String]:
@@ -157,6 +186,8 @@ struct _FakeFcm(RequestDispatcher):
     var auths: List[String]
     var types: List[String]
     var bodies: List[String]
+    var metadata_targets: List[String]
+    var metadata_flavors: List[String]
 
     def __init__(out self):
         self.methods = List[String]()
@@ -165,12 +196,28 @@ struct _FakeFcm(RequestDispatcher):
         self.auths = List[String]()
         self.types = List[String]()
         self.bodies = List[String]()
+        self.metadata_targets = List[String]()
+        self.metadata_flavors = List[String]()
 
     def dispatch[
         RT: Runtime,
     ](
         mut self, mut reactor: Reactor[RT.Sink], var req: HttpRequest
     ) raises -> HttpResponse:
+        if req.method.code == HttpMethod.get().code:
+            var target = String(req.path)
+            if req.query_string.byte_length() > 0:
+                target += "?" + req.query_string
+            self.metadata_targets.append(target^)
+            self.metadata_flavors.append(
+                req.headers.get(String("metadata-flavor")).or_else(
+                    String("<absent>")
+                )
+            )
+            return _json_response(
+                200,
+                String('{"access_token":"') + _BEARER + '","expires_in":3599}',
+            )
         var auth = req.headers.get(String("authorization")).or_else(
             String("<absent>")
         )
@@ -227,6 +274,10 @@ struct _RefusingMetadata(GcpHttpTransport, Movable, Deinitable):
 # -----------------------------------------------------------------------------
 
 
+def _mk_tcp() raises -> KernelTcpConnector:
+    return KernelTcpConnector.new()
+
+
 def _http() raises -> HttpClient[KernelTcpConnector]:
     return HttpClient[KernelTcpConnector].with_request_timeout_us(
         KernelTcpConnector.new(), _REQUEST_TIMEOUT_US
@@ -240,6 +291,7 @@ struct _FcmLeg(ClientLeg):
     var outcomes: List[FcmOutcome]
     var wrong_bearer: List[FcmOutcome]
     var closed: List[FcmOutcome]
+    var adc_sent: List[FcmOutcome]
 
     def __init__(out self, port: UInt16, closed_port: UInt16):
         self.port = port
@@ -248,6 +300,7 @@ struct _FcmLeg(ClientLeg):
         self.outcomes = List[FcmOutcome]()
         self.wrong_bearer = List[FcmOutcome]()
         self.closed = List[FcmOutcome]()
+        self.adc_sent = List[FcmOutcome]()
 
     def run(mut self) raises:
         var env = MapEnv()
@@ -297,6 +350,26 @@ struct _FcmLeg(ClientLeg):
         )
         self.closed.append(nowhere.send_one(String("tok-ok"), _wake()))
 
+        var fenv = MapEnv()
+        fenv.set(
+            String("GCE_METADATA_HOST"),
+            String("127.0.0.1:") + String(Int(self.port)),
+        )
+        var ffiles = MapFiles()
+        var fcm_adc = fcm_application_default_token_source_from(
+            fenv,
+            ffiles,
+            HttpClientConfig.defaults(),
+            _mk_tcp,
+            _mk_tcp,
+            FixedWallClock(1_790_000_000),
+            ManualClock(0),
+        )
+        var adc_client = _FcmAdcClient(
+            _http(), fcm_adc^, String(_PROJECT), FcmEndpoint.loopback_plaintext(self.port)
+        )
+        self.adc_sent.append(adc_client.send_one(String("tok-ok"), _wake()))
+
 
 def _kind(o: FcmOutcome) -> String:
     return fcm_outcome_name(o.kind)
@@ -331,11 +404,12 @@ def test_send_over_loopback() raises:
     )
 
     ref fake = loop.dispatcher
-    # 5 sends with the right bearer and 1 with another; none from the
-    # client whose token could not be minted.
-    assert_equal(len(fake.paths), 6, "requests the fake received")
+    # 5 sends with the right bearer, 1 with another and 1 with the token the
+    # fake's metadata answer gave; none from the client whose token could
+    # not be minted.
+    assert_equal(len(fake.paths), 7, "requests the fake received")
     var host = String("127.0.0.1:") + String(Int(port))
-    for i in range(6):
+    for i in range(7):
         assert_equal(fake.methods[i], "POST", "method #" + String(i))
         assert_equal(fake.paths[i], _PATH, "path #" + String(i))
         assert_equal(fake.hosts[i], host, "Host #" + String(i))
@@ -391,6 +465,18 @@ def test_send_over_loopback() raises:
         closed.detail,
         "POST FirebaseMessaging.SendMessage: no answer, transport error",
     )
+
+    # Step 5: the production ADC entry's one metadata request, whole.
+    assert_equal(len(fake.metadata_targets), 1, "metadata token requests")
+    assert_equal(
+        fake.metadata_targets[0],
+        "/computeMetadata/v1/instance/service-accounts/default/token"
+        "?scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Ffirebase.messaging",
+    )
+    assert_equal(fake.metadata_flavors[0], "Google")
+    assert_equal(len(leg.adc_sent), 1)
+    assert_equal(_kind(leg.adc_sent[0]), fcm_outcome_name(FCM_ACCEPTED), "ADC send")
+    assert_equal(fake.bodies[6], fcm_message_json(String("tok-ok"), _wake()))
     print("  test_send_over_loopback PASS")
 
 
@@ -445,6 +531,28 @@ def test_endpoint_refusals() raises:
         msg,
         "komira_gcp_fcm: plain http is only for 127.0.0.1; the bearer token"
         " would cross the network in clear",
+    )
+    # An https endpoint over a plaintext connector: komira_http_client's
+    # scheme check refuses it before dialling, and that raises rather than
+    # coming back TRANSIENT. The host is 127.0.0.1 and the port closed, so
+    # a client that dialled anyway finds nothing and returns an outcome.
+    var mismatched = _StaticClient(
+        _http(),
+        StaticTokenSource(String(_BEARER)),
+        String(_PROJECT),
+        FcmEndpoint.https(String("127.0.0.1"), _closed_port()),
+    )
+    msg = String("<not refused>")
+    try:
+        var o = mismatched.send_one(String("tok-ok"), _wake())
+        msg = String("<an outcome: ") + _kind(o) + " " + o.detail + ">"
+    except e:
+        msg = String(e)
+    assert_equal(
+        msg,
+        "komira_gcp_fcm: komira_http_client refused the request URL"
+        " (HttpError[URL_INVALID]: the endpoint's scheme and the connector"
+        " disagree); nothing was sent",
     )
     var p = FcmEndpoint.public()
     assert_equal(p.host, "fcm.googleapis.com")
