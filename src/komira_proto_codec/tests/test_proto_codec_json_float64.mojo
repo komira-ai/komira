@@ -17,11 +17,14 @@
 #       and i_number_very_big_negative_int literals among them) read as the
 #       nearest double. Catches: a digit-count limit in the reader.
 #   R3  correct rounding: the exact midpoint 1 + 2^-53 ties to even (1.0),
-#       one unit in the 55th digit either side goes down / up, 2^53 + 1 and
-#       2^53 + 3 tie to even, and the 768-digit midpoint between two
+#       one unit in the 55th digit either side goes down / up, the exact
+#       1 + 2^-53 + 2^-55 goes up (its excess is a bit shifted out of the
+#       quotient, not a division remainder) and 1 + 2^-53 - 2^-55 goes down,
+#       2^53 + 1 and 2^53 + 3 tie to even, and the 768-digit midpoint between two
 #       subnormals ties to even, goes up with a nonzero digit 829 places in,
 #       and down one unit in its last digit. Catches: a reader that rounds
-#       twice or truncates, and a significant-digit cap below 768 (the
+#       twice or truncates, a shifted-out bit that never reaches the sticky
+#       flag, and a significant-digit cap below 768 (the
 #       midpoint's 768th digit would join the sticky tail and read as above).
 #   R4  subnormals and zeros: 5e-324, 4.9e-324, 2.5e-324 and 3e-324 are the
 #       smallest subnormal, 2^-1075 exactly (752 digits) ties to +0.0 and
@@ -56,14 +59,18 @@
 #       "-Infinity" in a field and a repeated element, and read back.
 #       Catches: writing `null`, which reads back as an absent field (0.0).
 #   W2  extremes round-trip bit-exactly through encode_json / decode_json
-#       (max, smallest normal, largest and smallest subnormal, -0.0, 0.1,
+#       (max, smallest normal, largest and smallest subnormal, -0.0, 0.1, -1.5,
 #       1e23, 0.30000000000000004). Catches: a reader and a writer that
 #       disagree on a value the reader accepts.
 #   F1  the fast path (15 digits or fewer, |exponent| <= 22) agrees with
 #       the exact path on its edge values (1e22, 123456789012345e-22, 7e-10),
 #       and values just outside it (3e23, 1e-23, a 16-digit 0.97...) are
-#       exact. Catches: a fast path taken past the range where one IEEE
-#       operation is exact (each of those three reads wrong through it).
+#       exact; short negatives (-1.5, -0.1) keep their sign; and the exact
+#       midpoint 4.73e21 followed by a nonzero digit 900 places in reads
+#       above the midpoint. Catches: a fast path taken past the range where
+#       one IEEE operation is exact (each of those three reads wrong through
+#       it), a fast path that drops the sign, and a fast path taken when a
+#       nonzero tail past the kept digits was dropped.
 # =============================================================================
 
 from std.math import isinf, isnan
@@ -295,6 +302,20 @@ def test_r3_correct_rounding() raises:
         "just above 1 + 2^-53",
     )
     _expect_read(mid + _zeros(900) + "1", UInt64(0x3FF0000000000001), "a tail")
+    # 1 + 2^-53 + 2^-55 exactly: above the midpoint by a binary-exact amount
+    # that the division leaves in q's lowest bit, which normalisation shifts
+    # out; that bit must reach the sticky flag. Its mirror 1 + 2^-53 - 2^-55
+    # is below the midpoint.
+    _expect_read(
+        "1.0000000000000001387778780781445675529539585113525390625",
+        UInt64(0x3FF0000000000001),
+        "1 + 2^-53 + 2^-55 (shifted-out sticky bit)",
+    )
+    _expect_read(
+        "1.0000000000000000832667268468867405317723751068115234375",
+        ONE_BITS,
+        "1 + 2^-53 - 2^-55",
+    )
     _expect_read(
         "9007199254740993", UInt64(0x4340000000000000), "2^53 + 1 ties down"
     )
@@ -475,6 +496,7 @@ def test_w2_round_trip_extremes() raises:
     cases.append(MIN_SUBNORMAL_BITS)
     cases.append(NEG_ZERO_BITS)
     cases.append(UInt64(0x3FB999999999999A))  # 0.1
+    cases.append(UInt64(0xBFF8000000000000))  # -1.5
     cases.append(UInt64(0x44B52D02C7E14AF6))  # 1e23
     cases.append(UInt64(0x3FD3333333333334))  # 0.30000000000000004
     cases.append(UInt64(0x00005C0AB9347ED7))  # 5e-310
@@ -494,6 +516,18 @@ def test_f1_fast_path_edges() raises:
     )
     _expect_read("7e-10", UInt64(0x3E080D43DE9CC603), "7e-10")
     _expect_read("0.1", UInt64(0x3FB999999999999A), "0.1")
+    _expect_read("-1.5", UInt64(0xBFF8000000000000), "-1.5")
+    _expect_read("-0.1", UInt64(0xBFB999999999999A), "-0.1")
+    # 4.73e21 = (473 * 5^19) * 2^19 with an odd 54-bit 473 * 5^19: an exact
+    # midpoint, which one IEEE multiply ties to even (...cda). A nonzero digit
+    # 900 places in, past the 800 significant digits kept, puts the value
+    # above it (...cdb), so the fast path must not run when a tail was dropped.
+    _expect_read("4.73e21", UInt64(0x4470069EFB362CDA), "4.73e21")
+    _expect_read(
+        "4.73" + _zeros(900) + "1e21",
+        UInt64(0x4470069EFB362CDB),
+        "4.73e21 with a dropped nonzero tail",
+    )
     _expect_read(
         "0.30000000000000004", UInt64(0x3FD3333333333334), "17 digits"
     )
