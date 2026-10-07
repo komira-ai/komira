@@ -88,7 +88,7 @@ custom role on GCP, a policy and its attachment on AWS, a role assignment and de
 binding on Kubernetes). The rules, kept in the vocabulary data and not in a branch on the cloud:
 
 - The principal is a `Ref` to an identity of the list (a service account, or a service or job with no
-  `run_as`). A foreign principal is written in full and printed as a trust edge.
+  `run_as`), or a foreign principal written in full and shown as a trust edge in the plan.
 - The scope is a `Ref` to an object the list owns, or a custom role of the same set. Project, account,
   subscription and cluster scope are refused, and so is each vocabulary's list of admin roles (owner and editor,
   `AdministratorAccess`, User Access Administrator, `cluster-admin`), unless the stage opts in with a named field

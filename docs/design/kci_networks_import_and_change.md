@@ -54,8 +54,8 @@ The engine has no replace in this version (`CONVERGE_REPLACE` raises), and the c
 place. A delete-then-create of the same subnet would also take down every service placed in it. So a changed
 range is refused, and the plan names the steps instead:
 
-1. Add a new subnet, under a new id, with the new range (it must not overlap the old one, which validate
-   already refuses within one network).
+1. Add a new subnet, under a new id, with the new range (it must not overlap the old one: the network and subnet
+   primitives (P10) refuse overlapping subnet ranges within one network at validate).
 2. Point each service's `network` at the new subnet and apply: the services move and the old subnet is empty.
 3. Remove the old subnet from the file and apply: the closed world deletes it.
 

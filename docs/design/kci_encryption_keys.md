@@ -12,7 +12,7 @@ Delete means something different on every cloud, and on none of them is it a che
 | Cloud | What a delete does |
 |---|---|
 | AWS KMS | schedules deletion, 7 to 30 days later; after that the data it encrypted is unreadable |
-| GCP Cloud KMS | a key cannot be deleted at all, only its versions destroyed; its key ring never can |
+| GCP Cloud KMS | only its versions can be destroyed; a key ring is never deleted |
 | Azure Key Vault | soft-deletes; purge protection can forbid the purge |
 | Vault transit | refused unless the key was marked `deletion_allowed` |
 
@@ -45,12 +45,16 @@ One mechanism, built from parts that exist, so nothing branches on the cloud:
 1. **Catalog.** `CatalogType` gains a delete capability, `deletable: Bool` (default True). The key's row says
    False and has `retention_default = RETENTION_NONE`, so `takes_retention()` is False and writing `retention`
    on a key is refused at validate by the existing check. The author cannot choose KEEP or DELETE for it.
-2. **Lowering.** A non-deletable type's nodes realize as `RETAIN_UNDELETABLE`. Rollback and destroy skip them
-   whatever `force_delete_data` says; `destroy_resources` returns them, and the command prints each one as a
-   survivor with the cloud's own deletion procedure, for a human to run if they mean it.
+2. **Lowering.** A non-deletable type's nodes realize as `RETAIN_UNDELETABLE` (a new arm in `deploy.mojo`
+   `engine_retention`). Rollback and destroy skip them whatever `force_delete_data` says; `destroy_resources`
+   returns them, and the command prints each one as a survivor with the cloud's own deletion procedure, for a
+   human to run if they mean it.
 3. **Leaving the file.** The adapter writes `kci-retention=retain` on every object of the type, so
    `list_owned` reports it RETAINED and the closed world leaves it behind instead of making it a node to
-   delete. A key whose id comes back into the file is still stamped with its identity, so it is the same key.
+   delete. This needs a new arm in `src/kci_cloud/labels.mojo` `retention_label_value`, which today maps only
+   `RETAIN_KEEP` and `RETAIN_DELETE` and raises on any other retention, beside the `deploy.mojo`
+   `engine_retention` arm of step 2. A key whose id comes back into the file is still stamped with its
+   identity, so it is the same key.
 4. **Adapter.** The adapter's delete for the key role refuses. The engine requires the set it skips and the set
    whose delete refuses to be the same set; the conformance kit would check both on every shaped fake.
 5. **Self-check.** The catalog refuses a row with `deletable: False` and any retention default but NONE.
