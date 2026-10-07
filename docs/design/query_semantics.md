@@ -86,6 +86,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 8. **Regex flags (§7.10).** `parse_flags_string` (`src/komira_column_kernels/regexp_nfa.mojo:217-234`) reads `m` as multi-line anchors and accepts `x`; DuckDB reads `m` as "`.` does not match a newline" and refuses `x`. It refuses `c` and `l`, which DuckDB accepts.
 9. **DECIMAL modulo is typed with the left operand's precision and scale (§5.10).** `src/komira_plan_expr/expr_walk.mojo:896-901`; the rule is DuckDB's DECIMAL(max(p1 - s1, p2 - s2) + max(s1, s2), max(s1, s2)), DOUBLE above 38.
 10. **The float-to-integer window for an unsigned target is empty (§6.3).** `eval_cast_float_to_int` (`src/komira_column_kernels/cast_null.mojo`, around line 277) builds its window as `[MIN, -MIN)`, which is `[0, 0)` for an unsigned target and would refuse every value; the rule's window is `[0, MAX + 1)`. Latent today: every caller instantiates a signed target.
+11. **A NULL literal is declared non-nullable (§8.19).** `walk_expr_field` returns `Field("literal", <type>, False)` for every literal, the NULL literal included (`src/komira_plan_expr/expr_walk.mojo:814-817`), so a projected `NULL` is a column declared non-nullable whose every row is NULL.
 
 ## 1. Three-valued logic
 
@@ -117,9 +118,9 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ### 1.3 IS NULL, IS NOT NULL
 
-- **Rule.** Both are total: never NULL. `x IS NULL` is TRUE exactly when `x` is NULL. A NaN is not NULL (§4.3).
+- **Rule.** Both are total: never NULL, so their result type is a non-nullable BOOLEAN (§8.21). `x IS NULL` is TRUE exactly when `x` is NULL. A NaN is not NULL (§4.3).
 - **DuckDB.** As stated ([NULL values](https://duckdb.org/docs/current/sql/data_types/nulls.html)).
-- **Current behaviour.** `src/komira_expr/runtime_expr_bool.mojo:766-800` returns an always-valid result from the validity bit.
+- **Current behaviour.** `src/komira_expr/runtime_expr_bool.mojo:766-800` returns an always-valid result from the validity bit, and the plan declares both non-nullable (`src/komira_plan_expr/expr_walk.mojo:1045-1052`).
 - **Mark.** MATCHES.
 
 ### 1.4 IN with a NULL in the list, or a NULL on the left
@@ -687,7 +688,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ## 8. Result types
 
-The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.20. It is part of this document: its items are counted below and its open items are in "Rulings needed".
+The type of every result column is in [the result-type table](query_semantics_types.md), items §8.1 to §8.21. It is part of this document: its items are counted below and its open items are in "Rulings needed".
 
 ## 9. Window functions
 
@@ -866,7 +867,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 80, DEPARTS 16, UNDECIDED 17: 113 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 33 rows of "Rulings needed" are the 16 DEPARTS and 17 UNDECIDED items.
+MATCHES 81, DEPARTS 16, UNDECIDED 17: 114 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 33 rows of "Rulings needed" are the 16 DEPARTS and 17 UNDECIDED items.
 
 ## What are its limits and open questions?
 
