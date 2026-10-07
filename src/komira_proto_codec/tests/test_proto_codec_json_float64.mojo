@@ -17,14 +17,19 @@
 #       and i_number_very_big_negative_int literals among them) read as the
 #       nearest double. Catches: a digit-count limit in the reader.
 #   R3  correct rounding: the exact midpoint 1 + 2^-53 ties to even (1.0),
-#       one unit in the 55th digit either side goes down / up, the exact
+#       one unit in the 55th digit either side goes down / up, a nonzero
+#       digit dropped past the 800th significant digit lifts the midpoint
+#       to 1 + 2^-52 whether it is dropped from the fraction or from the
+#       integer part (955 integer digits, then e-954), and with that digit
+#       zero the integer-part form still ties to even, the exact
 #       1 + 2^-53 + 2^-55 goes up (its excess is a bit shifted out of the
 #       quotient, not a division remainder) and 1 + 2^-53 - 2^-55 goes down,
 #       2^53 + 1 and 2^53 + 3 tie to even, and the 768-digit midpoint between two
 #       subnormals ties to even, goes up with a nonzero digit 829 places in,
 #       and down one unit in its last digit. Catches: a reader that rounds
 #       twice or truncates, a shifted-out bit that never reaches the sticky
-#       flag, and a significant-digit cap below 768 (the
+#       flag, a dropped digit that never sets the tail flag in either the
+#       integer or the fraction loop, and a significant-digit cap below 768 (the
 #       midpoint's 768th digit would join the sticky tail and read as above).
 #   R4  subnormals and zeros: 5e-324, 4.9e-324, 2.5e-324 and 3e-324 are the
 #       smallest subnormal, 2^-1075 exactly (752 digits) ties to +0.0 and
@@ -302,6 +307,17 @@ def test_r3_correct_rounding() raises:
         "just above 1 + 2^-53",
     )
     _expect_read(mid + _zeros(900) + "1", UInt64(0x3FF0000000000001), "a tail")
+    var mid_int = "100000000000000011102230246251565404236316680908203125"
+    _expect_read(
+        mid_int + _zeros(900) + "1e-954",
+        UInt64(0x3FF0000000000001),
+        "an integer-part tail past the 800th digit",
+    )
+    _expect_read(
+        mid_int + _zeros(901) + "e-954",
+        ONE_BITS,
+        "955 integer digits that are the midpoint tie to even",
+    )
     # 1 + 2^-53 + 2^-55 exactly: above the midpoint by a binary-exact amount
     # that the division leaves in q's lowest bit, which normalisation shifts
     # out; that bit must reach the sticky flag. Its mirror 1 + 2^-53 - 2^-55
