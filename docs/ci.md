@@ -180,8 +180,8 @@ approved run as able to affect every build that uses the same service.
 
 ## What a farm test action can do
 
-`./buck2 test //src/tests/support/komira_test_minio:farm_capability_probe`
-([the probe](../src/tests/support/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
+`./buck2 test //src/tests/helpers/komira_test_minio:farm_capability_probe`
+([the probe](../src/tests/helpers/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
 inside one test action (on the farm, a Linux worker; with no farm
 configured, the client, like any other standalone test), each thing an
 end-to-end test of a real server needs, and prints one
@@ -190,7 +190,7 @@ rows are required: the test fails, naming the capability, when one is
 missing. The rest are reported and never fail it.
 
 The probe watches the workers only when it runs: the PR check runs it when
-its unit (`//src/tests/support/komira_test_minio/...`) is affected, that is, when a PR
+its unit (`//src/tests/helpers/komira_test_minio/...`) is affected, that is, when a PR
 touches `komira_test_minio` or one of its dependencies. Anyone can run it on
 demand with the command above. A test result is not cached, so each run is a
 fresh probe.

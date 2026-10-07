@@ -24,6 +24,8 @@ load("//functional/public_boundary:fixture.bzl", "PB_HOLDS", "PB_HOSTS", "PB_TRE
         ("date_day_month", "docs/plant.md"),
         ("date_month_year", "docs/plant.md"),
         ("date_numeric", "docs/plant.md"),
+        ("date_unpadded", "docs/plant.md"),
+        ("date_dmy_dash", "docs/plant.md"),
         ("home_linux", "docs/plant.md"),
         ("home_mac", "docs/plant.md"),
         ("home_windows", "docs/plant.md"),
@@ -45,13 +47,44 @@ load("//functional/public_boundary:fixture.bzl", "PB_HOLDS", "PB_HOSTS", "PB_TRE
         ("sha_comment", "src/komira_a/plant.mojo"),
         ("sha_docstring", "src/komira_a/plant.mojo"),
         ("sha_c", "src/komira_a/plant.c"),
-        # third_party/ is upstream bytes but for its BUCK and .bzl files,
-        # which are this repository's: a date planted there is found.
+        # A `//` in a string before the comment: the comment is still read.
+        ("sha_c_after_string", "src/komira_a/plant.c"),
+        # third_party/ is read whole, its BUCK files and the rest.
         ("third_party_buck", "third_party/up/BUCK"),
+        ("third_party_c", "third_party/up/config.h"),
     ]
 ]
 
-# held.mojo with one more date: the row holds 13.
+# A date, a home directory and a deny-list word in a path, at line 0; the
+# path of binary data is read too. The file itself holds nothing.
+[
+    public_boundary(
+        name = name,
+        deny = "deny.txt",
+        files = PB_TREE | {path: "plant_clean.txt"},
+        holds = PB_HOLDS,
+        hosts = PB_HOSTS,
+        **PB_WINDOW
+    )
+    for name, path in [
+        ("path_date", "docs/notes_2031_08_31.md"),
+        ("path_home", "home/jdoe/notes.md"),
+        ("path_deny", "docs/zanzibar_notes.md"),
+        ("path_binary", "src/komira_a/tests/fixtures/2031-08-31.arrow"),
+    ]
+]
+
+# A file at a path of `paths` (a file another cell exports) is read.
+public_boundary(
+    name = "paths_attr",
+    files = PB_TREE,
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    paths = {"other/.config": "plant_date_iso.txt"},
+    **PB_WINDOW
+)
+
+# held.mojo with one more date: the row holds 15.
 public_boundary(
     name = "held_new_site",
     files = PB_TREE | {"src/komira_a/held.mojo": "held_plus.txt"},
@@ -94,11 +127,10 @@ public_boundary(
         # A row of three fields.
         ("holds_malformed", "holds_malformed.tsv", None),
         ("holds_rule", "holds_rule.tsv", None),
-        # A row for a file the tree does not hold, for binary data and for
-        # upstream bytes: neither is read.
+        # A row for a file the tree does not hold.
         ("holds_file", "holds_file.tsv", None),
+        # A row for binary data: its contents are not read, so it holds none.
         ("holds_binary", "holds_binary.tsv", None),
-        ("holds_upstream", "holds_upstream.tsv", None),
         ("holds_count", "holds_count.tsv", None),
         ("holds_reason", "holds_reason.tsv", None),
         ("holds_duplicate", "holds_duplicate.tsv", None),
@@ -124,6 +156,16 @@ public_boundary(
     holds = PB_HOLDS,
     hosts = PB_HOSTS,
     **PB_WINDOW
+)
+
+# A window whose month is 13: refused by the reader.
+public_boundary(
+    name = "window_month",
+    files = PB_TREE,
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    public_from = "2031-13-01",
+    window_from = 2030,
 )
 
 # A window that does not end on the first day of a month: refused by the reader.
