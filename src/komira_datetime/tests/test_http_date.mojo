@@ -160,6 +160,32 @@ def test_errors_name_no_protocol() raises:
         assert_true(msg.find("http-date") >= 0)
 
 
+# Each of the three zone bytes is checked on its own. The 29-byte list above
+# varies the zone only as a whole ("UTC", "gmt") or before it ("_GMT"), so a
+# reader that compared just "GM" (bytes 26..27) would pass it; these inputs
+# keep "GM" and change only byte 28, and one more each changes byte 26 or 27.
+def test_every_zone_byte_is_checked() raises:
+    # Control: the same shape with "GMT" reads, so the refusals below are
+    # about the zone alone. 2026-11-06 is a Friday.
+    assert_equal(
+        parse_http_date("Fri, 06 Nov 2026 08:49:37 GMT", check_weekday=True),
+        1793954977,
+    )
+    assert_equal(format_http_date(1793954977), "Fri, 06 Nov 2026 08:49:37 GMT")
+    var bad = [
+        "Fri, 06 Nov 2026 08:49:37 GMX",
+        "Fri, 06 Nov 2026 08:49:37 GMt",
+        "Fri, 06 Nov 2026 08:49:37 GM ",
+        "Fri, 06 Nov 2026 08:49:37 GMZ",
+        "Fri, 06 Nov 2026 08:49:37 XMT",
+        "Fri, 06 Nov 2026 08:49:37 GXT",
+    ]
+    for i in range(len(bad)):
+        assert_equal(bad[i].byte_length(), 29)
+        with assert_raises(contains="not in GMT"):
+            _ = parse_http_date(bad[i])
+
+
 def main() raises:
     test_the_rfc_example()
     test_every_weekday_and_month_name()
@@ -169,4 +195,5 @@ def main() raises:
     test_other_shapes_are_refused()
     test_malformed_29_byte_inputs()
     test_errors_name_no_protocol()
+    test_every_zone_byte_is_checked()
     print("all http-date tests passed")
