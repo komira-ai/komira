@@ -967,8 +967,9 @@ retargeted to `main` and then pushed to (a retarget alone is an `edited`
 event, which neither workflow listens for; the pull request adding the
 workflow sees its first real run then). Making it a required check, or switching coverage on in
 `pr / check`, waits for the sweep of tests that fail at `-O0` or under kcov
-(today one such test leaves all its library's dependents unbuilt in a
-coverage build) and is the CEO's decision. Details:
+(in a coverage build one such test leaves its library's conda package
+unbuilt: a coverage run or gate blocks only the package it measures from
+shipping, never the library or its dependents) and is the CEO's decision. Details:
 [The coverage workflow](../tools/build/coverage/README.md#the-coverage-workflow).
 
 ## merge-from-live (not yet running)

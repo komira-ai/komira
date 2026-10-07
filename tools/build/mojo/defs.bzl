@@ -8,8 +8,7 @@ Output layout of a library `L` with import name `I`:
     L/ungated/I.mojoc      the compiler's output (sub-target `[ungated]`: files
                            only, no MojoInfo, so it cannot be named in `deps`)
     L/pkg/I.mojoc          the public package: a copy of the ungated one that
-                           takes every test's PASS marker as an input (with
-                           coverage on, coverage.bzl's markers too)
+                           takes every test's PASS marker as an input
     L/src/I/...            the staged package sources
     L[gen]                 with `gen`: that target's DefaultInfo, re-exported
                            whole, sub-targets included (for mojo_gcp_client: the
@@ -427,10 +426,10 @@ def _library_impl(ctx):
         test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]])]
         markers.append(readme_marker[0])
 
-    # With coverage on, the package also waits for the coverage runs and the
-    # gate (coverage.bzl), a library with no test included.
-    cov_markers, cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch) if cov_link else ([], None, [])
-    if markers or cov_markers:
+    # With coverage on, the gate (coverage.bzl); only the conda package waits
+    # for it and the runs, never this package.
+    cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch) if cov_link else (None, [])
+    if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
             cmd_args(
@@ -438,7 +437,7 @@ def _library_impl(ctx):
                 "cp",
                 ungated,
                 public.as_output(),
-                hidden = markers + cov_markers,
+                hidden = markers,
             ),
             category = "mojo_gate_join",
         )
@@ -980,7 +979,7 @@ def _mojo_library(**kwargs):
         conda_package(
             name = name + "_conda",
             lib = ":" + name,
-            # A library of the coverage ledger: what ships waits for its gate.
+            # A library of the coverage ledger: its gate, `<name>_cov_gate`.
             coverage_gate = cov_gate,
             summary = summary or "The `{}` Mojo library of komira, as a conda package.".format(kwargs.get("import_name") or name),
             visibility = ["PUBLIC"],

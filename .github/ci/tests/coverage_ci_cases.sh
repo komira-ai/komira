@@ -614,8 +614,9 @@ pass
 
 # M9. A failed build is read per library from the build report. alpha
 # failed in its OWN gate alone (an enforce finding: its runs built), so it
-# is measured, its report read; beta failed in its dependency alpha's gate
-# (its runs never ran) and gamma in an error that is no action's: both not
+# is measured, its report read; beta failed in another library's gate (not
+# its own: no library waits for a gate today, but the classifier counts only
+# the library's own) and gamma in an error that is no action's: both not
 # measured.
 printf 'src/alpha/alpha.mojo\nsrc/beta/beta.mojo\nsrc/gamma/g.mojo\n' >"$W/git_names"
 printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\nkomira//src/gamma:gamma\n' >"$W/uquery_out"
