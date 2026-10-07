@@ -33,7 +33,8 @@
 # (`index_role_collisions`) as a limit.
 # =============================================================================
 
-from kci_resource_proto.resource import Resource, Table, Table_AccessPath, Table_Field
+from kci_resource_proto.data import Table, Table_AccessPath, Table_Field
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding, LoweredNode, OwnedRecord
 from kci_cloud.catalog import FIELD_BUCKET, FIELD_TABLE, ROLE_TABLE

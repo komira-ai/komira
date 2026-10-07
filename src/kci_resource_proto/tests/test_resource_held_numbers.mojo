@@ -46,37 +46,17 @@ from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import Serializable, decode_proto, encode_proto
 from kci_resource_proto.composite import CompositeDefinition, InputType
-from kci_resource_proto.resource import (
-    Access,
-    Bucket,
-    CellResource,
-    Certificate,
-    CompositeInstance,
-    DnsRecord,
-    DnsZone,
-    EventTrigger,
-    Grant,
-    ContainerJob,
-    Image,
-    IpAddress,
-    Network,
-    Output,
-    Queue,
-    Registry,
-    Resource,
-    Schedule,
-    Secret,
-    Service,
-    ServiceAccount,
-    SourceEvent,
-    Subnet,
-    Subscription,
-    Table,
-    Topic,
-    Uses,
-    Value,
-    Worker,
-)
+from kci_resource_proto.artifacts import Registry
+from kci_resource_proto.compute import ContainerJob, Service, Worker
+from kci_resource_proto.data import Bucket, Table
+from kci_resource_proto.identity import Grant, ServiceAccount
+from kci_resource_proto.messaging import Queue, Subscription, Topic
+from kci_resource_proto.names import Certificate, DnsRecord, DnsZone
+from kci_resource_proto.networks import IpAddress, Network, Subnet
+from kci_resource_proto.refs import Access, CellResource, Image, Output, Uses, Value
+from kci_resource_proto.resource import CompositeInstance, Resource
+from kci_resource_proto.secrets import Secret
+from kci_resource_proto.triggers import EventTrigger, Schedule, SourceEvent
 
 
 @fieldwise_init

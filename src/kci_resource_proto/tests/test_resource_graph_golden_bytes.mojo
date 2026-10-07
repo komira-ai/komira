@@ -8,7 +8,7 @@
 # that did not come from this repository. This file freezes the bytes this
 # package's encoder writes for ten composed graphs, as `.hex` fixtures; the
 # `resource_graph_fixtures` check in BUCK has protoc (which learned the format
-# from `resource.proto` alone) decode those bytes to the committed `.txtpb`,
+# from the package's `.proto` files alone) decode those bytes to the committed `.txtpb`,
 # and encode that text to the committed `.canonical.hex`. A symmetric defect,
 # one this encoder and this decoder share, round-trips here and is caught
 # there.
@@ -16,7 +16,7 @@
 # THE CORPUS. Each graph is authored as proto3 JSON, the form an author
 # writes and the one kci reads (`decode_json[ResourceList]`), then encoded
 # with `encode_proto`. Between them the ten graphs set every field of every
-# message of `resource.proto` at least once, to a value other than its
+# message of the catalog at least once, to a value other than its
 # default (a field at its default is not on protoc's side of the wire, so it
 # would check nothing), and every `Resource.body` arm:
 #

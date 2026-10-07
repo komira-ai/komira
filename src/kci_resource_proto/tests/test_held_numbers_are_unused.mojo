@@ -4,12 +4,11 @@
 #
 # THE HELD FIELD NUMBERS, DERIVED FROM THE PROTO ITSELF.
 #
-# resource.proto and composite.proto declare their held numbers once, in
-# `held-numbers:` lines of their headers (a message name, then numbers and
-# `a-b` ranges), and their retired numbers in `reserved` statements. This test
-# reads the two files' text (one after the other: no message is declared in
-# both), parses
-# every message's fields, and refuses:
+# Every `.proto` of the package declares its held numbers once, in
+# `held-numbers:` lines of its header (a message name, then numbers and `a-b`
+# ranges), and its retired numbers in `reserved` statements. This test reads
+# the files' text (one after the other, in `_protos()` order: no message is
+# declared in two), parses every message's fields, and refuses:
 #   * a field whose number is held for its message (so `string x = 101;` in
 #     `Resource` fails the build, not only the first number of each range);
 #   * a field that reuses a number its own message reserved;
@@ -209,8 +208,33 @@ def held_violations(text: String) raises -> List[String]:
     return out^
 
 
+def _protos() -> List[String]:
+    """Every `.proto` of the package (BUCK's `_PROTOS`), in its order."""
+    var l = List[String]()
+    for name in [
+        String("resource.proto"),
+        String("refs.proto"),
+        String("compute.proto"),
+        String("data.proto"),
+        String("identity.proto"),
+        String("messaging.proto"),
+        String("secrets.proto"),
+        String("names.proto"),
+        String("triggers.proto"),
+        String("networks.proto"),
+        String("artifacts.proto"),
+        String("composite.proto"),
+    ]:
+        l.append(name)
+    return l^
+
+
 def _real() raises -> String:
-    return Path(String("resource.proto")).read_text() + String("\n") + Path(String("composite.proto")).read_text()
+    var text = String("")
+    var names = _protos()
+    for i in range(len(names)):
+        text += Path(names[i]).read_text() + String("\n")
+    return text^
 
 
 def _insert_after(text: String, anchor: String, line: String) raises -> String:
@@ -281,7 +305,7 @@ def test_a_held_number_or_a_reserved_number_is_refused() raises:
 
 
 def main() raises:
-    print("test_held_numbers_are_unused: the held numbers, derived from resource.proto and composite.proto")
+    print("test_held_numbers_are_unused: the held numbers, derived from every .proto of the package")
     test_the_proto_uses_no_held_or_reserved_number()
     test_a_held_number_or_a_reserved_number_is_refused()
     print("ALL HELD-NUMBER TESTS PASSED")

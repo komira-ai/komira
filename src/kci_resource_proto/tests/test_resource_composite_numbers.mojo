@@ -47,7 +47,8 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
 from kci_resource_proto.composite import CompositeDefinition, Input, InputType, OutputDecl
-from kci_resource_proto.resource import CompositeInstance, Output, Ref, Resource, Value
+from kci_resource_proto.refs import Output, Ref, Value
+from kci_resource_proto.resource import CompositeInstance, Resource
 
 
 

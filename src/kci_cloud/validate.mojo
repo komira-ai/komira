@@ -93,7 +93,8 @@
 # =============================================================================
 
 from kci_resource_proto.composite import CompositeDefinition
-from kci_resource_proto.resource import Resource, Ref
+from kci_resource_proto.refs import Ref
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import (
     CloudAdapter,

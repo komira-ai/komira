@@ -62,7 +62,9 @@ from kci_cloud import (
     worker_replicas,
     workload_of,
 )
-from kci_resource_proto.resource import Image, Resource, Size, Value
+from kci_resource_proto.compute import Size
+from kci_resource_proto.refs import Image, Value
+from kci_resource_proto.resource import Resource
 
 from kci_cloud_fake.limits import FAKE_CITATION
 from kci_cloud_fake.network import network_input

@@ -65,7 +65,8 @@
 from komira_crypto import hex_lower_array_32, sha256
 from komira_proto_codec import encode_proto
 from kci_resource_proto.composite import CompositeDefinition, InputType
-from kci_resource_proto.resource import Ref, Resource, Value
+from kci_resource_proto.refs import Ref, Value
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding
 from kci_cloud.catalog import Catalog, FIELD_COMPOSITE, body_field

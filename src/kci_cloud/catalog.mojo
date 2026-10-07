@@ -43,8 +43,8 @@
 # ⚠ HAND-KEPT, BECAUSE THE GENERATED MOJO CANNOT ANSWER IT. The proto states
 # portability and `exposes` as message options; the Mojo the codec emits does
 # not surface message options (spike S3 of the catalog plan failed). So the
-# two option columns are copied here from `resource.proto`, and the copy is
-# the one thing in this package that can drift from the schema. What IS
+# two option columns are copied here from the catalog's `.proto` files, and
+# the copy is the one thing in this package that can drift from the schema. What IS
 # checked against generated code: the arm numbers (a body decoded from wire
 # field N must map back to N, `test_catalog_arms_match_the_wire`), the output
 # names (each must be a value of the generated `Output` enum) and the access

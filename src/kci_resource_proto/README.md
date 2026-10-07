@@ -21,7 +21,7 @@ Inside a definition a `Ref` names a component with `local` or a REF input
 with `input`, and a `Value` names a STRING input with `input`; anywhere, a
 `Ref.path` reaches an exported component of an instance. kci_cloud expands
 every instance into primitives before validating a list.
-Every other number the headers of `resource.proto` and `composite.proto` list is
+Every other number the `.proto` headers list is
 held: undeclared today, so it decodes as an unknown field, and declaring it
 later is an addition. A `secret` resource is the container only; a workload
 (a service, a container job or a worker) receives a secret by reference (`SecretRef`: by name, or a `secret`
@@ -48,8 +48,17 @@ undeclared.
 
 ## API
 
-The Mojo modules are `kci_resource_proto.resource` and
-`kci_resource_proto.composite`. Each message is a struct
+The schema is one package in files by message family, and each file is one
+Mojo module of the same name: `kci_resource_proto.resource` (`Resource`,
+`CompositeInstance`, `ResourceList`), `.refs` (`Ref`, `Value`, `Uses`,
+`Access`, `Output`, `CellResource`, `Retention`, `Image`, `StepOutput`,
+`SecretRef`, `Portability`), `.compute` (`Service`, `ContainerJob`,
+`Worker`, `Size`, `Scale`), `.data` (`Table`, `Bucket`), `.identity`
+(`ServiceAccount`, `Grant`), `.messaging` (`Queue`, `Topic`,
+`Subscription`), `.secrets` (`Secret`), `.names` (`DnsZone`, `DnsRecord`,
+`Certificate`), `.triggers` (`Schedule`, `EventTrigger`), `.networks`
+(`Network`, `Subnet`, `IpAddress`), `.artifacts` (`Registry`) and
+`.composite` (the format of a composite). Each message is a struct
 that conforms to `komira_proto_codec`'s `Serializable`, so `encode_proto`
 and `decode_proto` (and `encode_json` / `decode_json`, the proto3 JSON form
 with camelCase names) read and write it. A message field, a oneof arm and a
@@ -93,7 +102,8 @@ A `grant` gives a principal an access to a target; the enum is stored by
 number and rendered by name in JSON:
 
 ```mojo
-from kci_resource_proto.resource import Access, Resource
+from kci_resource_proto.refs import Access
+from kci_resource_proto.resource import Resource
 from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
 from std.testing import assert_equal, assert_true
 
@@ -113,7 +123,7 @@ assert_true('"access":"READ_WRITE"' in encode_json(back))
 absent, never confused with a written empty string.
 
 ```mojo
-from kci_resource_proto.resource import SecretRef
+from kci_resource_proto.refs import SecretRef
 from komira_proto_codec import decode_json, decode_proto, encode_proto
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -168,7 +178,8 @@ assert_false(Bool(back.subnet.value().zone))
 A `registry` names the format of what it holds; its JSON names the value:
 
 ```mojo
-from kci_resource_proto.resource import ArtifactFormat, Resource
+from kci_resource_proto.artifacts import ArtifactFormat
+from kci_resource_proto.resource import Resource
 from komira_proto_codec import decode_json, decode_proto, encode_proto
 from std.testing import assert_equal
 
