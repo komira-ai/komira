@@ -92,7 +92,9 @@ config_setting(
 # not carry the test stamp, if the metapackage does not require a member at
 # that version and build string, if conda-check refuses it, or if `libs` and
 # `metapackage` are not release_set.txt's (which kci_artifact's welded test
-# holds equal to release/artifacts.textproto's metapackage).
+# holds equal to release/artifacts.textproto's metapackage). Libraries of the
+# set call komira's C, so `native` packages komira_native with the same test
+# stamp as the set's last member (release_set.txt lists it last).
 conda_release_set_check(
     name = "release_set_check",
     metapackage = "komira_all",
@@ -134,7 +136,16 @@ conda_release_set_check(
         "//src/komira_test_run_id:komira_test_run_id",
         "//src/komira_test_verdict:komira_test_verdict",
         "//src/komira_kafka_server:komira_kafka_server",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_broker_proto:komira_broker_proto",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_plan_proto:komira_plan_proto",
+        "//src/komira_supervisor_proto:komira_supervisor_proto",
     ],
+    native = "//tools/build/native:komira_native",
     release_set = "release_set.txt",
 )
 
@@ -145,8 +156,8 @@ conda_release_set_check(
 # Red if the native package's [release_check] fails, if it does not carry
 # the test stamp, if the metapackage does not require it at that version and
 # build string, or if release_set_native.txt does not list it as the last
-# member. komira_native is not declared in release/artifacts.textproto: this
-# target checks the rule, not the release.
+# member. This set is not a release (nothing holds release_set_native.txt
+# equal to release/artifacts.textproto): this target checks the rule.
 conda_release_set_check(
     name = "release_set_native_check",
     metapackage = "komira_native_set",
