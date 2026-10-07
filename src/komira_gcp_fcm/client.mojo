@@ -21,7 +21,10 @@
 #
 # A per-token failure does not raise: a refused, dead or throttled token, and
 # a connection that failed or timed out (TRANSIENT, `http_status` 0), are
-# outcomes, so a caller sending to many tokens goes on to the next. What
+# outcomes, so a caller sending to many tokens goes on to the next. The
+# detail of a send with no answer keeps only komira_http_client's
+# `HttpError[<KIND>]` when the failure names one, else says `transport
+# error`; the failure's own text (an address, an errno) is not kept. What
 # raises is an input refused before sending, and a token that could not be
 # minted.
 #

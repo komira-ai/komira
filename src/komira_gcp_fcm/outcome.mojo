@@ -24,9 +24,10 @@
 # token. No answer at all (the connection failed or timed out) is TRANSIENT
 # with `http_status` 0 (client.mojo).
 #
-# `retry_after_ms` is the `Retry-After` header when it is a whole number of
-# seconds, else the envelope's `google.rpc.RetryInfo` delay, else -1. An
-# HTTP-date `Retry-After` is not read.
+# `retry_after_ms` is set on TRANSIENT only: the `Retry-After` header when
+# it is a whole number of seconds (read as at most 10^9 s), else the
+# envelope's `google.rpc.RetryInfo` delay, else -1. An HTTP-date
+# `Retry-After` is not read.
 #
 # NO BODY TEXT. `detail` is komira_gcp_core's `GcpStatusError.message()` (the
 # HTTP status, the canonical code, byte counts), and `fcm_error` is kept only

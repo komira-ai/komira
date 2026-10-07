@@ -386,11 +386,10 @@ def test_send_over_loopback() raises:
     ref closed = leg.closed[0]
     assert_equal(_kind(closed), fcm_outcome_name(FCM_TRANSIENT), "closed port")
     assert_equal(closed.http_status, 0)
-    assert_true(
-        closed.detail.startswith(
-            "POST FirebaseMessaging.SendMessage: no answer, "
-        ),
+    # The connect failure's own text (errno, address) is not kept.
+    assert_equal(
         closed.detail,
+        "POST FirebaseMessaging.SendMessage: no answer, transport error",
     )
     print("  test_send_over_loopback PASS")
 
