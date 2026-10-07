@@ -674,6 +674,81 @@ proto_codegen_golden(
     options = "default_protocol=rest,package_prefix=refused",
 )
 
+# ---- a service configuration's http.rules (`service_config`) ----
+#
+# corpus/mixin/v1/operations.proto is a mixin bound to its own generic paths
+# (`/v1/{name=operations/**}`) at its own host, as
+# google/longrunning/operations.proto is. service_config/fixture_v1.yaml, the
+# configuration of an API serving it, binds its four methods to the API's
+# paths: GetOperation with an additional binding, WaitOperation with
+# `body: '*'`, CancelOperation with `body: spec`, a field, and
+# ListOperations. Its `apis` does not list the mixin (as googleapis' API
+# Gateway configuration does not list google.longrunning.Operations): the
+# rules alone move the client to the configuration's `name`, and the client
+# names the configuration as its host's source. The rule for
+# DeleteOperation, a method the proto does not declare, is not used.
+proto_codegen_golden(
+    name = "service_config_rest",
+    srcs = ["corpus/mixin/v1/operations.proto"],
+    import_roots = _GOOGLEAPIS,
+    generate = ["mixin/v1/operations.proto"],
+    golden = ["golden/service_config_rest/operations.mojo.golden"],
+    options = "default_protocol=rest,package_prefix=komira_test_mixin",
+    service_config = "service_config/fixture_v1.yaml",
+    absent = [
+        "/v1/{name=operations/**}",
+        "mixin.example.com",
+        "delete_operation",
+        "`/v1/{name=operations}`",
+        "google.api.default_host",
+    ],
+    present = [
+        "\"\"\"GET `/v9/{name=projects/*/operations/*}`, `/v9/{name=folders/*/operations/*}` — REST/JSON, to the first path the request's values match.\"\"\"",
+        "\"\"\"POST `/v9/{name=projects/*/operations/*}:wait` — REST/JSON.\"\"\"",
+        "\"\"\"POST `/v9/{name=projects/*/operations/*}:cancel` — REST/JSON.\"\"\"",
+        "\"\"\"GET `/v9/{name=projects/*}/operations` — REST/JSON.\"\"\"",
+        "encode_json(req.spec.value())",
+        "self._rest_host = String(\"fixture.googleapis.com\")",
+        "configuration `name`, `fixture.googleapis.com`; `set_rest_host` replaces it.",
+    ],
+)
+
+# A generated mixin method the configuration does not bind is refused: its
+# service starts at the API's host, which does not serve the mixin's own
+# generic path (`/v1/{name=operations}`).
+proto_codegen_golden(
+    name = "refuse_service_config_unbound_mixin_method",
+    srcs = ["corpus/mixin/v1/operations.proto"],
+    import_roots = _GOOGLEAPIS,
+    expect_error = "unbound_v1.yaml`: `mixin.v1.Operations.ListOperations` is generated with no http rule in it, but its service starts at the configuration's `name`, `fixture.googleapis.com`, not its own `mixin.example.com`: the proto's binding is not served there; bind the method in `http.rules` or leave it out of the target",
+    generate = ["mixin/v1/operations.proto"],
+    options = "default_protocol=rest,package_prefix=komira_test_mixin",
+    service_config = "service_config/unbound_v1.yaml",
+)
+
+# `response_body` on a generated method is refused: the client decodes the
+# whole response as the method's output.
+proto_codegen_golden(
+    name = "refuse_service_config_response_body",
+    srcs = ["corpus/mixin/v1/operations.proto"],
+    import_roots = _GOOGLEAPIS,
+    expect_error = "line 24: the http rule for `mixin.v1.Operations.CancelOperation` sets `response_body`, which is not generated",
+    generate = ["mixin/v1/operations.proto"],
+    options = "default_protocol=rest,package_prefix=komira_test_mixin",
+    service_config = "service_config/response_body_v1.yaml",
+)
+
+# http.rules bind REST methods: a gRPC target given a configuration is refused.
+proto_codegen_golden(
+    name = "refuse_service_config_grpc",
+    srcs = ["corpus/mixin/v1/operations.proto"],
+    import_roots = _GOOGLEAPIS,
+    expect_error = "option `service_config` binds REST methods: it is read with `default_protocol=rest` only",
+    generate = ["mixin/v1/operations.proto"],
+    options = "default_protocol=grpc,package_prefix=komira_test_mixin",
+    service_config = "service_config/fixture_v1.yaml",
+)
+
 # The URL helpers protoc-gen-mojo emits into every REST client, cut out of
 # the shapes client and compiled on their own (they need nothing outside the
 # standard library). Building the library runs rest_url/test_helpers.mojo
@@ -780,6 +855,10 @@ proto_codegen_goldens(
         ":rest_unary_beside_streaming",
         ":refuse_rest_streaming_method_listed",
         ":refuse_rest_default_host_with_port",
+        ":service_config_rest",
+        ":refuse_service_config_unbound_mixin_method",
+        ":refuse_service_config_response_body",
+        ":refuse_service_config_grpc",
     ] + [":refuse_rest_" + name for name, _ in _REST_REFUSALS] + [
         ":refuse_module_names_" + name
         for name, _, _ in _MODULE_NAMES_REFUSALS

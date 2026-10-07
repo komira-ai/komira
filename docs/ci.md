@@ -179,8 +179,8 @@ approved run as able to affect every build that uses the same service.
 
 ## What a farm test action can do
 
-`./buck2 test //src/komira_test_minio:farm_capability_probe`
-([the probe](../src/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
+`./buck2 test //src/tests/support/komira_test_minio:farm_capability_probe`
+([the probe](../src/tests/support/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
 inside one test action (on the farm, a Linux worker; with no farm
 configured, the client, like any other standalone test), each thing an
 end-to-end test of a real server needs, and prints one
@@ -189,7 +189,7 @@ rows are required: the test fails, naming the capability, when one is
 missing. The rest are reported and never fail it.
 
 The probe watches the workers only when it runs: the PR check runs it when
-its unit (`//src/komira_test_minio/...`) is affected, that is, when a PR
+its unit (`//src/tests/support/komira_test_minio/...`) is affected, that is, when a PR
 touches `komira_test_minio` or one of its dependencies. Anyone can run it on
 demand with the command above. A test result is not cached, so each run is a
 fresh probe.
@@ -232,6 +232,10 @@ gate is `pr / check`. It runs in its own workflow,
 on a nightly schedule and on demand, never on a push or a pull request, with
 the same farm connection and the same job permissions as `pr / check`. Two runs never
 overlap. It needs a Linux x86_64 client and refuses any other (exit 2).
+The workflow puts the platform table's pinned pixi on `PATH` (built as
+`//tools/build/toolchains:pixi`, so buck2 keeps it only at the pin's sha256)
+and runs the script with `--require-install`: the conda install cases (33a,
+33b) then fail, never skip, when pixi or the network is missing.
 
 Run it by hand on a branch of this repository:
 
@@ -803,7 +807,8 @@ so the release files list no package:
   `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
   from the live graph (`buck2 cquery`) and answers one check per path group
   for every target no declared unit names or matches: `<p>` for each
-  library `//src/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
+  library `//src/<p>/...` and each test-only package
+  `//src/tests/<kind>/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
   `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
   for `tests//functional/...`; a name an artifact holds gets `_package`.
   Every name is one kci accepts (`[a-z][a-z0-9_]*`) whatever the directory
