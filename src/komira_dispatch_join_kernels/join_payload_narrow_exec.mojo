@@ -733,7 +733,11 @@ def narrow_build_batch[
     _ = build_batch^
 
     var bad = False
-    if num_workers < 2 or rows < _PN_MIN_PARALLEL_ROWS or n_tasks < 2:
+    if (
+        num_workers < 2
+        or rows < _PN_MIN_PARALLEL_ROWS
+        or n_tasks < 2  # cov: unreachable with 2+ workers and 65536+ rows, _tile_rows cuts 4+ tiles
+    ):
         # SERIAL ARM -- the SAME kernel, so it cannot diverge from the forked
         # one. Reached by every small fixture (and by every unit test), which
         # is why the tests drive both.

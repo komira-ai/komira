@@ -1,5 +1,6 @@
 """`flatten_selection_table_parallel` on a runtime of ONE worker, where the
-fork's tasks run one after another.
+fork's tasks run one after another, and with a pool width of one, where the
+fork is not taken at all.
 
 With every chunk mislabelled, the first task fails and records its message,
 and each later task must see the error flag and return without resolving its
@@ -80,6 +81,37 @@ def _selection_table() raises -> Table:
     return Table.from_chunks(chunks^, _dict_schema())
 
 
+def _flat_schema() raises -> Schema:
+    var sb = SchemaBuilder()
+    sb.add_field(Field("i_sel", ArrowType.INT64, False))
+    return sb.build()
+
+
+def test_a_pool_width_of_one_flattens_serially() raises:
+    """`num_workers` 1 over six chunks and 12,288 rows: the chunk and row
+    tests alone would fork, so only `num_workers < 2` keeps it serial. The
+    token is cancelled before the call, so a fork would raise; the serial
+    flatten never dispatches and returns every value.
+    MUTANT: `or num_workers < 2` dropped: the fork runs over the cancelled
+    token and raises."""
+    var tok = CancellationToken.new()
+    tok.cancel(String("the serial arm must not fork"))
+    var rt = _make_started_runtime(1)
+    ref disp = rt.dispatcher()
+    var out = flatten_selection_table_parallel(
+        _selection_table(), _flat_schema(), Pointer(to=disp), tok^, 1,
+    )
+    rt.shutdown()
+    assert_equal(out.num_chunks(), N_CHUNKS)
+    assert_equal(out.num_rows(), N_CHUNKS * CHUNK_ROWS)
+    for k in range(N_CHUNKS):
+        ref ch = out.chunks()[k]
+        var col = ch.column_at(0).as_primitive[I64]()
+        for r in range(0, CHUNK_ROWS, 61):
+            assert_equal(col.get(r), Int64(1000 * k + (r * 5) % BASE_ROWS))
+    _ = out^
+
+
 def test_later_tasks_return_once_one_has_failed() raises:
     """Every chunk fails; the first message comes out of the fork.
     MUTANT: the driver's `raise Error(raised_msg)` dropped: a table comes
@@ -104,4 +136,5 @@ def test_later_tasks_return_once_one_has_failed() raises:
 
 def main() raises:
     test_later_tasks_return_once_one_has_failed()
-    print("All 1 one-worker selection flatten tests passed.")
+    test_a_pool_width_of_one_flattens_serially()
+    print("All 2 one-worker selection flatten tests passed.")

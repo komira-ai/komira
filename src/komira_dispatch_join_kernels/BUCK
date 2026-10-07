@@ -22,19 +22,19 @@ mojo_library(
         "tests/test_join_deferred_fuse.mojo",
         # the four gather kernels against an oracle, around every loop boundary
         "tests/test_join_gather_kernels.mojo",
-        # the witness, copy, tile size, kernel refusals and an empty build batch
+        # the witness, copy, tile size, kernel refusals, a value below the base, an empty build batch, each fork operand
         "tests/test_join_payload_narrow_edges.mojo",
         # the narrow half's admission ladder, refusals and round trips (moved)
         "tests/test_join_payload_narrow_exec.mojo",
         # the widen and the shipped gather over a narrowed source (moved)
         "tests/test_join_payload_widen.mojo",
-        # the widen of no chunks, of a bitmap, and of a failing tile
+        # the widen of no chunks, of a bitmap, of a failing tile, and each fork operand
         "tests/test_join_payload_widen_edges.mojo",
         # the three process settings: defaults, then each set on its own
         "tests/test_join_settings.mojo",
         # every counter: counting, reset, a fresh slot, no sharing
         "tests/test_route_counters.mojo",
-        # the selection egress fork failing on a runtime of one worker
+        # the selection egress fork failing on one worker, and not forking at a pool width of one
         "tests/test_selection_flatten_one_worker.mojo",
         # the selection egress against an absolute oracle (moved)
         "tests/test_selection_flatten_parallel.mojo",

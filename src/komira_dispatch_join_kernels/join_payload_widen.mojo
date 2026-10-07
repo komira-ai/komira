@@ -296,7 +296,11 @@ def widen_payload_table_parallel[
         swid.append(plan.src_bytes[p])
         ocol.append(plan.out_col[p])
 
-    if num_workers < 2 or total_rows < _PN_MIN_PARALLEL_ROWS or n_tasks < 2:
+    if (
+        num_workers < 2
+        or total_rows < _PN_MIN_PARALLEL_ROWS
+        or n_tasks < 2  # cov: unreachable with 2+ workers and 65536+ rows, _tile_rows cuts 4+ tiles
+    ):
         # SERIAL ARM -- the SAME kernel, so the two arms cannot diverge.
         _ = cancel_token^
         for t in range(n_tasks):

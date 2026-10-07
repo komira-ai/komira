@@ -1,6 +1,7 @@
 """The parts of `widen_payload_table_parallel` the round trips do not reach: a
-result with no chunks, a narrow column that carries a validity bitmap, and a
-tile that fails, on the serial arm and on the forked one.
+result with no chunks, a narrow column that carries a validity bitmap, a tile
+that fails, on the serial arm and on the forked one, and each operand of the
+serial-or-fork decision taken on its own.
 """
 
 from std.memory import Pointer
@@ -189,9 +190,54 @@ def test_a_failing_tile_raises_out_of_the_fork() raises:
     rt.shutdown()
 
 
+def _widen_two_chunks_serially(rows: Int, num_workers: Int) raises:
+    """Two chunks of `rows` over a token cancelled before the call. Only the
+    serial arm can succeed (a fork raises on the cancelled token before it
+    enqueues), so widened values prove the fork was not taken."""
+    var tok = CancellationToken.new()
+    tok.cancel(String("the serial arm must not fork"))
+    var rt = _make_started_runtime(num_workers)
+    ref disp = rt.dispatcher()
+    var chunks = List[RecordBatch]()
+    chunks.append(_narrow_chunk(rows, -1))
+    chunks.append(_narrow_chunk(rows, -1))
+    var t = Table.from_chunks(chunks^, _narrow_schema())
+    var out = widen_payload_table_parallel(
+        t^, _plan(UInt8(2), Int64(7)), _wide_schema(), Pointer(to=disp),
+        tok^, num_workers,
+    )
+    rt.shutdown()
+    assert_equal(out.num_chunks(), 2)
+    for k in range(2):
+        ref ch = out.chunks()[k]
+        assert_true(ch.column_at(1).arrow_type == ArrowType.INT64)
+        var vc = ch.column_at(1).as_primitive[I64]()
+        assert_equal(vc.get(rows - 1), Int64((rows - 1) % 50000 + 7))
+    _ = out^
+
+
+def test_one_worker_widens_serially_above_the_fork_threshold() raises:
+    """`num_workers` 1 over 2 x 65,536 rows: the row test alone would fork
+    (one tile per chunk, two tasks), so only `num_workers < 2` keeps it
+    serial.
+    MUTANT: `num_workers < 2 or` dropped: the fork runs over the cancelled
+    token and raises."""
+    _widen_two_chunks_serially(_PN_MIN_PARALLEL_ROWS, 1)
+
+
+def test_few_rows_widen_serially_on_a_pool() raises:
+    """2 x 1,000 rows on four workers: one tile per chunk, two tasks, so only
+    `total_rows < _PN_MIN_PARALLEL_ROWS` keeps it serial.
+    MUTANT: `total_rows < _PN_MIN_PARALLEL_ROWS` dropped: the fork runs over
+    the cancelled token and raises."""
+    _widen_two_chunks_serially(1000, 4)
+
+
 def main() raises:
     test_no_chunks_still_carries_the_wide_schema()
     test_a_validity_bitmap_survives_the_widen()
     test_a_failing_tile_raises_on_the_serial_arm()
     test_a_failing_tile_raises_out_of_the_fork()
-    print("All 4 widen edge tests passed.")
+    test_one_worker_widens_serially_above_the_fork_threshold()
+    test_few_rows_widen_serially_on_a_pool()
+    print("All 6 widen edge tests passed.")
