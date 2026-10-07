@@ -43,7 +43,8 @@
 #      `uses` on a network, a subnet or an IP address; IPv4 ranges of the
 #      form, a network's private, a subnet's inside its network's and
 #      overlapping no other; a subnet's zone from 1 to 3; a service's
-#      `network` a subnet.
+#      `network` a subnet. And the registry rules (registry.mojo): no `uses`
+#      on a registry; its format written, and one this kci knows.
 #      And the identity rules (grants.mojo): no `uses` on a grant; a `uses`
 #      line or a grant names exactly one of a target and a cell resource,
 #      with a verb that target accepts; a grant's principal is an identity
@@ -98,6 +99,7 @@ from kci_cloud.catalog import (
     FIELD_IP_ADDRESS,
     FIELD_NETWORK,
     FIELD_QUEUE,
+    FIELD_REGISTRY,
     FIELD_SCHEDULE,
     FIELD_SECRET,
     FIELD_SERVICE_ACCOUNT,
@@ -122,6 +124,7 @@ from kci_cloud.dns import dns_findings
 from kci_cloud.firing import firings_of
 from kci_cloud.triggers import trigger_findings
 from kci_cloud.network import network_findings, service_network_findings
+from kci_cloud.registry import registry_findings
 from kci_cloud.workload import is_workload, workload_of
 from kci_cloud.grants import (
     GrantEdge,
@@ -519,6 +522,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             continue
         if field == FIELD_NETWORK or field == FIELD_SUBNET or field == FIELD_IP_ADDRESS:
             out.extend(network_findings(resources, field, r))
+            continue
+        if field == FIELD_REGISTRY:
+            out.extend(registry_findings(field, r))
             continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
