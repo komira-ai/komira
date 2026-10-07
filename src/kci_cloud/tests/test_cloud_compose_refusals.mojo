@@ -284,7 +284,9 @@ def test_a_nested_instance() raises:
     of the REF arm); a STRING input bound to an empty value accepted (drop
     the `arm == 0` finding); `physical_name` or `adopt` on an instance
     accepted (drop it from the metadata test, which labels alone would
-    not show)."""
+    not show); a binding inside a definition that names a missing local,
+    a resource or an undeclared input accepted at load (skip the
+    reference check for a composite component's sites)."""
     var web_text = String(
         '{"name":"acme.web","version":"1",'
         '"input":[{"name":"domain","type":"INPUT_STRING","required":true},{"name":"reads","type":"INPUT_REF"}],'
@@ -320,6 +322,15 @@ def test_a_nested_instance() raises:
     cases.append(w + "," + inst + ',"reads":{"ref":{"local":"b","named":"x"}}}}}')
     fields.append("component[w].composite.input.reads")
     needles.append("a REF input takes a reference to a resource: ref { ... } with no output")
+    cases.append(w + "," + inst + ',"reads":{"ref":{"local":"nope"}}}}}')
+    fields.append("component[w].composite.input.reads")
+    needles.append("acme.x@1 has no component \"nope\"")
+    cases.append(w + "," + inst + ',"reads":{"ref":{"resource":"x"}}}}}')
+    fields.append("component[w].composite.input.reads")
+    needles.append("a definition is closed")
+    cases.append(w + "," + inst + ',"reads":{"ref":{"input":"s"}}}}}')
+    fields.append("component[w].composite.input.reads")
+    needles.append("acme.x@1 declares no input \"s\"")
     cases.append(w + ',"composite":{"definition":"acme.web","version":"1","input":{"domain":{}}}}')
     fields.append("component[w].composite.input.domain")
     needles.append("has no value")
