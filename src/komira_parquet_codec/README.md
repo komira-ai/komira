@@ -39,16 +39,18 @@ _ = decompress(CompressionCodec.ZSTD, Span(packed)[0:n], Span(out))
 ## Native libraries
 
 snappy and the Brotli decoder are linked statically, from
-`//third_party/snappy` and `//third_party/brotli`, so neither library is
-needed at run time. Everything else is opened by name with `dlopen` at first
-use, as `komira_avro` does for its codecs, and must be installed on the
-machine that runs the code:
+`//third_party/snappy` (through `komira_compression`) and
+`//third_party/brotli`, so neither library is needed at run time. Everything
+else is opened by name with `dlopen` at first use by `komira_compression`,
+which owns every codec library, and must be installed on the machine that
+runs the code:
 
 | codec | library | through |
 |---|---|---|
-| LZ4_RAW, LZ4 | `liblz4.so.1` (`liblz4.dylib`) | `komira_lz4` and this package's LZ4 frame shim |
-| GZIP | `libz.so.1` (`libz.dylib`) | `komira_zlib` |
-| ZSTD | `libzstd.so.1` (`libzstd.dylib`) | this package |
+| SNAPPY | linked | `komira_compression.snappy_block` |
+| LZ4_RAW, LZ4 | `liblz4.so.1` (`liblz4.dylib`) | `komira_compression.lz4` |
+| GZIP | `libz.so.1` (`libz.dylib`) | `komira_compression.zlib` |
+| ZSTD | `libzstd.so.1` (`libzstd.dylib`) | `komira_compression.zstd_frame` |
 
 A missing library aborts the process at the first call that needs it.
 
