@@ -12,6 +12,8 @@ Public surface:
   * ExitInfo — decoded exit status (exit_code / signal / shell_code).
   * watch_process_exit / unwatch_process_exit — the reactor-integrated exit
     monitor (darwin EVFILT_PROC/NOTE_EXIT, Linux pidfd_open+epoll).
+  * proc_probe_children / ChildProbe — "is there any child of this
+    process?", asked without reaping one (waitid WNOWAIT).
   * SIGTERM / SIGKILL — the shared signal numbers.
 
 Scope: ONE child per Supervisor, no restart, no timeout, inherited env/cwd
@@ -34,9 +36,11 @@ from .supervisor import (
     DetachedExit,
 )
 from .proc_ffi import (
+    ChildProbe,
     ReapStatus,
     SIGTERM,
     SIGKILL,
+    proc_probe_children,
 )
 from .exit_monitor import (
     ProcExitWatch,

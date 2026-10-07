@@ -107,7 +107,7 @@ comptime WIRING_UNWIRED_UNKNOWN: Int = -1
 #
 # Codes are STABLE, NON-SECRET, dotted identifiers emitted verbatim into the
 # envelope. They name a CLASS of cause, never an instance — no collection name,
-# no project id, no tenant id, nothing read out of the raise.
+# no project id, no account id, nothing read out of the raise.
 
 # The raise carried no declared cause. This is the honest code for "the
 # boundary caught something and cannot name it" — and it is the string the
@@ -161,7 +161,7 @@ def new_incident_id() -> String:
     is not the failure mode worth engineering against here.
 
     Opaque by construction — it encodes only a boot-relative timestamp, so it
-    discloses nothing about the request, the tenant, or the deployment."""
+    discloses nothing about the request, the account, or the deployment."""
     return _hex16(_now_ns())
 
 
@@ -284,8 +284,8 @@ def error_response_log_line(
     replaces it.
 
     `detail` is the response BODY for a 5xx: our own envelope or refusal text,
-    never customer content. It is capped and redacted by `StructuredLogLine`
-    like every other value. A 2xx body IS customer content and must never be
+    never request or user content. It is capped and redacted by `StructuredLogLine`
+    like every other value. A 2xx body IS user content and must never be
     passed here — the caller gates on `status >= 500`."""
     var line = StructuredLogLine(SEVERITY_ERROR, String("http error response"))
     line.with_str("cause_code", String("returned.error_response"))
@@ -306,7 +306,7 @@ def error_response_log_line(
 def response_body_text(ref resp: HttpResponse) -> String:
     """The response body as text, for the log detail of a 5xx.
 
-    ⚠ CALLERS MUST GATE ON `status >= 500`. A 2xx body is customer content and
+    ⚠ CALLERS MUST GATE ON `status >= 500`. A 2xx body is user content and
     has no business in a retained, replicated log line; a 4xx is the caller's
     own error and logging it at ERROR trains operators to ignore ERROR."""
     var out = String("")

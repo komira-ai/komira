@@ -448,12 +448,13 @@ def crates_io_library(
         name,
         version,
         sha256,
+        size,
         crate = None,
         crate_root = "src/lib.rs",
         busybox = "komira//tools/build/toolchains:busybox",
         visibility = ["PUBLIC"],
         **kwargs):
-    """A crates.io crate, pinned by sha256 and compiled with rust_library.
+    """A crates.io crate, pinned by the sha256 and size (bytes) of its `.crate` file, compiled with rust_library.
 
     `crate` is the registry name (default `name`). Features and cfgs are
     stated explicitly: nothing is resolved and no build script runs, so a
@@ -466,6 +467,7 @@ def crates_io_library(
         name = name + ".crate",
         url = "https://static.crates.io/crates/{}/{}.crate".format(crate, prefix),
         sha256 = sha256,
+        size_bytes = size,
     )
     crate_source(
         name = name + ".src",

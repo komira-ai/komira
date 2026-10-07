@@ -6,17 +6,9 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK, Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime, block_on
 from komira_authz_api import AuthzAction, AuthzResource, DenyAllAuthz
-from komira_http_server.middleware import AuthedUser
-from komira_uuid.uuid import Uuid
+from komira_http_server.middleware import Principal
 
 comptime RT = BlockingRuntime[NoopSink]
-
-
-def _some_uuid() -> Uuid:
-    var b = Array[UInt8, 16](fill=UInt8(0))
-    b[0] = UInt8(0xAB)
-    b[15] = UInt8(0xCD)
-    return Uuid(b)
 
 
 def _denies_everything(mut reactor: Reactor[NoopSink]) raises -> Int64:
@@ -38,9 +30,9 @@ def _denies_everything(mut reactor: Reactor[NoopSink]) raises -> Int64:
         AuthzResource.org_and_workspace(String("document"), String("org"), String("ws"))
     )
 
-    var users = List[AuthedUser]()
-    users.append(AuthedUser(_some_uuid(), _some_uuid()))  # authenticated
-    users.append(AuthedUser(Uuid(), Uuid()))  # nil
+    var users = List[Principal]()
+    users.append(Principal(String("subject-1")))  # authenticated
+    users.append(Principal(String("")))  # empty
 
     var authz = DenyAllAuthz()
     var granted = Int64(0)

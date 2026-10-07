@@ -16,6 +16,7 @@ configured target, the same bytes.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 
 def _cases_impl(ctx):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
@@ -36,6 +37,7 @@ def _cases_impl(ctx):
             result.as_output(),
             tool,
             staged,
+            [h[DefaultInfo].default_outputs[0] for h in ctx.attrs.helpers],
         ),
         category = "kcov_tool_cases",
         identifier = ctx.label.name,
@@ -47,9 +49,10 @@ def _cases_impl(ctx):
 
 _kcov_tool_cases = rule(
     impl = _cases_impl,
-    doc = "Runs `script` under busybox sh as `sh <script> <busybox> <result.json> <tool> <dir>`, where `<dir>` holds `script` and `data` at their paths in the package. The script exits non-zero on a wrong result and writes a successful validation result otherwise.",
+    doc = "Runs `script` under busybox sh as `sh <script> <busybox> <result.json> <tool> <dir> [<helper>...]`, where `<dir>` holds `script` and `data` at their paths in the package and each `<helper>` is the default output of one of `helpers`, in order. The script exits non-zero on a wrong result and writes a successful validation result otherwise.",
     attrs = {
         "data": attrs.list(attrs.source(), default = [], doc = "Fixtures the script reads."),
+        "helpers": attrs.list(attrs.exec_dep(), default = [], doc = "Other tools the cases run, configured like `tool`."),
         "script": attrs.source(),
         "tool": attrs.exec_dep(providers = [RunInfo]),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
@@ -69,5 +72,25 @@ _kcov_tool = rule(
     },
 )
 
+def _link_dir_impl(ctx):
+    tc = ctx.attrs._toolchain[MojoToolchainInfo]
+    out = ctx.actions.copied_dir("cov_link", {
+        "debug_relocate": ctx.attrs.relocate[DefaultInfo].default_outputs[0],
+        "real": tc.link,
+        "zig": ctx.attrs.zig[DefaultInfo].default_outputs[0],
+    })
+    return [DefaultInfo(default_output = out)]
+
+_cov_link_dir = rule(
+    impl = _link_dir_impl,
+    doc = "The link directory of a coverage build: what mojo_wrapper.sh takes as <zig_dir>. It holds `zig` (cov_zig), `debug_relocate`, and `real/`, the Mojo toolchain's own link directory (the pinned zig), so a coverage link uses the zig a release link uses.",
+    attrs = {
+        "relocate": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/kcov:debug_relocate"),
+        "zig": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/kcov:cov_zig"),
+        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+    },
+)
+
 kcov_tool_cases = declares_docs(_kcov_tool_cases)
 kcov_tool = declares_docs(_kcov_tool)
+cov_link_dir = declares_docs(_cov_link_dir)

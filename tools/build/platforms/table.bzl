@@ -5,7 +5,7 @@ platform IS: the constraints that name it, the host that selects it, the
 `[komira_re]` key of its execution platform's worker property set, how zig
 links for it, the CPU floor every compile targets, the object format, what a
 built binary loads at run time, the operating-system floor it needs, and
-every pinned download its toolchains use (URL and sha256). The detector
+every pinned download its toolchains use (URL, sha256 and size). The detector
 (`platforms:host`), the execution platforms (defs.bzl), the toolchains and
 the checks that name a platform all read this table; none repeats a row.
 
@@ -36,11 +36,14 @@ def none(reason):
 def pending(reason):
     return {"pending": reason}
 
-# `pin(name, url, sha256)`: one sha256-pinned download. `name` is the target
-# name of the `pinned_file` that fetches it (an asset name: outputs of that
-# target live under it, so renaming one re-keys every action that reads it).
-def pin(name, url, sha256, executable = False):
-    return {"executable": executable, "name": name, "sha256": sha256, "url": url}
+# `pin(name, url, sha256, size = <bytes>)`: one sha256-pinned download. `name`
+# is the target name of the `pinned_file` that fetches it (an asset name:
+# outputs of that target live under it, so renaming one re-keys every action
+# that reads it). `size` is the file's length in bytes, required: with it and
+# the sha256 buck2 needs no request to the URL unless the remote CAS lacks the
+# blob (tools/build/mojo/download.bzl).
+def pin(name, url, sha256, executable = False, size = None):
+    return {"executable": executable, "name": name, "sha256": sha256, "size": size, "url": url}
 
 # The pinned downloads every registered row must state, by role. `none` is
 # allowed where a platform can need nothing (the conda runtime libraries the
@@ -130,11 +133,13 @@ PLATFORMS = {
                 "actionlint_1.7.12_linux_amd64.tar.gz",
                 "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
                 "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+                size = 2353908,
             ),
             "busybox": pin(
                 "busybox",
                 "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox",
                 "6e123e7f3202a8c1e9b1f94d8941580a25135382b99e8d3e34fb858bba311348",
+                size = 1131168,
                 executable = True,
             ),
             # kcov v42 (GPL-2.0): the tag's source archive, and the conda-forge
@@ -145,51 +150,61 @@ PLATFORMS = {
                 "bzip2_1.0.8_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_10.conda",
                 "1a0d382c515ebf55f8ee1f38c8b81bc95af5c2acc42ad53b66bc5df932032f96",
+                size = 257808,
             ),
             "kcov_elfutils": pin(
                 "elfutils_0.194_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/elfutils-0.194-h849f50c_0.conda",
                 "f71eae7dc8ff9392d225d2d529691b2db16289b7d8009646eeb1adf0caf3937b",
+                size = 1289929,
             ),
             "kcov_lzma": pin(
                 "liblzma-static_5.8.3_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/liblzma-static-5.8.3-ha02ee65_1.conda",
                 "237563ec760527207b84338807e49e817ac53c3306e566aecaa4fd4a32530b56",
+                size = 125751,
             ),
             "kcov_src": pin(
                 "kcov-v42.tar.gz",
                 "https://github.com/SimonKagstrom/kcov/archive/refs/tags/v42.tar.gz",
                 "2c47d75397af248bc387f60cdd79180763e1f88f3dd71c94bb52478f8e74a1f8",
+                size = 259243,
             ),
             "kcov_zlib": pin(
                 "zlib_1.3.2_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/zlib-1.3.2-h25fd6f3_3.conda",
                 "16080a1c7724f7d25727cdc23c7658e0cec2db52448c1dc0c33467ee2c6e1c62",
+                size = 96132,
             ),
             "kcov_zstd": pin(
                 "zstd-static_1.5.7_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/zstd-static-1.5.7-hb72f32e_7.conda",
                 "62e9e4b9274c2c7028e0bcdf80c254ee95499d4860e7c13d8926485d03b0d27b",
+                size = 475941,
             ),
             "libgcc": pin(
                 "libgcc_15.3.0_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/libgcc-15.3.0-h3363355_7.conda",
                 "0bb57ee8557aad33317eeb881e3957b6fab776dd75473311c25789fa3a29f792",
+                size = 1042438,
             ),
             "libstdcxx": pin(
                 "libstdcxx_15.3.0_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-15.3.0-h934c35e_7.conda",
                 "0c3dc08bf43357a77297b4449abd0ce1d40a140989f004071e69c04ed13e36bb",
+                size = 5836322,
             ),
             "libzlib": pin(
                 "libzlib_1.3.1_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda",
                 "d4bfe88d7cb447768e31650f06257995601f89076080e76df55e3112d4e47dc4",
+                size = 60963,
             ),
             "mojo_compiler": pin(
                 "mojo_compiler_1.0.0_linux-64.conda",
                 "https://conda.modular.com/max-nightly/linux-64/mojo-compiler-1.0.0-release.conda",
                 "4394c6146d47ec7794a9a3ed5775ae158f59f83f8e1aed59408b17c4909821b3",
+                size = 68511359,
             ),
             # pixi, the raw static (musl) executable of the release: no archive,
             # nothing to unpack. Release validations install into an environment
@@ -198,32 +213,38 @@ PLATFORMS = {
                 "pixi-0.67.2-x86_64-unknown-linux-musl",
                 "https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-x86_64-unknown-linux-musl",
                 "807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f",
+                size = 72538704,
                 executable = True,
             ),
             "protoc": pin(
                 "protoc-29.1-linux-x86_64.zip",
                 "https://github.com/protocolbuffers/protobuf/releases/download/v29.1/protoc-29.1-linux-x86_64.zip",
                 "00c83fe9722d85e96c81b941b29f17a744b33b4ce66e0f18009fd8937de22c60",
+                size = 3288942,
             ),
             "rust_std": pin(
                 "rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
                 "https://static.rust-lang.org/dist/rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
                 "285e105d25ebdf501341238d4c0594ecdda50ec9078f45095f793a736b1f1ac2",
+                size = 27989420,
             ),
             "rustc": pin(
                 "rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
                 "https://static.rust-lang.org/dist/rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
                 "7436f13797475082cd87aa65547449e01659d6a810b4cd5f8aedc48bb9f89dfb",
+                size = 72920412,
             ),
             "shellcheck": pin(
                 "shellcheck-v0.11.0.linux.x86_64.tar.xz",
                 "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz",
                 "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198",
+                size = 2559196,
             ),
             "zig": pin(
                 "zig_linux_x86_64.tar.xz",
                 "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz",
                 "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad",
+                size = 45480516,
             ),
         },
         "bundles": True,
@@ -241,9 +262,10 @@ PLATFORMS = {
         # tzdata, a nonroot user, no shell), tag `nonroot`, its linux/amd64 image
         # manifest. The manifest is checked in (a registry serves one only to a
         # client sending an Accept header); every blob is one pinned download. The
-        # digests are the pin.
+        # digests are the pin; the sizes are the manifest's.
         "oci_base": {
             "config": "sha256:c31423653c22931f970322b39ef0b1a9395efefa45e4e8d16fc409c286443c0b",
+            "config_size": 3147,
             "layers": [
                 "sha256:a5789fc40e828c4e7467626e3f69ec5dea8e5da22fe660db8ae6d16f777b0bbf",
                 "sha256:990a9c434e5e0f11549a8d4a41a1991e621b04e30cd63269adbc97b1dc38fd7e",
@@ -259,6 +281,23 @@ PLATFORMS = {
                 "sha256:96ed2737ae312e0bc637b40783f7c2f23416cb72ca957aa01855f1614278e64b",
                 "sha256:235c3625d753c5b8a741210c2e7fb26b47a0d02cf49acc631a38dcf847eedf89",
                 "sha256:dc0fb75e565a59a5824baedc9645656d17bc91c4b31332ee179580fa9f60eacd",
+            ],
+            # The size in bytes of each layer, in the order of `layers`.
+            "layer_sizes": [
+                83900,
+                12481,
+                445709,
+                29005,
+                67,
+                188,
+                123,
+                162,
+                80,
+                351,
+                314,
+                143347,
+                4951123,
+                2506537,
             ],
             "manifest": "sha256:5883c320d81f76c764e114c9ab14054f037bb040907816fc9028d80d9602a7c3",
             "manifest_file": "distroless_base_debian12.manifest.json",
@@ -299,6 +338,7 @@ PLATFORMS = {
                 "actionlint_1.7.12_darwin_arm64.tar.gz",
                 "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz",
                 "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f",
+                size = 2164202,
             ),
             # macOS has no static busybox: its applets come from the shim
             # tools/build/mojo/darwin/busybox.sh, a fixed list resolved from
@@ -317,38 +357,45 @@ PLATFORMS = {
                 "mojo_compiler_1.0.0_osx-arm64.conda",
                 "https://conda.modular.com/max-nightly/osx-arm64/mojo-compiler-1.0.0-release.conda",
                 "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59",
+                size = 61221085,
             ),
             # pixi, the raw executable of the same release as linux-x86_64's.
             "pixi": pin(
                 "pixi-0.67.2-aarch64-apple-darwin",
                 "https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-aarch64-apple-darwin",
                 "46665ae8c164120ad9b22293566fcd5b454cd25ff77f410a77970bb0e47e0622",
+                size = 56099104,
                 executable = True,
             ),
             "protoc": pin(
                 "protoc-29.1-osx-aarch_64.zip",
                 "https://github.com/protocolbuffers/protobuf/releases/download/v29.1/protoc-29.1-osx-aarch_64.zip",
                 "b8fd5976926198a7c4ea5c6eb4bf78959d5faed27bfc618254caa1043f770445",
+                size = 2290879,
             ),
             "rust_std": pin(
                 "rust-std-1.85.0-aarch64-apple-darwin.tar.xz",
                 "https://static.rust-lang.org/dist/rust-std-1.85.0-aarch64-apple-darwin.tar.xz",
                 "7da1367209de00e3fb315c0e76658e3605ee2559892d29851a3159ae7ea1ddc5",
+                size = 25447360,
             ),
             "rustc": pin(
                 "rustc-1.85.0-aarch64-apple-darwin.tar.xz",
                 "https://static.rust-lang.org/dist/rustc-1.85.0-aarch64-apple-darwin.tar.xz",
                 "2a03e227b57a49d80b43473b6fa2d56ad661ece0d8ffd81f639cd31600d3823e",
+                size = 55016276,
             ),
             "shellcheck": pin(
                 "shellcheck-v0.11.0.darwin.aarch64.tar.xz",
                 "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.aarch64.tar.xz",
                 "56affdd8de5527894dca6dc3d7e0a99a873b0f004d7aabc30ae407d3f48b0a79",
+                size = 7245972,
             ),
             "zig": pin(
                 "zig_macos_aarch64.tar.xz",
                 "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz",
                 "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f",
+                size = 43447724,
             ),
         },
         # Bundles, OCI images and the launcher are Linux server products.
@@ -401,6 +448,7 @@ PLATFORMS = {
                 "actionlint_1.7.12_linux_arm64.tar.gz",
                 "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz",
                 "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6",
+                size = 2111482,
             ),
             # busybox.net publishes no aarch64 binary (its binaries directory
             # holds i686 and x86_64 only); a pinned source build or another
@@ -416,47 +464,56 @@ PLATFORMS = {
                 "libgcc_15.3.0_linux-aarch64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-15.3.0-h954ee24_7.conda",
                 "df096c235cf04e802487602f68dbe60d3ab866a7e59e81ae0458f3596a752700",
+                size = 624560,
             ),
             "libstdcxx": pin(
                 "libstdcxx_15.3.0_linux-aarch64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-15.3.0-hef695bb_7.conda",
                 "70f23347c4e8481ef91a9806a59d50e4a4a96c7c72041d3a0654ed5b12470f3e",
+                size = 5519010,
             ),
             "libzlib": pin(
                 "libzlib_1.3.1_linux-aarch64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-aarch64/libzlib-1.3.1-h86ecc28_2.conda",
                 "5a2c1eeef69342e88a98d1d95bff1603727ab1ff4ee0e421522acd8813439b84",
+                size = 66657,
             ),
             "mojo_compiler": pin(
                 "mojo_compiler_1.0.0_linux-aarch64.conda",
                 "https://conda.modular.com/max-nightly/linux-aarch64/mojo-compiler-1.0.0-release.conda",
                 "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57",
+                size = 66479788,
             ),
             "pixi": pending("the pixi linux-aarch64 executable is recorded when the platform is brought up"),
             "protoc": pin(
                 "protoc-29.1-linux-aarch_64.zip",
                 "https://github.com/protocolbuffers/protobuf/releases/download/v29.1/protoc-29.1-linux-aarch_64.zip",
                 "1f74a3f3355de7c0666bc125611c13532c2598f853521d0d3e621a5b09f24799",
+                size = 3257573,
             ),
             "rust_std": pin(
                 "rust-std-1.85.0-aarch64-unknown-linux-gnu.tar.xz",
                 "https://static.rust-lang.org/dist/rust-std-1.85.0-aarch64-unknown-linux-gnu.tar.xz",
                 "8af1d793f7820e9ad0ee23247a9123542c3ea23f8857a018651c7788af9bc5b7",
+                size = 31001964,
             ),
             "rustc": pin(
                 "rustc-1.85.0-aarch64-unknown-linux-gnu.tar.xz",
                 "https://static.rust-lang.org/dist/rustc-1.85.0-aarch64-unknown-linux-gnu.tar.xz",
                 "e742b768f67303010b002b515f6613c639e69ffcc78cd0857d6fe7989e9880f6",
+                size = 87989012,
             ),
             "shellcheck": pin(
                 "shellcheck-v0.11.0.linux.aarch64.tar.xz",
                 "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.xz",
                 "12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588",
+                size = 6811484,
             ),
             "zig": pin(
                 "zig_linux_aarch64.tar.xz",
                 "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz",
                 "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63",
+                size = 41849060,
             ),
         },
         "bundles": True,
@@ -524,6 +581,8 @@ def _pin_refusal(row_name, role, a, registered):
         return "row {}: pin `{}` is an executable, but is not pinned with `executable = True`".format(row_name, role)
     if role in _ONE_RELEASE_ROLES and _release_version(a["url"]) == None:
         return "row {}: pin `{}`: url names no release (`/download/v<version>/`): `{}`".format(row_name, role, a["url"])
+    if type(a.get("size")) != "int" or a["size"] <= 0:
+        return "row {}: pin `{}` has no positive `size`: {}".format(row_name, role, repr(a.get("size")))
     return None
 
 def _release_version(url):
@@ -642,9 +701,12 @@ def table_refusals(table):
             if row["registered"]:
                 out.append("row {}: pin `oci_base` is pending, but the row is registered".format(name))
         else:
-            for f in ["config", "layers", "manifest", "manifest_file", "registry", "repository"]:
+            for f in ["config", "config_size", "layer_sizes", "layers", "manifest", "manifest_file", "registry", "repository"]:
                 if not oci.get(f):
                     out.append("row {}: pin `oci_base` has no `{}`".format(name, f))
+            sizes = [oci.get("config_size")] + (oci.get("layer_sizes") or [])
+            if [z for z in sizes if type(z) != "int" or z <= 0] or len(oci.get("layer_sizes") or []) != len(oci.get("layers") or []):
+                out.append("row {}: pin `oci_base`: `config_size` and each of `layer_sizes` must be a positive size, one per layer".format(name))
         for role in ASSET_ROLES:
             if role not in row["assets"]:
                 out.append("row {}: missing pin `{}`".format(name, role))
@@ -711,7 +773,7 @@ def constraints(name):
     return list(row(name)["constraints"])
 
 def asset(name, role):
-    """The pin of `role` for row `name`: a dict with name, url, sha256, executable. Fails for `none` and `pending`."""
+    """The pin of `role` for row `name`: a dict with name, url, sha256, size, executable. Fails for `none` and `pending`."""
     a = row(name)["assets"][role]
     if "name" not in a:
         fail("platform {} has no `{}` download: {}".format(name, role, a.get("none") or a.get("pending")))
@@ -720,7 +782,7 @@ def asset(name, role):
 def pinned_kwargs(name, role, **extra):
     """kwargs for `pinned_file` that fetch `role` of row `name`; `extra` (visibility, ...) is added."""
     a = asset(name, role)
-    kw = {"name": a["name"], "sha256": a["sha256"], "url": a["url"]}
+    kw = {"name": a["name"], "sha256": a["sha256"], "size_bytes": a["size"], "url": a["url"]}
     if a["executable"]:
         kw["executable"] = True
     kw.update(extra)

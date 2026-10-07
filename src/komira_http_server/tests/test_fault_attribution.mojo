@@ -75,7 +75,7 @@ comptime _REFUSAL_TEXT: String = (
 # no-echo invariant is tested against something that would be visible if it
 # leaked.
 comptime _FAULT_TEXT: String = (
-    "firestore: index missing for collection tenant_secrets"
+    "firestore: index missing for collection account_secrets"
     " <script>pwn</script>"
 )
 
@@ -206,7 +206,7 @@ def test_fault_and_refusal_on_the_identical_chain() raises:
     # not on the wire. Making faults diagnosable must not have made them
     # chatty.
     assert_false(
-        _contains(fbody, String("tenant_secrets")),
+        _contains(fbody, String("account_secrets")),
         String("the raise text leaked into the response body"),
     )
     assert_false(_contains(fbody, String("<script>")))
@@ -283,7 +283,7 @@ def test_fault_log_line_carries_the_raw_cause() raises:
     # THE CAUSE ITSELF. If this assertion is the one that breaks, the 500 is
     # undiagnosable again no matter what the envelope says.
     assert_true(
-        _contains(line, String("tenant_secrets")),
+        _contains(line, String("account_secrets")),
         String("the raw cause is not in the log line: ") + line,
     )
     # The boot-time wiring verdict rides the line — the join between "the boot
@@ -314,7 +314,7 @@ def test_fault_log_line_cannot_be_used_to_forge_a_second_line() raises:
     assert_true(_contains(line, String("real cause")))
 
 
-def test_log_line_redacts_credentials_and_tenant_email() raises:
+def test_log_line_redacts_credentials_and_user_email() raises:
     """THE LOG IS NOT A FREE PASS. The disclosure split sends the RAW cause to
     stdout, and it would be easy to read that as "logs are operator-only, so
     anything goes". They are not: a log line is retained, replicated and read
@@ -332,7 +332,7 @@ def test_log_line_redacts_credentials_and_tenant_email() raises:
         String("/orgs/o-1/settings"),
         String(
             "upstream rejected: Authorization: Bearer eyJhbGciOiJIUzI1NiJ9"
-            " while inserting Key (email)=(alice@customer.example)"
+            " while inserting Key (email)=(alice@users.example)"
         ),
         0,
         String(""),
@@ -343,8 +343,8 @@ def test_log_line_redacts_credentials_and_tenant_email() raises:
         String("a bearer token reached the log line: ") + line,
     )
     assert_false(
-        _contains(line, String("alice@customer.example")),
-        String("a tenant email address reached the log line: ") + line,
+        _contains(line, String("alice@users.example")),
+        String("a user email address reached the log line: ") + line,
     )
     # The line is still USEFUL — redaction that erases the diagnosis is just a
     # slower way of having no log.
@@ -377,7 +377,7 @@ def test_returned_5xx_is_observed_but_never_rewritten() raises:
     observe_error_response(
         refusal,
         String("POST"),
-        String("/workspaces/w-1/items"),
+        String("/projects/p-1/items"),
         String(""),
         String(""),
     )
@@ -394,7 +394,7 @@ def test_returned_5xx_is_observed_but_never_rewritten() raises:
     var line = error_response_log_line(
         Int32(503),
         String("POST"),
-        String("/workspaces/w-1/items"),
+        String("/projects/p-1/items"),
         body,
         String(""),
         String(""),
@@ -428,7 +428,7 @@ def test_the_two_arms_are_distinguishable_in_the_log() raises:
     var returned_line = error_response_log_line(
         Int32(503),
         String("POST"),
-        String("/workspaces/w-1/items"),
+        String("/projects/p-1/items"),
         String("deliberate refusal"),
         String(""),
         String(""),
@@ -450,7 +450,7 @@ def test_incident_ids_are_opaque_and_nonempty() raises:
     as a correlation token."""
     var a = new_incident_id()
     assert_equal(a.byte_length(), 16)
-    # Hex only — nothing structured, nothing tenant-derived.
+    # Hex only — nothing structured, nothing account-derived.
     var b = a.as_bytes()
     var i = 0
     while i < len(b):
@@ -648,7 +648,7 @@ def main() raises:
     test_fault_and_refusal_on_the_identical_chain()
     test_fault_log_line_carries_the_raw_cause()
     test_fault_log_line_cannot_be_used_to_forge_a_second_line()
-    test_log_line_redacts_credentials_and_tenant_email()
+    test_log_line_redacts_credentials_and_user_email()
     test_returned_5xx_is_observed_but_never_rewritten()
     test_the_two_arms_are_distinguishable_in_the_log()
     test_incident_ids_are_opaque_and_nonempty()

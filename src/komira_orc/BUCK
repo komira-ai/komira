@@ -56,6 +56,7 @@ mojo_library(
         "tests/test_orc_stripe_footer_decode.mojo",
         "tests/test_orc_struct_decode.mojo",
         "tests/test_orc_union_decode.mojo",
+        "tests/test_orc_write_int_sum_overflow.mojo",
         "tests/test_orc_write_multistripe.mojo",
         "tests/test_orc_write_nullable_roundtrip.mojo",
         "tests/test_orc_write_parallel_stream_compress.mojo",

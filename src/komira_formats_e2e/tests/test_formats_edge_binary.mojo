@@ -61,7 +61,12 @@
 #     (DoubleStatisticsImpl.updateDouble) does; a column whose FIRST value is
 #     NaN gets min = max = that NaN (bits kept), again as the Java writer
 #     does. The ORC spec itself says nothing about NaN in statistics; this
-#     pins the reference behaviour.
+#     pins the reference behaviour. A column (INT64_MAX, 1), whose running
+#     sum overflows int64, carries no `sum` (field 3) at stripe or file
+#     level, as Apache ORC's Java writer (IntegerStatisticsImpl) omits it on
+#     overflow; a wrapping writer would write sum = INT64_MIN
+#     (18 FF FF FF FF FF FF FF FF FF 01). The int column above is ordered so
+#     its running sum never overflows, so its sum (-2) is written.
 #   * test_orc_readback_bit_exact -- read_orc_bytes returns every value and
 #     bit pattern unchanged, uncompressed and with the default ZSTD codec.
 #
@@ -77,13 +82,6 @@
 #     and sign in test_avro_nan_raw_bits_java_reference and the read-back.
 #   * ORC _acc_dbl skipping NaN (a "NaN-aware" min/max/sum): the NaN-first
 #     column's stats become min -1.0, max 1.0 and a non-NaN sum.
-#
-# KNOWN DEFECT held out of the running assertions: IntegerStatistics.sum on
-# int64 overflow. Apache ORC's Java writer (IntegerStatisticsImpl) stops
-# summing at the first overflow and omits `sum`; komira's writer wraps, so
-# a column (INT64_MAX, 1) carries sum = INT64_MIN (bytes 18 FF FF FF FF FF
-# FF FF FF FF 01) where the reference writes no field 3. The int column
-# above is ordered so its running sum never overflows.
 # =============================================================================
 
 from komira_avro import (
@@ -93,7 +91,11 @@ from komira_avro import (
     scan_ocf_blocks,
     write_avro_bytes,
 )
-from komira_arrow.record_batch import RecordBatch
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import SchemaBuilder, Field
 from komira_orc import (
     ORC_COMPRESSION_NONE,
     OrcFileTail,
@@ -516,6 +518,29 @@ def test_orc_column_statistics() raises:
         _check_double_stats(
             sn[k], 3, UInt64(0x7FF80000DEADBEEF), UInt64(0x7FF80000DEADBEEF),
             "orc NaN-first " + where[k] + " stats", m,
+        )
+
+    # A column whose running sum overflows int64: no field 3 (sum).
+    var ov = PrimitiveArray[DType.int64].allocate(2)
+    ov.set(0, Int64.MAX)
+    ov.set(1, Int64(1))
+    var osb = SchemaBuilder()
+    osb.add_field(Field("i64", ArrowType.INT64, False))
+    var ob = RecordBatchBuilder.with_capacity(1)
+    ob.add_column(
+        Column.from_primitive_with_arrow_type[DType.int64](ov^, ArrowType.INT64)
+    )
+    var obytes = _orc_none(ob.build(osb.build()))
+    var ov_want = hex_bytes(
+        "08 02 12 0D"
+        " 08 02"  # min 1
+        " 10 FE FF FF FF FF FF FF FF FF 01"  # max INT64_MAX; no sum field
+        " 50 00"  # hasNull false
+    )
+    var so = _column_stats_bytes(obytes, 1, "orc i64 overflow stats", m)
+    for k in range(len(so)):
+        check_bytes(
+            m, Span(so[k]), Span(ov_want), "orc i64 overflow " + where[k] + " stats"
         )
     m.raise_if_any("test_orc_column_statistics")
 

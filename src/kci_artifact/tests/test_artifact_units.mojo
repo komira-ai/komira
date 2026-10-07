@@ -27,9 +27,11 @@ from kci_artifact_proto.artifact import (
 from kci_artifact import (
     AffectedValues,
     ReleaseStamp,
+    batch_groups,
     parse_affected_answer,
     parse_artifacts,
     render_affected_argv,
+    render_batch_argv,
     render_build_argv,
     render_targets_argv,
     require_affected_ready,
@@ -477,6 +479,86 @@ def test_build_targets_argv_golden() raises:
     except e:
         got = String(e)
     assert_equal(got, String("no unit 'nope' is declared"))
+
+
+def _groups(d: Artifacts, units: List[String]) raises -> String:
+    var g = batch_groups(d, units)
+    var s = String("")
+    for i in range(len(g)):
+        s += String("{")
+        for k in range(len(g[i])):
+            s += String("[") + g[i][k] + String("]")
+        s += String("}")
+    return s^
+
+
+def _batch_refusal(d: Artifacts, units: List[String]) -> String:
+    try:
+        _ = render_batch_argv(d, units)
+    except e:
+        return String(e)
+    return String("<rendered>")
+
+
+def _shared() raises -> Artifacts:
+    """`_FILE` with pack's build_targets equal to buck2's, element-wise
+    (both build systems with one command: one group)."""
+    var text = String(_FILE).replace(
+        String("    args: \"build\"\n  }\n}\nartifacts {\n  name: \"lib_a\""),
+        String("    args: \"build\"\n    args: \"--keep-going\"\n  }\n}\nartifacts {\n  name: \"lib_a\""),
+    )
+    assert_true(text != String(_FILE))
+    return _parse(text)
+
+
+def test_batch_groups_split_by_the_whole_command_in_first_appearance_order() raises:
+    var d = _parse(String(_FILE))
+    # buck2's command is `buck2 build --keep-going`, pack's `buck2 build`: the
+    # same executable, different args, so two groups; the first group is the
+    # one whose first unit comes first, units in the order given
+    assert_equal(_groups(d, _argv("lib_a", "meta", "lints", "tests_cell")), String("{[lib_a][lints][tests_cell]}{[meta]}"))
+    assert_equal(_groups(d, _argv("meta", "tests_cell", "lib_a")), String("{[meta]}{[tests_cell][lib_a]}"))
+    assert_equal(_groups(d, List[String]()), String(""))
+    # two build systems with one command element-wise are ONE group
+    var s = _shared()
+    assert_equal(_groups(s, _argv("lib_a", "meta", "lints")), String("{[lib_a][meta][lints]}"))
+    assert_equal(_batch_refusal(d, _argv("lib_a", "nope")), String("no unit 'nope' is declared"))
+    var got = String("<grouped>")
+    try:
+        _ = batch_groups(d, _argv("lib_a", "nope"))
+    except e:
+        got = String(e)
+    assert_equal(got, String("no unit 'nope' is declared"))
+
+
+def test_batch_argv_golden() raises:
+    var s = _shared()
+    # the shared command, then every unit's targets in the order given
+    _assert_list(
+        render_batch_argv(s, _argv("lib_a", "meta", "lints")),
+        _argv("buck2", "build", "--keep-going", "//src/lib_a:lib_a_conda", "//tools/pack:pack", "//:docs", "//:shell_lint"),
+    )
+    # one unit: exactly render_targets_argv
+    _assert_list(render_batch_argv(s, _argv("lints")), render_targets_argv(s, String("lints")))
+    # a target two units share appears once, where it first came
+    var dup = _parse(
+        String(_FILE).replace(String("  targets: \"tests//functional/...\""), String("  targets: \"//:docs\"\n  targets: \"tests//functional/...\""))
+    )
+    _assert_list(
+        render_batch_argv(dup, _argv("lints", "tests_cell")),
+        _argv("buck2", "build", "--keep-going", "//:docs", "//:shell_lint", "tests//functional/..."),
+    )
+
+
+def test_batch_argv_refusals() raises:
+    var d = _parse(String(_FILE))
+    assert_equal(
+        _batch_refusal(d, _argv("lib_a", "meta")),
+        String("unit 'meta' builds with `buck2 build` and unit 'lib_a' with `buck2 build --keep-going`: ")
+        + String("one batch runs one build_targets command"),
+    )
+    assert_equal(_batch_refusal(d, List[String]()), String("a batch needs at least one unit"))
+    assert_equal(_batch_refusal(d, _argv("lib_a", "nope")), String("no unit 'nope' is declared"))
 
 
 def test_the_release_argv_ignores_targets() raises:
