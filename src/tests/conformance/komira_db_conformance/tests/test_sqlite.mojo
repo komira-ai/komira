@@ -102,8 +102,18 @@ def main() raises:
             String("a 16-byte BLOB is read back as a UUID"),
         )
     )
+    # Both suites run before either verdict, so one log names every failure.
+    var failures = String()
     var neutral = SqliteNeutral()
-    run_neutral_suite(neutral, gaps)
+    try:
+        run_neutral_suite(neutral, gaps)
+    except e:
+        failures += String(e) + String("\n")
     var sql = SqliteSql()
-    run_sql_suite(sql, List[KnownGap]())
+    try:
+        run_sql_suite(sql, List[KnownGap]())
+    except e:
+        failures += String(e)
+    if failures.byte_length() > 0:
+        raise Error(failures)
     print("PASS komira_db_conformance komira_db_sqlite")
