@@ -26,7 +26,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_libc:komira_libc",
-        "//src/tests/support/komira_test_minio:komira_test_minio",
+        "//src/tests/helpers/komira_test_minio:komira_test_minio",
         "//src/komira_test_run_id:komira_test_run_id",
         "//src/komira_test_verdict:komira_test_verdict",
         "//src/komira_validation_run:komira_validation_run",
