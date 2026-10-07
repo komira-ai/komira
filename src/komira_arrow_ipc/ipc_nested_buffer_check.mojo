@@ -156,9 +156,12 @@ def check_struct_child_length(
     differs from the children's, and children whose lengths differ from
     each other; otherwise the struct takes the children's length. A
     top-level STRUCT column then fails the row-count check of
-    `RecordBatch::try_new_with_options` and the batch is refused; only a
-    STRUCT with no nulls under a LIST, LARGE_LIST or MAP is read, with the
-    children's length.
+    `RecordBatch::try_new_with_options` and the batch is refused. A
+    no-null STRUCT under a parent whose validation bounds the child's
+    length only from below is read: with the children's length under
+    LIST, LARGE_LIST, MAP, LIST_VIEW, LARGE_LIST_VIEW or a dense UNION,
+    and sliced to the list's window under FIXED_SIZE_LIST. A sparse UNION
+    requires each child's length to equal its own and refuses it.
     """
     if child_length != struct_length:
         raise Error(

@@ -516,9 +516,12 @@ def test_nested_refuses_too_few_buffers_second_view_column() raises:
     """Two BINARY_VIEW columns: the second column's count reads
     variadicBufferCounts[1], not [0]. With counts [0, 1] the second column
     lacks its variadic buffer, and the refusal fails if the call site reads
-    the first column's count. The control, counts [1, 0] with the buffers
-    they name, decodes, and fails if the second column takes the first
-    column's count (it would read one buffer too many)."""
+    the first column's count. With counts [1, 0] and only the first
+    column's validity and views buffers, the first column lacks its
+    variadic buffer, and the refusal fails if the call site gives the first
+    column another column's count. The control, counts [1, 0] with the
+    buffers they name, decodes, and fails if the second column takes the
+    first column's count (it would read one buffer too many)."""
     var short = List[BufferDescriptor]()
     short.append(_b(0, 0))
     short.append(_b(0, 16))
@@ -530,6 +533,16 @@ def test_nested_refuses_too_few_buffers_second_view_column() raises:
     assert_equal(
         _err(NESTED, K_BVIEW2, 1, _nodes(1, 1), short^, v01^),
         _reads(NESTED, 1, 3, 2, 4),
+    )
+    var first_short = List[BufferDescriptor]()
+    first_short.append(_b(0, 0))
+    first_short.append(_b(0, 16))
+    var v10_short = List[Int64]()
+    v10_short.append(Int64(1))
+    v10_short.append(Int64(0))
+    assert_equal(
+        _err(NESTED, K_BVIEW2, 1, _nodes(1, 1), first_short^, v10_short^),
+        _reads(NESTED, 0, 3, 0, 2),
     )
     var full = List[BufferDescriptor]()
     full.append(_b(0, 0))
