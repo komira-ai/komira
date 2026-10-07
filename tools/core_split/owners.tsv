@@ -58,7 +58,6 @@ komira_search	origin/lib/komira_search
 komira_secret_registry	origin/lib/komira_secret_registry
 komira_secret_store	origin/lib/komira_secret_store
 komira_serde	origin/lib/komira_serde
-komira_service_registry	origin/lib/komira_service_registry
 komira_supervisor	origin/lib/komira_supervisor
 komira_svcref	origin/lib/komira_svcref
 komira_wkt	origin/lib/komira_wkt

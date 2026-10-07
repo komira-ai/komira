@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # THE WIRE SHAPE, from the run server's run-log handler (and forwarded
-# VERBATIM by any proxy in front of `/pipelines/runs/{runId}/logs?after=&limit=`):
+# VERBATIM by any proxy in front of `/runs/{runId}/logs?after=&limit=`):
 #
 #     {"run_id":"<uuid>",
 #      "lines":[{"seq":1,"ts":1789200000000000,"level":"info",
@@ -83,7 +83,7 @@ starts appearing in an operator's terminal on its own."""
 # a producer that makes none is the one this library was written for.
 # =============================================================================
 comptime RUN_LOG_STREAM_STAGE_RECORDS: Int = 0
-"""A pipeline RUN's stage-record stream (`/pipelines/runs/{r}/logs`). Records
+"""A pipeline RUN's stage-record stream (`/runs/{r}/logs`). Records
 are written by the run server, `next_cursor` is a real `?after=` cursor,
 and "nothing wrote a stage record" IS the diagnosis when it is empty."""
 

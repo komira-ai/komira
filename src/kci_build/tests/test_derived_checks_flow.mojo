@@ -3,7 +3,8 @@
 #   The per-change check's DERIVED checks over ScriptedRunner: the
 #   derive_checks command runs before any affected command, with every
 #   declared unit in its units file; the checks it answers join the units
-#   (the affected command sees them, they build after the declared units);
+#   (the affected command sees them, their targets follow the declared
+#   units' in the one batch run);
 #   a declared check target matching nothing is a NOTICE, never a stop; an
 #   artifact target matching nothing, and a derived name a declared unit
 #   has, are REFUSED; a failing or garbled tool is INDETERMINATE.
@@ -154,14 +155,13 @@ def test_the_derived_checks_are_selected_and_built_after_the_declared_units() ra
     var runner = ScriptedRunner()
     runner.expect(_derive(req, String(_DERIVED)))
     runner.expect(_ask(req, String("WIDENED every unit\n")))
-    runner.expect(_build("//src/lib_a:lib_a_conda"))
-    runner.expect(_build("//:docs", "//gone/..."))
-    runner.expect(_build("//src/new_pkg/...", "//src/new_pkg:"))
-    runner.expect(_build("//:"))
+    # the declared units, then the derived checks, in one batch
+    runner.expect(_build("//src/lib_a:lib_a_conda", "//:docs", "//gone/...", "//src/new_pkg/...", "//src/new_pkg:", "//:"))
     var result = KciRunResult(String("run"), String("run"))
     var o = _run(req, runner, result)
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
     assert_equal(runner.remaining(), 0)
+    assert_equal(len(runner.calls), 3)
     # the derive command ran first, from the work dir, with the declared units
     assert_equal(runner.calls[0].path, String("/opt/fake/derive"))
     assert_equal(runner.calls[0].cwd, req.work_dir)
@@ -189,6 +189,9 @@ def test_an_affected_answer_may_name_a_derived_check() raises:
     var result = KciRunResult(String("run"), String("run"))
     var o = _run(req, runner, result)
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
+    assert_equal(runner.remaining(), 0)
+    assert_equal(len(runner.calls), 3)
+    assert_equal(runner.calls[2].stdout_path, req.log_dir + String("/new_pkg.stdout"))
     assert_equal(_list(o.lines), String("[BUILT new_pkg]"))
 
 

@@ -1,0 +1,151 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "api-runner"
+  retention: DELETE
+  service_account {
+  }
+}
+resource {
+  id: "api"
+  uses {
+    access: WRITE
+    cell: LOGS
+  }
+  uses {
+    access: WRITE
+    cell: METRICS
+  }
+  retention: DELETE
+  service {
+    image {
+      digest: "sha256:5f1d0c9a"
+      platform: "linux/amd64"
+    }
+    port: 8443
+    args: "serve"
+    args: "--listen=:8443"
+    env {
+      key: "API_ORIGIN"
+      value {
+        ref {
+          resource: "api"
+          standard: URL
+        }
+      }
+    }
+    env {
+      key: "LOG_LEVEL"
+      value {
+        literal: "info"
+      }
+    }
+    env {
+      key: "REGION"
+      value {
+        param: "region"
+      }
+    }
+    size {
+      cpu_millis: 1500
+      memory_mb: 2048
+    }
+    scale {
+      min: 2
+      max: 12
+    }
+    health_path: "/healthz"
+    request_timeout {
+      seconds: 45
+      nanos: 250000000
+    }
+    max_concurrency: 80
+    public {
+    }
+    secret_env {
+      key: "DB_PASSWORD"
+      value {
+        name: "api-db-password"
+        store: "primary"
+        version: "7"
+      }
+    }
+    run_as {
+      resource: "api-runner"
+    }
+  }
+}
+resource {
+  id: "web"
+  uses {
+    target {
+      resource: "api"
+      standard: URL
+    }
+    access: CALL
+  }
+  retention: DELETE
+  service {
+    image {
+      output {
+        step: "build-web"
+        name: "image"
+      }
+      platform: "linux/arm64"
+    }
+    port: 3000
+    args: "--upstream-from-env"
+    env {
+      key: "API_HOST"
+      value {
+        ref {
+          resource: "api"
+          standard: HOST
+        }
+      }
+    }
+    env {
+      key: "API_URL"
+      value {
+        ref {
+          resource: "api"
+          named: "grpc-url"
+        }
+      }
+    }
+    scale {
+      min: 0
+      max: 4
+    }
+    internal {
+    }
+    secret_env {
+      key: "SESSION_KEY"
+      value {
+        name: "web-session-key"
+      }
+    }
+  }
+}
+resource {
+  id: "web-calls-api"
+  grant {
+    principal {
+      resource: "web"
+    }
+    target {
+      resource: "api"
+      standard: URL
+    }
+    access: CALL
+  }
+}
+resource {
+  id: "api-reads-artifacts"
+  grant {
+    principal {
+      resource: "api-runner"
+    }
+    access: DESCRIBE
+    cell: ARTIFACTS
+  }
+}

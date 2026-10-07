@@ -3,11 +3,14 @@
 #   The per-change check (`--affected-by`) over ScriptedRunner: the change
 #   read through git (argv, no shell), each build system's affected command
 #   run with a golden argv and fed the changed-files and units files, exactly
-#   the reached units built in unit order (welded tests ride in each build),
+#   the reached units built in unit order (welded tests ride in each build;
+#   one batch run, both build systems sharing one build_targets command),
 #   every unit built when an answer is WIDENED (a build file, the buckconfig,
 #   a toolchain, a tools/build file, an unmapped file), and each stop: an
 #   empty change and a change reaching nothing REFUSED, a failing or
-#   garbled tool INDETERMINATE (never a widening), a failed unit FAILED, a
+#   garbled tool INDETERMINATE (never a widening), a failed batch FAILED
+#   naming the failed unit (affected_batch.mojo; test_affected_batch.mojo
+#   holds every batch case), a
 #   file without what the check needs refused before anything runs; --plan
 #   builds nothing; and a release build of the same file ignores the checks.
 # =============================================================================
@@ -250,13 +253,13 @@ def test_affected_selection_builds_exactly_the_reached_units() raises:
     # the tool answers in its own order; kci builds in unit order
     runner.expect(_ask_buck2(req, String("UNIT lints\nUNIT lib_a\nAFFECTED 2\n")))
     runner.expect(_ask_pack(req, String("AFFECTED 0\n")))
-    runner.expect(_build("//src/lib_a:lib_a_conda"))
-    runner.expect(_build("//:docs", "//:shell_lint"))
+    runner.expect(_build("//src/lib_a:lib_a_conda", "//:docs", "//:shell_lint"))
     var result = _fresh_result()
     var o = _run(req, runner, git, result)
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
     assert_equal(o.exit_code(), EXIT_OK)
     assert_equal(runner.remaining(), 0)
+    assert_equal(len(runner.calls), 3)
     assert_equal(git.remaining(), 0)
     # the affected command: golden program, cwd, timeout, files it was handed
     ref ask = runner.calls[0]
@@ -270,10 +273,11 @@ def test_affected_selection_builds_exactly_the_reached_units() raises:
         + String("lints\t//:shell_lint\ntests_cell\ttests//functional/...\n"),
     )
     assert_equal(Path(req.log_dir + String("/_units_pack.tsv")).read_text(), String("meta\t//tools/pack:pack\n"))
-    # the builds: build_targets + the unit's targets, never the release argv
+    # the build: build_targets + the units' targets in one batch, never the
+    # release argv
     assert_equal(runner.calls[2].path, String("buck2"))
-    assert_equal(runner.calls[2].stdout_path, req.log_dir + String("/lib_a.stdout"))
-    assert_equal(runner.calls[3].stderr_path, req.log_dir + String("/lints.stderr"))
+    assert_equal(runner.calls[2].stdout_path, req.log_dir + String("/_batch_1.stdout"))
+    assert_equal(runner.calls[2].stderr_path, req.log_dir + String("/_batch_1.stderr"))
     # the git commands are argv, never a shell
     assert_equal(git.calls[3].path, String("git"))
     # nothing ships: no release directory, no release.json
@@ -296,12 +300,14 @@ def test_two_build_systems_answers_are_united() raises:
     var runner = ScriptedRunner()
     runner.expect(_ask_buck2(req, String("UNIT lib_b\nAFFECTED 1\n")))
     runner.expect(_ask_pack(req, String("UNIT meta\nAFFECTED 1\n")))
-    runner.expect(_build("//src/lib_b:lib_b_conda"))
-    runner.expect(_build("//tools/pack:pack"))
+    # two build systems, one build_targets command: one batch
+    runner.expect(_build("//src/lib_b:lib_b_conda", "//tools/pack:pack"))
     var result = _fresh_result()
     var o = _run(req, runner, git, result)
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
     assert_equal(runner.remaining(), 0)
+    assert_equal(len(runner.calls), 3)
+    assert_equal(_list(o.lines), String("[BUILT lib_b][BUILT meta]"))
     assert_equal(_list(result.affected_units), String("[lib_b][meta]"))
 
 
@@ -315,15 +321,17 @@ def _widened_case(tag: String, changed: String, reason: String) raises:
     var runner = ScriptedRunner()
     runner.expect(_ask_buck2(req, String("WIDENED ") + reason + String("\n")))
     runner.expect(_ask_pack(req, String("AFFECTED 0\n")))
-    runner.expect(_build("//src/lib_a:lib_a_conda"))
-    runner.expect(_build("//src/lib_b:lib_b_conda"))
-    runner.expect(_build("//tools/pack:pack"))
-    runner.expect(_build("//:docs", "//:shell_lint"))
-    runner.expect(_build("tests//functional/..."))
+    runner.expect(
+        _build(
+            "//src/lib_a:lib_a_conda", "//src/lib_b:lib_b_conda", "//tools/pack:pack", "//:docs", "//:shell_lint",
+            "tests//functional/...",
+        )
+    )
     var result = _fresh_result()
     var o = _run(req, runner, git, result)
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
     assert_equal(runner.remaining(), 0, tag)
+    assert_equal(len(runner.calls), 3, tag)
     # the tool saw exactly the changed file
     assert_equal(Path(req.log_dir + String("/_changed_files")).read_text(), _z(changed))
     assert_equal(result.affected_verdict, String("WIDENED"))
@@ -424,20 +432,31 @@ def test_a_failing_tool_is_cannot_tell_never_a_widening() raises:
     )
 
 
-def test_a_failed_unit_stops_the_step() raises:
+def test_a_failed_batch_names_the_failed_unit() raises:
     var root = _fresh(String("fail"))
     var req = _request(root)
     var git = _git(_z("src/lib_a/a.mojo"))
     var runner = ScriptedRunner()
     runner.expect(_ask_buck2(req, String("UNIT lib_a\nUNIT lints\nAFFECTED 2\n")))
     runner.expect(_ask_pack(req, String("AFFECTED 0\n")))
+    # the batch fails; each unit alone names the failing one
+    runner.expect(
+        ScriptedStep(
+            _argv("build", "//src/lib_a:lib_a_conda", "//:docs", "//:shell_lint"),
+            exit_code=Int32(3),
+            stderr_text=String("test_a FAILED"),
+        )
+    )
     runner.expect(ScriptedStep(_argv("build", "//src/lib_a:lib_a_conda"), exit_code=Int32(3), stderr_text=String("test_a FAILED")))
+    runner.expect(_build("//:docs", "//:shell_lint"))
     var result = _fresh_result()
     var o = _run(req, runner, git, result)
     assert_equal(o.outcome, String(OUTCOME_FAILED))
     assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
     assert_equal(o.exit_code(), EXIT_FAILED)
     assert_equal(runner.remaining(), 0)
+    assert_equal(len(runner.calls), 5)
+    assert_equal(_list(o.lines), String("[BUILT lints]"))
     assert_true(o.message.find(String("unit 'lib_a': `buck2 build //src/lib_a:lib_a_conda` exit 3")) >= 0, o.message)
     assert_true(o.message.find(String("test_a FAILED")) >= 0, o.message)
     # the decision is still recorded: what the change reached
@@ -604,7 +623,8 @@ def test_a_real_fake_affected_executable_selects_exactly_the_reached_units() rai
     var o = run_build(req, result, rec, runner, git)
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
     assert_equal(Path(req.log_dir + String("/_affected_buck2.stdout")).read_text(), String("UNIT lib_b\nUNIT lints\nAFFECTED 2\n"))
-    assert_equal(Path(root + String("/built.log")).read_text(), String("//src/lib_b:lib_b_conda\n//docs:docs //src/lib_b:lint\n"))
+    # one batch run over both units' targets
+    assert_equal(Path(root + String("/built.log")).read_text(), String("//src/lib_b:lib_b_conda //docs:docs //src/lib_b:lint\n"))
     assert_equal(_list(result.affected_units), String("[lib_b][lints]"))
 
 
@@ -621,7 +641,7 @@ def test_a_real_fake_affected_executable_widening_builds_every_unit() raises:
     assert_equal(result.affected_reason, String("buck2: tools/build/mojo/defs.bzl is a build file"))
     assert_equal(
         Path(root + String("/built.log")).read_text(),
-        String("//src/lib_a:lib_a_conda\n//src/lib_b:lib_b_conda\n//docs:docs //src/lib_b:lint\n"),
+        String("//src/lib_a:lib_a_conda //src/lib_b:lib_b_conda //docs:docs //src/lib_b:lint\n"),
     )
 
 

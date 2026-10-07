@@ -26,6 +26,8 @@ mojo_library(
         "tests/test_jsonl_line_check_branches.mojo",
         "tests/test_jsonl_line_validation.mojo",
         "tests/test_nested_parsers.mojo",
+        "tests/test_not_null_nonfinite.mojo",
+        "tests/test_parse_float_exponent.mojo",
         "tests/test_read_json_batch_e2e.mojo",
         "tests/test_read_json_end_to_end.mojo",
         "tests/test_read_json_parallel.mojo",

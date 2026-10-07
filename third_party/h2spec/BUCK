@@ -23,19 +23,22 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # that package's platform constraint). `exec_compatible_with` below places
 # only the unpacking, not where the binary can run.
 #
-# A newer pin is `_VERSION`, `_COMMIT` (the commit the tag names), `_SHA256`
-# and `_LICENSE_SHA256` here; the conformance test's case count
+# A newer pin is `_VERSION`, `_COMMIT` (the commit the tag names), `_SHA256`,
+# `_SIZE`, `_LICENSE_SHA256` and `_LICENSE_SIZE` here; the conformance test's case count
 # (`_H2SPEC_CASES`) and its allowlist then have to be re-read against the new
 # suite (src/komira_http_conformance/h2spec_allowlist.txt).
 _VERSION = "v2.6.0"
 _COMMIT = "70ac2294010887f48b18e2d64f5cccd48421fad1"
 _SHA256 = "157ee0de702e01ad40e752dbf074b366027e550c8e7504f9450da2809e279318"
+_SIZE = 5207004
 _LICENSE_SHA256 = "b4498bd7f45a2d691299a0a814a3f6f8b152693142b0a52f1a79597ede7e9fed"
+_LICENSE_SIZE = 1074
 
 pinned_file(
     name = "h2spec_linux_amd64.tar.gz",
     url = "https://github.com/summerwind/h2spec/releases/download/{}/h2spec_linux_amd64.tar.gz".format(_VERSION),
     sha256 = _SHA256,
+    size_bytes = _SIZE,
 )
 
 # The archive holds the one file `h2spec`, mode 0755.
@@ -54,5 +57,6 @@ pinned_file(
     name = "LICENSE",
     url = "https://raw.githubusercontent.com/summerwind/h2spec/{}/LICENSE".format(_COMMIT),
     sha256 = _LICENSE_SHA256,
+    size_bytes = _LICENSE_SIZE,
     visibility = ["PUBLIC"],
 )

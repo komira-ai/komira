@@ -1,0 +1,60 @@
+load("@komira//tools/build/coverage/kcov:defs.bzl", "cov_link_dir")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("//functional/coverage:defs.bzl", "cov_debug_check")
+
+# A coverage link whose relocator rewrites nothing (test 41). Its [coverage]
+# must fail with mojo_wrapper.sh's exit 4, "contains this action's working
+# directory": the wrapper's check of every output stays on for coverage
+# builds, and a relocation that does not happen cannot pass it.
+zig_exe(
+    name = "noop_relocate",
+    src = "noop_relocate.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    exec_compatible_with = LINUX_X86_64,
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+cov_link_dir(
+    name = "noop_link",
+    exec_compatible_with = LINUX_X86_64,
+    relocate = ":noop_relocate",
+)
+
+# RED: tests//negative/coverage:noop[coverage]
+mojo_library(
+    name = "noop",
+    srcs = [
+        "noop/__init__.mojo",
+        "noop/value.mojo",
+    ],
+    conda = False,
+    coverage_debug = ":noop_link",
+    test_srcs = ["tests/test_one.mojo"],
+)
+
+# Planted defects for the hermetic check (tests//functional/coverage:check.sh,
+# test 41): made-up strings of a coverage binary, each good but for one
+# thing, checked as :hermetic checks the real binaries.
+_DIRS = [
+    "tests",
+    "buck-out/v2/art/tests/functional/coverage/__covlib_forced__/[0-9a-f]+/src/covlib",
+]
+
+# RED: tests//negative/coverage:abs_relocated (a Mojo source named by an
+# absolute path under the working directory, relocated)
+# RED: tests//negative/coverage:abs_other (an absolute path of another build
+# directory, which the wrapper's check of its own directory cannot see)
+# RED: tests//negative/coverage:no_reldir (no relative test directory)
+[
+    cov_debug_check(
+        name = name,
+        bins = ["planted/{}.txt".format(name)],
+        dirs = _DIRS,
+        mode = "hermetic",
+        names = ["value.mojo"],
+        script = "//functional/coverage:check.sh",
+    )
+    for name in ("abs_relocated", "abs_other", "no_reldir")
+]
