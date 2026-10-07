@@ -104,6 +104,7 @@ from kci_cloud import (
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, FIELD_SECRET, Feed,
+    FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE,
     apply_resources,
     body_field,
     describe,
@@ -274,6 +275,8 @@ struct _Stub(CloudAdapter, Movable):
             l.append(FIELD_GRANT)
             l.append(FIELD_SUBSCRIPTION)
             l.append(FIELD_SECRET)
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE]:
+                l.append(f)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -287,6 +290,8 @@ struct _Stub(CloudAdapter, Movable):
             for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]:
                 l.append(Absence(f, NOT_YET, String("no messaging")))
             l.append(Absence(FIELD_SECRET, NOT_YET, String("no secret store")))
+            for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD, FIELD_CERTIFICATE]:
+                l.append(Absence(f, NOT_YET, String("no names")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
