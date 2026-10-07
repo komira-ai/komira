@@ -16,8 +16,11 @@
 # missing or malformed `object`, `type` or `tag` line, an unknown type, a
 # bad `tagger` signature and a NUL in the header. A missing `tagger` line is
 # accepted (fsck reports it as information only), as is a tag name that is
-# not a valid ref name. Like `parse_commit` it also refuses upper-case hex
-# ids and a header with no empty line after it.
+# not a valid ref name. Like `parse_commit` it also refuses forms git
+# accepts but does not write, so that an accepted tag serializes back to its
+# own bytes: upper-case hex ids, a header with no empty line after it, extra
+# whitespace before a `tagger` date, an extra header line holding no space,
+# and a line starting with a space directly after `tag` or `tagger`.
 # =============================================================================
 
 from .bytes_util import _append_span, _append_str, _starts_with, _to_list

@@ -15,10 +15,15 @@
 # `parse_commit` refuses what `git fsck` reports for a commit: a missing or
 # malformed `tree`, `parent`, `author` or `committer` line, a second
 # `author` line, a bad signature (see signature.mojo), and a NUL in the
-# header. It also refuses two things git accepts, so that every accepted
-# commit serializes back to its own bytes: an id spelled in upper-case hex,
-# and a header block with no empty line after it (a commit with no message
-# separator; git itself always writes the empty line).
+# header. It also refuses these forms git accepts, so that every accepted
+# commit serializes back to its own bytes (git itself writes none of them):
+#   * an id spelled in upper-case hex;
+#   * a header block with no empty line after it (no message separator);
+#   * more than one space, or a tab, between an ident's '>' and its date
+#     (older git wrote these; see signature.mojo);
+#   * an extra header line holding no space (no `key SP value` split);
+#   * a line starting with a space directly after `committer` (a
+#     continuation of a header komira does not keep as an extra header).
 # =============================================================================
 
 from .bytes_util import _append_span, _append_str, _starts_with, _to_list

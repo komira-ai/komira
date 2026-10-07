@@ -41,10 +41,21 @@ protocol and storage layers of a git server or client build on.
 
 ## What the parsers accept
 
-Each parser refuses what `git fsck` reports as an error, plus the few forms
-git accepts but never writes (upper-case hex ids, a commit or tag with no
-empty line after its header, a zero-padded or legacy tree mode such as
-`100664`), so an accepted object serializes back to its own bytes and id.
+Each parser refuses what `git fsck` reports as an error, plus these forms
+git accepts but does not write today, so an accepted object serializes back
+to its own bytes and id:
+
+- an id spelled in upper-case hex;
+- a commit or tag with no empty line after its header;
+- more than one space, or a tab, between an ident's `>` and its date (git
+  fsck skips them; older git wrote them);
+- an extra header line holding no space, and a line starting with a space
+  directly after `committer`, `tag` or `tagger` (a continuation of a header
+  that is not kept as an extra header);
+- a zero-padded or legacy tree mode such as `100664`.
+
+An ident date is accepted up to 2^63-1 (19 digits), as `git fsck` accepts
+it; above that it is refused as fsck's badDateOverflow refuses it.
 A tag with no `tagger` line (early tags such as Linux's `v2.6.11-tree`
 have none) is accepted, as `git fsck` accepts it. A tree name of `.`, `..` or `.git` (any letter case) is
 refused; the HFS+ and NTFS spellings of `.git` that `git fsck` also
@@ -91,7 +102,9 @@ Parse a commit, read its fields, and get the same bytes and id back:
 from komira_git import ObjectFormat, parse_commit
 
 var text = String(
-    "tree 087704a96baf1c2d1c869a8b084481e121c88b5b\n"
+    "tree "
+    "087704a96baf1c2d1c869a8b084481e121c88b5b"
+    "\n"
     "author A U Thor <author@example.com> 1112911993 -0700\n"
     "committer C O Mitter <committer@example.com> 1112911993 -0700\n"
     "\nInitial commit\n"

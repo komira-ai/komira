@@ -9,13 +9,19 @@
 #     <name> SP '<' <email> '>' SP <seconds since the epoch> SP <+|-><hhmm>
 #
 # `parse_signature` refuses what `git fsck` reports for an ident (the
-# messages name fsck's rule): an empty line or one starting with '<'
-# (missingNameBeforeEmail), a '>' before the first '<' (badName), no '<'
-# (missingEmail), no space before '<' (missingSpaceBeforeEmail), a '<' or no
-# '>' after the e-mail (badEmail), no space after '>'
-# (missingSpaceBeforeDate), a zero-padded date (zeroPaddedDate), a date of
-# more than 18 digits (badDateOverflow), a non-number date (badDate) and a
-# time zone that is not a sign and four digits ending the line (badTimezone).
+# messages name fsck's rule): a line starting with '<'
+# (missingNameBeforeEmail), a '>' before the first '<' (badName), no '<',
+# which includes an empty line (missingEmail), no space before '<'
+# (missingSpaceBeforeEmail), a '<' or no '>' after the e-mail (badEmail),
+# no space after '>' (missingSpaceBeforeDate), a date starting with '0'
+# and not followed by a space (zeroPaddedDate), a date above 2^63-1
+# (badDateOverflow: fsck's rule is by value, and this is where a 64-bit
+# time_t ends), a non-number date (badDate) and a time zone that is not a
+# sign and four digits ending the line (badTimezone).
+#
+# It also refuses one form git accepts, so that an accepted signature
+# serializes back to its own bytes: more than one space, or a tab, between
+# '>' and the date (fsck skips them; current git writes one space).
 #
 # The header block of a commit or tag ends at the first empty line. Headers
 # after the fixed ones are kept as `ExtraHeader`s in order: `key SP value`,
@@ -30,14 +36,15 @@ from .bytes_util import (
     _append_str,
     _find_byte,
     _is_digit,
-    _parse_decimal,
     _to_list,
 )
 from .object_id import ObjectFormat, ObjectId
 
+comptime _B_TAB: Int = 9
 comptime _B_LF: Int = 10
 comptime _B_SPACE: Int = 32
 comptime _B_PLUS: Int = 43
+comptime _B_0: Int = 48
 comptime _B_MINUS: Int = 45
 comptime _B_LT: Int = 60
 comptime _B_GT: Int = 62
@@ -133,12 +140,27 @@ def _find_angle(s: Span[UInt8, _], start: Int) -> Int:
     return -1
 
 
+comptime _DATE_MAX = "9223372036854775807"
+
+
+def _date_overflows(line: Span[UInt8, _], d: Int, e: Int) -> Bool:
+    """True when the digits `line[d:e]` (no leading zero) are above 2^63-1,
+    the largest date that fits an Int."""
+    var m = _DATE_MAX.as_bytes()
+    if e - d != len(m):
+        return e - d > len(m)
+    for i in range(len(m)):
+        if line[d + i] != m[i]:
+            return line[d + i] > m[i]
+    return False
+
+
 def parse_signature(line: Span[UInt8, _], what: String) raises -> Signature:
     """Parse an ident value (no line break). `what` names the header in a
     refusal: `komira_git: <what>: <rule>`."""
     var pre = "komira_git: " + what + ": "
     var n = len(line)
-    if n == 0 or Int(line[0]) == _B_LT:
+    if n > 0 and Int(line[0]) == _B_LT:
         raise Error(pre + "missing name before email")
     var lt = _find_angle(line, 0)
     if lt < 0:
@@ -153,16 +175,22 @@ def parse_signature(line: Span[UInt8, _], what: String) raises -> Signature:
     if gt + 1 >= n or Int(line[gt + 1]) != _B_SPACE:
         raise Error(pre + "missing space before date")
     var d = gt + 2
+    if d < n and (Int(line[d]) == _B_SPACE or Int(line[d]) == _B_TAB):
+        raise Error(pre + "extra whitespace before date")
+    if d >= n or not _is_digit(Int(line[d])):
+        raise Error(pre + "bad date")
+    if Int(line[d]) == _B_0 and (d + 1 >= n or Int(line[d + 1]) != _B_SPACE):
+        raise Error(pre + "zero-padded date")
     var e = d
     while e < n and _is_digit(Int(line[e])):
         e += 1
-    if d < n and Int(line[d]) == 48 and e - d > 1:
-        raise Error(pre + "zero-padded date")
-    if e - d > 18:
+    if _date_overflows(line, d, e):
         raise Error(pre + "date overflows")
-    if e == d or e >= n or Int(line[e]) != _B_SPACE:
+    if e >= n or Int(line[e]) != _B_SPACE:
         raise Error(pre + "bad date")
-    var time = _parse_decimal(line, d, e, pre + "date")
+    var time = 0
+    for i in range(d, e):
+        time = time * 10 + (Int(line[i]) - _B_0)
     if not _check_tz(line[e + 1 : n]):
         raise Error(pre + "bad timezone")
     var tz = String()
