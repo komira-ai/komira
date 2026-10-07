@@ -107,6 +107,14 @@ def test_override() raises:
         check_override(_edit('{"originalStart":"2026-11-27","days":2,"start":"2026-11-26"}'), all_day),
         "an all-day occurrence over two days",
     )
+    _accepted(
+        check_override(_edit('{"originalStart":"2026-10-14T09:30:00","description":"Notes"}'), series),
+        "a description-only edit",
+    )
+    _accepted(
+        check_override(_edit('{"originalStart":"2026-10-14T09:30:00","description":"line one\\n\\tline two"}'), series),
+        "a multi-line description on one occurrence",
+    )
 
     var single = decode_json[Event](SERIES)
     single.recurrence = None
@@ -133,10 +141,44 @@ def test_override() raises:
     )
 
     _refused(
+        check_override(
+            _edit('{"originalStart":"2026-10-14T09:30:00","cancelled":true,"description":"Notes"}'), series
+        ),
+        "OVERRIDE_CANCELLED_WITH_CHANGES",
+        "cancelled",
+        "a cancelled occurrence carries no replacement fields",
+    )
+
+    _refused(
         check_override(_edit('{"originalStart":"2026-10-14T09:30:00"}'), series),
         "OVERRIDE_EMPTY",
         "cancelled",
         "an override cancels the occurrence or replaces at least one field",
+    )
+
+    _refused(
+        check_override(_edit('{"originalStart":"2026-10-14T09:30:00","title":"Stand\\nup"}'), series),
+        "TEXT_CONTROL_CHARACTER",
+        "title",
+        "title holds control character 0xa at byte 5",
+    )
+
+    var long_title = String('{"originalStart":"2026-10-14T09:30:00","title":"')
+    for _ in range(1025):
+        long_title += "t"
+    long_title += '"}'
+    _refused(
+        check_override(_edit(long_title), series),
+        "TEXT_TOO_LONG",
+        "title",
+        "title is 1025 bytes; at most 1024 are allowed",
+    )
+
+    _refused(
+        check_override(_edit('{"originalStart":"2026-10-14T09:30:00","description":"agenda\\u0001"}'), series),
+        "TEXT_CONTROL_CHARACTER",
+        "description",
+        "description holds control character 0x1 at byte 6",
     )
 
     _refused(

@@ -64,7 +64,7 @@ struct RefusalCode:
 @fieldwise_init
 struct Refusal(Copyable, Movable, Writable):
     """Why a value was refused: `code` (a `RefusalCode`), `field` (the JSON
-    path, for example `recurrence.until` or `reminders[5]`) and `message`."""
+    path, for example `recurrence.until` or `reminders[5].minutesBefore`) and `message`."""
 
     var code: String
     var field: String

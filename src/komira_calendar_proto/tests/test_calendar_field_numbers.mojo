@@ -331,20 +331,33 @@ comptime OVERRIDE_JSON = (
 )
 
 
+comptime CALENDAR_JSON = (
+    '{"id":"cal-1","owner":"subject-1","name":"Work","color":"#a0b1c2","timeZone":"Europe/London","version":"7",'
+    + '"createdAt":"2026-09-21T14:13:20Z","updatedAt":"2026-10-03T04:00:00Z"}'
+)
+
+
 def test_json_names() raises:
-    """Every JSON key and value form of Event (with Recurrence and Reminder)
-    and OccurrenceOverride, both ways."""
+    """Every JSON key and value form of Event (with Recurrence and Reminder),
+    OccurrenceOverride and Calendar, both ways."""
     var e = decode_proto[Event](_event_bytes())
     assert_equal(encode_json(e), EVENT_JSON)
     assert_equal(encode_json(decode_json[Event](EVENT_JSON)), EVENT_JSON)
     var o = decode_proto[OccurrenceOverride](_override_bytes())
     assert_equal(encode_json(o), OVERRIDE_JSON)
     assert_equal(encode_json(decode_json[OccurrenceOverride](OVERRIDE_JSON)), OVERRIDE_JSON)
-    var c = Calendar("cal-1", "subject-1", "Work", "#a0b1c2", "Europe/London", UInt64(7), None, None)
-    assert_equal(
-        encode_json(c),
-        '{"id":"cal-1","owner":"subject-1","name":"Work","color":"#a0b1c2","timeZone":"Europe/London","version":"7"}',
+    var c = Calendar(
+        "cal-1",
+        "subject-1",
+        "Work",
+        "#a0b1c2",
+        "Europe/London",
+        UInt64(7),
+        Timestamp(Int64(1790000000), Int32(0)),
+        Timestamp(Int64(1791000000), Int32(0)),
     )
+    assert_equal(encode_json(c), CALENDAR_JSON)
+    assert_equal(encode_json(decode_json[Calendar](CALENDAR_JSON)), CALENDAR_JSON)
 
 
 def test_enums() raises:

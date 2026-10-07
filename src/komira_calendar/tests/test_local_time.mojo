@@ -47,6 +47,8 @@ def test_local_datetime() raises:
 
     _refuses_datetime("2026-10-12T09:30", "a local date-time is YYYY-MM-DDTHH:MM:SS, nineteen bytes")
     _refuses_datetime("2026-10-12T09:30:00Z", "a local date-time is YYYY-MM-DDTHH:MM:SS, nineteen bytes")
+    _refuses_datetime("2026-10-12T09:30:00+01:00", "a local date-time is YYYY-MM-DDTHH:MM:SS, nineteen bytes")
+    _refuses_datetime("2026-10-12T09:30:00-05:00", "a local date-time is YYYY-MM-DDTHH:MM:SS, nineteen bytes")
     _refuses_datetime("2026-10-12T09:30:00.5", "a local date-time is YYYY-MM-DDTHH:MM:SS, nineteen bytes")
     _refuses_datetime("2026-10-12t09:30:00", "a local date-time has 'T' between the date and the time")
     _refuses_datetime("2026-10-12T09-30:00", "a local time is HH:MM:SS")

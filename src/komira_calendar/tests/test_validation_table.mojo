@@ -91,6 +91,10 @@ def test_event_text() raises:
     _refused(check_event(e), "TEXT_TOO_LONG", "uid", "uid is 256 bytes; at most 255 are allowed")
 
     e = _timed()
+    e.location = _repeat("l", 1025)
+    _refused(check_event(e), "TEXT_TOO_LONG", "location", "location is 1025 bytes; at most 1024 are allowed")
+
+    e = _timed()
     e.location = "Room\r1"
     _refused(check_event(e), "TEXT_CONTROL_CHARACTER", "location", "location holds control character 0xd at byte 4")
 
@@ -487,6 +491,8 @@ def test_event_accepts_each_bound() raises:
     var e = _timed()
     e.title = _repeat("t", 1024)
     e.uid = _repeat("u", 255)
+    e.location = _repeat("l", 1024)
+    e.description = _repeat("d", 65536)
     e.duration_seconds = UInt32(366 * 86400)
     for m in [0, 15, 40320]:
         e.reminders.append(Reminder(UInt32(m)))

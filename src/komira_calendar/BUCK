@@ -6,10 +6,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # stable code, a JSON field path and a sentence; the local date and
 # date-time text forms. No zone rules, no expansion, no store.
 #
-# test_validation_table drives one valid value per kind and, row by row, one
-# broken field each, asserting the exact code, field and message.
-# test_local_time pins the text forms. README.md's examples run as one more
-# welded test.
+# test_validation_table holds the event rows: two valid events and, row by
+# row, one broken field each, asserting the exact code, field and message.
+# test_calendar_override_table holds the calendar rows, the override rows and
+# the error envelope. test_local_time pins the text forms. README.md's
+# examples run as one more welded test.
 mojo_library(
     name = "komira_calendar",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
