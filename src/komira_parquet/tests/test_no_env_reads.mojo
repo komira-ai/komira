@@ -7,8 +7,8 @@
 #     name does not start with a single underscore): pointers are taken from
 #     Spans inside the bodies only,
 #   * rebuilds an address from an integer, or names a wildcard origin,
-#   * imports a komira package that is not one of the library's deps, or
-#     names komira_obs, komira_serde or komira_core.
+#   * imports a komira package that is not one of the library's deps (or
+#     the package itself), or names komira_obs, komira_serde or komira_core.
 # It also checks that the files it read are every staged one, subdirectories
 # included, so a new module that the scan does not read fails it.
 from std.os import listdir
@@ -32,6 +32,8 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
+    "bloom_pruner.mojo",
+    "bloom_reader.mojo",
     "byte_stream_split.mojo",
     "decimal_decode.mojo",
     "decode_arm_trace.mojo",
@@ -42,11 +44,17 @@ comptime _FILES: List[String] = [
     "dict_gather_fused.mojo",
     "dictionary.mojo",
     "dictionary_resolve.mojo",
+    "file_reader.mojo",
+    "footer_header.mojo",
     "gather_byte_array.mojo",
     "gather_common.mojo",
     "gather_dict.mojo",
+    "metadata_parser.mojo",
     "nested.mojo",
     "null_expand.mojo",
+    "num_rows_cache.mojo",
+    "page_header_parser.mojo",
+    "partition_pred_bridge.mojo",
     "payload_sel_trace.mojo",
     "plain.mojo",
     "plain_flba.mojo",
@@ -55,6 +63,7 @@ comptime _FILES: List[String] = [
     "scan_copy_trace.mojo",
     "selection_vector.mojo",
     "staged_filter_trace.mojo",
+    "thrift_compact.mojo",
 ]
 
 
@@ -186,10 +195,15 @@ def test_imports_only_its_deps() raises:
     # komira_serde are refused outright.
     var allowed: List[String] = [
         "komira_arrow",
+        "komira_async",
         "komira_atomic_alias",
         "komira_buffer",
         "komira_collections",
+        "komira_dynamic_filter",
+        "komira_fs",
+        "komira_parquet",
         "komira_parquet_api",
+        "komira_plan_expr",
         "komira_simd",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde", "komira_" + "core"]
@@ -215,8 +229,9 @@ def test_imports_only_its_deps() raises:
                     ok = True
             assert_true(ok, files[i] + " imports " + root + ", not a dep")
     # Not vacuous: the decoders import komira_arrow and komira_buffer, the
-    # arm counters komira_atomic_alias.
-    assert_true(seen >= 7, "found only " + String(seen) + " komira imports")
+    # arm counters komira_atomic_alias, the footer readers komira_fs and
+    # komira_parquet_api.
+    assert_true(seen >= 30, "found only " + String(seen) + " komira imports")
 
 
 def test_the_scan_saw_the_package() raises:
@@ -235,6 +250,8 @@ def test_the_scan_saw_the_package() raises:
     assert_equal(_count(_read("rle.mojo"), "\nstruct RleDecoder("), 1)
     assert_equal(_count(_read("decode_arm_trace.mojo"), "\ndef set_delta_page_memcpy_enabled("), 1)
     assert_true(_read("rle_bitunpack.mojo").byte_length() > 10000)
+    assert_equal(_count(_read("thrift_compact.mojo"), "\nstruct ThriftCompactReader["), 1)
+    assert_equal(_count(_read("file_reader.mojo"), "\nstruct ParquetFileReader["), 1)
 
 
 def main() raises:

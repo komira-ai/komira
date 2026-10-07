@@ -26,7 +26,9 @@
 #      `Ref`s are absent messages.
 #   5. AS ITS ARM. As `Resource.body` 15 (`queue`), 21 (`topic`) and 28
 #      (`subscription`), each fills its own field, at its position in
-#      declaration order (5th, 8th and 10th; 16 `secret` is the 6th).
+#      declaration order (5th, 9th and 13th; 16 `secret` is the 6th, 18
+#      `dns_zone` the 7th, 26 `dns_record` the 11th, 27 `certificate` the
+#      12th).
 # The bytes are a LITERAL restatement of the proto, deliberately.
 # =============================================================================
 
@@ -244,7 +246,7 @@ def test_queue() raises:
 
 def test_topic() raises:
     """Topic declares no field: any record in it is unknown and dropped. As
-    the `topic` arm 21 (the eighth), its empty record is kept."""
+    the `topic` arm 21 (the ninth), its empty record is kept."""
     var probe = List[UInt8]()
     _uint(probe, 1, 9)
     _str(probe, 2, "x")
@@ -256,7 +258,7 @@ def test_topic() raises:
     _msg(r, 21, List[UInt8]())
     var rr = decode_proto[Resource](r.copy())
     assert_true(Bool(rr.topic), "body 21 is `topic`")
-    assert_equal(rr._oneof0_case, 8, "the topic is the eighth arm")
+    assert_equal(rr._oneof0_case, 9, "the topic is the ninth arm")
     var again = encode_proto(rr)
     # `_same` drops an empty record as a zero value; the arm's tag (21,
     # length-delimited: 0xAA 0x01) and its zero length must be there.
@@ -272,7 +274,7 @@ def test_topic() raises:
 
 def test_subscription() raises:
     """Subscription: 1 topic, 2 queue (each a Ref); by name, binary, JSON,
-    absent = unset; as the `subscription` arm 28 (the tenth)."""
+    absent = unset; as the `subscription` arm 28 (the thirteenth)."""
     var b = List[UInt8]()
     _msg(b, 1, _ref("events"))
     _msg(b, 2, _ref("work"))
@@ -295,7 +297,7 @@ def test_subscription() raises:
     _msg(r, 28, b)
     var rr = decode_proto[Resource](r.copy())
     assert_true(Bool(rr.subscription), "body 28 is `subscription`")
-    assert_equal(rr._oneof0_case, 10, "the subscription is the tenth arm")
+    assert_equal(rr._oneof0_case, 13, "the subscription is the thirteenth arm")
     assert_equal(rr.subscription.value().queue.value().resource, "work")
     _same(encode_proto(rr), r, "Resource with a subscription")
     print("  test_subscription: PASS")

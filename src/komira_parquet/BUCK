@@ -17,12 +17,29 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # pages (gather_byte_array) and dictionary-encoded pages (gather_dict). Every
 # public decoder takes Spans; the arms are set by setters, never by the
 # environment.
+# They also read a file's footer and metadata: the file reader over any
+# FileSystem (file_reader), the Thrift Compact reader (thrift_compact), the
+# footer parsers (metadata_parser, footer_header), the page header parser
+# (page_header_parser), bloom filters and the row-group bloom pruner
+# (bloom_reader, bloom_pruner), a row-count cache (num_rows_cache) and the
+# partition-predicate mapping (partition_pred_bridge).
+#
+# It also reads a file's footer: the file reader over any FileSystem
+# (file_reader), the Thrift Compact reader (thrift_compact), the footer
+# parsers (metadata_parser, footer_header), the page header parser
+# (page_header_parser), bloom filters and the row-group bloom pruner
+# (bloom_reader, bloom_pruner), a row-count cache (num_rows_cache) and the
+# partition-predicate mapping (partition_pred_bridge).
 #
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
 #   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
 #   counts on and off the SIMD lane boundaries, against a test-local encoder.
 # - test_def_levels_u8: the per-page u8 validity vector from RLE def levels.
+# - test_delta_byte_array: DELTA_LENGTH_BYTE_ARRAY and DELTA_BYTE_ARRAY round
+#   trips and the DataPage V2 header parse.
+# - test_partition_pred_bridge_roundtrip: the partition-predicate mapping
+#   round-trips every op losslessly.
 # - test_neon_bss_decode: the SIMD BYTE_STREAM_SPLIT decode against the
 #   scalar block-transpose reference, f32 and f64, with and without a tail.
 # - test_parquet_encoding: PLAIN, RLE and DELTA_BINARY_PACKED decodes of
@@ -64,11 +81,16 @@ mojo_library(
     srcs = _SRCS,
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_fs:komira_fs",
         "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_simd:komira_simd",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_data = {
         "tests/test_no_env_reads.mojo": {
@@ -77,12 +99,15 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_bloom_pruner_direct.mojo",
+        "tests/test_bloom_reader_direct.mojo",
         "tests/test_bss_direct.mojo",
         "tests/test_decimal_decode_direct.mojo",
         "tests/test_decode_arm_trace_direct.mojo",
         "tests/test_decode_helpers_direct.mojo",
         "tests/test_def_level_bitmap_direct.mojo",
         "tests/test_def_levels_u8.mojo",
+        "tests/test_delta_byte_array.mojo",
         "tests/test_delta_byte_array_direct.mojo",
         "tests/test_delta_direct.mojo",
         "tests/test_delta_resumable.mojo",
@@ -93,20 +118,27 @@ mojo_library(
         "tests/test_dictionary_resolve_int32_simd_parity.mojo",
         "tests/test_dictionary_resolve_int64_simd_parity.mojo",
         "tests/test_dictionary_strings_flba_direct.mojo",
+        "tests/test_file_reader_local.mojo",
+        "tests/test_file_reader_object_store.mojo",
         "tests/test_flat_read_types_are_never_nested.mojo",
         "tests/test_flba_decimal_simd_parity.mojo",
+        "tests/test_footer_header_direct.mojo",
         "tests/test_gather_byte_array.mojo",
         "tests/test_gather_byte_array_direct.mojo",
         "tests/test_gather_common_direct.mojo",
         "tests/test_gather_dict_direct.mojo",
         "tests/test_gather_dict_refusals_direct.mojo",
         "tests/test_int96_decode.mojo",
+        "tests/test_metadata_parser_direct.mojo",
         "tests/test_neon_bss_decode.mojo",
         "tests/test_nested_direct.mojo",
         "tests/test_nested_types.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_null_expand_direct.mojo",
+        "tests/test_num_rows_cache_direct.mojo",
+        "tests/test_page_header_parser_direct.mojo",
         "tests/test_parquet_encoding.mojo",
+        "tests/test_partition_pred_bridge_roundtrip.mojo",
         "tests/test_plain_ba_fused_byte_equiv.mojo",
         "tests/test_plain_ba_raise_outlined.mojo",
         "tests/test_plain_direct.mojo",
@@ -120,6 +152,7 @@ mojo_library(
         "tests/test_selection_interval.mojo",
         "tests/test_selection_vector_direct.mojo",
         "tests/test_string_share_byte_equiv.mojo",
+        "tests/test_thrift_compact_direct.mojo",
     ],
     visibility = ["PUBLIC"],
 )
