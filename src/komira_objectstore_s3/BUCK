@@ -46,8 +46,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # aborted on failure, delete, and a Hive partition prune that never reads
 # the pruned partition), test_s3_fs_clone (an S3Fs clone builds its own
 # store), test_s3_fs_inflight (the in-flight bounds kept and never passed:
-# a prefetch and a multipart write timed over a slow, stateless fake S3, and
-# run_bounded_inflight over a fake that counts requests in flight),
+# a prefetch, one capped by S3Config's max_inflight, and a multipart write
+# timed over a slow, stateless fake S3; every request of a prefetch, on any
+# worker's store, carrying the handle's ETag; and run_bounded_inflight over
+# a fake that counts requests in flight),
 # test_s3_fs_one_version (a handle reads one object version: after an
 # overwrite its next read_at, prefetch or read_footer_of raises the named
 # error, its reads carry its first ETag in If-Match, and a new handle reads

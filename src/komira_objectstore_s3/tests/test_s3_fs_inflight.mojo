@@ -4,8 +4,14 @@
 # _DELAY_MS: a prefetch of _RANGES ranges too far apart to coalesce, with
 # `prefetch_max_inflight` K, takes at least ceil(_RANGES / K) delays (more
 # than K requests at once would finish sooner) and well under _RANGES delays
-# (one request at a time takes that long); a write of _PARTS parts with
-# `upload_max_inflight` K likewise. The fake holds no state: a connector
+# (one request at a time takes that long); with `prefetch_max_inflight` 0
+# (every range) and S3Config's `max_inflight` 2, at least ceil(_RANGES / 2)
+# delays; a write of _PARTS parts with `upload_max_inflight` K likewise.
+# Every request of a prefetch carries the handle's ETag, whichever worker's
+# store sends it: under `ver/` the fake answers a ranged GET by its
+# precondition (If-Match "v1": version 1; none, past offset 0: version 2,
+# other letters; another ETag: 412), so a request sent without it reads
+# bytes of version 2. The fake holds no state: a connector
 # factory is a thin function, so the stores S3Fs builds for its concurrent
 # requests each dial a fake of their own, and none could see what another
 # was sent. Its object is virtual (byte i is 'a' + i % 26), and it answers
@@ -67,6 +73,10 @@ def _byte_at(i: Int) -> UInt8:
     return UInt8(0x61 + i % 26)
 
 
+def _v2_byte_at(i: Int) -> UInt8:
+    return UInt8(0x41 + i % 26)
+
+
 def _bytes(s: String) -> List[UInt8]:
     var out = List[UInt8]()
     out.extend(Span(s.as_bytes()))
@@ -114,6 +124,16 @@ def _invalid(why: String) -> List[UInt8]:
     var body = String("<Error><Code>InvalidPart</Code><Message>") + why + "</Message></Error>"
     return _bytes(
         String("HTTP/1.1 400 Bad Request\r\nContent-Length: ")
+        + String(body.byte_length())
+        + "\r\nConnection: close\r\nContent-Type: application/xml\r\n\r\n"
+        + body
+    )
+
+
+def _precondition_failed() -> List[UInt8]:
+    var body = String("<Error><Code>PreconditionFailed</Code><Message>no</Message></Error>")
+    return _bytes(
+        String("HTTP/1.1 412 Precondition Failed\r\nContent-Length: ")
         + String(body.byte_length())
         + "\r\nConnection: close\r\nContent-Type: application/xml\r\n\r\n"
         + body
@@ -184,11 +204,14 @@ def _serve(written: List[UInt8]) raises -> List[UInt8]:
     if method == "POST" and target.find("uploadId=up-0") >= 0:
         return _complete(String(unsafe_from_utf8=Span(written)[end + 4 : n]))
     var range_ = String("")
+    var if_match = String("")
     for i in range(1, len(lines)):
         var line = String(lines[i])
         var colon = line.find(":")
         if colon > 0 and _sub(line, 0, colon).lower() == "range":
             range_ = String(_sub(line, colon + 1, line.byte_length()).strip())
+        if colon > 0 and _sub(line, 0, colon).lower() == "if-match":
+            if_match = String(_sub(line, colon + 1, line.byte_length()).strip())
     if range_.byte_length() == 0:
         raise Error("the fake S3 answers ranged GETs only")
     if slow:
@@ -197,13 +220,23 @@ def _serve(written: List[UInt8]) raises -> List[UInt8]:
     var dash = spec.find("-")
     var first = Int(_sub(spec, 0, dash))
     var last = min(Int(_sub(spec, dash + 1, spec.byte_length())), _SIZE - 1)
+    # An object under `ver/` answers by its request's precondition (the
+    # test of every request carrying the handle's ETag, below).
+    var version = 1
+    if target.find("/ver/") >= 0:
+        if if_match.byte_length() > 0 and if_match != '"v1"':
+            return _precondition_failed()
+        if if_match.byte_length() == 0 and first > 0:
+            version = 2
     var body = List[UInt8](capacity=last - first + 1)
     for i in range(first, last + 1):
-        body.append(_byte_at(i))
+        body.append(_byte_at(i) if version == 1 else _v2_byte_at(i))
     var out = _bytes(
         String("HTTP/1.1 206 Partial Content\r\nContent-Length: ")
         + String(len(body))
-        + "\r\nConnection: close\r\nETag: \"v1\"\r\nContent-Range: bytes "
+        + "\r\nConnection: close\r\nETag: \"v"
+        + String(version)
+        + "\"\r\nContent-Range: bytes "
         + String(first)
         + "-"
         + String(last)
@@ -282,7 +315,9 @@ def _mk() raises -> _Connector:
     return _Connector()
 
 
-def _fs(prefetch_max_inflight: Int, upload_max_inflight: Int = 1) raises -> _Fs:
+def _fs(
+    prefetch_max_inflight: Int, upload_max_inflight: Int = 1, max_inflight: Int = 64
+) raises -> _Fs:
     return _Fs.built(
         "lake",
         S3Config(
@@ -294,6 +329,7 @@ def _fs(prefetch_max_inflight: Int, upload_max_inflight: Int = 1) raises -> _Fs:
                 max_attempts=3,
                 deadline_ms=Int64(60_000),
             ),
+            max_inflight=max_inflight,
         ),
         _mk,
         HttpClientConfig.defaults(),
@@ -328,11 +364,12 @@ def _check(got: Slab[SharedAlignedBuffer[HeapRegion]]) raises:
             assert_equal(view[b], _byte_at(i * _SPACING + b))
 
 
-def _timed_prefetch_ms(bound: Int) raises -> Int:
+def _timed_prefetch_ms(bound: Int, max_inflight: Int = 64) raises -> Int:
     """Milliseconds of a prefetch of the far ranges on a handle a first
     prefetch has already read through (so the stores are built and the
-    handle's version is known), with the bytes checked."""
-    var fs = _fs(bound)
+    handle's version is known), with the bytes checked; `bound` is
+    `prefetch_max_inflight` and `max_inflight` is S3Config's."""
+    var fs = _fs(bound, max_inflight=max_inflight)
     var f = fs.open("v/big")
     _check(fs.read_ranges_prefetched(f, _far_ranges()))
     var start = perf_counter_ns()
@@ -353,6 +390,51 @@ def test_a_prefetch_keeps_its_bound_in_flight() raises:
         ms < 6 * _DELAY_MS,
         String("8 requests under a bound of 4 took ") + String(ms) + " ms: they were not sent 4 at a time",
     )
+
+
+def test_s3_config_max_inflight_caps_the_prefetch() raises:
+    # prefetch_max_inflight 0 is every range at once; S3Config's max_inflight
+    # of 2 caps it at two: four rounds, ceil(8 / 2) = 4 delays at least.
+    var ms = _timed_prefetch_ms(0, max_inflight=2)
+    assert_true(
+        ms >= 4 * _DELAY_MS,
+        String("8 requests under S3Config.max_inflight 2 took ")
+        + String(ms)
+        + " ms: more than 2 were in flight",
+    )
+    assert_true(
+        ms < 7 * _DELAY_MS,
+        String("8 requests under S3Config.max_inflight 2 took ")
+        + String(ms)
+        + " ms: they were not sent 2 at a time",
+    )
+
+
+def _check_version_1(got: Slab[SharedAlignedBuffer[HeapRegion]]) raises:
+    for i in range(_RANGES):
+        var view = got[i].view_range_ro(0, got[i].len()).into_span()
+        assert_equal(len(view), 5)
+        for b in range(5):
+            if view[b] != _byte_at(i * _SPACING + b):
+                raise Error(
+                    String("range ")
+                    + String(i)
+                    + " holds bytes of version 2: its request carried no If-Match"
+                )
+
+
+def test_every_request_of_a_prefetch_carries_the_etag() raises:
+    # Under `ver/` the fake answers a read carrying If-Match "v1" with
+    # version 1, and one carrying none with version 2 past offset 0, so the
+    # bytes say which requests carried the handle's ETag. The first request
+    # (offset 0) pins the handle to "v1"; the other seven go four at a time,
+    # on every worker's store, and each must carry it. Then again on the
+    # pinned handle.
+    var fs = _fs(4)
+    var f = fs.open("ver/big")
+    _check_version_1(fs.read_ranges_prefetched(f, _far_ranges()))
+    _check_version_1(fs.read_ranges_prefetched(f, _far_ranges()))
+    assert_equal(fs.stores_built(), 4)
 
 
 def test_a_bound_of_one_is_one_at_a_time() raises:
@@ -536,5 +618,7 @@ def main() raises:
     test_a_write_bound_of_one_is_one_part_at_a_time()
     test_a_prefetch_keeps_its_bound_in_flight()
     test_a_bound_of_one_is_one_at_a_time()
+    test_s3_config_max_inflight_caps_the_prefetch()
+    test_every_request_of_a_prefetch_carries_the_etag()
     test_file_systems_made_and_dropped_over_and_over()
     print("OK")
