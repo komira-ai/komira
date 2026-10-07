@@ -10,8 +10,9 @@
 #     invalid-curve attack input) and the all-zero (0, 0) encoding;
 #   * the point at infinity (SEC1 single byte 0x00);
 #   * wrong peer encodings: compressed (33 bytes), bare x || y (64 bytes), a
-#     65-byte buffer with a leading byte other than 0x04;
-#   * private keys that are not 32 bytes, are zero, or equal the order n;
+#     65-byte buffer with a leading byte other than 0x04, including the
+#     hybrid encoding (0x06) of a valid point;
+#   * private keys that are 31 or 33 bytes, are zero, or equal the order n;
 #   * accepted boundaries: priv = 1 gives x(Q), and priv = n - 1 gives
 #     x(-Q) = x(Q), so both must return Q's x-coordinate.
 #
@@ -117,6 +118,14 @@ def test_wrong_peer_encodings_refused() raises:
         _hex(_QX + _QY),
         "p256_ecdh: peer public key must be 65 bytes, got 64",
     )
+    # The hybrid SEC1 form of Q (0x06: y is even). AWS-LC's oct2point
+    # accepts it, so only p256_ecdh's own 0x04 check refuses it.
+    _expect(
+        "65-byte hybrid encoding of a valid point",
+        d,
+        _hex("06" + _QX + _QY),
+        "p256_ecdh: peer public key must start with 0x04 (uncompressed)",
+    )
     _expect(
         "65 bytes with a compressed-form leading byte",
         d,
@@ -132,6 +141,12 @@ def test_bad_private_keys_refused() raises:
         _hex(String(String(_D)[byte=2:])),
         peer,
         "p256_ecdh: private key must be 32 bytes, got 31",
+    )
+    _expect(
+        "33-byte key (a leading 0x00, same value)",
+        _hex("00" + _D),
+        peer,
+        "p256_ecdh: private key must be 32 bytes, got 33",
     )
     _expect(
         "zero",

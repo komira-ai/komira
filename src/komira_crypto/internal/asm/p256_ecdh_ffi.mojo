@@ -15,10 +15,13 @@
 #   * BN_bin2bn (through p256_ffi) / BN_clear_free
 #   * EC_POINT_new(group) / EC_POINT_free / EC_POINT_clear_free
 #   * EC_POINT_oct2point(group, point, buf, len, ctx): returns 0 for an
-#     encoding that is not a point on the curve, or a coordinate >= p
+#     uncompressed encoding that is not a point on the curve or has a
+#     coordinate >= p; it also accepts the hybrid forms 0x06/0x07, so the
+#     0x04 prefix check is the caller's (`p256_ecdh` in ecdh_p256.mojo)
 #   * EC_POINT_mul(group, r, NULL, q, m, ctx): r = m*q; constant-time in m
 #   * EC_POINT_point2oct(group, point, UNCOMPRESSED, buf, 65, ctx): returns
-#     0 for the point at infinity
+#     65 and writes 0x04 || x || y; for the point at infinity it returns 1
+#     and writes the single byte 0x00
 #
 # # FFI-BOUNDARY: ownership of every pointer crossing into AWS-LC
 #
@@ -69,8 +72,11 @@ def p256_ecdh_shared_x(
     Args:
         priv_be: 32-byte big-endian private scalar; refused unless
             0 < priv < n.
-        peer_uncompressed: 65-byte uncompressed SEC1 point 0x04 || x || y;
-            refused unless it is a point on P-256 with x, y < p.
+        peer_uncompressed: 65-byte SEC1 point; refused unless AWS-LC
+            decodes it as a point on P-256 with x, y < p. This function
+            does not check the 0x04 prefix: AWS-LC also accepts the hybrid
+            forms 0x06/0x07, and `p256_ecdh` refuses anything but 0x04
+            before calling here.
         z_out: receives the shared secret Z (SP 800-56A ECC CDH) on success;
             left untouched when this raises.
 
@@ -133,11 +139,12 @@ def p256_ecdh_shared_x(
 
         # SAFETY: peer_uncompressed is the caller's live 65-byte buffer;
         # AWS-LC reads exactly 65 bytes during this synchronous call and
-        # writes only peer_pt. It returns 0 for a wrong leading byte, a
-        # coordinate >= p, or a point that does not satisfy the curve
-        # equation; on that refusal it sets peer_pt to the generator, so
+        # writes only peer_pt. For an uncompressed or hybrid encoding with
+        # a coordinate >= p or a point that does not satisfy the curve
+        # equation it returns 0 and sets peer_pt to the generator, so
         # ignoring rc_oct would return x(priv * G), the caller's own public
-        # x-coordinate.
+        # x-coordinate. A leading byte of 0x00 or 0x02/0x03 (whose lengths
+        # must be 1 or 33) returns 0 and leaves peer_pt untouched.
         var peer_ptr = _span_ptr_mut(peer_uncompressed)
         var rc_oct = external_call[
             "EC_POINT_oct2point", Int32,
@@ -173,9 +180,13 @@ def p256_ecdh_shared_x(
         if rc_mul != 1:
             raise Error("p256_ecdh: EC_POINT_mul failed")
 
-        # SAFETY: raw65 is a local 65-byte buffer; AWS-LC writes exactly 65
-        # bytes (0x04 || x || y) and returns 65, or returns 0 when the
-        # point is the point at infinity.
+        # SAFETY: raw65 is a local 65-byte buffer and AWS-LC writes at most
+        # 65 bytes. For a finite point it writes 0x04 || x || y and returns
+        # 65; for the point at infinity it writes the single byte 0x00 and
+        # returns 1, which the n_written / raw65[0] check below refuses.
+        # With cofactor 1, a scalar in [1, n-1] and a decoded point, the
+        # product is never the point at infinity, so that branch is
+        # unreachable here.
         var raw_ptr = _inline65_ptr_mut(raw65)
         var n_written = external_call[
             "EC_POINT_point2oct", UInt,
