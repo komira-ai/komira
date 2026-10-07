@@ -67,10 +67,15 @@ def test_fixed_size_counts() raises:
     for zc in range(2):
         var z = zc == 1
         assert_equal(_count(ArrowType.FIXED_SIZE_BINARY, z, inner_size=4), 2)
+        assert_equal(_count(ArrowType.FIXED_SIZE_BINARY, z, inner_size=1), 2)
         assert_equal(_count(ArrowType.FIXED_SIZE_BINARY, z, inner_size=0), 0)
         assert_equal(_count(ArrowType.FIXED_SIZE_BINARY, z, inner_size=-1), 0)
         assert_equal(
             _count(ArrowType.FIXED_SIZE_LIST, z, n_children=1, inner_size=3),
+            1,
+        )
+        assert_equal(
+            _count(ArrowType.FIXED_SIZE_LIST, z, n_children=1, inner_size=1),
             1,
         )
         assert_equal(

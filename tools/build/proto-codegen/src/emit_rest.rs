@@ -1,8 +1,9 @@
 //! The REST client emitter: for `ProtocolMode::Rest`, one client method per
 //! unary or server-streaming method carrying a `(google.api.http)`
 //! annotation, on a client that starts at the service's
-//! `(google.api.default_host)` (or, with none, refuses to send until its
-//! caller names a host).
+//! `(google.api.default_host)`, or at the service configuration's `name`
+//! that replaced it (`IrService::host_from_service_config`), or, with
+//! neither, refuses to send until its caller names a host.
 
 use std::fmt::Write as _;
 
@@ -201,7 +202,8 @@ pub fn emit_rest_service_in(
     w.line("\"\"\"Headers merged into every request. Empty unless given.\"\"\"");
     w.blank();
     // The REST base host. It starts at the service's own
-    // `(google.api.default_host)`; with none declared it starts empty, and
+    // `(google.api.default_host)`, or at the service configuration's `name`
+    // that replaced it; with neither it starts empty, and
     // every method refuses to send (`_rest_require_host`) until the caller
     // names one. Never a placeholder: whatever host the URL names receives
     // the bearer token. The URL host feeds BOTH the dial-target DNS
@@ -211,6 +213,12 @@ pub fn emit_rest_service_in(
     w.line("var _rest_host: String");
     w.line("\"\"\"The host the request URLs target: it drives BOTH the dial DNS");
     match &default_host {
+        Some(h) if svc.host_from_service_config => {
+            w.line("    target and the `Host:` header. Starts at the API's service");
+            w.line(&format!(
+                "    configuration `name`, `{h}`; `set_rest_host` replaces it.\"\"\""
+            ));
+        }
         Some(h) => {
             w.line("    target and the `Host:` header. Starts at the service's");
             w.line(&format!(
@@ -293,6 +301,10 @@ pub fn emit_rest_service_in(
     w.line("if self._rest_host.byte_length() == 0:");
     w.indent();
     let why = match &default_host {
+        Some(h) if svc.host_from_service_config => format!(
+            "the host was set empty (the API's service configuration name is {h}); \
+             call set_rest_host(host) with a host before sending"
+        ),
         Some(h) => format!(
             "the host was set empty (the service's google.api.default_host is {h}); \
              call set_rest_host(host) with a host before sending"
@@ -357,7 +369,8 @@ fn fq_service_name(file: &IrFile, svc: &IrService) -> String {
 }
 
 /// The host a generated client of `svc` starts at: its
-/// `(google.api.default_host)`, or `None` when it declares none. googleapis
+/// `(google.api.default_host)` (or the service configuration's `name` that
+/// replaced it), or `None` when it has neither. googleapis
 /// writes the option as a bare host (`logging.googleapis.com`), and some
 /// services as `host:443`; the port is dropped, as the client always speaks
 /// HTTPS on the default port. Anything else (another port, a scheme, a path,
@@ -377,6 +390,13 @@ fn rest_default_host(fq_service: &str, svc: &IrService) -> Result<Option<String>
                 && !label.ends_with('-')
                 && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
         });
+    if !dns_name && svc.host_from_service_config {
+        return Err(format!(
+            "service `{fq_service}` starts at its service configuration's `name`, \
+             {declared:?}, which is not a host name (optionally `:443`): a REST client \
+             sends to it over HTTPS on the default port"
+        ));
+    }
     if !dns_name {
         return Err(format!(
             "service `{fq_service}` declares `(google.api.default_host)` = {declared:?}, \
@@ -1701,6 +1721,7 @@ mod tests {
         let svc = IrService {
             name: "Svc".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "DoThing".into(),
                 input: TypeRef {
@@ -1739,6 +1760,7 @@ mod tests {
         let svc = IrService {
             name: "Library".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "GetShelf".into(),
                 input: TypeRef {
@@ -1787,6 +1809,7 @@ mod tests {
         let svc = IrService {
             name: "Svc".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "GetThing".into(),
                 input: TypeRef {
@@ -1841,6 +1864,7 @@ mod tests {
         let svc = IrService {
             name: "Svc".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "RunQuery".into(),
                 input: ty.clone(),
@@ -1925,10 +1949,14 @@ mod tests {
     }
 
     fn with_host(host: Option<&str>) -> Result<RestServiceEmit, String> {
-        with_host_in("tiny.rest.v1", host)
+        with_host_in("tiny.rest.v1", host, false)
     }
 
-    fn with_host_in(package: &str, host: Option<&str>) -> Result<RestServiceEmit, String> {
+    fn with_host_in(
+        package: &str,
+        host: Option<&str>,
+        from_config: bool,
+    ) -> Result<RestServiceEmit, String> {
         let req = IrMessage {
             name: "Req".into(),
             mojo_name: "Req".into(),
@@ -1941,6 +1969,7 @@ mod tests {
         let svc = IrService {
             name: "Logging".into(),
             default_host: host.map(str::to_string),
+            host_from_service_config: from_config,
             methods: vec![IrMethod {
                 name: "M".into(),
                 input: ty.clone(),
@@ -2018,10 +2047,35 @@ mod tests {
             );
         }
         // A file with no package names the bare service, not `.Logging`.
-        let err = with_host_in("", Some("https://logging.googleapis.com")).unwrap_err();
+        let err = with_host_in("", Some("https://logging.googleapis.com"), false).unwrap_err();
         assert!(
             err.contains("service `Logging` declares `(google.api.default_host)`"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn a_host_from_the_service_configuration_is_named_as_such() {
+        let e = with_host_in("tiny.rest.v1", Some("api.googleapis.com"), true).unwrap();
+        assert_eq!(
+            e.source.matches("self._rest_host = String(\"api.googleapis.com\")").count(),
+            2
+        );
+        assert!(e.source.contains(
+            "    target and the `Host:` header. Starts at the API's service\n\
+             \x20       configuration `name`, `api.googleapis.com`; `set_rest_host` replaces it.\"\"\""
+        ));
+        assert!(e.source.contains(
+            "no REST host: the host was set empty (the API's service configuration name is \
+             api.googleapis.com); call set_rest_host(host) with a host before sending"
+        ));
+        assert!(!e.source.contains("default_host"), "{}", e.source);
+        let err = with_host_in("tiny.rest.v1", Some("api.googleapis.com:8443"), true).unwrap_err();
+        assert_eq!(
+            err,
+            "service `tiny.rest.v1.Logging` starts at its service configuration's `name`, \
+             \"api.googleapis.com:8443\", which is not a host name (optionally `:443`): a REST \
+             client sends to it over HTTPS on the default port"
         );
     }
 
@@ -2049,6 +2103,7 @@ mod tests {
         let svc = IrService {
             name: "Library".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "CreateBook".into(),
                 input: TypeRef {
@@ -2112,6 +2167,7 @@ mod tests {
         let svc = IrService {
             name: "Library".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "Revoke".into(),
                 input: TypeRef {
@@ -2177,6 +2233,7 @@ mod tests {
         let svc = IrService {
             name: "Library".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "GetBook".into(),
                 input: TypeRef {
@@ -2231,6 +2288,7 @@ mod tests {
         let svc = IrService {
             name: "Library".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "GetShelf".into(),
                 input: TypeRef {
@@ -2294,6 +2352,7 @@ mod tests {
         let svc = IrService {
             name: "Library".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "ListShelf".into(),
                 input: TypeRef {
@@ -2358,6 +2417,7 @@ mod tests {
         let svc = IrService {
             name: "Library".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "InsertShelf".into(),
                 input: TypeRef {
@@ -2413,6 +2473,7 @@ mod tests {
         let svc = IrService {
             name: "Library".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "DeleteShelf".into(),
                 input: TypeRef {
@@ -2455,6 +2516,7 @@ mod tests {
         let svc = IrService {
             name: "Logging".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "M".into(),
                 input: ty.clone(),
@@ -2549,6 +2611,7 @@ mod tests {
         let svc = IrService {
             name: "Svc".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "Get".into(),
                 input: ty.clone(),
@@ -2761,6 +2824,7 @@ mod tests {
         IrService {
             name: "Svc".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "M".into(),
                 input: ty.clone(),
@@ -3285,7 +3349,7 @@ mod tests {
     }
 
     fn svc_of(methods: Vec<IrMethod>) -> IrService {
-        IrService { name: "Jobs".into(), default_host: None, methods }
+        IrService { name: "Jobs".into(), default_host: None, host_from_service_config: false, methods }
     }
 
     /// `UpdateJobRequest { Job job; FieldMask update_mask; bool validate_only }`

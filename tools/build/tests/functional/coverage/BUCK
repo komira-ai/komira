@@ -23,7 +23,7 @@ mojo_library(
     ],
 )
 
-# Test 44: a library that depends on covlib. coverage_keys.sh builds it with
+# Test 45: a library that depends on covlib. coverage_keys.sh builds it with
 # the switch off, then on: its compile and test must not run again, so
 # covlib's package (its join's output) is the same bytes either way.
 mojo_library(
@@ -248,7 +248,7 @@ cov_debug_check(
     script = "check.sh",
 )
 
-# Test 45: branch coverage. A library whose function has every kind of
+# Test 46: branch coverage. A library whose function has every kind of
 # source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
 # its arms, never the first: with coverage (forced here, as for covlib_forced)
 # it has [coverage][bc], [coverage][pgo_bin] and [coverage][branch].
@@ -266,7 +266,7 @@ mojo_library(
     ],
 )
 
-# Test 45: a library with a C library in its closure (the cshim example's,
+# Test 46: a library with a C library in its closure (the cshim example's,
 # a cxx_library): its tests' links end with the C library, as mojo_wrapper.sh
 # appends it (--link-tail), and its branch coverage links pass the same
 # arguments in the same order. Its test calls into C and takes two of the
@@ -298,7 +298,7 @@ cov_branch_check(
     script = "branch_check.sh",
 )
 
-# Test 45: the branch coverage link of test_score_arms is the link of its
+# Test 46: the branch coverage link of test_score_arms is the link of its
 # release build plus the profile runtime: mojo_wrapper.sh's `cc` shim gives
 # zig what `mojo build` asks for (the compiler's runtime library,
 # --gc-sections, -lm, the shim's --strip-debug and run path), and
@@ -314,7 +314,7 @@ cov_link_line_check(
     src = "tests/test_score_arms.mojo",
 )
 
-# Test 45: the bitcode and the instrumented binary of one test built in two
+# Test 46: the bitcode and the instrumented binary of one test built in two
 # actions with different keys (repro_a and repro_b, above), so two
 # sandboxes, are the same bytes. No --no-remote-cache.
 cov_debug_check(

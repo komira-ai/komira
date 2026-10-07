@@ -1,0 +1,78 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Parquet reader core. These parts hold the value decoders of the Parquet
+# encodings: PLAIN (plain, with FIXED_LEN_BYTE_ARRAY in plain_flba), RLE /
+# Bit-Packing Hybrid (rle, with its bit-unpack kernels in rle_bitunpack),
+# DELTA_BINARY_PACKED (delta), DELTA_LENGTH_BYTE_ARRAY and DELTA_BYTE_ARRAY
+# (delta_byte_array) and BYTE_STREAM_SPLIT (byte_stream_split); the DECIMAL to
+# Decimal128 decoders (decimal_decode); and the run-time arms and fire
+# counters of the decode and scan paths (decode_arm_trace, scan_copy_trace,
+# payload_sel_trace, staged_filter_trace). Every public decoder takes Spans;
+# the arms are set by setters, never by the environment.
+#
+# The welded tests:
+# - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
+#   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
+#   counts on and off the SIMD lane boundaries, against a test-local encoder.
+# - test_def_levels_u8: the per-page u8 validity vector from RLE def levels.
+# - test_neon_bss_decode: the SIMD BYTE_STREAM_SPLIT decode against the
+#   scalar block-transpose reference, f32 and f64, with and without a tail.
+# - test_parquet_encoding: PLAIN, RLE and DELTA_BINARY_PACKED decodes of
+#   hand-encoded pages with known values.
+# - test_int96_decode: INT96 timestamps (Julian day + nanos) to Unix nanos.
+# - test_plain_ba_fused_byte_equiv: the two PLAIN BYTE_ARRAY walks emit the
+#   same bytes and refuse the same pages; the fused walk allocates no more.
+# - test_plain_ba_raise_outlined: the walks' refusal sentences, byte for byte.
+# - test_flba_decimal_simd_parity: the SIMD FLBA DECIMAL to Float64 decode
+#   against a scalar reference, FLBA(16) and FLBA(8), with tails.
+# - test_string_share_byte_equiv: Column.from_string_shared against the
+#   copying Column.from_string, and the paired string share counters.
+# - test_no_env_reads: the package's sources read no environment, import no
+#   komira package outside the deps below (and never komira_core), hold no
+#   raw pointer in a public signature, rebuild no address from an integer
+#   and name no wildcard origin. It is staged every source `srcs` compiles,
+#   so a module the scan does not read fails it.
+_SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
+
+mojo_library(
+    name = "komira_parquet",
+    srcs = _SRCS,
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_simd:komira_simd",
+    ],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in _SRCS
+        },
+    },
+    test_srcs = [
+        "tests/test_bss_direct.mojo",
+        "tests/test_decimal_decode_direct.mojo",
+        "tests/test_decode_arm_trace_direct.mojo",
+        "tests/test_def_levels_u8.mojo",
+        "tests/test_delta_byte_array_direct.mojo",
+        "tests/test_delta_direct.mojo",
+        "tests/test_delta_resumable.mojo",
+        "tests/test_flba_decimal_simd_parity.mojo",
+        "tests/test_int96_decode.mojo",
+        "tests/test_neon_bss_decode.mojo",
+        "tests/test_no_env_reads.mojo",
+        "tests/test_parquet_encoding.mojo",
+        "tests/test_plain_ba_fused_byte_equiv.mojo",
+        "tests/test_plain_ba_raise_outlined.mojo",
+        "tests/test_plain_direct.mojo",
+        "tests/test_plain_flba_direct.mojo",
+        "tests/test_rle_bitunpack_sweep.mojo",
+        "tests/test_rle_decoder_direct.mojo",
+        "tests/test_rle_simd.mojo",
+        "tests/test_rle_simd_bw_small.mojo",
+        "tests/test_scan_copy_trace_direct.mojo",
+        "tests/test_scan_trace_leaves_direct.mojo",
+        "tests/test_string_share_byte_equiv.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

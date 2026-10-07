@@ -1,5 +1,5 @@
 # Calls used() only: covun/unused.mojo is in the package, and no test binary
-# compiles it (test 44).
+# compiles it (test 45).
 from covun import used
 from std.testing import assert_equal
 

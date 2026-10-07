@@ -5,7 +5,7 @@ cov_plant, a copy of a script with one planted defect, and kcov_stub_dir,
 a kcov distribution whose bin/kcov is a stand-in (test 43); and
 cov_branch_check, branch_check.sh over a branch coverage run's profile,
 and cov_link_line_check, link_line.sh over a branch coverage link
-(test 45)."""
+(test 46)."""
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load("@komira//tools/build/toolchains/llvm_branch:defs.bzl", "LlvmBranchInfo")
@@ -102,7 +102,7 @@ def _report_impl(ctx):
 # action (report.sh): `golden`, each report is its golden file byte for byte;
 # `census`, covcheck's build gate in census mode reads the reports over the
 # package's sources (`files`, {repository path: source}) and its result JSON
-# holds each `expect` string; `result` (test 44), the result JSON of a
+# holds each `expect` string; `result` (test 45), the result JSON of a
 # library's own gate (its [coverage][gate][result], the one `reports` entry)
 # holds each `expect` string.
 cov_report_check = rule(
@@ -191,7 +191,7 @@ def _branch_check_impl(ctx):
     )
     return [DefaultInfo(default_output = out)]
 
-# Test 45: the profile of a branch coverage run ([coverage][branch][<test>])
+# Test 46: the profile of a branch coverage run ([coverage][branch][<test>])
 # holds exactly one function named like `function`, whose block counts,
 # sorted, are `counts` (branch_check.sh).
 cov_branch_check = rule(
@@ -230,7 +230,7 @@ def _link_line_impl(ctx):
     )
     return [DefaultInfo(default_output = out)]
 
-# Test 45: the branch coverage link of `src` (its bitcode `bc`, linked by
+# Test 46: the branch coverage link of `src` (its bitcode `bc`, linked by
 # the link directory of `branch`) is the link mojo_wrapper.sh gives `mojo
 # build` of `src` against `lib`'s closure, plus the profile runtime
 # (link_line.sh).

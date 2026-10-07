@@ -1,4 +1,4 @@
-# Test 45: green in the release gate, red in a branch coverage run, which
+# Test 46: green in the release gate, red in a branch coverage run, which
 # sets LLVM_PROFILE_FILE for the test: the run's verdict is the test's.
 from noop import one
 from std.os import getenv

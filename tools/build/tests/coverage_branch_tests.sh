@@ -1,14 +1,14 @@
 # shellcheck shell=bash
 # coverage_branch_tests.sh -- tests of branch coverage runs
 # (tools/build/coverage/branch/README.md). Sourced by
-# tools/build/tests/coverage_run_tests.sh after test 44's (uses run_tests.sh's
+# tools/build/tests/coverage_run_tests.sh after test 45's (uses run_tests.sh's
 # BUCK2, LOG, pass, fail, expect_green and expect_red); not run on its own.
 #
-#  45. Branch coverage runs: with coverage, each welded test is also emitted
+#  46. Branch coverage runs: with coverage, each welded test is also emitted
 #      as LLVM bitcode, instrumented with IR profile counters by Mojo's lld,
 #      linked with the profile runtime, and run through the release gate's
 #      runner; its merged profile is [coverage][branch][<test>]
-#      (tools/build/tests/coverage_runs.md, test 45).
+#      (tools/build/tests/coverage_runs.md, test 46).
 #      tests//functional/coverage:branch_counts (branchlib's test takes some
 #      arms of classify_score, an if/elif/or/and function: its counters,
 #      sorted, are 0,0,1,1,2,2); :link_line (the branch link of that test
