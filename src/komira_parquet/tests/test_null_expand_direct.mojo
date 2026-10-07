@@ -10,6 +10,7 @@ from komira_arrow.bitmap import Bitmap
 from komira_arrow.decimal_array import Decimal128Array
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.string_array import StringArray
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 
 from komira_parquet.null_expand import (
     _all_null_binary,
@@ -116,6 +117,24 @@ def test_expand_floats_and_fewer_values_than_bits() raises:
     assert_equal(c.get(4), Float64(2.75))
     assert_equal(c.get(6), Float64(0))
     assert_true(c.validity.value().test(6))
+    # Four dense values in a buffer of eight: the four past the array's
+    # length are sentinels (99) that a read past the dense values would show.
+    var b32 = OwnedAlignedBuffer(8 * 4)
+    var b64 = OwnedAlignedBuffer(8 * 8)
+    for i in range(8):
+        b32.set_typed[Int32](i, Int32(i + 1) if i < 4 else Int32(99))
+        b64.set_typed[Int64](i, Int64(i + 1) if i < 4 else Int64(99))
+    b32.set_length(8 * 4)
+    b64.set_length(8 * 8)
+    var i32 = PrimitiveArray[DType.int32](b32^, 4, None, 0, 0)
+    var i64 = PrimitiveArray[DType.int64](b64^, 4, None, 0, 0)
+    var d = _expand_with_nulls_int32(i32, b.unsafe_ptr(), 7)
+    var e = _expand_with_nulls_int64(i64, b.unsafe_ptr(), 7)
+    assert_equal(d.get(4), Int32(4))
+    assert_equal(d.get(5), Int32(0))
+    assert_equal(e.get(4), Int64(4))
+    assert_equal(e.get(6), Int64(0))
+    assert_equal(e.null_count, 1)
 
 
 def test_expand_decimal128() raises:
