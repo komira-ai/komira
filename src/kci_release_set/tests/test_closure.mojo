@@ -22,7 +22,8 @@
 #       closed; another range, no range, a channel prefix, another case, a
 #       second space, a tab and a package the table does not hold are
 #       listed, naming the library; the native package requiring a row is
-#       listed (only a library opens a system library).
+#       listed (only a library opens a system library); a row listed more
+#       than once is listed once.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -199,6 +200,15 @@ def test_a_library_may_require_a_system_library_exactly() raises:
         s = _closed()
         s[0].conda.depends.append(refused[i].copy())
         _one(s^, _line(String("komira_alpha"), refused[i], requirement_name(refused[i])))
+    # listed twice (or three times): one line, as PUBLISH refuses it
+    s = _closed()
+    s[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    s[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    _one(s^, String("artifact 'komira_alpha' requires 'zstd >=1.5.2,<2' more than once"))
+    s = _closed()
+    for _ in range(3):
+        s[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    _one(s^, String("artifact 'komira_alpha' requires 'zstd >=1.5.2,<2' more than once"))
     print("  test_a_library_may_require_a_system_library_exactly: PASS")
 
 

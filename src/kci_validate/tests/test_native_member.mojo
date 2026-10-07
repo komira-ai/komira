@@ -25,6 +25,9 @@
 #       `zstd >=1.5.2,<2`: pixi.toml lists the conda-forge extra channel and
 #       names no zstd; its record from conda-forge reads back as a pass, one
 #       from an undeclared channel FAILS
+#     ENV refusals of the native package's link name, before anything runs:
+#       none (no lib/lib<x>.so row), `<x>` in another case, `<x>` holding a
+#       path separator
 #     every README run (ENV) and the program run (SMOKE) links komira_native
 #       from the environment: `-Xlinker -L<env>/lib -Xlinker -lkomira_native`
 #       (tools/build/native/README.md), pinned argv and script text
@@ -393,6 +396,37 @@ def test_env_a_native_package_with_no_link_name_is_refused() raises:
     )
     assert_equal(len(runner.calls), 0)
     assert_equal(t.call_count(), 0)
+
+
+def _refused_link_name(sub: String, bad: String) raises:
+    """komira_native's lib_files hold the shared object and a file row at
+    `bad`, its only `lib/lib<x>.so` (the metadata parser accepts it: under
+    lib/, bytes in [A-Za-z0-9_.+-/]; a file row, so no link target need
+    resolve): refused naming it, before anything runs."""
+    var fx = Fixture(
+        sub, String(VALIDATION_KIND_CONDA_INSTALL_ENV), _names(String("komira_alpha")),
+        String("komira_alpha"), String(NATIVE), String("lib_files"),
+        String('[{"path":"') + bad + String('","sha256":"') + _sha(bad) + String('"},')
+        + String('{"path":"lib/libkomira_native.so.1","sha256":"') + _sha(String(NATIVE)) + String('"}]'),
+    )
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var row = _env(runner, t, fx)
+    _assert_fails_with(
+        row,
+        String("'komira_native' ships '") + bad
+        + String("', whose link name is not lowercase letters, digits and `_`: kci will not write it into a link line"),
+    )
+    assert_equal(len(runner.calls), 0)
+    assert_equal(t.call_count(), 0)
+
+
+def test_env_a_native_link_name_in_another_case_is_refused() raises:
+    _refused_link_name(String("link_upper"), String("lib/libKomira.so"))
+
+
+def test_env_a_native_link_name_holding_a_path_separator_is_refused() raises:
+    _refused_link_name(String("link_slash"), String("lib/libsub/libx.so"))
 
 
 # ---- ENV: a library requiring a system library from conda-forge ---------------
