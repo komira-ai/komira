@@ -4,7 +4,7 @@ in release/artifacts.textproto.
   python3 release/ci/derive_checks.py <units file>   # what kci runs
   python3 release/ci/derive_checks.py --from release/artifacts.textproto
                                                      # the same answer, for a reader
-  python3 release/ci/derive_checks.py --selftest     # the naming table (SELFTEST)
+  python3 release/ci/derive_checks.py --selftest     # the naming and pattern tables (SELFTEST, PATTERN_SELFTEST)
 
 The per-change check (`kci run --stage pr --affected-by <base>`) builds units:
 the artifacts and checks release/artifacts.textproto declares, and the checks
@@ -261,9 +261,28 @@ SELFTEST = [
 ]
 
 
+# THE PATTERN SELF-TEST: (label, the pattern of the derived check it lands
+# in). A check's pattern is what kci builds for it, so a test-only package
+# must keep a pattern of its own, not one shared by all of src/tests.
+PATTERN_SELFTEST = [
+    ("//src/komira_clock:komira_clock", "//src/komira_clock/..."),
+    ("//src/tests/e2e/komira_x_e2e:t", "//src/tests/e2e/komira_x_e2e/..."),
+    ("//src/tests/conformance/komira_c_conformance:t", "//src/tests/conformance/komira_c_conformance/..."),
+    ("//src/tests/support/komira_y/sub:t", "//src/tests/support/komira_y/..."),
+    ("//src/tests/e2e:t", "//src/tests/e2e:"),
+]
+
+
 def selftest():
-    """The failures of SELFTEST (each a line of text); none is green."""
+    """The failures of SELFTEST and PATTERN_SELFTEST (each a line of text); none is green."""
     failures = []
+    for label, want in PATTERN_SELFTEST:
+        got = group_pattern(label)
+        if got != want:
+            failures.append("group_pattern(%s): %r, want %r" % (label, got, want))
+        checks, _ = derive([], [label])
+        if checks != [(check_name(label), [want])]:
+            failures.append("derive() over %s: %r, want the one check %r with [%r]" % (label, checks, check_name(label), want))
     for label, taken, want in SELFTEST:
         got = check_name(label, frozenset(taken))
         if got != want or not VALID_NAME.match(got):
@@ -280,7 +299,7 @@ def main(argv):
         failures = selftest()
         for f in failures:
             sys.stderr.write("derive_checks.py selftest: RED: %s\n" % f)
-        sys.stderr.write("derive_checks.py selftest: %s (%d cases)\n" % ("RED" if failures else "GREEN", len(SELFTEST)))
+        sys.stderr.write("derive_checks.py selftest: %s (%d cases)\n" % ("RED" if failures else "GREEN", len(SELFTEST) + len(PATTERN_SELFTEST)))
         return 1 if failures else 0
     # The naming is held on every run: a name kci refuses would turn the
     # check red for a change that only added a package.

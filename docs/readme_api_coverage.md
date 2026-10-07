@@ -13,7 +13,7 @@ The lint is [`readme_api_coverage`](../tools/build/lint/readme_api_coverage.bzl)
 states the same rules), declared once in the root [`BUCK`](../BUCK) as
 `//:readme_api_coverage` over every file of the cell. It is a validation
 that runs on the farm like the other lints; its tests are
-[test 40](../tools/build/tests/README.md#40-readme-api-coverage).
+[test 40](../tools/build/tests/lint_tests.md#40-readme-api-coverage).
 
 ```sh
 ./buck2 build //:readme_api_coverage                                     # the census; fails only on the ledger
@@ -254,7 +254,7 @@ undocumented count:
 
 ## Tests
 
-[Test 40](../tools/build/tests/README.md#40-readme-api-coverage):
+[Test 40](../tools/build/tests/lint_tests.md#40-readme-api-coverage):
 `tests//functional/readme_api_coverage:ok` builds a planted tree whose census
 must equal its expected `[packages]`, `[symbols]` and `[report]` byte for byte, and each
 target of `tests//negative/readme_api_coverage` must fail naming its planted

@@ -1169,6 +1169,10 @@ expect_red readme_api_coverage_malformed_symbol "$N/ledger_malformed.tsv:3: a ro
 expect_red readme_api_coverage_stale_private "$N/ledger_stale_gone.tsv:3: komira_a Greeter._secret: not exported" "$N:stale_gone"
 expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enforce"
 
+# 41
+# shellcheck source=tools/build/tests/coverage_tests.sh
+. "$ROOT/tools/build/tests/coverage_tests.sh"
+
 # 42
 expect_green src_layout //:src_layout tests//functional/src_layout:ok
 N=tests//negative/src_layout
@@ -1189,10 +1193,6 @@ for want in \
     "empty|src_layout: checked nothing"; do
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
-
-# 41
-# shellcheck source=tools/build/tests/coverage_tests.sh
-. "$ROOT/tools/build/tests/coverage_tests.sh"
 
 # 37
 pt_rc=0
