@@ -1,0 +1,36 @@
+load("@komira//tools/build/lint:codec_owner.bzl", "codec_owner")
+load(":fixture.bzl", "CODEC_OWNERS", "CODEC_TREE")
+
+# Test 43 (the codec owner lint), the half that must build: the planted tree
+# of fixture.bzl, whose owners hold every codec declaration, soname and
+# layer import, beside near misses outside them. negative/codec_owner plants
+# one defect each in the same tree.
+[
+    export_file(
+        name = f,
+        visibility = ["tests//negative/codec_owner:"],
+    )
+    for f in [
+        "near.txt",
+        "owner_libraries.txt",
+        "owner_lz4.txt",
+        "owner_prefixed.txt",
+        "owner_snappy.txt",
+        "owner_zlib.txt",
+    ]
+]
+
+codec_owner(
+    name = "ok",
+    files = CODEC_TREE,
+    owners = CODEC_OWNERS,
+)
+
+# The snappy owner with the symbol-prefixed declarations
+# (`"komira_snappy_uncompress"`, the names the vendored snappy exports once
+# its symbols carry the komira_ prefix): the owner check accepts either name.
+codec_owner(
+    name = "ok_prefixed",
+    files = CODEC_TREE | {"src/komira_compression/snappy_block.mojo": "owner_prefixed.txt"},
+    owners = CODEC_OWNERS,
+)

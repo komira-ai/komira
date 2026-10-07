@@ -1,0 +1,2 @@
+# Planted: snappy_single
+_ = external_call['snappy_compress', Int32]()

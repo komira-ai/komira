@@ -1,0 +1,9 @@
+# The snappy owner once the vendored library is symbol-prefixed.
+from std.ffi import external_call
+
+
+def uncompress(src: Int, dst: Int) -> Int32:
+    return external_call[
+        "komira_snappy_uncompress",
+        Int32,
+    ](src, dst)

@@ -137,10 +137,12 @@ _TESTS_LINTS = [
 
 # One owner per codec library (tools/build/lint/codec_owner.bzl): no .mojo
 # file under src/ outside komira_compression and its implementation layers
-# komira_zlib and komira_lz4 names a snappy C symbol or a codec library soname
-# in a string, or imports komira_zlib / komira_lz4. The other packages call
+# komira_zlib and komira_lz4 names a snappy C symbol (with or without the
+# komira_ prefix) or a codec library soname in a string literal (either
+# quote), or imports komira_zlib / komira_lz4. The other packages call
 # komira_compression's codec API. The tree is every file of the cell
-# (`:doc_tree`).
+# (`:doc_tree`). Test 43 (tests//functional/codec_owner,
+# tests//negative/codec_owner) plants each form.
 [codec_owner(
     name = "codec_owner",
     owners = [

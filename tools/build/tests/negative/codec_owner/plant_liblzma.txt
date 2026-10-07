@@ -1,0 +1,2 @@
+# Planted: liblzma
+var h = OwnedDLHandle("liblzma.so.5")

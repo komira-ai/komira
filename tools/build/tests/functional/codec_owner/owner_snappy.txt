@@ -1,0 +1,18 @@
+# The snappy owner: its declarations, each on the line after external_call[.
+from std.ffi import external_call
+
+
+def compress_bound(n: Int) -> Int:
+    return Int(
+        external_call[
+            "snappy_max_compressed_length",
+            UInt,
+        ](UInt(n))
+    )
+
+
+def uncompress(src: Int, dst: Int) -> Int32:
+    return external_call[
+        "snappy_uncompress",
+        Int32,
+    ](src, dst)

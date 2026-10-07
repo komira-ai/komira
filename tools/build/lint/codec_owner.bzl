@@ -4,13 +4,18 @@ A validation, like the lints in defs.bzl: a build of the target fails when
 any .mojo file under `root` of `tree` (a doc_tree target: the root one holds
 every file of the cell) or, for a fixture, of `files` ({path in the tree:
 source}), outside the `owners` directories (paths in the tree), names a snappy
-C symbol in a string (`"snappy_compress"`: the name `external_call`
-declares), names a codec library soname in a string (libz, libzstd, liblz4,
-libbz2, liblzma, libsnappy; `.so` and `.dylib`), or imports komira_zlib or
-komira_lz4, the owners' implementation layers. The owners must hold the
-snappy declarations and the five sonames, so a pattern that stops matching
-fails too. codec_owner.sh says each pattern; a target with no `owners`, or
-with both or neither of `tree` and `files`, fails at analysis.
+C symbol as a whole string literal in either quote (`"snappy_compress"`, or
+`"komira_snappy_compress"` once the vendored snappy's symbols carry the
+prefix: the name `external_call` declares), starts a string literal with a
+codec library soname (libz, libzstd, liblz4, libbz2, liblzma, libsnappy;
+`.so` and `.dylib`), or imports komira_zlib or komira_lz4, the owners'
+implementation layers. A name built from pieces (adjacent literals, `+`) is
+not seen. The owners must hold a snappy declaration (`"snappy_uncompress"`,
+either spelling) and the five sonames, so the snappy and soname patterns
+cannot stop matching unnoticed; the import pattern and libsnappy have no such
+check and are pinned by tests//negative/codec_owner (test 43).
+codec_owner.sh says each pattern; a target with no `owners`, or with both or
+neither of `tree` and `files`, fails at analysis.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -40,7 +45,7 @@ def _codec_owner_impl(ctx):
 
 _codec_owner_rule = rule(
     impl = _codec_owner_impl,
-    doc = "No .mojo file under `root` of `tree` or `files`, outside the `owners` directories, declares a snappy symbol, names a codec library soname or imports komira_zlib / komira_lz4; and the owners hold the snappy declarations and the five sonames.",
+    doc = "No .mojo file under `root` of `tree` or `files`, outside the `owners` directories, names a snappy symbol (with or without the komira_ prefix) or a codec library soname in a string literal of either quote, or imports komira_zlib / komira_lz4; and the owners hold a snappy declaration and the five sonames.",
     attrs = {
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "owners": attrs.list(attrs.string()),

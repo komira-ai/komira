@@ -1,0 +1,2 @@
+# Planted: libzstd
+var h = OwnedDLHandle("libzstd.so.1")

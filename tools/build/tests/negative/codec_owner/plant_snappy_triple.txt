@@ -1,0 +1,2 @@
+# Planted: snappy_triple
+_ = external_call['''snappy_validate_compressed_buffer''', Int32]()

@@ -1,0 +1,2 @@
+# Planted: soname_single
+var h = OwnedDLHandle('liblz4.so.1')

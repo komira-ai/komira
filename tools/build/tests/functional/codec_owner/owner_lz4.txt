@@ -1,0 +1,4 @@
+# The liblz4 layer.
+from std.sys.info import CompilationTarget
+
+comptime LZ4 = "liblz4.dylib" if CompilationTarget.is_macos() else "liblz4.so.1"

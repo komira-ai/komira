@@ -6,17 +6,27 @@
 # Every codec library has one owner. No .mojo file under <tree>/<root>
 # (<tree>: a doc_tree output, or a fixture's staged files; findings are named
 # <prefix><path>) outside the <owner> directories (paths in the tree) holds:
-#   * a snappy C symbol in a string: `"snappy_<lower case and _>"`, the name
-#     `external_call` declares, on its line or the next;
-#   * a codec library soname in a string: `"libz.so`, `"libzstd.so`,
-#     `"liblz4.so`, `"libbz2.so`, `"liblzma.so`, `"libsnappy.so`, or the same
-#     names with `.dylib`;
+#   * a snappy C symbol as a whole string literal, in double or single quotes
+#     (so triple quotes too): `"snappy_<a-z, 0-9, _>"`, or with the komira_
+#     prefix the vendored snappy exports once its symbols are prefixed,
+#     `"komira_snappy_..."`; the name `external_call` declares, on its line
+#     or the next;
+#   * a codec library soname at the start of a string literal, either quote:
+#     `"libz.so`, `"libzstd.so`, `"liblz4.so`, `"libbz2.so`, `"liblzma.so`,
+#     `"libsnappy.so`, or the same names with `.dylib`;
 #   * an import of the owners' implementation layers, `komira_zlib` or
-#     `komira_lz4`.
-# A line whose first non-blank character is `#` is a comment, not a site.
-# The owners must hold the snappy declarations (`"snappy_uncompress"`) and
-# each of the five sonames between them; otherwise the patterns match
-# nothing, which is a finding too. Writes <result.json>, the validation
+#     `komira_lz4`: `from komira_zlib[.x] import ...`, `import komira_lz4[.x]`
+#     (with or without `as`), and either name in an `import a, b` list.
+# A line whose first non-blank character is `#` is a comment, not a site; a
+# site with a trailing comment is a site. Not covered: a name built from
+# pieces (adjacent literals, `+`, formatting), a soname with a directory
+# before it, and an import continued with a backslash.
+# The owners must hold a snappy declaration (`"snappy_uncompress"` or
+# `"komira_snappy_uncompress"`) and each of the five sonames between them,
+# so the snappy arm and the soname arms cannot stop matching unnoticed: a
+# missing one is a finding. The import arm and libsnappy have no such check
+# (no owner declares libsnappy; it is linked); tests//negative/codec_owner
+# pins them. Writes <result.json>, the validation
 # result Buck2 reads (ValidationInfo): status "failure" with the findings as
 # the message, else "success". Only the pinned busybox runs: PATH is its
 # applets.
@@ -41,18 +51,25 @@ export PATH
 [ -d "$TREE/$ROOT" ] && (cd "$TREE" && find "$ROOT" -name '*.mojo' \( -type f -o -type l \) | sort) > "$T/files"
 checked=$(wc -l < "$T/files" | tr -d ' ')
 : > "$T/hits"
+# The site patterns. Q is either quote.
+Q="[\"']"
+SITES="$Q(komira_)?snappy_[a-z0-9_]+$Q|${Q}lib(z|zstd|lz4|bz2|lzma|snappy)\\.(so|dylib)"
+SITES="$SITES|^[[:space:]]*(from|import)[[:space:]]+komira_(zlib|lz4)([.[:space:]]|\$)"
+SITES="$SITES|^[[:space:]]*import[[:space:]][^#]*[[:space:],]komira_(zlib|lz4)([.[:space:],]|\$)"
 if [ "$checked" -gt 0 ]; then
-    (cd "$TREE" && xargs grep -nE '"snappy_[a-z_]+"|"lib(z|zstd|lz4|bz2|lzma|snappy)\.(so|dylib)|^[[:space:]]*(from|import)[[:space:]]+komira_(zlib|lz4)([.[:space:]]|$)' /dev/null < "$T/files" || true) > "$T/hits"
+    (cd "$TREE" && xargs grep -nE "$SITES" /dev/null < "$T/files" || true) > "$T/hits"
 fi
-awk -v OWNERS="$OWNERS" -v P="$PREFIX" '
+awk -v OWNERS="$OWNERS" -v P="$PREFIX" -v SQ="'" '
     BEGIN {
         n = split(OWNERS, own, " ")
-        need["snappy"] = "\"snappy_uncompress\""; shown["snappy"] = "the snappy declarations"
-        need["libzstd"] = "\"libzstd.so"; shown["libzstd"] = "the libzstd soname"
-        need["libz"] = "\"libz.so"; shown["libz"] = "the libz soname"
-        need["liblz4"] = "\"liblz4.so"; shown["liblz4"] = "the liblz4 soname"
-        need["libbz2"] = "\"libbz2.so"; shown["libbz2"] = "the libbz2 soname"
-        need["liblzma"] = "\"liblzma.so"; shown["liblzma"] = "the liblzma soname"
+        q = "[\"" SQ "]"
+        need["snappy"] = q "(komira_)?snappy_uncompress" q
+        shown["snappy"] = "the snappy declarations (\"snappy_uncompress\" or \"komira_snappy_uncompress\")"
+        split("libzstd libz liblz4 libbz2 liblzma", libs, " ")
+        for (k in libs) {
+            need[libs[k]] = q libs[k] "\\.so"
+            shown[libs[k]] = "the " libs[k] " soname (\"" libs[k] ".so)"
+        }
     }
     {
         i = index($0, ":"); f = substr($0, 1, i - 1); rest = substr($0, i + 1)
@@ -61,7 +78,7 @@ awk -v OWNERS="$OWNERS" -v P="$PREFIX" '
         owned = 0
         for (k = 1; k <= n; k++) if (index(f, own[k] "/") == 1) owned = 1
         if (owned) {
-            for (w in need) if (index(text, need[w])) found[w] = 1
+            for (w in need) if (text ~ need[w]) found[w] = 1
             next
         }
         gsub(/[\t ]+/, " ", text); sub(/^ /, "", text)
@@ -69,7 +86,7 @@ awk -v OWNERS="$OWNERS" -v P="$PREFIX" '
     }
     END {
         for (w in need)
-            if (!(w in found)) print "codec_owner: no owner file holds " shown[w] " (" need[w] "), so the patterns match nothing"
+            if (!(w in found)) print "codec_owner: no owner file holds " shown[w] ", so the patterns match nothing"
     }' "$T/hits" | sort > "$T/report"
 [ "$checked" -gt 0 ] || echo "codec_owner: checked nothing (no .mojo file under $ROOT)" >> "$T/report"
 if [ -s "$T/report" ]; then

@@ -1,0 +1,2 @@
+# Planted: dylib
+var h = OwnedDLHandle("libzstd.dylib")

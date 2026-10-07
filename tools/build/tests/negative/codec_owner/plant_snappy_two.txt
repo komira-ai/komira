@@ -1,0 +1,5 @@
+# Planted: snappy_two
+_ = external_call[
+    "snappy_uncompressed_length",
+    Int32,
+]()

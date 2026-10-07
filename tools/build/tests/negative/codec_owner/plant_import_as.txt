@@ -1,0 +1,2 @@
+# Planted: import_as
+import komira_zlib as z

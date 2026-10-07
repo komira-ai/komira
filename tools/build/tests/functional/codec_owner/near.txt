@@ -1,0 +1,21 @@
+# Near misses: nothing in this file is a site.
+#   external_call["snappy_compress", Int32]() in a comment
+#   OwnedDLHandle("libzstd.so.1") and 'liblz4.so.1' in a comment
+#   from komira_zlib import deflate
+# import komira_lz4
+from komira_compression import compress, decompress
+import komira_compression.lz4
+import komira_zlib_extra
+from komira_lz4x import thing
+import os  # komira_zlib, in a trailing comment
+
+
+def describe(code: Int) -> String:
+    var snappy_compress = 1  # an identifier, not a string
+    var a = "snappy_uncompress failed (" + String(code) + ")"
+    var b = "libzstd is opened by komira_compression"
+    var c = "see libz.so"[0:3]
+    var d = "komira_snappy_ok? no: not a whole string" + a + b + c
+    var e = String("my_snappy_compress")
+    var f = "snappy-compress"
+    return d + e + f + String(snappy_compress)

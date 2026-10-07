@@ -1,0 +1,2 @@
+# Planted: trailing_comment
+var h = OwnedDLHandle("libz.so.1")  # opened here, not in komira_compression

@@ -1008,6 +1008,43 @@ the tree, and must fail naming it.
 ./buck2 build tests//negative/pointer_lint:partial_move_two   # must fail: plant.mojo:4: partial_move
 ```
 
+## 43. Codec owner lint
+
+[`codec_owner`](../lint/codec_owner.bzl) is a validation over every `.mojo`
+file under `src/` of a tree: outside its owner directories (for
+`//:codec_owner`, `komira_compression` and its implementation layers
+`komira_zlib` and `komira_lz4`) no file names a snappy C symbol as a whole
+string literal (either quote, with or without the `komira_` prefix), starts a
+string literal with a codec library soname (`libz`, `libzstd`, `liblz4`,
+`libbz2`, `liblzma`, `libsnappy`; `.so` or `.dylib`), or imports
+`komira_zlib` or `komira_lz4`. A comment line is not a site; a line with a
+trailing comment is. The owners must hold a snappy declaration and the five
+sonames, so those patterns cannot stop matching unnoticed; this test pins
+the rest. Its action is [`codec_owner.sh`](../lint/codec_owner.sh).
+[`functional/codec_owner:ok`](functional/codec_owner/BUCK) builds a planted
+tree ([`fixture.bzl`](functional/codec_owner/fixture.bzl)) whose owners hold
+every form, beside near misses outside them (comment lines, a trailing
+comment, packages whose names only start like the layers', a snappy name as
+an identifier or inside a longer string, a codec library name with no soname
+suffix); `:ok_prefixed` builds the same tree with the snappy owner declaring
+`"komira_snappy_uncompress"`. Each target of
+[`negative/codec_owner`](negative/codec_owner/BUCK) plants one site in the
+same tree and must fail naming its file, line and code: a snappy symbol on
+the `external_call[` line, on the next, prefixed, single- and triple-quoted;
+each soname as `.so`, one as `.dylib`, one single-quoted, one with a trailing
+comment; each import shape (`from x import`, `from x.m import`, a
+parenthesised import, `import x.m`, `import x as y`, `import a, x`, an
+indented import); a directory whose name only starts with an owner's. Two
+more drop an owner file (the snappy owner, the libz layer) and must fail
+naming the unmet check; an empty tree fails as checking nothing, and a target
+with no owners, or naming both or neither of `tree` and `files`, is refused
+at analysis.
+
+```sh
+./buck2 build //:codec_owner tests//functional/codec_owner:ok tests//functional/codec_owner:ok_prefixed
+./buck2 build tests//negative/codec_owner:snappy_single   # must fail: plant.mojo:2: _ = external_call['snappy_compress', Int32]() -- codec FFI outside its owners
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`

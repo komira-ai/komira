@@ -1,0 +1,2 @@
+# Planted: libsnappy
+var h = OwnedDLHandle("libsnappy.so.1")
