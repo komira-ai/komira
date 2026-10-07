@@ -1,5 +1,5 @@
 # =============================================================================
-# Tests for StringArray (komira_core.arrow)
+# Tests for StringArray (the core packages)
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false

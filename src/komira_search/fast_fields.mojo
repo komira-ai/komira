@@ -28,7 +28,7 @@
 # DESIGN POINTS J1–J6 (referenced by label below)
 # -----------------------------------------------------------------------------
 #   J1  Temporal classification + fail-loud dispatch. Field.dtype is
-#       DType.invalid for DATE32/DATE64/TIME*/DURATION*/INTERVAL* (komira_core
+#       DType.invalid for DATE32/DATE64/TIME*/DURATION*/INTERVAL* (the core packages
 #       schema), so ingest+read dispatch is on arrow_type_id -> a STORAGE DType
 #       (_storage_dtype_for_arrow_type_id), NOT on Field.dtype. DATE is classified
 #       only when arrow_type.is_temporal() AND the arrow_type_id maps to int32/
@@ -69,14 +69,14 @@
 from std.memory import bitcast
 from std.sys import size_of
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.dtype_sentinel import DTYPE_NONE
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.column import Column
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.collections.byte_buffer import write_uleb128
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.dtype_sentinel import DTYPE_NONE
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.column import Column
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_buffer.byte_buffer import write_uleb128
 
 from .analyzer import (
     FIELD_CLASS_KEYWORD,
@@ -123,7 +123,7 @@ init_sink raises if a user column is literally named this."""
 # =============================================================================
 #
 # Field.dtype is DType.invalid for DATE32/DATE64/TIME*/DURATION*/INTERVAL*
-# (komira_core's schema only maps numerics + timestamps to a real DType). So the
+# (the core packages' schema only maps numerics + timestamps to a real DType). So the
 # ingest read + the read-back materializer dispatch on arrow_type_id mapped to a
 # STORAGE-ALIASABLE DType. This is J1: never read a composite temporal through
 # col_i64 (that corrupts the bit pattern).
@@ -135,10 +135,10 @@ init_sink raises if a user column is literally named this."""
 
 
 # =============================================================================
-# THE ABSENT-DType SENTINEL IS ONE VALUE, AND IT LIVES IN komira_core.
+# THE ABSENT-DType SENTINEL IS ONE VALUE, AND IT LIVES IN the core packages.
 # =============================================================================
 # This package does NOT define its own "not a fast field" sentinel: a second
-# sentinel bound to the SAME DType as komira_core's `DTYPE_NONE` would collide
+# sentinel bound to the SAME DType as the core packages' `DTYPE_NONE` would collide
 # with it. (This comment does not NAME the type: only the sentinel's own file
 # should.)
 #
@@ -154,7 +154,7 @@ init_sink raises if a user column is literally named this."""
 # field" was a NAME for the absence, not a second concept.
 #
 # The `Optional[DType]` migration remains the end state and remains open
-# (see `komira_core/dtype_sentinel.mojo`). What changed here is that there is
+# (see `komira_arrow/dtype_sentinel.mojo`). What changed here is that there is
 # now ONE place to migrate instead of two that must be migrated in lockstep.
 comptime _DTYPE_NOT_A_FAST_FIELD: DType = DTYPE_NONE
 
@@ -1367,7 +1367,7 @@ struct FastFieldReader(Movable, Deinitable):
     def fast_field_column(
         self, view: SplitView, name: String
     ) raises -> Column[HeapRegion]:
-        """Decode the whole dense column into a komira_core Arrow Column (with
+        """Decode the whole dense column into a core-package Arrow Column (with
         validity). Numeric/date -> Column.from_primitive_with_arrow_type[dtype]
         (DATE32 survives as DATE32); float -> from_primitive_with_arrow_type
         over the reconstructed float; keyword -> from_int64_dict_indices (a

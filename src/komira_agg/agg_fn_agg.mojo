@@ -120,7 +120,7 @@
 #   - map_fn_rt.mojo — the parallel MapFn -> RowTransform bridge.
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 
 from komira_udf.agg_fn import AggFn
 from komira_agg.aggregator import Aggregator

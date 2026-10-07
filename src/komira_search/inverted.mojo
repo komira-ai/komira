@@ -68,8 +68,8 @@
 #   * InvertedIndexBuilder is MOVE-ONLY (Slab is Movable, NOT Copyable).
 # =============================================================================
 
-from komira_core.collections.slab import Slab
-from komira_core.collections.string_column_view import StringColumnView
+from komira_collections.slab import Slab
+from komira_arrow.string_column_view import StringColumnView
 
 from komira_hash import fnv1a_64
 

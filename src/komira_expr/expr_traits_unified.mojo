@@ -40,8 +40,8 @@
 
 from std.memory import UnsafePointer
 
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.byte_view import ByteView
+from komira_arrow.batch_view import BatchView
+from komira_buffer.byte_view import ByteView
 
 from komira_kernels.eval_chunks import (
     EvalBoolChunk,

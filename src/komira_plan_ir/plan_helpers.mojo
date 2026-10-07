@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # ★ WHY IT LIVES IN CORE. It is not an optimizer pass: its ENTIRE import list
-# is `std` + `komira_core` -- no pass, no rule, no engine, no filesystem. SDK
+# is `std` + the core packages -- no pass, no rule, no engine, no filesystem. SDK
 # modules that need only these helpers (agg_node_exec, parquet_helpers,
 # agg_scalar_fold, plan_validation_gate, explain_analyze_render, the scan
 # share / dedup / CSE passes, ...) would otherwise depend on
@@ -12,7 +12,7 @@
 # importer would be pulled into the execution tier. Keeping these pure
 # functions here keeps that edge out of the SDK.
 #
-# ⚠ THE COST, STATED. Almost everything depends on `komira_core`, so an edit to
+# ⚠ THE COST, STATED. Almost everything depends on the core packages, so an edit to
 # THIS file invalidates far more than an edit to an optimizer module would.
 # That is the price of the tier being correct; it is why a file lands here
 # only when its import list proves it is core.

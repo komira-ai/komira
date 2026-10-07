@@ -30,8 +30,8 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.schema import Schema
-from komira_core.source.csv_source import CsvSource
+from komira_arrow.schema import Schema
+from komira_scan_source.csv_source import CsvSource
 
 from komira_csv import (
     CsvReadOptions,

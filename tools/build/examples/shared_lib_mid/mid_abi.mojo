@@ -1,16 +1,13 @@
-"""A mid-size closure re-exported through one @export file: komira_core
+"""A mid-size closure re-exported through one @export file: the core packages
 (Arrow batch builder, snappy C lib), komira_json, komira_encoding,
 komira_crypto (aws-lc), komira_protobuf and komira_gcp_core."""
 
-from komira_core.arrow import (
-    ArrowType,
-    Column,
-    Field,
-    StringArray,
-    SchemaBuilder,
-)
-from komira_core.arrow.schema import RecordBatchBuilder
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.string_array import StringArray
+from komira_arrow.schema import RecordBatchBuilder
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_crypto.sha256 import sha256
 from komira_encoding import base64_encode
 from komira_gcp_core.status import code_from_http_status

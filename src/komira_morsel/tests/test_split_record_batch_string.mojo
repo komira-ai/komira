@@ -15,20 +15,20 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import (
     Field,
     RecordBatch,
     Schema,
     SchemaBuilder,
 )
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.bitmap import Bitmap
+from komira_arrow.string_array import StringArray
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.bitmap import Bitmap
 from komira_morsel.morsel import MorselArray, split_record_batch
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 def _make_strings(n: Int) -> List[String]:

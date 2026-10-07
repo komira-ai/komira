@@ -1,5 +1,5 @@
 # =============================================================================
-# Tests for komira_core/simd/byte_class/{comparisons,horizontal_reduce,
+# Tests for the core packages{comparisons,horizontal_reduce,
 # broadcast_iota,type_cast,conditional_select,prefix_xor}.mojo.
 # =============================================================================
 #

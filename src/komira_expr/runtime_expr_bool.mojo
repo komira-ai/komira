@@ -43,8 +43,8 @@
 #     (no stale-slab hazard — RuntimeNode is a POD with no heap fields).
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.byte_view import ByteView
+from komira_arrow.batch_view import BatchView
+from komira_buffer.byte_view import ByteView
 from komira_kernels.eval_chunks import EvalBoolChunk, EvalI64Chunk
 from komira_expr.expr_traits_unified import (
     ExprBoolU,
@@ -62,7 +62,7 @@ from komira_kernels.kleene import (
 # =============================================================================
 #
 # These mirror the planner's runtime Expr tag space (see
-# `komira_core.plan.expr`). The 16-tag set is the
+# `komira_plan_expr.expr`). The 16-tag set is the
 # full tag scope, including EXPR_AGG_FN and EXPR_WHEN.
 #
 # Tag numbering is INDEPENDENT of the planner's EXPR_* constants —
@@ -91,7 +91,7 @@ comptime RT_EXPR_CAST: UInt8 = 15   # Type cast (FALLBACK)
 
 # Comparison sub-op constants (when tag == RT_COMPARISON, `extra`
 # carries the comparison kind). Mirror BIN_LT / BIN_LE / BIN_GT /
-# BIN_GE / BIN_EQ / BIN_NE from `komira_core.plan.expr`.
+# BIN_GE / BIN_EQ / BIN_NE from `komira_plan_expr.expr`.
 comptime CMP_LT: UInt8 = 0
 comptime CMP_LE: UInt8 = 1
 comptime CMP_GT: UInt8 = 2

@@ -29,7 +29,7 @@
 # =============================================================================
 
 from std.sys import simd_width_of
-from komira_core.plan.agg_expr import AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX
+from komira_plan_expr.agg_expr import AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX
 
 
 # Accumulator variant tags. Intentionally distinct from AccTypeTag in the sink —

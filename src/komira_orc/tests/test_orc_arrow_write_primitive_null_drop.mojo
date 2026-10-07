@@ -18,18 +18,18 @@
 # decode_record_batch_message — the SAME validity-buffer emit pyarrow reads).
 #
 # It deliberately uses the LOW-LEVEL writer-bytes entry points (komira_orc +
-# komira_core only), not the SDK.
+# the core packages only), not the SDK.
 # =============================================================================
 
 from std.testing import TestSuite, assert_true, assert_equal
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
 
 from komira_orc import (
     OrcWriterOptions,
@@ -40,8 +40,8 @@ from komira_orc import (
     ORC_COMPRESSION_ZSTD,
 )
 
-from komira_core.arrow.ipc_encoder_dispatch import encode_record_batch_message
-from komira_core.arrow.ipc_decoder_dispatch import decode_record_batch_message
+from komira_arrow_ipc.ipc_encoder_dispatch import encode_record_batch_message
+from komira_arrow_ipc.ipc_decoder_dispatch import decode_record_batch_message
 from komira_runtime_paths import test_tmpdir
 
 

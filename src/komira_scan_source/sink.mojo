@@ -5,11 +5,11 @@
 # `Sink` is the mirror image of `SourceLike` (`source_like.mojo`) on the write
 # side: every concrete destination (in-memory buffer, Parquet file, Arrow C
 # stream, CSV) implements `init_sink(schema)` / `accept_batch(var rb)` /
-# `finish()`. Lives here in `komira_core.source` next to `SourceLike` —
-# `ParquetSink` does NOT (it needs the Parquet writer, which `komira_core`
+# `finish()`. Lives here in `komira_scan_source`.source` next to `SourceLike` —
+# `ParquetSink` does NOT (it needs the Parquet writer, which the core packages
 # must not depend on), so the concrete `ParquetSink` lives in the SDK layer.
 # `InMemorySink` only needs `Slab` / `RecordBatch` / `Schema` / `ArcPointer`
-# (all in `komira_core`), so it lives here.
+# (all in the core packages), so it lives here.
 #
 # Mojo-mechanics notes:
 #   - `trait Sink(Movable, Deinitable)` requires ONLY `Movable` —
@@ -66,7 +66,7 @@ trait Sink(Movable, Deinitable):
         ...
 
     # NOTE: the row-native write hook `accept_row_blocks(var ro: RowOutput)`
-    # is NOT on the core `Sink` trait — it would force `komira_core` to
+    # is NOT on the core `Sink` trait — it would force the core packages to
     # import `RowOutput` from `komira_eval` (a higher layer), creating a
     # `core -> eval` import cycle. Instead the hook lives on the
     # `RowSink(Sink)` refinement in `komira_eval.row_format.row_sink`.

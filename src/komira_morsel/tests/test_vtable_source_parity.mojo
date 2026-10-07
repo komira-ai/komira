@@ -42,12 +42,12 @@ from komira_atomic_alias import AtomicI64
 from std.memory import alloc, UnsafePointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column, HeapRegion
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.traits.source_capabilities import SourceCapabilities
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column, HeapRegion
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_scan_source.source_capabilities import SourceCapabilities
 from komira_morsel.morsel import Morsel
 from komira_morsel.morsel_source import MorselSourceImpl
 from komira_morsel.vtable_source import (

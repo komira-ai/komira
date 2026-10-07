@@ -45,17 +45,17 @@ from std.testing import (
     assert_true,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.string_array import StringArray
-from komira_core.collections.slab import Slab
-from komira_core.plan.logical_plan import LogicalPlan
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_resolver import resolve_for_execution
-from komira_core.source.source_variant import SourceVariant
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.string_array import StringArray
+from komira_collections.slab import Slab
+from komira_plan_ir.logical_plan import LogicalPlan
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_resolver import resolve_for_execution
+from komira_scan_source.source_variant import SourceVariant
 
 from komira_scan_resolver.drain_scan import drain_scan
 from komira_scan_resolver.scan_source_resolver import (

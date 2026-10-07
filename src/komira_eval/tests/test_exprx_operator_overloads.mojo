@@ -31,13 +31,13 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType as PublicArrowType
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections.batch_view import batch_view_over
+from komira_arrow.arrow_types import ArrowType as PublicArrowType
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.batch_view import batch_view_over
 
 from komira_udf.column_resolver import ColumnResolver
 from komira_eval.expr_x_conformers import (

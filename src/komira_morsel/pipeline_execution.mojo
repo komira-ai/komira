@@ -37,9 +37,9 @@
 from komira_atomic_alias import AtomicI8, AtomicI32
 from std.memory import UnsafePointer
 
-from komira_core.collections import Slab
+from komira_collections.slab import Slab
 
-from komira_core.engine_error import EngineError
+from komira_exec_types.engine_error import EngineError
 
 
 struct PipelineExecution(

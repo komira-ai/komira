@@ -37,7 +37,7 @@ from komira_async.runtime.tcp_stream import (
     TcpListener,
     TcpStream,
 )
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 def _connect_blocking(port: UInt16) raises -> Int32:

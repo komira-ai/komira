@@ -614,7 +614,7 @@ long long komira_set_nofile_soft_limit(long long soft) {
 //   (a) inter-segment barrier  — a worker parks while NO run_with_state dispatch
 //       is live (between breaker segments; the driver-serial combine/finalize
 //       window). Discriminator: komira_on_pool_depth() == 0 at park entry
-//       (the pool-dispatch depth counter lives in komira_core).
+//       (the pool-dispatch depth counter lives in the core packages).
 //   (b) intra-segment straggler — a worker parks while a dispatch IS live
 //       (finished its shard, waits for the slowest). Discriminator: depth > 0.
 //   (c) dispatch CPU           — the enqueue-loop wall (make_borrowed_erased +

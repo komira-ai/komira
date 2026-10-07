@@ -45,7 +45,7 @@ from komira_async.runtime.tcp_stream import (
     TcpListener,
     TcpStream,
 )
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_core.codec.h1.parser import (
     build_100_continue_bytes,

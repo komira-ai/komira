@@ -28,7 +28,7 @@
 # records.
 # =============================================================================
 
-from komira_core.simd.byte_class.byte_memmem import find_needle
+from komira_simd.byte_class.byte_memmem import find_needle
 
 from .ocf_header import OcfHeader, OCF_SYNC_LEN, decode_ocf_header, VarintRead
 
@@ -163,7 +163,7 @@ def _sync_matches(
 # the next block boundary from an arbitrary file offset.
 #
 # The inner needle-search is the SIMD "first+last byte" memmem primitive
-# (`komira_core.simd.byte_class.byte_memmem.find_needle`). It finds the same
+# (`komira_simd.byte_class.byte_memmem.find_needle`). It finds the same
 # marker positions as a scalar first-byte fast-skip loop — the SIMD path is
 # validated bit-identical to a scalar reference by the memmem property test.
 

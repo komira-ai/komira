@@ -38,9 +38,9 @@ from std.testing import (
     assert_raises,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.record_batch import RecordBatch
 
 from komira_search.analyzer import (
     AnalyzedField,

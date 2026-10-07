@@ -33,10 +33,10 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
 from komira_fs.file_system import FileSystem, WriteMode
 from komira_fs.footer_region import FooterRegion
 from komira_fs.shallow_dir_entry import ShallowDirEntry

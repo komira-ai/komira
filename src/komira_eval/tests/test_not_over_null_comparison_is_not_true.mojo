@@ -26,7 +26,7 @@
 # comparison and its negation — it is not a row that flips sides.
 #
 # ⚠ THE CONSUMER IS THE CONSTRAINT, AND IT READS THE DATA BITMAP ONLY.
-# `filter_to_indices` (`komira_core.eval.comparison`) walks
+# `filter_to_indices` (`komira_column_kernels.comparison`) walks
 # `mask.data` 64 bits at a time and never looks at `mask.validity`. So a
 # nullable mask alone fixes NOTHING.
 # The invariant this file pins is therefore the stronger one that survives
@@ -46,8 +46,12 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import StringArray, BooleanArray, HeapRegion
-from komira_core.eval import eval_string_eq, eval_not, filter_to_indices
+from komira_arrow.string_array import StringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_buffer.heap_region import HeapRegion
+from komira_column_kernels.string_comparison import eval_string_eq
+from komira_column_kernels.arithmetic import eval_not
+from komira_column_kernels.comparison import filter_to_indices
 
 
 def _fixture() raises -> StringArray[HeapRegion]:
