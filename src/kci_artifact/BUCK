@@ -6,8 +6,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the args appended for it). Reads an artifacts file (textproto) into the
 # generated `kci.release.v1.Artifacts`, validates it, and renders
 # the argv that builds one artifact into an output
-# directory (the six placeholders substituted in one pass: `{out_dir}`,
-# `{release_dir}` and the git-derived stamp `{revision_id}`,
+# directory (the seven placeholders substituted in one pass: `{out_dir}`,
+# `{release_dir}`, `{platform}` and the git-derived stamp `{revision_id}`,
 # `{source_commit}`, `{build_number}`, `{timestamp_ms}`; artifacts build in
 # file order, so a metapackage declared last reads its members' manifests
 # under `{release_dir}`). One artifact per entry: it also
