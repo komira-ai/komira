@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The Parquet reader core. This part holds the value decoders of the Parquet
+# The Parquet reader core. It holds the value decoders of the Parquet
 # encodings: RLE / Bit-Packing Hybrid (rle, with its bit-unpack kernels in
 # rle_bitunpack), DELTA_BINARY_PACKED (delta), DELTA_LENGTH_BYTE_ARRAY and
 # DELTA_BYTE_ARRAY (delta_byte_array) and BYTE_STREAM_SPLIT
@@ -8,11 +8,22 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # path (decode_arm_trace). Every public decoder takes Spans; the arms are set
 # by setters, never by the environment.
 #
+# It also reads a file's footer: the file reader over any FileSystem
+# (file_reader), the Thrift Compact reader (thrift_compact), the footer
+# parsers (metadata_parser, footer_header), the page header parser
+# (page_header_parser), bloom filters and the row-group bloom pruner
+# (bloom_reader, bloom_pruner), a row-count cache (num_rows_cache) and the
+# partition-predicate mapping (partition_pred_bridge).
+#
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
 #   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
 #   counts on and off the SIMD lane boundaries, against a test-local encoder.
 # - test_def_levels_u8: the per-page u8 validity vector from RLE def levels.
+# - test_delta_byte_array: DELTA_LENGTH_BYTE_ARRAY and DELTA_BYTE_ARRAY round
+#   trips and the DataPage V2 header parse.
+# - test_partition_pred_bridge_roundtrip: the partition-predicate mapping
+#   round-trips every op losslessly.
 # - test_neon_bss_decode: the SIMD BYTE_STREAM_SPLIT decode against the
 #   scalar block-transpose reference, f32 and f64, with and without a tail.
 # - test_no_env_reads: the package's sources read no environment, import no
@@ -27,8 +38,15 @@ mojo_library(
     srcs = _SRCS,
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_data = {
         "tests/test_no_env_reads.mojo": {
@@ -37,18 +55,29 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_bloom_pruner_direct.mojo",
+        "tests/test_bloom_reader_direct.mojo",
         "tests/test_bss_direct.mojo",
         "tests/test_decode_arm_trace_direct.mojo",
         "tests/test_def_levels_u8.mojo",
+        "tests/test_delta_byte_array.mojo",
         "tests/test_delta_byte_array_direct.mojo",
         "tests/test_delta_direct.mojo",
         "tests/test_delta_resumable.mojo",
+        "tests/test_file_reader_local.mojo",
+        "tests/test_file_reader_object_store.mojo",
+        "tests/test_footer_header_direct.mojo",
+        "tests/test_metadata_parser_direct.mojo",
         "tests/test_neon_bss_decode.mojo",
         "tests/test_no_env_reads.mojo",
+        "tests/test_num_rows_cache_direct.mojo",
+        "tests/test_page_header_parser_direct.mojo",
+        "tests/test_partition_pred_bridge_roundtrip.mojo",
         "tests/test_rle_bitunpack_sweep.mojo",
         "tests/test_rle_decoder_direct.mojo",
         "tests/test_rle_simd.mojo",
         "tests/test_rle_simd_bw_small.mojo",
+        "tests/test_thrift_compact_direct.mojo",
     ],
     visibility = ["PUBLIC"],
 )
