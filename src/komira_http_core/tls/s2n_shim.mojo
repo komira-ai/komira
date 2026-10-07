@@ -71,6 +71,7 @@ from komira_http_core.tls.ffi import (
     s2n_config_set_session_tickets_onoff,
     s2n_config_wipe_trust_store,
     s2n_connection_free,
+    s2n_connection_get_actual_protocol_version,
     s2n_connection_get_session,
     s2n_connection_get_session_length,
     s2n_connection_is_session_resumed,
@@ -138,6 +139,12 @@ comptime TLS_OUTCOME_ERROR: UInt8 = 3
 protocol-violation). The caller MUST close the connection. The
 specific s2n errno is queryable via `last_s2n_errno()` immediately
 after the call (thread-local; do not call into s2n in between)."""
+
+comptime TLS_VERSION_TLS12: Int = 33
+"""`TlsConnection.negotiated_tls_version()` for TLS 1.2 (s2n's S2N_TLS12)."""
+
+comptime TLS_VERSION_TLS13: Int = 34
+"""`TlsConnection.negotiated_tls_version()` for TLS 1.3 (s2n's S2N_TLS13)."""
 
 
 @always_inline
@@ -1906,6 +1913,13 @@ struct TlsConnection(Movable, Deinitable):
         # 1 on resumption-abbreviated, 0 on full / not-yet-DONE.
         var rc = s2n_connection_is_session_resumed(self._handle[]._raw)
         return rc == Int32(1)
+
+    def negotiated_tls_version(self) -> Int:
+        """The TLS version the handshake negotiated: `TLS_VERSION_TLS13`,
+        `TLS_VERSION_TLS12`, another s2n protocol-version number for an older
+        version, or -1 before the handshake is DONE or on failure."""
+        # SAFETY: synchronous accessor; no pointer escapes.
+        return Int(s2n_connection_get_actual_protocol_version(self._handle[]._raw))
 
     def last_handshake_message_name(self) -> String:
         """Get the name of the last handshake message the connection was
