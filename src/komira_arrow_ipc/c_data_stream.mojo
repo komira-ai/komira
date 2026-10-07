@@ -186,12 +186,17 @@ comptime _ArrayPtr = UnsafePointer[CArrowArray, MutUntrackedOrigin]
 # that its default convention matches C. The bug these types fixed came from
 # `raises`, not from a missing `abi("C")`: a `raises thin` slot read a garbage
 # return code from a C callee (measured in the block above
-# `drain_c_abi_record_batch_stream`). A non-raising default-convention slot
-# returning `Int32` or a pointer was measured to interoperate with C on
-# linux-x86_64, so the dlopen gate of `:arrow_c_abi_probe` would not catch
-# these slots losing `abi("C")`. It does catch them gaining `raises`. No
-# callback raises: errors are a non-zero errno-style return and the text
-# `get_last_error` returns.
+# `drain_c_abi_record_batch_stream`). Non-raising default-convention
+# `get_schema`/`get_next` slots, the two that return `Int32`, were measured
+# to interoperate with C on linux-x86_64 (that run did not call
+# `get_last_error`), so the dlopen gate of `:arrow_c_abi_probe` would not
+# catch those two losing `abi("C")`; whether the pointer-returning
+# `get_last_error` would interoperate without it was not measured. The gate
+# does catch any of the three gaining `raises`: `arrow_c_abi_driver.mojo`
+# calls `get_schema` and `get_next` in both directions, and
+# `arrow_c_abi_error_driver.mojo` calls `get_last_error` in both directions
+# after a forced failure and checks the text. No callback raises: errors are
+# a non-zero errno-style return and the text `get_last_error` returns.
 comptime _GetSchemaFn = def(OpaquePtr, _SchemaPtr) abi("C") thin -> Int32
 comptime _GetNextFn = def(OpaquePtr, _ArrayPtr) abi("C") thin -> Int32
 comptime _GetLastErrorFn = def(OpaquePtr) abi("C") thin -> UnsafePointer[Int8, MutUntrackedOrigin]
@@ -738,8 +743,9 @@ def _release_schema(sch_ptr: _SchemaPtr) -> None:
 # crossing the FFI boundary be `abi("C")`; Mojo documents no guarantee that
 # its default convention matches C. It holds today by measurement, not by
 # contract: the measured return-code skew came from the `raises` convention,
-# and these slots do not raise (a non-raising default-convention stream slot
-# was also measured to work with C callers and callees on linux-x86_64).
+# and these slots do not raise (non-raising default-convention `get_schema`
+# and `get_next` slots, which return `Int32`, were also measured to work with
+# C callers and callees on linux-x86_64).
 # Evidence that the release slots work across the seam: the RELEASE arm of
 # the measurement block above
 # `drain_c_abi_record_batch_stream`, and the dlopen gate of
@@ -3205,10 +3211,13 @@ def _stream_error_text(stream: UnsafePointer[CArrowArrayStream, MutUntrackedOrig
 # skew, not an argument one; the garbage value is pointer-derived and differs
 # between builds. SUBJECT and CONTROL 2 differ in two things at once (`raises`
 # and `abi("C")`), so these arms alone do not say which one matters. A
-# separate measurement on linux-x86_64 settles it: with every stream slot,
-# stub and exported callback on the Mojo default convention but non-raising,
-# the dlopen gate of `:arrow_c_abi_probe` passes in both directions. The skew
-# is the `raises` convention's. The fourth arm is why the release callbacks
+# separate measurement on linux-x86_64 settles it for the `Int32` returns:
+# with every stream slot, stub and exported callback on the Mojo default
+# convention but non-raising, the dlopen gate of `:arrow_c_abi_probe` passed
+# in both directions. That gate called `get_schema` and `get_next`, not
+# `get_last_error` (its error-path driver came later), so the pointer return
+# was not measured without `abi("C")`. The skew is the `raises`
+# convention's. The fourth arm is why the release callbacks
 # (`_ArrayReleaseFn = def (_ArrayPtr) thin -> None`) work across the seam. The
 # Mojo stdlib states the rule at `std/ffi/__init__.mojo:get_function`: *"Using
 # a plain Mojo function type causes silent ABI corruption for struct arguments
@@ -3216,7 +3225,8 @@ def _stream_error_text(stream: UnsafePointer[CArrowArrayStream, MutUntrackedOrig
 # `raises thin`, and `drain_record_batch_stream` then read a garbage return
 # code from every C producer; the dlopen gate of `:arrow_c_abi_probe`
 # (`tests/c_abi/arrow_c_abi_driver.mojo`) drains a C-convention stream through
-# it and fails if that comes back.
+# it and fails if that comes back, and `tests/c_abi/arrow_c_abi_error_driver.mojo`
+# makes the C producer fail and checks that its `get_last_error` text arrives.
 #
 # ⚠ WHAT IS UNCHANGED, AND IT IS THE WHOLE POINT: the DATA still crosses as
 # plain Arrow C Data Interface `ArrowSchema` / `ArrowArray` — `_read_root_schema`

@@ -12,13 +12,22 @@
 #       (columns int64, float64, nullable utf8, large utf8, dictionary<int32,
 #       utf8>, decimal128(10, 2)). The caller owns the stream and every schema
 #       and array it hands out, and releases each of them.
-#   probe_import_stream(struct ArrowArrayStream *in, uint64_t *checksum) -> int32
+#   probe_export_failing_stream(struct ArrowArrayStream *out) -> int32
+#       fills the caller's struct with an empty stream whose one column is a
+#       list<int64>. Its get_schema fails with EIO (an empty stream has no
+#       sample batch to derive a nested child type from), and its
+#       get_last_error then returns the error text. The caller releases it.
+#   probe_import_stream(struct ArrowArrayStream *in, uint64_t *checksum,
+#                       char *err, int64_t err_cap) -> int32
 #       drains a caller-produced stream with drain_record_batch_stream (which
 #       calls the caller's release callbacks) and writes a checksum of the
-#       imported values. The caller owns `in`'s memory; this library calls
-#       only the release callbacks the caller put in it.
+#       imported values. On failure it writes the error message, which
+#       includes the text the caller's get_last_error returned, to `err` as a
+#       NUL-terminated string of at most `err_cap` bytes. The caller owns
+#       `in`'s memory; this library calls only the release callbacks the
+#       caller put in it.
 #
-# Both return 0 on success and 5 (EIO) after printing the error.
+# All three return 0 on success and 5 (EIO) after printing the error.
 #
 # Ownership across the boundary: every pointer the caller passes stays the
 # caller's. `probe_export_stream` writes into `*out`; the buffers it hands out
@@ -249,16 +258,47 @@ def probe_export_stream(out_stream: _StreamPtr) abi("C") -> Int32:
 
 
 @export
+def probe_export_failing_stream(out_stream: _StreamPtr) abi("C") -> Int32:
+    """Fill `*out_stream` with an empty stream of one list<int64> column,
+    whose get_schema fails. The caller releases it."""
+    try:
+        var sb = SchemaBuilder()
+        sb.add_field(Field.list_of("l", ArrowType.INT64, nullable=True))
+        build_record_batch_stream(Slab[RecordBatch].with_capacity(1), sb.build(), out_stream)
+    except e:
+        print("probe_export_failing_stream: " + String(e))
+        return _EIO
+    return 0
+
+
+def _write_c_string(msg: String, dst: UnsafePointer[UInt8, MutUntrackedOrigin], cap: Int64):
+    """Copy `msg` into the caller's `dst[0:cap]`, truncated, NUL-terminated."""
+    if cap <= 0:
+        return
+    var b = msg.as_bytes()
+    var n = min(len(b), Int(cap) - 1)
+    for k in range(n):
+        # SAFETY: k < cap - 1, inside the caller's `err_cap` bytes.
+        dst[k] = b[k]
+    dst[n] = 0
+
+
+@export
 def probe_import_stream(
-    in_stream: _StreamPtr, out_checksum: UnsafePointer[UInt64, MutUntrackedOrigin]
+    in_stream: _StreamPtr,
+    out_checksum: UnsafePointer[UInt64, MutUntrackedOrigin],
+    err: UnsafePointer[UInt8, MutUntrackedOrigin],
+    err_cap: Int64,
 ) abi("C") -> Int32:
     """Drain the caller's `*in_stream` (releasing it) and write the checksum of
-    its values to `*out_checksum`."""
+    its values to `*out_checksum`; on failure write the error to `err`."""
     try:
         var batches = drain_record_batch_stream(in_stream)
         # SAFETY: `out_checksum` is the caller's live `uint64_t`; one write.
         out_checksum[] = _checksum(batches)
     except e:
-        print("probe_import_stream: " + String(e))
+        var msg = "probe_import_stream: " + String(e)
+        print(msg)
+        _write_c_string(msg, err, err_cap)
         return _EIO
     return 0

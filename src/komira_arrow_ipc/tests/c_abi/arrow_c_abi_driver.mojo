@@ -31,6 +31,8 @@
 #      ARROW_FLAG_NULLABLE = 2).
 #   4. Each chunk is released through its own callback, which must set its
 #      release member to NULL (C Data Interface "Released structure").
+#   5. get_last_error, called after the drain, returns NULL: no call failed.
+#      (arrow_c_abi_error_driver.mojo drives the error paths.)
 #
 # Import direction (the driver produces, the library consumes):
 #   The driver builds a stream of two chunks with its own private_data and
@@ -192,6 +194,11 @@ def _as_get_schema(w: Void) -> GetSchemaFn:
 def _as_get_next(w: Void) -> GetNextFn:
     var x = w
     return UnsafePointer(to=x).bitcast[GetNextFn]()[]
+
+
+def _as_last_error(w: Void) -> LastErrorFn:
+    var x = w
+    return UnsafePointer(to=x).bitcast[LastErrorFn]()[]
 
 
 # --- the arena: every block the driver allocates --------------------------------
@@ -515,6 +522,8 @@ def _export_direction(lib: OwnedDLHandle) raises:
         if len(chunks) > 2:
             _fail("the stream delivered more than 2 chunks")
     _eq("chunks delivered", Int64(len(chunks)), 2)
+    if not _is_null(_as_last_error(_ptr(st, ST_GET_LAST_ERROR))(st).bitcast[NoneType]()):
+        _fail("get_last_error after a clean drain is not NULL")
 
     # The stream goes first; every chunk must survive it.
     _call_release(st, ST_RELEASE, "exported stream")
@@ -949,8 +958,11 @@ def _import_direction(lib: OwnedDLHandle) raises:
     _set_ptr(st, ST_RELEASE, _release_word(_drv_release_stream))
     _set_ptr(st, ST_PRIVATE, state.bitcast[NoneType]())
     var sum_box = p.arena.bytes(8).bitcast[UInt64]()
+    var err = p.arena.bytes(512)
 
-    _eq("probe_import_stream rc", Int64(lib.call["probe_import_stream", Int32](st, sum_box)), 0)
+    var rc = lib.call["probe_import_stream", Int32](st, sum_box, err, Int64(512))
+    if rc != 0:
+        _fail("probe_import_stream rc is " + String(rc) + ": " + _read_cstr(err))
 
     _eq("get_schema calls", _i64(state, _P_SCHEMA_CALLS), 1)
     _eq("chunks taken", _i64(state, _P_NEXT), 2)
