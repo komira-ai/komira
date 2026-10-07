@@ -362,7 +362,9 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
 
 Exit 0 writes the gate's marker. Exit 3 (enforce mode, a finding) fails the
 action with `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage
-gate]): covcheck gate exited 3` and the summary; exits 1 and 2 (an input
+gate]): covcheck gate exited 3`, `The conda package (<name>_conda) is not
+produced until its coverage meets the policy; the library and its
+dependents still build.` and the summary; exits 1 and 2 (an input
 covcheck refuses, bad usage) fail it in every mode with `COVERAGE GATE ERROR`
 and covcheck's message: a malformed ratchet fails a census gate too (test
 46). Census and neutral mode never fail on a finding.

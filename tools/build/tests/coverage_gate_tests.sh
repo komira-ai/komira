@@ -61,8 +61,10 @@ expect_red coverage_gate_branch_arm "COVERAGE GATE FAILED (enforce): $P ($N:covb
 # Each red is its own finding: covlow's is BelowTarget, covfull_unread's
 # only finding is BranchNotMeasured (line 100%, a ratchet row), and covbranch's
 # only finding is BelowTarget on branch (line 100%, a ratchet row, its
-# branch records read).
+# branch records read). The enforce banner names what a red gate blocks:
+# the conda package only.
 for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is below the target 100.00%" \
+    "coverage_gate_enforce|The conda package (covlow_conda) is not produced until its coverage meets the policy;" \
     "coverage_gate_branch|### Findings (1)" \
     "coverage_gate_branch_arm|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
     "coverage_gate_branch_arm|### Findings (1)"; do
