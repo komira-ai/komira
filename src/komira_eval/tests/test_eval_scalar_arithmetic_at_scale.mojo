@@ -9,7 +9,7 @@
 # SUB,MUL,DIV}_{I64,F64}). If an EXPR_COL leaf in that per-row descent called
 # `batch.column_as_primitive_{int64,float64}(idx)`, it would DEEP-COPY the
 # ENTIRE source column into a fresh `OwnedAlignedBuffer` (see
-# `komira_core.arrow.column as_primitive[dtype]`, which allocates
+# `komira_arrow.column as_primitive[dtype]`, which allocates
 # `total_elems * elem_size` bytes per call).
 #
 # For a TPC-H Q6-shape arithmetic-over-cols expression (`l_extendedprice *
@@ -41,20 +41,20 @@
 #
 # - Production code: komira_eval.expression_executor
 #   (`_eval_scalar_f64_from_view`, `_eval_scalar_i64_from_view`)
-# - Per-row column accessor: komira_core.arrow.column
+# - Per-row column accessor: komira_arrow.column
 #   `as_primitive[dtype]()`
-# - Zero-copy primitive: komira_core.collections.batch_view
+# - Zero-copy primitive: komira_arrow.batch_view
 #   `BatchView.col_f64/col_i64`
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.collections.batch_view import batch_view_over
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.batch_view import batch_view_over
 from komira_eval.expression_executor import ExpressionExecutor
 from komira_kernels.runtime_expr import (
     RuntimeExpr,
@@ -64,7 +64,7 @@ from komira_kernels.runtime_expr import (
     make_add_f64,
     make_lit_f64,
 )
-from komira_core.eval.selection_vector_row import RowSelectionVector
+from komira_arrow.selection_vector_row import RowSelectionVector
 
 
 # -----------------------------------------------------------------------------

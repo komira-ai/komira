@@ -32,7 +32,7 @@ def test_no_environment_read() raises:
         "GOOGLE_APPLICATION_CREDENTIALS",
         "CLOUDSDK_",
         "application_default",
-        "komira_core_ffi",
+        "komira_libc",
         "komira_libc",
         "external_call",
     ]

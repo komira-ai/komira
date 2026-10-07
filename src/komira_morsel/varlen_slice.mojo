@@ -16,12 +16,12 @@
 
 from std.sys import size_of
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.column import Column
+from komira_arrow.arrow_types import ArrowType
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
 
 
 def _payload_window_shareable(

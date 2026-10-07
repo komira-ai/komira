@@ -75,12 +75,12 @@
 #     — no komira_engine_runtime dep (the broker is a DAG leaf).
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_collections.slab import Slab
 
 from komira_objectstore.cas_manifest import CasManifestStore, is_not_found
 from komira_objectstore.store import ConditionalWriteStore

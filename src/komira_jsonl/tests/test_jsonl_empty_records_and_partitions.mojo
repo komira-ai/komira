@@ -27,8 +27,8 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema, SchemaBuilder, Field
 
 from komira_json_index.structural_index import JsonlPartitions, StructuralIndex
 from komira_jsonl.columnar_materializer import (

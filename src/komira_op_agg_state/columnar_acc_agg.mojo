@@ -45,11 +45,12 @@
 # monotonic-shrinking; do NOT add new wildcard sites to this file.
 # =============================================================================
 
-from komira_core.arrow import ArrowType, Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_collections.slab import Slab
 from komira_op_agg_state.accumulator_trait import Accumulator
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 # =============================================================================
@@ -344,7 +345,7 @@ struct CountDistinctAcc(Accumulator):
     NOT HAVE. Both overloads take a values pointer and a row count and
     nothing else, so there is no bit to consult — the same MISSING INPUT
     (not a missed branch) that let the defect survive four implementations.
-    `komira_core.agg_column_ptrs.ValidityLanes` is the channel to thread.
+    `komira_agg_api.agg_column_ptrs.ValidityLanes` is the channel to thread.
     """
 
     var buffers: List[List[Int64]]

@@ -353,7 +353,7 @@ def test_two_mtimes_of_one_orc_file_do_not_share_a_plan_cache_key() raises:
 def test_orc_is_binding_backed_and_carries_the_orc_kind() raises:
     """The arm's payload is a `ScanBinding`, not an `Optional[OrcSource]`.
     No `OrcSource` is reachable from a plan node — which is the
-    property that lets a source live outside `komira_core` at all."""
+    property that lets a source live outside the core packages at all."""
     var sv = SourceVariant(_orc_src(String(GOLDEN_PATH), _proj(0, 2)))
     assert_true(sv.is_binding_backed(), "ORC arm is binding-backed")
     ref b = sv.binding_ref()

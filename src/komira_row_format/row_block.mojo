@@ -41,22 +41,22 @@ from std.sys import size_of
 from std.utils import Variant
 from std.memory import bitcast
 
-from komira_core.instr.keyeq_census import keyeq_record, KEYEQ_ROWBLOCK_MEMCMP
-from komira_core.simd.byte_class.byte_equal import bytes_equal
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections.batch_view import (
+from komira_counters.keyeq_census import keyeq_record, KEYEQ_ROWBLOCK_MEMCMP
+from komira_simd.byte_class.byte_equal import bytes_equal
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.batch_view import (
     BatchView, BoolColView, ColView, Decimal128CellView,
 )
-from komira_core.collections.byte_view import ByteView
-from komira_core.io.heap_region import HeapRegion
-from komira_core.collections.string_column_view import (
+from komira_buffer.byte_view import ByteView
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.string_column_view import (
     BinaryColumnView,
     StringColumnView,
 )
@@ -88,7 +88,7 @@ from komira_udf.float_quotient_order import (
 # cell names another row's bytes.
 #
 # ⚠ THE CONSTANT IS DUPLICATED ON PURPOSE, NOT SHARED. `komira_row_format` deps only
-# `komira_core`; importing the operators' copy would put
+# the core packages; importing the operators' copy would put
 # the engine tower underneath the row format and invert the dependency. Two
 # declarations of one number is the lesser defect, and both name the other.
 #
@@ -3127,7 +3127,7 @@ def _hash_row_bytes[
 # and under a hermetic Zig toolchain `bcmp` resolves to compiler_rt's
 # byte-at-a-time loop, so a "call memcmp above N bytes" branch picks between two
 # byte loops and only adds call overhead. Both widths route to
-# `komira_core.simd.byte_class.byte_equal.bytes_equal`, which is
+# `komira_simd.byte_class.byte_equal.bytes_equal`, which is
 # `@always_inline` and issues no call at any width.
 #
 # `key_stride` is a RUNTIME value here, so the whole ladder is inlined at this
@@ -3161,7 +3161,7 @@ def _row_bytes_equal[
     `key_stride` bytes.
 
     ONE arm, at every width: the shared SIMD byte-equality primitive
-    `komira_core.simd.byte_class.byte_equal.bytes_equal`. See the note above
+    `komira_simd.byte_class.byte_equal.bytes_equal`. See the note above
     for why the two-arm form and its 16-byte threshold are gone.
 
     SAFETY: `_row_base_ptr_ro` returns a pointer whose origin is the caller's
@@ -4763,7 +4763,7 @@ struct RowHashAggTable(Movable, Deinitable):
     # OWN private byte storage (`rows._fixed_storage`) + the row stride /
     # agg-registration invariants. The engine spill-state (`RowHashAggSpillState`
     # in `komira_engine_operators.runtime.row_hash_agg_spill`) deals only
-    # in `SharedAlignedBuffer` bytes (a `komira_core` type) + the THSPILL2
+    # in `SharedAlignedBuffer` bytes (a core-package type) + the THSPILL2
     # codec — no `RowBlock` internals cross the module boundary.
     # ----------------------------------------------------------------------
 

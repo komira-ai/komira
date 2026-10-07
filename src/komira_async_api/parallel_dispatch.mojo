@@ -2,13 +2,13 @@
 # komira_async_api.parallel_dispatch — ParallelDispatch trait
 # =============================================================================
 # The arrow IPC body compress/decompress + decoder-dispatch entries in
-# `komira_core/arrow/` dispatch parallel per-buffer work, but the concrete
+# the core packages dispatch parallel per-buffer work, but the concrete
 # dispatcher (`LocalDispatcher[NoopSink]`) lives UP in `komira_async`. Naming
 # `LocalDispatcher[NoopSink]` in their signatures would create a
-# `komira_core -> komira_async` up-edge (an import cycle).
+# `the core packages -> komira_async` up-edge (an import cycle).
 #
 # TRAIT INVERSION: this trait abstracts the ONE dispatch operation the arrow
-# IPC path uses (`run_with_state`). `komira_core` depends only on the trait;
+# IPC path uses (`run_with_state`). The core packages depends only on the trait;
 # `komira_async`'s `LocalDispatcher` CONFORMS to it (a down-edge async ->
 # core, which is allowed). The arrow IPC entries become generic over
 # `D: ParallelDispatch` — `D` is a monomorphized type parameter, so the call
@@ -39,10 +39,10 @@ trait ParallelDispatch(Movable, Deinitable):
     decompress / decode path.
 
     The ONE method `run_with_state[State, T]` matches
-    `LocalDispatcher.run_with_state` byte-for-byte. `komira_core/arrow/`
+    `LocalDispatcher.run_with_state` byte-for-byte. The core packages
     entries thread a `D: ParallelDispatch` through their dispatcher pointers
     instead of hard-coding `LocalDispatcher[NoopSink]`, which removes the
-    `komira_core -> komira_async` up-edge.
+    `the core packages -> komira_async` up-edge.
 
     Conformers:
       * `LocalDispatcher[S]` (in `komira_async`) — the real

@@ -117,7 +117,7 @@
 
 from std.memory import OwnedPointer
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.reactor import Reactor

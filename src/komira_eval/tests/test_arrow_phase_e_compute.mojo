@@ -5,7 +5,7 @@
 # Strategy: temporal types share storage DType with INT32/INT64 (e.g.
 # TIME32_S stores Int32 buffer); `Column.as_primitive[
 # DType.int32]()` accepts these storage-compatible Columns, so the
-# existing generic compute kernels in `komira_core.eval.comparison`,
+# existing generic compute kernels in `komira_column_kernels.comparison`,
 # `arithmetic.mojo`, etc. operate on them without per-type wrappers.
 #
 # This test file exercises:
@@ -16,25 +16,14 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import (
-    ArrowType,
-    Column,
-    Field,
-    PrimitiveArray,
-    Schema,
-    SchemaBuilder,
-)
-from komira_core.eval import (
-    eval_gt,
-    eval_lt,
-    eval_eq,
-    eval_add,
-    eval_sub,
-    eval_mul,
-    eval_cast,
-    filter_to_indices,
-    SelectionVector,
-)
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_column_kernels.comparison import eval_gt, eval_lt, eval_eq, filter_to_indices
+from komira_column_kernels.arithmetic import eval_add, eval_sub, eval_mul
+from komira_column_kernels.cast_null import eval_cast
+from komira_arrow.selection_vector import SelectionVector
 
 
 # --- Float16 compute ---------------------------------------------------------

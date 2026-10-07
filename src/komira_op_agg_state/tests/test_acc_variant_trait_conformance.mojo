@@ -27,7 +27,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow import Column
+from komira_arrow.column import Column
 
 from komira_op_agg_state.accumulator_trait import Accumulator
 from komira_op_agg_state.columnar_acc_typed_extra import (

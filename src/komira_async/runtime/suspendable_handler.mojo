@@ -65,7 +65,7 @@ from komira_async.reactor.completion_queue import Completion
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.parked_morsel_slab import ParkedMorselSlab
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # =============================================================================

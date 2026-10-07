@@ -6,7 +6,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # intent) and per-call Creds. A per-provider conformer is a separate package
 # that imports this and implements Resource; this core names no provider.
 #
-# Deps: komira_core (Slab, the node storage of the graph) and komira_log (the
+# Deps: the core packages (Slab, the node storage of the graph) and komira_log (the
 # WARN breadcrumb a swallowed best-effort prune fault emits).
 #
 # The welded tests drive the real engine over in-memory conformers: topo
@@ -24,7 +24,7 @@ mojo_library(
     name = "kci_reconciler",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
         "//src/komira_log:komira_log",
     ],
     test_srcs = [

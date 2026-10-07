@@ -14,9 +14,9 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
-        "//src/komira_core:komira_core",
         # Imported only by tests/test_h1_keepalive_pooled_conn.mojo. mojo_library
         # has no test-only dependency attribute, so these stay in `deps` for now.
+        "//src/komira_collections:komira_collections",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",

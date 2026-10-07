@@ -26,19 +26,19 @@ it pins:
 from std.memory import ArcPointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     SCAN_EPOCH_NONE,
     SNAPSHOT_LIVE,
     scan_kind_id,
 )
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import ScanParams
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import ScanParams
 from komira_scan_resolver.drain_scan import (
     drain_scan,
     split_read_order,

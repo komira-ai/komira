@@ -41,12 +41,12 @@
 # new place on the next call.
 #
 # Each thunk is monomorphised for one concrete `T` and recovers the typed
-# view with `_cast_acc[T](box)`, which delegates to `DynValue._as_ptr[T]` (the
-# origin-tied cast) and widens the origin inside its own body only. The one
-# remaining contract is the type match: the `T` a thunk is instantiated with
-# must be the `T` the box was created with, which the wiring in
-# accumulator_factory.mojo guarantees by instantiating the whole vtable for
-# one concrete type.
+# view with `_cast_acc[T](box)`, which delegates to `DynValue.get[T]` (the
+# checked, origin-tied reference) and widens the origin inside its own body
+# only. The one remaining contract is the type match: the `T` a thunk is
+# instantiated with must be the `T` the box was created with, which the wiring
+# in accumulator_factory.mojo guarantees by instantiating the whole vtable for
+# one concrete type; `get` checks it on every call and a mismatch aborts.
 # =============================================================================
 
 # =============================================================================
@@ -70,13 +70,14 @@
 # monotonic-shrinking; do NOT add new wildcard sites to this file.
 # =============================================================================
 
+from std.os import abort
 from std.sys import size_of
 
-from komira_core.arrow import Column
-from komira_core.collections.dyn_value import DynValue
+from komira_arrow.column import Column
+from komira_collections.dyn_value import DynValue
 
 from komira_op_agg_state.accumulator_trait import Accumulator
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 # PERF-CRITICAL: MAX_ACC_SIZE must be large enough for the largest accumulator.
@@ -157,7 +158,7 @@ def _cast_acc[T: Accumulator](
     """The typed view of the accumulator stored in `box`.
 
     Private to the package: it is the one place a thunk widens the
-    origin-tied pointer `DynValue._as_ptr[T]` returns, and the result never
+    reference the checked `DynValue.get[T]` returns, and the result never
     leaves the thunk body that asked for it (the fn-ptr boundary carries the
     box, not this pointer).
 
@@ -171,11 +172,16 @@ def _cast_acc[T: Accumulator](
     expose their readbacks as `mut` methods; the readbacks do not change the
     accumulator's observable state.
     """
-    return (
-        box._as_ptr[T]()
-        .unsafe_mut_cast[True]()
-        .unsafe_origin_cast[MutUntrackedOrigin]()
-    )
+    try:
+        return (
+            UnsafePointer(to=box.get[T]())
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+    except e:
+        # A box that does not hold a T is a wiring bug (the SAFETY contract
+        # above); the thunks that call this cannot raise, so it aborts.
+        abort(String("_cast_acc: ") + String(e))
 
 
 # =============================================================================
@@ -327,21 +333,21 @@ struct DynAccumulator(Movable):
         This is the ONE call-site-facing entry for tag-dispatched access to
         the concrete accumulator inside a DynAccumulator. Every tag-dispatch
         helper in columnar_agg_map.mojo / streaming_s3_agg.mojo funnels
-        through this method, which in turn delegates to
-        `DynValue._as_ptr[T]()`. The `_value` field is a `DynValue` stored
+        through this method, which in turn delegates to the checked
+        `DynValue.get[T]()`. The `_value` field is a `DynValue` stored
         INLINE in `self`, so the delegated pointer inherits `self`'s origin
         and the compiler tracks every deref site against `self`'s liveness.
 
         CLUSTER-Z: previously returned a wildcard-origin
         (MutExternalOrigin) pointer by delegating to a `DynValue._as_ptr`
         that round-tripped the storage address through `Int(...)`. The raw-address round-trip and wildcard are now
-        gone — `_as_ptr` returns a `self`-origin-tied pointer and that origin
-        propagates through here.
+        gone: `DynValue.get[T]` returns a reference tied to the storage of
+        `self` and that origin propagates through here.
 
         SAFETY CONTRACT (caller must honor):
           1. Caller MUST verify `self.tag == <T-matching tag>` before
-             calling. Mismatched T is immediate UB (type-punned read
-             of the wrong concrete accumulator state).
+             calling. A mismatched T aborts (`DynValue.get` checks the
+             stored type), so it is a crash, not a type-punned read.
           2. The returned reference's origin `o` is tied to the receiver
              borrow, so the compiler keeps `self` alive across every use.
 
@@ -350,10 +356,15 @@ struct DynAccumulator(Movable):
           sits on one function, not on 13 duplicated arms in
           columnar_agg_map.mojo.
         """
-        # `_value` is inline in self, so `_value._as_ptr[T]()` ties to the
-        # `_value` sub-origin; re-tie to the whole-self origin `o` (mirrors
-        # RecordBatch._column_ref) so the returned type matches the signature.
-        return self._value._as_ptr[T]().unsafe_origin_cast[o]()[]
+        # `_value` is inline in self, so `_value.get[T]()` ties to the
+        # `_value` storage sub-origin; re-tie to the whole-self origin `o`
+        # (mirrors RecordBatch._column_ref) so the returned type matches the
+        # signature. `get` checks the stored type: a mismatch aborts here
+        # instead of reading the wrong accumulator's bytes.
+        try:
+            return UnsafePointer(to=self._value.get[T]()).unsafe_origin_cast[o]()[]
+        except e:
+            abort(String("DynAccumulator.as_mut: ") + String(e))
 
     def finalize(mut self) raises -> Column[HeapRegion]:
         return self._vtable.finalize(self._value)

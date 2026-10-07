@@ -23,8 +23,8 @@
 # call boundary.
 # =============================================================================
 
-from komira_core.arrow import Column
-from komira_core.collections.dyn_value import DynValue
+from komira_arrow.column import Column
+from komira_collections.dyn_value import DynValue
 
 from .accumulator_set import AccumulatorSet
 from .dyn_accumulator import (

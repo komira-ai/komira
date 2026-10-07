@@ -4,7 +4,8 @@ replaced them. It can be run on a tree again and again, on main or on an open br
 rewrite is not touched, and a second run changes nothing.
 
   repoint.py [--tree DIR] [--core-root DIR | --core-rev REV] [--only PREFIX]... [--exclude PREFIX]...
-             [--dry-run] [--report FILE] [--strict] [--renames]
+             [--dry-run] [--report FILE] [--strict] [--renames] [--reword-prose]
+  repoint.py --check          # write nothing; exit 1 if any file outside tools/core_split names komira_core
 
 What it does to each file outside the frozen packages:
   * `.mojo`: every `from komira_core.<module> import <names>` is rewritten to the package that now defines the module.
@@ -25,7 +26,7 @@ The frozen komira_core is read from --core-root (a directory holding komira_core
 src/komira_core still exists, or, once it is deleted, from the parent of the commit that deleted it (--core-rev
 overrides that). Exit 0 when done (or, with --dry-run, always); with --strict exit 1 if an imported name could not be
 resolved or an import of komira_core is left. Pure python3 stdlib, deterministic."""
-import os,re,sys,subprocess,tempfile,argparse,shutil,collections
+import os,re,sys,subprocess,tempfile,argparse,shutil,collections,shlex
 HERE=os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0,HERE)
 import split as S
 import deps as D
@@ -33,10 +34,11 @@ import deps as D
 def load_renames():
     return [tuple(l.rstrip('\n').split('\t')) for l in open(os.path.join(HERE,'renames.tsv')) if l.strip() and not l.startswith('#')]
 RENAMES=load_renames()
-ALWAYS_EXCLUDE=('src/komira_core/','src/komira_core_ffi/','tools/core_split/','.github/workflows/core_split.yml','.git/','buck-out/')
-TEXT_EXT=('.mojo','.md','.bzl','.sh','.py','.tsv','.txt','.toml','.yml','.yaml','.textproto')
+ALWAYS_EXCLUDE=('src/komira_core/','src/komira_core_ffi/','tools/core_split/','.git/','buck-out/')
+TEXT_EXT=('.mojo','.md','.bzl','.sh','.py','.tsv','.txt','.toml','.yml','.yaml','.textproto','.proto','.c','.h','.inc','.cc','.json')
 CORE=re.compile(r'(?<![A-Za-z0-9_])komira_core(?:_ffi)?(?![A-Za-z0-9_])')
 HARD=re.compile(r'(?m)^[ \t]*(?:from|import)[ \t]+komira_core(?:_ffi)?(?![A-Za-z0-9_])|//src/komira_core(?:_ffi)?:')
+KEY=re.compile(r'"komira_core_(?!ffi\b|posix\b)[a-z0-9_]+')  # a counter or metric key still spelled under the deleted package's name
 def word(n): return re.compile(r'(?<![A-Za-z0-9_])'+re.escape(n)+r'(?![A-Za-z0-9_])')
 def git(tree,*a): return subprocess.run(['git','-C',tree]+list(a),capture_output=True,text=True)
 def frozen_root(a):
@@ -48,7 +50,7 @@ def frozen_root(a):
         r=git(a.tree,'log','--diff-filter=D','--format=%H','-n','1','--','src/komira_core/BUCK')
         if not r.stdout.strip(): sys.exit('repoint: src/komira_core is gone and no commit that deleted it was found; pass --core-rev or --core-root')
         rev=r.stdout.strip()+'^'
-    tmp=tempfile.mkdtemp(prefix='repoint_core.'); p=subprocess.run('git -C %s archive %s src/komira_core src/komira_core_ffi | tar -x -C %s'%(a.tree,rev,tmp),shell=True,capture_output=True,text=True)
+    tmp=tempfile.mkdtemp(prefix='repoint_core.'); p=subprocess.run('git -C %s archive %s src/komira_core | tar -x -C %s'%(shlex.quote(a.tree),shlex.quote(rev),shlex.quote(tmp)),shell=True,capture_output=True,text=True)
     if p.returncode: sys.exit('repoint: git archive of %s failed: %s'%(rev,p.stderr.strip()))
     return os.path.join(tmp,'src'),tmp
 def tracked(tree):
@@ -67,6 +69,57 @@ def active_renames(tree,do):
         if nd and not od: out.append((o,n,'done'))
         elif od and do: out.append((o,n,'todo'))
     return out
+
+# ---- prose ----------------------------------------------------------------------------------------------------
+def dir_packages(rows):
+    """top-level directory of komira_core -> the package that took most of its modules."""
+    c=collections.defaultdict(collections.Counter)
+    for r in rows:
+        if r['kind']=='src' and r['disposition']=='copy' and '/' in r['file']: c[r['file'].split('/')[0]][r['dest']]+=1
+    return {d:n.most_common(1)[0][0] for d,n in c.items()}
+OWN_PHRASE=re.compile(r'(?i)\b(lives?|is|was|sits?|stays?)((?:\s+here)?,?\s+in\s+)`?komira_core`?(?![A-Za-z0-9_])')
+def prose_lines(f,text):
+    """-> the set of 0-based line numbers of `text` that are prose (a comment or a docstring), or None for all of them."""
+    if f.endswith('.md') or f.endswith('.txt'): return None
+    lines=text.split('\n'); out=set()
+    if f.endswith('.mojo'):
+        masked=S.masked(text); starts=[0]
+        for l in lines[:-1]: starts.append(starts[-1]+len(l)+1)
+        for i,l in enumerate(lines):
+            if l.lstrip().startswith('#'): out.add(i)
+        for m in re.finditer(r'"""(.*?)"""',text,flags=re.S):
+            a=text.count('\n',0,m.start()); b=text.count('\n',0,m.end())
+            out.update(range(a,b+1))
+    elif f.endswith(('.proto','.c','.h','.inc','.cc')):
+        out={i for i,l in enumerate(lines) if l.lstrip().startswith(('//','*','/*'))}
+    elif os.path.basename(f) in('BUCK','BUCK.v2') or f.endswith(('.bzl','.sh','.py','.yml','.yaml','.toml')):
+        out={i for i,l in enumerate(lines) if l.lstrip().startswith('#')}
+    return out
+def reword_prose(f,text,dirpkg=None):
+    """Say what a comment meant now that komira_core is gone. `lives in komira_core` names the package of the file; any
+    other mention of komira_core, or of one of its directories, becomes `the core packages`. Markdown is left for a
+    person (a table row or a path cannot be reworded by rule), and so is any line that is not prose (a string literal,
+    code): both are reported."""
+    if f.endswith('.md'): return text
+    m=re.match(r'src/([a-z0-9_]+)/',f); own=m.group(1) if m else None
+    keep=prose_lines(f,text); lines=text.split('\n'); out=[]
+    for i,l in enumerate(lines):
+        if not CORE_ONLY.search(l) or (keep is not None and i not in keep) or '"komira_core"' in l: out.append(l); continue
+        if own and own in KNOWN_OWN: l=OWN_PHRASE.sub(lambda m:'%s%s`%s`'%(m.group(1),m.group(2),own),l)
+        # a directory of komira_core (komira_core/collections/, komira_core.arrow) is the core packages too
+        l=re.sub(r'`komira_core(?:[/.][a-z0-9_]+)*/?`(?![A-Za-z0-9_])','the core packages',l)
+        l=re.sub(r'(?<![A-Za-z0-9_])komira_core(?:[/.][a-z0-9_]+)*/?(?![A-Za-z0-9_])','the core packages',l)
+        l=re.sub(r"the core packages's",'the core packages\'',l)
+        l=re.sub(r'the core packages package\b','the core packages',l)
+        l=re.sub(r'\b(the|The) the core packages',lambda m:m.group(1)+' core packages',l)
+        l=re.sub(r'\ba the core packages',"a core-package",l)
+        l=re.sub(r'\ban the core packages',"a core-package",l)
+        l=re.sub(r'(?<![A-Za-z0-9`])(the core packages)(?=\s+(?:is|are|has|have|holds|sits|owns|does|depends|never|can|cannot|must|links|ships|defines|only|alone)\b)',lambda m:m.group(1),l)
+        l=re.sub(r'([.!?]\s+)the core packages',lambda m:m.group(1)+'The core packages',l)
+        out.append(l)
+    return '\n'.join(out)
+CORE_ONLY=re.compile(r'(?<![A-Za-z0-9_])komira_core(?![A-Za-z0-9_])')
+KNOWN_OWN=set()
 # ---- BUCK -----------------------------------------------------------------------------------------------------
 DEPS_BLOCK=re.compile(r'(?ms)^([ \t]*)deps = \[\n(.*?)^\1\]')
 LABEL=re.compile(r'^\s*"([^"]+)",\s*$')
@@ -143,7 +196,19 @@ def add_test_srcs(text,tests):
         lines.insert(pos,item)
     return text[:m.start()]+'%stest_srcs = [\n%s\n%s]'%(ind,'\n'.join(lines),ind)+text[m.end():]
 # ---- main -----------------------------------------------------------------------------------------------------
+def check(a):
+    """No file outside tools/core_split names komira_core or komira_core_ffi (as a word), or spells a string key "komira_core_<name>". Exit 1 and list them if one does."""
+    tree=os.path.abspath(a.tree); hits=[]
+    for f in tracked(tree):
+        if under(f,ALWAYS_EXCLUDE) or under(f,a.exclude) or (a.only and not under(f,a.only)): continue
+        t=read(os.path.join(tree,f))
+        if t is None: continue
+        for i,l in enumerate(t.split('\n')):
+            if CORE.search(l) or KEY.search(l): hits.append('%s:%d: %s'%(f,i+1,l.strip()[:140]))
+    print('\n'.join(hits)); print('repoint --check: %d lines name komira_core or komira_core_ffi'%len(hits))
+    return 1 if hits else 0
 def run(a):
+    if a.check: return check(a)
     if a.renames_only: a.renames=True
     tree=os.path.abspath(a.tree); croot,cleanup=frozen_root(a)
     rows=S.load_map(os.path.join(HERE,'split_map.tsv')) if not a.map else S.load_map(a.map)
@@ -157,6 +222,7 @@ def run(a):
         for r,n in rename_re: t=r.sub(n,t)
         return t
     new={}; stats=collections.Counter(); notes=[]
+    dirpkg=dir_packages(rows); KNOWN_OWN.update(r['dest'] for r in rows if r['dest'].startswith('komira_')); KNOWN_OWN.update(n for _,n,_ in rens)
     # the modules that move with their consumer are created first (they are new files)
     created={}
     inner=S.Rewriter(croot,rows,external=False)
@@ -175,6 +241,7 @@ def run(a):
         if not ((CORE.search(t) and not a.renames_only) or any(r.search(t) for r,_ in rename_re)): continue
         if os.path.basename(f) in('BUCK','BUCK.v2'): continue
         u=t if a.renames_only else (rw.rewrite(f,t) if f.endswith('.mojo') else rw.textual(t))
+        if a.reword_prose and not a.renames_only: u=reword_prose(f,u)
         u=rn(u)
         if u!=t: new[f]=u; stats['files_'+('mojo' if f.endswith('.mojo') else 'text')]+=1
     # created files may belong to a package whose BUCK needs the tests
@@ -185,7 +252,9 @@ def run(a):
         if t is None: continue
         u=t
         if (CORE.search(t) and not a.renames_only) or any(r.search(t) for r,_ in rename_re):
-            if not a.renames_only: u,n=fix_buck(tree,f,t,texts,known,own,third,rename_map); notes+=n
+            if not a.renames_only:
+                u,n=fix_buck(tree,f,t,texts,known,own,third,rename_map); notes+=n; u=rw.textual(u)
+                if a.reword_prose: u=reword_prose(f,u)
             u=rn(u)
         pk=os.path.dirname(f)
         added=[np[len(pk)+1:] for np in created if np.startswith(pk+'/tests/') and np.endswith('.mojo') and os.path.dirname(os.path.dirname(np))==pk]
@@ -225,6 +294,6 @@ def run(a):
 def main():
     ap=argparse.ArgumentParser(description=__doc__.split('\n')[0]); ap.add_argument('--tree',default='.'); ap.add_argument('--core-root'); ap.add_argument('--core-rev')
     ap.add_argument('--map'); ap.add_argument('--only',action='append',default=[]); ap.add_argument('--exclude',action='append',default=[])
-    ap.add_argument('--dry-run',action='store_true'); ap.add_argument('--report'); ap.add_argument('--strict',action='store_true'); ap.add_argument('--renames',action='store_true'); ap.add_argument('--renames-only',action='store_true',help='do the renames and nothing else (implies --renames)')
+    ap.add_argument('--dry-run',action='store_true'); ap.add_argument('--report'); ap.add_argument('--strict',action='store_true'); ap.add_argument('--renames',action='store_true'); ap.add_argument('--reword-prose',action='store_true',help='also reword the comments and documents that still name komira_core'); ap.add_argument('--check',action='store_true',help='write nothing; exit 1 if a file still names komira_core or komira_core_ffi'); ap.add_argument('--renames-only',action='store_true',help='do the renames and nothing else (implies --renames)')
     return run(ap.parse_args())
 if __name__=='__main__': sys.exit(main())

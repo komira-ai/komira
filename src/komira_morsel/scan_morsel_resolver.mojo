@@ -6,7 +6,7 @@
 # Design: an internal doc §6.2 (tier 2), RFC v2 "broker and
 # search as plan citizens" §2.1 / §2.3.2 / §5 row P1.
 #
-# THE TWO TIERS. `komira_core/source/scan_resolver.mojo` is tier 1: identity
+# THE TWO TIERS. `komira_scan_source/scan_resolver.mojo` is tier 1: identity
 # and freshness (`epoch`, `is_bound`, `resolve_snapshot`), the only questions
 # core can spell. Tier 2 (here) adds what a KIND owns and core must never learn:
 #
@@ -43,13 +43,13 @@
 
 from std.memory import ArcPointer, OwnedPointer, UnsafePointer, alloc
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.collections.slab import Slab
-from komira_core.plan.expr import Expr
-from komira_core.source.scan_binding import ScanBinding
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_resolver import ScanResolver
+from komira_arrow.record_batch import RecordBatch
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import Expr
+from komira_scan_source.scan_binding import ScanBinding
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_resolver import ScanResolver
 
 
 comptime SCAN_KIND_NOT_EXECUTABLE: StaticString = "SCAN_KIND_NOT_EXECUTABLE"

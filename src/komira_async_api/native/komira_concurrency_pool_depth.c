@@ -3,7 +3,7 @@
 // The counter is a process-resident static updated with relaxed atomics: it
 // carries no happens-before guarantee and is only read as a total. This file
 // is the only definition of these symbols. A package that needs one of them
-// depends on komira_concurrency rather than defining its own copy.
+// depends on komira_async_api rather than defining its own copy.
 
 #include <stdint.h>
 

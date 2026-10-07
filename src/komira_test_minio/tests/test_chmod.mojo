@@ -5,7 +5,7 @@
 from std.os import stat, remove
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 from komira_test_minio._sys import _chmod
 
 

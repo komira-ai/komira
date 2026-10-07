@@ -82,7 +82,7 @@ from komira_arrow_ipc.ipc_encoder_dispatch import encode_column, _estimate_body_
 
 # -----------------------------------------------------------------------------
 # LANE-2 sched-trace call-site ids. MIRRORED,
-# not imported: `komira_async` deps on `komira_core`, so importing
+# not imported: `komira_async` deps on the core packages, so importing
 # `komira_async.runtime.sched_trace` here would close a package cycle. These
 # two comptime values MUST stay in lockstep with `SITE_FORMAT_READ` /
 # `SITE_FORMAT_WRITE` in `komira_async/runtime/sched_trace.mojo` and with the
