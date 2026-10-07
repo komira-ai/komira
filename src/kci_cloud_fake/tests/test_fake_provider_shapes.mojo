@@ -141,8 +141,8 @@ def test_the_shape_table() raises:
     var g = ProviderShape.generic()
     assert_equal(
         len(g.rows),
-        12,
-        "generic: identity, run, public; identity, run, schedule; table; bucket; identity; queue; topic; sub",
+        13,
+        "generic: identity, run, public; identity, run, schedule; table; bucket; identity; queue; topic; sub; secret",
     )
     # The table: one `table` row where it is hosted (gcp adds its index and
     # TTL objects), a grant row to it, and NOT_YET on onprem.
