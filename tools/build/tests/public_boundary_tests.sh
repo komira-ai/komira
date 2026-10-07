@@ -10,12 +10,14 @@
 #      tests//functional/public_boundary:ok (a planted tree whose every finding
 #      is held at its exact count, beside near misses, upstream bytes and
 #      binary data) build; each target of tests//negative/public_boundary fails
-#      naming its one planted finding (each rule in each spelling, a date in
-#      a third_party BUCK file, one finding over a hold, a word of a deny
-#      list) or ledger defect (a row for binary data or upstream bytes among
-#      them, and a row holding a deny-list word), a window not ending on the
-#      first day of a month is refused, an empty tree fails as checking
-#      nothing, and a target naming no tree is refused at analysis. The
+#      naming its one planted finding (each rule in each spelling, an email
+#      address after `mailto:`, in a URL's path and after a URL's user, which
+#      is none, a date in a third_party BUCK file, one finding over a hold, a
+#      word of a deny list) or ledger defect (a row for binary data or
+#      upstream bytes among them, and a row holding a deny-list word), a
+#      window not ending on the first day of a month is refused, an empty tree
+#      fails as checking nothing, and a target naming no tree is refused at
+#      analysis. The
 #      planted tree's window is 2030 to 2031-09-01, so no file of it holds a
 #      date of the root target's window.
 
@@ -43,7 +45,10 @@ for want in \
     "host_unlisted|$M: host: build.corp.zz -- a URL host that is neither a reserved example name nor under a domain of $HS" \
     "host_private|$M: host: svc.corp.internal -- " \
     "host_ipv6|$M: host: [fd7a:115c::1] -- " \
-    "email|$M: email: jdoe@corp.zz -- " \
+    "email|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
+    "email_mailto|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
+    "email_url_path|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
+    "email_after_url|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
     "sha_md|$M: commit_sha: 1a2b3c4d -- " \
     "sha_comment|$N/src/komira_a/plant.mojo:1: commit_sha: 9f8e7d6c5b -- " \
     "sha_docstring|$N/src/komira_a/plant.mojo:3: commit_sha: 9f8e7d6c5b -- " \

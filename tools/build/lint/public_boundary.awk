@@ -59,8 +59,13 @@
 #               read; an IPv4 host is the ip rule's.
 #   email       An address local@domain, unless the domain is reserved
 #               (example.com, example.net, example.org, *.example, *.test,
-#               *.invalid, *.localhost) or the local part is noreply or
-#               no-reply (a commit trailer's address names no person).
+#               *.invalid, *.localhost), the local part is noreply or
+#               no-reply (a commit trailer's address names no person), or
+#               the local part starts right after `://`: that is the user
+#               of a URL's authority (`scheme://user@host`, such as Hadoop
+#               ABFS's abfss://<container>@<account>.dfs.core.windows.net),
+#               and the host rule reads the host when the scheme reaches a
+#               network. `mailto:` and an address elsewhere in a URL are read.
 #   commit_sha  In prose, a hex string shaped like a commit id: 7 to 12, or
 #               40, lowercase hex digits holding at least two changes
 #               between digit and letter, standing alone (no letter, digit,
@@ -253,14 +258,17 @@ function find_host(s,    rest, off, pos, scheme, h, i) {
     return ""
 }
 
-function find_email(s,    rest, e, at, local, dom) {
-    rest = s
+function find_email(s,    rest, off, pos, e, at, local, dom) {
+    rest = s; off = 0
     while (match(rest, /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z][A-Za-z]+/)) {
+        pos = off + RSTART
         e = substr(rest, RSTART, RLENGTH)
-        rest = substr(rest, RSTART + RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH); off = pos + length(e) - 1
         at = index(e, "@")
         local = tolower(substr(e, 1, at - 1)); dom = tolower(substr(e, at + 1))
         if (local == "noreply" || local == "no-reply" || reserved(dom)) continue
+        # The userinfo of a URL's authority, right after `://`, is no address.
+        if (pos > 3 && substr(s, pos - 3, 3) == "://") continue
         return e
     }
     return ""
