@@ -249,7 +249,9 @@ def test_a_bad_command_line_is_exit_2() raises:
     assert_equal(run.code, EXIT_USAGE, run.stderr)
     _has(run.stderr, String("usage:\n  kci run"))
     var said = String("unknown flag '--no-such-flag' for kci run")
-    _has(run.stderr, said)
+    # the message on a line of its own after ONE `kci: `
+    _has(run.stderr, String("\nkci: ") + said + String("\n"))
+    _lacks(run.stderr, String("kci: kci:"))
     _has(run.stderr, _exit_line(String("REFUSED"), EXIT_USAGE))
     var res = _result(root + String("/result.json"))
     assert_equal(res.status, String(STATUS_FINISHED))

@@ -1,0 +1,55 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Scan support for the engine dispatcher: whole-file decompression of compressed CSV and JSONL text, hive partition path parsing, the CSV read options of a row scan, scalar extraction from a one-column batch, plan predicates for lowering, the row-to-column re-route policy and its scan-leaf walkers, the cross-query scan dedup cache, and the UDF routing and refusal predicates.
+mojo_library(
+    name = "komira_dispatch_scan",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_csv:komira_csv",
+        "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_host:komira_host",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_scan_source:komira_scan_source",
+        # test_decompress_reader takes its scratch directory from it
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        # the scan dedup cache: the entry and byte caps, LRU eviction, clear
+        # (welded)
+        "tests/test_scan_dedup_cache_bound.mojo",
+        # the RAM-sized byte budget and the byte-size parser (welded)
+        "tests/test_scan_dedup_cache_ram_sizing.mojo",
+        # a shared insert outlives its producer and equals a copied one
+        # (welded)
+        "tests/test_scan_dedup_cache_share_insert.mojo",
+        # share_batch against copy_batch, the cache round trip and the share
+        # switch's default (welded)
+        "tests/test_scan_share_batch.mojo",
+        # the by-name projection's share arm against its copy arm: the second
+        # half of test_scan_share_batch, split out to keep files under 1,000
+        # lines (welded)
+        "tests/test_scan_share_batch_by_name.mojo",
+        # every branch of the moved modules the welded tests do not reach
+        # (direct tests, new): one file per module, the scan dedup cache's
+        # switches, and the three scan-leaf walkers together
+        "tests/test_decompress_reader.mojo",
+        "tests/test_hive_partition_parser.mojo",
+        "tests/test_lower_untyped.mojo",
+        "tests/test_record_batch_extract.mojo",
+        "tests/test_row_column_reroute.mojo",
+        "tests/test_row_scan_leaf_walkers.mojo",
+        "tests/test_scan_dedup_cache_switches.mojo",
+        "tests/test_udf_execution_refusal.mojo",
+        "tests/test_udf_expr_routing.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
