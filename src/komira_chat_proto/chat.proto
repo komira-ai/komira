@@ -10,7 +10,7 @@ package komira.chat.v1;
 // The routes are listed in chat_service.proto. No field has a `json_name`
 // option: every JSON key is the proto3 lowerCamel form of the field name.
 //
-// One deployment holds one space: nothing here names a tenant or a space.
+// One deployment holds one space: no message carries a space id.
 // A user is identified to the server by the bearer token's issuer and subject;
 // the server assigns each (iss, sub) one `user_id`, and every other message
 // names users by that id. Identity is never taken from a request body.
