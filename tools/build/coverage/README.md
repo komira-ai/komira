@@ -486,6 +486,106 @@ file in its numbers and `unmeasured_files` those that raised
 finding about a whole file has `line` 0, and `count` is the lines an
 `UnmeasuredFile` counts (`null` for every other finding).
 
+## The coverage workflow
+
+`.github/workflows/coverage.yml` (workflow `coverage`) shows a pull
+request's line coverage as the check run `coverage`: covcheck's summary and
+its annotations on the lines of the "Files changed" view. It is
+informational. It is not `pr / check`, it is not a required check, and its
+result cannot make `pr / check` red; its conclusion is `neutral` in census
+mode (the policy's today). Making it required, or switching coverage on in
+`pr / check` itself, waits for the tree-wide sweep of tests that fail at
+`-O0` or under kcov: today a library whose test fails there leaves every
+dependent unbuilt in a coverage build. Like `pr / check` it runs only for a
+pull request from a branch of this repository, and only for one whose base
+is `main` (`pull_request: branches: [main]` filters on the base): a pull
+request stacked on another branch gets no coverage run until it is
+retargeted to `main` and then pushed to (a retarget alone is an `edited`
+event, which the workflow does not listen for).
+
+Job `measure` (`contents: read`, and `id-token: write` for the farm
+connection) checks out the pull request's head commit with its history and
+runs `.github/ci/coverage_measure.sh` (its header has the details):
+
+1. the diff from the merge base of the base and head commits to the head,
+   as `--diff` above;
+2. the packages of the changed paths (old and new), each the nearest
+   directory holding a BUCK file, leaving out the paths of the other cells'
+   directories (the `tests` cell's libraries are fixtures, some failing by
+   design);
+3. the `mojo_library` targets of those packages
+   (`buck2 uquery "kind('^mojo_library_rule$', set(//<package>: ...))"`);
+4. one `buck2 build -c komira.coverage=true --keep-going --build-report F
+   '<library>[coverage][tests]'...` of all of them (the farm builds them in
+   parallel): their tests' reports and their gates. Each library's verdict
+   is its entry in the build report: `SUCCESS`, or `FAIL` with only errors
+   of its own gate's action (`mojo_cov_gate` owned by the library: an
+   enforce finding or a gate error, every run built), is measured, from the
+   entry's `cov/tests/*.xml` paths (`--show-output` prints no path for a
+   sub-target with several outputs; buck2 lists what did build for a failed
+   target too). Any other failure lists the library as `not measured
+   (coverage build failed)`, in the summary and in the check run's summary,
+   and none of its reports is used; the job stays green. A dependency's
+   failed gate fails the library's runs, so in enforce mode a library is
+   measured only when its dependencies pass theirs;
+5. `covcheck report` over the reports of the libraries measured, with the
+   policy's mode and target, `git ls-files -z` as `--repo-files`, the head
+   as `--head-sha`, and the ratchet's comment lines and the rows of the
+   measured libraries' packages only (`report` compares every row it is
+   given, and a row of a package not measured here would read as a
+   `Regression`). With no report at all (no library touched, none
+   measured, none has a test, or the query failed), the script writes the
+   summary and a neutral two-body check run itself, in covcheck's shape.
+
+It writes the summary to the job's step summary and uploads the bodies,
+`summary.md`, `result.json`, `annotations.json` (every annotation) and the
+lists of libraries as an artifact, and no build log (a job log is masked for
+the farm's address; an artifact is not).
+
+Job `post` has `checks: write` and nothing else. It checks nothing out and
+runs no file of the pull request: it downloads the artifact and sends the
+bodies with `gh api`, `000.json` as the POST for the head commit and every
+later body as a PATCH, in file order, one second apart. The poster is
+written in the workflow (between its `# post_checkrun:` marker lines) and
+first checks the bodies' shape: numbered from `000.json` with no gap,
+`000.json` naming the check `coverage` and the head commit, the last body
+completing the run. This is a check of shape, not a trust boundary: the
+bodies come from the pull request's code, which can edit the workflow too. A
+failed POST sends nothing more; a failed PATCH fails the job. The poster
+keeps the created run's id in a file until its last PATCH; the job's last
+step (`if: failure() || cancelled()`, its function between the
+`# complete_checkrun:` markers) PATCHes a run that file still names to
+completed, `neutral` with the title `coverage: posting failed`, or
+`cancelled` when the job was cancelled (a newer push cancels the older
+run), so that no run stays in progress on the head commit. A cancel that
+ends the job before that step's PATCH is sent still leaves the run in
+progress. The artifact has one name in every attempt of the run
+(`coverage-<head sha>`, uploaded with `overwrite`), so "Re-run failed jobs"
+on `post` alone finds what the first attempt's `measure` uploaded.
+
+What only a run on GitHub shows: the welded cases (`//:coverage_ci_cases`,
+`.github/ci/tests/coverage_ci_cases.sh`) run the poster and the completing
+function against a stand-in `gh` over bodies the real covcheck wrote for 0,
+1, 51 and 120 annotations; the measure script against stand-ins for git
+and buck2 (whose build reports have buck2's shape, and one of which is a
+report buck2 wrote for a library failing in its gate alone) with the real
+covcheck; and they hold the workflow's text for the calls and the artifact
+name. First seen on a real pull request: GitHub's API answers, the
+artifact's round trip and a re-run of `post` alone, whether the `if:`
+conditions run the completing step after a failure, a cancel or a
+timeout, the farm build of real coverage targets from the runner, how GitHub
+draws the annotations, and which check suite the run is drawn under (a run
+created with the workflow's token joins a GitHub Actions suite of the head
+commit, possibly shown beside `pr / check`). The cases run under busybox
+`sh` and `awk`; on the runner the measure script runs under dash and mawk
+and the poster under bash. The first such run is that of the first pull
+request to `main` after the workflow exists there, or of the one adding it
+once it is retargeted to `main` and pushed to.
+
+Welded tests outside a package's `tests/`
+(named to `gate` with `--test-source`) have no `report` flag yet, so the
+check run counts them as that package's source where its gate does not.
+
 ## Example
 
 ```mojo

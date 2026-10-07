@@ -13,6 +13,13 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+# The policy, as data for the coverage workflow's cases (the root BUCK's
+# coverage_ci_cases), which parse it the way .github/ci/coverage_measure.sh does.
+export_file(
+    name = "policy.bzl",
+    visibility = ["PUBLIC"],
+)
+
 mojo_library(
     name = "covcheck",
     srcs = glob(["covcheck/*.mojo"]),
