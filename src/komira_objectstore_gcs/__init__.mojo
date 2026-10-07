@@ -22,7 +22,9 @@ traits.
   * `StorageGrpcBackend[C, T, K]` (grpc_backend.mojo) — the production
     conformer of `GcsStorageBackend`: google.storage.v2 over gRPC through the
     generated `komira_gcp_storage` client, on connector `C`
-    (`GcsTlsConnector`, built by `build_gcs_tls_connector`), a
+    (`GcsTlsConnector`, built by `build_gcs_tls_connector` with public-CA
+    trust, or by `build_gcs_tls_connector_with_config` over a caller's
+    `TlsConfig`, e.g. `gcs_tls_config_trusting_only(root_pem)`), a
     `komira_gcp_core.GcpTokenSource` `T` and a komira_retry
     `MonotonicClock` `K`. `gcs_error_kind_from_code` /
     `gcs_store_error_from_code` map a gRPC status onto the `GCS_ERR_*` kinds.
@@ -53,11 +55,13 @@ from .grpc_backend import (
     GcsTlsConnector,
     StorageGrpcBackend,
     build_gcs_tls_connector,
+    build_gcs_tls_connector_with_config,
     gcs_bucket_resource_name,
     gcs_error_kind_from_code,
     gcs_routing_param,
     gcs_store_error_from_code,
     gcs_store_error_from_raised,
+    gcs_tls_config_trusting_only,
 )
 from .signer import (
     GCS_SIGNER_CLOUD,
