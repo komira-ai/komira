@@ -71,11 +71,9 @@
 # and one that deletes a package loses it, with no edit here.
 #
 # Naming a target that depends on another is not enough: buck2 builds only
-# the outputs a dependent consumes. A library's conda package consumes the
-# library's gated `.mojoc`, so building the package runs the library's welded
-# tests, but it builds none of the library's other targets (a standalone
-# test, a binary, a check beside it). The derivation covers every target,
-# not the roots.
+# the outputs a dependent consumes, so building a library's conda package
+# does not build the library itself or run its welded tests. The derivation
+# covers every target, not the roots.
 #
 # A declared target that matches nothing in the graph is reported by the
 # tool (UNMATCHED): for a CHECK it is a notice in the check's output (the
