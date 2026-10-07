@@ -106,6 +106,7 @@ _TESTS_LINTS = [
     "//src/tests/e2e/komira_job_supervisor_loopback:deps_lint",
     "//src/tests/e2e/komira_secrets_e2e:deps_lint",
     "//src/tests/e2e/komira_udf_e2e:deps_lint",
+    "//src/tests/helpers/komira_plan_harness:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
