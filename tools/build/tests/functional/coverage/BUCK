@@ -250,14 +250,16 @@ cov_debug_check(
 
 # Test 47: branch coverage. A library whose function has every kind of
 # source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
-# its arms, never the first: with coverage (forced here, as for covlib_forced)
-# it has [coverage][bc], [coverage][pgo_bin] and [coverage][branch].
+# its arms, never the first (and a String destroyed at an `if`): with
+# coverage (forced here, as for covlib_forced) it has [coverage][bc],
+# [coverage][pgo_bin] and [coverage][branch].
 mojo_library(
     name = "branchlib",
     srcs = [
         "branchlib/__init__.mojo",
         "branchlib/score.mojo",
         "branchlib/shapes.mojo",
+        "branchlib/strings.mojo",
     ],
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
@@ -337,6 +339,10 @@ cov_branch_check(
 # iteration, 3); the ternary (27,15: 1,1). A classifier summing the three
 # branches at 4,5 into one record would give 2,9 here; one losing a
 # derivation, no rhs; one writing a decision tested twice, 25,19 twice.
+# strings.mojo: `first` owns a String destroyed on its `if`'s return path,
+# so the IR holds five branches at the `if` (8,5): the `if` and the String
+# destructor's four, one record (1,1); a classifier reading the String's
+# branches as decisions there gives 8,5:br:0/5 to 4/5.
 # test_gate_env calls none of branchlib: its record file is empty.
 cov_report_check(
     name = "branch_info",

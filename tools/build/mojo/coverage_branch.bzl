@@ -146,6 +146,10 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             "--map",
             cmd_args(src_dir, format = "{}/=" + src_repo),
             [["--gen", g] for g in gen],
+            # Where the standard library's sources are named: a String's
+            # last-reference test is its code inlined at the branch.
+            "--stdlib",
+            "oss/modular/",
             # The standard library, the closure's other libraries (each a
             # [src] under buck-out/), the test itself and the compile unit
             # with no file are not measured.

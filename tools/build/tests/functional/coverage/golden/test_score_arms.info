@@ -34,3 +34,7 @@ BRDA:25,19:br:0/1,1,3
 BRDA:27,15:select:0/1,0,1
 BRDA:27,15:select:0/1,1,1
 end_of_record
+SF:tools/build/tests/functional/coverage/branchlib/strings.mojo
+BRDA:8,5:br:0/1,0,1
+BRDA:8,5:br:0/1,1,1
+end_of_record

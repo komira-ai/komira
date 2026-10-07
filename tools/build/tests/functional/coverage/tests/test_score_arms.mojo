@@ -1,7 +1,7 @@
 # Test 47: some arms of classify_score, never "invalid" (its counter stays
 # 0 in the profile of the branch coverage run), and of the decisions of
-# shapes.mojo.
-from branchlib import any_positive, classify_score, shapes
+# shapes.mojo, and both arms of strings.mojo's `first`.
+from branchlib import any_positive, classify_score, first, shapes
 from std.testing import assert_equal
 
 
@@ -14,3 +14,5 @@ def main() raises:
     assert_equal(shapes(0, False), 0 + 2 + 4, "no turn, no flag, pick 4")
     assert_equal(any_positive(0, 0, 1), 1, "the last decides")
     assert_equal(any_positive(1, 0, 0), 1, "the first decides")
+    assert_equal(first(String("abc"), True), 1, "the flag returns 1")
+    assert_equal(first(String("abcd"), False), 4, "no flag: the length")

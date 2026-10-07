@@ -2,3 +2,4 @@
 
 from .score import classify_score
 from .shapes import any_positive, shapes
+from .strings import first

@@ -433,8 +433,11 @@ rdep of the library) or these three ship ungated:
 
 **Branch coverage**: kcov reports none; the branch records of `branch/`
 are the source, read by the gate of a library of `COVERAGE_BRANCH_GATE`
-(`policy.bzl`, each row with its evidence: today `komira_retry`, whose
-census gate reads 73 of 74 arms) and of every fixture of the tests cell
+(`policy.bzl`, each row with its evidence: every library whose tests'
+branches all classify and hold an arm, as the sweep of every library found
+them, among them `komira_retry`, whose census gate reads 73 of 74 arms,
+and `komira_json`, whose `komira_json_cov_gate` reads them) and of every
+fixture of the tests cell
 but those passing `coverage_branch_gate = False` (test 46's
 `covfull_unread`).
 Every other measured package has `BranchNotMeasured`; in census mode it is
