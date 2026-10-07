@@ -17,10 +17,13 @@
 #      the action's scratch directory, a server certificate, a loopback port
 #      the action chooses, and that server's PgConfig passed to `_run_live`;
 #   2. the first live run's failures are triaged. Read from the code, not
-#      run: FLOAT8 / FLOAT4 values bind with the TEXT type OID
-#      (pg_driver.mojo `_oid_for_logical`), and Postgres has no implicit
-#      text -> double precision assignment cast, so type_float8 /
-#      type_float4 may be refused; and `jsonb` stores a parsed value and
+#      run: the driver's Parse sends no parameter types, so the server
+#      infers float8 from the column, while the client sends a FLOAT's text
+#      bytes under the binary format code (its own TEXT tag; pg_driver.mojo
+#      `_oid_for_logical`, as it describes for BOOL), which the server
+#      refuses as malformed binary data, so type_float8 / type_float4 may
+#      be refused (and a FLOAT8 read would fall to the text fallback on
+#      binary bytes); and `jsonb` stores a parsed value and
 #      prints it normalised (spaces after ':' and ','), so type_jsonb's byte
 #      comparison would fail. Either is then a defect or a gap to list.
 #
