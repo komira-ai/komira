@@ -18,6 +18,12 @@
 #       outside package and a missing guard are each refused, naming it; the
 #       library's pin on it at another build is refused; a metapackage
 #       without its row is refused naming `native 'komira_native'`;
+#   (2b) the floor is a version: `__glibc <=2.34`, `__glibc ==2.34` and a
+#       floor that is not digits and dots (`>=abc`, `>=2..34`, `>=2.34.`,
+#       `>=.2`) are each refused by name; a requirement given twice (the
+#       guard, the floor) is ONE refusal, "listed twice", and nothing else;
+#       a metapackage row naming a package outside the set says it is
+#       neither a library nor the native package;
 #   (3) the PUBLISH targets put komira_native BEFORE komira_beta, which
 #       requires it, although the artifacts file declares it after; the
 #       metapackage stays last;
@@ -176,6 +182,37 @@ def test_the_native_package_requires_only_the_guard_and_one_glibc_floor() raises
     print("  test_the_native_package_requires_only_the_guard_and_one_glibc_floor: PASS")
 
 
+def _only(members: List[ReleaseMember], line: String) raises:
+    """require_closure refuses with exactly the one refusal `line`."""
+    var got = String("<not refused>")
+    try:
+        require_closure(members)
+    except e:
+        got = String(e)
+    assert_equal(got, String("PUBLISH step: requirement closure refused:\n  ") + line)
+
+
+def test_the_glibc_floor_is_a_version_and_a_twice_is_one_refusal() raises:
+    var who = String("artifact 'komira_native': ")
+    for bad in ["__glibc <=2.34", "__glibc ==2.34", "__glibc >=abc", "__glibc >=2..34", "__glibc >=2.34.", "__glibc >=.2"]:
+        var m = _members(String("floor"))
+        var n = _index(m, String("komira_native"))
+        m[n].conda.depends[1] = String(bad)
+        _refused(
+            m, who + String("requirement '") + String(bad) + String("' is not the guard '__linux' or '__glibc >=<floor>'")
+        )
+    for twice in ["__linux", "__glibc >=2.34"]:
+        var m = _members(String("twice"))
+        var n = _index(m, String("komira_native"))
+        m[n].conda.depends.append(String(twice))
+        _only(m, who + String("requirement '") + String(twice) + String("' is listed twice"))
+    var m = _members(String("outside"))
+    var meta = _index(m, String("komira"))
+    m[meta].conda.members[0].name = String("komira_gamma")
+    _refused(m, String("member 'komira_gamma' is neither a library nor the native package of this set"))
+    print("  test_the_glibc_floor_is_a_version_and_a_twice_is_one_refusal: PASS")
+
+
 def test_the_native_package_is_published_before_its_requirer() raises:
     var r = _release()
     var d = _root(String("order"))
@@ -241,6 +278,7 @@ def test_new_names_list_the_native_package_the_first_time() raises:
 def main() raises:
     test_step_zero_reads_the_native_package()
     test_the_native_package_requires_only_the_guard_and_one_glibc_floor()
+    test_the_glibc_floor_is_a_version_and_a_twice_is_one_refusal()
     test_the_native_package_is_published_before_its_requirer()
     test_new_names_list_the_native_package_the_first_time()
     print("test_publish_native_package: ALL PASS")

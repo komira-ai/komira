@@ -90,7 +90,7 @@ struct ReleaseMember(Copyable, Movable):
         return String("")
 
     def kind(self) -> String:
-        """`library` / `metapackage` for CONDA; "" otherwise."""
+        """`library` / `native` / `metapackage` for CONDA; "" otherwise."""
         if self.has_conda:
             return self.conda.kind.copy()
         return String("")

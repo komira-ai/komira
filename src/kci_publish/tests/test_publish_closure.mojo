@@ -109,7 +109,7 @@ def test_the_metapackage_holds_exactly_the_libraries() raises:
     _refused(m, String("member 'komira_alpha' has sha256 abab"))
     m = _good()
     m[2].conda.members[1].name = String("komira")
-    _refused(m, String("member 'komira' is not a library of this set"))
+    _refused(m, String("member 'komira' is neither a library nor the native package of this set"))
     m = _good()
     m[2].conda.members[0].has_build = False
     m[2].conda.members[0].build = String("")

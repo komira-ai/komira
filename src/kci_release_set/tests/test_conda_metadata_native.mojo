@@ -26,7 +26,12 @@
 #       link whose target no file row installs (a link to a link counts as
 #       none); an unknown row key is ignored and listed;
 #   (5) a library: lib_files absent is recorded, [] and a file row parse, a
-#       malformed row is refused as on the native package.
+#       malformed row is refused as on the native package, and a link row
+#       is refused (the packer refuses --lib-link on a library);
+#   (6) a path as strict as the packer's `libPath`: a byte outside
+#       [A-Za-z0-9_.+-/], more than 100 bytes, or under lib/mojo/ (a
+#       library's payload directory) is refused; 100 bytes and lib/mojox
+#       pass.
 # =============================================================================
 
 from std.pathlib import Path
@@ -239,6 +244,53 @@ def test_a_library_may_carry_lib_files() raises:
         _libs(String("[") + _file(String("bin/x")) + String("]"), String(_LIB)),
         String("lib_files[0]: 'path' bin/x is not under lib/ with no empty, '.' or '..' component"),
     )
+
+
+def test_a_library_ships_no_link() raises:
+    _expect(
+        _libs(
+            String("[") + _file(String("lib/libkomira_log_holder.a")) + String(",")
+            + _link(String("lib/libkomira_log_holder.so"), String("libkomira_log_holder.a")) + String("]"),
+            String(_LIB),
+        ),
+        String("lib_files[1]: a link ('target') on a library: only the native package ships links"),
+    )
+
+
+def test_a_lib_path_is_as_strict_as_the_packers() raises:
+    for bad in ["lib/x;y.so", "lib/a b.so", "lib/x$y.so", "lib/x\\y.so", "lib/x=y.so"]:
+        var path = String(bad)
+        var b = path.as_bytes()
+        var at = 0
+        for i in range(len(b)):
+            var c = Int(b[i])
+            var ok = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57)
+            if not ok and c != 95 and c != 46 and c != 43 and c != 45 and c != 47:
+                at = i
+                break
+        var raw = _file(path).replace(String("\\"), String("\\\\"))
+        _expect(
+            _libs(String("[") + raw + String("]")),
+            String("lib_files[0]: 'path' ") + path + String(" holds '") + String(path[byte = at : at + 1])
+            + String("', which is not in [A-Za-z0-9_.+-/]"),
+        )
+    var long = String("lib/")
+    for _ in range(96):
+        long += String("a")
+    var ok100 = parse_conda_metadata(_libs(String("[") + _file(long) + String("]")), String(_SRC))
+    assert_equal(ok100.lib_files[0].path.byte_length(), 100)
+    long += String("a")
+    _expect(
+        _libs(String("[") + _file(long) + String("]")),
+        String("lib_files[0]: 'path' ") + long + String(" is longer than 100 bytes"),
+    )
+    for f in [String(_NATIVE), String(_LIB)]:
+        _expect(
+            _libs(String("[") + _file(String("lib/mojo/x.so")) + String("]"), f),
+            String("lib_files[0]: 'path' lib/mojo/x.so is under lib/mojo/, a library's payload directory"),
+        )
+    var mojox = parse_conda_metadata(_libs(String("[") + _file(String("lib/mojox.so")) + String("]")), String(_SRC))
+    assert_equal(mojox.lib_files[0].path, String("lib/mojox.so"))
 
 
 def main() raises:

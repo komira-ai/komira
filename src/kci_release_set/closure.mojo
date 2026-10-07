@@ -44,7 +44,9 @@ def requirement_name(requirement: String) -> String:
     return String(requirement[byte=:sp])
 
 
-def _is_other_library(members: List[ReleaseMember], name: String, own: Int) -> Bool:
+def _is_other_member(members: List[ReleaseMember], name: String, own: Int) -> Bool:
+    """Whether `name` is a library or the native package of `members` other
+    than the one at `own`."""
     for j in range(len(members)):
         if j == own:
             continue
@@ -67,7 +69,7 @@ def undeclared_requirements(members: List[ReleaseMember]) -> List[String]:
             var name = requirement_name(dep)
             if name.startswith(String("__")) or name == MOJO_COMPILER_PACKAGE:
                 continue
-            if _is_other_library(members, name, i):
+            if _is_other_member(members, name, i):
                 continue
             out.append(
                 String("artifact '")

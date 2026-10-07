@@ -34,11 +34,15 @@
 #
 # `lib_files` is an array of rows, each `{path, sha256}` (a file) or
 # `{path, target}` (a symbolic link): `path` under lib/ with no empty, '.'
-# or '..' component and given once; `target` a bare file name in the
-# link's own directory that a FILE row of the array installs. A library
-# carries it (the packer writes [] when it ships no archive), a package
-# written before the packer shipped lib files has none; the reader records
-# whether it was there (`CondaMetadata.has_lib_files`).
+# or '..' component, given once, and as strict as the packer's `libPath`
+# (tools/build/package/pack/komira_pack.zig): only [A-Za-z0-9_.+-/], at
+# most 100 bytes, not under lib/mojo/ (a library's payload directory);
+# `target` a bare file name in the link's own directory that a FILE row of
+# the array installs. Only the native package has link rows (the packer
+# refuses --lib-link on a library). A library carries it (the packer writes
+# [] when it ships no archive), a package written before the packer shipped
+# lib files has none; the reader records whether it was there
+# (`CondaMetadata.has_lib_files`).
 #
 # `doc_files` is optional because a package the packer wrote before it
 # shipped docs has none; the reader records whether it was there
@@ -56,7 +60,8 @@
 # type, an empty string (only `source_commit` of an unstamped package may be
 # empty: the packer writes "" when no commit was given), a sha256 that is not
 # 64 lowercase hex characters, an unknown `kind`, a malformed `lib_files`
-# row, a native package with no file in `lib_files`.
+# row (a path outside the packer's rules, a link on a library), a native
+# package with no file in `lib_files`.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -82,6 +87,12 @@ comptime KIND_NATIVE: String = "native"
 """The package of libkomira_native.so.1: one shared object and its link name,
 no Mojo. Libraries that call komira's C require it at the release's version
 and build."""
+
+
+comptime LIB_PATH_MAX_BYTES = 100
+"""The longest `lib_files` path, as the packer's `libPath` allows."""
+comptime LIB_PAYLOAD_DIR: String = "lib/mojo/"
+"""A library's payload directory: no `lib_files` row is under it."""
 
 
 def is_member_kind(kind: String) -> Bool:
@@ -410,6 +421,31 @@ def _lib_row(row: JsonValue, index: Int, seen: List[LibFile], source: String, mu
             source,
             what + String("'path' ") + f.path + String(" is not under lib/ with no empty, '.' or '..' component"),
         )
+    if f.path.byte_length() > LIB_PATH_MAX_BYTES:
+        _refuse(
+            source,
+            what + String("'path' ") + f.path + String(" is longer than ") + String(LIB_PATH_MAX_BYTES)
+            + String(" bytes"),
+        )
+    if f.path.startswith(String(LIB_PAYLOAD_DIR)):
+        _refuse(
+            source,
+            what + String("'path' ") + f.path + String(" is under ") + String(LIB_PAYLOAD_DIR)
+            + String(", a library's payload directory"),
+        )
+    var b = f.path.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        var allowed = (
+            (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57)
+            or c == 95 or c == 46 or c == 43 or c == 45 or c == 47
+        )
+        if not allowed:
+            _refuse(
+                source,
+                what + String("'path' ") + f.path + String(" holds '") + String(f.path[byte = i : i + 1])
+                + String("', which is not in [A-Za-z0-9_.+-/]"),
+            )
     for i in range(len(seen)):
         if seen[i].path == f.path:
             _refuse(source, what + String("'path' ") + f.path + String(" is given twice"))
@@ -432,14 +468,21 @@ def _lib_row(row: JsonValue, index: Int, seen: List[LibFile], source: String, mu
 
 
 def _read_lib_files(doc: JsonValue, mut md: CondaMetadata, source: String) raises:
-    """`lib_files` into `md` (file header): every row checked, then every
-    link's target a file row of the array."""
+    """`lib_files` into `md` (file header): every row checked, a link row
+    refused unless `md` is the native package, then every link's target a
+    file row of the array."""
     md.has_lib_files = True
     var rows = doc.get(String("lib_files"))
     if rows.kind_tag() != JSON_ARRAY:
         _refuse(source, String("'lib_files' is not an array"))
     for i in range(rows.array_len()):
         var f = _lib_row(rows.element_at(i), i, md.lib_files, source, md.ignored_keys)
+        if f.is_link() and not md.is_native():
+            _refuse(
+                source,
+                String("lib_files[") + String(i)
+                + String("]: a link ('target') on a ") + md.kind + String(": only the native package ships links"),
+            )
         md.lib_files.append(f^)
     for i in range(len(md.lib_files)):
         ref f = md.lib_files[i]
