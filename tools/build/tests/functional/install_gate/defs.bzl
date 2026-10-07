@@ -1,7 +1,8 @@
 """Runs install_gate.sh's cases (cases.sh) in one action under the Mojo
 toolchain's busybox: the SKIP and FAIL lines of the pixi install case of
-conda.sh and conda_set.sh, on PATHs this action makes, and both scripts'
-refusal of --require-install beside --no-install.
+conda.sh and conda_set.sh, on PATHs this action makes, both scripts'
+refusal of --require-install beside --no-install, and each script run up to
+and through its own install_gate call.
 """
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")

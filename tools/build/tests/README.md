@@ -648,8 +648,11 @@ the nightly workflow's flag, a missing `pixi` or network is a FAIL line). The
 switch is [`install_gate.sh`](functional/install_gate/install_gate.sh), and
 `tests//functional/install_gate:cases` holds it, on PATHs it makes: no `pixi`
 gives `SKIP  conda install (no pixi)`, and with the flag
-`FAIL  conda install: --require-install, but it cannot run (no pixi)`. See
-[packaging/conda](../../../packaging/conda/README.md).
+`FAIL  conda install: --require-install, but it cannot run (no pixi)`. Each
+script calls the gate before any build, so the target also runs conda.sh and
+conda_set.sh themselves with no `pixi` and no `curl` on PATH: with the flag each
+prints its own FAIL line and exits 1, without it its first line is its SKIP
+line. See [packaging/conda](../../../packaging/conda/README.md).
 
 ## 33b. Conda package set and metapackage
 

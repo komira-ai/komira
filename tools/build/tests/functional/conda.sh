@@ -112,6 +112,11 @@ if [ "$install" = 0 ] && [ "$require_install" = 1 ]; then
     exit 2
 fi
 . "$ROOT/tools/build/tests/functional/install_gate/install_gate.sh"
+# The install case's gate runs before any build: its SKIP line is printed here,
+# and with --require-install a case that cannot run ends the script here (exit 1).
+install_gate conda "$install" "$require_install" https://conda.modular.com/max/linux-64/repodata.json
+gate=$?
+[ "$gate" != 2 ] || exit 1
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_conda.XXXXXX")
 fails=0
 pass() { echo "PASS  conda $1"; }
@@ -652,9 +657,7 @@ else
     echo "SKIP  conda uncached (--no-uncached)"
 fi
 
-# ---- install ----------------------------------------------------------------
-install_gate conda "$install" "$require_install" https://conda.modular.com/max/linux-64/repodata.json
-gate=$?
+# ---- install (its gate ran above, before any build) ---------------------
 if [ "$gate" = 0 ]; then
     problems=""
     # The channel is the one komira_pack conda-index wrote (section index).
@@ -700,8 +703,6 @@ EOF
     if [ -n "$problems" ]; then fail "install:$problems (see $W)"; else
         pass "install: pixi installs $PKG from a file:// channel with mojo-compiler ==$pin, \`mojo run\` of a program importing it (no -I) prints deadbeef and 3q2+7w==, the env holds $DOC byte-equal to the source README, and the same project without it cannot import it"
     fi
-else
-    [ "$gate" = 1 ] || fails=$((fails + 1))
 fi
 
 if [ "$fails" = 0 ] && [ -z "${KOMIRA_TEST_KEEP:-}" ]; then rm -rf "$W"; else echo "logs: $W"; fi

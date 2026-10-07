@@ -67,6 +67,11 @@ if [ "$install" = 0 ] && [ "$require_install" = 1 ]; then
     exit 2
 fi
 . "$ROOT/tools/build/tests/functional/install_gate/install_gate.sh"
+# The install case's gate runs before any build: its SKIP line is printed here,
+# and with --require-install a case that cannot run ends the script here (exit 1).
+install_gate conda_set "$install" "$require_install" https://conda.modular.com/max/linux-64/repodata.json
+gate=$?
+[ "$gate" != 2 ] || exit 1
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_conda_set.XXXXXX")
 fails=0
 pass() { echo "PASS  conda_set $1"; }
@@ -339,9 +344,7 @@ else
     echo "SKIP  conda_set uncached (--no-uncached)"
 fi
 
-# ---- install ------------------------------------------------------------------
-install_gate conda_set "$install" "$require_install" https://conda.modular.com/max/linux-64/repodata.json
-gate=$?
+# ---- install (its gate ran above, before any build) ---------------------
 if [ "$gate" = 0 ]; then
     C="$W/channel"
     mkdir -p "$C/linux-64" "$C/noarch" "$W/with" "$W/without" "$W/unpinned" "$W/badpin"
@@ -432,8 +435,6 @@ EOM
     if [ -n "$problems" ]; then fail "install:$problems (see $W)"; else
         pass "install: pixi installs only '$META ==$VERSION' from a file:// channel of the set (which also holds a newer build $BUILD8 of komira_encoding: the requirement name ==$VERSION $BUILD installs build $BUILD and not $BUILD8, while an unpinned requirement takes $BUILD8, and a requirement on a build the channel lacks fails to solve), the solver brings all ${#OK[@]} libraries (each .mojoc installed as built) and mojo-compiler ==$pin, and a program importing komira_encoding and komira_hash prints deadbeef and 12638187200555641996; the same project without the metapackage cannot import"
     fi
-else
-    [ "$gate" = 1 ] || fails=$((fails + 1))
 fi
 
 if [ "$fails" = 0 ] && [ -z "${KOMIRA_TEST_KEEP:-}" ]; then rm -r -f "$W"; else echo "logs: $W"; fi

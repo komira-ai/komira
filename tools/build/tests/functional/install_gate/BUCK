@@ -2,8 +2,9 @@ load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load(":defs.bzl", "install_gate_cases")
 
 # The switch between SKIP and FAIL of the pixi install case of conda.sh and
-# conda_set.sh (install_gate.sh), and both scripts' refusal of
-# --require-install beside --no-install (tools/build/tests/run_tests.sh, 33a).
+# conda_set.sh (install_gate.sh), both scripts' refusal of --require-install
+# beside --no-install, and each script's own install_gate call (its suite name
+# and flags), run with no pixi and no curl (tools/build/tests/run_tests.sh, 33a).
 install_gate_cases(
     name = "cases",
     conda = "//:conda.sh",
