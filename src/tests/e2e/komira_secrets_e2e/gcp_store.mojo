@@ -31,9 +31,10 @@ comptime GCP_REGION = "us-central1"
 
 def crc32c(data: Span[UInt8, _]) -> UInt32:
     """CRC-32C (Castagnoli, reflected polynomial 0x82F63B78), bit by bit:
-    the checksum Secret Manager keeps as `dataCrc32c`. Small and slow on
-    purpose, so the fake checks the client with code the client does not
-    share."""
+    the checksum Secret Manager keeps as `dataCrc32c`. The generated client
+    has no CRC32C code: it only carries the value its caller sets, so this
+    function is checked against published values (test_gcp_secret_lifecycle),
+    not against the client."""
     var crc = UInt32(0xFFFFFFFF)
     for i in range(len(data)):
         crc ^= UInt32(data[i])

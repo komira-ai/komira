@@ -23,10 +23,12 @@
 #     read back: a path, query or body the client spells wrong (the fake
 #     answers an unknown path 404 and a regional path at the global host
 #     400), or a response it decodes wrong;
-#   * the payload's CRC32C: the fake refuses a dataCrc32c that is not the
-#     payload's, so the first add proves the client sent the checksum it
-#     was given over the bytes it sent; each access returns the fake's own
-#     CRC32C, compared with the test's;
+#   * the payload's CRC32C: the client has no CRC32C code of its own, so
+#     the fake's `crc32c` both makes the dataCrc32c the test sends and
+#     checks it (refusing one that is not the payload's), and makes the one
+#     each access returns. What that proves is that the client carried the
+#     payload bytes and the int64-as-string checksum unchanged, both ways;
+#     the checksum itself is proved by the published values below;
 #   * the fake's request log, exactly (verb, path, query, Host, status): a
 #     regional secret sent at the global path or host, a call retried or not
 #     sent, a page token not sent back;
@@ -36,8 +38,9 @@
 #     connection presented `localhost` (the global client's is the dial
 #     host it pushed, the regional client's its pin).
 #
-# The fake's CRC32C is checked first against published values, so a wrong
-# checksum cannot agree with itself.
+# The fake's CRC32C is checked first against published values: in the
+# lifecycle the same function makes and checks every checksum, so only those
+# values prove it computes CRC32C at all.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -273,6 +276,19 @@ def test_gcp_secret_lifecycle_over_tls() raises:
     assert_true(conns >= 2 and conns <= len(want), String(conns))
     for i in range(conns):
         assert_equal(server.front.snis[i], GLOBAL_HOST)
+    # Drain before asserting that no connection is left open. The client
+    # closes each connection (every one today, and pooled ones when its
+    # clients drop at the end of `run`) BEFORE the leg raises the stop
+    # flag, so by the time `serve_while` has joined, every close_notify or
+    # FIN is already queued in the kernel; but the server thread may have
+    # stopped stepping before the front read the last of them. Stepping
+    # the front here (non-blocking, no server needed) reads those queued
+    # closes, so the outcome does not depend on thread scheduling: one step
+    # suffices, and the bound only guards a defect that keeps a pair open.
+    var drains = 0
+    while server.front.open_pairs() > 0 and drains < 100:
+        server.front.step()
+        drains += 1
     assert_equal(server.front.open_pairs(), 0, "a connection left open")
     assert_equal(server.front.handshakes_failed, 0)
     print("  test_gcp_secret_lifecycle_over_tls PASS")

@@ -21,11 +21,12 @@
 #      UNAUTHENTICATED (the service's "missing required authentication
 #      credential"), another token than the fake's is 401 too ("invalid
 #      authentication credentials").
-#   2. The endpoint: a global resource must arrive at the global host and a
+#   2. The path: an unknown one is 404 NOT_FOUND, as the front end
+#      answers, whichever host it arrived at.
+#   3. The endpoint: a global resource must arrive at the global host and a
 #      regional one at its location's host (`Host`, port dropped). A
 #      resource sent to the other endpoint is refused 400 INVALID_ARGUMENT
 #      (the code is this fake's choice; it serves neither there).
-#   3. The path: an unknown one is 404 NOT_FOUND, as the front end answers.
 #   4. The method: 404 NOT_FOUND for a missing secret or version, 409
 #      ALREADY_EXISTS for a secret id taken in that location, 400
 #      INVALID_ARGUMENT for a global create without `replication`, a
