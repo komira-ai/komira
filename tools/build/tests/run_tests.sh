@@ -330,7 +330,8 @@
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
 #  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
-#  46. The registry lint (tools/build/lint/defs.bzl, fs_registry_deps):
+#  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
+#  47. The registry lint (tools/build/lint/defs.bzl, fs_registry_deps):
 #      //:fs_registry_deps (every package under src/, against
 #      tests/fs_registry_physical.tsv) and tests//functional/fs_registry_deps:ok
 #      (a planted tree whose physical-plan packages name komira_fs_registry
@@ -493,6 +494,7 @@ expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests/
 expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
 expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
 expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
+expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action
@@ -1241,7 +1243,11 @@ expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`
 # shellcheck source=tools/build/tests/coverage_run_tests.sh
 . "$ROOT/tools/build/tests/coverage_run_tests.sh"
 
-# 46
+# 44
+# shellcheck source=tools/build/tests/public_boundary_tests.sh
+. "$ROOT/tools/build/tests/public_boundary_tests.sh"
+
+# 47
 expect_green fs_registry_deps //:fs_registry_deps tests//functional/fs_registry_deps:ok
 N=tests//negative/fs_registry_deps
 R="but a physical-plan package"

@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "fs_registry_deps")
 load("//functional/fs_registry_deps:fixture.bzl", "FS_REGISTRY_PHYSICAL", "FS_REGISTRY_TREE")
 
-# Test 46 (the registry lint), the half that must go red: one planted defect
+# Test 47 (the registry lint), the half that must go red: one planted defect
 # per target, in the tree of functional/fs_registry_deps (whose `ok` builds).
 # run_tests.sh requires each to fail naming its finding.
 

@@ -1,4 +1,4 @@
-"""The planted tree of test 46 (the registry lint), as {path in the tree: file}.
+"""The planted tree of test 47 (the registry lint), as {path in the tree: file}.
 
 The BUCK files are text files here, staged at src/<package>/BUCK by the
 lint, so none is a package of this cell. physical.tsv is the fixture's set:

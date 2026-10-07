@@ -4,6 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (UNCOMPRESSED, SNAPPY, GZIP, ZSTD, LZ4_RAW, the deprecated LZ4, BROTLI), the
 # snappy codec (the snappy C API, statically linked, and a Mojo decoder), the
 # LZ4 frame codec and a CRC-32C helper. Every public entry takes Spans.
+# text_decompress reads a whole `.csv/.jsonl[.gz|.zst|.lz4]` file, decompressed
+# by those codecs; it needs komira_arrow_ipc's read_chunked, which is why it is
+# here and not in komira_compression (komira_arrow_ipc depends on that).
 #
 # snappy and the Brotli decoder are linked from //third_party/snappy and
 # //third_party/brotli. LZ4 raw block and zlib come from komira_lz4 and
@@ -39,6 +42,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   truncations, single-byte corruptions, short and empty destinations and
 #   hostile size fields, sentinel-guarded on both sides of the destination.
 # - test_crc32c: published CRC-32C check values.
+# - test_lz4_text_framing_detection: `.lz4` text files as LZ4 frames and as
+#   raw blocks through text_decompress: the framing selector, both round
+#   trips, a frame that needs a grow step, and a corrupt frame refused as not
+#   a capacity failure.
+# - test_text_decompress_direct: every branch of text_decompress: the twelve
+#   suffixes, the codec map, the size guess and the gzip ISIZE hint, a
+#   compressed CSV read back for each codec, and the cap-and-grow loop driven
+#   with a lowered cap (the ISIZE and LZ4 Content Size hints, growth, the
+#   inclusive cap, the refusal's message).
 # - test_parquet_file_pages_e2e: every page of Parquet files pyarrow wrote
 #   (tests/fixtures/parquet, staged at parquet/; gen_pyarrow_fixtures.py is
 #   their provenance and SHA256SUMS pins them): the footer walked by a
@@ -67,9 +79,19 @@ mojo_library(
     name = "komira_parquet_codec",
     srcs = _SRCS,
     deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_host:komira_host",
+        "//src/komira_libc:komira_libc",
         "//src/komira_lz4:komira_lz4",
         "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_simd:komira_simd",
         "//src/komira_zlib:komira_zlib",
         "//third_party/brotli:brotlidec",
         "//third_party/snappy:snappy",
@@ -104,6 +126,7 @@ mojo_library(
         "tests/test_compression_lz4_framings.mojo",
         "tests/test_compression_zstd_lz4.mojo",
         "tests/test_crc32c.mojo",
+        "tests/test_lz4_text_framing_detection.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_parquet_file_pages_e2e.mojo",
         "tests/test_snappy_corpus.mojo",
@@ -111,6 +134,7 @@ mojo_library(
         "tests/test_snappy_fuzz.mojo",
         "tests/test_snappy_mojo_oracle.mojo",
         "tests/test_snappy_short_offset.mojo",
+        "tests/test_text_decompress_direct.mojo",
     ],
     visibility = ["PUBLIC"],
 )

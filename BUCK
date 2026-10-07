@@ -1,7 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "fs_registry_deps", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "fs_registry_deps", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 
@@ -183,9 +183,38 @@ _TESTS_LINTS = [
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 
+# The public boundary (tools/build/lint/defs.bzl, public_boundary; the reader
+# tools/build/lint/public_boundary.awk says what each rule matches): no file of
+# the repository (the cell's `:doc_tree`, the dotfiles a glob skips, and the
+# tests cell's tree) holds a date from `window_from` up to `public_from`, a
+# home directory naming a person, a private or written-out network address, a
+# URL host outside the reserved example names and
+# tests/public_boundary_hosts.tsv, an email address outside the reserved
+# example domains, or a commit id in prose.
+# Binary data and upstream bytes are not read. The findings a file must keep
+# (fixtures, test vectors, planted defects) are held, per rule and file at an
+# exact count, in tests/public_boundary_holds.tsv, which only shrinks.
+# A repository that keeps words of its own out of this one passes a list of
+# them, one per line, kept outside it: `-c komira_lint.public_boundary_deny=`
+# a target or a path from the root (`.public_boundary_deny` is gitignored for
+# it). No row may hold a word of that list, and no such list is committed here.
+[public_boundary(
+    name = "public_boundary",
+    cells = {"tools/build/tests": "tests//:doc_tree"},
+    deny = read_root_config("komira_lint", "public_boundary_deny", None),
+    holds = "tests/public_boundary_holds.tsv",
+    hosts = "tests/public_boundary_hosts.tsv",
+    # The public history starts on this day. Dates before 2025 in this tree
+    # are data (epochs, certificates, standards), so the window starts there.
+    public_from = "2026-09-01",
+    srcs = [".buckconfig", ".buckconfig.local.example", ".gitignore"] + glob([".github/**"]),
+    tree = ":doc_tree",
+    window_from = 2025,
+) for _ in _TESTS_LINTS[:1]]
+
 # The file-system registry stays out of the physical plan
 # (tools/build/lint/defs.bzl, fs_registry_deps; tools/build/tests/README.md,
-# test 46): no physical-plan package under src/ depends on komira_fs_registry,
+# test 47): no physical-plan package under src/ depends on komira_fs_registry,
 # directly or through other packages, or imports it. Such a package takes a
 # FileSystem-generic parameter and its caller passes the concrete backend, so
 # a compiled plan instantiates one file system; logical-plan packages may use
