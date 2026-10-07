@@ -32,6 +32,15 @@
 #     with numberOfRows 0x80 0x08, 0x80 0x08, 0xB8 0x07); every row of id,
 #     label and flag (BOOL) with its NULLs; null counts 0/750/500. Catches a
 #     reader that loses rows or PRESENT state at a stripe boundary.
+#   * test_failed_read_leaves_reader_usable / test_failed_parallel_read_
+#     leaves_reader_usable -- one encoding byte changed so `id` fails while
+#     the other columns decode; the read raises naming column 0, and two
+#     reads of the unchanged file after it are correct (serial; 4-worker
+#     dispatcher). Catches an error path that drops the accumulator slab
+#     with slots already moved out (a double free: the next read crashes).
+#   * test_cancelled_parallel_read_leaves_reader_usable -- a pre-cancelled
+#     token makes the dispatched read raise CancelledError, and the next
+#     reads are correct.
 #
 # Mutants planted and seen red here are listed in the BUCK file header.
 # =============================================================================
@@ -560,6 +569,47 @@ def test_failed_parallel_read_leaves_reader_usable() raises:
             Span(good), Pointer(to=disp), CancellationToken.never()
         )
         _check_good(batch, "parallel read after a failed read #" + String(k))
+    _ = rt^
+
+
+def test_cancelled_parallel_read_leaves_reader_usable() raises:
+    """A dispatch that raises (here: a token cancelled before the read)
+    surfaces as an error and leaves the next read intact.
+
+    Reach: the token is cancelled before dispatch, so the dispatcher's
+    first between-task poll raises before any column task runs; no
+    accumulator slot has been taken when the decode state drops. A cancel
+    landing BETWEEN two column tasks (some slots taken, the state dropped)
+    cannot be produced deterministically through the public API: the token
+    is only cancelled from outside the decode, and the dispatcher polls it
+    between tasks on worker threads. That state is the one the column-error
+    tests above drop, through the same slab type."""
+    var good = Path("orc/pyarrow_nullable_mixed.orc").read_bytes()
+    var rt = PerCoreAsyncRuntime[NoopSink](
+        num_workers=4,
+        sink_factory=_noop_sink_factory,
+        backend=BACKEND_MOCK,
+        placement=PLACEMENT_FIXED,
+    )
+    ref disp = rt.dispatcher()
+    var tok = CancellationToken.new()
+    tok.cancel("cancelled by the test")
+    var raised = False
+    var msg = String()
+    try:
+        _ = read_orc_bytes_with_dispatcher[origin_of(disp)](
+            Span(good), Pointer(to=disp), tok^
+        )
+    except e:
+        raised = True
+        msg = String(e)
+    assert_true(raised, "a cancelled read must raise")
+    assert_true(msg.find("CancelledError") >= 0, "the error says cancelled: " + msg)
+    for k in range(2):
+        var batch = read_orc_bytes_with_dispatcher[origin_of(disp)](
+            Span(good), Pointer(to=disp), CancellationToken.never()
+        )
+        _check_good(batch, "parallel read after a cancelled read #" + String(k))
     _ = rt^
 
 

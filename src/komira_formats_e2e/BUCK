@@ -31,8 +31,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   test_formats_foreign_orc -- six ORC files pyarrow's ORC C++ writer
 #     wrote (tests/fixtures/orc, with the generator script as provenance),
 #     read by value: codec, row count, every value and NULL, stripe count;
-#     and a read that fails in one column (one encoding byte changed) leaves
-#     the next read intact, serial and column-parallel.
+#     and a read that fails in one column (one encoding byte changed) or is
+#     cancelled leaves the next read intact, serial and column-parallel.
 #   test_formats_foreign_avro -- Apache Avro's weather OCF files (codecs
 #     null, deflate, snappy, zstandard; pinned in //third_party/apache-avro),
 #     read by value against upstream's own expected records.
@@ -47,10 +47,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   * komira_avro reads the snappy block's CRC32 trailer little-endian:
 #     test_weather_snappy red ("SNAPPY_CRC32_MISMATCH"), the only test in
 #     this package to catch it; komira_avro's own snappy tests also do.
-#   * komira_orc marks its accumulator slab empty after the error re-raise
-#     instead of before (the double free fixed alongside these tests): both
-#     failed-read tests red (SIGSEGV; out-of-bounds assert); komira_orc's
-#     own tests stay green.
+#   * The ORC reader before the error-path fix (double free): the
+#     serial failed-read test died with SIGSEGV (exit 139). With the slab
+#     marked empty after the re-raise instead of before, both tests in one
+#     run gave exit 139; the column-parallel test alone gave exit 132
+#     ("index 800 is out of bounds, valid range is 0 to 799").
+#     komira_orc's own tests stayed green.
+#   * Now that each accumulator slot is an Optional: a column-parallel
+#     worker moves its accumulator out through a raw pointer, leaving the
+#     slot Some: test_formats_foreign_orc exit 139 (komira_orc's own tests
+#     stay green, since none of them reads through a dispatcher). The same
+#     move in the serial loop: 13 komira_orc tests red (exit 139/132/1).
 #
 # `deps` lists the Mojo packages of the full transitive closure of the five
 # format/storage packages the fixture and tests use (each package's C helper
