@@ -25,6 +25,7 @@
 
 from komira_arrow.arrow_types import ArrowType
 
+from .json_number import scan_json_number
 from .json_string import decode_json_string
 
 
@@ -325,7 +326,7 @@ struct AvroSchema(Movable):
         var value = parser.parse_value()
         parser.skip_ws()
         if not parser.at_end():
-            raise Error("AvroSchemaError.MALFORMED_JSON: trailing data after schema")
+            raise parser._malformed("trailing data after schema")
 
         var nodes = List[AvroNode]()
         var named_in_scope = List[String]()  # visit-stack for recursion detect
@@ -1086,6 +1087,16 @@ struct _JsonParser:
             self.data.append(b[i])
         self.pos = 0
 
+    def _malformed(self, reason: String) -> Error:
+        """A MALFORMED_JSON error naming `reason` and the byte offset the
+        parser stands on."""
+        return Error(
+            String("AvroSchemaError.MALFORMED_JSON: ")
+            + reason
+            + " at byte "
+            + String(self.pos)
+        )
+
     @always_inline
     def at_end(self) -> Bool:
         return self.pos >= len(self.data)
@@ -1125,7 +1136,7 @@ struct _JsonParser:
             )
         self.skip_ws()
         if self.at_end():
-            raise Error("AvroSchemaError.MALFORMED_JSON: unexpected end of input")
+            raise self._malformed("unexpected end of input")
         var c = self._peek()
         if c == UInt8(ord('"')):
             return self._parse_string()
@@ -1139,7 +1150,7 @@ struct _JsonParser:
             return self._parse_null()
         elif c == UInt8(ord("-")) or (c >= UInt8(ord("0")) and c <= UInt8(ord("9"))):
             return self._parse_number()
-        raise Error("AvroSchemaError.MALFORMED_JSON: unexpected character")
+        raise self._malformed("unexpected character")
 
     def _parse_string(mut self) raises -> _JsonValue:
         # Escapes (including UTF-16 surrogate pairs) and raw UTF-8 are decoded
@@ -1160,11 +1171,11 @@ struct _JsonParser:
         while True:
             self.skip_ws()
             if self._peek() != UInt8(ord('"')):
-                raise Error("AvroSchemaError.MALFORMED_JSON: object key not string")
+                raise self._malformed("object key not string")
             var key = self._parse_string()
             self.skip_ws()
             if self._peek() != UInt8(ord(":")):
-                raise Error("AvroSchemaError.MALFORMED_JSON: expected ':'")
+                raise self._malformed("expected ':'")
             self.pos += 1
             var val = self.parse_value(depth + 1)
             v.obj_keys.append(key.str_val)
@@ -1177,7 +1188,7 @@ struct _JsonParser:
             elif c == UInt8(ord("}")):
                 self.pos += 1
                 break
-            raise Error("AvroSchemaError.MALFORMED_JSON: expected ',' or '}'")
+            raise self._malformed("expected ',' or '}'")
         return v^
 
     def _parse_array(mut self, depth: Int) raises -> _JsonValue:
@@ -1199,7 +1210,7 @@ struct _JsonParser:
             elif c == UInt8(ord("]")):
                 self.pos += 1
                 break
-            raise Error("AvroSchemaError.MALFORMED_JSON: expected ',' or ']'")
+            raise self._malformed("expected ',' or ']'")
         return v^
 
     def _parse_bool(mut self) raises -> _JsonValue:
@@ -1210,30 +1221,22 @@ struct _JsonParser:
         elif self._match_literal("false"):
             v.bool_val = False
         else:
-            raise Error("AvroSchemaError.MALFORMED_JSON: bad boolean literal")
+            raise self._malformed("bad boolean literal")
         return v^
 
     def _parse_null(mut self) raises -> _JsonValue:
         if not self._match_literal("null"):
-            raise Error("AvroSchemaError.MALFORMED_JSON: bad null literal")
+            raise self._malformed("bad null literal")
         return _json_null()
 
     def _parse_number(mut self) raises -> _JsonValue:
+        # The literal is checked against the RFC 8259 number grammar first
+        # (json_number.mojo); the value parsers below rely on it.
         var start = self.pos
-        var is_float = False
-        if self._peek() == UInt8(ord("-")):
-            self.pos += 1
-        while not self.at_end():
-            var c = self.data[self.pos]
-            if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
-                self.pos += 1
-            elif c == UInt8(ord(".")) or c == UInt8(ord("e")) or c == UInt8(ord("E")) or c == UInt8(ord("+")) or c == UInt8(ord("-")):
-                is_float = True
-                self.pos += 1
-            else:
-                break
+        var scan = scan_json_number(Span(self.data), start)
+        self.pos = scan.end
         var v = _json_null()
-        if is_float:
+        if scan.is_float:
             v.tag = _JSON_FLOAT
             # Parse the consumed digits as a Float64 (the substring start..pos)
             # via a small hand decimal parser (no stdlib atof). Used
