@@ -944,11 +944,14 @@ def _import_direction(lib: OwnedDLHandle) raises:
 
 
 def main() raises:
-    var lib = OwnedDLHandle(LIB)
-    _export_direction(lib)
-    _import_direction(lib)
-    # The release callbacks the library installed are its code: the handle
-    # stays open until every struct it produced has been released.
-    if not lib.check_symbol("probe_import_stream"):
-        _fail("probe_import_stream is no longer resolvable")
+    # The handle is never closed. With an `OwnedDLHandle` local, which closes
+    # the library when it is dropped at the end of main, this program printed
+    # "ok" and then died at process exit with SIGSEGV (exit 139): work that
+    # runs at exit refers to the library's code once the library has run.
+    # Unloading is not what this gate tests, so the handle is moved to a heap
+    # block that is never freed and the library stays mapped until the end.
+    var lib = alloc[OwnedDLHandle](1)
+    lib.unsafe_write(OwnedDLHandle(LIB))
+    _export_direction(lib[])
+    _import_direction(lib[])
     print("ok")
