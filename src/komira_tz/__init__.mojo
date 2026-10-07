@@ -1,5 +1,5 @@
-"""IANA time zones: TZif (RFC 8536) files read into zones, UTC to local and
-local to UTC with named gap and fold policies.
+"""IANA time zones: TZif files (RFC 9636, which obsoletes RFC 8536) read
+into zones, UTC to local and local to UTC with named gap and fold policies.
 
   offset.mojo    ZoneOffset (seconds east of UTC, DST flag, abbreviation) and
                  Transition

@@ -1,8 +1,9 @@
 # komira_tz
 
-IANA time zones in pure Mojo. It reads TZif files (RFC 8536, versions 1 to 4)
-into a `Zone`, evaluates the POSIX TZ string of their footer for instants past
-the last listed transition, converts a UTC instant to local time, and converts
+IANA time zones in pure Mojo. It reads TZif files (versions 1 to 3 of RFC
+8536, and version 4 of RFC 9636, which obsoletes it) into a `Zone`, evaluates
+the POSIX TZ string of their footer for instants past the last listed
+transition, converts a UTC instant to local time, and converts
 a local time to UTC, where a local time the clock skipped (a gap) or showed
 twice (a fold) is settled by a policy the caller must name.
 
