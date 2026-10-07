@@ -31,7 +31,11 @@ library:
   * the subdir comes from the TARGET platform's constraints (a select), never an
     attribute: a package cannot say `osx-arm64` over a linux `.mojoc`;
   * the payload is the library's gated `.mojoc`, so the package cannot exist
-    until the library's own welded tests pass;
+    until the library's own welded tests pass; with coverage on
+    (`-c komira.coverage=true`), not until its coverage runs passed and its
+    coverage gate held either (tools/build/coverage/README.md, "The build
+    gate"): the conda package is the one target a library's coverage
+    blocks, never the library or its dependents;
   * the library's README.md, when its package holds one, is installed at
     `share/doc/<name>/README.md` (a file of the package, listed in
     info/paths.json): what a user reads is inside what they installed, and
@@ -105,6 +109,7 @@ for each choice: packaging/conda/README.md.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/mojo:coverage.bzl", "MojoCoverageGateInfo")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -271,10 +276,13 @@ def _conda_package_impl(ctx):
     # No packed file is kcov, a build-only GPL-2.0 tool (kcov_guard.bzl).
     guarded = kcov_guard(ctx, ctx.attrs._kcov_guard, ctx.label.name, packed)
 
-    # A library of the coverage ledger (tools/build/coverage/policy.bzl,
-    # COVERAGE_NO_GATE), with coverage on: its own package cannot wait for
-    # its coverage gate, so what ships does.
-    gate = ctx.attrs.coverage_gate[DefaultInfo].default_outputs if ctx.attrs.coverage_gate else []
+    # With coverage on, what ships waits for the library's coverage runs and
+    # its gate (tools/build/mojo/coverage.bzl); for a library of the coverage
+    # ledger (tools/build/coverage/policy.bzl, COVERAGE_NO_GATE) the gate is
+    # its `<name>_cov_gate`. The library itself waits for neither.
+    gate = lib[MojoCoverageGateInfo].markers if MojoCoverageGateInfo in lib else []
+    if ctx.attrs.coverage_gate:
+        gate = gate + ctx.attrs.coverage_gate[DefaultInfo].default_outputs
 
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("out", dir = True)

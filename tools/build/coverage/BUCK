@@ -113,8 +113,8 @@ mojo_binary(
 # The directory every mojo_library's coverage gate runs from
 # (tools/build/mojo/coverage.bzl; README.md, "The build gate"): cov_gate.sh,
 # covcheck_bin and ratchet.tsv. The Mojo libraries covcheck_bin depends on
-# cannot wait for it: they are the ledger COVERAGE_NO_GATE of policy.bzl,
-# held equal to that closure by no_gate.bxl.
+# cannot have it as a dependency (a gate of their own): they are the ledger
+# COVERAGE_NO_GATE of policy.bzl, held equal to that closure by no_gate.bxl.
 cov_gate_dir(
     name = "cov_gate",
     exec_compatible_with = LINUX_X86_64,
