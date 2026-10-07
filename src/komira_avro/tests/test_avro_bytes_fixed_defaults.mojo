@@ -23,6 +23,12 @@
 #   T6 a writer schema with [bytes, null] and default null still opens.
 #   T7 schema resolution refuses a reader default that does not fit the
 #      reader column (exact messages), and still accepts one that fits.
+#   T8 schema resolution accepts a default on every arm of the fit check
+#      and synthesizes its value: string ("x", "", enum symbol, uuid,
+#      [string, null]); boolean; int into int, long, date, timestamp-millis,
+#      float, double and [int, null]; double into float and double; null
+#      into [long, null] (null as the second branch) and [null, string].
+#      A fit check too strict on any arm refuses the reader and goes red.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -456,6 +462,92 @@ def test_resolution_refuses_unfit_default() raises:
     )
 
 
+def test_resolution_accepts_fitting_defaults() raises:
+    """T8: one reader adds a field per arm of the default fit check; the
+    file resolves and every row carries the synthesized default."""
+    var writer = String(
+        '{"type":"record","name":"R","fields":[{"name":"id","type":"long"}]}'
+    )
+    var reader = String(
+        '{"type":"record","name":"R","fields":['
+        '{"name":"id","type":"long"},'
+        '{"name":"s","type":"string","default":"x"},'
+        '{"name":"s0","type":"string","default":""},'
+        '{"name":"e","type":{"type":"enum","name":"E","symbols":["A","B"]},'
+        '"default":"B"},'
+        '{"name":"uu","type":{"type":"string","logicalType":"uuid"},'
+        '"default":"123e4567-e89b-12d3-a456-426614174000"},'
+        '{"name":"t","type":"boolean","default":true},'
+        '{"name":"i","type":"int","default":5},'
+        '{"name":"l","type":"long","default":7},'
+        '{"name":"dt","type":{"type":"int","logicalType":"date"},'
+        '"default":3},'
+        '{"name":"ts","type":{"type":"long","logicalType":"timestamp-millis"},'
+        '"default":9},'
+        '{"name":"f","type":"float","default":1.5},'
+        '{"name":"fi","type":"float","default":2},'
+        '{"name":"d","type":"double","default":2.5},'
+        '{"name":"ln","type":["long","null"],"default":null},'
+        '{"name":"ns","type":["null","string"],"default":null},'
+        '{"name":"sn","type":["string","null"],"default":"y"},'
+        '{"name":"in","type":["int","null"],"default":4}]}'
+    )
+    var p = List[UInt8]()
+    _enc_long(Int64(5), p)
+    _enc_long(Int64(6), p)
+    var buf = _ocf(writer, p, 2)
+    var rb = read_avro_bytes_resolved(Span(buf), reader)
+    assert_equal(rb.num_rows(), 2)
+    assert_equal(rb.num_columns(), 17)
+    for r in range(2):
+        assert_equal(rb.column_at(1).as_string().get(r), String("x"), "s")
+        assert_equal(rb.column_at(2).as_string().get(r), String(""), "s0")
+        assert_equal(rb.column_at(3).as_string().get(r), String("B"), "e")
+        assert_equal(
+            rb.column_at(4).as_string().get(r),
+            String("123e4567-e89b-12d3-a456-426614174000"),
+            "uu",
+        )
+        assert_equal(rb.column_at(5).as_boolean().get(r), True, "t")
+        assert_equal(
+            Int(rb.column_at(6).as_primitive[DType.int32]().get(r)), 5, "i"
+        )
+        assert_equal(
+            Int(rb.column_at(7).as_primitive[DType.int64]().get(r)), 7, "l"
+        )
+        assert_equal(
+            Int(rb.column_at(8).as_primitive[DType.int32]().get(r)), 3, "dt"
+        )
+        assert_equal(
+            Int(rb.column_at(9).as_primitive[DType.int64]().get(r)), 9, "ts"
+        )
+        assert_equal(
+            rb.column_at(10).as_primitive[DType.float32]().get(r),
+            Float32(1.5),
+            "f",
+        )
+        assert_equal(
+            rb.column_at(11).as_primitive[DType.float32]().get(r),
+            Float32(2.0),
+            "fi",
+        )
+        assert_equal(
+            rb.column_at(12).as_primitive[DType.float64]().get(r),
+            Float64(2.5),
+            "d",
+        )
+        assert_true(
+            rb.column_at(13).as_primitive[DType.int64]().is_null(r), "ln null"
+        )
+        assert_true(rb.column_at(14).as_string().is_null(r), "ns null")
+        var sn = rb.column_at(15).as_string()
+        assert_true(not sn.is_null(r), "sn not null")
+        assert_equal(sn.get(r), String("y"), "sn")
+        var inc = rb.column_at(16).as_primitive[DType.int32]()
+        assert_true(not inc.is_null(r), "in not null")
+        assert_equal(Int(inc.get(r)), 4, "in")
+
+
 def main() raises:
     test_bytes_default_is_latin1()
     test_fixed_default()
@@ -464,4 +556,5 @@ def main() raises:
     test_resolution_applies_latin1_default()
     test_writer_union_null_default_opens()
     test_resolution_refuses_unfit_default()
+    test_resolution_accepts_fitting_defaults()
     print("test_avro_bytes_fixed_defaults: ALL PASS")
