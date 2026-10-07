@@ -29,7 +29,7 @@ from_address	src/komira_table_store/tests/test_table_store_multiwriter_gcs_occ.m
 from_address	src/komira_table_store/tests/test_table_store_si_thread_property.mojo	1	predates the lint
 from_address	src/komira_table_store/tests/test_table_store_unique_index.mojo	2	predates the lint
 partial_move	src/komira_async/runtime/local_dispatcher.mojo	3	predates the lint
-public_pointer	src/komira_agg_contract/accumulator_trait.mojo	1	predates the lint
+public_pointer	src/komira_agg_api/accumulator_trait.mojo	1	predates the lint
 public_pointer	src/komira_arrow/key_column_view.mojo	1	predates the lint
 public_pointer	src/komira_arrow_ipc/c_data_interface.mojo	2	predates the lint
 public_pointer	src/komira_arrow_ipc/c_data_stream.mojo	4	predates the lint
@@ -63,7 +63,7 @@ public_pointer	src/komira_morsel/source_hooks.mojo	3	predates the lint
 public_pointer	src/komira_morsel/vtable_source.mojo	1	predates the lint
 public_pointer	src/komira_simd/simd_helpers.mojo	3	predates the lint
 wildcard_origin	src/kci_reconciler/erased_resource.mojo	49	predates the lint
-wildcard_origin	src/komira_agg_contract/accumulator_trait.mojo	2	predates the lint
+wildcard_origin	src/komira_agg_api/accumulator_trait.mojo	2	predates the lint
 wildcard_origin	src/komira_arrow/primitive_array.mojo	2	predates the lint
 wildcard_origin	src/komira_arrow/record_batch.mojo	2	predates the lint
 wildcard_origin	src/komira_arrow/tests/test_dict_merge.mojo	2	predates the lint
@@ -116,7 +116,7 @@ wildcard_origin	src/komira_collections/slab.mojo	6	predates the lint
 wildcard_origin	src/komira_collections/tests/test_owned_slab.mojo	7	predates the lint
 wildcard_origin	src/komira_column_kernels/string_comparison.mojo	1	predates the lint
 wildcard_origin	src/komira_compression/compression.mojo	3	predates the lint
-wildcard_origin	src/komira_concurrency/spawn_drop.mojo	1	predates the lint
+wildcard_origin	src/komira_async_api/spawn_drop.mojo	1	predates the lint
 wildcard_origin	src/komira_core/accumulator_trait.mojo	2	predates the lint
 wildcard_origin	src/komira_core/arrow/compression.mojo	3	predates the lint
 wildcard_origin	src/komira_core/arrow/owned_aligned_buffer.mojo	10	predates the lint
