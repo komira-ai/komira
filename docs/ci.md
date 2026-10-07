@@ -121,11 +121,9 @@ address, and the address is one reachable only from inside the tailnet, so
 printing it would still disclose nothing usable. `//:no_endpoint` keeps an
 endpoint out of every committed buckconfig, workflow and local action.
 
-To check the connection without a build, run the manual workflow
-[`tailnet-probe`](../.github/workflows/tailnet-probe.yml) (the same join and the
-same port check, which also prints how the path runs, direct or relayed, and
-that the ports a CI node must not reach are blocked) from a branch of this
-repository.
+The connection is checked on every farm-connected run: the action's
+`refuse unless the farm answers` step fails the job before any build when the
+farm's port does not answer.
 
 Give CI its own remote-execution instance name, a sub-instance such as
 `<prefix>/ci`, so its action-cache entries are kept apart from developers' on a
