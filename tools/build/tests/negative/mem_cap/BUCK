@@ -10,9 +10,9 @@ _SRCS = [
     "chunks.mojo",
 ]
 
-# RED (GATED TEST FAILED, then MEMORY CAP: ... capped at 512 MiB): a test
-# that allocates without bound is stopped by its cap. With no cap it would
-# reach its 2 GiB fuse, hold it for 5 s and pass.
+# RED (GATED TEST FAILED, then MEMORY CAP: killed ... over its cap of
+# 512 MiB): a test that allocates without bound is stopped by its cap. With
+# no cap it would reach its 2 GiB fuse, hold it for 5 s and pass.
 mojo_library(
     name = "lib_unbounded",
     srcs = _SRCS,
@@ -30,9 +30,9 @@ mojo_test(
     deps = ["//functional/mem_cap:lib_under_cap"],
 )
 
-# RED (GATED TEST FAILED, then MEMORY CAP: ... capped at 192 MiB): the test
-# that passes under 1024 MiB (functional:lib_under_cap) fails under a cap
-# below the 256 MiB it holds for 2 s, after it has started.
+# RED (GATED TEST FAILED, then MEMORY CAP: killed ... over its cap of
+# 192 MiB): the test that passes under 1024 MiB (functional:lib_under_cap)
+# fails under a cap below the 256 MiB it holds for 2 s, after it has started.
 mojo_library(
     name = "lib_over_cap",
     srcs = _SRCS,
