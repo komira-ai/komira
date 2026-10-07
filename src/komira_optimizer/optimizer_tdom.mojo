@@ -883,9 +883,17 @@ def composite_ndv_pk_side[
                          tie-break (e.g. prefer larger cardinality side
                          as the FK side / smaller as PK).
 
+    A bucket endpoint outside `chain.relations` answers -1 (no FK-PK
+    signal); `build_pair_buckets` never emits one.
+
     It surfaces this as a convenience. It does NOT alter cost
     model behavior; pure read.
     """
+    var n_rel = len(chain.relations)
+    if bucket.rel_a < 0 or bucket.rel_a >= n_rel:
+        return -1
+    if bucket.rel_b < 0 or bucket.rel_b >= n_rel:
+        return -1
     var ndv_a = composite_ndv_for_relation(chain, bucket, bucket.rel_a, provider)
     var ndv_b = composite_ndv_for_relation(chain, bucket, bucket.rel_b, provider)
     var card_a = chain.relations[bucket.rel_a].cardinality
