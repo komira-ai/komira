@@ -57,6 +57,10 @@ mojo_library(
         "//third_party/brotli:brotlidec",
         "//third_party/snappy:snappy",
     ],
+    dlopen = [
+        "liblz4.so.1",
+        "libzstd.so.1",
+    ],
     test_data = {
         "tests/test_codecs_adversarial.mojo": {
             "brotli": "//third_party/brotli:testdata",

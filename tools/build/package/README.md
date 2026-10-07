@@ -210,6 +210,13 @@ uploaded, and an uploader reads only the `[release]` sub-target, which exists on
 after the release check (stamped, with its source commit) passed. The name, the run
 requirements, the subdir and the version are derived, a library that cannot be
 packaged keeps a target that builds as a refusal, and the bytes are reproducible.
+A library calling komira's C requires the package `komira_native`
+(`conda_native_package`, libkomira_native.so.1, built in
+[`../native`](../native/README.md)); one opening a system library at run time
+requires the package [`system_libs.bzl`](system_libs.bzl) names for its soname.
+`komira_pack conda-install` and `conda_prefix` ([`conda_prefix.bzl`](conda_prefix.bzl))
+make an environment from packages by their run requirements, for a build
+action to run programs in.
 `conda_manifest_kci` ([`manifest_probe/BUCK`](manifest_probe/BUCK)) is the build
 gate between the two: it builds one real package and reads its manifest with
 kci's parser, so `buck2 build //...` fails if the packer and kci disagree.

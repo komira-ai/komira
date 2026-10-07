@@ -27,7 +27,14 @@ library:
     and each DIRECT dependency of the library, by its published name, at the
     same version AND the same build string (`name ==V BUILD`: every package of a
     release is lockstep, so the solver's closure is the build's, and a second
-    build of a dependency in the channel cannot be chosen);
+    build of a dependency in the channel cannot be chosen), with `komira_native`
+    among them when the library's closure links C that libkomira_native.so.1
+    holds (tools/build/native/members.bzl); then the package shipping each
+    soname the library opens at run time (its `dlopen`, by
+    system_libs.bzl), which the packer holds to the sonames its sources name;
+  * the `per_library` C archives the library names in `deps` (komira_log's
+    holder) are installed at lib/lib<name>.a, for a program to link into its
+    own image;
   * the subdir comes from the TARGET platform's constraints (a select), never an
     attribute: a package cannot say `osx-arm64` over a linux `.mojoc`;
   * the payload is the library's gated `.mojoc`, so the package cannot exist
@@ -49,16 +56,21 @@ library:
     `tools/build/package/release_version.sh` prints all of them and the
     timestamp.
 
-A library that CANNOT be packaged (it links native code, has no tests, depends on
-a library with no package, opens a shared library by name at run time, or its name
-is not a conda name) keeps its package target, and the target builds: it is a
+A library that CANNOT be packaged (it links C that libkomira_native.so.1 does not
+hold, has no tests, depends on a library with no package, opens a shared library at
+run time by a soname it does not declare, or its name is not a conda name) keeps
+its package target, and the target builds: it is a
 directory holding one file, `REFUSED`, with the reason. Refusing by failing would
 make `buck2 build //...` fail on every such library. What refuses is asking for
 the RELEASE: `[release]`, `[release][manifest]` and `[release_check]` fail naming
 the reason. The package's dependents are refused the same way when the reason is
-known to the build; a library that dlopens is found only when its package is made,
-so the release tool must also check that every dependency of a declared package is
-declared.
+known to the build; a library whose sources open a library it does not declare is
+found only when its package is made, so the release tool must also check that every
+dependency of a declared package is declared.
+
+`conda_native_package` is libkomira_native.so.1 as the package `komira_native`
+(lib/libkomira_native.so.1 and the link lib/libkomira_native.so), stamped the
+same way, with the same sub-targets.
 
 Output contract. A package is a DIRECTORY, and an uploader reads `[release]` and
 nothing else:
@@ -108,7 +120,8 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/platforms:table.bzl", "asset")
+load("@komira//tools/build/platforms:table.bzl", "asset", "row")
+load("@komira//tools/build/native:members.bzl", NATIVE_CONDA_NAME = "CONDA_NAME")
 load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
 
 def _compiler_version():
@@ -160,6 +173,29 @@ def _copy_dir(ctx, bb, src, dst, category, identifier, hidden):
         identifier = identifier,
     )
 
+def _native_deps(info):
+    """The conda names a library requires beyond its Mojo dependencies:
+    `komira_native` when its closure links C that libkomira_native.so.1 holds
+    (tools/build/native/members.bzl), at this release's version and build
+    string like every other requirement."""
+    if info.native != None and info.native.shared:
+        return [NATIVE_CONDA_NAME]
+    return []
+
+def _lib_args(info):
+    # The `per_library` C archives the library names in `deps`, installed at
+    # lib/lib<name>.a: a program links them into its own image. The same
+    # argument goes to the packer and to its check.
+    if info.native == None:
+        return []
+    return [cmd_args("--lib-file", cmd_args(a, format = dest + "={}")) for dest, a in info.native.ships]
+
+def _dlopen_args(info):
+    # The sonames the library opens at run time and the requirement of each
+    # (tools/build/package/system_libs.bzl). The packer checks them against
+    # the sources; the same argument goes to its check.
+    return [cmd_args("--dlopen", "{}={}".format(s, r)) for s, r in info.dlopen]
+
 def _doc_args(info):
     # The package's documentation: its README.md, installed at
     # share/doc/<name>/README.md. The same argument goes to the packer and to
@@ -167,6 +203,37 @@ def _doc_args(info):
     if info.readme == None:
         return []
     return ["--doc-file", cmd_args(info.readme, format = "README.md={}")]
+
+def _published(ctx, raw, checked, release_checked, guarded):
+    """The providers of a package target: `raw` (the packer's directory)
+    copied after its checks passed, and the sub-targets (module docstring)."""
+    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output("out", dir = True)
+    _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded])
+
+    # [release]: the same directory, copied only after the RELEASE check passed
+    # (stamped, with its source commit and a positive commit time, and not
+    # refused) and the kcov guard passed. This is the only thing an uploader
+    # reads.
+    rel = ctx.actions.declare_output("release", dir = True)
+    _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded])
+    return [DefaultInfo(
+        default_output = out,
+        sub_targets = {
+            "check": [DefaultInfo(default_output = checked)],
+            "kcov_guard": [DefaultInfo(default_output = guarded)],
+            "manifest": [DefaultInfo(default_output = out.project("manifest.json"))],
+            "metadata": [DefaultInfo(default_output = out.project("metadata.json"))],
+            "release": [DefaultInfo(
+                default_output = rel,
+                sub_targets = {
+                    "manifest": [DefaultInfo(default_output = rel.project("manifest.json"))],
+                    "metadata": [DefaultInfo(default_output = rel.project("metadata.json"))],
+                },
+            )],
+            "release_check": [DefaultInfo(default_output = release_checked)],
+        },
+    )]
 
 def _conda_package_impl(ctx):
     lib = ctx.attrs.lib
@@ -185,6 +252,7 @@ def _conda_package_impl(ctx):
     # the kcov guard reads (kcov_guard.bzl). The packer adds generated JSON
     # only, and conda-check refuses any other member of the pkg tar.
     packed = []
+    deps = []
     if refusal != None:
         cmd = cmd_args(pack, "conda", "--name", name, "--refuse", refusal, "--out-dir", raw.as_output())
         payload = None
@@ -194,12 +262,14 @@ def _conda_package_impl(ctx):
             fail("{}: {} has no tests, but its library should have been refused for that".format(ctx.label, lib.label))
         payload = lib[DefaultInfo].default_outputs[0]
         sources = lib[DefaultInfo].sub_targets["src"][DefaultInfo].default_outputs[0]
-        deps = [info.direct_conda[d].name for d in info.direct]
+        deps = [info.direct_conda[d].name for d in info.direct] + _native_deps(info)
         extra_files = [["info/licenses/LICENSE", ctx.attrs._license_file]]
         packed.append(["lib/mojo/{}.mojoc".format(info.import_name), payload])
         packed.extend(extra_files)
         if info.readme != None:
             packed.append(["share/doc/{}/README.md".format(name), info.readme])
+        if info.native != None:
+            packed.extend([[dest, a] for dest, a in info.native.ships])
         cmd = cmd_args(
             pack,
             "conda",
@@ -231,6 +301,8 @@ def _conda_package_impl(ctx):
             str(ctx.label.raw_target()),
             [cmd_args("--dep", d) for d in deps],
             _doc_args(info),
+            _lib_args(info),
+            _dlopen_args(info),
             "--out-dir",
             raw.as_output(),
         )
@@ -256,8 +328,10 @@ def _conda_package_impl(ctx):
         ]
         if payload != None:
             args += ["--payload", payload]
-            args += [cmd_args("--dep", info.direct_conda[d].name) for d in info.direct]
+            args += [cmd_args("--dep", d) for d in deps]
             args.append(_doc_args(info))
+            args.append(_lib_args(info))
+            args.append(_dlopen_args(info))
         ctx.actions.run(
             cmd_args(args, extra, "--out", marker.as_output()),
             category = "conda_check",
@@ -271,33 +345,7 @@ def _conda_package_impl(ctx):
     # No packed file is kcov, a build-only GPL-2.0 tool (kcov_guard.bzl).
     guarded = kcov_guard(ctx, ctx.attrs._kcov_guard, ctx.label.name, packed)
 
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
-    out = ctx.actions.declare_output("out", dir = True)
-    _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded])
-
-    # [release]: the same directory, copied only after the RELEASE check passed
-    # (stamped, with its source commit and a positive commit time, and not
-    # refused) and the kcov guard passed. This is the only thing an uploader
-    # reads.
-    rel = ctx.actions.declare_output("release", dir = True)
-    _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded])
-    return [DefaultInfo(
-        default_output = out,
-        sub_targets = {
-            "check": [DefaultInfo(default_output = checked)],
-            "kcov_guard": [DefaultInfo(default_output = guarded)],
-            "manifest": [DefaultInfo(default_output = out.project("manifest.json"))],
-            "metadata": [DefaultInfo(default_output = out.project("metadata.json"))],
-            "release": [DefaultInfo(
-                default_output = rel,
-                sub_targets = {
-                    "manifest": [DefaultInfo(default_output = rel.project("manifest.json"))],
-                    "metadata": [DefaultInfo(default_output = rel.project("metadata.json"))],
-                },
-            )],
-            "release_check": [DefaultInfo(default_output = release_checked)],
-        },
-    )]
+    return _published(ctx, raw, checked, release_checked, guarded)
 
 _conda_package = rule(
     impl = _conda_package_impl,
@@ -368,6 +416,144 @@ def _conda_package_with_stamp(commit, stamp, timestamp_ms, **kwargs):
             "DEFAULT": "unsupported",
         }),
         timestamp_ms = timestamp_ms,
+        exec_compatible_with = LINUX_X86_64,
+        **kwargs
+    )
+
+# ---- libkomira_native.so.1 as a package ---------------------------------------
+
+def _glibc_floor():
+    # The glibc the library is linked against: the platform table's zig
+    # triple for linux x86_64 (`x86_64-linux-gnu.<version>`), which the Mojo
+    # toolchain's link uses. The package requires `__glibc >=<it>`.
+    triple = row("linux-x86_64")["zig_triple"]
+    head = "x86_64-linux-gnu."
+    if not triple.startswith(head) or not triple[len(head):][:1].isdigit():
+        fail("the linux-x86_64 zig triple `{}` is not `{}<glibc version>`".format(triple, head))
+    return triple[len(head):]
+
+# The glibc floor of the native package's run requirements (`__glibc >=<it>`).
+NATIVE_GLIBC = _glibc_floor()
+
+def _conda_native_package_impl(ctx):
+    lib = ctx.attrs.lib[DefaultInfo]
+    so = lib.default_outputs[0]
+    if "link" not in lib.sub_targets:
+        fail("{}: {} has no [link] sub-target (not a komira_native?)".format(ctx.label, ctx.attrs.lib.label))
+    link = lib.sub_targets["link"][DefaultInfo].default_outputs[0]
+    name = NATIVE_CONDA_NAME
+    subdir = _subdir(ctx)
+    pack = ctx.attrs._pack[RunInfo]
+    raw = ctx.actions.declare_output("raw/" + ctx.label.name, dir = True)
+    files = [
+        "--lib-file",
+        cmd_args(so, format = "lib/" + so.basename + "={}"),
+        "--lib-link",
+        "lib/{}={}".format(link.basename, so.basename),
+    ]
+    if subdir == None:
+        cmd = cmd_args(pack, "conda", "--name", name, "--refuse", "the target platform is not linux x86_64: libkomira_native.so.1 is built for linux x86_64 only", "--out-dir", raw.as_output())
+    else:
+        cmd = cmd_args(
+            pack,
+            "conda",
+            "--kind",
+            "native",
+            "--name",
+            name,
+            "--stamp",
+            ctx.attrs.stamp,
+            "--timestamp-ms",
+            ctx.attrs.timestamp_ms,
+            ["--commit", ctx.attrs.commit] if ctx.attrs.commit else [],
+            "--subdir",
+            subdir,
+            "--mojo-pin",
+            MOJO_COMPILER_VERSION,
+            "--glibc",
+            NATIVE_GLIBC,
+            "--license",
+            _LICENSE,
+            "--summary",
+            ctx.attrs.summary,
+            "--home",
+            _HOME,
+            "--extra-file",
+            cmd_args(ctx.attrs._license_file, format = "info/licenses/LICENSE={}"),
+            "--label",
+            str(ctx.label.raw_target()),
+            files,
+            "--out-dir",
+            raw.as_output(),
+        )
+    ctx.actions.run(cmd, category = "conda_pack", identifier = ctx.label.name)
+
+    def check(marker_name, extra):
+        marker = ctx.actions.declare_output(marker_name)
+        ctx.actions.run(
+            cmd_args(
+                pack,
+                "conda-check",
+                "--dir",
+                raw,
+                "--kind",
+                "native",
+                "--name",
+                name,
+                "--expect-subdir",
+                subdir or "linux-64",
+                "--mojo-pin",
+                MOJO_COMPILER_VERSION,
+                "--glibc",
+                NATIVE_GLIBC,
+                files,
+                extra,
+                "--out",
+                marker.as_output(),
+            ),
+            category = "conda_check",
+            identifier = marker_name,
+        )
+        return marker
+
+    checked = check(ctx.label.name + ".checked", [])
+    release_checked = check(ctx.label.name + ".release_checked", ["--require-stamped", "true"])
+    guarded = kcov_guard(ctx, ctx.attrs._kcov_guard, ctx.label.name, [["lib/" + so.basename, so], ["info/licenses/LICENSE", ctx.attrs._license_file]])
+    return _published(ctx, raw, checked, release_checked, guarded)
+
+_conda_native_package = rule(
+    impl = _conda_native_package_impl,
+    attrs = {
+        "commit": attrs.string(default = ""),
+        "lib": attrs.dep(doc = "A komira_native target (tools/build/native/komira_native.bzl): the shared object and its `[link]` name."),
+        "stamp": attrs.string(),
+        "subdir": attrs.string(),
+        "summary": attrs.string(),
+        "timestamp_ms": attrs.string(),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
+        "_license_file": attrs.source(default = "komira//:LICENSE"),
+        "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
+    },
+)
+
+def conda_native_package(**kwargs):
+    """libkomira_native.so.1 as the conda package `komira_native`
+    (tools/build/native/members.bzl CONDA_NAME): lib/libkomira_native.so.1
+    and the symbolic link lib/libkomira_native.so to it, the package every
+    library whose closure links that C requires at the same version and build
+    string. Stamped from the configuration as conda_package is; the same
+    sub-targets. Its run requirements are the platform guard and
+    `__glibc >=<NATIVE_GLIBC>`; it holds no Mojo and requires no compiler.
+    """
+    _conda_native_package(
+        commit = read_config("komira", "package_commit", ""),
+        stamp = read_config("komira", "package_stamp", "0"),
+        subdir = select({
+            "komira//tools/build/package:is_linux_x86_64": "linux-64",
+            "DEFAULT": "unsupported",
+        }),
+        timestamp_ms = read_config("komira", "package_timestamp_ms", "0"),
         exec_compatible_with = LINUX_X86_64,
         **kwargs
     )
@@ -470,8 +656,11 @@ def _conda_doc_check_impl(ctx):
             "--payload",
             lib[DefaultInfo].default_outputs[0],
             [cmd_args("--dep", info.direct_conda[d].name) for d in info.direct],
+            [cmd_args("--dep", d) for d in _native_deps(info)],
             "--doc-file",
             cmd_args(info.readme, format = "README.md={}"),
+            _lib_args(info),
+            _dlopen_args(info),
             "--out",
             marker.as_output(),
         ),
@@ -501,6 +690,7 @@ def conda_doc_check(**kwargs):
     _conda_doc_check(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 conda_package = declares_docs(conda_package)
+conda_native_package = declares_docs(conda_native_package)
 conda_package_test_stamped = declares_docs(conda_package_test_stamped)
 conda_manifest_kci = declares_docs(conda_manifest_kci)
 conda_doc_check = declares_docs(conda_doc_check)

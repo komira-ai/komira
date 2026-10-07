@@ -18,6 +18,19 @@ MojoInfo = provider(fields = {
     # on: what a binary linking this package must also link. None when there
     # are none.
     "c_link": provider_field(typing.Any, default = None),
+    # What the C of `c_link` is to libkomira_native.so.1, by the targets this
+    # package and every package it depends on name in `deps` (a C library's
+    # own C dependencies are not seen: the shared library's link fails if one
+    # is missing from it). A struct of sorted label lists in the form of
+    # tools/build/native/members.bzl, None when `c_link` is None:
+    #   shared        declared `shared` (a NativeArchiveInfo)
+    #   per_library   declared `per_library`
+    #   undeclared    no declaration: a plain cxx_library, or a target outside
+    #                 the komira cell
+    # and `ships`, a list of (path in the package, archive) for the
+    # `per_library` archives this package itself names in `deps`, which its
+    # conda package carries (tools/build/package/conda.bzl).
+    "native": provider_field(typing.Any, default = None),
     # The import names of the packages this one lists in `deps`, sorted: its
     # direct dependencies, which a published package names in its run
     # requirements (tools/build/package/conda.bzl). Required, not defaulted:
@@ -26,13 +39,17 @@ MojoInfo = provider(fields = {
     # What the library's conda package is (tools/build/package/conda.bzl):
     # `conda_name` is the published name, None when the library opted out
     # (`conda = False`) or is not a mojo_library; `conda_refusal` is why the
-    # package cannot be built (native code, no tests, a dependency with no
-    # package), None when it can. `direct_conda` maps the import name of each
+    # package cannot be built (C outside libkomira_native.so.1, no tests, a
+    # dependency with no package), None when it can. `direct_conda` maps the import name of each
     # direct dependency to a struct(name, refusal) of the same two facts, which
     # is how a package names its requirements by their PUBLISHED names.
     "conda_name": provider_field(typing.Any, default = None),
     "conda_refusal": provider_field(typing.Any, default = None),
     "direct_conda": provider_field(typing.Any, default = {}),
+    # The sonames the library opens at run time (`dlopen`, sorted), each with
+    # the conda requirement of the package that ships it
+    # (tools/build/package/system_libs.bzl): a list of (soname, requirement).
+    "dlopen": provider_field(typing.Any, default = []),
     "import_name": provider_field(str),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
     # The package's README.md (the source artifact), None without one. Its

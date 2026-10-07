@@ -21,7 +21,7 @@ native_archive(
     kind = "shared",
     lib = ":komira_scan_source_inmem_id",
     reason = "The in-memory source id counter: ids must be unique across the process.",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 # What a scan is: SourceLike, ScanBinding identity, scan params, per-format source descriptors, pushdown gate, Sink trait, in-memory registry.
@@ -29,7 +29,7 @@ mojo_library(
     name = "komira_scan_source",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_scan_source_inmem_id",
+        ":komira_scan_source_inmem_id_native",
         "//src/komira_arrow:komira_arrow",
         "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_buffer:komira_buffer",

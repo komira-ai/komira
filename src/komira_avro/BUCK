@@ -23,6 +23,12 @@ mojo_library(
         "//third_party/snappy:snappy",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
+    dlopen = [
+        "libbz2.so.1.0",
+        "liblzma.so.5",
+        "libz.so.1",
+        "libzstd.so.1",
+    ],
     test_srcs = [
         "tests/test_avro_all_primitive_types_decode.mojo",
         "tests/test_avro_arrow_logical_round_trip.mojo",

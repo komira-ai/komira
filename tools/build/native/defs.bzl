@@ -15,8 +15,9 @@ libkomira_native.so.1 (komira_native.bzl) may take it: its kind, `shared`
 (its symbols and state are one per process, so the shared library holds it)
 or `per_library` (it holds state that must be one per Mojo library, so it
 stays a static archive linked into each), and why. `native_archive` declares
-it for a `cxx_library`; `checked_cxx_library` declares it for a prefixed
-vendored library through `native_kind`.
+it for a `cxx_library` and forwards the library's providers, so a Mojo
+package names the declaration in its `deps`; `checked_cxx_library` declares
+it for a prefixed vendored library through `native_kind`.
 
 Every action runs under the pinned busybox, and every script and source an
 action reads is copied under buck-out first (as in tools/build/lint): a source
@@ -158,6 +159,9 @@ NativeArchiveInfo = provider(
     fields = {
         # The position-independent static archive (the library's `[static-pic]`).
         "archive": provider_field(Artifact),
+        # The library's target name: a `per_library` archive is shipped in a
+        # conda package as lib/lib<name>.a.
+        "name": provider_field(str),
         # "shared": in libkomira_native.so.1. "per_library": never in it.
         "kind": provider_field(str),
         # Why: what state the archive holds, and whose it must be.
@@ -176,15 +180,18 @@ def _static_pic(ctx, lib):
 def _native_info(ctx, lib, kind, reason):
     if not reason.strip():
         fail("{}: the declaration needs a reason: what state the archive holds and whose it must be".format(ctx.label))
-    return NativeArchiveInfo(archive = _static_pic(ctx, lib), kind = kind, reason = reason)
+    return NativeArchiveInfo(archive = _static_pic(ctx, lib), kind = kind, name = lib.label.name, reason = reason)
 
 def _native_archive_impl(ctx):
-    info = _native_info(ctx, ctx.attrs.lib, ctx.attrs.kind, ctx.attrs.reason)
-    return [DefaultInfo(default_output = info.archive), info]
+    # Every provider of the library, unchanged, plus the declaration: a Mojo
+    # package names this target in its `deps` (its link arguments are the
+    # library's own, so no action key changes), which is how its conda package
+    # knows the kind of every C archive in its closure (tools/build/mojo/defs.bzl).
+    return list(ctx.attrs.lib.providers) + [_native_info(ctx, ctx.attrs.lib, ctx.attrs.kind, ctx.attrs.reason)]
 
 _native_archive = rule(
     impl = _native_archive_impl,
-    doc = "The declaration of the C archive `lib` (a cxx_library) for libkomira_native.so.1: `kind` shared (one copy per process, in the shared library) or per_library (state each Mojo library must own, kept out of it), and the `reason`. The default output is the archive.",
+    doc = "The declaration of the C archive `lib` (a cxx_library) for libkomira_native.so.1: `kind` shared (one copy per process, in the shared library) or per_library (state each Mojo library must own, kept out of it), and the `reason`. It carries every provider of `lib` unchanged, so a mojo_library names it in `deps` in place of the library.",
     attrs = {
         "kind": attrs.enum(_KINDS),
         "lib": attrs.dep(),

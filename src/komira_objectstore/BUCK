@@ -37,19 +37,19 @@ native_archive(
     kind = "shared",
     lib = ":komira_objectstore_posix",
     reason = "Errno-surfacing file wrappers; its only state is the test fault hooks, plain ints.",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 mojo_library(
     name = "komira_objectstore",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_objectstore_posix",
+        ":komira_objectstore_posix_native",
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
-        "//src/komira_fs:komira_fs_posix",
+        "//src/komira_fs:komira_fs_posix_native",
         "//src/komira_libc:komira_libc",
         "//src/komira_metrics:komira_metrics",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",

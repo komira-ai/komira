@@ -30,14 +30,14 @@ native_archive(
     kind = "shared",
     lib = ":komira_metrics_ea_flag",
     reason = "The EXPLAIN ANALYZE arm flag, a plain int: one per process.",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 mojo_library(
     name = "komira_metrics",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_metrics_ea_flag",
+        ":komira_metrics_ea_flag_native",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_clock:komira_clock",
         "//src/komira_collections:komira_collections",

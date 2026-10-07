@@ -175,15 +175,24 @@ _CASES = ["R1", "B1", "IR1", "IR2"]
 
 def _run_test_impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
-    lib = ctx.attrs.lib[DefaultInfo]
-    so = lib.default_outputs[0]
-    files = {
-        "lib/" + so.basename: so,
-        "lib/" + lib.sub_targets["link"][DefaultInfo].default_outputs[0].basename: so,
-    }
-    for name, pkg in ctx.attrs.mojoc.items():
-        files["lib/mojo/{}.mojoc".format(name)] = pkg
-    prefix = ctx.actions.copied_dir("prefix", files)
+    if ctx.attrs.prefix != None:
+        # An environment the packages themselves were installed into
+        # (tools/build/package/conda_prefix.bzl).
+        if ctx.attrs.lib != None or ctx.attrs.mojoc:
+            fail("{}: `prefix` is the whole environment; give `lib` and `mojoc` only without it".format(ctx.label))
+        prefix = ctx.attrs.prefix[DefaultInfo].default_outputs[0]
+    else:
+        if ctx.attrs.lib == None:
+            fail("{}: give `lib` (and `mojoc`), or `prefix`".format(ctx.label))
+        lib = ctx.attrs.lib[DefaultInfo]
+        so = lib.default_outputs[0]
+        files = {
+            "lib/" + so.basename: so,
+            "lib/" + lib.sub_targets["link"][DefaultInfo].default_outputs[0].basename: so,
+        }
+        for name, pkg in ctx.attrs.mojoc.items():
+            files["lib/mojo/{}.mojoc".format(name)] = pkg
+        prefix = ctx.actions.copied_dir("prefix", files)
     srcs = ctx.actions.copied_dir("programs", {s.basename: s for s in ctx.attrs.srcs})
     wd_idle = str(tc.watchdog_idle_secs) if tc.watchdog_idle_secs != None else "300"
     wd_sample = str(tc.watchdog_sample_secs) if tc.watchdog_sample_secs != None else "30"
@@ -215,6 +224,9 @@ def _run_test_impl(ctx):
                 ctx.attrs._elfsyms[RunInfo],
                 case,
                 log.as_output(),
+                # The defaults stay off the command line, so the cases of
+                # :komira_native_run_test keep their action keys.
+                [ctx.attrs.program] + ctx.attrs.link if ctx.attrs.program != "native_run" or ctx.attrs.link else [],
             ),
             category = "native_run_test",
             identifier = case,
@@ -242,11 +254,14 @@ def _run_test_impl(ctx):
 
 _komira_native_run_test = rule(
     impl = _run_test_impl,
-    doc = "Runs `srcs` (Mojo programs) against `lib` (a komira_native target) laid out as a conda environment holds it, one action per case of native_run.sh; each fails its action unless its program prints RESULT PASS. The result is a validation of this target.",
+    doc = "Runs `srcs` (Mojo programs) against `lib` (a komira_native target) laid out as a conda environment holds it, or in `prefix`, an environment the conda packages were installed into, one action per case of native_run.sh; each fails its action unless its program prints RESULT PASS. The result is a validation of this target.",
     attrs = {
         "cases": attrs.list(attrs.string(), doc = "Cases of native_run.sh: R1, B1, IR1, IR2."),
-        "lib": attrs.dep(doc = "A komira_native target."),
+        "lib": attrs.option(attrs.dep(), default = None, doc = "A komira_native target."),
+        "link": attrs.list(attrs.string(), default = [], doc = "Libraries a program links after komira_native (`-l<name>`): the per_library archives the environment's packages ship."),
         "mojoc": attrs.dict(attrs.string(), attrs.source(), default = {}, doc = "Import name -> a mojo_library: the packages the programs import, installed as lib/mojo/<name>.mojoc."),
+        "prefix": attrs.option(attrs.dep(), default = None, doc = "A conda_prefix: the environment, in place of `lib` and `mojoc`."),
+        "program": attrs.string(default = "native_run", doc = "The program R1 runs and B1 builds: <program>.mojo of `srcs`."),
         "srcs": attrs.list(attrs.source(), doc = "The programs and the modules they import, staged in one directory."),
         "_elfsyms": attrs.exec_dep(default = _ELFSYMS, providers = [RunInfo]),
         "_run_sh": attrs.source(default = "komira//tools/build/native:native_run.sh"),

@@ -19,6 +19,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 mojo_library(
     name = "komira_zlib",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    dlopen = ["libz.so.1"],
     test_data = {
         "tests/test_zlib_into.mojo": {
             "golden/zlib": "//third_party/zlib:files",

@@ -54,7 +54,7 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_clock:komira_clock",
         "//src/komira_fork_join:komira_fork_join",
-        "//src/komira_fs:komira_fs_posix",
+        "//src/komira_fs:komira_fs_posix_native",
         "//src/komira_hash:komira_hash",
         "//src/komira_log:komira_log",
         "//src/komira_lz4:komira_lz4",

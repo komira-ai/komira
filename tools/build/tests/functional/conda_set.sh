@@ -9,9 +9,11 @@
 #        KOMIRA_TEST_KEEP=1 keeps the scratch directory, with every log, after a pass)
 #
 #   enumerate  tools/build/package/list_conda_targets.sh prints a package target for every library
-#              of //src with no declaration anywhere; every one of them builds (a refusal is a
-#              value, not a build failure), and the libraries that cannot be packaged say why
-#              (komira_libc: native code). The rest are the set the later checks use.
+#              of //src with no declaration anywhere, and the native package (libkomira_native.so.1,
+#              which the libraries linking komira's C require); every one of them builds (a refusal
+#              is a value, not a build failure), and the libraries that cannot be packaged say why
+#              (komira_db_sqlite: C the shared library does not hold). komira_libc, whose C the
+#              shared library holds, makes a package. The rest are the set the later checks use.
 #   contract   the manifest of every package of the set, and of the metapackage, is read by
 #              kci's own parser (src/kci_artifact_manifest, run as the probe
 #              //tools/build/package/manifest_probe:parse_manifest) and rendered again by kci's
@@ -80,7 +82,7 @@ BUILD8=h01234567_8
 
 # ---- enumerate ------------------------------------------------------------
 TARGETS=()
-while IFS= read -r t; do [ -n "$t" ] && TARGETS+=("$t"); done < <(tools/build/package/list_conda_targets.sh //src/... //tools/build/mojo/runtime_paths/... 2> "$W/list.err")
+while IFS= read -r t; do [ -n "$t" ] && TARGETS+=("$t"); done < <(tools/build/package/list_conda_targets.sh //src/... //tools/build/mojo/runtime_paths/... //tools/build/native/... 2> "$W/list.err")
 if [ "${#TARGETS[@]}" -lt 2 ]; then
     fail "enumerate: list_conda_targets.sh printed ${#TARGETS[@]} targets (see $W/list.err)"
     echo "logs: $W"
@@ -105,12 +107,15 @@ while read -r target path; do
 done < "$W/all.out"
 problems=""
 [ "$((${#OK[@]} + ${#REFUSED[@]}))" = "${#TARGETS[@]}" ] || problems="$problems targets-without-output"
-printf '%s\n' "${REFUSED[@]}" | grep -qx komira_libc || problems="$problems komira_libc-not-refused"
-grep -q 'links native code' "$K/dev/komira_libc/REFUSED" 2> /dev/null || problems="$problems komira_libc-reason:[$(cat "$K/dev/komira_libc/REFUSED" 2> /dev/null)]"
+printf '%s\n' "${REFUSED[@]}" | grep -qx komira_db_sqlite || problems="$problems komira_db_sqlite-not-refused"
+grep -q 'links C that libkomira_native.so.1 does not hold' "$K/dev/komira_db_sqlite/REFUSED" 2> /dev/null || problems="$problems komira_db_sqlite-reason:[$(cat "$K/dev/komira_db_sqlite/REFUSED" 2> /dev/null)]"
 printf '%s\n' "${OK[@]}" | grep -qx komira_encoding || problems="$problems komira_encoding-refused"
+printf '%s\n' "${OK[@]}" | grep -qx komira_libc || problems="$problems komira_libc-refused"
+printf '%s\n' "${OK[@]}" | grep -qx komira_native || problems="$problems komira_native-refused"
+jq -e '. as $m | $m.depends | index("komira_native ==\($m.version) \($m.build)")' "$K/dev/komira_libc/metadata.json" > /dev/null 2>&1 || problems="$problems komira_libc-does-not-require-komira_native"
 for r in "${REFUSED[@]}"; do [ -s "$K/dev/$r/REFUSED" ] || problems="$problems $r-has-no-reason"; done
 if [ -n "$problems" ]; then fail "enumerate:$problems (see $W)"; else
-    pass "enumerate: ${#TARGETS[@]} package targets, one per library of //src (and of komira_runtime_paths, which a package requires), none declared anywhere; all build; ${#REFUSED[@]} are refused with a reason (komira_libc: native code) and ${#OK[@]} make a package"
+    pass "enumerate: ${#TARGETS[@]} package targets, one per library of //src (and of komira_runtime_paths, which a package requires, and the native package), none declared anywhere; all build; ${#REFUSED[@]} are refused with a reason (komira_db_sqlite: C outside libkomira_native.so.1) and ${#OK[@]} make a package (komira_libc requiring komira_native)"
 fi
 
 # The release tool's completeness rule, played here: every requirement of a package of the set is
@@ -120,7 +125,9 @@ fi
 # reading sources, so the release tool must check this over its declarations.
 problems=""
 for n in "${OK[@]}"; do
-    for req in $(jq -r '.depends[2:][] | split(" ")[0]' "$K/dev/$n/metadata.json"); do
+    # (a requirement with no `==`, such as `zstd >=1.5.2,<2`, is a system library's package
+    # from the public channel, not one of the set)
+    for req in $(jq -r '.depends[2:][] | select(contains("==")) | split(" ")[0]' "$K/dev/$n/metadata.json"); do
         printf '%s\n' "${OK[@]}" | grep -qx "$req" || problems="$problems $n-requires-$req"
     done
 done
@@ -152,7 +159,7 @@ for n in "${OK[@]}"; do
     jq -e --arg v "$VERSION" --arg f "$n-$VERSION-$BUILD.conda" '.version == $v and .file == $f' "$K/rel/$n/manifest.json" > /dev/null || problems="$problems $n-version"
     jq -e --arg c "$C40" --arg b "$BUILD" '.stamped == true and .source_commit == $c and .build == $b and .build_number == 7' "$K/rel/$n/metadata.json" > /dev/null || problems="$problems $n-stamp"
     # every dependency is pinned by version AND build string
-    jq -e --arg v "$VERSION" --arg b "$BUILD" '.depends[2:] | all(endswith(" ==\($v) \($b)"))' "$K/rel/$n/metadata.json" > /dev/null || problems="$problems $n-requirement-without-build"
+    jq -e --arg v "$VERSION" --arg b "$BUILD" '.depends[2:] | all(endswith(" ==\($v) \($b)") or (contains("==") | not))' "$K/rel/$n/metadata.json" > /dev/null || problems="$problems $n-requirement-without-build"
 done
 for r in "${REFUSED[@]}"; do
     # shellcheck disable=SC2086

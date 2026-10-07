@@ -35,14 +35,14 @@ native_archive(
     kind = "per_library",
     lib = ":komira_log_holder",
     reason = "Holds the addresses of Mojo structs (the logging engine, its config) that only the library that elaborated them may read: one cell per library, hidden by design (engine/_log_holder_shim.c).",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 mojo_library(
     name = "komira_log",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_log_holder",
+        ":komira_log_holder_native",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_clock:komira_clock",
         "//src/komira_collections:komira_collections",

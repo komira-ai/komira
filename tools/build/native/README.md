@@ -83,8 +83,15 @@ Each C archive declares its kind, next to its `cxx_library`
 ([`defs.bzl`](defs.bzl)):
 
 - `native_archive(name = "<lib>_native", lib = ":<lib>", kind = ..., reason = ...)`
-  for komira's own C;
+  for komira's own C; it carries every provider of the library, and a Mojo
+  package names it in `deps` in place of the library (the link arguments are
+  the library's, so no action key changes);
 - `native_kind = "shared"` on a vendored library's `checked_cxx_library`.
+
+[`members.bzl`](members.bzl) states what the library holds, once: its
+`ARCHIVES`, its `PER_LIBRARY` archives and its `CALLERS`. The library's
+target is built from those lists, and every Mojo package's conda package
+reads them (below).
 
 `shared` C is one copy per process and goes in the library. `per_library`
 C holds state that must be one per Mojo library and stays out: today only
@@ -118,10 +125,64 @@ is not listed fails its own link against the library once packages link it,
 so a missing one cannot ship.
 
 Names only welded tests call (`komira_objstore_test_*`, `komira_fs_test_*`,
-`komira_mac_*`, `komira_s2n_config_enable_quic`) are not exported. A test
-linking the static archive instead gets its own copy of the archive's
-statics, so a test hook it sets would not reach the library's copy: how the
-tests link is decided with the packages' move to the library.
+`komira_mac_*`, `komira_s2n_config_enable_quic`) are not exported.
+
+### Welded tests link the archives, never the library
+
+A welded test (and a README example) is linked against the static archives
+of its package's closure, exactly as before the library existed, and never
+against `libkomira_native.so.1`: the library's target provides no
+`MergedLinkInfo`, so a Mojo target cannot name it in `deps`. A test process
+therefore holds one copy of every C static, and a test hook it sets
+(`komira_objstore_test_fail_next_link_emlink`, say) is the copy the code
+under test reads. Were a test to link both, its hook would set the archive's
+copy while the library's code read its own, and the test would pass without
+testing anything. Planted, red: that hook made inert in
+`_objectstore_shim.c` fails `test_local_fs_store_create_write_failure`
+(`AssertionError: not an I/O error`). What a user links, the library, is
+tested by the run tests below, against the same archives linked whole.
+
+### The package
+
+`:komira_native_conda` (`conda_native_package`,
+[`../package/conda.bzl`](../package/conda.bzl)) is the conda package
+`komira_native`: `lib/libkomira_native.so.1` and the symbolic link
+`lib/libkomira_native.so` to it, made from `:komira_native`, so it exists
+only after the export checks and the run test passed. Its version and build
+string are every package's of the release; its run requirements are the
+platform guard and `__glibc >=2.34` (the glibc of the platform table's link
+target). A Mojo library whose closure links an archive of `ARCHIVES` requires
+it at its own version and build string, and its `.mojoc` carries no C (it
+never did: a `.mojoc` holds no machine code). A library that names a
+`PER_LIBRARY` archive in `deps` ships it in its own package as
+`lib/lib<name>.a` (komira_log: `lib/libkomira_log_holder.a`), which a
+program built against the package links into its own image
+(`-Xlinker -lkomira_log_holder`), keeping one copy of its state per Mojo
+library. A library linking C that is in neither list is refused
+([packaging/conda](../../../packaging/conda/README.md)).
+
+A consumer links `-Xlinker -L<env>/lib -Xlinker -lkomira_native`, and a
+built program finds the library with the run path `$ORIGIN/../lib`.
+`mojo run` does not link a static archive, so a program using komira_log (or a
+library depending on it) must be built, not run with `mojo run`.
+
+The installed run tests build the environment from the packages themselves
+(`conda_prefix`, [`../package/conda_prefix.bzl`](../package/conda_prefix.bzl):
+`komira_pack conda-install` follows the root's run requirements through a
+pool of package targets and extracts what they reach):
+
+| target | environment | cases |
+|---|---|---|
+| `:installed_crypto_run_test` | komira_crypto's package and what it requires | R1 and B1 of `run_test/installed_crypto.mojo`: SHA-256 and HMAC-SHA256 known answers through komira_crypto, whose aws-lc is the library's |
+| `:installed_log_run_test` | komira_log's package and what it requires | B1 of `run_test/installed_log.mojo`, linking `-lkomira_log_holder`: a filter installed through the package's holder archive is read back |
+
+Only the requirements decide what is installed, so a library package that
+stopped requiring `komira_native` gets an environment without the library.
+Planted, red: the requirement dropped from every library package
+(`conda.bzl` `_native_deps`) leaves the packages' own `[check]` green (it is
+given the same list) and fails R1 (`Symbols not found: [ komira_awslc_SHA256,
+... ]`) and B1 (`unable to find dynamic system library 'komira_native'`).
+`:komira_native_conda_kci` reads the package's manifest with kci's parser.
 
 ### The link and the checks
 
@@ -157,5 +218,8 @@ IR1 and IR2 fail on a worker without the system `libcrypto.so.3` and
 | IR2 | the order a host process (a Python interpreter, say) gives: the system OpenSSL loaded `RTLD_GLOBAL` and called first, then ours dlopened by path `RTLD_GLOBAL` and called through the handle (the program links nothing of ours); the same checks |
 
 `:komira_native` is `:libkomira_native` with the run test as a check, so no
-build of it succeeds while any of the three is red. The library is built for linux
+build of it succeeds while any of the three is red. The run test takes an
+installed environment in place of the library (`prefix`), a program other
+than `native_run` (`program`) and per_library archives to link after the
+library (`link`): the installed run tests above. The library is built for linux
 x86_64 only (an ELF version script; aws-lc's assembly).

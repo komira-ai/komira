@@ -9,6 +9,7 @@ mojo_library(
         "//src/komira_zlib:komira_zlib",
         "//third_party/snappy:snappy",
     ],
+    dlopen = ["libzstd.so.1"],
     test_data = {
         "tests/test_gzip_lz4_frame_conformers.mojo": {
             "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",

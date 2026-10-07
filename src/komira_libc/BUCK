@@ -22,7 +22,7 @@ native_archive(
     kind = "shared",
     lib = ":komira_libc_posix",
     reason = "Fixed-arity POSIX file and memory-map wrappers and two process-wide memory-map counters: one copy per process.",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 # The libc and POSIX layer every package shares: one getenv, the access probes and pthread_self, file and memory-map syscall wrappers with the C shim symbols they call, chunked large writes, RAII file descriptor.
@@ -30,7 +30,7 @@ mojo_library(
     name = "komira_libc",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_libc_posix",
+        ":komira_libc_posix_native",
     ],
     test_srcs = [
         "tests/test_chunked_write.mojo",

@@ -14,7 +14,7 @@ the compiler sees. Worked uses of each rule are in
 
 | rule | produces | example |
 |---|---|---|
-| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
+| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level, dlopen)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
@@ -42,6 +42,19 @@ mojo_library(
   staged source directory can never shadow a package. A package reaches the
   compiler only through `deps`
   ([`tests/negative/missing_dep`](../tests/negative/missing_dep/BUCK) fails to compile).
+- **C in `deps`.** A C library named in `deps` is linked statically into
+  every executable built with the package in its closure, the welded tests
+  included. komira's own C archives are named by their declaration for
+  libkomira_native.so.1 (`:<archive>_native`, a `native_archive` carrying the
+  library's providers; [native/README.md](../native/README.md)), which is how
+  the package's conda package knows that the shared library holds the C. A
+  test binary links archives only, never the shared library (which provides
+  no `MergedLinkInfo`, so `deps` refuses it): one copy of each C static per
+  test process, so a test hook it sets is the one the code under test reads.
+- **`dlopen`** lists the sonames the package opens at run time
+  (`OwnedDLHandle("libz.so.1")`), each named in
+  [`system_libs.bzl`](../package/system_libs.bzl); its conda package requires
+  the package that ships each ([Packaging](../package/README.md)).
 - **The gate.** Each file in `test_srcs` is built from that one file against
   the ungated package (at `test_optimization_level`, default `-O1`; see [Optimization levels](#optimization-levels)) and run;
   a failing test prints `GATED TEST FAILED: <label> (exit N)`. The public

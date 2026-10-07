@@ -30,14 +30,14 @@ native_archive(
     kind = "shared",
     lib = ":komira_supervisor_proc",
     reason = "Stateless spawn, pipe and wait wrappers.",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 mojo_library(
     name = "komira_supervisor",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_supervisor_proc",
+        ":komira_supervisor_proc_native",
         "//src/komira_async:komira_async",
     ],
     test_srcs = [

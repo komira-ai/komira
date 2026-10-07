@@ -4,15 +4,18 @@
 # (komira_native.bzl):
 #   sh native_run.sh <busybox> <mojo_wrapper.sh> <compiler dir> <zig dir> <zig target> \
 #       <target cpu> <watchdog idle> <watchdog sample> <prefix> <src dir> <runtime dir> \
-#       <elfsyms> <case> <log>
+#       <elfsyms> <case> <log> [<program> [<library>...]]
 # <prefix> is laid out as a conda environment would be: lib/libkomira_native.so.1,
-# lib/libkomira_native.so and lib/mojo/<package>.mojoc. The case works on a
+# lib/libkomira_native.so and lib/mojo/<package>.mojoc (or is one the packages
+# were installed into). <program> (default native_run) is what R1 runs and B1
+# builds; each <library> is linked after komira_native (`-l<library>`, a
+# per_library archive a package ships in lib/). The case works on a
 # writable copy that also holds the Mojo runtime libraries in lib/ (where an
 # environment has them) and a bin/. Every compile sees only `-I <prefix>/lib/mojo`
 # (and the programs in <src dir>), and links nothing komira-owned but
-# `-Xlinker -L<prefix>/lib -Xlinker -lkomira_native`.
-#   R1   `mojo run` of native_run.mojo
-#   B1   `mojo build --runpath='$ORIGIN/../lib'` of native_run.mojo into
+# `-Xlinker -L<prefix>/lib -Xlinker -lkomira_native` (and the <library>s).
+#   R1   `mojo run` of <program>.mojo
+#   B1   `mojo build --runpath='$ORIGIN/../lib'` of <program>.mojo into
 #        <prefix>/bin, run there with LD_LIBRARY_PATH unset: the program NEEDs
 #        libkomira_native.so.1 (its SONAME), has that run path and no other,
 #        and finds the library through it alone
@@ -49,6 +52,12 @@ RT=$(abspath "$2")
 ELFSYMS=$(abspath "$3")
 CASE=$4
 LOG=$(abspath "$5")
+shift 5
+PROG=native_run
+if [ "$#" -gt 0 ]; then
+    PROG=$1
+    shift
+fi
 
 case "${BUCK_SCRATCH_PATH:-}" in
     "") W="$PWD/.native_run/$CASE" ;;
@@ -95,7 +104,8 @@ run_jit() {
 # build_into_bin <program>: build <src>/<program>.mojo into <prefix>/bin.
 build_into_bin() {
     rc=0
-    mojo_do build --target-cpu "$CPU" -I "$P/lib/mojo" -I "$SRC" -Xlinker "-L$P/lib" -Xlinker -lkomira_native \
+    # shellcheck disable=SC2086 # LINK is a list of words
+    mojo_do build --target-cpu "$CPU" -I "$P/lib/mojo" -I "$SRC" $LINK \
         "$SRC/$1.mojo" -o "$W/out/$1" || true
     if [ -s "$W/out/$1" ]; then
         cp "$W/out/$1" "$P/bin/$1"
@@ -125,19 +135,22 @@ run_bin() {
 }
 
 LINK="-Xlinker -L$P/lib -Xlinker -lkomira_native"
+for l in "$@"; do
+    LINK="$LINK -Xlinker -l$l"
+done
 case "$CASE" in
     R1)
-        # shellcheck disable=SC2086 # LINK is four words
-        run_jit $LINK "$SRC/native_run.mojo"
+        # shellcheck disable=SC2086 # LINK is a list of words
+        run_jit $LINK "$SRC/$PROG.mojo"
         ;;
     B1)
         # shellcheck disable=SC2016 # $ORIGIN is the loader's, not the shell's
         RP='$ORIGIN/../lib'
-        build_into_bin native_run
-        run_bin native_run
+        build_into_bin "$PROG"
+        run_bin "$PROG"
         ;;
     IR1)
-        # shellcheck disable=SC2086 # LINK is four words
+        # shellcheck disable=SC2086 # LINK is a list of words
         run_jit $LINK "$SRC/native_interpose.mojo"
         ;;
     IR2)

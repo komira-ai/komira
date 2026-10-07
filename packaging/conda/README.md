@@ -2,7 +2,9 @@
 
 A Mojo library published as a conda package (a `.conda`) installs
 `lib/mojo/<name>.mojoc` into the prefix, and, when the library has a README.md,
-`share/doc/<name>/README.md`. The Mojo compiler's default import
+`share/doc/<name>/README.md`. A library whose code calls komira's C requires
+the package `komira_native`, which installs `lib/libkomira_native.so.1`
+([Native code](#native-code-libkomira_nativeso1)). The Mojo compiler's default import
 path is that prefix's `lib/mojo`, where `std.mojoc` already sits, so a program
 that imports the library compiles with no `-I` flag and no activation script.
 The README is the library's documentation and its examples, the same bytes the
@@ -50,7 +52,7 @@ disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each)
 | fact | where it comes from |
 |---|---|
 | name | `conda_name` of the library, else its import name (the `.mojoc` basename): lowercase letters, digits, `_`, starting with a letter |
-| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<compiler version>`, then each **direct** dependency of the library, by its published name, at the same version **and the same build string** (`name ==<version> <build string>`), sorted. Direct only: every package of a release is built in lockstep, so the solver's closure is the build's, and a second build of a dependency in the channel cannot be chosen |
+| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<compiler version>`, then each **direct** dependency of the library, by its published name, and `komira_native` when the library's closure links C that libkomira_native.so.1 holds, at the same version **and the same build string** (`name ==<version> <build string>`), sorted; then the package shipping each shared library the library opens at run time (`dlopen`, below). Direct only: every package of a release is built in lockstep, so the solver's closure is the build's, and a second build of a dependency in the channel cannot be chosen |
 | subdir | the target platform's constraints (a `select`), never an attribute. Only `linux-64` is written: a `.mojoc` cannot be cross-compiled, so another subdir needs a build for that platform. On any other target platform the package target still builds, as a refusal saying so |
 | payload | the library's gated `.mojoc`, so the package cannot exist until the library's own welded tests pass |
 | version | **the Mojo compiler version** the library is built with, below |
@@ -58,7 +60,7 @@ disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each)
 
 To list the package targets (a development helper; it is not the published
 list): `tools/build/package/list_conda_targets.sh [pattern...]`, which prints
-`buck2 uquery 'kind(conda_package, //src/...)'`.
+`buck2 uquery "kind('conda_package|conda_native_package', //src/...)"`.
 
 ### What a package is: a directory
 
@@ -86,13 +88,19 @@ file's; `metadata` is `metadata.json`, the file next to the manifest. The
 parser requires `metadata` on a CONDA manifest and refuses one that is not a
 bare file name (no `/`, not `.` or `..`), so copying the manifest's directory
 cannot separate the two. Every other fact is in `metadata.json` (sorted
-compact JSON): `format` (`kci.conda_metadata`), `schema_version`, `kind` (`library` or
-`metapackage`), `name`, `version`, `subdir`, `build` (the build string),
+compact JSON): `format` (`kci.conda_metadata`), `schema_version`, `kind` (`library`,
+`native` or `metapackage`), `name`, `version`, `subdir`, `build` (the build string),
 `build_number`, `file_name`, `size`, `depends`, `timestamp_ms`,
 `source_commit`, `stamped`, `label`, and for a library `import_name`,
 `mojo_pin`, `payload_path`, `payload_sha256`, `doc_files` (path and sha256
-of each documentation file the package installs, `[]` when none); for a
-metapackage `members` (name, version, build, sha256 each). The manifest's `version` is the compiler
+of each documentation file the package installs, `[]` when none),
+`lib_files` (each file it installs under `lib/` besides the `.mojoc`:
+`{path, sha256}`, `[]` when none) and `dlopen` (`{soname, requirement}` of
+each shared library it opens at run time, `[]` when none); for the native
+package `lib_files` (its shared object `{path, sha256}` and the link name
+`{path, target}`); for a metapackage `members` (name, version, build, sha256
+each). kci's metadata reader does not know the `native` kind yet, so the
+native package's metadata is not read by kci today. The manifest's `version` is the compiler
 version; the build number, build string and source commit are metadata (kci's
 manifest has no key for them).
 `tools/build/package/manifest_probe` runs kci's parser and writer over a
@@ -125,20 +133,66 @@ file, `REFUSED`, with the reason. Refusing by failing would make
 release (`[release]`, `[release][manifest]`, `[release_check]`), naming the
 reason. The reasons:
 
-- it links native code (a `.mojoc` holds none, so a consumer would fail at its
-  own link);
+- it names in `deps` C that libkomira_native.so.1 does not hold and no
+  package ships (an undeclared `cxx_library`, such as the vendored sqlite or
+  brotli; a `.mojoc` holds no machine code, so a consumer would fail at its
+  own link), or a declared archive that
+  [`members.bzl`](../../tools/build/native/members.bzl) does not list, or it
+  names a `shared` archive and is not one of the library's `CALLERS`;
 - it has no tests (no test would gate its package);
 - it depends on a library with no package (`conda = False`, or itself refused);
 - its name is not a conda name;
-- it opens a shared library by name at run time (`OwnedDLHandle`), whose conda
-  package this tool does not derive yet.
+- it declares a soname in `dlopen` that
+  [`system_libs.bzl`](../../tools/build/package/system_libs.bzl) does not name;
+- its sources open a shared library at run time (`OwnedDLHandle`) by sonames
+  other than those it declares, or it declares sonames and no source opens a
+  library.
 
-The first four are known to the build when it analyses the library, so a
+All but the last are known to the build when it analyses the library, so a
 dependent of such a library is refused too. The last is found only when the
 package is made (the tool reads the sources), so **a dependent of a library
-that dlopens is not refused by the build**; the release tool must therefore
-check that every dependency of a declared package is itself declared and has a
-`[release]` (below).
+whose declaration disagrees with its sources is not refused by the build**;
+the release tool must therefore check that every dependency of a declared
+package is itself declared and has a `[release]` (below).
+
+### Native code: libkomira_native.so.1
+
+komira's own C, and the symbol-prefixed aws-lc, s2n-tls and snappy, are one
+shared library ([tools/build/native](../../tools/build/native/README.md)),
+published as the package `komira_native`: `lib/libkomira_native.so.1` and the
+symbolic link `lib/libkomira_native.so` (a `softlink` row of
+`info/paths.json`, with the sha256 and size of the file it points to, as
+conda-build writes one). Its run requirements are the platform guard and
+`__glibc >=<the link target's glibc>`.
+
+- A library whose closure links an archive the shared library holds requires
+  `komira_native ==<version> <build string>`; nothing of that C is in its
+  `.mojoc`.
+- A library naming a `per_library` archive in `deps` (komira_log's holder,
+  whose cells must be one per Mojo library) ships it as `lib/lib<name>.a`,
+  and a program links it into its own image.
+- A program links `-Xlinker -L<env>/lib -Xlinker -lkomira_native` (and
+  `-Xlinker -l<name>` for each such archive in its closure; `mojo run`
+  does not link a static archive), and a built program finds the library with
+  the run path `$ORIGIN/../lib`.
+
+The run tests `//tools/build/native:installed_crypto_run_test` and
+`:installed_log_run_test` install packages into an environment by their run
+requirements (`komira_pack conda-install`, `conda_prefix`) and run and build
+programs there.
+
+### Libraries a package opens at run time
+
+A library that opens a system library (`OwnedDLHandle("libzstd.so.1")`)
+declares the soname: `mojo_library(..., dlopen = ["libzstd.so.1"])`.
+[`system_libs.bzl`](../../tools/build/package/system_libs.bzl) names the
+conda package that installs each soname (`libzstd.so.1`: `zstd >=1.5.2,<2`),
+and the library's package requires it. `komira_pack conda` reads the
+sources: in every file that names `OwnedDLHandle`, the string literals that
+are sonames must be exactly the declared ones, or the package is refused,
+naming both lists. How a program finds the library at run time is the
+loader's search (the program's run path, `LD_LIBRARY_PATH`); that a
+conda-installed `mojo run` finds the environment's copy is not tested here.
 
 ### Sub-targets
 
@@ -363,8 +417,10 @@ rule, when it is written:
 
 - `linux-aarch64` and `osx-arm64` (they need their own payload build and an
   architecture guard);
-- libraries that link native code, and libraries that open a shared library
-  at run time (both refused by name rather than published incompletely);
+- libraries linking C that libkomira_native.so.1 does not hold (the vendored
+  sqlite and brotli: refused by name rather than published incompletely);
+- kci reading the native package's metadata (kind `native`) and publishing it;
+- the native package for linux-aarch64 and macOS;
 - the upload step and the release tool's list (kci's; the files it reads are
   above);
 - the Python wheel rule (design above);

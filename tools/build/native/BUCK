@@ -2,9 +2,12 @@
 # (README.md): the symbol reader, the scripts of the rules in defs.bzl and
 # komira_native.bzl, and the shared library itself.
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/package:conda.bzl", "conda_manifest_kci", "conda_native_package")
+load("@komira//tools/build/package:conda_prefix.bzl", "conda_prefix")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "c_exe", "checked_cxx_library")
 load(":komira_native.bzl", "komira_native", "komira_native_run_test")
+load(":members.bzl", "ARCHIVES", "CALLERS", "PER_LIBRARY")
 
 # elfsyms: an archive's symbol table and its members' symbols, a shared
 # object's dynamic section and symbols (elfsyms.c).
@@ -78,49 +81,14 @@ shell_lint(
 # shared library"). The export check is a validation of this target.
 komira_native(
     name = "libkomira_native",
-    archives = [
-        "//src/komira_async:komira_async_posix_native",
-        "//src/komira_async_api:komira_concurrency_pool_depth_native",
-        "//src/komira_crypto:komira_crypto_sha256_hw_native",
-        "//src/komira_fs:komira_fs_posix_native",
-        "//src/komira_libc:komira_libc_posix_native",
-        "//src/komira_metrics:komira_metrics_ea_flag_native",
-        "//src/komira_objectstore:komira_objectstore_posix_native",
-        "//src/komira_scan_source:komira_scan_source_inmem_id_native",
-        "//src/komira_supervisor:komira_supervisor_proc_native",
-        "//third_party/aws-lc:crypto",
-        "//third_party/s2n-tls:s2n",
-        "//third_party/snappy:snappy",
-    ],
+    archives = ARCHIVES,
     # Every package whose sources call a name one of the archives defines
     # (a package calling one it does not list fails its own link against the
-    # library, once packages link it).
-    callers = [
-        "//src/komira_async:komira_async",
-        "//src/komira_async_api:komira_async_api",
-        "//src/komira_avro:komira_avro",
-        "//src/komira_buffer:komira_buffer",
-        "//src/komira_column_kernels:komira_column_kernels",
-        "//src/komira_compression:komira_compression",
-        "//src/komira_crypto:komira_crypto",
-        "//src/komira_fs:komira_fs",
-        "//src/komira_http_client:komira_http_client",
-        "//src/komira_http_core:komira_http_core",
-        "//src/komira_http_server:komira_http_server",
-        "//src/komira_libc:komira_libc",
-        "//src/komira_log:komira_log",
-        "//src/komira_metrics:komira_metrics",
-        "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_orc:komira_orc",
-        "//src/komira_parquet_codec:komira_parquet_codec",
-        "//src/komira_scan_source:komira_scan_source",
-        "//src/komira_supervisor:komira_supervisor",
-        "//src/komira_uuid:komira_uuid",
-    ],
+    # library). The lists are in members.bzl, which the conda packages of the
+    # Mojo libraries read too.
+    callers = CALLERS,
     exec_compatible_with = LINUX_X86_64,
-    per_library = [
-        "//src/komira_log:komira_log_holder_native",
-    ],
+    per_library = PER_LIBRARY,
     soname = "libkomira_native.so.1",
 )
 
@@ -154,4 +122,90 @@ checked_cxx_library(
     checks = [":komira_native_run_test"],
     lib = ":libkomira_native",
     visibility = ["PUBLIC"],
+)
+
+# The conda package `komira_native`: lib/libkomira_native.so.1 and the link
+# name lib/libkomira_native.so, from :komira_native (so it exists only after
+# the export checks and the run test passed). Every Mojo library whose closure
+# links an archive of the library requires it at the same version and build
+# string (tools/build/package/conda.bzl).
+conda_native_package(
+    name = "komira_native_conda",
+    lib = ":komira_native",
+    summary = "komira's C in one shared library: the komira C shims and the symbol-prefixed aws-lc, s2n-tls and snappy that komira's Mojo packages call.",
+    visibility = ["PUBLIC"],
+)
+
+# The packages as a user installs them: komira_crypto's conda package and
+# what its run requirements reach among the pool below, extracted into an
+# environment (tools/build/package/conda_prefix.bzl), and a program calling
+# aws-lc through komira_crypto run (R1) and built and run (B1) there. Only the
+# requirements decide what is installed, so a library package that stopped
+# requiring komira_native has no libkomira_native.so.1 here and fails.
+conda_prefix(
+    name = "installed_crypto_prefix",
+    packages = [
+        ":komira_native_conda",
+        "//src/komira_crypto:komira_crypto_conda",
+        "//src/komira_encoding:komira_encoding_conda",
+    ],
+    root = "komira_crypto",
+)
+
+komira_native_run_test(
+    name = "installed_crypto_run_test",
+    cases = [
+        "R1",
+        "B1",
+    ],
+    exec_compatible_with = LINUX_X86_64,
+    prefix = ":installed_crypto_prefix",
+    program = "installed_crypto",
+    srcs = [
+        "run_test/installed_crypto.mojo",
+        "run_test/native_util.mojo",
+    ],
+)
+
+# komira_log's package ships its per_library holder archive
+# (lib/libkomira_log_holder.a), which a program links into its own image
+# (`-lkomira_log_holder`); `mojo run` links no static archive, so only B1.
+conda_prefix(
+    name = "installed_log_prefix",
+    packages = [
+        ":komira_native_conda",
+        "//src/komira_atomic_alias:komira_atomic_alias_conda",
+        "//src/komira_clock:komira_clock_conda",
+        "//src/komira_collections:komira_collections_conda",
+        "//src/komira_fork_join:komira_fork_join_conda",
+        "//src/komira_hash:komira_hash_conda",
+        "//src/komira_libc:komira_libc_conda",
+        "//src/komira_log:komira_log_conda",
+        "//src/komira_metrics:komira_metrics_conda",
+        "//src/komira_name_registry:komira_name_registry_conda",
+        "//src/komira_spsc_ring:komira_spsc_ring_conda",
+        "//src/komira_trace:komira_trace_conda",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths_conda",
+    ],
+    root = "komira_log",
+)
+
+komira_native_run_test(
+    name = "installed_log_run_test",
+    cases = ["B1"],
+    exec_compatible_with = LINUX_X86_64,
+    link = ["komira_log_holder"],
+    prefix = ":installed_log_prefix",
+    program = "installed_log",
+    srcs = [
+        "run_test/installed_log.mojo",
+        "run_test/native_util.mojo",
+    ],
+)
+
+# The native package's manifest, read with kci's artifact-manifest parser
+# (tools/build/package/manifest_probe): what a PUBLISH step reads.
+conda_manifest_kci(
+    name = "komira_native_conda_kci",
+    package = ":komira_native_conda",
 )

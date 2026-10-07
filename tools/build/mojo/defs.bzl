@@ -24,7 +24,16 @@ staged source directory can never shadow a package.
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo", "welded_tests_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/native:defs.bzl", "NativeArchiveInfo")
+load(
+    "@komira//tools/build/native:members.bzl",
+    _NATIVE_ARCHIVES = "ARCHIVES",
+    _NATIVE_CALLERS = "CALLERS",
+    _NATIVE_PER_LIBRARY = "PER_LIBRARY",
+    "native_label",
+)
 load("@komira//tools/build/package:conda.bzl", "conda_package")
+load("@komira//tools/build/package:system_libs.bzl", "SYSTEM_LIBS")
 load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_kwargs", "coverage_link_dir")
 load(
     ":test_runtime.bzl",
@@ -288,22 +297,80 @@ def _check_import_name(ctx, name):
     if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
         fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
 
-def _conda_facts(ctx, import_name, c_link, has_tests):
+def _native_facts(ctx, c_link):
+    """(MojoInfo.native, direct) for this library: what its C closure is to
+    libkomira_native.so.1 (providers.bzl), and the same three lists for the
+    C targets this library itself names in `deps`. None, None without C."""
+    if c_link == None:
+        return None, None
+    closure = {"per_library": {}, "shared": {}, "undeclared": {}}
+    direct = {"per_library": {}, "shared": {}, "undeclared": {}}
+    ships = []
+    for d in ctx.attrs.deps:
+        if MojoInfo in d:
+            n = d[MojoInfo].native
+            if n != None:
+                for kind in closure:
+                    for label in getattr(n, kind):
+                        closure[kind][label] = True
+        elif MergedLinkInfo in d:
+            label = native_label(d.label) or str(d.label.raw_target())
+            kind = "undeclared"
+            if NativeArchiveInfo in d:
+                info = d[NativeArchiveInfo]
+                kind = info.kind
+                if kind == "per_library":
+                    ships.append(("lib/lib{}.a".format(info.name), info.archive))
+            closure[kind][label] = True
+            direct[kind][label] = True
+    native = struct(
+        per_library = sorted(closure["per_library"]),
+        shared = sorted(closure["shared"]),
+        ships = ships,
+        undeclared = sorted(closure["undeclared"]),
+    )
+    return native, struct(**{k: sorted(v) for k, v in direct.items()})
+
+def _native_refusal(ctx, direct):
+    """Why the C this library names in `deps` keeps it from a conda package,
+    or None. Its dependencies' C is their own packages' business: a dependency
+    refused for it refuses this package too (_conda_facts)."""
+    if direct == None:
+        return None
+    me = ctx.label.raw_target()
+    if direct.undeclared:
+        return "{} links C that libkomira_native.so.1 does not hold and no package ships: {}. A `.mojoc` holds no machine code, so a consumer could not link it; declare the archive (native_archive, tools/build/native/README.md) and list it in tools/build/native/members.bzl".format(me, ", ".join(direct.undeclared))
+    missing = [l for l in direct.shared if l not in _NATIVE_ARCHIVES]
+    if missing:
+        return "{} links {}, declared `shared`, which libkomira_native.so.1 does not hold (tools/build/native/members.bzl ARCHIVES)".format(me, ", ".join(missing))
+    missing = [l for l in direct.per_library if l not in _NATIVE_PER_LIBRARY]
+    if missing:
+        return "{} links {}, declared `per_library`, which tools/build/native/members.bzl PER_LIBRARY does not list".format(me, ", ".join(missing))
+    if direct.shared and native_label(ctx.label) not in _NATIVE_CALLERS:
+        return "{} links {} of libkomira_native.so.1 but is not one of its callers (tools/build/native/members.bzl CALLERS), so the library need not export what it calls".format(me, ", ".join(direct.shared))
+    return None
+
+def _conda_facts(ctx, import_name, native_direct, has_tests):
     """(conda name, refusal) of this library's conda package.
 
     The name is None when the library opted out. The refusal is None when the
     package can be built, else the reason it cannot: a reason known without
-    reading a source (native code, no tests, a dependency with no package, a name
-    that is not a conda name). The package target still builds, as a directory
-    holding the reason (tools/build/package/conda.bzl).
+    reading a source (C that libkomira_native.so.1 does not hold, no tests, a
+    dependency with no package, a name that is not a conda name). The package
+    target still builds, as a directory holding the reason
+    (tools/build/package/conda.bzl).
     """
     if not ctx.attrs.conda:
         return None, None
     name = ctx.attrs.conda_name or import_name
     if not regex_match("^[a-z][a-z0-9_]*$", name):
         return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
-    if c_link != None:
-        return name, "{} links native code. A `.mojoc` holds none, so a consumer would fail at its own link; no conda package for it until native code is supported".format(ctx.label.raw_target())
+    refusal = _native_refusal(ctx, native_direct)
+    if refusal != None:
+        return name, refusal
+    unknown = [s for s in ctx.attrs.dlopen if s not in SYSTEM_LIBS]
+    if unknown:
+        return name, "{} opens {} at run time (`dlopen`), for which tools/build/package/system_libs.bzl names no conda package".format(ctx.label.raw_target(), ", ".join(unknown))
     if not has_tests:
         return name, "{} has no tests, so its package would not be gated by any; declare test_srcs on the library".format(ctx.label.raw_target())
     for d in ctx.attrs.deps:
@@ -324,6 +391,7 @@ def _library_impl(ctx):
     _check_deps(ctx)
     deps = _dep_closure(ctx)
     c_link = _c_link(ctx)
+    native, native_direct = _native_facts(ctx, c_link)
 
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
@@ -397,7 +465,7 @@ def _library_impl(ctx):
     # README's examples are not counted, since analysis cannot tell whether
     # it holds any (see _readme_gate).
     has_tests = len(markers) > 0
-    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests)
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, native_direct, has_tests)
 
     # A README that ships (the library has a conda package the build can make,
     # which installs it at share/doc/<conda name>/README.md) refuses relative
@@ -449,12 +517,14 @@ def _library_impl(ctx):
             conda_name = conda_name,
             conda_refusal = conda_refusal,
             direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps if MojoInfo in d]),
+            dlopen = [(s, SYSTEM_LIBS[s]) for s in sorted(ctx.attrs.dlopen) if s in SYSTEM_LIBS],
             direct_conda = {
                 d[MojoInfo].import_name: struct(name = d[MojoInfo].conda_name, refusal = d[MojoInfo].conda_refusal)
                 for d in ctx.attrs.deps
                 if MojoInfo in d
             },
             import_name = import_name,
+            native = native,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
             pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
@@ -586,6 +656,11 @@ mojo_library_rule = rule(
         "conda_name": attrs.option(attrs.string(), default = None),
         # Mojo packages and C/C++ libraries; see _check_deps.
         "deps": attrs.list(attrs.dep(), default = []),
+        # The sonames the library's code opens at run time (OwnedDLHandle),
+        # each named in tools/build/package/system_libs.bzl: its conda package
+        # requires the package that ships each, and is refused when the
+        # sources open another (tools/build/package/conda.bzl).
+        "dlopen": attrs.list(attrs.string(), default = []),
         # Optional: the target that generated `srcs` (mojo_gcp_client, for example).
         # Its DefaultInfo is re-exported whole as the `[gen]` sub-target, so a
         # reader or an IDE finds the generated code (and what it was generated

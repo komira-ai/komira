@@ -36,14 +36,14 @@ native_archive(
     kind = "shared",
     lib = ":komira_async_posix",
     reason = "The SIGTERM flag, the CAS-manifest gate lock and the scheduler-trace counters: one signal disposition and one lock per process.",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 mojo_library(
     name = "komira_async",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_async_posix",
+        ":komira_async_posix_native",
         "//src/komira_arrow:komira_arrow",
         "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",

@@ -29,14 +29,14 @@ native_archive(
     kind = "shared",
     lib = ":komira_fs_posix",
     reason = "Stateless directory-walk wrappers.",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 mojo_library(
     name = "komira_fs",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_fs_posix",
+        ":komira_fs_posix_native",
         "//src/komira_arrow:komira_arrow",
         "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_async:komira_async",

@@ -40,7 +40,7 @@
 #              run requirements at its own version.
 #   refusals   a library that cannot be packaged keeps a target that BUILDS (so
 #              `buck2 build //...` stays green), holding a REFUSED file with the
-#              reason, and its [release] fails naming it: no tests, native code,
+#              reason, and its [release] fails naming it: no tests, C outside libkomira_native.so.1,
 #              a run-time shared library, a name that is not a conda name, a
 #              dependency with no package (opted out, or itself refused). The
 #              libraries still build.
@@ -517,7 +517,7 @@ fi
 refused refuse_no_tests "has no tests, so its package would not be gated by any" "$FX:fx_notests_conda"
 refused refuse_dlopen "opens a shared library at run time (OwnedDLHandle)" "$FX:fx_dlopen_conda"
 refused refuse_bad_name "is not a conda name" "$FX:fx_badname_conda"
-refused refuse_native "links native code" komira//tools/build/examples/cshim:cadd_conda
+refused refuse_native "links C that libkomira_native.so.1 does not hold" komira//tools/build/examples/cshim:cadd_conda
 refused refuse_dep_opted_out "which has no conda package (\`conda = False\`" "$FX:fx_optout_user_conda"
 refused refuse_dep_refused "it depends on" "$FX:fx_notests_user_conda"
 # the libraries themselves still build

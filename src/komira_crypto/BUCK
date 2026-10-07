@@ -23,7 +23,7 @@ native_archive(
     kind = "shared",
     lib = ":komira_crypto_sha256_hw",
     reason = "A stateless wrapper exporting aws-lc's SHA-NI block function.",
-    visibility = ["//tools/build/native:"],
+    visibility = ["PUBLIC"],
 )
 
 # Cryptographic primitives: SHA-1 / SHA-2 / BLAKE2b-256, HMAC, HKDF, PBKDF2,
@@ -37,7 +37,7 @@ mojo_library(
     name = "komira_crypto",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        ":komira_crypto_sha256_hw",
+        ":komira_crypto_sha256_hw_native",
         "//src/komira_encoding:komira_encoding",
         "//third_party/aws-lc:crypto",
     ],

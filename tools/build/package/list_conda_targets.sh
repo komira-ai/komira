@@ -10,7 +10,9 @@
 # list of what is published: that is the release tool's reviewed list of artifact
 # declarations, and a target printed here is published only if one names it.
 # A library that cannot be packaged is still printed (its target builds, as a
-# refusal; see tools/build/package/conda.bzl).
+# refusal; see tools/build/package/conda.bzl). The native package
+# (//tools/build/native:komira_native_conda, libkomira_native.so.1) is printed
+# when the patterns cover it.
 set -eu
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 buck2=${BUCK2:-$root/buck2}
@@ -19,4 +21,4 @@ set_expr=$1
 shift
 for p in "$@"; do set_expr="$set_expr + $p"; done
 cd "$root"
-exec "$buck2" uquery "kind(conda_package, $set_expr)"
+exec "$buck2" uquery "kind('conda_package|conda_native_package', $set_expr)"

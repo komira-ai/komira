@@ -20,6 +20,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 mojo_library(
     name = "komira_lz4",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    dlopen = ["liblz4.so.1"],
     test_data = {
         "tests/test_codec_into.mojo": {
             "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
