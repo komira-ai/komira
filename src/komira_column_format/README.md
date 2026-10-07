@@ -20,7 +20,7 @@ then gives each column:
   valid.
 
 `grow_to` enlarges every column and keeps the live slots. The caller owns the
-slot count (`set_n_slots`) and must stay below `capacity`: the storage does not
+slot count (`set_n_slots`) and must keep it at most `capacity`: the storage does not
 insert, hash, compare keys or know about batches on its own. Import from
 `komira_column_format.column_format_storage`; there is no facade module.
 

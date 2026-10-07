@@ -20,7 +20,9 @@ JSON Lines (one JSON object per line) to and from Arrow record batches
   (`write_batch_jsonl_direct`, `write_batch_jsonl_fused`) or as a pretty JSON
   array (`write_batch_json_pretty`), with the cell writers (`write_i64_dec`,
   `write_f64_dtoa`, `write_string_escaped`, `write_date32`, ...) on their own.
-  A non-finite float is written as `null`.
+  `write_f64_dtoa` writes a non-finite float as `null`, and so do the batch
+  and row writers in a nullable column; NaN or +-Inf in a non-nullable column
+  is refused with an error that names the column, the row and the value.
 - **Records.** `JsonCompatible` is the trait a struct implements to be one JSON
   object (`to_json`, `from_json`); `write_record` appends one as a line and
   `parse_record` reads one back.

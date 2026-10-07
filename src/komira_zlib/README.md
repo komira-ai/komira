@@ -9,9 +9,11 @@ caller owns:
   one stream and returns the bytes written; `dst` must hold
   `zlib_compress_bound(len(src), window_bits)` bytes.
 - `zlib_inflate_into(dst, src, window_bits)` decodes the stream at the start of
-  `src` and returns the bytes written. A stream that does not fit in `dst`, ends
-  before `src` does, is corrupt, or fails its Adler-32 / CRC-32 check is
-  refused. Bytes after the first stream are not read.
+  `src` and returns the bytes written. A stream that does not fit in `dst`, is
+  corrupt, or fails its Adler-32 / CRC-32 check is refused, and so is a `src`
+  that ends before the stream does (truncated). Bytes in `src` after the end
+  of the first stream are not read: a gzip file of several members decodes its
+  first member only.
 - `zlib_inflate_once` is one `inflate` call whose return code and counts come
   back unjudged, for a caller with its own policy on a full destination.
 - `zlib_skip_stream` returns how many bytes the stream at the start of `src`
@@ -26,8 +28,9 @@ detected). There is no incremental streaming API and no gzip header fields
 
 ## Examples
 
-A gzip round trip, and the empty input as the 20-byte gzip stream RFC 1952
-describes:
+A gzip round trip, and the empty input as a 20-byte gzip stream (the 10-byte
+RFC 1952 header, a 2-byte empty deflate block and the 8-byte CRC-32 / size
+trailer):
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
