@@ -7,8 +7,9 @@ only; the TCP layer is in `komira_async`.
 - `parse_ip_literal(host)` never calls the resolver. `""`, `localhost` and
   `127.0.0.1` are loopback; a dotted-quad IPv4 literal is parsed. It returns
   `None` for any host with a character other than a digit or a dot (a DNS
-  name), and raises on a malformed literal (wrong number of dots, an empty
-  octet, an octet over 255).
+  name), and raises on a malformed literal (wrong number of octets, an empty
+  octet before a dot, an octet over 255). One trailing dot after four
+  octets is accepted: `192.0.2.10.` parses as `192.0.2.10`.
 - `resolve_host(host, port)` returns a literal as one target without a
   lookup; otherwise it calls `getaddrinfo` on the calling thread (a blocking
   call: never call it on a reactor thread) and returns one `SockAddr` per A
@@ -45,6 +46,7 @@ with assert_raises():
     _ = parse_ip_literal("192.0.2.256")  # octet out of range
 with assert_raises():
     _ = parse_ip_literal("192..2.10")  # empty octet
+assert_equal(parse_ip_literal("192.0.2.10.").value().v4_be, 0x0A0200C0)  # trailing dot
 ```
 
 `resolve_host` on a literal returns it as the only target and does not call

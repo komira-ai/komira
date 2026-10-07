@@ -82,28 +82,35 @@ from std.tempfile import TemporaryDirectory
 from komira_oci import PUSH_NOOP, PUSH_UPLOADED, FakeOciRegistry, LayoutPusher, OciAuth
 from komira_oci import push_outcome_name, read_oci_layout, write_test_layout
 
+# TemporaryDirectory.__exit__ swallows an error raised in its block, so the
+# checks run inside a try and any failure is re-asserted after the block.
+var failure = String()
 with TemporaryDirectory() as dir:
-    var layers = List[List[UInt8]]()
-    var layer_one: List[UInt8] = [1, 2, 3, 4]
-    var layer_two: List[UInt8] = [5, 6, 7]
-    layers.append(layer_one^)
-    layers.append(layer_two^)
-    var written = write_test_layout(dir, layers)
-    var layout = read_oci_layout(dir)
-    assert_equal(layout.manifest_digest, written)
+    try:
+        var layers = List[List[UInt8]]()
+        var layer_one: List[UInt8] = [1, 2, 3, 4]
+        var layer_two: List[UInt8] = [5, 6, 7]
+        layers.append(layer_one^)
+        layers.append(layer_two^)
+        var written = write_test_layout(dir, layers)
+        var layout = read_oci_layout(dir)
+        assert_equal(layout.manifest_digest, written)
 
-    var host = String("registry.example.com")
-    var pusher = LayoutPusher[FakeOciRegistry](
-        FakeOciRegistry(host), OciAuth.basic("user", "token"), False, 0
-    )
-    var first = pusher.push(layout, host, "team/app", "build-1")
-    assert_equal(push_outcome_name(first.outcome), push_outcome_name(PUSH_UPLOADED))
-    assert_equal(first.blobs_uploaded, 3)  # two layers and the config
-    assert_equal(first.platform, "linux/amd64")
-    assert_equal(first.reference(), "registry.example.com/team/app@" + written)
-    assert_equal(pusher.transport().tag_digest("team/app", "build-1"), written)
+        var host = String("registry.example.com")
+        var pusher = LayoutPusher[FakeOciRegistry](
+            FakeOciRegistry(host), OciAuth.basic("user", "token"), False, 0
+        )
+        var first = pusher.push(layout, host, "team/app", "build-1")
+        assert_equal(push_outcome_name(first.outcome), push_outcome_name(PUSH_UPLOADED))
+        assert_equal(first.blobs_uploaded, 3)  # two layers and the config
+        assert_equal(first.platform, "linux/amd64")
+        assert_equal(first.reference(), "registry.example.com/team/app@" + written)
+        assert_equal(pusher.transport().tag_digest("team/app", "build-1"), written)
 
-    var again = pusher.push(layout, host, "team/app", "build-1")
-    assert_equal(push_outcome_name(again.outcome), push_outcome_name(PUSH_NOOP))
-    assert_true(pusher.transport().has_manifest("team/app", written))
+        var again = pusher.push(layout, host, "team/app", "build-1")
+        assert_equal(push_outcome_name(again.outcome), push_outcome_name(PUSH_NOOP))
+        assert_true(pusher.transport().has_manifest("team/app", written))
+    except e:
+        failure = String(e)
+assert_equal(failure, "")
 ```

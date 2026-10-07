@@ -17,9 +17,9 @@ HTTP/2 and TLS. The pieces:
   CORS, error mapping, request logging, tracing headers and metrics, plus
   fault reporting with an incident id. `Principal` and `Claims` carry who a
   request was authenticated as; the library never interprets them.
-- `komira_http_server.serving`: `ServerlessEntry`, a per-platform serving
-  driver that runs one router on the platform's runtime, and
-  `parse_serve_port`.
+- `komira_http_server.serving`: `ServerlessEntry`, the trait for a serving
+  driver that runs one router on a platform's runtime (one conformer today,
+  `GcpServerlessEntry`, for Google Cloud Run), and `parse_serve_port`.
 
 It does not authenticate requests, serve static files or compress
 responses.
