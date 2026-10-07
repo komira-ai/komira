@@ -154,14 +154,14 @@ Libraries a test uses to run against real infrastructure and prove it
 cleaned up. Each is configured by the test's own flags, and with no flags a
 test that needs one SKIPS with a reason (exit 77) instead of passing. The
 dependency order is the order of the rows; the harnesses built on them are
-in `src/tests/support/` ([End-to-end tests](#end-to-end-tests)).
+in `src/tests/helpers/` ([End-to-end tests](#end-to-end-tests)).
 
 | module | what it is |
 |---|---|
 | [`komira_test_verdict`](../src/komira_test_verdict/) | the exit-code vocabulary of a test that can do more than pass or fail: `Verdict` (CLEAN 0, CANNOT_TELL 3, LEAK 6; the worst wins and every reason is kept) and SKIP (77) / CANNOT_TELL (3) with a reason, which end the process and are never exit 0. Standard library only. |
 | [`komira_test_run_id`](../src/komira_test_run_id/) | a per-run id minted inside the test process from the wall clock and 64 random bits, never derived from inputs, so a retry and its twin get disjoint resources; with the clock and random-source seams and their fakes. |
 
-[`komira_test_fake_s3`](../src/tests/support/komira_test_fake_s3/) is a
+[`komira_test_fake_s3`](../src/tests/helpers/komira_test_fake_s3/) is a
 test-support library of another kind: a fake S3 in memory for hermetic
 welded tests, with no flags and no socket. It is a komira_http_core
 `Connector` whose streams answer GET (ranges, suffix ranges, If-Match),
@@ -181,7 +181,7 @@ target name), never directly under `src/`, which holds what komira ships:
   libraries together (over loopback, or over the real local filesystem);
 - `src/tests/conformance/<name>`: a library against an external conformance
   suite, or every implementation of a trait against the trait's contract;
-- `src/tests/support/<name>`: test harnesses that no shipped library depends
+- `src/tests/helpers/<name>`: test harnesses that no shipped library depends
   on.
 
 No shipped library depends on them (a test binary may). Their welded tests
@@ -203,10 +203,10 @@ anywhere else under `src/`.
 | [`komira_http_conformance`](../src/tests/conformance/komira_http_conformance/) | `komira_http_server` against h2spec, an external HTTP/2 conformance suite (pinned in `third_party/h2spec`), gated on a reviewed allowlist of the cases the server still fails. |
 | [`komira_db_conformance`](../src/tests/conformance/komira_db_conformance/) | the `komira_db` contract written once, generic over the `Database` and `SqlDatabase` traits, and run against `SqliteDatabase` (both suites, a new in-memory database per check) and `FirestoreDatabase` over its in-process `MockFirestore` (the neutral suite): every logical type through `put` and `get_by_key`, NULLs, non-ASCII text and binary values of 0 to 256 bytes (16 bytes is a known gap on SQLite, which reads any 16-byte BLOB back as a UUID); the structured ops (filters, order, limit, the compare-and-set update with its version bump and COALESCE, multi-row updates, deletes, create-if-absent on one column and on a tuple, claims); transactions; the SQL string surface (rows affected, `query_one` and `query_opt` cardinality, parameters stored verbatim and never run as SQL, integer parameters bound as numbers); and syntax, unique, NOT NULL and missing-table errors by the backend's own message, each followed by a statement on the same handle. Each target is gated on a list of known gaps, each pinned to the text its failure carries. `FirestoreDatabase` is checked against the mock's model of Firestore, not Firestore itself. `PgDatabase` runs only the server-free dialect check: the live suites are wired and compiled but have never run, and need a Postgres server a build action does not have. |
 | [`komira_json_conformance`](../src/tests/conformance/komira_json_conformance/) | every JSON parser komira ships against JSONTestSuite's `test_parsing` corpus (`third_party/jsontestsuite`), gated per parser on a shrink-only allowlist. |
-| [`komira_test_minio`](../src/tests/support/komira_test_minio/) | an embedded MinIO the test starts itself: pinned by sha256, a private temporary directory, a random root credential in 0600 files, random loopback-only ports, dies with the test. It hands back the endpoint, region and credentials-file path, and `stop()` returns a verdict. |
-| [`komira_test_bucket`](../src/tests/support/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
-| [`komira_test_s3_adapter`](../src/tests/support/komira_test_s3_adapter/) | the real adapters behind those seams, for a test that runs on an embedded MinIO: `SpawnedProcessRunner` (starts the server through `spawn_detached` and setpriv so it dies with the test, Linux only; readiness from MinIO's health endpoint) and `MinioObjectStore` (an `S3Store`, path-style plaintext, the credential from the shared-credentials file), and `open_embedded_minio_test_bucket`, which opens a run's bucket from the test's flags with both. The only one of these libraries with an HTTP stack and a process supervisor. |
-| [`komira_test_fake_s3`](../src/tests/support/komira_test_fake_s3/) | a fake S3 in memory for hermetic welded tests, a komira_http_core `Connector` with faults a test sets ([Test infrastructure](#test-infrastructure)). |
+| [`komira_test_minio`](../src/tests/helpers/komira_test_minio/) | an embedded MinIO the test starts itself: pinned by sha256, a private temporary directory, a random root credential in 0600 files, random loopback-only ports, dies with the test. It hands back the endpoint, region and credentials-file path, and `stop()` returns a verdict. |
+| [`komira_test_bucket`](../src/tests/helpers/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
+| [`komira_test_s3_adapter`](../src/tests/helpers/komira_test_s3_adapter/) | the real adapters behind those seams, for a test that runs on an embedded MinIO: `SpawnedProcessRunner` (starts the server through `spawn_detached` and setpriv so it dies with the test, Linux only; readiness from MinIO's health endpoint) and `MinioObjectStore` (an `S3Store`, path-style plaintext, the credential from the shared-credentials file), and `open_embedded_minio_test_bucket`, which opens a run's bucket from the test's flags with both. The only one of these libraries with an HTTP stack and a process supervisor. |
+| [`komira_test_fake_s3`](../src/tests/helpers/komira_test_fake_s3/) | a fake S3 in memory for hermetic welded tests, a komira_http_core `Connector` with faults a test sets ([Test infrastructure](#test-infrastructure)). |
 
 ### Third-party code
 

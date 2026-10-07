@@ -3,11 +3,12 @@
 # Rows:
 #  * parse_azure_url, accepted: az://, abfs:// and abfss:// with the
 #    container as the authority (no account, no endpoint named); Hadoop
-#    ABFS's container@account.dfs.core.windows.net (and .blob.); DuckDB's
-#    az://account.blob.core.windows.net/container/...; the Blob service's
-#    https://account.blob.core.windows.net/container/...; an emulator's
-#    path-style http://host:port/account/container/...; the scheme and the
-#    host compared case-insensitively; $web as a container; an empty path;
+#    ABFS's abfs[s]://container@account.dfs.core.windows.net (and .blob.);
+#    DuckDB's az://account.blob.core.windows.net/container/...; the Blob
+#    service's https://account.blob.core.windows.net/container/...; an
+#    emulator's path-style http://<host>:<port>/account/container/...; the
+#    scheme and the host compared case-insensitively; $web as a container;
+#    an empty path;
 #    DuckDB's abfss://account.dfs.core.windows.net/filesystem/... form.
 #  * parse_azure_url, refused by exact message: another scheme, no scheme,
 #    no container, a container or account name Azure does not allow, an abfs
@@ -405,9 +406,9 @@ def test_endpoint_scheme() raises:
     assert_true(azure_endpoint_is_plaintext("http://127.0.0.1:10000"))
     assert_true(azure_endpoint_is_plaintext("Http://127.0.0.1:10000"))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'ftp://x'"
+        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'ftp://x.test'"
     ):
-        _ = azure_endpoint_is_plaintext("ftp://x")
+        _ = azure_endpoint_is_plaintext("ftp://x.test")
     with assert_raises(
         contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'HTTPX://x'"
     ):
@@ -439,27 +440,27 @@ def test_azure_config_for() raises:
     assert_false(tls.path_style)
 
     with assert_raises(
-        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'ftp://h'"
+        contains="fs_registry: an Azure endpoint must start with http:// or https://, got 'ftp://h.test'"
     ):
-        _ = azure_config_for(_cfg("myacct", "ftp://h", True))
+        _ = azure_config_for(_cfg("myacct", "ftp://h.test", True))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h:0'"
+        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:0'"
     ):
-        _ = azure_config_for(_cfg("myacct", "http://h:0", True))
+        _ = azure_config_for(_cfg("myacct", "http://h.test:0", True))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h:70000'"
+        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:70000'"
     ):
-        _ = azure_config_for(_cfg("myacct", "http://h:70000", True))
+        _ = azure_config_for(_cfg("myacct", "http://h.test:70000", True))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h:1x'"
+        contains="fs_registry: an Azure endpoint's port must be 1 to 65535, got 'http://h.test:1x'"
     ):
-        _ = azure_config_for(_cfg("myacct", "http://h:1x", True))
+        _ = azure_config_for(_cfg("myacct", "http://h.test:1x", True))
     with assert_raises(contains="fs_registry: an Azure endpoint names no host, got 'http://:10'"):
         _ = azure_config_for(_cfg("myacct", "http://:10", True))
     with assert_raises(
-        contains="fs_registry: an Azure endpoint is scheme://host[:port] with no path, got 'http://h/p'"
+        contains="fs_registry: an Azure endpoint is scheme://host[:port] with no path, got 'http://h.test/p'"
     ):
-        _ = azure_config_for(_cfg("myacct", "http://h/p", True))
+        _ = azure_config_for(_cfg("myacct", "http://h.test/p", True))
     with assert_raises(contains="fs_registry: an Azure arm needs an account name"):
         _ = azure_config_for(_cfg("", "", False))
     with assert_raises(
