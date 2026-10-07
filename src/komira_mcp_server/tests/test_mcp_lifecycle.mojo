@@ -192,6 +192,22 @@ def test_initialize_params_checked() raises:
         '{"jsonrpc":"2.0","id":5,"error":{"code":-32602,"message":"Invalid params","data":"initialize requires params.clientInfo.name and params.clientInfo.version, strings"}}',
         "initialize without clientInfo.version",
     )
+    # Each member present with the wrong type is refused like a missing one.
+    _expect(
+        s.handle('{"jsonrpc":"2.0","id":6,"method":"initialize","params":{"protocolVersion":7,"capabilities":{},"clientInfo":{"name":"c","version":"0"}}}'),
+        '{"jsonrpc":"2.0","id":6,"error":{"code":-32602,"message":"Invalid params","data":"initialize requires params.protocolVersion, a string"}}',
+        "initialize with a non-string protocolVersion",
+    )
+    _expect(
+        s.handle('{"jsonrpc":"2.0","id":7,"method":"initialize","params":{"protocolVersion":"x","capabilities":1,"clientInfo":{"name":"c","version":"0"}}}'),
+        '{"jsonrpc":"2.0","id":7,"error":{"code":-32602,"message":"Invalid params","data":"initialize requires params.capabilities, an object"}}',
+        "initialize with a non-object capabilities",
+    )
+    _expect(
+        s.handle('{"jsonrpc":"2.0","id":8,"method":"initialize","params":{"protocolVersion":"x","capabilities":{},"clientInfo":"c"}}'),
+        '{"jsonrpc":"2.0","id":8,"error":{"code":-32602,"message":"Invalid params","data":"initialize requires params.clientInfo, an object"}}',
+        "initialize with a non-object clientInfo",
+    )
     # None of those initialized the session.
     assert_false(s.is_initialized())
     print("  test_initialize_params_checked: PASS")
@@ -215,6 +231,17 @@ def test_request_id_rules() raises:
         s.handle('{"id":"x","method":"ping"}'),
         '{"jsonrpc":"2.0","id":"x","error":{"code":-32600,"message":"Invalid Request"}}',
         "missing jsonrpc",
+    )
+    # JSON-RPC 4.2: params, when present, MUST be an object or an array.
+    _expect(
+        s.handle('{"jsonrpc":"2.0","id":1,"method":"ping","params":"bar"}'),
+        '{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid Request"}}',
+        "string params",
+    )
+    _expect(
+        s.handle('{"jsonrpc":"2.0","id":2,"method":"ping","params":3}'),
+        '{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"Invalid Request"}}',
+        "number params",
     )
     # Integer and string ids are echoed with their type.
     _expect(s.handle('{"jsonrpc":"2.0","id":-12,"method":"ping"}'), '{"jsonrpc":"2.0","id":-12,"result":{}}', "negative integer id")

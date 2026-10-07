@@ -13,7 +13,11 @@
 #     this server does not paginate (a cursor it never issued is refused,
 #     test_mcp_lifecycle.mojo);
 #   - the error examples give only the reply; the request is written here
-#     with the example's id.
+#     with the example's id;
+#   - the structured-content example gives only the reply, so its request
+#     is written here with id 5;
+#   - resources/templates/list answers an empty list rather than the
+#     example's one template, since there is no template seam.
 
 from std.testing import assert_equal, assert_true, assert_false
 
@@ -374,6 +378,8 @@ def test_tools_call() raises:
 
 
 def test_tools_call_structured_content() raises:
+    # The specification gives only the reply; the request is written here
+    # with the reply's id.
     var s = _initialized_server()
     assert_reply(
         s.handle(

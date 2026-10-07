@@ -141,10 +141,17 @@ Welded (`test_srcs`), so they run whenever the library is built:
 - `tests/test_mcp_spec_examples.mojo`: the specification's JSON examples
   (lifecycle, ping, tools, resources and their error examples) fed to a
   server holding the examples' tool and resource; each reply must equal the
-  example's response.
+  example's response. Stated deviations: list requests drop `cursor` and
+  list replies drop `nextCursor` (no pagination); the error examples and
+  the structured-content example give only the reply, so their requests are
+  written in the test with the example's id; resources/templates/list
+  answers an empty list rather than the example's one template, since there
+  is no template seam.
 - `tests/test_jsonrpc_spec_examples.mojo`: the JSON-RPC 2.0 specification's
   examples (section 7): parse error, invalid request, unknown method,
   notifications, batches (one Invalid Request under MCP) and responses.
 - `tests/test_mcp_lifecycle.mojo`: the initialize gate, version negotiation,
-  request-id rules, params checks, the cursor refusal, and how provider
-  raises map to replies, each error reply compared whole.
+  request-id rules (including non-object, non-array `params`), initialize
+  params checks (each member missing and of the wrong type), the cursor
+  refusal, and how provider raises map to replies, each error reply
+  compared whole.
