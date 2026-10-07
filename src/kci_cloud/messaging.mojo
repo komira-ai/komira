@@ -61,7 +61,7 @@ def dead_letter_of(r: Resource) -> String:
     return String("")
 
 
-def _check_ref(
+def check_typed_ref(
     resources: List[Resource],
     id: String,
     path: String,
@@ -156,7 +156,7 @@ def _queue_findings(resources: List[Resource], r: Resource, mut out: List[Findin
         )
     if not q.dead_letter:
         return
-    _check_ref(resources, id, String("queue.dead_letter"), q.dead_letter.value(), FIELD_QUEUE, String("queue"), out)
+    check_typed_ref(resources, id, String("queue.dead_letter"), q.dead_letter.value(), FIELD_QUEUE, String("queue"), out)
     # A cycle: follow the dead-letter queues from this one (at most one step
     # per resource), and refuse when the walk comes back to it.
     var path = id.copy()
@@ -190,11 +190,11 @@ def _subscription_findings(resources: List[Resource], r: Resource, mut out: List
     if not s.topic:
         out.append(Finding(FINDING_GRAPH, id, String("subscription.topic"), String("no topic")))
     else:
-        _check_ref(resources, id, String("subscription.topic"), s.topic.value(), FIELD_TOPIC, String("topic"), out)
+        check_typed_ref(resources, id, String("subscription.topic"), s.topic.value(), FIELD_TOPIC, String("topic"), out)
     if not s.queue:
         out.append(Finding(FINDING_GRAPH, id, String("subscription.queue"), String("no queue")))
     else:
-        _check_ref(resources, id, String("subscription.queue"), s.queue.value(), FIELD_QUEUE, String("queue"), out)
+        check_typed_ref(resources, id, String("subscription.queue"), s.queue.value(), FIELD_QUEUE, String("queue"), out)
     if not s.topic or not s.queue:
         return
     var topic = s.topic.value().resource.copy()

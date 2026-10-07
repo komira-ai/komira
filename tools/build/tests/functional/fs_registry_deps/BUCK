@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "fs_registry_deps")
 load(":fixture.bzl", "FS_REGISTRY_PHYSICAL", "FS_REGISTRY_TREE")
 
-# Test 47 (the registry lint), the half that must build: the planted tree of
+# Test 50 (the registry lint), the half that must build: the planted tree of
 # fixture.bzl, whose physical-plan packages name the registry only where it
 # is not a dependency, and whose logical-plan packages (and the two named
 # like a prefix without being under it) depend on it. negative/fs_registry_deps

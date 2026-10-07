@@ -1,7 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "fs_registry_deps", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "fs_registry_deps", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 
@@ -56,6 +56,24 @@ no_endpoint(
     srcs = [".buckconfig.local.example"] + WORKFLOWS + ACTIONS,
 )
 
+# The layout of src/ (tools/build/lint/defs.bzl, src_layout): src/<name> holds
+# what komira ships; a package that exists only to test others is
+# src/tests/<kind>/<name> (e2e, conformance, helpers; docs/architecture.md
+# says which). So a *_e2e, *_loopback or *_conformance package directly
+# under src/ fails the build, and so does a komira_test_* one `shipped` does
+# not name. The packages are read from the build graph (every BUCK file under
+# src/), so a new one is checked with no edit here. Declared in every
+# checkout, so a repository using komira as a cell builds it by name.
+src_layout(
+    name = "src_layout",
+    # The test libraries komira ships, directly under src/ (the harnesses
+    # under src/tests/helpers build on them).
+    shipped = [
+        "komira_test_run_id",
+        "komira_test_verdict",
+    ],
+)
+
 # The shell lints of the tests cell (tools/build/tests: run_tests.sh and
 # the scripts it runs). `//...` does not reach into another cell, so this
 # target names them: `./buck2 build //...` fails on a finding in a test
@@ -71,22 +89,23 @@ _TESTS_LINTS = [
     "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
     "tests//functional/install_gate:shell_lint",
+    "tests//functional/mem_cap:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
     "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
     # The deps of a package that names its imports (tools/build/lint, mojo_deps).
     "//src/komira_aws_lambda_http:deps_lint",
-    "//src/komira_azure_blob_e2e:deps_lint",
     "//src/komira_http_client:deps_lint",
-    "//src/komira_http_conformance:deps_lint",
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
-    "//src/komira_http_tls_e2e:deps_lint",
-    "//src/komira_secrets_e2e:deps_lint",
-    "//src/komira_job_supervisor_loopback:deps_lint",
-    "//src/komira_json_conformance:deps_lint",
-    "//src/komira_udf_e2e:deps_lint",
+    "//src/tests/conformance/komira_http_conformance:deps_lint",
+    "//src/tests/conformance/komira_json_conformance:deps_lint",
+    "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
+    "//src/tests/e2e/komira_http_tls_e2e:deps_lint",
+    "//src/tests/e2e/komira_job_supervisor_loopback:deps_lint",
+    "//src/tests/e2e/komira_secrets_e2e:deps_lint",
+    "//src/tests/e2e/komira_udf_e2e:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
@@ -153,7 +172,8 @@ _TESTS_LINTS = [
 ) for _ in _TESTS_LINTS[:1]]
 
 # README API coverage (tools/build/lint/readme_api_coverage.bzl; the rules and
-# today's census: docs/readme_api_coverage.md): per package under src/, the
+# today's census: docs/readme_api_coverage.md): per package under src/ (not
+# the test-only ones under src/tests/, which publish no API), the
 # public API its __init__.mojo exports and which of it the README's examples
 # (the welded [tests][readme] test) use. `[report]`, `[packages]` and
 # `[symbols]` are the census. The tree is every file of the cell (`:doc_tree`).
@@ -191,8 +211,13 @@ _TESTS_LINTS = [
 # home directory naming a person, a private or written-out network address, a
 # URL host outside the reserved example names and
 # tests/public_boundary_hosts.tsv, an email address outside the reserved
-# example domains, or a commit id in prose.
-# Binary data and upstream bytes are not read. The findings a file must keep
+# example domains, or a commit id in prose, in its contents or (dates, home
+# directories, deny-list words) its path. Binary data is not read; its path
+# is. Nothing committed is upstream bytes (upstream sources are pinned
+# downloads), so third_party/ is read whole. Not read: the toolchains cell's
+# one BUCK file, the template a consuming repository copies byte for byte
+# (test 7 pins its targets equal to a consumer's copy), which so cannot export
+# itself to this target; review holds it. The findings a file must keep
 # (fixtures, test vectors, planted defects) are held, per rule and file at an
 # exact count, in tests/public_boundary_holds.tsv, which only shrinks.
 # A repository that keeps words of its own out of this one passes a list of
@@ -205,6 +230,8 @@ _TESTS_LINTS = [
     deny = read_root_config("komira_lint", "public_boundary_deny", None),
     holds = "tests/public_boundary_holds.tsv",
     hosts = "tests/public_boundary_hosts.tsv",
+    # The tests cell's dotfile, which its doc_tree's glob skips.
+    paths = {"tools/build/tests/.buckconfig": "tests//:buckconfig"},
     # The public history starts on this day. Dates before 2025 in this tree
     # are data (epochs, certificates, standards), so the window starts there.
     public_from = "2026-09-01",
@@ -215,7 +242,7 @@ _TESTS_LINTS = [
 
 # The file-system registry stays out of the physical plan
 # (tools/build/lint/defs.bzl, fs_registry_deps; tools/build/tests/README.md,
-# test 47): no physical-plan package under src/ depends on komira_fs_registry,
+# test 50): no physical-plan package under src/ depends on komira_fs_registry,
 # directly or through other packages, or imports it. Such a package takes a
 # FileSystem-generic parameter and its caller passes the concrete backend, so
 # a compiled plan instantiates one file system; logical-plan packages may use
