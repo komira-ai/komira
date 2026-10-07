@@ -310,7 +310,7 @@
 #      reason, and a root with no package.
 #  40. README API coverage (tools/build/lint/readme_api_coverage.bzl;
 #      docs/readme_api_coverage.md): //:readme_api_coverage (the census of
-#      every package under src/, report-only) and
+#      every package under src/ but the test-only ones, report-only) and
 #      tests//functional/readme_api_coverage:ok (a planted tree whose census
 #      must equal its expected files, counts and statuses exactly) build; each
 #      target of tests//negative/readme_api_coverage fails naming its one
@@ -327,14 +327,24 @@
 #      planted tree whose every site is held at its exact count, beside near
 #      misses) build; each target of tests//negative/pointer_lint fails naming
 #      its one planted site (each rule, the two-statement partial move, a
-#      public method and __init__.mojo, one site over a hold, a non-origin
+#      public method and __init__.mojo, a library file of a test-only package
+#      under src/tests/<kind>/, one site over a hold, a non-origin
 #      site in an FFI module, an unlisted marked module) or ledger defect,
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
 #  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
 #  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
-#  45. The coverage gate and join: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
-#  46. Branch coverage runs: tools/build/tests/coverage_branch_tests.sh (sourced by 43's).
+#  45. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
+#      (every package under src/, read from the build graph) and
+#      tests//functional/src_layout:ok (a planted list) build; each target of
+#      tests//negative/src_layout fails naming its one planted finding: an
+#      *_e2e, *_loopback or *_conformance package directly under src/, an
+#      unshipped komira_test_* there, a stale `shipped` name, a package nested
+#      where none is, a src/tests kind it does not hold or a package not at
+#      src/tests/<kind>/<name>, a package under the wrong kind, and a root with
+#      no package.
+#  46. The coverage gate and join: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
+#  47. Branch coverage runs: tools/build/tests/coverage_branch_tests.sh (sourced by 43's).
 set -uo pipefail
 
 umbrella=1
@@ -1142,6 +1152,7 @@ tw_tree=tests//functional/test_weld/src
 for want in \
     "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \
     "untested|$tw_tree/komira_b: 1 .mojo source(s) and no welded test" \
+    "untested|$tw_tree/tests/support/komira_e: 1 .mojo source(s) and no welded test" \
     "shrink_package|src/komira_c: the package welds 1 test(s) now; delete the row (the ledger only shrinks)" \
     "shrink_file|src/komira_c/wire/tests/test_wire.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
     "shrink_computed|src/komira_a/tests/test_one.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
@@ -1209,6 +1220,7 @@ for want in \
     "libc_open|$S:3: libc_redeclare: " \
     "public_pointer|$S:2: public_pointer: " \
     "public_method|$S:3: public_pointer: " \
+    "public_pointer_container|$N/src/tests/e2e/komira_c_e2e/plant.mojo:2: public_pointer: " \
     "public_init|$N/src/komira_b/__init__.mojo:2: public_pointer: " \
     "held_new_site|$N/src/komira_a/held.mojo:85: parallelize: parallelize[_worker](n) -- the standard library's parallelize[: run the work on a ParallelDispatch (3 sites, held 2)" \
     "ffi_from_address|$N/src/komira_a/ffi.mojo:11: from_address: " \
@@ -1242,6 +1254,27 @@ expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`
 # 44
 # shellcheck source=tools/build/tests/public_boundary_tests.sh
 . "$ROOT/tools/build/tests/public_boundary_tests.sh"
+
+# 45
+expect_green src_layout //:src_layout tests//functional/src_layout:ok
+N=tests//negative/src_layout
+F="a test-only package directly under src/, which holds what komira ships; move it to"
+for want in \
+    "top_e2e|//src/komira_foo_e2e: $F src/tests/e2e/komira_foo_e2e" \
+    "top_loopback|//src/komira_foo_loopback: $F src/tests/e2e/komira_foo_loopback" \
+    "top_conformance|//src/komira_foo_conformance: $F src/tests/conformance/komira_foo_conformance" \
+    "top_test_library|//src/komira_test_unlisted: a test library directly under src/ that \`shipped\` does not name" \
+    "shipped_missing|shipped names komira_test_gone, which is no package directly under src/; delete it" \
+    "nested|//src/komira_a_extra/komira_x_e2e: a package is src/<name>" \
+    "bad_kind|//src/tests/bench/komira_y: src/tests holds packages only at src/tests/<kind>/<name>" \
+    "shallow|//src/tests/komira_z_e2e: src/tests holds packages only at src/tests/<kind>/<name>" \
+    "e2e_in_conformance|this one belongs in src/tests/e2e/komira_w_e2e" \
+    "conformance_in_e2e|this one belongs in src/tests/conformance/komira_v_conformance" \
+    "e2e_in_support|this one belongs in src/tests/e2e/komira_u_loopback" \
+    "harness_in_e2e|this one belongs in src/tests/support/komira_t" \
+    "empty|src_layout: checked nothing"; do
+    expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
 
 # 37
 pt_rc=0

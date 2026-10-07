@@ -4,11 +4,11 @@
 # tools/build/tests/coverage_run_tests.sh (uses run_tests.sh's BUCK2, LOG,
 # pass, fail, expect_green and expect_red); not run on its own.
 #
-#  45. The coverage gate: with coverage, a library's package waits for its
+#  46. The coverage gate: with coverage, a library's package waits for its
 #      tests' coverage runs and for `covcheck gate` over their reports and
 #      their branch records (--branch-lcov).
 #      tests//negative/coverage (tools/build/coverage/README.md, "The build
-#      gate"; tools/build/tests/coverage_runs.md, test 45):
+#      gate"; tools/build/tests/coverage_runs.md, test 46):
 #      covlow, covnotests, covun, covfull_unread and covbranch in enforce
 #      mode are red, each naming its finding: BelowTarget (a test covering
 #      3 of 6 lines, and 1 of the 4 arms of its two `if`s), NotMeasured (a

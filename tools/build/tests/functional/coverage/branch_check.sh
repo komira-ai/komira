@@ -1,5 +1,5 @@
 #!/bin/sh
-# branch_check.sh -- a check of a branch coverage run's profile (test 46),
+# branch_check.sh -- a check of a branch coverage run's profile (test 47),
 # run as a build action by cov_branch_check (defs.bzl):
 #   sh branch_check.sh <busybox> <out> <llvm_dir> <profdata> <function> <count>,<count>...
 #

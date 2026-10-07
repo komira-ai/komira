@@ -1,5 +1,5 @@
 # Calls clamp(20) and clamp(5): every line of covbranch runs, and the `if`
-# is true once and false once, so both branch arms are taken (test 45).
+# is true once and false once, so both branch arms are taken (test 46).
 from covbranch import clamp
 from std.testing import assert_equal
 

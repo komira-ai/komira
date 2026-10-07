@@ -1,4 +1,4 @@
-"""branchc: a library of the branch coverage tests (test 46) that calls
+"""branchc: a library of the branch coverage tests (test 47) that calls
 into C (komira_example_add, of komira//tools/build/examples/cshim:add)."""
 
 from std.ffi import external_call

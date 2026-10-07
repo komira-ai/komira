@@ -836,11 +836,11 @@ A library in the `tests` cell may pass `coverage_debug` itself (a
 when not given) and `coverage_gate` (a `cov_gate_dir`) with `coverage_mode`
 (the policy's when not given): it then has coverage binaries and runs, and
 with `coverage_gate` the gate and the join, whatever the switch says, which
-is how tests 41, 43, 45 and 46 build them, plant a defective relocator or run
+is how tests 41, 43, 46 and 47 build them, plant a defective relocator or run
 script, and gate in enforce mode, without `-c`. Without `coverage_gate`
 its package does not wait for its runs. It may also pass
 `coverage_branch_gate = False`, so its gate does not read its branch
-records (test 45's `covfull_unread`). Anywhere else passing any of them is
+records (test 46's `covfull_unread`). Anywhere else passing any of them is
 refused.
 
 ## Errors

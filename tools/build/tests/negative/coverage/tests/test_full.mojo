@@ -1,5 +1,5 @@
 # Calls full(): every line of covfull has a hit, and kcov reports no branch
-# (test 45).
+# (test 46).
 from covfull import full
 from std.testing import assert_equal
 

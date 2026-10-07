@@ -313,7 +313,7 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | finding | when |
 |---|---|
 | `BelowTarget` | line, or branch when measured, below `--target-bp` (labelled `(census)` in census mode) |
-| `BranchNotMeasured` | a package (not a file: one branch record anywhere in the package clears it) with a line record has no branch record in any report (before exemptions), and no branch record file names one of its kept files, while `--target-bp` is above 0: its branch coverage cannot be shown to meet the target, so it is not passing. kcov's Cobertura has no branch data, so with kcov alone every measured package has it, and enforce mode cannot pass on line coverage alone; the summary shows the branch column `not measured`. A branch record file names every measured file its test holds code of, one with no decision with no `BRDA` (`SF:` then `end_of_record`), so a package with no decision at all whose gate reads the records does not have it: its branches are measured, with none to take (test 45's `covfull`; `covfull_unread`, whose gate does not read them, has it) |
+| `BranchNotMeasured` | a package (not a file: one branch record anywhere in the package clears it) with a line record has no branch record in any report (before exemptions), and no branch record file names one of its kept files, while `--target-bp` is above 0: its branch coverage cannot be shown to meet the target, so it is not passing. kcov's Cobertura has no branch data, so with kcov alone every measured package has it, and enforce mode cannot pass on line coverage alone; the summary shows the branch column `not measured`. A branch record file names every measured file its test holds code of, one with no decision with no `BRDA` (`SF:` then `end_of_record`), so a package with no decision at all whose gate reads the records does not have it: its branches are measured, with none to take (test 46's `covfull`; `covfull_unread`, whose gate does not read them, has it) |
 | `NotMeasured` | a package in the run (in `gate`, the gated package) has no line record from a report and no exempted recorded line while `--target-bp` is above 0: no report covers it, or none of its paths mapped to it (the lines of files no test compiled do not make it measured) |
 | `Regression` | line or branch below its ratchet floor; or a floor above 0 whose value was not measured (no data, `measured_bp` null): in `report` for every row whose directory holds a BUCK file, in `gate` for its package's row |
 | `MissingRow` | lines were measured and the ratchet has no row for the package |
@@ -365,7 +365,7 @@ action with `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage
 gate]): covcheck gate exited 3` and the summary; exits 1 and 2 (an input
 covcheck refuses, bad usage) fail it in every mode with `COVERAGE GATE ERROR`
 and covcheck's message: a malformed ratchet fails a census gate too (test
-45). Census and neutral mode never fail on a finding.
+46). Census and neutral mode never fail on a finding.
 
 The library's package (its `mojo_gate_join`) waits for the gate's marker and
 every coverage run's, so dependents compile against a package whose
@@ -393,7 +393,7 @@ than komira's, a gate reading branch records (`coverage_branch_gate`) for a
 library not in `COVERAGE_BRANCH_GATE` or not reading them for one in it,
 coverage runs with no gate, or the ledger's join (runs, no gate) for a
 library not in the ledger is refused. These refusals are outside the
-tests cell, so test 45 cannot plant them there: test 7
+tests cell, so test 46 cannot plant them there: test 7
 (`tests/functional/umbrella_cache.sh`) plants each in a consumer
 repository's own cell.
 
@@ -423,7 +423,7 @@ which their conda package (what ships) waits for. `no_gate.bxl` fails
 unless the ledger names exactly the Mojo libraries `:cov_gate` depends on,
 the ledger is within the frozen list `_CEILING` in the same file (so it
 only shrinks: a new row also needs a reviewed edit of that list), and each
-one's conda package waits for its gate (test 45). A check that builds only
+one's conda package waits for its gate (test 46). A check that builds only
 the libraries a change affects must also build their `<name>_cov_gate` (an
 rdep of the library) or these three ship ungated:
 
@@ -435,7 +435,7 @@ rdep of the library) or these three ship ungated:
 are the source, read by the gate of a library of `COVERAGE_BRANCH_GATE`
 (`policy.bzl`, each row with its evidence: today `komira_retry`, whose
 census gate reads 73 of 74 arms) and of every fixture of the tests cell
-but those passing `coverage_branch_gate = False` (test 45's
+but those passing `coverage_branch_gate = False` (test 46's
 `covfull_unread`).
 Every other measured package has `BranchNotMeasured`; in census mode it is
 listed, in enforce mode it fails. Line coverage alone is never read as

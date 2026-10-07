@@ -7,7 +7,7 @@
 #  41. Coverage builds: with -c komira.coverage=true, every release action
 #      of tests//functional/coverage:covlib, :covuser and //src/komira_retry
 #      keeps its command line and inputs, but the join, whose inputs gain
-#      exactly one coverage run per test and the gate (test 45), and covuser
+#      exactly one coverage run per test and the gate (test 46), and covuser
 #      (a dependent of covlib) does not compile again; :covbare (no test, no
 #      README) has a join only with the switch on, waiting for its gate
 #      alone; and the only new actions are coverage ones,
