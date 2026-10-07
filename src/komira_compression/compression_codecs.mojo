@@ -2,9 +2,10 @@
 # Compression conformers — 8 codec marker structs implementing `Compression`
 # =============================================================================
 #
-# WORKING — call the snappy C API (statically linked), libzstd (via
-# OwnedDLHandle FFI, here), and libz / liblz4 through the komira_zlib and
-# komira_lz4 leaves (which own those libraries' handles and FFI):
+# WORKING — call the codec libraries through this package's codec modules:
+# snappy through snappy_block.mojo (statically linked), libzstd through the
+# handle of codec_libraries.mojo, and libz / liblz4 through the komira_zlib and
+# komira_lz4 layers (which own those libraries' handles and FFI):
 #   - `Uncompressed`               — no-op (no FFI).
 #   - `Snappy`                     — snappy, linked into the binary.
 #   - `Zstd[level: Int = 3]`       — libzstd.
@@ -26,28 +27,31 @@
 # FFI-BOUNDARY discipline:
 #   - All conformer compress/decompress methods accept `Span[UInt8, _]`
 #     (origin-polymorphic, safe surface — encapsulation rule).
-#   - Internally, helpers use `.unsafe_ptr()` + `.unsafe_origin_cast[
-#     MutUntrackedOrigin]()` ONLY at the `external_call` boundary, with
-#     `# FFI-BOUNDARY:` comments. This mirrors
-#     `komira_parquet/compression.mojo` patterns.
+#   - The Zstd conformer calls libzstd through `_zstd_handle()`
+#     (codec_libraries.mojo) for its decompression contexts and its
+#     pointer-taking `*_into` methods; helpers use `.unsafe_ptr()` +
+#     `.unsafe_origin_cast[MutUntrackedOrigin]()` ONLY at those call sites,
+#     with `# FFI-BOUNDARY:` comments.
 #   - The Snappy / Zstd / Uncompressed conformers each build a
 #     `List[UInt8](capacity=...)` output, call the C lib into that buffer,
 #     then set the final length. Gzip / Lz4Raw / Lz4Frame hand a Span of
 #     their output List to the komira_zlib / komira_lz4 Span API.
 #
-# HANDLES: libzstd keeps a process-lifetime OwnedDLHandle singleton here (a
-# `_Global`, below): the OwnedDLHandle ctor costs ~220us per construction on
-# Darwin. libz and liblz4 are NOT opened here: komira_zlib and komira_lz4 own
-# them, with their own process-lifetime singletons and known-answer tests.
+# HANDLES: no library is opened here. libzstd's process-lifetime handle is
+# codec_libraries.mojo's; libz and liblz4 are komira_zlib's and komira_lz4's,
+# with their own process-lifetime singletons and known-answer tests.
 # =============================================================================
 
 from std.memory import OwnedPointer, unsafe_memcpy, alloc
-from std.ffi import OwnedDLHandle, _Global, external_call
-from std.os import abort
 
-from std.sys.info import CompilationTarget
-
+from komira_compression.codec_libraries import _zstd_handle
 from komira_compression.compression import ArrowIpcCompression, Compression
+from komira_compression.snappy_block import (
+    snappy_compress_into,
+    snappy_max_compressed_length,
+    snappy_uncompress_into,
+    snappy_uncompressed_length,
+)
 from komira_lz4.codec import (
     lz4_compress_bound,
     lz4_compress_into,
@@ -91,50 +95,6 @@ def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
 
 
 # =============================================================================
-# Library sonames — per-OS dylib/so basename
-# =============================================================================
-
-comptime _LIBZSTD: StaticString = "libzstd.dylib" if CompilationTarget.is_macos() else "libzstd.so.1"
-
-
-# =============================================================================
-# Per-codec OwnedDLHandle singletons (process-lifetime dlopen cache)
-# =============================================================================
-#
-# libzstd gets a process-lifetime `_Global` runtime slot (dlopen'd once,
-# init-once, cross-compile-unit-coherent, KGEN-managed) — no environment
-# variable and no `unsafe_from_address=Int`. A distinct `_Global` name keeps it
-# independent of the parquet / orc / avro singletons for the same dylib.
-
-
-def _init_arrow_zstd_handle() -> OwnedDLHandle:
-    """`_Global` init_fn: dlopen libzstd once per process (KGEN-serialized).
-
-    SAFETY: init_fn must be non-raising; the OwnedDLHandle ctor raises only on
-    an unresolvable pinned dylib (fatal provisioning error), so we `abort` —
-    matching a raise that aborts the query.
-    """
-    try:
-        return OwnedDLHandle(_LIBZSTD)
-    except e:
-        abort("libzstd dlopen failed (arrow codec handle init)")
-
-
-comptime _ZSTD_GLOBAL = _Global[
-    "komira_arrow_zstd_handle", _init_arrow_zstd_handle
-]
-
-
-# Per-codec accessors — return the process-lifetime handle slot (init-once via
-# `_Global`). SAFETY: FFI carve-out; `MutUntrackedOrigin` is the stdlib
-# `_Global` return type (runtime-managed static storage). No env var, no
-# `unsafe_from_address`.
-@always_inline
-def _zstd_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
-    return _ZSTD_GLOBAL.get_or_create_ptr()
-
-
-# =============================================================================
 # Span -> FFI-pointer adapter
 # =============================================================================
 #
@@ -151,7 +111,7 @@ def _span_ptr(s: Span[UInt8, _]) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     for FFI. FFI-BOUNDARY: synchronous C call; caller owns the buffer.
     """
     # SAFETY: see header. The cast does not extend lifetime; the Span ref
-    # remains in scope across the external_call below.
+    # remains in scope across the FFI call below.
     return (
         s.unsafe_ptr()
         .unsafe_mut_cast[True]()
@@ -320,26 +280,8 @@ struct Uncompressed(ArrowIpcCompression):
 # Snappy — the snappy C API, statically linked (Parquet codec id 1)
 # =============================================================================
 #
-# snappy-c.h API used:
-#   snappy_status snappy_compress(const char* input, size_t input_length,
-#                                 char* compressed, size_t* compressed_length);
-#   snappy_status snappy_uncompress(const char* compressed, size_t compressed_length,
-#                                   char* uncompressed, size_t* uncompressed_length);
-#   snappy_status snappy_uncompressed_length(const char* compressed,
-#                                            size_t compressed_length,
-#                                            size_t* result);
-#
-# `snappy_status` is a C enum where 0 == SNAPPY_OK.
-#
-# Snappy guarantees `compressed_size <= 32 + input_len + input_len/6` (same
-# formula snappy reports via `snappy_max_compressed_length`).
+# Through snappy_block.mojo, the one module that declares the snappy symbols.
 # =============================================================================
-
-
-@always_inline
-def _snappy_max_compressed_length(input_len: Int) -> Int:
-    """Snappy guarantees compressed_size <= 32 + n + n/6."""
-    return 32 + input_len + input_len // 6
 
 
 @fieldwise_init
@@ -348,9 +290,9 @@ struct Snappy(Compression):
     id 1. Default for Parquet (matches DuckDB).
 
     The snappy library is statically linked into every binary that uses
-    the core packages, so no shared library is needed at run time. A native Mojo
-    Snappy port lives in `komira_parquet` and is used on the Parquet path;
-    this conformer calls the C library directly.
+    this package, so no shared library is needed at run time. A native Mojo
+    Snappy decoder lives in `komira_parquet_codec` and is used on the Parquet
+    path; this conformer calls the C library through `snappy_block`.
     """
 
     var _reserved: Bool
@@ -365,26 +307,16 @@ struct Snappy(Compression):
     @staticmethod
     def compress(input: Span[UInt8, _]) raises -> List[UInt8]:
         var n = len(input)
-        var max_out = _snappy_max_compressed_length(n)
+        var max_out = snappy_max_compressed_length(n)
         var out = List[UInt8](capacity=max_out)
-
-        # SAFETY: see _span_ptr / _list_ptr; synchronous FFI.
-        var size_buf = alloc[Int64](1)
-        size_buf[0] = Int64(max_out)
-        # FFI-BOUNDARY:
-        var status = external_call["snappy_compress", Int32](
-            _span_ptr(input),
-            Int64(n),
-            _list_ptr(out),
-            size_buf,
-        )
-        var written = Int(size_buf[0])
-        size_buf.free()
-        if Int(status) != 0:
-            raise Error(
-                "Snappy.compress: snappy_compress failed (status="
-                + String(Int(status)) + ", n=" + String(n) + ")"
-            )
+        # SAFETY: the `max_out` bytes are the List's reserved capacity; snappy
+        # writes the block into them and the List is cut to what it wrote.
+        out.resize(unsafe_uninit_length=max_out)
+        var written: Int
+        try:
+            written = snappy_compress_into(Span(out), input)
+        except e:
+            raise Error("Snappy.compress: " + String(e))
         out.resize(unsafe_uninit_length=written)
         return out^
 
@@ -402,45 +334,26 @@ struct Snappy(Compression):
             out_len = expected_size
         else:
             # Ask snappy for the declared uncompressed length.
-            var sz = alloc[Int64](1)
-            sz[0] = Int64(0)
-            var status = external_call["snappy_uncompressed_length", Int32](
-                _span_ptr(input),
-                Int64(n),
-                sz,
-            )
-            var sz_val = Int(sz[0])
-            sz.free()
-            if Int(status) != 0:
-                raise Error(
-                    "Snappy.decompress: snappy_uncompressed_length failed "
-                    + "(status=" + String(Int(status)) + ")"
-                )
-            out_len = sz_val
+            try:
+                out_len = snappy_uncompressed_length(input)
+            except e:
+                raise Error("Snappy.decompress: " + String(e))
 
         var out = List[UInt8](capacity=out_len)
-        var size_buf = alloc[Int64](1)
-        size_buf[0] = Int64(out_len)
-        # FFI-BOUNDARY:
-        var status2 = external_call["snappy_uncompress", Int32](
-            _span_ptr(input),
-            Int64(n),
-            _list_ptr(out),
-            size_buf,
-        )
-        var written = Int(size_buf[0])
-        size_buf.free()
-        if Int(status2) != 0:
-            raise Error(
-                "Snappy.decompress: snappy_uncompress failed (status="
-                + String(Int(status2)) + ", n=" + String(n) + ")"
-            )
+        # SAFETY: the `out_len` bytes are the List's reserved capacity; snappy
+        # writes at most that many and the List is cut to what it wrote.
+        out.resize(unsafe_uninit_length=out_len)
+        var written: Int
+        try:
+            written = snappy_uncompress_into(Span(out), input)
+        except e:
+            raise Error("Snappy.decompress: " + String(e))
         out.resize(unsafe_uninit_length=written)
         return out^
 
 
 # =============================================================================
-# Zstd[level] — libzstd via OwnedDLHandle (Parquet codec id 6)
+# Zstd[level] — libzstd through codec_libraries.mojo's handle (Parquet codec id 6)
 # =============================================================================
 #
 # zstd.h API used:
