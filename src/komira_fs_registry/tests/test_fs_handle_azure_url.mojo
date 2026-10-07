@@ -16,10 +16,14 @@
 #    with or without a port), an http:// URL that is
 #    not path-style, and a query (a SAS token pasted into the URL), whose
 #    refusal does not echo the token.
-#  * parse_azure_url, encoded paths: the https:// resource URI's and Hadoop
-#    container@host form's paths are percent-decoded once (year%3D2024 is
-#    year=2024), az:// and DuckDB's host-first form are taken as written,
-#    and a bad escape or a decoded path that is not UTF-8 is refused.
+#  * parse_azure_url, encoded paths: the https:// resource URI's, the
+#    http:// emulator URL's and Hadoop container@host form's paths are
+#    percent-decoded once (year%3D2024 is year=2024), az:// and DuckDB's
+#    host-first form are taken as written, and a bad escape (on https://,
+#    abfs:// and http://) or a decoded path that is not UTF-8 is refused.
+#  * the decoder: lowercase hex escapes decode as uppercase ones do; an
+#    overlong lead, a surrogate, a bad continuation byte, a code point above
+#    U+10FFFF and a truncated sequence are each refused by exact message.
 #  * azure_arm_config_for_url: a URL naming no account or endpoint takes the
 #    configuration's; one naming the configured endpoint (scheme and host
 #    case-insensitive, a trailing / ignored) uses it; a different account,
@@ -89,8 +93,8 @@ def test_accepted_urls() raises:
 
 
 def test_encoded_paths() raises:
-    # The https:// resource URI and Hadoop's abfs[s]://container@host are
-    # percent-encoded and decoded once here (komira_azure_blob encodes the
+    # The https:// resource URI, the http:// emulator URL and Hadoop's
+    # abfs[s]://container@host are percent-encoded and decoded once here (komira_azure_blob encodes the
     # blob name again on the wire); az:// and DuckDB's host-first form are
     # taken as written.
     _row(
@@ -100,6 +104,10 @@ def test_encoded_paths() raises:
     _row(
         "abfss://lake@myacct.dfs.core.windows.net/a%20b/%C3%A9.bin",
         "myacct", "lake", "a b/é.bin", True, "", False,
+    )
+    _row(
+        "http://127.0.0.1:10000/devstoreaccount1/lake/year%3D2024/a",
+        "devstoreaccount1", "lake", "year=2024/a", True, "http://127.0.0.1:10000", True,
     )
     _row("az://lake/year%3D2024/a", "", "lake", "year%3D2024/a", False, "", False)
     _row(
@@ -122,6 +130,36 @@ def test_encoded_paths() raises:
         contains="fs_registry: an Azure URL's decoded path is not UTF-8, got 'https://myacct.blob.core.windows.net/lake/a%FF'"
     ):
         _ = parse_azure_url("https://myacct.blob.core.windows.net/lake/a%FF")
+    with assert_raises(
+        contains="fs_registry: an Azure URL's path has a '%' not followed by two hex digits, got 'http://127.0.0.1:10000/devstoreaccount1/lake/a%G0'"
+    ):
+        _ = parse_azure_url("http://127.0.0.1:10000/devstoreaccount1/lake/a%G0")
+
+
+comptime _UTF8_MSG = "fs_registry: an Azure URL's decoded path is not UTF-8, got '"
+comptime _BLOB = "https://myacct.blob.core.windows.net/lake/"
+
+
+def test_decoder_rules() raises:
+    # Lowercase hex is the same escape as uppercase (RFC 3986 section 2.1).
+    _row(_BLOB + "%c3%a9.bin", "myacct", "lake", "é.bin", True, "", False)
+    _row(_BLOB + "a%3d%7E", "myacct", "lake", "a=~", True, "", False)
+    # RFC 3629: each malformed sequence is refused, naming the URL.
+    # Overlong two-byte lead (C0 AF is an overlong '/').
+    with assert_raises(contains=_UTF8_MSG + _BLOB + "%C0%AF'"):
+        _ = parse_azure_url(_BLOB + "%C0%AF")
+    # A UTF-16 surrogate (U+D800) encoded as ED A0 80.
+    with assert_raises(contains=_UTF8_MSG + _BLOB + "%ED%A0%80'"):
+        _ = parse_azure_url(_BLOB + "%ED%A0%80")
+    # A three-byte sequence whose third byte is not a continuation byte.
+    with assert_raises(contains=_UTF8_MSG + _BLOB + "%E1%80%41'"):
+        _ = parse_azure_url(_BLOB + "%E1%80%41")
+    # U+110000, above U+10FFFF.
+    with assert_raises(contains=_UTF8_MSG + _BLOB + "%F4%90%80%80'"):
+        _ = parse_azure_url(_BLOB + "%F4%90%80%80")
+    # A two-byte lead with nothing after it.
+    with assert_raises(contains=_UTF8_MSG + _BLOB + "a%C3'"):
+        _ = parse_azure_url(_BLOB + "a%C3")
 
 
 comptime _SCHEME_MSG = (
@@ -344,6 +382,7 @@ def test_azure_config_for() raises:
 def main() raises:
     test_accepted_urls()
     test_encoded_paths()
+    test_decoder_rules()
     test_refused_urls()
     test_arm_config_for_url()
     test_endpoint_scheme()

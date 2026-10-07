@@ -41,9 +41,10 @@
 #   http://<host>[:<port>]/<account>/<container>/<path>
 #                                                 (an emulator, path-style)
 #
-# ENCODING. The https:// resource URI and Hadoop's abfs[s]://container@host
-# form are URIs whose path is percent-encoded (RFC 3986 section 2.1; Azure's
-# SDKs build and parse them so): their path is decoded once here, a `%` not
+# ENCODING. The https:// resource URI, the http:// emulator's path-style
+# resource URI and Hadoop's abfs[s]://container@host form are URIs whose
+# path is percent-encoded (RFC 3986 section 2.1; Azure's SDKs build and
+# parse them so): their path is decoded once here, a `%` not
 # followed by two hex digits and a decoded path that is not UTF-8 are
 # refused. az:// in every form and DuckDB's abfs[s]://<account>.<svc>...
 # form are taken as written, as fsspec/adlfs and DuckDB take them. The blob
@@ -375,7 +376,7 @@ def parse_azure_url(url: String) raises -> AzureUrl:
         _check_account(account)
         var q = _split_first(p[1])
         container = q[0]
-        path = q[1]
+        path = _percent_decode_path(q[1], url)
         names_endpoint = True
         endpoint = String("http://") + authority
         path_style = True
