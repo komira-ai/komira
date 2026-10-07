@@ -122,7 +122,10 @@ case "$rc" in
         fi
         echo "==================================================================" >&2
         echo "COVERAGE GATE FAILED (enforce): $PACKAGE ($LABEL): covcheck gate exited 3" >&2
-        echo "The library's package is not produced until its coverage meets the policy." >&2
+        name=${LABEL%% *}
+        name=${name##*:}
+        echo "The conda package (${name}_conda) is not produced until its coverage meets the policy;" >&2
+        echo "the library and its dependents still build." >&2
         echo "==================================================================" >&2
         cat "$SUMMARY" >&2
         cat "$K/out" >&2

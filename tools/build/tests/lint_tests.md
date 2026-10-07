@@ -31,7 +31,7 @@ in the root [`BUCK`](../../../BUCK) holds the repository to them.
 list holding an entry in a comment, a helper under `tests/`, a nested test, a
 test welded by a target of its own, a package with no `.mojo`, and under
 `src/tests/` a test-only package that welds its test and one that has a
-ledger row by its path, `src/tests/support/komira_e`) whose ledger
+ledger row by its path, `src/tests/helpers/komira_e`) whose ledger
 holds it exactly, and each target of
 [`negative/test_weld`](negative/test_weld/BUCK) plants one defect in the same
 tree and must fail naming it; `shrink_computed` is a ledger row for a test
@@ -102,22 +102,32 @@ exists only to test others is under `src/tests/`, by kind
 ([architecture](../../../docs/architecture.md#end-to-end-tests)).
 [`src_layout`](../lint/defs.bzl) is a validation over the packages under
 `src/`: each is `src/<name>`, or `src/tests/<kind>/<name>` with kind `e2e`
-(named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `support`
+(named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `helpers`
 (neither). An `*_e2e`, `*_loopback` or `*_conformance` package directly under
 `src/` is a finding, and so is a `komira_test_*` one its `shipped` list does
 not name, a `shipped` name that is no package there, and any package not at
 one of the two places. `//:src_layout` in the root [`BUCK`](../../../BUCK)
 reads the packages from the build graph (the root package's subpackages, the
 nearest directories holding a BUCK file), so it is declared in every checkout
-and a new package is checked with no edit.
+and a new package is checked with no edit to a BUCK file. Given a `map` (the
+root target names [docs/architecture.md](../../../docs/architecture.md#the-module-map)),
+it also reads the module map's table rows, so a new package needs its row
+there: every package under `src/` has
+exactly one row whose link is its directory and whose name is the
+directory's, and no row links a directory under `src/` that is not a
+package. The root call must name `map`: without it the
+macro fails at load, so the map check cannot be dropped silently.
 [`functional/src_layout:ok`](functional/src_layout/BUCK) is a planted list
 ([`fixture.bzl`](functional/src_layout/fixture.bzl): a package of each kind,
 a `*_loopback` under `e2e`, a shipped `komira_test_*`, a name holding `e2e`
 without ending in it, and an `*_e2e` package outside `src/`) that must pass;
 each target of [`negative/src_layout`](negative/src_layout/BUCK) adds one
-defect to it and must fail naming it.
+defect to it and must fail naming it; the `map_*` ones plant a defect in the
+map ([`map.txt`](functional/src_layout/map.txt)): a package with no row, a
+row for a package that is gone, two rows for one package, a misnamed row.
 
 ```sh
 ./buck2 build //:src_layout tests//functional/src_layout:ok
 ./buck2 build tests//negative/src_layout:top_e2e   # must fail: //src/komira_foo_e2e: a test-only package directly under src/
+./buck2 build tests//negative/src_layout:map_missing_row   # must fail: //src/komira_new: no row in ...
 ```

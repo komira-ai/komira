@@ -180,8 +180,8 @@ approved run as able to affect every build that uses the same service.
 
 ## What a farm test action can do
 
-`./buck2 test //src/tests/support/komira_test_minio:farm_capability_probe`
-([the probe](../src/tests/support/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
+`./buck2 test //src/tests/helpers/komira_test_minio:farm_capability_probe`
+([the probe](../src/tests/helpers/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
 inside one test action (on the farm, a Linux worker; with no farm
 configured, the client, like any other standalone test), each thing an
 end-to-end test of a real server needs, and prints one
@@ -190,7 +190,7 @@ rows are required: the test fails, naming the capability, when one is
 missing. The rest are reported and never fail it.
 
 The probe watches the workers only when it runs: the PR check runs it when
-its unit (`//src/tests/support/komira_test_minio/...`) is affected, that is, when a PR
+its unit (`//src/tests/helpers/komira_test_minio/...`) is affected, that is, when a PR
 touches `komira_test_minio` or one of its dependencies. Anyone can run it on
 demand with the command above. A test result is not cached, so each run is a
 fresh probe.
@@ -967,8 +967,9 @@ retargeted to `main` and then pushed to (a retarget alone is an `edited`
 event, which neither workflow listens for; the pull request adding the
 workflow sees its first real run then). Making it a required check, or switching coverage on in
 `pr / check`, waits for the sweep of tests that fail at `-O0` or under kcov
-(today one such test leaves all its library's dependents unbuilt in a
-coverage build) and is the CEO's decision. Details:
+(in a coverage build one such test leaves its library's conda package
+unbuilt: a coverage run or gate blocks only the package it measures from
+shipping, never the library or its dependents) and is the CEO's decision. Details:
 [The coverage workflow](../tools/build/coverage/README.md#the-coverage-workflow).
 
 ## merge-from-live (not yet running)

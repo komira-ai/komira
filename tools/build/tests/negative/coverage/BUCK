@@ -296,12 +296,14 @@ mojo_library(
     test_srcs = ["tests/test_lingers.mojo"],
 )
 
-# ---- Test 46: the coverage gate and the join ------------------------------
+# ---- Test 46: the coverage gate -------------------------------------------
 #
 # Each library below has coverage builds and the gate whatever the switch
 # says (coverage_debug and coverage_gate, which a tests-cell fixture may
-# pass), in the mode it names. A red one fails its default output, the
-# package: the join waits for the gate. Its census twin is green, and
+# pass), in the mode it names. A red gate fails its [coverage][gate] and,
+# for covlow and covnotests, which have one, its conda package (what ships
+# waits for the gate); the library itself, its package, builds GREEN: no
+# dependent waits for a gate. Its census twin is green, and
 # :<name>_census_result reads the twin's [coverage][gate][result].
 _LINK = "komira//tools/build/coverage/kcov:cov_link"
 
@@ -319,7 +321,7 @@ _GATED = {
     "covun": (["covun/__init__.mojo", "covun/unused.mojo", "covun/used.mojo"], ["tests/test_used.mojo"], _GATE),
     # Every line covered, a ratchet row at 100% line, and no decision: its
     # branch records name full.mojo with no arm (measured, none to take), so
-    # it has no finding and builds GREEN in enforce mode too.
+    # it has no finding and its gate is GREEN in enforce mode too.
     "covfull": (["covfull/__init__.mojo", "covfull/full.mojo"], ["tests/test_full.mojo"], ":covfull_gate"),
     # Every line covered, a ratchet row at 100% line and branch floor 0, and
     # one `if` whose false arm test_clamp_high never takes: the one finding
@@ -334,7 +336,7 @@ cov_gate_dir(
 )
 
 # GREEN in enforce mode: covbranch with a test taking both arms of its `if`,
-# every line covered: no finding, so its package is built.
+# every line covered: no finding, so its [coverage][gate] is green.
 mojo_library(
     name = "covbranch_both",
     srcs = [
@@ -357,8 +359,8 @@ cov_gate_dir(
 
 # covfull with `coverage_branch_gate = False`: its gate reads no branch
 # record (the side of a library not in COVERAGE_BRANCH_GATE), so the one
-# finding left is BranchNotMeasured. RED in enforce mode; its census twin's
-# result.json says so (:covfull_unread_census_result).
+# finding left is BranchNotMeasured. Its gate is RED in enforce mode; its
+# census twin's result.json says so (:covfull_unread_census_result).
 [
     mojo_library(
         name = "covfull_unread" + suffix,
@@ -377,15 +379,19 @@ cov_gate_dir(
     for suffix, mode in (("", "enforce"), ("_census", "census"))
 ]
 
-# RED: tests//negative/coverage:covlow, :covnotests, :covun, :covbranch
-# (enforce). GREEN: :covfull (enforce), :covlow_census, :covnotests_census,
-# :covun_census, :covfull_census, :covbranch_census and their
-# :<name>_census_result checks.
+# RED: tests//negative/coverage:covlow[coverage][gate], :covnotests[...],
+# :covun[...], :covfull_unread[...], :covbranch[...] (enforce), and
+# :covlow_conda, :covnotests_conda (a library with no test: a REFUSED conda
+# package, which waits for its NotMeasured gate all the same). GREEN:
+# :covlow, :covnotests, :covun, :covfull, :covfull_unread, :covbranch (the
+# libraries), :covfull[coverage][gate] (enforce), :covlow_census,
+# :covnotests_census, :covun_census, :covfull_census, :covbranch_census and
+# their :<name>_census_result checks.
 [
     mojo_library(
         name = name + suffix,
         srcs = srcs,
-        conda = False,
+        conda = suffix == "" and name in ("covlow", "covnotests"),
         coverage_debug = _LINK,
         coverage_gate = gate,
         coverage_mode = mode,
@@ -491,9 +497,21 @@ cov_report_check(
     script = "//functional/coverage:report.sh",
 )
 
+# Test 46. A library that depends on covlow, whose gate (enforce) is red:
+# it compiles against covlow's package and its test runs. GREEN:
+# tests//negative/coverage:covlow_user (the gate blocks what ships, never a
+# dependent).
+mojo_library(
+    name = "covlow_user",
+    srcs = ["covlow_user/__init__.mojo"],
+    conda = False,
+    deps = [":covlow"],
+    test_srcs = ["tests/test_covlow_user.mojo"],
+)
+
 # Test 46. A census gate over a malformed ratchet: covcheck exits 1, which
 # fails the gate in every mode (census never fails on a finding, but does on
-# an input covcheck refuses). RED: tests//negative/coverage:covbad
+# an input covcheck refuses). RED: tests//negative/coverage:covbad[coverage][gate]
 cov_gate_dir(
     name = "covbad_gate",
     exec_compatible_with = LINUX_X86_64,
@@ -515,13 +533,14 @@ mojo_library(
 )
 
 # Test 46. A test that passes in the release gate and fails under kcov (the
-# tracer test above), in a library with no coverage attribute of its own: with
-# -c komira.coverage=true its package waits for that coverage run, so the
-# build is RED ("COVERAGE RUN FAILED"); without the switch it is GREEN.
+# tracer test above), in a library with no coverage attribute of its own.
+# Without the switch, GREEN: :tracer_shipped and :tracer_shipped_conda. With
+# -c komira.coverage=true, :tracer_shipped is still GREEN (nothing of the
+# library waits for a coverage run) and :tracer_shipped_conda is RED
+# ("COVERAGE RUN FAILED"): what ships waits for the run.
 mojo_library(
-    name = "tracer_joined",
+    name = "tracer_shipped",
     srcs = ["tracer/__init__.mojo"],
-    conda = False,
     import_name = "tracer",
     test_srcs = ["tests/test_tracer.mojo"],
 )

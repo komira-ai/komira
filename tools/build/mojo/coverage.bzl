@@ -32,16 +32,21 @@ and, per library (tests or none):
   `[coverage][gate]` (category `mojo_cov_gate`, cov_gate.sh of
   tools/build/coverage).
 
-The library's package (`mojo_gate_join`) then also waits for every coverage
+What ships, the library's conda package (`<name>_conda`, its joins
+`conda_join` and `conda_release_join`), then also waits for every coverage
 run and the gate (and through the gate, when it reads them, for every branch
-coverage action): a test failing at -O0, under kcov or (branch records
-read) instrumented for branch coverage, a branch the classifier refuses,
-or a gate failing in enforce mode, leaves it unbuilt. A library with no
-test gets a join too (its gate has no report: NotMeasured). The libraries the gate's own tool depends
-on (COVERAGE_NO_GATE, a ledger in policy.bzl) wait for their runs only; their
-gate is the target `<name>_cov_gate`, which their conda package waits for.
-`[coverage]` is the binaries, the reports and the gate's outputs. Every other
-action of the package and its tests is what it is with the switch off.
+coverage action), through the library's MojoCoverageGateInfo: a test failing
+at -O0, under kcov or (branch records read) instrumented for branch
+coverage, a branch the classifier refuses, or a gate failing in enforce
+mode, leaves the conda package unbuilt. The library's own package
+(`mojo_gate_join`, what dependents compile against) does not wait for them:
+a library whose coverage is red still builds, and so do its dependents. A
+library with no test still has a gate (it has no report: NotMeasured), which
+its conda package waits for. The libraries the gate's own tool depends on
+(COVERAGE_NO_GATE, a ledger in policy.bzl) have no gate of their own: their
+gate is the target `<name>_cov_gate`, which their conda package waits for
+too. `[coverage]` is the binaries, the reports and the gate's outputs. Every
+action of the library and its tests is what it is with the switch off.
 
 The macro reads `[komira] coverage` from the buckconfig of the cell its
 BUCK file is in: `-c` and a global buckconfig reach every cell, a cell's own
@@ -50,17 +55,14 @@ BUCK file is in: `-c` and a global buckconfig reach every cell, a cell's own
 The switch is read here, in the macro, and only sets the `coverage_*`
 attributes: a buckconfig value is not part of the configuration, so it moves
 no output path and no action key, and with the switch off the attributes are
-absent and analysis is what it was before they existed. With it on, the one
-release action of a library that changes is `mojo_gate_join`, whose inputs
-gain the coverage markers (its command and its output bytes do not change,
-so its dependents keep their keys); for a library of the ledger, its conda
-package's joins (`conda_join`, `conda_release_join`) also gain the marker of
-its `<name>_cov_gate`, likewise without changing their bytes. A library
-with no test (and no README) gains
-that join, so its package moves from `ungated/` to `pkg/` and its dependents'
-compiles are new actions in coverage builds. On a target platform other than
-linux-x86_64 the attributes are None (the `select` below), so the library
-builds as with the switch off.
+absent and analysis is what it was before they existed. With it on, no
+release action of a library changes (its `mojo_gate_join` included, so its
+dependents keep their keys); the actions that change are its conda
+package's joins (`conda_join`, `conda_release_join`), whose inputs gain the
+coverage markers (for a library of the ledger, the marker of its
+`<name>_cov_gate` too), without changing their command or their bytes. On a
+target platform other than linux-x86_64 the attributes are None (the
+`select` below), so the library builds as with the switch off.
 
 Scope: a library's `test_srcs`. A README's examples, `mojo_test`,
 `mojo_shared_lib` drivers and generated test sources get no coverage binary,
@@ -71,7 +73,7 @@ is NotMeasured in its gate.
 """
 
 load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_BRANCH_GATE", "COVERAGE_MODE", "COVERAGE_NO_GATE", "COVERAGE_TARGET_BP")
-load(":coverage_branch.bzl", "coverage_branch_sub_targets")
+load(":coverage_branch.bzl", "coverage_branch", "coverage_branch_sub_targets")
 load(":providers.bzl", "MojoToolchainInfo")
 
 # The link directory of every coverage build (cov_link_dir, kcov/defs.bzl):
@@ -98,12 +100,15 @@ _COVERAGE_BRANCH = "komira//tools/build/coverage/branch:cov_branch"
 # covcheck's `--test-source`); `reports`, its tests' Cobertura reports;
 # `branch_infos`, its tests' branch records (coverage_branch.bzl's
 # `cov/branch/<test>.info`, each covcheck's `--branch-lcov`) when the gate
-# reads them (_branch_gated), else none. A library
-# returns it whenever it has coverage builds, so `<name>_cov_gate`
-# (mojo_cov_gate) can gate a library of the ledger.
+# reads them (_branch_gated), else none. And `markers`: what its conda
+# package (tools/build/package/conda.bzl) waits for, the marker of every
+# coverage run and of its gate (none of a gate for a library of the ledger,
+# whose `<name>_cov_gate` the conda package names itself). A library
+# returns it whenever it has coverage builds.
 MojoCoverageGateInfo = provider(fields = {
     "branch_infos": provider_field(typing.Any),
     "label": provider_field(typing.Any),
+    "markers": provider_field(typing.Any),
     "package": provider_field(str),
     "reports": provider_field(typing.Any),
     "root": provider_field(typing.Any),
@@ -117,12 +122,10 @@ COVERAGE_ATTRS = {
     "coverage_debug": attrs.option(attrs.exec_dep(), default = None),
     # A cov_run_dir, set together with coverage_debug; None otherwise.
     "coverage_run": attrs.option(attrs.exec_dep(), default = None),
-    # A cov_gate_dir: the gate this library's package waits for. Set with
-    # coverage on, except for a library of COVERAGE_NO_GATE; None otherwise.
+    # A cov_gate_dir: this library's gate, which its conda package waits for.
+    # Set with coverage on, except for a library of COVERAGE_NO_GATE; None
+    # otherwise.
     "coverage_gate": attrs.option(attrs.exec_dep(), default = None),
-    # With coverage_debug: whether the package waits for the coverage runs
-    # even with no coverage_gate (a library of COVERAGE_NO_GATE).
-    "coverage_join": attrs.bool(default = False),
     # The gate's mode, with coverage_gate: policy.bzl's COVERAGE_MODE (a
     # fixture of the tests cell may set another).
     "coverage_mode": attrs.option(attrs.enum(["census", "neutral", "enforce"]), default = None),
@@ -130,10 +133,10 @@ COVERAGE_ATTRS = {
     # coverage builds and runs of coverage_branch.bzl. None otherwise.
     "coverage_branch": attrs.option(attrs.exec_dep(), default = None),
     # Whether the gate reads the tests' branch records (`--branch-lcov`),
-    # so the package waits for every branch coverage action. Set by the
-    # macro with coverage: whether the library is in COVERAGE_BRANCH_GATE
-    # (policy.bzl); for a fixture of the tests cell, True unless it passes
-    # False. False otherwise.
+    # so the conda package waits for every branch coverage action (through
+    # the gate). Set by the macro with coverage: whether the library is in
+    # COVERAGE_BRANCH_GATE (policy.bzl); for a fixture of the tests cell,
+    # True unless it passes False. False otherwise.
     "coverage_branch_gate": attrs.bool(default = False),
 }
 
@@ -162,10 +165,10 @@ def coverage_kwargs(kwargs):
     library uses when not given), `coverage_branch` (a cov_branch_dir;
     likewise) and `coverage_gate` (a cov_gate_dir) with
     `coverage_mode` (policy.bzl's when not given): its library then has
-    coverage binaries and runs, and with `coverage_gate` the gate and the
-    join, whatever the switch says, through the directories it names, so a
-    test can plant a defective tool or gate in enforce mode. Anywhere else
-    passing any of them is refused.
+    coverage binaries and runs, and with `coverage_gate` the gate, whatever
+    the switch says, through the directories it names, so a test can plant
+    a defective tool or gate in enforce mode. Anywhere else passing any of
+    them is refused.
 
     With coverage, `coverage_branch_gate` is whether the library is in
     COVERAGE_BRANCH_GATE (policy.bzl); a fixture of the tests cell reads
@@ -180,8 +183,6 @@ def coverage_kwargs(kwargs):
     mode = kwargs.get("coverage_mode")
     branch = kwargs.get("coverage_branch")
     reads = kwargs.get("coverage_branch_gate")
-    if "coverage_join" in kwargs:
-        fail("{}: `coverage_join` is set by mojo_library; do not pass it".format(name))
     if reads != None and get_cell_name() != "tests":
         fail("{}: `coverage_branch_gate` is set by mojo_library from COVERAGE_BRANCH_GATE (tools/build/coverage/policy.bzl); do not pass it".format(name))
     ledger = None
@@ -203,7 +204,6 @@ def coverage_kwargs(kwargs):
         if "{}//{}:{}".format(get_cell_name(), package_name(), name) in COVERAGE_NO_GATE:
             ledger = name + "_cov_gate"
             _mojo_cov_gate(name = ledger, lib = ":" + name, mode = mode)
-            kwargs["coverage_join"] = True
         else:
             gate = _COVERAGE_GATE
     else:
@@ -257,6 +257,17 @@ def coverage_sources(ctx, root):
                 rel = rel[len(root) + 1:]
             gen.append(rel)
     return src_repo, gen
+
+def coverage_branch_of(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, root):
+    """The branch coverage actions of test source `t` (coverage_branch.bzl),
+    as {stem: their outputs}, with `coverage_branch` set; {} otherwise. The
+    arguments are coverage_branch's, but `root`, the package directory [src]
+    stages (_package_root), from which its measured sources are found
+    (coverage_sources)."""
+    if not ctx.attrs.coverage_branch:
+        return {}
+    src_repo, gen = coverage_sources(ctx, root)
+    return {stem: coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, src_repo, gen)}
 
 def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, env_args):
     """Declares the `mojo_cov_run` action of test source `t`: its coverage
@@ -352,12 +363,13 @@ def _branch_gated(ctx):
     `coverage_branch_gate` (coverage_kwargs sets it)."""
     return ctx.attrs.coverage_branch_gate
 
-def _gate_inputs(ctx, runs, branch):
+def _gate_inputs(ctx, runs, branch, markers):
     """The MojoCoverageGateInfo of this library: its non-generated sources
     and its test sources at their repository paths, a BUCK file at its
     package, the list of its test sources, its tests' reports (`runs`
-    {stem: (report, marker)}) and, when it reads them (_branch_gated),
-    their branch records (`branch` {stem: coverage_branch's struct})."""
+    {stem: (report, marker)}), when it reads them (_branch_gated) their
+    branch records (`branch` {stem: coverage_branch's struct}), and
+    `markers`."""
     where = "{}: coverage gate".format(ctx.label.raw_target())
     pkg = _pkg_dir(ctx.label)
     files = {}
@@ -383,6 +395,7 @@ def _gate_inputs(ctx, runs, branch):
     return MojoCoverageGateInfo(
         branch_infos = [branch[k].info for k in sorted(branch)] if _branch_gated(ctx) else [],
         label = ctx.label.raw_target(),
+        markers = markers,
         package = pkg or "(root)",
         reports = [runs[k][0] for k in sorted(runs)],
         root = ctx.actions.copied_dir("cov/gate/root", files),
@@ -426,10 +439,9 @@ def _gate_action(actions, bb, gate_dir, mode, info, prefix):
 def _check_tools(ctx):
     """Outside the tests cell, the coverage attributes are what the macro
     sets (coverage_kwargs): komira's link, run and gate directories, and a
-    gate, or for a library of the ledger COVERAGE_NO_GATE its join. A BUCK
-    file loading the rule itself cannot give a library a lenient gate (its
-    own ratchet, a script that passes a failure), runs that nothing waits
-    for, or the ledger's join without a gate."""
+    gate unless the library is of the ledger COVERAGE_NO_GATE. A BUCK file
+    loading the rule itself cannot give a library a lenient gate (its own
+    ratchet, a script that passes a failure) or runs with no gate."""
     if ctx.label.cell == "tests":
         return
     where = ctx.label.raw_target()
@@ -437,37 +449,44 @@ def _check_tools(ctx):
         d = getattr(ctx.attrs, attr)
         if d != None and str(d.label.raw_target()) != want:
             fail("{}: {} is {}, not {}: only a fixture of the tests cell may name another (tools/build/mojo/coverage.bzl)".format(where, attr, d.label.raw_target(), want))
-    if ctx.attrs.coverage_join and str(where) not in COVERAGE_NO_GATE:
-        fail("{}: coverage_join without a gate is for a library of the ledger COVERAGE_NO_GATE (tools/build/coverage/policy.bzl) only, and this one is not in it".format(where))
-    if ctx.attrs.coverage_gate == None and not ctx.attrs.coverage_join:
-        fail("{}: coverage builds with neither coverage_gate nor coverage_join: its package would wait for no coverage gate; only a fixture of the tests cell may".format(where))
+    if ctx.attrs.coverage_gate == None and str(where) not in COVERAGE_NO_GATE:
+        fail("{}: coverage builds with no coverage_gate: its conda package would wait for no coverage gate; only a library of the ledger COVERAGE_NO_GATE (tools/build/coverage/policy.bzl) or a fixture of the tests cell may".format(where))
     if ctx.attrs.coverage_branch_gate != (str(where) in COVERAGE_BRANCH_GATE):
         fail("{}: coverage_branch_gate is {}, but the library is {}in COVERAGE_BRANCH_GATE (tools/build/coverage/policy.bzl); only a fixture of the tests cell may set it".format(where, ctx.attrs.coverage_branch_gate, "" if str(where) in COVERAGE_BRANCH_GATE else "not "))
 
 def coverage_gate(ctx, tc, runs, branch):
     """The coverage gate of a library with coverage builds (`runs` {stem:
     (report, marker)}, possibly empty, and `branch` {stem: coverage_branch's
-    struct}, the same tests' branch records). Returns (markers, gate, providers):
-    the markers its package's join also waits for (none without
-    coverage_gate or coverage_join: a tests-cell fixture's runs alone), the
-    gate's outputs (a struct for coverage_sub_targets, or None) and
-    [MojoCoverageGateInfo]."""
+    struct}, the same tests' branch records). Returns (gate, providers): the
+    gate's outputs (a struct for coverage_sub_targets, or None without
+    coverage_gate: a library of the ledger, or a tests-cell fixture's runs
+    alone) and [MojoCoverageGateInfo], whose `markers` (every run's, and
+    the gate's, which reads the branch records when the library is gated on
+    them) its conda package waits for. Nothing of the library waits for
+    them: its package is the one it has with the switch off."""
     _check_tools(ctx)
-    info = _gate_inputs(ctx, runs, branch)
-    gate_dir = ctx.attrs.coverage_gate
-    if gate_dir == None and not ctx.attrs.coverage_join:
-        return [], None, [info]
     markers = [runs[k][1] for k in sorted(runs)]
-    gate = None
-    if gate_dir != None:
-        mode = ctx.attrs.coverage_mode
-        if mode == None:
-            fail("{}: coverage_gate needs coverage_mode".format(ctx.label.raw_target()))
-        if mode != COVERAGE_MODE and ctx.label.cell != "tests":
-            fail("{}: coverage_mode is {}, but the policy's is {} (tools/build/coverage/policy.bzl); only a fixture of the tests cell may set another".format(ctx.label.raw_target(), mode, COVERAGE_MODE))
-        gate = _gate_action(ctx.actions, tc.busybox, gate_dir, mode, info, "cov/gate/")
-        markers.append(gate.marker)
-    return markers, gate, [info]
+    gate_dir = ctx.attrs.coverage_gate
+    if gate_dir == None:
+        return None, [_gate_inputs(ctx, runs, branch, markers)]
+    mode = ctx.attrs.coverage_mode
+    if mode == None:
+        fail("{}: coverage_gate needs coverage_mode".format(ctx.label.raw_target()))
+    if mode != COVERAGE_MODE and ctx.label.cell != "tests":
+        fail("{}: coverage_mode is {}, but the policy's is {} (tools/build/coverage/policy.bzl); only a fixture of the tests cell may set another".format(ctx.label.raw_target(), mode, COVERAGE_MODE))
+    # The info returned is the gate's inputs, with the gate's own marker
+    # added to `markers`.
+    pre = _gate_inputs(ctx, runs, branch, markers)
+    gate = _gate_action(ctx.actions, tc.busybox, gate_dir, mode, pre, "cov/gate/")
+    return gate, [MojoCoverageGateInfo(
+        branch_infos = pre.branch_infos,
+        label = pre.label,
+        markers = markers + [gate.marker],
+        package = pre.package,
+        reports = pre.reports,
+        root = pre.root,
+        tests = pre.tests,
+    )]
 
 def _cov_gate_impl(ctx):
     if MojoCoverageGateInfo not in ctx.attrs.lib:
@@ -480,7 +499,9 @@ def _cov_gate_impl(ctx):
     return [DefaultInfo(default_output = g.marker, other_outputs = [g.result, g.summary])]
 
 # The gate of a library of the ledger COVERAGE_NO_GATE (policy.bzl), which
-# its own package cannot wait for: the same action as a library's
+# cannot be an action of the library itself: the library would depend on
+# the gate's tool, which depends on the library (a cycle of configured
+# targets, whatever waits for the gate). The same action as a library's
 # [coverage][gate], over the library's MojoCoverageGateInfo. Its default
 # output is the marker, which the library's conda package waits for; the
 # result and summary come with it.

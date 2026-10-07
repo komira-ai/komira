@@ -169,14 +169,16 @@ retired_names_rule = rule(
 )
 
 def _src_layout_impl(ctx):
-    staged, _ = _stage(ctx, [])
-    args = [ctx.attrs.root, ",".join(ctx.attrs.shipped) or "-", ctx.label.cell + "//"] + ctx.attrs.packages
-    return _lint(ctx, "src_layout", [], args, staged)
+    staged, copy = _stage(ctx, [ctx.attrs.map] if ctx.attrs.map else [])
+    args = [ctx.attrs.root, ",".join(ctx.attrs.shipped) or "-", ctx.label.cell + "//"]
+    args.append(copy[ctx.attrs.map.short_path] if ctx.attrs.map else "-")
+    return _lint(ctx, "src_layout", [], args + ctx.attrs.packages, staged)
 
 src_layout_rule = rule(
     impl = _src_layout_impl,
-    doc = "`root` (src) holds what komira ships: each of `packages` (package paths in the cell) is `<root>/<name>`, or a test-only package `<root>/tests/<kind>/<name>`, kind `e2e` (named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `support` (neither). A `komira_test_*` package directly under `root` must be one `shipped` names. The `src_layout` macro fills `packages` from the build graph.",
+    doc = "`root` (src) holds what komira ships: each of `packages` (package paths in the cell) is `<root>/<name>`, or a test-only package `<root>/tests/<kind>/<name>`, kind `e2e` (named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `helpers` (neither). A `komira_test_*` package directly under `root` must be one `shipped` names. With `map` (a Markdown file: the module map, docs/architecture.md), each package under `root` has exactly one table row `| [`<name>`](<link>) |` whose link, less its leading `../`s and trailing `/`, is the package's path and whose `<name>` is its last component, and no such row links a path under `root` that is not one of `packages`. The `src_layout` macro fills `packages` from the build graph.",
     attrs = _COMMON | {
+        "map": attrs.option(attrs.source(), default = None),
         "packages": attrs.list(attrs.string()),
         "root": attrs.string(default = "src"),
         "shipped": attrs.list(attrs.string(), default = []),
@@ -219,6 +221,7 @@ def _public_boundary_impl(ctx):
     for prefix, tree in ctx.attrs.cells.items():
         for path, f in tree[DocTreeInfo].files.items():
             files[prefix + "/" + path] = f
+    files.update(ctx.attrs.paths)
     staged = ctx.actions.copied_dir("tree", files)
     package = "{}//{}".format(ctx.label.cell, ctx.label.package + "/" if ctx.label.package else "")
     args = []
@@ -230,7 +233,7 @@ def _public_boundary_impl(ctx):
 
 public_boundary_rule = rule(
     impl = _public_boundary_impl,
-    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips) and the doc_tree of each other cell in `cells` (at its path): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data and upstream bytes are not read. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. lint.sh (kind public_boundary) says the formats; public_boundary.awk, the reader, says what each rule matches.",
+    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips), the doc_tree of each other cell in `cells` (at its path), and `paths` ({path in the tree: source}, a file another cell exports, such as its dotfiles): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data is not read (its path is), and the path of every file is read for dates, home directories and deny-list words. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. lint.sh (kind public_boundary) says the formats; public_boundary.awk, the reader, says what each rule matches.",
     attrs = _COMMON | {
         "cells": attrs.dict(attrs.string(), attrs.dep(providers = [DocTreeInfo]), default = {}),
         "deny": attrs.option(attrs.source(), default = None),
@@ -238,6 +241,7 @@ public_boundary_rule = rule(
         "holds": attrs.source(),
         "hosts": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
+        "paths": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "public_from": attrs.string(),
         "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
         "window_from": attrs.int(),
@@ -350,11 +354,15 @@ def tar_member(**kwargs):
 # root package's subpackages: a directory holding a BUCK file, the nearest
 # below the root (src/ and src/tests/ hold none, so src/<name> and
 # src/tests/<kind>/<name> are listed, and so is any other package a missing
-# BUCK file leaves nearest). A fixture names `packages` instead.
+# BUCK file leaves nearest). That call must name `map`, the module map, so
+# the map check cannot be dropped by deleting one line. A fixture names
+# `packages` instead, and `map` only when it tests the map.
 def src_layout(**kwargs):
     if "packages" not in kwargs:
         if package_name():
             fail("src_layout {}: without `packages` it lists the root package's subpackages, so it belongs in the cell's root BUCK".format(kwargs.get("name", "")))
+        if not kwargs.get("map"):
+            fail("src_layout {}: the cell's src_layout must name `map`, the module map (docs/architecture.md), which must list every package under src/".format(kwargs.get("name", "")))
         root = kwargs.get("root", "src")
         kwargs["packages"] = sorted([p for p in __internal__.sub_packages() if p.startswith(root + "/")])
     src_layout_rule(**_linux(kwargs))

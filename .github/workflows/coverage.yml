@@ -6,7 +6,7 @@
 # check, and nothing here can make `pr / check` red. Whether it becomes a
 # required check, or coverage is switched on in `pr / check` itself, is
 # decided after the tree-wide -O0/ptrace sweep (a library whose test fails at
-# -O0 or under kcov leaves every dependent unbuilt in coverage mode), not here.
+# -O0 or under kcov leaves its conda package unbuilt in coverage mode), not here.
 #
 # Two jobs, so that the job holding a write token runs no code of the pull
 # request:

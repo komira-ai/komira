@@ -27,8 +27,30 @@ load("//functional/src_layout:fixture.bzl", "SRC_LAYOUT_PACKAGES", "SRC_LAYOUT_S
         ("shallow", ["src/tests/komira_z_e2e"], None),
         ("e2e_in_conformance", ["src/tests/conformance/komira_w_e2e"], None),
         ("conformance_in_e2e", ["src/tests/e2e/komira_v_conformance"], None),
-        ("e2e_in_support", ["src/tests/support/komira_u_loopback"], None),
+        ("e2e_in_helpers", ["src/tests/helpers/komira_u_loopback"], None),
         ("harness_in_e2e", ["src/tests/e2e/komira_t"], None),
+    ]
+]
+
+# The module map (`map`): one planted defect each, against the map of
+# functional/src_layout or a copy of it.
+[
+    src_layout(
+        name = name,
+        map = map,
+        packages = packages,
+        shipped = SRC_LAYOUT_SHIPPED,
+    )
+    for name, map, packages in [
+        # A package with no row: a new package the map does not list.
+        ("map_missing_row", "//functional/src_layout:map.txt", SRC_LAYOUT_PACKAGES + ["src/komira_new"]),
+        # A row for a path that is no package: a package deleted or moved
+        # while its row stayed.
+        ("map_stale_row", "//functional/src_layout:map.txt", [p for p in SRC_LAYOUT_PACKAGES if p != "src/komira_a"]),
+        # Two rows for one package.
+        ("map_duplicate_row", "map_duplicate_row.txt", SRC_LAYOUT_PACKAGES),
+        # A row whose name is not its link's directory.
+        ("map_misnamed_row", "map_misnamed_row.txt", SRC_LAYOUT_PACKAGES),
     ]
 ]
 
