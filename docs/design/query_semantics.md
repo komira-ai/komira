@@ -41,7 +41,6 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §3.8 | ASOF tolerance; no strict `<` / `>` ASOF | DEPARTS | Accept: the tolerance is a komira extension (the oracle checks it with a LEFT ASOF join and NULLing); strict forms are refused by name. |
 | §4.5 | NaN in comparison predicates | UNDECIDED | Match DuckDB: `NaN = NaN` is TRUE, `NaN > x` is TRUE for every non-NaN `x`; one float model for comparisons, sorting and grouping. |
 | §5.1 | `BIN_DIV` on two integers truncates and keeps the integer type | DEPARTS | Accept: the plan has one division operator, and it is DuckDB's `//`; a frontend's true division (`/`) casts an operand to DOUBLE first. |
-| §5.10 | DECIMAL `%` by zero | UNDECIDED | Measure DuckDB and match it; NULL, like integers, if DuckDB answers NULL. |
 | §6.6 | String-to-integer grammar | UNDECIDED | (a): accept all of DuckDB's extensions (`'1.5'` is 2, `'1e2'` is 100, `'1_000'` is 1000, `'0x1F'`, `'0b101'`), each measured by the oracle. |
 | §6.7 | String-to-double out of range | UNDECIDED | Match DuckDB (likely a Conversion Error, to be measured); the code saturates to ±inf today. |
 | §6.8 | Casts between timestamp units | UNDECIDED | Match DuckDB: widening is exact, narrowing follows DuckDB's measured rounding before the Unix epoch, out of range is an error. |
@@ -55,6 +54,7 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §8.1 | SUM of a signed integer or BOOLEAN is INT64 and refuses overflow | DEPARTS | Accept: Arrow has no 128-bit integer; a total outside INT64 is an error naming the column, never a wrapped value. |
 | §8.2 | SUM of an unsigned integer is UINT64 | DEPARTS | Accept, with the same overflow error as §8.1. |
 | §8.9 | Result type of integer and mixed arithmetic | UNDECIDED | Adopt the narrowest-common-type table in §8.9 (DuckDB's rule); retire "left operand wins". |
+| §8.11 | Decimal addition and subtraction | DEPARTS | Accept: DECIMAL(min(max(p1 - s1, p2 - s2) + max(s1, s2) + 1, 38), max(s1, s2)) without DuckDB's 18-digit case, for §8.12's reason. |
 | §8.12 | Decimal multiplication | DEPARTS | Accept: DECIMAL(min(p1 + p2, 38), s1 + s2) without DuckDB's 18-digit case; the code drops its `+ 1`. |
 | §8.14 | Result type of CASE and COALESCE over mixed types | UNDECIDED | The common type by §8.9's table; mixes with none are refused by name. |
 | §8.17 | MEDIAN of FLOAT32, DECIMAL, DATE | UNDECIDED | Match DuckDB for FLOAT32 (FLOAT) and DECIMAL (same DECIMAL); refuse DATE by name. |
@@ -84,6 +84,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 6. **The `running_*` window builders use a ROWS frame (§9.1).** `src/komira_plan_expr/partition_expr.mojo:257-283` builds `running_sum`, `running_count`, `running_avg`, `running_min` and `running_max` with `PartitionFrame.default_ordered()`, which is `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` (`src/komira_plan_expr/partition_frame.mojo:89-110`). That is correct for an explicit ROWS frame and wrong as the default of an ordered window, which is RANGE.
 7. **Sample statistics of one row answer NaN (§2.11).** `src/komira_agg/builtin_agg_fns_stddev.mojo:15-18` and `:67-79` answer NaN for `stddev_samp` and `var_samp` over one row and call it DuckDB's NULL convention; DuckDB answers NULL.
 8. **Regex flags (§7.10).** `parse_flags_string` (`src/komira_column_kernels/regexp_nfa.mojo:217-234`) reads `m` as multi-line anchors and accepts `x`; DuckDB reads `m` as "`.` does not match a newline" and refuses `x`. It refuses `c` and `l`, which DuckDB accepts.
+9. **DECIMAL modulo is typed with the left operand's precision and scale (§5.10).** `src/komira_plan_expr/expr_walk.mojo:896-901`; the rule is DuckDB's DECIMAL(max(p1 - s1, p2 - s2) + max(s1, s2), max(s1, s2)), DOUBLE above 38.
 
 ## 1. Three-valued logic
 
@@ -248,7 +249,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 ### 2.13 BOOLEAN aggregates
 
 - **Rule.** MIN and MAX of BOOLEAN order FALSE before TRUE and return BOOLEAN. SUM of BOOLEAN counts the TRUE values (its type is §8.1's). BOOL_AND and BOOL_OR skip NULLs and are NULL over a group with no non-NULL value.
-- **DuckDB.** `sum(BOOLEAN)` exists (`extension/core_functions/aggregate/distributive/sum.cpp:165` at v1.5.6); `bool_and`/`bool_or` follow §2.1.
+- **DuckDB.** `sum(BOOLEAN)` exists (`extension/core_functions/aggregate/distributive/sum.cpp:163-164` at v1.5.6); `bool_and`/`bool_or` follow §2.1.
 - **Current behaviour.** `sum(<BOOL>)` is typed INT64 and answers the count of non-NULL TRUEs (`src/komira_plan_ir/logical_plan.mojo:2431-2460`); BOOL_AND/BOOL_OR are BOOLEAN (`src/komira_plan_expr/agg_expr.mojo:245-253`).
 - **Mark.** MATCHES.
 
@@ -448,12 +449,10 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ### 5.10 DECIMAL modulo and division by zero
 
-- **Rule (proposed).** `BIN_MOD` of two DECIMALs keeps the left operand's precision and scale (`src/komira_plan_expr/expr_walk.mojo:896-901`); a zero divisor answers NULL, as §5.3 does for integers. DECIMAL `/` is FLOAT64 (§8.13), so a zero divisor follows §5.6.
-- **DuckDB.** `BindDecimalModulo` binds DECIMAL `%` (`src/function/scalar/operator/arithmetic.cpp:1160` at v1.5.6); its zero-divisor answer is not documented.
-- **Current behaviour.** `decimal_arith` raises on a zero divisor in decimal division (`src/komira_scalar_arithmetic/decimal_arith.mojo:271-274`); no DECIMAL `%` kernel here.
-- **Options.** (a) NULL, like integers. (b) An error.
-- **Recommendation.** Measure DuckDB and match it; (a) if it answers NULL, as its integer kernel does.
-- **Mark.** UNDECIDED.
+- **Rule.** `BIN_MOD` of DECIMAL(p1, s1) and DECIMAL(p2, s2) is DECIMAL(max(p1 - s1, p2 - s2) + max(s1, s2), max(s1, s2)); if that precision exceeds 38, both operands are cast to DOUBLE and the result is DOUBLE (§5.9). A zero divisor answers NULL for that row, as §5.3 does for integers. DECIMAL `/` is FLOAT64 (§8.13), so its zero divisor follows §5.6.
+- **DuckDB.** `BindDecimalModulo` computes that type through `BindDecimalArithmetic` with no `+ 1`, falls back to DOUBLE when it does not fit, and executes through `GetBinaryFunctionIgnoreZero`, which answers NULL for a zero divisor (`src/function/scalar/operator/arithmetic.cpp:193-245` and `:1118-1132` at v1.5.6).
+- **Current behaviour.** The plan types DECIMAL `%` with the **left** operand's precision and scale (`src/komira_plan_expr/expr_walk.mojo:896-901`), which cannot hold `5.0 % 0.30` = `0.20` at scale 1; no DECIMAL `%` kernel is here ("Code that does not follow", item 9).
+- **Mark.** MATCHES.
 
 ## 6. Casts
 
@@ -473,10 +472,10 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ### 6.3 Float to integer
 
-- **Rule.** A FLOAT or DOUBLE casts to an integer by rounding **half to even** (2.5 to 2, 3.5 to 4, -2.5 to -2). The **rounded** value must fit the target type, otherwise the cast is an error; NaN and ±inf are errors.
-- **DuckDB.** "Casting from FLOAT and DOUBLE to integers of any size: round to the nearest integer, with ties (halfs) rounded to the nearest even number" ([numeric types](https://duckdb.org/docs/current/sql/data_types/numeric.html)). A bare literal such as `2.5` is a DECIMAL in DuckDB and follows §6.4, so oracle SQL casts it to DOUBLE first (§8.19). **pyarrow.** A safe cast refuses a non-integral float; it is not the oracle.
-- **Oracle cases exclude the boundary band.** Values in `[2^(N-1) - 0.5, 2^(N-1))` and `[-2^(N-1) - 0.5, -2^(N-1))` (at the half-unit edge of an N-bit target) are not used: komira checks the unrounded value against `[-2^(N-1), 2^(N-1))` before rounding (`src/komira_column_kernels/cast_null.mojo:238-270`, which records DuckDB's answer in that band differing by platform), so the two orders of check disagree only in that band.
-- **Current behaviour.** `src/komira_column_kernels/cast_null.mojo:177-260` implements the rule. One path truncates ("Code that does not follow", item 3).
+- **Rule.** A FLOAT or DOUBLE casts to an integer in two steps. First the **unrounded** value must lie in `[MIN, MAX + 1)` of the target type, otherwise the cast is an error; NaN and ±inf are errors. Then it rounds **half to even** (2.5 to 2, 3.5 to 4, -2.5 to -2). So `CAST(-2147483648.4 AS INTEGER)` is an error although it would round to INT32_MIN, and `CAST(-0.4 AS UTINYINT)` is an error although it would round to 0.
+- **DuckDB.** "Casting from FLOAT and DOUBLE to integers of any size: round to the nearest integer, with ties (halfs) rounded to the nearest even number" ([numeric types](https://duckdb.org/docs/current/sql/data_types/numeric.html)). `TryCastWithOverflowCheckFloat` checks `value >= min && value < max` on the unrounded value and then calls `nearbyint` (`src/include/duckdb/common/operator/numeric_cast.hpp:75-85` at v1.5.6). A bare literal such as `2.5` is a DECIMAL in DuckDB and follows §6.4, so oracle SQL casts it to DOUBLE first (§8.19). **pyarrow.** A safe cast refuses a non-integral float; it is not the oracle.
+- **Oracle cases exclude one band.** A value in `[MAX + 0.5, MAX + 1)` passes the check and rounds to `MAX + 1`, which DuckDB's `static_cast` leaves undefined (its answer differs by platform). Cases do not use that band. The lower edge is defined: values below MIN are errors in both engines.
+- **Current behaviour.** `src/komira_column_kernels/cast_null.mojo:217-290` checks the unrounded value against the same window before rounding, as DuckDB does, and clamps the undefined band to MAX (`:257-270`). One other path truncates ("Code that does not follow", item 3).
 - **Mark.** MATCHES.
 
 ### 6.4 Decimal to integer, and float to decimal
@@ -866,7 +865,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 80, DEPARTS 15, UNDECIDED 18: 113 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 33 rows of "Rulings needed" are the 15 DEPARTS and 18 UNDECIDED items.
+MATCHES 80, DEPARTS 16, UNDECIDED 17: 113 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 33 rows of "Rulings needed" are the 16 DEPARTS and 17 UNDECIDED items.
 
 ## What are its limits and open questions?
 
