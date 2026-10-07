@@ -3,11 +3,14 @@
 Byte-stream codec trait and the eight codec implementations, and the codec
 API the file formats call.
 
-This package owns the codec libraries: the snappy C API (statically linked
-from `//third_party/snappy`) and the sonames of libzstd, libbz2 and liblzma,
-each opened once per process (`codec_libraries.mojo`). libz and liblz4 are
-opened by its implementation layers `komira_zlib` and `komira_lz4`, which it
-re-exports.
+This package is meant to be the one owner of the codec libraries: the snappy
+C API (statically linked from `//third_party/snappy`) and the sonames of
+libzstd, libbz2 and liblzma, each opened once per process
+(`codec_libraries.mojo`). libz and liblz4 are opened by its implementation
+layers `komira_zlib` and `komira_lz4`, which it re-exports. komira_avro,
+komira_orc and komira_parquet_codec still declare their own copies of the
+snappy symbols and open some of these sonames themselves; they move onto
+this package's API in follow-up changes.
 
 - `compression` / `compression_codecs`: the `Compression` and
   `ArrowIpcCompression` traits and their conformers (`Snappy`, `Zstd`, `Gzip`,
@@ -27,6 +30,10 @@ re-exports.
   `lz4_frames_decompress_into` for concatenated frames.
 
 Every entry takes Spans: the destination's length is its capacity, and no
-signature holds a pointer. A codec library that cannot be loaded aborts the
-process at first use, with the message `komira_compression: cannot load
-<soname>: <the loader's error>`.
+signature holds a pointer. When libzstd, libbz2 or liblzma cannot be
+loaded, the process aborts at first use with the message
+`komira_compression: cannot load <soname>: <the loader's error>`. libz and
+liblz4 are opened by `komira_zlib` and `komira_lz4`, which abort with their
+own messages (`libz dlopen failed (komira_zlib FFI handle init)` and
+`liblz4 dlopen failed (komira_lz4 raw-block handle init)`), naming neither
+the soname nor the loader's error.

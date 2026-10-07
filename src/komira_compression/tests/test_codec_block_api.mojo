@@ -12,10 +12,16 @@
 #
 # What it catches: a capacity passed to the C library that is not `len(dst)`
 # (the sentinels change, or the short destination is accepted), a status
-# code read as success, an empty Span handed to C as a null pointer, the
-# Optional "destination full" answers of bzip2 / xz swapped with a raise,
-# and an error message that drops the code, the input length or the
-# capacity.
+# code read as success, a zlib_inflate_once with an empty destination that
+# drops the source instead of handing it to libz, the Optional "destination
+# full" answers of bzip2 / xz swapped with a raise, and an error message that
+# drops the code, the input length or the capacity.
+#
+# What it cannot catch: an empty Span handed to C as a null pointer. Spans
+# and Lists built in Mojo carry a dangling, non-null pointer when empty, and
+# snappy, libzstd, libbz2 and liblzma accept a null pointer at length 0
+# anyway, so removing the empty-Span scratch branches leaves these tests
+# green.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -422,6 +428,15 @@ def test_zlib_inflate_once_hands_back_libz_state() raises:
     var none = zlib_inflate_once(Span(big)[0:16], Span(empty), ZLIB_WINDOW_BITS_RAW)
     assert_equal(none.rc, Z_BUF_ERROR)
     assert_equal(none.written, 0)
+
+    # Empty destination: libz still reads the stored block's 5-byte header
+    # and stops at the first output byte; progress made, so Z_OK.
+    var no_room = List[UInt8]()
+    var stuck = zlib_inflate_once(Span(no_room), Span(stream), ZLIB_WINDOW_BITS_RAW)
+    assert_equal(stuck.rc, Z_OK)
+    assert_equal(stuck.written, 0)
+    assert_equal(stuck.unwritten, 0)
+    assert_equal(stuck.unread, len(stream) - 5)
 
 
 # -----------------------------------------------------------------------------
