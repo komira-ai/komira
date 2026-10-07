@@ -33,6 +33,10 @@ interface. This package names no cloud:
   * messaging.mojo   — the rules of the messaging types (queue, topic,
                        subscription): their graph findings and the queue's
                        versioned ack deadline.
+  * secrets.mojo     — the rules of the secret type and of the `secret_env`
+                       references to it: their graph findings (one of a
+                       name and a secret; a secret resource read by the
+                       identity that receives it).
   * labels.mojo      — the standard label rule (encode, decode, check), and
                        komira_validation_run's two marks: the retention
                        mark `kci-retention=<retain|delete>` on every object
@@ -75,6 +79,7 @@ from kci_cloud.catalog import (
     FIELD_SERVICE_ACCOUNT,
     FIELD_GRANT,
     FIELD_QUEUE,
+    FIELD_SECRET,
     FIELD_TOPIC,
     FIELD_SUBSCRIPTION,
     OUTPUT_URL,
@@ -97,6 +102,7 @@ from kci_cloud.catalog import (
     ROLE_IDENTITY,
     ROLE_GRANT,
     ROLE_QUEUE,
+    ROLE_SECRET,
     ROLE_TOPIC,
     ROLE_SUBSCRIPTION,
     BodyArm,
@@ -161,6 +167,7 @@ from kci_cloud.data import (
     table_key_text,
 )
 from kci_cloud.feed import Feed, feeds_into, feeds_of, field_of_id
+from kci_cloud.secrets import secret_env_findings, secret_findings, secret_of
 from kci_cloud.messaging import (
     ACK_DEADLINE_DEFAULT_SECONDS,
     ACK_DEADLINE_MAX_SECONDS,
