@@ -157,7 +157,7 @@ RUN_CHECKS=("komira//tools/build/examples:hello[run_check]" "komira//tools/build
     "komira//tools/build/examples/cshim:cadd_user[run_check]")
 
 # Analysis only. Outside the tests cell the coverage attributes are the
-# rules' own (tools/build/mojo/coverage.bzl; test 45): in the consumer's
+# rules' own (tools/build/mojo/coverage.bzl; test 46): in the consumer's
 # cell, a BUCK file passing them to mojo_library is refused when it loads
 # (even the policy's mode with komira's directories), and one calling
 # mojo_library_rule itself is refused in analysis for a mode other than the

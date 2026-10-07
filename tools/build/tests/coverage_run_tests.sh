@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 # coverage_run_tests.sh -- tests of coverage runs (tools/build/coverage/kcov/README.md#cov_run).
 # Sourced by tools/build/tests/run_tests.sh (uses its BUCK2, LOG, pass, fail,
-# expect_green and expect_red); not run on its own. Sources test 45's
-# coverage_gate_tests.sh after its own, then test 46's
+# expect_green and expect_red); not run on its own. Sources test 46's
+# coverage_gate_tests.sh after its own, then test 47's
 # coverage_branch_tests.sh.
 #
 #  43. Coverage runs: each test's coverage binary runs under kcov through the
@@ -79,10 +79,10 @@ else
 fi
 expect_red coverage_run_proc "/proc is not readable as this run's own" 'tests//negative/coverage:lingerproc[coverage][tests][test_lingers]'
 
-# 45
+# 46
 # shellcheck source=tools/build/tests/coverage_gate_tests.sh
 . "$ROOT/tools/build/tests/coverage_gate_tests.sh"
 
-# 46
+# 47
 # shellcheck source=tools/build/tests/coverage_branch_tests.sh
 . "$ROOT/tools/build/tests/coverage_branch_tests.sh"

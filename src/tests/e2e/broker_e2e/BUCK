@@ -19,7 +19,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
 # it.
 mojo_test(
     name = "test_broker_lifecycle_e2e",
-    srcs = ["test_broker_lifecycle_e2e.mojo"],
+    srcs = ["tests/test_broker_lifecycle_e2e.mojo"],
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_arrow_ipc:komira_arrow_ipc",

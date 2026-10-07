@@ -25,7 +25,7 @@ package does not wait for them. They are built when asked for:
 |---|---|
 | `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, [`cov_branch_run.sh`](cov_branch_run.sh) with `llvm/` (`llvm-profdata`) and `raw_version`, the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/`; `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
 | `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_source.zig`](cov_branch_source.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by `:cov_branch_classify_cases` ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh) over [`fixtures/`](fixtures)), which run as a build action: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
-| `:cov_branch_link.sh`, `:cov_branch_run.sh`, `:cov_branch_annotate.sh` | the scripts, exported so a fixture of the tests cell can plant a defect in a copy (test 46) |
+| `:cov_branch_link.sh`, `:cov_branch_run.sh`, `:cov_branch_annotate.sh` | the scripts, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
 
 Per `test_srcs` entry that is a source file, five actions, each a
 sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
@@ -58,7 +58,7 @@ waits for them).
    `libKGENCompilerRTShared.so`, `--gc-sections`, `-lm`; the shim's
    `--strip-debug` and the one run path `$ORIGIN/lib`; then the C libraries
    of the closure, `test_deps` included), with `llvm/runtime/libclang_rt.profile-x86_64.a` as a
-   whole archive. Test 46's `link_line` records the line zig is given by
+   whole archive. Test 47's `link_line` records the line zig is given by
    both links (a stand-in zig) and fails when they differ by more than the
    profile runtime, so a Mojo release that links with another library, or
    another flag, is caught there.
@@ -129,7 +129,7 @@ until the executor's timeout.
    a run writes the counters of every instrumented function it links, zeros
    included, so a function of the bitcode the profile does not hold is a
    profile of other bitcode, not a function that never ran (branchmissing).
-   The six tests of `komira_retry` and the two of test 46's `branchlib` give
+   The six tests of `komira_retry` and the two of test 47's `branchlib` give
    neither.
 3. What lld printed is exactly one dump, starting with `; *** IR Dump After
    PGOInstrumentationUse on [module] ***`; it is `cov/branch/<test>.ll`,
@@ -165,7 +165,7 @@ a `switch`, an `elif` as anything an `if` is): that is safe because a
 decision is recorded, never dropped, so a wrong guess shows as a record, not
 as a branch missing from the count:
 
-| class | tokens | kinds | evidence (`komira_retry`'s six tests and test 46's `branchlib`) |
+| class | tokens | kinds | evidence (`komira_retry`'s six tests and test 47's `branchlib`) |
 |---|---|---|---|
 | source decision | `if` (statement or ternary) | br, select, switch | `policy.mojo` 117:9 and every `if` statement; the ternaries 291:40 (`String("throttled") if verdict.throttled else ...`, a br) and `branchlib/shapes.mojo`'s `1 if flag else 2` (a select); the `if` of a plain `@always_inline` helper, a select at its own line with `inlinedAt` (`shapes.mojo`'s `pick`); `budget.mojo` 63:9 is both branched on and selected on (one decision, below). No switch has been seen; it is a decision by its meaning |
 | source decision | `elif` | br, select, switch | Mojo gives an `elif`'s branch its `if`'s location (`branchlib/score.mojo`: three branches at 4:5), so none has shown at an `elif` column yet; allowed as a decision by its meaning |
@@ -178,7 +178,7 @@ as a branch missing from the count:
 
 A branch at the `(` of a call to a function the library's own sources
 declare `@always_inline("nodebug")` is refused: that function's code has no
-location of its own, so its decisions land on the call (test 46's
+location of its own, so its decisions land on the call (test 47's
 `branchnodebug`: its `while` is a br at `count_down(`), where they cannot be
 told from the compiler's. A plain `@always_inline` keeps its locations (with
 `inlinedAt`), and its decisions are recorded where they are written. A
@@ -230,7 +230,7 @@ constant from the other target is the phi of another expression (`not a or
 b`) and is refused, as is one arriving straight from the `br`'s own block or
 through a chain of forwarding blocks (a correct shape no IR has shown yet:
 refused rather than read without evidence). A result that is returned, stored or passed on (`return
-a or b`, test 46's `branchretor`) is never tested, so when the right operand
+a or b`, test 47's `branchretor`) is never tested, so when the right operand
 decides cannot be counted. A value `and`/`or` (not `i1`) has no right
 operand that decides. Since an `elif` carries its `if`'s location, its
 records name the `if`'s line.
@@ -298,7 +298,7 @@ LLVM pieces are unpacked and checked once, by `toolchains/llvm_branch`.
 
 ## Tests
 
-[Test 46](../../tests/coverage_runs.md#test-46-branch-coverage-runs) of
+[Test 47](../../tests/coverage_runs.md#test-47-branch-coverage-runs) of
 the tests cell: a fixture library whose test takes some arms of an
 `if`/`elif`/`or`/`and` function and of a `while`, a `range(` loop, a
 ternary, an `or` chain and a plain `@always_inline` helper, whose profile

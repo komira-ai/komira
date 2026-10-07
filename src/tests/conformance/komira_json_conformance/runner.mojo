@@ -51,7 +51,7 @@ comptime CHILD_FLAG = "--child"
 
 def allowlist_path(parser: String) -> String:
     """The allowlist's test_data destination (its path in the repository)."""
-    return "src/komira_json_conformance/allowlists/" + parser + ".txt"
+    return "src/tests/conformance/komira_json_conformance/allowlists/" + parser + ".txt"
 
 
 def run_one(parser: String, name: String, b: List[UInt8]) -> FileResult:
