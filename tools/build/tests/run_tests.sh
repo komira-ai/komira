@@ -359,7 +359,7 @@
 #      where none is, a src/tests kind it does not hold or a package not at
 #      src/tests/<kind>/<name>, a package under the wrong kind, and a root with
 #      no package.
-#  46. The coverage gate and join: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
+#  46. The coverage gate and what ships waits for it: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
 set -uo pipefail
 
 umbrella=1

@@ -35,9 +35,10 @@
 #     error) is measured too, since every run built; any other FAIL, or no
 #     entry, leaves it NOT MEASURED (coverage build failed): none of its
 #     reports is used and the summary lists it. The reports are its entry's
-#     `cov/tests/*.xml` paths. A dependency's failed gate fails the
-#     library's runs, so in enforce mode a library below its dependencies'
-#     targets is not measured.
+#     `cov/tests/*.xml` paths. A dependency's failed run or gate does not
+#     reach the library's runs (only a conda package waits for coverage), so
+#     an error of another library's gate in the entry is not expected; it
+#     would still leave the library not measured.
 #  5. `covcheck report` over the reports of the libraries measured, in the
 #     mode and against the target of <policy>, with the ratchet's rows of
 #     the measured libraries' packages only (every other row would read as
