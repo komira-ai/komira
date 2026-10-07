@@ -529,8 +529,8 @@ def _fold_grouped_cd_nativehash(
         if not _cd_key_dtype_ok(batch.column_arrow_type(ki)):
             return None
         var kc_opt = _cd_extract_native_key_col(batch, ki)
-        if not kc_opt:
-            return None
+        if not kc_opt:  # cov: unreachable the extractor reads the same column type the dtype gate above admitted
+            return None  # cov: unreachable see the line above
         key_cols.append(kc_opt.take())
         key_names.append(kn)
 
@@ -779,8 +779,8 @@ def _fold_grouped_cd_stringkey(
         if not _cd_key_dtype_ok(batch.column_arrow_type(ki)):
             return None
         var kc_opt = _cd_extract_key_col(batch, ki)
-        if not kc_opt:
-            return None
+        if not kc_opt:  # cov: unreachable the extractor reads the same column type the dtype gate above admitted
+            return None  # cov: unreachable see the line above
         key_cols.append(kc_opt.take())
         key_names.append(kn)
 
@@ -1168,8 +1168,8 @@ def fold_grouped_string_minmax_over_batch(
     var key_cols = List[_CDKeyCol]()
     for k in range(n_keys):
         var kc_opt = _cd_extract_key_col(batch, key_idx[k])
-        if not kc_opt:
-            return None
+        if not kc_opt:  # cov: unreachable phase A admitted this column's type, and the extractor reads the same type
+            return None  # cov: unreachable see the line above
         key_cols.append(kc_opt.take())
 
     var agg_vals = List[List[String]]()   # per-agg flat string input values

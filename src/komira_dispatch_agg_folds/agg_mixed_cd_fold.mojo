@@ -471,11 +471,11 @@ def mixed_offcell_servable_for_schema(
             return True
         if not _mix_is_minmax(ae.func):
             continue
-        if not ae.child:
-            continue
+        if not ae.child:  # cov: unreachable the candidate gate above requires an input for every MIN/MAX
+            continue  # cov: unreachable see the line above
         var in_opt = _cd_strip_alias_col_ref(ae.child.value())
-        if not in_opt:
-            continue
+        if not in_opt:  # cov: unreachable the candidate gate above requires every MIN/MAX input to be a column
+            continue  # cov: unreachable see the line above
         var ci = _cd_col_idx(schema, in_opt.value())
         if ci < 0:
             continue
@@ -1129,8 +1129,8 @@ def _mix_extract_batch(
         if batch.column_at(ki).null_count() != 0:
             return False
         var kc_opt = _cd_extract_native_key_col(batch, ki)
-        if not kc_opt:
-            return False
+        if not kc_opt:  # cov: unreachable the extractor reads the same column type the dtype gate above admitted
+            return False  # cov: unreachable see the line above
         kcols.append(kc_opt.take())
         if first:
             st.key_names.append(kn)

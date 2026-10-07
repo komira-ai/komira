@@ -25,6 +25,31 @@ mojo_library(
         # a string MIN/MAX costs nothing per row (peak RSS), and the byte
         # order of the in-place compare (welded from the source)
         "tests/test_mixed_fold_string_minmax_is_flat_in_rows.mojo",
+        # the spill-envelope verdict vocabulary, the driver and route
+        # witness slots, the string MIN/MAX arming slots and the 0-key stream
+        # pass counter: every name, every slot, every reset
+        "tests/test_agg_witness_counters.mojo",
+        # the ordered 0-key MIN/MAX: which reader each type gets, both int
+        # widths and both string widths folded, and the one emitter
+        "tests/test_agg_minmax_ordered.mojo",
+        # the aggregate leaf binding, the file-derived scan projection and
+        # both agreement checks, each refusal and each admit
+        "tests/test_agg_leaf_resolution.mojo",
+        # the grouped COUNT(DISTINCT) folds: the native-hash fold against the
+        # string-key oracle, a forced hash collision, two rehashes, every
+        # decline of the grouped and 0-key folds, and the key extractors
+        "tests/test_cd_grouped_fold.mojo",
+        # the grouped string MIN/MAX fold: values over STRING and
+        # LARGE_STRING, NULL keys in three key types, both witnesses, and
+        # every decline
+        "tests/test_cd_grouped_string_minmax.mojo",
+        # the mixed fold's gates, its ceiling and lowering, its helpers,
+        # and every decline of the per-batch extraction
+        "tests/test_mixed_fold_gates.mojo",
+        # the mixed fold's values: every accumulator kind against a hand
+        # oracle, key types, the 0-key identity row, the batch list, two
+        # rehashes, a forced composite-hash collision and the null-key guard
+        "tests/test_mixed_fold_values.mojo",
     ],
     visibility = ["PUBLIC"],
 )
