@@ -475,6 +475,7 @@ expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests/
 expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
 expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
 expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
+expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action

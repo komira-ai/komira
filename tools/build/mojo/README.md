@@ -630,7 +630,12 @@ providing `MergedLinkInfo` (any `cxx_library`) is linked, statically, into
 every executable with that target in its closure: a `mojo_library` passes its
 C deps on to its consumers and to its own gated tests. A dep providing neither
 `MojoInfo` nor `MergedLinkInfo` is refused. The link arguments go at the end of
-the link line, after the compiler's own objects. C++ code links zig's libc++
+the link line, after the compiler's own objects. Each C library is an archive, and the
+linker takes a member of one only for a symbol still undefined, so two
+libraries defining the same symbol is not an error: the first definition
+wins. The one-definition gate,
+[`komira//tools/build/one_definition:one_definition`](../one_definition/BUCK),
+links every library under `src/` whole and fails on such a symbol. C++ code links zig's libc++
 statically: its `cxx_library` lists
 `komira//tools/build/toolchains:libcxx` in `exported_deps`.
 A C or C++ source read from the project tree is an input of the remote
