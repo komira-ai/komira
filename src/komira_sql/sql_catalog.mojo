@@ -47,7 +47,7 @@ struct CatalogTable(Copyable, Movable):
 
 
 struct SqlCatalog(Copyable, Movable):
-    """The set of tables — and, since SQL-UDF (2026-09-04), the set of UDFs — a
+    """The set of tables — and, since 2026-09-04, the set of UDFs — a
     SQL query may reference.
 
     ★ THE UDFs LIVE HERE RATHER THAN IN A SECOND CATALOG THREADED BESIDE THIS

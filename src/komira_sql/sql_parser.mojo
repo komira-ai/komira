@@ -172,7 +172,7 @@ struct _Parser(Movable):
         return stmt^
 
     def _parse_set_operator_tail(mut self, mut lhs: SelectStmt) raises:
-        """★ SQL-UNION-ALL (2026-09-21). `<select> UNION ALL <select>`.
+        """★ UNION ALL (2026-09-21). `<select> UNION ALL <select>`.
 
         MEASURED: THIRTY-EIGHT of 52 cross-surface "unexpected trailing
         tokens" refusals at the
@@ -973,7 +973,7 @@ struct _Parser(Movable):
         # read_avro. The ident is lower-folded by the tokenizer, so compare
         # directly.
         #
-        # ⭐ `read_avro` ADDED 2026-09-14 so the ~13 avro conformer ids have a
+        # ⭐ `read_avro` ADDED 2026-09-14 so Avro files have a
         # SQL spelling at all. DuckDB's side resolves the same name once
         # `INSTALL avro; LOAD avro;` has run (verified: a bad path
         # fails at the PATH ARGUMENT, not at the function name — contrast
@@ -1675,7 +1675,7 @@ struct _Parser(Movable):
             elif self._is_kw("desc"):
                 self._advance()
                 desc = True
-            # ORDNULL-EXPRESS (2026-09-22):
+            # NULLS FIRST / NULLS LAST (2026-09-22):
             # `NULLS FIRST` / `NULLS LAST`, standard SQL and DuckDB-accepted.
             #
             # ⚠ ABSENT IS NOT `LAST`, AND THAT IS WHY THIS IS AN `Optional`.
@@ -2258,7 +2258,7 @@ struct _Parser(Movable):
         return self._parse_cast_suffix(base^)
 
     def _parse_cast_suffix(mut self, var base: SqlExpr) raises -> SqlExpr:
-        """`<expr>::<type>` — the POSTFIX cast operator (SQL-CAST, 2026-09-14).
+        """`<expr>::<type>` — the POSTFIX cast operator (2026-09-14).
 
         ⭐ IT BINDS TIGHTER THAN EVERYTHING, INCLUDING UNARY MINUS, which is
         why the two negative-literal arms above route through it as well
@@ -2435,7 +2435,7 @@ struct _Parser(Movable):
                 self._advance()  # the quoted date string
                 return SqlExpr.date_lit(ds)
             # ★ timestamp literal: `timestamp '...'` / `timestamptz '...'`
-            # (SQL-TEMPORAL-LITERAL, 2026-09-21). THE SAME SHAPE AS THE DATE
+            # (2026-09-21). THE SAME SHAPE AS THE DATE
             # ARM ABOVE and gated the same way — the keyword reading is taken
             # only when a quoted string follows, so a table with a column
             # called `timestamp` still binds as a column reference everywhere
@@ -2452,7 +2452,7 @@ struct _Parser(Movable):
                 var ts = String(self.tokens[self.pos].text)
                 self._advance()  # the quoted timestamp string
                 return SqlExpr.timestamp_lit(ts, aware)
-            # ★★ `EXTRACT(<field> FROM <expr>)` — SQL-TEMPORAL-PARITY (2026-09-03).
+            # ★★ `EXTRACT(<field> FROM <expr>)` (2026-09-03).
             #
             # A SEPARATE GRAMMAR ARM AND NOT A FUNCTION NAME, because `FROM`
             # inside the parentheses is not an argument separator: the general
@@ -2539,7 +2539,7 @@ struct _Parser(Movable):
                 pargs.append(needle^)
                 return SqlExpr.call(String(_POSITION_IN_DESUGAR_NAME), pargs^)
             # ★★ `CAST(<expr> AS <type>)` / `TRY_CAST(<expr> AS <type>)` —
-            # SQL-CAST (2026-09-14).
+            # Added 2026-09-14.
             #
             # A SEPARATE GRAMMAR ARM FOR THE SAME REASON `EXTRACT` HAS ONE:
             # `AS` inside the parentheses is not an argument separator, so the

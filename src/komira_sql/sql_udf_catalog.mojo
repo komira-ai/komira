@@ -3,7 +3,7 @@
 #                          THREE SURFACES DO NOT.
 # =============================================================================
 #
-# SQL-UDF (2026-09-04). SQL was the ONLY one of the four authoring surfaces
+# SQL UDFs (2026-09-04). SQL was the ONLY one of the four authoring surfaces
 # with no UDF door. The other three resolve the function at COMPTIME —
 #
 #   Mojo typed    `df.map[margin]()`                    f is a comptime param
@@ -48,13 +48,13 @@
 # through which a second dtype (or a second name) could be written, which is
 # strictly stronger than the Python bridge's position — `register_python_udf`
 # takes both tags as arguments because a CPython callable has no signature to
-# read, and relies on `_udf.py` being their single writer. Here the compiler
+# read, and relies on the Python bridge being their single writer. Here the compiler
 # holds it. Full reasoning: `komira_plan_expr/declared_scalar_udf.mojo`.
 #
 # ⚠ AND THAT IS WHY THIS MODULE NEVER NAMES `ScalarUdf`. It is generic over
 # `DeclaredScalarUdf`, a `komira_plan_expr` trait; the concrete engine type is
 # supplied by the caller. `komira_sql` has ZERO source imports of
-# `komira_engine_operators` (the ENGINE-FREE property) and this
+# an engine package (the ENGINE-FREE property) and this
 # file does not add the first one.
 # =============================================================================
 
