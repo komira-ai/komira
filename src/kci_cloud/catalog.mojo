@@ -635,6 +635,19 @@ def body_field(r: Resource) raises -> Int:
     return arms[arm - 1].field
 
 
+def body_is(r: Resource, field: Int) -> Bool:
+    """True iff `r`'s set arm is the `Resource.body` field `field`, read
+    through `body_field`. Never raises: no arm, or an arm beyond the table,
+    is no type. This, not an arm's `Optional`, is the type test: a message
+    merged from two bodies (protobuf's last arm wins) decodes with the
+    earlier arm's `Optional` still populated, and only the case says which
+    arm is set."""
+    try:
+        return body_field(r) == field
+    except:
+        return False
+
+
 def effective_retention(catalog: Catalog, r: Resource) raises -> Int:
     """`r`'s retention: `Resource.retention` when written, else its type's
     versioned default (`RETENTION_NONE` for a type that takes none). Raises

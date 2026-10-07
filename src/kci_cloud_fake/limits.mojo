@@ -17,10 +17,13 @@
 
 from kci_cloud import (
     EDGE_TARGET_CELL,
+    FIELD_CONTAINER_JOB,
+    FIELD_SERVICE,
     FIELD_TABLE,
     FINDING_LIMIT,
     Finding,
     GrantEdge,
+    body_is,
     edges_of,
     index_role,
     index_role_collisions,
@@ -92,7 +95,7 @@ def index_limits(r: Resource, shape: ProviderShape, cloud: String, mut out: List
 
 
 def common_limits(r: Resource, mut out: List[Finding]):
-    if r._oneof0_case == 1:
+    if body_is(r, FIELD_SERVICE):
         ref svc = r.service.value()
         if Bool(svc.request_timeout) and Int(svc.request_timeout.value().seconds) > REQUEST_TIMEOUT_MAX_SECONDS:
             out.append(
@@ -120,7 +123,7 @@ def common_limits(r: Resource, mut out: List[Finding]):
                     String(FAKE_CITATION),
                 )
             )
-    elif r.container_job:
+    elif body_is(r, FIELD_CONTAINER_JOB):
         ref job = r.container_job.value()
         if Bool(job.timeout) and Int(job.timeout.value().seconds) > JOB_TIMEOUT_MAX_SECONDS:
             out.append(

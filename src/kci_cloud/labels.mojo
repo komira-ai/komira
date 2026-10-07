@@ -34,9 +34,10 @@
 # can exist without a relabel step (the precondition in adapter.mojo).
 #
 # THE BUDGET. The `role` label is the longest value: one segment per level
-# plus a separator each. `role_budget_findings` (validate.mojo) checks every
-# lowered node against `LABEL_VALUE_MAX` before anything is realized, so a
-# role over the budget refuses the graph instead of failing at create time.
+# plus a separator each. Validate checks every lowered node against
+# `LABEL_VALUE_MAX` (`lowered_budget_findings`, validate.mojo), so a role
+# over the budget is reported by `validate` and refuses a plan, an apply or
+# a destroy before anything is created, instead of failing at create time.
 #
 # RETENTION IS ONE MORE LABEL, OUTSIDE THE IDENTITY, ON EVERY OBJECT. Every
 # object kci creates or adopts carries komira_validation_run's retention mark

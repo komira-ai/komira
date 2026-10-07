@@ -57,6 +57,7 @@ from kci_cloud import (
     LoweredNode,
     Setting,
     ack_deadline_seconds,
+    body_is,
     dead_letter_of,
     edges_of,
     feeds_into,
@@ -225,7 +226,7 @@ def messaging_limits(
     """The limits of a pull shape (see the file header); none elsewhere."""
     if not pull_shape(shape):
         return
-    if r.subscription:
+    if body_is(r, FIELD_SUBSCRIPTION):
         for i in range(len(feeds)):
             if feeds[i].subscription != r.id:
                 continue
