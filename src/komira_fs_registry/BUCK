@@ -22,7 +22,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # ScriptedConnector, a wrapped built store kept, and the production arm
 # refusing a plaintext http:// endpoint), test_fs_handle_descriptor (a
 # descriptor's tag, the named errors for GCS, Azure and an unknown scheme,
-# and a komira_core descriptor resolved by its scheme code) and
+# and a core-package descriptor resolved by its scheme code) and
 # test_no_env_reads (the package's sources read no environment).
 mojo_library(
     name = "komira_fs_registry",

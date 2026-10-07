@@ -33,7 +33,7 @@ from std.memory import ArcPointer, OwnedPointer, alloc
 from std.memory import UnsafePointer
 from komira_atomic_alias import AtomicI32, AtomicU64
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_async.channel.spsc import (
     TryRecvOutcome,

@@ -25,7 +25,7 @@
 from std.testing import assert_equal, assert_true
 
 from komira_avro import AvroSchema, avro_node_to_arrow, crc_64_avro
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 
 def _fp(json: String) raises -> UInt64:

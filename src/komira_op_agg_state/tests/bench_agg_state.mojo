@@ -34,7 +34,7 @@ from komira_op_agg_state.accumulator_set import (
 from komira_op_agg_state.accumulator_factory import make_single_dyn_acc
 from komira_op_agg_state.columnar_acc_typed import SumI64Acc, CountI64Acc, MinI64Acc
 from komira_op_agg_state.columnar_agg_accumulator import ACC_SUM_INT64
-from komira_core.agg_layout import ACC_SUM_COUNT_F64
+from komira_agg_api.agg_layout import ACC_SUM_COUNT_F64
 
 comptime N = 262144
 comptime G = 1024

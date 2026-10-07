@@ -1,7 +1,7 @@
 # `komira_udf`
 
 The trait surface a library user writes user-defined functions against, built
-on `komira_core` alone.
+on `komira_arrow` and `komira_plan_expr`.
 
 - Schema descriptors: `schema_descriptor`, `schema_auto`, `auto_komira_schema`,
   `udf_descriptor`.
@@ -10,7 +10,7 @@ on `komira_core` alone.
   `frame_view`, `partition_row_view` and `partition_local_map_fn`.
 - Shared leaves: `purity`, `predicate`, `row_transform`, `column_resolver`,
   `row_builder`, `stateful_contract`.
-- `float_quotient_order`: the float equality and ordering model; it moves to
-  `komira_column_kernels` with the `komira_core` split.
+- `float_quotient_order`: the float equality and ordering model; it is
+  to move to `komira_column_kernels`.
 
 There are no root re-exports; import each name from its module.

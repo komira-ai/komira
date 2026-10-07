@@ -62,8 +62,8 @@ from komira_async.runtime.shared_erasure import (
     make_erased,
 )
 
-from komira_core.collections.slab import Slab
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_collections.slab import Slab
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 from komira_log.engine.shared_engine import SharedEngine
 from komira_log.engine.emit import emit_record

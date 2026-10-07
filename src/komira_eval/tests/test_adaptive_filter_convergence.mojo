@@ -50,7 +50,7 @@ from komira_atomic_alias import AtomicI64
 from std.ffi import external_call
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 from komira_eval.adaptive_filter import (
     AdaptiveFilter,
     ADAPTIVE_FILTER_OBSERVE_ITERS,

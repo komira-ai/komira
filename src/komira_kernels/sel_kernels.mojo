@@ -56,13 +56,13 @@
 
 from std.sys import simd_width_of, size_of
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.simd.compress import compress_u32xW
-from komira_core.eval.selection_vector_row import (
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_simd.compress import compress_u32xW
+from komira_arrow.selection_vector_row import (
     RowSelectionVector,
     load_via_sel,
 )
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 # -----------------------------------------------------------------------------

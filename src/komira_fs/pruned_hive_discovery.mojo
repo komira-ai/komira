@@ -41,9 +41,9 @@
 #     every slab element a POD (String / Int), never a heap-owning `List`.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field
+from komira_collections.slab import Slab
 from komira_fs.file_system import FileSystem
 from komira_fs.file_discovery import (
     FileDiscovery,

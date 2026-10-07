@@ -27,7 +27,7 @@
 #     lifetime is bound by `origin`; it cannot outlive the borrowed batch.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.record_batch import RecordBatch
 
 
 # Max partition-UDF input arity. The resolved-index map is a fixed InlineArray

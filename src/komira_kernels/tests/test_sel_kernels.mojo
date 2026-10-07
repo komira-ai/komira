@@ -20,8 +20,8 @@
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 from std.math import isnan
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.eval.selection_vector_row import RowSelectionVector
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.selection_vector_row import RowSelectionVector
 from komira_kernels.sel_kernels import (
     BIN_OP_GT,
     BIN_OP_GE,

@@ -313,7 +313,19 @@
 #      root with no package.
 
 #  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
-#  42. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
+#  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
+#      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
+#      file of the cell, against tests/pointer_lint_ffi.tsv and
+#      tests/pointer_lint_holds.tsv) and tests//functional/pointer_lint:ok (a
+#      planted tree whose every site is held at its exact count, beside near
+#      misses) build; each target of tests//negative/pointer_lint fails naming
+#      its one planted site (each rule, the two-statement partial move, a
+#      public method and __init__.mojo, a library file of a test-only package
+#      under src/tests/<kind>/, one site over a hold, a non-origin
+#      site in an FFI module, an unlisted marked module) or ledger defect,
+#      an empty tree fails as checking nothing, and a target naming no tree
+#      is refused at analysis.
+#  43. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
 #      (every package under src/, read from the build graph) and
 #      tests//functional/src_layout:ok (a planted list) build; each target of
 #      tests//negative/src_layout fails naming its one planted finding: an
@@ -1174,6 +1186,47 @@ expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enfor
 . "$ROOT/tools/build/tests/coverage_tests.sh"
 
 # 42
+expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
+N=tests//negative/pointer_lint
+S="$N/src/komira_a/plant.mojo"
+for want in \
+    "wildcard_origin|$S:2: wildcard_origin: " \
+    "from_address|$S:3: from_address: " \
+    "partial_move|$S:3: partial_move: " \
+    "partial_move_two|$S:4: partial_move: var v = p.take_pointee() (bound to a field's address at line 3)" \
+    "parallelize|$S:3: parallelize: " \
+    "libc_read|$S:3: libc_redeclare: " \
+    "libc_open|$S:3: libc_redeclare: " \
+    "public_pointer|$S:2: public_pointer: " \
+    "public_method|$S:3: public_pointer: " \
+    "public_pointer_container|$N/src/tests/e2e/komira_c_e2e/plant.mojo:2: public_pointer: " \
+    "public_init|$N/src/komira_b/__init__.mojo:2: public_pointer: " \
+    "held_new_site|$N/src/komira_a/held.mojo:85: parallelize: parallelize[_worker](n) -- the standard library's parallelize[: run the work on a ParallelDispatch (3 sites, held 2)" \
+    "ffi_from_address|$N/src/komira_a/ffi.mojo:11: from_address: " \
+    "ffi_unlisted|$N/src/komira_a/ffi_clean.mojo:7: wildcard_origin: " \
+    "holds_malformed|$N/holds_malformed.tsv:8: a row has 4 tab-separated fields (rule, file, count, reason), not 3" \
+    "holds_rule|$N/holds_rule.tsv:8: unknown rule \`pointer_magic\`" \
+    "holds_file|$N/holds_file.tsv:8: src/komira_a/gone.mojo is not a .mojo file of the tree; delete the row" \
+    "holds_count|$N/holds_count.tsv:8: count \`0\` is not a positive whole number" \
+    "holds_reason|$N/holds_reason.tsv:8: empty reason" \
+    "holds_duplicate|$N/holds_duplicate.tsv:8: a second row for parallelize in src/komira_a/held.mojo" \
+    "holds_lower|$N/holds_lower.tsv:6: parallelize in src/komira_a/held.mojo is held at 3 and has 2: lower the count to 2" \
+    "holds_delete|$N/holds_delete.tsv:8: from_address in src/komira_a/near.mojo is held at 1 and has 0: delete the row" \
+    "holds_ffi_wildcard|$N/holds_ffi_wildcard.tsv:8: wildcard_origin in src/komira_a/ffi.mojo is held at 2 and has 0: delete the row" \
+    "ffi_malformed|$N/ffi_malformed.tsv:3: a row has 2 tab-separated fields (file, reason), not 1" \
+    "ffi_unmarked|$N/ffi_unmarked.tsv:3: src/komira_a/near.mojo carries no \`# FFI-BOUNDARY:\` comment" \
+    "ffi_mention|$N/ffi_mention.tsv:3: src/komira_a/mention.mojo carries no \`# FFI-BOUNDARY:\` comment" \
+    "ffi_clean_row|$N/ffi_clean_row.tsv:3: src/komira_a/ffi_clean.mojo names no wildcard origin; delete the row" \
+    "ffi_file|$N/ffi_file.tsv:3: src/komira_a/gone.mojo is not a .mojo file of the tree; delete the row" \
+    "ffi_duplicate|$N/ffi_duplicate.tsv:3: a second row for src/komira_a/ffi.mojo" \
+    "ffi_reason|$N/ffi_reason.tsv:3: empty reason" \
+    "empty|pointer_lint: checked nothing"; do
+    expect_red "pointer_lint_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
+expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
+
+# 43
 expect_green src_layout //:src_layout tests//functional/src_layout:ok
 N=tests//negative/src_layout
 F="a test-only package directly under src/, which holds what komira ships; move it to"

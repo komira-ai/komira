@@ -28,7 +28,7 @@
 #   - composite_key.mojo (analogous CompositeKey shape; KeyValue1..4).
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 from komira_expr.expr_x import ExprXBool, ExprXI64, ExprXF64, ExprXString
 
 

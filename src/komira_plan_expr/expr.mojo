@@ -44,7 +44,7 @@ from komira_plan_expr.expr_helpers import _write_binop, _write_unop, _write_stro
 # would put this file inside a large strongly-connected component spanning
 # `plan/` and `source/`.
 #
-#     MEASURED (komira_core-restricted, seed included):
+#     MEASURED (the core packages-restricted, seed included):
 #       closure(plan/expr.mojo) with that import ............. 90
 #       ... without it ....................................... 59
 #       ... plus the `partition_expr` -> `partition_frame` cut .. 7
@@ -115,7 +115,7 @@ comptime EXPR_WINDOW_FN: UInt8 = 13
 comptime EXPR_CORRELATED_SUBQUERY: UInt8 = 14
 
 # `regexp_*`
-# functions backed by the pure-Mojo Thompson NFA (`komira_core/eval/
+# functions backed by the pure-Mojo Thompson NFA (`the core packages
 # regexp_nfa.mojo`).  One variant carrying `RegexpData{op, child, pattern,
 # replacement, flags, group}` where `op` is one of the `REGEXP_*` ops below.
 # The pattern is a plan-literal String (compiled once per batch by the
@@ -2576,7 +2576,7 @@ struct UdfCallData(Movable):
     ⚠ THE THUNK IS NOT A FIELD, AND IT MUST NOT BECOME ONE. `UdfRunBatchThunk`
     is a function type over `UnsafePointer[..., MutExternalOrigin]`, so putting
     it here would (a) put a wildcard-origin pointer in a plan-IR field, (b)
-    make `komira_core` depend on `komira_engine_operators` — a package CYCLE,
+    make the core packages depend on `komira_engine_operators` — a package CYCLE,
     since engine_operators already depends on komira_compiler which depends on
     core — and (c) put an unserializable value in a type the wire encodes. The
     handle is the indirection that avoids all three.
@@ -3975,7 +3975,7 @@ struct Expr(Movable, Writable):
         ONLY caller that should exist in customer-reachable code. A second
         caller passing hand-written arguments re-opens exactly the two defects
         (two names, a restated dtype) that `scalar_udf.mojo` exists to make
-        unrepresentable; this factory is here because `komira_core` cannot
+        unrepresentable; this factory is here because the core packages cannot
         depend on the SDK, not because the arguments are meant to be typed.
         """
         var e = Expr(EXPR_UDF_CALL)

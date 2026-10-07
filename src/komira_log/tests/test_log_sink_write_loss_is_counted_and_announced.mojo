@@ -42,7 +42,7 @@ comptime _EBADF: Int32 = 9
 
 # openat(2) constants. AT_FDCWD is PLATFORM-SPECIFIC (-100 Linux / -2 Darwin);
 # the rest agree except O_CREAT/O_TRUNC, mirrored from
-# `komira_core/io/posix_io.mojo`.
+# `komira_libc/posix_io.mojo`.
 comptime _O_WRONLY: Int32 = 1
 
 

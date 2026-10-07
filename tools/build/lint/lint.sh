@@ -70,6 +70,25 @@
 #       (another cell's) placed at its <path>. <unchecked> is `-` or a
 #       comma-separated list of .md paths left out (planted dead links).
 #       The reader is `inspect doc-links` (tools/build/inspect).
+#   kind "pointer_lint", tools <pointer_lint.awk>, args <public root> <ffi> <ffi name> <holds> <holds name>
+#       The Mojo pointer rules over every .mojo file under <stage> (the tree;
+#       pointer_lint.awk reads them and names the rules): no wildcard origin
+#       outside a module's FFI internals (wildcard_origin), no
+#       `unsafe_from_address=` (from_address), no partial move through a
+#       pointer (partial_move), no `parallelize[` (parallelize), no second
+#       declaration of libc read/open (libc_redeclare), no public function of
+#       a library file under <public root> taking or returning a pointer
+#       (public_pointer). Two ledgers, `#` lines and blank lines comments:
+#       <ffi>, rows `<file> <reason>` tab-separated: the FFI modules, whose
+#       wildcard origins are not sites; a row's file must hold a comment
+#       line starting `# FFI-BOUNDARY:` and name a wildcard origin. <holds>, rows
+#       `<rule> <file> <count> <reason>`: the sites that predate the lint. A
+#       held file must have exactly <count> sites of that rule: more is a new
+#       site, fewer is a row to lower or delete, so the holds only shrink. A
+#       row naming no .mojo file of the tree, a repeated row, an unknown rule,
+#       a bad count or an empty reason is a finding, in either ledger. The
+#       <name>s are what findings call the ledgers. File names hold no
+#       whitespace.
 set -eu
 
 BB=$1 RESULT=$2 KIND=$3 STAGE=$4 PREFIX=$5
@@ -281,6 +300,78 @@ doc_links)
         [ -s "$REPORT" ] || echo "inspect doc-links failed without a finding" >> "$REPORT"
     fi
     checked=${checked:-0}
+    ;;
+pointer_lint)
+    AWK=$(abs "$1"); shift
+    [ "$1" = -- ] && shift
+    pubroot=$1 ffi=$2 ffi_name=$3 holds=$4 holds_name=$5
+    (cd "$STAGE" && find . -name '*.mojo' \( -type f -o -type l \) | sed 's#^\./##' | sort) > "$T/files"
+    checked=$(wc -l < "$T/files" | tr -d ' ')
+    : > "$T/sites"
+    : > "$T/marked"
+    if [ "$checked" -gt 0 ]; then
+        (cd "$STAGE" && xargs awk -v PUBLIC_ROOT="$pubroot/" -f "$AWK" < "$T/files") > "$T/sites"
+        (cd "$STAGE" && xargs grep -l '^[[:space:]]*#[[:space:]]*FFI-BOUNDARY:' < "$T/files" || true) > "$T/marked"
+    fi
+    awk -F '\t' -v P="$STAGE/" -v FN="$ffi_name" -v HN="$holds_name" '
+        BEGIN {
+            rule["wildcard_origin"] = "a wildcard origin outside a module'"'"'s FFI internals"
+            rule["from_address"] = "a pointer made from an integer (unsafe_from_address=)"
+            rule["partial_move"] = "a partial move through a pointer: move the field out with Optional.take(), OwnedPointer.take(), swap or List.pop()"
+            rule["parallelize"] = "the standard library'"'"'s parallelize[: run the work on a ParallelDispatch"
+            rule["libc_redeclare"] = "a second declaration of libc read or open, which the standard library binds"
+            rule["public_pointer"] = "a public function takes or returns a pointer"
+            kinds = "wildcard_origin, from_address, partial_move, parallelize, libc_redeclare, public_pointer"
+        }
+        FILENAME == ARGV[1] { known[$0] = 1; next }
+        FILENAME == ARGV[2] { marked[$0] = 1; next }
+        FILENAME == ARGV[3] {
+            if ($0 ~ /^[[:space:]]*(#|$)/) next
+            where = FN ":" FNR ": "
+            if (NF != 2) { print where "a row has 2 tab-separated fields (file, reason), not " NF; next }
+            if (!($1 in known)) { print where $1 " is not a .mojo file of the tree; delete the row"; next }
+            if ($2 !~ /[^[:space:]]/) { print where "empty reason: say which foreign resource the module owns"; next }
+            if ($1 in ffi) { print where "a second row for " $1; next }
+            if (!($1 in marked)) { print where $1 " carries no `# FFI-BOUNDARY:` comment line, so it is not an FFI module"; next }
+            ffi[$1] = FNR
+            next
+        }
+        FILENAME == ARGV[4] {
+            if ($0 ~ /^[[:space:]]*(#|$)/) next
+            where = HN ":" FNR ": "
+            if (NF != 4) { print where "a row has 4 tab-separated fields (rule, file, count, reason), not " NF; next }
+            if (!($1 in rule)) { print where "unknown rule `" $1 "` (rules: " kinds ")"; next }
+            if (!($2 in known)) { print where $2 " is not a .mojo file of the tree; delete the row"; next }
+            if ($3 !~ /^[1-9][0-9]*$/) { print where "count `" $3 "` is not a positive whole number"; next }
+            if ($4 !~ /[^[:space:]]/) { print where "empty reason: say why this file still holds the sites"; next }
+            k = $1 SUBSEP $2
+            if (k in held) { print where "a second row for " $1 " in " $2; next }
+            held[k] = $3; hrow[k] = FNR
+            next
+        }
+        {
+            if ($1 == "wildcard_origin" && ($2 in ffi)) { fsites[$2]++; next }
+            k = $1 SUBSEP $2
+            n[k]++
+            site[k, n[k]] = P $2 ":" $3 ": " $1 ": " $4
+        }
+        END {
+            for (k in n) {
+                h = (k in held) ? held[k] : 0
+                if (n[k] <= h) continue
+                split(k, kf, SUBSEP)
+                for (i = 1; i <= n[k]; i++)
+                    print site[k, i] " -- " rule[kf[1]] (h ? " (" n[k] " sites, held " h ")" : "")
+            }
+            for (k in held) {
+                c = (k in n) ? n[k] : 0
+                if (c >= held[k]) continue
+                split(k, kf, SUBSEP)
+                print HN ":" hrow[k] ": " kf[1] " in " kf[2] " is held at " held[k] " and has " c ": " (c ? "lower the count to " c : "delete the row")
+            }
+            for (f in ffi)
+                if (!(f in fsites)) print FN ":" ffi[f] ": " f " names no wildcard origin; delete the row"
+        }' "$T/files" "$T/marked" "$ffi" "$holds" "$T/sites" | sort >> "$REPORT"
     ;;
 *)
     echo "lint.sh: unknown kind $KIND" >&2

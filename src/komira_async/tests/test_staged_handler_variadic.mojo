@@ -90,7 +90,7 @@ from komira_async.runtime.staged_handler import (
     StagedHandlerNoop,
 )
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # =============================================================================

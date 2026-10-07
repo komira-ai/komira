@@ -26,8 +26,8 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_fs.footer_region import FOOTER_SPECULATIVE_WINDOW
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
 
 from komira_objectstore_gcs.backend import GCS_LIST_MAX_PAGES
 from komira_objectstore_gcs import (

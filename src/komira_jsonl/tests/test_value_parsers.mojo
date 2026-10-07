@@ -33,8 +33,8 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema, SchemaBuilder, Field
 
 from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
 from komira_jsonl.value_parsers.parse_date import parse_date32

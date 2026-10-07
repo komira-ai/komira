@@ -48,7 +48,7 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
 from komira_collections.slab import Slab
 
-from komira_concurrency.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_buffer.heap_region import HeapRegion
 from komira_compression.compression import ArrowIpcCompression
 from komira_compression.compression_codecs import _CodecDctxHandle
@@ -72,8 +72,8 @@ from komira_arrow_ipc.ipc_flatbuf import (
     METADATA_VERSION_V5,
     IPC_CONTINUATION_MARKER,
 )
-from komira_concurrency.token import CancellationToken
-from komira_concurrency.parallel_dispatch import (
+from komira_async_api.token import CancellationToken
+from komira_async_api.parallel_dispatch import (
     ParallelDispatch,
     NoDispatch,
 )
@@ -82,7 +82,7 @@ from komira_arrow_ipc.ipc_encoder_dispatch import encode_column, _estimate_body_
 
 # -----------------------------------------------------------------------------
 # LANE-2 sched-trace call-site ids. MIRRORED,
-# not imported: `komira_async` deps on `komira_core`, so importing
+# not imported: `komira_async` deps on the core packages, so importing
 # `komira_async.runtime.sched_trace` here would close a package cycle. These
 # two comptime values MUST stay in lockstep with `SITE_FORMAT_READ` /
 # `SITE_FORMAT_WRITE` in `komira_async/runtime/sched_trace.mojo` and with the

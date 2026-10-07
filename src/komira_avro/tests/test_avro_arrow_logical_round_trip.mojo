@@ -26,7 +26,7 @@ from komira_avro import (
     arrow_logical_annotation,
     is_lossy_arrow_type,
 )
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 
 def _round_trip(arrow_type: ArrowType) raises -> ArrowType:

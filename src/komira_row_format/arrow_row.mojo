@@ -77,7 +77,7 @@ from komira_udf.float_quotient_order import (
     float_quotient_order_bits_f64,
 )
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 
 
 # =============================================================================

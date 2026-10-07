@@ -12,6 +12,9 @@ export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
 export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
 
+# The reader of lint kind pointer_lint (lint.sh; the rule is pointer_lint in defs.bzl).
+export_file(name = "pointer_lint.awk", visibility = ["PUBLIC"])
+
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
 tar_member(

@@ -34,12 +34,12 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.large_string_array import LargeStringArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, SchemaBuilder
-from komira_core.arrow.string_array import StringArray
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.large_string_array import LargeStringArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.string_array import StringArray
 
 from komira_orc.orc_schema import ORC_KIND_STRING
 from komira_orc.stripe_emit import build_col_encoders

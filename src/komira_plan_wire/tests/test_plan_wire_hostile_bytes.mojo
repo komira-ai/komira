@@ -94,19 +94,19 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.plan.expr import Expr, BIN_AND, BIN_GT, BIN_LT
-from komira_core.plan.logical_plan import LogicalPlan
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_plan_expr.expr import Expr, BIN_AND, BIN_GT, BIN_LT
+from komira_plan_ir.logical_plan import LogicalPlan
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     scan_kind_id,
     SNAPSHOT_PINNED,
 )
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.source_variant import SourceVariant, SOURCE_VARIANT_ORC
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.source_variant import SourceVariant, SOURCE_VARIANT_ORC
 
 # ★ THE GATE IS NOT THE GUARANTEE — so this file reaches PAST it. `decode_proto`
 # is what every socket-facing caller uses on bytes off a socket, most of them
@@ -142,7 +142,7 @@ from komira_plan_wire import (
     plan_to_bytes_with_write_target,
     plan_envelope_from_bytes,
 )
-from komira_core.arrow.write_target import (
+from komira_arrow.write_target import (
     WriteTarget,
     WFMT_CSV,
     WFMT_PARQUET,

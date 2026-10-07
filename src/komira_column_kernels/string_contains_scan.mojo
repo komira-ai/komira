@@ -101,7 +101,7 @@ def _init_contains_scan_counter() -> OwnedPointer[AtomicI64]:
 
 
 comptime _CONTAINS_SCAN_COUNTER = _Global[
-    "komira_core_string_contains_scan_calls",
+    "komira_column_kernels_string_contains_scan_calls",
     _init_contains_scan_counter,
 ]
 

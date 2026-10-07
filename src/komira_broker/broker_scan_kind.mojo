@@ -105,11 +105,11 @@
 # reader owns its own `ConsumeCore` by value.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.source.scan_binding import ScanBinding, SCAN_EPOCH_NONE
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import ScanParams
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_scan_source.scan_binding import ScanBinding, SCAN_EPOCH_NONE
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import ScanParams
 
 from komira_scan_resolver.scan_source_resolver import (
     ErasedScanSourceResolver,

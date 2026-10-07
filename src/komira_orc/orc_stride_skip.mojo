@@ -10,7 +10,7 @@
 #   (1) column-projection  (2) stripe-stats  (3) stride-stats [THIS MODULE]
 #   (4) stride-bloom [hangs off the same per-stride loop]
 #
-# Predicate surface: the predicate type is `komira_core.plan.expr.Expr`
+# Predicate surface: the predicate type is `komira_plan_expr.expr.Expr`
 # (predicates travel as `Expr` + `ScalarValue`, exactly as the Parquet page
 # pruner takes them). This module supports the range-predicate subset (col <op> int-literal, AND /
 # OR composition); every unsupported shape degrades CONSERVATIVELY to all-pass
@@ -27,10 +27,10 @@
 # are small POD lists.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.helpers.compiler_helpers import gather_batch
+from komira_arrow.record_batch import RecordBatch
+from komira_column_kernels.compiler_helpers import gather_batch
 
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     EXPR_BINARY_OP,
     EXPR_COL_REF,
@@ -45,10 +45,10 @@ from komira_core.plan.expr import (
     BIN_GT,
     BIN_GE,
 )
-from komira_core.plan.scalar_value import ScalarValue
+from komira_plan_expr.scalar_value import ScalarValue
 
-from komira_core.collections.slab import Slab
-from komira_core.arrow.record_batch import RecordBatchBuilder
+from komira_collections.slab import Slab
+from komira_arrow.record_batch import RecordBatchBuilder
 
 from .footer import (
     OrcFileTail,

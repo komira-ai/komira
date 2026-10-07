@@ -24,7 +24,7 @@
 # the correct end state. It is not what this file does because:
 #
 #   * It changes a FIELD TYPE, so it ripples to every reader, across several
-#     packages that depend on `komira_core`.
+#     packages that depend on the core packages.
 #   * `is_null()` is on the hot path of every scalar comparison.
 #
 # So the sentinel is one named constant, which keeps the representation

@@ -23,7 +23,7 @@
 # module boundary.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.record_batch import RecordBatch
 
 from .action_table import ActionTableInterpreter, ResolutionTable
 from .avro_codec import decompress_block
