@@ -23,6 +23,7 @@ mojo_library(
         "//third_party/s2n-tls:s2n",
     ],
     test_srcs = [
+        "tests/test_L1_h1_length_wrap.mojo",
         "tests/test_L1_tls_alpn.mojo",
         "tests/test_L1_tls_buffered_plaintext_lost_wakeup.mojo",
         "tests/test_L1_tls_cert_verify.mojo",
@@ -52,6 +53,7 @@ mojo_library(
         "tests/test_L2_h2_flow_control.mojo",
         "tests/test_L2_h2_frame.mojo",
         "tests/test_L2_h2_hpack.mojo",
+        "tests/test_L2_h2_hpack_hostile_input.mojo",
         "tests/test_L2_h2_preface_alpn.mojo",
         "tests/test_L2_h2_stream.mojo",
         "tests/test_grpc_content_type_nonascii.mojo",
