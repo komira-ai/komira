@@ -1,0 +1,6 @@
+# Made-up strings of a coverage binary for check.sh (BUCK): no relative
+# test directory.
+.debug_line
+value.mojo
+buck-out/v2/art/tests/functional/coverage/__covlib_forced__/0123456789abcdef/src/covlib
+/__________________________________

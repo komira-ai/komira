@@ -54,8 +54,9 @@
 #     ASSERTS base==dense (the running fold high-water) AND last==base+count-1
 #     (contiguity); a divergence is a torn fold and RAISES.
 #   * RETIRE: after a shard's `[already .. snap_total)` tail is materialized, the
-#     now-fully-folded SOURCE chunks are tombstoned (the existing grace-gated
-#     reaper reclaims them) AND the source shard's durable `_LOG_START` is
+#     now-fully-folded SOURCE chunks get MOVED markers (the
+#     `.seg` objects are `_base`'s now: a `ReapWorker` over the shard reclaims
+#     the chunk keys only) AND the source shard's durable `_LOG_START` is
 #     advanced to the folded watermark (the monotone-forward cursor the serve path
 #     reads for `folded_counts`). The ONLY cross-shard resolution state is the
 #     live un-folded tail — BOUNDED by the fold cadence (live-shard width x
@@ -119,7 +120,7 @@ struct SegmentFoldStats(Copyable, Movable, Deinitable):
       var live_shard_count: Int    — source sub-lineages enumerated at the boundary.
       var base_chunks_appended: Int — `_base` manifest chunks this round appended
                                       (one per intersecting source chunk).
-      var source_chunks_retired: Int — source chunks tombstoned this round.
+      var source_chunks_retired: Int — source chunks newly tombstoned this round.
     """
 
     var dense_high_water: Int64
@@ -314,11 +315,23 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
             records_folded += blk.count
         _ = base^
 
-        # RETIRE the now-folded source chunks + advance each source `_LOG_START`.
-        for i in range(len(plan)):
-            ref blk = plan[i]
+        # RETIRE the now-folded source chunks + advance each source `_LOG_START`,
+        # for EVERY snapshot shard, not only the shards in this round's plan: a
+        # shard whose earlier retire advance failed (it is swallowed) is fully
+        # folded by `_base`'s anchor, so it is in no plan again, and only this
+        # loop moves its cursor. Its watermark is the folded count, raised by
+        # any block this round folded from it. A shard already at its watermark
+        # costs one `_LOG_START` read.
+        for i in range(len(snap)):
+            var watermark = folded[i].folded_count
+            for j in range(len(plan)):
+                ref blk = plan[j]
+                if blk.shard_id == snap[i].shard_id:
+                    var hi = blk.source_local_base + blk.count
+                    if hi > watermark:
+                        watermark = hi
             source_retired += self._retire_folded_source(
-                blk.shard_id, blk.source_local_base + blk.count, now_ms
+                snap[i].shard_id, watermark, now_ms
             )
 
         return SegmentFoldStats(
@@ -503,10 +516,24 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
     ) raises -> Int:
         """RETIRE the source-shard chunks whose records are now FULLY folded into
         `_base` (every chunk whose entire local range is below
-        `folded_through_total`) by tombstoning them (the EXISTING grace-gated
-        reaper reclaims them; a partially-folded chunk past the snapshot boundary
-        is left live). Then advance the source shard's `_LOG_START` to
-        `folded_through_total` (the first still-UN-folded local offset).
+        `folded_through_total`) with MOVED markers
+        (`schedule_moved_for_delete_at`): `_base`
+        re-recorded their `.seg` objects, so a grace-gated `ReapWorker` over the
+        shard reclaims the chunk keys and never the segments (a partially-folded
+        chunk past the snapshot boundary is left live). Then advance the source
+        shard's `_LOG_START` to `folded_through_total` (the first still-UN-folded
+        local offset). No in-tree caller runs a reaper over a shard prefix
+        today; the MOVED markers keep one that does off `_base`'s data.
+
+        Every chunk the walk retires gets its MOVED marker (re)written at
+        `now_ms`, including one that already carries a marker (left by a
+        failed advance, or a plain retention tombstone), so the grace window
+        counts from this retire. The return value counts only chunks that
+        carried no marker of either kind.
+
+        Nothing to do when `folded_through_total` is at or below the shard's
+        `_LOG_START` offset (the steady state of a shard this round did not
+        fold): returns 0 after one `_LOG_START` read, writing nothing.
 
         That `_LOG_START` pointer IS the durable per-shard fold cursor — the
         monotone-forward cursor the serve path reads for `folded_counts` (via
@@ -516,19 +543,22 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
         (possibly-reaped) `_base` blocks. The retire-then-advance is the SAME
         retention semantics a single-manifest partition uses. Raw retention-key
         arithmetic stays INSIDE the substrate. Returns the number of source chunks
-        tombstoned this call. `now_ms` is recorded as the tombstone schedule ts
-        (the grace-gated reaper reads it)."""
-        _ = now_ms  # the schedule ts is stamped inside `schedule_for_delete`
+        newly tombstoned this call. `now_ms` is recorded as the tombstone
+        schedule ts (the grace-gated reaper reads it)."""
         var s = self._shard_manifest(shard_id)
+        var cur = s.read_log_start()
+        if folded_through_total <= cur.log_start_offset:
+            _ = s^
+            return 0  # the cursor is already there: nothing to retire
         var head: ManifestHead
         try:
             head = s.read_head_authoritative()
         except e:
-            _ = e
             _ = s^
-            return 0  # already reaped
+            if not _is_not_found_msg(String(e)):
+                raise e^
+            return 0  # the shard manifest is gone: nothing to retire
         var already_tomb = s.tombstone_seqs()
-        var cur = s.read_log_start()
         var running = cur.log_start_offset
         var seq = cur.log_start_seq if cur.log_start_seq >= Int64(0) else Int64(0)
         var first_unfolded_seq = head.chunk_seq + Int64(1)
@@ -546,16 +576,16 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
             var chunk_hi = running + rc  # exclusive local end
             # Fully folded iff the chunk's entire range is <= the folded watermark.
             if chunk_hi <= folded_through_total:
-                if not _i64_in(already_tomb, seq):
-                    to_tomb.append(seq)
+                to_tomb.append(seq)
             elif not found_unfolded:
                 first_unfolded_seq = seq
                 found_unfolded = True
             running = chunk_hi
             seq += Int64(1)
         for t in range(len(to_tomb)):
-            s.schedule_for_delete(to_tomb[t])
-            retired += 1
+            s.schedule_moved_for_delete_at(to_tomb[t], now_ms)
+            if not _i64_in(already_tomb, to_tomb[t]):
+                retired += 1
         # Advance the durable source `_LOG_START` to the folded watermark (the
         # first un-folded local offset == `folded_through_total`, at the first
         # surviving chunk seq). Monotone-forward; a stale 412 is a harmless lose
@@ -563,10 +593,9 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
         # A swallowed failure deletes nothing live: the tombstones above then
         # sit on chunks at or above `_LOG_START`, which `CasManifestStore.reap`
         # refuses and the broker `ReapWorker` skips (chunk_reclaim_guard.mojo),
-        # and the next call re-reads `_LOG_START` and re-advances. That is NOT
-        # a claim that reaping these tombstones is safe once the advance lands:
-        # `_base` may still reference their `.seg` objects
-        # (komira-ai/komira#494).
+        # and the next call re-reads `_LOG_START`, re-stamps them and
+        # re-advances. Once the advance lands a reaper reclaims their chunk
+        # keys; the MOVED markers keep it off the `.seg` objects `_base` reads.
         if folded_through_total > cur.log_start_offset:
             try:
                 _ = s.advance_log_start(

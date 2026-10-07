@@ -1,7 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "retired_names", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "retired_names", "shell_lint", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 
@@ -68,6 +68,7 @@ _TESTS_LINTS = [
     "tests//:shell_lint",
     "tests//functional/aws_codegen:shell_lint",
     "tests//functional/bundle_parity:shell_lint",
+    "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
@@ -81,7 +82,9 @@ _TESTS_LINTS = [
     "//src/komira_http_core:deps_lint",
     "//src/komira_http_server:deps_lint",
     "//src/komira_http_tls_e2e:deps_lint",
+    "//src/komira_secrets_e2e:deps_lint",
     "//src/komira_job_supervisor_loopback:deps_lint",
+    "//src/komira_json_conformance:deps_lint",
     "//src/komira_udf_e2e:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
@@ -161,5 +164,21 @@ _TESTS_LINTS = [
     name = "readme_api_coverage",
     enforce = False,
     exceptions = "tests/readme_api_exceptions.tsv",
+    tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md, "What must
+# always hold?"; tools/build/lint/defs.bzl, pointer_lint): over every .mojo
+# file of the cell (`:doc_tree`), no wildcard origin outside an FFI module, no
+# `unsafe_from_address=`, no partial move through a pointer, no `parallelize[`,
+# no second declaration of libc read/open, and no public function of a library
+# under src/ taking or returning a pointer. tests/pointer_lint_ffi.tsv lists
+# the FFI modules (each holds a `# FFI-BOUNDARY:` comment); the sites that
+# predate the lint are held, per rule and file with an exact count, in
+# tests/pointer_lint_holds.tsv, which only shrinks.
+[pointer_lint(
+    name = "pointer_lint",
+    ffi = "tests/pointer_lint_ffi.tsv",
+    holds = "tests/pointer_lint_holds.tsv",
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]

@@ -1,0 +1,6 @@
+# komira_connect: crash-only (testees.mojo): its verdicts are printed, not gated.
+# This file lists only the JSONTestSuite files that abort parse_connect_error_json (komira_connect/codec_connect_json.mojo),
+# as `<file> ABORTS: <text the abort prints> | <note>` (gate.mojo). Each runs
+# in a child process that must still abort with that text; a fix makes the
+# line STALE and the test red until the line goes.
+

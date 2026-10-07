@@ -183,7 +183,7 @@ def test_records_present_are_parsed_paged_and_bounded() raises:
     bl.append(p1)
     bl.append(p2)
     var t = _ScriptedTransport(bl^)
-    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://pipeline.example"), _RUN)
+    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://runs.example"), _RUN)
 
     assert_true(tail.ok(), "a good read must not carry a fetch_error")
     assert_equal(len(tail.records), 5)
@@ -245,7 +245,7 @@ def test_an_empty_stream_says_no_stage_records() raises:
     producer happens to write — so an empty stream must render
     as a sentence, not as blank space and not as a crash."""
     var t = _ScriptedTransport(_one(_page(String(""), 0, False)))
-    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://pipeline.example"), _RUN)
+    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://runs.example"), _RUN)
 
     assert_true(tail.ok(), "an empty stream is a SUCCESS, not a failure")
     assert_true(tail.is_empty(), "and it is empty")
@@ -272,7 +272,7 @@ def test_a_transport_raise_becomes_a_tail_not_a_raise() raises:
     """⛔ THE ENRICHMENT MUST NOT BECOME THE FAILURE. The caller is already
     reporting something more important."""
     var t = _ScriptedTransport(_one(String("")), _MODE_RAISE)
-    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://pipeline.example"), _RUN)
+    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://runs.example"), _RUN)
 
     assert_false(tail.ok(), "a dial fault must be recorded")
     assert_true(
@@ -295,7 +295,7 @@ def test_a_4xx_is_reported_without_echoing_the_body() raises:
     answer, and auth answers are precisely the bodies that carry material. The
     scripted 403 body here holds a live-SHAPED grant token."""
     var t = _ScriptedTransport(_one(String("")), _MODE_STATUS, 403)
-    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://pipeline.example"), _RUN)
+    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://runs.example"), _RUN)
 
     assert_false(tail.ok())
     assert_true(_contains(tail.fetch_error, String("HTTP 403")), tail.fetch_error)
@@ -316,7 +316,7 @@ def test_an_unparseable_200_is_reported_without_echoing_the_body() raises:
     var t = _ScriptedTransport(
         _one(String('{"run_id":"x","surprise":"ya29.OTHERSECRET"}'))
     )
-    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://pipeline.example"), _RUN)
+    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://runs.example"), _RUN)
 
     assert_false(tail.ok())
     assert_true(
@@ -338,10 +338,10 @@ def test_a_cut_short_read_still_shows_what_it_got() raises:
     var t = _ScriptedTransport(bl^)
     # Page 1 parses; the scripted transport then answers the SAME body forever,
     # so drive the partial case directly through the tail value instead.
-    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://pipeline.example"), _RUN)
+    var tail = fetch_run_log_tail[_ScriptedTransport](t, String("https://runs.example"), _RUN)
     assert_true(tail.ok())
     var partial = tail.copy()
-    partial.fetch_error = String("HTTP 503 from /pipelines/runs/x/logs")
+    partial.fetch_error = String("HTTP 503 from /runs/x/logs")
     var out = render_run_log_tail(partial, 40, 400)
     assert_true(_contains(out, String("[1] info build: compiling")), out)
     assert_true(_contains(out, String("CUT SHORT")), out)
@@ -504,25 +504,25 @@ def test_the_shared_path_helpers_compose_the_route() raises:
     They live here so no two callers can derive different paths for the same
     run."""
     assert_equal(
-        join_url(String("https://pipeline.example/"), String("/pipelines/runs/x")),
-        String("https://pipeline.example/pipelines/runs/x"),
+        join_url(String("https://runs.example/"), String("/runs/x")),
+        String("https://runs.example/runs/x"),
     )
     assert_equal(
         build_run_status_path(DEFAULT_RUN_PATH_PREFIX, String("abc")),
-        String("/pipelines/runs/abc"),
+        String("/runs/abc"),
     )
     assert_equal(
-        build_run_logs_path(String("/pipelines/runs"), String("abc")),
-        String("/pipelines/runs/abc/logs"),
+        build_run_logs_path(String("/runs"), String("abc")),
+        String("/runs/abc/logs"),
     )
     assert_equal(build_run_logs_query(0, 0), String(""))
     assert_equal(build_run_logs_query(0, 200), String("?limit=200"))
     assert_equal(build_run_logs_query(7, 200), String("?after=7&limit=200"))
     assert_equal(
         build_run_logs_url(
-            String("https://pipeline.example"), DEFAULT_RUN_PATH_PREFIX, String("abc"), 7, 50
+            String("https://runs.example"), DEFAULT_RUN_PATH_PREFIX, String("abc"), 7, 50
         ),
-        String("https://pipeline.example/pipelines/runs/abc/logs?after=7&limit=50"),
+        String("https://runs.example/runs/abc/logs?after=7&limit=50"),
     )
 
 
@@ -534,7 +534,7 @@ def test_a_cursor_that_never_advances_cannot_hang_the_caller() raises:
     var stuck = _page(_line(1, String("build"), String("x")), 1, False)
     var t = _ScriptedTransport(_one(stuck))
     var tail = fetch_run_log_tail[_ScriptedTransport](
-        t, String("https://pipeline.example"), _RUN, DEFAULT_RUN_PATH_PREFIX, 1
+        t, String("https://runs.example"), _RUN, DEFAULT_RUN_PATH_PREFIX, 1
     )
     assert_true(tail.ok(), tail.fetch_error)
     assert_equal(
@@ -576,7 +576,7 @@ def test_a_clip_that_lands_mid_codepoint_does_not_ABORT_the_process() raises:
     bl.append(_page(_line(1, String("deploy"), msg), 1, True))
     var t = _ScriptedTransport(bl^)
     var tail = fetch_run_log_tail[_ScriptedTransport](
-        t, String("https://pipeline.example"), _RUN
+        t, String("https://runs.example"), _RUN
     )
     assert_equal(len(tail.records), 1, "the fixture must parse")
 
@@ -606,7 +606,7 @@ def test_a_clip_that_lands_mid_codepoint_does_not_ABORT_the_process() raises:
     )
     var t2 = _ScriptedTransport(ascii_only^)
     var tail2 = fetch_run_log_tail[_ScriptedTransport](
-        t2, String("https://pipeline.example"), _RUN
+        t2, String("https://runs.example"), _RUN
     )
     var out2 = render_run_log_tail(tail2, 40, 4)
     assert_true(

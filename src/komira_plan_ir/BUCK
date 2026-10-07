@@ -17,6 +17,7 @@ mojo_library(
         "tests/test_col_expr_bind.mojo",
         "tests/test_col_expr_desugar_verbs.mojo",
         "tests/test_col_expr_polars_named_verbs.mojo",
+        "tests/test_date32_fingerprint_dedup.mojo",
         "tests/test_expr_correlated_subquery.mojo",
         "tests/test_infer_agg_field_keeps_timestamp_zone.mojo",
         "tests/test_inmem_content_identity.mojo",
