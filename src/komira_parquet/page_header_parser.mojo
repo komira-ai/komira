@@ -61,7 +61,8 @@ def _parse_page_header[
     Raises:
         Error if the header is malformed.
     """
-    # The Span's origin `o` flows through ByteView[o] into
+    # SAFETY: the pointer and length are the Span's own, so the view covers
+    # exactly `data`. The Span's origin `o` flows through ByteView[o] into
     # ThriftCompactReader, so the reader's lifetime is tied to the input.
     var view = ByteView[o](data.unsafe_ptr(), len(data))
     var reader = ThriftCompactReader(view)

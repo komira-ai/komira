@@ -493,7 +493,7 @@ def parse_metadata_summary[
         elif field_id == 6 and wire_type == 8:
             # created_by: string (binary)
             var str_len = reader._read_varint()
-            if str_len > 0 and reader.pos + str_len <= reader.data_len:
+            if str_len > 0 and str_len <= reader.data_len - reader.pos:
                 # Safe scalar byte-append — no wildcard-origin cast, no
                 # memcpy pointer laundering. The per-byte access goes
                 # through the origin-tied view. The footer's `created_by`
@@ -505,7 +505,9 @@ def parse_metadata_summary[
                 reader.pos += str_len
                 summary.created_by = String(unsafe_from_utf8_ptr=bytes.unsafe_ptr())
             else:
-                reader.pos += str_len
+                # An empty string, or a length past the end: the walk stops at
+                # the end of the bytes, and `pos` is never moved past it.
+                reader.pos += min(str_len, reader.data_len - reader.pos)
         else:
             reader._skip_field(wire_type)
 

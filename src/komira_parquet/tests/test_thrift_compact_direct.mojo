@@ -8,7 +8,8 @@
 # read each wire type, and hold the reader to its refusals: a read outside the
 # view, a varint past 64 bits or negative, a length or element count the
 # bytes cannot hold, and nesting past the depth cap, which a list of lists or
-# a map of maps reaches without passing through a struct.
+# a map of maps reaches without passing through a struct. The summary's
+# created_by is held to a length near Int.MAX, which wrapped its bound.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -506,6 +507,19 @@ def test_summary_refuses_a_list_count_the_bytes_cannot_hold() raises:
     except e:
         raised = String(e).find("list declares 1000") >= 0
     assert_true(raised)
+
+
+def test_summary_created_by_length_near_int_max_stops_the_walk() raises:
+    # A length of Int.MAX - 1 wrapped `pos + len` negative and passed the
+    # bound, and the copy's allocation aborted the process. Now the string is
+    # left empty and `pos` stops at the end of the bytes.
+    var out = List[UInt8]()
+    _fh(out, 6, 8)
+    _uleb(out, Int.MAX - 1)
+    for _ in range(4):
+        out.append(0x00)
+    var s = parse_metadata_summary(_view(Span(out)))
+    assert_equal(s.created_by, "")
 
 
 def main() raises:

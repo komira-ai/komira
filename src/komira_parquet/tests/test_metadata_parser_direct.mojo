@@ -13,7 +13,11 @@
 #     modern annotation was not taken as text;
 #   * Statistics field 9 is the spec's i64 `nan_count`; a binary field 9 was
 #     read as HLL registers. The registers come from the chunk's key-value
-#     metadata (ColumnMetaData field 8) under `hll_footer.HLL_REGISTERS_KEY`.
+#     metadata (ColumnMetaData field 8) under `hll_footer.HLL_REGISTERS_KEY`;
+#   * each string field (created_by, KeyValue key and value, SchemaElement
+#     name, a path_in_schema segment) checked its length as
+#     `pos + len <= data_len`; a length near Int.MAX wrapped that sum
+#     negative, passed, and the copy's allocation aborted the process.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -755,6 +759,63 @@ def test_full_metadata_long_form_lists_and_counts_too_large() raises:
         var bad = _W()
         bad.list(ids[field], 1000, 12)
         assert_true(_raises(bad.out, "list declares 1000"), "field " + String(ids[field]))
+
+
+# ---- string lengths near Int.MAX ---------------------------------------------
+#
+# Each test ends a string field with a length of Int.MAX - 1 and four bytes of
+# padding. Before the fix the bound `pos + len` wrapped negative, the check
+# passed, and `List[UInt8](capacity=len + 1)` aborted the process (a null
+# allocation), so each test failed by crashing. Now the string is left empty,
+# `pos` stops at the end of the bytes (it is not moved past it, which would
+# wrap it negative and make the next field read raise), and the walk ends.
+
+
+def _huge_string(mut out: List[UInt8]):
+    _uleb(out, Int.MAX - 1)
+    for _ in range(4):
+        out.append(0x00)
+
+
+def test_full_metadata_created_by_length_near_int_max() raises:
+    var b = List[UInt8]()
+    b.append(0x68)  # field 6 (created_by), binary
+    _huge_string(b)
+    var md = parse_full_metadata(_view(Span(b)))
+    assert_false(Bool(md.created_by))
+    assert_equal(len(md.schema), 0)
+
+
+def test_key_value_length_near_int_max() raises:
+    var b = List[UInt8]()
+    b.append(0x18)  # field 1 (key), binary
+    _huge_string(b)
+    var r = ThriftCompactReader(_view(Span(b)))
+    var kv = _parse_key_value(r)
+    assert_equal(kv.key, "")
+    assert_false(Bool(kv.value))
+    assert_equal(r.pos, len(b))
+
+
+def test_schema_element_name_length_near_int_max() raises:
+    var b = List[UInt8]()
+    b.append(0x48)  # field 4 (name), binary
+    _huge_string(b)
+    var r = ThriftCompactReader(_view(Span(b)))
+    var e = _parse_schema_element(r)
+    assert_equal(e.name, "")
+    assert_equal(r.pos, len(b))
+
+
+def test_path_in_schema_segment_length_near_int_max() raises:
+    var b = List[UInt8]()
+    b.append(0x39)  # field 3 (path_in_schema), list
+    b.append(0x18)  # one binary element
+    _huge_string(b)
+    var r = ThriftCompactReader(_view(Span(b)))
+    var m = _parse_column_metadata(r)
+    assert_equal(len(m.path_in_schema), 0)
+    assert_equal(r.pos, len(b))
 
 
 def main() raises:

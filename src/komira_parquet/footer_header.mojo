@@ -206,7 +206,7 @@ def _arrow_schema_value_at[
         if field[0] != 2 or field[1] != 8:
             return String("")
         var str_len = reader._read_varint()
-        if str_len <= 0 or reader.pos + str_len > reader.data_len:
+        if str_len <= 0 or str_len > reader.data_len - reader.pos:
             return String("")
         # Same safe scalar byte-append idiom as `_parse_key_value` — no
         # wildcard-origin cast, no memcpy pointer laundering.

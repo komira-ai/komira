@@ -4,9 +4,10 @@
 # `_MemFs` holds one file in memory and answers the FileSystem trait the way
 # an object store does: `IS_MMAP_BACKED` is False, every read is an owning
 # copy, and the footer comes from a tail read. Its `mode` makes it misbehave
-# on purpose, to reach the preamble's two refusals that a well-behaved file
+# on purpose, to reach the preamble's refusals that a well-behaved file
 # system cannot: a tail region shorter than the 8-byte trailer, and an exact
-# follow-up read that does not cover the footer.
+# follow-up read that does not cover the footer, either because it starts
+# after the footer or because it ends before the footer does.
 #
 # What each test proves: the reader takes the `fs.read_at` arm for data (no
 # mapping, no advice), clones keep their own file system, the fan-out read
@@ -20,13 +21,14 @@ from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
 from komira_collections.slab import Slab
 from komira_fs.file_system import FileSystem, WriteMode
-from komira_fs.footer_region import FooterRegion
+from komira_fs.footer_region import FOOTER_SPECULATIVE_WINDOW, FooterRegion
 from komira_fs.shallow_dir_entry import ShallowDirEntry
 from komira_parquet.file_reader import ParquetFileReader, read_parquet_preamble
 
 comptime _MODE_OK = 0
 comptime _MODE_SHORT_REGION = 1
 comptime _MODE_TRAILER_ONLY = 2
+comptime _MODE_EXACT_ENDS_SHORT = 3
 
 
 struct _Handle(Movable, Deinitable):
@@ -91,8 +93,14 @@ struct _MemFs(FileSystem, Movable, Deinitable):
             w = 4
         elif self.mode == _MODE_TRAILER_ONLY:
             w = 8
+        # _MODE_EXACT_ENDS_SHORT: a read wider than the 16-byte speculative
+        # window the test asks for (the exact follow-up) starts where it
+        # should but stops 9 bytes short of the end of the file.
+        var end = size
+        if self.mode == _MODE_EXACT_ENDS_SHORT and w > 16:
+            end = size - 9
         var bytes = List[UInt8](capacity=w)
-        for i in range(size - w, size):
+        for i in range(size - w, end):
             bytes.append(self.data[i])
         return FooterRegion(bytes^, size - w, size)
 
@@ -177,10 +185,12 @@ def test_preamble_miss_through_the_object_store() raises:
     assert_equal(r.metadata_length, 100)
 
 
-def _refused(mode: Int, needle: String) -> Bool:
+def _refused(
+    mode: Int, needle: String, window: Int = FOOTER_SPECULATIVE_WINDOW
+) -> Bool:
     try:
         var fs = _MemFs(_file(40), mode)
-        _ = read_parquet_preamble[_MemFs](fs, "mem://f")
+        _ = read_parquet_preamble[_MemFs](fs, "mem://f", window=window)
     except e:
         return String(e).find(needle) >= 0
     return False
@@ -190,6 +200,16 @@ def test_preamble_refuses_a_short_region_and_an_exact_read_that_misses() raises:
     assert_true(_refused(_MODE_SHORT_REGION, "< 8-byte trailer"))
     assert_true(_refused(_MODE_TRAILER_ONLY, "did not cover the metadata blob"))
     assert_false(_refused(_MODE_OK, "did not cover"))
+
+
+def test_preamble_refuses_an_exact_read_that_ends_before_the_footer() raises:
+    # The speculative 16-byte window misses the 40-byte footer; the exact
+    # read starts at the footer's first byte but holds 39 of its 40 bytes.
+    # Its start passes the check, so only the end comparison refuses it.
+    assert_true(
+        _refused(_MODE_EXACT_ENDS_SHORT, "did not cover the metadata blob", 16)
+    )
+    assert_false(_refused(_MODE_OK, "did not cover", 16))
 
 
 def main() raises:

@@ -131,7 +131,7 @@ def parse_full_metadata[
         elif field_id == 6 and wire_type == 8:
             # created_by: string (binary)
             var str_len = reader._read_varint()
-            if str_len > 0 and reader.pos + str_len <= reader.data_len:
+            if str_len > 0 and str_len <= reader.data_len - reader.pos:
                 # Safe scalar byte-append — no wildcard-origin cast,
                 # no memcpy pointer laundering. Per-byte reads go through
                 # the origin-tied view. `created_by` is typically ~20
@@ -143,7 +143,9 @@ def parse_full_metadata[
                 reader.pos += str_len
                 created_by = String(unsafe_from_utf8_ptr=bytes.unsafe_ptr())
             else:
-                reader.pos += str_len
+                # An empty string, or a length past the end: the walk stops at
+                # the end of the bytes, and `pos` is never moved past it.
+                reader.pos += min(str_len, reader.data_len - reader.pos)
         else:
             reader._skip_field(wire_type)
 
@@ -303,7 +305,7 @@ def _parse_key_value[
         if (fid == 1 or fid == 2) and wt == 8:
             var str_len = reader._read_varint()
             var text = String("")
-            if str_len > 0 and reader.pos + str_len <= reader.data_len:
+            if str_len > 0 and str_len <= reader.data_len - reader.pos:
                 # Safe scalar byte-append -- no wildcard-origin cast, no
                 # memcpy pointer laundering. Same idiom as `created_by`.
                 var bytes = List[UInt8](capacity=str_len + 1)
@@ -313,7 +315,9 @@ def _parse_key_value[
                 reader.pos += str_len
                 text = String(unsafe_from_utf8_ptr=bytes.unsafe_ptr())
             else:
-                reader.pos += str_len
+                # An empty string, or a length past the end: the walk stops at
+                # the end of the bytes, and `pos` is never moved past it.
+                reader.pos += min(str_len, reader.data_len - reader.pos)
             if fid == 1:
                 key = text^
             else:
@@ -358,7 +362,7 @@ def _parse_schema_element[
             rep_type = FieldRepetitionType(reader._read_zigzag())
         elif fid == 4 and wt == 8:
             var str_len = reader._read_varint()
-            if str_len > 0 and reader.pos + str_len <= reader.data_len:
+            if str_len > 0 and str_len <= reader.data_len - reader.pos:
                 # Safe scalar byte-append — no wildcard-origin cast.
                 # Schema element names are short (few dozen bytes); perf
                 # is not sensitive.
@@ -369,7 +373,9 @@ def _parse_schema_element[
                 reader.pos += str_len
                 name = String(unsafe_from_utf8_ptr=bytes.unsafe_ptr())
             else:
-                reader.pos += str_len
+                # An empty string, or a length past the end: the walk stops at
+                # the end of the bytes, and `pos` is never moved past it.
+                reader.pos += min(str_len, reader.data_len - reader.pos)
         elif fid == 5 and wt == 5:
             num_children = reader._read_zigzag()
         elif fid == 6 and wt == 5:
@@ -592,7 +598,7 @@ def _parse_column_metadata[
             list_size = reader._checked_list_size(list_size)
             for _ in range(list_size):
                 var str_len = reader._read_varint()
-                if str_len > 0 and reader.pos + str_len <= reader.data_len:
+                if str_len > 0 and str_len <= reader.data_len - reader.pos:
                     # Safe scalar byte-append — no wildcard-origin cast.
                     # Column path segments are short identifiers; not
                     # perf-sensitive.
@@ -605,7 +611,9 @@ def _parse_column_metadata[
                         String(unsafe_from_utf8_ptr=bytes.unsafe_ptr())
                     )
                 else:
-                    reader.pos += str_len
+                    # An empty string, or a length past the end: the walk stops at
+                    # the end of the bytes, and `pos` is never moved past it.
+                    reader.pos += min(str_len, reader.data_len - reader.pos)
         elif fid == 4 and wt == 5:
             codec = CompressionCodec(reader._read_zigzag())
         elif fid == 5 and wt == 6:

@@ -13,7 +13,9 @@
 #     the tail distance (or the whole footer when absent), and returns ""
 #     for every near miss: no 0x0C length byte before the key, a key that
 #     differs in its last byte, a value of the wrong type, an empty value, a
-#     value longer than the footer, a header cut off by the end of the bytes;
+#     value longer than the footer (a length near Int.MAX included, whose
+#     `pos + len` bound wrapped and aborted the process), a header cut off by
+#     the end of the bytes;
 #   * the 32-byte pre-filter skips windows with no 'A' and falls back to the
 #     byte-by-byte check where one holds an 'A' (the answer is the same);
 #   * the num_rows-only parse stops at field 3 and never searches.
@@ -344,6 +346,22 @@ def test_num_rows_only_stop_end_and_wrong_type() raises:
     var n2 = parse_metadata_num_rows_only(_view(Span(empty)))
     assert_equal(n2.num_rows, 0)
     assert_equal(n2.bytes_examined, 0)
+
+
+def test_arrow_schema_value_length_near_int_max_is_absent() raises:
+    # A value length of Int.MAX - 1 wrapped `pos + len` negative and passed
+    # the bound, and the copy's allocation aborted the process inside a
+    # search documented never to raise. Now the value is absent.
+    var b = List[UInt8]()
+    b.append(0x00)
+    b.append(0x0C)
+    for c in "ARROW:schema".as_bytes():
+        b.append(c)
+    b.append(0x18)  # field 2 (value), binary
+    _uleb(b, Int.MAX - 1)
+    for _ in range(4):
+        b.append(0x00)
+    assert_equal(find_arrow_schema_value(_view(Span(b))), "")
 
 
 def main() raises:
