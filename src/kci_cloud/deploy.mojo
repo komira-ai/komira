@@ -93,6 +93,7 @@ from kci_cloud.catalog import (
 )
 from kci_cloud.clouds import Clouds
 from kci_cloud.data import key_change_findings
+from kci_cloud.feed import feeds_of
 from kci_cloud.grants import edges_for
 from kci_cloud.labels import validation_run_problem
 from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
@@ -153,14 +154,16 @@ def _resolve(catalog: Catalog, resources: List[Resource], producer: String) rais
 def lower_data[
     S: CloudAdapter
 ](cloud: S, resources: List[Resource]) raises -> List[LoweredNode]:
-    """Lower every resource to data, check the lowering contract, then
-    resolve references to resources and set each node's retention."""
+    """Lower every resource to data (each with its grant edges and the
+    list's feeds), check the lowering contract, then resolve references to
+    resources and set each node's retention."""
     var catalog = Catalog.v1()
     var out = List[LoweredNode]()
+    var feeds = feeds_of(resources)
     for i in range(len(resources)):
         ref r = resources[i]
         var retention = engine_retention(effective_retention(catalog, r))
-        var nodes = cloud.lower(r, edges_for(resources, r))
+        var nodes = cloud.lower(r, edges_for(resources, r), feeds)
         if len(nodes) == 0:
             raise Error(
                 String("cloud \"")

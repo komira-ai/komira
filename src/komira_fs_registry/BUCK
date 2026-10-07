@@ -2,8 +2,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The registry's handle layer: FsHandle, the closed sum of the concrete file
 # systems a plan's descriptors stand for, with the local arm (komira_fs's
-# LocalFs) and the S3 arm (komira_objectstore_s3's S3Fs, over a TLS connector
-# from komira_http_client), tags equal to komira_plan_expr's FS_SCHEME_*
+# LocalFs) and the S3 arm (komira_objectstore_s3's S3Fs, over a connector
+# that is plaintext for an http:// endpoint and komira_http_client's TLS
+# connector otherwise), tags equal to komira_plan_expr's FS_SCHEME_*
 # codes. The GCS and Azure codes are reserved, and a descriptor naming either
 # is refused with an error that names the missing arm. The engine's registry,
 # which dispatches a plan over handles, imports this package; this package
@@ -11,7 +12,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # komira_runtime_paths is a library dep only because mojo_library has no
 # test-only deps: test_fs_handle_local_read takes its scratch directory from
-# `test_tmpdir()`. Do not drop it as unused.
+# `test_tmpdir()`. Do not drop it as unused. komira_retry is one likewise,
+# for test_fs_handle_shared_creds, which builds an S3Config with a retry
+# policy.
 #
 # The tests are hermetic, no socket: test_fs_handle_arms (each arm
 # constructs and clones with its tag, nothing dialed: the production S3
@@ -19,8 +22,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (the wrap and the arm test, and None for a file system that is not an arm's
 # type), test_fs_handle_local_read (a real file read through the local arm),
 # test_fs_handle_s3_read (the S3 arm read through komira_http_core's
-# ScriptedConnector, a wrapped built store kept, and the production arm
-# refusing a plaintext http:// endpoint), test_fs_handle_descriptor (a
+# ScriptedConnector, a wrapped built store kept, and the production
+# connector's TLS form refusing a plaintext http:// endpoint),
+# test_fs_handle_s3_scheme (the endpoint's scheme picks the connector: an
+# http:// endpoint read over the plaintext side of a split connector, an
+# https:// one over the TLS side, any other scheme refused, and the
+# production factory's and the production arm's choice), test_fs_handle_shared_creds (a
+# handle and its clone sign with the credential the shared default chain
+# holds now, one refresh for both), test_fs_handle_descriptor (a
 # descriptor's tag, the named errors for GCS, Azure and an unknown scheme,
 # and a core-package descriptor resolved by its scheme code) and
 # test_no_env_reads (the package's sources read no environment).
@@ -35,6 +44,7 @@ mojo_library(
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore_s3:komira_objectstore_s3",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_retry:komira_retry",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_data = {
@@ -49,6 +59,8 @@ mojo_library(
         "tests/test_fs_handle_from_typed_fs.mojo",
         "tests/test_fs_handle_local_read.mojo",
         "tests/test_fs_handle_s3_read.mojo",
+        "tests/test_fs_handle_s3_scheme.mojo",
+        "tests/test_fs_handle_shared_creds.mojo",
         "tests/test_no_env_reads.mojo",
     ],
     visibility = ["PUBLIC"],
