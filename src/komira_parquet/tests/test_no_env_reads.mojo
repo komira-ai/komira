@@ -35,6 +35,7 @@ comptime _FILES: List[String] = [
     "bloom_pruner.mojo",
     "bloom_reader.mojo",
     "byte_stream_split.mojo",
+    "decimal_decode.mojo",
     "decode_arm_trace.mojo",
     "delta.mojo",
     "delta_byte_array.mojo",
@@ -44,8 +45,13 @@ comptime _FILES: List[String] = [
     "num_rows_cache.mojo",
     "page_header_parser.mojo",
     "partition_pred_bridge.mojo",
+    "payload_sel_trace.mojo",
+    "plain.mojo",
+    "plain_flba.mojo",
     "rle.mojo",
     "rle_bitunpack.mojo",
+    "scan_copy_trace.mojo",
+    "staged_filter_trace.mojo",
     "thrift_compact.mojo",
 ]
 
@@ -187,6 +193,7 @@ def test_imports_only_its_deps() raises:
         "komira_parquet",
         "komira_parquet_api",
         "komira_plan_expr",
+        "komira_simd",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde", "komira_" + "core"]
     var files = materialize[_FILES]()

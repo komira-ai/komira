@@ -1,9 +1,22 @@
 # komira_parquet
 
-The Parquet reader core. The package holds the value decoders of the Parquet
-encodings, each a function of encoded bytes to values with no file, page
-header or engine around it:
+The Parquet reader core. These parts of the package hold the value decoders of
+the Parquet encodings, each a function of encoded bytes to values with no file,
+page header or engine around it:
 
+- `plain`: PLAIN. `decode_plain_int32` / `_int64` / `_float32` / `_float64`
+  (a copy into a new array) and their `_zero_copy` twins (the page buffer
+  becomes the array), `decode_plain_boolean`, `decode_plain_byte_array` (two
+  walks with the same output, chosen by `set_plain_ba_fused_enabled`) and
+  `decode_plain_int96_to_int64` (INT96 timestamps to Unix nanoseconds). Each
+  refuses a page that cannot hold the count it is asked for, including a
+  count whose byte size wraps.
+- `plain_flba`: PLAIN FIXED_LEN_BYTE_ARRAY, to a `BinaryArray`
+  (`decode_plain_fixed_len_byte_array`) or, for a DECIMAL column, to Float64
+  (`decode_plain_flba_decimal_to_float64`).
+- `decimal_decode`: DECIMAL to Arrow `Decimal128Array`, from FLBA
+  (`decode_plain_flba_decimal_to_i128`), INT32 or INT64
+  (`decode_int32_buf_to_decimal128`, `decode_int64_buf_to_decimal128`).
 - `rle`: the RLE / Bit-Packing Hybrid (definition and repetition levels,
   dictionary codes, booleans). `RleDecoder(data, bit_width)` with
   `decode_int32` (as many values as asked for, skipping the rest of a run cut
@@ -26,6 +39,12 @@ header or engine around it:
   decoder reads). All default on; `set_*_enabled(False)` turns one off for the
   process, and fire counters count each arm. Nothing is read from the
   environment: a program that wants a switch maps its own flag to the setter.
+- `scan_copy_trace`: the same for six scan sites where a whole buffer is
+  either copied or handed over (gates set with `set_*_enabled`, the readahead
+  hint with `set_prefetch_mode`), with paired counters and
+  `scan_copy_trace_dump`, which prints every counter of the decode and scan
+  paths when `set_scan_copy_trace_enabled(True)`. `payload_sel_trace` and
+  `staged_filter_trace` hold the gates and counters of two scan stages.
 
 Every public decoder takes the encoded bytes as a `Span[UInt8]` and writes into
 a `Span` (or a buffer) whose length it respects: a request larger than the
@@ -133,6 +152,35 @@ from std.testing import assert_equal
 var data: List[UInt8] = [0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x3F, 0x40]
 var arr = decode_byte_stream_split_float32(Span(data), 2)
 assert_equal(arr.get(1), 2.0)
+```
+
+## PLAIN
+
+```mojo
+from komira_parquet.plain import decode_plain_byte_array, decode_plain_int32
+from std.testing import assert_equal
+
+# Two Int32s, 1 and -2, little-endian.
+var ints: List[UInt8] = [0x01, 0, 0, 0, 0xFE, 0xFF, 0xFF, 0xFF]
+assert_equal(decode_plain_int32(Span(ints), 2).get(1), -2)
+# BYTE_ARRAY: a 4-byte little-endian length, then the bytes.
+var strs: List[UInt8] = [2, 0, 0, 0, 0x68, 0x69, 0, 0, 0, 0]
+var arr = decode_plain_byte_array(Span(strs), 2)
+assert_equal(arr.get(0), "hi")
+assert_equal(arr.get(1), "")
+```
+
+## DECIMAL
+
+```mojo
+from komira_parquet.decimal_decode import decode_plain_flba_decimal_to_i128
+from std.testing import assert_equal
+
+# FLBA(2) DECIMAL(4, 2): -1.29 is the unscaled -129, big-endian 0xFF7F.
+var data: List[UInt8] = [0xFF, 0x7F]
+var arr = decode_plain_flba_decimal_to_i128(Span(data), 1, 2, 2)
+assert_equal(arr.get_low(0), -129)
+assert_equal(arr.precision, 4)
 ```
 
 ## The decode arms

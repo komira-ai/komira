@@ -483,11 +483,8 @@ impl AwsEmitter<'_> {
             ));
         }
 
-        // `endpoint.hostPrefix`, with its `hostLabel` members substituted.
-        // Not reached today: the front-end refuses an operation with a host
-        // prefix (host-prefix) because the generated `send` does not apply
-        // `req.host_prefix` yet. It is kept so lifting that refusal is the
-        // only change the builder needs, as in the awsJson binding.
+        // `endpoint.hostPrefix`, with its `hostLabel` members substituted;
+        // the client's sends prepend it to the resolved endpoint host.
         if let Some(hp) = &facts.host_prefix {
             let expr = self.host_prefix_expr(hp, &m.input.fq_name)?;
             self.line(&format!("req.host_prefix = {expr}"));
@@ -1318,15 +1315,8 @@ impl AwsEmitter<'_> {
                 // botocore sets a prefix-header map whether or not a header
                 // carries the prefix (`BaseRestParser._parse_non_payload_attrs`,
                 // shared by every REST protocol; the restXml corpus's
-                // `HttpPrefixHeadersAreNotPresent`). restXml follows it here.
-                // restJson1 still leaves the map unset when no header carries
-                // the prefix: aligning it changes the restJson1 goldens, so it
-                // is deferred to a change that bumps AWS_GENERATOR_VERSION.
-                let guarded = self.protocol != AwsProtocol::RestXml;
-                if guarded {
-                    self.line(&format!("if len({raw}) > 0:"));
-                    self.push();
-                }
+                // `HttpPrefixHeadersAreNotPresent`), so every REST protocol
+                // sets it here, empty when no header carries the prefix.
                 self.line(&format!("var {tmp} = Dict[String, {vt}]()"));
                 self.line(&format!("for _i in range(len({raw})):"));
                 self.push();
@@ -1334,9 +1324,6 @@ impl AwsEmitter<'_> {
                 self.line(&format!("{tmp}[{raw}[_i].name] = {value}"));
                 self.pop();
                 assign(self, &format!("{tmp}^"));
-                if guarded {
-                    self.pop();
-                }
             }
         }
         Ok(())

@@ -15,7 +15,7 @@
 #
 # THE CORPUS. Each graph is authored as proto3 JSON, the form an author
 # writes and the one kci reads (`decode_json[ResourceList]`), then encoded
-# with `encode_proto`. Between them the two graphs set every field of every
+# with `encode_proto`. Between them the three graphs set every field of every
 # message of `resource.proto` at least once, to a value other than its
 # default (a field at its default is not on protoc's side of the wire, so it
 # would check nothing), and every `Resource.body` arm:
@@ -34,6 +34,11 @@
 #                   and a table kept on delete (`Retention.KEEP`) with every
 #                   `Bucket` and `Table` field, the job's identity, and three
 #                   grants from it.
+#   messaging_graph  a queue kept on delete with every `Queue` field set (an
+#                   ack deadline, a dead-letter queue, max deliveries), its
+#                   dead-letter queue, a topic, the subscription that feeds
+#                   the queue from the topic, an identity that RECEIVEs from
+#                   the queue, and a grant that lets it SEND to the topic.
 #
 # Map keys are authored in sorted order. protoc prints and re-encodes a map
 # sorted by key, and this encoder writes a map in insertion order, so a
@@ -165,6 +170,26 @@ comptime _JOB_BUCKET_GRAPH = (
     + '{"id":"nightly-writes-logs","grant":{'
     + '"principal":{"resource":"nightly-runner"},'
     + '"access":"WRITE","cell":"LOGS"}}'
+    + "]}"
+)
+
+
+comptime _MESSAGING_GRAPH = (
+    '{"resource":['
+    # The receiver's identity: RECEIVE on the queue.
+    + '{"id":"rx","serviceAccount":{},'
+    + '"uses":[{"target":{"resource":"work"},"access":"RECEIVE"}]},'
+    # The dead-letter queue, then the queue. Every Queue field is set.
+    + '{"id":"dl","retention":"DELETE","queue":{}},'
+    + '{"id":"work","retention":"KEEP","queue":{"ackDeadline":"45s",'
+    + '"deadLetter":{"resource":"dl"},"maxDeliveries":7}},'
+    # The topic, and the subscription that feeds the queue from it.
+    + '{"id":"ev","retention":"DELETE","topic":{}},'
+    + '{"id":"ev-work","subscription":{"topic":{"resource":"ev"},'
+    + '"queue":{"resource":"work"}}},'
+    # A grant: the identity may SEND to the topic.
+    + '{"id":"rx-send","grant":{"principal":{"resource":"rx"},'
+    + '"target":{"resource":"ev"},"access":"SEND"}}'
     + "]}"
 )
 
@@ -372,10 +397,16 @@ def test_job_bucket_graph_bytes_are_frozen() raises:
     _assert_frozen("job_bucket_graph", _JOB_BUCKET_GRAPH, 8)
 
 
+def test_messaging_graph_bytes_are_frozen() raises:
+    _assert_frozen("messaging_graph", _MESSAGING_GRAPH, 6)
+
+
 def main() raises:
     print("test_resource_graph_golden_bytes")
     _print_golden("service_graph", _SERVICE_GRAPH)
     _print_golden("job_bucket_graph", _JOB_BUCKET_GRAPH)
+    _print_golden("messaging_graph", _MESSAGING_GRAPH)
     test_service_graph_bytes_are_frozen()
     test_job_bucket_graph_bytes_are_frozen()
+    test_messaging_graph_bytes_are_frozen()
     print("ALL kci.resource.v1 GRAPH GOLDEN-BYTES TESTS PASSED")
