@@ -64,11 +64,11 @@ mojo_library(
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_compression:komira_compression",
-        "//src/komira_concurrency:komira_concurrency",
         "//src/komira_counters:komira_counters",
         "//src/komira_host:komira_host",
         "//src/komira_libc:komira_libc",
