@@ -1,5 +1,5 @@
 # A welded test at the package's top (as a cloud SDK client's): set aside
-# like elsewhere/tests/test_top.mojo (test 44).
+# like elsewhere/tests/test_top.mojo (test 45).
 from covtop import top
 from std.testing import assert_equal
 

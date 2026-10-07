@@ -1,3 +1,3 @@
-"""covnotests: a library with no test (test 44)."""
+"""covnotests: a library with no test (test 45)."""
 
 from .inc import inc

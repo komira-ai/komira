@@ -1,15 +1,15 @@
-# Tests 41, 43 and 44: coverage builds, runs and the gate
+# Tests 41, 43 and 45: coverage builds, runs and the gate
 
 The checks of [test 41](README.md#41-coverage-builds),
 [test 43](README.md#43-coverage-runs) and
-[test 44](README.md#44-coverage-gate) of the [tests README](README.md).
+[test 45](README.md#45-coverage-gate) of the [tests README](README.md).
 
 ## Test 41: coverage builds
 
 [Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`)
 add one -O0 binary with line tables per `test_srcs` entry and must leave
 every release action as it is, but the package's join, which also waits for
-the coverage runs and the gate (test 44). [`coverage_tests.sh`](coverage_tests.sh)
+the coverage runs and the gate (test 45). [`coverage_tests.sh`](coverage_tests.sh)
 runs these checks:
 
 | check | what it proves | the defect planted to see it go red |
@@ -68,7 +68,7 @@ With coverage on, each test's coverage binary also runs under kcov through the r
 ./buck2 build 'tests//negative/coverage:linger[coverage][tests][test_lingers]'  # must fail: did not finish within 20 s
 ```
 
-## Test 44: the coverage gate
+## Test 45: the coverage gate
 
 With coverage on, each library also has a gate, `covcheck gate` over its
 tests' reports and its sources ([The build gate](../coverage/README.md#the-build-gate)),

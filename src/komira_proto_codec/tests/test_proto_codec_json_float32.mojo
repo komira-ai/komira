@@ -50,17 +50,13 @@
 #       range. Catches: an exponent clamped at a fixed bound, which misreads
 #       the offset cases (0.(1000001 zeros)1e1000002 read as 10^-900002,
 #       i.e. zero).
-#   S1  a strided sweep over float32 bit patterns (about 262000 values,
-#       every exponent): each round-trips bit-exactly through encode_json /
-#       decode_json, has at most 9 significant digits, and no decimal one
-#       digit shorter reads back as the same float32. Catches: a writer that
-#       is not round-trip exact (the standard library's `String(Float32)`
-#       fails ~0.5% of this sweep at small magnitudes), one that prints the
-#       float64 expansion (up to 17 digits), and one that pads to a fixed 9
-#       digits (`%.9g`).
+#   S1  a strided sweep over float32 bit patterns (every 16411th, 261713
+#       values, every exponent) is split over the welded tests
+#       test_proto_codec_json_float32_sweep_0 .. _5 (disjoint index ranges,
+#       each asserting its count; see their header).
 # =============================================================================
 
-from std.math import isinf, isnan
+from std.math import isnan
 from std.memory import bitcast
 from std.testing import assert_equal, assert_true
 
@@ -646,31 +642,6 @@ def test_r6_long_inputs() raises:
     print("  test_r6_long_inputs: PASS")
 
 
-def test_s1_sweep_round_trip() raises:
-    var checked = 0
-    var bits = 0
-    while bits < (1 << 32):
-        var v = _f(UInt32(bits))
-        var json = _write_one(v)
-        var back = _read_one(json)
-        if isnan(v):
-            assert_true(isnan(back), "sweep NaN: " + json)
-        else:
-            if _bits(back) != UInt32(bits):
-                assert_equal(_bits(back), UInt32(bits), "sweep bits: " + json)
-            if not isinf(v):
-                # A float32 needs at most 9 significant digits; its
-                # float64 expansion needs up to 17.
-                var d = _significant_digits(json)
-                if d > 9:
-                    assert_true(False, "sweep: too many digits: " + json)
-                _no_shorter_decimal(json, v)
-        checked += 1
-        bits += 16411
-    assert_true(checked > 260000, "sweep covered the space")
-    print("  test_s1_sweep_round_trip: PASS (", checked, "values )")
-
-
 def main() raises:
     print("test_proto_codec_json_float32 — proto3 JSON float32 gate")
     test_w1_shortest_scalar()
@@ -683,5 +654,4 @@ def main() raises:
     test_r5_correct_rounding()
     test_e1_binade_edges()
     test_r6_long_inputs()
-    test_s1_sweep_round_trip()
     print("test_proto_codec_json_float32: ALL PASS")
