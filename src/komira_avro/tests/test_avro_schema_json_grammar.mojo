@@ -30,9 +30,9 @@
 #       and a number right before '}' and ','. Catches: a scanner that
 #       refuses a valid form or stops early (then the value or the next
 #       token is wrong).
-#   G5  escaped control characters and U+007F stay legal; raw 'é' and
-#       "é" decode to C3 A9 and a surrogate pair to F0 9F 98 80, in a
-#       default. Catches: the control-character check refusing escapes or a
+#   G5  escaped control characters and U+007F stay legal; a raw 'é' and
+#       the escape \u00e9 decode to C3 A9, and the escaped surrogate pair
+#       \ud83d\ude00 to F0 9F 98 80, in a default. Catches: the control-character check refusing escapes or a
 #       byte >= 0x20, and a regression of the byte-exact string decoding.
 # =============================================================================
 
@@ -115,10 +115,13 @@ def test_number_grammar_refusals() raises:
         "[1.]", _bad_number(3, _DOT), "n_number_real_without_fractional_part"
     )
     _refused("[012]", _bad_number(2, _ZERO), "n_number_with_leading_zero")
-    # Not from the suite: the byte after an exponent, and 'E' after a
-    # fraction (the trailing-byte check covers every mark).
+    # Not from the suite: each of '-', 'e' and 'E' straight after a complete
+    # exponent, refused by the trailing-byte check with its own text.
     _refused(
         "[1e5-2]", _bad_number(4, "'-' cannot follow a number"), "1e5-2"
+    )
+    _refused(
+        "[1e5e5]", _bad_number(4, "'e' cannot follow a number"), "1e5e5"
     )
     _refused(
         "[1.5e2E1]", _bad_number(6, "'E' cannot follow a number"), "1.5e2E1"
