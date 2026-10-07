@@ -16,7 +16,8 @@
 # obsolete forms they accept only `obs-phrase` (a `.` in an unquoted display
 # name, as in `Joe Q. Public`), which cannot change where mail goes. Source
 # routes, empty list elements, CFWS around a `.` of a local part or domain,
-# and a dotted local part holding a quoted string are refused as `Obsolete`.
+# and a dotted local part holding a quoted string (before or after a `.`) are
+# refused as `Obsolete`.
 #
 # RFC 5321 (path) entry points accept `<Local-part@Domain>` with no white
 # space or comment, and `<>` where a reverse path is asked for. A source
@@ -138,11 +139,13 @@ def _read_dot_atom_text(
     mut i: Int,
     function: StaticString,
     missing: StaticString,
+    local_part: Bool,
     mut out: List[UInt8],
 ) raises:
     """Append the `dot-atom-text` at `i`. A `.` followed by white space or
-    a comment is the obsolete form; one followed by anything else that is
-    not an atom is a syntax error."""
+    a comment is the obsolete form, and so, in a local part (`local_part`
+    True), is a `.` followed by a quoted string; a `.` followed by anything
+    else that is not an atom is a syntax error."""
     var n = len(data)
     if i >= n or not is_atext(data[i]):
         raise address_error(SYNTAX, function, missing, i)
@@ -160,6 +163,13 @@ def _read_dot_atom_text(
                     OBSOLETE,
                     function,
                     "white space or a comment after '.' (obsolete syntax)",
+                    i + 1,
+                )
+            elif local_part and i + 1 < n and data[i + 1] == DQUOTE:
+                raise address_error(
+                    OBSOLETE,
+                    function,
+                    "a quoted string in a dotted local part (obsolete syntax)",
                     i + 1,
                 )
             else:
@@ -190,7 +200,9 @@ def _parse_addr_spec_at(
                 i,
             )
     else:
-        _read_dot_atom_text(data, i, function, "expected a local part", local)
+        _read_dot_atom_text(
+            data, i, function, "expected a local part", True, local
+        )
     if cfws:
         if _skip_cfws(data, i, function) and i < n and data[i] == DOT:
             raise address_error(
@@ -208,7 +220,9 @@ def _parse_addr_spec_at(
     if i < n and data[i] == LBRACKET:
         raise address_error(UNSUPPORTED, function, "a domain literal", i)
     var domain = List[UInt8]()
-    _read_dot_atom_text(data, i, function, "expected a domain", domain)
+    _read_dot_atom_text(
+        data, i, function, "expected a domain", False, domain
+    )
     if cfws:
         if _skip_cfws(data, i, function) and i < n and data[i] == DOT:
             raise address_error(

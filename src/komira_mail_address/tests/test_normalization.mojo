@@ -25,7 +25,7 @@ def test_domain_is_lower_cased_local_part_kept() raises:
     assert_equal(a.format(), "Jane.Doe@example.com")
     assert_equal(AddrSpec("x", "MAIL.Example.ORG").domain(), "mail.example.org")
     assert_equal(parse_addr_spec("a@XN--BCHER-KVA.Example").domain(), "xn--bcher-kva.example")
-    assert_equal(parse_addr_spec("a@Sub-1.Example9.com").domain(), "sub-1.example9.com")
+    assert_equal(parse_addr_spec("a@Sub-1.Example9.test").domain(), "sub-1.example9.test")
 
 
 def test_equality() raises:

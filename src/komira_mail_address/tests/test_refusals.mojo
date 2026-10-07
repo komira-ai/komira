@@ -11,6 +11,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_mail_address import (
     AddrSpec,
+    Group,
     Mailbox,
     error_kind,
     parse_addr_spec,
@@ -77,6 +78,14 @@ def _new_mailbox_error(name: String) -> String:
     return String("OK")
 
 
+def _new_group_error(name: String) -> String:
+    try:
+        _ = Group(name, List[Mailbox]())
+    except e:
+        return String(e)
+    return String("OK")
+
+
 comptime P: String = "komira_mail_address."
 
 
@@ -127,6 +136,14 @@ def test_cr_lf_nul_are_refused_everywhere() raises:
         _new_mailbox_error("Joe\r\nBcc: x@example.net"),
         P + "ForbiddenByte: Mailbox: CR, LF or NUL at position 3",
     )
+    assert_equal(
+        _new_group_error("A\r\nBcc: x@example.net"),
+        P + "ForbiddenByte: Group: CR, LF or NUL at position 1",
+    )
+    assert_equal(
+        _new_group_error(String("A") + chr(1) + "B"),
+        P + "Syntax: Group: a control byte in the group name at position 1",
+    )
 
 
 def test_non_ascii_is_refused_and_a_labels_pass() raises:
@@ -169,11 +186,27 @@ def test_one_input_one_address() raises:
         _mailbox_error("<a@b@acme.example>"),
         P + "Syntax: parse_mailbox: expected '>' at position 4",
     )
+    assert_equal(
+        _mailbox_error("a@b@acme.example"),
+        P + "Syntax: parse_mailbox: unexpected byte after the address at position 3",
+    )
+    # Two mailboxes where one is asked for: refused, never the first.
+    assert_equal(
+        _mailbox_error("a@x.test, b@y.test"),
+        P + "Syntax: parse_mailbox: unexpected byte after the address at position 8",
+    )
 
 
 def test_rfc3696_section_3_examples() raises:
-    # Valid, as the section lists them (errata 246 moves the backslash forms
-    # inside quotes).
+    # Valid: the section's list, with its first three entries as corrected
+    # by erratum 246 (the backslash forms moved inside quotes), byte for byte.
+    assert_equal(parse_addr_spec('"Abc\\@def"@example.com').local_part(), "Abc@def")
+    assert_equal(
+        parse_addr_spec('"Fred\\ Bloggs"@example.com').local_part(), "Fred Bloggs"
+    )
+    assert_equal(
+        parse_addr_spec('"Joe.\\\\Blow"@example.com').local_part(), "Joe.\\Blow"
+    )
     assert_equal(
         parse_addr_spec("customer/department=shipping@example.com").local_part(),
         "customer/department=shipping",
@@ -187,8 +220,7 @@ def test_rfc3696_section_3_examples() raises:
     assert_equal(
         parse_addr_spec('"Fred Bloggs"@example.com').local_part(), "Fred Bloggs"
     )
-    assert_equal(parse_addr_spec('"Joe\\\\Blow"@example.com').local_part(), "Joe\\Blow")
-    # Invalid: the unquoted backslash forms of the original text.
+    # Invalid: the three unquoted backslash forms of the original text.
     assert_equal(
         _addr_error("Abc\\@def@example.com"),
         P + "Syntax: parse_addr_spec: expected '@' at position 3",
@@ -196,6 +228,10 @@ def test_rfc3696_section_3_examples() raises:
     assert_equal(
         _addr_error("Fred\\ Bloggs@example.com"),
         P + "Syntax: parse_addr_spec: expected '@' at position 4",
+    )
+    assert_equal(
+        _addr_error("Joe.\\\\Blow@example.com"),
+        P + "Syntax: parse_addr_spec: '.' not followed by an atom at position 3",
     )
     # RFC 5321 section 4.1.2: "Joe\,Smith" is the nine-character `Joe,Smith`.
     var j = parse_addr_spec('"Joe\\,Smith"@example.com')
@@ -213,11 +249,11 @@ def test_domains() raises:
         P + "InvalidDomain: parse_addr_spec: a byte other than a letter, digit or '-' in a domain label at position 8",
     )
     assert_equal(
-        _addr_error("user@-example.com"),
+        _addr_error("user@-example.test"),
         P + "InvalidDomain: parse_addr_spec: a domain label starting or ending with '-' at position 5",
     )
     assert_equal(
-        _addr_error("user@example-.com"),
+        _addr_error("user@example-.test"),
         P + "InvalidDomain: parse_addr_spec: a domain label starting or ending with '-' at position 12",
     )
     assert_equal(
@@ -257,6 +293,14 @@ def test_length_limits() raises:
         _new_addr_error(_repeat("a", 62) + " ", "example.com"),
         P + "TooLong: AddrSpec: a local part longer than 64 octets at position 0",
     )
+    # A '"' is written with a backslash: 61 + 1 content octets are 2 + 62 + 1
+    # = 65 written, refused; 60 + 1 are 64 written, accepted.
+    assert_equal(
+        _new_addr_error(_repeat("a", 61) + '"', "example.com"),
+        P + "TooLong: AddrSpec: a local part longer than 64 octets at position 0",
+    )
+    var q64 = AddrSpec(_repeat("a", 60) + '"', "example.com")
+    assert_equal(q64.format(), '"' + _repeat("a", 60) + '\\""@example.com')
     # Label: 63 octets.
     assert_equal(parse_addr_spec("a@" + _repeat("b", 63) + ".com").domain(), _repeat("b", 63) + ".com")
     assert_equal(
@@ -313,6 +357,16 @@ def test_malformed() raises:
     assert_equal(
         _addr_error('"a".b@example.com'),
         P + "Obsolete: parse_addr_spec: a quoted string in a dotted local part (obsolete syntax) at position 3",
+    )
+    # The same obsolete form with the quoted word after the '.'.
+    assert_equal(
+        _addr_error('a."b"@example.com'),
+        P + "Obsolete: parse_addr_spec: a quoted string in a dotted local part (obsolete syntax) at position 2",
+    )
+    # A domain has no quoted strings, obsolete or not.
+    assert_equal(
+        _addr_error('a@example."com"'),
+        P + "Syntax: parse_addr_spec: '.' not followed by an atom at position 9",
     )
     assert_equal(
         _addr_error("a. b@example.com"),

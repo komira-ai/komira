@@ -29,7 +29,8 @@ or RFC 5321 section 4.1.2 for a path)."""
 comptime OBSOLETE: StaticString = "Obsolete"
 """An RFC 5322 section 4 obsolete form other than a `.` in a display name:
 a source route, an empty list element, white space or a comment around a `.`
-of a local part or a domain, or a quoted string inside a dotted local part."""
+of a local part or a domain, or a quoted string before or after a `.` of a
+local part."""
 
 comptime UNSUPPORTED: StaticString = "Unsupported"
 """A domain literal (`[...]`, the RFC 5321 address literal)."""
