@@ -63,7 +63,9 @@
 #      that session (gate_runner, kcov, the test and any child it left) is
 #      killed and the action fails, saying so; a process of the group still
 #      running (not a zombie) 10 s after the kill fails it with its own
-#      message (survived the kill). kcov waits for every process
+#      message (survived the kill), and so does a /proc that does not show
+#      this shell under its own pid (another PID namespace's, or one hiding
+#      processes), where that scan would see nothing. kcov waits for every process
 #      the test started, so without the bound a test leaving a child running
 #      would hold the action open.
 #   3. kcov writes exactly one report (<out>/cov.xml); anything else fails.
@@ -268,7 +270,20 @@ if [ -e "$K/timed_out" ]; then
     # alone: a process of it that is not a zombie after up to 10 s (SIGKILL
     # is delivered when a process next runs) survived it. A zombie has
     # exited (whoever reaps the orphans may not have yet), so it is not one.
-    [ -r /proc/self/stat ] || red "cov_run: /proc is not readable, so whether the time limit's kill reached every process of the run cannot be checked."
+    # The scan reads /proc, so /proc must show this shell under its own pid:
+    # /proc/$$/stat's first field is $$, and so is that of /proc/self/stat,
+    # read by this shell itself (a builtin's redirection, no child). A /proc
+    # of another PID namespace (where /proc/$$ may be another process), or
+    # one hiding processes, would list none of the group, and the scan would
+    # pass without checking.
+    me=$$
+    seen=""
+    self=""
+    { read -r seen _ <"/proc/$me/stat"; } 2>/dev/null || :
+    { read -r self _ </proc/self/stat; } 2>/dev/null || :
+    if [ "$seen" != "$me" ] || [ "$self" != "$me" ]; then
+        red "cov_run: /proc is not readable as this run's own: /proc/$me/stat and /proc/self/stat must both start with this shell's pid $me, and start with '$seen' and '$self'. So whether the time limit's kill reached every process of the run cannot be checked."
+    fi
     n=0
     while left=$(group_left "$gate") && [ -n "$left" ] && [ "$n" -lt 10 ]; do
         sleep 1
