@@ -920,8 +920,11 @@ dunder, a trait method, a return type), held at their exact counts, so a
 site the reader missed would fail the build; and whose `near.mojo` names
 every banned spelling where it is not a site (docstrings, comments, strings,
 longer identifiers, private and nested functions, whole-value moves, a
-rebound name). Each target of [`negative/pointer_lint`](negative/pointer_lint/BUCK)
-plants one site of a rule in the same tree, or one defect in a ledger (a
+rebound name); a test file is not a site, in a package's own `tests/` and in
+a test-only package's under `src/tests/<kind>/`. Each target of
+[`negative/pointer_lint`](negative/pointer_lint/BUCK)
+plants one site of a rule in the same tree (a library file of a test-only
+package included), or one defect in a ledger (a
 malformed, repeated, unknown-rule, zero-count or reasonless row, a row for
 no file, a count above the sites, a row for an FFI module's origins, an FFI
 row with no `# FFI-BOUNDARY:` comment line or no wildcard origin), or empties

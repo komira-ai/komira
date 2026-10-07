@@ -320,7 +320,8 @@
 #      planted tree whose every site is held at its exact count, beside near
 #      misses) build; each target of tests//negative/pointer_lint fails naming
 #      its one planted site (each rule, the two-statement partial move, a
-#      public method and __init__.mojo, one site over a hold, a non-origin
+#      public method and __init__.mojo, a library file of a test-only package
+#      under src/tests/<kind>/, one site over a hold, a non-origin
 #      site in an FFI module, an unlisted marked module) or ledger defect,
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
@@ -1198,6 +1199,7 @@ for want in \
     "libc_open|$S:3: libc_redeclare: " \
     "public_pointer|$S:2: public_pointer: " \
     "public_method|$S:3: public_pointer: " \
+    "public_pointer_container|$N/src/tests/e2e/komira_c_e2e/plant.mojo:2: public_pointer: " \
     "public_init|$N/src/komira_b/__init__.mojo:2: public_pointer: " \
     "held_new_site|$N/src/komira_a/held.mojo:85: parallelize: parallelize[_worker](n) -- the standard library's parallelize[: run the work on a ParallelDispatch (3 sites, held 2)" \
     "ffi_from_address|$N/src/komira_a/ffi.mojo:11: from_address: " \
