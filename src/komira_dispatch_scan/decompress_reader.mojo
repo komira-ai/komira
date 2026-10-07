@@ -430,13 +430,13 @@ def decompress_text_bytes_to_buffer(
             # for text in one retry.
             var new_cap = cap * 4
             if new_cap < cap:  # overflow guard
-                raise Error(
-                    String(
+                raise Error(  # cov: unreachable cap was allocated, so cap * 4 cannot wrap
+                    String(  # cov: unreachable cap was allocated, so cap * 4 cannot wrap
                         "decompress_reader: capacity arithmetic overflow"
                         " in grow loop for path '"
                     )
-                    + path
-                    + String("'")
+                    + path  # cov: unreachable cap was allocated, so cap * 4 cannot wrap
+                    + String("'")  # cov: unreachable cap was allocated, so cap * 4 cannot wrap
                 )
             cap = new_cap
             # Loop again at the new cap.
