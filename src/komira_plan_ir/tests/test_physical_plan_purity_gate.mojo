@@ -14,7 +14,7 @@
 # ⛔ WHAT GOES RED WITHOUT THE GATE. Every refusal case here calls the door and
 # requires it to RAISE; against no gate at all the module does not exist and
 # this file does not compile, and against a gate that walks only the tags the
-# fail-open walker walks, the ELEVEN container cases in
+# fail-open walker walks, the EIGHT non-WHEN container cases in
 # `test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips`
 # return False and this file fails.
 #
@@ -220,15 +220,17 @@ def test_walker_raises_on_a_tag_it_does_not_model() raises:
 
 
 # ===========================================================================
-# THE EXPRESSION WALKER — the containers a fail-open walk skips.
+# THE EXPRESSION WALKER — a subquery hidden under each container.
 # ===========================================================================
 
 
 def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() raises:
-    """`flatten_dependent_joins._expr_contains_correlated_subquery` models 8 of
-    the 24 tags and returns False for the rest. Each case below hides the SAME
-    `EXISTS (subquery)` under one of the containers it does not descend; every
-    one of them is False under that walk and must be True here.
+    """`flatten_dependent_joins._expr_contains_correlated_subquery` models 9 of
+    the 27 tags and returns False for the rest. Each case below hides the SAME
+    `EXISTS (subquery)` under a container. The three `EXPR_WHEN` cases (the
+    condition, the result, the default) are ones that walk also descends;
+    every other case is under a container it does not descend, is False under
+    that walk, and must be True here.
 
     This is the test that would have to be deleted, not merely adjusted, to
     reuse the fail-open walker as the gate."""

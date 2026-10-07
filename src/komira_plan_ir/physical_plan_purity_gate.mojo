@@ -41,10 +41,12 @@
 #
 # ⚠ WHY NOT REUSE THE WALKER THAT ALREADY EXISTS. `flatten_dependent_joins.
 # _expr_contains_correlated_subquery` answers the same question and **FAILS
-# OPEN**: its own comment concedes it skips `EXPR_WHEN` and `EXPR_WINDOW_FN`,
-# and it also skips `EXPR_REGEXP`, `EXPR_SUBSTRING`, `EXPR_EXTRACT`,
-# `EXPR_MATH_FN*`, `EXPR_MAP_GET`, `EXPR_JSON_EXTRACT` and both `STRUCT_FIELD`
-# arms. Failing open is FINE for an optimization decision
+# OPEN**: it descends every `EXPR_WHEN` arm (each case's condition and result,
+# and the default), but its own comment concedes it does not descend
+# `EXPR_WINDOW_FN` or "the remaining tags", and among those it returns False
+# for `EXPR_REGEXP`, `EXPR_SUBSTRING`, `EXPR_EXTRACT`, `EXPR_MATH_FN*`,
+# `EXPR_MAP_GET`, `EXPR_JSON_EXTRACT` and both `STRUCT_FIELD` arms without
+# looking inside them. Failing open is FINE for an optimization decision
 # (guess wrong and you decorrelate nothing, and the plan still runs) and WRONG
 # for a safety check, where the miss is the whole failure. It also lives in
 # `komira_compiler`, which `segment_cutter`'s §"WHAT THIS MODULE NAMES" firewall
@@ -179,9 +181,9 @@ def expr_carries_correlated_subquery(expr: Expr) raises -> Bool:
     if tag == EXPR_WINDOW_FN:
         # `WindowFnData` carries column NAMES (`arg_col` / `partition_by` /
         # `order_by`), an op code and a frame — not child `Expr` values.
-        # ⚠ THIS IS ONE OF THE TWO ARMS THE FAIL-OPEN WALKER SKIPS. It reaches
-        # the same answer; the difference is that this one is a STATED fact
-        # about `WindowFnData`'s fields rather than a fallthrough.
+        # ⚠ THE FAIL-OPEN WALKER HAS NO ARM FOR THIS TAG. It reaches the same
+        # answer; the difference is that this one is a STATED fact about
+        # `WindowFnData`'s fields rather than a fallthrough.
         return False
     if tag == EXPR_BETWEEN or tag == EXPR_SORT_KEY:
         # Tags 10 / 11 are DECLARED in `expr.mojo` with no payload field and no
@@ -293,10 +295,11 @@ def expr_carries_correlated_subquery(expr: Expr) raises -> Bool:
 
     # ---- N CHILDREN --------------------------------------------------------
     if tag == EXPR_WHEN:
-        # ⚠ THE OTHER ARM THE FAIL-OPEN WALKER SKIPS, and unlike EXPR_WINDOW_FN
-        # this one is NOT a leaf: `WhenData` holds a condition AND a result per
-        # case plus a default, every one of them an `Expr`. A `CASE WHEN EXISTS
-        # (...) THEN …` predicate is invisible to a walk that stops here.
+        # Unlike EXPR_WINDOW_FN this one is NOT a leaf: `WhenData` holds a
+        # condition AND a result per case plus a default, every one of them an
+        # `Expr`. A `CASE WHEN EXISTS (...) THEN …` predicate is invisible to a
+        # walk that stops here. The fail-open walker descends all three slots
+        # too.
         if not expr._when:
             return False
         for i in range(expr.when_num_cases()):
