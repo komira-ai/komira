@@ -149,6 +149,7 @@ def test_wire_refuses_a_plan_past_the_depth_limit() raises:
     var problems = List[String]()
     _ = check_wire(Case.hand("deep", "filter_3vl", _too_deep, CanonPolicy.unordered()), problems)
     assert_true(_any_contains(problems, "plan_wire_admit refused its bytes: PLAN_WIRE_TOO_DEEP"))
+    assert_true(_any_contains(problems, "plan_from_bytes refused its bytes: PLAN_WIRE_TOO_DEEP"))
 
 
 def test_wire_build_raises() raises:
@@ -245,6 +246,20 @@ def test_float_header_must_match_the_case() raises:
     assert_equal(len(p), 1)
     assert_true(p[0].find("order/float header differs") >= 0)
     assert_true(p[0].find("ulps=1") >= 0)
+
+
+def test_expectation_checks_cells() raises:
+    # check_expectation itself must run check_cells, not only the direct
+    # call below: a NULL in the non-nullable id column is refused.
+    var plan = _ints()
+    var text = String(_HEAD) + "# derivation: §1.2\nid:int64\tx:int64?\n\\N\t1\n"
+    var p = check_expectation(_case("a", "filter_3vl"), text, plan)
+    assert_equal(len(p), 1)
+    assert_equal(
+        p[0],
+        "expect: filter_3vl/a (expect/filter_3vl/a.tsv): row 1 column id:"
+        + " `\\N` is not a value of `id:int64`",
+    )
 
 
 def test_cells_must_be_values_of_their_type() raises:
