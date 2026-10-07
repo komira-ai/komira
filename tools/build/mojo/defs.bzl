@@ -26,8 +26,7 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "creat
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo", "welded_tests_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
-load(":coverage_branch.bzl", "coverage_branch")
-load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_sources", "coverage_sub_targets")
+load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_branch_of", "coverage_sub_targets")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(
     ":test_runtime.bzl",
@@ -366,11 +365,7 @@ def _library_impl(ctx):
     # second binary at -O0 with line tables and its run under kcov, under
     # cov/. None when coverage is off.
     cov_link = coverage_link_dir(ctx)
-    cov_bins = {}
-    cov_runs = {}
-    cov_branch = {}  # coverage_branch.bzl, with coverage_branch set
-    # The package root of [src]: `root` names each test's staged tree below.
-    src_root = root
+    cov_bins, cov_runs, cov_branch = {}, {}, {}  # cov_branch: coverage_branch.bzl
     for t in ctx.attrs.test_srcs:
         stem = _stem(t)
         if stem in test_subtargets:
@@ -390,7 +385,7 @@ def _library_impl(ctx):
         )
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         key = _test_key(ctx, t)
-        root, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
+        test_dir, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
                 capped_prefix(tc, mem_cap_script(ctx), "{}:{}".format(ctx.label.raw_target(), t.short_path), cap),
@@ -403,19 +398,17 @@ def _library_impl(ctx):
                 staged,
                 marker.as_output(),
                 env_args,
-                hidden = root,
+                hidden = test_dir,
             ),
             category = "mojo_gated_test",
             identifier = stem,
         )
-        test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
+        test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [test_dir])]
         markers.append(marker)
         if cov_link and t.is_source:
             cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link, defines = test_defines)
-            cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, src_root, test_data.get(key, {}), env_args)
-            if ctx.attrs.coverage_branch:
-                src_repo, gen = coverage_sources(ctx, src_root)
-                cov_branch[stem] = coverage_branch(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, src_repo, gen)
+            cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, root, test_data.get(key, {}), env_args)
+            cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root))
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether
