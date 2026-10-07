@@ -8,9 +8,8 @@
 # check reads each type through its getter (get_text, get_int4, get_int8,
 # get_uuid, get_timestamptz_micros, get_bytes, get_jsonb, get_text_array).
 # DbRow has no float or bool getter: a FLOAT cell is compared as the number its
-# text parses to, and a BOOL cell as the carrier text `DbValue.bool_val`
-# writes ("true" / "false"); that is the only canonical form komira_db names
-# for a bool.
+# text parses to, and a BOOL cell as the generated decoder reads it
+# (`_db_decode_bool`: "true", "1" or "t" is true, other text false).
 #
 # Each value goes into its own row of conf_types (id r0, r1, ...) with every
 # other column left out, and is read back alone.
@@ -167,12 +166,23 @@ def check_float4[T: NeutralTarget](mut t: T) raises:
 
 
 def check_bool[T: NeutralTarget](mut t: T) raises:
+    """A bool reads back as what the generated decoder (`_db_decode_bool`,
+    protoc-gen-mojo-db) reads as that bool: true is one of "true" / "1" /
+    "t", false is any other non-NULL text."""
     var vals = List[DbValue]()
     vals.append(DbValue.bool_val(True))
     vals.append(DbValue.bool_val(False))
     var rows = _store_and_read(t, String("t_bool"), vals)
-    assert_equal(rows[0].get_text(0), String("true"), "bool true round trip")
-    assert_equal(rows[1].get_text(0), String("false"), "bool false round trip")
+    var t0 = rows[0].get_text(0)
+    var f0 = rows[1].get_text(0)
+    assert_true(_decodes_true(t0), String("bool true read back as '") + t0 + "'")
+    assert_true(not rows[1].is_null(0), "bool false read back as NULL")
+    assert_true(not _decodes_true(f0), String("bool false read back as '") + f0 + "'")
+
+
+def _decodes_true(s: String) -> Bool:
+    # `_db_decode_bool`'s rule, verbatim.
+    return s == String("true") or s == String("1") or s == String("t")
 
 
 def _byte_run(start: Int, n: Int) -> List[UInt8]:
@@ -187,8 +197,9 @@ def _check_bytes_lengths[
 ](mut t: T, lengths: List[Int]) raises:
     var want = List[List[UInt8]]()
     for i in range(len(lengths)):
-        # Starts at 0x00 and runs past 0x7F for the longer values, so a NUL
-        # byte and non-UTF-8 bytes are both in play.
+        # Value i runs up from byte 0x7A * i (mod 256): the first from 0x00,
+        # and the 256-byte value through every byte, so NUL and non-UTF-8
+        # bytes are both in play.
         want.append(_byte_run(0x7A * i, lengths[i]))
     var vals = List[DbValue]()
     for i in range(len(want)):

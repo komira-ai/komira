@@ -12,7 +12,7 @@ from std.testing import assert_equal, assert_true
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 
-from komira_db import DbRow, DbRows, DbValue, LOGICAL_TEXT
+from komira_db import DbRow, DbRows, DbValue, LOGICAL_TEXT, LOGICAL_TIMESTAMPTZ
 
 comptime Rt = BlockingRuntime[NoopSink]
 
@@ -54,7 +54,7 @@ def item_row(
     else:
         out.append(DbValue.null(LOGICAL_TEXT))
     out.append(DbValue.int8(created_at))
-    out.append(DbValue.null(LOGICAL_TEXT))
+    out.append(DbValue.null(LOGICAL_TIMESTAMPTZ))
     return out^
 
 
@@ -64,6 +64,17 @@ def no_note() -> Optional[String]:
 
 def a_note(s: StaticString) -> Optional[String]:
     return Optional[String](String(s))
+
+
+def now_micros(rows: DbRows, col: String) raises -> Int64:
+    """The now-stamped TIMESTAMPTZ column `col` of the first row, in µs since
+    the UNIX epoch (raises when it is NULL)."""
+    var ci = rows.column_index(col)
+    if ci < 0:
+        raise Error(String("result has no column '") + col + String("'"))
+    if rows.row(0).is_null(ci):
+        raise Error(col + String(" was not stamped (NULL)"))
+    return rows.row(0).get_timestamptz_micros(ci)
 
 
 def text_col(rows: DbRows, col: String) raises -> List[String]:

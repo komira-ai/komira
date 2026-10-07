@@ -23,6 +23,7 @@ from komira_db_conformance.neutral_checks import (
     check_query_rows_locked,
     check_conditional_update_cas,
     check_conditional_update_coalesce,
+    check_conditional_update_coalesce_multi_row,
     check_conditional_update_multi_row,
     check_delete_where,
     check_create_if_absent,
@@ -189,6 +190,11 @@ def run_neutral_suite[T: NeutralTarget](mut t: T, gaps: List[KnownGap]) raises:
         r.ok(String("conditional_update_coalesce"))
     except e:
         r.fail(String("conditional_update_coalesce"), String(e))
+    try:
+        check_conditional_update_coalesce_multi_row[T](t)
+        r.ok(String("conditional_update_coalesce_multi_row"))
+    except e:
+        r.fail(String("conditional_update_coalesce_multi_row"), String(e))
     try:
         check_conditional_update_multi_row[T](t)
         r.ok(String("conditional_update_multi_row"))

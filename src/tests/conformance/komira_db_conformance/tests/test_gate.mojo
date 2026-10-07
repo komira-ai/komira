@@ -5,7 +5,8 @@
 # A report with one passing check ("p") and one failing ("f", error "boom:
 # X"), gated five ways. Only "f listed with a fragment of its error" passes;
 # an unlisted failure, a stale entry, an entry whose fragment the error lacks
-# and an entry naming no check each fail the gate, naming the violation.
+# and an entry naming no check each fail the gate, naming the violation; a gap
+# with an empty fragment (which every error contains) cannot be built.
 # =============================================================================
 
 from std.testing import assert_true
@@ -20,11 +21,11 @@ def _report() -> ConformanceReport:
     return r^
 
 
-def _gap(name: StaticString, frag: StaticString) -> KnownGap:
+def _gap(name: StaticString, frag: StaticString) raises -> KnownGap:
     return KnownGap(String(name), String(frag), String("test"))
 
 
-def _gate_error(gaps: List[KnownGap]) -> String:
+def _gate_error(gaps: List[KnownGap]) raises -> String:
     """The gate's error text, or "" when it passes."""
     try:
         _report().gate(gaps)
@@ -57,4 +58,10 @@ def main() raises:
     typo.append(_gap("no_such_check", "x"))
     var e4 = _gate_error(typo)
     assert_true(e4.find(String("known gap names no check: no_such_check")) >= 0, String("a misspelt entry fails: ") + e4)
+    var empty_refused = False
+    try:
+        _ = _gap("f", "")
+    except e:
+        empty_refused = String(e).find(String("empty must_contain")) >= 0
+    assert_true(empty_refused, "a gap with an empty fragment is refused")
     print("PASS komira_db_conformance gate")

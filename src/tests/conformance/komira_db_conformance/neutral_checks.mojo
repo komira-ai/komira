@@ -31,6 +31,7 @@ from komira_db_conformance.common import (
     item_row,
     new_rt,
     no_note,
+    now_micros,
     sorted_strs,
     strs,
     text_col,
@@ -113,8 +114,8 @@ def check_put_get_by_key[T: NeutralTarget](mut t: T) raises:
 
 
 def check_put_duplicate_key_raises[T: NeutralTarget](mut t: T) raises:
-    """put inserts; a second row with the same primary key is refused and the
-    first row is unchanged."""
+    """put inserts and never overwrites (the `Database.put` doc): a second row
+    with the same primary key raises and the first row is unchanged."""
     var db = t.fresh()
     var rt = new_rt()
     ref reactor = rt.reactor()
@@ -254,8 +255,7 @@ def check_conditional_update_cas[T: NeutralTarget](mut t: T) raises:
     var a = _get_item[T](db, reactor, "a")
     assert_strs(text_col(a, String("phase")), strs("RUN"), "phase set")
     assert_strs(text_col(a, String("version")), strs("2"), "version bumped by 1")
-    var ts = text_col(a, String("updated_at"))
-    assert_true(ts[0] != String("<NULL>"), "now column stamped")
+    assert_true(now_micros(a, String("updated_at")) > 0, "now column stamped after the epoch")
     var stale = db.conditional_update[Rt](
         reactor, String(ITEMS), _guard_a_v(1), ups, False, Optional[String](String("version")), List[String]()
     )
@@ -319,6 +319,31 @@ def check_conditional_update_multi_row[T: NeutralTarget](mut t: T) raises:
     var m = db.conditional_update[Rt](reactor, String(ITEMS), o1, ups2, False, Optional[String](), List[String]())
     assert_equal(m, UInt64(3), "owner=o1 matches three rows")
     assert_strs(_ids_where[T](db, reactor, Filter.just(Pred.eq(String("phase"), DbValue.text(String("DONE"))))), strs("a", "b", "d"), "all three updated")
+
+
+def check_conditional_update_coalesce_multi_row[T: NeutralTarget](mut t: T) raises:
+    """`coalesce=True` on a guard that is not the key (the multi-row update,
+    a separate path from the keyed one on a document backend): every matched
+    row takes the bound value and keeps its column where the bind is NULL."""
+    var db = t.fresh()
+    var rt = new_rt()
+    ref reactor = rt.reactor()
+    _seed4[T](db, reactor)
+    var ups = List[DbColVal]()
+    ups.append(DbColVal.bind(String("note"), DbValue.null(LOGICAL_TEXT)))
+    ups.append(DbColVal.bind(String("phase"), DbValue.text(String("M"))))
+    var o1 = Filter.just(Pred.eq(String("owner"), DbValue.text(String("o1"))))
+    var n = db.conditional_update[Rt](reactor, String(ITEMS), o1, ups, True, Optional[String](), List[String]())
+    assert_equal(n, UInt64(3), "owner=o1 matches three rows")
+    var rows = db.query_rows[Rt](reactor, String(ITEMS), strs("id", "phase", "note"), o1.copy(), _asc_created(), _no_limit())
+    assert_strs(text_col(rows, String("phase")), strs("M", "M", "M"), "the non-NULL bind is written to every row")
+    assert_strs(text_col(rows, String("note")), strs("<NULL>", "y", "x"), "coalesce=True: each row keeps its note")
+
+
+def _asc_created() -> List[Order]:
+    var o = List[Order]()
+    o.append(Order.asc(String("created_at")))
+    return o^
 
 
 def check_delete_where[T: NeutralTarget](mut t: T) raises:
@@ -403,7 +428,7 @@ def check_claim_rows[T: NeutralTarget](mut t: T) raises:
     assert_strs(text_col(p2, String("phase")), strs("CLAIMED"), "p2 persisted CLAIMED")
     assert_strs(text_col(p2, String("version")), strs("2"), "p2 version bumped")
     assert_strs(text_col(p2, String("note")), strs("w1"), "extra applied")
-    assert_true(text_col(p2, String("updated_at"))[0] != String("<NULL>"), "now column stamped")
+    assert_true(now_micros(p2, String("updated_at")) > 0, "now column stamped after the epoch")
     assert_strs(text_col(_get_item[T](db, reactor, "p1"), String("phase")), strs("PENDING"), "p1 not claimed")
     assert_strs(text_col(_get_item[T](db, reactor, "q"), String("phase")), strs("NEW"), "a row in another phase is never claimed")
     var rest = db.claim_rows[Rt](

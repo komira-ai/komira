@@ -6,16 +6,26 @@
 # RUN HERE: the dialect check (dialect() is "pg", placeholder(i) is `$<i+1>`,
 # now_expr() is an expression), which needs no server.
 #
-# NOT RUN HERE: both live suites. PgDatabase speaks to a Postgres server over
-# TCP, with TLS 1.3 required and SCRAM-SHA-256 authentication. A build action
-# has no network and no Postgres: third_party/ pins no Postgres source, the
-# toolchain has no server binary, and no service runs beside the farm. To run
-# them, a build action needs a Postgres it starts itself (a pinned server
-# built from source, an initdb in the action's scratch directory, a server
-# certificate, a listener on a loopback port the action chooses), and the
-# test needs that server's PgConfig. `_run_live` below is the call site: it
-# is compiled with this file, so the targets keep conforming, and it is the
-# only thing left to call once a server exists.
+# WIRED, NOT RUN: both live suites (`_run_live`, compiled with this file, so
+# the targets keep conforming). They have never run against a server, and
+# are known not to be sufficient until:
+#   1. a build action can run a Postgres. PgDatabase speaks to a server over
+#      TCP with TLS 1.3 required and SCRAM-SHA-256 authentication; a build
+#      action has no network and no Postgres (third_party/ pins no Postgres
+#      source, the toolchain has no server binary, no service runs beside
+#      the farm). It needs a pinned server built from source, an initdb in
+#      the action's scratch directory, a server certificate, a loopback port
+#      the action chooses, and that server's PgConfig passed to `_run_live`;
+#   2. the first live run's failures are triaged. Read from the code, not
+#      run: FLOAT8 / FLOAT4 values bind with the TEXT type OID
+#      (pg_driver.mojo `_oid_for_logical`), and Postgres has no implicit
+#      text -> double precision assignment cast, so type_float8 /
+#      type_float4 may be refused; and `jsonb` stores a parsed value and
+#      prints it normalised (spaces after ':' and ','), so type_jsonb's byte
+#      comparison would fail. Either is then a defect or a gap to list.
+#
+# The now column (`updated_at`) is TIMESTAMPTZ here, as komira_db types a
+# column `now_expr()` writes (migration.mojo): pg's NOW() is a timestamptz.
 #
 # `fresh()` on a server cannot open a new database per check the way the
 # in-memory targets do; it drops the conformance tables and recreates the
@@ -82,7 +92,7 @@ struct PgNeutral(NeutralTarget):
             String(
                 "CREATE TABLE conf_items (id TEXT PRIMARY KEY, owner TEXT NOT"
                 " NULL, phase TEXT NOT NULL, version BIGINT NOT NULL, note"
-                " TEXT, created_at BIGINT NOT NULL, updated_at BIGINT)"
+                " TEXT, created_at BIGINT NOT NULL, updated_at TIMESTAMPTZ)"
             ),
         )
         _exec(
@@ -131,8 +141,8 @@ struct PgSql(SqlTarget):
 
 
 def _run_live(config: PgConfig) raises:
-    """Both suites against the server `config` names. Not called: see the
-    header for what a build action needs before it can be."""
+    """Both suites against the server `config` names. Never called and never
+    run: see the header for what is missing before it can be."""
     var neutral = PgNeutral(config.copy())
     run_neutral_suite(neutral, List[KnownGap]())
     var sql = PgSql(config.copy())

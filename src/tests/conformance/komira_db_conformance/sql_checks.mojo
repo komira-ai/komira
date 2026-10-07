@@ -19,7 +19,14 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.reactor.reactor import Reactor
 
-from komira_db import DbRows, DbValue, LOGICAL_INT8, LOGICAL_TEXT, SqlDatabase
+from komira_db import (
+    DbRows,
+    DbValue,
+    LOGICAL_INT4,
+    LOGICAL_INT8,
+    LOGICAL_TEXT,
+    SqlDatabase,
+)
 
 from komira_db_conformance.common import (
     Rt,
@@ -47,6 +54,23 @@ def _int8_type[DB: SqlDatabase]() -> String:
 
 def _ph[DB: SqlDatabase](i: Int) -> String:
     return DB.placeholder(i)
+
+
+def _typed_ph[DB: SqlDatabase](i: Int, logical: Int) -> String:
+    """Placeholder `i` for a value of `logical` type, as an expression whose
+    type the server knows. SQLite types the bound value itself (its dynamic
+    typing is what lets these checks see how a value was bound), so the bare
+    placeholder; Postgres infers a bare parameter in `$1 < $2` as text and
+    cannot type `$1 IS NULL` at all, so there it is cast to the logical
+    type's column type."""
+    if DB.dialect() == String("sqlite"):
+        return DB.placeholder(i)
+    var ty = String("TEXT")
+    if logical == LOGICAL_INT8:
+        ty = String("BIGINT")
+    elif logical == LOGICAL_INT4:
+        ty = String("INTEGER")
+    return String("CAST(") + DB.placeholder(i) + String(" AS ") + ty + String(")")
 
 
 def _no_params() -> List[DbValue]:
@@ -232,17 +256,31 @@ def check_params_never_interpolated[T: SqlTarget](mut t: T) raises:
     assert_equal(n.get_int8(0), Int64(len(hostile)), "every row is still there")
 
 
+def _cmp_sql[DB: SqlDatabase](logical: Int) -> String:
+    return (
+        String("SELECT 1 AS one WHERE ")
+        + _typed_ph[DB](0, logical)
+        + String(" < ")
+        + _typed_ph[DB](1, logical)
+    )
+
+
 def check_params_typed[T: SqlTarget](mut t: T) raises:
     """INT4 and INT8 parameters bind as numbers: 9 < 10 holds for them and
-    fails for the same digits bound as TEXT (the control)."""
+    fails for the same digits bound as TEXT (the control). On SQLite the
+    bound value's own type decides the comparison, so an integer bound as
+    text fails here; on Postgres each parameter is cast to its logical
+    type's column type (`_typed_ph`)."""
     var db = t.fresh()
     var rt = new_rt()
     ref reactor = rt.reactor()
-    var sql = String("SELECT 1 AS one WHERE ") + _ph[T.DB](0) + String(" < ") + _ph[T.DB](1)
-    assert_equal(db.query[Rt](reactor, sql, _params(DbValue.int8(9), DbValue.int8(10))).__len__(), 1, "INT8 9 < 10")
-    assert_equal(db.query[Rt](reactor, sql, _params(DbValue.int4(9), DbValue.int4(10))).__len__(), 1, "INT4 9 < 10")
-    assert_equal(db.query[Rt](reactor, sql, _params(DbValue.int8(-5), DbValue.int8(3))).__len__(), 1, "INT8 -5 < 3")
-    assert_equal(db.query[Rt](reactor, sql, _params(DbValue.text(String("9")), DbValue.text(String("10")))).__len__(), 0, "TEXT '9' < '10' is false")
+    var i8 = _cmp_sql[T.DB](LOGICAL_INT8)
+    var i4 = _cmp_sql[T.DB](LOGICAL_INT4)
+    var tx = _cmp_sql[T.DB](LOGICAL_TEXT)
+    assert_equal(db.query[Rt](reactor, i8, _params(DbValue.int8(9), DbValue.int8(10))).__len__(), 1, "INT8 9 < 10")
+    assert_equal(db.query[Rt](reactor, i4, _params(DbValue.int4(9), DbValue.int4(10))).__len__(), 1, "INT4 9 < 10")
+    assert_equal(db.query[Rt](reactor, i8, _params(DbValue.int8(-5), DbValue.int8(3))).__len__(), 1, "INT8 -5 < 3")
+    assert_equal(db.query[Rt](reactor, tx, _params(DbValue.text(String("9")), DbValue.text(String("10")))).__len__(), 0, "TEXT '9' < '10' is false")
 
 
 def check_params_null[T: SqlTarget](mut t: T) raises:
@@ -250,10 +288,11 @@ def check_params_null[T: SqlTarget](mut t: T) raises:
     var db = t.fresh()
     var rt = new_rt()
     ref reactor = rt.reactor()
-    var sql = String("SELECT 1 AS one WHERE ") + _ph[T.DB](0) + String(" IS NULL")
-    assert_equal(db.query[Rt](reactor, sql, _params(DbValue.null(LOGICAL_TEXT))).__len__(), 1, "NULL IS NULL")
-    assert_equal(db.query[Rt](reactor, sql, _params(DbValue.null(LOGICAL_INT8))).__len__(), 1, "INT8 NULL IS NULL")
-    assert_equal(db.query[Rt](reactor, sql, _params(DbValue.text(String("")))).__len__(), 0, "'' is not NULL")
+    var txt = String("SELECT 1 AS one WHERE ") + _typed_ph[T.DB](0, LOGICAL_TEXT) + String(" IS NULL")
+    var int8 = String("SELECT 1 AS one WHERE ") + _typed_ph[T.DB](0, LOGICAL_INT8) + String(" IS NULL")
+    assert_equal(db.query[Rt](reactor, txt, _params(DbValue.null(LOGICAL_TEXT))).__len__(), 1, "NULL IS NULL")
+    assert_equal(db.query[Rt](reactor, int8, _params(DbValue.null(LOGICAL_INT8))).__len__(), 1, "INT8 NULL IS NULL")
+    assert_equal(db.query[Rt](reactor, txt, _params(DbValue.text(String("")))).__len__(), 0, "'' is not NULL")
 
 
 def check_tx_commit_visible[T: SqlTarget](mut t: T) raises:

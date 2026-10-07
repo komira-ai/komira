@@ -51,7 +51,12 @@ struct KnownGap(Copyable, Movable):
 
     def __init__(
         out self, var check: String, var must_contain: String, var reason: String
-    ):
+    ) raises:
+        if must_contain.byte_length() == 0:
+            # An empty fragment is in every error: it would excuse any failure.
+            raise Error(
+                String("KnownGap ") + check + String(": empty must_contain")
+            )
         self.check = check^
         self.must_contain = must_contain^
         self.reason = reason^

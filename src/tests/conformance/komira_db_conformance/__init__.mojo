@@ -14,6 +14,10 @@ Each run records every check and is gated on the target's list of known
 gaps, each pinned to the text its failure must carry (report.mojo). The
 library imports komira_db and komira_async only; the implementations are
 imported by the tests that run the suites against them.
+
+The Firestore target runs on `MockFirestore`, so it proves conformance to the
+mock's model of Firestore (what mock_firestore.mojo says it models), not to
+Firestore itself.
 """
 
 from komira_db_conformance.report import ConformanceReport, KnownGap

@@ -20,7 +20,10 @@
 # THE NEUTRAL SCHEMA (column, logical type, NULL allowed):
 #
 #   conf_items  id TEXT primary key, owner TEXT, phase TEXT, version INT8,
-#               note TEXT NULL, created_at INT8, updated_at INT8 NULL
+#               note TEXT NULL, created_at INT8,
+#               updated_at TIMESTAMPTZ NULL (the now column: `now_expr()` writes
+#               it, and komira_db/migration.mojo types such a column
+#               TIMESTAMPTZ so pg's NOW() and sqlite's µs INTEGER both fit)
 #   conf_types  id TEXT primary key, then one NULL-able column per logical
 #               type: t_text TEXT, t_int4 INT4, t_int8 INT8, t_float8 FLOAT8,
 #               t_float4 FLOAT4, t_bool BOOL, t_bytes BYTES, t_uuid UUID,
@@ -29,9 +32,10 @@
 #
 # A SQL backend declares them with the column types protoc-gen-mojo-db gives
 # each logical type for its dialect (tools/build/proto-codegen,
-# emit_dbstorable.rs). The only query shape that needs a declared composite
-# index on a document backend is `owner == ? ORDER BY created_at` on
-# conf_items (ascending).
+# emit_dbstorable.rs). The only query shape the Firestore index guard checks
+# that needs a declared composite index is `owner == ? ORDER BY created_at` on
+# conf_items (ascending). The claim query (phase == ? ORDER BY created_at)
+# bypasses the guard; on real Firestore it needs an index too.
 # =============================================================================
 
 from komira_db import Database, SqlDatabase
