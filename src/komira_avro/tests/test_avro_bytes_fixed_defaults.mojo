@@ -26,8 +26,9 @@
 #   T8 schema resolution accepts a default on every arm of the fit check
 #      and synthesizes its value: string ("x", "", enum symbol, uuid,
 #      [string, null]); boolean; int into int, long, date, timestamp-millis,
-#      float, double and [int, null]; double into float and double; null
-#      into [long, null] (null as the second branch) and [null, string].
+#      float, double and [int, null]; double into float and double; bytes
+#      ("\u00ff" is FF); null into [long, null] (null as the second branch)
+#      and [null, string].
 #      A fit check too strict on any arm refuses the reader and goes red.
 # =============================================================================
 
@@ -490,7 +491,9 @@ def test_resolution_accepts_fitting_defaults() raises:
         '{"name":"ln","type":["long","null"],"default":null},'
         '{"name":"ns","type":["null","string"],"default":null},'
         '{"name":"sn","type":["string","null"],"default":"y"},'
-        '{"name":"in","type":["int","null"],"default":4}]}'
+        '{"name":"in","type":["int","null"],"default":4},'
+        '{"name":"di","type":"double","default":3},'
+        '{"name":"b","type":"bytes","default":"\\u00ff"}]}'
     )
     var p = List[UInt8]()
     _enc_long(Int64(5), p)
@@ -498,7 +501,7 @@ def test_resolution_accepts_fitting_defaults() raises:
     var buf = _ocf(writer, p, 2)
     var rb = read_avro_bytes_resolved(Span(buf), reader)
     assert_equal(rb.num_rows(), 2)
-    assert_equal(rb.num_columns(), 17)
+    assert_equal(rb.num_columns(), 19)
     for r in range(2):
         assert_equal(rb.column_at(1).as_string().get(r), String("x"), "s")
         assert_equal(rb.column_at(2).as_string().get(r), String(""), "s0")
@@ -546,6 +549,15 @@ def test_resolution_accepts_fitting_defaults() raises:
         var inc = rb.column_at(16).as_primitive[DType.int32]()
         assert_true(not inc.is_null(r), "in not null")
         assert_equal(Int(inc.get(r)), 4, "in")
+        assert_equal(
+            rb.column_at(17).as_primitive[DType.float64]().get(r),
+            Float64(3.0),
+            "di",
+        )
+        ref bvcol = rb.column_at(18)
+        var bv = bvcol.as_binary().get(r)
+        assert_equal(len(bv), 1, "b is one byte")
+        assert_equal(Int(bv[0]), 0xFF, "b == FF")
 
 
 def main() raises:
