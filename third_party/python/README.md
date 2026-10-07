@@ -50,9 +50,15 @@ drivers), and anything they require.
 | libgcc_s, libstdc++ | GPL-3.0-or-later WITH GCC-exception-3.1 | |
 | zlib | Zlib | |
 
-None is the AGPL. The GPL code is GCC's runtime libraries, under the GCC
-Runtime Library Exception, which komira's own toolchains already use
-(libgcc_s and libstdc++, [toolchains](../../tools/build/toolchains/README.md)).
+None is the AGPL. The GNU-licensed code is GCC's runtime libraries.
+libgcc_s, libstdc++ and numpy's libgfortran are GPL-3.0-or-later WITH
+GCC-exception-3.1, the GCC Runtime Library Exception, which komira's own
+toolchains already use for libgcc_s and libstdc++
+([toolchains](../../tools/build/toolchains/README.md)). numpy's libquadmath is
+LGPL-2.1-or-later with no exception. libgfortran and libquadmath ship only
+inside the numpy wheel, which is test-only: its visibility (`_TEST_ONLY` in
+[`BUCK`](BUCK)) keeps it out of every shipped package
+([Never shipped](#never-shipped)).
 
 The test [`licenses`](../../src/tests/helpers/komira_test_python/README.md)
 holds this table to the files: each installed distribution must be pinned,

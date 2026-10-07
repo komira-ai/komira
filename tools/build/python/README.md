@@ -61,8 +61,9 @@ platform: every action runs the linux interpreter.
 What a Python action takes from the worker is the floor of every action
 ([toolchains/README.md](../toolchains/README.md#host-floor)): a Linux x86_64
 kernel, an `x86-64-v3` CPU, and glibc (the interpreter needs 2.17, the
-wheels at most 2.28). The test `isolation` checks it: after every wheel's
-native module is imported, each file the process maps is under the action's
+wheels at most 2.28). The test `isolation` checks it: once the native
+module of every wheel that has one is mapped (it asserts each is, protobuf's
+upb backend included), each file the process maps is under the action's
 directory except glibc's own libraries. The time-zone database is not part
 of it: a script that asks `zoneinfo` for a zone reads the worker's
 `/usr/share/zoneinfo` (no test does).

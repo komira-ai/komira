@@ -4,6 +4,8 @@ Arguments: `python=<version>` and one `<distribution>=<version>` per wheel of
 third_party/python/pins.bzl. Fails unless the distributions named are exactly
 the ones MODULES lists, each module imports, and each version (the module's
 `__version__`, or the installed metadata where the module has none) is the pin.
+A distribution whose module does not load its native code on import also has
+the native module named in EXTENSIONS imported.
 """
 
 import importlib
@@ -26,6 +28,12 @@ MODULES = {
     "typing-extensions": ("typing_extensions", False),
 }
 
+# distribution -> its native module, where importing the module above does not
+# load it: `google.protobuf` is pure Python, and upb loads on first use.
+EXTENSIONS = {
+    "protobuf": "google._upb._message",
+}
+
 
 def main(args):
     pins = dict(a.split("=", 1) for a in args)
@@ -37,6 +45,8 @@ def main(args):
     for dist in sorted(pins):
         module, has_version = MODULES[dist]
         m = importlib.import_module(module)
+        if dist in EXTENSIONS:
+            importlib.import_module(EXTENSIONS[dist])
         got = m.__version__ if has_version else importlib.metadata.version(dist)
         assert got == pins[dist], "{} ({}) is {}, the pin says {}".format(dist, module, got, pins[dist])
         print(dist, got)
