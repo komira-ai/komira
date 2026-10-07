@@ -24,7 +24,7 @@ from komira_arrow.boolean_array import BooleanArray
 from komira_buffer.heap_region import HeapRegion
 from komira_arrow.bitmap import Bitmap, bytes_for_bits
 from komira_buffer.constants import SIMD_WIDTH_U8, SIMD_WIDTH_F64
-from komira_scalar_arith.int_overflow import (
+from komira_scalar_arithmetic.int_overflow import (
     add_overflow_bits,
     sub_overflow_bits,
     top_bit_set,

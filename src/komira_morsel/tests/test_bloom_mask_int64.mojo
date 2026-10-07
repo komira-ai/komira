@@ -12,8 +12,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.collections.bloom_filter import BloomFilter
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_dynamic_filter.bloom_filter import BloomFilter
 from komira_morsel.bloom_mask import bloom_mask_int64
 
 

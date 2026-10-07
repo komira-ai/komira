@@ -60,15 +60,17 @@
 from komira_counters.global_counter import GlobalCounter
 
 
-comptime _SD_CALLS = GlobalCounter["komira_core_strdrain_calls"]
-comptime _SD_VALUES = GlobalCounter["komira_core_strdrain_values"]
-comptime _SD_BYTES = GlobalCounter["komira_core_strdrain_bytes"]
-comptime _SD_AGGDICT_CALLS = GlobalCounter["komira_core_strdrain_aggdict_calls"]
+comptime _SD_CALLS = GlobalCounter["komira_counters_strdrain_calls"]
+comptime _SD_VALUES = GlobalCounter["komira_counters_strdrain_values"]
+comptime _SD_BYTES = GlobalCounter["komira_counters_strdrain_bytes"]
+comptime _SD_AGGDICT_CALLS = GlobalCounter[
+    "komira_counters_strdrain_aggdict_calls"
+]
 comptime _SD_AGGDICT_STAGE_VALUES = GlobalCounter[
-    "komira_core_strdrain_aggdict_stage_values"
+    "komira_counters_strdrain_aggdict_stage_values"
 ]
 comptime _SD_AGGDICT_BUILDER_VALUES = GlobalCounter[
-    "komira_core_strdrain_aggdict_builder_values"
+    "komira_counters_strdrain_aggdict_builder_values"
 ]
 
 
@@ -138,10 +140,10 @@ comptime SD_OWNER_CD_SERIAL = 2
 comptime SD_OWNER_CD_PARALLEL = 3
 """agg_count_distinct_parallel._execute_count_distinct_agg_parallel (s6)."""
 
-comptime _SD_OWNER_0 = GlobalCounter["komira_core_strdrain_owner0"]
-comptime _SD_OWNER_1 = GlobalCounter["komira_core_strdrain_owner1"]
-comptime _SD_OWNER_2 = GlobalCounter["komira_core_strdrain_owner2"]
-comptime _SD_OWNER_3 = GlobalCounter["komira_core_strdrain_owner3"]
+comptime _SD_OWNER_0 = GlobalCounter["komira_counters_strdrain_owner0"]
+comptime _SD_OWNER_1 = GlobalCounter["komira_counters_strdrain_owner1"]
+comptime _SD_OWNER_2 = GlobalCounter["komira_counters_strdrain_owner2"]
+comptime _SD_OWNER_3 = GlobalCounter["komira_counters_strdrain_owner3"]
 
 
 @always_inline
@@ -172,14 +174,14 @@ def strdrain_owner_values(owner: Int) raises -> Int:
     return _SD_OWNER_3.read()
 
 
-comptime _SD_SITE_0 = GlobalCounter["komira_core_strdrain_site0"]
-comptime _SD_SITE_1 = GlobalCounter["komira_core_strdrain_site1"]
-comptime _SD_SITE_2 = GlobalCounter["komira_core_strdrain_site2"]
-comptime _SD_SITE_3 = GlobalCounter["komira_core_strdrain_site3"]
-comptime _SD_SITE_4 = GlobalCounter["komira_core_strdrain_site4"]
-comptime _SD_SITE_5 = GlobalCounter["komira_core_strdrain_site5"]
-comptime _SD_SITE_6 = GlobalCounter["komira_core_strdrain_site6"]
-comptime _SD_SITE_7 = GlobalCounter["komira_core_strdrain_site7"]
+comptime _SD_SITE_0 = GlobalCounter["komira_counters_strdrain_site0"]
+comptime _SD_SITE_1 = GlobalCounter["komira_counters_strdrain_site1"]
+comptime _SD_SITE_2 = GlobalCounter["komira_counters_strdrain_site2"]
+comptime _SD_SITE_3 = GlobalCounter["komira_counters_strdrain_site3"]
+comptime _SD_SITE_4 = GlobalCounter["komira_counters_strdrain_site4"]
+comptime _SD_SITE_5 = GlobalCounter["komira_counters_strdrain_site5"]
+comptime _SD_SITE_6 = GlobalCounter["komira_counters_strdrain_site6"]
+comptime _SD_SITE_7 = GlobalCounter["komira_counters_strdrain_site7"]
 
 
 @always_inline
@@ -248,12 +250,12 @@ def strdrain_site_values(site: Int) raises -> Int:
 # never entered (so neither arm counter could have moved for a reason the arm
 # choice had any part in), while `calls > 0 and stage == 0 and builder == 0` is
 # IMPOSSIBLE and indicts the instrument rather than the lever.
-comptime _SD_RX_CALLS = GlobalCounter["komira_core_strdrain_rx_calls"]
-comptime _SD_RX_STAGE = GlobalCounter["komira_core_strdrain_rx_stage"]
-comptime _SD_RX_BUILDER = GlobalCounter["komira_core_strdrain_rx_builder"]
-comptime _SD_CDP_CALLS = GlobalCounter["komira_core_strdrain_cdp_calls"]
-comptime _SD_CDP_STAGE = GlobalCounter["komira_core_strdrain_cdp_stage"]
-comptime _SD_CDP_BUILDER = GlobalCounter["komira_core_strdrain_cdp_builder"]
+comptime _SD_RX_CALLS = GlobalCounter["komira_counters_strdrain_rx_calls"]
+comptime _SD_RX_STAGE = GlobalCounter["komira_counters_strdrain_rx_stage"]
+comptime _SD_RX_BUILDER = GlobalCounter["komira_counters_strdrain_rx_builder"]
+comptime _SD_CDP_CALLS = GlobalCounter["komira_counters_strdrain_cdp_calls"]
+comptime _SD_CDP_STAGE = GlobalCounter["komira_counters_strdrain_cdp_stage"]
+comptime _SD_CDP_BUILDER = GlobalCounter["komira_counters_strdrain_cdp_builder"]
 
 
 @always_inline

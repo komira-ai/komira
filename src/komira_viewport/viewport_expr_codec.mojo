@@ -7,7 +7,7 @@
 #   Expr -> encode_expr -> bytes -> decode_expr -> Expr'  with
 #   Expr.structural_hash() == Expr'.structural_hash()  (identical plan hash).
 #
-# THE ALLOW-LIST (the security spine). The full komira_core Expr surface has
+# THE ALLOW-LIST (the security spine). The full komira_plan_expr Expr surface has
 # ~23 variant tags (agg-fn, window-fn, correlated-subquery, regexp, UDF,
 # json_extract, struct/map projection, ...). viewport protocol v1 serializes ONLY the SIX
 # grid-filter / sort / computed-column tags:
@@ -35,8 +35,8 @@
 # UnsafePointer crosses the boundary. Mojo 1.0.0b2 (def-only).
 # =============================================================================
 
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.expr import (
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.expr import (
     Expr,
     EXPR_COL_REF,
     EXPR_LITERAL,

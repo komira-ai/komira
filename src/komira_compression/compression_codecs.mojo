@@ -348,7 +348,7 @@ struct Snappy(Compression):
     id 1. Default for Parquet (matches DuckDB).
 
     The snappy library is statically linked into every binary that uses
-    komira_core, so no shared library is needed at run time. A native Mojo
+    the core packages, so no shared library is needed at run time. A native Mojo
     Snappy port lives in `komira_parquet` and is used on the Parquet path;
     this conformer calls the C library directly.
     """

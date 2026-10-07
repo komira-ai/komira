@@ -28,12 +28,12 @@
 #   * Zero ArcPointer.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections.batch_view import BatchView, ColView
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.batch_view import BatchView, ColView
 
 from komira_row_format.row_block import (
     RowBlock,
@@ -359,7 +359,7 @@ struct RowSortBuffer(Movable, Deinitable, RowPermComparator):
             add_key_direction).
           * `nulls_first_flags` = NULLS_FIRST per key (there is no
             per-key null-position). ⚠ It does NOT match the engine's default
-            placement — `komira_core.plan.null_order_policy.derived_nulls_first`
+            placement — `komira_plan_expr.null_order_policy.derived_nulls_first`
             is NULLS LAST in both directions — and that is harmless ONLY because no NULL can
             reach the encode: `feed_batch` REFUSES a key or payload column
             holding one. ⛔ That refusal is the only thing that forbids

@@ -60,7 +60,7 @@ from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.local_io_block import LocalIoBlock
 from komira_async.runtime.parked_morsel_slab import ParkedMorselSlab
 from komira_async.runtime.step_result import StepResult
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 # =============================================================================

@@ -81,7 +81,7 @@ assert_equal(polars_agg_out_name(AGG_COUNT, False, String()), String("len"))
 
 ## Dependencies
 
-`deps` in `BUCK` is the full transitive closure. `komira_core` is in it
-because `komira_udf`, whose row UDF types `row_udf_chain` names, depends on it.
+`deps` in `BUCK` is the full transitive closure, so it includes the deps of
+`komira_udf`, whose row UDF types `row_udf_chain` names.
 `komira_op_agg_state` is there for one welded test, which also covers its
 statistical accumulators.

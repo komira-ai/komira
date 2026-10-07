@@ -76,7 +76,7 @@
 # accessors REINTERPRET those bytes into `Span[Scalar[dt], origin]` inside
 # private helpers with a `# SAFETY:` comment — identical to how `ColView`
 # re-derives its interior pointer inside `load[W]`. This file is under
-# `komira_core/collections/`, so the `ByteView._unsafe_ptr` module-private
+# the core packages, so the `ByteView._unsafe_ptr` module-private
 # escape is in-scope.
 # =============================================================================
 
@@ -289,7 +289,7 @@ struct BandView[origin: Origin[mut=False]](Movable):
         var bv = self._dict_off[idx]
         # SAFETY: `bv` is an origin-tied ByteView over the ctx's dict-offsets
         # buffer; its byte length is a multiple of 4. Reinterpret as int32. This
-        # file is under komira_core/collections/, so `_unsafe_ptr` is in-scope.
+        # file is under the core packages, so `_unsafe_ptr` is in-scope.
         # The returned Span carries `Self.origin` — no wildcard.
         var n = bv.len() // 4
         var ptr = bv._unsafe_ptr().bitcast[Scalar[DType.int32]]()
@@ -361,7 +361,7 @@ struct BandView[origin: Origin[mut=False]](Movable):
         # view too short to cover the band (a producer page-alignment / lockstep
         # bug) BEFORE the reinterpret, rather than as a silent OOB read in the
         # fold. Reinterpret the byte pointer as `Scalar[dt]`; length is `_n_rows`.
-        # This file is under komira_core/collections/, so `_unsafe_ptr` is
+        # This file is under the core packages, so `_unsafe_ptr` is
         # in-scope. The returned Span carries `Self.origin` — no wildcard,
         # no raw pointer in the public surface.
         debug_assert(

@@ -33,7 +33,7 @@ from komira_orc import (
     PB_WIRE_VARINT,
     PB_WIRE_LEN,
 )
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 
 def _pb_varint(n: UInt64, mut out: List[UInt8]):

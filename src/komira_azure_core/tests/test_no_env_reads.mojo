@@ -46,7 +46,7 @@ def test_no_environment_read() raises:
         "_read_env",
         "std.os",
         "from_environ",
-        "komira_core_ffi",
+        "komira_libc",
         "komira_libc",
         "external_call",
         "AZURE_STORAGE_ACCOUNT",

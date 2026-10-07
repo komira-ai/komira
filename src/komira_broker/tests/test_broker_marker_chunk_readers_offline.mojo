@@ -42,13 +42,13 @@
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.string_array import StringArray
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.string_array import StringArray
+from komira_collections.slab import Slab
 
 from komira_broker.broker_core import BrokerCore
 from komira_broker.compacted_index import CompactionIndex, dual_tier_resolve

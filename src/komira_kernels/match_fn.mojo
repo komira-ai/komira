@@ -22,7 +22,7 @@
 # The SIMD inner loop produces a packed-byte bitmap as its natural output:
 # the comparison `lhs.gt(rhs)` yields a `SIMD[Bool, W]` mask whose lanes
 # are byte-packed into a bitmap byte (matches the existing `eval_col_gt`
-# shape in `komira_core.eval.comparison`). When the operator
+# shape in `komira_column_kernels.comparison`). When the operator
 # wants a selection vector (`NO_MATCH_SEL=True` per DuckDB's terminology),
 # it materializes the sel-vector AFTER the SIMD loop via
 # `filter_to_indices(bitmap)`. Keeping the kernel output uniform across
@@ -61,7 +61,7 @@
 #   T: DType            -- the input column physical type (lhs and rhs match)
 #   OP_TAG: UInt8       -- comparison-op tag (reuse `BIN_LT` / `BIN_LE` /
 #                          `BIN_GT` / `BIN_GE` / `BIN_EQ` / `BIN_NE` from
-#                          `komira_core.plan.expr`). The conformer asserts
+#                          `komira_plan_expr.expr`). The conformer asserts
 #                          which tag it implements via the `OP_TAG` member.
 #   NO_MATCH_SEL: Bool  -- True ⇒ the operator will additionally materialize
 #                          a sel-vector of NON-matching rows (reserved;
@@ -79,8 +79,8 @@
 # its 3-param shape is simpler (no rhs).
 # =============================================================================
 
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.primitive_array import PrimitiveArray
 
 
 # =============================================================================
@@ -126,7 +126,7 @@ trait MatchFn(Movable, Copyable, Deinitable):
     Mojo 1.0.0b1's autovectorizer does NOT fire on unit-stride numeric
     loops. Each conformer's `eval_chunk` body MUST hand-stage SIMD via
     the `PrimitiveArray.load[width=W]` + `.gt() / .lt() / .eq()` cascade
-    (see `komira_core.eval.comparison:eval_col_gt` for the
+    (see `komira_column_kernels.comparison:eval_col_gt` for the
     canonical compare-pack shape). The built-in conformers in
     `builtin_match_fns.mojo` follow this template.
 
@@ -183,7 +183,7 @@ trait UnaryMatchFn(Movable, Copyable, Deinitable):
     Conformers MUST provide:
       - `T: DType` -- comptime physical type of the input column.
       - `OP_TAG: UInt8` -- `UN_IS_NULL` / `UN_IS_NOT_NULL` from
-        `komira_core.plan.expr`.
+        `komira_plan_expr.expr`.
       - `INPUT_VALID: Bool` -- True ⇒ input may have validity bitmap.
         False ⇒ input is non-nullable (IS_NULL is trivially false,
         IS_NOT_NULL is trivially true — kernel body is comptime-elided).

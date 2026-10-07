@@ -188,8 +188,8 @@
 #     own 1-bit render. DECIMAL128 does not fit the Int64 slot at all.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, Schema
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema
 
 
 # The canonicalisation families. `-1` is "not a join key at all"; every other

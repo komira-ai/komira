@@ -165,7 +165,7 @@ def _deflate_raw_compress(src: List[UInt8], window_bits: Int32) raises -> List[
 
 
 def _snappy_compress(src: List[UInt8]) raises -> List[UInt8]:
-    # snappy is statically linked (through komira_core), not dlopened.
+    # snappy is statically linked (through the core packages), not dlopened.
     var in_buf = alloc[UInt8](len(src) if len(src) > 0 else 1)
     for i in range(len(src)):
         in_buf[i] = src[i]

@@ -397,7 +397,7 @@ comptime ArrayReleaseFn = def (_ArrayPtrRel) thin -> None
 # fn-ptr and call THROUGH it, so our own tests exercise the same indirection a
 # C consumer does — SEGFAULTS THE MOJO 1.0.0b2 COMPILER. Not the built binary:
 # the compiler, during `MojoCompileExecutable` of any test that imports this
-# module from the precompiled `komira_core` package (`(Segmentation fault)`, no diagnostic).
+# module from the precompiled the core packages (`(Segmentation fault)`, no diagnostic).
 # It is specifically an indirect call through a bitcast `def (T) thin -> None`
 # made from a function elaborated OUT OF A precompiled package; the identical call
 # compiles fine in test-local source. So `release_c_*` below calls the release

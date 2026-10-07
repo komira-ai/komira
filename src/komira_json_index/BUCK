@@ -6,13 +6,17 @@ mojo_library(
     name = "komira_json_index",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_simd:komira_simd",
     ],
     test_srcs = [
         "tests/test_json_extract.mojo",
         "tests/test_json_extract_operator_diff.mojo",
         "tests/test_simd_primitives.mojo",
         "tests/test_structural_index.mojo",
+        "tests/test_utf8_check.mojo",
     ],
     visibility = ["PUBLIC"],
 )

@@ -47,8 +47,8 @@ from komira_async.runtime.runtime import (
     PLACEMENT_FIXED,
     PerCoreAsyncRuntime,
 )
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import RecordBatch
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import RecordBatch
 
 from komira_csv import CsvReadOptions
 from komira_csv.csv_options import QUOTE_STYLE_TAG_RFC4180

@@ -25,14 +25,14 @@
 #
 # Module-private escape:
 #   _unsafe_ptr() exists solely for decoder hot loops within this module
-#   (only files under komira_core/collections/ may call it). It does NOT
+#   (only files under the core packages may call it). It does NOT
 #   cross the module boundary to callers.
 # =============================================================================
 
 from std.memory import UnsafePointer, unsafe_memcpy, unsafe_memset
 from std.sys import size_of
 
-# `komira_core.simd` imports nothing from `komira_core`, so this
+# the core packages imports nothing from the core packages, so this
 # does NOT create a collections <-> simd cycle.
 from komira_simd.fast_copy import fast_copy_bytes
 
@@ -620,7 +620,7 @@ struct ByteView[mut: Bool, //, origin: Origin[mut=mut]](
     # `origin_of(ctx)` into one bundle. It replaces the module-private
     # `_unsafe_ptr().unsafe_origin_cast[o]()` dance `BatchView` runs inline
     # with a named, SAFETY-documented method callable from
-    # OUTSIDE komira_core (e.g. a Parquet producer, which cannot
+    # OUTSIDE the core packages (e.g. a Parquet producer, which cannot
     # reach `_unsafe_ptr`). Encapsulation-clean: ByteView in, ByteView out — no
     # UnsafePointer in the signature, no wildcard origin (`o2` is a concrete,
     # witnessed origin).
@@ -661,7 +661,7 @@ struct ByteView[mut: Bool, //, origin: Origin[mut=mut]](
         # bytes, so `o2` is a containing origin for `self._data`. Narrow mut to
         # read (no-op when already read), then re-tie the origin to `o2`. The
         # `_data` escape stays INSIDE this module (byte_view.mojo is under
-        # komira_core/collections/); only the widened SAFE
+        # the core packages); only the widened SAFE
         # `ByteView[o2]` crosses back to the caller — no raw pointer, no
         # wildcard origin.
         return ByteView[o2](
@@ -690,7 +690,7 @@ struct ByteView[mut: Bool, //, origin: Origin[mut=mut]](
         return Span[Byte, Self.origin](unsafe_ptr=self._data, length=self._len)
 
     # =========================================================================
-    # Module-private escape (only files in komira_core/collections/ may
+    # Module-private escape (only files in the core packages may
     # call this)
     # =========================================================================
 
@@ -701,7 +701,7 @@ struct ByteView[mut: Bool, //, origin: Origin[mut=mut]](
         SAFETY: caller must not escape the pointer past `self`'s lifetime.
         File-private discipline: this pointer does NOT cross the module
         boundary via this method -- callers are other files under
-        komira_core/collections/ only.
+        the core packages only.
         """
         return self._data
 

@@ -46,7 +46,7 @@
 from komira_atomic_alias import AtomicI32, AtomicI64
 from std.memory import alloc, OwnedPointer, UnsafePointer
 
-from komira_core.collections import Slab
+from komira_collections.slab import Slab
 
 from komira_clock import now_ns as _platform_now_ns
 from komira_name_registry import name_id as _literal_name_id

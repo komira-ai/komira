@@ -8,7 +8,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # rejection). A viewport server decodes and validates a client's ticket with
 # it; it reads no file and serves nothing.
 #
-# It depends on komira_core for Expr / ScalarValue and on komira_protobuf for
+# It depends on komira_plan_expr for Expr / ScalarValue and on komira_protobuf for
 # the varint primitive, so it builds and tests without the engine.
 #
 # The welded tests:
@@ -21,7 +21,8 @@ mojo_library(
     name = "komira_viewport",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_protobuf:komira_protobuf",
     ],
     test_srcs = [

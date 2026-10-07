@@ -28,8 +28,8 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema, SchemaBuilder, Field
 
 from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,

@@ -23,7 +23,7 @@ from komira_op_agg_state.accumulator_set import (
     sum_count_f64_aos_thunk,
     resolve_row_thunk,
 )
-from komira_core.agg_layout import (
+from komira_agg_api.agg_layout import (
     ACC_SUM_COUNT_MIN_MAX_F64,
     ACC_SUM_COUNT_F64,
     ACC_SUM_F64,

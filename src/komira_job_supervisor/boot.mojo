@@ -14,14 +14,14 @@
 # layout such as `<sha256>/binary`). A key with neither is fetched unverified.
 #
 # The bytes are an owned List[UInt8]; the file is written through
-# komira_core's `RawWriteFd`. The one local FFI is `chmod(2)`, a fixed-arity
+# komira_libc's `RawWriteFd`. The one local FFI is `chmod(2)`, a fixed-arity
 # libc call bounded inside `_chmod`. No pointer type crosses a boundary.
 # =============================================================================
 
 from std.ffi import external_call
 from std.os import mkdir as _os_mkdir
 
-from komira_core.io.posix_io import RawWriteFd
+from komira_libc.posix_io import RawWriteFd
 from komira_crypto.sha256 import sha256
 from komira_crypto.hex import hex_lower_array_32
 from komira_objectstore.path import Path

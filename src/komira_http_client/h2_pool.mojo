@@ -27,7 +27,7 @@
 from std.memory import ArcPointer, OwnedPointer
 
 from komira_async.sync.select import SelectFirstNotify
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_client.h2_client import (
     H2ClientConnectionState,

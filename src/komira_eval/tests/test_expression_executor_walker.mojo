@@ -25,10 +25,10 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
 from komira_kernels.runtime_expr import (
     EXPR_LIT_I64,
     RuntimeExpr,
@@ -44,7 +44,7 @@ from komira_kernels.runtime_expr import (
     make_lt_i64,
 )
 from komira_eval.expression_executor import ExpressionExecutor
-from komira_core.eval.selection_vector_row import RowSelectionVector
+from komira_arrow.selection_vector_row import RowSelectionVector
 
 
 # -----------------------------------------------------------------------------

@@ -46,8 +46,8 @@
 #   the module boundary.
 # =============================================================================
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.string_array import StringArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
 from komira_hash import FNV1A_64_OFFSET_BASIS, FNV1A_64_PRIME
 
 from .hash_fn import NULL_HASH, StringHashFn

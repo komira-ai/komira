@@ -32,7 +32,7 @@
 #   - `agg_fn_agg.mojo` — the single-input AggFn adapter.
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 from komira_agg.aggregator import Aggregator
 
 

@@ -15,7 +15,7 @@ Record-level codec:
 
   3. `decode.parse_record[T: JsonCompatible](bytes: Span[UInt8, _]) -> T`
      — per-line parser. The structural-character scan uses the
-     `hadd_u8x16` primitive (`komira_core.simd.horizontal_add`, a direct
+     `hadd_u8x16` primitive (`komira_simd.horizontal_add`, a direct
      `llvm.aarch64.neon.uaddv` intrinsic).
 
 Columnar reading and writing: key dispatch, typed value parsers, schema
@@ -24,7 +24,7 @@ source, and the JSON / JSONL writers (`json_writer`). The SIMD structural
 index and the `json_extract` kernel live in `komira_json_index`.
 
 Dependency direction (cycle-free):
-  komira_jsonl -> komira_core (Arrow types, SIMD primitives, sources)
+  komira_jsonl -> the core packages (Arrow types, SIMD primitives, sources)
   komira_jsonl -> komira_json_index (structural index, input limits, string unescaper)
   komira_jsonl -> komira_async (parallel fork-join for JSONL parse)
   komira_jsonl -> komira_row_format (row-format output for the row-native writer)

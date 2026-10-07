@@ -31,7 +31,7 @@ from std.collections import Dict
 from std.memory import OwnedPointer
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 # The helpers under test (Dict + Slab.swap_remove + index patching) are
 # reproduced directly in this file; the sentinel import keeps the test tied

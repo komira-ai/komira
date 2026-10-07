@@ -44,10 +44,10 @@
 from std.io import FileHandle
 from std.memory import unsafe_memcpy
 
-from komira_core.collections.slab import Slab
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.arrow_helpers.streaming_concat import _concat_two_batches
+from komira_collections.slab import Slab
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.streaming_concat import _concat_two_batches
 
 from komira_jsonl.columnar_materializer import _materialize_checked
 from komira_jsonl.part_concat import _concat_jsonl_parts
@@ -79,7 +79,7 @@ def _file_size_bytes(path: String) raises -> Int:
     """Return the byte length of the file at `path` by SEEK_END.
 
     Local helper so this module does not depend on `komira_parquet`'s
-    writer helpers; the dep direction stays `komira_jsonl -> komira_core`.
+    writer helpers; the dep direction stays `komira_jsonl -> the core packages`.
     """
     var f = FileHandle(path, "r")
     _ = f.seek(0, 2)  # SEEK_END

@@ -36,8 +36,8 @@
 
 from std.testing import TestSuite, assert_true
 
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.primitive_array import PrimitiveArray
 from komira_kernels.eval_chunks import EvalBoolChunk
 from komira_kernels.kleene import (
     _kleene_and_chunk,

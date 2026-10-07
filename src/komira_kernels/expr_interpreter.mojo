@@ -39,9 +39,9 @@
 
 from std.ffi import external_call
 
-from komira_core.eval.cast_null import round_half_to_even
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.expr import (
+from komira_column_kernels.cast_null import round_half_to_even
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.expr import (
     Expr,
     EXPR_COL_REF,
     EXPR_LITERAL,

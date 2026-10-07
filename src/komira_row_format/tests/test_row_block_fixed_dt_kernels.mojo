@@ -34,15 +34,15 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, SchemaBuilder
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.collections.batch_view import batch_view_over
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.batch_view import batch_view_over
 
 from komira_row_format.row_block import RowBlock
 

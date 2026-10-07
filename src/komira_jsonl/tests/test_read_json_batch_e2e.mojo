@@ -10,7 +10,7 @@
 #       that ctx.read_json_batch routes through internally).
 #
 # NOTE: the EngineContext-level driver `ctx.read_json_batch(path, schema)`
-# is exercised by the SDK suite; this test focuses on the komira_core
+# is exercised by the SDK suite; this test focuses on the core packages
 # source + komira_jsonl surfaces. Splitting the coverage two-way keeps each
 # test under the compile-time template-instantiation budget while still
 # covering the contract (JsonSource conforms to SourceLike; SourceVariant JSON arm
@@ -19,10 +19,10 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.source.json_source import JsonSource
-from komira_core.source.source_variant import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_scan_source.json_source import JsonSource
+from komira_scan_source.source_variant import (
     SourceVariant,
     SOURCE_VARIANT_JSON,
 )
