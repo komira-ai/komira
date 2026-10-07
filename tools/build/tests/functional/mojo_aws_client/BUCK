@@ -134,12 +134,14 @@ gen_check(
     ],
 )
 
-# The layout probe is welded into the client, not only generated, and the
-# caller's test ran after it: the library ran exactly these, and each passed.
+# The layout probe and the environment scan are welded into the client, not
+# only generated, and the caller's test ran after them: the library ran
+# exactly these, and each passed.
 tests_check(
     name = "komira_aws_logs_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_logs_get_log_events",
     ],
     markers = ":komira_aws_logs[tests]",
@@ -186,6 +188,7 @@ tests_check(
     name = "komira_aws_logs_hand_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_logs_hand_override",
     ],
     markers = ":komira_aws_logs_hand[tests]",

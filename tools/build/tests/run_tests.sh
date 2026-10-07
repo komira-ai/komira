@@ -258,10 +258,11 @@
 #      which builds only once its layout probe and a caller test over a
 #      scripted connector and komira_aws_core's echo connector pass. For
 #      each, exactly its files are generated, nothing of an operation not
-#      named, and exactly its two welded tests ran. A second client adds a
-#      hand_srcs module and the overrides manifest naming it: the module is
-#      copied into the package, the header names its owner, and a caller test
-#      imports it. A client-mode client (tests//functional/aws_client_mode)
+#      named, and exactly its welded tests ran (the layout probe, the
+#      environment scan mojo_aws_client writes, the caller's). A second
+#      client adds a hand_srcs module and the overrides manifest naming it:
+#      the module is copied into the package, the header names its owner,
+#      and a caller test imports it. A client-mode client (tests//functional/aws_client_mode)
 #      carries the signed-send surface, the komira_http_core and
 #      komira_http_client imports, the constructor's HttpClientConfig and
 #      the error builder, and builds against the same stubs with their client
@@ -271,9 +272,11 @@
 #      analysis: empty, joined or repeated `operations`, empty `deps`,
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
-#      model path the service id cannot be read from; an operation the model
-#      lacks by the generator; and a failing caller test reds the client
-#      (tests//negative/mojo_aws_client).
+#      model path the service id cannot be read from, and a caller
+#      `test_data` entry for the environment scan; an operation the model
+#      lacks by the generator; a failing caller test reds the client; and so
+#      does a hand-written module of the package that reads HOME, through
+#      the environment scan (tests//negative/mojo_aws_client).
 #  37. The platform table (tools/build/platforms/table.bzl, one row per
 #      (os, cpu)) is complete and the default target platform is the client's
 #      own: loading tests//functional/platform_table: runs the load-time
@@ -1061,6 +1064,8 @@ expect_red aws_client_hand_src_is_label '`hand_srcs` entry `:hand_owner_label` i
 expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is not a source path of a `.mojo` file' tests//negative/mojo_aws_client:hand_src_not_mojo
 expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/mojo_aws_client:hand_src_clashes
 expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/mojo_aws_client:service_unreadable
+expect_red aws_client_env_read_hand 'env_reader.mojo names getenv; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_hand
+expect_red aws_client_env_scan_data_given '`test_data` has an entry for `tests/_no_env_reads.mojo`, the generated environment scan' tests//negative/mojo_aws_client:env_scan_data_given
 
 # 9
 if [ "$MODE" = local ]; then

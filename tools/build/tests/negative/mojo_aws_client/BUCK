@@ -163,3 +163,28 @@ mojo_aws_client(
     operations = ["GetLogEvents"],
     deps = _RUNTIME,
 )
+
+# "env_reader.mojo names getenv; a mojo_aws_client package takes every input
+# as a parameter", in the build: the package compiles, and its generated
+# environment scan (_no_env_reads) reads every file of it, the hand-written
+# module that reads HOME included, and fails.
+mojo_aws_client(
+    name = "env_read_hand",
+    hand_srcs = ["hand/env_reader.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_reader.json",
+    deps = _RUNTIME,
+)
+
+# "`test_data` has an entry for `tests/_no_env_reads.mojo`", at analysis:
+# the scan's data is the package, staged by the rule.
+mojo_aws_client(
+    name = "env_scan_data_given",
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    test_data = {"tests/_no_env_reads.mojo": ["hand/notes.txt"]},
+    deps = _RUNTIME,
+)
