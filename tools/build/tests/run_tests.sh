@@ -330,6 +330,7 @@
 #      an empty tree fails as checking nothing, and a target naming no tree
 #      is refused at analysis.
 #  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
+#  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
 set -uo pipefail
 
 umbrella=1
@@ -1228,6 +1229,10 @@ expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`
 # 43
 # shellcheck source=tools/build/tests/coverage_run_tests.sh
 . "$ROOT/tools/build/tests/coverage_run_tests.sh"
+
+# 44
+# shellcheck source=tools/build/tests/public_boundary_tests.sh
+. "$ROOT/tools/build/tests/public_boundary_tests.sh"
 
 # 37
 pt_rc=0
