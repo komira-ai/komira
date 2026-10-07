@@ -133,10 +133,10 @@ COVERAGE_ATTRS = {
     # coverage builds and runs of coverage_branch.bzl. None otherwise.
     "coverage_branch": attrs.option(attrs.exec_dep(), default = None),
     # Whether the gate reads the tests' branch records (`--branch-lcov`),
-    # so the package waits for every branch coverage action. Set by the
-    # macro with coverage: whether the library is in COVERAGE_BRANCH_GATE
-    # (policy.bzl); for a fixture of the tests cell, True unless it passes
-    # False. False otherwise.
+    # so the conda package waits for every branch coverage action (through
+    # the gate). Set by the macro with coverage: whether the library is in
+    # COVERAGE_BRANCH_GATE (policy.bzl); for a fixture of the tests cell,
+    # True unless it passes False. False otherwise.
     "coverage_branch_gate": attrs.bool(default = False),
 }
 
