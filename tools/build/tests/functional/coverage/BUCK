@@ -22,7 +22,7 @@ mojo_library(
     ],
 )
 
-# Test 44: a library that depends on covlib. coverage_keys.sh builds it with
+# Test 45: a library that depends on covlib. coverage_keys.sh builds it with
 # the switch off, then on: its compile and test must not run again, so
 # covlib's package (its join's output) is the same bytes either way.
 mojo_library(
