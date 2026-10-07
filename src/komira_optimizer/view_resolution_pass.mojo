@@ -323,7 +323,8 @@ def _expand_ref(
 ) raises -> LogicalPlan:
     """Look up `vname` and return a deep clone of the matched (still
     UNRESOLVED) plan. CTE scope is consulted first, then the ctx view
-    registry. Raises `ViewNotFound` if `vname` is in neither scope."""
+    registry. Raises `ViewNotFound` if `vname` is in neither scope or its
+    registry slot is empty."""
     # --- CTE scope (statement-scoped `with_cte` bindings) ---
     for i in range(len(cte_names)):
         if cte_names[i] == vname:
@@ -334,8 +335,13 @@ def _expand_ref(
         # `view_slab[idx]` is `Optional[LogicalPlan]`; a live registry
         # entry is always `Some` (drop_view sets it to `None` AND removes
         # the name→idx mapping, so a name present in `view_name_to_idx`
-        # always maps to a `Some` slot). If that invariant is ever violated,
-        # `.value()` aborts the process; it does not raise an Error.
+        # always maps to a `Some` slot). A violated invariant raises
+        # `ViewNotFound` rather than aborting in `.value()`.
+        if not view_slab[idx]:
+            raise Error(
+                "ViewNotFound: '" + vname + "' maps to an empty view-registry"
+                + " slot (the name was not removed when its plan was)"
+            )
         return view_slab[idx].value().copy()
     raise Error(
         "ViewNotFound: '" + vname + "' referenced by a PLAN_VIEW_REF is"

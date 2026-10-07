@@ -1,0 +1,4 @@
+# The domains the planted tree uses; each row is used.
+amazonaws.com	used by docs/near.md
+github.com	used by third_party/up/BUCK, which is read
+windows.net	used by docs/near.md
