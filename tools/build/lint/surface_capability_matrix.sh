@@ -18,11 +18,15 @@
 #   <capabilities.tsv>      `name grounding meaning`, in report order;
 #                           grounding is `contract` or comma-separated identifiers;
 #   <not_capabilities.tsv>  `identifiers reason`: plan constants that are no capability;
-#   <rows.tsv>              `n surface capability target note package test`: the
-#                           ledger's row n as written, then what the build graph
-#                           says of its target: the package Buck2 puts it in
-#                           (`cell//path`) and whether it is a test (yes or no),
-#                           both `-` when the target is `-`;
+#   <rows.tsv>              `n surface capability target note package test made ident`:
+#                           the ledger's row n as written, then what the build
+#                           graph says of its target: the package Buck2 puts it
+#                           in (`cell//path`), whether it is a test (yes or no),
+#                           the comma-separated packages whose targets made
+#                           its default outputs (`-` when none has a maker),
+#                           and which test it is however spelt (the targets that
+#                           made its outputs, else its label), all `-` when the
+#                           target is `-`;
 #   <families.tsv>          `path prefixes`: a grounding file (under the
 #                           grounding dir) and its comma-separated identifier
 #                           prefixes, `-` for none.
@@ -32,14 +36,19 @@
 #   - a surface or capability name that is not [a-z][a-z0-9_]*, or listed twice;
 #     a capability with no meaning; a not_capabilities row with no reason;
 #   - a grounding identifier (of a capability or a not_capabilities row) that
-#     no grounding file declares as `comptime <ID>: UInt8` at column 0;
+#     no grounding file declares at column 0 as `comptime <ID>: UInt8 = ...`
+#     or `comptime <ID> = UInt8(...)`;
 #   - an identifier a grounding file declares that starts with one of its
-#     prefixes and that no capability and no not_capabilities row names;
+#     prefixes and that no capability and no not_capabilities row names, or
+#     that it declares in neither form and with no other type annotation;
 #   - a row with an empty surface, capability or target, an unknown surface or
 #     capability, or a pair that already has a row; a (surface, capability)
 #     pair with no row;
 #   - a row whose target is not in <cell//root>/tests/e2e/<surface>_e2e (the
-#     surface's own package), or is no test;
+#     surface's own package, exactly: not a subpackage, not a longer name), or
+#     whose default outputs another package's target made (an alias of a test
+#     elsewhere), or that is no test; a target that fills a second cell of the
+#     same surface;
 #   - fewer filled cells than <floor>.
 # A missing cell (target `-`) is never a finding: the census lists it.
 #
@@ -87,16 +96,26 @@ export PATH
 : > "$T/findings"
 : > "$T/declared"
 
-# The identifiers each grounding file declares: `id<TAB>path<TAB>line<TAB>family`,
-# family 1 when the identifier starts with one of the file's prefixes.
+# The identifiers each grounding file declares: `id<TAB>path<TAB>line<TAB>family<TAB>form`,
+# family 1 when the identifier starts with one of the file's prefixes. A
+# column-0 `comptime <ID>` declares a constant as `comptime <ID>: UInt8 = ...`
+# or `comptime <ID> = UInt8(...)` (form `tag`); with another type annotation
+# (`comptime <ID>: Int = ...`) it is no tag and is not listed; in any other
+# form (no annotation and no `UInt8(`) it is listed with form `unread`, and a
+# family identifier so written is a finding: never skipped silently.
 while IFS="$(printf '\t')" read -r path prefixes; do
     awk -v path="$path" -v prefixes="$prefixes" '
         BEGIN { n = (prefixes == "-") ? 0 : split(prefixes, pre, ",") }
-        /^comptime [A-Za-z_][A-Za-z0-9_]*[ \t]*:[ \t]*UInt8[ \t]*=/ {
-            id = $2; sub(/:.*/, "", id)
+        /^comptime[ \t]+[A-Za-z_][A-Za-z0-9_]*/ {
+            rest = $0; sub(/^comptime[ \t]+/, "", rest)
+            match(rest, /^[A-Za-z_][A-Za-z0-9_]*/); id = substr(rest, 1, RLENGTH)
+            rest = substr(rest, RLENGTH + 1); sub(/^[ \t]+/, "", rest)
+            if (rest ~ /^:[ \t]*UInt8[ \t]*=/ || rest ~ /^=[ \t]*UInt8[ \t]*\(/) form = "tag"
+            else if (rest ~ /^:/) next
+            else form = "unread"
             fam = 0
             for (i = 1; i <= n; i++) if (index(id, pre[i]) == 1) fam = 1
-            print id "\t" path "\t" FNR "\t" fam
+            print id "\t" path "\t" FNR "\t" fam "\t" form
         }' "$GROUND/$path" >> "$T/declared"
 done < "$FAMILIES"
 
@@ -117,7 +136,12 @@ awk -F '\t' -v OFS='\t' -v surf="$SURFACES" -v caps="$CAPS" -v nots="$NOTS" -v r
     }
     BEGIN {
         while ((getline l < decl) > 0) {
-            split(l, a, "\t"); declared[a[1]] = 1
+            split(l, a, "\t")
+            if (a[5] == "unread") {
+                if (a[4] == 1) bad(a[2] ":" a[3] ": " a[1] " is a constant of a grounding family in a form this lint cannot read; declare it as `comptime " a[1] ": UInt8 = <n>`")
+                continue
+            }
+            declared[a[1]] = 1
             if (a[4] == 1) { nf++; fid[nf] = a[1]; fwhere[nf] = a[2] ":" a[3] }
         }
         while ((getline l < surf) > 0) {
@@ -144,7 +168,7 @@ awk -F '\t' -v OFS='\t' -v surf="$SURFACES" -v caps="$CAPS" -v nots="$NOTS" -v r
         filled = 0
         while ((getline l < rows) > 0) {
             split(l, a, "\t")
-            n = a[1]; s = a[2]; c = a[3]; t = a[4]; note = a[5]; pkg = a[6]; test = a[7]
+            n = a[1]; s = a[2]; c = a[3]; t = a[4]; note = a[5]; pkg = a[6]; test = a[7]; made = a[8]; ident = a[9]
             where = "matrix row " n " (" s ", " c ")"
             if (s == "" || c == "" || t == "") {
                 bad(where ": an empty field (surface, capability and target are required; the target is `-` when none)")
@@ -162,7 +186,14 @@ awk -F '\t' -v OFS='\t' -v surf="$SURFACES" -v caps="$CAPS" -v nots="$NOTS" -v r
             if (t != "-") {
                 want = root "/tests/e2e/" s "_e2e"
                 if (pkg != want) bad(where ": " t " is in " pkg ", not " want ", the surface" "\047" "s own package")
+                else if (made != "-") {
+                    k = split(made, mk, ",")
+                    for (i2 = 1; i2 <= k; i2++) if (mk[i2] != want)
+                        bad(where ": " t " stands for a target of " mk[i2] " (its outputs are made there, as an alias" "\047" "s are), not of " want)
+                }
                 if (test != "yes") bad(where ": " t " is no test (it has no ExternalRunnerTestInfo and welds no test_srcs)")
+                if ((s SUBSEP ident) in filler) bad(where ": " t " fills (" s ", " fillcap[s SUBSEP ident] ") already, at row " filler[s SUBSEP ident] "; each filled cell of a surface names a test of its own")
+                else { filler[s SUBSEP ident] = n; fillcap[s SUBSEP ident] = c }
                 filled++; status[key] = "filled"
             } else status[key] = "missing"
             target[key] = t; nnote[key] = note
@@ -176,7 +207,7 @@ awk -F '\t' -v OFS='\t' -v surf="$SURFACES" -v caps="$CAPS" -v nots="$NOTS" -v r
             print sname[i], cname[j], status[key] >> cells
         }
         if (filled < floor + 0)
-            bad("floor: " filled " cell(s) are filled and the floor is " floor "; the floor only rises, so a filled cell was emptied or lost its test")
+            bad("floor: " filled " cell(s) are filled and the floor is " floor ": a filled cell was emptied or lost its test (lowering the floor is for review to refuse)")
         if (ns == 0 || nc == 0) bad("surface_capability_matrix: checked nothing (no surface or no capability)")
         print ns, nc, filled > counts
     }' /dev/null

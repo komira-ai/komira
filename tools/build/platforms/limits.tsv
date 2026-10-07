@@ -28,3 +28,4 @@ run-tests-linux-x86-64-client	native-pr:11a	tools/build/tests/run_tests.sh: the 
 rust-toolchain-x86-64	native-pr:5	tools/build/toolchains/defs.bzl: the Rust toolchain is the linux-x86_64 one; one per row
 s2n-tls-x86-64-linux	native-pr:8b	third_party/s2n-tls/BUCK: depends on aws-lc, which is x86_64 Linux only until PR 8a
 snappy-x86-64-v3	native-pr:6	third_party/snappy/BUCK: config.h hardcodes x86_64 Linux at x86-64-v3
+surface-matrix-incompatible-fixture	never	product: tools/build/tests/functional/surface_capability_matrix/src/tests/e2e/pandas_e2e/BUCK: a planted macOS-only test that test 53 requires the surface capability matrix lint to refuse; a fixture of the check, not a platform limit

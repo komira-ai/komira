@@ -226,15 +226,17 @@ _TESTS_LINTS = [
 # target outside its surface's package or no test), on a capability not
 # grounded in the plan constants of the files `grounding` names (or a
 # constant of those families no capability or NOT_CAPABILITIES row names),
-# and on fewer filled cells than `floor`, which only rises: raise it to the
-# new count in the change that fills a cell. A missing cell is never a
-# finding: `[report]` and `[matrix]` are the census.
+# and on fewer filled cells than `floor`. Raising the floor to the new count
+# in the change that fills a cell, and never lowering it, is a review rule:
+# the lint fails only below it. A missing cell is never a finding:
+# `[report]` and `[matrix]` are the census.
 [surface_capability_matrix(
     name = "surface_capability_matrix",
     capabilities = CAPABILITIES,
     floor = 0,
     grounding = {
-        "src/komira_plan_expr/expr.mojo": [],
+        "src/komira_arrow/write_target.mojo": ["WFMT_"],
+        "src/komira_plan_expr/expr.mojo": ["EXPR_"],
         "src/komira_plan_expr/fs_descriptor_pod.mojo": ["FS_SCHEME_"],
         "src/komira_plan_expr/udf_data.mojo": ["UDF_KIND_"],
         "src/komira_plan_ir/logical_plan.mojo": ["PLAN_", "SOURCE_", "JOIN_"],

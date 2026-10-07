@@ -2,7 +2,8 @@
 
 Two surfaces, pandas and polars, whose e2e packages are planted under
 src/tests/e2e/ of this directory (real mojo_library and mojo_test targets,
-never built: the lint only analyses them). Five capabilities, grounded in
+the lint only analyses them; tests//functional/... builds them). Five
+capabilities, grounded in
 two planted grounding files:
 
 plan.txt (src/plan/plan.mojo in the tree, families PLAN_ and JOIN_) declares
@@ -11,7 +12,10 @@ JOIN_ALGO_HASH, each named by a capability or a NOT_CAPABILITIES row (so the
 family check passes), and SOURCE_CSV, outside the families, which a
 capability names. Near misses that are no declaration, each of which would
 be an unnamed PLAN_ constant if read: `comptime PLAN_TAG_COUNT: Int` (not
-UInt8), a commented-out PLAN_RETIRED and an indented PLAN_NESTED.
+UInt8), a commented-out PLAN_RETIRED and an indented PLAN_NESTED. PLAN_UNTYPED
+is declared as `comptime PLAN_UNTYPED = UInt8(16)`, the unannotated form,
+which the lint reads: a NOT_CAPABILITIES row names it, so reading it is what
+keeps `ok` green.
 udf.txt (src/plan/udf.mojo, no family) declares UDF_KIND_MAP, which udf_map
 names, and UDF_KIND_SPARE, which nothing names and nothing has to.
 
@@ -21,7 +25,11 @@ label relative to this cell (`//functional/...`, so the package check reads
 where Buck2 puts the target, not the text), and polars filter. The census
 must equal expect_matrix.tsv and expect_report.txt byte for byte, with
 FLOOR, the count of filled cells. negative/surface_capability_matrix plants
-one defect each in these lists.
+one defect each in these lists, naming the other planted targets: in
+pandas_e2e, lib_no_tests (a mojo_library that welds no test), alias_outside
+(an alias of test_outside) and test_mac (incompatible with Linux); the
+packages pandas_e2e/sub and pandas_e2e_extra, which are not the surface's
+package; and test_outside, a test of this package, outside src/tests/e2e.
 """
 
 _DIR = "tests//functional/surface_capability_matrix:"
@@ -53,6 +61,7 @@ SCM_CAPABILITIES = [
 
 SCM_NOT_CAPABILITIES = [
     ("PLAN_CSE_REF", "made only by an optimizer rewrite"),
+    ("PLAN_UNTYPED", "declared without an annotation, as UInt8(16): read all the same"),
     ("JOIN_INNER,JOIN_ALGO_HASH", "left out of this fixture's vocabulary"),
 ]
 

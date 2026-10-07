@@ -26,14 +26,21 @@ the vocabulary and the grounding files, and finds:
 - a row naming an unknown surface or capability, a pair with two rows, a
   pair with none, a row with an empty field;
 - a target outside its surface's own package,
-  `<root>/tests/e2e/<surface>_e2e` of this cell, or a target that is no test;
+  `<root>/tests/e2e/<surface>_e2e` of this cell exactly (not a subpackage,
+  not a longer name), or one whose default outputs a target of another
+  package made (an `alias` forwards its actual target's providers, so an
+  alias in the surface's package standing for a test elsewhere is refused),
+  a target that is no test, or a target that already fills another cell of
+  the same surface (each filled cell names a test of its own);
 - a vocabulary that is not grounded in the plan: a capability name repeated
   or malformed, a grounding identifier no grounding file declares (as
-  `comptime <ID>: UInt8`), or a declared identifier of a grounding family (a
-  prefix `grounding` names for its file) that no capability and no
-  `not_capabilities` row names, so a new plan tag, join kind or source kind
-  fails here until it is classified;
-- fewer filled cells than `floor`, the ratchet (it may only rise).
+  `comptime <ID>: UInt8 = ...` or `comptime <ID> = UInt8(...)`), a
+  declared identifier of a grounding family (a prefix `grounding` names for
+  its file) that no capability and no `not_capabilities` row names, so a new
+  plan tag, join kind or source kind fails here until it is classified, or a
+  family identifier declared in a form the lint cannot read;
+- fewer filled cells than `floor` (that the floor is raised with each filled
+  cell and never lowered is a review rule, not this lint's);
 
 A missing cell (`-`) is never a finding: the census counts and lists it.
 
@@ -63,6 +70,19 @@ def _is_test(dep):
         return True
     return WeldedTestsInfo in dep and len(dep[WeldedTestsInfo].srcs) > 0
 
+def _made_by(dep):
+    """Where `dep`'s default outputs were made: the comma-separated packages,
+    and the comma-separated targets, that declared them (source files have
+    no maker), each `-` when none has one. An `alias` forwards its actual
+    target's providers, so its outputs name the target it stands for, not
+    itself."""
+    packages, targets = {}, {}
+    for out in dep[DefaultInfo].default_outputs:
+        if out.owner != None:
+            packages["{}//{}".format(out.owner.cell, out.owner.package)] = True
+            targets[str(out.owner.raw_target())] = True
+    return ",".join(sorted(packages.keys())) or "-", ",".join(sorted(targets.keys())) or "-"
+
 def _tsv(fields):
     for f in fields:
         if "\t" in f or "\n" in f:
@@ -90,17 +110,23 @@ def _surface_capability_matrix_impl(ctx):
     ground = ctx.actions.copied_dir("grounding", staged)
 
     # The rows as the action reads them: what the ledger says, then what the
-    # graph says of its target (the package Buck2 puts it in, and whether it
-    # is a test), `-` for an empty cell.
+    # graph says of its target (the package Buck2 puts it in, whether it is
+    # a test, the packages that made its default outputs, and which test it
+    # is), `-` for an empty cell.
     rows = []
     for i, row in enumerate(ctx.attrs.rows):
         surface, capability, target, note = row
-        package, test = "-", "-"
+        package, test, made, ident = "-", "-", "-", "-"
         if target not in ("-", ""):
             dep = ctx.attrs.targets[target]
             package = "{}//{}".format(dep.label.cell, dep.label.package)
             test = "yes" if _is_test(dep) else "no"
-        rows.append(_tsv([str(i + 1), surface, capability, target, note, package, test]))
+            made, makers = _made_by(dep)
+
+            # The test a row names, however it is spelt: the targets that
+            # made its outputs, else its own label.
+            ident = makers if makers != "-" else str(dep.label.raw_target())
+        rows.append(_tsv([str(i + 1), surface, capability, target, note, package, test, made, ident]))
     caps = [_tsv([c[0], c[1], c[2]]) for c in ctx.attrs.capabilities]
     nots = [_tsv([n[0], n[1]]) for n in ctx.attrs.not_capabilities]
     inputs = ctx.actions.write("inputs/rows.tsv", _lines(rows))
@@ -163,7 +189,8 @@ _surface_capability_matrix_rule = rule(
         "expect_matrix": attrs.option(attrs.source(), default = None),
         "expect_report": attrs.option(attrs.source(), default = None),
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
-        # The ratchet: the build fails with fewer filled cells. It may only rise.
+        # The build fails with fewer filled cells. Raising it with each filled
+        # cell, and never lowering it, is a review rule.
         "floor": attrs.int(default = 0),
         # {path in the tree: identifier prefixes}: the files that declare the
         # grounding identifiers; every declared `comptime <prefix>...: UInt8`

@@ -49,18 +49,22 @@ could not reach the graph.
 A capability is named by what the plan expresses, not by any surface's
 spelling, so a capability that no surface can express shows up as an empty
 row. Each is **grounded**: its grounding names the plan constants that
-express it, which the lint requires a grounding file to declare (as
-`comptime <ID>: UInt8` at column 0). The grounding files, and the
-identifier prefixes (families) of each, are named in the root
-[`BUCK`](../BUCK): `src/komira_plan_ir/logical_plan.mojo` (`PLAN_`, the plan
-node tags; `SOURCE_`, the source kinds; `JOIN_`, the join kinds),
+express it, which the lint requires a grounding file to declare at column 0,
+as `comptime <ID>: UInt8 = <n>` or `comptime <ID> = UInt8(<n>)`. The
+grounding files, and the identifier prefixes (families) of each, are named
+in the root [`BUCK`](../BUCK): `src/komira_plan_ir/logical_plan.mojo`
+(`PLAN_`, the plan node tags; `SOURCE_`, the source kinds; `JOIN_`, the join
+kinds), `src/komira_plan_expr/expr.mojo` (`EXPR_`, the expression kinds),
 `src/komira_plan_expr/fs_descriptor_pod.mojo` (`FS_SCHEME_`, the remote
 prefixes), `src/komira_plan_expr/udf_data.mojo` (`UDF_KIND_`) and
-`src/komira_plan_expr/expr.mojo` (no family: read for the expression tags
-named below). Every constant of a family must be named by a capability or a
-`NOT_CAPABILITIES` row, so a new plan node, join kind or source kind fails
-the build until it is classified. A `contract` capability is a promise every
-surface makes that no plan node expresses.
+`src/komira_arrow/write_target.mojo` (`WFMT_`, the formats a result is
+written in). Every constant of a family must be named by a capability or a
+`NOT_CAPABILITIES` row, so a new plan node, expression kind, join kind,
+source kind or write format fails the build until it is classified. A
+family constant declared in another form (`comptime PLAN_X = 17`) is a
+finding too, never skipped; one with another type annotation
+(`comptime PLAN_TAG_COUNT: Int = 16`) is no tag. A `contract` capability is
+a promise every surface makes that no plan node expresses.
 
 | Capability | Grounding | Meaning |
 |---|---|---|
@@ -75,8 +79,18 @@ surface makes that no plan node expresses.
 | `scan_gs` | `PLAN_SCAN`, `FS_SCHEME_GCS` | read from a gs:// prefix |
 | `scan_az` | `PLAN_SCAN`, `FS_SCHEME_AZURE` | read from an az:// prefix |
 | `filter` | `PLAN_FILTER` | keep the rows a predicate holds for |
-| `project` | `PLAN_PROJECT` | select, reorder and rename columns |
-| `computed_column` | `PLAN_PROJECT`, `EXPR_BINARY_OP` | add or replace a column computed from an expression |
+| `project` | `PLAN_PROJECT`, `EXPR_COL_REF`, `EXPR_COL_IDX`, `EXPR_ALIAS` | select, reorder and rename columns |
+| `computed_column` | `PLAN_PROJECT`, `EXPR_LITERAL`, `EXPR_BINARY_OP`, `EXPR_UNARY_OP` | add or replace a column computed from literals, arithmetic, comparison and logic |
+| `cast` | `EXPR_CAST` | convert a value to another type |
+| `case_when` | `EXPR_WHEN` | a conditional expression (CASE WHEN, when/then/otherwise) |
+| `in_list` | `EXPR_IN_LIST` | membership of a value in a list of values |
+| `between` | `EXPR_BETWEEN` | a value within a closed range |
+| `string_functions` | `EXPR_STRING_OP`, `EXPR_STRING_FN`, `EXPR_STRING_FN_N`, `EXPR_SUBSTRING` | string functions: case, trim, length, substring, concat, replace, pad, position |
+| `regexp` | `EXPR_REGEXP` | regular-expression match, extract, replace and split |
+| `temporal_extract` | `EXPR_EXTRACT` | extract a date or time field, or truncate to a period |
+| `math_functions` | `EXPR_MATH_FN`, `EXPR_MATH_FN2` | math functions of one or two arguments |
+| `nested_access` | `EXPR_STRUCT_FIELD`, `EXPR_STRUCT_FIELD_IDX`, `EXPR_MAP_GET` | a struct field or a map value by key |
+| `json_extract` | `EXPR_JSON_EXTRACT` | a path extracted from a JSON column |
 | `join_inner` | `PLAN_JOIN`, `JOIN_INNER` | inner join |
 | `join_left` | `PLAN_JOIN`, `JOIN_LEFT` | left outer join |
 | `join_right` | `PLAN_JOIN`, `JOIN_RIGHT` | right outer join |
@@ -88,16 +102,20 @@ surface makes that no plan node expresses.
 | `aggregate` | `PLAN_AGGREGATE` | aggregates over the whole input (no group keys) |
 | `group_by` | `PLAN_AGGREGATE` | aggregates per group of key values |
 | `window` | `PLAN_PARTITION_BY`, `EXPR_WINDOW_FN` | window functions over partitions, every row kept |
-| `sort` | `PLAN_SORT` | order the rows |
+| `sort` | `PLAN_SORT`, `EXPR_SORT_KEY` | order the rows, NULLs first or last |
 | `topn` | `PLAN_TOPN` | the first n rows of an order |
 | `topn_per_group` | `PLAN_PARTITION_TOPN` | the first k rows of an order within each group |
 | `limit` | `PLAN_LIMIT` | the first n rows, with an offset |
 | `distinct` | `PLAN_DISTINCT` | drop duplicate rows, or rows duplicate on some columns |
 | `union` | `PLAN_UNION` | concatenate inputs of one schema (union all) |
 | `subquery` | `EXPR_CORRELATED_SUBQUERY` | a subquery inside an expression, correlated or not |
-| `udf_map` | `UDF_KIND_MAP` | a user function computing a column |
+| `view` | `PLAN_VIEW_REF` | register a named view and query it |
+| `udf_map` | `UDF_KIND_MAP`, `EXPR_UDF_CALL` | a user function computing a column, alone or inside an expression |
 | `udf_filter` | `UDF_KIND_FILTER` | a user function as a filter predicate |
 | `udf_agg` | `UDF_KIND_AGG` | a user aggregate function |
+| `write_parquet` | `WFMT_PARQUET` | write a result as Parquet |
+| `write_csv` | `WFMT_CSV` | write a result as CSV |
+| `write_jsonl` | `WFMT_JSONL` | write a result as JSON Lines |
 | `null_semantics` | contract | NULL in comparisons, logic, joins, aggregates and ordering, as the surface documents |
 | `errors` | contract | an invalid query or a failed read raises to the caller in the surface's own error form |
 | `output_dtypes` | contract | results arrive in the surface's own types, every column type converted |
@@ -107,9 +125,9 @@ The constants that are no capability:
 
 | Identifiers | Why |
 |---|---|
-| `PLAN_VIEW_REF` | a registered view is replaced by its plan before optimization; the plan it expands to is what the capabilities cover |
 | `PLAN_CSE_REF` | made only by the optimizer's common-subexpression rewrite; no surface builds it |
 | `PLAN_CAST_TO_VARCHAR` | inserted above a text sink by a rewrite; no surface builds it |
+| `EXPR_AGG_FN` | an aggregate inside an expression, made and consumed by the optimizer's scalar-broadcast rewrite; a surface's aggregates are the aggregate and group_by capabilities |
 | `SOURCE_BINDING` | the open arm: a source kind named by its binding, not by this enum; a kind gets a capability when a surface reaches it |
 | `SOURCE_KIND_COLUMNAR`, `SOURCE_KIND_ROW`, `SOURCE_KIND_UNSET` | the layout a source format derives, which picks a reader; not something a query asks for |
 | `JOIN_ALGO_AUTO`, `JOIN_ALGO_HASH`, `JOIN_ALGO_SORT_MERGE` | the join algorithm, a physical choice with the same result |
@@ -123,10 +141,16 @@ build fails on:
 - **A lying row**: a target that does not exist (Buck2 refuses the graph:
   "Unknown target", or a package that does not exist); a target outside its
   surface's own package, `src/tests/e2e/<surface>_e2e` of the komira cell
-  (the package Buck2 puts the target in, however the label is spelt); a
-  target that is no test: it has no `ExternalRunnerTestInfo` (what every test
-  rule gives, `mojo_test` among them) and is not a `mojo_library` whose
-  `test_srcs` weld a test.
+  exactly, not a subpackage and not a longer name (the package Buck2 puts the
+  target in, however the label is spelt); a target whose default outputs a
+  target of another package made (an `alias` forwards its actual target's
+  providers, so an alias in the surface's package standing for a test
+  elsewhere is refused); a target that is no test: it has no
+  `ExternalRunnerTestInfo` (what every test rule gives, `mojo_test` among
+  them) and is not a `mojo_library` whose `test_srcs` weld a test (a library
+  with no `test_srcs` is no test); a test that already fills another cell of
+  the same surface, however spelt (each filled cell names a test of its
+  own).
 - **A malformed ledger**: an unknown surface or capability in a row; a second
   row for a pair; a pair with no row; a row with an empty surface,
   capability or target; a surface or capability name that is not
@@ -134,12 +158,20 @@ build fails on:
   `NOT_CAPABILITIES` row with no reason.
 - **An ungrounded vocabulary**: a grounding identifier no grounding file
   declares; a constant of a grounding family that no capability and no
-  `NOT_CAPABILITIES` row names.
-- **The ratchet**: fewer filled cells than `floor` (the root `BUCK`, today
-  0). The floor only rises: the change that fills cells raises it to the new
-  count, so a later change cannot empty a cell or lose its test unnoticed.
-  More filled cells than the floor is not a finding (two changes that each
-  fill a cell can merge in either order); the report prints the floor.
+  `NOT_CAPABILITIES` row names, or that is declared in a form the lint
+  cannot read.
+- **The floor**: fewer filled cells than `floor` (the root `BUCK`, today
+  0), so a change that empties a cell or loses its test fails. That the
+  floor only rises is a **review rule**, not something the lint enforces: the
+  change that fills cells raises it to the new count, and review refuses a
+  change that lowers it. More filled cells than the floor is not a finding
+  (two changes that each fill a cell can merge in either order); the report
+  prints the floor.
+- **A test incompatible with Linux x86-64**, the platform the lint is
+  configured for: Buck2 refuses the lint that depends on it ("does not pass
+  compatibility check ... because its transitive dep ..."), even when the
+  lint is reached by a pattern (`//...`, `//:`), so the lint cannot drop out
+  of a build silently. Test 53 pins this with a package-pattern build.
 
 A label that is not a label at all (`foo`) fails when the root `BUCK` is
 read, naming the attribute.
@@ -160,9 +192,10 @@ read, naming the attribute.
    it, and it must be compatible with Linux x86-64, the platform the lint
    is configured for.
 3. Replace the cell's `-` in `MATRIX` with the target's label and say in the
-   note what it checks; one target may fill several cells.
+   note what it checks. Each filled cell of a surface names a test of its
+   own: one target filling two cells of a surface is a finding.
 4. Raise `floor` in `//:surface_capability_matrix` to the new number of
-   filled cells, and refresh the census below.
+   filled cells (review holds this), and refresh the census below.
 
 The lint proves the target exists, lives in the surface's package and is a
 test; whether it exercises what its row claims is for review. The target's
@@ -171,22 +204,23 @@ own build (or `buck2 test`) is what runs it: the lint only analyses it.
 ## Census
 
 The census of 2026-10-07: `./buck2 build '//:surface_capability_matrix[report]'`
-on the farm over the tree of that day. A dated snapshot: rebuild `[report]`
-for today's numbers.
+on the farm over the tree of that day. A dated snapshot, written by hand from
+`[report]`: the lint's `[report]` and `[matrix]` are the source of truth, so
+rebuild them for today's numbers.
 
-**Totals.** 6 surfaces x 38 capabilities = 228 cells;
-**0 filled (0.0%)**; 228 missing; floor 0. No surface e2e package
+**Totals.** 6 surfaces x 52 capabilities = 312 cells;
+**0 filled (0.0%)**; 312 missing; floor 0. No surface e2e package
 exists yet (`src/tests/e2e/<surface>_e2e`), so every cell is `-`. That is
 the starting point.
 
 | Surface | Filled | Cells | % |
 |---|---:|---:|---:|
-| `pandas` | 0 | 38 | 0.0% |
-| `polars` | 0 | 38 | 0.0% |
-| `sql` | 0 | 38 | 0.0% |
-| `mojo_polars` | 0 | 38 | 0.0% |
-| `ts_polars` | 0 | 38 | 0.0% |
-| `excel` | 0 | 38 | 0.0% |
+| `pandas` | 0 | 52 | 0.0% |
+| `polars` | 0 | 52 | 0.0% |
+| `sql` | 0 | 52 | 0.0% |
+| `mojo_polars` | 0 | 52 | 0.0% |
+| `ts_polars` | 0 | 52 | 0.0% |
+| `excel` | 0 | 52 | 0.0% |
 
 Every cell, `yes` when filled and `-` when missing:
 
@@ -205,6 +239,16 @@ Every cell, `yes` when filled and `-` when missing:
 | `filter` | - | - | - | - | - | - |
 | `project` | - | - | - | - | - | - |
 | `computed_column` | - | - | - | - | - | - |
+| `cast` | - | - | - | - | - | - |
+| `case_when` | - | - | - | - | - | - |
+| `in_list` | - | - | - | - | - | - |
+| `between` | - | - | - | - | - | - |
+| `string_functions` | - | - | - | - | - | - |
+| `regexp` | - | - | - | - | - | - |
+| `temporal_extract` | - | - | - | - | - | - |
+| `math_functions` | - | - | - | - | - | - |
+| `nested_access` | - | - | - | - | - | - |
+| `json_extract` | - | - | - | - | - | - |
 | `join_inner` | - | - | - | - | - | - |
 | `join_left` | - | - | - | - | - | - |
 | `join_right` | - | - | - | - | - | - |
@@ -223,9 +267,13 @@ Every cell, `yes` when filled and `-` when missing:
 | `distinct` | - | - | - | - | - | - |
 | `union` | - | - | - | - | - | - |
 | `subquery` | - | - | - | - | - | - |
+| `view` | - | - | - | - | - | - |
 | `udf_map` | - | - | - | - | - | - |
 | `udf_filter` | - | - | - | - | - | - |
 | `udf_agg` | - | - | - | - | - | - |
+| `write_parquet` | - | - | - | - | - | - |
+| `write_csv` | - | - | - | - | - | - |
+| `write_jsonl` | - | - | - | - | - | - |
 | `null_semantics` | - | - | - | - | - | - |
 | `errors` | - | - | - | - | - | - |
 | `output_dtypes` | - | - | - | - | - | - |
@@ -239,20 +287,34 @@ whose census must equal its expected `[matrix]` and `[report]` byte for
 byte, three cells filled by real `mojo_library` and `mojo_test` targets in
 planted `pandas_e2e` and `polars_e2e` packages (one named by a cell-relative
 label), with grounding files holding near misses (an `Int` constant, a
-commented-out one, an indented one). Each target of
+commented-out one, an indented one) and an unannotated
+`comptime PLAN_UNTYPED = UInt8(16)` that must be read. Each target of
 `tests//negative/surface_capability_matrix` must fail naming its planted
 defect: a target that does not exist, a repeated pair, an unknown capability,
-an unknown surface, a target in another surface's package, a target outside
-`src/tests/e2e`, a target that is no test, a pair with no row, an empty
-field, a capability grounded in no declared constant, a family constant no
-capability names, a repeated capability, fewer filled cells than the floor,
-and no surface. Each of these mutants of the lint turns a test red: dropping
-the package check, the test check, the duplicate check, the unknown
-capability or surface check, the missing-pair check, the grounding check, the
-family check, the vocabulary duplicate check, the floor or the empty check;
-reading an indented `comptime`, or a constant of any type; taking the
-package from the label's text instead of the graph; calling every target a
-test; not making the named targets dependencies; and a wrong percentage.
+an unknown surface, a target in another surface's package, a test outside
+`src/tests/e2e`, a test in a package whose name starts with the surface's, a
+test in a subpackage of it, an alias in the surface's package of a test
+elsewhere, a target that is no test (a file; a `mojo_library` with no
+`test_srcs`), one test filling two cells of a surface, a family constant in a
+form the lint cannot read, a pair with no row, an empty field, a capability
+re-grounded in a constant no file declares, a family constant no capability
+names, a repeated capability, fewer filled cells than the floor, and no
+surface; five of them must yield exactly one finding. The negative
+`incompatible`, alone in its package, is built by a package pattern and must
+fail naming the incompatible test. Each of these mutants of the lint turns a
+test red: dropping the package check, the test check, the duplicate check,
+the unknown capability or surface check, the missing-pair check, the
+grounding check, the family check, the vocabulary duplicate check, the floor
+or the empty check; matching the package by prefix; dropping the alias
+(output maker) check, or taking the maker from the label; counting a library
+with no `test_srcs` as a test; dropping the one-test-per-cell check, or
+keying it on the label's spelling; not reading the unannotated form, or
+skipping a form it cannot read; reading an indented `comptime`, or a
+constant of any type; taking the package from the label's text instead of
+the graph; calling every target a test; not making the named targets
+dependencies; and a wrong percentage. The planted e2e targets build too
+(`tests//functional/...` builds them; `test_mac` is skipped there as
+incompatible).
 
 ## Limits
 
@@ -262,8 +324,11 @@ test; not making the named targets dependencies; and a wrong percentage.
 - Every cell weighs the same: a surface's percentage counts a remote prefix
   like a join kind.
 - The vocabulary is as fine as the plan constants: one capability per join
-  kind and source kind, one for all of an aggregate's functions and one for
-  every expression of a computed column.
+  kind, source kind and write format, one for all of an aggregate's
+  functions, one per expression kind or group of them.
+- The alias check reads where a target's default outputs were made; a test
+  whose default outputs are all source files (no maker) is placed by its
+  own label only.
 - `union` is the plan's union of inputs of one schema; a surface's set
   operations may lower otherwise (the plan builds `PLAN_UNION` for multi-file
   scans today).

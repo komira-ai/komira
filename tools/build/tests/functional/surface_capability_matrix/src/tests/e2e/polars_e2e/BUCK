@@ -1,7 +1,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
 
 # Test 53 (the surface capability matrix): the planted polars surface e2e
-# package. Never built: the matrix lint only analyses this target.
+# package. The matrix lint only analyses this target; tests//functional/...
+# builds it.
 
 mojo_test(
     name = "test_filter",
