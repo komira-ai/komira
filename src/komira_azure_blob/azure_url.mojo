@@ -178,8 +178,12 @@ def _account_of_host(host: String, allow_dfs: Bool) raises -> String:
     var h = _ascii_lower(host)
     var dot = h.find(".")
     var svc = String("")
-    if dot > 0 and h.endswith(_AZURE_SUFFIX):
-        svc = _slice(h, dot + 1, h.byte_length() - _AZURE_SUFFIX.byte_length())
+    # The first dot must come before the suffix: on the bare service host
+    # (`blob.core.windows.net`) it is the suffix's own, and there is no
+    # account label.
+    var svc_end = h.byte_length() - _AZURE_SUFFIX.byte_length()
+    if dot > 0 and dot < svc_end and h.endswith(_AZURE_SUFFIX):
+        svc = _slice(h, dot + 1, svc_end)
     if svc == "blob" or (allow_dfs and svc == "dfs"):
         var account = _slice(h, 0, dot)
         _check_account(account)

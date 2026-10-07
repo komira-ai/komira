@@ -14,7 +14,8 @@
 #  * parse_azure_url, refused by exact message: another scheme, no scheme,
 #    no container, a container or account name Azure does not allow, an abfs
 #    host that is not an Azure storage host, an https host that is not a
-#    blob host, plaintext http:// to Azure's own host (in any letter case,
+#    blob host, the bare service host with no account label (blob. or dfs.,
+#    on https:// and abfs[s]:// and az://), plaintext http:// to Azure's own host (in any letter case,
 #    with or without a port), an http:// URL that is
 #    not path-style, and a query (a SAS token pasted into the URL), whose
 #    refusal does not echo the token.
@@ -297,6 +298,20 @@ def test_refused_urls() raises:
         contains="azure_url: an https:// Azure URL's host must be <account>.blob.core.windows.net, got 'example.com'"
     ):
         _ = parse_azure_url("https://example.com/lake/x")
+    # The bare service host, with no account label before it: refused, not
+    # sliced past its end.
+    with assert_raises(
+        contains="azure_url: an https:// Azure URL's host must be <account>.blob.core.windows.net, got 'blob.core.windows.net'"
+    ):
+        _ = parse_azure_url("https://blob.core.windows.net/lake/x")
+    with assert_raises(
+        contains="azure_url: an Azure URL's host must be <account>.blob.core.windows.net or <account>.dfs.core.windows.net, got 'dfs.core.windows.net'"
+    ):
+        _ = parse_azure_url("abfss://lake@dfs.core.windows.net/x")
+    with assert_raises(
+        contains="azure_url: an Azure URL's host must be <account>.blob.core.windows.net or <account>.dfs.core.windows.net, got 'Blob.core.windows.net'"
+    ):
+        _ = parse_azure_url("az://Blob.core.windows.net/lake/x")
     with assert_raises(
         contains="azure_url: 'my_acct' is not an Azure storage account name (3 to 24 lowercase letters and digits)"
     ):
