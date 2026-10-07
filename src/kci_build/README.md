@@ -1,10 +1,12 @@
 # kci_build
 
-One BUILD step of a kci stage (`kci run --stage S`). `run_build` checks the
-release identity (`--revision-id` must be a full commit id that is the
-checkout's `HEAD`, in a full-history clone with no modified tracked files,
-on the one platform kci releases), records the run's RUNNING result before
-the first effect, derives the release stamp from git, then builds each
+One BUILD step of a kci stage (`kci run --stage S`). `run_build` first
+checks, reading only, that the platform is one kci releases, that
+`--revision-id` is a full commit id, the path flags and the artifacts file;
+it then records the run's RUNNING result before the first effect, and
+derives the release stamp from git, refusing a shallow clone, a `HEAD` that
+is not the revision, or modified tracked files (that refusal comes after the
+RUNNING record); then it builds each
 artifact of the artifacts file (read by `kci_artifact`) in file order, one at
 a time, into an EMPTY directory under `<release_dir>/<platform>/`, and checks
 what each build left. When every artifact passed it writes `release.json`

@@ -7,8 +7,9 @@ error before anything is read. `kci_main` then reads the machine file
 resolves stage `S` and runs each of its steps in order through `kci_build`
 (BUILD) or `kci_publish` (PUBLISH), with each step's validations
 (`kci_validate`) after it. Under GitHub Actions it first checks the workflow
-it runs under against the machine file, the ref it runs on (a stage without
-`break_glass` runs only on `main`) and the release set it was handed. Every
+it runs under against the machine file, the ref it runs on (a stage that is
+neither the pull-request stage nor `break_glass` runs only on `main`) and the
+release set it was handed. Every
 run writes `kci_api`'s result document to `--result-file` (RUNNING before
 the first effect, FINISHED on every exit path), appends a markdown summary
 to `--summary-file` when given, and exits with `kci_api`'s exit numbers.

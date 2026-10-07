@@ -27,8 +27,9 @@ outside kci before it ran. Nothing here talks to a real cloud.
 Plan and apply a two-resource graph (a public service allowed to start a
 scheduled job) on `"fake"`. A plan makes no mutating call; an apply creates
 every node the graph lowers to: for each resource its identity and its run,
-the service's public ingress and its grant to start the job, and each
-resource's implicit grant to write the cell's logs:
+the job's schedule, the service's public ingress and its grant to start the
+job, and each resource's implicit grant to write the cell's logs (nine
+nodes):
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
