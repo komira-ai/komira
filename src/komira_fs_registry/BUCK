@@ -27,7 +27,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_fs_handle_s3_scheme (the endpoint's scheme picks the connector: an
 # http:// endpoint read over the plaintext side of a split connector, an
 # https:// one over the TLS side, any other scheme refused, and the
-# production factory's choice), test_fs_handle_shared_creds (a
+# production factory's and the production arm's choice), test_fs_handle_shared_creds (a
 # handle and its clone sign with the credential the shared default chain
 # holds now, one refresh for both), test_fs_handle_descriptor (a
 # descriptor's tag, the named errors for GCS, Azure and an unknown scheme,

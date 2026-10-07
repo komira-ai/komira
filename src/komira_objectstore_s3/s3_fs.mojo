@@ -382,6 +382,12 @@ struct S3Fs[
         then 1 plus the workers its widest concurrent call used."""
         return len(self._stores[])
 
+    def new_connector(self) raises -> Self.C:
+        """A connector from the factory this file system's stores dial with,
+        made and not connected: a caller can ask it what it is (`is_tls()`)
+        without a request being sent."""
+        return self._mk_connector()
+
     @always_inline
     def bucket(self) -> String:
         """The bucket this file system reads and writes."""

@@ -11,8 +11,11 @@
 #    each read passes komira_http_client's scheme check, so a factory picked
 #    the wrong way round is refused there (HttpError[URL_INVALID]).
 #  * the production factory: its connector for an http:// endpoint is
-#    plaintext and for https:// or AWS's own is TLS (nothing is dialed), and
-#    s3_prod_arm builds an arm without dialing.
+#    plaintext and for https:// or AWS's own is TLS (nothing is dialed).
+#  * the production arm: the file system s3_prod_arm builds for an http://
+#    endpoint makes plaintext connectors, for https:// or AWS's own TLS ones
+#    (asked through S3Fs.new_connector, nothing dialed, no store built), and
+#    an ftp:// endpoint is refused, named.
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from komira_aws_core import AwsCredential, StaticCredsSource, SystemAwsClock
@@ -118,14 +121,40 @@ def test_the_production_factory() raises:
         "", s3_prod_plain_connector, s3_prod_tls_connector
     )()
     assert_true(aws.is_tls())
+
+
+def _prod_arm_is_tls(var config: S3Config) raises -> Bool:
+    """Whether the connectors s3_prod_arm's file system dials with, for
+    `config`'s endpoint, are TLS; nothing is dialed."""
     var arm = s3_prod_arm(
         "lake",
-        S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
+        config^,
         HttpClientConfig.defaults(),
         _creds(),
     )
     assert_equal(arm.bucket(), "lake")
+    var is_tls = arm.new_connector().is_tls()
     assert_equal(arm.stores_built(), 0)
+    return is_tls
+
+
+def test_the_production_arm() raises:
+    assert_false(
+        _prod_arm_is_tls(S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000")),
+        "s3_prod_arm dials TLS for an http:// endpoint",
+    )
+    assert_true(
+        _prod_arm_is_tls(S3Config.custom_endpoint("us-east-1", "https://s3.example.test")),
+        "s3_prod_arm dials plaintext for an https:// endpoint",
+    )
+    assert_true(
+        _prod_arm_is_tls(S3Config.aws("us-east-1")),
+        "s3_prod_arm dials plaintext for AWS's own endpoint",
+    )
+    with assert_raises(
+        contains="fs_registry: an S3 endpoint must start with http:// or https://, got 'ftp://x'"
+    ):
+        _ = _prod_arm_is_tls(S3Config.custom_endpoint("us-east-1", "ftp://x"))
 
 
 def main() raises:
@@ -133,4 +162,5 @@ def main() raises:
     test_an_http_endpoint_reads_over_plaintext()
     test_an_https_endpoint_reads_over_tls()
     test_the_production_factory()
+    test_the_production_arm()
     print("OK")
