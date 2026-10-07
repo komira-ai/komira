@@ -48,6 +48,8 @@ mojo_library(
         "tests/test_hkdf_smoke.mojo",
         "tests/test_hmac_kat.mojo",
         "tests/test_hmac_streaming_smoke.mojo",
+        "tests/test_p256_ecdh_kat.mojo",
+        "tests/test_p256_ecdh_refusals.mojo",
         "tests/test_name_matcher.mojo",
         "tests/test_rng_chacha20_drbg_smoke.mojo",
         "tests/test_rng_system_entropy_smoke.mojo",
