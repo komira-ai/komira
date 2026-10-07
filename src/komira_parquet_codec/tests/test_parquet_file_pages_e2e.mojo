@@ -71,9 +71,9 @@ from std.memory import bitcast
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
+from komira_compression.zlib import zlib_crc32
 from komira_parquet_api import CompressionCodec, PageType
 from komira_parquet_codec.compression import decompress
-from komira_zlib import zlib_crc32
 
 comptime _DIR = "parquet/"
 comptime _ARROW_24 = "parquet-cpp-arrow version 24.0.0"
