@@ -135,7 +135,9 @@ def p256_ecdh_shared_x(
         # AWS-LC reads exactly 65 bytes during this synchronous call and
         # writes only peer_pt. It returns 0 for a wrong leading byte, a
         # coordinate >= p, or a point that does not satisfy the curve
-        # equation (in which case peer_pt is not the decoded point).
+        # equation; on that refusal it sets peer_pt to the generator, so
+        # ignoring rc_oct would return x(priv * G), the caller's own public
+        # x-coordinate.
         var peer_ptr = _span_ptr_mut(peer_uncompressed)
         var rc_oct = external_call[
             "EC_POINT_oct2point", Int32,
