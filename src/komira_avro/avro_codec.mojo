@@ -468,8 +468,8 @@ def crc32_ieee(bytes: Span[UInt8, _]) -> UInt32:
 #   xz        — a standard .xz stream (liblzma lzma_easy_buffer_encode).
 #
 # Encapsulation: takes a borrowed Span[UInt8], returns an owned List[UInt8].
-# The FFI carve-out is confined to each codec's call site (same singleton dlopen
-# handles the decompress side already uses).
+# Each codec is komira_compression's codec API; this module declares no FFI
+# and takes no pointer but the null codec's memcpy.
 
 
 def compress_block(codec_tag: Int, payload: Span[UInt8, _]) raises -> List[UInt8]:

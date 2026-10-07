@@ -43,6 +43,7 @@ comptime _FILES: List[String] = [
     "snappy/format.mojo",
     "snappy/snappy_ffi.mojo",
     "snappy/varint.mojo",
+    "text_decompress.mojo",
     "zstd/__init__.mojo",
     "zstd/zstd_ffi.mojo",
 ]
@@ -167,6 +168,7 @@ def test_imports_only_its_deps() raises:
     # makes a new dep a change to the test too, and komira_obs and
     # komira_serde are refused outright.
     var allowed: List[String] = [
+        "komira_arrow_ipc",
         "komira_buffer",
         "komira_compression",
         "komira_parquet_api",

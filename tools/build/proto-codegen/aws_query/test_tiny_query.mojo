@@ -1,7 +1,8 @@
 # The caller's test of a generated pure-mode awsQuery client
 # (tiny_query.json): the requests it builds (method, target, Content-Type
 # and the form body) and the responses it reads (the members of the
-# <SendThingResult> element), each compared exactly, and the error document
+# <SendThingResult> element, and a 200 with no body as an empty result),
+# each compared exactly, and the error document
 # a client reads through komira_aws_core.
 from komira_aws_tiny_query.komira_aws_tiny_query import (
     TinyQueryDetail,
@@ -153,6 +154,18 @@ def test_an_empty_result_sets_nothing() raises:
     assert_false(Bool(out.detail))
 
 
+def test_a_200_with_an_empty_body_is_an_empty_result() raises:
+    # The awsQuery protocol tests QueryEmptyInputAndEmptyOutput and
+    # QueryNoInputAndOutput answer an operation that has an output shape
+    # with a 200 and no body, and expect an empty result.
+    var out = parse_send_thing_response(AwsResponse.of_text(200, String("")))
+    assert_equal(out.message_id, "")
+    assert_false(Bool(out.sizes))
+    assert_false(Bool(out.attributes))
+    assert_false(Bool(out.labels))
+    assert_false(Bool(out.detail))
+
+
 def test_a_response_without_its_result_element_is_refused() raises:
     with assert_raises(contains="holds no <SendThingResult> element"):
         _ = parse_send_thing_response(
@@ -189,6 +202,7 @@ def main() raises:
     test_an_operation_with_no_input()
     test_send_thing_response()
     test_an_empty_result_sets_nothing()
+    test_a_200_with_an_empty_body_is_an_empty_result()
     test_a_response_without_its_result_element_is_refused()
     test_an_operation_with_no_output_reads_nothing()
     test_the_error_document()

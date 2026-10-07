@@ -51,6 +51,7 @@ mojo_library(
         "tests/test_broker_scan_kind_budget.mojo",
         "tests/test_broker_scan_kind_compaction_race.mojo",
         "tests/test_broker_segment_key_collision_offline.mojo",
+        "tests/test_broker_split_compaction_retry_offline.mojo",
         "tests/test_broker_sublineage_marker_chunks_offline.mojo",
         "tests/test_broker_sublineage_write_soak_offline.mojo",
         "tests/test_broker_txn_control_offline.mojo",

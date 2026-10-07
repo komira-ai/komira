@@ -8,6 +8,9 @@
     Metadata Service;
   * `ServicePrincipalProvider` — the Entra client-credentials grant.
 
+Both token providers keep their token's expiry on a komira_retry
+`MonotonicClock` parameter, `SystemClock` by default; `with_clock` swaps it.
+
 Every setting is a parameter; the package reads no environment. Shared Key
 SIGNING is Storage-specific (it canonicalizes `x-ms-*` headers and the storage
 resource path), so it lives in `komira_azure_blob`, with the store.

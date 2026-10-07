@@ -3,9 +3,11 @@
 # =============================================================================
 #
 # FFI-BOUNDARY: the snappy C API (snappy-c.h), statically linked from
-# //third_party/snappy and declared here with `external_call`; this is the one
-# module of the tree that declares those symbols. snappy keeps no pointer past
-# a call and owns no memory a caller sees.
+# //third_party/snappy and declared here with `external_call`; inside
+# komira_compression this is the one module that declares those symbols
+# (komira_avro, komira_orc and komira_parquet_codec still declare their own
+# until they move onto this module). snappy keeps no pointer past a call and
+# owns no memory a caller sees.
 #
 #   snappy_status snappy_compress(const char* input, size_t input_length,
 #                                 char* compressed, size_t* compressed_length);
