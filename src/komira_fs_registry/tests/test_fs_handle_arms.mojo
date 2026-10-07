@@ -14,7 +14,13 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
-from komira_aws_core import AwsCredential, StaticCredsSource, SystemAwsClock
+from komira_aws_core import (
+    AwsCredential,
+    AwsCredentialParams,
+    ProcessCredsSource,
+    SystemAwsClock,
+    process_creds_source,
+)
 from komira_plan_expr.fs_descriptor_pod import (
     FS_SCHEME_AZURE as CORE_FS_SCHEME_AZURE,
     FS_SCHEME_FILE as CORE_FS_SCHEME_FILE,
@@ -41,17 +47,22 @@ def _http() -> HttpClientConfig:
     return HttpClientConfig.defaults()
 
 
-def _creds() -> StaticCredsSource:
-    return StaticCredsSource(
+def _creds() raises -> ProcessCredsSource:
+    """The production source: the default chain, shared by every clone, with
+    the keys stated so that it needs no network."""
+    var params = AwsCredentialParams()
+    params.credential = Optional[AwsCredential](
         AwsCredential(
             String("AKIDEXAMPLE"),
             String("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"),
             String(""),
         )
     )
+    return process_creds_source(params, _http())
 
 
 def _s3_arm() raises -> S3Arm[S3ProdConnector]:
+    """The production arm's type: its credential source is the default."""
     return S3Arm[S3ProdConnector](
         "lake", S3Config.aws("us-east-1"), _never_dial, _http(), _creds(), SystemAwsClock()
     )
