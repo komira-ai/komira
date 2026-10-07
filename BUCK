@@ -70,6 +70,7 @@ _TESTS_LINTS = [
     "tests//functional/bundle_parity:shell_lint",
     "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
+    "tests//functional/install_gate:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
     "tests//functional/watchdog:shell_lint",

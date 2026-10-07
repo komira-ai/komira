@@ -3,7 +3,7 @@
 # `komira_pack conda` / `conda-check` behind it), on //src/komira_encoding:komira_encoding_conda
 # and the fixture libraries of tests//negative/conda.
 #
-# usage: tools/build/tests/functional/conda.sh [--no-uncached] [--no-install]   (from anywhere; BUCK2 overrides;
+# usage: tools/build/tests/functional/conda.sh [--no-uncached] [--no-install | --require-install]   (from anywhere; BUCK2 overrides;
 #        KOMIRA_TEST_KEEP=1 keeps the scratch directory, with every log, after a pass)
 #
 #   shape      the .conda is read with tools that are not the writer's: unzip
@@ -87,7 +87,8 @@
 #              holds share/doc/komira_encoding/README.md byte-equal to the
 #              source README; the same project
 #              without the package cannot import it. Needs pixi, jq and network
-#              (the compiler comes from the channel it is pinned to); otherwise SKIP.
+#              (the compiler comes from the channel it is pinned to); otherwise SKIP,
+#              or FAIL with --require-install (install_gate/install_gate.sh).
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
@@ -97,13 +98,20 @@ if [ -z "${BUCK2:-}" ]; then
 fi
 uncached=1
 install=1
+require_install=0
 for a in "$@"; do
     case "$a" in
         --no-uncached) uncached=0 ;;
         --no-install) install=0 ;;
+        --require-install) require_install=1 ;;
         *) echo "conda.sh: unknown argument $a" >&2; exit 2 ;;
     esac
 done
+if [ "$install" = 0 ] && [ "$require_install" = 1 ]; then
+    echo "conda.sh: --require-install and --no-install contradict each other" >&2
+    exit 2
+fi
+. "$ROOT/tools/build/tests/functional/install_gate/install_gate.sh"
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_conda.XXXXXX")
 fails=0
 pass() { echo "PASS  conda $1"; }
@@ -645,7 +653,9 @@ else
 fi
 
 # ---- install ----------------------------------------------------------------
-if [ "$install" = 1 ] && command -v pixi > /dev/null && curl -fsSL -o /dev/null -I https://conda.modular.com/max/linux-64/repodata.json 2> /dev/null; then
+install_gate conda "$install" "$require_install" https://conda.modular.com/max/linux-64/repodata.json
+gate=$?
+if [ "$gate" = 0 ]; then
     problems=""
     # The channel is the one komira_pack conda-index wrote (section index).
     C="$W/channel"
@@ -691,7 +701,7 @@ EOF
         pass "install: pixi installs $PKG from a file:// channel with mojo-compiler ==$pin, \`mojo run\` of a program importing it (no -I) prints deadbeef and 3q2+7w==, the env holds $DOC byte-equal to the source README, and the same project without it cannot import it"
     fi
 else
-    echo "SKIP  conda install ($([ "$install" = 1 ] || echo '--no-install'; command -v pixi > /dev/null || echo 'no pixi'; [ "$install" = 0 ] || curl -fsSL -o /dev/null -I https://conda.modular.com/max/linux-64/repodata.json 2> /dev/null || echo 'no network'))"
+    [ "$gate" = 1 ] || fails=$((fails + 1))
 fi
 
 if [ "$fails" = 0 ] && [ -z "${KOMIRA_TEST_KEEP:-}" ]; then rm -rf "$W"; else echo "logs: $W"; fi
