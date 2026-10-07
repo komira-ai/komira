@@ -38,7 +38,11 @@ library:
   * the subdir comes from the TARGET platform's constraints (a select), never an
     attribute: a package cannot say `osx-arm64` over a linux `.mojoc`;
   * the payload is the library's gated `.mojoc`, so the package cannot exist
-    until the library's own welded tests pass;
+    until the library's own welded tests pass; with coverage on
+    (`-c komira.coverage=true`), not until its coverage runs passed and its
+    coverage gate held either (tools/build/coverage/README.md, "The build
+    gate"): the conda package is the one target a library's coverage
+    blocks, never the library or its dependents;
   * the library's README.md, when its package holds one, is installed at
     `share/doc/<name>/README.md` (a file of the package, listed in
     info/paths.json): what a user reads is inside what they installed, and
@@ -122,6 +126,7 @@ for each choice: packaging/conda/README.md.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/mojo:coverage.bzl", "MojoCoverageGateInfo")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -209,19 +214,20 @@ def _doc_args(info):
         return []
     return ["--doc-file", cmd_args(info.readme, format = "README.md={}")]
 
-def _published(ctx, raw, checked, release_checked, guarded):
+def _published(ctx, raw, checked, release_checked, guarded, gate = []):
     """The providers of a package target: `raw` (the packer's directory)
-    copied after its checks passed, and the sub-targets (module docstring)."""
+    copied after its checks passed (and, with coverage on, after `gate`, the
+    library's coverage markers), and the sub-targets (module docstring)."""
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("out", dir = True)
-    _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded])
+    _copy_dir(ctx, bb, raw, out, "conda_join", ctx.label.name, [checked, guarded] + gate)
 
     # [release]: the same directory, copied only after the RELEASE check passed
     # (stamped, with its source commit and a positive commit time, and not
     # refused) and the kcov guard passed. This is the only thing an uploader
     # reads.
     rel = ctx.actions.declare_output("release", dir = True)
-    _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded])
+    _copy_dir(ctx, bb, raw, rel, "conda_release_join", ctx.label.name, [release_checked, guarded] + gate)
     return [DefaultInfo(
         default_output = out,
         sub_targets = {
@@ -350,13 +356,24 @@ def _conda_package_impl(ctx):
     # No packed file is kcov, a build-only GPL-2.0 tool (kcov_guard.bzl).
     guarded = kcov_guard(ctx, ctx.attrs._kcov_guard, ctx.label.name, packed)
 
-    return _published(ctx, raw, checked, release_checked, guarded)
+    # With coverage on, what ships waits for the library's coverage runs and
+    # its gate (tools/build/mojo/coverage.bzl); for a library of the coverage
+    # ledger (tools/build/coverage/policy.bzl, COVERAGE_NO_GATE) the gate is
+    # its `<name>_cov_gate`. The library itself waits for neither.
+    gate = lib[MojoCoverageGateInfo].markers if MojoCoverageGateInfo in lib else []
+    if ctx.attrs.coverage_gate:
+        gate = gate + ctx.attrs.coverage_gate[DefaultInfo].default_outputs
+
+    return _published(ctx, raw, checked, release_checked, guarded, gate)
 
 _conda_package = rule(
     impl = _conda_package_impl,
     attrs = {
         # The source commit of the stamp (-c komira.package_commit), "" if none.
         "commit": attrs.string(default = ""),
+        # The `<lib>_cov_gate` of a library of the coverage ledger, set by
+        # mojo_library with coverage on (tools/build/mojo/coverage.bzl).
+        "coverage_gate": attrs.option(attrs.dep(), default = None),
         "lib": attrs.dep(providers = [MojoInfo]),
         "stamp": attrs.string(),
         "subdir": attrs.string(),
