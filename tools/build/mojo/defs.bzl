@@ -28,6 +28,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage_branch.bzl", "coverage_branch")
 load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_sources", "coverage_sub_targets")
+load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(
     ":test_runtime.bzl",
     _arg_args = "arg_args",
@@ -343,6 +344,9 @@ def _library_impl(ctx):
         category = "mojo_precompile",
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
+    check_test_deps(ctx)
+    tests_closure = test_closure(ctx, ungated_tset)
+    tests_c_link = test_c_link(ctx, c_link)
 
     test_data = _admit_test_data(ctx)
     env_args = _env_args("{}: test_env".format(ctx.label.raw_target()), ctx.attrs.test_env)
@@ -369,11 +373,11 @@ def _library_impl(ctx):
             "tests/{}/{}".format(stem, stem),
             [t],
             t,
-            [ungated_tset],
+            tests_closure,
             ctx.attrs.test_optimization_level,
             "mojo_build_test",
             stem,
-            c_link,
+            tests_c_link,
         )
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         key = _test_key(ctx, t)
@@ -397,7 +401,7 @@ def _library_impl(ctx):
         test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
         markers.append(marker)
         if cov_link and t.is_source:
-            cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, [ungated_tset], "0", "mojo_build_cov_test", stem, c_link, debug_link = cov_link)
+            cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link)
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, src_root, test_data.get(key, {}), env_args)
             if ctx.attrs.coverage_branch:
                 src_repo, gen = coverage_sources(ctx, src_root)
@@ -603,6 +607,9 @@ mojo_library_rule = rule(
         "srcs": attrs.list(attrs.source()),
         "test_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
         "test_srcs": attrs.list(attrs.source(), default = []),
+        # Mojo packages the welded tests (test_srcs) are compiled against
+        # besides the library and its deps; see test_deps.bzl.
+        "test_deps": attrs.list(attrs.dep(), default = []),
         # {test_srcs path: data}, data as in mojo_test's `data`; see _admit_test_data.
         "test_data": attrs.dict(attrs.string(), attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source())), default = {}),
         # Environment for every gated test of this library.

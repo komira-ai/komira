@@ -26,7 +26,7 @@
 #      given when `mojo build` links through mojo_wrapper.sh's `cc` shim:
 #      the compiler's runtime library, `--gc-sections`, `-lm`,
 #      `--strip-debug`, the one run path `$ORIGIN/lib` as DT_RUNPATH, then
-#      the link tail), with the profile runtime as a whole archive. Test 45's
+#      the link tail), with the profile runtime as a whole archive. Test 46's
 #      tests//functional/coverage:link_line records both lines and fails
 #      when they differ by more than the profile runtime.
 #   3. The binary must hold no path of this action (its working directory or

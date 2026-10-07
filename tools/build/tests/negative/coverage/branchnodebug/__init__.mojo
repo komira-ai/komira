@@ -1,5 +1,5 @@
 """branchnodebug: a helper declared @always_inline("nodebug"), whose loop
-test carries the location of its call (test 45): branch coverage refuses
+test carries the location of its call (test 46): branch coverage refuses
 the branch there rather than take it for the compiler's."""
 
 

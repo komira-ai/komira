@@ -1,5 +1,5 @@
 """branchretor: an `or` whose result is returned, never branched on (test
-45): when its right operand decides cannot be counted, and branch coverage
+46): when its right operand decides cannot be counted, and branch coverage
 refuses it rather than count the left operand alone."""
 
 

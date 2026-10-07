@@ -1,6 +1,6 @@
 #!/bin/sh
 # link_line.sh -- a check that a branch coverage link is the link of a
-# release test (test 45), run as a build action by cov_link_line_check
+# release test (test 46), run as a build action by cov_link_line_check
 # (defs.bzl):
 #   sh link_line.sh <busybox> <out> <wrapper> <compiler_dir> <zig_dir> <cc_target> <cpu>
 #       <test.mojo> <bitcode> <link_dir> [-I<dir>...]

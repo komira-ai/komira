@@ -1,4 +1,4 @@
-# Test 45: a test whose library calls into C; two of add_clamped's three
+# Test 46: a test whose library calls into C; two of add_clamped's three
 # arms (never "below 0").
 from std.testing import assert_equal
 

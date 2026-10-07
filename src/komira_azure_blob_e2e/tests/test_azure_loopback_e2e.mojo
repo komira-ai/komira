@@ -35,11 +35,14 @@
 #   test_listing_pages_over_loopback -- list (recursive, four pages of two),
 #     list_dir_shallow under a prefix (three pages, delimiter folds, the
 #     directory's own marker blob skipped) and at the container root, is_dir
-#     (a prefix, a nested prefix, a blob, nothing). The log pins how many
+#     (a prefix, a nested prefix, a blob, nothing), and one
+#     AzureStore.list_page through AzureClient's store, whose ContainerName
+#     (the root's attribute) and Prefix must be the fake's. The log pins how many
 #     List Blobs requests were made and that each later page carried the
 #     previous NextMarker, percent-encoded. Catches: pagination stopping early
 #     or looping, a marker not encoded or not signed decoded (the second
-#     page is refused 403), a fold read as a file, prefix normalization.
+#     page is refused 403), a fold read as a file, prefix normalization, and
+#     a ContainerName read from the wrong place or not read at all.
 #   test_errors_over_loopback -- a missing blob on HEAD and on GET (404, read
 #     as NOT_FOUND; the GET carries azure_code=BlobNotFound), a range starting
 #     at EOF (416, read as MALFORMED), a missing container (404
@@ -57,10 +60,6 @@
 #     record of what it signed, so the whole message is still compared
 #     exactly, and a message that carried the key or the signature would
 #     differ from it.
-#
-# Not asserted: the ContainerName of a List Blobs result. azure_xml cannot
-# read XML attributes, so it is always empty today (komira issue #356); the
-# fake sends it, and a test should assert it once that is fixed.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -72,6 +71,8 @@ from komira_azure_blob.azure import (
     AZURE_ERR_PERMISSION_DENIED,
     azure_store_error_kind_from_message,
 )
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.runtime import PerCoreAsyncRuntime
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
 from komira_buffer.heap_region import HeapRegion
 from komira_encoding import base64_encode
@@ -86,6 +87,8 @@ from komira_azure_blob_e2e import (
     FakeBlobService,
     serve_while,
 )
+from komira_azure_blob import AzureClientSpec, AzureCredential
+from komira_azure_core import AzureSharedKey
 
 
 comptime _Fs = AzureFs[KernelTcpConnector]
@@ -141,10 +144,18 @@ def _client(port: UInt16, key_b64: String) raises -> AzureClient[KernelTcpConnec
     )
 
 
-def _no_factory() raises -> AzureClient[KernelTcpConnector]:
-    """`AzureFs`'s clone factory. These tests never clone (a thin function
-    cannot carry the port the server picked at run time)."""
-    raise Error("the loopback tests do not clone an AzureFs")
+def _kernel_connector() raises -> KernelTcpConnector:
+    return KernelTcpConnector.new()
+
+
+def _spec(port: UInt16, key_b64: String) raises -> AzureClientSpec[KernelTcpConnector]:
+    """What a clone's client is built from: the account and key of
+    `_client(port, key_b64)`."""
+    return AzureClientSpec[KernelTcpConnector](
+        AzureConfig.azurite(String(AZURITE_ACCOUNT), String("127.0.0.1"), port),
+        AzureCredential.shared_key(AzureSharedKey(String(AZURITE_ACCOUNT), key_b64)),
+        _kernel_connector,
+    )
 
 
 def _wrong_key() -> String:
@@ -264,7 +275,7 @@ struct _Leg(ClientLeg):
         var fs = _Fs(
             container=String(_CONTAINER),
             client=_client(self.port, self.key_b64),
-            mk_client=_no_factory,
+            spec=_spec(self.port, self.key_b64),
         )
         if self.scenario == _SCENARIO_READS:
             self._reads(fs)
@@ -366,6 +377,20 @@ struct _Leg(ClientLeg):
         assert_false(fs.is_dir(String(_EVENTS)), "is_dir on a blob")
         assert_false(fs.is_dir(String("nothing")), "is_dir on nothing")
 
+        # One List Blobs page through AzureClient's own store.
+        var client = _client(self.port, self.key_b64)
+        ref store_opt = client._inner_store
+        ref connector_opt = client._inner_connector
+        ref reactor_opt = client._inner_reactor
+        var page = store_opt.value().list_page[
+            PerCoreAsyncRuntime[NoopSink], KernelTcpConnector
+        ](
+            String(_CONTAINER), String("data/year=2026/"), String("/"), String(""),
+            connector_opt.value(), reactor_opt.value(),
+        )
+        assert_equal(page.container, String(_CONTAINER), "List Blobs ContainerName")
+        assert_equal(page.prefix, String("data/year=2026/"), "List Blobs Prefix")
+
     def _errors(self, fs: _Fs) raises:
         # HEAD has no body, so no azure_code: the service's code arrives
         # only in the x-ms-error-code header, which AzureStore.head does not
@@ -401,7 +426,7 @@ struct _Leg(ClientLeg):
         var other = _Fs(
             container=String("nocontainer"),
             client=_client(self.port, self.key_b64),
-            mk_client=_no_factory,
+            spec=_spec(self.port, self.key_b64),
         )
         # A List Blobs error names the prefix where a blob would go: the
         # container root here, so the path ends in `/`.
@@ -485,7 +510,8 @@ def test_listing_pages_over_loopback() raises:
     var loop = _run(_SCENARIO_LISTING, String(AZURITE_KEY_B64))
     _signed_ok(loop)
     # Each List Blobs request's query, as it arrived: the recursive list's
-    # four pages, the shallow list's three, the root's two, one per is_dir.
+    # four pages, the shallow list's three, the root's two, one per is_dir,
+    # and the one page read through AzureClient's store.
     var want = List[String]()
     var base = String("restype=container&comp=list")
     want.append(base + "&prefix=data%2F")
@@ -501,6 +527,7 @@ def test_listing_pages_over_loopback() raises:
     want.append(base + "&prefix=data%2Fyear%3D2025%2F&delimiter=%2F")
     want.append(base + "&prefix=data%2Fevents.bin%2F&delimiter=%2F")
     want.append(base + "&prefix=nothing%2F&delimiter=%2F")
+    want.append(base + "&prefix=data%2Fyear%3D2026%2F&delimiter=%2F")
     var got = List[String]()
     for i in range(len(loop.service.log)):
         ref r = loop.service.log[i]

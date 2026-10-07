@@ -1,4 +1,4 @@
-"""Source decisions of other shapes than classify_score's (test 45): a
+"""Source decisions of other shapes than classify_score's (test 46): a
 `while`, a `for ... in range(`, a ternary `if`, a chain of `or`s, and the
 `if` of a plain `@always_inline` helper, which keeps its own location where
 it is inlined."""
