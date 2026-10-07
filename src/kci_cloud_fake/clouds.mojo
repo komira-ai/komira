@@ -8,8 +8,9 @@
 #   * `FakeLimitedCloud` ("fake-limited")   is DELIBERATELY PARTIAL: it does
 #     not host `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a
 #     catalog that marks `job` CLOUD_BOUND), `table`, `bucket`,
-#     `service_account`, `grant`, `queue`, `topic` nor `subscription`
-#     (NOT_YET), and it has no public ingress,
+#     `service_account`, `grant`, `queue`, `topic`, `subscription`,
+#     `secret`, `dns_zone`, `dns_record` nor `certificate` (NOT_YET), and it
+#     has no public ingress,
 #     so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
@@ -25,6 +26,13 @@
 #   bucket  -> `<id>/bucket` (it holds no identity, so no grants)
 #   queue, topic, subscription -> `<id>/queue`, `<id>/topic`, `<id>/sub`
 #              (messaging.mojo, from kci's feeds; no identity, no grants)
+#   secret  -> `<id>/secret` (secrets.mojo; the container, no value, no
+#              identity, no grants); a service or job's `secret_env` entry
+#              that names it is an input on its NAME
+#   DNS zone, DNS record, certificate -> `<id>/zone`, `<id>/record`,
+#              `<id>/cert` (dns.mojo; no identity, no grants); a record
+#              reads its zone's NAME, and a CNAME its producer's HOST, as
+#              inputs
 #   service account -> `<id>/identity` (it exposes NAME), and its grants
 #   grant   -> `<id>/grant`
 # The grants are kci's EDGES (`kci_cloud.grants`), handed to `lower` with
@@ -47,9 +55,10 @@
 # edge folded into the identity as the field `cell.<NAME>`; on the gcp shape
 # a table's indexes and TTL policy as nodes of their own, and a queue as a
 # pull subscription (its private topic, its subscription turned off); on the
-# aws shape a queue's policy. A shape's NOT_YET types (onprem: `table`,
-# `queue`, `topic`, `subscription`) are the cloud's absences, and such a
-# cloud is not complete. `list_owned` reports a table object's stored key
+# aws shape a queue's policy; on the gcp shape a certificate's DNS
+# authorization and its record. A shape's NOT_YET types (onprem: `table`,
+# `queue`, `topic`, `subscription`, `dns_zone`, `dns_record`,
+# `certificate`) are the cloud's absences, and such a cloud is not complete. `list_owned` reports a table object's stored key
 # (`OwnedRecord.key`) and the validation run that created the object (its
 # `kci-run-id` label, `OwnedRecord.validation_run_id`), both read back from
 # the object.
@@ -105,9 +114,13 @@ from kci_cloud import (
     RUN_UNKNOWN,
     Setting,
     FIELD_BUCKET,
+    FIELD_CERTIFICATE,
+    FIELD_DNS_RECORD,
+    FIELD_DNS_ZONE,
     FIELD_GRANT,
     FIELD_JOB,
     FIELD_QUEUE,
+    FIELD_SECRET,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_SUBSCRIPTION,
@@ -128,9 +141,10 @@ from kci_cloud import (
     standard_label_rule,
     validation_run_of,
 )
-from kci_resource_proto.resource import Image, Resource, SecretRef, Size, Value
+from kci_resource_proto.resource import Image, Resource, Size, Value
 
 from kci_cloud_fake.data import lower_bucket, lower_table
+from kci_cloud_fake.dns import dns_limits, lower_certificate, lower_record, lower_zone
 from kci_cloud_fake.fake_store import FakeStore
 from kci_cloud_fake.messaging import lower_queue, lower_subscription, lower_topic, messaging_limits
 from kci_cloud_fake.limits import (
@@ -140,6 +154,7 @@ from kci_cloud_fake.limits import (
     index_limits,
 )
 from kci_cloud_fake.nodes import FakeNode, live_key
+from kci_cloud_fake.secrets import lower_secret, secret_env_fields
 from kci_cloud_fake.shapes import (
     ProviderShape,
     ROLE_BUCKET,
@@ -216,27 +231,6 @@ def _env(
             refs.append(InputRef(rf.resource.copy(), rf.standard.value().json_name(), field))
         else:
             fields.append(Setting(field, v.literal.value()))
-
-
-def _secret_env(kind: String, secrets: Dict[String, SecretRef], mut fields: List[Setting]):
-    """`secret_env` in key order, as REFERENCES (store, name, version); a
-    secret value is never in kci's memory, so it is never in a digest."""
-    var keys = List[String]()
-    for entry in secrets.items():
-        keys.append(entry.key.copy())
-    var sorted = _sorted(keys^)
-    for i in range(len(sorted)):
-        try:
-            ref ref_ = secrets[sorted[i]]
-            var s = String("")
-            if ref_.store:
-                s += ref_.store.value() + String("/")
-            s += ref_.name
-            if ref_.version:
-                s += String("@") + ref_.version.value()
-            fields.append(Setting(kind + String(".secret_env.") + sorted[i], s^))
-        except:
-            pass
 
 
 def _duration(seconds: Int, nanos: Int) -> String:
@@ -360,6 +354,14 @@ def _lower(
         return lower_topic(r, shape)
     if field == FIELD_SUBSCRIPTION:
         return lower_subscription(r, shape)
+    if field == FIELD_SECRET:
+        return lower_secret(r, shape)
+    if field == FIELD_DNS_ZONE:
+        return lower_zone(r, shape)
+    if field == FIELD_DNS_RECORD:
+        return lower_record(r, shape)
+    if field == FIELD_CERTIFICATE:
+        return lower_certificate(r, shape)
     var out = List[LoweredNode]()
     if field == FIELD_GRANT:
         _lower_edges(r, edges, shape, out)
@@ -388,7 +390,7 @@ def _lower(
         for i in range(len(svc.args)):
             fields.append(Setting(String("arg"), svc.args[i].copy()))
         _env(String("service"), svc.env, fields, refs)
-        _secret_env(String("service"), svc.secret_env, fields)
+        secret_env_fields(String("service"), svc.secret_env, fields, refs)
         fields.append(Setting(String("size"), _size(svc.size)))
         var scale = String(DEFAULT_SCALE)
         if svc.scale:
@@ -456,7 +458,7 @@ def _lower(
         for i in range(len(job.args)):
             fields.append(Setting(String("arg"), job.args[i].copy()))
         _env(String("job"), job.env, fields, refs)
-        _secret_env(String("job"), job.secret_env, fields)
+        secret_env_fields(String("job"), job.secret_env, fields, refs)
         fields.append(Setting(String("size"), _size(job.size)))
         var retries = String(DEFAULT_RETRIES)
         if job.max_retries:
@@ -632,6 +634,10 @@ struct FakeCloud(ConformanceTarget, Movable):
         all.append(FIELD_QUEUE)
         all.append(FIELD_TOPIC)
         all.append(FIELD_SUBSCRIPTION)
+        all.append(FIELD_SECRET)
+        all.append(FIELD_DNS_ZONE)
+        all.append(FIELD_DNS_RECORD)
+        all.append(FIELD_CERTIFICATE)
         var l = List[Int]()
         for i in range(len(all)):
             if self._shape.hosts(all[i]):
@@ -674,6 +680,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         fold_limits(r, self._shape, self._id, out)
         index_limits(r, self._shape, self._id, out)
         messaging_limits(r, feeds, self._shape, self._id, out)
+        dns_limits(r, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
@@ -817,6 +824,10 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
         l.append(Absence(FIELD_GRANT, NOT_YET, String("fake-limited has no standalone grants")))
         for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]:
             l.append(Absence(f, NOT_YET, String("fake-limited has no messaging")))
+        l.append(Absence(FIELD_SECRET, NOT_YET, String("fake-limited has no secret store")))
+        for f in [FIELD_DNS_ZONE, FIELD_DNS_RECORD]:
+            l.append(Absence(f, NOT_YET, String("fake-limited has no DNS")))
+        l.append(Absence(FIELD_CERTIFICATE, NOT_YET, String("fake-limited issues no certificates")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
