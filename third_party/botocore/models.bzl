@@ -29,8 +29,9 @@ BOTOCORE_MODELS = {
         sha256 = "fdb831dc9be4cb380b42e21525a1a7e6e379958b7d8a3df7fd71c6c7f50df47c",
     ),
     # Amazon CloudWatch (//src/komira_aws_metrics), whose GetMetricData
-    # reader is hand-written: the model declares smithy-rpc-v2-cbor, which
-    # the AWS generator refuses. Its test_cloudwatch_model checks the
+    # reader is hand-written; generating it from this model is a follow-up
+    # (the AWS generator chooses `json` from the model's `protocols`, whose
+    # first entry is smithy-rpc-v2-cbor). Its test_cloudwatch_model checks the
     # reader's constants against this model and its endpoint against the
     # service's endpoint tests. Its endpoint prefix and signing name are
     # `monitoring`.

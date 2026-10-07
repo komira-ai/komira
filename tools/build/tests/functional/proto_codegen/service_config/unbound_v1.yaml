@@ -1,0 +1,30 @@
+# fixture_v1.yaml with the mixin listed in `apis` and no rule for
+# ListOperations: the client would send the mixin's own generic path to the
+# API's host.
+type: google.api.Service
+config_version: 3
+name: fixture.googleapis.com
+title: Fixture API
+
+apis:
+- name: fixture.v1.Things
+- name: mixin.v1.Operations
+
+documentation:
+  summary: |-
+    Not read by the generator: a block scalar outside `http`.
+
+http:
+  rules:
+  - selector: mixin.v1.Operations.GetOperation
+    get: '/v9/{name=projects/*/operations/*}'
+    additional_bindings:
+    - get: '/v9/{name=folders/*/operations/*}'
+  - selector: mixin.v1.Operations.WaitOperation
+    post: '/v9/{name=projects/*/operations/*}:wait'
+    body: '*'
+  - selector: mixin.v1.Operations.CancelOperation
+    post: '/v9/{name=projects/*/operations/*}:cancel'
+    body: spec
+  - selector: mixin.v1.Operations.DeleteOperation
+    delete: '/v9/{name=projects/*/operations/*}'

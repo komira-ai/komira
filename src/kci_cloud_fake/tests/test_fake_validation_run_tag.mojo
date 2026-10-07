@@ -14,13 +14,14 @@
 #
 # 1. CREATED UNDER A RUN: on a graph holding every catalog type the cloud
 #    hosts (checked against `implemented()`, so a type the lowering skipped
-#    is seen) with a KEEP bucket, a default-KEEP table (where hosted) and a
-#    DELETE bucket, every wanted node's live object carries exactly one
+#    is seen) with a KEEP bucket, a default-KEEP table and a queue, a topic
+#    and a subscription (where hosted) and a DELETE bucket, every wanted node's live object carries exactly one
 #    run-id label, with the key `validation_run_tag_key("kci")` (spelled
 #    `kci-run-id`) and the run id verbatim, and exactly one retention mark
 #    with `resource_retention_tag_key("kci")` and `retention_tag_value` of
 #    the node's retention (`retain` and `delete` both seen); every resource
-#    owns at least one checked node; `list_owned` reports the same id for
+#    owns at least one checked node (except a gcp subscription, which has no
+#    object: its one node is turned off); `list_owned` reports the same id for
 #    every object; the provenance run id is a different value and does not
 #    leak into the tag. Catches: the create path dropping the tag or the
 #    mark, a second spelling of a key, the provenance id written instead, a
@@ -87,6 +88,8 @@ from kci_cloud import (
     CellContext,
     Clouds,
     ConformanceTarget,
+    FIELD_QUEUE,
+    FIELD_SUBSCRIPTION,
     FIELD_TABLE,
     LoweredNode,
     OwnedRecord,
@@ -148,14 +151,24 @@ comptime _TABLE = (
 """A table with the default retention (KEEP), an index and a TTL field: gcp
 lowers it to `orders/table`, `orders/ix-<h>` and `orders/ttl`."""
 
+comptime _MESSAGING = (
+    '{"id":"jobs","queue":{}},{"id":"news","topic":{}},'
+    '{"id":"news-jobs","subscription":{"topic":{"resource":"news"},"queue":{"resource":"jobs"}}}'
+)
+"""A queue, a topic and the subscription between them: aws adds the
+queue's `jobs/policy`; gcp lowers the queue as `jobs/topic` (turned off:
+the queue is fed) and `jobs/queue`, and the subscription's one node turned
+off."""
+
 
 def _full(
-    api_port: String, roles_on: Bool = True, kept: Bool = False, table: Bool = False
+    api_port: String, roles_on: Bool = True, kept: Bool = False, table: Bool = False, messaging: Bool = False
 ) -> String:
     """A public service with a `uses` grant, an internal service reading its
     URL, a scheduled job running as an account, an account, a grant
     resource and a DELETE bucket. `kept` adds a bucket with the default
-    retention (KEEP); `table` adds `_TABLE`. `roles_on` False makes api
+    retention (KEEP); `table` adds `_TABLE`; `messaging` adds `_MESSAGING`.
+    `roles_on` False makes api
     internal and removes web's grant on api."""
     var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
     var exposure = String('"public":{}')
@@ -181,6 +194,7 @@ def _full(
         + String('{"id":"store","retention":"DELETE","bucket":{"versioning":true}}')
         + (String(',{"id":"vault","bucket":{}}') if kept else String(""))
         + ((String(",") + String(_TABLE)) if table else String(""))
+        + ((String(",") + String(_MESSAGING)) if messaging else String(""))
         + String("]}")
     )
 
@@ -189,6 +203,14 @@ def _hosts_table[S: ConformanceTarget](cloud: S) -> Bool:
     var l = cloud.implemented()
     for i in range(len(l)):
         if l[i] == FIELD_TABLE:
+            return True
+    return False
+
+
+def _hosts_messaging[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_QUEUE:
             return True
     return False
 
@@ -333,10 +355,19 @@ def _covers_every_hosted_type[
         if not seen:
             used.append(f)
         var owns = False
+        var off = False
         for k in range(len(nodes)):
-            if nodes[k].wanted and nodes[k].owner == resources[i].id:
-                owns = True
-        assert_true(owns, where + String(": ") + resources[i].id + String(" owns a checked node"))
+            if nodes[k].owner == resources[i].id:
+                if nodes[k].wanted:
+                    owns = True
+                else:
+                    off = True
+        # A subscription with no object of its own (gcp: it is the topic its
+        # queue's subscription is on) lowers one node, turned off.
+        assert_true(
+            owns or (f == FIELD_SUBSCRIPTION and off),
+            where + String(": ") + resources[i].id + String(" owns a checked node"),
+        )
     assert_equal(len(used), len(hosted), where + String(": one resource per hosted type"))
     for k in range(len(hosted)):
         var found = False
@@ -370,7 +401,7 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
     for s in range(len(shapes)):
         var cloud = FakeCloud(shape=shapes[s].copy())
         var where = shapes[s].name
-        var json = _full("8080", kept=True, table=_hosts_table(cloud))
+        var json = _full("8080", kept=True, table=_hosts_table(cloud), messaging=_hosts_messaging(cloud))
         _ = _apply_and_check(cloud, json, _run(String(_RUN)), String(_RUN), where)
         var resources = _list(json)
         var nodes = lower_data(cloud, resources)
@@ -393,7 +424,7 @@ def test_outside_a_run_no_object_carries_a_tag() raises:
     var shapes = _shapes()
     for s in range(len(shapes)):
         var cloud = FakeCloud(shape=shapes[s].copy())
-        var json = _full("8080", kept=True, table=_hosts_table(cloud))
+        var json = _full("8080", kept=True, table=_hosts_table(cloud), messaging=_hosts_messaging(cloud))
         _ = _apply_and_check(cloud, json, None, String("(none)"), shapes[s].name)
     var limited = FakeLimitedCloud()
     _ = _apply_and_check(limited, _limited("8080"), None, String("(none)"), String("fake-limited"))
