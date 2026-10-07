@@ -496,6 +496,20 @@ def test_env_a_requirement_whose_name_is_a_pattern_is_refused() raises:
         String("pattern_regex"), String("^komira_nat.*$ ==1.0.0 ") + b,
         _pattern(String("^komira_nat.*$ ==1.0.0 ") + b),
     )
+    # the first word is found past leading whitespace, and runs through a
+    # `<channel>::` prefix to the next space
+    _refused_requirement(
+        String("pattern_lead"), String(" komira_nativ* ==1.0.0 ") + b,
+        _pattern(String(" komira_nativ* ==1.0.0 ") + b),
+    )
+    _refused_requirement(
+        String("pattern_tab"), String("\\tkomira_nativ* ==1.0.0 ") + b,
+        _pattern(String("\tkomira_nativ* ==1.0.0 ") + b),
+    )
+    _refused_requirement(
+        String("pattern_chan"), String("chan::komira_nativ* ==1.0.0 ") + b,
+        _pattern(String("chan::komira_nativ* ==1.0.0 ") + b),
+    )
 
 
 def test_env_another_package_named_like_the_native_one_is_not_checked_as_it() raises:
