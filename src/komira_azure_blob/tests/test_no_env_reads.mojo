@@ -25,8 +25,10 @@ comptime _FILES: List[String] = [
     "__init__.mojo",
     "azure.mojo",
     "azure_client.mojo",
+    "azure_client_spec.mojo",
     "azure_fs.mojo",
     "azure_sas.mojo",
+    "azure_sas_query.mojo",
     "azure_signing.mojo",
     "azure_xml.mojo",
 ]

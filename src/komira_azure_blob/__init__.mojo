@@ -10,7 +10,11 @@ the file system and the service SAS signer.
     real Azure (virtual-hosted) or Azurite (path-style); `azure_xml` reads
     the List Blobs and error bodies.
   * `AzureClient` — the per-worker bundle of HttpClient, signing layer,
-    store, connector and reactor.
+    store, connector and reactor; `SasQueryLayer` appends a SAS token to
+    each of its requests when it has one.
+  * `AzureCredential` (a Shared Key, a SAS token, or anonymous) and
+    `AzureClientSpec`, the endpoint, credential and connector factory a
+    client is built from.
   * `AzureFs` — komira_fs's `FileSystem` over one container, read-only.
   * `AzureSasSigner` — komira_objectstore's `ObjectUrlSigner`, as a blob
     service SAS.
@@ -29,13 +33,21 @@ from .azure import (
     build_azure_blob_url,
     build_azure_listing_url,
 )
-from .azure_client import AzureClient
+from .azure_client import AzureClient, AzureClientHttp
+from .azure_client_spec import (
+    AZURE_CREDENTIAL_ANONYMOUS,
+    AZURE_CREDENTIAL_SAS,
+    AZURE_CREDENTIAL_SHARED_KEY,
+    AzureClientSpec,
+    AzureCredential,
+)
 from .azure_fs import (
     AZURE_LIST_MAX_PAGES,
     AzureFileHandle,
     AzureFs,
     AzureWriteFile,
 )
+from .azure_sas_query import SasQueryLayer, azure_sas_query_normalize
 from .azure_signing import (
     AzureSharedKeyProvider,
     AzureSharedKeySigningContext,
