@@ -19,18 +19,18 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.arrow_types import ArrowType
 
-from komira_core.collections.batch_view import BatchView, batch_view_over
-from komira_core.collections.chunk_typed import (
+from komira_arrow.batch_view import BatchView, batch_view_over
+from komira_arrow.chunk_typed import (
     ChunkTyped,
     chunk_typed_from_view,
     chunk_typed_from_view_with_sel,
 )
-from komira_core.eval.selection_vector_row import RowSelectionVector
+from komira_arrow.selection_vector_row import RowSelectionVector
 
 
 # ---------------------------------------------------------------------------

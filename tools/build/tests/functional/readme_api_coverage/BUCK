@@ -1,0 +1,42 @@
+load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
+load(":fixture.bzl", "README_API_LEDGER", "README_API_TREE")
+
+# Test 40 (README API coverage), the half that must build: the planted tree of
+# fixture.bzl, whose census must equal expect_packages.tsv,
+# expect_symbols.tsv and expect_report.txt byte for byte (the counts, the
+# percentages, every symbol's status and the notes), with its one ledger row.
+# negative/readme_api_coverage plants one defect each in the same tree.
+[
+    export_file(
+        name = f,
+        visibility = ["tests//negative/readme_api_coverage:"],
+    )
+    for f in [
+        "a_errors.txt",
+        "a_extra.txt",
+        "a_greet.txt",
+        "a_init.txt",
+        "a_readme.txt",
+        "a_shapes.txt",
+        "a_test.txt",
+        "b_init.txt",
+        "b_thing.txt",
+        "c_init.txt",
+        "c_readme.txt",
+        "d_dee.txt",
+        "d_init.txt",
+        "d_readme.txt",
+        "exceptions.tsv",
+        "expect_report.txt",
+        "gen_buck.txt",
+    ]
+]
+
+readme_api_coverage(
+    name = "ok",
+    exceptions = README_API_LEDGER,
+    expect_packages = "expect_packages.tsv",
+    expect_report = "expect_report.txt",
+    expect_symbols = "expect_symbols.tsv",
+    files = README_API_TREE,
+)

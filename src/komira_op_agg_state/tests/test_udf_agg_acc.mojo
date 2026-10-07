@@ -21,10 +21,10 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_almost_equal
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import (
     Field, SchemaBuilder, RecordBatch, RecordBatchBuilder,
 )
 from komira_udf.agg_fn import AggFn, PodState
@@ -32,7 +32,7 @@ from komira_udf.schema_descriptor import schema_of, DT_F64
 from komira_kernels.simd_of import SimdOf
 from komira_op_agg_state.agg_fn_fused_kernel import _AggFnFusedKernel
 from komira_op_agg_state.agg_fn_acc import AggFnAcc
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 # =============================================================================

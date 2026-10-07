@@ -301,6 +301,29 @@
 #      row for a welded test or package (the ledger only shrinks; one test is
 #      welded only by a computed list), a row naming nothing, a row with no
 #      reason, and a root with no package.
+#  40. README API coverage (tools/build/lint/readme_api_coverage.bzl;
+#      docs/readme_api_coverage.md): //:readme_api_coverage (the census of
+#      every package under src/, report-only) and
+#      tests//functional/readme_api_coverage:ok (a planted tree whose census
+#      must equal its expected files, counts and statuses exactly) build; each
+#      target of tests//negative/readme_api_coverage fails naming its one
+#      planted finding: a malformed ledger row, a repeated row, a row for a
+#      symbol not exported, a row for a symbol the README uses (the ledger
+#      only shrinks), an undocumented symbol under `enforce = True`, and a
+#      root with no package.
+
+#  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
+#  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
+#      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
+#      file of the cell, against tests/pointer_lint_ffi.tsv and
+#      tests/pointer_lint_holds.tsv) and tests//functional/pointer_lint:ok (a
+#      planted tree whose every site is held at its exact count, beside near
+#      misses) build; each target of tests//negative/pointer_lint fails naming
+#      its one planted site (each rule, the two-statement partial move, a
+#      public method and __init__.mojo, one site over a hold, a non-origin
+#      site in an FFI module, an unlisted marked module) or ledger defect,
+#      an empty tree fails as checking nothing, and a target naming no tree
+#      is refused at analysis.
 set -uo pipefail
 
 umbrella=1
@@ -1129,6 +1152,67 @@ else
         fail "$name: named '$tw_named', want '$tw_want' (see $LOG/$name.log)"
     fi
 fi
+
+# 40
+expect_green readme_api_coverage //:readme_api_coverage tests//functional/readme_api_coverage:ok
+L=tests//functional/readme_api_coverage:exceptions.tsv
+N=tests//negative/readme_api_coverage
+for want in \
+    "malformed|$N/ledger_malformed.tsv:2: a row is <package><TAB><symbol><TAB><reason>, with a reason" \
+    "duplicate|$N/ledger_duplicate.tsv:3: komira_a top_level has a row already, on line 1" \
+    "stale_gone|$N/ledger_stale_gone.tsv:2: komira_a Circle: not exported by src/komira_a/__init__.mojo; delete the row" \
+    "stale_used|$N/ledger_stale_used.tsv:3: komira_a bye: src/komira_a/README.md uses it now; delete the row (the ledger only shrinks)" \
+    "enforce|$N:enforce[files]/src/komira_a/greet.mojo:23: komira_a Greeter.wave: exported and used by no README example" \
+    "empty|readme_api_coverage: checked nothing (no package under nosuch)"; do
+    expect_red "readme_api_coverage_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red readme_api_coverage_malformed_symbol "$N/ledger_malformed.tsv:3: a row is" "$N:malformed"
+expect_red readme_api_coverage_stale_private "$N/ledger_stale_gone.tsv:3: komira_a Greeter._secret: not exported" "$N:stale_gone"
+expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enforce"
+
+# 41
+# shellcheck source=tools/build/tests/coverage_tests.sh
+. "$ROOT/tools/build/tests/coverage_tests.sh"
+
+# 42
+expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
+N=tests//negative/pointer_lint
+S="$N/src/komira_a/plant.mojo"
+for want in \
+    "wildcard_origin|$S:2: wildcard_origin: " \
+    "from_address|$S:3: from_address: " \
+    "partial_move|$S:3: partial_move: " \
+    "partial_move_two|$S:4: partial_move: var v = p.take_pointee() (bound to a field's address at line 3)" \
+    "parallelize|$S:3: parallelize: " \
+    "libc_read|$S:3: libc_redeclare: " \
+    "libc_open|$S:3: libc_redeclare: " \
+    "public_pointer|$S:2: public_pointer: " \
+    "public_method|$S:3: public_pointer: " \
+    "public_init|$N/src/komira_b/__init__.mojo:2: public_pointer: " \
+    "held_new_site|$N/src/komira_a/held.mojo:85: parallelize: parallelize[_worker](n) -- the standard library's parallelize[: run the work on a ParallelDispatch (3 sites, held 2)" \
+    "ffi_from_address|$N/src/komira_a/ffi.mojo:11: from_address: " \
+    "ffi_unlisted|$N/src/komira_a/ffi_clean.mojo:7: wildcard_origin: " \
+    "holds_malformed|$N/holds_malformed.tsv:8: a row has 4 tab-separated fields (rule, file, count, reason), not 3" \
+    "holds_rule|$N/holds_rule.tsv:8: unknown rule \`pointer_magic\`" \
+    "holds_file|$N/holds_file.tsv:8: src/komira_a/gone.mojo is not a .mojo file of the tree; delete the row" \
+    "holds_count|$N/holds_count.tsv:8: count \`0\` is not a positive whole number" \
+    "holds_reason|$N/holds_reason.tsv:8: empty reason" \
+    "holds_duplicate|$N/holds_duplicate.tsv:8: a second row for parallelize in src/komira_a/held.mojo" \
+    "holds_lower|$N/holds_lower.tsv:6: parallelize in src/komira_a/held.mojo is held at 3 and has 2: lower the count to 2" \
+    "holds_delete|$N/holds_delete.tsv:8: from_address in src/komira_a/near.mojo is held at 1 and has 0: delete the row" \
+    "holds_ffi_wildcard|$N/holds_ffi_wildcard.tsv:8: wildcard_origin in src/komira_a/ffi.mojo is held at 2 and has 0: delete the row" \
+    "ffi_malformed|$N/ffi_malformed.tsv:3: a row has 2 tab-separated fields (file, reason), not 1" \
+    "ffi_unmarked|$N/ffi_unmarked.tsv:3: src/komira_a/near.mojo carries no \`# FFI-BOUNDARY:\` comment" \
+    "ffi_mention|$N/ffi_mention.tsv:3: src/komira_a/mention.mojo carries no \`# FFI-BOUNDARY:\` comment" \
+    "ffi_clean_row|$N/ffi_clean_row.tsv:3: src/komira_a/ffi_clean.mojo names no wildcard origin; delete the row" \
+    "ffi_file|$N/ffi_file.tsv:3: src/komira_a/gone.mojo is not a .mojo file of the tree; delete the row" \
+    "ffi_duplicate|$N/ffi_duplicate.tsv:3: a second row for src/komira_a/ffi.mojo" \
+    "ffi_reason|$N/ffi_reason.tsv:3: empty reason" \
+    "empty|pointer_lint: checked nothing"; do
+    expect_red "pointer_lint_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
+expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
 # 37
 pt_rc=0

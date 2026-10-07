@@ -3,7 +3,7 @@
 # bit-for-bit — and the scan ARM is really the one production takes.
 # =============================================================================
 #
-# `komira_core.eval.string_contains_scan` answers a bare `%lit%` (and the
+# `komira_column_kernels.string_contains_scan` answers a bare `%lit%` (and the
 # `contains()` function) with ONE SIMD substring scan over the column's
 # contiguous data buffer, mapping each hit back to its row, instead of one libc
 # `memmem` per row (a large share of CPU on ClickBench Q20). It is
@@ -28,18 +28,18 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.large_string_array import LargeStringArray
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.eval.string_comparison import (
+from komira_arrow.string_array import StringArray
+from komira_arrow.large_string_array import LargeStringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_column_kernels.string_comparison import (
     eval_string_like,
     eval_large_string_like,
     eval_string_contains,
     eval_large_string_contains,
 )
-from komira_core.eval.string_contains_scan import (
+from komira_column_kernels.string_contains_scan import (
     contains_scan_call_count,
     reset_contains_scan_call_count,
 )

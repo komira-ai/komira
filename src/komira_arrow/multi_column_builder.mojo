@@ -609,11 +609,11 @@ def string_column_slot(
 # `RowTransform.write_one` (eval layer) takes a
 # method-level type parameter `MCB: MultiColumnSink`.
 #
-# It lives HERE, in `komira_core`, next to `MultiColumnBuilder` — NOT in
+# It lives HERE, in `komira_arrow`, next to `MultiColumnBuilder` — NOT in
 # the eval layer where `RowTransform` lives. A struct can only declare
-# conformance to a trait importable at its own layer, and `komira_core`
+# conformance to a trait importable at its own layer, and the core packages
 # cannot import from the eval layer (the layering runs eval ->
-# `komira_core`). `MultiColumnBuilder` (this file) must conform to
+# the core packages). `MultiColumnBuilder` (this file) must conform to
 # `MultiColumnSink`, so the trait must be reachable here.
 #
 # The bound is `Movable` only — a builder is moved into the Stage's per-row

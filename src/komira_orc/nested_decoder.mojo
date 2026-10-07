@@ -42,15 +42,15 @@
 # Recursion is over schema-tree INDICES (flat arena), never recursive structs.
 # =============================================================================
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.arrow.column import Column
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.list_array import ListArray
-from komira_core.arrow.map_array import MapArray
-from komira_core.arrow.struct_array import StructArray
-from komira_core.arrow.union_array import UnionArray
-from komira_core.collections.slab import Slab
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.bitmap import Bitmap
+from komira_arrow.column import Column
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.list_array import ListArray
+from komira_arrow.map_array import MapArray
+from komira_arrow.struct_array import StructArray
+from komira_arrow.union_array import UnionArray
+from komira_collections.slab import Slab
 
 from std.sys import size_of
 

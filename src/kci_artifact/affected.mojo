@@ -22,6 +22,19 @@
 #               (the change reaches every declared unit). One trailing
 #               newline is allowed.
 #
+# And to build the units it decided:
+#
+#   kci runs    <build_targets.executable> <build_targets.args...> then
+#               targets, no placeholder. One unit alone gets its own targets
+#               (`render_targets_argv`). Units whose build_targets commands
+#               are element-wise identical (the executable and every arg) form
+#               one GROUP (`batch_groups`: groups in the order their first
+#               unit comes, unit order inside each), and a group of two or
+#               more runs once over the union of its units' targets, in unit
+#               order, exact repeats dropped (`render_batch_argv`). So a
+#               build_targets command must be correct on the union of several
+#               units' targets: it builds and tests them together.
+#
 # `parse_affected_answer` refuses anything else: an unknown line, an empty
 # line, a UNIT the build system does not own or names twice, a missing,
 # repeated or misplaced verdict, an n that is not the count, a WIDENED with
@@ -112,11 +125,24 @@ def render_affected_argv(arts: Artifacts, build_system: String, values: Affected
     return argv^
 
 
-def render_targets_argv(arts: Artifacts, unit: String) raises -> List[String]:
-    """`[executable] + build_targets.args + targets` of the unit named
-    `unit`. Raises on an unknown unit, a unit with no targets, or a build
-    system with no build_targets command."""
-    var units = units_of(arts)
+struct _UnitCommand(Copyable, Movable):
+    """One unit's build_targets command (`[executable] + args`) and its
+    targets.
+
+    Layout: owned values only. No pointer field."""
+
+    var command: List[String]
+    var targets: List[String]
+
+    def __init__(out self, var command: List[String], var targets: List[String]):
+        self.command = command^
+        self.targets = targets^
+
+
+def _unit_command(arts: Artifacts, units: List[Unit], unit: String) raises -> _UnitCommand:
+    """The build_targets command and the targets of the unit named `unit`
+    (`units` is `units_of(arts)`). Raises on an unknown unit, a unit with no
+    targets, or a build system with no build_targets command."""
     for i in range(len(units)):
         ref u = units[i]
         if u.name != unit:
@@ -132,14 +158,91 @@ def render_targets_argv(arts: Artifacts, unit: String) raises -> List[String]:
                 + String("' declares no build_targets command")
             )
         ref c = arts.build_systems[j].build_targets.value()
-        var argv = List[String]()
-        argv.append(c.executable.copy())
+        var command = List[String]()
+        command.append(c.executable.copy())
         for k in range(len(c.args)):
-            argv.append(c.args[k].copy())
-        for k in range(len(u.targets)):
-            argv.append(u.targets[k].copy())
-        return argv^
+            command.append(c.args[k].copy())
+        return _UnitCommand(command^, u.targets.copy())
     raise Error(String("no unit '") + unit + String("' is declared"))
+
+
+def _same(a: List[String], b: List[String]) -> Bool:
+    """Element-wise equal."""
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        if a[i] != b[i]:
+            return False
+    return True
+
+
+def _joined(xs: List[String]) -> String:
+    var s = String("")
+    for i in range(len(xs)):
+        if i > 0:
+            s += String(" ")
+        s += xs[i]
+    return s^
+
+
+def render_targets_argv(arts: Artifacts, unit: String) raises -> List[String]:
+    """`[executable] + build_targets.args + targets` of the unit named
+    `unit`. Raises on an unknown unit, a unit with no targets, or a build
+    system with no build_targets command."""
+    var c = _unit_command(arts, units_of(arts), unit)
+    var argv = c.command.copy()
+    for k in range(len(c.targets)):
+        argv.append(c.targets[k].copy())
+    return argv^
+
+
+def batch_groups(arts: Artifacts, units: List[String]) raises -> List[List[String]]:
+    """`units` split into groups whose build_targets commands are
+    element-wise identical (file header): groups in the order of their
+    first unit, `units`' order inside each. Raises as `render_targets_argv`
+    does for any unit."""
+    var all = units_of(arts)
+    var commands = List[List[String]]()
+    var groups = List[List[String]]()
+    for i in range(len(units)):
+        var c = _unit_command(arts, all, units[i])
+        var at = -1
+        for g in range(len(commands)):
+            if _same(commands[g], c.command):
+                at = g
+                break
+        if at < 0:
+            commands.append(c.command.copy())
+            groups.append(List[String]())
+            at = len(groups) - 1
+        groups[at].append(units[i].copy())
+    return groups^
+
+
+def render_batch_argv(arts: Artifacts, units: List[String]) raises -> List[String]:
+    """The shared build_targets command of `units`, then every unit's
+    targets in `units`' order with exact repeats dropped (file header).
+    Raises on an empty list, an unknown unit, a unit with no targets, or
+    units whose commands differ."""
+    if len(units) == 0:
+        raise Error(String("a batch needs at least one unit"))
+    var all = units_of(arts)
+    var first = _unit_command(arts, all, units[0])
+    var argv = first.command.copy()
+    var seen = List[String]()
+    for i in range(len(units)):
+        var c = _unit_command(arts, all, units[i])
+        if not _same(c.command, first.command):
+            raise Error(
+                String("unit '") + units[i] + String("' builds with `") + _joined(c.command) + String("` and unit '")
+                + units[0] + String("' with `") + _joined(first.command)
+                + String("`: one batch runs one build_targets command")
+            )
+        for k in range(len(c.targets)):
+            if not _contains(seen, c.targets[k]):
+                seen.append(c.targets[k].copy())
+                argv.append(c.targets[k].copy())
+    return argv^
 
 
 struct AffectedAnswer(Copyable, Movable):

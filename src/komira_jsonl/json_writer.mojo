@@ -12,7 +12,10 @@
 #
 #   - `fn write_i64_dec(mut buf, v: Int64)` — integer decimal-string encoder
 #   - `fn write_f64_dtoa(mut buf, v: Float64)` — IEEE 754 double-to-string;
-#       NaN / +Inf / -Inf -> `null` per RFC 8259 §6.
+#       NaN / +Inf / -Inf -> `null` per RFC 8259 §6. The batch and row
+#       writers refuse NaN / +-Inf in a NOT NULL column instead (the error
+#       names the column, the row and the value; `encode.
+#       not_null_nonfinite_error`).
 #   - `fn write_string_escaped(mut buf, s)` — JSON-spec string escape
 #       (matches `_emit_string_escaped` byte-for-byte, no String alloc).
 #   - `fn write_date32(mut buf, days)` — ISO-8601 `YYYY-MM-DD` encoder
@@ -48,17 +51,17 @@
 from std.bit import count_trailing_zeros
 from std.memory import bitcast
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.large_string_array import LargeStringArray
-from komira_core.arrow.string_array import StringArray
-from komira_core.simd.byte_class.byte_find_any_of import byte_find_eq_2_u8x16
-from komira_core.simd.byte_class.byte_mask_ops import bytemask_or
-from komira_core.simd.byte_class.comparisons import byte_lt
-from komira_core.simd.byte_class.movemask import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.large_string_array import LargeStringArray
+from komira_arrow.string_array import StringArray
+from komira_simd.byte_class.byte_find_any_of import byte_find_eq_2_u8x16
+from komira_simd.byte_class.byte_mask_ops import bytemask_or
+from komira_simd.byte_class.comparisons import byte_lt
+from komira_simd.byte_class.movemask import (
     bool_vec_to_uint_u8x16,
     movemask_to_uint_u8x16,
 )
@@ -69,6 +72,8 @@ from komira_jsonl.encode import (
     _nibble_hex_lower,
     _emit_float64,
     _emit_string_escaped,
+    check_float_column_writable,
+    not_null_nonfinite_error,
 )
 
 # JSONL row-native write: the row-native JSONL emitter reads cells
@@ -897,13 +902,19 @@ def _write_cell_pretty(
         if arr.is_null(row):
             _append_null_lit(buf)
         else:
-            write_f64_dtoa(buf, arr.get(row))
+            var v = arr.get(row)
+            if (_is_nan_f64(v) or _is_inf_f64(v)) and not batch.schema.field_nullable(col_index):
+                raise not_null_nonfinite_error(String(batch.schema.field_name(col_index)), row, v)
+            write_f64_dtoa(buf, v)
     elif at == ArrowType.FLOAT32:
         var arr = col_ref.as_primitive[DType.float32]()
         if arr.is_null(row):
             _append_null_lit(buf)
         else:
-            write_f64_dtoa(buf, Float64(arr.get(row)))
+            var v = Float64(arr.get(row))
+            if (_is_nan_f64(v) or _is_inf_f64(v)) and not batch.schema.field_nullable(col_index):
+                raise not_null_nonfinite_error(String(batch.schema.field_name(col_index)), row, v)
+            write_f64_dtoa(buf, v)
     elif at == ArrowType.BOOL:
         var arr = col_ref.as_boolean()
         if arr.is_null(row):
@@ -1413,9 +1424,11 @@ def _encode_column_cells_fused(
         _encode_col_uint8_cells(cell_bytes, cell_offsets, arr, row_start, row_end)
     elif at == ArrowType.FLOAT64:
         var arr = col_ref.as_primitive[DType.float64]()
+        check_float_column_writable(arr, row_start, row_end, batch.schema, col_index)
         _encode_col_float64_cells(cell_bytes, cell_offsets, arr, row_start, row_end)
     elif at == ArrowType.FLOAT32:
         var arr = col_ref.as_primitive[DType.float32]()
+        check_float_column_writable(arr, row_start, row_end, batch.schema, col_index)
         _encode_col_float32_cells(cell_bytes, cell_offsets, arr, row_start, row_end)
     elif at == ArrowType.BOOL:
         var arr = col_ref.as_boolean()
@@ -1636,7 +1649,8 @@ def write_batch_jsonl_fused_range(
 # reusing the EXACT same value formatters:
 #   * INT64 / INT32  -> `write_i64_dec` (decimal-string encoder).
 #   * FLOAT64 / FLOAT32 -> `write_f64_dtoa` (shortest-round-trip; NaN/Inf ->
-#     `null`). FLOAT32 is widened to Float64 before the call, MATCHING the
+#     `null`, refused in a NOT NULL column as the columnar writers refuse
+#     it). FLOAT32 is widened to Float64 before the call, MATCHING the
 #     column path's `_write_cell_pretty` FLOAT32 arm (`write_f64_dtoa(buf,
 #     Float64(arr.get(row)))`).
 #   * STRING -> `write_string_escaped` (the same JSON escape lattice + quoting).
@@ -1681,6 +1695,8 @@ def write_row_output_jsonl(
         write_string_escaped(kb, String(schema.field_name(c)))
         keys.append(kb^)
 
+    # Row number across blocks, for the NOT NULL NaN / +-Inf refusal.
+    var row_index = 0
     for bi in range(len(ro.blocks)):
         ref blk = ro.blocks[bi]
         for r in range(blk.n_rows):
@@ -1703,12 +1719,20 @@ def write_row_output_jsonl(
                     write_i64_dec(
                         buf, Int64(blk.read_fixed[DType.int32](r, off))
                     )
-                elif dt == DT_F64:
-                    write_f64_dtoa(buf, blk.read_fixed[DType.float64](r, off))
-                elif dt == DT_F32:
-                    write_f64_dtoa(
-                        buf, Float64(blk.read_fixed[DType.float32](r, off))
-                    )
+                elif dt == DT_F64 or dt == DT_F32:
+                    var v: Float64
+                    if dt == DT_F64:
+                        v = blk.read_fixed[DType.float64](r, off)
+                    else:
+                        v = Float64(blk.read_fixed[DType.float32](r, off))
+                    if (
+                        (_is_nan_f64(v) or _is_inf_f64(v))
+                        and not schema.field_nullable(c)
+                    ):
+                        raise not_null_nonfinite_error(
+                            String(schema.field_name(c)), row_index, v
+                        )
+                    write_f64_dtoa(buf, v)
                 elif dt == DT_STRING:
                     var raw = blk.read_var_string_at(r, off)
                     var s = String(StringSlice(unsafe_from_utf8=Span(raw)))
@@ -1722,3 +1746,4 @@ def write_row_output_jsonl(
                 c = c + 1
             buf.append(UInt8(0x7D))  # }
             buf.append(UInt8(0x0A))  # \n
+            row_index += 1

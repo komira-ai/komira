@@ -28,7 +28,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.collections.constant_filter import ConstantFilter
+from komira_dynamic_filter.constant_filter import ConstantFilter
 from komira_morsel.dynamic_join_filter import DynamicJoinFilter
 
 

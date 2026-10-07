@@ -42,7 +42,7 @@
 #   - filter_fn.mojo — `FilterFn` (refines `Predicate`).
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 from komira_udf.purity import Purity
 
 

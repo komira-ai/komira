@@ -1,0 +1,78 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_azure_blob's AzureFs and AzureClient over a real
+# KernelTcpConnector, against a fake Blob service on 127.0.0.1:0 served by a
+# real komira_http_server on a second thread (komira_fork_join). The fake
+# recomputes each request's Shared Key signature with its own canonicalizer
+# (written from the Shared Key document, not komira_azure_blob's) under the
+# published Azurite development key, and refuses a mismatch with 403
+# AuthenticationFailed. Nothing ships, so `conda = False`.
+#
+# A package of its own, not a test of komira_azure_blob: the fake needs an
+# HTTP server and a second thread, and a welded test's imports are the
+# library's deps, so testing it there would put komira_http_server and
+# komira_fork_join into every consumer of komira_azure_blob.
+#
+# The welded test, test_azure_loopback_e2e: read_at (several ranges, the last
+# byte, a short read at EOF), file_size, read_footer, read_ranges_prefetched
+# and AzureClient's head_blob / get_blob_range; list over four NextMarker
+# pages, list_dir_shallow with a delimiter (under a prefix and at the root),
+# is_dir; a missing blob (404 BlobNotFound) and container (404
+# ContainerNotFound) read as NOT_FOUND, a range at EOF (416) as MALFORMED, and
+# a wrong key refused 403 and read as PERMISSION_DENIED. The fake's request
+# log pins each Range header and each List Blobs query on the wire.
+#
+# test_shared_key_oracle pins the fake's own string-to-sign to the Shared Key
+# document's examples and a hand-built vector, so the oracle cannot share a
+# misreading with the signer unseen.
+#
+# `deps` lists the Mojo packages of the full transitive closure of
+# komira_azure_blob, komira_http_server and komira_fork_join.
+mojo_library(
+    name = "komira_azure_blob_e2e",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_azure_blob:komira_azure_blob",
+        "//src/komira_azure_core:komira_azure_core",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_json:komira_json",
+        "//src/komira_log:komira_log",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_net:komira_net",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_uuid:komira_uuid",
+        "//src/komira_xml:komira_xml",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_azure_loopback_e2e.mojo",
+        "tests/test_shared_key_oracle.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

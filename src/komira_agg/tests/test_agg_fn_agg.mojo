@@ -40,11 +40,11 @@
 # patterns (BatchView fixture + parametric trait-dispatch helpers).
 # =============================================================================
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.collections.batch_view import BatchView, batch_view_over
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_arrow.batch_view import BatchView, batch_view_over
 
 from komira_udf.agg_fn import AggFn, PodState
 from komira_agg.aggregator import Aggregator

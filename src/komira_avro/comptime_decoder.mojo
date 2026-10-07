@@ -39,9 +39,9 @@
 # so the output RecordBatch is byte-identical.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_collections.slab import Slab
 
 from .action_table import (
     ActionTableInterpreter,

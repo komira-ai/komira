@@ -15,7 +15,7 @@
 #   No wildcard origins on any signature; no unsafe_from_address=Int; no
 #   take_pointee. The C shim owns all ABI-hostile syscalls (posix_spawn's
 #   pointer-array argv/envp/file_actions, waitpid's WIF* macro decode,
-#   pidfd_open).
+#   waitid's P_ALL/WNOWAIT probe, pidfd_open).
 # =============================================================================
 
 from std.ffi import external_call
@@ -345,6 +345,52 @@ def proc_reap(pid: Int32, nohang: Bool) -> ReapStatus:
             collected=False, error=True, exited=False,
             exit_code=Int32(-1), signaled=False, signal=Int32(-1),
         )
+
+
+# -----------------------------------------------------------------------------
+# proc_probe_children -- does this process have any child, asked WITHOUT
+# reaping one: waitid(P_ALL, 0, WEXITED | WNOHANG | WNOWAIT) in the shim.
+#
+# "A child exists" means any child of this process that reports its exit with
+# SIGCHLD (every posix_spawn child does; without __WALL, Linux waitid skips
+# __WCLONE children), in any state: running, stopped, or exited and not yet
+# reaped. An exited child stays a zombie (its
+# owner still collects it with waitpid(pid)); `exited_pid` names one such
+# child, or is 0 when none has exited. Only ECHILD means "no child"; any other
+# waitid failure raises with its errno.
+#
+# FFI-BOUNDARY: the shim writes two caller-owned stack Int32 slots during the
+# call and retains nothing; no pointer leaves this function.
+# -----------------------------------------------------------------------------
+@fieldwise_init
+struct ChildProbe(Copyable, ImplicitlyCopyable, Movable):
+    """What proc_probe_children saw (see its header)."""
+
+    var any_child: Bool
+    var exited_pid: Int32  # an exited, still-unreaped child; 0 when none
+
+
+def proc_probe_children() raises -> ChildProbe:
+    """Whether this process has any child, without reaping one. Raises on any
+    waitid failure but ECHILD (the message carries the errno)."""
+    var out_exited_pid = Int32(0)
+    var out_errno = Int32(0)
+    # SAFETY: both pointers are to the two locals above, which outlive the
+    # call; the shim writes them synchronously and keeps neither.
+    var r = external_call["komira_proc_probe_children", Int32](
+        UnsafePointer(to=out_exited_pid),
+        UnsafePointer(to=out_errno),
+    )
+    _ = out_exited_pid
+    _ = out_errno
+    if r == Int32(1):
+        return ChildProbe(any_child=True, exited_pid=out_exited_pid)
+    if r == Int32(0):
+        return ChildProbe(any_child=False, exited_pid=Int32(0))
+    raise Error(
+        String("waitid(P_ALL, WEXITED|WNOHANG|WNOWAIT) failed: errno ")
+        + String(out_errno)
+    )
 
 
 # -----------------------------------------------------------------------------

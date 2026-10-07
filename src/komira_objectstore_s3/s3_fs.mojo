@@ -71,11 +71,11 @@
 from std.memory import ArcPointer, unsafe_memcpy
 
 from komira_aws_core import AwsClock, AwsCredsSource
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
-from komira_core.plan.fs_descriptor_pod import FS_SCHEME_S3
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
+from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_S3
 from komira_fs.file_system import FileSystem, WriteMode
 from komira_fs.footer_region import FooterRegion, speculative_tail_start
 # `_shallow_basename` is komira_fs's one definition of a listing key's final

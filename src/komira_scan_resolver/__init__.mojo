@@ -9,6 +9,6 @@
 # keyed by kind id, that refuses a duplicate kind and an unknown one by name.
 # `drain_scan` is the bounded read over any conformer.
 #
-# Depends on `komira_core` only. See `scan_source_resolver.mojo`,
+# Depends on the core packages only. See `scan_source_resolver.mojo`,
 # `scan_split.mojo` and `drain_scan.mojo`.
 # =============================================================================

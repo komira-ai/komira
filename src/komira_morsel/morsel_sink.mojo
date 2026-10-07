@@ -12,7 +12,7 @@
 # names `capabilities() -> SinkCapabilities` -- still deferred.
 # =============================================================================
 
-from komira_core.arrow.schema import RecordBatch
+from komira_arrow.schema import RecordBatch
 from .morsel import Morsel
 from .pipeline_execution import PipelineExecution
 

@@ -3,7 +3,7 @@
 #
 # The row-mode design slices a BatchOf through a SelectionVector at the COLUMN borrow site
 # (not via a typed batch wrapper, which is structurally hostile in Mojo
-# 1.0.0b1). The `load_via_sel` free function in `komira_core.eval.selection_vector_row`
+# 1.0.0b1). The `load_via_sel` free function in `komira_arrow.selection_vector_row`
 # is that primitive.
 #
 # Correctness contract: `load_via_sel[T](array, sel, k)` is byte-identical to
@@ -16,8 +16,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.eval.selection_vector_row import (
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.selection_vector_row import (
     RowSelectionVector,
     load_via_sel,
 )

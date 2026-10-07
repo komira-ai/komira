@@ -3,8 +3,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The HTTP server over the komira_async reactor: accept loop, dispatch, serve_h2,
 # the connection, HttpServer, the middleware chain, the router, and the
-# serverless entry point. It depends on komira_http_core and not on
+# serverless entry point. It depends on komira_http_core, and its tests take
 # their scratch directory from `test_tmpdir()`.
+#
+# It is generic: no identity, tenancy or authorization model of its own. An
+# embedder plugs in its own `Middleware` (see middleware/middleware.mojo), and
+# tests/test_no_product_vocabulary.mojo keeps product concepts out.
 
 mojo_library(
     name = "komira_http_server",
@@ -12,8 +16,9 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
         "//src/komira_http_core:komira_http_core",
+        "//src/komira_libc:komira_libc",
         "//src/komira_log:komira_log",
         "//src/komira_uuid:komira_uuid",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
@@ -32,7 +37,9 @@ mojo_library(
         "tests/test_L3_tracing.mojo",
         "tests/test_L4_routing_basic.mojo",
         "tests/test_chunked_request_body_dispatch.mojo",
+        "tests/test_claims_principal.mojo",
         "tests/test_cloudrun_bind_before_warmup.mojo",
+        "tests/test_custom_middleware.mojo",
         "tests/test_e2e_bind_any_addr.mojo",
         "tests/test_e2e_bring_up.mojo",
         "tests/test_e2e_fault_attribution_socket.mojo",
@@ -42,6 +49,7 @@ mojo_library(
         "tests/test_fault_report_emit_line_loss.mojo",
         "tests/test_gcp_cloud_run_serve_stack.mojo",
         "tests/test_middleware_in_dispatch_path.mojo",
+        "tests/test_no_product_vocabulary.mojo",
         "tests/test_route_pack.mojo",
         "tests/test_serverless_entry.mojo",
     ],
@@ -49,6 +57,12 @@ mojo_library(
         "tests/test_L3_metrics_sink.mojo": {
             "src/komira_http_server/middleware/metrics.mojo": "middleware/metrics.mojo",
         },
+        # The vocabulary test reads the library's own sources, staged at their
+        # repository paths.
+        "tests/test_no_product_vocabulary.mojo": glob(
+            ["**/*.mojo"],
+            exclude = ["tests/**/*.mojo"],
+        ),
     },
     visibility = ["PUBLIC"],
 )

@@ -12,7 +12,7 @@ Terms used below:
 - A **connector** dials a connection and returns a **stream**, a non-blocking byte stream conforming to `IoStream`.
 - A **serve round** handles one reactor event on one connection.
 
-The library depends on `komira_async`, `komira_core`, `komira_obs`, `komira_uuid`, the vendored s2n-tls (`third_party/s2n-tls`) and `komira_runtime_paths`.
+The library depends on `komira_async`, `komira_collections`, `komira_libc`, `komira_obs`, `komira_uuid`, the vendored s2n-tls (`third_party/s2n-tls`) and `komira_runtime_paths`.
 
 Out of scope:
 
@@ -75,9 +75,11 @@ Any other HTTP/2 request is matched against the server's `Router`: a match answe
 
 ### How do middleware and routing work?
 
-`MiddlewareChain` (`src/komira_http_server/middleware/chain.mojo`) holds four optional built-ins, `ErrorMappingMiddleware`, `CorsMiddleware`, `TracingMiddleware` and `LoggingMiddleware`, and runs one user middleware that the caller passes in. `run_before_legs` calls `before` on CORS, tracing, logging, then the user middleware; a `before` that returns a response skips the rest and the handler. `run_after_legs` calls `after` in reverse order on whatever response resulted, and skips the user middleware's `after` when its `before` did not run. A raise is turned into a response by `map_chain_error`. `MetricsMiddleware` and `PairMiddleware` (`middleware/metrics.mojo`) are user-slot middleware: the first reports one `RequestMetric` per request to a `MetricsSink`, and the second runs two middleware in one slot.
+`MiddlewareChain` (`src/komira_http_server/middleware/chain.mojo`) holds four optional built-ins, `ErrorMappingMiddleware`, `CorsMiddleware`, `TracingMiddleware` and `LoggingMiddleware`, and runs one user middleware that the caller passes in. `run_before_legs` calls `before` on CORS, tracing, logging, then the user middleware; a `before` that returns a response skips the rest and the handler. `run_after_legs` calls `after` in reverse order on whatever response resulted, and skips the user middleware's `after` when its `before` did not run. A raise is turned into a response by `map_chain_error`. `MetricsMiddleware` and `PairMiddleware` (`middleware/metrics.mojo`) are user-slot middleware: the first reports one `RequestMetric` per request to a `MetricsSink`, and the second runs two middleware in one slot, and nests to compose more.
 
-In `serve_one_iteration_dispatch_chained`, the dispatcher is a `CtxRequestDispatcher`: `dispatch_with_ctx` also receives the `RequestContext` the chain filled in, for example the `AuthedUser` an authentication middleware resolved.
+The library has no identity or authorization model of its own. `RequestContext` carries an optional `Principal` (an opaque `subject` string plus a `Claims` string map) and an `attributes` string map; an embedder's middleware fills them and its dispatcher reads them. `tests/test_no_product_vocabulary.mojo` fails the build if a library source names a tenancy, grant or hosted-application concept (the word list is in the test).
+
+In `serve_one_iteration_dispatch_chained`, the dispatcher is a `CtxRequestDispatcher`: `dispatch_with_ctx` also receives the `RequestContext` the chain filled in, for example the `Principal` an authentication middleware attached.
 
 Two routers exist. `Router` (`src/komira_http_server/routing/router.mojo`) maps a method and path to an integer handler id; patterns hold static segments, `:name` parameters and a `*` that matches the rest of the path and must be the last segment. `AppRouter[*Routes]` (`src/komira_http_server/routing/route.mojo`) is a `RequestDispatcher` over a compile-time pack of `Route` types, each with a `METHOD`, a `PATTERN` and a `handle[RT]` method. It matches through a `Router`, fills `req.path_params`, and answers 405 for a known path with the wrong method and 404 for an unknown path.
 

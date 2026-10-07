@@ -1,22 +1,27 @@
 # kcov path tools
 
-Two static executables for running a test under kcov in a build action and
-getting a coverage report whose bytes depend only on the sources and the
-tests. Both are built from one Zig file each with the pinned zig (`zig_exe`,
-`tools/build/mojo/toolchain.bzl`), and run with no shell, PATH or network.
+Static executables for building a test with debug info and running it
+under kcov in a build action, with a coverage report whose bytes depend only
+on the sources and the tests. Each is built from one Zig file with the pinned
+zig (`zig_exe`, `tools/build/mojo/toolchain.bzl`), and runs with no shell,
+PATH or network.
 
 | target | what it does |
 |---|---|
 | `:debug_relocate` | overwrites a directory path in a file (a test binary) with a placeholder of the same length |
 | `:cov_normalize` | rewrites one kcov Cobertura report to repository paths, in a canonical form |
+| `:cov_zig` | the `zig` of a coverage build's link directory: keeps a link's debug info and relocates the action's directories out of it |
+| `:cov_link` | that link directory (`cov_link_dir`): `cov_zig`, `debug_relocate` and the Mojo toolchain's zig, what a coverage build of a `mojo_library` links through ([Coverage builds](../../mojo/README.md#coverage-builds)) |
 
 ## Why: the sandbox path in the debug info
 
-A coverage build keeps the DWARF line tables, which kcov reads. They name the
-directory the compile ran in (`DW_AT_comp_dir`, and every source path under
-it). Under remote execution that is the action's own absolute sandbox
-directory, which differs per action (for example `/worker/build/<hex>/root`);
-locally it is a path in the checkout.
+A coverage build keeps the DWARF line tables, which kcov reads. A compiler
+that records the directory the compile ran in (`DW_AT_comp_dir`, and a
+source path under it) writes the action's own absolute sandbox directory,
+which differs per action under remote execution; locally it is a path in the
+checkout. In a Mojo coverage binary only zig's C runtime units do: the
+pinned Mojo records no compilation directory and names its sources by
+relative paths ([Names in a coverage binary](#names-in-a-coverage-binary)).
 Left in, it makes the binary differ from one action to the next (no cache hit,
 no reproducible bytes), and it trips the wrapper's check that no output names
 the action's directory. So the coverage build rewrites it.
@@ -39,10 +44,12 @@ The rewrite has to satisfy two things at once:
   followed by `_` characters names nothing, so `realpath` fails and kcov keeps
   it as written.
 
-So a directory of length L becomes `/` and L-1 `_`, and kcov is run with
-`--replace-src-path='^/_+:<source root>'` (the expression matches the
-placeholder of any length, so no length needs to agree between actions) and
-`--configure=cobertura-full-paths=1`. Without the latter kcov writes each file
+So a directory of length L becomes `/` and L-1 `_`, and a name under the
+placeholder is mapped with `--replace-src-path='^/_+:<source root>'` (the
+expression matches the placeholder of any length, so no length needs to
+agree between actions); in a Mojo binary that is only the C runtime, whose
+files are excluded, and the Mojo names are relative (see the table below).
+kcov is run with `--configure=cobertura-full-paths=1`. Without the latter kcov writes each file
 name relative to the common prefix of that one report, so a report holding
 only test files would get bare names, and they could not be mapped back to
 the package.
@@ -65,10 +72,20 @@ followed by `/` (a path under it) or NUL (the end of a string, such as
 `DW_AT_comp_dir`) is rewritten to `/` and `_` up to the same length.
 Occurrences are found left to right and do not overlap; the byte before an
 occurrence is not looked at. It prints `<count> <dir>` per directory, before
-the file is written; a directory with no occurrence counts 0. A count of 0
-does not prove the file is free of the directory: a compressed debug section
-(`SHF_COMPRESSED`) hides it from a byte search. A caller that expects the
-directory (the `DW_AT_comp_dir` of a debug build) requires a count above 0.
+the file is written; a directory with no occurrence counts 0. A caller that
+expects the directory (the `DW_AT_comp_dir` of a debug build) requires a
+count above 0.
+
+- An ELF file with a section whose flags hold `SHF_COMPRESSED` is refused
+  (exit 1, untouched): a compressed section's bytes are not the strings it
+  holds, so a byte search could miss the directory there and a count of 0
+  would claim a clean file. So is an ELF file whose section headers cannot be
+  read (not little-endian, or past the end of the file), which cannot be
+  shown free of one. A file that does not start with the ELF magic is
+  searched as bytes.
+- Relocating is idempotent: the placeholder never holds the directory it
+  replaced, so a second run with the same directory rewrites nothing and
+  does not write the file.
 
 - An occurrence followed by any other byte, or by the end of the file, is
   refused (exit 1) with its offset: it is a longer name that only starts with
@@ -84,6 +101,83 @@ directory (the `DW_AT_comp_dir` of a debug build) requires a count above 0.
   a regular file and leave the file it names as it was. Pass the file itself.
 - Exit 1 always means the file is unchanged, including when printing the
   counts fails.
+
+## cov_zig
+
+```
+<dir>/zig <zig arguments...>
+```
+
+`mojo_wrapper.sh` runs every link of `mojo build` as `<zig_dir>/zig cc
+-target <t> -Wl,--strip-debug ...`. A coverage build passes `:cov_link` as
+`<zig_dir>`, so the wrapper is the same file for every compile; `cov_zig`
+finds its directory from `argv[0]` and runs `real/zig` and `debug_relocate`
+from there.
+
+A `cc` or `c++` that links (an `-o` output, and none of `-c`, `-S`, `-E`,
+`-M`, `-MM`, `-fsyntax-only`):
+
+- drops every `-Wl,--strip-debug`, so the line tables the compiler wrote
+  reach the binary;
+- appends `-Wl,--build-id=none -Wl,--compress-debug-sections=none`. Not
+  `-Wl,-O1`: zig 0.12 ignores a linker optimization level and warns that it
+  did;
+- runs `real/zig`, and exits with its status if the link fails (128 + N for
+  signal N);
+- runs `debug_relocate <output> <dirs>`: the working directory (`getcwd`),
+  then `$PWD` when it is another absolute path to it (LLVM records that
+  spelling when it names the same directory), then an absolute
+  `$BUCK_SCRATCH_PATH` outside the working directory (zig's cache, where it
+  builds its C runtime objects, is there). A `$PWD` or `$BUCK_SCRATCH_PATH`
+  that is relative, under 8 bytes, or the working directory or under it is
+  left out without an error; a working directory under 8 bytes is
+  `debug_relocate`'s usage error, so the link fails;
+- fails (exit 1) when `debug_relocate` refuses, passing its message on, or
+  when the output has a `.debug_info` or `.debug_line` section and the working
+  directory, `getcwd` and `$PWD` counted together, was found 0 times. In a
+  Mojo binary the only units that record a directory are zig's C runtime's
+  (`crt1`, `crti`, `crtn`, as `DW_AT_comp_dir`), so a count of 0 means they
+  record one nobody relocated (the binary would differ by machine) or have no
+  debug info. An output that is not an ELF64 little-endian file is refused
+  too.
+
+A link at a release optimization level (`-O1` to `-O4`, `-Ofast`, `-Os`,
+`-Oz`) is refused before `real/zig` runs: zig 0.12 then gives lld `-O2` or
+`-O3` (`link/Elf.zig`), which merges string tails in `.debug_str`, and since
+`debug_relocate` does not look at the byte before an occurrence, a string
+that is the tail of a relocated directory would be rewritten with it. `-O0`
+and `-Og` are Debug for zig, and a bare `-O` reaches clang without changing
+the mode; Mojo's links pass none of the refused levels.
+
+Anything else (a compile, another subcommand) runs `real/zig` unchanged.
+Exit status: `real/zig`'s, 1 for a refused output, 2 when `argv[0]` names no
+directory or `real/zig` cannot be run.
+
+The wrapper's check that no output holds the action's working directory
+(exit 4) stays on: it runs after `cov_zig`, on the relocated binary, so a
+relocation that did not happen fails there; test 41 plants one ([tests README](../../tests/README.md#41-coverage-builds)).
+
+## Names in a coverage binary
+
+What the line tables of a `mojo_library` coverage binary name, and what the
+step that runs kcov over it has to map. Read from the binaries of
+`komira_retry` and of test 41's `covlib` with `readelf --debug-dump`:
+
+| units | directory | file names | maps to |
+|---|---|---|---|
+| the test (`producer: Mojo`) | none | `tests` + `test_<x>.mojo` | the package's `tests/` |
+| the library | none | `buck-out/v2/art/<cell>/<package>/__<target>__/<hash>/src/<import>` + the file, where `<hash>` names the staged source directory | the package's `<import>/` |
+| the Mojo standard library | none | `oss/modular/mojo/stdlib/std/...` | nothing in the repository: excluded |
+| zig's C runtime (`crt1`, `crti`, `crtn`) | the placeholder `/___...` | `buck-out/v2/art/komira/tools/build/coverage/kcov/__cov_link__/<hash>/cov_link/real/lib/libc/...`, where `<hash>` is the configuration of `:cov_link` | nothing in the repository: excluded |
+
+Every Mojo name is relative and no Mojo unit records a directory, so kcov
+resolves them against its own working directory: the step that runs kcov
+has to start it in a directory where those relative names resolve to the
+sources, or map each form above. The `--replace-src-path` placeholder
+rule matches only the runtime's names. The runtime's `<hash>` is the same in
+every checkout whose execution platforms are configured the same (a
+repository that mounts komira as a cell and copies its platforms); no test
+compares a binary across two checkouts.
 
 ## cov_normalize
 
@@ -148,7 +242,10 @@ Exit status, both tools: 0 done, 1 refused, 2 bad usage.
 
 Each tool's cases run as a build action (`kcov_tool_cases` in
 [defs.bzl](defs.bzl)) that exits non-zero on the first wrong result, and the
-public target (`:debug_relocate`, `:cov_normalize`) depends on them. Buck2 runs
+public target (`:debug_relocate`, `:cov_normalize`, `:cov_zig`) depends on
+them; `:cov_link` takes the public targets, so a coverage build is gated by
+their cases. The cases of `cov_zig` also take `:debug_relocate` and the pinned zig
+(`helpers`). Buck2 runs
 a dependency's validations with any build that uses it, so the tool cannot be
 built, or used, unless its cases pass. The public target and the cases both
 take the executable as an `exec_dep` on the same execution platform, so the
@@ -174,6 +271,36 @@ part way; a probe first checks that the shell can do this.
 | symbolic link | exit 1, the link still a link, its target unchanged | the link replaced by a regular file |
 | failed write | exit 1, file unchanged, no temporary file left | exiting without removing the temporary file |
 | failed stdout | exit 1 and the file unchanged | printing the counts after the rename |
+| compressed section | an ELF64 file whose second section has `SHF_COMPRESSED` (0x800) is refused, exit 1 naming the section, nothing printed, untouched, although its directory is rewritable | no check (red-first: it failed before the check existed); a mask other than 0x800 |
+| uncompressed ELF | the same file with flags 0x2 is relocated as any file | refusing every ELF file |
+| idempotent | the relocated file again: `0 <dir>`, exit 0, same bytes, same inode | a placeholder that holds the directory; writing a file with no occurrence |
+| section headers past the end | refused, exit 1, untouched | reading section headers without a bounds check (ReleaseSafe panics, exit 134) |
+| compressed section, `e_shnum` 0 | an ELF64 file whose `e_shnum` is 0 and whose section 0 `sh_size` holds the count (3): the compressed section is found and refused; with flags 0x2 it is relocated | the count in section 0 not read (planted: red) |
+| compressed section, ELF32 | an ELF32 file (40-byte section headers, 32-bit flags) with a compressed section: refused, untouched; with flags 0x2 it is relocated | ELF32 files not looked at (planted: red) |
+
+`cov_zig_cases.sh` runs `cov_zig` from a directory whose `real/zig` is a
+stand-in (a script that records its arguments and copies a given ELF file to
+the `-o` output) and, in the last two cases, the pinned zig itself. The
+fixtures put the working directory where a C runtime unit's
+`DW_AT_comp_dir` would be:
+
+| case | proves | a defect it catches |
+|---|---|---|
+| link | `-Wl,--strip-debug` dropped, the two flags appended after the compiler's arguments, the rest in order; the working directory in the output rewritten to its placeholder | strip kept; a flag missing; no relocation |
+| joined `-o` | `-oout` is a link output too | |
+| compile | `-c`: the arguments unchanged, the output not relocated | a compile taken for a link |
+| other subcommand | passes through unchanged | |
+| failed link | real/zig's exit status (7), nothing relocated | the status dropped |
+| debug info elsewhere | a `.debug_line` section without the working directory: exit 1 | no zero-count check; debug sections not seen |
+| no debug section | no section and no directory: exit 0 | |
+| relocation refused | the directory followed by `x`: exit 1, debug_relocate's message passed on | debug_relocate's status ignored |
+| compressed section | exit 1 naming `SHF_COMPRESSED` | |
+| not ELF | exit 1 | |
+| logical directory | reached through a symbolic link: `$PWD` and an absolute `$BUCK_SCRATCH_PATH` outside it are relocated too | `$PWD` ignored |
+| logical only | the output names only `$PWD`, not `getcwd`: relocated, exit 0 | a zero count of `getcwd` alone failing the link (red-first: it did) |
+| release level | `-O1` to `-O4`, `-Ofast`, `-Os`, `-Oz` on a link: exit 1 naming the level, `real/zig` not run; `-O0`, `-Og`, `-O` and a `-c -O2` compile pass | no refusal (red-first); refusing a Debug level (red-first: `-Og` was refused) |
+| pinned zig | a C file compiled with `-g` and linked through `cov_zig` with `-Wl,--strip-debug`: `.debug_line` kept, the placeholder present, the directory absent, no compressed section | the flags rejected by zig 0.12 |
+| pinned zig, release | the same link through zig directly has no `.debug_line`, so the previous case's line tables are `cov_zig`'s doing | |
 
 `cov_normalize_cases.sh` runs `fixtures/kcov_full_paths.xml` (a made-up kcov
 report with absolute paths, in both the sandbox and the placeholder form):

@@ -127,7 +127,7 @@ from komira_async.reactor.reactor import Reactor
 # trigger branch in `_append_inner`'s retry loop. NO wildcard-origin field
 # the field is `Optional[OwnedPointer[MetricsSet]]`, a POD handle
 # behind the canonical OwnedPointer indirection. Cycle-free: komira_metrics deps
-# {komira_core and the small leaf packages} only — never reaches back into komira_objectstore.
+# {the core packages and the small leaf packages} only — never reaches back into komira_objectstore.
 from komira_metrics.metrics_set import MetricsSet, new_owned_metrics_set
 
 from komira_objectstore.path import Path
@@ -140,6 +140,18 @@ from komira_objectstore.chunk_reclaim_guard import (
     reap_is_refused,
     reap_refused_error,
     rewrite_target_deleted_error,
+)
+
+# The reaped-slot guard (opt-in; komira-ai/komira#486): a create that wins a
+# chunk slot below `_LOG_START` is never reported committed. The rules, the
+# soundness argument and the error text live in `manifest_slot_guard`; this
+# file only calls them (cycle-free: it imports nothing from this package).
+from komira_objectstore.manifest_slot_guard import (
+    head_is_below_log_start,
+    log_start_unread_error,
+    probed_slot_is_below_log_start,
+    slot_reaped_error,
+    won_slot_is_reaped,
 )
 
 # Adaptive index sharding: the neutral shard-id +
@@ -878,7 +890,7 @@ trait MetadataStore(Movable, Deinitable):
 # =============================================================================
 #
 # We deliberately do NOT pull a JSON library into komira_objectstore (it
-# depends only on komira_core — adding a serde dep would invert the DAG).
+# depends only on the core packages — adding a serde dep would invert the DAG).
 # The chunk object the manifest protocol manages has a tiny fixed envelope:
 #   [ record_count: Int64 LE ][ body_len: Int64 LE ][ body bytes... ]
 # The body is the consumer's opaque payload (offset record / split entry).
@@ -1004,6 +1016,16 @@ def head_key(prefix: String) raises -> Path:
 # durability bug): one tiny S3 object per tombstoned chunk:
 #
 #   <prefix>/tombstones/<chunk_seq:020d>.tomb   ← body = schedule_ts_ms (i64 LE)
+#   <prefix>/moved_tombstones/<chunk_seq:020d>.tomb   ← same body
+#
+# A MOVED marker retires a chunk whose payload objects (the objects its body
+# names, the broker's `.seg`) another manifest now references: a reaper deletes
+# the chunk key and the markers, never the payload. It is a separate key so
+# that a plain tombstone written later for the same chunk (a retention pass
+# working from an older `_LOG_START` snapshot) cannot overwrite it: only
+# `schedule_moved_for_delete_at` writes it. A chunk is ScheduledForDelete when
+# either marker exists, `tombstone_seqs` lists both, and `reap` and
+# `purge_all` delete both.
 #
 # Per-chunk markers are idempotent (create-or-overwrite of one key), discovered
 # on restart via a LIST of `<prefix>/tombstones/`, and decoupled from the hot
@@ -1028,6 +1050,14 @@ def head_key(prefix: String) raises -> Path:
 def tombstone_key(prefix: String, chunk_seq: Int64) raises -> Path:
     return Path.parse(
         prefix + "/tombstones/" + _pad20(chunk_seq) + ".tomb"
+    )
+
+
+def moved_tombstone_key(prefix: String, chunk_seq: Int64) raises -> Path:
+    """The MOVED marker of `chunk_seq`: retire the chunk key, keep the payload
+    another manifest references."""
+    return Path.parse(
+        prefix + "/moved_tombstones/" + _pad20(chunk_seq) + ".tomb"
     )
 
 
@@ -1145,10 +1175,37 @@ def decode_log_start(bytes: List[UInt8], etag: String) raises -> LogStart:
     return LogStart(off, seq, etag)
 
 
+def _sorted_unique(var xs: List[Int64]) -> List[Int64]:
+    """`xs` ascending with duplicates removed (insertion sort: manifests'
+    marker sets are small)."""
+    for i in range(1, len(xs)):
+        var v = xs[i]
+        var j = i - 1
+        while j >= 0 and xs[j] > v:
+            xs[j + 1] = xs[j]
+            j -= 1
+        xs[j + 1] = v
+    var out = List[Int64]()
+    for i in range(len(xs)):
+        if len(out) == 0 or out[len(out) - 1] != xs[i]:
+            out.append(xs[i])
+    return out^
+
+
 @always_inline
 def _seq_from_tombstone_key(key: String) -> Int64:
     # Extract the <chunk_seq:020d> from "..../tombstones/<020d>.tomb".
-    var marker = String("/tombstones/")
+    return _seq_after_marker(key, String("/tombstones/"))
+
+
+@always_inline
+def _seq_from_moved_tombstone_key(key: String) -> Int64:
+    # Extract the <chunk_seq:020d> from "..../moved_tombstones/<020d>.tomb".
+    return _seq_after_marker(key, String("/moved_tombstones/"))
+
+
+@always_inline
+def _seq_after_marker(key: String, marker: String) -> Int64:
     var idx = key.rfind(marker)
     if idx < 0:
         return Int64(-1)
@@ -1237,6 +1294,9 @@ struct CasManifestStore[Store: ConditionalWriteStore](
     # signature. The handle never crosses a module boundary as a raw pointer
     # (invariant #7) — only the typed `Int64` escalation count is read out.
     var _escalation_metrics: Optional[OwnedPointer[MetricsSet]]
+    # The reaped-slot guard (manifest_slot_guard.mojo). DEFAULT-OFF: a manifest
+    # that never opts in pays nothing. The broker opts in for its partitions.
+    var _reaped_slot_guard: Bool
 
     def __init__(
         out self,
@@ -1253,10 +1313,28 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # Escalation metrics: DEFAULT-OFF — no holder constructed. The instrumented index-
         # write dispatcher OPTS IN via `enable_escalation_metrics()`.
         self._escalation_metrics = None
+        self._reaped_slot_guard = False
 
     @always_inline
     def prefix(self) -> String:
         return self._prefix
+
+    # ---- the reaped-slot guard (opt-in) ----
+
+    @always_inline
+    def enable_reaped_slot_guard(mut self):
+        """OPT IN to the reaped-slot guard (manifest_slot_guard.mojo): after
+        every winning create this manifest GETs `_LOG_START` and refuses a win
+        below it with the retryable `slot_reaped` error; the forward probe and
+        the cold write path never trust a head below the log start. Cost: one
+        GET per acknowledged append. For a lineage whose chunks are reaped (the
+        broker's partitions); idempotent."""
+        self._reaped_slot_guard = True
+
+    @always_inline
+    def reaped_slot_guard_enabled(self) -> Bool:
+        """True iff `enable_reaped_slot_guard` was called on this handle."""
+        return self._reaped_slot_guard
 
     # ---- the tier-2 LIST-escalation counter ----
 
@@ -1461,7 +1539,11 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             _ = e
             return String("")
 
-    def _read_head_inner(self, force_authoritative: Bool = False) raises -> ManifestHead:
+    def _read_head_inner(
+        self,
+        force_authoritative: Bool = False,
+        clamp_to_log_start: Bool = False,
+    ) raises -> ManifestHead:
         # Stale-head forward progress: when `force_authoritative` is
         # set (the contended append's escalation after N consecutive 412s), we
         # BYPASS the cached `_HEAD` entirely and go straight to the bucket's
@@ -1480,10 +1562,11 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         if force_authoritative:
             return self._recover_head_by_list()
         # Try the cached _HEAD object first (the fast path).
+        var h: ManifestHead
         try:
             var hk = head_key(self._prefix)
             var raw = self._store.get(hk)
-            return decode_head(raw)
+            h = decode_head(raw)
         except e:
             if _is_not_found(String(e)):
                 # _HEAD absent — recover the true tail by LISTing the
@@ -1491,6 +1574,15 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                 # bucket is the source of truth, the pointer is a cache).
                 return self._recover_head_by_list()
             raise e^
+        # Reaped-slot guard rule 4 (manifest_slot_guard.mojo), WRITE PATH ONLY:
+        # a durable `_HEAD` below `_LOG_START` (it lags on an idle partition)
+        # is replaced by the LIST-recovered head. One more GET; readers do not
+        # pass the flag.
+        if clamp_to_log_start and head_is_below_log_start(
+            h.chunk_seq, self._read_log_start_seq_inner()
+        ):
+            return self._recover_head_by_list()
+        return h^
 
     def _read_log_start_inner(self) raises -> LogStart:
         """UNLOCKED `_LOG_START` read (the gate is already held by the caller —
@@ -1776,12 +1868,27 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         base_offset: Int64,
         record_count: Int64,
         var won_etag: String,
-    ) -> None:
+        log_start_seq_after_win: Int64 = Int64(-1),
+    ) raises -> None:
         """Finalize a poll-shaped create-CAS WIN: the same best-effort monotone
         `_HEAD` advance + local-cache invalidate the sync `try_append_at_seq`
         does on its win (so a subsequent cached `read_head` tracks the tail). A
         lost advance is recoverable by LIST; table-store correctness reads always go
-        authoritative. The op passes the slot + base + the won chunk etag."""
+        authoritative. The op passes the slot + base + the won chunk etag.
+
+        On a guarded manifest the op passes `log_start_seq_after_win`, the
+        `_LOG_START` its parked check phase read after the win; a win below it
+        (or a missing read, -1) raises instead of advancing `_HEAD`
+        (manifest_slot_guard.mojo). Unguarded manifests ignore it."""
+        if self._reaped_slot_guard:
+            if log_start_seq_after_win < Int64(0):
+                raise Error(
+                    "CasManifestStore.apply_async_append_win: a guarded"
+                    " manifest needs the _LOG_START read after the win"
+                )
+            if won_slot_is_reaped(candidate_seq, log_start_seq_after_win):
+                self._head_cache = _LocalHeadCache.cold()
+                raise slot_reaped_error("apply_async_append_win")
         self._try_advance_head(
             candidate_seq,
             base_offset + record_count,
@@ -2273,47 +2380,74 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # function's return boundary (the same materialization the unwind
         # forced), so no GET transient survives into the PUT. Returns
         # `Some(result)` on WIN, `None` on a 412 (caller re-reads + retries);
-        # re-raises any non-412 error.
+        # re-raises any non-412 error. A guarded manifest raises `slot_reaped`
+        # or `log_start_unread` instead of returning a win it must not
+        # acknowledge (manifest_slot_guard.mojo).
         var candidate_seq = head.chunk_seq + Int64(1)
         var base = head.next_offset
         var ck = chunk_key(self._prefix, candidate_seq)
         var encoded = encode_chunk(body, record_count)
+        # Only the create sits inside the `try`: a 412 there is a lost slot. The
+        # reaped-slot check runs outside it, so no error raised after the win
+        # can be mistaken for a lost slot and re-append the same body.
+        var meta: ObjectMeta
         try:
-            var meta = self._store.conditional_put(
+            meta = self._store.conditional_put(
                 ck, encoded, WritePrecondition.if_none_match_star()
-            )
-            # WON the slot — its records occupy [base, last]. Ordering
-            # is now fixed.
-            var meta_etag = meta.etag
-            var last = base + record_count - Int64(1)
-            # Best-effort MONOTONE HEAD advance. The fast path is a ONE-CALL
-            # If-Match on `head_etag` (the `_HEAD` etag this attempt read): it
-            # succeeds only if `_HEAD` is STILL at `candidate_seq-1`, so the
-            # write to `candidate_seq` is strictly forward (monotone). On any
-            # conflict / empty etag it falls back to the read-recheck loop. A
-            # lost advance is recoverable by LIST.
-            # Flush-op reduction: DEFER this off the ack-blocking path on
-            # the hot append (the caller updates its local cache synchronously
-            # instead). The monotone If-Match invariant is preserved for any
-            # advance that DOES run (the OCC path + the contention/cold fall-back
-            # both keep calling `_try_advance_head`, which never writes `_HEAD`
-            # backwards).
-            if not defer_durable_advance:
-                self._try_advance_head(
-                    candidate_seq,
-                    base + record_count,
-                    meta_etag,
-                    head.chunk_seq,
-                    head_etag,
-                )
-            return Optional[AppendResult](
-                AppendResult(candidate_seq, base, last, meta_etag^, attempt)
             )
         except e:
             if not _is_precondition(String(e)):
                 raise e^
             # 412 — another writer won this slot. Signal retry to the caller.
             return Optional[AppendResult](None)
+        # Reaped-slot guard rule 1 (opt-in): before any `_HEAD` or cache update.
+        if self._reaped_slot_guard:
+            self._refuse_win_below_log_start(candidate_seq, "append")
+        # WON the slot — its records occupy [base, last]. Ordering
+        # is now fixed.
+        var meta_etag = meta.etag
+        var last = base + record_count - Int64(1)
+        # Best-effort MONOTONE HEAD advance. The fast path is a ONE-CALL
+        # If-Match on `head_etag` (the `_HEAD` etag this attempt read): it
+        # succeeds only if `_HEAD` is STILL at `candidate_seq-1`, so the
+        # write to `candidate_seq` is strictly forward (monotone). On any
+        # conflict / empty etag it falls back to the read-recheck loop. A
+        # lost advance is recoverable by LIST.
+        # Flush-op reduction: DEFER this off the ack-blocking path on
+        # the hot append (the caller updates its local cache synchronously
+        # instead). The monotone If-Match invariant is preserved for any
+        # advance that DOES run (the OCC path + the contention/cold fall-back
+        # both keep calling `_try_advance_head`, which never writes `_HEAD`
+        # backwards).
+        if not defer_durable_advance:
+            self._try_advance_head(
+                candidate_seq,
+                base + record_count,
+                meta_etag,
+                head.chunk_seq,
+                head_etag,
+            )
+        return Optional[AppendResult](
+            AppendResult(candidate_seq, base, last, meta_etag^, attempt)
+        )
+
+    def _refuse_win_below_log_start(
+        mut self, candidate_seq: Int64, site: String
+    ) raises:
+        """Reaped-slot guard rules 1 and 2 (manifest_slot_guard.mojo), run after
+        a create WON `candidate_seq` and before any `_HEAD` or cache update. ONE
+        GET of the `_LOG_START` body. A win below it raises `slot_reaped`; a
+        failed read raises `log_start_unread` (fail closed). Either way the head
+        cache is invalidated and nothing is acknowledged."""
+        var log_start_seq: Int64
+        try:
+            log_start_seq = self._read_log_start_seq_inner()
+        except e:
+            self._head_cache = _LocalHeadCache.cold()
+            raise log_start_unread_error(site, String(e))
+        if won_slot_is_reaped(candidate_seq, log_start_seq):
+            self._head_cache = _LocalHeadCache.cold()
+            raise slot_reaped_error(site)
 
     def _append_inner(
         mut self,
@@ -2391,7 +2525,10 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             from_cache = True
         else:
             # UNLOCKED internal read (the gate is already held by `append`).
-            head = self._read_head_inner()
+            # Guarded manifests clamp a durable `_HEAD` below `_LOG_START`.
+            head = self._read_head_inner(
+                clamp_to_log_start=self._reaped_slot_guard
+            )
             # Capture the `_HEAD` OBJECT etag so the winning append can do a
             # ONE-CALL monotone advance (If-Match on this etag) instead of a
             # GET+HEAD+PUT cycle. Empty when `_HEAD` is absent (LIST-recovered
@@ -2530,6 +2667,12 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             if probed:
                 head = probed.take()
                 head_etag = String("")
+            elif self._reaped_slot_guard:
+                # Reaped-slot guard rule 3: the taken slot is gone (reaped since
+                # the 412), so this writer is below the log start and so may be
+                # the durable `_HEAD`. Recover by LIST (log-start aware).
+                head = self._recover_head_by_list()
+                head_etag = String("")
             else:
                 head = self._read_head_inner(force_authoritative=False)
                 head_etag = self._read_head_etag()
@@ -2574,9 +2717,12 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # LIST or a stale-_HEAD re-read) and return a head pointing AT `taken_seq`
         # with `next_offset = prev_head.next_offset + record_count`, so the next
         # attempt tries `taken_seq+1` at the correct running-sum base. Returns
-        # None if the chunk is not yet readable (transient) so the caller falls
-        # back to a cached-_HEAD re-read. This is a forward-progress HINT only —
-        # the slot If-None-Match CAS is the gaplessness oracle. We only advance
+        # None if the chunk is gone (a 404): an unguarded caller falls back to
+        # a cached-_HEAD re-read, a guarded one to LIST recovery (the slot was
+        # reaped, so the writer is below the log start). A guarded manifest
+        # also re-anchors by LIST when the slot is below `_LOG_START`. This is
+        # a forward-progress HINT only — the slot If-None-Match CAS is the
+        # gaplessness oracle. We only advance
         # ONE slot at a time, so if the other writer is several slots ahead, the
         # next probe walks forward one more (each a single GET), or the
         # LIST_ESCALATE_AFTER fallback re-anchors on the true top.
@@ -2584,6 +2730,13 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         try:
             var c = self._store.get(ck)
             var rc = decode_chunk_record_count(c)
+            # Reaped-slot guard rule 3 (opt-in): a chunk below `_LOG_START` may
+            # be a refused win with a different record count; its count must not
+            # seed the next offset. Re-anchor by LIST (log-start aware) instead.
+            if self._reaped_slot_guard and probed_slot_is_below_log_start(
+                taken_seq, self._read_log_start_seq_inner()
+            ):
+                return Optional(self._recover_head_by_list())
             return Optional(
                 ManifestHead(
                     taken_seq, prev_head.next_offset + rc, String("")
@@ -3043,11 +3196,41 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             _cas_gate_unlock()
             raise e^
 
-    def _is_marked(self, chunk_seq: Int64) raises -> Bool:
-        # Consult S3: the tombstone marker object exists iff the chunk is
-        # ScheduledForDelete. (No process-local state — restart-safe.)
+    def schedule_moved_for_delete_at(
+        mut self, chunk_seq: Int64, schedule_ts_ms: Int64
+    ) raises -> None:
+        """Retire `chunk_seq` with a MOVED marker
+        `<prefix>/moved_tombstones/<seq>.tomb` (body: the schedule ts): another
+        manifest now references the payload objects the chunk body names, so a
+        reaper deletes the chunk key and never the payload. No other verb writes
+        this key, so a later `schedule_for_delete_at` on the same chunk cannot
+        undo it. Idempotent (a rewrite refreshes the ts); fail-loud if the chunk
+        does not exist."""
+        # CAS-GATE: WRITE verb -> EXCLUSIVE lock (existence GET + marker PUT).
+        _cas_gate_wrlock()
         try:
-            var _t = self._store.get(tombstone_key(self._prefix, chunk_seq))
+            var _c = self._store.get(chunk_key(self._prefix, chunk_seq))
+            _ = _c
+            var tomb = List[UInt8]()
+            _put_i64_le(tomb, schedule_ts_ms)
+            _ = self._store.put(
+                moved_tombstone_key(self._prefix, chunk_seq), tomb
+            )
+            _cas_gate_unlock()
+        except e:
+            _cas_gate_unlock()
+            raise e^
+
+    def _is_marked(self, chunk_seq: Int64) raises -> Bool:
+        # Consult S3: a plain or a moved marker object exists iff the chunk is
+        # ScheduledForDelete. (No process-local state — restart-safe.)
+        if self._marker_exists(tombstone_key(self._prefix, chunk_seq)):
+            return True
+        return self._marker_exists(moved_tombstone_key(self._prefix, chunk_seq))
+
+    def _marker_exists(self, key: Path) raises -> Bool:
+        try:
+            var _t = self._store.get(key)
             _ = _t
             return True
         except e:
@@ -3055,32 +3238,71 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                 return False
             raise e^
 
+    def _list_marker_seqs(
+        self, dir: String, moved: Bool
+    ) raises -> List[Int64]:
+        """The seqs under `<prefix>/<dir>/`, unsorted. Caller holds the lock."""
+        var res = self._store.list_with_delimiter(
+            Path.parse(self._prefix + "/" + dir + "/")
+        )
+        var out = List[Int64]()
+        for i in range(len(res.objects)):
+            ref loc = res.objects[i].location
+            var seq = (
+                _seq_from_moved_tombstone_key(loc) if moved
+                else _seq_from_tombstone_key(loc)
+            )
+            if seq >= Int64(0):
+                out.append(seq)
+        return out^
+
     def tombstone_seqs(self) raises -> List[Int64]:
         """The chunk_seqs currently ScheduledForDelete — discovered by LISTing
-        `<prefix>/tombstones/` (restart-safe; this is how a fresh broker
-        re-discovers marks, ground-truth #1). Returned ascending."""
+        `<prefix>/tombstones/` AND `<prefix>/moved_tombstones/` (restart-safe;
+        this is how a fresh broker re-discovers marks, ground-truth #1). A seq
+        with both markers appears once. Returned ascending."""
         # READ verb -> SHARED (read) lock.
         _cas_gate_rdlock()
         try:
-            var lk = Path.parse(self._prefix + "/tombstones/")
-            var res = self._store.list_with_delimiter(lk)
-            var out = List[Int64]()
-            for i in range(len(res.objects)):
-                var seq = _seq_from_tombstone_key(res.objects[i].location)
-                if seq >= Int64(0):
-                    out.append(seq)
+            var out = self._list_marker_seqs(String("tombstones"), False)
+            var moved = self._list_marker_seqs(String("moved_tombstones"), True)
             _cas_gate_unlock()
-            # ascending insertion sort (manifests are small)
-            for i in range(1, len(out)):
-                var v = out[i]
-                var j = i - 1
-                while j >= 0 and out[j] > v:
-                    out[j + 1] = out[j]
-                    j -= 1
-                out[j + 1] = v
-            return out^
+            for i in range(len(moved)):
+                out.append(moved[i])
+            return _sorted_unique(out^)
         except e:
             _cas_gate_unlock()
+            raise e^
+
+    def moved_tombstone_seqs(self) raises -> List[Int64]:
+        """The chunk_seqs carrying a MOVED marker (LIST of
+        `<prefix>/moved_tombstones/`). Returned ascending."""
+        # READ verb -> SHARED (read) lock.
+        _cas_gate_rdlock()
+        try:
+            var out = self._list_marker_seqs(String("moved_tombstones"), True)
+            _cas_gate_unlock()
+            return _sorted_unique(out^)
+        except e:
+            _cas_gate_unlock()
+            raise e^
+
+    def moved_tombstone_ts(self, chunk_seq: Int64) raises -> Optional[Int64]:
+        """The schedule ts of `chunk_seq`'s MOVED marker, or None when it has
+        none. Any read error other than absence raises."""
+        # READ verb -> SHARED (read) lock.
+        _cas_gate_rdlock()
+        try:
+            var t = self._store.get(
+                moved_tombstone_key(self._prefix, chunk_seq)
+            )
+            var ts = _get_i64_le(t, 0)
+            _cas_gate_unlock()
+            return Optional[Int64](ts)
+        except e:
+            _cas_gate_unlock()
+            if _is_not_found(String(e)):
+                return None
             raise e^
 
     def tombstone_schedule_ts(self, chunk_seq: Int64) raises -> Int64:
@@ -3101,8 +3323,12 @@ struct CasManifestStore[Store: ConditionalWriteStore](
     def reap(mut self, chunk_seq: Int64) raises -> None:
         """Remove the chunk object for a ScheduledForDelete chunk (the reaper
         verb). Fail-loud if the chunk is NOT tombstoned (tombstone before you
-        reap). Idempotent (deleting an absent object succeeds). Deletes the
-        tombstone marker too (the chunk is gone; the marker is spent).
+        reap). Either marker counts: a plain tombstone or a MOVED marker.
+        Idempotent (deleting an absent object succeeds). Deletes both markers
+        too (the chunk is gone; the markers are spent). It never touches the
+        payload objects the chunk body names: deleting those is the caller's
+        decision (the broker `ReapWorker` deletes them only without a MOVED
+        marker).
 
         Grace gating lives ABOVE this verb (in the ReapWorker / the
         BrokerCore reap trigger, which reads `tombstone_schedule_ts` and only
@@ -3126,8 +3352,9 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             if reap_is_refused(chunk_seq, floor):
                 raise reap_refused_error(chunk_seq, floor)
             self._store.delete(chunk_key(self._prefix, chunk_seq))
-            # Drop the spent marker (idempotent — deleting absent is fine).
+            # Drop the spent markers (idempotent — deleting absent is fine).
             self._store.delete(tombstone_key(self._prefix, chunk_seq))
+            self._store.delete(moved_tombstone_key(self._prefix, chunk_seq))
             _cas_gate_unlock()
         except e:
             _cas_gate_unlock()
@@ -3135,7 +3362,8 @@ struct CasManifestStore[Store: ConditionalWriteStore](
 
     def purge_all(mut self) raises -> Int64:
         """WHOLE-LINEAGE reclamation: delete EVERY object this manifest owns —
-        all `manifest/<seq>.chunk` chunks, all `tombstones/<seq>.tomb` markers,
+        all `manifest/<seq>.chunk` chunks, all `tombstones/<seq>.tomb` and
+        `moved_tombstones/<seq>.tomb` markers,
         all `_meta/dedup/<pid>/<seq>.seq` sentinels, the `_HEAD` cache, and the
         `_LOG_START` pointer. Returns the number of DELETE calls issued.
 
@@ -3161,7 +3389,8 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         the singleton `_HEAD` / `_LOG_START` keys.
 
         Key-layout encapsulation: the manifest's internal key shapes
-        (`manifest/`, `tombstones/`, `_meta/dedup/`, `_HEAD`, `_LOG_START`) stay
+        (`manifest/`, `tombstones/`, `moved_tombstones/`, `_meta/dedup/`,
+        `_HEAD`, `_LOG_START`) stay
         PRIVATE to this module — the reaper above this layer reclaims a manifest
         lineage by calling THIS verb, never by reconstructing the CAS-internal
         key names."""
@@ -3184,6 +3413,12 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             var tomb_res = self._store.list_with_delimiter(tomb_lk)
             for i in range(len(tomb_res.objects)):
                 self._store.delete(Path.parse(tomb_res.objects[i].location))
+                deletes += Int64(1)
+            # moved_tombstones/<seq>.tomb
+            var moved_lk = Path.parse(self._prefix + "/moved_tombstones/")
+            var moved_res = self._store.list_with_delimiter(moved_lk)
+            for i in range(len(moved_res.objects)):
+                self._store.delete(Path.parse(moved_res.objects[i].location))
                 deletes += Int64(1)
             # _meta/dedup/<pid>/<seq>.seq  (the idempotency sentinels)
             var dedup_lk = Path.parse(self._prefix + "/_meta/dedup/")
@@ -3624,9 +3859,18 @@ def is_retryable_contention(msg: String) -> Bool:
 # wildcard origin, NO unsafe_from_address, NO pointer. The reactor is a per-call
 # `mut` borrow. AT MOST ONE create-CAS in flight per op (single `_inflight`).
 
+# The site name the op's refusals carry (no digits: manifest_slot_guard.mojo).
+comptime _AMA_SITE: String = "async_append"
+
 comptime _AMA_IDLE: UInt8 = 0
-comptime _AMA_INFLIGHT: UInt8 = 1
+comptime _AMA_INFLIGHT: UInt8 = 1  # the create-CAS is in flight
 comptime _AMA_DONE: UInt8 = 2
+# Guarded manifests only (manifest_slot_guard.mojo): after the create WINS, the
+# op reads `_LOG_START` as its own parkable phase before anything is applied.
+comptime _AMA_CHECKING: UInt8 = 3  # the `_LOG_START` read is in flight
+comptime _AMA_CHECKED: UInt8 = 4  # won and live: `take` applies the win
+comptime _AMA_LOST: UInt8 = 5  # the create's take raised a 412
+comptime _AMA_REFUSED: UInt8 = 6  # slot_reaped / log_start_unread
 
 
 struct AsyncManifestAppendOp[
@@ -3641,12 +3885,20 @@ struct AsyncManifestAppendOp[
     var _candidate: Int64
     var _base: Int64
     var _rc: Int64
+    # Guarded manifests: the won chunk etag, the `_LOG_START` seq the check
+    # read after the win, and the refusal text (slot_reaped / log_start_unread).
+    var _won_etag: String
+    var _log_start_seq: Int64
+    var _refusal: String
 
     def __init__(out self):
         self._state = _AMA_IDLE
         self._candidate = Int64(0)
         self._base = Int64(0)
         self._rc = Int64(0)
+        self._won_etag = String("")
+        self._log_start_seq = Int64(-1)
+        self._refusal = String("")
 
     @staticmethod
     def resume_inflight(
@@ -3656,7 +3908,11 @@ struct AsyncManifestAppendOp[
         The caller (a parkable-commit driver) mirrors the POD slot
         bookkeeping on its own across-park state; the actual in-flight transport
         op persists inside the WAL's conformer, so this faithfully RESUMES it.
-        `poll`/`take` then advance the same in-flight conformer op."""
+        `poll`/`take` then advance the same in-flight conformer op.
+
+        It resumes the CREATE phase only. On a guarded manifest the op's
+        `_LOG_START` check phase is not mirrored, so a guarded caller keeps the
+        op itself across parks (the broker's appender does)."""
         var op = AsyncManifestAppendOp[Self.Storage]()
         op._state = _AMA_INFLIGHT
         op._candidate = candidate
@@ -3684,6 +3940,9 @@ struct AsyncManifestAppendOp[
         self._candidate = candidate_seq
         self._base = base_offset
         self._rc = record_count
+        self._won_etag = String("")
+        self._log_start_seq = Int64(-1)
+        self._refusal = String("")
         var built = wal.async_append_build_chunk(
             candidate_seq, body, record_count
         )
@@ -3691,9 +3950,10 @@ struct AsyncManifestAppendOp[
         var encoded = built[1].copy()
         _ = built^
         self._state = _AMA_INFLIGHT
-        return wal.store_mut().cas_put_start[S](
+        var prog = wal.store_mut().cas_put_start[S](
             ck, encoded^, String(""), reactor
         )
+        return self._after_put[S](wal, prog^, reactor)
 
     def poll[
         S: WakerSink & Movable & Deinitable,
@@ -3702,11 +3962,93 @@ struct AsyncManifestAppendOp[
     ) raises -> CasOpProgress:
         """Advance the in-flight create-CAS one non-blocking step (called when
         its op_id completed). READY / PENDING(op_id) / ERR."""
-        if self._state != _AMA_INFLIGHT:
-            return CasOpProgress.error(
-                String("AsyncManifestAppendOp.poll: no create-CAS in flight")
+        if self._state == _AMA_INFLIGHT:
+            var prog = wal.store_mut().cas_put_poll[S](reactor)
+            return self._after_put[S](wal, prog^, reactor)
+        if self._state == _AMA_CHECKING:
+            var rp: CasOpProgress
+            try:
+                rp = wal.store_mut().read_poll[S](reactor)
+            except e:
+                return self._refuse(
+                    wal, log_start_unread_error(_AMA_SITE, String(e))
+                )
+            return self._after_check(wal, rp^)
+        return CasOpProgress.error(
+            String("AsyncManifestAppendOp.poll: no create-CAS in flight")
+        )
+
+    def _after_put[
+        S: WakerSink & Movable & Deinitable,
+    ](
+        mut self,
+        mut wal: CasManifestStore[Self.Storage],
+        var prog: CasOpProgress,
+        mut reactor: Reactor[S],
+    ) raises -> CasOpProgress:
+        """The create-CAS advanced. Unguarded, or not READY yet: return it as
+        is (`take` finalizes, exactly as before). Guarded and READY: take the
+        create now and, on a WIN, start the `_LOG_START` read as the next
+        parkable phase (reaped-slot guard rule 1), BEFORE any `_HEAD` or cache
+        update. A 412 from the take parks nothing: `take` returns None."""
+        if not prog.is_ready() or not wal.reaped_slot_guard_enabled():
+            return prog^
+        var meta: ObjectMeta
+        try:
+            meta = wal.store_mut().cas_put_take()
+        except e:
+            if not _is_precondition(String(e)):
+                raise e^
+            self._state = _AMA_LOST
+            return CasOpProgress.ready()
+        self._won_etag = meta.etag
+        self._state = _AMA_CHECKING
+        var rp: CasOpProgress
+        try:
+            rp = wal.store_mut().read_start[S](
+                log_start_key(wal.prefix()), reactor
             )
-        return wal.store_mut().cas_put_poll[S](reactor)
+        except e:
+            return self._refuse(wal, log_start_unread_error(_AMA_SITE, String(e)))
+        return self._after_check(wal, rp^)
+
+    def _after_check(
+        mut self, mut wal: CasManifestStore[Self.Storage], var rp: CasOpProgress
+    ) raises -> CasOpProgress:
+        """The `_LOG_START` read advanced. PENDING: park. ERR or an undecodable
+        body: FAIL CLOSED (rule 2). A win below the log start: `slot_reaped`
+        (rule 1). Otherwise READY, and `take` applies the win."""
+        if rp.is_pending():
+            return rp^
+        if rp.is_error():
+            return self._refuse(
+                wal, log_start_unread_error(_AMA_SITE, rp.err_text())
+            )
+        var log_start_seq: Int64
+        try:
+            var r = wal.store_mut().read_take()
+            if r.absent:
+                log_start_seq = Int64(0)  # never truncated
+            else:
+                log_start_seq = decode_log_start(r.body, String("")).log_start_seq
+        except e:
+            return self._refuse(wal, log_start_unread_error(_AMA_SITE, String(e)))
+        if won_slot_is_reaped(self._candidate, log_start_seq):
+            return self._refuse(wal, slot_reaped_error(_AMA_SITE))
+        self._log_start_seq = log_start_seq
+        self._state = _AMA_CHECKED
+        return CasOpProgress.ready()
+
+    def _refuse(
+        mut self, mut wal: CasManifestStore[Self.Storage], err: Error
+    ) -> CasOpProgress:
+        """End the op without acknowledging: invalidate the head cache, keep
+        the refusal for `take`, and surface it as ERR (the live error channel
+        the caller classifies, like a 412). `_HEAD` is never touched."""
+        wal._head_cache = _LocalHeadCache.cold()
+        self._refusal = String(err)
+        self._state = _AMA_REFUSED
+        return CasOpProgress.error(self._refusal)
 
     def take(
         mut self, mut wal: CasManifestStore[Self.Storage]
@@ -3718,6 +4060,12 @@ struct AsyncManifestAppendOp[
         advance + cache-invalidate the sync `try_append_at_seq` does (via
         `wal.apply_async_append_win`).
 
+        On a guarded manifest (manifest_slot_guard.mojo) the create's take and
+        the post-win `_LOG_START` read already ran in `start`/`poll` (the read
+        is its own parked phase), so `take` only applies a checked win, returns
+        None for a 412, or raises the refusal (`slot_reaped` /
+        `log_start_unread`) that `poll` already surfaced as ERR.
+
         LOW-1 / ABI NOTE — the LIVE lost-slot 412 channel is the ERR `*_start` /
         `*_poll` return, classified by the caller's `_is_lost_slot_412`, NOT this
         `take`->None path. Both shipping `AsyncCasStore` conformers surface a 412
@@ -3728,8 +4076,40 @@ struct AsyncManifestAppendOp[
         exactly as the sync `_try_append_at` maps a 412 to `None`) is kept as
         defense-in-depth for a hypothetical conformer that defers the 412 to
         `cas_put_take` — correct if ever taken, but not exercised today."""
+        if self._state == _AMA_CHECKED:
+            # Guarded, won, and the post-win `_LOG_START` check passed.
+            self._state = _AMA_DONE
+            var won_etag = self._won_etag
+            wal.apply_async_append_win(
+                self._candidate,
+                self._base,
+                self._rc,
+                won_etag.copy(),
+                self._log_start_seq,
+            )
+            return Optional[AppendResult](
+                AppendResult(
+                    self._candidate,
+                    self._base,
+                    self._base + self._rc - Int64(1),
+                    won_etag^,
+                    1,
+                )
+            )
+        if self._state == _AMA_LOST:
+            self._state = _AMA_DONE
+            return Optional[AppendResult](None)
+        if self._state == _AMA_REFUSED:
+            self._state = _AMA_DONE
+            raise Error(self._refusal)
         if self._state != _AMA_INFLIGHT:
             raise Error("AsyncManifestAppendOp.take: no create-CAS in flight")
+        if wal.reaped_slot_guard_enabled():
+            # A guarded op becomes takeable only through its check phase.
+            raise Error(
+                "AsyncManifestAppendOp.take: the create and its _LOG_START"
+                " check have not completed"
+            )
         self._state = _AMA_DONE
         var candidate = self._candidate
         var base = self._base

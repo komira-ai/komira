@@ -23,12 +23,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # request and fail closed (test_heartbeat_auth_seam), refuse a credential on a
 # plaintext heartbeat against a loopback listener
 # (test_heartbeat_no_credential_in_clear), project each heartbeat onto the
-# wire messages (test_heartbeat_proto_roundtrip), run the whole loop over HTTP
-# against a 127.0.0.1 responder whose CANCEL reply stops the job and whose
-# unknown directive does not (test_heartbeat_send_cancel), and run the binary
-# fetch, the
-# terminal writes, the live stream and the S3 store's verbs over an in-memory
-# store and a scripted connector (test_job_supervisor_object_store).
+# wire messages (test_heartbeat_proto_roundtrip), and run the binary fetch,
+# the terminal writes, the live stream and the S3 store's verbs over an
+# in-memory store and a scripted connector (test_job_supervisor_object_store).
+# The whole loop over HTTP, against a stateful heartbeat receiver on a real
+# komira_http_server (a CANCEL the receiver decides on stops the job, an
+# unknown directive does not, a long stderr tail arrives whole), is
+# komira_job_supervisor_loopback's, so this package's deps carry no server.
+# That package depends on this one, so the per-change check, which builds the
+# reverse dependencies of what a change touches, builds it for every change
+# here; this package's own build no longer runs the loop over HTTP.
 mojo_library(
     name = "komira_job_supervisor",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -36,12 +40,11 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
-        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_job_report_proto:komira_job_report_proto",
+        "//src/komira_libc:komira_libc",
         "//src/komira_log:komira_log",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_objectstore_s3:komira_objectstore_s3",
@@ -55,7 +58,6 @@ mojo_library(
         "tests/test_heartbeat_auth_seam.mojo",
         "tests/test_heartbeat_no_credential_in_clear.mojo",
         "tests/test_heartbeat_proto_roundtrip.mojo",
-        "tests/test_heartbeat_send_cancel.mojo",
     ],
     visibility = ["PUBLIC"],
 )

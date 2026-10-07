@@ -7,9 +7,9 @@ so a test whose valid data never holds 0 can tell a null that leaked into a
 UDF as a value from one that was kept out.
 """
 
-from komira_core.arrow.column import Column
-from komira_core.collections.column_builder import ColumnBuilder
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.column import Column
+from komira_arrow.column_builder import ColumnBuilder
+from komira_buffer.heap_region import HeapRegion
 
 
 def _check_lengths(n_vals: Int, n_valid: Int, what: String) raises:

@@ -24,7 +24,10 @@ from wherever it is copied. A program finds its data through
 
 Sub-targets: `[test_launcher]` is the same launcher built with the test hook
 (it judges the made-up CPU named by $KOMIRA_TEST_CPU); it is never part of
-the bundle. `[launcher]` is the shipped one.
+the bundle. `[launcher]` is the shipped one. `[kcov_guard]` is the output of
+the kcov guard over the bundle (kcov_guard.bzl): built with the bundle, and an
+input of `bundle_tarball` and `oci_image`, so no format packs a bundle that
+holds kcov.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -32,6 +35,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:providers.bzl", "MojoProgramInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
 
 # x86-64 levels: target_cpu -> the level the launcher requires.
 _LEVELS = {
@@ -43,9 +47,11 @@ _LEVELS = {
 _CC_TARGET = "x86_64-linux-gnu.2.34"
 
 # What every package format reads from a bundle.
-# dir: the bundle directory; name: the program (bin/<name>); platform: e.g.
-# linux-x86_64; version: the package version.
-BundleInfo = provider(fields = ["dir", "name", "platform", "version"])
+# dir: the bundle directory; kcov_guard: the output of the kcov guard over it
+# (kcov_guard.bzl), an input of every action that packs `dir`; name: the
+# program (bin/<name>); platform: e.g. linux-x86_64; version: the package
+# version.
+BundleInfo = provider(fields = ["dir", "kcov_guard", "name", "platform", "version"])
 
 _PRELUDE = """
 BB="$1"; shift
@@ -145,15 +151,20 @@ rm -rf "$T"
         busybox_sh(bb, script, out.as_output(), name, prog.target_cpu, launcher, prog.shared, prog.runtime, version, data_args),
         category = "komira_bundle",
     )
+    # No file of the bundle is kcov (kcov_guard.bzl): built with the bundle,
+    # and an input of each format that packs it.
+    guarded = kcov_guard(ctx, ctx.attrs._kcov_guard, ctx.label.name, [[".", out]])
     return [
         DefaultInfo(
             default_output = out,
+            other_outputs = [guarded],
             sub_targets = {
+                "kcov_guard": [DefaultInfo(default_output = guarded)],
                 "launcher": [DefaultInfo(default_output = launcher)],
                 "test_launcher": [DefaultInfo(default_output = test_launcher)],
             },
         ),
-        BundleInfo(dir = out, name = name, platform = "linux-x86_64", version = ctx.attrs.version),
+        BundleInfo(dir = out, kcov_guard = guarded, name = name, platform = "linux-x86_64", version = ctx.attrs.version),
     ]
 
 _mojo_bundle = rule(
@@ -164,6 +175,7 @@ _mojo_bundle = rule(
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "version": attrs.string(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
         "_launcher_sources": attrs.dep(default = "komira//tools/build/package/launcher:sources"),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
     },
@@ -230,6 +242,8 @@ def _bundle_tarball_impl(ctx):
             "{}-{}/".format(b.name, b.version),
             "--out",
             out.as_output(),
+            # Packed only after the kcov guard passed over the bundle.
+            hidden = [b.kcov_guard],
         ),
         category = "komira_pack_tar",
     )
@@ -284,7 +298,7 @@ def _sha256_of(digest):
         fail("`{}` is not a sha256:<64 hex> digest".format(digest))
     return digest[len("sha256:"):]
 
-def oci_base(name, registry, repository, manifest, manifest_file, config, layers, visibility = None):
+def oci_base(name, registry, repository, manifest, manifest_file, config, config_size, layers, layer_sizes, visibility = None):
     """A base image pinned by digest: the manifest in the repo, one pinned download per blob.
 
     `manifest` is the digest of the single-platform (linux/amd64) image
@@ -294,14 +308,20 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, layers
     `manifest`. `config` and `layers` are the digests the manifest names, in
     order; each URL names its digest and each download is checked against it,
     so the base cannot change without this declaration changing. komira_pack
-    also refuses unless the manifest names exactly these blobs.
+    also refuses unless the manifest names exactly these blobs. `config_size`
+    and `layer_sizes` are the blobs' sizes in bytes, as the manifest states
+    them, so the downloads need no request to the registry while the remote
+    cache holds them.
     """
+    if len(layer_sizes) != len(layers):
+        fail("oci_base {}: {} layers but {} layer_sizes".format(name, len(layers), len(layer_sizes)))
     base_url = "https://{}/v2/{}/".format(registry, repository)
     _sha256_of(manifest)
     pinned_file(
         name = name + "_config",
         url = base_url + "blobs/" + config,
         sha256 = _sha256_of(config),
+        size_bytes = config_size,
     )
     layer_targets = []
     for i, d in enumerate(layers):
@@ -309,6 +329,7 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, layers
             name = "{}_layer_{}".format(name, i),
             url = base_url + "blobs/" + d,
             sha256 = _sha256_of(d),
+            size_bytes = layer_sizes[i],
         )
         layer_targets.append(":{}_layer_{}".format(name, i))
     _oci_base(
@@ -359,6 +380,8 @@ def _oci_image_impl(ctx):
             archive.as_output(),
             "--digest",
             digest.as_output(),
+            # Packed only after the kcov guard passed over the bundle.
+            hidden = [b.kcov_guard],
         ),
         category = "komira_pack_oci",
     )

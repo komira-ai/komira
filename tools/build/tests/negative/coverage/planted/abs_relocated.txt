@@ -1,0 +1,9 @@
+# Made-up strings of a coverage binary for check.sh (BUCK): a relative
+# library directory, the test directory, a library file, a placeholder,
+# and a Mojo source named by an absolute (relocated) path.
+.debug_line
+value.mojo
+tests
+buck-out/v2/art/tests/functional/coverage/__covlib_forced__/0123456789abcdef/src/covlib
+/__________________________________
+/__________________________________/tests/test_value.mojo

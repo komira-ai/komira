@@ -12,7 +12,7 @@
 #   - `fn split_lines(bytes: Span[UInt8, _]) -> List[String]`
 #       — split a JSONL byte stream into per-line String records. The
 #       NEON path uses `hadd_u8x16` (the `uaddv` intrinsic, in
-#       `komira_core.simd.horizontal_add`) for the byte-mask scan. x86_64
+#       `komira_simd.horizontal_add`) for the byte-mask scan. x86_64
 #       uses the stdlib reduction (correct, not separately tuned).
 #
 # This module holds only the trait-level `parse_record[T]` and the SIMD
@@ -27,7 +27,7 @@
 
 from std.sys.info import CompilationTarget
 
-from komira_core.simd.horizontal_add import hadd_u8x16
+from komira_simd.horizontal_add import hadd_u8x16
 
 from komira_jsonl.json_compatible import JsonCompatible
 
@@ -59,7 +59,7 @@ def parse_record[T: JsonCompatible](s: String) raises -> T:
 #
 # The `llvm.aarch64.neon.uaddv` direct intrinsic for the 16-byte SIMD
 # reduce is faster than the generic reduction on the key-scan inner loop.
-# The `hadd_u8x16` primitive in `komira_core.simd.horizontal_add` wraps
+# The `hadd_u8x16` primitive in `komira_simd.horizontal_add` wraps
 # it; we consume it
 # directly. NEON arm: `cmeq.16b` + `hadd_u8x16` is the hot kernel; x86_64
 # arm: stdlib `reduce_add()` fallback (correct, not yet empirically

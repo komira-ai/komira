@@ -28,9 +28,9 @@
 # returns owned List[UInt8]. No UnsafePointer crosses any module boundary.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
 
 from .footer import (
     ORC_COMPRESSION_NONE,
@@ -56,6 +56,7 @@ from .stripe_emit import (
     ColumnStats,
     build_col_encoders,
 )
+from .int_stats_sum import merge_int_sum
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
@@ -298,7 +299,7 @@ def _merge_stats(mut acc: ColumnStats, s: ColumnStats):
                 acc.int_min = s.int_min
             if s.int_max > acc.int_max:
                 acc.int_max = s.int_max
-        acc.int_sum += s.int_sum
+        merge_int_sum(acc.int_sum, s.int_sum)
     elif s.is_double:
         acc.is_double = True
         if acc.number_of_values == 0:

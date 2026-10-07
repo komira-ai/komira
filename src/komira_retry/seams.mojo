@@ -6,7 +6,7 @@
 # The system conformers use only the standard library (`std.time`), so the
 # package has no FFI and no dependency, and that is the rule: `SystemClock`
 # stays on `std.time`. komira_retry imports nothing outside the standard
-# library, komira_core included. A shared clock that lives elsewhere conforms
+# library, the core packages included. A shared clock that lives elsewhere conforms
 # to `MonotonicClock` in its own package and is injected by the caller; this
 # package never imports it, and the trait needs no change for it.
 #

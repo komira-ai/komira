@@ -671,6 +671,72 @@ tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake
 ([`../examples/s2n_tls`](../examples/s2n_tls)) from Mojo. The aarch64
 assembly lists are generated but not built yet.
 
+## Coverage builds
+
+`-c komira.coverage=true` (default `false`) gives every `mojo_library` one
+more binary per `test_srcs` entry: the test compiled at `-O0` with
+`--debug-level line-tables`, against
+the same ungated package its gated test uses, for a coverage tool (kcov) to
+map what ran to source lines. They are `[coverage][bin][<test>]`
+(`cov/tests/<test>/<test>`, action category `mojo_build_cov_test`), and
+`[coverage]` is all of them. Nothing depends on them yet: the package, its
+tests and their markers are what they are without the switch.
+
+```sh
+./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
+```
+
+The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
+and does one thing: it sets the attribute `coverage_debug` to
+`komira//tools/build/coverage/kcov:cov_link`. A buckconfig value is not part
+of the configuration, so no output path moves; with the switch off the
+attribute is absent and analysis is what it was without coverage builds. With
+it on, the release actions (`mojo_precompile`, `mojo_build_test`,
+`mojo_gated_test`, the README's, `mojo_gate_join`) keep their command lines and
+inputs, so they keep their cache hits, and the coverage builds are new
+actions. A value other than `true` or `false` fails at load, naming it.
+
+The macro reads the switch from the buckconfig of the cell whose BUCK file
+it runs in. `-c komira.coverage=true` on the command line, or a global
+buckconfig (`~/.buckconfig.d`), applies to every cell. `[komira] coverage =
+true` in a cell's own `.buckconfig` or `.buckconfig.local` applies to that
+cell only: in a repository that mounts komira as the cell `komira`, setting it
+in the root cell's file leaves komira's libraries without `[coverage]`
+("unknown subtarget").
+
+A coverage build runs the same `mojo_wrapper.sh` as every compile, byte for
+byte, with one argument changed: its link directory (`<zig_dir>`) is
+`cov_link` instead of the toolchain's zig. That directory holds the
+toolchain's zig as `real/` and, as `zig`, `cov_zig`
+([kcov README](../coverage/kcov/README.md#cov_zig)), which for a link drops
+`-Wl,--strip-debug`, asks for no build id and no compressed debug section,
+and after the link overwrites the action's directory with a placeholder of
+the same length, with `debug_relocate`. The pinned Mojo records no
+compilation directory and names its sources by relative paths (`tests/...`,
+the staged library sources under `buck-out/`, the standard library under
+`oss/modular/`); the directory overwritten is the one zig's C runtime units
+record ([names in a coverage binary](../coverage/kcov/README.md#names-in-a-coverage-binary)).
+The wrapper's own check, that no output holds the action's working directory
+(exit 4), runs on the result as on any compile; a relocation that did not
+happen fails there ([test 41](../tests/README.md#41-coverage-builds)).
+
+Scope, for now:
+
+- linux-x86_64. On another target platform the attribute is None (a
+  `select`) and the library builds as with the switch off: it has no
+  `[coverage]` sub-target, so asking for one is an "unknown subtarget" error,
+  not an empty result. Whatever collects coverage asks only on linux-x86_64.
+- A library's `test_srcs` that are source files. A README's examples,
+  `mojo_test`, the drivers of `mojo_shared_lib` and generated test sources
+  (a `test_srcs` entry that is a build output) get no coverage binary.
+- Nothing runs the binaries yet: running them under kcov and reading the
+  reports comes next.
+
+A library in the `tests` cell may pass `coverage_debug` itself (a
+`cov_link_dir`): it then has coverage binaries whatever the switch says, which
+is how test 41 builds them, and plants a defective relocator, without `-c`.
+Anywhere else passing it is refused.
+
 ## Errors
 
 | message | from | meaning |
@@ -678,12 +744,16 @@ assembly lists are generated but not built yet.
 | `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
 | `<target>: tests_known_failing was removed: every welded test must pass` | [`defs.bzl`](defs.bzl) | a `mojo_library` call names `tests_known_failing`; delete it and make the test pass |
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
-| `<target>: ... data destination <d> ...` | [`defs.bzl`](defs.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
-| `<target>: ... env sets <NAME>, which the test runner sets itself` | [`defs.bzl`](defs.bzl) | `test_env`/`env` names a variable the runner owns |
+| `<target>: ... data destination <d> ...` | [`test_runtime.bzl`](test_runtime.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
+| `<target>: ... env sets <NAME>, which the test runner sets itself` | [`test_runtime.bzl`](test_runtime.bzl) | `test_env`/`env` names a variable the runner owns |
 | `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
 | `mojo_wrapper: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([test 4](../tests/README.md#4-closure-refusal)) |
 | `mojo_wrapper: <output> contains this action's working directory` (exit 4) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | a compile output embeds a machine-specific path |
 | `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
+| ``[komira] coverage = "<v>": it must be `true` or `false` (default false)`` | [`coverage.bzl`](coverage.bzl) | the coverage switch has another value; it fails at load rather than reading a typo as off |
+| `cov_zig: ... has debug sections but holds the working directory (...) nowhere` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link's debug info holds neither spelling of the working directory: zig's C runtime units (the only ones that record a directory) record one the relocation was not given, so the binary would differ by machine, or have no debug info |
+| `cov_zig: a link with the optimization level <level> is refused` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link at a release level, where lld would merge string tails the relocation cannot see |
+| `cov_zig: debug_relocate refused <output>` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | the relocation refused a coverage link's output (a longer name starting with the directory, a compressed section); its own message follows |
 | `run_check: stdout of <binary> differs from <expected>` | [`run_check.sh`](run_check.sh) | `[run_check]` output did not match `expected_stdout` |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |

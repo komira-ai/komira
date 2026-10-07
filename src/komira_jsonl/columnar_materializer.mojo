@@ -70,25 +70,22 @@ from komira_async.runtime.parallel_fork_join import (
     parallel_fork_join_serial,
 )
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow_helpers.streaming_concat import (
-    _concat_variable_width_batches,
-)
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.list_array import ListArray
-from komira_core.arrow.map_array import MapArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.struct_array import StructArray
-from komira_core.collections.slab import Slab
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.list_array import ListArray
+from komira_arrow.map_array import MapArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.string_array import StringArray
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.struct_array import StructArray
+from komira_collections.slab import Slab
 
 from komira_json_index.input_limits import (
     check_arrow_string_bytes,
@@ -98,6 +95,7 @@ from komira_json_index.input_limits import (
 )
 from komira_jsonl.key_dispatch import KeyTable
 from komira_jsonl.key_unescape import key_has_escape, unescape_key
+from komira_jsonl.part_concat import _concat_jsonl_parts
 from komira_jsonl.line_check import (
     build_jsonl_index,
     check_jsonl_lines,
@@ -266,7 +264,7 @@ struct _StringAcc(Copyable, Movable):
     a single `data.extend(span)` memcpy with NO intermediate `String`; the
     no-null hot path never touches the lazy validity list. This is the
     same primitive the ORC and Avro readers use
-    (`komira_core.arrow.string_builder`)."""
+    (`komira_arrow.string_builder`)."""
 
     var builder: ArrowStringBuilder
 
@@ -952,7 +950,9 @@ def materialize_jsonl_to_batch(
     included. Keys are compared as the text they spell (escapes decoded).
     Keys the schema does not read are skipped unread with their values,
     repeated or not, at top level and inside a STRUCT. Every error raised
-    while reading a row names the row's line."""
+    while reading a row names the row's line. One empty record per `{}`
+    line: with a schema of no fields (inferred from `{}` lines, or given),
+    the batch has no column and one row per object."""
     var no_prefix = List[UInt8]()
     return _materialize_checked(bytes, schema^, idx, no_prefix, 0)
 
@@ -1019,6 +1019,8 @@ def _walk_jsonl_rows(
 
     Raises on:
       * A key the schema reads repeated in one object.
+      * A JSON `null`, or an object without the key, for a NOT NULL field
+        (a nullable field reads both as NULL).
       * Schema column type outside the supported set.
       * Per-value parse errors (overflow, bad bool literal, ...).
     """
@@ -1056,10 +1058,14 @@ def _walk_jsonl_rows(
     # 5=DECIMAL128, 6=LIST, 7=STRUCT, 8=MAP.
     var col_kinds = List[UInt8](capacity=n)
     var field_names = List[String](capacity=n)
+    # A NOT NULL field refuses a JSON `null` and an object without its key
+    # (both read as NULL in a nullable field): it never holds a NULL.
+    var col_nullable = List[Bool](capacity=n)
     for i in range(n):
         var at = schema.field_arrow_type(i)
         var fld = schema.field_at_unchecked(i)
         field_names.append(String(schema.field_name(i)))
+        col_nullable.append(schema.field_nullable(i))
         int_accs.append(_Int64Acc.create())
         bool_accs.append(_BoolAcc.create())
         string_accs.append(_StringAcc.create())
@@ -1379,6 +1385,11 @@ def _walk_jsonl_rows(
                     # Check for explicit "null" first — affects validity.
                     if (s_end - s_start) == 4 and bytes[s_start] == UInt8(0x6E):
                         parse_null(bytes, s_start, s_end)
+                        if not col_nullable[col_idx]:
+                            raise Error(
+                                "NOT NULL field '" + schema.field_name(col_idx)
+                                + "' holds JSON null"
+                            )
                         if kind == UInt8(0):
                             int_accs[col_idx].push_null()
                         elif kind == UInt8(1):
@@ -1444,6 +1455,11 @@ def _walk_jsonl_rows(
         # push null.
         for c in range(n):
             if not per_row_seen[c]:
+                if not col_nullable[c]:
+                    raise Error(
+                        "NOT NULL field '" + schema.field_name(c)
+                        + "' has no key in the object"
+                    )
                 var kind = col_kinds[c]
                 if kind == UInt8(0):
                     int_accs[c].push_null()
@@ -1471,6 +1487,14 @@ def _walk_jsonl_rows(
     # The rows are read; an error from here on (building the columns)
     # belongs to no row, so it is not labelled with a line.
     row_start = -1
+
+    # No columns (a schema with no fields, e.g. inferred from `{}` lines):
+    # the batch carries the row count alone, one empty record per object.
+    # The builder below would return 0 rows, having no column to count.
+    if n == 0:
+        var empty = RecordBatch.count_only(row_count)
+        empty.schema = schema^
+        return empty^
 
     # Assemble RecordBatch. Build columns by popping accumulators from
     # the front in lockstep across all 9 parallel acc lists (6 scalar +
@@ -1959,13 +1983,8 @@ def _materialize_with_partitions_impl[
     if k == 0:
         _ = fj_out^
         return materialize_jsonl_to_batch(bytes, schema^)
-    # SAFETY: `fj_out` is a stack-rooted Slab whose heap storage is stable
-    # across this call; `get_mut_interior(0)` yields a ref into the slab's
-    # interior and `UnsafePointer(to=ref)` lifts it to slot 0. The pointer
-    # is internal to this module and never crosses the public signature.
-    ref slot0 = fj_out.get_mut_interior(0)
-    var staging_ptr = UnsafePointer(to=slot0)
-    var combined = _concat_variable_width_batches(staging_ptr, k)
+    # Zero-column parts (a schema with no fields) are joined by row count.
+    var combined = _concat_jsonl_parts(fj_out, k)
     _ = fj_out^
     _ = schema^
     return combined^
@@ -2135,15 +2154,9 @@ def _materialize_parallel_impl[
         _ = fj_out^
         return materialize_jsonl_to_batch(bytes, schema^)
 
-    # SAFETY: `fj_out` is a stack-rooted Slab whose heap storage is stable
-    # across this call; `get_mut_interior(0)` yields a ref into the slab's
-    # interior and `UnsafePointer(to=ref)` lifts it to slot 0. The pointer
-    # is internal to this module and never crosses the public signature
-    # (this fn returns a RecordBatch). `_concat_variable_width_batches`
-    # walks slots [0, k) by index, reading each in order.
-    ref slot0 = fj_out.get_mut_interior(0)
-    var staging_ptr = UnsafePointer(to=slot0)
-    var combined = _concat_variable_width_batches(staging_ptr, k)
+    # `_concat_jsonl_parts` walks slots [0, k) in order; zero-column parts
+    # (a schema with no fields) are joined by row count.
+    var combined = _concat_jsonl_parts(fj_out, k)
     # The concat `.take()`s each slot, so the slab destructor sees empty
     # slots (no-op drop). schema is dropped here (each worker used a copy).
     _ = fj_out^

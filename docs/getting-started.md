@@ -98,7 +98,7 @@ mojo_library(
     name = "komira_example",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
     ],
     test_srcs = ["tests/test_example.mojo"],
     visibility = ["PUBLIC"],

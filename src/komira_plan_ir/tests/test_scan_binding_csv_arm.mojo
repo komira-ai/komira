@@ -387,7 +387,7 @@ def test_two_paths_do_not_share_a_plan_cache_key() raises:
 def test_csv_is_binding_backed_and_carries_the_csv_kind() raises:
     """The arm's payload is a `ScanBinding`, not an `Optional[CsvSource]`.
     No `CsvSource` is reachable from a plan node — which is the
-    property that lets a source live outside `komira_core` at all."""
+    property that lets a source live outside the core packages at all."""
     var sv = SourceVariant(_csv_src(String(GOLDEN_PATH)))
     assert_true(sv.is_binding_backed(), "CSV arm is binding-backed")
     ref b = sv.binding_ref()
@@ -802,7 +802,7 @@ def test_a_missing_path_stats_to_zero_rather_than_raising() raises:
 
 # ⚠ THE "core defaults == chassis defaults" PIN IS **NOT** HERE, AND CANNOT BE.
 # `CSV_DEFAULT_DELIMITER` / `CSV_DEFAULT_HAS_HEADER` are core's own copy of
-# `CsvReadOptions`' defaults, because `komira_core` cannot import `komira_csv`
+# `CsvReadOptions`' defaults, because the core packages cannot import `komira_csv`
 # (the chassis depends on core, not the reverse) — and this test inherits that
 # layering, so it cannot import `komira_csv.csv_options`. The pin lives at the
 # first layer that can see both (the SQL `read_csv` dialect plan-identity test,

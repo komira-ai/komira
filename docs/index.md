@@ -10,6 +10,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | The build tooling, and using komira from another repository | [tools/build/README.md](../tools/build/README.md) |
 | The Mojo rules | [tools/build/mojo/README.md](../tools/build/mojo/README.md) |
 | The end-to-end tests | [tools/build/tests/README.md](../tools/build/tests/README.md) |
+| README API coverage: which public symbols the README examples use, its ledger, and the census | [readme_api_coverage.md](readme_api_coverage.md) |
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
 | The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |
 | Columnar memory: Arrow buffers, columns, batches, IPC and the C Data Interface | [design/columnar_memory_and_arrow.md](design/columnar_memory_and_arrow.md) |
@@ -47,6 +48,6 @@ and its limits. A family's doc lands together with the libraries it describes;
 | runtime | [the async runtime](design/async_runtime.md); the job supervisor and its job report wire: no design doc yet |
 | observability | [logging and telemetry](design/logging_and_telemetry.md) |
 | agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |
-| cloud | the AWS, GCP and Azure clients and their credentials, secrets and the service registry: no design doc yet; deploy marks: coming with the cloud SDK libraries |
+| cloud | the AWS, GCP and Azure clients and their credentials and secrets: no design doc yet; deploy marks: coming with the cloud SDK libraries |
 | CI and deploy | the `kci` command line, the resource model and its cloud providers, apply, validate and rollout: no design doc yet ([release machines](design/release_machine.md) covers komira's own release stages) |
 | packaging | [release machines: bundles, tarballs and OCI images](design/release_machine.md); the shared-library ABI: coming with `komira_so` |

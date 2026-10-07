@@ -1,0 +1,8 @@
+# Made-up strings of a coverage binary for check.sh (BUCK): everything
+# a good one has, and an absolute path of some other build directory.
+.debug_line
+value.mojo
+tests
+buck-out/v2/art/tests/functional/coverage/__covlib_forced__/0123456789abcdef/src/covlib
+/__________________________________
+/var/build/0123456789abcdef/out/tests/test_value.mojo

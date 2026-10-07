@@ -34,7 +34,8 @@
 #       Catches: the old catch-all `except: continue  # already-reaped`. A
 #       live chunk that READS AS ABSENT (not_found) is raised too. Catches: a
 #       walk that skips only not_found. After a failed (swallowed) advance,
-#       both walks' re-runs re-advance without re-tombstoning.
+#       both walks' re-runs re-advance and count no new tombstone (they
+#       re-stamp the stranded ones; test_broker_moved_payload_reap_offline).
 #
 # Faults come from `_FaultStore`, which wraps the shared in-memory store and
 # keeps its rules as marker objects IN that store, so every clone sees them.
@@ -42,12 +43,12 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_collections.slab import Slab
 
 from komira_broker.broker_core import BrokerCore
 from komira_broker.manifest_body import ManifestBody
@@ -825,7 +826,8 @@ def test_retire_walks_raise_on_a_live_chunk_reading_as_absent() raises:
 def test_retire_walks_rerun_after_a_failed_advance() raises:
     """The tombstones land and the swallowed advance fails (or the process
     stops in between): the tombstones sit on live chunks, which the reaper
-    skips. A re-run does not re-tombstone, and advances the log start."""
+    skips. A re-run counts no new tombstone (it re-stamps the stranded
+    ones), and advances the log start."""
     print("[test_retire_walks_rerun_after_a_failed_advance] starting...")
     var inner = _Inner()
     # Segment fold.

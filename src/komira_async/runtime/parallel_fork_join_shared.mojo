@@ -11,9 +11,9 @@
 # the sort's stage-4 `gather_batch` as well.
 #
 # The State / Task / driver live in
-# `komira_core.runtime_traits.fork_join_shared`, genericized over
+# `komira_async_api.fork_join_shared`, genericized over
 # `D: ParallelDispatch`, because `gather_batch` (stage 4 of every `ORDER BY`)
-# is in `komira_core`, which `komira_async` depends on, so it cannot import
+# is in the core packages, which `komira_async` depends on, so it cannot import
 # them from here. There is exactly ONE shared-payload fork-join driver; this
 # file binds it to `D = LocalDispatcher[NoopSink]` and keeps every public
 # signature below unchanged.
@@ -44,11 +44,11 @@
 
 from komira_async.runtime.sched_trace import SITE_GENERIC_FORK_JOIN
 
-from komira_core.cancellation.token import CancellationToken
+from komira_async_api.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.local_dispatcher import LocalDispatcher
-from komira_core.runtime_traits.fork_join_shared import fork_join_shared
-from komira_core.runtime_traits.shared_chunk_work import SharedChunkWork
+from komira_async_api.fork_join_shared import fork_join_shared
+from komira_async_api.shared_chunk_work import SharedChunkWork
 
 
 # =============================================================================
