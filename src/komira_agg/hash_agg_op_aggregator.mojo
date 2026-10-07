@@ -59,8 +59,8 @@
 #     Aggregator]` consumes these adapters as the `*Aggs` pack.
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.morsel_view import MorselView
+from komira_arrow.batch_view import BatchView
+from komira_arrow.morsel_view import MorselView
 
 from komira_agg.aggregator import Aggregator
 from komira_agg.agg_op_traits import (

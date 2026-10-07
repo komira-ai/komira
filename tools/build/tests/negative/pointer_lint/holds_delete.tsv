@@ -1,0 +1,8 @@
+# The planted sites of held.mojo, each rule counted exactly.
+wildcard_origin	src/komira_a/held.mojo	7	planted
+public_pointer	src/komira_a/held.mojo	4	planted
+from_address	src/komira_a/held.mojo	2	planted
+partial_move	src/komira_a/held.mojo	5	planted
+parallelize	src/komira_a/held.mojo	2	planted
+libc_redeclare	src/komira_a/held.mojo	3	planted
+from_address	src/komira_a/near.mojo	1	planted

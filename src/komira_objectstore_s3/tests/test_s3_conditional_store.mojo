@@ -30,7 +30,7 @@ from std.testing import assert_equal, assert_false, assert_raises, assert_true
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import (
     Connector,

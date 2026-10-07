@@ -63,5 +63,5 @@ def _shallow_basename(key: String) -> String:
     # S3/GCS/Azure key or CommonPrefixes fold (`events/city=Zürich/`) yielded a
     # basename that does not exist in the bucket. `StringSlice(
     # unsafe_from_utf8=)` is the in-tree byte-exact, LENGTH-EXPLICIT spelling
-    # (`komira_core/collections/string_column_view.mojo:145`).
+    # (`komira_arrow/string_column_view.mojo:145`).
     return String(StringSlice(unsafe_from_utf8=bs[last + 1 : n]))

@@ -51,13 +51,13 @@ from komira_fs.local_fs_probe import (
 )
 from komira_fs.shallow_dir_entry import ShallowDirEntry
 from komira_async.ops.waker_sink import WakerSink
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.collections.slab import Slab
-from komira_core.io.chunked_read import read_chunked, read_chunked_range
-from komira_core.io.heap_region import HeapRegion
-from komira_core.io.mmap_region import MmapRegion
-from komira_core.io.posix_io import (
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_collections.slab import Slab
+from komira_arrow_ipc.chunked_read import read_chunked, read_chunked_range
+from komira_buffer.heap_region import HeapRegion
+from komira_buffer.mmap_region import MmapRegion
+from komira_libc.posix_io import (
     RawWriteFd,
     IOV_MAX,
     fsync_path,
@@ -270,7 +270,7 @@ def _local_fs_list_recursive(var root: String) raises -> List[String]:
         for j in range(start, i):
             name_bytes.append(out_buf[j])
         # `StringSlice(unsafe_from_utf8=)` is the in-tree byte-exact spelling
-        # (`komira_core/collections/string_column_view.mojo:145`) -- and it is
+        # (`komira_arrow/string_column_view.mojo:145`) -- and it is
         # LENGTH-EXPLICIT, unlike `String(unsafe_from_utf8_ptr=)`, which stops
         # at the first NUL.
         paths.append(String(StringSlice(unsafe_from_utf8=Span(name_bytes))))
@@ -484,7 +484,7 @@ struct LocalFile(Movable, Deinitable):
 #   var _cursor: Int64      # logical write position; advanced by write_at
 #
 # `_fd: RawWriteFd` is the owning POSIX-fd primitive from
-# `komira_core/io/posix_io.mojo`. Its `__del__` calls `close(2)` if the
+# `komira_libc/posix_io.mojo`. Its `__del__` calls `close(2)` if the
 # fd is still open (idempotent; `close_write` consumes the LocalWriteFile
 # and closes explicitly first, so the destructor on the consumed-into
 # parameter sees a sentinel fd).
@@ -599,7 +599,7 @@ struct LocalWriteFile(Movable, Deinitable):
 # The Mojo 1.0.0b1 stdlib `FileHandle.write(s)` silently flushes 0 bytes
 # for `len(s) > ~2 GB` (Int32 overflow in the underlying write(2) count
 # argument). The canonical workaround is to chunk every write at 64 MiB
-# (`komira_core.io.chunked_write.write_chunked`). For the FileSystem
+# (`komira_libc.chunked_write.write_chunked`). For the FileSystem
 # trait surface, we absorb that workaround INSIDE `LocalFs.write_at`
 # so codec writers stop importing `chunked_write` directly.
 #
@@ -612,7 +612,7 @@ struct LocalWriteFile(Movable, Deinitable):
 # =============================================================================
 
 
-# 64 MiB chunk size. Mirrors `komira_core.io.chunked_write.CHUNK_BYTES`;
+# 64 MiB chunk size. Mirrors `komira_libc.chunked_write.CHUNK_BYTES`;
 # we redeclare locally to avoid pulling chunked_write's `FileHandle`-based
 # helpers into the LocalFs trait conformance path.
 comptime _LOCAL_FS_WRITE_CHUNK_BYTES: Int = 64 * 1024 * 1024
@@ -714,7 +714,7 @@ struct LocalFs[
 
     # ----
     # Bind the trait's WriteFile alias to LocalWriteFile (declared above;
-    # wraps RawWriteFd from `komira_core.io.posix_io`).
+    # wraps RawWriteFd from `komira_libc.posix_io`).
     comptime WriteFile = LocalWriteFile
     # POSIX pwrite(2) is atomic for disjoint ranges on a regular file —
     # advertise that disjoint-range concurrent writes are safe.
@@ -1232,7 +1232,7 @@ struct LocalFs[
 
         Durability: close(2) does NOT fsync. For write-to-storage
         durability, the caller must invoke
-        `komira_core.io.posix_io.fsync_path(path)` separately
+        `komira_libc.posix_io.fsync_path(path)` separately
         (matches the existing `-
         MOJO-SIDE` pattern at posix_io.mojo:586-607).
 
@@ -1322,12 +1322,12 @@ struct LocalFs[
 
     # ---- facade methods --------------------------------
     # Thin delegates over
-    # `komira_core.io.chunked_read.read_chunked` /
+    # `komira_arrow_ipc.chunked_read.read_chunked` /
     # `read_chunked_range` — that file is the single canonical
     # mmap-wrap site in the tree.
     #
     # Why both this facade AND read_chunked exist:
-    #   * `read_chunked(path)` lives in `komira_core/io/` so downstream
+    #   * `read_chunked(path)` lives in the core packages so downstream
     #     reader packages (`komira_orc`, `komira_csv`, `komira_json`,
     #     `komira_sdk`) can import it without an upward layering hop
     #     into `komira_async`.
@@ -1344,7 +1344,7 @@ struct LocalFs[
     def read_whole(self, path: String) raises -> SharedAlignedBuffer[HeapRegion]:
         """Sync slurp facade — mmap `path` and return a borrowed MmapAlignedBuffer.
 
-        Thin delegate to `komira_core.io.chunked_read.read_chunked`
+        Thin delegate to `komira_arrow_ipc.chunked_read.read_chunked`
         (the canonical mmap-wrap site). The returned buffer's
         `_keepalive` is an `ArcPointer[MmapRegion]`; bytes alias the
         kernel mmap mapping (zero-copy on warm page cache); the last
@@ -1382,7 +1382,7 @@ struct LocalFs[
         """Sync ranged-read facade — mmap `path` and return a borrowed
         MmapAlignedBuffer over `[offset, offset+length)`.
 
-        Thin delegate to `komira_core.io.chunked_read.read_chunked_range`
+        Thin delegate to `komira_arrow_ipc.chunked_read.read_chunked_range`
         (the canonical mmap-wrap site).
 
         Args:

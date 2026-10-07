@@ -59,8 +59,9 @@ build on its own.
    googleapis's default branch, and which extracted files differ between the
    two. It is a report; nothing runs it in the build. If no file differs,
    there is nothing to bump for.
-2. Set `_COMMIT` in BUCK to the new full commit sha, and `_SHA256` to the
-   sha256 of `https://github.com/googleapis/googleapis/archive/<commit>.tar.gz`.
+2. Set `_COMMIT` in BUCK to the new full commit sha, and `_SHA256` and
+   `_SIZE` to the sha256 and the length in bytes of
+   `https://github.com/googleapis/googleapis/archive/<commit>.tar.gz`.
 3. Build `//tools/vendor/googleapis:` (every checked closure). If the new
    commit changed an import closure, its check names the file to add to (or
    drop from) that closure's list (`_LOGGING_V2_CLOSURE`,

@@ -41,23 +41,23 @@ from std.testing import (
     assert_true,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.arrow.string_array import StringArray
-from komira_core.io.heap_region import HeapRegion
-from komira_core.plan.expr import Expr, BIN_AND, BIN_EQ, BIN_GE, BIN_GT
-from komira_core.plan.logical_plan import LogicalPlan
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.scan_identity_render_audit import audit_scan_identity
-from komira_core.source.scan_binding import ScanBinding
-from komira_core.source.scan_identity_audit import ScanIdentityCorpus
-from komira_core.source.scan_kind_registry import ScanKindRegistry
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_resolver import resolve_for_execution
-from komira_core.source.source_variant import SourceVariant
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.string_array import StringArray
+from komira_buffer.heap_region import HeapRegion
+from komira_plan_expr.expr import Expr, BIN_AND, BIN_EQ, BIN_GE, BIN_GT
+from komira_plan_ir.logical_plan import LogicalPlan
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_ir.scan_identity_render_audit import audit_scan_identity
+from komira_scan_source.scan_binding import ScanBinding
+from komira_scan_source.scan_identity_audit import ScanIdentityCorpus
+from komira_scan_source.scan_kind_registry import ScanKindRegistry
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_resolver import resolve_for_execution
+from komira_scan_source.source_variant import SourceVariant
 
 from komira_scan_resolver.drain_scan import drain_scan
 from komira_scan_resolver.scan_source_resolver import (

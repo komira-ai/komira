@@ -52,7 +52,7 @@
 #   - aggregator.mojo — the unified `Aggregator` trait surface.
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 from komira_agg.aggregator import Aggregator
 from komira_expr.expr_x import ExprXF64
 

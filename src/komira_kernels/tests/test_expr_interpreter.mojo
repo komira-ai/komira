@@ -10,8 +10,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.expr import (
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.expr import (
     Expr,
     BIN_ADD,
     BIN_SUB,

@@ -30,15 +30,16 @@ from std.testing import TestSuite, assert_equal, assert_true
 from std.sys import size_of
 from std.memory import unsafe_memcpy
 
-from komira_core.arrow import StringArray, BooleanArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.dictionary_array import StringDictionaryArray
-from komira_core.eval import (
+from komira_arrow.string_array import StringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.dictionary_array import StringDictionaryArray
+from komira_column_kernels.string_comparison import (
     eval_string_eq, eval_string_ne, eval_string_gt, eval_string_lt,
     eval_string_ge, eval_string_le,
 )
-from komira_core.eval.dict_filter import (
+from komira_column_kernels.dict_filter import (
     DictFilterOp, dict_filter_eval, dict_filter_eval_bool_mask,
 )
 

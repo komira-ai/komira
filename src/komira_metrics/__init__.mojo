@@ -11,7 +11,7 @@ path.
 Public API: import directly from sub-modules. No facade.
 
 Dependency direction (DAG, leaf-ish):
-  komira_metrics -> komira_core (Slab), komira_name_registry (comptime name
+  komira_metrics -> the core packages (Slab), komira_name_registry (comptime name
                     ids), komira_hash (FNV-1a constants), komira_clock
 
 komira_metrics MUST NOT depend on engine packages, on `komira_trace` or on

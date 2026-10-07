@@ -6,7 +6,7 @@
 # does, and only in a file named in _allowed() below with its reason. Every
 # library source of the package is staged as test data
 # (src/komira_gcp_core/*.mojo); the test reads each one and fails if a file
-# not in _allowed() names getenv, setenv, `_read_env`, komira_core_ffi or an
+# not in _allowed() names getenv, setenv, `_read_env`, komira_libc or an
 # `external_call`. An allowed entry must exist and must actually read the
 # environment, so a stale entry fails too.
 #
@@ -39,7 +39,7 @@ def _allowed() -> List[Tuple[String, String]]:
             String("sources.mojo"),
             String(
                 "the chain's EnvSource seam: ProcessEnv reads getenv through"
-                " komira_core_ffi's _read_env"
+                " komira_libc's _read_env"
             ),
         ),
     ]
@@ -80,7 +80,7 @@ def test_scan() raises:
         "getenv",
         "setenv",
         "_read_env",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
     ]
     for i in range(len(names)):

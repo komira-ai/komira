@@ -875,7 +875,7 @@ struct BatchView[origin: Origin[mut=False]](
         # view rides that sub-origin. Re-label onto `Self.origin` (the batch
         # owns the column slab, so the sub-origin is bounded by it).
         # SAFETY: module-private `_unsafe_ptr` escape (BatchView is under
-        # komira_core/collections/); the cast widens a
+        # the core packages); the cast widens a
         # sub-origin to its enclosing batch origin — both ASAP-tracked, no
         # wildcard. Mirrors ColumnNativeBatch's `values_view_native` re-cast.
         var v = self._batch[].column_at(idx).string_dict_codes_view()

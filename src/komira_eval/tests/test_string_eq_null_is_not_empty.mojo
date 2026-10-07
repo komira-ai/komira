@@ -6,11 +6,11 @@
 # string-equality path:
 #
 #   PipelineCompiler predicate evaluation  `eval_string_eq(arr, str_val)`
-#     -> komira_core.eval.string_comparison (a one-line `import *` shim)
-#     -> komira_core.eval.string_comparison  `eval_string_eq`
-#     -> komira_core.eval.string_comparison  `_string_eq_kernel`
+#     -> komira_column_kernels.string_comparison (a one-line `import *` shim)
+#     -> komira_column_kernels.string_comparison  `eval_string_eq`
+#     -> komira_column_kernels.string_comparison  `_string_eq_kernel`
 #
-# `komira_eval.kleene` and `komira_core.eval.comparison` are the
+# `komira_eval.kleene` and `komira_column_kernels.comparison` are the
 # other two implementations and NEITHER is reached by a string comparison.
 #
 # THE DEFECT IS IN THE SIGNATURE, NOT IN THE LOOP. `_string_eq_kernel` takes
@@ -33,8 +33,9 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import StringArray, BooleanArray
-from komira_core.eval import eval_string_eq, eval_string_ne
+from komira_arrow.string_array import StringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_column_kernels.string_comparison import eval_string_eq, eval_string_ne
 
 
 def _count_true(mask: BooleanArray) raises -> Int:

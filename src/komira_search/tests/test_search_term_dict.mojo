@@ -33,7 +33,7 @@ from std.testing import (
     assert_raises,
 )
 
-from komira_core.collections.byte_buffer import ByteBuffer, write_uleb128
+from komira_buffer.byte_buffer import ByteBuffer, write_uleb128
 
 from komira_search.analyzer import AnalyzedField, Token
 from komira_search.inverted import InvertedIndexBuilder, FinalizedIndex

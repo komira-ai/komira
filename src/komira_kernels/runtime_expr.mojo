@@ -130,7 +130,7 @@ comptime EXPR_POW_F64: Int = 87
 # THE GENERIC UNARY-MATH NODE.
 #
 # ⭐ WHY A GENERIC NODE RATHER THAN ONE TAG PER OP. `MATH_*` in
-# `komira_core.plan.expr` holds many unary ops. With a per-op tag, an op with
+# `komira_plan_expr.expr` holds many unary ops. With a per-op tag, an op with
 # no tag makes `lower_untyped_expr._translate_node`'s EXPR_MATH_FN arm raise
 # `UnsupportedByLowerUntypedExpr`, which `compute_project` turns into a
 # DECLINE and `materialize_subplan` into a hard REFUSAL for a computed PROJECT
@@ -253,10 +253,10 @@ comptime EXPR_I64_TO_F64: Int = 81
 # numeric family is float the lowering wraps this node in EXPR_I64_TO_F64.
 comptime EXPR_EXTRACT_I64: Int = 82
 
-# Mirror of komira_core.plan.expr EXTRACT_* unit constants — kept here so the
+# Mirror of komira_plan_expr.expr EXTRACT_* unit constants — kept here so the
 # runtime walker arm + the row lowering don't have to reach across to the SDK
 # IR module for the field selector. These MUST equal the EXPR_* values in
-# komira_core.plan.expr (EXTRACT_YEAR=0 ... EXTRACT_SECOND=6).
+# komira_plan_expr.expr (EXTRACT_YEAR=0 ... EXTRACT_SECOND=6).
 comptime RT_EXTRACT_YEAR: Int = 0
 comptime RT_EXTRACT_QUARTER: Int = 1
 comptime RT_EXTRACT_MONTH: Int = 2
@@ -266,7 +266,7 @@ comptime RT_EXTRACT_MINUTE: Int = 5
 comptime RT_EXTRACT_SECOND: Int = 6
 
 # The DAY-INDEX units. Same mirror
-# rule as above: these MUST equal `komira_core.plan.expr.EXTRACT_DAYOFWEEK` =
+# rule as above: these MUST equal `komira_plan_expr.expr.EXTRACT_DAYOFWEEK` =
 # 7 / `EXTRACT_ISODOW` = 8 / `EXTRACT_DAYOFYEAR` = 9.
 #
 # ⛔ `RT_EXTRACT_DAYOFWEEK` AND `RT_EXTRACT_ISODOW` ARE TWO SELECTORS AND NOT
@@ -478,7 +478,7 @@ comptime EXPR_NEQ_STRING: Int = 34
 #   - EXPR_ADD_DECIMAL128 / EXPR_SUB_DECIMAL128 / EXPR_MUL_DECIMAL128 /
 #     EXPR_DIV_DECIMAL128 (arity 2): per-row decimal arithmetic. Walker
 #     calls `decimal_add_i128` / `decimal_sub_i128` / `decimal_mul_i128`
-#     / `decimal_div_i128` from `komira_core.eval.decimal_arith`
+#     / `decimal_div_i128` from `komira_scalar_arithmetic.decimal_arith`
 #     (overflow-checked, native SIMD[DType.int128, 1] arithmetic).
 #     Result (precision, scale) computed via `decimal_{add,mul,div}_result_ps`.
 #
@@ -566,7 +566,7 @@ comptime EXPR_LE_STRING: Int = 52
 #   - Other bytes match themselves (literal).
 #
 # Case-sensitive. The walker's arm calls the ONE shared matcher,
-# `komira_core.eval.string_comparison.like_match_string`, so `_` is one
+# `komira_column_kernels.string_comparison.like_match_string`, so `_` is one
 # character here exactly as in the columnar kernel (`'é' LIKE '_'` is
 # true). ESCAPE clause + ILIKE (case-insensitive) are out of scope.
 #
@@ -1202,7 +1202,7 @@ def make_col_decimal128(idx: Int) -> RuntimeExpr:
 def make_add_decimal128(left: Int, right: Int) -> RuntimeExpr:
     """Element-wise Decimal128 add. Children at `left`/`right` pool
     indices. Walker calls `decimal_add_i128(a, s1, b, s2, out_scale)`
-    per row from `komira_core.eval.decimal_arith`. Result
+    per row from `komira_scalar_arithmetic.decimal_arith`. Result
     (precision, scale) via `decimal_add_result_ps(p1, s1, p2, s2)`.
     """
     return RuntimeExpr(EXPR_ADD_DECIMAL128, 0, 0.0, False, 0, left, right)

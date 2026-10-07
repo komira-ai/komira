@@ -224,8 +224,8 @@ comptime STMT_CREATE_TABLE_AS: UInt8 = 2  # CREATE [OR REPLACE] TABLE <name> AS 
 #
 # They became a WIRE VOCABULARY when `komira.plan.v1.WirePlanEnvelope` gained
 # its `write_target` field. `scripts/lint_plan_wire_space_coverage.py` ARM 1
-# derives the set of vocabularies it can see from the transitive `komira_core`
-# import closure of `plan_wire_codec.mojo` — and `komira_sdk` is not in that
+# derives the set of vocabularies it can see from the transitive import
+# closure of `plan_wire_codec.mojo` — and `komira_sdk` is not in that
 # closure and structurally cannot be, because the codec sits BELOW the engine.
 # Declared here, a write vocabulary is one the completeness gate CANNOT SEE.
 #

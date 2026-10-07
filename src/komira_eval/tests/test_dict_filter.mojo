@@ -10,11 +10,11 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.dictionary_array import StringDictionaryArray
-from komira_core.eval.dict_filter import DictFilterOp, dict_filter_eval, dict_filter_eval_bool_mask
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.dictionary_array import StringDictionaryArray
+from komira_column_kernels.dict_filter import DictFilterOp, dict_filter_eval, dict_filter_eval_bool_mask
 from std.sys import size_of
 from std.memory import unsafe_memcpy
 

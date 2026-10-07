@@ -1,0 +1,11 @@
+# FFI-BOUNDARY: libz; the caller owns `buf` and frees it, libz only reads it.
+# The FFI ledger (ffi.tsv) lists this module, so its wildcard origins are
+# not sites.
+def _inflate(buf: UnsafePointer[UInt8, MutExternalOrigin], n: Int) -> Int:
+    var p = buf.unsafe_origin_cast[MutAnyOrigin]()
+    return n
+
+
+def _addr(a: Int):
+    # The FFI ledger exempts wildcard origins only.
+    var p = UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=a)

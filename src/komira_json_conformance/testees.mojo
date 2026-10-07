@@ -87,9 +87,9 @@ from kci_logs.gcp_logging_query import parse_entries_list_body
 from kci_logs.run_log_tail import parse_run_logs_body
 from komira_avro import decode_ocf_header
 from komira_connect import parse_connect_error_json
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.string_array import StringArray
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.string_array import StringArray
 from komira_json import parse_json_bytes
 from komira_json_index.json_extract_kernel import extract_column
 from komira_json_index.parse_string import parse_string

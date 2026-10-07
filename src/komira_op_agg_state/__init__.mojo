@@ -9,8 +9,9 @@ map into (byte-keyed, composite-keyed, dense, parametric, growable). Anything
 that holds or updates a running aggregate lives here; the sinks and kernels that
 drive it are in the packages above.
 
-It depends on `komira_core`, `komira_agg`, `komira_expr`, `komira_kernels` and
-`komira_udf`, and on no engine package.
+It depends on the core packages (`komira_agg_api`, `komira_arrow`, `komira_buffer`,
+`komira_collections`, `komira_plan_expr`), `komira_agg`, `komira_expr`,
+`komira_kernels` and `komira_udf`, and on no engine package.
 
 Public API: import directly from sub-modules. No facade.
 """

@@ -27,7 +27,7 @@ from komira_fs.file_format_capabilities import (
     PhysicalPredicate,
 )
 
-from komira_core.traits.expr_id import ExprId
+from komira_plan_expr.expr_id import ExprId
 
 
 # =============================================================================

@@ -89,7 +89,7 @@ from komira_async.runtime.wake_primitives import (
     _SleepingFlag,
     pause_intrinsic,
 )
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 # komira_log P2b — the per-core log drain. The worker drains its OWN log ring
 # (SPSC: this worker is the sole consumer of ring[worker_id]) at the cooperative

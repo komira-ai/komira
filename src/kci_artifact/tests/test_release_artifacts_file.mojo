@@ -59,12 +59,53 @@ def _flag_values(argv: List[String], flag: String) -> List[String]:
     return out^
 
 
-def test_the_first_release_is_komira_encoding_then_komira_all() raises:
+def test_the_declared_names_in_release_order() raises:
+    """The names this file declares, in build order: each library after the
+    libraries it depends on, and the metapackage last. A name added or
+    dropped here is a change to what is published, so it changes this list."""
     assert_equal(read_artifacts(String(_FILE)).schema_version, Int32(1))
     var d = read_artifacts(String(_FILE))
-    assert_equal(len(d.artifacts), 2)
-    assert_equal(d.artifacts[0].name, String("komira_encoding"))
-    assert_equal(d.artifacts[1].name, String("komira_all"))
+    var want = List[String]()
+    want.append(String("komira_encoding"))
+    want.append(String("komira_json"))
+    want.append(String("komira_protobuf"))
+    want.append(String("komira_xml"))
+    want.append(String("komira_retry"))
+    want.append(String("komira_datetime"))
+    want.append(String("komira_textproto"))
+    want.append(String("komira_hash"))
+    want.append(String("komira_atomic_alias"))
+    want.append(String("komira_proto_codec"))
+    want.append(String("kci_api"))
+    want.append(String("kci_release_channel"))
+    want.append(String("kci_artifact_manifest"))
+    want.append(String("kci_logs"))
+    want.append(String("kci_params"))
+    want.append(String("kci_release_machine"))
+    want.append(String("komira_wkt"))
+    want.append(String("kci_resource_proto"))
+    want.append(String("kci_validator_rows"))
+    want.append(String("kci_validator_report"))
+    want.append(String("kci_workflow_check"))
+    want.append(String("komira_anomaly"))
+    want.append(String("komira_clock"))
+    want.append(String("komira_counters"))
+    want.append(String("komira_fork_join"))
+    want.append(String("komira_host"))
+    want.append(String("komira_job_report_proto"))
+    want.append(String("komira_name_registry"))
+    want.append(String("komira_parquet_api"))
+    want.append(String("komira_runtime_paths"))
+    want.append(String("komira_resources"))
+    want.append(String("komira_scalar_arithmetic"))
+    want.append(String("komira_simd"))
+    want.append(String("komira_validation_run"))
+    want.append(String("komira_test_run_id"))
+    want.append(String("komira_test_verdict"))
+    want.append(String("komira_all"))
+    assert_equal(len(d.artifacts), len(want))
+    for i in range(len(want)):
+        assert_equal(d.artifacts[i].name, want[i], String("artifact ") + String(i))
 
 
 def test_every_library_builds_stamped_into_its_own_directory() raises:
@@ -77,10 +118,14 @@ def test_every_library_builds_stamped_into_its_own_directory() raises:
         assert_equal(_count(argv, String("komira.package_stamp=154")), 1)
         assert_equal(_count(argv, String("komira.package_commit=") + String(_SRC)), 1)
         assert_equal(_count(argv, String("komira.package_timestamp_ms=1790994309000")), 1)
-        assert_equal(
-            _count(argv, String("//src/") + name + String(":") + name + String("_conda[release]")),
-            1,
-        )
+        # Exactly one release label, and it is the artifact's own target plus
+        # [release]: `//<package path>:<name>_conda[release]`, where the
+        # package path is pinned by the target (a library may live outside
+        # src/: komira_runtime_paths is in tools/build/mojo).
+        assert_equal(len(d.artifacts[i].targets), 1, name)
+        var target = d.artifacts[i].targets[0].copy()
+        assert_true(target.endswith(String(":") + name + String("_conda")), name)
+        assert_equal(_count(argv, target + String("[release]")), 1, name)
         var outs = _flag_values(argv, String("--out"))
         assert_equal(len(outs), 1)
         assert_equal(outs[0], String(_REL) + String("/") + name)

@@ -1984,7 +1984,7 @@ def _infer_expr_field(expr: Expr, schema: Schema) -> Field:
     file is exactly the defect `expr_walk.mojo`'s header describes.
 
     ⛔ **THIS FUNCTION CANNOT RAISE, AND THAT IS MEASURED, NOT ASSUMED.**
-    With `walk_expr_field` declared `raises`, `komira_core` does not build:
+    With `walk_expr_field` declared `raises`, the core packages does not build:
 
         komira_plan_ir/logical_plan.mojo: error: cannot call
         function that may raise in a context that cannot raise
