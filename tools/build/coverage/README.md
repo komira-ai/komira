@@ -9,7 +9,8 @@ reviewer's approval (it does not check approval itself), and writes:
 
 - `covcheck report`: a Markdown summary, the request bodies of a GitHub check
   run (annotations included) and a JSON result, for a pull request;
-- `covcheck gate`: one package's numbers and findings, for the build gate.
+- `covcheck gate`: one package's numbers and findings, for the build gate
+  ([The build gate](#the-build-gate)).
 
 Both commands run the same computation (`covcheck/analyze.mojo`),
 so the PR check and the build gate cannot disagree; a welded test holds the
@@ -20,6 +21,9 @@ gate's JSON entry for a package equal to the report's.
 | `:covcheck` | the library (`covcheck/*.mojo`), its tests welded |
 | `:covcheck_bin` | the command line (`main.mojo`, dispatching to `covcheck/cli.mojo`) |
 | `:ratchet.tsv` | the floors (`ratchet.tsv`) |
+| `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
+| `policy.bzl` | the gate's mode and target, and the ledger of libraries whose package cannot wait for its own gate |
+| `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
 
 ## What line coverage means here
 
@@ -47,9 +51,10 @@ covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR
                 [--annotations-out F] [--ratchet-out F]
 
 covcheck gate   --package DIR --repo-files F --source-root DIR
-                (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--mutants [PKGDIR=]F]...
+                [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... --ratchet F --mode census|neutral|enforce
-                [--target-bp N] [--include-tests] --result-out F --summary-out F
+                [--target-bp N] [--include-tests] [--test-source P]...
+                --result-out F --summary-out F
 ```
 
 Every input is a flag; nothing is read from the environment.
@@ -58,13 +63,14 @@ Every input is a flag; nothing is read from the environment.
 |---|---|
 | `--repo-files F` | the output of `git ls-files -z` (NUL-terminated paths): the repository's files |
 | `--source-root DIR` | the checkout; the sources of measured files are read from it for exemption markers, and the files no test compiled for their executable lines |
-| `--cobertura [PKGDIR=]F`, `--lcov [PKGDIR=]F` | a report, repeatable (one per test binary), all of one format: the two formats identify a line's branches differently, so mixing them is bad usage. `PKGDIR` is the package the report's relative paths may be relative to; a file name holding `=` is given as `=F` |
+| `--cobertura [PKGDIR=]F`, `--lcov [PKGDIR=]F` | a report, repeatable (one per test binary), all of one format: the two formats identify a line's branches differently, so mixing them is bad usage. `PKGDIR` is the package the report's relative paths may be relative to; a file name holding `=` is given as `=F`. `report` needs at least one; `gate` takes none for a library with no test, whose package is then `NotMeasured` |
 | `--mutants [PKGDIR=]F` | a mutation-testing result, repeatable (format below) |
 | `--strip-prefix P` | repeatable; a report path starting with `P` loses it (the longest matching prefix wins) |
 | `--ratchet F` | the floors file (format below) |
 | `--mode` | `census`, `neutral` (the default of `report`) or `enforce`; `gate` requires it |
 | `--target-bp N` | the target, basis points 0 to 10000; default 10000 (100%) |
 | `--include-tests` | count test sources (left out by default) |
+| `--test-source P` | `gate`: repeatable; the repository path of a test source of `--package` outside its `tests/` (a welded test elsewhere), left out like those; a path that is not a file of `--repo-files` or not in `--package` is an error (exit 1) |
 | `--diff F` | the output of `git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ --unified=0 -M <merge-base> <head>` (the explicit prefixes override a `diff.noprefix` setting) |
 | `--head-sha SHA` | the commit the check run is for: 40 lowercase hex digits |
 | `--name N` | the check run's name; default `coverage` |
@@ -87,7 +93,7 @@ enforce mode when the package has a finding, so the build fails.
 |---|---|
 | 0 | the outputs were written, whatever they conclude (`report` never carries the conclusion in its exit code) |
 | 1 | an input is malformed (each reader names the file and line, or the byte's line), a report path is unmapped, a source cannot be read, `--checkrun-dir` is not empty, `--package` holds no BUCK file, or an output cannot be written |
-| 2 | bad usage: no or unknown command, an unknown flag, a flag without its value or given twice, a required flag missing, no report, both `--cobertura` and `--lcov` reports, a malformed `--mode`, `--target-bp` or `--head-sha`, a `--max-annotations` that is not a number of 1 or more |
+| 2 | bad usage: no or unknown command, an unknown flag, a flag without its value or given twice, a required flag missing, no report (`report`), both `--cobertura` and `--lcov` reports, a malformed `--mode`, `--target-bp` or `--head-sha`, a `--max-annotations` that is not a number of 1 or more |
 | 3 | `gate` only: `--mode enforce` and the package has at least one finding |
 
 ## Reading the reports
@@ -164,9 +170,11 @@ A file's package is the nearest directory above it holding a `BUCK` file
 one; an error when none does. Files under `tests/` directly inside a package
 (`src/m/tests/...`) are test sources: left out of the numbers, the changed-line
 coverage and the annotations, and counted in the summary, unless
-`--include-tests`. Only that directory is: a test file or test helper
-anywhere else in the package (`src/m/testing.mojo`, `src/m/x/tests/t.mojo`)
-is source, measured and held to the target like any other file.
+`--include-tests`. Only that directory is, and for `gate` each
+`--test-source` (the build gate names every test the library welds, so a
+test elsewhere in its package is left out too): any other test file or test
+helper in the package (`src/m/testing.mojo`, `src/m/x/tests/t.mojo`) is
+source, measured and held to the target like any other file.
 
 ## Files no test compiled
 
@@ -269,6 +277,7 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | finding | when |
 |---|---|
 | `BelowTarget` | line, or branch when measured, below `--target-bp` (labelled `(census)` in census mode) |
+| `BranchNotMeasured` | a package (not a file: one branch record anywhere in the package clears it) with a line record has no branch record in any report (before exemptions), while `--target-bp` is above 0: its branch coverage cannot be shown to meet the target, so it is not passing. kcov's Cobertura has no branch data, so with kcov every measured package has it, and enforce mode cannot pass on line coverage alone; the summary shows the branch column `not measured` |
 | `NotMeasured` | a package in the run (in `gate`, the gated package) has no line record from a report and no exempted recorded line while `--target-bp` is above 0: no report covers it, or none of its paths mapped to it (the lines of files no test compiled do not make it measured) |
 | `Regression` | line or branch below its ratchet floor; or a floor above 0 whose value was not measured (no data, `measured_bp` null): in `report` for every row whose directory holds a BUCK file, in `gate` for its package's row |
 | `MissingRow` | lines were measured and the ratchet has no row for the package |
@@ -280,6 +289,108 @@ hits > 0), branch (only when the package has a branch record), mutants.
 
 Conclusion: `neutral` in census and neutral mode whatever was found; in
 enforce mode `failure` with any finding, else `success`.
+
+## The build gate
+
+With `-c komira.coverage=true`, every `mojo_library` on linux-x86_64 has a
+coverage build (`tools/build/mojo/README.md`, "Coverage builds"):
+each test's -O0 binary is run under kcov and gives a Cobertura report in
+repository paths (`kcov/README.md`, "cov_run"). The gate is one more
+action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
+`:cov_gate`):
+
+1. The library's sources are staged at their repository paths: every
+   `srcs` file that is a source (a generated one is not measured), every
+   test source, and a BUCK file at the package's directory, so covcheck's
+   nearest-BUCK rule names the package. A tests-cell package is under
+   `tools/build/tests/`. Each test source is also named to covcheck
+   (`--test-source`), so a welded test outside the package's `tests/`
+   (`wire/tests/test_x.mojo`, a test at the package's top) is set aside as
+   those under it are, not measured as the library's source.
+2. `--repo-files` is every file of that tree (sorted, NUL-separated): the
+   gate sees each source of the library, so a source no test compiled is an
+   `UnmeasuredFile` (its executable lines count, uncovered) and a library
+   with no test is `NotMeasured`; the test sources are left out of the
+   numbers.
+3. `covcheck gate --package <dir> --mode <M> --target-bp <N> --ratchet
+   ratchet.tsv --test-source <test>... --cobertura <report>...`, one report per test (none for a
+   library with no test); the reports are in repository paths, so no
+   `PKGDIR=` is given. Its `result.json` and `summary.md` are the library's
+   `[coverage][gate]` (`[coverage][gate][result]`, `[coverage][gate][summary]`).
+
+Exit 0 writes the gate's marker. Exit 3 (enforce mode, a finding) fails the
+action with `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage
+gate]): covcheck gate exited 3` and the summary; exits 1 and 2 (an input
+covcheck refuses, bad usage) fail it in every mode with `COVERAGE GATE ERROR`
+and covcheck's message: a malformed ratchet fails a census gate too (test
+44). Census and neutral mode never fail on a finding.
+
+The library's package (its `mojo_gate_join`) waits for the gate's marker and
+every coverage run's, so dependents compile against a package whose
+coverage runs passed and whose gate held: a test failing at -O0 or under
+kcov leaves the package unbuilt with coverage on, and a gate failing in
+enforce mode does too. A library with no test gets that join as well
+(without coverage it has one only if it has a README).
+
+Every dependent compiles against that package, so with coverage on a
+library's dependents wait for its coverage runs and its gate, not only its
+tests: the gate is on the critical path of every build with the switch on
+(and a library whose test fails at -O0 leaves all its dependents red). With
+the switch off nothing waits for them.
+
+**Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
+`COVERAGE_TARGET_BP = 10000`. A fixture of the `tests` cell may name another mode
+(`coverage_mode`), and with it its own gate directory (`coverage_gate`, a
+`cov_gate_dir` with another ratchet or script); anywhere else both are
+refused at load, and at analysis (a BUCK file calling the rule itself) a
+mode other than the policy's, a link, run or gate directory other than
+komira's, coverage runs with no gate, or the ledger's join (runs, no gate)
+for a library not in the ledger is refused. These refusals are outside the
+tests cell, so test 44 cannot plant them there: test 7
+(`tests/functional/umbrella_cache.sh`) plants each in a consumer
+repository's own cell.
+
+**Before enforce.** Enforce mode is not reachable with kcov alone, so it
+is not a one-line change today:
+- kcov reports no branch, so every measured package has
+  `BranchNotMeasured` (below) and fails in enforce mode whatever its line
+  coverage. Enforce needs a branch source first, or a decided split of the
+  target into a line target and a branch target that stays 0 until one
+  exists.
+- A library whose sources are all generated (a `mojo_aws_client` or
+  `mojo_gcp_client`: its hand-written sources pass through the generator
+  too) stages no source, so its gate is `NotMeasured` and fails in enforce
+  mode; its hand-written code is never measured. It needs measuring (by
+  its repository path) or a documented exemption.
+
+**The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
+runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
+(`covcheck`, `komira_json`, and `readme_examples`, whose tool runs the
+examples of their README) cannot have their package wait for a gate: it
+would depend on itself. Each has a row with its reason; their packages still
+wait for their coverage runs, and their gate is the target `<name>_cov_gate`,
+which their conda package (what ships) waits for. `no_gate.bxl` fails
+unless the ledger names exactly the Mojo libraries `:cov_gate` depends on,
+the ledger is within the frozen list `_CEILING` in the same file (so it
+only shrinks: a new row also needs a reviewed edit of that list), and each
+one's conda package waits for its gate (test 44). A check that builds only
+the libraries a change affects must also build their `<name>_cov_gate` (an
+rdep of the library) or these three ship ungated:
+
+```sh
+./buck2 bxl //tools/build/coverage/no_gate.bxl:check -c komira.coverage=true
+```
+
+**Branch coverage**: kcov reports none, so every measured package has
+`BranchNotMeasured`; in census mode it is listed, in enforce mode it fails.
+Line coverage alone is never read as meeting a line-and-branch target. The
+finding is per package: a package one of whose files has a branch record
+does not have it, though its other files may have none (no report kcov
+writes has any).
+
+```sh
+./buck2 build 'komira//src/komira_retry:komira_retry[coverage][gate]' -c komira.coverage=true
+```
 
 ## The ratchet
 

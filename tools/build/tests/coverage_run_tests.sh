@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # coverage_run_tests.sh -- tests of coverage runs (tools/build/coverage/kcov/README.md#cov_run).
 # Sourced by tools/build/tests/run_tests.sh (uses its BUCK2, LOG, pass, fail,
-# expect_green and expect_red); not run on its own.
+# expect_green and expect_red); not run on its own. Sources test 44's
+# coverage_gate_tests.sh after its own.
 #
 #  43. Coverage runs: each test's coverage binary runs under kcov through the
 #      release gate's runner, and its report is in repository paths.
@@ -20,7 +21,7 @@
 #      the test and passed its exit status on); orphan[coverage] green and
 #      exits[coverage] red, exit 1 and exit 137 (the status is the test's,
 #      not a child's it left behind, and 128+N for signal N), the first
-#      without gate_runner's banner (the package is not affected);
+#      without gate_runner's banner (the release gate's test did not fail);
 #      tests//negative/coverage:linger and linger[coverage][tests][test_brief]
 #      green, ...[test_lingers] red (a child left sleeping 100 s holds kcov,
 #      and the run's 20 s test-only limit kills the run), and its log without
@@ -47,8 +48,7 @@ expect_red coverage_run_data_buckout 'the data destination "buck-out/data.txt" i
 expect_red coverage_run_parent_fails "The test failed under kcov (exit 1)" 'tests//negative/coverage:exits[coverage][tests][test_parent_fails]'
 expect_red coverage_run_killed "The test failed under kcov (exit 137)" 'tests//negative/coverage:exits[coverage][tests][test_killed]'
 # The failing run's message is a coverage run's: not gate_runner's banner,
-# which says the library's package is not produced (it is: the package
-# does not depend on a coverage run).
+# which would say the release gate's test failed (it passed).
 if grep -E "GATED TEST FAILED|package is not produced" "$LOG/coverage_run_parent_fails.log" > "$LOG/coverage_run_banner.txt"; then
     fail "coverage_run_banner: a failing coverage run prints the release gate's banner: $(head -n 1 "$LOG/coverage_run_banner.txt") (see $LOG/coverage_run_parent_fails.log)"
 else
@@ -64,3 +64,7 @@ if grep -F "processes of the coverage run survived the kill" "$LOG/coverage_run_
 else
     pass coverage_run_lingers_group
 fi
+
+# 44
+# shellcheck source=tools/build/tests/coverage_gate_tests.sh
+. "$ROOT/tools/build/tests/coverage_gate_tests.sh"

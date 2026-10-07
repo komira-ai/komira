@@ -182,6 +182,10 @@ whose run check compares stdout; the binary's compile must put both packages on 
 buck2 loads the rules once per cell of the BUCK file that loads them, and a
 transitive set of one load refuses children of the other, so before
 `mojo_pkg_children` this failed in analysis.
+The `./komira` consumer also plants, in its own cell, a `mojo_library` that passes
+coverage attributes (refused at load) and four direct `mojo_library_rule` calls refused in analysis
+(another mode, another gate directory, runs with no gate, the ledger's join off the ledger): test 44,
+[`coverage_runs.md`](coverage_runs.md#test-44-the-coverage-gate).
 
 A fifth consumer, fetched as a git external cell, has no `.buckconfig.local`:
 the remote-execution settings are appended to its root `.buckconfig`, and it
@@ -945,9 +949,8 @@ defect in the same tree and must fail naming it, `enforce = True` included.
 
 ## 41. Coverage builds
 
-[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0
-binary with line tables per `test_srcs` entry and leave every release action as it is;
-[`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0 binary per test and move no
+release action but the join; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
 ## 42. Pointer lint
 
@@ -985,9 +988,13 @@ the tree, and must fail naming it.
 
 ## 43. Coverage runs
 
-Each test's coverage binary also runs under kcov through the release gate's runner
-([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`;
-[`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+Each test's coverage binary also runs under kcov ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report
+`[coverage][tests][<test>]`; [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+
+## 44. Coverage gate
+
+With coverage, a library's package waits for its runs and [its gate](../coverage/README.md#the-build-gate);
+[`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-44-the-coverage-gate).
 
 ## Diagnostics
 
