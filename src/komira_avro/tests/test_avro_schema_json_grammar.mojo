@@ -25,11 +25,13 @@
 #       '+', a leading '.') keep their exact texts with offsets; "-Infinity"
 #       and "- 1" now name the '-'. Catches: a regression that lets one of
 #       them through, or a wrong offset in the structural errors.
-#   G4  every number shape the grammar allows parses to the right default:
-#       0, -0, a multi-digit int, fractions, both exponent marks and signs,
-#       and a number right before '}' and ','. Catches: a scanner that
-#       refuses a valid form or stops early (then the value or the next
-#       token is wrong).
+#   G4  number shapes the grammar allows parse to the right default: 0,
+#       -0, multi-digit ints, fractions, both exponent marks and signs, and
+#       one-, two- and three-digit exponents; each literal is checked right
+#       before ',' and right before '}', and numbers (one with a two-digit
+#       exponent) sit before ',' and ']' in an array. Catches: a scanner
+#       that refuses a valid form or stops early, e.g. one that reads a
+#       single exponent digit (then the next byte is refused).
 #   G5  escaped control characters and U+007F stay legal; a raw 'é' and
 #       the escape \u00e9 decode to C3 A9, and the escaped surrogate pair
 #       \ud83d\ude00 to F0 9F 98 80, in a default. Catches: the control-character check refusing escapes or a
@@ -176,13 +178,14 @@ def test_other_number_forms_refused() raises:
 
 
 def _record(lit: String) -> String:
-    """A record whose first field `a` defaults to `lit` and whose second
-    field `b` follows it, so `lit` sits right before ','."""
+    """A record with two fields defaulting to `lit`: in field `a` a "doc"
+    member follows the default, so `lit` sits right before ','; in field `b`
+    the default is the last member, so `lit` sits right before '}'."""
     return (
         String('{"type":"record","name":"R","fields":[')
         + '{"name":"a","type":"double","default":'
         + lit
-        + '},{"name":"b","type":"long","default":'
+        + ',"doc":"d"},{"name":"b","type":"long","default":'
         + lit
         + "}]}"
     )
@@ -220,11 +223,17 @@ def test_valid_numbers_parse() raises:
     _check_float("5e-1", 0.5)
     _check_float("-1.5E+3", -1500.0)
     _check_float("0.0", 0.0)
+    # Exponents of two or more digits: a scanner that reads one exponent
+    # digit stops before the second and refuses the next byte.
+    _check_float("1e10", 1e10)
+    _check_float("25E-01", 2.5)
+    _check_float("123e45", 123e45)
     # A number right before '}' (the fixed size) and at the end of an array.
     var f = AvroSchema.parse(String('{"type":"fixed","name":"F","size":16}'))
     assert_equal(f.nodes[f.root_idx].size, 16, "size before '}'")
     var e = AvroSchema.parse(
-        String('{"type":"enum","name":"E","symbols":["A"],"x":[1,2.5e1]}')
+        String('{"type":"enum","name":"E","symbols":["A"],')
+        + '"x":[1,2.5e1,1E22]}'
     )
     assert_equal(len(e.nodes[e.root_idx].symbols), 1, "number before ']'")
 
