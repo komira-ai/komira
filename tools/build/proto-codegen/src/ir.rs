@@ -239,6 +239,11 @@ pub struct IrService {
     /// client starts at this host, and with `None` it refuses to send until
     /// its caller names one.
     pub default_host: Option<String>,
+    /// True when `default_host` is a service configuration's `name` that
+    /// replaced a different (or absent) `(google.api.default_host)`
+    /// ([`crate::service_config::ServiceConfig::apply`]); the REST emitter
+    /// then names the configuration as the host's source.
+    pub host_from_service_config: bool,
 }
 
 /// One RPC method.
@@ -453,6 +458,7 @@ mod tests {
         let svc = IrService {
             name: "S".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "M".into(),
                 input: ty.clone(),
