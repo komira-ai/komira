@@ -25,6 +25,12 @@
 
 from komira_core.arrow.arrow_types import ArrowType
 
+from .avro_names import (
+    check_avro_fullname,
+    check_avro_name,
+    check_avro_namespace,
+    latin1_default_bytes,
+)
 from .json_string import decode_json_string
 
 
@@ -241,6 +247,8 @@ struct AvroDefault(Copyable, Movable):
     var int_val: Int64
     var double_val: Float64
     var str_val: String
+    # AVRO_DEFAULT_BYTES only: the default's code points read as byte values.
+    var bytes_val: List[UInt8]
 
     @staticmethod
     def none() -> AvroDefault:
@@ -250,6 +258,7 @@ struct AvroDefault(Copyable, Movable):
             int_val=Int64(0),
             double_val=Float64(0.0),
             str_val=String(""),
+            bytes_val=List[UInt8](),
         )
 
     @always_inline
@@ -350,8 +359,9 @@ struct AvroSchema(Movable):
                        type, name, fields, symbols, items, values, size.
           [ORDER]      order record fields as: name, type, fields, symbols,
                        items, values, size (object member order fixed).
-          [STRINGS]    JSON-escape strings (we only emit names/symbols which
-                       are Avro identifiers — no escaping needed).
+          [STRINGS]    JSON-escape strings. The only strings emitted are
+                       names and symbols, which `parse` has checked against
+                       [A-Za-z_][A-Za-z0-9_]*, so none needs escaping.
           [INTEGERS]   eliminate quotes around and leading zeros in size.
           [WHITESPACE] eliminate all whitespace outside strings.
         """
@@ -514,6 +524,10 @@ def _build_node(
 
         if k == AVRO_KIND_RECORD:
             var name = _obj_get_string(value, "name")
+            check_avro_fullname("record name", name)
+            check_avro_namespace(
+                "record namespace", _obj_get_string(value, "namespace")
+            )
             # Push name on visit-stack BEFORE descending into fields.
             named_in_scope.append(name)
             defined_names.append(name)
@@ -529,12 +543,13 @@ def _build_node(
                 if fobj.tag != _JSON_OBJECT:
                     raise Error("AvroSchemaError.MALFORMED_JSON: field not object")
                 var fname = _obj_get_string(fobj, "name")
+                check_avro_name("field name", fname)
                 var ftype = _obj_get(fobj, "type")
                 var ci = _build_node(ftype^, nodes, named_in_scope, defined_names)
                 child_idxs.append(ci)
                 fnames.append(fname)
                 # Capture the field's `default` (if any) + `aliases`.
-                fdefaults.append(_capture_default(fobj))
+                fdefaults.append(_capture_default(fobj, fname, nodes, ci))
                 faliases.append(_capture_aliases(fobj))
             # Pop the record name off the visit-stack on the way out.
             _ = named_in_scope.pop()
@@ -551,11 +566,18 @@ def _build_node(
 
         if k == AVRO_KIND_ENUM:
             var name = _obj_get_string(value, "name")
+            check_avro_fullname("enum name", name)
+            check_avro_namespace(
+                "enum namespace", _obj_get_string(value, "namespace")
+            )
             defined_names.append(name)
             var syms_val = _obj_get(value, "symbols")
             var syms = List[String]()
             if syms_val.tag == _JSON_ARRAY:
                 for i in range(len(syms_val.arr_val)):
+                    # A non-string symbol carries an empty str_val, which the
+                    # name check refuses.
+                    check_avro_name("enum symbol", syms_val.arr_val[i].str_val)
                     syms.append(syms_val.arr_val[i].str_val)
             var node = _empty_node(AVRO_KIND_ENUM)
             node.name = name
@@ -567,6 +589,10 @@ def _build_node(
 
         if k == AVRO_KIND_FIXED:
             var name = _obj_get_string(value, "name")
+            check_avro_fullname("fixed name", name)
+            check_avro_namespace(
+                "fixed namespace", _obj_get_string(value, "namespace")
+            )
             defined_names.append(name)
             var sz = _obj_get_int(value, "size")
             # UNTRUSTED INPUT. `size` comes from the
@@ -682,13 +708,37 @@ def _contains(list: List[String], target: String) -> Bool:
     return False
 
 
-def _capture_default(fobj: _JsonValue) -> AvroDefault:
+def _default_target(nodes: List[AvroNode], type_idx: Int) -> Int:
+    """The arena index of the type a field default is read as: the field's
+    type, or a union's first branch. A by-name reference to a fixed (built as
+    a record placeholder carrying the name) resolves to the fixed node."""
+    var idx = type_idx
+    if nodes[idx].kind == AVRO_KIND_UNION and len(nodes[idx].children) > 0:
+        idx = nodes[idx].children[0]
+    if nodes[idx].kind == AVRO_KIND_RECORD and len(nodes[idx].children) == 0:
+        for j in range(len(nodes)):
+            if (
+                nodes[j].kind == AVRO_KIND_FIXED
+                and nodes[j].name == nodes[idx].name
+            ):
+                return j
+    return idx
+
+
+def _capture_default(
+    fobj: _JsonValue, fname: String, nodes: List[AvroNode], type_idx: Int
+) raises -> AvroDefault:
     """Capture a record field's `default` value.
 
     Avro field defaults are arbitrary JSON. We capture the scalar kinds the
     resolution-rewriter can synthesize. A `default` member that is absent
     yields AvroDefault.none(). Complex defaults (object / array) are treated
-    as `none()` (a complex default is not synthesized)."""
+    as `none()` (a complex default is not synthesized).
+
+    When the default is read as `bytes` or `fixed` (the field's type, or a
+    union's first branch), it must be a JSON string; its code points are read
+    as Latin-1 byte values (AVRO_DEFAULT_BYTES), and a fixed default must be
+    exactly the fixed size."""
     # Detect presence: scan the object keys for "default".
     var found = False
     for i in range(len(fobj.obj_keys)):
@@ -698,30 +748,62 @@ def _capture_default(fobj: _JsonValue) -> AvroDefault:
     if not found:
         return AvroDefault.none()
     var v = _obj_get(fobj, "default")
+    var target = _default_target(nodes, type_idx)
+    var tkind = nodes[target].kind
+    if tkind == AVRO_KIND_BYTES or tkind == AVRO_KIND_FIXED:
+        if v.tag != _JSON_STRING:
+            raise Error(
+                String("AvroSchemaError.INVALID_DEFAULT: field '")
+                + fname
+                + "' default for "
+                + avro_kind_name(tkind)
+                + " is not a JSON string"
+            )
+        var b = latin1_default_bytes(fname, v.str_val)
+        if tkind == AVRO_KIND_FIXED and len(b) != nodes[target].size:
+            raise Error(
+                String("AvroSchemaError.INVALID_DEFAULT: field '")
+                + fname
+                + "' default is "
+                + String(len(b))
+                + " bytes; fixed '"
+                + nodes[target].name
+                + "' has size "
+                + String(nodes[target].size)
+            )
+        return AvroDefault(
+            kind=AVRO_DEFAULT_BYTES, bool_val=False, int_val=Int64(0),
+            double_val=Float64(0.0), str_val=String(""), bytes_val=b^,
+        )
     if v.tag == _JSON_NULL:
         return AvroDefault(
             kind=AVRO_DEFAULT_NULL, bool_val=False, int_val=Int64(0),
             double_val=Float64(0.0), str_val=String(""),
+            bytes_val=List[UInt8](),
         )
     elif v.tag == _JSON_BOOL:
         return AvroDefault(
             kind=AVRO_DEFAULT_BOOL, bool_val=v.bool_val, int_val=Int64(0),
             double_val=Float64(0.0), str_val=String(""),
+            bytes_val=List[UInt8](),
         )
     elif v.tag == _JSON_INT:
         return AvroDefault(
             kind=AVRO_DEFAULT_INT, bool_val=False, int_val=Int64(v.int_val),
             double_val=Float64(v.int_val), str_val=String(""),
+            bytes_val=List[UInt8](),
         )
     elif v.tag == _JSON_FLOAT:
         return AvroDefault(
             kind=AVRO_DEFAULT_DOUBLE, bool_val=False, int_val=Int64(0),
             double_val=v.float_val, str_val=String(""),
+            bytes_val=List[UInt8](),
         )
     elif v.tag == _JSON_STRING:
         return AvroDefault(
             kind=AVRO_DEFAULT_STRING, bool_val=False, int_val=Int64(0),
             double_val=Float64(0.0), str_val=v.str_val,
+            bytes_val=List[UInt8](),
         )
     # Object / array default — not synthesized.
     return AvroDefault.none()

@@ -49,6 +49,13 @@ from .avro_schema import (
     AVRO_KIND_MAP,
     AVRO_KIND_UNION,
     AVRO_KIND_FIXED,
+    AVRO_DEFAULT_NONE,
+    AVRO_DEFAULT_NULL,
+    AVRO_DEFAULT_BOOL,
+    AVRO_DEFAULT_INT,
+    AVRO_DEFAULT_DOUBLE,
+    AVRO_DEFAULT_STRING,
+    AVRO_DEFAULT_BYTES,
 )
 from .ocf_header import (
     OcfHeader,
