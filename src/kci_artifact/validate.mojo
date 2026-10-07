@@ -50,7 +50,7 @@
 # Not here, by design (over the built manifests: the PUBLISH step, and for
 # requirement closure by name also the BUILD step): every declared artifact
 # built, versions in lockstep, exactly one metapackage whose members are
-# every library (a recommendation the CEO has not answered;
+# every library and the native package (a recommendation the CEO has not answered;
 # placeholders.mojo), requirement closure over the set.
 #
 # Owned values only; no pointer.

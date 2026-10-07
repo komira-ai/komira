@@ -137,6 +137,26 @@ conda_release_set_check(
     release_set = "release_set.txt",
 )
 
+# The native slot of the same rule, on a set of its own: komira_crypto
+# requires komira_native (its closure links aws-lc, which
+# libkomira_native.so.1 holds), so the set carries the native package,
+# packaged with the same test stamp from //tools/build/native:komira_native.
+# Red if the native package's [release_check] fails, if it does not carry
+# the test stamp, if the metapackage does not require it at that version and
+# build string, or if release_set_native.txt does not list it as the last
+# member. komira_native is not declared in release/artifacts.textproto: this
+# target checks the rule, not the release.
+conda_release_set_check(
+    name = "release_set_native_check",
+    metapackage = "komira_native_set",
+    libs = [
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_crypto:komira_crypto",
+    ],
+    native = "//tools/build/native:komira_native",
+    release_set = "release_set_native.txt",
+)
+
 # The release set file: kci_artifact's welded test holds it equal to
 # release/artifacts.textproto's metapackage (release_set.txt's header).
 export_file(
@@ -151,4 +171,11 @@ conda_manifest_kci(
     name = "release_set_kci",
     kind = "metapackage",
     package = ":release_set_check",
+)
+
+# The native set's metapackage, read the same way.
+conda_manifest_kci(
+    name = "release_set_native_kci",
+    kind = "metapackage",
+    package = ":release_set_native_check",
 )

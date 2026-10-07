@@ -243,6 +243,17 @@ fails the build in these cases:
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`
   it gives conda-meta differ from [`release_set.txt`](release_set.txt).
 
+The rule's optional `native` slot takes the komira_native library
+(`//tools/build/native:komira_native`): the macro packages it as `komira_native`
+with the same test stamp (`conda_native_package_test_stamped`), and the set holds
+it after every library, so its release file lists it as the last member and every
+case above covers it. Without `native`, a library whose package requires
+komira_native fails the analysis, naming it. `:release_set_native_check`
+(`komira_encoding`, `komira_crypto`, which requires komira_native, and
+`komira_native`; [`release_set_native.txt`](release_set_native.txt)) builds that
+path, and `:release_set_native_kci` reads its metapackage with kci's parser. The
+release set itself does not hold komira_native yet.
+
 The welded test `test_release_artifacts_file` of `src/kci_artifact` holds
 `release_set.txt` equal to `release/artifacts.textproto`'s metapackage, so a
 library added to the release set and not here is red. `:release_set_kci` reads

@@ -61,7 +61,8 @@
 #         build wrote into it) is REFUSED. The set hash is computed from this
 #         second pass, i.e. from the bytes that stay on disk;
 #      c. every requirement of every library member must name ANOTHER
-#         library of the set (kci_release_set's `undeclared_requirements`;
+#         library or the native package of the set (kci_release_set's
+#         `undeclared_requirements`, which checks the native package too;
 #         the platform guard and the compiler pin aside): a set that needs a
 #         package it does not declare is REFUSED, naming each requirement.
 #    Then write `<P>/release.json` LAST (kci.release_set major 2: the
