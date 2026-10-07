@@ -1037,6 +1037,8 @@ and must fail naming it.
 ```sh
 ./buck2 build //:public_boundary tests//functional/public_boundary:ok
 ./buck2 build tests//negative/public_boundary:host_single   # must fail: docs/plant.md:1: host: builder
+```
+
 ## 48. Codec owner lint
 
 [`codec_owner`](../lint/codec_owner.bzl) is a validation over every `.mojo`
