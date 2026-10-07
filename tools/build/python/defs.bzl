@@ -250,9 +250,11 @@ _py_test = rule(
 # ---- python_oracle -----------------------------------------------------------
 #
 # An oracle computes the answer a komira test compares against, so nothing it
-# reads may come from komira: each input that an action built (not a checked-in
-# file) must be the output of a target under third_party/. Only direct inputs
-# are checked: a third_party/ target is trusted not to build from komira.
+# reads may come from komira: src, each srcs entry, each data source, each
+# wheel of deps and the interpreter's directory, if an action built it (not a
+# checked-in file), must be the output of a target under third_party/. Only
+# direct inputs are checked: a third_party/ target is trusted not to build from
+# komira.
 _ORACLE_INPUT_REFUSED = "{}: the oracle's {} is built by {}, which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only, so that its answer cannot come from komira (tools/build/python/README.md, Oracles)"
 
 def _third_party(label):
@@ -301,6 +303,10 @@ def _python_oracle_impl(ctx):
             if k in closure and closure[k][0] != v[0]:
                 fail("{}: {} is pinned at {} and at {} in its deps".format(ctx.label, k, closure[k][0], v[0]))
             closure[k] = v
+    # The interpreter's directory is built by the python_dist target itself;
+    # its native_libs and preload libraries come with that target, trusted
+    # like any other third_party/ target's inputs.
+    _check_independent(ctx, "python", dist.root)
     _check_outs(ctx)
     staged = ctx.actions.copied_dir(ctx.label.name + ".srcs", srcs)
     data_dir = ctx.actions.copied_dir(ctx.label.name + ".data", data)
@@ -323,7 +329,7 @@ def _python_oracle_impl(ctx):
 
 _python_oracle = rule(
     impl = _python_oracle_impl,
-    doc = "Runs `src` twice with the hermetic interpreter (`oracle_run.py`) and outputs the directory the first run wrote, only if both runs wrote the same tree; each `outs` path is a sub-target `[<path>]`. The script gets `sys.argv = [src, <output directory>, <data directory>, *args]`; `data` ({dest: source}, or sources staged at their paths) is staged in the data directory, `srcs` next to `src`. Analysis fails if an input an action built is not the output of a target under third_party/.",
+    doc = "Runs `src` twice with the hermetic interpreter (`oracle_run.py`) and outputs the directory the first run wrote, only if both runs wrote the same tree; each `outs` path is a sub-target `[<path>]`. The script gets `sys.argv = [src, <output directory>, <data directory>, *args]`; `data` ({dest: source}, or sources staged at their paths) is staged in the data directory, `srcs` next to `src`. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under third_party/.",
     attrs = {
         "args": attrs.list(attrs.string(), default = []),
         "data": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = {}),

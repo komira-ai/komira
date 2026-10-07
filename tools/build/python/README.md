@@ -22,7 +22,7 @@ surfaces. Nothing built with these rules is shipped
 | `python_dist(name, archive, version, native_libs, preload)` | a CPython `install_only` archive (python-build-standalone) unpacked into one directory by busybox `tar`, with the packages of its `site-packages` (pip) removed. Fails unless `bin/python<major>.<minor>` runs and prints `version` (`python_dist: the interpreter in <archive> is <got>, the pin says <version>`). `native_libs` is a directory of shared libraries, `preload` the paths in it a `py_test` loads before its script. |
 | `python_wheel(name, distribution, version, wheel, python, deps)` | one wheel installed into a directory of its own by `wheel_install.py`, run with `python`: every member at its path, a `<name>-<version>.data/` directory's `purelib/` and `platlib/` merged in, its `scripts/`, `headers/` and `data/` left out. Fails unless the wheel holds exactly one `.dist-info` and that directory's name and its METADATA `Name` and `Version` are `distribution` and `version`. `deps` are the wheels it imports; a closure holding one distribution at two versions fails analysis. |
 | `py_test(name, src, srcs, deps, args, expect_error, python)` | runs `src` with the interpreter as a build action; its output (`<name>.pass`) exists only if the script passed, so building the target is running the test. `srcs` are staged next to `src` and importable from it, `deps` are `python_wheel` targets (each with its deps), `args` the script's arguments (`$(location ...)` expands). With `expect_error`, the script passes only if it raises an exception whose last traceback line (`Type: message`) is exactly that string. `python` defaults to `komira//third_party/python:cpython`. |
-| `python_oracle(name, src, srcs, data, deps, args, outs, python)` | runs `src` twice ([Oracles](#oracles)) and outputs the directory the first run wrote (`<name>/`), only if both runs wrote the same tree. Other targets take it as test data: the directory as `:<name>`, each `outs` path as the sub-target `:<name>[<path>]` (a Mojo library's `test_data`, a `py_test`'s `args` through `$(location ...)`). `data` is `{dest: source}` (or sources, each staged at its path from the cell root), staged in the data directory; `srcs` are staged next to `src`; `deps` are `python_wheel` targets; `args` are plain strings. Analysis fails if an input an action built is not the output of a target under `third_party/`. |
+| `python_oracle(name, src, srcs, data, deps, args, outs, python)` | runs `src` twice ([Oracles](#oracles)) and outputs the directory the first run wrote (`<name>/`), only if both runs wrote the same tree. Other targets take it as test data: the directory as `:<name>`, each `outs` path as the sub-target `:<name>[<path>]` (a Mojo library's `test_data`, a `py_test`'s `args` through `$(location ...)`). `data` is `{dest: source}` (or sources, each staged at its path from the cell root), staged in the data directory; `srcs` are staged next to `src`; `deps` are `python_wheel` targets; `args` are plain strings. Analysis fails if `src`, a `srcs` entry, a `data` source, a wheel of `deps` or the `python` dist was built by a target not under `third_party/`. |
 | `python_proto(name, src)` | the module `<stem>_pb2.py` that the pinned protoc (`komira//tools/build/toolchains/proto:protoc`, 29.1) generates for one `.proto` with no imports, for a `py_test`'s `srcs` (staged next to its script, so `import <stem>_pb2`). protoc 29.1 writes Python gencode 5.29.1; the test `protobuf_gencode` holds the pinned protobuf runtime to it. |
 
 The macros set `exec_compatible_with` to the linux x86_64 execution
@@ -85,28 +85,34 @@ runs
   iteration order of a set of strings is the same in every run. The oracle
   passes only if the two trees hold the same paths, each a directory or a
   regular file, with the same bytes and executable bit; a symlink is
-  refused. A clock, a random number, a process id, the output path or a
-  listing in directory order written into a file makes the runs differ:
+  refused. A clock, a random number, a process id or the output path
+  written into a file makes the runs differ:
   `python_oracle: two runs of <script> differ at <path>: the bytes`. Two
-  runs on one worker cannot see a difference between workers; the test
-  `oracle_twins` builds the same oracle as two targets, two actions, and
-  compares their outputs.
+  runs on one worker cannot see what is fixed on that worker: a listing in
+  directory order (both runs list the same filesystem), the CPU count, the
+  host name, a clock read at a coarse grain. Sort a listing before writing
+  it. The test `oracle_twins` builds the same oracle as two targets, two
+  actions, and compares their outputs.
 - **outs.** With `outs`, the files written must be exactly those paths
   (`python_oracle: <script> wrote <path>, which outs does not declare`,
   `... did not write <path>`); without it, at least one file must be written
   (`... wrote nothing`). A failing script is `python_oracle: <script> failed:
-  <last traceback line>`.
+  <last traceback line>`, also when it calls `sys.exit` with a status other
+  than 0 or `None` (`SystemExit: 3`).
 - **Inputs, and independence from komira.** An oracle reads only what it
-  declares: `src`, `srcs`, `data` and the wheels of `deps` are the action's
-  inputs, and `args` are strings, so no `$(location ...)` adds one. Each
-  input an action built (not a checked-in file) must be the output of a
-  target under `third_party/` (a pinned download, a wheel); anything else
-  fails analysis:
+  declares: `src`, `srcs`, `data`, the wheels of `deps` and the `python`
+  dist (with its `native_libs`) are the action's inputs, and `args` are
+  strings, so no `$(location ...)` adds one. Each of `src`, `srcs`, `data`,
+  the wheels and the dist's directory, if an action built it (not a
+  checked-in file), must be the output of a target under `third_party/` (a
+  pinned download, a wheel, the interpreter); anything else fails analysis:
   `<oracle>: the oracle's data "<dest>" is built by <target>, which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only, so that its answer cannot come from komira (tools/build/python/README.md, Oracles)`
-  (likewise `srcs entry`, `src` and `wheel <name>`). Checked-in files are
+  (likewise `srcs entry`, `src`, `wheel <name>` and `python`). Checked-in files are
   allowed anywhere, so a package's test data under `src/` is an input; a
   komira library, binary or generated file is not. Only direct inputs are
-  checked: a `third_party/` target is trusted not to be built from komira.
+  checked: a `third_party/` target is trusted not to be built from komira,
+  and the dist's `native_libs` come with the dist, so they are not checked
+  apart from it.
   The interpreter can still open any absolute path on the worker; nothing
   stops a script that does.
 

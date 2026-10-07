@@ -8,7 +8,9 @@ load("@komira//tools/build/python:defs.bzl", "python_dist", "python_oracle", "py
 #
 # The real interpreter (komira//third_party/python:cpython) is visible only to
 # the test-only packages, so these oracles name a stand-in python_dist over an
-# empty file. Nothing here runs: analysis refuses each oracle first.
+# empty file. The interpreter is checked after every other input, so each
+# oracle but local_python is refused for its other input. Nothing here runs:
+# analysis refuses each oracle first.
 
 export_file(
     name = "not_an_archive",
@@ -51,4 +53,20 @@ python_oracle(
     src = "oracle.py",
     python = ":stand_in_python",
     deps = [":local_wheel"],
+)
+
+# RED: a komira binary as the script.
+python_oracle(
+    name = "komira_src",
+    src = "komira//tools/build/examples:hello",
+    python = ":stand_in_python",
+)
+
+# RED: an interpreter built outside third_party/ (the stand-in above). The
+# targets before this one fail on their other input first: python is checked
+# last.
+python_oracle(
+    name = "local_python",
+    src = "oracle.py",
+    python = ":stand_in_python",
 )
