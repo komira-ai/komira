@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:defs.bzl", "native_archive")
 
 # Structured logging: the five-level facade (`log.info[fmt, module](*args)`),
 # the typed argument model, the per-module level filter, the synchronous P1
@@ -25,6 +26,16 @@ cxx_library(
     name = "komira_log_holder",
     srcs = [":log_holder_files[engine/_log_holder_shim.c]"],
     visibility = ["PUBLIC"],
+)
+
+# Its declaration for libkomira_native.so.1 (tools/build/native/README.md):
+# kept out of it, linked into each Mojo library that calls it.
+native_archive(
+    name = "komira_log_holder_native",
+    kind = "per_library",
+    lib = ":komira_log_holder",
+    reason = "Holds the addresses of Mojo structs (the logging engine, its config) that only the library that elaborated them may read: one cell per library, hidden by design (engine/_log_holder_shim.c).",
+    visibility = ["//tools/build/native:"],
 )
 
 mojo_library(

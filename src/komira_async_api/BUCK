@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:defs.bzl", "native_archive")
 
 # The pool-depth counter: three C functions over one process-global static.
 staged_files(
@@ -11,6 +12,16 @@ cxx_library(
     name = "komira_concurrency_pool_depth",
     srcs = [":pool_depth_files[native/komira_concurrency_pool_depth.c]"],
     visibility = ["PUBLIC"],
+)
+
+# Its declaration for libkomira_native.so.1 (tools/build/native/README.md):
+# in the shared library.
+native_archive(
+    name = "komira_concurrency_pool_depth_native",
+    kind = "shared",
+    lib = ":komira_concurrency_pool_depth",
+    reason = "The pool-depth counter: a pool entered from any library must see the depth of the whole process.",
+    visibility = ["//tools/build/native:"],
 )
 
 # Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter.

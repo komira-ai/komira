@@ -156,5 +156,7 @@ checked_cxx_library(
     name = "snappy",
     checks = [":snappy_symbols"],
     lib = ":snappy_prefixed",
+    native_kind = "shared",
+    native_reason = "Prefixed: its C API is komira_snappy_*; its C++ names are left local by the shared library's version script.",
     visibility = ["PUBLIC"],
 )

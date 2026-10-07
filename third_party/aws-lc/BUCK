@@ -181,5 +181,7 @@ checked_cxx_library(
     name = "crypto",
     checks = [":crypto_symbols"],
     lib = ":crypto_prefixed",
+    native_kind = "shared",
+    native_reason = "Prefixed: every symbol is komira_awslc_*, so no other libcrypto of a process binds to it or it to another.",
     visibility = ["PUBLIC"],
 )

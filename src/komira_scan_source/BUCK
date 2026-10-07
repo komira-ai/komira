@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:defs.bzl", "native_archive")
 
 # The in-memory source id counter: one C function over one process-global static.
 staged_files(
@@ -11,6 +12,16 @@ cxx_library(
     name = "komira_scan_source_inmem_id",
     srcs = [":inmem_id_files[native/komira_scan_source_inmem_id.c]"],
     visibility = ["PUBLIC"],
+)
+
+# Its declaration for libkomira_native.so.1 (tools/build/native/README.md):
+# in the shared library.
+native_archive(
+    name = "komira_scan_source_inmem_id_native",
+    kind = "shared",
+    lib = ":komira_scan_source_inmem_id",
+    reason = "The in-memory source id counter: ids must be unique across the process.",
+    visibility = ["//tools/build/native:"],
 )
 
 # What a scan is: SourceLike, ScanBinding identity, scan params, per-format source descriptors, pushdown gate, Sink trait, in-memory registry.

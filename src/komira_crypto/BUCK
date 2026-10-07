@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:defs.bzl", "native_archive")
 
 # The exported name of aws-lc's SHA-NI block function, which aws-lc's
 # assembly declares hidden (native/komira_crypto_sha256_hw.c).
@@ -13,6 +14,16 @@ cxx_library(
     srcs = [":sha256_hw_files[native/komira_crypto_sha256_hw.c]"],
     deps = ["//third_party/aws-lc:crypto"],
     visibility = ["PUBLIC"],
+)
+
+# Its declaration for libkomira_native.so.1 (tools/build/native/README.md):
+# in the shared library.
+native_archive(
+    name = "komira_crypto_sha256_hw_native",
+    kind = "shared",
+    lib = ":komira_crypto_sha256_hw",
+    reason = "A stateless wrapper exporting aws-lc's SHA-NI block function.",
+    visibility = ["//tools/build/native:"],
 )
 
 # Cryptographic primitives: SHA-1 / SHA-2 / BLAKE2b-256, HMAC, HKDF, PBKDF2,

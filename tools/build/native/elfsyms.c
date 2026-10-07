@@ -9,10 +9,16 @@
  *   elfsyms symtab <lib.a>   every non-local symbol of every ELF member's
  *                            .symtab, one per line:
  *                            DEF|UND <bind> <type> <visibility> <name>
+ *   elfsyms dynsym <file>    a shared object's or a dynamically linked
+ *                            program's dynamic section, one entry per
+ *                            line (SONAME <name>, NEEDED <name>, RUNPATH
+ *                            <path>, RPATH <path>, SYMBOLIC, FLAGS <hex>),
+ *                            then every symbol of its .dynsym, in the
+ *                            symtab form above (LOCAL ones included)
  *
- * Only 64-bit little-endian ELF members are read; any other member, or a
- * header pointing outside its member, is an error (exit 2), so a reader that
- * silently skips what it cannot read cannot pass a check.
+ * Only 64-bit little-endian ELF is read; any other member or file, or a
+ * header pointing outside its member or file, is an error (exit 2), so a
+ * reader that silently skips what it cannot read cannot pass a check.
  */
 #include <elf.h>
 #include <stdint.h>
@@ -220,9 +226,90 @@ static int symtab(const char *path) {
     return 0;
 }
 
+/* The section of type `type` and its linked string table; 0 if there is none,
+ * 1 if found, -1 if a header lies outside the file. */
+static int section(const unsigned char *o, size_t n, unsigned type, const Elf64_Shdr **sec, const char **str,
+                   size_t *strsize) {
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *)o;
+    const Elf64_Shdr *sh = (const Elf64_Shdr *)(o + eh->e_shoff);
+    for (int i = 0; i < eh->e_shnum; i++) {
+        if (sh[i].sh_type != type) continue;
+        const Elf64_Shdr *ss = sh[i].sh_link < eh->e_shnum ? &sh[sh[i].sh_link] : NULL;
+        if (!ss || sh[i].sh_offset > n || sh[i].sh_size > n - sh[i].sh_offset || ss->sh_offset > n ||
+            ss->sh_size > n - ss->sh_offset || ss->sh_size == 0 || o[ss->sh_offset + ss->sh_size - 1] != 0)
+            return -1;
+        *sec = &sh[i];
+        *str = (const char *)o + ss->sh_offset;
+        *strsize = ss->sh_size;
+        return 1;
+    }
+    return 0;
+}
+
+static int dynsym(const char *path) {
+    size_t n;
+    unsigned char *o = slurp(path, &n);
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *)o;
+    if (n < sizeof(*eh) || memcmp(o, ELFMAG, SELFMAG) != 0 || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh->e_ident[EI_DATA] != ELFDATA2LSB || (eh->e_type != ET_DYN && eh->e_type != ET_EXEC)) {
+        fprintf(stderr, "elfsyms: %s is not a 64-bit little-endian ELF shared object or program\n", path);
+        return 2;
+    }
+    if (eh->e_shentsize != sizeof(Elf64_Shdr) || eh->e_shoff > n ||
+        (size_t)eh->e_shnum * sizeof(Elf64_Shdr) > n - eh->e_shoff) {
+        fprintf(stderr, "elfsyms: %s: its section headers lie outside it\n", path);
+        return 2;
+    }
+    const Elf64_Shdr *sec;
+    const char *str;
+    size_t strsize;
+    int r = section(o, n, SHT_DYNAMIC, &sec, &str, &strsize);
+    if (r != 1) {
+        fprintf(stderr, "elfsyms: %s: %s\n", path, r == 0 ? "no dynamic section" : "its dynamic section lies outside it");
+        return 2;
+    }
+    const Elf64_Dyn *d = (const Elf64_Dyn *)(o + sec->sh_offset);
+    size_t count = sec->sh_size / sizeof(Elf64_Dyn);
+    for (size_t k = 0; k < count && d[k].d_tag != DT_NULL; k++) {
+        const char *what = NULL;
+        switch (d[k].d_tag) {
+            case DT_SONAME: what = "SONAME"; break;
+            case DT_NEEDED: what = "NEEDED"; break;
+            case DT_RUNPATH: what = "RUNPATH"; break;
+            case DT_RPATH: what = "RPATH"; break;
+            case DT_SYMBOLIC: puts("SYMBOLIC"); break;
+            case DT_FLAGS: printf("FLAGS 0x%llx\n", (unsigned long long)d[k].d_un.d_val); break;
+            default: break;
+        }
+        if (!what) continue;
+        if (d[k].d_un.d_val >= strsize) {
+            fprintf(stderr, "elfsyms: %s: a dynamic entry's name lies outside its string table\n", path);
+            return 2;
+        }
+        printf("%s %s\n", what, str + d[k].d_un.d_val);
+    }
+    r = section(o, n, SHT_DYNSYM, &sec, &str, &strsize);
+    if (r != 1) {
+        fprintf(stderr, "elfsyms: %s: %s\n", path, r == 0 ? "no dynamic symbol table" : "its dynamic symbol table lies outside it");
+        return 2;
+    }
+    const Elf64_Sym *s = (const Elf64_Sym *)(o + sec->sh_offset);
+    count = sec->sh_size / sizeof(Elf64_Sym);
+    for (size_t k = 1; k < count; k++) {
+        if (s[k].st_name >= strsize) {
+            fprintf(stderr, "elfsyms: %s: a symbol name lies outside its string table\n", path);
+            return 2;
+        }
+        printf("%s %s %s %s %s\n", s[k].st_shndx == SHN_UNDEF ? "UND" : "DEF", bind_name(ELF64_ST_BIND(s[k].st_info)),
+               type_name(ELF64_ST_TYPE(s[k].st_info)), vis_name(ELF64_ST_VISIBILITY(s[k].st_other)), str + s[k].st_name);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc == 3 && strcmp(argv[1], "armap") == 0) return armap(argv[2]);
     if (argc == 3 && strcmp(argv[1], "symtab") == 0) return symtab(argv[2]);
-    fprintf(stderr, "usage: elfsyms armap <lib.a> | elfsyms symtab <lib.a>\n");
+    if (argc == 3 && strcmp(argv[1], "dynsym") == 0) return dynsym(argv[2]);
+    fprintf(stderr, "usage: elfsyms armap <lib.a> | elfsyms symtab <lib.a> | elfsyms dynsym <file>\n");
     return 2;
 }

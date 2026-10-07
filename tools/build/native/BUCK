@@ -1,10 +1,13 @@
-# Symbol prefixing of the vendored C libraries (README.md): the symbol reader
-# and the scripts of the rules in defs.bzl.
+# Symbol prefixing of the vendored C libraries, and libkomira_native.so.1
+# (README.md): the symbol reader, the scripts of the rules in defs.bzl and
+# komira_native.bzl, and the shared library itself.
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "c_exe")
+load(":defs.bzl", "c_exe", "checked_cxx_library")
+load(":komira_native.bzl", "komira_native", "komira_native_run_test")
 
-# elfsyms: an archive's symbol table and its members' symbols (elfsyms.c).
+# elfsyms: an archive's symbol table and its members' symbols, a shared
+# object's dynamic section and symbols (elfsyms.c).
 c_exe(
     name = "elfsyms",
     exec_compatible_with = LINUX_X86_64,
@@ -22,10 +25,114 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+export_file(
+    name = "native_exports.sh",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "native_link.sh",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "native_check.sh",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "native_run.sh",
+    visibility = ["PUBLIC"],
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = [
         "archive_check.sh",
+        "native_check.sh",
+        "native_exports.sh",
+        "native_link.sh",
+        "native_run.sh",
         "prefix_header.sh",
     ],
+)
+
+# libkomira_native.so.1: every C archive komira's Mojo packages call that
+# holds nothing per library, with the prefixed vendored libraries, exporting
+# exactly the names those packages pass to external_call (README.md, "One
+# shared library"). The export check is a validation of this target.
+komira_native(
+    name = "libkomira_native",
+    archives = [
+        "//src/komira_async:komira_async_posix_native",
+        "//src/komira_async_api:komira_concurrency_pool_depth_native",
+        "//src/komira_crypto:komira_crypto_sha256_hw_native",
+        "//src/komira_fs:komira_fs_posix_native",
+        "//src/komira_libc:komira_libc_posix_native",
+        "//src/komira_metrics:komira_metrics_ea_flag_native",
+        "//src/komira_objectstore:komira_objectstore_posix_native",
+        "//src/komira_scan_source:komira_scan_source_inmem_id_native",
+        "//src/komira_supervisor:komira_supervisor_proc_native",
+        "//third_party/aws-lc:crypto",
+        "//third_party/s2n-tls:s2n",
+        "//third_party/snappy:snappy",
+    ],
+    # Every package whose sources call a name one of the archives defines
+    # (a package calling one it does not list fails its own link against the
+    # library, once packages link it).
+    callers = [
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_avro:komira_avro",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_log:komira_log",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_orc:komira_orc",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_supervisor:komira_supervisor",
+        "//src/komira_uuid:komira_uuid",
+    ],
+    exec_compatible_with = LINUX_X86_64,
+    per_library = [
+        "//src/komira_log:komira_log_holder_native",
+    ],
+    soname = "libkomira_native.so.1",
+)
+
+# Mojo programs calling aws-lc, snappy, s2n-tls and komira_libc's shim
+# through the library, as a conda environment would hold it (native_run.sh).
+komira_native_run_test(
+    name = "komira_native_run_test",
+    cases = [
+        "R1",
+        "B1",
+        "IR1",
+    ],
+    exec_compatible_with = LINUX_X86_64,
+    lib = ":libkomira_native",
+    mojoc = {"komira_libc": "//src/komira_libc:komira_libc"},
+    srcs = [
+        "run_test/native_checks.mojo",
+        "run_test/native_interpose.mojo",
+        "run_test/native_run.mojo",
+    ],
+)
+
+# The library as others name it: :libkomira_native gated by the run test
+# (and by its own export check).
+checked_cxx_library(
+    name = "komira_native",
+    checks = [":komira_native_run_test"],
+    lib = ":libkomira_native",
+    visibility = ["PUBLIC"],
 )

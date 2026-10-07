@@ -136,5 +136,7 @@ checked_cxx_library(
     name = "s2n",
     checks = [":s2n_symbols"],
     lib = ":s2n_prefixed",
+    native_kind = "shared",
+    native_reason = "Prefixed: every symbol is komira_s2n_*, on the prefixed aws-lc, so no other copy of s2n-tls or libcrypto of a process binds to it.",
     visibility = ["PUBLIC"],
 )

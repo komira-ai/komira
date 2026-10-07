@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:defs.bzl", "native_archive")
 
 # The vendor-neutral object-storage layer: the Path / URI types, the
 # ObjectStore trait family (metadata, conditional writes, ranged and parkable
@@ -27,6 +28,16 @@ cxx_library(
     srcs = [":objectstore_shim_files[_objectstore_shim.c]"],
     compiler_flags = ["-O2", "-Wall", "-Werror"],
     visibility = ["PUBLIC"],
+)
+
+# Its declaration for libkomira_native.so.1 (tools/build/native/README.md):
+# in the shared library.
+native_archive(
+    name = "komira_objectstore_posix_native",
+    kind = "shared",
+    lib = ":komira_objectstore_posix",
+    reason = "Errno-surfacing file wrappers; its only state is the test fault hooks, plain ints.",
+    visibility = ["//tools/build/native:"],
 )
 
 mojo_library(

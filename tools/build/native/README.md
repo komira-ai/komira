@@ -1,4 +1,4 @@
-# Symbol prefixing of the vendored C libraries
+# Symbol prefixing of the vendored C libraries, and libkomira_native.so.1
 
 The C libraries built from source in [`third_party/`](../../../third_party) are
 built with every global symbol renamed under a komira prefix, so that a
@@ -63,4 +63,79 @@ the C toolchain has no `nm` or `readelf` (an action may not take one from the
 worker), so the build reads ELF itself. `elfsyms armap <lib.a>` prints an
 archive's symbol table; `elfsyms symtab <lib.a>` prints every non-local
 symbol of every member as `DEF|UND <bind> <type> <visibility> <name>`. A
-member it cannot read is an error, never skipped.
+member it cannot read is an error, never skipped. `elfsyms dynsym <file>`
+prints a shared object's or a program's dynamic section (`SONAME`,
+`NEEDED`, `RUNPATH`, `RPATH`, `SYMBOLIC`, `FLAGS`) and its dynamic symbols
+in the `symtab` form.
+
+## One shared library
+
+`//tools/build/native:komira_native` is `libkomira_native.so.1` (and its
+link name `libkomira_native.so`, the `[link]` sub-target): every
+komira-owned C archive the Mojo packages call, and the prefixed aws-lc,
+s2n-tls and snappy, in one shared object. A consumer links it with
+`-Xlinker -L<env>/lib -Xlinker -lkomira_native`; a built program finds it
+with the run path `$ORIGIN/../lib`.
+
+### What goes in
+
+Each C archive declares its kind, next to its `cxx_library`
+([`defs.bzl`](defs.bzl)):
+
+- `native_archive(name = "<lib>_native", lib = ":<lib>", kind = ..., reason = ...)`
+  for komira's own C;
+- `native_kind = "shared"` on a vendored library's `checked_cxx_library`.
+
+`shared` C is one copy per process and goes in the library. `per_library`
+C holds state that must be one per Mojo library and stays out: today only
+komira_log's holder (`src/komira_log/engine/_log_holder_shim.c`), whose
+cells hold the addresses of Mojo structs that only the library that built
+them may read, so its accessors are hidden and each Mojo library links its
+own copy. The rule takes only declared archives (an undeclared one is an
+analysis error: the dependency lacks `NativeArchiveInfo`) and refuses a
+`per_library` one in `archives`, or a `shared` one in `per_library`.
+
+### The exports, generated
+
+[`native_exports.sh`](native_exports.sh) writes the export list and the
+version script from the code: the names the `callers`' sources pass to
+`external_call["..."]` (their `[src]`, tests excluded) that a `shared`
+archive defines. Every other symbol is local: aws-lc's and s2n-tls's
+internals, snappy's C++ and the C++ runtime. It fails when
+
+- a symbol is defined by two archives (one owner per C symbol);
+- a called name is defined only hidden (the library could not export it);
+- a called `komira_*` name is defined by no `shared` and no `per_library`
+  archive, or by both;
+- an archive defines none of the exports, or a caller calls none of them.
+
+`callers` is a list in the BUCK file: a package that calls the library and
+is not listed fails its own link against the library once packages link it,
+so a missing one cannot ship.
+
+### The link and the checks
+
+[`native_link.sh`](native_link.sh) links the archives `--whole-archive` with
+`-Bsymbolic`, `--gc-sections`, `-z defs` and the version script, with the
+Mojo toolchain's zig and target. [`native_check.sh`](native_check.sh), a
+validation of `:libkomira_native`, reads the result back and fails unless
+every exported symbol is `komira_*` and the exports are exactly the
+generated list (and the version script's), no strong undefined symbol is
+`komira_*`, the SONAME is `libkomira_native.so.1`, NEEDED is only glibc's
+own libraries, and it was linked `-Bsymbolic` with no run path.
+
+`:komira_native_run_test` ([`native_run.sh`](native_run.sh), programs in
+[`run_test/`](run_test)) lays the library out as a conda environment holds
+it, with `komira_libc` as `lib/mojo/komira_libc.mojoc`, and runs Mojo
+programs calling aws-lc (SHA-256, AES-256-GCM), snappy, s2n-tls (init, a
+TLS 1.3 config, a client connection) and komira_libc's shim through it:
+
+| case | what |
+|---|---|
+| R1 | `mojo run` with `-Xlinker -L<prefix>/lib -Xlinker -lkomira_native` |
+| B1 | `mojo build --runpath='$ORIGIN/../lib'`, the program in `<prefix>/bin`, run with `LD_LIBRARY_PATH` unset; it must NEED `libkomira_native.so.1` |
+| IR1 | R1 after the system `libcrypto.so.3` and `libssl.so.3` are loaded `RTLD_GLOBAL`: the library exports none of their names, the global scope resolves them to the system's, and the system `SSL_CTX_new` still works (a worker without them runs our calls only, and says so) |
+
+`:komira_native` is `:libkomira_native` with the run test as a check, so no
+build of it succeeds while either is red. The library is built for linux
+x86_64 only (an ELF version script; aws-lc's assembly).

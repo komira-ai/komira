@@ -10,6 +10,14 @@ dependencies, so Buck2 runs them in every build whose graph holds the
 library. `c_exe` builds `elfsyms` itself: one C file, compiled and linked
 static (musl) with the pinned zig.
 
+`NativeArchiveInfo` is what a C archive declares about itself before
+libkomira_native.so.1 (komira_native.bzl) may take it: its kind, `shared`
+(its symbols and state are one per process, so the shared library holds it)
+or `per_library` (it holds state that must be one per Mojo library, so it
+stays a static archive linked into each), and why. `native_archive` declares
+it for a `cxx_library`; `checked_cxx_library` declares it for a prefixed
+vendored library through `native_kind`.
+
 Every action runs under the pinned busybox, and every script and source an
 action reads is copied under buck-out first (as in tools/build/lint): a source
 file's path differs between a standalone checkout and a repository mounting
@@ -145,15 +153,60 @@ _prefixed_archive_check = rule(
 
 prefixed_archive_check = declares_docs(_prefixed_archive_check)
 
+NativeArchiveInfo = provider(
+    doc = "A C archive's declaration for libkomira_native.so.1 (README.md, \"One shared library\").",
+    fields = {
+        # The position-independent static archive (the library's `[static-pic]`).
+        "archive": provider_field(Artifact),
+        # "shared": in libkomira_native.so.1. "per_library": never in it.
+        "kind": provider_field(str),
+        # Why: what state the archive holds, and whose it must be.
+        "reason": provider_field(str),
+    },
+)
+
+_KINDS = ["shared", "per_library"]
+
+def _static_pic(ctx, lib):
+    subs = lib[DefaultInfo].sub_targets
+    if "static-pic" not in subs:
+        fail("{}: {} has no [static-pic] archive (not a cxx_library?)".format(ctx.label, lib.label))
+    return subs["static-pic"][DefaultInfo].default_outputs[0]
+
+def _native_info(ctx, lib, kind, reason):
+    if not reason.strip():
+        fail("{}: the declaration needs a reason: what state the archive holds and whose it must be".format(ctx.label))
+    return NativeArchiveInfo(archive = _static_pic(ctx, lib), kind = kind, reason = reason)
+
+def _native_archive_impl(ctx):
+    info = _native_info(ctx, ctx.attrs.lib, ctx.attrs.kind, ctx.attrs.reason)
+    return [DefaultInfo(default_output = info.archive), info]
+
+_native_archive = rule(
+    impl = _native_archive_impl,
+    doc = "The declaration of the C archive `lib` (a cxx_library) for libkomira_native.so.1: `kind` shared (one copy per process, in the shared library) or per_library (state each Mojo library must own, kept out of it), and the `reason`. The default output is the archive.",
+    attrs = {
+        "kind": attrs.enum(_KINDS),
+        "lib": attrs.dep(),
+        "reason": attrs.string(),
+    },
+)
+
+native_archive = declares_docs(_native_archive)
+
 def _checked_impl(ctx):
-    return ctx.attrs.lib.providers
+    if ctx.attrs.native_kind == None:
+        return ctx.attrs.lib.providers
+    return list(ctx.attrs.lib.providers) + [_native_info(ctx, ctx.attrs.lib, ctx.attrs.native_kind, ctx.attrs.native_reason)]
 
 _checked_cxx_library = rule(
     impl = _checked_impl,
-    doc = "The C/C++ library `lib`, every provider of it unchanged, gated by `checks`: targets returning a `ValidationInfo`, which Buck2 runs in every build whose graph holds this target.",
+    doc = "The C/C++ library `lib`, every provider of it unchanged, gated by `checks`: targets returning a `ValidationInfo`, which Buck2 runs in every build whose graph holds this target. With `native_kind`, also its declaration for libkomira_native.so.1 (a `NativeArchiveInfo`).",
     attrs = {
         "checks": attrs.list(attrs.dep(providers = [ValidationInfo])),
         "lib": attrs.dep(),
+        "native_kind": attrs.option(attrs.enum(_KINDS), default = None, doc = "The archive's kind for libkomira_native.so.1 (see `native_archive`); unset, it declares none."),
+        "native_reason": attrs.string(default = "", doc = "With `native_kind`: why."),
     },
 )
 
