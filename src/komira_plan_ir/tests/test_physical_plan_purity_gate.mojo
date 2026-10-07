@@ -29,11 +29,12 @@
 # `test_walker_has_an_arm_for_every_expr_tag` instantiates EVERY tag id in
 # `[0, EXPR_TAG_COUNT)` and requires the walk to answer rather than raise, and
 # `test_walker_raises_on_a_tag_it_does_not_model` proves that raise arm is live
-# rather than unreachable. Adding `EXPR_TAG_COUNT = 25` without an arm here
-# turns the first one red.
+# rather than unreachable. Raising `EXPR_TAG_COUNT` for a new tag without an
+# arm here turns the first one red.
 #
-# What this file does NOT prove: that `segment_cutter.cut_and_admit` still CALLS
-# the door. That is asserted end-to-end by `komira_engine_dispatch`'s tests.
+# What this file does NOT prove: that anything CALLS the door. Its intended
+# caller, `segment_cutter.cut_and_admit`, is not in this tree, and nothing in
+# this tree calls the door except this file.
 # =============================================================================
 
 from std.memory import OwnedPointer
