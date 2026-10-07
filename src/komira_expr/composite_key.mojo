@@ -35,7 +35,7 @@
 #   - composite_hash_table — consumer of CompositeKeyN.
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 from komira_expr.expr_x import ExprXBool, ExprXI64, ExprXF64, ExprXString
 
 
@@ -49,7 +49,7 @@ from komira_expr.expr_x import ExprXBool, ExprXI64, ExprXF64, ExprXString
 # ColumnValue cells.
 #
 # ColumnValue uses tag+Optional shape mirroring SourceVariant /
-# SinkVariant from komira_core.source.source_variant (the canonical
+# SinkVariant from komira_scan_source.source_variant (the canonical
 # in-tree tag+Optional pattern). The tag identifies which DType cell
 # is populated; the other cells are None.
 #

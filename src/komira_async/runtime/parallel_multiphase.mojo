@@ -50,8 +50,8 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.local_dispatcher import LocalDispatcher
 from komira_async.runtime.multiphase_work import MultiPhaseWork
-from komira_core.collections.slab import Slab
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_collections.slab import Slab
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 
 # =============================================================================

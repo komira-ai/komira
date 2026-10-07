@@ -7,7 +7,7 @@
 # view_version) and gets back an Arrow-IPC (or JSON) slice + schema + rowcount +
 # view_version. This package is the request half — the versioned Expr/plan wire
 # serialization + the untrusted-ticket validation boundary — kept as a LIBRARY
-# so it depends only on komira_core (+ komira_protobuf's varint), builds
+# so it depends only on komira_plan_expr and komira_collections (+ komira_protobuf's varint), builds
 # fast, and is unit-testable without linking the whole engine.
 #
 # Two properties are proven directly against this surface:

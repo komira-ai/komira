@@ -88,6 +88,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # ruleset, and requires each to pass. test_env_source_only scans the
 # package's own sources, staged as its data, for any environment read
 # outside sources.mojo.
+# shared_creds.mojo is the one Copyable credential source over a refreshing
+# chain (komira_sync's SpinMutex behind an ArcPointer), and
+# process_creds.mojo the default chain of a process in that type. Its test,
+# test_shared_creds, runs the real chain over a scripted container endpoint
+# and a clock it advances, with clones of the source and real threads
+# (komira_fork_join, a dependency for that test): rotation, one refresh for
+# all clones, single flight, a failed refresh, the named error with canary
+# secrets kept out of it, and a source that never expires; test_shared_creds_clone
+# checks, over a provider that caches by value, that clones read the one
+# provider's cache; test_http_credential_transport checks the scheme-split
+# transport's routing (http, https, any other refused) over scripted
+# transports.
 _FIXTURES = glob(["tests/fixtures/*"])
 
 # botocore's S3 endpoint ruleset, partition table and endpoint test cases,
@@ -129,13 +141,15 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_encoding:komira_encoding",
+        "//src/komira_fork_join:komira_fork_join",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
         "//src/komira_retry:komira_retry",
+        "//src/komira_sync:komira_sync",
         "//src/komira_xml:komira_xml",
     ],
     test_srcs = [
@@ -157,11 +171,14 @@ mojo_library(
         "tests/test_endpoint_resolution.mojo",
         "tests/test_endpoint_rules_library.mojo",
         "tests/test_endpoint_signing.mojo",
+        "tests/test_http_credential_transport.mojo",
         "tests/test_env_source_only.mojo",
         "tests/test_idempotency_token.mojo",
         "tests/test_s3_endpoint_rules.mojo",
         "tests/test_s3_wire.mojo",
         "tests/test_shared_config.mojo",
+        "tests/test_shared_creds.mojo",
+        "tests/test_shared_creds_clone.mojo",
         "tests/test_signed_request.mojo",
         "tests/test_sigv4_refusals.mojo",
         "tests/test_sigv4_test_suite.mojo",

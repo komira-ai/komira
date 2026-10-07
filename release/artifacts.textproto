@@ -444,12 +444,12 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_scalar_arith"
+  name: "komira_scalar_arithmetic"
   build_system: "buck2"
-  args: "//src/komira_scalar_arith:komira_scalar_arith_conda[release]"
+  args: "//src/komira_scalar_arithmetic:komira_scalar_arithmetic_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_scalar_arith:komira_scalar_arith_conda"
+  targets: "//src/komira_scalar_arithmetic:komira_scalar_arithmetic_conda"
 }
 
 artifacts {
@@ -566,7 +566,7 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_resources/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_scalar_arith/manifest.json"
+  args: "{release_dir}/komira_scalar_arithmetic/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_simd/manifest.json"
   args: "--member-manifest"

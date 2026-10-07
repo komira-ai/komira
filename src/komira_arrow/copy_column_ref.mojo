@@ -8,7 +8,7 @@
 #
 # The function has no engine / dispatch / parquet types in its
 # signature — it operates over a borrowed `Column` reference and
-# returns an owned `Column`, so arrow is its natural home; `komira_core`
+# returns an owned `Column`, so arrow is its natural home; the core packages
 # covers all needed primitives (Column, Bitmap, OwnedAlignedBuffer,
 # ArrowType, size_of).
 # =============================================================================

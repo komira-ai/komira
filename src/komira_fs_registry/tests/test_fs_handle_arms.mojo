@@ -4,7 +4,7 @@
 #
 # Rows: the tags are komira_plan_expr's FS_SCHEME_FILE and FS_SCHEME_S3, and
 # the other copies of the scheme codes agree with them: LocalArm.SCHEME,
-# S3Arm.SCHEME and komira_core's FS_SCHEME_* (the codes the plan wire codec
+# S3Arm.SCHEME and the core packages' FS_SCHEME_* (the codes the plan wire codec
 # decodes into); the keyword constructors set exactly their own arm; the
 # local arm's tag is FS_SCHEME_FILE and FsHandle.FS_LOCAL, only the
 # local Optional is set, and a clone keeps both; the S3 arm's tag is
@@ -14,8 +14,14 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
-from komira_aws_core import AwsCredential, StaticCredsSource, SystemAwsClock
-from komira_core.plan.fs_descriptor_pod import (
+from komira_aws_core import (
+    AwsCredential,
+    AwsCredentialParams,
+    ProcessCredsSource,
+    SystemAwsClock,
+    process_creds_source,
+)
+from komira_plan_expr.fs_descriptor_pod import (
     FS_SCHEME_AZURE as CORE_FS_SCHEME_AZURE,
     FS_SCHEME_FILE as CORE_FS_SCHEME_FILE,
     FS_SCHEME_GCS as CORE_FS_SCHEME_GCS,
@@ -41,17 +47,22 @@ def _http() -> HttpClientConfig:
     return HttpClientConfig.defaults()
 
 
-def _creds() -> StaticCredsSource:
-    return StaticCredsSource(
+def _creds() raises -> ProcessCredsSource:
+    """The production source: the default chain, shared by every clone, with
+    the keys stated so that it needs no network."""
+    var params = AwsCredentialParams()
+    params.credential = Optional[AwsCredential](
         AwsCredential(
             String("AKIDEXAMPLE"),
             String("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"),
             String(""),
         )
     )
+    return process_creds_source(params, _http())
 
 
 def _s3_arm() raises -> S3Arm[S3ProdConnector]:
+    """The production arm's type: its credential source is the default."""
     return S3Arm[S3ProdConnector](
         "lake", S3Config.aws("us-east-1"), _never_dial, _http(), _creds(), SystemAwsClock()
     )
@@ -72,7 +83,7 @@ def test_every_copy_of_the_scheme_codes_agrees() raises:
     # The arms' own SCHEME values.
     assert_equal(LocalArm.SCHEME, FsHandle.FS_LOCAL)
     assert_equal(S3Arm[S3ProdConnector].SCHEME, FsHandle.FS_S3)
-    # komira_core's copy of the codes.
+    # the core packages' copy of the codes.
     assert_equal(CORE_FS_SCHEME_FILE, FS_SCHEME_FILE)
     assert_equal(CORE_FS_SCHEME_S3, FS_SCHEME_S3)
     assert_equal(CORE_FS_SCHEME_GCS, FS_SCHEME_GCS)

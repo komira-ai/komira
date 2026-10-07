@@ -36,14 +36,14 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.column import Column
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.scan_resolver import resolve_for_execution
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.string_array import StringArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.column import Column
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.scan_resolver import resolve_for_execution
 
 from komira_scan_resolver.drain_scan import drain_scan
 from komira_scan_resolver.scan_source_resolver import ScanOpened, ScanRequest

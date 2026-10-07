@@ -48,7 +48,7 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
 from komira_collections.slab import Slab
 
-from komira_concurrency.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_buffer.heap_region import HeapRegion
 from komira_compression.compression import ArrowIpcCompression
 from komira_compression.compression_codecs import _CodecDctxHandle
@@ -72,8 +72,8 @@ from komira_arrow_ipc.ipc_flatbuf import (
     METADATA_VERSION_V5,
     IPC_CONTINUATION_MARKER,
 )
-from komira_concurrency.token import CancellationToken
-from komira_concurrency.parallel_dispatch import (
+from komira_async_api.token import CancellationToken
+from komira_async_api.parallel_dispatch import (
     ParallelDispatch,
     NoDispatch,
 )
@@ -82,7 +82,7 @@ from komira_arrow_ipc.ipc_encoder_dispatch import encode_column, _estimate_body_
 
 # -----------------------------------------------------------------------------
 # LANE-2 sched-trace call-site ids. MIRRORED,
-# not imported: `komira_async` deps on `komira_core`, so importing
+# not imported: `komira_async` deps on the core packages, so importing
 # `komira_async.runtime.sched_trace` here would close a package cycle. These
 # two comptime values MUST stay in lockstep with `SITE_FORMAT_READ` /
 # `SITE_FORMAT_WRITE` in `komira_async/runtime/sched_trace.mojo` and with the
@@ -1442,7 +1442,8 @@ def _decompress_record_batch_frame_impl[
         downstream).
       - Each `BufferDescriptor` rewritten to point at the (offset,
         length) of the decompressed bytes in the fresh body.
-      - FieldNode + length fields preserved verbatim.
+      - FieldNode, length and variadicBufferCounts fields preserved
+        verbatim.
 
     The output is consumable by `decode_record_batch_message` (and
     `decode_record_batch_message_nested`) WITHOUT any further changes
@@ -1579,7 +1580,7 @@ def _decompress_record_batch_frame_impl[
     # === PASS 2: build FB metadata once with finalized new_buffers ===
     var w = FlatbufWriter(2048)
     var rb_pos = write_record_batch(
-        w, Int64(rb.length), rb.nodes, new_buffers
+        w, Int64(rb.length), rb.nodes, new_buffers, rb.variadic_buffer_counts
     )
     var msg_pos = write_message(
         w,
@@ -2130,7 +2131,7 @@ def _build_rb_context[C: ArrowIpcCompression](
 
     var w = FlatbufWriter(2048)
     var rb_pos = write_record_batch(
-        w, Int64(rb.length), rb.nodes, new_buffers
+        w, Int64(rb.length), rb.nodes, new_buffers, rb.variadic_buffer_counts
     )
     var msg_pos = write_message(
         w,
@@ -2774,7 +2775,7 @@ def _decompress_dictionary_batch_frame_impl[
     # === PASS 2: build FB metadata once ===
     var w = FlatbufWriter(2048)
     var rb_pos = write_record_batch(
-        w, Int64(rb.length), rb.nodes, new_buffers
+        w, Int64(rb.length), rb.nodes, new_buffers, rb.variadic_buffer_counts
     )
     var db_pos = write_dictionary_batch(
         w, db_desc.id, rb_pos, db_desc.is_delta

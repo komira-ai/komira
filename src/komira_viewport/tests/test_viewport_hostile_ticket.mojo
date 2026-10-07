@@ -21,8 +21,8 @@
 
 from std.testing import TestSuite, assert_raises, assert_true
 
-from komira_core.collections import Slab
-from komira_core.plan.expr import Expr
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import Expr
 from komira_viewport import (
     ViewportWriter,
     GridTicket,

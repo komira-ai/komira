@@ -6,16 +6,21 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # move.
 #
 # Deps: komira_fs for the filesystem types and partition discovery, and
-# komira_core for the Arrow and plan-expression types (`plan.expr` lives in
-# komira_core until the core split is cut over).
+# the core packages for the Arrow and plan-expression types (`plan.expr` lives in
+# the core packages until the core split is cut over).
 mojo_library(
     name = "komira_scan_planning",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_fs:komira_fs",
+        "//src/komira_plan_expr:komira_plan_expr",
     ],
     test_srcs = [
+        "tests/test_partition_pred_bridge_fields.mojo",
+        "tests/test_partition_pred_bridge_roundtrip.mojo",
         "tests/test_partition_predicate_split.mojo",
     ],
     visibility = ["PUBLIC"],

@@ -75,8 +75,8 @@
 #     cast. No Movable-struct-in-byte-slab-with-heap-field shape.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.collections.slab import Slab
+from komira_arrow.record_batch import RecordBatch
+from komira_collections.slab import Slab
 
 from komira_objectstore.cas_manifest import CasManifestStore, LogStart
 from komira_objectstore.path import Path

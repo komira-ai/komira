@@ -85,7 +85,7 @@ comptime KOMIRA_SIMD_ALLOW_AVX512: Bool = is_defined[
 # package-resident comptime requires a SOURCE edit + package rebuild.
 #
 # Therefore the sweep instrument is these SOURCE constants. To run a sweep step:
-# set the relevant constant, rebuild `komira_core` and `komira_parquet` (the
+# set the relevant constant, rebuild the core packages and `komira_parquet` (the
 # package bakes the width) and then the benchmark, measure, repeat.
 #
 #   value -> forced U64 LANE COUNT (scaled per-dtype, clamped to native):

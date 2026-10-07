@@ -24,6 +24,7 @@ def _read(name: String) raises -> String:
 comptime _FILES: List[String] = [
     "__init__.mojo",
     "fs_handle.mojo",
+    "s3_connector.mojo",
 ]
 
 
@@ -36,7 +37,7 @@ def test_no_environment_read() raises:
         "ProcessEnv",
         "DefaultChainCredsSource",
         "aws_endpoint_config",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
     ]
     var files = materialize[_FILES]()

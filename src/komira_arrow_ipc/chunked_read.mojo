@@ -44,7 +44,7 @@
 #
 # `MmapRegion.open_readonly(path)` plus the Arc-wrapped `MmapRegion` +
 # non-owning aligned-buffer keepalive is the proven shape (the Avro read
-# path uses it). This helper packages it in the same `komira_core/io/`
+# path uses it). This helper packages it in the same the core packages
 # namespace as `chunked_write.mojo` so every downstream package (sdk, csv,
 # orc) can import it without an upward layering hop.
 #

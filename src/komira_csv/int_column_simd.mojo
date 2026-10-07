@@ -75,11 +75,11 @@
 #   * No byte-erased fn-ptr dispatch.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
 
 from .cell_parsers import (
     _try_parse_int64,

@@ -25,7 +25,7 @@
 from std.testing import TestSuite, assert_equal, assert_true
 from std.io import FileHandle
 
-from komira_core.io.chunked_read import read_chunked
+from komira_arrow_ipc.chunked_read import read_chunked
 
 from komira_csv.reader import (
     read_csv_bytes_to_batch,
@@ -34,7 +34,7 @@ from komira_csv.reader import (
 from komira_csv.csv_options import CsvReadOptions
 from komira_csv.quote_styles import Rfc4180
 
-from komira_core.arrow.schema import Schema
+from komira_arrow.schema import Schema
 from komira_runtime_paths import test_tmpdir
 
 

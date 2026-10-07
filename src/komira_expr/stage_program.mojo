@@ -60,11 +60,11 @@
 
 from std.collections import Optional
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import RecordBatch, RecordBatchBuilder, SchemaBuilder, Field
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import RecordBatch, RecordBatchBuilder, SchemaBuilder, Field
+from komira_arrow.batch_view import BatchView
 
 from komira_udf.column_resolver import ColumnResolver
 from komira_expr.expr_x import ExprXBool

@@ -29,8 +29,8 @@
 
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.source.scan_params import ScanParams
+from komira_arrow.record_batch import RecordBatch
+from komira_scan_source.scan_params import ScanParams
 
 
 comptime SCAN_RESOLVER_ABI_VERSION: UInt32 = 1

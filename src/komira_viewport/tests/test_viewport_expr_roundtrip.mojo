@@ -18,7 +18,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     BIN_ADD, BIN_SUB, BIN_MUL, BIN_DIV,
     BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE,
@@ -26,8 +26,8 @@ from komira_core.plan.expr import (
     UN_NOT, UN_NEGATE, UN_IS_NULL, UN_IS_NOT_NULL,
     STR_CONTAINS, STR_STARTS_WITH, STR_ENDS_WITH, STR_LIKE,
 )
-from komira_core.collections import Slab
-from komira_core.plan.scalar_value import ScalarValue
+from komira_collections.slab import Slab
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_viewport import (
     ViewportWriter,
     ViewportReader,

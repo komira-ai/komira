@@ -97,7 +97,7 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("komira_parquet_api"))
     want.append(String("komira_runtime_paths"))
     want.append(String("komira_resources"))
-    want.append(String("komira_scalar_arith"))
+    want.append(String("komira_scalar_arithmetic"))
     want.append(String("komira_simd"))
     want.append(String("komira_validation_run"))
     want.append(String("komira_test_run_id"))

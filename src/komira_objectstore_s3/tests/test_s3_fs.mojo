@@ -53,10 +53,10 @@ from std.testing import assert_equal, assert_false, assert_raises, assert_true
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
-from komira_core.plan.fs_descriptor_pod import FS_SCHEME_S3
+from komira_arrow.arrow_types import ArrowType
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
+from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_S3
 from komira_fs.file_discovery import GlobDiscoveryOptions
 from komira_fs.file_system import WriteMode
 from komira_fs.pruned_hive_discovery import (
@@ -904,8 +904,7 @@ def _two_far_ranges() -> List[Tuple[Int64, Int64]]:
 
 def test_a_prefetch_reads_one_version() raises:
     # Two ranges too far apart to coalesce are two GETs. Untouched, both
-    # land. (A bound of 1 is recorded only: the sends are serial with any
-    # bound, so the bytes are the same.)
+    # land.
     var fs = _Fs.built(
         "lake",
         _config(),
@@ -920,8 +919,10 @@ def test_a_prefetch_reads_one_version() raises:
     assert_equal(_buf_text(out[0]), "abc")
     assert_equal(_buf_text(out[1]), "stu")
     # Overwritten after the first GET: the second carries the first one's
-    # ETag in If-Match, is answered 412, and the read raises rather than
-    # return bytes of two versions.
+    # ETag in If-Match (the handle's, pinned by the first answer), is
+    # answered 412, and the read raises rather than return bytes of two
+    # versions. The second GET is the only one left after the first, so it
+    # goes on store 0, whose fake was overwritten.
     var g = _fs(_mk_big_overwritten_after_get)
     var h = g.open("r/big")
     with assert_raises(contains="StoreError[PRECONDITION] GetObject s3://lake/r/big status=412"):
@@ -1016,7 +1017,10 @@ def _pattern(n: Int, seed: Int) -> List[UInt8]:
 
 
 def _small_parts() raises -> S3FsOptions:
-    return S3FsOptions(upload_part_bytes=_PART)
+    # One part in flight: the fake keeps its objects per connector, so parts
+    # sent on the extra stores of a larger bound would land in fakes that
+    # store 0's completion cannot see. test_s3_fs_inflight covers the bound.
+    return S3FsOptions(upload_part_bytes=_PART, upload_max_inflight=1)
 
 
 def _fs_parts(mk: def () raises thin -> FakeS3Connector) raises -> _Fs:

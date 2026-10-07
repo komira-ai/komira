@@ -38,7 +38,7 @@ def test_no_environment_read() raises:
         "_read_env",
         "std.os",
         "from_environ",
-        "komira_core_ffi",
+        "komira_libc",
         "komira_libc",
         "external_call",
         "AZURE_STORAGE_ACCOUNT",
@@ -75,7 +75,7 @@ def test_the_scan_saw_the_package() raises:
     # Not vacuous: each file is the package's, whole.
     assert_equal(_count(_read("azure.mojo"), "\nstruct AzureStore["), 1)
     assert_equal(_count(_read("azure_fs.mojo"), "\nstruct AzureFs["), 1)
-    assert_equal(_count(_read("azure_sas.mojo"), "\nstruct AzureSasSigner("), 1)
+    assert_equal(_count(_read("azure_sas.mojo"), "\nstruct AzureSasSigner["), 1)
     assert_equal(_count(_read("azure_signing.mojo"), "\nstruct SharedKeySigningLayer["), 1)
     assert_true(_read("azure_fs.mojo").byte_length() > 10000)
 

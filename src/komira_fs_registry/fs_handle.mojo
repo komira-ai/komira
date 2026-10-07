@@ -15,14 +15,14 @@
 # THE ARMS IN THIS BUILD
 #
 #   tag 0  FS_SCHEME_FILE   LocalArm   komira_fs's LocalFs[NoopSink]
-#   tag 1  FS_SCHEME_S3     S3Arm[C]   komira_objectstore_s3's S3Fs
+#   tag 1  FS_SCHEME_S3     S3Arm[C, T] komira_objectstore_s3's S3Fs
 #   tag 2  FS_SCHEME_GCS    (reserved: no arm in this build)
 #   tag 3  FS_SCHEME_AZURE  (reserved: no arm in this build)
 #
 # THE TAGS. `FS_LOCAL` and `FS_S3` are komira_plan_expr's `FS_SCHEME_FILE` and
 # `FS_SCHEME_S3`: that package's `FsDescriptorPod` is the one a plan node
 # carries. The scheme codes are also written down twice more, and those are
-# COPIES, not the same names: komira_core's `FS_SCHEME_*` (which `S3Fs.SCHEME`
+# COPIES, not the same names: the core packages' `FS_SCHEME_*` (which `S3Fs.SCHEME`
 # and the plan wire codec use) and `LocalFs.SCHEME`, a literal. The tests pin
 # all three to these tags (test_fs_handle_arms), so a drift reds the build.
 # `fs_arm_tag_for_scheme` takes the bare code, so a caller holding either
@@ -38,24 +38,26 @@
 # THE S3 ARM'S TYPE. `S3Fs[C, T, K]` is generic over its connector, its
 # credential source and its signing clock. A table of handles needs ONE type,
 # so the handle fixes the clock to `SystemAwsClock` and the credential source
-# to `StaticCredsSource`, the one copyable source (an arm's clone copies its
-# source). The connector stays a parameter of `FsHandleOver[C]`, and
-# `FsHandle` is the production handle, `FsHandleOver[S3ProdConnector]` with
-# `S3ProdConnector = TlsConnector[KernelTcpConnector]`.
+# to `ProcessCredsSource` by default: the AWS SDK default credential chain
+# (environment keys, shared config and credentials files, web identity,
+# container and instance-role credentials) behind a Copyable source whose
+# clones SHARE one cache and one refresh (komira_aws_core's
+# `SharedCredsSource`). An arm's clone copies its source, so a temporary
+# credential is fetched once for all clones, refreshed before it expires, and
+# never goes stale. A caller with fixed keys states them in the chain's
+# parameters (`process_creds_source`) or names another source as the handle's
+# second parameter (`FsHandleOver[C, StaticCredsSource]`, used by tests).
+# The connector stays a parameter of `FsHandleOver[C, T]`, and `FsHandle` is
+# the production handle, `FsHandleOver[S3ProdConnector]`.
 #
-# Two limits of the production arm follow, and both are deliberate for now:
-#
-#   * TLS ONLY. komira_http_client sends an https request only over a
-#     connector whose streams speak TLS, and refuses an http:// request over
-#     one (`HttpError[URL_INVALID]`). The production arm therefore serves
-#     https endpoints only; a plaintext S3-compatible endpoint
-#     (`S3Config.custom_endpoint(..., "http://...")`) is refused on the first
-#     request (test_fs_handle_s3_read). Serving one needs a connector that
-#     picks TLS or plaintext per URL scheme, or a second arm.
-#   * A FIXED CREDENTIAL. The credential the arm signs with is the one it was
-#     given; a temporary credential (an instance role, STS, SSO) is not
-#     refreshed, and requests fail once it expires. Refreshing needs a
-#     copyable source that shares a refreshing chain, so a clone keeps it.
+# THE ENDPOINT'S SCHEME. komira_http_client sends an https request only over
+# a TLS connector and an http request only over a plaintext one. The
+# production connector (`S3ProdConnector`, s3_connector.mojo) is either,
+# fixed when it is made, and `s3_prod_arm` makes the arm's connectors
+# plaintext only when its endpoint is `http://` (a local MinIO or an
+# emulator) and TLS for an `https://` endpoint or AWS's own. An arm built
+# directly over a factory dials what that factory makes: a TLS connector
+# refuses an http:// endpoint on the first request (`HttpError[URL_INVALID]`).
 #
 # A test drives the same handle over komira_http_core's ScriptedConnector
 # (`FsHandleOver[ScriptedConnector]`), so the S3 arm is read through without a
@@ -80,12 +82,10 @@
 from std.builtin.rebind import rebind_var
 
 from komira_async.ops.waker_sink import NoopSink
-from komira_aws_core import StaticCredsSource, SystemAwsClock
+from komira_aws_core import AwsCredsSource, ProcessCredsSource, SystemAwsClock
 from komira_fs.file_system import FileSystem
 from komira_fs.local_fs import LocalFs
-from komira_http_client.tls_connector import TlsConnector
 from komira_http_core.transport.io_stream import Connector
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_objectstore_s3 import S3Fs
 from komira_plan_expr.fs_descriptor_pod import (
     FS_SCHEME_AZURE,
@@ -95,18 +95,21 @@ from komira_plan_expr.fs_descriptor_pod import (
     FsDescriptorPod,
 )
 
+from .s3_connector import S3ProdConnector
 
-# The production S3 arm's connector: TLS over a kernel TCP dial.
-comptime S3ProdConnector = TlsConnector[KernelTcpConnector]
 
 # The local arm: komira_fs's `LocalFs` with no waker sink.
 comptime LocalArm = LocalFs[NoopSink]
 
-# The S3 arm over connector `C`, with a static credential and the process's
-# wall clock for signing.
-comptime S3Arm[C: Connector] = S3Fs[C, StaticCredsSource, SystemAwsClock]
+# The S3 arm over connector `C` and credential source `T` (the shared,
+# refreshing default chain unless the caller names another), with the
+# process's wall clock for signing.
+comptime S3Arm[
+    C: Connector, T: AwsCredsSource & Copyable = ProcessCredsSource
+] = S3Fs[C, T, SystemAwsClock]
 
-# The production handle: its S3 arm speaks TLS.
+# The production handle: its S3 arm dials plaintext or TLS as its endpoint
+# says (`s3_prod_arm`).
 comptime FsHandle = FsHandleOver[S3ProdConnector]
 
 
@@ -161,7 +164,9 @@ def fs_arm_tag_for_descriptor(desc: FsDescriptorPod) raises -> UInt8:
     return fs_arm_tag_for_scheme(desc.scheme, desc.bucket, desc.node_id)
 
 
-struct FsHandleOver[C: Connector](Movable, Deinitable):
+struct FsHandleOver[
+    C: Connector, T: AwsCredsSource & Copyable = ProcessCredsSource
+](Movable, Deinitable):
     """One live file system of the registry: a tag and the arm it names
     (module header). `FsHandle` is `FsHandleOver[S3ProdConnector]`.
 
@@ -176,7 +181,7 @@ struct FsHandleOver[C: Connector](Movable, Deinitable):
 
     var _tag: UInt8
     var _local: Optional[LocalArm]
-    var _s3: Optional[S3Arm[Self.C]]
+    var _s3: Optional[S3Arm[Self.C, Self.T]]
 
     def __init__(out self, *, var local: LocalArm):
         """The local arm, `tag() == FS_LOCAL`."""
@@ -184,11 +189,11 @@ struct FsHandleOver[C: Connector](Movable, Deinitable):
         self._local = Optional[LocalArm](local^)
         self._s3 = None
 
-    def __init__(out self, *, var s3: S3Arm[Self.C]):
+    def __init__(out self, *, var s3: S3Arm[Self.C, Self.T]):
         """The S3 arm, `tag() == FS_S3`. Dials nothing."""
         self._tag = Self.FS_S3
         self._local = None
-        self._s3 = Optional[S3Arm[Self.C]](s3^)
+        self._s3 = Optional[S3Arm[Self.C, Self.T]](s3^)
 
     @staticmethod
     def from_local(var fs: LocalArm) -> Self:
@@ -196,7 +201,7 @@ struct FsHandleOver[C: Connector](Movable, Deinitable):
         return Self(local=fs^)
 
     @staticmethod
-    def from_s3(var fs: S3Arm[Self.C]) -> Self:
+    def from_s3(var fs: S3Arm[Self.C, Self.T]) -> Self:
         """The S3 arm, `tag() == FS_S3`. Dials nothing."""
         return Self(s3=fs^)
 
@@ -206,7 +211,7 @@ struct FsHandleOver[C: Connector](Movable, Deinitable):
         (`LocalArm`, `S3Arm[C]`)."""
         comptime if (FS == LocalArm):
             return True
-        elif (FS == S3Arm[Self.C]):
+        elif (FS == S3Arm[Self.C, Self.T]):
             return True
         else:
             return False
@@ -220,8 +225,8 @@ struct FsHandleOver[C: Connector](Movable, Deinitable):
         is an identity, and an S3 store `fs` has built is kept."""
         comptime if (FS == LocalArm):
             return Optional[Self](Self(local=rebind_var[LocalArm](fs^)))
-        elif (FS == S3Arm[Self.C]):
-            return Optional[Self](Self(s3=rebind_var[S3Arm[Self.C]](fs^)))
+        elif (FS == S3Arm[Self.C, Self.T]):
+            return Optional[Self](Self(s3=rebind_var[S3Arm[Self.C, Self.T]](fs^)))
         else:
             _ = fs^
             return Optional[Self](None)
@@ -257,7 +262,7 @@ struct FsHandleOver[C: Connector](Movable, Deinitable):
         """The local arm's Optional; set iff `is_local()`."""
         return self._local
 
-    def s3_ref(self) -> ref [self._s3] Optional[S3Arm[Self.C]]:
+    def s3_ref(self) -> ref [self._s3] Optional[S3Arm[Self.C, Self.T]]:
         """The S3 arm's Optional; set iff `is_s3()`."""
         return self._s3
 

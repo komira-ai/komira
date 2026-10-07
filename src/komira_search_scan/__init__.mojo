@@ -30,7 +30,7 @@
 # Build DAG (cycle-free, no engine):
 #   komira_search_scan -> komira_search         (SearchCore / QueryIR / hit_schema)
 #   komira_search_scan -> komira_scan_resolver  (ScanSourceResolver / ScanRequest)
-#   komira_search_scan -> komira_core           (ScanBinding / RecordBatch / Expr)
+#   komira_search_scan -> the core packages           (ScanBinding / RecordBatch / Expr)
 # =============================================================================
 
 from .search_source import (

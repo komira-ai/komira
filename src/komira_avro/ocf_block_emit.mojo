@@ -30,7 +30,7 @@ from std.ffi import external_call
 from std.memory import UnsafePointer
 from std.sys.info import CompilationTarget
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink

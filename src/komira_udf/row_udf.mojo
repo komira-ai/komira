@@ -54,7 +54,7 @@
 # this way reads the wrong columns and NOTHING reports it.
 # =============================================================================
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 
 from komira_udf.auto_komira_schema import AutoKomiraSchema
 from komira_udf.filter_fn import FilterFn

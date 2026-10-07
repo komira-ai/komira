@@ -463,9 +463,9 @@ struct SumOf2[
 # `_build_row`'s input-side one, so widening it to N fields is a loop over
 # `field_offset[index=j]()` in the SAME shape rather than a new mechanism.
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.collections.batch_view import BatchView
-from komira_core.plan.expr import Expr
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.batch_view import BatchView
+from komira_plan_expr.expr import Expr
 
 from komira_udf.column_resolver import ColumnResolver
 from komira_expr.expr_x import ExprXString

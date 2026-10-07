@@ -2,7 +2,7 @@
 # Fused multi-conjunct filter -- parquet late-mat helper
 # =============================================================================
 #
-# Bridges `komira_core.eval.fused_predicate` (the SIMD kernel) with the
+# Bridges `komira_column_kernels.fused_predicate` (the SIMD kernel) with the
 # parquet morsel source filter loop in `parquet_morsel_source.mojo`.
 #
 # Detection contract:
@@ -33,12 +33,12 @@
 # file is already 1615 lines (over the 1000-line guidance).
 # =============================================================================
 
-from komira_core.arrow.schema import RecordBatch
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import RecordBatch
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.primitive_array import PrimitiveArray
 
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     EXPR_BINARY_OP,
     EXPR_COL_REF,
@@ -47,7 +47,7 @@ from komira_core.plan.expr import (
     EXPR_ALIAS,
     BIN_AND,
 )
-from komira_core.eval.fused_predicate import (
+from komira_column_kernels.fused_predicate import (
     ConjunctDescI64,
     ConjunctDescF64,
     FUSED_MAX_CONJUNCTS,
@@ -56,10 +56,10 @@ from komira_core.eval.fused_predicate import (
     fused_eval_and_mixed,
     fused_op_from_bin_op,
 )
-from komira_core.helpers.compiler_helpers import resolve_col_index
+from komira_column_kernels.compiler_helpers import resolve_col_index
 
-from komira_core.traits.expr_id import ExprId
-from komira_core.plan.expr_pool import ExprPool
+from komira_plan_expr.expr_id import ExprId
+from komira_plan_expr.expr_pool import ExprPool
 
 
 # =============================================================================

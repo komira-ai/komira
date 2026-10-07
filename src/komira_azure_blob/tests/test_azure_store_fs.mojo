@@ -29,7 +29,7 @@ from komira_async.reactor.reactor import (
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_client.body import RequestBody
 from komira_http_client.header_map import HeaderMap

@@ -46,10 +46,10 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, SchemaBuilder
-from komira_core.collections.batch_view import BatchView, batch_view_over
-from komira_core.collections.multi_column_builder import (
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.batch_view import BatchView, batch_view_over
+from komira_arrow.multi_column_builder import (
     ColumnSlot,
     MultiColumnBuilder,
     column_slot,

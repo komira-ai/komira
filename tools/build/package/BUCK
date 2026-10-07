@@ -128,7 +128,7 @@ conda_release_set_check(
         "//src/komira_parquet_api:komira_parquet_api",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
         "//src/komira_resources:komira_resources",
-        "//src/komira_scalar_arith:komira_scalar_arith",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_simd:komira_simd",
         "//src/komira_validation_run:komira_validation_run",
         "//src/komira_test_run_id:komira_test_run_id",

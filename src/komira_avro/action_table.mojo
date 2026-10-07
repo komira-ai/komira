@@ -10,7 +10,7 @@
 #
 # Architecture:
 #   - `FieldAction` is a runtime tagged-union (explicit Int8 tag + Optional
-#     payload-per-arm), matching `komira_core`'s logical-plan
+#     payload-per-arm), matching the core packages' logical-plan
 #     tagged-union precedent. NO byte-erased fn-ptr dispatch (no
 #     trampolines). Identity resolution emits only the `ReadField` arm; full
 #     resolution adds the 6 resolution arms (SynthesizeDefault / ReadAndPromote /
@@ -28,27 +28,28 @@
 
 from std.sys import size_of
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.binary_array import BinaryArray
-from komira_core.arrow.bitmap import Bitmap, bytes_for_bits
-from komira_core.io.heap_region import HeapRegion
-from komira_core.simd.validity_pack import pack_validity_from_null_flags
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.collections.slab import Slab
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.binary_array import BinaryArray
+from komira_arrow.bitmap import Bitmap, bytes_for_bits
+from komira_buffer.heap_region import HeapRegion
+from komira_simd.validity_pack import pack_validity_from_null_flags
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_collections.slab import Slab
 
 from .avro_schema import (
     AvroSchema,
     AvroNode,
     AvroDefault,
     avro_node_to_arrow,
+    avro_kind_name,
     AVRO_DEFAULT_NONE,
     AVRO_DEFAULT_NULL,
     AVRO_DEFAULT_BOOL,
@@ -970,7 +971,7 @@ struct _StringAcc(Copyable, Movable):
         self._null_count += 1
 
     def build(var self) raises -> Column[HeapRegion]:
-        from komira_core.arrow.string_array import StringArray
+        from komira_arrow.string_array import StringArray
 
         comptime int32_size = size_of[Int32]()
         var num_strings = len(self.offsets) - 1
@@ -1145,7 +1146,7 @@ def _null_count(nulls: List[Bool]) -> Int:
 def _bitmap_from_nulls(nulls: List[Bool]) raises -> Optional[Bitmap[HeapRegion]]:
     """Return a validity Bitmap iff any row is null; else None (all-valid).
 
-    Packs with the shared `komira_core.simd.validity_pack` movemask packer
+    Packs with the shared `komira_simd.validity_pack` movemask packer
     (16 rows/iteration, an order of magnitude faster than a bit-by-bit
     `create_all_valid + per-null clear` scalar pack). Output is bit-for-bit
     identical to the scalar pack. Cold on all-present columns (this
@@ -1865,11 +1866,7 @@ struct ActionTableInterpreter(Movable):
         elif dk == AVRO_DEFAULT_STRING:
             self.accs[oi].push_string(sd.default.str_val)
         elif dk == AVRO_DEFAULT_BYTES:
-            var b = List[UInt8]()
-            var sb = sd.default.str_val.as_bytes()
-            for i in range(len(sb)):
-                b.append(sb[i])
-            self.accs[oi].push_binary(b^)
+            self.accs[oi].push_binary(sd.default.bytes_val.copy())
         else:
             raise Error(
                 "AvroResolutionError.NO_DEFAULT_FOR_MISSING_FIELD: field '"
@@ -2159,6 +2156,69 @@ def _named_types_match(writer: AvroNode, reader: AvroNode) -> Bool:
     return False
 
 
+def _default_kind_name(dk: Int) -> String:
+    """`a <kind>` / `an <kind>` for an AVRO_DEFAULT_* (diagnostics only)."""
+    if dk == AVRO_DEFAULT_NULL:
+        return String("a null")
+    if dk == AVRO_DEFAULT_BOOL:
+        return String("a boolean")
+    if dk == AVRO_DEFAULT_INT:
+        return String("an int")
+    if dk == AVRO_DEFAULT_DOUBLE:
+        return String("a double")
+    if dk == AVRO_DEFAULT_STRING:
+        return String("a string")
+    if dk == AVRO_DEFAULT_BYTES:
+        return String("a bytes")
+    return String("a kind#") + String(dk)
+
+
+def _check_default_fits(
+    fname: String, dk: Int, rfd: ReadFieldData
+) raises:
+    """Refuse a reader default that `_synthesize_default` cannot push into
+    the column accumulator `rfd` selects: null needs a nullable column; a
+    boolean needs a boolean column; an int needs an int/long/float/double
+    column; a double needs a float/double column; a string needs a string
+    column; bytes need a binary column."""
+    var fits: Bool
+    if dk == AVRO_DEFAULT_NULL:
+        fits = rfd.nullability != NULL_NONE
+    else:
+        var tag = ColumnAccVariant.create(rfd).tag
+        if dk == AVRO_DEFAULT_BOOL:
+            fits = tag == ACC_BOOL
+        elif dk == AVRO_DEFAULT_INT:
+            fits = (
+                tag == ACC_I32
+                or tag == ACC_I64
+                or tag == ACC_F32
+                or tag == ACC_F64
+            )
+        elif dk == AVRO_DEFAULT_DOUBLE:
+            fits = tag == ACC_F32 or tag == ACC_F64
+        elif dk == AVRO_DEFAULT_STRING:
+            fits = tag == ACC_STRING
+        elif dk == AVRO_DEFAULT_BYTES:
+            fits = tag == ACC_BINARY
+        else:
+            fits = False
+    if fits:
+        return
+    var ty = String("Avro ") + avro_kind_name(rfd.avro_kind)
+    if rfd.logical_type.byte_length() > 0:
+        ty += ", logical " + rfd.logical_type
+    raise Error(
+        "AvroResolutionError.INVALID_DEFAULT: reader field '"
+        + fname
+        + "' has "
+        + _default_kind_name(dk)
+        + " default that does not fit its type ("
+        + ty
+        + ")"
+    )
+
+
 def _resolve_schemas(
     writer: AvroSchema, reader: AvroSchema
 ) raises -> ResolutionTable:
@@ -2332,6 +2392,7 @@ def _resolve_schemas(
                 " declared default"
             )
         var rfd = out_specs[ri].copy()
+        _check_default_fits(rname, rdefault.kind, rfd)
         actions.append(
             FieldAction.synth_default(
                 rname,

@@ -41,7 +41,7 @@ member komira_name_registry
 member komira_parquet_api
 member komira_runtime_paths
 member komira_resources
-member komira_scalar_arith
+member komira_scalar_arithmetic
 member komira_simd
 member komira_validation_run
 member komira_test_run_id

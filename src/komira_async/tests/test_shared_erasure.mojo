@@ -38,7 +38,7 @@ from komira_async.runtime.shared_erasure import (
     step_no_ctx,
 )
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_log.engine.shared_engine import SharedEngine
 from komira_log.env_filter import EnvFilter

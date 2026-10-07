@@ -26,9 +26,12 @@ comptime _FILES: List[String] = [
     "conditional_store.mojo",
     "config.mojo",
     "errors.mojo",
+    "inflight.mojo",
     "presign.mojo",
     "ranges.mojo",
     "s3_fs.mojo",
+    "s3_fs_jobs.mojo",
+    "s3_fs_options.mojo",
     "store.mojo",
 ]
 
@@ -42,7 +45,7 @@ def test_no_environment_read() raises:
         "ProcessEnv",
         "DefaultChainCredsSource",
         "aws_endpoint_config",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
     ]
     var files = materialize[_FILES]()

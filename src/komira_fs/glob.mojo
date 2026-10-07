@@ -178,7 +178,7 @@ def _slice_str(s: String, start: Int, end: Int) -> String:
     """
     var bs = s.as_bytes()
     # `StringSlice(unsafe_from_utf8=)` is the in-tree byte-exact spelling
-    # (`komira_core/collections/string_column_view.mojo:145`); LENGTH-EXPLICIT,
+    # (`komira_arrow/string_column_view.mojo:145`); LENGTH-EXPLICIT,
     # unlike `String(unsafe_from_utf8_ptr=)`, which stops at the first NUL.
     return String(StringSlice(unsafe_from_utf8=bs[start:end]))
 
