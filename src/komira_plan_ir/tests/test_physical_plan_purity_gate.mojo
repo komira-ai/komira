@@ -14,7 +14,7 @@
 # ⛔ WHAT GOES RED WITHOUT THE GATE. Every refusal case here calls the door and
 # requires it to RAISE; against no gate at all the module does not exist and
 # this file does not compile, and against a gate that walks only the tags the
-# fail-open walker walks, the EIGHT non-WHEN container cases in
+# fail-open walker walks, the TWELVE non-WHEN container cases in
 # `test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips`
 # return False and this file fails.
 #
@@ -52,6 +52,9 @@ from komira_plan_expr.expr import (
     EXPR_TAG_COUNT,
     EXTRACT_YEAR,
     MATH2_POW,
+    MATH_SQRT,
+    STRFN_UPPER,
+    STRFNN_CONCAT,
     STR_LIKE,
 )
 from komira_plan_expr.scalar_value import ScalarValue
@@ -300,6 +303,41 @@ def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() ra
     assert_equal(
         _walk(Expr.json_extract_json(_corr(), String("$.a"))), String("T"),
         "JSON_EXTRACT parent",
+    )
+
+    # EXPR_MATH_FN / EXPR_STRING_FN — the one-child scalar function families.
+    assert_equal(
+        _walk(Expr.math_fn(MATH_SQRT, _corr())), String("T"), "MATH_FN child"
+    )
+    assert_equal(
+        _walk(Expr.string_fn(STRFN_UPPER, _corr())), String("T"),
+        "STRING_FN child",
+    )
+
+    # EXPR_STRING_FN_N — hidden in the THIRD argument, which is what catches an
+    # arm that reads a fixed number of arguments instead of looping over all.
+    var concat_args = List[Expr]()
+    concat_args.append(Expr.col_ref(String("a")))
+    concat_args.append(Expr.col_ref(String("b")))
+    concat_args.append(_corr())
+    assert_equal(
+        _walk(Expr.string_fn_n(STRFNN_CONCAT, concat_args^)), String("T"),
+        "STRING_FN_N third argument",
+    )
+
+    # EXPR_UDF_CALL — the UDF's one argument. `affine((SELECT ...))`.
+    assert_equal(
+        _walk(
+            Expr.udf_call(
+                String("affine"),
+                Optional[Int](7),
+                ArrowType.INT64,
+                ArrowType.INT64,
+                _corr(),
+            )
+        ),
+        String("T"),
+        "UDF_CALL child",
     )
 
     # And one the fail-open walker DOES model, so the fixture is not selecting
