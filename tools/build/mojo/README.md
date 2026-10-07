@@ -274,7 +274,10 @@ keys, it had before they existed.
   resident memory, not address space: the Mojo runtime's allocator reserves
   address space in 1 GiB regions when it starts, and a test under an
   address-space limit of a few GiB (`ulimit -v`) aborts before its first line.
-  Linux only: on macOS a capped test is refused.
+  The gate runner leads a session of its own: if `/proc` cannot be read, or
+  `mem_cap.sh` is signalled or killed, the session's process group is killed,
+  so a capped test never goes on running uncapped (a process that starts a
+  session of its own leaves it). Linux only: on macOS a capped test is refused.
 
 The `mojo_library` attributes apply to each `test_srcs` build and run, and
 the assert level and defines to its coverage build; not to the package's

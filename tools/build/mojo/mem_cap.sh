@@ -12,7 +12,17 @@
 #   MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap_mib> MiB
 # and exits with the command's status. A test that allocates without bound
 # therefore fails instead of exhausting the worker's memory. No cgroup and no
-# privilege: only /proc and signals to its own children.
+# privilege: only /proc, signals to its own children, and a FIFO in a
+# directory it makes (and removes) under the working directory.
+#
+# The command leads a session (and process group) of its own, which the test
+# and every child it starts join unless they leave it. Where the tree cannot
+# be read (three readings in a row fail, or do not show this script itself),
+# and on SIGHUP, SIGINT or SIGTERM, this script kills that whole group, which
+# needs no /proc. SIGKILL cannot be caught: a tether in the command's session
+# blocks reading a FIFO whose only writer is this script (fd 9), and when this
+# script exits, however it exits, the read returns and the tether kills the
+# session's process group (what is left of it once the command has exited).
 #
 # Resident memory, not address space: the Mojo runtime's allocator (tcmalloc)
 # reserves address space in aligned 1 GiB regions at start, so an
@@ -24,7 +34,7 @@
 #
 # Exit status: the command's (137 for a test the cap killed, through
 # gate_runner.sh); 2 for a usage error, or when it cannot read the process
-# tree (the test is killed: it never runs uncapped). Linux only: on macOS
+# tree (the command's process group is killed first). Linux only: on macOS
 # there is no /proc, and a capped test is refused (exit 2).
 set -eu
 
@@ -44,15 +54,18 @@ CAP_KB=$((CAP * 1024))
 # tree <root> [pids]: prints the summed VmRSS (KiB) of root and its
 # descendants, or "gone" once root has exited (a zombie counts as exited);
 # with `pids`, prints the descendants of root (root excluded), one per line.
-# The status files are read through cat, which goes on past a process that
-# exited while it read (awk would stop at that file).
+# Prints nothing when the reading does not show this script's own process: a
+# failed read is not taken for an exited root. The status files are read
+# through cat, which goes on past a process that exited while it read (awk
+# would stop at that file).
 tree() {
-    "$BB" cat /proc/[0-9]*/status 2> /dev/null | "$BB" awk -v root="$1" -v mode="${2:-}" '
+    "$BB" cat /proc/[0-9]*/status 2> /dev/null | "$BB" awk -v root="$1" -v self="$$" -v mode="${2:-}" '
         $1 == "State:" { state = $2 }
         $1 == "Pid:" { p = $2; n++; pid[n] = p; st[p] = state; rss_of[p] = 0 }
         $1 == "PPid:" { par[p] = $2 }
         $1 == "VmRSS:" { rss_of[p] = $2 }
         END {
+            if (!(self in par)) exit
             if (!(root in par) || st[root] == "Z") { if (mode != "pids") print "gone"; exit }
             in_[root] = 1
             do {
@@ -74,9 +87,28 @@ kill_below() {
     for q in $(tree "$1" pids); do kill -s KILL "$q" 2> /dev/null || true; done
 }
 
-"$@" &
+T=$("$BB" mktemp -d "$PWD/.komira_mem_cap.XXXXXX")
+trap '"$BB" rm -rf "$T"' EXIT
+"$BB" mkfifo "$T/tether"
+exec 9<> "$T/tether"
+# setsid needs no fork: this shell has no job control, so its background job
+# leads no group, and $! is the command's pid. The session's shell opens the
+# FIFO for reading (fd 8; this script holds the writer, so the open does not
+# block), starts the tether (its output to /dev/null, so it holds no pipe of
+# this script's caller open), and execs the command. The tether kills the
+# group by the session leader's pid, not as group 0: if setsid did not make a
+# session, that group does not exist and the kill reaches nothing, where
+# group 0 would be this script's caller's.
+"$BB" setsid "$BB" sh -c '
+    exec 8< "$2"
+    g=$$
+    { "$1" cat <&8; kill -s KILL "-$g"; } > /dev/null 2>&1 &
+    exec 8<&-
+    shift 2
+    exec "$@"
+' tether "$BB" "$T/tether" "$@" 9>&- &
 pid=$!
-trap 'kill_below "$pid"; kill -s KILL "$pid" 2> /dev/null; exit 143' HUP INT TERM
+trap 'kill -s KILL "-$pid" 2> /dev/null || true; exit 143' HUP INT TERM
 killed=""
 unread=0
 while :; do
@@ -84,12 +116,12 @@ while :; do
     case "$s" in
         gone) break ;;
         "")
-            # No reading: a failure of cat or awk. Three in a row end the run
-            # rather than leave it uncapped.
+            # No reading: cat or awk failed, or what they read does not show
+            # this script. Three in a row kill the command's process group
+            # rather than leave it running uncapped.
             unread=$((unread + 1))
             if [ "$unread" -ge 3 ]; then
-                kill_below "$pid"
-                kill -s KILL "$pid" 2> /dev/null || true
+                kill -s KILL "-$pid" 2> /dev/null || true
                 wait "$pid" 2> /dev/null || true
                 echo "mem_cap: cannot read the process tree of $LABEL from /proc; killed it rather than run it uncapped" >&2
                 exit 2

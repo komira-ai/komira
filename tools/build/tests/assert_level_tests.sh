@@ -8,7 +8,10 @@
 #      ASSERT=<level>` and each define where a target sets them, the gated
 #      test runs under mem_cap.sh at 4096 MiB by default at ASSERT=none and at
 #      the cap a target names, and a target that sets none of them has neither
-#      (tools/build/tests/functional/assert_level.sh: aquery);
+#      (tools/build/tests/functional/assert_level.sh: aquery, with and
+#      without komira.coverage=true, and a mojo_test's buck2-test command);
+#      mem_cap.sh on a stand-in leaves nothing alive when /proc stops being
+#      readable or it is signalled (tests//functional/mem_cap:cases);
 #      tests//functional/assert_level and tests//functional/mem_cap build (a
 #      library's debug_asserts are off in its test at ASSERT=none, an
 #      assert_mode=none one is off at the default level, a define reaches the
@@ -28,6 +31,17 @@ else
     fail "$(grep -o 'FAIL  assert level: .*' "$LOG/assert_level.log" | cut -c 7- | cut -c 1-400) (see $LOG/assert_level.log)"
 fi
 expect_green assert_level_functional tests//functional/assert_level: tests//functional/mem_cap:
+if ! "$BUCK2" build tests//functional/mem_cap:cases --show-full-simple-output > "$LOG/mem_cap_cases.txt" 2> "$LOG/mem_cap_cases.log"; then
+    fail "mem_cap cases: $(grep '^BAD ' "$LOG/mem_cap_cases.log" | sort -u | tr '\n' ' ')(see $LOG/mem_cap_cases.log)"
+else
+    report=$(tail -n 1 "$LOG/mem_cap_cases.txt")
+    ok=$(grep -c '^ok ' "$report" || true)
+    if grep -q '^BAD ' "$report" || [ "$ok" -lt 4 ]; then
+        fail "mem_cap cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
+    else
+        pass "mem_cap cases: $ok stand-in runs; an unreadable /proc and a signalled cap leave nothing of the run alive"
+    fi
+fi
 expect_green assert_level_run_check 'tests//functional/assert_level:bin_none[run_check]'
 if timeout 900 "$BUCK2" test tests//functional/assert_level:test_none > "$LOG/assert_level_test_none.log" 2>&1; then
     pass "assert_level_test_none: buck2 test of a mojo_test at ASSERT=none"

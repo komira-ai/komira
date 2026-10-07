@@ -1,4 +1,6 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load(":defs.bzl", "mojo_mem_cap_cases")
 
 # The memory cap of a test run (test 45; tools/build/mojo/mem_cap.sh). Every
 # target here builds; the twins that must go red are in
@@ -18,4 +20,18 @@ mojo_library(
     test_srcs = ["tests/test_holds_256mib.mojo"],
     # negative:test_unbounded compiles against it.
     visibility = ["//negative/mem_cap/..."],
+)
+
+# Where the process tree cannot be read, and where the cap itself is
+# signalled, mem_cap.sh leaves nothing of the run alive (cases.sh, on a
+# stand-in for gate_runner.sh).
+mojo_mem_cap_cases(
+    name = "cases",
+    script = "cases.sh",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["cases.sh"],
+    visibility = ["komira//:tests_lints"],
 )
