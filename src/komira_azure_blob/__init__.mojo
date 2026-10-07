@@ -6,7 +6,8 @@ the file system and the service SAS signer.
     stamps `x-ms-date` and adds `Authorization: SharedKey <account>:<sig>`.
     Shared Key is Storage-specific (it canonicalizes `x-ms-*` headers and the
     storage resource path), so it lives here, not in `komira_azure_core`.
-  * `AzureStore` — HEAD, range GET and List Blobs over any HttpService,
+  * `AzureStore` — HEAD, range GET, List Blobs and Put Blob (a block blob
+    in one request) over any HttpService,
     real Azure (virtual-hosted) or Azurite (path-style); `azure_xml` reads
     the List Blobs and error bodies.
   * `AzureClient` — the per-worker bundle of HttpClient, signing layer,
@@ -17,7 +18,9 @@ the file system and the service SAS signer.
     client is built from.
   * `AzureFs` — komira_fs's `FileSystem` over one container, read-only.
   * `AzureSasSigner` — komira_objectstore's `ObjectUrlSigner`, as a blob
-    service SAS.
+    service SAS, signed at the instant its `AzureSasClock` reports at each
+    mint (`SystemAzureSasClock` in production, `FixedAzureSasClock` in
+    tests).
 """
 
 from .azure import (
@@ -49,6 +52,7 @@ from .azure_fs import (
 )
 from .azure_sas_query import SasQueryLayer, azure_sas_query_normalize
 from .azure_signing import (
+    SHARED_KEY_EMPTY_ZERO_LENGTH_VERSION,
     AzureSharedKeyProvider,
     AzureSharedKeySigningContext,
     AzureSharedKeyResult,
@@ -58,6 +62,7 @@ from .azure_signing import (
     build_string_to_sign,
     canonicalize_headers,
     canonicalize_resource,
+    shared_key_content_length,
 )
 from .azure_xml import (
     AzureBlobEntry,
@@ -78,8 +83,11 @@ from .azure_sas import (
     AZURE_SAS_PERM_CREATE_WRITE,
     AZURE_SAS_PERM_READ,
     AZURE_SAS_VERSION,
+    AzureSasClock,
     AzureSasResult,
     AzureSasSigner,
+    FixedAzureSasClock,
+    SystemAzureSasClock,
     azure_blob_service_sas,
     azure_sas_canonicalized_resource,
     azure_sas_iso8601_utc,
