@@ -18,7 +18,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                      metadata server).
 #   test_fcm_outcome   the answer table: 2xx, 404 and UNREGISTERED (DEAD),
 #                      429 and 5xx (TRANSIENT, Retry-After and RetryInfo),
-#                      400/401/403 (REFUSED), and no body text in any detail.
+#                      400/401/403 (REFUSED), no body text in any detail,
+#                      and a send with no answer: TRANSIENT for every
+#                      failure but HttpError[URL_INVALID], which raises.
 #   test_fcm_loopback  `FcmClient` over a real KernelTcpConnector against a
 #                      fake FCM served by komira_http_server on 127.0.0.1:
 #                      the request as it arrived, each answer's outcome, a

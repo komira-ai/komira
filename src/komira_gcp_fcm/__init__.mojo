@@ -9,7 +9,8 @@ content-blind wake of one device.
                 5xx, or no answer) or REFUSED (any other status), with the
                 server's retry delay; never body text.
   client.mojo   `FcmClient[C: Connector, T: GcpTokenSource]` and its
-                `send_one`, `FcmEndpoint`, and
+                `send_one`, `send_failure_outcome` (a send with no
+                answer), `FcmEndpoint`, and
                 `fcm_application_default_token_source` and its seamed
                 `fcm_application_default_token_source_from` (komira_gcp_core's
                 Application Default Credentials with `FCM_SCOPE`).
@@ -49,5 +50,6 @@ from .client import (
     URL_INVALID_KIND,
     fcm_application_default_token_source,
     fcm_application_default_token_source_from,
+    send_failure_outcome,
     token_mint_error,
 )

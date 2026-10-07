@@ -27,6 +27,15 @@
 #   * test_error_code_reading: only an FcmError's own `errorCode`, and only a
 #     bare upper-case token, is read; a lower-case `unregistered` or one
 #     under another `@type` does not make a token dead.
+#   * test_send_failure_outcome: a send with no answer (client.mojo's
+#     `send_failure_outcome` over komira_http_client's error text). Every
+#     tagged failure but URL_INVALID (TIMEOUT, CONNECT_TIMEOUT,
+#     EOF_MID_RESPONSE, RETRYABLE_TRANSPORT) is TRANSIENT, status 0, with the
+#     detail keeping only `HttpError[<KIND>]`; an untagged one says
+#     `transport error` and keeps no address; URL_INVALID raises the exact
+#     refusal. Catches a check widened from URL_INVALID to any
+#     `HttpError[` (a timeout would raise and stop a caller's loop over many
+#     tokens), and a URL_INVALID read as TRANSIENT (retried forever).
 # =============================================================================
 
 from std.testing import assert_equal
@@ -40,6 +49,7 @@ from komira_gcp_fcm import (
     classify_fcm_response,
     fcm_error_code,
     fcm_outcome_name,
+    send_failure_outcome,
 )
 
 
@@ -235,10 +245,66 @@ def test_error_code_reading() raises:
     print("  test_error_code_reading PASS")
 
 
+def _failure_refusal(text: String) -> String:
+    try:
+        _ = send_failure_outcome(text)
+    except e:
+        return String(e)
+    return String("<not raised>")
+
+
+def test_send_failure_outcome() raises:
+    comptime NO_ANSWER = "POST FirebaseMessaging.SendMessage: no answer, "
+    var tagged = List[String]()
+    tagged.append(String("TIMEOUT"))
+    tagged.append(String("CONNECT_TIMEOUT"))
+    tagged.append(String("EOF_MID_RESPONSE"))
+    tagged.append(String("RETRYABLE_TRANSPORT"))
+    for i in range(len(tagged)):
+        var kind = String("HttpError[") + tagged[i] + "]"
+        _check(
+            send_failure_outcome(kind + ": 127.0.0.1:9 after 30000 ms"),
+            FCM_TRANSIENT,
+            0,
+            "",
+            -1,
+            String(NO_ANSWER) + kind,
+            kind,
+        )
+    _check(
+        send_failure_outcome(String("connect 127.0.0.1:9: errno 111")),
+        FCM_TRANSIENT,
+        0,
+        "",
+        -1,
+        String(NO_ANSWER) + "transport error",
+        "an untagged failure",
+    )
+    comptime REFUSAL = (
+        "komira_gcp_fcm: komira_http_client refused the request URL"
+        " (HttpError[URL_INVALID]: the endpoint's scheme and the connector"
+        " disagree); nothing was sent"
+    )
+    assert_equal(
+        _failure_refusal(
+            String("HttpError[URL_INVALID]: https:// URL requires a TLS connector")
+        ),
+        REFUSAL,
+        "URL_INVALID raises",
+    )
+    assert_equal(
+        _failure_refusal(String("send: HttpError[URL_INVALID]: empty host")),
+        REFUSAL,
+        "URL_INVALID after a prefix raises",
+    )
+    print("  test_send_failure_outcome PASS")
+
+
 def main() raises:
     test_accepted()
     test_dead()
     test_transient()
     test_refused()
     test_error_code_reading()
+    test_send_failure_outcome()
     print("PASS komira_gcp_fcm outcome")

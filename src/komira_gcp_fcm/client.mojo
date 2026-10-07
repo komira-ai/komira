@@ -194,6 +194,30 @@ def _transport_kind(text: String) -> String:
     return String(text[byte = at : end + 1])
 
 
+def send_failure_outcome(text: String) raises -> FcmOutcome:
+    """What a send that got no answer means, from komira_http_client's
+    error text: `HttpError[URL_INVALID]` raises (the endpoint's scheme and
+    the connector disagree, so every send fails the same way); any other
+    failure is TRANSIENT with `http_status` 0 and the detail
+    `POST FirebaseMessaging.SendMessage: no answer, <kind>`, where `<kind>`
+    is `HttpError[<KIND>]` or `transport error` (`_transport_kind`)."""
+    var kind = _transport_kind(text)
+    if kind == String(URL_INVALID_KIND):
+        raise Error(
+            "komira_gcp_fcm: komira_http_client refused the request"
+            " URL (HttpError[URL_INVALID]: the endpoint's scheme and"
+            " the connector disagree); nothing was sent"
+        )
+    return FcmOutcome(
+        FCM_TRANSIENT,
+        0,
+        String(),
+        String(),
+        -1,
+        String("POST FirebaseMessaging.SendMessage: no answer, ") + kind,
+    )
+
+
 struct FcmClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
     """`messages:send` for one project.
 
@@ -271,21 +295,7 @@ struct FcmClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
                 Int(resp.status), retry_after, resp.body.take_bytes()
             )
         except e:
-            var kind = _transport_kind(String(e))
-            if kind == String(URL_INVALID_KIND):
-                raise Error(
-                    "komira_gcp_fcm: komira_http_client refused the request"
-                    " URL (HttpError[URL_INVALID]: the endpoint's scheme and"
-                    " the connector disagree); nothing was sent"
-                )
-            return FcmOutcome(
-                FCM_TRANSIENT,
-                0,
-                String(),
-                String(),
-                -1,
-                String("POST FirebaseMessaging.SendMessage: no answer, ") + kind,
-            )
+            return send_failure_outcome(String(e))
 
 
 def fcm_application_default_token_source_from[

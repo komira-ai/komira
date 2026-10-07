@@ -57,9 +57,10 @@ def check_project_id(project_id: String) raises:
     """A project id: non-empty, only `[a-z0-9.:-]` (a project id, or a
     legacy domain-scoped `example.com:project`), and starting with
     `[a-z0-9]`. It is spliced into the request path, so a `/`, `?` or `#`
-    would send the request elsewhere, and a `.` or `..` segment would be
-    removed by a server that normalises dot segments (RFC 3986 section
-    6.2.2.3), sending the request to `/v1/messages:send`."""
+    would send the request elsewhere. A server that normalises dot
+    segments (RFC 3986 section 6.2.2.3) would remove a `..` segment together
+    with `projects`, sending the request to `/v1/messages:send`, and a `.`
+    segment, sending it to `/v1/projects/messages:send`."""
     var b = project_id.as_bytes()
     if len(b) == 0:
         raise Error("komira_gcp_fcm: the project id is empty")
