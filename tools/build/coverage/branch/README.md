@@ -13,8 +13,15 @@ records. The rules are
 [`coverage_branch.bzl`](../../mojo/coverage_branch.bzl); the LLVM pieces are
 [`toolchains/llvm_branch`](../../toolchains/llvm_branch/README.md).
 
-Nothing reads the records yet: no gate reads them, and the library's
-package does not wait for them. They are built when asked for:
+The coverage gate reads the records (`covcheck gate --branch-lcov`,
+[The build gate](../README.md#the-build-gate)) of a library of
+`COVERAGE_BRANCH_GATE` ([`policy.bzl`](../policy.bzl), today
+`komira_retry`) and of every fixture of the tests cell: their packages
+wait for these actions, so a test failing instrumented or a branch the
+classifier refuses leaves the package unbuilt with the switch on, in
+every mode. The classifier refuses what it has no evidence for, and most
+libraries have such shapes today, so for every other library nothing waits
+for them, and they are built when asked for:
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage][branch_info]' -c komira.coverage=true
@@ -44,8 +51,9 @@ them, and a library whose `test_env` sets `LLVM_PROFILE_FILE` is refused at
 analysis, since the run sets it. With the switch off the actions do not
 exist, and with it on no release action changes
 ([test 41](../../tests/coverage_runs.md#test-41-coverage-builds)'s
-`coverage_keys.sh` counts one of each per test and requires that no join
-waits for them).
+`coverage_keys.sh` counts one of each per test, requires that no join
+waits for them directly, and that the gate's inputs hold each test's
+records).
 
 ## cov_branch_link
 
@@ -254,15 +262,24 @@ Every measured file with code on a line holding a decision word (`if`,
 `elif`, `while`, `for`, `and`, `or`, outside strings and comments) must
 have a branch parsed, or the action fails (the branches were not read).
 
-Output: per measured file with a source decision, `SF:<repository path>`,
+Output: per measured file the IR holds code of, `SF:<repository path>`,
 its records sorted by line, column, kind, `<n>` and arm, `end_of_record`;
-files sorted bytewise. A test that runs none of the library's code writes an
-empty file. The block field `<col>:<kind>:<n>/<N>` of these `BRDA` lines is
+files sorted bytewise. A file with code and no source decision is named
+with no record (`SF:` then `end_of_record`), so covcheck counts its
+package's branches as measured with none to take, rather than not measured
+(a package with no decision at all, test 45's `covfull`, then passes on
+branches). A test whose IR holds no code of the library writes an empty
+file. The block field `<col>:<kind>:<n>/<N>` of these `BRDA` lines is
 read by covcheck only: upstream lcov and genhtml take a block number there,
-and these files are not for them. `<line>,<col>:<kind>:<n>/<N>,<arm>` is what covcheck will sum by
-across tests; one test's action cannot see another's, so two tests whose
+and these files are not for them. `<line>,<col>:<kind>:<n>/<N>,<arm>` is what covcheck sums by
+across tests; one test's action cannot see another's, so covcheck refuses
+two tests' records that give one location (line, column, kind) a different
+`<N>`, or one decision a different number of arms
+([Reading the reports](../README.md#reading-the-reports)). Two tests whose
 copies of a function hold as many decisions at a location but different
-ones (each folded away another) are for covcheck to refuse (slice 4).
+ones (each folded away another) look the same to it and are summed
+crosswise: like `<n>/<N>` within one test (Known shapes), a limit, not a
+check.
 
 `komira//src/komira_retry`, `test_decide` and `test_budget` (excerpts;
 `budget.mojo` 63 is `if cost < 0 or cost > self._available:`, a
@@ -278,6 +295,7 @@ BRDA:65,20:select:0/1,0,0
 BRDA:65,20:select:0/1,1,6
 BRDA:117,9:br:0/1,0,0
 BRDA:117,9:br:0/1,1,16
+end_of_record
 SF:src/komira_retry/budget.mojo
 BRDA:63,9:br:0/1,0,8
 BRDA:63,9:br:0/1,1,26
@@ -285,6 +303,7 @@ BRDA:63,21:br:0/1,0,1
 BRDA:63,21:br:0/1,1,33
 BRDA:63,21:rhs:0/1,0,7
 BRDA:63,21:rhs:0/1,1,26
+end_of_record
 ```
 
 ## Cost

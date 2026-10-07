@@ -8,7 +8,7 @@ is malformed, a report path is unmapped, or an output cannot be written;
 from std.io import FileDescriptor
 from std.os import listdir, makedirs
 
-from covcheck.analyze import FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
+from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
 from covcheck.annotate import (
     DEFAULT_MAX_ANNOTATIONS,
     DiffCoverage,
@@ -37,21 +37,22 @@ comptime USAGE_MARK = "usage: "
 
 comptime USAGE_REPORT = (
     "covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR"
-    + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--mutants [PKGDIR=]F]..."
+    + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce] [--target-bp N]"
     + " [--include-tests] [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
     + " [--annotations-out F] [--ratchet-out F]"
 )
 comptime USAGE_GATE = (
     "covcheck gate --package DIR --repo-files F --source-root DIR"
-    + " [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
+    + " [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... --ratchet F --mode census|neutral|enforce [--target-bp N]"
     + " [--include-tests] [--test-source P]... --result-out F --summary-out F"
 )
 
 
 struct FileArg(Copyable, Movable):
-    """`--cobertura`, `--lcov` or `--mutants` `[PKGDIR=]FILE`."""
+    """`--cobertura`, `--lcov`, `--branch-lcov` or `--mutants`
+    `[PKGDIR=]FILE`."""
 
     var format: String
     var pkgdir: String
@@ -123,7 +124,10 @@ def parse_args(args: List[String]) raises -> Args:
             a.include_tests = True
             i += 1
             continue
-        var known = flag == String("--cobertura") or flag == String("--lcov") or flag == String("--mutants") or flag == String("--strip-prefix")
+        var known = (
+            flag == String("--cobertura") or flag == String("--lcov") or flag == String("--branch-lcov")
+            or flag == String("--mutants") or flag == String("--strip-prefix")
+        )
         if flag == String("--test-source") and not report:
             known = True
         for k in range(len(single)):
@@ -141,6 +145,8 @@ def parse_args(args: List[String]) raises -> Args:
             a.reports.append(file_arg(String(FORMAT_COBERTURA), v))
         elif flag == String("--lcov"):
             a.reports.append(file_arg(String(FORMAT_LCOV), v))
+        elif flag == String("--branch-lcov"):
+            a.reports.append(file_arg(String(FORMAT_BRANCH_LCOV), v))
         elif flag == String("--mutants"):
             a.mutants.append(file_arg(String("mutants"), v))
         elif flag == String("--strip-prefix"):
@@ -161,11 +167,17 @@ def parse_args(args: List[String]) raises -> Args:
         if required[k] not in a.values:
             _usage(a.command + String(" needs ") + required[k])
     # `gate` takes none: a library with no test has no report, and its
-    # package, always measured by the gate, is then NotMeasured.
-    if len(a.reports) == 0 and report:
+    # package, always measured by the gate, is then NotMeasured. A branch
+    # record file (`--branch-lcov`) is no line report, and is read with
+    # either format.
+    var line_reports = List[FileArg]()
+    for k in range(len(a.reports)):
+        if a.reports[k].format != String(FORMAT_BRANCH_LCOV):
+            line_reports.append(a.reports[k].copy())
+    if len(line_reports) == 0 and report:
         _usage(a.command + String(" needs at least one --cobertura or --lcov report"))
-    for k in range(1, len(a.reports)):
-        if a.reports[k].format != a.reports[0].format:
+    for k in range(1, len(line_reports)):
+        if line_reports[k].format != line_reports[0].format:
             _usage(String("give --cobertura or --lcov reports, not both (their branch identities differ)"))
     var mode = a.get(String("--mode"))
     if mode.byte_length() > 0 and not valid_mode(mode):

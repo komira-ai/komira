@@ -23,8 +23,12 @@ linux-x86_64), per `test_srcs` entry that is a source file:
   decision or a known compiler-made branch, as lcov `BRDA` records in
   repository paths (cov_branch_classify), `cov/branch/<test>.info`.
 
-Nothing waits for them: the package's join, `[coverage]` and the gate are
-what they are without them.
+The gate (coverage.bzl) reads each test's `cov/branch/<test>.info` when
+the library's `coverage_branch_gate` is set (a library of
+COVERAGE_BRANCH_GATE in tools/build/coverage/policy.bzl, or a fixture of
+the tests cell that does not pass False), so its package waits for all
+five through the gate; for any other library nothing waits for them. The package's join
+never takes them directly, and `[coverage]` does not include them.
 """
 
 load(":providers.bzl", "MojoPkgTSet")

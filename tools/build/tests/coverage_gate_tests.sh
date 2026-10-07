@@ -5,16 +5,22 @@
 # pass, fail, expect_green and expect_red); not run on its own.
 #
 #  45. The coverage gate: with coverage, a library's package waits for its
-#      tests' coverage runs and for `covcheck gate` over their reports.
+#      tests' coverage runs and for `covcheck gate` over their reports and
+#      their branch records (--branch-lcov).
 #      tests//negative/coverage (tools/build/coverage/README.md, "The build
 #      gate"; tools/build/tests/coverage_runs.md, test 45):
-#      covlow, covnotests, covun and covfull in enforce mode are red, each
-#      naming its finding: BelowTarget (a test covering 3 of 6 lines),
-#      NotMeasured (a library with no test still has a join and a gate),
-#      UnmeasuredFile (a source no test compiles), BranchNotMeasured alone
-#      (every line covered and a ratchet row, but kcov measures no branch);
-#      their census twins are green and their result.json says so
-#      (:<name>_census_result); covtop_census_result: a library whose welded
+#      covlow, covnotests, covun, covfull_unread and covbranch in enforce
+#      mode are red, each naming its finding: BelowTarget (a test covering
+#      3 of 6 lines, and 1 of the 4 arms of its two `if`s), NotMeasured (a
+#      library with no test still has a join and a gate), UnmeasuredFile (a
+#      source no test compiles), BranchNotMeasured alone (every line covered
+#      and a ratchet row, its gate reading no branch record:
+#      coverage_branch_gate = False), BelowTarget on branch alone (every
+#      line covered, one arm of its `if` never taken: the branch records
+#      reach the gate); covbranch_both (both arms taken) and covfull (the
+#      library of covfull_unread, no decision, its records naming its file
+#      with no arm) are green in enforce mode; the census twins are
+#      green and their result.json says so (:<name>_census_result); covtop_census_result: a library whose welded
 #      tests are outside its package's tests/ analyzes with coverage, and
 #      its gate leaves both tests out of its numbers (--test-source); covbad:
 #      a census gate over a malformed ratchet is red (covcheck exit 1 fails
@@ -35,16 +41,22 @@
 N=tests//negative/coverage
 P=tools/build/tests/negative/coverage
 expect_green coverage_gate_census "$N:covlow_census_result" "$N:covnotests_census_result" \
-    "$N:covun_census_result" "$N:covfull_census_result" "$N:covtop_census_result"
+    "$N:covun_census_result" "$N:covfull_census_result" "$N:covfull_unread_census_result" \
+    "$N:covtop_census_result" "$N:covbranch_census_result" "$N:covbranch_both" "$N:covfull"
 expect_red coverage_gate_census_malformed "COVERAGE GATE ERROR: $P ($N:covbad [coverage gate]): covcheck exited 1" "$N:covbad"
 expect_red coverage_gate_enforce "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow"
 expect_red coverage_gate_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests"
 expect_red coverage_gate_unmeasured "- **UnmeasuredFile** \`$P\` \`$P/covun/unused.mojo\`: no test binary compiled this file" "$N:covun"
-expect_red coverage_gate_branch "- **BranchNotMeasured** \`$P\`: no branch of this package was measured" "$N:covfull"
-# Each red is its own finding: covlow's is BelowTarget, and covfull's only
-# finding is BranchNotMeasured (line 100%, a ratchet row).
+expect_red coverage_gate_branch "- **BranchNotMeasured** \`$P\`: no branch of this package was measured" "$N:covfull_unread"
+expect_red coverage_gate_branch_arm "COVERAGE GATE FAILED (enforce): $P ($N:covbranch [coverage gate]): covcheck gate exited 3" "$N:covbranch"
+# Each red is its own finding: covlow's is BelowTarget, covfull_unread's
+# only finding is BranchNotMeasured (line 100%, a ratchet row), and covbranch's
+# only finding is BelowTarget on branch (line 100%, a ratchet row, its
+# branch records read).
 for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is below the target 100.00%" \
-    "coverage_gate_branch|### Findings (1)"; do
+    "coverage_gate_branch|### Findings (1)" \
+    "coverage_gate_branch_arm|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
+    "coverage_gate_branch_arm|### Findings (1)"; do
     if grep -qF -- "${want#*|}" "$LOG/${want%%|*}.log"; then
         pass "${want%%|*}_finding"
     else

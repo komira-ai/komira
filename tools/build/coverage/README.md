@@ -1,7 +1,7 @@
 # covcheck: coverage numbers, the PR check run and the build gate
 
 `covcheck` reads coverage reports (kcov's Cobertura XML first, lcov
-tracefiles too), maps every file in them to a file of the repository and its
+tracefiles too, and the branch records of `branch/`), maps every file in them to a file of the repository and its
 package, and measures each package's line and branch coverage of its whole
 source. It holds the numbers to the policy (a target, per-package floors that
 may only rise, no surviving mutant) and lists every exemption for a
@@ -44,14 +44,16 @@ compiler emits.
 
 ```text
 covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR
-                (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--mutants [PKGDIR=]F]...
+                (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]...
+                [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce]
                 [--target-bp N] [--include-tests] [--name N] [--max-annotations N]
                 --summary-out F --checkrun-dir D --result-out F
                 [--annotations-out F] [--ratchet-out F]
 
 covcheck gate   --package DIR --repo-files F --source-root DIR
-                [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]...
+                [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]...
+                [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... --ratchet F --mode census|neutral|enforce
                 [--target-bp N] [--include-tests] [--test-source P]...
                 --result-out F --summary-out F
@@ -64,6 +66,7 @@ Every input is a flag; nothing is read from the environment.
 | `--repo-files F` | the output of `git ls-files -z` (NUL-terminated paths): the repository's files |
 | `--source-root DIR` | the checkout; the sources of measured files are read from it for exemption markers, and the files no test compiled for their executable lines |
 | `--cobertura [PKGDIR=]F`, `--lcov [PKGDIR=]F` | a report, repeatable (one per test binary), all of one format: the two formats identify a line's branches differently, so mixing them is bad usage. `PKGDIR` is the package the report's relative paths may be relative to; a file name holding `=` is given as `=F`. `report` needs at least one; `gate` takes none for a library with no test, whose package is then `NotMeasured` |
+| `--branch-lcov [PKGDIR=]F` | a branch record file (`branch/README.md`, cov_branch_classify: one per test binary), repeatable, read with either line format: branches only, never lines (see Reading the reports). It is no line report: `report` still needs a `--cobertura` or `--lcov` |
 | `--mutants [PKGDIR=]F` | a mutation-testing result, repeatable (format below) |
 | `--strip-prefix P` | repeatable; a report path starting with `P` loses it (the longest matching prefix wins) |
 | `--ratchet F` | the floors file (format below) |
@@ -92,7 +95,7 @@ enforce mode when the package has a finding, so the build fails.
 | code | meaning |
 |---|---|
 | 0 | the outputs were written, whatever they conclude (`report` never carries the conclusion in its exit code) |
-| 1 | an input is malformed (each reader names the file and line, or the byte's line), a report path is unmapped, a source cannot be read, `--checkrun-dir` is not empty, `--package` holds no BUCK file, or an output cannot be written |
+| 1 | an input is malformed (each reader names the file and line, or the byte's line), branch record files disagree on a location's decisions, a file has branch data from both a line report and a branch record file, a report path is unmapped, a source cannot be read, `--checkrun-dir` is not empty, `--package` holds no BUCK file, or an output cannot be written |
 | 2 | bad usage: no or unknown command, an unknown flag, a flag without its value or given twice, a required flag missing, no report (`report`), both `--cobertura` and `--lcov` reports, a malformed `--mode`, `--target-bp` or `--head-sha`, a `--max-annotations` that is not a number of 1 or more |
 | 3 | `gate` only: `--mode enforce` and the package has at least one finding |
 
@@ -143,6 +146,39 @@ A path named in several records or reports (one report per test binary) is
 merged by summing hits per line (and per branch), so a line any test reached
 is covered. Cobertura gives no branch identity, so two reports' `k of n` on
 one line merge as the first `k` of `n` taken in each.
+
+**Branch record files** (`--branch-lcov`, `covcheck/branch_lcov.mojo`) are
+what `cov_branch_classify` writes per test (`branch/README.md`,
+"cov_branch_classify"): `SF:<path>`, then
+`BRDA:<line>,<col>:<kind>:<n>/<N>,<arm>,<taken|->` lines, then
+`end_of_record`; an empty file is a test that ran none of the library's
+code. `<kind>` is `br`, `select`, `switch` or `rhs`; `<N>` is how many
+decisions of that kind one copy of the code holds at that line and column
+and `<n>` which one; arms are numbered from 0. Only these three records
+are read: a `DA` (line data comes from the line reports alone), `LF`,
+`BRF`, `FN`, `TN` or any other is refused, naming `<file>:<line>`, as is a
+blank line, a carriage return, a record outside `SF` .. `end_of_record`, an
+`SF` naming no file or a file named twice, a `BRDA` without exactly four
+fields, a block that is not `<col>:<kind>:<n>/<N>`, another kind, a line or
+column of 0, `<n>` not below `<N>`, a malformed arm or count, the same arm
+twice, and a last record without `end_of_record`; at each `end_of_record`,
+a decision whose arms are not 0 to k-1 (two for `br`, `select` and `rhs`,
+two or more for `switch`) and a location missing one of its `N` decisions.
+A branch is identified by `<line>,<col>:<kind>:<n>/<N>,<arm>` (numbers
+without leading zeros), and an arm's counts are summed across files by that
+id; `-` (the decision's code never ran) is counted and not taken, so it
+adds nothing: `-` and `n` give `n`, two `-` an arm not taken. One test's
+classifier cannot see another's copies of the code, so two files that give
+one location (line, column, kind) a different `N`, or one decision a
+different number of arms, are refused, naming the file, the line and both
+files: their records cannot be summed by id. (Two copies holding the same
+number of decisions but different ones cannot be told apart here; see
+`branch/README.md`, "Known shapes".) The branches join the file of the same
+repository path from the line reports; a file whose line report gives
+branch data too (Cobertura `condition-coverage`, lcov `BRDA`) is refused:
+one source of branch data per file. A file only branch record files name
+(no line record) is counted as a file no test compiled (its lines from its
+source, `UnmeasuredFile`), with its branches.
 
 ## From a report path to a repository file
 
@@ -277,7 +313,7 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | finding | when |
 |---|---|
 | `BelowTarget` | line, or branch when measured, below `--target-bp` (labelled `(census)` in census mode) |
-| `BranchNotMeasured` | a package (not a file: one branch record anywhere in the package clears it) with a line record has no branch record in any report (before exemptions), while `--target-bp` is above 0: its branch coverage cannot be shown to meet the target, so it is not passing. kcov's Cobertura has no branch data, so with kcov every measured package has it, and enforce mode cannot pass on line coverage alone; the summary shows the branch column `not measured` |
+| `BranchNotMeasured` | a package (not a file: one branch record anywhere in the package clears it) with a line record has no branch record in any report (before exemptions), and no branch record file names one of its kept files, while `--target-bp` is above 0: its branch coverage cannot be shown to meet the target, so it is not passing. kcov's Cobertura has no branch data, so with kcov alone every measured package has it, and enforce mode cannot pass on line coverage alone; the summary shows the branch column `not measured`. A branch record file names every measured file its test holds code of, one with no decision with no `BRDA` (`SF:` then `end_of_record`), so a package with no decision at all whose gate reads the records does not have it: its branches are measured, with none to take (test 45's `covfull`; `covfull_unread`, whose gate does not read them, has it) |
 | `NotMeasured` | a package in the run (in `gate`, the gated package) has no line record from a report and no exempted recorded line while `--target-bp` is above 0: no report covers it, or none of its paths mapped to it (the lines of files no test compiled do not make it measured) |
 | `Regression` | line or branch below its ratchet floor; or a floor above 0 whose value was not measured (no data, `measured_bp` null): in `report` for every row whose directory holds a BUCK file, in `gate` for its package's row |
 | `MissingRow` | lines were measured and the ratchet has no row for the package |
@@ -285,6 +321,7 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | `BranchFloorMissing` | branches were measured and the row's branch floor is `-` |
 | `MutantSurvived` | a surviving mutant |
 | `UnmeasuredFile` | a source file of a measured package that no report names still has lines counted (see Files no test compiled) |
+| `BranchUnmeasuredFile` | a file with a line record, in a package one of whose kept files a branch record file names, that no branch record file names and whose line report gives no branch record of its own: cov_branch_classify names every measured file its test holds code of (a decision-free one with no `BRDA`), so this file's branches were not read, and counting them as none would lift the package's branch number. A failure in enforce mode, listed in census mode, as `UnmeasuredFile` is |
 | `ExemptionWithoutReason`, `StaleExemption` | see Exemptions |
 
 Conclusion: `neutral` in census and neutral mode whatever was found; in
@@ -313,10 +350,15 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
    with no test is `NotMeasured`; the test sources are left out of the
    numbers.
 3. `covcheck gate --package <dir> --mode <M> --target-bp <N> --ratchet
-   ratchet.tsv --test-source <test>... --cobertura <report>...`, one report per test (none for a
-   library with no test); the reports are in repository paths, so no
-   `PKGDIR=` is given. Its `result.json` and `summary.md` are the library's
-   `[coverage][gate]` (`[coverage][gate][result]`, `[coverage][gate][summary]`).
+   ratchet.tsv --test-source <test>... --cobertura <report>...
+   [--branch-lcov <records>...]`, one report per test (none for a library
+   with no test), and for a library of `COVERAGE_BRANCH_GATE`
+   (`policy.bzl`) or a fixture of the tests cell (unless it passes
+   `coverage_branch_gate = False`) each test's branch records
+   (`[coverage][branch_info][<test>]`, `branch/README.md`); they are in
+   repository paths, so no `PKGDIR=` is given. Its `result.json` and
+   `summary.md` are the library's `[coverage][gate]`
+   (`[coverage][gate][result]`, `[coverage][gate][summary]`).
 
 Exit 0 writes the gate's marker. Exit 3 (enforce mode, a finding) fails the
 action with `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage
@@ -329,7 +371,10 @@ The library's package (its `mojo_gate_join`) waits for the gate's marker and
 every coverage run's, so dependents compile against a package whose
 coverage runs passed and whose gate held: a test failing at -O0 or under
 kcov leaves the package unbuilt with coverage on, and a gate failing in
-enforce mode does too. A library with no test gets that join as well
+enforce mode does too. A gate that reads branch records waits for every
+branch coverage action of the library's tests, so for such a library a
+test failing instrumented, or a branch the classifier refuses, does as
+well, in every mode. A library with no test gets that join as well
 (without coverage it has one only if it has a README).
 
 Every dependent compiles against that package, so with coverage on a
@@ -343,20 +388,25 @@ the switch off nothing waits for them.
 (`coverage_mode`), and with it its own gate directory (`coverage_gate`, a
 `cov_gate_dir` with another ratchet or script); anywhere else both are
 refused at load, and at analysis (a BUCK file calling the rule itself) a
-mode other than the policy's, a link, run or gate directory other than
-komira's, coverage runs with no gate, or the ledger's join (runs, no gate)
-for a library not in the ledger is refused. These refusals are outside the
+mode other than the policy's, a link, run, branch or gate directory other
+than komira's, a gate reading branch records (`coverage_branch_gate`) for a
+library not in `COVERAGE_BRANCH_GATE` or not reading them for one in it,
+coverage runs with no gate, or the ledger's join (runs, no gate) for a
+library not in the ledger is refused. These refusals are outside the
 tests cell, so test 45 cannot plant them there: test 7
 (`tests/functional/umbrella_cache.sh`) plants each in a consumer
 repository's own cell.
 
 **Before enforce.** Enforce mode is not reachable with kcov alone, so it
 is not a one-line change today:
-- kcov reports no branch, so every measured package has
+- kcov reports no branch, so every measured package whose gate reads no
+  branch records (every library but those of `COVERAGE_BRANCH_GATE`;
+  `coverage_branch_gate` in `tools/build/mojo/coverage.bzl`) has
   `BranchNotMeasured` (below) and fails in enforce mode whatever its line
-  coverage. Enforce needs a branch source first, or a decided split of the
-  target into a line target and a branch target that stays 0 until one
-  exists.
+  coverage. Enforce needs that list to hold the libraries (the classifier
+  refuses shapes most libraries have today; `branch/README.md`), or a
+  decided split of the target into a line target and a branch target that
+  stays 0 until then.
 - A library whose sources are all generated (a `mojo_aws_client` or
   `mojo_gcp_client`: its hand-written sources pass through the generator
   too) stages no source, so its gate is `NotMeasured` and fails in enforce
@@ -381,12 +431,26 @@ rdep of the library) or these three ship ungated:
 ./buck2 bxl //tools/build/coverage/no_gate.bxl:check -c komira.coverage=true
 ```
 
-**Branch coverage**: kcov reports none, so every measured package has
-`BranchNotMeasured`; in census mode it is listed, in enforce mode it fails.
-Line coverage alone is never read as meeting a line-and-branch target. The
-finding is per package: a package one of whose files has a branch record
-does not have it, though its other files may have none (no report kcov
-writes has any).
+**Branch coverage**: kcov reports none; the branch records of `branch/`
+are the source, read by the gate of a library of `COVERAGE_BRANCH_GATE`
+(`policy.bzl`, each row with its evidence: today `komira_retry`, whose
+census gate reads 73 of 74 arms) and of every fixture of the tests cell
+but those passing `coverage_branch_gate = False` (test 45's
+`covfull_unread`).
+Every other measured package has `BranchNotMeasured`; in census mode it is
+listed, in enforce mode it fails. Line coverage alone is never read as
+meeting a line-and-branch target. The finding is per package: a package
+one of whose files has a branch record does not have it; a package with no
+decision at all, whose records name its files with no arm, has its
+branches measured with none to take. In a package whose branch records are
+read, a file with line records that no branch record file names is
+`BranchUnmeasuredFile`: its branches were not read, so the package's
+branch number would leave it out. The
+pull request check (`coverage_measure.sh`) passes covcheck the kcov reports
+only, so for a library of `COVERAGE_BRANCH_GATE` its summary shows branch
+`not measured` where the gate measures it. Passing the PR check the
+branch records too (or having it say "gate only") is follow-up work, due
+before any library moves to enforce.
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage][gate]' -c komira.coverage=true

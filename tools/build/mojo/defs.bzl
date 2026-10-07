@@ -426,7 +426,7 @@ def _library_impl(ctx):
 
     # With coverage on, the package also waits for the coverage runs and the
     # gate (coverage.bzl), a library with no test included.
-    cov_markers, cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs) if cov_link else ([], None, [])
+    cov_markers, cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch) if cov_link else ([], None, [])
     if markers or cov_markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
