@@ -40,6 +40,7 @@ Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accep
 | §3.7 | ASOF `NEAREST`, ties to the earlier row | DEPARTS | Accept: DuckDB has no NEAREST; keep it as a komira extension with hand-derived expectations citing this item. |
 | §3.8 | ASOF tolerance; no strict `<` / `>` ASOF | DEPARTS | Accept: the tolerance is a komira extension (the oracle checks it with a LEFT ASOF join and NULLing); strict forms are refused by name. |
 | §3.14 | Join output name collisions | DEPARTS | Accept: a right column colliding with a left one becomes `<name>_right`; a second collision is refused by name; oracle queries alias every column. |
+| §3.16 | EXISTS outside a filter conjunct | DEPARTS | Accept for now: frontends refuse it by name until the plan has a MARK join; then EXISTS as a value is a non-nullable BOOLEAN. |
 | §4.5 | NaN in comparison predicates | UNDECIDED | Match DuckDB: `NaN = NaN` is TRUE, `NaN > x` is TRUE for every non-NaN `x`; one float model for comparisons, sorting and grouping. |
 | §5.1 | `BIN_DIV` on two integers truncates and keeps the integer type | DEPARTS | Accept: the plan has one division operator, and it is DuckDB's `//`; a frontend's true division (`/`) casts an operand to DOUBLE first. |
 | §6.6 | String-to-integer grammar | UNDECIDED | (a): accept all of DuckDB's extensions (`'1.5'` is 2, `'1e2'` is 100, `'1_000'` is 1000, `'0x1F'`, `'0b101'`), each measured by the oracle. |
@@ -88,7 +89,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 9. **DECIMAL modulo is typed with the left operand's precision and scale (§5.10).** `src/komira_plan_expr/expr_walk.mojo:896-901`; the rule is DuckDB's DECIMAL(max(p1 - s1, p2 - s2) + max(s1, s2), max(s1, s2)), DOUBLE above 38.
 10. **The float-to-integer window for an unsigned target is empty (§6.3).** `eval_cast_float_to_int` (`src/komira_column_kernels/cast_null.mojo`, around line 277) builds its window as `[MIN, -MIN)`, which is `[0, 0)` for an unsigned target and would refuse every value; the rule's window is `[0, MAX + 1)`. Latent today: every caller instantiates a signed target.
 11. **A NULL literal is declared non-nullable (§8.19).** `walk_expr_field` returns `Field("literal", <type>, False)` for every literal, the NULL literal included (`src/komira_plan_expr/expr_walk.mojo:814-817`), so a projected `NULL` is a column declared non-nullable whose every row is NULL.
-12. **Join output schema (§3.13, §3.14).** `LogicalPlan.join` (`src/komira_plan_ir/logical_plan.mojo:1255-1273`) keeps each side's input nullability for the padded side of LEFT, RIGHT and FULL joins, so a padded NULL lands in a column declared non-nullable; and it checks a right column's name only against left names before appending `_right`, so `a`, `a_right` on the left with `a` on the right yields two columns named `a_right`.
+12. **Join output schema (§3.13, §3.14).** `LogicalPlan.join` (`src/komira_plan_ir/logical_plan.mojo:1255-1273`) keeps each side's input nullability for the padded side of LEFT, RIGHT and FULL joins, so a padded NULL lands in a column declared non-nullable; and it checks a right column's name only against left names before appending `_right`, so `a`, `a_right` on the left with `a` on the right, or `a` on the left with `a`, `a_right` on the right, yields two columns named `a_right`. The comparison is case-sensitive, so `A` and `a` do not collide.
 
 ## 1. Three-valued logic
 
@@ -356,17 +357,24 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 
 ### 3.14 Name collisions in join output
 
-- **Rule.** Output column names are unique. A right column whose name equals a left column's is renamed `<name>_right`; left names are never changed. If `<name>_right` is itself taken, the plan refuses the join by name; a frontend renames or projects first.
-- **DuckDB.** Keeps both names in SQL (`SELECT *` gives `k` and `k`). When it materializes a result for a client it renames repeats by appending `_1`, `_2` (`QueryResult::DeduplicateColumns`, `src/main/query_result.cpp:71-93` at v1.5.6). Oracle queries alias every output column explicitly, so the names are the plan's.
-- **Current behaviour.** `src/komira_plan_ir/logical_plan.mojo:1263-1273` appends `_right` (ASOF: `:1490-1501`), checking the right name only against left names, so a second collision produces duplicate names ("Code that does not follow", item 12).
-- **Mark.** DEPARTS: the plan addresses columns by name, so duplicates cannot stand, and `_right` is the convention of the dataframe surfaces (polars uses it); DuckDB's `_1` exists only at its client boundary.
+- **Rule.** Output column names are unique, compared case-sensitively. A right column whose name equals a left column's is renamed `<name>_right`; left names are never changed. If `<name>_right` is itself taken by any left **or** right column (for example a left `a` with a right side holding both `a` and `a_right`), the plan refuses the join by name; a frontend renames or projects first.
+- **DuckDB.** SQL `SELECT *` keeps duplicate names (`k` and `k`). DuckDB renames repeats `<name>_<n>` where it must store or return unique names: `QueryResult::DeduplicateColumns` (`src/main/query_result.cpp:71-93` at v1.5.6) and `ColumnList::AddToNameMap` when `allow_duplicate_names` is set (`src/parser/column_list.cpp:38-51`). Its name comparison is case-insensitive. Oracle queries alias every output column explicitly, so the names are the plan's.
+- **Current behaviour.** `src/komira_plan_ir/logical_plan.mojo:1263-1273` appends `_right` (ASOF: `:1490-1501`), comparing names case-sensitively (`==` on the strings) and only against left names, so a second collision produces duplicate names ("Code that does not follow", item 12).
+- **Mark.** DEPARTS: the plan addresses columns by name, so duplicates cannot stand, and `_right` is the convention of the dataframe surfaces (polars uses it); DuckDB's `<name>_<n>` applies only where it must store or return unique names, and DuckDB compares names case-insensitively where the plan does not.
 
 ### 3.15 EXISTS and NOT EXISTS
 
-- **Rule.** A correlated `EXISTS` is a SEMI join (§3.11) and `NOT EXISTS` an ANTI join (§3.12) on the correlation keys. Neither yields NULL: a left row with a NULL correlation key has no match, so EXISTS is FALSE and NOT EXISTS TRUE for it. Neither produces an output column (§8.21).
+- **Rule.** Where a correlated `EXISTS` or `NOT EXISTS` is a top-level AND conjunct of a filter, it is a SEMI join (§3.11) or ANTI join (§3.12). Equality correlation predicates become the join keys; any other correlation predicate becomes the join's residual (§3.5), not a key. A left row with a NULL correlation key has no match, so EXISTS is FALSE and NOT EXISTS TRUE for it. In this position neither produces an output column. Every other position is §3.16.
 - **DuckDB.** Anti joins have the logic of NOT EXISTS, not of NOT IN (§3.2, [FROM and JOIN](https://duckdb.org/docs/current/sql/query_syntax/from.html)).
 - **Current behaviour.** `src/komira_plan_expr/corr_subquery_data.mojo:66-69`.
 - **Mark.** MATCHES.
+
+### 3.16 EXISTS outside a filter conjunct
+
+- **Rule.** `EXISTS` and `NOT EXISTS` in any other position (a SELECT-list value, under OR or NOT, inside CASE, compared with a value) are refused by name by the frontend. The plan has no MARK join, the join that yields a per-row BOOLEAN, so it cannot express them. When a MARK join is added, EXISTS as a value is a non-nullable BOOLEAN and gets a row in §8.
+- **DuckDB.** Evaluates these positions with a MARK join, giving a non-nullable BOOLEAN.
+- **Current behaviour.** The plan's correlated-subquery kinds lower to SEMI and ANTI joins only (`src/komira_plan_expr/corr_subquery_data.mojo:66-69`).
+- **Mark.** DEPARTS: a narrowing, refused by name until the plan has a MARK join.
 
 ## 4. Sort order and floating-point order
 
@@ -911,7 +919,7 @@ DuckDB has no error values, so nothing in this section has a DuckDB oracle. The 
 
 ## Counts
 
-MATCHES 86, DEPARTS 17, UNDECIDED 17: 120 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 34 rows of "Rulings needed" are the 17 DEPARTS and 17 UNDECIDED items.
+MATCHES 86, DEPARTS 18, UNDECIDED 17: 121 marks, across this file and [the result-type table](query_semantics_types.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 35 rows of "Rulings needed" are the 18 DEPARTS and 17 UNDECIDED items.
 
 ## What are its limits and open questions?
 
