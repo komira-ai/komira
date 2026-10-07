@@ -8,7 +8,7 @@
 # run these graphs on every shape (test_fake_metadata).
 #
 # 1. EVERY METADATA REFUSAL, IN ONE PASS, each pinned by resource, field path
-#    and reason: label keys (empty start, uppercase, a digit first, a
+#    and reason: label keys (empty, an uppercase start, a digit first, a
 #    trailing `-`, a character outside the rule, 64 bytes, `kci_` and `kci-`
 #    keys), label values (a leading `-`, a trailing `_`, a space, 64 bytes),
 #    cloud names (written empty, uppercase, `--`, a trailing `-`, `_`, 64
@@ -110,7 +110,7 @@ def test_every_metadata_refusal_in_one_pass() raises:
     var k64 = _bytes(64)
     var g = _list(
         String('{"resource":[')
-        + String('{"id":"k1","labels":{"Team":"x","9lives":"x","team-":"x","te.am":"x"},"bucket":{}},')
+        + String('{"id":"k1","labels":{"":"x","Team":"x","9lives":"x","team-":"x","te.am":"x"},"bucket":{}},')
         + String('{"id":"k2","labels":{"kci_role":"x","kci-retention":"retain","') + k64 + String('":"x"},"bucket":{}},')
         + String('{"id":"v1","labels":{"a":"-x","b":"x_","c":"has space","d":"') + k64 + String('"},"bucket":{}},')
         + String('{"id":"n-empty","physicalName":"","bucket":{}},')
@@ -131,6 +131,7 @@ def test_every_metadata_refusal_in_one_pass() raises:
         + String("]}")
     )
     var l = _lines(graph_findings(Catalog.v1(), g))
+    _expect(l, "k1|labels.|", "a label key is not empty")
     _expect(l, "k1|labels.Team|", "a label key starts with a lowercase letter")
     _expect(l, "k1|labels.9lives|", "a label key starts with a lowercase letter")
     _expect(l, "k1|labels.team-|", "a label key ends with a letter or a digit")
@@ -152,7 +153,7 @@ def test_every_metadata_refusal_in_one_pass() raises:
     _expect(l, "g|physical_name|", "a grant has no cloud name of its own to write")
     _expect(l, "www|physical_name|", "a dns_record has no cloud name of its own to write")
     _expect(l, "orphan|adopt|", "adopt takes over the existing object named physical_name, and none is written")
-    assert_equal(len(l), 21, String("nothing else is reported:\n") + _all(l))
+    assert_equal(len(l), 22, String("nothing else is reported:\n") + _all(l))
     print("  test_every_metadata_refusal_in_one_pass: PASS")
 
 

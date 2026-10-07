@@ -56,7 +56,10 @@
 # itself breaks the lowering contract. A plan, an apply or a destroy whose
 # primary node asks for another cloud name than the one its object was
 # created under is refused after `list_owned`, before anything is realized
-# (`metadata.name_change_findings`). Plan and apply run with the primary
+# (`metadata.name_change_findings`). Unlike a table key, a changed name
+# refuses a destroy too: where a cloud addresses an object by its name, a
+# destroy realized from the file's new name would address another object
+# and leave the first one behind. Plan and apply run with the primary
 # node of every resource that writes `adopt` in the scope's adopt list
 # (`with_adopted`); destroy does not need it (the engine ignores it there).
 #

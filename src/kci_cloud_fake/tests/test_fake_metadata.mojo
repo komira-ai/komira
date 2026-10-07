@@ -47,6 +47,13 @@
 # 7. THE LOWERING CONTRACT HOLDS THE METADATA: an adapter that writes a
 #    `label.<key>` or `physical_name` field itself, or lowers no primary
 #    node for a named resource, is refused by `lower_data`.
+# 8. ONE NAME PER KIND ON A CLOUD: a service and a worker under one name
+#    are refused where their primary objects are one kind (generic, azure,
+#    onprem) and taken where they are two (aws, gcp), a bucket under the
+#    same name taken everywhere; plan and apply refuse it before any
+#    change; the check runs only on a graph with no other finding; and the
+#    kind is the lowered primary node's (a cheat adapter: one kind for all
+#    collides, no primary node or a lowering that raises is skipped).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -94,6 +101,7 @@ from kci_cloud import (
     lowering_json,
     plan_resources,
     run_conformance,
+    validate_for,
 )
 from kci_resource_proto.resource import Resource, ResourceList
 
@@ -609,7 +617,9 @@ def test_each_shape_refuses_its_metadata_limits() raises:
 struct _Cheat(CloudAdapter, Movable):
     """The generic fake, except that it writes `label.x` (`mode` "label")
     or `physical_name` (`mode` "name") on every node itself, or lowers no
-    `bucket` node (`mode` "drop")."""
+    `bucket` node (`mode` holds "drop"). For section 8: `mode` holding
+    "same" lowers every node to the one kind `k`, "hide" lowers no bucket
+    or table node, and "raise" raises on the resource `b`."""
 
     var inner: FakeCloud
     var mode: String
@@ -645,12 +655,18 @@ struct _Cheat(CloudAdapter, Movable):
     def lower(
         self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
     ) raises -> List[LoweredNode]:
+        if self.mode.find("raise") >= 0 and r.id == "b":
+            raise Error("this cheat cannot lower b")
         var nodes = self.inner.lower(r, edges, feeds, firings)
         var out = List[LoweredNode]()
         for i in range(len(nodes)):
             var n = nodes[i].copy()
-            if self.mode == "drop" and n.id.endswith("/bucket"):
+            if self.mode.find("drop") >= 0 and n.id.endswith("/bucket"):
                 continue
+            if self.mode.find("hide") >= 0 and (n.id.endswith("/bucket") or n.id.endswith("/table")):
+                continue
+            if self.mode.find("same") >= 0:
+                n.kind = String("k")
             if self.mode == "label":
                 n.desired.append(Setting(String("label.x"), String("y")))
             if self.mode == "name":
@@ -711,6 +727,112 @@ def test_the_lowering_contract_holds_the_metadata() raises:
     print("  test_the_lowering_contract_holds_the_metadata: PASS")
 
 
+# ---- 8. one name per kind on a cloud -------------------------------------------------------
+
+
+def _validated[S: CloudAdapter](cloud: S, json: String) raises -> List[String]:
+    """`validate_for` of `json` on `cloud`, as `id|path|reason` lines."""
+    var reg = Clouds(Catalog.v1())
+    reg.add(describe(cloud))
+    var f = validate_for(reg, cloud, _list(json))
+    var out = List[String]()
+    for k in range(len(f)):
+        out.append(f[k].resource_id + String("|") + f[k].field_path + String("|") + f[k].reason)
+    return out^
+
+
+def _all_of(lines: List[String]) -> String:
+    var s = String("")
+    for i in range(len(lines)):
+        s += lines[i] + String("\n")
+    return s^
+
+
+comptime SHARED = (
+    '{"resource":[{"id":"api","physicalName":"web","service":{"image":{"digest":"sha256:0011"},"internal":{},"scale":{"min":1,"max":2}}},'
+    + '{"id":"w","physicalName":"web","worker":{"image":{"digest":"sha256:0011"}}},'
+    + '{"id":"b","physicalName":"web","bucket":{}}]}'
+)
+"""A service, a worker and a bucket under one cloud name `web`: three
+types, so the graph rule (one name per type) passes."""
+
+
+def test_one_name_per_kind_on_each_shape() raises:
+    """Catches: one name taken by two types whose primary objects are one
+    kind on a cloud (a service and a worker that are both a container app on
+    azure, both a Deployment on onprem, both `run` on generic): it would pass
+    validate and collide at create, part-way through an apply. And the
+    other way: a name refused for two kinds that are distinct (the bucket
+    beside them everywhere; the service and the worker on aws and gcp,
+    where they are two kinds), which would refuse a file the cloud takes.
+    MUTANTS: the kind left out of the comparison (aws, gcp and the bucket
+    go red); the check not called by validate (generic, azure, onprem go
+    red)."""
+    var shapes = _shapes()
+    var kinds = List[String]()
+    kinds.append(String("run"))
+    kinds.append(String(""))
+    kinds.append(String(""))
+    kinds.append(String("Microsoft.App/containerApps"))
+    kinds.append(String("apps/v1/Deployment"))
+    for i in range(len(shapes)):
+        var id = String("p-") + shapes[i].name
+        var l = _validated(FakeCloud(id, shape=shapes[i].copy()), String(SHARED))
+        if kinds[i].byte_length() == 0:
+            assert_equal(len(l), 0, shapes[i].name + String(": two kinds, no finding:\n") + _all_of(l))
+            continue
+        assert_equal(len(l), 1, shapes[i].name + String(": one finding:\n") + _all_of(l))
+        assert_equal(
+            l[0],
+            String('w|physical_name|"web" is also the cloud name of "api": on cloud "') + id + String('" both are ')
+            + kinds[i] + String(", and one name names one object of a kind"),
+        )
+    print("  test_one_name_per_kind_on_each_shape: PASS")
+
+
+def test_one_name_per_kind_refuses_before_any_change() raises:
+    """Catches: the per-kind refusal reported by validate but not stopping
+    plan or apply (the apply would create the service, then fail on the
+    worker). And the gate: the check runs only on a graph with no other
+    finding (it lowers, and an adapter is never asked to lower a graph it
+    refused), so a collision beside a bad label reports the label alone.
+    MUTANT: the gate dropped (the second graph reports two findings)."""
+    var reg = _reg()
+    var cloud = FakeCloud()
+    var st = InMemoryStateStore()
+    for verb in [String("plan"), String("apply")]:
+        _refused(reg, cloud, String(SHARED), verb, st, String('"web" is also the cloud name of "api"'))
+    assert_equal(cloud.live_count(), 0, "nothing was created")
+    var bad = String(SHARED).replace('{"id":"b",', '{"id":"b","labels":{"Bad":"x"},')
+    var l = _validated(FakeCloud(), bad)
+    assert_equal(len(l), 1, String("the label alone:\n") + _all_of(l))
+    assert_true(l[0].startswith("b|labels.Bad|"), l[0])
+    print("  test_one_name_per_kind_refuses_before_any_change: PASS")
+
+
+def test_one_name_per_kind_reads_the_lowering() raises:
+    """Catches: the kind taken from anything but the cloud's lowered
+    primary node. A cheat that lowers every node to one kind makes a
+    bucket and a table under one name collide (the positive control); one
+    that lowers neither a bucket nor a table node, or that cannot lower the
+    bucket, makes no finding and does not raise (the lowering contract
+    refuses those at plan). MUTANT: an empty kind (no primary node) not
+    skipped ("hide" goes red: two empty kinds compare equal)."""
+    var g = String(
+        '{"resource":[{"id":"b","physicalName":"web","bucket":{}},'
+        + '{"id":"t","physicalName":"web","table":{"key":{"partition":{"name":"id","type":"STRING"}}}}]}'
+    )
+    var same = _validated(_Cheat(String("same")), g)
+    assert_equal(len(same), 1, String("same:\n") + _all_of(same))
+    assert_equal(same[0], 't|physical_name|"web" is also the cloud name of "b": on cloud "cheat" both are k, and one name names one object of a kind')
+    var hide = _validated(_Cheat(String("same,hide")), g)
+    assert_equal(len(hide), 0, String("hide:\n") + _all_of(hide))
+    var boom = _validated(_Cheat(String("same,raise")), g)
+    assert_equal(len(boom), 0, String("raise:\n") + _all_of(boom))
+    assert_equal(len(_validated(_Cheat(String("honest")), g)), 0, "two kinds on the honest generic lowering")
+    print("  test_one_name_per_kind_reads_the_lowering: PASS")
+
+
 def main() raises:
     print("test_fake_metadata")
     test_golden_lowering_per_shape()
@@ -720,4 +842,7 @@ def main() raises:
     test_adopt_takes_over_the_named_object()
     test_each_shape_refuses_its_metadata_limits()
     test_the_lowering_contract_holds_the_metadata()
+    test_one_name_per_kind_on_each_shape()
+    test_one_name_per_kind_refuses_before_any_change()
+    test_one_name_per_kind_reads_the_lowering()
     print("ALL kci_cloud_fake METADATA TESTS PASSED")

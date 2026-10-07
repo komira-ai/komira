@@ -338,6 +338,7 @@ from kci_cloud.metadata import (
     metadata_findings,
     name_change_findings,
     physical_name_problem,
+    shared_name_findings,
     sorted_label_keys,
 )
 from kci_cloud.conformance import ConformanceTarget, run_conformance

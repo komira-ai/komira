@@ -155,7 +155,8 @@
 // `labels` are the author's, written beside kci's own; a key in kci's own
 // label space (`kci_*`, `kci-*`) is refused. A name or a label a cloud
 // refuses (a name too long or too short, a kind with no name of its own
-// there, more labels than an object carries there) is refused as a limit
+// there, one name on two objects of one kind there, more labels than an
+// object carries there) is refused as a limit
 // of that cloud when the graph is validated, before anything is created.
 //
 // RESERVED NOW, BUILT LATER (held numbers, not declared; each is an addition

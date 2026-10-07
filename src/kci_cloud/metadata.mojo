@@ -28,6 +28,14 @@
 #     may not write the same name. A cloud that takes fewer bytes, or more
 #     at least, or that has no name of its own for a kind, refuses it as
 #     its limit.
+#     ONE NAME PER KIND ON A CLOUD (`shared_name_findings`, a LIMIT finding
+#     of validate): two types may lower their primary objects to one cloud
+#     kind (a service and a worker that are both one kind of container app
+#     on a cloud), so two resources of two types writing one name would
+#     collide there partway through an apply. Validate lowers each named
+#     resource the cloud hosts and passes (data, nothing realized) and
+#     refuses the second name of a (kind, name) pair, the kind read from the
+#     cloud's own lowering: a value, never a cloud's name.
 #   * `adopt` 8: take over the existing object named `physical_name`, so it
 #     must be written. kci adds the resource's primary node to the scope's
 #     adopt list (`with_adopted`) on plan and apply; the engine then stamps
@@ -54,8 +62,11 @@
 
 from kci_resource_proto.resource import Resource
 
-from kci_cloud.adapter import FINDING_GRAPH, Finding, LoweredNode, OwnedRecord, Setting
-from kci_cloud.catalog import Catalog, body_field
+from kci_cloud.adapter import CloudAdapter, FINDING_GRAPH, FINDING_LIMIT, Finding, LoweredNode, OwnedRecord, Setting
+from kci_cloud.catalog import Catalog, body_field, primary_node
+from kci_cloud.feed import Feed
+from kci_cloud.firing import Firing
+from kci_cloud.grants import edges_for
 
 comptime LABEL_FIELD_PREFIX = "label."
 """The desired-field prefix of an author's label (`label.<key>`)."""
@@ -283,14 +294,67 @@ def _shown(name: String) -> String:
 
 
 def adopted_nodes(catalog: Catalog, resources: List[Resource]) raises -> List[String]:
-    """The primary node of every resource that writes `adopt`."""
+    """The primary node of every resource that writes `adopt`. Raises for a
+    resource of no catalog type (validate refuses it first)."""
     var out = List[String]()
     for i in range(len(resources)):
         ref r = resources[i]
         if not r.adopt:
             continue
-        var t = catalog.index_of(body_field(r))
-        if t < 0:
+        out.append(primary_node(catalog, resources, r.id))
+    return out^
+
+
+def shared_name_findings[
+    S: CloudAdapter
+](
+    cloud: S,
+    catalog: Catalog,
+    resources: List[Resource],
+    feeds: List[Feed],
+    firings: List[Firing],
+) -> List[Finding]:
+    """One LIMIT finding per resource whose primary object, lowered by
+    `cloud`, is of the same kind and writes the same `physical_name` as an
+    earlier resource's (the file header). Validate calls this only on a
+    graph with no other finding, so every resource is one the cloud hosts
+    and takes. A resource whose lowering raises, or that lowers no primary
+    node, is skipped: the lowering contract refuses it at plan."""
+    var kinds = List[String]()
+    var names = List[String]()
+    var owners = List[String]()
+    var out = List[Finding]()
+    for i in range(len(resources)):
+        ref r = resources[i]
+        if not r.physical_name:
             continue
-        out.append(r.id + String("/") + catalog.types[t].primary_role)
+        var kind = String("")
+        try:
+            var primary = primary_node(catalog, resources, r.id)
+            var nodes = cloud.lower(r, edges_for(resources, r), feeds, firings)
+            for n in range(len(nodes)):
+                if nodes[n].id == primary:
+                    kind = nodes[n].kind.copy()
+                    break
+        except:
+            continue
+        if kind.byte_length() == 0:
+            continue
+        ref name = r.physical_name.value()
+        for k in range(len(kinds)):
+            if kinds[k] == kind and names[k] == name:
+                out.append(
+                    Finding(
+                        FINDING_LIMIT,
+                        r.id,
+                        String("physical_name"),
+                        String("\"") + name + String("\" is also the cloud name of \"") + owners[k]
+                        + String("\": on cloud \"") + cloud.cloud_id().text() + String("\" both are ") + kind
+                        + String(", and one name names one object of a kind"),
+                    )
+                )
+                break
+        kinds.append(kind^)
+        names.append(name.copy())
+        owners.append(r.id.copy())
     return out^

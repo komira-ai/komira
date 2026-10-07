@@ -62,10 +62,12 @@
 #      needs for the type (`CloudAdapter.required_artifact`); or a `public {}`
 #      service in a cell whose settings choose no public mechanism
 #      (`CloudAdapter.public_mechanism`). The mechanism is chosen HERE, from
-#      the cell's settings, and never fallen back on at apply time.
+#      the cell's settings, and never fallen back on at apply time. Last, on
+#      a graph with no other finding, one cloud name per (kind, name) of the
+#      cloud's lowered primary objects (`metadata.shared_name_findings`).
 #
-#   4. The ROLE LABEL BUDGET (`role_budget_findings`), the one check that
-#      needs the lowering: every lowered node's role (the node id after its
+#   4. The ROLE LABEL BUDGET (`role_budget_findings`), the check that needs
+#      the whole lowering: every lowered node's role (the node id after its
 #      owner) must fit the 63-byte label value once encoded. It is a GRAPH
 #      finding naming the node, the byte count and every segment's length,
 #      and it runs after lowering (data, nothing realized) and before
@@ -126,7 +128,7 @@ from kci_cloud.firing import firings_of
 from kci_cloud.triggers import trigger_findings
 from kci_cloud.network import network_findings, service_network_findings
 from kci_cloud.registry import registry_findings
-from kci_cloud.metadata import metadata_findings
+from kci_cloud.metadata import metadata_findings, shared_name_findings
 from kci_cloud.workload import is_workload, workload_of
 from kci_cloud.grants import (
     GrantEdge,
@@ -692,6 +694,8 @@ def validate_for[
                 + listed,
             )
         )
+    if len(out) == 0:  # lower only a graph with no other finding
+        out.extend(shared_name_findings(cloud, clouds.catalog, resources, feeds, firings))
     return out^
 
 
