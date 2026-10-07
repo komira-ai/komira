@@ -30,10 +30,14 @@
 from std.ffi import external_call
 from std.memory import OwnedPointer, UnsafePointer, alloc
 from std.testing import assert_false, assert_true
+from std.time import perf_counter_ns
 
 from komira_atomic_alias import AtomicI64
 from komira_async_api.token import CancellationToken
-from komira_async_api.fork_join_shared import fork_join_shared
+from komira_async_api.fork_join_shared import (
+    fork_join_pool_depth,
+    fork_join_shared,
+)
 from komira_async_api.parallel_dispatch import ParallelDispatch
 from komira_async_api.shared_chunk_work import SharedChunkWork
 from komira_async_api.worker_pool_traits import KeepAlive, Segment
@@ -43,7 +47,13 @@ comptime N_THREADS = 4
 comptime REPS_RACE = 2000  # the two probabilistic races
 comptime REPS_ORDERED = 300  # races whose failure is not timing-dependent
 comptime OBSERVER_POLLS = 1000  # monotonicity polls after the first True
-comptime DERIVE_DEPTH = 12  # tokens per deriving chunk; half before the latch
+comptime DERIVE_DEPTH = 12  # tokens per deriving chunk; depths 0..6 pre-latch
+# Every wait in a chunk gives up after this long and records a code, so a
+# chunk that never runs concurrently (shards inline, a thread that failed to
+# start) turns the build red instead of hanging it.
+comptime WAIT_LIMIT_NS = 30_000_000_000
+comptime CODE_LATCH_TIMEOUT = 900
+comptime CODE_DONE_TIMEOUT = 901
 
 comptime MODE_CANCEL_ALL = 0
 comptime MODE_OBSERVE = 1
@@ -227,17 +237,23 @@ struct _RacePayload(Movable, Deinitable):
             self.seen.append(String(""))
 
 
-def _wait_at_least(mut ctr: OwnedPointer[AtomicI64], target: Int):
+def _wait_at_least(mut ctr: OwnedPointer[AtomicI64], target: Int) -> Bool:
+    """Spin until `ctr >= target`; False once WAIT_LIMIT_NS has passed."""
+    var start = perf_counter_ns()
     var spins = 0
     while Int(ctr[].load()) < target:
         spins += 1
         if spins % 256 == 0:
             _ = external_call["sched_yield", Int32]()
+            if perf_counter_ns() - start > WAIT_LIMIT_NS:
+                return False
+    return True
 
 
-def _arrive_and_wait(mut ctr: OwnedPointer[AtomicI64], n: Int):
+def _arrive_and_wait(mut ctr: OwnedPointer[AtomicI64], n: Int) -> Bool:
+    """The start latch. False if the other chunks never arrived."""
     _ = ctr[].fetch_add(Int64(1))
-    _wait_at_least(ctr, n)
+    return _wait_at_least(ctr, n)
 
 
 # -----------------------------------------------------------------------------
@@ -250,7 +266,8 @@ def _chunk_cancel(inp: _RaceInput, mut p: _RacePayload, c: Int) -> Int:
     """Cancel through a private clone; record the reason seen right after
     `cancel` returned."""
     var mine = p.root.clone()
-    _arrive_and_wait(p.arrived, N_THREADS)
+    if not _arrive_and_wait(p.arrived, N_THREADS):
+        return CODE_LATCH_TIMEOUT
     mine.cancel(inp.reasons[c])
     var code = 0
     if not mine.is_cancelled():
@@ -264,9 +281,13 @@ def _chunk_observe(mut p: _RacePayload) -> Int:
     """Poll until cancelled; then the reason must be published and the token
     must stay cancelled."""
     var mine = p.root.clone()
-    _arrive_and_wait(p.arrived, N_THREADS)
+    if not _arrive_and_wait(p.arrived, N_THREADS):
+        return CODE_LATCH_TIMEOUT
     var saw = False
+    var start = perf_counter_ns()
     while True:
+        if perf_counter_ns() - start > WAIT_LIMIT_NS:
+            return CODE_DONE_TIMEOUT
         # Read the counter BEFORE polling: if every canceller had returned
         # before this poll, the poll must see the cancel.
         var all_returned = Int(p.cancels_done[].load()) >= N_THREADS - 1
@@ -291,8 +312,9 @@ def _derive_chain(
     depth: Int,
 ) -> Int:
     """One token per frame: a child at even depth, a clone at odd depth. The
-    first DERIVE_DEPTH / 2 frames are made before this chunk reaches the
-    start latch (so strictly before the cancel), the rest race it. The
+    frames at depths 0..DERIVE_DEPTH / 2 (7 tokens) are made before this
+    chunk reaches the start latch (so strictly before the cancel); depths
+    DERIVE_DEPTH / 2 + 1..DERIVE_DEPTH - 1 (5 tokens) race it. The
     deepest frame waits for the cancel to return, then derives a late child
     of the root; every frame checks its own token on the way out."""
     var tok: CancellationToken
@@ -301,12 +323,14 @@ def _derive_chain(
     else:
         tok = parent.clone()
     if depth == DERIVE_DEPTH // 2:
-        _arrive_and_wait(p.arrived, N_THREADS)
+        if not _arrive_and_wait(p.arrived, N_THREADS):
+            return CODE_LATCH_TIMEOUT
     var code = 0
     if depth + 1 < DERIVE_DEPTH:
         code = _derive_chain(inp, p, tok, depth + 1)
+    elif not _wait_at_least(p.cancels_done, 1):
+        code = CODE_DONE_TIMEOUT
     else:
-        _wait_at_least(p.cancels_done, 1)
         var late = p.root.child()
         if not late.is_cancelled():
             code = 10
@@ -325,10 +349,12 @@ def _chunk_upward(inp: _RaceInput, mut p: _RacePayload, c: Int) -> Int:
     the siblings must not see it."""
     var mine = p.root.child()
     var grandchild = mine.child()
-    _arrive_and_wait(p.arrived, N_THREADS)
+    if not _arrive_and_wait(p.arrived, N_THREADS):
+        return CODE_LATCH_TIMEOUT
     mine.cancel(inp.reasons[c])
     _ = p.cancels_done[].fetch_add(Int64(1))
-    _wait_at_least(p.cancels_done, N_THREADS)
+    if not _wait_at_least(p.cancels_done, N_THREADS):
+        return CODE_DONE_TIMEOUT
     if not mine.is_cancelled():
         return 1
     if p.root.is_cancelled():
@@ -345,7 +371,8 @@ def _chunk_upward(inp: _RaceInput, mut p: _RacePayload, c: Int) -> Int:
 def _chunk_never(inp: _RaceInput, mut p: _RacePayload, c: Int) -> Int:
     """Every chunk cancels a clone of a `never()` token at once."""
     var mine = p.root.clone()
-    _arrive_and_wait(p.arrived, N_THREADS)
+    if not _arrive_and_wait(p.arrived, N_THREADS):
+        return CODE_LATCH_TIMEOUT
     mine.cancel(inp.reasons[c])
     if mine.is_cancelled():
         return 1
@@ -409,11 +436,23 @@ struct _TokenRace(SharedChunkWork):
 
 
 def _race(
-    mode: Int, inp: _RaceInput, var root: CancellationToken
+    mode: Int, rep: Int, inp: _RaceInput, var root: CancellationToken
 ) raises -> _RacePayload:
-    """One repetition: N_THREADS chunks on N_THREADS fresh pthreads."""
+    """One repetition: N_THREADS chunks on N_THREADS fresh pthreads.
+
+    Raises if any chunk's wait timed out, before any race-specific check
+    reads the codes."""
+    # `fork_join_shared` runs the chunks INLINE on this thread when a
+    # dispatch window is already live (`fork_join_pool_depth() > 0`); the
+    # start latch would then wait for chunks that run only after it.
+    if fork_join_pool_depth() != Int64(0):
+        raise Error(
+            "fork_join_pool_depth() is "
+            + String(fork_join_pool_depth())
+            + ": fork_join_shared would run the chunks inline, so no race"
+        )
     var disp = _PthreadDispatch(N_THREADS)
-    return fork_join_shared[
+    var p = fork_join_shared[
         _TokenRace,
         _RaceInput,
         _RacePayload,
@@ -434,6 +473,20 @@ def _race(
         CancellationToken.never(),
         UInt32(0),
     )
+    for c in range(N_THREADS):
+        if p.codes[c] == CODE_LATCH_TIMEOUT:
+            _fail(
+                "latch", rep, c,
+                "the other chunks never arrived at the start latch within "
+                + "the wait limit: are the shards running inline, or did a "
+                + "thread fail to start?",
+            )
+        if p.codes[c] == CODE_DONE_TIMEOUT:
+            _fail(
+                "latch", rep, c,
+                "the cancels never completed within the wait limit",
+            )
+    return p^
 
 
 def _fail(test: String, rep: Int, chunk: Int, what: String) raises:
@@ -458,7 +511,7 @@ def test_concurrent_cancel_is_one_transition() raises:
     repetitions."""
     var inp = _RaceInput()
     for rep in range(REPS_RACE):
-        var p = _race(MODE_CANCEL_ALL, inp, CancellationToken.new())
+        var p = _race(MODE_CANCEL_ALL, rep, inp, CancellationToken.new())
         var final_reason = p.root.reason()
         if not p.root.is_cancelled():
             _fail("one transition", rep, -1, "root is not cancelled")
@@ -496,7 +549,7 @@ def test_observer_sees_published_reason_and_monotonic_flag() raises:
     REPS_RACE repetitions."""
     var inp = _RaceInput()
     for rep in range(REPS_RACE):
-        var p = _race(MODE_OBSERVE, inp, CancellationToken.new())
+        var p = _race(MODE_OBSERVE, rep, inp, CancellationToken.new())
         var final_reason = p.root.reason()
         for c in range(N_THREADS):
             var code = p.codes[c]
@@ -523,14 +576,15 @@ def test_observer_sees_published_reason_and_monotonic_flag() raises:
 
 def test_tokens_derived_around_cancel_all_observe_it() raises:
     """Chunk 0 cancels the root while chunks 1..N-1 build a chain of
-    DERIVE_DEPTH children/clones of it: half made before the start latch
-    (strictly before the cancel), half racing it, plus one child made after
+    DERIVE_DEPTH children/clones of it: depths 0..6 (7 tokens) made before
+    the start latch (strictly before the cancel), depths 7..11 racing it,
+    plus one child made after
     the cancel returned. Once the cancel returned, every one of them must be
     cancelled with the root's reason. Deterministic: a derived token that does
     not share its ancestors' slots fails on the pre-latch half every time."""
     var inp = _RaceInput()
     for rep in range(REPS_ORDERED):
-        var p = _race(MODE_DERIVE, inp, CancellationToken.new())
+        var p = _race(MODE_DERIVE, rep, inp, CancellationToken.new())
         for c in range(N_THREADS):
             var code = p.codes[c]
             if code == 0:
@@ -547,7 +601,7 @@ def test_tokens_derived_around_cancel_all_observe_it() raises:
                 _fail(
                     "derive", rep, c,
                     "token at depth " + String(code - 100) + " (made "
-                    + ("before" if code - 100 < DERIVE_DEPTH // 2 else "during")
+                    + ("before" if code - 100 <= DERIVE_DEPTH // 2 else "during")
                     + " the cancel) is not cancelled after it returned",
                 )
             _fail("derive", rep, c, "unknown code " + String(code))
@@ -561,7 +615,7 @@ def test_concurrent_child_cancels_do_not_propagate_up() raises:
     var inp = _RaceInput()
     for rep in range(REPS_ORDERED):
         var root = CancellationToken.new()
-        var p = _race(MODE_UPWARD, inp, root^)
+        var p = _race(MODE_UPWARD, rep, inp, root^)
         for c in range(N_THREADS):
             var code = p.codes[c]
             if code == 1:
@@ -582,7 +636,7 @@ def test_never_token_ignores_concurrent_cancels() raises:
     cancelled or carry a reason. Deterministic."""
     var inp = _RaceInput()
     for rep in range(REPS_ORDERED):
-        var p = _race(MODE_NEVER, inp, CancellationToken.never())
+        var p = _race(MODE_NEVER, rep, inp, CancellationToken.never())
         for c in range(N_THREADS):
             if p.codes[c] == 1:
                 _fail("never", rep, c, "a never() token became cancelled")

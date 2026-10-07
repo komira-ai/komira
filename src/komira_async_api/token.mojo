@@ -53,6 +53,8 @@
 # =============================================================================
 
 from std.memory import ArcPointer, OwnedPointer, alloc
+from std.sys.info import CompilationTarget
+from std.sys.intrinsics import llvm_intrinsic
 from komira_atomic_alias import AtomicU8
 
 
@@ -63,6 +65,21 @@ from komira_atomic_alias import AtomicU8
 comptime _LIVE = UInt8(0)
 comptime _CANCELLED = UInt8(1)
 comptime _CLAIMED = UInt8(2)
+
+
+@always_inline
+def _spin_hint():
+    """CPU spin-wait hint for `reason()`'s wait on a CLAIMED slot.
+
+    x86: the PAUSE instruction (`llvm.x86.sse2.pause`), which eases the
+    sibling hyper-thread and the memory-order pipeline flush on exit. Other
+    targets: nothing (a plain re-load), because the aarch64 hint intrinsic
+    shape is unverified here (the same choice as `komira_async`'s
+    `pause_intrinsic`). This is NOT a yield: this leaf has no libc yield it
+    may call without new FFI (see `reason()`).
+    """
+    comptime if CompilationTarget.is_x86():
+        llvm_intrinsic["llvm.x86.sse2.pause", NoneType]()
 
 
 # Single ancestor-chain entry. Holds flag + reason + frozen flag for one
@@ -84,7 +101,7 @@ struct _AtomicSlot(Movable, Deinitable):
         var raw = alloc[AtomicU8](1)
         # SAFETY: raw is a fresh allocation we own. Atomic ctor accepts a
         # Scalar value. Ownership transfers to OwnedPointer.
-        raw[] = AtomicU8(UInt8(0))
+        raw[] = AtomicU8(_LIVE)
         self._flag = OwnedPointer[AtomicU8](unsafe_from_raw_pointer=raw)
         self._reason = String("")
         self._frozen = frozen
@@ -103,7 +120,9 @@ struct CancellationToken(Movable, Deinitable):
       * `is_cancelled()` — walks ancestor chain checking each slot.
       * `cancel(reason)` — idempotent; mutates only the LAST slot.
       * `child()` — derives a new token with self as parent.
-      * `reason()` — first non-empty reason in the chain (root → leaf).
+      * `reason()` — the reason of the first cancelled slot in the chain
+        (root → leaf); "" if none is cancelled (or if that slot was
+        cancelled with "").
 
     NOT Copyable — use `clone()` explicitly. The Movable-only constraint
     matches the engine's DynamicFilter pattern.
@@ -172,7 +191,7 @@ struct CancellationToken(Movable, Deinitable):
         branch) is visible to a trampoline's between-task poll.
         """
         for i in range(len(self._chain)):
-            if self._chain[i][]._flag[].load() != UInt8(0):
+            if self._chain[i][]._flag[].load() != _LIVE:
                 return True
         return False
 
@@ -233,8 +252,10 @@ struct CancellationToken(Movable, Deinitable):
         return CancellationToken(_chain=new_chain^)
 
     def reason(self) -> String:
-        """Returns the first non-empty reason in
-        the chain (root → leaf), or "" if no slot is cancelled.
+        """Returns the reason of the first slot in the chain (root → leaf)
+        that is not LIVE, or "" if no slot is cancelled. That reason is
+        whatever its `cancel` was given, so it is "" after `cancel("")`
+        even when a deeper slot carries a non-empty reason.
 
         Walks root-to-leaf so the OUTERMOST cancellation reason wins (which
         matches the user's mental model: a parent cancelling for a query-
@@ -242,14 +263,20 @@ struct CancellationToken(Movable, Deinitable):
 
         A slot that is CLAIMED (a cancel is between its claim and its
         publish) is waited out by spinning: its reason is being written and
-        is readable only once the slot is CANCELLED. The wait is bounded by
-        one String assignment on the claiming thread.
+        is readable only once the slot is CANCELLED. The wait lasts until
+        the claiming thread runs its String assignment (which may allocate)
+        and the publishing store: bounded only by that thread being
+        scheduled. If it is preempted between claim and publish, readers
+        spin (with a CPU pause hint on x86, no yield) until it runs again.
+        `reason()` is a cold path (error reporting), and the window is a
+        few instructions plus one allocation, so a reader rarely waits.
         """
         for i in range(len(self._chain)):
             var state = self._chain[i][]._flag[].load()
             if state == _LIVE:
                 continue
             while state == _CLAIMED:
+                _spin_hint()
                 state = self._chain[i][]._flag[].load()
             return self._chain[i][]._reason
         return String("")
