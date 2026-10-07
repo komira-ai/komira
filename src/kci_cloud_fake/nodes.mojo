@@ -194,7 +194,8 @@ struct FakeNode(EngineResource, Movable, Deinitable):
     var _secret_named: Bool
     var _addressed: String
     var _outs: List[String]
-    """`out.<OUTPUT>` fields as `OUTPUT=value` pairs, in order."""
+    """`out.<OUTPUT>` fields in order, two entries each: the OUTPUT name,
+    then its value."""
     var _retention: Int
     var _deps: List[String]
     var _refs: List[InputRef]

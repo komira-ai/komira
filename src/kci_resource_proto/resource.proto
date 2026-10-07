@@ -673,9 +673,10 @@ message DnsRecord {
 
 // A MANAGED, DOMAIN-VALIDATED certificate, publicly trusted: the cloud
 // obtains it, proves control of each domain with records in `zone`, and
-// renews it. kci never holds its private key. A private-CA certificate is
-// not this type. Its NAME is the cloud's name for it. Its retention default
-// is DELETE. 50 to 53 are held for the per-cloud extensions (file header).
+// renews it. kci never holds its private key. This version means a publicly
+// trusted certificate only; whether private-CA certificates join this type
+// (a new field) or another type is open. Its NAME is the cloud's name for
+// it. Its retention default is DELETE. 50 to 53 are held for the per-cloud extensions (file header).
 message Certificate {
   option (portability) = PORTABLE;
   option (exposes) = NAME;

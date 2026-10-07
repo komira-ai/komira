@@ -181,9 +181,11 @@
 #                 for the certificate's first name), authrec (the
 #                 dns.googleapis.com/ResourceRecordSet that authorization
 #                 asks for, in the zone) and cert
-#                 (certificatemanager.googleapis.com/Certificate). One
-#                 authorization covers one name and its wildcard, so a
-#                 certificate for any other name is a limit here.
+#                 (certificatemanager.googleapis.com/Certificate). The
+#                 fake lowers ONE authorization per certificate (the
+#                 cloud accepts several), and one authorization covers one
+#                 name and its wildcard, so a certificate for any other
+#                 name is a limit of this lowering.
 #   * `azure`     zone -> Microsoft.Network/dnsZones; record ->
 #                 Microsoft.Network/dnsZones/<TYPE> (the ARM type names the
 #                 record type: `<TYPE>` is replaced by it, e.g.

@@ -29,9 +29,11 @@
 #               certificate depends on both.
 #
 # LIMITS (`dns_limits`, the shapes' own; they cite this package):
-#   * on a shape with a `dnsauth` row, one authorization covers one name and
-#     its wildcard: every domain is the first name (without `*.`) or `*.`
-#     and it;
+#   * on a shape with a `dnsauth` row, this lowering emits one
+#     authorization per certificate (the cloud accepts several; one per
+#     certificate is the fake's choice), and one authorization covers one
+#     name and its wildcard: every domain is the first name (without `*.`)
+#     or `*.` and it;
 #   * on a shape with `single_name_certificates` (azure), a certificate has
 #     one domain, and it is not a wildcard.
 # =============================================================================
