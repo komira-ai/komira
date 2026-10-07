@@ -159,14 +159,31 @@ def s3_prod_plain_connector() raises -> S3ProdConnector:
     return S3ProdConnector(plain=KernelTcpConnector.new())
 
 
+def _ascii_prefix_is(s: String, lower_prefix: StringLiteral) -> Bool:
+    """Whether `s` starts with `lower_prefix` (lowercase ASCII), comparing
+    ASCII letters case-insensitively."""
+    var a = s.as_bytes()
+    var b = lower_prefix.as_bytes()
+    if len(a) < len(b):
+        return False
+    for i in range(len(b)):
+        var c = Int(a[i])
+        if c >= ord("A") and c <= ord("Z"):
+            c += 32
+        if c != Int(b[i]):
+            return False
+    return True
+
+
 def s3_endpoint_is_plaintext(endpoint: String) raises -> Bool:
     """True for an `http://` endpoint, False for an `https://` one or for
-    "" (AWS's own endpoint, which is https). Raises
-    `fs_registry: an S3 endpoint must start with http:// or https://, got
-    '<endpoint>'` for anything else."""
-    if endpoint.byte_length() == 0 or endpoint.startswith("https://"):
+    "" (AWS's own endpoint, which is https). The scheme is compared ASCII
+    case-insensitively (RFC 3986 section 3.1), so `HTTP://` is plaintext and
+    `HTTPS://` is TLS. Raises `fs_registry: an S3 endpoint must start with
+    http:// or https://, got '<endpoint>'` for anything else."""
+    if endpoint.byte_length() == 0 or _ascii_prefix_is(endpoint, "https://"):
         return False
-    if endpoint.startswith("http://"):
+    if _ascii_prefix_is(endpoint, "http://"):
         return True
     raise Error(
         "fs_registry: an S3 endpoint must start with http:// or https://, got '"

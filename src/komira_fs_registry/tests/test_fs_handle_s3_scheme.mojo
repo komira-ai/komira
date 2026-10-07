@@ -3,17 +3,21 @@
 #
 # Rows:
 #  * s3_endpoint_is_plaintext: "" (AWS's own endpoint) and https:// are TLS,
-#    http:// is plaintext, and any other scheme is refused, named.
+#    http:// is plaintext, and any other scheme is refused, named. The scheme
+#    is case-insensitive (RFC 3986 section 3.1): HTTP:// is plaintext and
+#    HTTPS:// is TLS.
 #  * through the arm: a SchemeConnector over two ScriptedConnectors, the
 #    plaintext one answering "plai" and the TLS one (which reports TLS, no
 #    handshake) answering "tlsx". The factory s3_connector_factory picks for
 #    an http:// endpoint reads "plai", and for an https:// endpoint "tlsx";
 #    each read passes komira_http_client's scheme check, so a factory picked
-#    the wrong way round is refused there (HttpError[URL_INVALID]).
+#    the wrong way round is refused there (HttpError[URL_INVALID]). An
+#    HTTP:// and an HTTPS:// endpoint read the same way.
 #  * the production factory: its connector for an http:// endpoint is
 #    plaintext and for https:// or AWS's own is TLS (nothing is dialed).
 #  * the production arm: the file system s3_prod_arm builds for an http://
-#    endpoint makes plaintext connectors, for https:// or AWS's own TLS ones
+#    endpoint makes plaintext connectors, for https://, HTTPS:// or AWS's own
+#    TLS ones
 #    (asked through S3Fs.new_connector, nothing dialed, no store built), and
 #    an ftp:// endpoint is refused, named.
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
@@ -94,18 +98,23 @@ def test_the_endpoint_scheme_decides() raises:
         contains="fs_registry: an S3 endpoint must start with http:// or https://, got 'ftp://x'"
     ):
         _ = s3_endpoint_is_plaintext("ftp://x")
+    assert_true(s3_endpoint_is_plaintext("HTTP://x"))
+    assert_true(s3_endpoint_is_plaintext("Http://x"))
+    assert_false(s3_endpoint_is_plaintext("HTTPS://x"))
     with assert_raises(
-        contains="fs_registry: an S3 endpoint must start with http:// or https://, got 'HTTP://x'"
+        contains="fs_registry: an S3 endpoint must start with http:// or https://, got 'HTTPX://x'"
     ):
-        _ = s3_endpoint_is_plaintext("HTTP://x")
+        _ = s3_endpoint_is_plaintext("HTTPX://x")
 
 
 def test_an_http_endpoint_reads_over_plaintext() raises:
     assert_equal(_read("http://127.0.0.1:9000"), "plai")
+    assert_equal(_read("HTTP://127.0.0.1:9000"), "plai")
 
 
 def test_an_https_endpoint_reads_over_tls() raises:
     assert_equal(_read("https://127.0.0.1:9000"), "tlsx")
+    assert_equal(_read("HTTPS://127.0.0.1:9000"), "tlsx")
 
 
 def test_the_production_factory() raises:
@@ -146,6 +155,10 @@ def test_the_production_arm() raises:
     assert_true(
         _prod_arm_is_tls(S3Config.custom_endpoint("us-east-1", "https://s3.example.test")),
         "s3_prod_arm dials plaintext for an https:// endpoint",
+    )
+    assert_true(
+        _prod_arm_is_tls(S3Config.custom_endpoint("us-east-1", "HTTPS://minio.example.test:9000")),
+        "s3_prod_arm dials plaintext for an HTTPS:// endpoint",
     )
     assert_true(
         _prod_arm_is_tls(S3Config.aws("us-east-1")),
