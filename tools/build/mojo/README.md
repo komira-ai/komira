@@ -787,7 +787,9 @@ Scope, for now:
 - linux-x86_64. On another target platform the attributes are None (a
   `select`) and the library builds as with the switch off: it has no
   `[coverage]` sub-target, so asking for one is an "unknown subtarget" error,
-  not an empty result. Whatever collects coverage asks only on linux-x86_64.
+  not an empty result. Whatever collects coverage asks only on linux-x86_64,
+  as the pull request's `coverage` workflow does
+  ([The coverage workflow](../coverage/README.md#the-coverage-workflow)).
 - A library's `test_srcs` that are source files. A README's examples,
   `mojo_test`, the drivers of `mojo_shared_lib` and generated test sources
   (a `test_srcs` entry that is a build output) get no coverage binary, and
