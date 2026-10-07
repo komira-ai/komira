@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # coverage_run_tests.sh -- tests of coverage runs (tools/build/coverage/kcov/README.md#cov_run).
 # Sourced by tools/build/tests/run_tests.sh (uses its BUCK2, LOG, pass, fail,
-# expect_green and expect_red); not run on its own. Sources test 45's
+# expect_green and expect_red); not run on its own. Sources test 46's
 # coverage_gate_tests.sh after its own.
 #
 #  43. Coverage runs: each test's coverage binary runs under kcov through the
@@ -65,6 +65,6 @@ else
     pass coverage_run_lingers_group
 fi
 
-# 45
+# 46
 # shellcheck source=tools/build/tests/coverage_gate_tests.sh
 . "$ROOT/tools/build/tests/coverage_gate_tests.sh"
