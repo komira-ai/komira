@@ -335,7 +335,7 @@ trait Reader(Movable, Deinitable):
         col_indices: List[Int], preserve_dict: Bool,
         mask: BooleanArray,
     ) raises -> Optional[RecordBatch]:
-        """PAYLOAD-DECODE-SKIP: decode `col_indices`
+        """Masked payload decode: decode `col_indices`
         from unit `unit_in_file` materialising ONLY the rows that `mask` keeps.
 
         Returns `Some(RecordBatch)` of `popcount(mask)` rows — ALREADY

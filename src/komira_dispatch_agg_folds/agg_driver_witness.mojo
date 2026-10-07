@@ -51,7 +51,7 @@ from komira_dispatch_agg_folds.agg_spill_envelope import SPILL_ENV_NOT_CONSULTED
 comptime AGG_DRIVER_NONE: Int = 0
 """No driver has run in this process yet (or the shape declined before one)."""
 comptime AGG_DRIVER_VECTOR_DECODE_LEAF: Int = 1
-"""`materialize_parquet_untyped_agg_subrg` — the sub-RG fold-and-free leaf."""
+"""`materialize_parquet_untyped_agg_subrg` — the sub-row-group fold-and-free leaf."""
 comptime AGG_DRIVER_GRACE_HASH_SPILL: Int = 2
 """`run_grace_hash_agg_spill` — the two-phase decode-then-fold spill driver."""
 comptime AGG_DRIVER_STRATEGY_LEAF: Int = 3

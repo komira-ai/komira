@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "env_read_backtick_triple.env_backtick_triple",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override: a hand-written module of the package that reads HOME through Path.home, its module named after an import at column 0 between two backtick identifiers that each hold three single quotes."
+    }
+  ]
+}
