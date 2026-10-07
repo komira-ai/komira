@@ -1,0 +1,208 @@
+# =============================================================================
+# test_cards.mojo -- card structure, limits and vCard 2.1 quoted-printable;
+# hostile input fails closed with exact messages.
+# =============================================================================
+#
+# What each test proves (and the defect it catches):
+#   two_cards_mixed_case     BEGIN:vCard / END:vCard (RFC 2426 §7 spells it
+#                            so) pair; versions and line numbers are kept.
+#   unterminated_card        a BEGIN:VCARD with no END:VCARD is refused, not
+#                            returned half-read.
+#   structure_refusals       END with no card, a property outside a card, a
+#                            nested BEGIN, no VERSION, a second VERSION, an
+#                            unsupported VERSION.
+#   card_limit               card max_cards + 1 is refused (a missing count
+#                            check imports any number of cards).
+#   ten_mb_line              a 10 MiB line is refused under the default
+#                            1 MiB line limit (the "remove the size cap"
+#                            mutant).
+#   invalid_utf8             a card holding an ill-formed octet is refused
+#                            (the "skip UTF-8 validation" mutant).
+#   quoted_printable         vCard 2.1 QP with soft breaks, UTF-8 and
+#                            ISO-8859-1, the bare QUOTED-PRINTABLE parameter;
+#                            bad hex, a bad charset and QP decoding to
+#                            invalid UTF-8 are refused.
+# =============================================================================
+
+from std.testing import assert_equal, assert_true
+
+from komira_vcard import VCardLimits, parse_vcards
+
+
+def _b(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        out.append(b[i])
+    return out^
+
+
+def _extend(mut d: List[UInt8], s: String):
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        d.append(b[i])
+
+
+def _err(s: String, limits: VCardLimits = VCardLimits()) -> String:
+    try:
+        _ = parse_vcards(s.as_bytes(), limits)
+    except e:
+        return String(e)
+    return String("no error")
+
+
+def _err_b(d: List[UInt8]) -> String:
+    try:
+        _ = parse_vcards(Span(d))
+    except e:
+        return String(e)
+    return String("no error")
+
+
+def test_two_cards_mixed_case() raises:
+    var s = (
+        "BEGIN:vCard\r\nVERSION:3.0\r\nFN:A\r\nEND:vCard\r\n"
+        "\r\n"
+        "begin:VCARD\r\nfn:B\r\nversion:4.0\r\nNOTE:x\r\nend:vcard\r\n"
+    )
+    var cards = parse_vcards(s.as_bytes())
+    assert_equal(len(cards), 2)
+    assert_equal(cards[0].version, "3.0")
+    assert_equal(cards[0].begin_line, 1)
+    assert_equal(len(cards[0].lines), 1)
+    assert_equal(cards[0].lines[0].line.name, "FN")
+    assert_equal(cards[1].version, "4.0")
+    assert_equal(cards[1].begin_line, 6)
+    assert_equal(len(cards[1].lines), 2)
+    assert_equal(cards[1].lines[0].text, "fn:B")
+    assert_equal(cards[1].lines[1].line_number, 9)
+    assert_equal(len(parse_vcards("".as_bytes())), 0)
+    print("  test_two_cards_mixed_case PASS")
+
+
+def test_unterminated_card() raises:
+    assert_equal(
+        _err("BEGIN:VCARD\r\nVERSION:4.0\r\nFN:A\r\n"),
+        "vcard: the card begun at line 1 has no END:VCARD",
+    )
+    print("  test_unterminated_card PASS")
+
+
+def test_structure_refusals() raises:
+    assert_equal(
+        _err("END:VCARD\r\n"), "vcard: line 1: END:VCARD with no card begun"
+    )
+    assert_equal(
+        _err("FN:A\r\n"),
+        "vcard: line 1: a property outside BEGIN:VCARD and END:VCARD",
+    )
+    assert_equal(
+        _err("BEGIN:VCARD\r\nVERSION:4.0\r\nBEGIN:VCARD\r\n"),
+        "vcard: line 3: BEGIN:VCARD inside the card begun at line 1",
+    )
+    assert_equal(
+        _err("BEGIN:VCARD\r\nFN:A\r\nEND:VCARD\r\n"),
+        "vcard: the card begun at line 1 has no VERSION",
+    )
+    assert_equal(
+        _err("BEGIN:VCARD\r\nVERSION:4.0\r\nVERSION:4.0\r\nEND:VCARD\r\n"),
+        "vcard: line 3: a second VERSION in the card begun at line 1",
+    )
+    assert_equal(
+        _err("BEGIN:VCARD\r\nVERSION:5.0\r\nEND:VCARD\r\n"),
+        "vcard: line 2: VERSION 5.0 is not 2.1, 3.0 or 4.0",
+    )
+    print("  test_structure_refusals PASS")
+
+
+def test_card_limit() raises:
+    var one = String("BEGIN:VCARD\r\nVERSION:4.0\r\nFN:A\r\nEND:VCARD\r\n")
+    var lim = VCardLimits(max_cards=2)
+    var two = one.copy()
+    two += one
+    var three = two.copy()
+    three += one
+    assert_equal(len(parse_vcards(two.as_bytes(), lim)), 2)
+    assert_equal(
+        _err(three, lim),
+        "vcard: line 9: card 3 is over the limit of 2 cards",
+    )
+    print("  test_card_limit PASS")
+
+
+def test_ten_mb_line() raises:
+    var d = _b("BEGIN:VCARD\r\nVERSION:4.0\r\nNOTE:")
+    for _ in range(10 * 1024 * 1024):
+        d.append(120)
+    _extend(d, "\r\nEND:VCARD\r\n")
+    assert_equal(
+        _err_b(d), "content line: line 3 is longer than the 1048576-octet limit"
+    )
+    print("  test_ten_mb_line PASS")
+
+
+def test_invalid_utf8() raises:
+    var d = _b("BEGIN:VCARD\r\nVERSION:4.0\r\nFN:J")
+    d.append(0xC3)
+    d.append(0x28)
+    _extend(d, "\r\nEND:VCARD\r\n")
+    assert_equal(
+        _err_b(d),
+        "content line: line 3 is not valid UTF-8 (octet 4 of the unfolded line)",
+    )
+    print("  test_invalid_utf8 PASS")
+
+
+def test_quoted_printable() raises:
+    var s = (
+        "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+        "NOTE;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:caf=C3=A9 =\r\n"
+        "au lait=0D=0A=\r\n"
+        "line 2\r\n"
+        "N;CHARSET=ISO-8859-1;ENCODING=QUOTED-PRINTABLE:M=FCller;J=F6rg\r\n"
+        "ADR;HOME;QUOTED-PRINTABLE:;;Stra=C3=9Fe 1\r\n"
+        "END:VCARD\r\n"
+    )
+    var cards = parse_vcards(s.as_bytes())
+    assert_equal(len(cards[0].lines), 3)
+    ref note = cards[0].lines[0]
+    assert_equal(note.line.value, "café au lait\\nline 2")
+    assert_equal(len(note.line.params), 0)
+    assert_equal(note.line_number, 3)
+    assert_equal(cards[0].lines[1].line.value, "Müller;Jörg")
+    assert_equal(cards[0].lines[1].text, "N:Müller;Jörg")
+    assert_equal(cards[0].lines[2].text, "ADR;HOME:;;Straße 1")
+    assert_equal(
+        _err(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\nNOTE;ENCODING=QUOTED-PRINTABLE:a=G1\r\n"
+        ),
+        "vcard: line 3: invalid quoted-printable at octet 1",
+    )
+    assert_equal(
+        _err(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;ENCODING=QUOTED-PRINTABLE;CHARSET=KOI8-R:a\r\n"
+        ),
+        "vcard: line 3: CHARSET KOI8-R is not UTF-8, US-ASCII or ISO-8859-1",
+    )
+    assert_equal(
+        _err(
+            "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+            "NOTE;ENCODING=QUOTED-PRINTABLE:ab=FF\r\n"
+        ),
+        "vcard: line 3: the quoted-printable value is not valid UTF-8 (octet"
+        " 2)",
+    )
+    print("  test_quoted_printable PASS")
+
+
+def main() raises:
+    print("test_cards")
+    test_two_cards_mixed_case()
+    test_unterminated_card()
+    test_structure_refusals()
+    test_card_limit()
+    test_ten_mb_line()
+    test_invalid_utf8()
+    test_quoted_printable()
+    print("ALL TESTS PASS")
