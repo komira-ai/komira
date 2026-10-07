@@ -1,9 +1,9 @@
 """The coverage policy of the build gate (README.md, "The build gate").
 
-With `-c komira.coverage=true`, every mojo_library's package
-(tools/build/mojo/README.md, "Coverage builds") waits for `covcheck gate`
-over its tests' kcov reports, run in COVERAGE_MODE against
-COVERAGE_TARGET_BP. Only a fixture of the `tests` cell may name another
+With `-c komira.coverage=true`, every mojo_library's conda package (what
+ships; tools/build/mojo/README.md, "Coverage builds") waits for `covcheck
+gate` over its tests' kcov reports, run in COVERAGE_MODE against
+COVERAGE_TARGET_BP. The library itself, and its dependents, do not. Only a fixture of the `tests` cell may name another
 mode (`coverage_mode`, tools/build/mojo/coverage.bzl).
 
 Enforce is not reachable with kcov alone: the target is line and branch,
@@ -24,20 +24,21 @@ COVERAGE_MODE = "census"
 # Basis points of line (and branch) coverage per package: 10000 is 100%.
 COVERAGE_TARGET_BP = 10000
 
-# The ledger of libraries whose own package cannot wait for a coverage gate,
-# by label, each with why and where it is gated instead.
+# The ledger of libraries that cannot have a coverage gate of their own, by
+# label, each with why and where it is gated instead.
 # tools/build/coverage/no_gate.bxl holds this list equal to the Mojo
 # libraries the gate depends on (covcheck_bin's, and through komira_json's
 # README the README tool's), so a row whose library leaves that closure
 # fails the check until it is deleted, and a library that joins it fails
-# until it has a row (without one, its package would depend on its own
-# gate: a cycle). It only shrinks: the check also holds it within the
+# until it has a row (without one, the library would depend on its own
+# gate's directory, which depends on the library: a cycle of configured
+# targets, whatever waits for the gate). It only shrinks: the check also holds it within the
 # frozen list `_CEILING` of no_gate.bxl, so a new row means a reviewed edit
 # of that list too, not only a new dependency of covcheck.
 #
-# Each still has its coverage binaries and runs, and its package still waits
-# for them (a test failing at -O0 or under kcov fails it); its gate is the
-# target `<name>_cov_gate`, which its conda package (what ships) waits for.
+# Each still has its coverage binaries and runs; its gate is the target
+# `<name>_cov_gate`, and its conda package (what ships) waits for both, as
+# every library's conda package waits for its runs and its gate.
 _CLOSURE = "covcheck_bin, the gate's tool, depends on it"
 
 COVERAGE_NO_GATE = {
