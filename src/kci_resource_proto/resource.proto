@@ -11,8 +11,8 @@
 //   * A COMPOSITE is DATA, not an arm of this file: a named graph of other
 //     resources (primitives or other composites, to any depth) with inputs
 //     and outputs. It is expanded into its primitives before lowering, so the
-//     engine only ever sees primitives. Its format and its instance arm are
-//     not declared yet (body arm 80 is held for the instance).
+//     engine only ever sees primitives. Its format is composite.proto; an
+//     INSTANCE of one is `Resource.body` 80, not a catalog type.
 //
 // THE RULE THAT DECIDES A PRIMITIVE'S SHAPE
 //   * R1, a NEUTRAL primitive (PORTABLE): one type for a kind whose identity
@@ -42,7 +42,6 @@
 //   * `Resource.body` 17, 19 and 32 to 36: the later neutral primitives
 //     (17 and 19 unused, 32 mail domain, 33 parameter, 34 encryption key,
 //     35 function, 36 virtual machine).
-//   * `Resource.body` 80: a composite instance.
 //   * `Resource.body` 90: the `raw` escape hatch, specified separately.
 //   * `Resource.body` 100-299, 300-499, 500-699 and 700-899: provider
 //     primitives (R2) of four clouds, one range each.
@@ -52,7 +51,8 @@
 // test `test_held_numbers_are_unused` reads: no field of the named message may
 // use a held number, and no message may reuse a `reserved` number. A held
 // number leaves this list in the same change that declares it.
-// held-numbers: Resource 5 17 19 32-36 80 90 100-299 300-499 500-699 700-899
+// held-numbers: Resource 5 17 19 32-36 90 100-299 300-499 500-699 700-899
+// held-numbers: CompositeInstance 5 6
 // held-numbers: Value 4
 // held-numbers: Image 4
 // held-numbers: Uses 3
@@ -226,15 +226,28 @@ enum Output {
 
 // A reference to another resource of the same list. With neither arm of
 // `output` set it names the resource itself (as in `Uses.target`); with
-// `standard` set it names one value the resource
-// produces at apply time. `named` is reserved for the escape hatch's own
-// outputs and is refused for every other producer.
+// `standard` set it names one value the resource produces at apply time;
+// `named` names an output a composite DECLARES (composite.proto), and is
+// refused for every other producer (it is also held for the escape hatch).
+// THE BASE is exactly one of `resource` (a top-level resource; refused
+// inside a composite definition), `local` (inside a definition: a sibling
+// component) and `input` (inside a definition: a REF input), written and
+// not empty. They are separate fields, not a oneof, so the generated
+// `resource` keeps its shape (the wire is the same); `path`, `local` and
+// `input` have presence, so a graph that writes none encodes as before.
+// `path` goes below the base into a composite instance: `/`-joined
+// component ids, each EXPORTED by its definition; one that ends on an
+// instance reads a declared output with `named`. Expansion rewrites every
+// reference to `resource` alone, the full path (composite.proto).
 message Ref {
   string resource = 1;
   oneof output {
     Output standard = 2;
     string named = 3;
   }
+  optional string path = 4;
+  optional string local = 5;
+  optional string input = 6;
 }
 
 // What a consumer may do to a resource. CALL is accepted by a service (call
@@ -292,14 +305,17 @@ message Uses {
   CellResource cell = 4;
 }
 
-// A configuration value: a literal, a release machine parameter, or a value
-// another resource produces. All three are plain (not secret) values. 4 is
-// held; a secret never rides a `Value` (see `SecretRef`).
+// A configuration value: a literal, a release machine parameter, a value
+// another resource produces, or (inside a composite definition only) a
+// STRING input of the definition, which expansion replaces with its value.
+// All are plain (not secret) values. 4 is held; a secret never rides a
+// `Value` (see `SecretRef`).
 message Value {
   oneof v {
     string literal = 1;
     string param = 2;
     Ref ref = 3;
+    string input = 5;
   }
 }
 
@@ -398,9 +414,9 @@ message Resource {
   bool adopt = 8;
 
   // Typed and closed. Held, not declared (see the file header): 17, 19
-  // and 32 to 36 the later neutral primitives, 80
-  // a composite instance, 90 the escape hatch, 100-299 / 300-499 / 500-699 /
-  // 700-899 the provider primitives of four clouds.
+  // and 32 to 36 the later neutral primitives, 90 the escape hatch,
+  // 100-299 / 300-499 / 500-699 / 700-899 the provider primitives of four
+  // clouds. 80 is not a primitive: an instance of a composite.
   oneof body {
     Service service = 10;
     ContainerJob container_job = 11;
@@ -422,7 +438,24 @@ message Resource {
     Subnet subnet = 29;
     IpAddress ip_address = 30;
     EventTrigger event_trigger = 31;
+    CompositeInstance composite = 80;
   }
+}
+
+// `Resource.body` 80: one use of a composite definition (composite.proto),
+// in a list or as a component of another definition. kci EXPANDS it into
+// its primitives (ids `<top>/<component>/...`, all OWNED by the top-level
+// resource) before validating; the engine never sees one. It has no object,
+// so `uses`, `retention`, `physical_name`, `labels` and `adopt` are refused
+// on it. `definition` and `version` name a given definition; `digest`, when
+// written, must be `sha256:<hex>` of its bytes as this kci encodes them.
+// `input` binds inputs by name: a STRING input takes a value, a REF input a
+// `Ref` naming a resource. 5 and 6 are held (image and secret inputs).
+message CompositeInstance {
+  string definition = 1;
+  string version = 2;
+  optional string digest = 3;
+  map<string, Value> input = 4;
 }
 
 // The resources of one deploy step, in no particular order: ordering is

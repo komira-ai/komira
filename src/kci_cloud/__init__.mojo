@@ -77,7 +77,21 @@ interface. This package names no cloud:
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
                        `resolve` (with a typo suggestion), and the rule that
                        every cloud declares every catalog type.
-  * validate.mojo    — the validate phase: graph, coverage and limit
+  * compose_refs.mojo — the one walk over every reference of a resource
+                       (`ref_sites`, `with_sites`), the guard that none of
+                       the composite form is left (`unrewritten`), the id
+                       and name grammars of resources and composites, and
+                       the owner of a node or path (`owner_of_node`, its
+                       first segment at any depth).
+  * compose.mojo     — EXPANSION: a list with composite instances -> a list
+                       of primitives with path ids `top/c1/.../ck`
+                       (`expand`): the definitions loaded and checked,
+                       containment cycles and the size guard refused,
+                       every reference rewritten to a full path through
+                       exports and declared outputs, and the tree a plan
+                       prints (`Expansion`).
+  * validate.mojo    — the validate phase: expansion first, then graph,
+                       coverage and limit
                        findings, collected in one pass; on a graph with
                        no other finding, the role label budget over the
                        cloud's lowering; the refusal text.
@@ -119,6 +133,7 @@ from kci_cloud.catalog import (
     FIELD_SUBSCRIPTION,
     FIELD_SCHEDULE,
     FIELD_EVENT_TRIGGER,
+    FIELD_COMPOSITE,
     FIELD_NETWORK,
     FIELD_SUBNET,
     FIELD_IP_ADDRESS,
@@ -301,27 +316,53 @@ from kci_cloud.clouds import (
     describe,
     artifact_problems,
 )
+from kci_cloud.compose_refs import (
+    COMPONENT_ID_MAX_BYTES,
+    ID_MAX_BYTES,
+    RefSite,
+    SITE_REF,
+    SITE_VALUE,
+    component_id_problem,
+    definition_name_problem,
+    id_problem,
+    literal_value,
+    no_ref,
+    owner_of_node,
+    ref_sites,
+    ref_value,
+    unrewritten,
+    with_sites,
+)
+from kci_cloud.compose import (
+    Expansion,
+    INPUT_REF,
+    INPUT_STRING,
+    MAX_EXPANDED_PRIMITIVES,
+    definition_digest,
+    definition_key,
+    expand,
+    is_composite,
+)
 from kci_cloud.validate import (
     graph_findings,
     edge_findings,
     validate_for,
+    validate_expanded,
     refusal_text,
-    id_problem,
     node_role,
     lowered_budget_findings,
     role_budget_findings,
-    ID_MAX_BYTES,
 )
 from kci_cloud.deploy import (
     ApplyOutcome,
     Removals,
     engine_retention,
     refuse_unless_valid,
+    valid_expansion,
     lower_data,
     lowering_json,
     realize_graph,
     removals,
-    owner_of_node,
     lower_resources,
     plan_resources,
     apply_resources,

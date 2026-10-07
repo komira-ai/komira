@@ -1,0 +1,107 @@
+// The FORMAT of a composite (`kci.resource.v1`): a named graph of resources
+// (primitives, or instances of other composites, to any depth) with inputs
+// and outputs, written as data. A definition is not a catalog type and not
+// an arm of `Resource.body`: kci needs no code change to accept a new one. A
+// deploy step uses one through an INSTANCE, `Resource.body` 80
+// (`CompositeInstance`, resource.proto), and kci expands every instance into
+// its primitives before validating, planning or applying.
+//
+// WHAT EXPANSION REFUSES (each before anything is validated per type,
+// lowered or created):
+//   * a definition whose name is not `<namespace>.<name>`, each part
+//     `[a-z][a-z0-9-]{0,31}`, or with no version; two definitions with one
+//     name and version but different bytes;
+//   * a CONTAINMENT CYCLE: a definition that instantiates itself, directly
+//     or through others (A -> B -> A), printed as the cycle;
+//   * a list that expands to more than 10,000 primitives (a diamond of
+//     definitions multiplies), with the count of each top-level instance;
+//   * a component id outside `[a-z][a-z0-9-]{0,11}` (no trailing or doubled
+//     `-`), repeated, or one of the reserved words `run`, `public`,
+//     `identity`, `schedule`, `uses`, `cell`, `u-*` and `ix-*`;
+//   * inside a definition, a `Ref.resource` (a definition is closed), a
+//     `local` naming no component, an `input` naming no REF input, a
+//     `Value.input` naming no STRING input; outside one, a `local` or an
+//     `input`;
+//   * a `Ref.path` segment that is missing or not EXPORTED by its
+//     definition, a path below a primitive, and a reference that ends on a
+//     composite instance without naming one of its declared outputs;
+//   * an instance of an unknown definition or version, a digest that does not
+//     match, an undeclared, missing or ill-typed input, and `uses`,
+//     `retention` or metadata written on an instance.
+//
+// WHAT HOLDS AT EVERY DEPTH. A primitive below a top-level instance `top`
+// becomes the resource `top/c1/.../ck` (its PATH), and every engine node it
+// lowers to is `<path>/<role>`, OWNED by `top`: the stamp's resource label
+// is `top` however deep the node is, and its role label is the rest of the
+// node id. So the closed world holds at any depth (a component dropped from
+// a definition is a role of `top` the file no longer lowers, and is
+// removed), and retention holds per primitive (a KEEP component that leaves
+// the file is left behind, never deleted). Nesting is unbounded in this
+// schema; the 63-byte role label is its practical bound, checked on every
+// lowered node when the graph is validated.
+//
+// HELD, not declared (an addition when each lands): `CompositeDefinition` 5
+// input bindings into typed fields, 8 variants chosen by capability, 9
+// optional components; `CompositeInstance` 5 and 6 (resource.proto) image
+// and secret inputs; `InputType` 2 INT, 3 BOOL, 4 DURATION, 6 IMAGE, 7
+// SECRET, 8 RETENTION and 9 VALUE_MAP, which need those bindings to reach a
+// component.
+// held-numbers: CompositeDefinition 5 8 9
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "kci/resource/v1/resource.proto";
+
+// One composite. `name` is `<namespace>.<name>`; `version` is the author's
+// label for this revision of it (an instance names both). `component` holds
+// the resources it is made of, each with an id LOCAL to the definition, and
+// may hold instances of other definitions. `export` names the components an
+// outsider may reach with `Ref.path` (to grant to them or read their
+// outputs); the rest are private, so the author may change them without
+// breaking a user. `output` declares the values the composite produces, each
+// read by a user as `Ref.named`.
+message CompositeDefinition {
+  string name = 1;
+  string version = 2;
+  repeated Input input = 3;
+  repeated Resource component = 4;
+  repeated OutputDecl output = 6;
+  repeated string export = 7;
+  string doc = 10;
+}
+
+// One input of a definition. `name` is `[a-z][a-z0-9_]{0,31}`, unique in the
+// definition. A `required` input has no `default`, and writing both is
+// refused. `default` is a literal, for a STRING input only. An optional input
+// with no default that an instance leaves unbound removes whatever it stands
+// for (a `Value` or a `Ref` of a component), and validate then judges the
+// component without it.
+message Input {
+  string name = 1;
+  InputType type = 2;
+  bool required = 3;
+  Value default = 4;
+  string doc = 5;
+}
+
+// What an input carries. The values are prefixed because proto3 enum values
+// share their package's scope, and `FieldType.STRING` is already there.
+// INPUT_STRING: a plain value, used in a component as `Value.input`.
+// INPUT_REF: a reference to a resource (a dependency or a grant target from
+// outside the composite), used in a component as `Ref.input`.
+// 2-4 and 6-9 are held (see the file header).
+enum InputType {
+  INPUT_TYPE_UNSET = 0;
+  INPUT_STRING = 1;
+  INPUT_REF = 5;
+}
+
+// One declared output: `name` (`[a-z][a-z0-9_]{0,31}`, unique in the
+// definition) is what a user writes in `Ref.named`; `from` says which value
+// it is, as a reference with `local` as its base (and `path` below it, if
+// it reaches into a nested composite) and `standard` or `named` set.
+message OutputDecl {
+  string name = 1;
+  Ref from = 2;
+}

@@ -251,12 +251,23 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             d += String("|") + self._refs[i].field + String("=") + self._bound[i]
         return d^
 
+    def _resource(self) -> String:
+        """The id of the resource this node was lowered from: its id up to
+        the role (`store/app/files` of `store/app/files/bucket`). It is the
+        owner for a resource written at the top, and the full path for one
+        a composite expanded (whose owner is the top), so two objects under
+        one owner never share a default name."""
+        var at = self._id.rfind("/")
+        if at <= 0:
+            return self._owner.copy()
+        return String(self._id[byte=0:at])
+
     def _base(self) -> String:
         """What this node's outputs are built on: its object's name, else
-        its owner's id."""
+        its resource's id."""
         if self._name.byte_length() > 0:
             return self._name.copy()
-        return self._owner.copy()
+        return self._resource()
 
     def _url(self) -> String:
         if self._serves:
@@ -370,7 +381,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             return o^
         var named = self._name.byte_length() > 0
         if self._stores:
-            var n = self._name.copy() if named else fake_bucket_name(self._owner)
+            var n = self._name.copy() if named else fake_bucket_name(self._resource())
             o.set(String("NAME"), n)
             o.set(String("ADDRESS"), String("fake-bucket://") + n)
             return o^
@@ -378,13 +389,13 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             o.set(String("NAME"), fake_account_name(self._base()))
             return o^
         if self._named:
-            o.set(String("NAME"), self._name.copy() if named else fake_table_name(self._owner))
+            o.set(String("NAME"), self._name.copy() if named else fake_table_name(self._resource()))
             return o^
         if self._secret_named:
-            o.set(String("NAME"), self._name.copy() if named else fake_secret_name(self._owner))
+            o.set(String("NAME"), self._name.copy() if named else fake_secret_name(self._resource()))
             return o^
         if self._addressed.byte_length() > 0:
-            var n = self._name.copy() if named else fake_messaging_name(self._owner, self._addressed)
+            var n = self._name.copy() if named else fake_messaging_name(self._resource(), self._addressed)
             o.set(String("NAME"), n)
             o.set(String("ADDRESS"), String("fake-") + self._addressed + String("://") + n)
             return o^

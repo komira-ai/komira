@@ -4,9 +4,11 @@
 #
 # THE HELD FIELD NUMBERS, DERIVED FROM THE PROTO ITSELF.
 #
-# resource.proto declares its held numbers once, in `held-numbers:` lines of
-# its header (a message name, then numbers and `a-b` ranges), and its retired
-# numbers in `reserved` statements. This test reads the proto text, parses
+# resource.proto and composite.proto declare their held numbers once, in
+# `held-numbers:` lines of their headers (a message name, then numbers and
+# `a-b` ranges), and their retired numbers in `reserved` statements. This test
+# reads the two files' text (one after the other: no message is declared in
+# both), parses
 # every message's fields, and refuses:
 #   * a field whose number is held for its message (so `string x = 101;` in
 #     `Resource` fails the build, not only the first number of each range);
@@ -208,7 +210,7 @@ def held_violations(text: String) raises -> List[String]:
 
 
 def _real() raises -> String:
-    return Path(String("resource.proto")).read_text()
+    return Path(String("resource.proto")).read_text() + String("\n") + Path(String("composite.proto")).read_text()
 
 
 def _insert_after(text: String, anchor: String, line: String) raises -> String:
@@ -240,6 +242,12 @@ def test_the_proto_uses_no_held_or_reserved_number() raises:
     # The parser read the declarations: a parser that found none would pass
     # the line above vacuously.
     assert_true(_held_total(_real()) > 600, "the held lines expand to the documented ranges")
+    # composite.proto's own line is read too: a number it holds is refused.
+    var c = held_violations(
+        _insert_after(_real(), String("  repeated Resource component = 4;"), String("  string bind = 5;"))
+    )
+    assert_equal(len(c), 1, _joined(c))
+    assert_true(c[0].find("CompositeDefinition uses held number 5") >= 0, c[0])
     print("  test_the_proto_uses_no_held_or_reserved_number: PASS")
 
 
@@ -273,7 +281,7 @@ def test_a_held_number_or_a_reserved_number_is_refused() raises:
 
 
 def main() raises:
-    print("test_held_numbers_are_unused: the held numbers, derived from resource.proto")
+    print("test_held_numbers_are_unused: the held numbers, derived from resource.proto and composite.proto")
     test_the_proto_uses_no_held_or_reserved_number()
     test_a_held_number_or_a_reserved_number_is_refused()
     print("ALL HELD-NUMBER TESTS PASSED")

@@ -38,6 +38,7 @@
 
 from kci_resource_proto.resource import Ref, Resource
 
+from kci_cloud.compose_refs import no_ref
 from kci_cloud.adapter import FINDING_GRAPH, Finding
 from kci_cloud.catalog import (
     Catalog,
@@ -322,7 +323,7 @@ def _record_findings(catalog: Catalog, resources: List[Resource], r: Resource, m
         id,
         String("dns_record.zone"),
         Bool(d.zone),
-        d.zone.value().copy() if d.zone else Ref(String(""), 0, None, None),
+        d.zone.value().copy() if d.zone else no_ref(),
         out,
     )
     var bad = dns_name_problem(d.name, True)
@@ -418,7 +419,7 @@ def _certificate_findings(resources: List[Resource], r: Resource, mut out: List[
         id,
         String("certificate.zone"),
         Bool(c.zone),
-        c.zone.value().copy() if c.zone else Ref(String(""), 0, None, None),
+        c.zone.value().copy() if c.zone else no_ref(),
         out,
     )
     var n = len(c.domains)

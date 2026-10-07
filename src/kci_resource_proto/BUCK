@@ -11,7 +11,10 @@ _GRAPHS = ["compute_graph", "dns_graph", "job_bucket_graph", "messaging_graph", 
 
 mojo_proto_library(
     name = "kci_resource_proto",
-    srcs = ["resource.proto"],
+    srcs = [
+        "resource.proto",
+        "composite.proto",
+    ],
     import_prefix = "kci/resource/v1",
     deps = [
         "//src/komira_proto_codec:komira_proto_codec",
@@ -27,6 +30,7 @@ mojo_proto_library(
         "tests/test_resource_network_numbers.mojo",
         "tests/test_resource_registry_numbers.mojo",
         "tests/test_resource_metadata_numbers.mojo",
+        "tests/test_resource_composite_numbers.mojo",
         "tests/test_resource_held_numbers.mojo",
         "tests/test_resource_list_copy_and_json.mojo",
         "tests/test_held_numbers_are_unused.mojo",
@@ -35,6 +39,7 @@ mojo_proto_library(
     # The held-number test reads the proto text itself.
     test_data = {
         "tests/test_held_numbers_are_unused.mojo": {
+            "composite.proto": "composite.proto",
             "resource.proto": "resource.proto",
         },
         "tests/test_resource_graph_golden_bytes.mojo": {
