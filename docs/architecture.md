@@ -257,7 +257,8 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 ## Conventions
 
 These are the rules for new code. Existing code has exceptions, chiefly FFI
-handles, and the build checks none of the pointer rules; review holds them.
+handles. The build checks the pointer rules (`//:pointer_lint`, whose ledgers
+hold the exceptions that predate it and only shrink); review holds the rest.
 
 - **Pointers.** `UnsafePointer` does not cross a module boundary: it is
   allowed inside a struct for performance or FFI, and the public API exposes

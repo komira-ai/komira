@@ -1,0 +1,3 @@
+# A planted site: no row holds it.
+def _f(a: Int):
+    var p = UnsafePointer[UInt8, o](unsafe_from_address=a)

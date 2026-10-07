@@ -105,15 +105,17 @@ The toolchain pins Mojo `1.0.0` (the `mojo-compiler` packages in `tools/build/to
 
 ## What must always hold?
 
-None of these is checked by the build in this repository today; each is held by review.
+The build checks the first six: `//:pointer_lint` (the `pointer_lint` lint, `tools/build/lint/defs.bzl`; its reader, `tools/build/lint/pointer_lint.awk`, says what each rule matches) reads every `.mojo` file of the repository and fails `./buck2 build //...` on a site no ledger holds. The last is held by review.
 
-- **No `unsafe_from_address=`.**
-- **No partial move via a pointer.**
-- **No new declaration of the reserved libc `read` or `open`.**
-- **No `parallelize[`.** Today the spelling appears in `src/` only in comments.
-- **No public function takes or returns a pointer.**
-- **No wildcard origin outside a module's internals.** See the limits.
+- **No `unsafe_from_address=`** (rule `from_address`).
+- **No partial move via a pointer** (rule `partial_move`): `UnsafePointer(to=<expr>.<field>).take_pointee()`, or a name bound to a field's address and taken later in the same function.
+- **No new declaration of the reserved libc `read` or `open`** (rule `libc_redeclare`): `external_call["read", ...]` or `external_call["open", ...]`.
+- **No `parallelize[`** (rule `parallelize`). Today the spelling appears in `src/` only in comments.
+- **No public function takes or returns a pointer** (rule `public_pointer`): a signature naming `UnsafePointer` or `OpaquePointer`, of a module-level function or a method of a public struct or trait, in a library file (under `src/`, not in `tests/`, no path segment starting with `_` but `__init__.mojo`).
+- **No wildcard origin outside a module's FFI internals** (rule `wildcard_origin`: `MutAnyOrigin`, `ImmutAnyOrigin`, `MutExternalOrigin`, `MutUntrackedOrigin`). The FFI modules are the rows of `tests/pointer_lint_ffi.tsv`; each must hold a comment line starting `# FFI-BOUNDARY:` and name a wildcard origin.
 - **Every `UnsafePointer` carries a `# SAFETY:` comment.**
+
+The sites that were in the tree when the lint landed are the rows of `tests/pointer_lint_holds.tsv`, one per rule and file with an exact count and a reason. One more site than a row holds fails the build naming it; one fewer fails too, asking for the row to be lowered or deleted, so the ledger only shrinks. Comments, docstrings and string literals are not read, and a statement over several lines is read as one.
 
 The spelling rules in the table above are different: the compiler refuses the old spelling, so every build checks them.
 
@@ -125,19 +127,20 @@ The spelling rules in the table above are different: the compiler refuses the ol
 | `src/komira_async_api/parallel_dispatch.mojo`, `fork_join_shared.mojo` | the parallel dispatch contract | `ParallelDispatch`, `NoDispatch`, `fork_join_shared` |
 | `src/komira_buffer/mmap_region.mojo`, `src/komira_libc/native/komira_libc_posix.c` | an FFI boundary through a C shim that resolves platform constants in C | `open_readonly`, `komira_open_ro` |
 | `tools/build/toolchains/BUCK` | the compiler pin | the `mojo-compiler` 1.0.0 packages |
+| `tools/build/lint/pointer_lint.awk`, `lint.sh`, `defs.bzl`; `tests/pointer_lint_ffi.tsv`, `tests/pointer_lint_holds.tsv` | the pointer lint, and its two ledgers | `pointer_lint`, `//:pointer_lint` |
 
 Entry points:
 
 - **Public API:** none; the rules apply to every Mojo file.
-- **Execution starts at:** nothing runs; the compiler enforces the spellings at every build.
+- **Execution starts at:** the compiler enforces the spellings at every build, and `//:pointer_lint` checks the pointer rules in every `./buck2 build //...`.
 
 ## How is it tested?
 
-The spelling rules are tested by compiling the tree: `./buck2 build //...` fails on an old spelling. Nothing tests the other rules.
+The spelling rules are tested by compiling the tree: `./buck2 build //...` fails on an old spelling. The pointer lint is test 42 of `tools/build/tests` (`tests//functional/pointer_lint:ok` builds a planted tree holding every rule's sites at their exact counts beside near misses; each target of `tests//negative/pointer_lint` fails naming one planted site or ledger defect).
 
 ## What are its limits and open questions?
 
-- **Limit: the pointer and origin rules have no check.** No lint in this repository looks for a public pointer, a wildcard origin, `unsafe_from_address=`, a partial move or `parallelize[`, so a new violation leaves the build green.
-- **Limit: wildcard origins are common.** 40 non-test files under `src/` name `MutAnyOrigin`, `ImmutAnyOrigin` or `MutExternalOrigin`, 23 name `MutUntrackedOrigin`, and `Slab.get_mut_interior` returns `ref [MutUntrackedOrigin] Self.T`. The ban describes new code, not the tree.
+- **Limit: the pointer lint reads text.** A wildcard origin or a pointer type reached through an alias or a type parameter is not seen, nor a field's address bound in one function and taken in another or through a second name, nor a move through a subscript (`to=x[i]`), nor a public struct's field typed with a pointer.
+- **Limit: wildcard origins are common.** When the lint landed, its holds counted 1,232 wildcard origins in 170 files and the 13 FFI modules named the rest, 105 public signatures with a pointer in 33 files, 43 `unsafe_from_address=` in 23 files and 3 partial moves in one; `Slab.get_mut_interior` returns `ref [MutUntrackedOrigin] Self.T`. The ban describes new code; the holds describe the tree.
 - **Limit: two Mojo 1.1 miscompiles have no check.** On Mojo 1.1 a program crashes when a `ref name = ...` alias is read inside a nested `@parameter` closure (the closure reads a dead slot), and copies zeros when `unsafe_memcpy`'s `src=` is a pointer to a local cast to an untracked origin. Pass the referent as a closure argument, and write the bytes explicitly.
-- **Open question: should the rules become build actions, and should a pointer rule be a type check?** A line-pattern lint run as part of each library's build would turn the rules above into checks. Patterns over source text still miss a pointer type reached through an alias or a type parameter; a checker with type information would not. What would decide the second half is whether Mojo exposes such a checker.
+- **Open question: should a pointer rule be a type check?** The pointer lint matches source text, so it misses a pointer type reached through an alias or a type parameter; a checker with type information would not. What would decide it is whether Mojo exposes such a checker.

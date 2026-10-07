@@ -1,0 +1,2 @@
+# The FFI module of the planted tree.
+src/komira_a/ffi.mojo	libz, through _inflate
