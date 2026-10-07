@@ -14,19 +14,22 @@
 #       3. a read ending exactly at EOF returns the exact tail bytes;
 #       4. clone() builds an independent backend through the factory;
 #       5. a zero-length read issues no request, a negative range is
-#          refused, and a footer window inside the object reads its tail.
+#          refused, and a footer window inside the object reads its tail;
+#       6. a backend that returns a page token forever makes list and
+#          list_dir_shallow raise after GCS_LIST_MAX_PAGES requests.
 #
 # The backend wraps FakeGcsStorageBackend, so the listing fold, the name order
 # and the paging under test are the public fake's; the wrapper adds only a
-# forced short read.
+# forced short read. §B.6 uses a second backend whose listing never ends.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_fs.footer_region import FOOTER_SPECULATIVE_WINDOW
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
 
+from komira_objectstore_gcs.backend import GCS_LIST_MAX_PAGES
 from komira_objectstore_gcs import (
     FakeGcsStorageBackend,
     GcsFs,
@@ -449,6 +452,122 @@ def test_read_footer_window_inside_object() raises:
         assert_equal(footer.bytes[i], want[i])
 
 
+# =============================================================================
+# §B.6 — a page token that never ends hits the page cap.
+# =============================================================================
+
+
+struct _LoopingListBackend(GcsStorageBackend, Movable, Deinitable):
+    """Every ListObjects page is empty and carries a non-empty
+    `next_page_token`, so a drain loop with no cap never ends. With
+    `end_at > 0`, page `end_at` carries an empty token and ends the listing.
+    A list request past GCS_LIST_MAX_PAGES raises its own error, so a missing
+    cap fails the test instead of hanging it. No other verb is used."""
+
+    var list_calls: Int
+    var end_at: Int
+
+    def __init__(out self):
+        self = Self(0)
+
+    def __init__(out self, end_at: Int):
+        self.list_calls = 0
+        self.end_at = end_at
+
+    def conditional_create(
+        mut self, bucket: String, key: String, data: List[UInt8]
+    ) raises -> Int64:
+        raise Error("_LoopingListBackend: conditional_create not used")
+
+    def compare_and_swap(
+        mut self,
+        bucket: String,
+        key: String,
+        data: List[UInt8],
+        expected_generation: Int64,
+    ) raises -> Int64:
+        raise Error("_LoopingListBackend: compare_and_swap not used")
+
+    def read_range(
+        mut self,
+        bucket: String,
+        key: String,
+        read_offset: Int64,
+        read_limit: Int64,
+    ) raises -> List[UInt8]:
+        raise Error("_LoopingListBackend: read_range not used")
+
+    def get_object(mut self, bucket: String, key: String) raises -> ObjectMetaRaw:
+        raise Error("_LoopingListBackend: get_object not used")
+
+    def delete_object(mut self, bucket: String, key: String) raises:
+        raise Error("_LoopingListBackend: delete_object not used")
+
+    def list_objects(
+        mut self,
+        bucket: String,
+        prefix: String,
+        page_token: String,
+        delimiter: String = String(""),
+    ) raises -> ListPageRaw:
+        self.list_calls += 1
+        if self.list_calls > GCS_LIST_MAX_PAGES:
+            raise Error("_LoopingListBackend: list request past the page cap")
+        var token = String("same-token")
+        if self.end_at > 0 and self.list_calls == self.end_at:
+            token = String("")
+        return ListPageRaw(List[ObjectMetaRaw](), List[String](), token^)
+
+
+def _make_looping_backend() raises -> _LoopingListBackend:
+    return _LoopingListBackend()
+
+
+def _make_looping_fs(end_at: Int) raises -> GcsFs[_LoopingListBackend]:
+    return GcsFs[_LoopingListBackend](
+        bucket=String("test-bucket"),
+        backend=_LoopingListBackend(end_at),
+        mk_backend=_make_looping_backend,
+    )
+
+
+def _assert_page_cap_error(msg: String) raises:
+    assert_true(
+        msg.find(String("page cap exceeded")) >= 0,
+        String("want the GcsFs page-cap error, got: ") + msg,
+    )
+
+
+def test_list_page_cap_refuses_a_looping_token() raises:
+    """list raises once it has drained GCS_LIST_MAX_PAGES pages instead of
+    looping forever; the backend's own guard proves no request went past the
+    cap. A listing that ends on exactly the last allowed page succeeds."""
+    var fs = _make_looping_fs(0)
+    var raised = False
+    try:
+        _ = fs.list(String("data/"))
+    except e:
+        raised = True
+        _assert_page_cap_error(String(e))
+    assert_true(raised, "a token that never ends must hit the page cap")
+
+    var at_cap = _make_looping_fs(GCS_LIST_MAX_PAGES)
+    assert_equal(len(at_cap.list(String("data/"))), 0)
+
+
+def test_list_dir_shallow_page_cap_refuses_a_looping_token() raises:
+    var fs = _make_looping_fs(0)
+    var raised = False
+    try:
+        _ = fs.list_dir_shallow(String("data"))
+    except e:
+        raised = True
+        _assert_page_cap_error(String(e))
+    assert_true(raised, "a token that never ends must hit the page cap")
+
+    var at_cap = _make_looping_fs(GCS_LIST_MAX_PAGES)
+    assert_equal(len(at_cap.list_dir_shallow(String("data"))), 0)
+
 def main() raises:
     test_bucket_and_open()
     test_capability_queries()
@@ -467,4 +586,6 @@ def main() raises:
     test_read_at_zero_length_issues_no_request()
     test_read_at_refuses_negative_offset_or_length()
     test_read_footer_window_inside_object()
+    test_list_page_cap_refuses_a_looping_token()
+    test_list_dir_shallow_page_cap_refuses_a_looping_token()
     print("PASS test_gcs_fs_backend")

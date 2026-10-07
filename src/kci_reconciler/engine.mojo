@@ -64,8 +64,8 @@
 #
 # ★ THE CELL SCOPE (kci_reconciler/ownership.mojo). Every verb has an OWNED form
 # (`plan_graph_owned`, `apply_graph_owned`, `destroy_graph_owned`) that runs in a
-# `CellScope (machine, cell, provenance, adopt)`; the older forms run in the
-# UNOWNED scope and behave exactly as before. In an owned scope:
+# `CellScope (machine, cell, provenance, adopt, validation_run_id)`; the older
+# forms run in the UNOWNED scope and behave exactly as before. In an owned scope:
 #   * the store is keyed `(machine, cell, logical id)`;
 #   * before ANY change, every node must stamp ownership and every present object
 #     must be this node's (stamped with its identity, or explicitly adopted):
@@ -127,6 +127,10 @@ from kci_reconciler.fault_domain import (
     fault_error,
     fault_domain_of_error,
     fault_message_of_error,
+)
+from kci_reconciler.deploy_fault import (
+    carry_deploy_fault_mark,
+    deploy_fault_message,
 )
 from kci_reconciler.state import StateStore, IntentTicket, InMemoryStateStore
 from kci_reconciler.graph import ResourceGraph, topo_sort, reverse_order
@@ -460,7 +464,7 @@ def _node_fault_domain(
     """WHOSE FAULT this node's `verb` failure is — the engine's resolution of the
     two carriers, in precedence order (`kci_reconciler.fault_domain`).
 
-      1. THE RAISE SITE, if it stated one (`fault_error(FAULT_CUSTOMER, ...)`
+      1. THE RAISE SITE, if it stated one (`fault_error(FAULT_USER, ...)`
          leaves our canonical token on the front of `inner`). A site that knew
          about THIS failure outranks a claim about the verb in general.
       2. THE CONFORMER'S PER-VERB DECLARATION (`Resource.fault_domain(verb)`).
@@ -508,7 +512,7 @@ def _node_verb_error(
 
     ⛔ IF THE INNER MESSAGE ALREADY CARRIES A TOKEN, IT IS STRIPPED FIRST — one
     token per error, at the front, always. Two tokens (`[fault=ours] apply node
-    ... failed: [fault=customer] ...`) would make `fault_domain_of_error` answer
+    ... failed: [fault=user] ...`) would make `fault_domain_of_error` answer
     with the OUTER one, which is right, while leaving a second one mid-message
     for a human to misread. `_node_fault_domain` has already read the inner one
     and given it precedence, so nothing is lost.
@@ -528,25 +532,28 @@ def _node_verb_error(
     `_node_fault_domain` lets both fall through to the conformer's per-verb
     declaration — which is right, because "I looked and could not tell" must not
     veto a node that CAN tell. The explicit form is a note to the next reader of
-    that raise site, not a signal to this function."""
-    if domain == FAULT_UNSET:
-        return Error(
-            String("apply node '")
-            + lid
-            + String("' verb=")
-            + verb
-            + String(" failed: ")
-            + fault_message_of_error(inner)
-        )
-    return fault_error(
-        domain,
+    that raise site, not a signal to this function.
+
+    ⚠ A DEPLOY-FAULT MARK ON `inner` MOVES TO THE FRONT (`deploy_fault`). The
+    PERMANENT and IN-FLIGHT marks are prefix tests, so left where the inner
+    message puts them they would sit mid-message and stop counting, and a
+    proven-permanent fault would be retried like any other. This frame carries
+    the SAME fault, so it carries the mark; it never adds one, and a mark the
+    node's message only QUOTES is not at the front of `inner` and is not
+    carried. The result is `[fault=<domain>] <mark>apply node ...`, the one
+    order `deploy_fault` reads. An unmarked failure is unchanged."""
+    var body = carry_deploy_fault_mark(
+        inner,
         String("apply node '")
         + lid
         + String("' verb=")
         + verb
         + String(" failed: ")
-        + fault_message_of_error(inner),
+        + deploy_fault_message(inner),
     )
+    if domain == FAULT_UNSET:
+        return Error(body)
+    return fault_error(domain, body)
 
 
 def apply_graph[
@@ -832,7 +839,7 @@ def _apply_impl[
             verb = VERB_UPDATE if adopted else VERB_NOOP
             # The no-op re-apply STILL surfaces the served URL — off the live read
             # we already did (no extra RPC). So a no-op
-            # customer-env re-apply records `served_endpoint` without a post-apply
+            # user-env re-apply records `served_endpoint` without a post-apply
             # poll (which returns NOT_FOUND/CONVERGING on that path).
             served_endpoint = live.endpoint
         elif live.phase == RES_ABSENT:
@@ -1025,14 +1032,14 @@ def rollback_create[
         `mark_reaped(logical_id)`.
 
     ⛔ WHY THE VERB_NOOP SKIP IS SEPARATE FROM already_confirmed, AND WHY OMITTING
-    IT DESTROYS CUSTOMER DATA. `already_confirmed` is a fact about OUR INTENT
+    IT DESTROYS USER DATA. `already_confirmed` is a fact about OUR INTENT
     LEDGER — "a prior apply of ours confirmed this key" — NOT about who created the
     resource. On the FIRST apply against a PRE-EXISTING cloud resource there is no
     prior intent, so `record_or_adopt_intent` writes a fresh PROVISIONING row and
     the ticket reports already_confirmed=False, while the live read reports MATCHED
     and §3 ADOPTS with verb=VERB_NOOP. Skipping only already_confirmed would
     therefore issue `delete(physical_id)` against a resource this deploy never
-    created — a customer's pre-existing bucket / table / secret, destroyed
+    created — a user's pre-existing bucket / table / secret, destroyed
     because an unrelated node failed later in the same apply. Adoption is the
     ORDINARY `MATCHED` arm of `apply_graph`, not a rare path, so this would reach
     every adopted resource.

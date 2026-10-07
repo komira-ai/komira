@@ -7,19 +7,22 @@ Everything the build needs besides the project configuration
 
 | directory | Buck2 name | what it holds |
 |---|---|---|
-| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_proto_library`, `mojo_db_proto_library`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
+| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_proto_library`, `mojo_db_proto_library`), `proto_fixture_check` and `proto_encode` (protoc reading and writing wire fixtures; their welded self-test is the package `mojo/proto_fixture_testdata`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
 | [`toolchains/`](toolchains/) | package `komira//tools/build/toolchains` | the sha256-pinned downloads and the hermetic Mojo toolchain built from them. [Reference](toolchains/README.md). |
 | [`platforms/`](platforms/) | package `komira//tools/build/platforms` | the target platform, the execution constraints and configurations, and `komira_execution_platforms`; [`platforms/default/`](platforms/default/) registers a standalone checkout's execution platforms: local, or remote when `.buckconfig.local` names a service. [Reference](platforms/README.md). |
 | [`rust/`](rust/) | package `komira//tools/build/rust` | the Rust rules (`rust_library`, `rust_binary`, `crates_io_library`) and the rustc toolchain rule. [Reference](rust/README.md). |
 | [`proto-codegen/`](proto-codegen/) | package `komira//tools/build/proto-codegen` | the `komira_proto_codegen` crate: `protoc-gen-mojo` and `protoc-gen-mojo-db`, the protoc plugins of `mojo_proto_library` and `mojo_db_proto_library`, and `:db_options`, the `(komira.db.*)` options (see [Protobuf](mojo/README.md#protobuf-mojo_proto_library)); `aws-client-gen`, the AWS client generator, published behind `:aws_conformance_test`, which runs botocore's protocol conformance corpus against the generated Mojo and checks the result against `aws_conformance_ledger.txt`. |
 | [`lint/`](lint/) | package `komira//tools/build/lint` | lints that are part of the build: `shell_lint`, `workflow_lint`, `action_pins`, `no_endpoint` and `mojo_deps` (the `deps` of a Mojo package name every module its files import) return their verdict as a Buck2 validation, and the pinned shellcheck and actionlint. The Mojo and Rust toolchains depend on the lint of the scripts their rules run; the root [`BUCK`](../../BUCK) lints the top-level scripts and the workflows. |
 | [`inspect/`](inspect/) | package `komira//tools/build/inspect` | `buildtools`, a Mojo package of readers the tools share (SHA-256, JSON, tar members, Mach-O load commands, Markdown links; its unit tests are welded), and `inspect`, the Mojo tool the [checks](tests/README.md) run for every structured read ([`inspect.mojo`](inspect/inspect.mojo)). |
+| [`coverage/kcov/`](coverage/kcov/) | package `komira//tools/build/coverage/kcov` | the static tools of a coverage build: `debug_relocate` (a directory in a binary overwritten by a placeholder of the same length), `cov_normalize` (a kcov report rewritten to repository paths), `cov_zig` and `cov_link`, the link directory a `mojo_library`'s coverage build links through ([Coverage builds](mojo/README.md#coverage-builds)); each gated by cases run as build actions. [Reference](coverage/kcov/README.md). |
+| [`ci/`](ci/) | package `komira//tools/build/ci` | `affected`, the Mojo tool that maps the files of a change to the targets it affects (the owners of the files, the packages that load a changed `.bzl`, the reverse dependencies) and to the units of the release template it reaches; what it widens on is the data file [`rules.txt`](ci/rules.txt). It never leaves a target out: a file it cannot map widens the answer to every target, and a change that reaches no target is refused. The mapping, `change_map`, has welded unit tests over table graphs. |
+| [`coverage/`](coverage/) | package `komira//tools/build/coverage` | `covcheck`, the Mojo tool that reads coverage reports (kcov's Cobertura, lcov), maps them to repository files and packages, and holds each package's line and branch coverage to the target, the floors in [`ratchet.tsv`](coverage/ratchet.tsv), and surviving mutants, and lists every exemption for approval: `covcheck report` writes a pull request's check-run bodies, summary and JSON result, `covcheck gate` one package's verdict for the build gate, both from one computation. Its unit tests are welded. [Reference](coverage/README.md). |
 | [`third_party_srcs/`](third_party_srcs/) | package `komira//tools/build/third_party_srcs` | `gen`, which reads a vendored C library's source lists out of its pinned release archive, and `third_party_srcs`, which declares the generated file and the drift test holding the committed copy to it ([`defs.bzl`](third_party_srcs/defs.bzl)); tested on two made-up archives. |
 | [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
 | `cells/toolchains/` | cell `toolchains` | the Mojo toolchain the rules use, `toolchains//:mojo`, declared by `komira_mojo_toolchains`, the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains`, and the Rust and protobuf toolchains, `toolchains//:rust` and `toolchains//:mojo_proto`, declared by `komira_rust_toolchains` and `komira_proto_toolchains`; one call of `komira_toolchains` declares them all ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
 | [`tests/`](tests/) | cell `tests` | end-to-end tests: `functional/` (behaviour that must work) and `negative/` (planted defects that must go red). A standalone checkout's only, and outside `//...`. [Reference](tests/README.md). |
-| [`third_party/`](../../third_party/) | packages `komira//third_party/...` | C and C++ libraries built from pinned source archives (snappy, aws-lc, s2n-tls), see [C and C++](mojo/README.md#c-and-c); and the crates.io crates of the Rust rules (`third_party/rust`). |
+| [`third_party/`](../../third_party/) | packages `komira//third_party/...` | C and C++ libraries built from pinned source archives (snappy, aws-lc, s2n-tls, sqlite, and others), see [C and C++](mojo/README.md#c-and-c); and the crates.io crates of the Rust rules (`third_party/rust`). |
 | [`consumer.buckconfig`](consumer.buckconfig) | | the `.buckconfig` of a repository using komira ([below](#using-komira-from-another-repository)). |
 
 The repository is one cell, `komira`: the rules, toolchains, platforms and
@@ -106,6 +109,16 @@ changes it for every Mojo target; `omit = ["mojo"]` and declaring
 `mojo_toolchain` targets yourself replaces them altogether. A single target can
 also set `toolchain =` itself. Leaving the call unchanged keeps the digests
 of a standalone checkout.
+
+**Your own Mojo packages may depend on komira's.** A `mojo_library`,
+`mojo_binary` or `mojo_test` in your cell can name a komira package in `deps`.
+buck2 keys a `.bzl` module by the cell of the BUCK file that loads it, so the
+rules are loaded once for your cell and once for `komira`, and each load has
+its own `MojoPkgTSet`; the rules re-wrap the closure of a dependency built by
+the other load (`mojo_pkg_children` in `mojo/providers.bzl`), and pass one
+built by the same load through untouched, so komira's own targets are built
+by exactly the actions they always were. Test 7 builds such a package, with its
+gated test and a binary on it.
 
 **Your own targets need a target platform too.**
 `target_platform_detector_spec` is a single key; `consumer.buckconfig` maps

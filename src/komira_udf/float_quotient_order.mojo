@@ -4,8 +4,8 @@
 #
 # PLACEMENT: this module lives in `komira_udf` for now so that the packages
 # above it (`komira_row_format`, `komira_kernels`, `komira_agg`) can import it
-# without a dependency on `komira_core`. It moves to `komira_column_kernels`
-# with the `komira_core` split.
+# without a dependency on the core packages. It is to move to
+# `komira_column_kernels`.
 #
 # WHAT THIS FILE IS FOR
 # =====================

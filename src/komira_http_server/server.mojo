@@ -37,7 +37,7 @@ from komira_async.reactor.socket_setup import inet_any_be, inet_loopback_be
 from komira_async.runtime.tcp_stream import TcpListener
 from komira_async.runtime.runtime_trait import Runtime
 from komira_async.ops.waker_sink import NoopSink
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_core.codec import (
     HttpMethod,
@@ -1112,7 +1112,7 @@ struct HttpServer[
         EWOULDBLOCK-buffer machinery, but the per-request leaf runs
         `serve_read_round_dispatch_chained[D, M, RT]` — the chain's `before`
         legs (CORS / Tracing / Logging, then `auth_mw` which resolves
-        `ctx.authed_user` or short-circuits 401) run BEFORE the dispatcher, and
+        `ctx.principal` or short-circuits 401) run BEFORE the dispatcher, and
         a 401 short-circuit means the dispatcher / handler is never reached.
 
         Backward-compat: this is ADDITIVE. Chain-less callers (JobDispatcher,

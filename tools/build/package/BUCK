@@ -1,7 +1,10 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
+load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
+load(":release_set.bzl", "conda_release_set_check")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
 launcher_level_test(
@@ -26,9 +29,47 @@ zig_exe(
 shell_lint(
     name = "shell_lint",
     srcs = [
+        "kcov_guard.sh",
         "list_conda_targets.sh",
         "release_version.sh",
     ],
+)
+
+# kcov is GPL-2.0 and build-only: every package format runs this guard over
+# what it packs and refuses a file that is kcov's bin/kcov (by the sha256 in
+# tools/build/toolchains/kcov/identity.bzl) or holds its usage line
+# (kcov_guard.bzl, README.md "kcov is never packed"). It depends on no kcov
+# target. Gated by the cases below, so a guard that cannot refuse is red.
+kcov_guard_tool(
+    name = "kcov_guard",
+    exec_compatible_with = LINUX_X86_64,
+    script = "kcov_guard.sh",
+    checks = [":kcov_guard_cases"],
+    visibility = ["PUBLIC"],
+)
+
+# The guard on known inputs, with a fixture file standing for bin/kcov (its
+# sha256 is passed as the constant): a malformed sha256 or an empty line
+# (refused); the fixture renamed, as a file and under a path (refused by the
+# sha256); a file holding the usage line after other bytes, and the line
+# between NUL bytes (refused by the line); two offenders named together;
+# symlinks to the fixture and to a directory holding it; near misses of the
+# line, the line split by a NUL or a newline, and the fixture with a byte
+# more (accepted); and three of those through the guard's command line, as
+# the package rules run it.
+kcov_guard_cases(
+    name = "kcov_guard_cases",
+    exec_compatible_with = LINUX_X86_64,
+    script = "kcov_guard.sh",
+)
+
+# release_version.sh as a file: kci_workflow_check's welded test holds kci.yml's
+# documentation filter (its push trigger's paths-ignore) to the documentation
+# this script does not count (rule R17).
+export_file(
+    name = "release_version.sh",
+    src = "release_version.sh",
+    visibility = ["//src/kci_workflow_check:"],
 )
 
 # Selectable form of linux-x86_64: what conda_package derives its subdir from
@@ -41,4 +82,72 @@ config_setting(
         "prelude//cpu/constraints:x86_64",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The stamped release path, before any release runs it (release_set.bzl): each
+# library of the release set packaged with the fixed test stamp of conda.bzl
+# (build number 999999999, build string h7e57c0de_999999999), their [release]
+# manifests given to `komira_pack conda-meta`, and the metapackage read back.
+# Red if a member's [release_check] fails, if a member or the metapackage does
+# not carry the test stamp, if the metapackage does not require a member at
+# that version and build string, if conda-check refuses it, or if `libs` and
+# `metapackage` are not release_set.txt's (which kci_artifact's welded test
+# holds equal to release/artifacts.textproto's metapackage).
+conda_release_set_check(
+    name = "release_set_check",
+    metapackage = "komira_all",
+    libs = [
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_json:komira_json",
+        "//src/komira_protobuf:komira_protobuf",
+        "//src/komira_xml:komira_xml",
+        "//src/komira_retry:komira_retry",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_textproto:komira_textproto",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/kci_api:kci_api",
+        "//src/kci_release_channel:kci_release_channel",
+        "//src/kci_artifact_manifest:kci_artifact_manifest",
+        "//src/kci_logs:kci_logs",
+        "//src/kci_params:kci_params",
+        "//src/kci_release_machine:kci_release_machine",
+        "//src/komira_wkt:komira_wkt",
+        "//src/kci_resource_proto:kci_resource_proto",
+        "//src/kci_validator_rows:kci_validator_rows",
+        "//src/kci_validator_report:kci_validator_report",
+        "//src/kci_workflow_check:kci_workflow_check",
+        "//src/komira_anomaly:komira_anomaly",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_host:komira_host",
+        "//src/komira_job_report_proto:komira_job_report_proto",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+        "//src/komira_resources:komira_resources",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_validation_run:komira_validation_run",
+        "//src/komira_test_run_id:komira_test_run_id",
+        "//src/komira_test_verdict:komira_test_verdict",
+    ],
+    release_set = "release_set.txt",
+)
+
+# The release set file: kci_artifact's welded test holds it equal to
+# release/artifacts.textproto's metapackage (release_set.txt's header).
+export_file(
+    name = "release_set.txt",
+    src = "release_set.txt",
+    visibility = ["//src/kci_artifact:"],
+)
+
+# The stamped metapackage above, read with kci's own manifest parser
+# (manifest_probe/BUCK): what a PUBLISH step reads.
+conda_manifest_kci(
+    name = "release_set_kci",
+    package = ":release_set_check",
 )

@@ -1,15 +1,21 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Stateless compute kernels over komira_core: cast, temporal extract, match,
+# Stateless compute kernels over the core packages: cast, temporal extract, match,
 # hash, Kleene three-valued logic, selection-vector and SIMD chunk kernels,
 # the join-key envelope, kernel templates, the RuntimeExpr AST and the
-# expression interpreter. Depends on komira_core, komira_hash and komira_udf.
+# expression interpreter. Depends on the core packages, komira_hash and komira_udf.
 mojo_library(
     name = "komira_kernels",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
         "//src/komira_hash:komira_hash",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_simd:komira_simd",
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
@@ -18,6 +24,7 @@ mojo_library(
         "tests/test_comparison_kleene_offset_validity.mojo",
         "tests/test_comptime_field_validation.mojo",
         "tests/test_expr_interpreter.mojo",
+        "tests/test_kleene_comparison_properties.mojo",
         "tests/test_kleene_helpers.mojo",
         "tests/test_sel_kernels.mojo",
         "tests/test_simd_of.mojo",

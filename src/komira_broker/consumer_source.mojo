@@ -22,7 +22,7 @@
 # -----------------------------------------------------------------------------
 #
 # A pipeline source conforms to TWO traits:
-#   (1) `SourceLike`        (komira_core) — plan-side identity:
+#   (1) `SourceLike`        (the core packages) — plan-side identity:
 #       schema / estimate_rows / fingerprint / supports_filter_pushdown.
 #   (2) `MorselSourceImpl`  (komira_morsel) — runtime `next_morsel`.
 #
@@ -46,7 +46,7 @@
 # `decode_arrow_ipc_stream` + `BatchMorselSource` deps already live (placing
 # them here would invert the build DAG: broker -> {core, objectstore, async,
 # obs} only — exactly why `ArrowSource.to_dataframe` lives in the SDK and NOT
-# on the komira_core source struct).
+# on the core packages source struct).
 #
 # The consume loop drives `ConsumeCore` directly via this edge's
 # `drain_streams()` — byte-faithful, mid-offset, and tail.
@@ -73,9 +73,9 @@
 #     substrate). The consumer is a stack value, not a byte-slab element.
 # =============================================================================
 
-from komira_core.arrow.schema import Schema
-from komira_core.collections.slab import Slab
-from komira_core.plan.expr import Expr
+from komira_arrow.schema import Schema
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import Expr
 
 from komira_objectstore.cas_manifest import CasManifestStore
 from komira_objectstore.store import ConditionalWriteStore
@@ -85,7 +85,7 @@ from .consume_core import ConsumeCore, ConsumeSegment
 
 # =============================================================================
 # FNV-1a hash helpers — local copy (mirrors arrow_source.mojo; avoids a
-# komira_core.collections dep for the fingerprint).
+# the core packages dep for the fingerprint).
 # =============================================================================
 
 
@@ -250,10 +250,14 @@ struct MessageBrokerConsumer[Storage: ConditionalWriteStore](
         return self._core.read_from(self._start_offset)
 
     def poll_tail(mut self, drained_chunks: Int64) raises -> Slab[ConsumeSegment]:
-        """TAIL / live-consume mode: a consumer that has already
-        drained `drained_chunks` segments re-polls for new ones. Returns the
-        segments for chunks `[drained_chunks, num_chunks)` — the new tail
+        """TAIL / live-consume mode: a consumer that has already drained the
+        first `drained_chunks` manifest chunks re-polls for new ones. Returns
+        the segments for chunks `[drained_chunks, num_chunks)` — the new tail
         appended since the last drain. Empty slab = no new segments yet.
+        `drained_chunks` counts manifest chunks, not segments: a chunk that
+        owns no segment (a txn COMMIT/ABORT marker) yields no entry, so the
+        caller resumes after the last returned `chunk_seq` (or the polled
+        chunk count), never after `len(result)`.
 
         `Slab[ConsumeSegment]` (Movable-only container) — see `drain_streams`.
         Read-only re-poll: no CAS contention (the gate does not bind consume).
@@ -262,7 +266,9 @@ struct MessageBrokerConsumer[Storage: ConditionalWriteStore](
         var out = Slab[ConsumeSegment]()
         var seq = drained_chunks
         while seq < total:
-            out.append(self._core.read_chunk_segment(seq))
+            var seg = self._core.read_chunk_segment(seq)
+            if seg:
+                out.append(seg.take())
             seq += Int64(1)
         return out^
 

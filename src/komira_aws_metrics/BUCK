@@ -1,0 +1,73 @@
+load(
+    "@komira//third_party/botocore:models.bzl",
+    "botocore_endpoint_file",
+    "botocore_endpoint_tests_path",
+    "botocore_model",
+)
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Read a workload's CloudWatch metrics through komira_metrics_reader:
+# GetMetricData's request body, response parse and error (pure), and
+# `CloudWatchMetricsReader`, a `MetricsReader` for one namespace and a fixed
+# set of dimensions that signs and sends each call through komira_aws_core
+# over the transport it is given.
+#
+# Hand-written, not generated: the CloudWatch model in the pinned botocore
+# archive (//third_party/botocore:cloudwatch) declares the smithy-rpc-v2-cbor
+# protocol, which the AWS generator refuses by name; the request is the
+# awsJson 1.0 form the service also serves.
+#
+# The endpoint is built by komira_aws_core's generic `aws_service_endpoint`
+# (`cloudwatch_endpoint` for the regional one), not resolved through the
+# service's endpoint ruleset; test_cloudwatch_model runs botocore's
+# CloudWatch endpoint tests against it, the regional and dual-stack cases.
+# ⚠ Not FIPS: in aws-us-gov the ruleset's FIPS endpoint is the plain
+# `monitoring.` host and the generic helper's is `monitoring-fips.`, so a
+# FIPS caller needs the ruleset, which this package does not embed.
+#
+# Welded tests, none of which talks to the service: test_cloudwatch_model
+# (the constants, the query-mode trait, the periods and the window semantics
+# against the pinned model, and the endpoint against botocore's endpoint
+# tests), test_cloudwatch_requests
+# (the body byte for byte and the builder's refusals), test_cloudwatch_responses
+# (pages, parallel arrays, malformed bodies never echoed, the error shape),
+# test_cloudwatch_reader (the reader against the seam over a scripted
+# transport and over komira_http_core's ScriptedConnector, the request as it
+# reached the wire) and test_no_env_reads (the sources read no environment).
+_CLOUDWATCH = botocore_model("cloudwatch")
+
+_ENDPOINT_TESTS = botocore_endpoint_tests_path("cloudwatch")
+
+mojo_library(
+    name = "komira_aws_metrics",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_data = {
+        "tests/test_cloudwatch_model.mojo": {
+            "cloudwatch/2010-08-01/service-2.json": _CLOUDWATCH.model,
+            _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
+        },
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in glob(["*.mojo"])
+        },
+    },
+    test_srcs = [
+        "tests/test_cloudwatch_model.mojo",
+        "tests/test_cloudwatch_reader.mojo",
+        "tests/test_cloudwatch_requests.mojo",
+        "tests/test_cloudwatch_responses.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        # For test_cloudwatch_reader's HttpClientConfig only: the library
+        # imports nothing of it (mojo_library has no test-only deps).
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
+        "//src/komira_metrics_reader:komira_metrics_reader",
+        # Each call's retry loop is komira_retry's `system_retry_loop`.
+        "//src/komira_retry:komira_retry",
+    ],
+    visibility = ["PUBLIC"],
+)

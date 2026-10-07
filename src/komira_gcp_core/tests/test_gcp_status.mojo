@@ -143,6 +143,57 @@ def test_status_name_outranks_http_status() raises:
     assert_equal(u.code(), CODE_RESOURCE_EXHAUSTED)
 
 
+def test_the_older_envelope_reason_is_kept_as_a_token() raises:
+    # Compute Engine v1's envelope: no `status`, an `errors[]` list. The
+    # first entry's `reason` is what tells a 409 for a resource that already
+    # exists from another 409; the messages beside it are counted, not kept.
+    var exists = parse_gcp_status(
+        "POST", "Insert", 409,
+        _bytes(
+            '{"error": {"code": 409, "message": "The resource projects/p1 already'
+            ' exists", "errors": [{"message": "The resource projects/p1 already'
+            ' exists", "domain": "global", "reason": "alreadyExists"},'
+            ' {"reason": "second"}]}}'
+        ),
+    )
+    assert_equal(exists.reason, "alreadyExists")
+    assert_equal(exists.code(), CODE_ABORTED)
+    var text = exists.message()
+    assert_true(
+        text.startswith("POST Insert: HTTP 409, ABORTED (code 10), reason alreadyExists, "),
+        text,
+    )
+    assert_false(_has(text, "projects/p1"))
+    assert_false(_has(text, "second"))
+    # Another 409 reads differently.
+    var busy = parse_gcp_status(
+        "POST", "Insert", 409,
+        _bytes('{"error": {"code": 409, "errors": [{"reason": "resourceNotReady"}]}}'),
+    )
+    assert_equal(busy.reason, "resourceNotReady")
+    # A reason that is not a bare token, a wrong-typed one, an empty list and
+    # a non-list are all dropped, and the text never carries them.
+    for doc in [
+        '{"error": {"errors": [{"reason": "already exists: projects/leak"}]}}',
+        '{"error": {"errors": [{"reason": 7}]}}',
+        '{"error": {"errors": [{"domain": "global"}]}}',
+        '{"error": {"errors": []}}',
+        '{"error": {"errors": {"reason": "alreadyExists"}}}',
+        '{"error": {"errors": ["alreadyExists"]}}',
+    ]:
+        var e = parse_gcp_status("POST", "Insert", 409, _bytes(String(doc)))
+        assert_equal(e.reason, "", String(doc))
+        assert_false(_has(e.message(), "reason"), String(doc))
+    var long_reason = String()
+    for _ in range(65):
+        long_reason += "a"
+    var over = parse_gcp_status(
+        "POST", "S", 409,
+        _bytes('{"error": {"errors": [{"reason": "' + long_reason + '"}]}}'),
+    )
+    assert_equal(over.reason, "")
+
+
 def test_no_envelope_and_empty_body() raises:
     var e = parse_gcp_status("GET", "S", 502, _bytes('{"foo": 1}'))
     assert_equal(e.envelope, ENVELOPE_ABSENT)
@@ -504,6 +555,7 @@ def main() raises:
     test_missing_fields_fall_back_to_http_status()
     test_wrong_typed_and_smuggling_fields_are_dropped()
     test_status_name_outranks_http_status()
+    test_the_older_envelope_reason_is_kept_as_a_token()
     test_no_envelope_and_empty_body()
     test_deep_nesting_is_refused_not_recursed()
     test_balanced_nesting_past_the_limit_is_refused()

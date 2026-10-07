@@ -20,6 +20,11 @@
 #   - `fn _emit_float64(v: Float64) -> String`
 #       — Float64 NaN / +Inf / -Inf serialize as `null` (RFC 8259 §6
 #         disallows non-finite floats).
+#   - `fn check_float_column_writable[dt](arr, row_start, row_end, schema,
+#     col_index) raises`, `fn not_null_nonfinite_error(column, row, v)`
+#       — a NOT NULL float column cannot take that `null`: every batch
+#         writer here and in `json_writer` refuses NaN / +-Inf in one,
+#         naming the column, the row and the value.
 #   - `fn _emit_bool(v: Bool) -> String`
 #   - `fn _emit_optional_int(v: Optional[Int]) -> String`
 #   - `fn _emit_optional_string(v: Optional[String]) -> String`
@@ -37,9 +42,10 @@
 
 from std.memory import bitcast
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
 
 from komira_jsonl.json_compatible import JsonCompatible
 
@@ -72,6 +78,58 @@ def _is_inf_f64(v: Float64) -> Bool:
     var exp = (bits >> UInt64(52)) & UInt64(0x7FF)
     var mant = bits & UInt64(0xFFFFFFFFFFFFF)
     return exp == UInt64(0x7FF) and mant == UInt64(0)
+
+
+# =============================================================================
+# NOT NULL float columns: NaN / +-Inf have no JSON spelling but `null`
+# =============================================================================
+#
+# A nullable column writes them as `null` (above). A NOT NULL column cannot
+# hold a null, so a writer that met one would write a file whose reader
+# must either refuse it or return a NULL in a NOT NULL field: the writers
+# refuse instead, before the cell is written.
+
+
+def not_null_nonfinite_error(column: String, row: Int, v: Float64) -> Error:
+    """The error for NaN / +Inf / -Inf `v` at `row` of NOT NULL `column`."""
+    var what: String
+    if _is_nan_f64(v):
+        what = "NaN"
+    elif v > 0:
+        what = "+Inf"
+    else:
+        what = "-Inf"
+    return Error(
+        "json_writer: column '" + column + "' is NOT NULL and row "
+        + String(row) + " holds " + what
+        + ", which JSON cannot spell (RFC 8259 section 6); only a nullable"
+        + " column writes it as null"
+    )
+
+
+def check_float_column_writable[
+    dt: DType
+](
+    arr: PrimitiveArray[dt],
+    row_start: Int,
+    row_end: Int,
+    schema: Schema,
+    col_index: Int,
+) raises:
+    """Raise `not_null_nonfinite_error` for the first NaN / +-Inf in rows
+    `[row_start, row_end)` of float column `col_index` when its field is
+    NOT NULL; a nullable field returns at once. Row numbers are the
+    batch's (not relative to `row_start`)."""
+    if schema.field_nullable(col_index):
+        return
+    for r in range(row_start, row_end):
+        if arr.is_null(r):
+            continue
+        var v = arr.get(r).cast[DType.float64]()
+        if _is_nan_f64(v) or _is_inf_f64(v):
+            raise not_null_nonfinite_error(
+                String(schema.field_name(col_index)), r, v
+            )
 
 
 # =============================================================================
@@ -281,7 +339,8 @@ def _format_column_cells_json(
 
     Edge cases:
       - String/LargeString/Dictionary: escape via `_emit_string_escaped`.
-      - Float NaN/Inf: -> `"null"`.
+      - Float NaN/Inf: -> `"null"`; refused in a NOT NULL column
+        (`check_float_column_writable`).
       - Bool: `"true"` / `"false"`.
       - Decimal128: emit as JSON number via `get_as_float` (lossy for >15
         sig. digits; an exact form would route through a JSON string
@@ -332,6 +391,7 @@ def _format_column_cells_json(
             out.append(String("null") if arr.is_null(r) else String(arr.get(r)))
     elif at == ArrowType.FLOAT64:
         var arr = col_ref.as_primitive[DType.float64]()
+        check_float_column_writable(arr, 0, num_rows, batch.schema, col_index)
         for r in range(num_rows):
             if arr.is_null(r):
                 out.append(String("null"))
@@ -339,6 +399,7 @@ def _format_column_cells_json(
                 out.append(_emit_float64(arr.get(r)))
     elif at == ArrowType.FLOAT32:
         var arr = col_ref.as_primitive[DType.float32]()
+        check_float_column_writable(arr, 0, num_rows, batch.schema, col_index)
         for r in range(num_rows):
             if arr.is_null(r):
                 out.append(String("null"))

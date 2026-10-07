@@ -102,7 +102,7 @@ def _action_pins_impl(ctx):
 
 action_pins_rule = rule(
     impl = _action_pins_impl,
-    doc = "Every `uses:` in the workflow files names a full 40-hex commit SHA. Refuses a set with no `uses:` at all.",
+    doc = "Every `uses:` in the workflow files (and local actions) names a full 40-hex commit SHA, except a local action (`./path`), which is part of the checkout. Refuses a set with no `uses:` at all.",
     attrs = _COMMON | {"srcs": attrs.list(attrs.source())},
 )
 
@@ -147,6 +147,52 @@ mojo_deps_rule = rule(
     attrs = _COMMON | {
         "buck": attrs.source(),
         "srcs": attrs.list(attrs.source()),
+    },
+)
+
+def _retired_names_impl(ctx):
+    if not ctx.attrs.names:
+        fail("retired_names {}: names is empty, so it would check nothing".format(ctx.label))
+    staged, copy = _stage(ctx, ctx.attrs.srcs)
+    tree = ctx.attrs.tree[DefaultInfo].default_outputs[0]
+    args = [tree, "{}//".format(ctx.label.cell)] + ctx.attrs.names + ["--"] + [copy[s.short_path] for s in ctx.attrs.srcs]
+    return _lint(ctx, "retired_names", [], args, staged)
+
+retired_names_rule = rule(
+    impl = _retired_names_impl,
+    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it.",
+    attrs = _COMMON | {
+        "names": attrs.list(attrs.string()),
+        "srcs": attrs.list(attrs.source(), default = []),
+        "tree": attrs.dep(providers = [DocTreeInfo]),
+    },
+)
+
+def _pointer_lint_impl(ctx):
+    if (ctx.attrs.tree == None) == (not ctx.attrs.files):
+        fail("pointer_lint {}: name the files in exactly one of `tree` and `files`".format(ctx.label))
+    if ctx.attrs.tree != None:
+        staged = ctx.attrs.tree[DefaultInfo].default_outputs[0]
+    else:
+        staged = ctx.actions.copied_dir("tree", ctx.attrs.files)
+    package = "{}//{}".format(ctx.label.cell, ctx.label.package + "/" if ctx.label.package else "")
+    args = [ctx.attrs.public_root]
+    for ledger in [ctx.attrs.ffi, ctx.attrs.holds]:
+        # Findings name a source of this package by its path in the cell, and a
+        # file another package exports by its target.
+        args += [ledger, str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path]
+    return _lint(ctx, "pointer_lint", [ctx.attrs._reader], args, staged)
+
+pointer_lint_rule = rule(
+    impl = _pointer_lint_impl,
+    doc = "The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md) over every .mojo file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both: no wildcard origin outside the FFI modules `ffi` lists, no `unsafe_from_address=`, no partial move through a pointer, no `parallelize[`, no second declaration of libc read/open, and no public function of a library file under `public_root` taking or returning a pointer. `holds` lists the sites that predate the lint, per rule and file with an exact count, and only shrinks. lint.sh (kind pointer_lint) says the ledger formats; pointer_lint.awk, the reader, says what each rule matches.",
+    attrs = _COMMON | {
+        "ffi": attrs.source(),
+        "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "holds": attrs.source(),
+        "public_root": attrs.string(default = "src"),
+        "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
+        "_reader": attrs.source(default = "komira//tools/build/lint:pointer_lint.awk"),
     },
 )
 
@@ -238,6 +284,12 @@ def push_verdicts(**kwargs):
 def mojo_deps(**kwargs):
     mojo_deps_rule(**_linux(kwargs))
 
+def pointer_lint(**kwargs):
+    pointer_lint_rule(**_linux(kwargs))
+
+def retired_names(**kwargs):
+    retired_names_rule(**_linux(kwargs))
+
 def tar_member(**kwargs):
     tar_member_rule(**_linux(kwargs))
 
@@ -253,7 +305,9 @@ lint_suite = declares_docs(lint_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
 mojo_deps = declares_docs(mojo_deps)
 no_endpoint = declares_docs(no_endpoint)
+pointer_lint = declares_docs(pointer_lint)
 push_verdicts = declares_docs(push_verdicts)
+retired_names = declares_docs(retired_names)
 shell_lint = declares_docs(shell_lint)
 tar_member = declares_docs(tar_member)
 workflow_lint = declares_docs(workflow_lint)

@@ -1,13 +1,39 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The shared LZ4 raw-block codec: compress, decompress and the compress bound,
-# over liblz4. liblz4 is loaded at run time with dlopen and kept in one
+# The shared LZ4 codecs over liblz4: the raw block (compress, decompress and
+# the compress bound) and the frame (LZ4F_*, the Arrow IPC LZ4_FRAME
+# framing). liblz4 is loaded at run time with dlopen and kept in one
 # process-lifetime `_Global` slot, so there is no link dep, and there are no
-# first-party deps: the Parquet page codecs and the document store's `_source`
-# compression both depend on this leaf and on nothing of each other.
+# first-party deps: the Parquet page codecs, the document store's `_source`
+# compression and komira_compression's codecs depend on this leaf and on
+# nothing of each other.
+#
+# The welded tests:
+# - test_codec: the List API (`lz4_compress` / `lz4_decompress`) round trips.
+# - test_codec_into: the into-buffer API (`lz4_compress_into` /
+#   `lz4_decompress_into`): a known-answer block from //third_party/pierrec-lz4
+#   (pinned by sha256, staged at golden/), round trips, the empty block, the
+#   too-small destination and corrupt blocks.
+# - test_frame: the frame API (`lz4_frame_*`, `Lz4FrameDecoder`): the same
+#   golden file decoded as the whole frame it is, round trips, a reused
+#   decoder, the too-small destination, corrupt and doubled frames.
 mojo_library(
     name = "komira_lz4",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_codec.mojo"],
+    test_data = {
+        "tests/test_codec_into.mojo": {
+            "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
+            "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
+        },
+        "tests/test_frame.mojo": {
+            "golden/gettysburg.txt": "//third_party/pierrec-lz4:gettysburg.txt",
+            "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
+        },
+    },
+    test_srcs = [
+        "tests/test_codec.mojo",
+        "tests/test_codec_into.mojo",
+        "tests/test_frame.mojo",
+    ],
     visibility = ["PUBLIC"],
 )

@@ -26,6 +26,7 @@
 # =============================================================================
 
 from .avro_schema import AvroSchema
+from .json_string import utf8_to_string
 
 
 # =============================================================================
@@ -232,9 +233,19 @@ def decode_ocf_header(bytes: Span[UInt8, _]) raises -> OcfHeader:
                     + " header bytes remain"
                 )
             if key == "avro.schema":
-                schema_json = _bytes_to_string(bytes, val_start, val_len)
+                schema_json = _bytes_to_string(
+                    bytes,
+                    val_start,
+                    val_len,
+                    "AvroSchemaError.MALFORMED_JSON: avro.schema",
+                )
             elif key == "avro.codec":
-                codec_name = _bytes_to_string(bytes, val_start, val_len)
+                codec_name = _bytes_to_string(
+                    bytes,
+                    val_start,
+                    val_len,
+                    "AvroOcfError.MALFORMED_HEADER: avro.codec",
+                )
                 saw_codec = True
             pos = val_start + val_len
 
@@ -316,12 +327,21 @@ def _read_string(bytes: Span[UInt8, _], pos: Int) raises -> StringRead:
             + String(len(bytes) - start)
             + " header bytes remain"
         )
-    var s = _bytes_to_string(bytes, start, n)
+    var s = _bytes_to_string(
+        bytes, start, n, "AvroOcfError.MALFORMED_HEADER: metadata key"
+    )
     return StringRead(s^, start + n)
 
 
-def _bytes_to_string(bytes: Span[UInt8, _], start: Int, n: Int) raises -> String:
-    """Copy `n` bytes starting at `start` into an owned String.
+def _bytes_to_string(
+    bytes: Span[UInt8, _], start: Int, n: Int, what: String
+) raises -> String:
+    """Copy `n` bytes starting at `start` into an owned String, byte-exact.
+
+    The bytes must be well-formed UTF-8, or this raises with the prefix
+    `what`. They used to be widened one at a time through `chr(byte)`, which
+    turned the UTF-8 of `ü` (C3 BC) into `Ã¼` (C3 83 C2 BC) before the schema
+    parser ever saw it.
 
     UNTRUSTED INPUT: this function checks the range itself rather than
     trusting whichever caller computed `n` — a caller's guard can be defeated
@@ -347,7 +367,4 @@ def _bytes_to_string(bytes: Span[UInt8, _], start: Int, n: Int) raises -> String
             + String(len(bytes))
             + "-byte header view"
         )
-    var out = String("")
-    for i in range(n):
-        out += String(chr(Int(bytes[start + i])))
-    return out^
+    return utf8_to_string(bytes[start : start + n], what)

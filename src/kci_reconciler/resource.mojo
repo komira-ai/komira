@@ -599,12 +599,12 @@ trait Resource(Movable, Deinitable):
         ⚠ THIS IS A PER-VERB CLAIM, NOT A PER-ERROR ONE, so it is the WEAKER of
         the two carriers on purpose. A conformer that needs per-raise precision
         (a 403 that means one thing on a grant and another on a project service)
-        states it AT THE RAISE with `fault_error(FAULT_CUSTOMER, "...")`, and the
+        states it AT THE RAISE with `fault_error(FAULT_USER, "...")`, and the
         engine takes that in preference to this. Use this for what is true of
         EVERY failure of the verb; use `fault_error` for what is true of one.
 
         A conformer whose verb can fail EITHER way and cannot tell must return
-        `FAULT_UNSET` and leave it ours. Guessing `FAULT_CUSTOMER` to reduce
+        `FAULT_UNSET` and leave it ours. Guessing `FAULT_USER` to reduce
         noise is the one change this design cannot survive.
 
         ⚠ `raises` ONLY BECAUSE THE ERASURE VTABLE IS UNIFORMLY RAISING — AN
@@ -704,8 +704,9 @@ trait Resource(Movable, Deinitable):
     def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
         """Create the resource AS `creds` CARRYING `stamp` in the same call
         (the identity as labels, or as the description's first line on an
-        object that cannot carry labels; the provenance as annotations), and
-        return its physical id. The owned scope's create: there is never a
+        object that cannot carry labels; the provenance as annotations; the
+        stamp's validation run, when it has one, as the cloud's run-id
+        label), and return its physical id. The owned scope's create: there is never a
         moment when an object kci made exists without its stamp.
 
         DEFAULT = REFUSE (the engine checks `stamps_ownership` first, so this
@@ -720,7 +721,9 @@ trait Resource(Movable, Deinitable):
         mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
     ) raises:
         """Stamp the EXISTING unstamped object `physical_id` with `stamp`: the
-        explicit `--adopt <id>` takeover, and nothing else calls it.
+        explicit `--adopt <id>` takeover, and nothing else calls it. The
+        stamp's validation run is NOT written: the run did not create the
+        object, so it must not be able to claim it.
 
         DEFAULT = REFUSE."""
         raise Error(

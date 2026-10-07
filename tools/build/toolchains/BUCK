@@ -1,8 +1,9 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row", "zig_strip_prefix")
+load("@komira//tools/build/platforms:table.bzl", "by_target_os", "pinned_kwargs", "release_version", "row", "zig_strip_prefix")
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe")
+load(":pixi.bzl", "pixi_pin_record", "pixi_version_check")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
 # Each is a row pin of the platform table (tools/build/platforms/table.bzl):
@@ -24,6 +25,44 @@ pinned_file(**pinned_kwargs("linux-x86_64", "mojo_compiler"))
 pinned_file(**pinned_kwargs("linux-x86_64", "libstdcxx"))
 
 pinned_file(**pinned_kwargs("linux-x86_64", "libgcc", visibility = ["PUBLIC"]))
+
+# ---- pixi ---------------------------------------------------------------------
+# The raw pixi executable of each registered row, pinned by sha256 in the
+# platform table: downloaded on the client and never unpacked, so no action
+# (and no remote worker) is needed to have it. Each file is named `pixi`.
+pinned_file(**pinned_kwargs("linux-x86_64", "pixi", out = "pixi"))
+
+pinned_file(**pinned_kwargs("darwin-arm64", "pixi", out = "pixi"))
+
+# The pixi of the target platform's row: the client's own unless
+# `--target-platforms` names another, so a Mac gets the macOS executable and a
+# Linux x86_64 machine the linux one. Runnable (`$(exe ...)`, `buck2 run`).
+alias(
+    name = "pixi",
+    actual = select(by_target_os("pixi")),
+    visibility = ["PUBLIC"],
+)
+
+# The linux pin's URL and sha256 as a file: kci.yml's validate job downloads
+# that URL itself (it has no buck2) and keeps the bytes only at that sha256,
+# and src/kci_workflow_check's test_repo_kci_yml holds the job's two values to this
+# record, so the job runs exactly the table's pin.
+pixi_pin_record(
+    name = "pixi_pin_linux_x86_64",
+    sha256 = pinned_kwargs("linux-x86_64", "pixi")["sha256"],
+    url = pinned_kwargs("linux-x86_64", "pixi")["url"],
+    visibility = ["PUBLIC"],
+)
+
+# The linux pin runs and reports the release its URL names. A remote linux
+# action, so `./buck2 build //...` fails when the bytes are not that release.
+# The macOS pin is checked by its sha256 only: no linux worker can run it.
+pixi_version_check(
+    name = "pixi_version",
+    exec_compatible_with = LINUX_X86_64,
+    pixi = ":" + pinned_kwargs("linux-x86_64", "pixi")["name"],
+    version = release_version("linux-x86_64", "pixi"),
+)
 
 # The base of oci_image: distroless base-debian12 for linux/amd64, its
 # digests in the linux-x86_64 row of the platform table (table.bzl).

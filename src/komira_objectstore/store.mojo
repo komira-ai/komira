@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # The NETWORK-FREE TRAIT surface is declared here as the vendor-neutral
-# contract; concrete backends (`S3Store`, `GcsStore`, `AzureStore`) live in
-# `komira_aws_s3`, `komira_gcp_gcs` and `komira_azure_blob`.
+# contract; concrete backends live in per-cloud packages (the GCS one is
+# `GcsConditionalStore` in `komira_objectstore_gcs`).
 #
 # Design choice — a narrow base trait + an ObjectStoreHttp local stub. A full
 # trait surface would carry `IoOp[T, Self.S,...]`-typed async carriers
@@ -24,7 +24,7 @@
 #   * ZERO wildcard origins.
 # =============================================================================
 
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.reactor import Reactor
@@ -114,8 +114,8 @@ trait ObjectStoreHttpStub(Movable, Deinitable):
 # The base surface carries the synchronous metadata methods only. The
 # runtime-coupled byte-fetch methods live on refining traits below.
 #
-# Conformers: S3Store (komira_aws_s3), GcsStore (komira_gcp_gcs),
-# AzureStore (komira_azure_blob), MinioStore (S3Store with endpoint override).
+# Conformers: GcsConditionalStore (komira_objectstore_gcs), and the other
+# per-cloud stores as they conform.
 # -----------------------------------------------------------------------------
 
 
@@ -162,8 +162,8 @@ trait ObjectStore(Movable, Deinitable):
 # Why a REFINING trait (not a method on the base `ObjectStore`): Mojo
 # traits carry NO default method bodies, so adding `conditional_put` to the
 # base `ObjectStore` trait would force-break every existing `ObjectStore`
-# conformer (S3Store and any future GcsStore / AzureStore) — they would all
-# fail to compile until they implemented the new verb. Refining keeps the
+# conformer (GcsConditionalStore and any other per-cloud store) — they would
+# all fail to compile until they implemented the new verb. Refining keeps the
 # addition strictly ADDITIVE: only the conformers that opt into
 # `ConditionalWriteStore` carry the verb.
 #
@@ -185,9 +185,9 @@ trait ConditionalWriteStore(ObjectStore):
     SHARED SUBSTRATE — broker AND search-engine conform to this trait. The
     surface is intentionally vendor-neutral and lifecycle-complete (it is
     NOT broker-specific): every verb a CAS-manifest reader/writer needs at
-    the object layer lives here, and the GCS / Azure conformers
-    (komira_gcp_gcs / komira_azure_blob) implement the same verbs against
-    their provider headers.
+    the object layer lives here, and the per-cloud conformers (for GCS,
+    `GcsConditionalStore` in komira_objectstore_gcs) implement the same verbs
+    against their provider's API.
 
     Conflict semantics: a precondition that fails server-side (HTTP 412)
     raises `StoreError.precondition(...)` (via the backend's Error-message
@@ -211,13 +211,13 @@ trait ConditionalWriteStore(ObjectStore):
     the returned `ObjectMeta` carries the committed etag/version by value.
 
     Per-backend version handles: the opaque version handle is an S3 etag
-    string for S3. The GCS
-    integer-generation precondition (`x-goog-if-generation-match`) and the
-    Azure version/ETag precondition (`If-Match` / `If-None-Match` with the
-    Azure ETag shape) land in their own per-cloud conformers
-    (komira_gcp_gcs / komira_azure_blob) — they conform to THIS trait
-    with the same `WritePrecondition` surface but map the precondition to
-    their provider-specific headers. Leave `version` opaque; do not assume
+    string for S3. The GCS integer-generation precondition
+    (`if_generation_match`) and the Azure version/ETag precondition
+    (`If-Match` / `If-None-Match` with the Azure ETag shape) land in their own
+    per-cloud conformers (for GCS, `GcsConditionalStore` in
+    komira_objectstore_gcs) — they conform to THIS trait with the same
+    `WritePrecondition` surface but map the precondition to their provider's
+    API. Leave `version` opaque; do not assume
     an S3 etag shape at the trait boundary.
     """
 

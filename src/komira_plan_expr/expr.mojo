@@ -44,7 +44,7 @@ from komira_plan_expr.expr_helpers import _write_binop, _write_unop, _write_stro
 # would put this file inside a large strongly-connected component spanning
 # `plan/` and `source/`.
 #
-#     MEASURED (komira_core-restricted, seed included):
+#     MEASURED (the core packages-restricted, seed included):
 #       closure(plan/expr.mojo) with that import ............. 90
 #       ... without it ....................................... 59
 #       ... plus the `partition_expr` -> `partition_frame` cut .. 7
@@ -115,7 +115,7 @@ comptime EXPR_WINDOW_FN: UInt8 = 13
 comptime EXPR_CORRELATED_SUBQUERY: UInt8 = 14
 
 # `regexp_*`
-# functions backed by the pure-Mojo Thompson NFA (`komira_core/eval/
+# functions backed by the pure-Mojo Thompson NFA (`the core packages
 # regexp_nfa.mojo`).  One variant carrying `RegexpData{op, child, pattern,
 # replacement, flags, group}` where `op` is one of the `REGEXP_*` ops below.
 # The pattern is a plan-literal String (compiled once per batch by the
@@ -314,7 +314,7 @@ comptime EXPR_UDF_CALL: UInt8 = 25
 # one-line addition. MEASURED: **dozens of non-test modules switch on the
 # `BIN_*` op space** — `expr_to_runtime` (numeric opcode compilation),
 # `komira_eval/expr_interpreter`, `expr_kernel_templates`, `builtin_binary_fns`,
-# `ivp_expr_codec`, `row_capability`, `optimizer_expr` among them — and a
+# `viewport_expr_codec`, `row_capability`, `optimizer_expr` among them — and a
 # STRING-PRODUCING member arriving at any of those AS A BINARY OP is a silent
 # mishandling, not a refusal. Nothing measures that space the way the
 # walker-arms lint measures this one. The `EXPR_*`
@@ -728,7 +728,7 @@ comptime UN_IS_NOT_NULL: UInt8 = 3
 # rather than assumed — every non-test module that reads a `UN_*` is an
 # ALLOWLIST: `row_capability._unary_walkable`
 # and `_value_expr_is_bool_output`, the engine's `_translate_unary` mirror,
-# `_arith_node_walkable` (rejects EXPR_UNARY_OP outright), `ivp_expr_codec.
+# `_arith_node_walkable` (rejects EXPR_UNARY_OP outright), `viewport_expr_codec.
 # _is_allowed_unop`, `optimizer_expr`'s template matcher (returns None),
 # `optimizer_filter_selectivity`, `inmem_leaf`, `plan_leaf_servable`,
 # `lower_untyped_expr` and both display ladders. An unknown member is an honest
@@ -2576,7 +2576,7 @@ struct UdfCallData(Movable):
     ⚠ THE THUNK IS NOT A FIELD, AND IT MUST NOT BECOME ONE. `UdfRunBatchThunk`
     is a function type over `UnsafePointer[..., MutExternalOrigin]`, so putting
     it here would (a) put a wildcard-origin pointer in a plan-IR field, (b)
-    make `komira_core` depend on `komira_engine_operators` — a package CYCLE,
+    make the core packages depend on `komira_engine_operators` — a package CYCLE,
     since engine_operators already depends on komira_compiler which depends on
     core — and (c) put an unserializable value in a type the wire encodes. The
     handle is the indirection that avoids all three.
@@ -3975,7 +3975,7 @@ struct Expr(Movable, Writable):
         ONLY caller that should exist in customer-reachable code. A second
         caller passing hand-written arguments re-opens exactly the two defects
         (two names, a restated dtype) that `scalar_udf.mojo` exists to make
-        unrepresentable; this factory is here because `komira_core` cannot
+        unrepresentable; this factory is here because the core packages cannot
         depend on the SDK, not because the arguments are meant to be typed.
         """
         var e = Expr(EXPR_UDF_CALL)

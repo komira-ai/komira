@@ -71,7 +71,8 @@ def _expect(text: String, why: String) raises:
 
 def test_real_library_metadata_parses() raises:
     var md = read_conda_metadata(String(_LIB))
-    assert_equal(md.schema, 1)
+    assert_equal(md.schema_version, 1)
+    assert_equal(len(md.ignored_keys), 0)
     assert_equal(md.kind, String(KIND_LIBRARY))
     assert_equal(md.name, String("komira_name_registry"))
     assert_equal(md.version, String("0.1.7"))
@@ -166,8 +167,35 @@ def test_refuses_a_key_twice() raises:
     _expect(String('{"label":"x",') + String(t[byte = 1:]), String("'label' is given twice"))
 
 
-def test_refuses_an_unknown_key() raises:
-    _expect(_edit(String(_LIB), String("zzz"), String("1")), String("unknown key 'zzz'"))
+def test_an_unknown_key_of_a_known_major_is_ignored_and_listed() raises:
+    var md = parse_conda_metadata(_edit(String(_LIB), String("zzz"), String("1")), String(_SRC))
+    assert_equal(len(md.ignored_keys), 1)
+    assert_equal(md.ignored_keys[0], String("zzz"))
+    assert_equal(md.name, String("komira_name_registry"))
+
+
+def test_format_and_major_are_read_first() raises:
+    _expect(
+        _edit(String(_LIB), String("format"), drop=True),
+        String("no 'format' (a kci.conda_metadata document names its format)"),
+    )
+    _expect(_edit(String(_LIB), String("schema_version"), drop=True), String("no 'schema_version'"))
+    _expect(
+        _edit(String(_LIB), String("format"), String('"kci.artifact_manifest"')),
+        String("format 'kci.artifact_manifest' is not 'kci.conda_metadata'"),
+    )
+    _expect(
+        _edit(String(_LIB), String("schema_version"), String("2")),
+        String("schema_version 2 needs a newer kci (this kci reads kci.conda_metadata up to major 1)"),
+    )
+    _expect(
+        _edit(String(_LIB), String("schema_version"), String('"1"')),
+        String("'schema_version' is not an integer"),
+    )
+    # the old unversioned shape (`schema`, no `format`) is refused, not guessed
+    var old = _text(String(_LIB)).replace(String('"format":"kci.conda_metadata",'), String(""))
+    old = old.replace(String('"schema_version":1'), String('"schema":1'))
+    _expect(old, String("no 'format' (a kci.conda_metadata document names its format)"))
 
 
 def test_refuses_a_key_of_the_other_kind() raises:
@@ -191,7 +219,7 @@ def test_refuses_an_unknown_kind() raises:
 def test_refuses_every_missing_key() raises:
     var lib_keys = List[String]()
     for k in [
-        "schema", "kind", "name", "version", "subdir", "build", "build_number", "file_name",
+        "kind", "name", "version", "subdir", "build", "build_number", "file_name",
         "size", "depends", "timestamp_ms", "source_commit", "stamped", "label",
         "import_name", "mojo_pin", "payload_path", "payload_sha256",
     ]:
@@ -205,7 +233,6 @@ def test_refuses_every_missing_key() raises:
 
 
 def test_refuses_wrong_types() raises:
-    _expect(_edit(String(_LIB), String("schema"), String('"1"')), String("'schema' is not an integer"))
     _expect(_edit(String(_LIB), String("size"), String("1.5")), String("'size' is not an integer"))
     _expect(
         _edit(String(_LIB), String("build_number"), String("true")),
@@ -240,7 +267,6 @@ def test_refuses_empty_strings() raises:
 
 
 def test_refuses_bad_values() raises:
-    _expect(_edit(String(_LIB), String("schema"), String("2")), String("schema 2 is not 1"))
     _expect(_edit(String(_LIB), String("build_number"), String("-1")), String("'build_number' is negative"))
     _expect(_edit(String(_LIB), String("size"), String("0")), String("'size' is not positive"))
     _expect(
@@ -259,18 +285,21 @@ def test_refuses_bad_member_rows() raises:
         _edit(
             String(_META),
             String("members"),
-            String('[{"name":"a","version":"1","sha256":"') + h + String('","extra":1}]'),
-        ),
-        String("members[0]: unknown key 'extra'"),
-    )
-    _expect(
-        _edit(
-            String(_META),
-            String("members"),
             String('[{"name":"a","version":"1","sha256":"') + h + String('","name":"b"}]'),
         ),
         String("members[0]: 'name' is given twice"),
     )
+    # an unknown key in a member row of a known major is ignored and listed
+    var md = parse_conda_metadata(
+        _edit(
+            String(_META),
+            String("members"),
+            String('[{"name":"a","version":"1","sha256":"') + h + String('","extra":1}]'),
+        ),
+        String(_SRC),
+    )
+    assert_equal(len(md.ignored_keys), 1)
+    assert_equal(md.ignored_keys[0], String("members[0].extra"))
     _expect(
         _edit(String(_META), String("members"), String('[{"name":"a","version":"1"}]')),
         String("members[0]: missing 'sha256'"),
@@ -286,6 +315,106 @@ def test_refuses_bad_member_rows() raises:
             String('[{"name":"a","version":"1","build":"","sha256":"') + h + String('"}]'),
         ),
         String("members[0]: 'build' is EMPTY"),
+    )
+
+
+comptime _DOC = "share/doc/komira_name_registry/README.md"
+comptime _H = "94a65a7d5ca61240531cfc9271b1ccceaacd7f5e79ff88c8976edc5695bf15ce"
+
+
+def _docs(rows: String) raises -> String:
+    return _edit(String(_LIB), String("doc_files"), rows)
+
+
+def _row(path: String, sha: String = String(_H)) -> String:
+    return String('{"path":"') + path + String('","sha256":"') + sha + String('"}')
+
+
+def test_doc_files_rows_parse() raises:
+    var md = parse_conda_metadata(
+        _docs(String("[") + _row(String(_DOC)) + String("]")), String(_SRC)
+    )
+    assert_true(md.has_doc_files)
+    assert_equal(len(md.doc_files), 1)
+    assert_equal(md.doc_files[0].path, String(_DOC))
+    assert_equal(md.doc_files[0].sha256_hex, String(_H))
+    # a known key: never listed as ignored
+    assert_equal(len(md.ignored_keys), 0)
+    var empty = parse_conda_metadata(_docs(String("[]")), String(_SRC))
+    assert_true(empty.has_doc_files)
+    assert_equal(len(empty.doc_files), 0)
+
+
+def test_doc_files_absent_is_recorded_not_refused() raises:
+    # A package written before the packer shipped docs has no `doc_files`:
+    # read, and recorded as absent. Whether a release needs it is the
+    # validation's rule, not the reader's.
+    var md = read_conda_metadata(String(_LIB))
+    assert_false(md.has_doc_files)
+    assert_equal(len(md.doc_files), 0)
+
+
+def test_refuses_bad_doc_files() raises:
+    _expect(_docs(String('"README.md"')), String("'doc_files' is not an array"))
+    _expect(_docs(String("[1]")), String("doc_files[0]: not an object"))
+    _expect(
+        _docs(String('[{"path":"') + String(_DOC) + String('"}]')),
+        String("doc_files[0]: missing 'sha256'"),
+    )
+    _expect(
+        _docs(String('[{"sha256":"') + String(_H) + String('"}]')),
+        String("doc_files[0]: missing 'path'"),
+    )
+    _expect(
+        _docs(String("[") + _row(String(_DOC), String("00")) + String("]")),
+        String("doc_files[0]: 'sha256' is not 64 lowercase hex characters"),
+    )
+    _expect(_docs(String("[") + _row(String("")) + String("]")), String("doc_files[0]: 'path' is EMPTY"))
+    _expect(
+        _docs(
+            String('[{"path":"') + String(_DOC) + String('","path":"x","sha256":"') + String(_H) + String('"}]')
+        ),
+        String("doc_files[0]: 'path' is given twice"),
+    )
+    # installed under share/doc/<name>/, and nowhere else
+    _expect(
+        _docs(String("[") + _row(String("share/doc/other/README.md")) + String("]")),
+        String(
+            "doc_files[0]: 'path' share/doc/other/README.md is not under"
+            " share/doc/komira_name_registry/ with no empty, '.' or '..' component"
+        ),
+    )
+    _expect(
+        _docs(String("[") + _row(String("share/doc/komira_name_registry/../x")) + String("]")),
+        String(
+            "doc_files[0]: 'path' share/doc/komira_name_registry/../x is not under"
+            " share/doc/komira_name_registry/ with no empty, '.' or '..' component"
+        ),
+    )
+    _expect(
+        _docs(String("[") + _row(String("share/doc/komira_name_registry/")) + String("]")),
+        String(
+            "doc_files[0]: 'path' share/doc/komira_name_registry/ is not under"
+            " share/doc/komira_name_registry/ with no empty, '.' or '..' component"
+        ),
+    )
+    _expect(
+        _docs(String("[") + _row(String(_DOC)) + String(",") + _row(String(_DOC)) + String("]")),
+        String("doc_files[1]: 'path' " + _DOC + " is given twice"),
+    )
+    # an unknown key in a row of a known major is ignored and listed
+    var md = parse_conda_metadata(
+        _docs(
+            String('[{"path":"') + String(_DOC) + String('","sha256":"') + String(_H) + String('","mode":1}]')
+        ),
+        String(_SRC),
+    )
+    assert_equal(len(md.ignored_keys), 1)
+    assert_equal(md.ignored_keys[0], String("doc_files[0].mode"))
+    # a metapackage ships no doc
+    _expect(
+        _edit(String(_META), String("doc_files"), String("[]")),
+        String("'doc_files' does not belong to a metapackage"),
     )
 
 

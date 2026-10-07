@@ -6,10 +6,11 @@ mojo_library(
     name = "komira_agg",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/komira_core:komira_core",
+        "//src/komira_arrow:komira_arrow",
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
+        "tests/test_agg_combine_laws.mojo",
         "tests/test_agg_fn_agg.mojo",
         "tests/test_minmax_float_nan_order_independence.mojo",
         "tests/test_typed_col_corr_kerneldirect.mojo",

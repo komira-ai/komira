@@ -6,7 +6,9 @@
 # + the original `bytes` + a `Schema` describing the target columns and
 # emits a `RecordBatch`.
 #
-# Input: JSONL (one top-level object per line). Column types: the scalar
+# Input: JSONL (one top-level object per line; every line is checked
+# against RFC 8259 and that rule by `line_check.mojo` before any row is
+# built, and a bad line raises naming it). Column types: the scalar
 # parsers (Int64, Float64, Bool, String, Date32, Decimal128) plus the
 # single-level nested parsers (List, Struct, Map).
 #
@@ -49,7 +51,7 @@
 #     bounds-check overhead in -O3).
 #
 # Cross-references:
-#   - Stage 1 structural index: `komira_jsonl.structural_index`.
+#   - Stage 1 structural index: `komira_json_index.structural_index`.
 #   - Key dispatch: `komira_jsonl.key_dispatch`.
 #   - Value parsers: `komira_jsonl.value_parsers`.
 # =============================================================================
@@ -68,34 +70,38 @@ from komira_async.runtime.parallel_fork_join import (
     parallel_fork_join_serial,
 )
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow_helpers.streaming_concat import (
-    _concat_variable_width_batches,
-)
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.list_array import ListArray
-from komira_core.arrow.map_array import MapArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.struct_array import StructArray
-from komira_core.collections.slab import Slab
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.list_array import ListArray
+from komira_arrow.map_array import MapArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.string_array import StringArray
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.struct_array import StructArray
+from komira_collections.slab import Slab
 
-from komira_jsonl.input_limits import (
+from komira_json_index.input_limits import (
     check_arrow_string_bytes,
     check_json_column_count,
     max_rows_for_columns,
     raise_json_cell_budget_exceeded,
 )
 from komira_jsonl.key_dispatch import KeyTable
-from komira_jsonl.simd_primitives import (
+from komira_jsonl.key_unescape import key_has_escape, unescape_key
+from komira_jsonl.part_concat import _concat_jsonl_parts
+from komira_jsonl.line_check import (
+    build_jsonl_index,
+    check_jsonl_lines,
+    count_lf,
+)
+from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,
@@ -105,7 +111,7 @@ from komira_jsonl.simd_primitives import (
     TAG_QUOTE_OPEN,
     TAG_QUOTE_CLOSE,
 )
-from komira_jsonl.structural_index import (
+from komira_json_index.structural_index import (
     build_structural_index,
     JsonlPartitions,
     StructuralIndex,
@@ -117,7 +123,7 @@ from komira_jsonl.value_parsers.parse_float import parse_float_f64
 from komira_jsonl.value_parsers.parse_int import parse_int_i64
 from komira_jsonl.value_parsers.parse_list import parse_list_one_value
 from komira_jsonl.value_parsers.parse_map import parse_map_one_value
-from komira_jsonl.value_parsers.parse_string import parse_string_raw, parse_string_with_escapes
+from komira_json_index.parse_string import parse_string_raw, parse_string_with_escapes
 from komira_jsonl.value_parsers.parse_struct import parse_struct_one_value
 
 
@@ -258,7 +264,7 @@ struct _StringAcc(Copyable, Movable):
     a single `data.extend(span)` memcpy with NO intermediate `String`; the
     no-null hot path never touches the lazy validity list. This is the
     same primitive the ORC and Avro readers use
-    (`komira_core.arrow.string_builder`)."""
+    (`komira_arrow.string_builder`)."""
 
     var builder: ArrowStringBuilder
 
@@ -922,7 +928,8 @@ def materialize_jsonl_to_batch(
     the index-accepting overload. Use that overload directly when the
     index has ALREADY been built (e.g. by the schema inferrer) to avoid
     a second full-file Stage-1 SIMD pass."""
-    var idx = build_structural_index(bytes)
+    var no_prefix = List[UInt8]()
+    var idx = build_jsonl_index(bytes, no_prefix, 0)
     return materialize_jsonl_to_batch(bytes, schema^, idx)
 
 
@@ -933,6 +940,63 @@ def materialize_jsonl_to_batch(
 ) raises -> RecordBatch:
     """Single-pass JSONL → RecordBatch materializer over an ALREADY-built
     structural index.
+
+    Every line of `bytes` must be blank (skipped) or hold exactly one JSON
+    object (RFC 8259); anything else raises `komira_jsonl: line N: ...`
+    before any row is built, so the input is read whole or not at all
+    (`line_check.mojo`). A key the schema reads may appear once per object:
+    a repeat raises. That covers top-level columns and STRUCT children;
+    keys inside a MAP value are its entries, kept in order, repeats
+    included. Keys are compared as the text they spell (escapes decoded).
+    Keys the schema does not read are skipped unread with their values,
+    repeated or not, at top level and inside a STRUCT. Every error raised
+    while reading a row names the row's line. One empty record per `{}`
+    line: with a schema of no fields (inferred from `{}` lines, or given),
+    the batch has no column and one row per object."""
+    var no_prefix = List[UInt8]()
+    return _materialize_checked(bytes, schema^, idx, no_prefix, 0)
+
+
+def _materialize_checked(
+    bytes: Span[UInt8, _],
+    var schema: Schema,
+    ref idx: StructuralIndex,
+    before: Span[UInt8, _],
+    lines_before: Int,
+) raises -> RecordBatch:
+    """`materialize_jsonl_to_batch` over `bytes`, a slice of a larger input:
+    `before` is the bytes of that input preceding the slice (a parallel
+    partition passes them) and `lines_before` the lines preceding those (a
+    streaming chunk passes its count); both only number the line of an
+    error and are read only when there is one."""
+    check_jsonl_lines(bytes, idx, before, lines_before)
+    # The byte offset of the `{` of the row being read, or -1 before the
+    # first row: an error raised while reading a row is re-raised naming
+    # the row's line.
+    var row_start = -1
+    try:
+        return _walk_jsonl_rows(bytes, schema^, idx, row_start)
+    except e:
+        if row_start < 0:
+            raise e^
+        var line = (
+            lines_before + count_lf(before) + count_lf(bytes[:row_start]) + 1
+        )
+        raise Error(
+            String("komira_jsonl: line ") + String(line) + ": " + String(e)
+        )
+
+
+def _walk_jsonl_rows(
+    bytes: Span[UInt8, _],
+    var schema: Schema,
+    ref idx: StructuralIndex,
+    mut row_start: Int,
+) raises -> RecordBatch:
+    """The row walk of `materialize_jsonl_to_batch`, over a tape
+    `check_jsonl_lines` has passed. Sets `row_start` to the byte offset of
+    each row's `{` as it starts the row, and back to -1 once the rows are
+    read.
 
     Reads `bytes` (a complete JSONL byte stream — one `{...}` per line,
     `\\n`-separated) using the caller-provided `idx` and produces ONE
@@ -954,7 +1018,9 @@ def materialize_jsonl_to_batch(
          and assemble into the final RecordBatch.
 
     Raises on:
-      * Malformed JSON structure (unbalanced braces, missing colon).
+      * A key the schema reads repeated in one object.
+      * A JSON `null`, or an object without the key, for a NOT NULL field
+        (a nullable field reads both as NULL).
       * Schema column type outside the supported set.
       * Per-value parse errors (overflow, bad bool literal, ...).
     """
@@ -992,10 +1058,14 @@ def materialize_jsonl_to_batch(
     # 5=DECIMAL128, 6=LIST, 7=STRUCT, 8=MAP.
     var col_kinds = List[UInt8](capacity=n)
     var field_names = List[String](capacity=n)
+    # A NOT NULL field refuses a JSON `null` and an object without its key
+    # (both read as NULL in a nullable field): it never holds a NULL.
+    var col_nullable = List[Bool](capacity=n)
     for i in range(n):
         var at = schema.field_arrow_type(i)
         var fld = schema.field_at_unchecked(i)
         field_names.append(String(schema.field_name(i)))
+        col_nullable.append(schema.field_nullable(i))
         int_accs.append(_Int64Acc.create())
         bool_accs.append(_BoolAcc.create())
         string_accs.append(_StringAcc.create())
@@ -1087,14 +1157,17 @@ def materialize_jsonl_to_batch(
     var per_row_seen = List[Bool](capacity=n)
     for _ in range(n):
         per_row_seen.append(False)
+    # The decoded spelling of a key that holds an escape, reused per key.
+    var key_buf = List[UInt8]()
     while t < tape_len:
         # Find next OPEN_BRACE.
         if idx.tags[t] != TAG_OPEN_BRACE:
-            # Stray structural between objects — skip (e.g. could be
-            # a comma between top-level objects in some JSONL dialects;
-            # the contract is one object per line).
+            # Unreachable on a tape `check_jsonl_lines` passed (every
+            # top-level token is a `{`); kept so the walk never reads past a
+            # token it does not understand.
             t += 1
             continue
+        row_start = Int(idx.offsets[t])
         # Walk this object: reset the reused seen-flags to all-False.
         for c in range(n):
             per_row_seen[c] = False
@@ -1127,7 +1200,26 @@ def materialize_jsonl_to_batch(
             var key_start = quote_open_offset + 1
             var key_end = quote_close_offset
             # Walk key bytes — copy into a Span via input[].
-            var col_idx = key_table.lookup(bytes[key_start:key_end])
+            # A key is looked up as the text it spells (key_unescape.mojo):
+            # raw bytes when it has no backslash, decoded otherwise.
+            var col_idx: Int
+            if key_has_escape(bytes[key_start:key_end]):
+                unescape_key(bytes[key_start:key_end], key_buf)
+                col_idx = key_table.lookup(key_buf)
+            else:
+                col_idx = key_table.lookup(bytes[key_start:key_end])
+            # DUPLICATE KEY. A key the schema reads, seen twice in one
+            # object, would push two values into its column for one row
+            # (the column then outgrows the row count and every later row
+            # is shifted). Refused, not first- or last-wins: neither value
+            # is the record's, and komira_json, which keeps both in order,
+            # has no single-value answer to match. Keys are compared as
+            # the text they spell (decoded above).
+            if col_idx >= 0 and per_row_seen[col_idx]:
+                raise Error(
+                    "duplicate key '" + schema.field_name(col_idx)
+                    + "' in one object (a key the schema reads may appear once)"
+                )
             # Expect colon next.
             if t >= tape_len or idx.tags[t] != TAG_COLON:
                 raise Error(
@@ -1293,6 +1385,11 @@ def materialize_jsonl_to_batch(
                     # Check for explicit "null" first — affects validity.
                     if (s_end - s_start) == 4 and bytes[s_start] == UInt8(0x6E):
                         parse_null(bytes, s_start, s_end)
+                        if not col_nullable[col_idx]:
+                            raise Error(
+                                "NOT NULL field '" + schema.field_name(col_idx)
+                                + "' holds JSON null"
+                            )
                         if kind == UInt8(0):
                             int_accs[col_idx].push_null()
                         elif kind == UInt8(1):
@@ -1358,6 +1455,11 @@ def materialize_jsonl_to_batch(
         # push null.
         for c in range(n):
             if not per_row_seen[c]:
+                if not col_nullable[c]:
+                    raise Error(
+                        "NOT NULL field '" + schema.field_name(c)
+                        + "' has no key in the object"
+                    )
                 var kind = col_kinds[c]
                 if kind == UInt8(0):
                     int_accs[c].push_null()
@@ -1382,6 +1484,17 @@ def materialize_jsonl_to_batch(
         # row, against a value computed once outside the loop.
         if row_count > max_rows:
             raise_json_cell_budget_exceeded(row_count, n, len(bytes))
+    # The rows are read; an error from here on (building the columns)
+    # belongs to no row, so it is not labelled with a line.
+    row_start = -1
+
+    # No columns (a schema with no fields, e.g. inferred from `{}` lines):
+    # the batch carries the row count alone, one empty record per object.
+    # The builder below would return 0 rows, having no column to count.
+    if n == 0:
+        var empty = RecordBatch.count_only(row_count)
+        empty.schema = schema^
+        return empty^
 
     # Assemble RecordBatch. Build columns by popping accumulators from
     # the front in lockstep across all 9 parallel acc lists (6 scalar +
@@ -1633,8 +1746,10 @@ struct _JsonlMatWithIdxWork[byte_o: Origin[mut=False]](ChunkWork):
         var hi = ip[].partitions.his[chunk_id]
         var slice = Span(unsafe_ptr=ip[].bytes_ptr + lo, length=hi - lo)
         ref idx = ip[].partitions.indices[chunk_id]
-        var batch = materialize_jsonl_to_batch(
-            slice, ip[].schema.copy(), idx
+        # The bytes before this partition number an error's line.
+        var before = Span(unsafe_ptr=ip[].bytes_ptr, length=lo)
+        var batch = _materialize_checked(
+            slice, ip[].schema.copy(), idx, before, 0
         )
         var op = UnsafePointer(to=out_slot).bitcast[Optional[RecordBatch]]()
         op[] = Optional[RecordBatch](batch^)
@@ -1666,9 +1781,11 @@ struct _JsonlMatBuildIdxWork[byte_o: Origin[mut=False]](ChunkWork):
         var lo = ip[].los[chunk_id]
         var hi = ip[].his[chunk_id]
         var slice = Span(unsafe_ptr=ip[].bytes_ptr + lo, length=hi - lo)
-        var idx = build_structural_index(slice)
-        var batch = materialize_jsonl_to_batch(
-            slice, ip[].schema.copy(), idx
+        # The bytes before this partition number an error's line.
+        var before = Span(unsafe_ptr=ip[].bytes_ptr, length=lo)
+        var idx = build_jsonl_index(slice, before, 0)
+        var batch = _materialize_checked(
+            slice, ip[].schema.copy(), idx, before, 0
         )
         var op = UnsafePointer(to=out_slot).bitcast[Optional[RecordBatch]]()
         op[] = Optional[RecordBatch](batch^)
@@ -1866,13 +1983,8 @@ def _materialize_with_partitions_impl[
     if k == 0:
         _ = fj_out^
         return materialize_jsonl_to_batch(bytes, schema^)
-    # SAFETY: `fj_out` is a stack-rooted Slab whose heap storage is stable
-    # across this call; `get_mut_interior(0)` yields a ref into the slab's
-    # interior and `UnsafePointer(to=ref)` lifts it to slot 0. The pointer
-    # is internal to this module and never crosses the public signature.
-    ref slot0 = fj_out.get_mut_interior(0)
-    var staging_ptr = UnsafePointer(to=slot0)
-    var combined = _concat_variable_width_batches(staging_ptr, k)
+    # Zero-column parts (a schema with no fields) are joined by row count.
+    var combined = _concat_jsonl_parts(fj_out, k)
     _ = fj_out^
     _ = schema^
     return combined^
@@ -2042,15 +2154,9 @@ def _materialize_parallel_impl[
         _ = fj_out^
         return materialize_jsonl_to_batch(bytes, schema^)
 
-    # SAFETY: `fj_out` is a stack-rooted Slab whose heap storage is stable
-    # across this call; `get_mut_interior(0)` yields a ref into the slab's
-    # interior and `UnsafePointer(to=ref)` lifts it to slot 0. The pointer
-    # is internal to this module and never crosses the public signature
-    # (this fn returns a RecordBatch). `_concat_variable_width_batches`
-    # walks slots [0, k) by index, reading each in order.
-    ref slot0 = fj_out.get_mut_interior(0)
-    var staging_ptr = UnsafePointer(to=slot0)
-    var combined = _concat_variable_width_batches(staging_ptr, k)
+    # `_concat_jsonl_parts` walks slots [0, k) in order; zero-column parts
+    # (a schema with no fields) are joined by row count.
+    var combined = _concat_jsonl_parts(fj_out, k)
     # The concat `.take()`s each slot, so the slab destructor sees empty
     # slots (no-op drop). schema is dropped here (each worker used a copy).
     _ = fj_out^

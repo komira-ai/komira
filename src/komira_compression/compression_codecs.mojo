@@ -2,17 +2,19 @@
 # Compression conformers — 8 codec marker structs implementing `Compression`
 # =============================================================================
 #
-# WORKING (4) — call the snappy C API (statically linked) and libzstd / libz
-# (via OwnedDLHandle FFI):
+# WORKING — call the snappy C API (statically linked), libzstd (via
+# OwnedDLHandle FFI, here), and libz / liblz4 through the komira_zlib and
+# komira_lz4 leaves (which own those libraries' handles and FFI):
 #   - `Uncompressed`               — no-op (no FFI).
 #   - `Snappy`                     — snappy, linked into the binary.
 #   - `Zstd[level: Int = 3]`       — libzstd.
-#   - `Gzip[level: Int = 6]`       — libz (inflateInit2_ with auto-detect).
+#   - `Gzip[level: Int = 6]`       — libz via komira_zlib (auto-detect read).
+#   - `Lz4Raw`                     — liblz4 raw block via komira_lz4.
+#   - `Lz4Frame`                   — liblz4 frame via komira_lz4.frame.
 #
-# SCAFFOLD (4) — trait shape lands; bodies raise clear errors:
+# SCAFFOLD — trait shape lands; bodies raise clear errors:
 #   - `Lzo`                        — Parquet codec id 3.
 #   - `Brotli[quality: Int = 11]`  — Parquet codec id 4.
-#   - `Lz4Raw`                     — Parquet codec id 7.
 #   - `Zlib[level: Int = 6]`       — Parquet codec id 8.
 #
 # The scaffold bodies raise `Error("<codec>: not yet wired in
@@ -25,30 +27,46 @@
 #   - All conformer compress/decompress methods accept `Span[UInt8, _]`
 #     (origin-polymorphic, safe surface — encapsulation rule).
 #   - Internally, helpers use `.unsafe_ptr()` + `.unsafe_origin_cast[
-#     MutExternalOrigin]()` ONLY at the `external_call` boundary, with
+#     MutUntrackedOrigin]()` ONLY at the `external_call` boundary, with
 #     `# FFI-BOUNDARY:` comments. This mirrors
 #     `komira_parquet/compression.mojo` patterns.
-#   - The Snappy / Zstd / Gzip / Uncompressed conformers each build a
+#   - The Snappy / Zstd / Uncompressed conformers each build a
 #     `List[UInt8](capacity=...)` output, call the C lib into that buffer,
-#     then call `_unsafe_set_size_unchecked(...)` to set the final length.
+#     then set the final length. Gzip / Lz4Raw / Lz4Frame hand a Span of
+#     their output List to the komira_zlib / komira_lz4 Span API.
 #
-# DEDUPLICATION NOTE: this module duplicates the OwnedDLHandle singleton
-# pattern from `komira_parquet/compression.mojo` (~80 LOC). The duplication
-# is INTENTIONAL: arrow cannot depend on `komira_parquet` (cycle
-# direction). The OwnedDLHandle ctor costs ~220us per construction on
-# Darwin, so a process-lifetime singleton (a `_Global`, below) is the only
-# way to amortize the cost without an explicit EngineContext-owned handle.
-# If EngineContext comes to own codec handles, this module can drop its
-# singletons and accept `ref` handles in by parameter.
+# HANDLES: libzstd keeps a process-lifetime OwnedDLHandle singleton here (a
+# `_Global`, below): the OwnedDLHandle ctor costs ~220us per construction on
+# Darwin. libz and liblz4 are NOT opened here: komira_zlib and komira_lz4 own
+# them, with their own process-lifetime singletons and known-answer tests.
 # =============================================================================
 
-from std.memory import unsafe_memcpy, alloc
+from std.memory import OwnedPointer, unsafe_memcpy, alloc
 from std.ffi import OwnedDLHandle, _Global, external_call
 from std.os import abort
 
 from std.sys.info import CompilationTarget
 
 from komira_compression.compression import ArrowIpcCompression, Compression
+from komira_lz4.codec import (
+    lz4_compress_bound,
+    lz4_compress_into,
+    lz4_decompress_into,
+)
+from komira_lz4.frame import (
+    Lz4FrameDecoder,
+    lz4_frame_compress_bound,
+    lz4_frame_compress_into,
+    lz4_frame_decompress_into,
+)
+from komira_zlib import (
+    ZLIB_WINDOW_BITS_AUTO,
+    ZLIB_WINDOW_BITS_ZLIB,
+    zlib_compress_bound,
+    zlib_crc32,
+    zlib_deflate_into,
+    zlib_inflate_into,
+)
 
 
 @always_inline
@@ -77,22 +95,16 @@ def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
 # =============================================================================
 
 comptime _LIBZSTD: StaticString = "libzstd.dylib" if CompilationTarget.is_macos() else "libzstd.so.1"
-comptime _LIBZ: StaticString = "libz.dylib" if CompilationTarget.is_macos() else "libz.so.1"
-comptime _LIBLZ4: StaticString = "liblz4.dylib" if CompilationTarget.is_macos() else "liblz4.so.1"
 
 
 # =============================================================================
 # Per-codec OwnedDLHandle singletons (process-lifetime dlopen cache)
 # =============================================================================
 #
-# Each codec gets a process-lifetime `_Global` runtime slot (dlopen'd once,
+# libzstd gets a process-lifetime `_Global` runtime slot (dlopen'd once,
 # init-once, cross-compile-unit-coherent, KGEN-managed) — no environment
-# variable and no `unsafe_from_address=Int`. Distinct `_Global` names keep the arrow handles
-# independent of the parquet / orc / avro singletons for the same dylibs.
-
-# LZ4F_VERSION constant from liblz4 (lz4frame.h `#define LZ4F_VERSION 100`).
-# Passed to LZ4F_createDecompressionContext for ABI version-mismatch detection.
-comptime _LZ4F_VERSION: UInt32 = 100
+# variable and no `unsafe_from_address=Int`. A distinct `_Global` name keeps it
+# independent of the parquet / orc / avro singletons for the same dylib.
 
 
 def _init_arrow_zstd_handle() -> OwnedDLHandle:
@@ -108,27 +120,9 @@ def _init_arrow_zstd_handle() -> OwnedDLHandle:
         abort("libzstd dlopen failed (arrow codec handle init)")
 
 
-def _init_arrow_z_handle() -> OwnedDLHandle:
-    """`_Global` init_fn: dlopen libz once per process (KGEN-serialized)."""
-    try:
-        return OwnedDLHandle(_LIBZ)
-    except e:
-        abort("libz dlopen failed (arrow codec handle init)")
-
-
-def _init_arrow_lz4_handle() -> OwnedDLHandle:
-    """`_Global` init_fn: dlopen liblz4 once per process (KGEN-serialized)."""
-    try:
-        return OwnedDLHandle(_LIBLZ4)
-    except e:
-        abort("liblz4 dlopen failed (arrow codec handle init)")
-
-
 comptime _ZSTD_GLOBAL = _Global[
     "komira_arrow_zstd_handle", _init_arrow_zstd_handle
 ]
-comptime _Z_GLOBAL = _Global["komira_arrow_z_handle", _init_arrow_z_handle]
-comptime _LZ4_GLOBAL = _Global["komira_arrow_lz4_handle", _init_arrow_lz4_handle]
 
 
 # Per-codec accessors — return the process-lifetime handle slot (init-once via
@@ -140,22 +134,12 @@ def _zstd_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
     return _ZSTD_GLOBAL.get_or_create_ptr()
 
 
-@always_inline
-def _z_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
-    return _Z_GLOBAL.get_or_create_ptr()
-
-
-@always_inline
-def _lz4_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
-    return _LZ4_GLOBAL.get_or_create_ptr()
-
-
 # =============================================================================
 # Span -> FFI-pointer adapter
 # =============================================================================
 #
 # Conformer trait methods accept `Span[UInt8, _]` (origin-poly). At the FFI
-# boundary we cast to `UnsafePointer[UInt8, MutExternalOrigin]` because the
+# boundary we cast to `UnsafePointer[UInt8, MutUntrackedOrigin]` because the
 # C ABI does not speak Mojo origins. The cast is sound because the C call
 # is synchronous and the caller proves the buffer outlives the call by
 # holding the `Span` in the enclosing scope.
@@ -163,7 +147,7 @@ def _lz4_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
 
 @always_inline
 def _span_ptr(s: Span[UInt8, _]) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    """Coerce a `Span[UInt8, _]` to a `MutExternalOrigin`-cast UnsafePointer
+    """Coerce a `Span[UInt8, _]` to a `MutUntrackedOrigin`-cast UnsafePointer
     for FFI. FFI-BOUNDARY: synchronous C call; caller owns the buffer.
     """
     # SAFETY: see header. The cast does not extend lifetime; the Span ref
@@ -364,7 +348,7 @@ struct Snappy(Compression):
     id 1. Default for Parquet (matches DuckDB).
 
     The snappy library is statically linked into every binary that uses
-    komira_core, so no shared library is needed at run time. A native Mojo
+    the core packages, so no shared library is needed at run time. A native Mojo
     Snappy port lives in `komira_parquet` and is used on the Parquet path;
     this conformer calls the C library directly.
     """
@@ -725,49 +709,45 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
 
 
 # =============================================================================
-# Gzip[level] — libz via OwnedDLHandle (Parquet codec id 2)
+# Gzip[level] — libz through komira_zlib (Parquet codec id 2)
 # =============================================================================
 #
-# Uses one-shot `compress2` for write (zlib framing — accepted by all major
-# Parquet readers with auto-detect). For read, uses `inflateInit2_` with
-# `windowBits = 15 + 32` for auto-detect of gzip / zlib / raw-deflate framing
-# (load-bearing for interop with pyarrow / parquet-mr / DuckDB / Spark).
+# Write: one zlib-framed deflate stream (`zlib_deflate_into` with
+# `ZLIB_WINDOW_BITS_ZLIB`, memLevel 8, default strategy: the same stream libz's
+# `compress2` writes) — accepted by all major Parquet readers with auto-detect.
+# Read: `zlib_inflate_into` with `ZLIB_WINDOW_BITS_AUTO` (15 + 32), which
+# auto-detects gzip / zlib framing (load-bearing for interop with pyarrow /
+# parquet-mr / DuckDB / Spark).
 #
 # ⚠ ZLIB FRAMING IS NOT GZIP FILE FRAMING, and a `.gz` FILE must be the latter.
-# `compress2` emits RFC 1950 (2-byte header + deflate + adler32); a gzip FILE is
-# RFC 1952 (10-byte header starting `1f 8b` + raw deflate + crc32 + isize).
+# The zlib stream is RFC 1950 (2-byte header + deflate + adler32); a gzip FILE
+# is RFC 1952 (10-byte header starting `1f 8b` + raw deflate + crc32 + isize).
 # Inside a Parquet page the distinction is invisible — every major reader
 # auto-detects, which is why the write path above is fine there and has been for
 # its whole life. On DISK it is the difference between a file `gunzip`, `zcat`
 # and DuckDB can open and one they refuse. `compress_gzip_file` below is the
 # file-framing entry; use it for any whole-file `.gz` sink.
 #
-# z_stream struct is 112 bytes on LP64.
+# libz itself is loaded, once per process, by komira_zlib; this file holds no
+# libz handle and declares no libz symbol.
 # =============================================================================
-
-comptime _Z_STREAM_SIZE: Int = 112
-comptime _Z_OK: Int = 0
-comptime _Z_STREAM_END: Int = 1
-comptime _Z_NO_FLUSH: Int = 0
-comptime _Z_WINDOWBITS_AUTO: Int32 = 15 + 32
-
-# zlib's `crc32(uLong, const Bytef*, uInt)` takes a 32-BIT length. Feed it in
-# chunks so a >4 GiB buffer (a whole-file CSV/JSONL sink is exactly that shape)
-# cannot silently wrap and produce a valid-looking file with a wrong CRC.
-comptime _Z_CRC_CHUNK: Int = 1 << 30
 
 
 @fieldwise_init
 struct Gzip[level: Int = 6](Compression):
-    """The libz FFI compression codec. Parquet codec id 2.
+    """The libz compression codec (through komira_zlib). Parquet codec id 2.
 
     `level` is a comptime parameter (1-9; default 6 matches DuckDB /
     pyarrow / parquet-mr).
 
-    Write path: `compress2` (zlib framing) — for a Parquet PAGE.
+    Write path: `compress` (zlib framing) — for a Parquet PAGE.
     File path:  `compress_gzip_file` (RFC 1952 gzip framing) — for a `.gz` FILE.
-    Read path: `inflateInit2_` with `windowBits = 15 + 32` (auto-detect
-    gzip / zlib / raw-deflate framing), so both framings read back here.
+    Both take an input of any length, over 4 GiB included (komira_zlib feeds
+    libz in 32-bit slices, as `compress2` did; ISIZE is the length mod 2^32).
+    Read path: `decompress`, auto-detecting gzip / zlib framing, so both
+    framings read back here. The stream must end inside the input and decode
+    to at most `expected_size` bytes; a truncated, oversized or corrupt stream
+    is refused.
     """
 
     var _reserved: Bool
@@ -780,55 +760,28 @@ struct Gzip[level: Int = 6](Compression):
         self._reserved = False
 
     @staticmethod
-    def compress(input: Span[UInt8, _]) raises -> List[UInt8]:
+    def _deflate_zlib(input: Span[UInt8, _], lead: Int) raises -> List[UInt8]:
+        """`[lead bytes, uninitialised][zlib stream of input]`, with room for 8
+        more bytes after the stream (capacity only)."""
         var n = len(input)
-        var handle_ptr = _z_handle()
-        var bound = Int(
-            handle_ptr[].call["compressBound", Int64](Int64(n))
-        )
-        var out = List[UInt8](capacity=bound)
-
-        var size_buf = alloc[Int64](1)
-        size_buf[0] = Int64(bound)
-        # FFI-BOUNDARY:
-        var status = handle_ptr[].call["compress2", Int32](
-            _list_ptr(out),
-            size_buf,
-            _span_ptr(input),
-            Int64(n),
+        var bound = zlib_compress_bound(n, ZLIB_WINDOW_BITS_ZLIB)
+        var out = List[UInt8](capacity=lead + bound + 8)
+        out.resize(unsafe_uninit_length=lead + bound)
+        var zlen = zlib_deflate_into(
+            Span(out)[lead : lead + bound],
+            input,
             Int32(Self.level),
+            ZLIB_WINDOW_BITS_ZLIB,
         )
-        var written = Int(size_buf[0])
-        size_buf.free()
-        if Int(status) != 0:
-            raise Error(
-                "Gzip.compress: zlib compress2 failed (status="
-                + String(Int(status)) + ", n=" + String(n) + ")"
-            )
-        out.resize(unsafe_uninit_length=written)
+        out.resize(lead + zlen, UInt8(0))
         return out^
 
     @staticmethod
-    def _crc32(input: Span[UInt8, _]) raises -> UInt32:
-        """zlib `crc32` over the whole span, fed in <=1 GiB chunks.
-
-        The chunking is not an optimization: zlib's `len` parameter is `uInt`
-        (32-bit), and a whole-file sink buffer is routinely larger than that.
-        `crc32` is incremental by construction, so chunking is exact."""
-        var handle_ptr = _z_handle()
-        var crc = Int64(0)
-        var off = 0
-        var n = len(input)
-        while off < n:
-            var take = min(_Z_CRC_CHUNK, n - off)
-            # FFI-BOUNDARY: synchronous call; `input` outlives it.
-            crc = handle_ptr[].call["crc32", Int64](
-                crc,
-                _span_ptr(input) + off,
-                Int32(take),
-            )
-            off += take
-        return UInt32(Int(crc) & 0xFFFFFFFF)
+    def compress(input: Span[UInt8, _]) raises -> List[UInt8]:
+        try:
+            return Self._deflate_zlib(input, 0)
+        except e:
+            raise Error("Gzip.compress: " + String(e))
 
     @staticmethod
     def compress_gzip_file(input: Span[UInt8, _]) raises -> List[UInt8]:
@@ -842,36 +795,21 @@ struct Gzip[level: Int = 6](Compression):
 
         ZERO-COPY REFRAME. A zlib stream is `[2-byte header][deflate][4-byte
         adler32]`; a gzip file is `[10-byte header][the SAME deflate][4-byte
-        crc32][4-byte isize]`. So `compress2` writes at offset 8, the 10-byte
-        gzip header then overwrites exactly the two zlib header bytes it left at
-        [8,10), and the 8-byte trailer overwrites the 4 adler bytes in place. The
-        deflate payload — all of it — is never moved.
+        crc32][4-byte isize]`. So the zlib stream is written at offset 8, the
+        10-byte gzip header then overwrites exactly the two zlib header bytes it
+        left at [8,10), and the 8-byte trailer overwrites the 4 adler bytes in
+        place. The deflate payload — all of it — is never moved.
         """
         var n = len(input)
-        var handle_ptr = _z_handle()
-        var bound = Int(handle_ptr[].call["compressBound", Int64](Int64(n)))
-        # 8 leading (so the deflate body lands at 10) + 8 trailing (crc + isize,
-        # of which 4 overwrite the adler32).
-        var out = List[UInt8](capacity=8 + bound + 8)
-        var base = _list_ptr(out)
-
-        var size_buf = alloc[Int64](1)
-        size_buf[0] = Int64(bound)
-        # FFI-BOUNDARY:
-        var status = handle_ptr[].call["compress2", Int32](
-            base + 8,
-            size_buf,
-            _span_ptr(input),
-            Int64(n),
-            Int32(Self.level),
-        )
-        var zlen = Int(size_buf[0])
-        size_buf.free()
-        if Int(status) != 0:
-            raise Error(
-                "Gzip.compress_gzip_file: zlib compress2 failed (status="
-                + String(Int(status)) + ", n=" + String(n) + ")"
-            )
+        var out: List[UInt8]
+        var crc: UInt32
+        try:
+            # 8 leading bytes, so the deflate body lands at 10.
+            out = Self._deflate_zlib(input, 8)
+            crc = zlib_crc32(input)
+        except e:
+            raise Error("Gzip.compress_gzip_file: " + String(e))
+        var zlen = len(out) - 8
         if zlen < 6:
             raise Error(
                 "Gzip.compress_gzip_file: zlib stream too short to reframe"
@@ -881,98 +819,50 @@ struct Gzip[level: Int = 6](Compression):
         # RFC 1952 §2.3 header: magic, CM=8 (deflate), FLG=0 (no name/extra),
         # MTIME=0 (no timestamp — keeps the output BYTE-DETERMINISTIC, which a
         # write-parity corpus depends on), XFL by level, OS=255 (unknown).
-        base[0] = UInt8(0x1F)
-        base[1] = UInt8(0x8B)
-        base[2] = UInt8(8)
-        base[3] = UInt8(0)
-        base[4] = UInt8(0)
-        base[5] = UInt8(0)
-        base[6] = UInt8(0)
-        base[7] = UInt8(0)
+        out[0] = UInt8(0x1F)
+        out[1] = UInt8(0x8B)
+        out[2] = UInt8(8)
+        out[3] = UInt8(0)
+        out[4] = UInt8(0)
+        out[5] = UInt8(0)
+        out[6] = UInt8(0)
+        out[7] = UInt8(0)
         comptime xfl = 2 if Self.level == 9 else (4 if Self.level == 1 else 0)
-        base[8] = UInt8(xfl)
-        base[9] = UInt8(255)
+        out[8] = UInt8(xfl)
+        out[9] = UInt8(255)
 
         # Trailer, little-endian, starting where the adler32 sat.
-        var crc = Self._crc32(input)
         var isize = UInt32(n & 0xFFFFFFFF)
-        var t = 8 + zlen - 4
-        base[t + 0] = UInt8(Int(crc) & 0xFF)
-        base[t + 1] = UInt8((Int(crc) >> 8) & 0xFF)
-        base[t + 2] = UInt8((Int(crc) >> 16) & 0xFF)
-        base[t + 3] = UInt8((Int(crc) >> 24) & 0xFF)
-        base[t + 4] = UInt8(Int(isize) & 0xFF)
-        base[t + 5] = UInt8((Int(isize) >> 8) & 0xFF)
-        base[t + 6] = UInt8((Int(isize) >> 16) & 0xFF)
-        base[t + 7] = UInt8((Int(isize) >> 24) & 0xFF)
-
-        out.resize(unsafe_uninit_length=zlen + 12)
+        out.resize(8 + zlen - 4, UInt8(0))
+        out.append(UInt8(Int(crc) & 0xFF))
+        out.append(UInt8((Int(crc) >> 8) & 0xFF))
+        out.append(UInt8((Int(crc) >> 16) & 0xFF))
+        out.append(UInt8((Int(crc) >> 24) & 0xFF))
+        out.append(UInt8(Int(isize) & 0xFF))
+        out.append(UInt8((Int(isize) >> 8) & 0xFF))
+        out.append(UInt8((Int(isize) >> 16) & 0xFF))
+        out.append(UInt8((Int(isize) >> 24) & 0xFF))
         return out^
 
     @staticmethod
     def decompress(
         input: Span[UInt8, _], expected_size: Int
     ) raises -> List[UInt8]:
-        var n = len(input)
         if expected_size <= 0:
             raise Error(
                 "Gzip.decompress: expected_size must be > 0 (got "
                 + String(expected_size) + ")"
             )
         var out = List[UInt8](capacity=expected_size)
-
-        var handle_ptr = _z_handle()
-        var version = handle_ptr[].call[
-            "zlibVersion", UnsafePointer[UInt8, MutUntrackedOrigin]
-        ]()
-
-        # SAFETY: opaque z_stream scratch buffer, freed via inflateEnd +
-        # alloc.free() before return.
-        var strm = alloc[UInt8](_Z_STREAM_SIZE)
-        # zero-init the 112-byte struct
-        var zi: Int = 0
-        while zi < _Z_STREAM_SIZE:
-            strm[zi] = UInt8(0)
-            zi += 1
-
-        # z_stream layout on LP64 (verified in komira_parquet/compression.mojo):
-        #   off  0, size 8: next_in   (const unsigned char*)
-        #   off  8, size 4: avail_in  (unsigned int)
-        #   off 12, size 4: _pad1
-        #   off 16, size 8: total_in
-        #   off 24, size 8: next_out
-        #   off 32, size 4: avail_out
-        #   off 40, size 8: total_out
-        var src_ptr = _span_ptr(input)
-        var dst_ptr = _list_ptr(out)
-        (strm.bitcast[UInt64]() + 0)[] = UInt64(Int(src_ptr))
-        (strm.bitcast[UInt32]() + 2)[] = UInt32(n)
-        (strm.bitcast[UInt64]() + 3)[] = UInt64(Int(dst_ptr))
-        (strm.bitcast[UInt32]() + 8)[] = UInt32(expected_size)
-
-        var init_rc = handle_ptr[].call["inflateInit2_", Int32](
-            strm, _Z_WINDOWBITS_AUTO, version, Int32(_Z_STREAM_SIZE)
-        )
-        if Int(init_rc) != _Z_OK:
-            strm.free()
-            raise Error(
-                "Gzip.decompress: inflateInit2_ failed (rc="
-                + String(Int(init_rc)) + ")"
+        out.resize(unsafe_uninit_length=expected_size)
+        var written: Int
+        try:
+            written = zlib_inflate_into(
+                Span(out), input, ZLIB_WINDOW_BITS_AUTO
             )
-
-        var rc = handle_ptr[].call["inflate", Int32](
-            strm, Int32(_Z_NO_FLUSH)
-        )
-        var total_out = Int((strm.bitcast[UInt64]() + 5)[])
-        _ = handle_ptr[].call["inflateEnd", Int32](strm)
-        strm.free()
-
-        if Int(rc) != _Z_OK and Int(rc) != _Z_STREAM_END:
-            raise Error(
-                "Gzip.decompress: inflate failed (rc=" + String(Int(rc))
-                + ", n=" + String(n) + ")"
-            )
-        out.resize(unsafe_uninit_length=total_out)
+        except e:
+            raise Error("Gzip.decompress: " + String(e))
+        out.resize(written, UInt8(0))
         return out^
 
 
@@ -1061,13 +951,12 @@ struct Brotli[quality: Int = 11](Compression):
 struct Lz4Raw(Compression):
     """LZ4 raw-block compression codec (Parquet codec id 7).
 
-    Wires liblz4's raw-block API (`LZ4_compressBound` / `LZ4_compress_default`
-    / `LZ4_decompress_safe`) via the shared `OwnedDLHandle` singleton — the
-    SAME C entry points used by `komira_parquet.compression`'s
-    `_compress_lz4_raw` / `_decompress_lz4_raw` page-codec path. This is the
-    raw LZ4 BLOCK format (no frame magic, no block list, no end mark);
-    distinct on-wire from `Lz4Frame` (Arrow IPC, magic 0x184D2204). The two
-    LZ4 framings are NOT interchangeable.
+    Delegates to komira_lz4's raw-block API (`lz4_compress_bound` /
+    `lz4_compress_into` / `lz4_decompress_into`, over liblz4's
+    `LZ4_compressBound` / `LZ4_compress_default` / `LZ4_decompress_safe`).
+    This is the raw LZ4 BLOCK format (no frame magic, no block list, no end
+    mark); distinct on-wire from `Lz4Frame` (Arrow IPC, magic 0x184D2204). The
+    two LZ4 framings are NOT interchangeable.
     """
 
     var _reserved: Bool
@@ -1081,68 +970,40 @@ struct Lz4Raw(Compression):
 
     @staticmethod
     def compress(input: Span[UInt8, _]) raises -> List[UInt8]:
-        # liblz4 raw-block compress. lz4.h:
-        #   int LZ4_compress_default(const char* src, char* dst,
-        #                            int srcSize, int dstCapacity);
-        # Returns bytes written (0 on insufficient dstCapacity). The block
-        # format carries NO length/frame prefix — the caller stores the
-        # uncompressed size out-of-band (Parquet page header carries it),
-        # mirroring `komira_parquet.compression._compress_lz4_raw`.
-        var n = len(input)
-        var handle_ptr = _lz4_handle()
-        # LZ4_compressBound(inputSize) — worst-case compressed size.
-        var bound = Int(
-            handle_ptr[].call["LZ4_compressBound", Int32](Int32(n))
-        )
-        var out = List[UInt8](capacity=bound)
-        # FFI-BOUNDARY: arg order is (src, dst, srcSize, dstCapacity).
-        var written = handle_ptr[].call["LZ4_compress_default", Int32](
-            _span_ptr(input),
-            _list_ptr(out),
-            Int32(n),
-            Int32(bound),
-        )
-        if Int(written) <= 0:
-            raise Error(
-                "Lz4Raw.compress: LZ4_compress_default failed (result="
-                + String(Int(written)) + ", n=" + String(n)
-                + ", bound=" + String(bound) + ")"
-            )
-        out.resize(unsafe_uninit_length=Int(written))
+        # The block format carries NO length/frame prefix — the caller stores
+        # the uncompressed size out-of-band (Parquet page header carries it).
+        # An empty input is the one-byte empty block 0x00.
+        var out: List[UInt8]
+        try:
+            var bound = lz4_compress_bound(len(input))
+            out = List[UInt8](capacity=bound)
+            out.resize(unsafe_uninit_length=bound)
+            var written = lz4_compress_into(Span(out), input)
+            out.resize(written, UInt8(0))
+        except e:
+            raise Error("Lz4Raw.compress: " + String(e))
         return out^
 
     @staticmethod
     def decompress(
         input: Span[UInt8, _], expected_size: Int
     ) raises -> List[UInt8]:
-        # liblz4 raw-block decompress. lz4.h:
-        #   int LZ4_decompress_safe(const char* src, char* dst,
-        #                           int compressedSize, int dstCapacity);
-        # Returns bytes written (negative on error). The raw block carries
-        # no uncompressed-size prefix, so `expected_size` (the decoded size
-        # the caller knows out-of-band) IS the destination capacity.
-        var n = len(input)
+        # The raw block carries no uncompressed-size prefix, so `expected_size`
+        # (the decoded size the caller knows out-of-band) IS the destination
+        # capacity.
         if expected_size <= 0:
             raise Error(
                 "Lz4Raw.decompress: expected_size must be > 0 (got "
                 + String(expected_size) + ")"
             )
-        var handle_ptr = _lz4_handle()
         var out = List[UInt8](capacity=expected_size)
-        # FFI-BOUNDARY: arg order is (src, dst, compressedSize, dstCapacity).
-        var written = handle_ptr[].call["LZ4_decompress_safe", Int32](
-            _span_ptr(input),
-            _list_ptr(out),
-            Int32(n),
-            Int32(expected_size),
-        )
-        if Int(written) < 0:
-            raise Error(
-                "Lz4Raw.decompress: LZ4_decompress_safe failed (result="
-                + String(Int(written)) + ", n=" + String(n)
-                + ", expected_size=" + String(expected_size) + ")"
-            )
-        out.resize(unsafe_uninit_length=Int(written))
+        out.resize(unsafe_uninit_length=expected_size)
+        var written: Int
+        try:
+            written = lz4_decompress_into(Span(out), input)
+        except e:
+            raise Error("Lz4Raw.decompress: " + String(e))
+        out.resize(written, UInt8(0))
         return out^
 
 
@@ -1155,8 +1016,11 @@ struct Lz4Raw(Compression):
 # Distinct from `Lz4Raw` (Parquet codec id 7) which is the raw-block form —
 # the two LZ4 framings are wire-incompatible.
 #
-# Wired to liblz4's `LZ4F_compressFrame` / `LZ4F_decompress` FFI entry
-# points (the same shape as `Zstd[level]` / `Snappy`).
+# Delegates to komira_lz4's frame API (`komira_lz4.frame`: liblz4's
+# `LZ4F_compressFrame` with default preferences, and one-shot
+# `LZ4F_decompress`). The trait's opaque dctx pointer is a heap-boxed
+# `Lz4FrameDecoder` (which owns the `LZ4F_dctx`); only this struct makes or
+# opens the box.
 #
 # `PARQUET_CODEC_ID = -1` sentinel: Lz4Frame is wire-incorrect for
 # Parquet (Parquet uses Lz4Raw at id 7, NOT Lz4Frame). The -1 sentinel
@@ -1176,9 +1040,9 @@ struct Lz4Frame(ArrowIpcCompression):
     Distinct from `Lz4Raw` (Parquet codec id 7 raw-block form): LZ4-Frame
     is the streaming-friendly wrapper format with magic `0x184D2204`.
 
-    Wired to `liblz4`'s `LZ4F_compressFrame` / `LZ4F_decompress` FFI entry
-    points (the streaming Arrow IPC per-buffer compression surface; mirror
-    of the `Zstd[level]` / `Snappy` FFI pattern in this file).
+    Delegates to komira_lz4's frame API. A decode is one-shot: one
+    `LZ4F_decompress` call over the whole input, refused on a liblz4 error or
+    when any input is left unconsumed.
     """
 
     var _reserved: Bool
@@ -1193,125 +1057,36 @@ struct Lz4Frame(ArrowIpcCompression):
 
     @staticmethod
     def compress(input: Span[UInt8, _]) raises -> List[UInt8]:
-        # Calls liblz4 `LZ4F_compressFrame` via
-        # OwnedDLHandle singleton (mirrors the Zstd / Gzip shape).
-        # The frame format wraps the LZ4 raw block in a frame magic
-        # (0x184D2204) + frame descriptor + block list + end mark — the
-        # streaming-friendly LZ4 variant that Arrow IPC ships as
-        # `BodyCompression.codec = LZ4_FRAME (0)`. Distinct on-wire from
-        # `Lz4Raw` (Parquet codec id 7); the two are NOT interchangeable.
-        var n = len(input)
-        var handle_ptr = _lz4_handle()
-        # LZ4F_compressFrameBound(srcSize, prefs=NULL): returns max
-        # compressed size for srcSize input with default preferences.
-        # Pass NULL prefs (LZ4F_INIT_PREFERENCES default — compressionLevel
-        # 0 = LZ4F_CLEVEL_DEFAULT, no checksums, autoFlush off).
-        var null_prefs = _null_ptr[UInt8, MutUntrackedOrigin]()
-        var bound = handle_ptr[].call["LZ4F_compressFrameBound", Int](
-            n, null_prefs
-        )
-        var out = List[UInt8](capacity=bound)
-        # FFI-BOUNDARY:
-        var written = handle_ptr[].call["LZ4F_compressFrame", Int](
-            _list_ptr(out),
-            bound,
-            _span_ptr(input),
-            n,
-            null_prefs,
-        )
-        # LZ4F_isError(result) — nonzero on error. The encoding API uses
-        # the same "is_error" tagged return as the decode API.
-        var is_err = handle_ptr[].call["LZ4F_isError", Int32](written)
-        if Int(is_err) != 0:
-            raise Error(
-                "Lz4Frame.compress: LZ4F_compressFrame failed (result="
-                + String(written) + ", n=" + String(n) + ")"
-            )
-        out.resize(unsafe_uninit_length=written)
+        # Default preferences (liblz4's NULL prefs), so the bytes are the ones
+        # `compress_into` writes.
+        var out: List[UInt8]
+        try:
+            var bound = lz4_frame_compress_bound(len(input))
+            out = List[UInt8](capacity=bound)
+            out.resize(unsafe_uninit_length=bound)
+            var written = lz4_frame_compress_into(Span(out), input)
+            out.resize(written, UInt8(0))
+        except e:
+            raise Error("Lz4Frame.compress: " + String(e))
         return out^
 
     @staticmethod
     def decompress(
         input: Span[UInt8, _], expected_size: Int
     ) raises -> List[UInt8]:
-        # Calls liblz4 `LZ4F_decompress` via
-        # OwnedDLHandle singleton. Requires a decompression context
-        # (LZ4F_dctx); create + free per-call. The dctx is a few KB and
-        # per-call alloc is fine for the Arrow IPC per-buffer model
-        # (the alternative is a thread-local cache).
-        var n = len(input)
         if expected_size <= 0:
             raise Error(
                 "Lz4Frame.decompress: expected_size must be > 0 (got "
                 + String(expected_size) + ")"
             )
-        var handle_ptr = _lz4_handle()
-
-        # SAFETY: dctx_ptr is a heap-allocated pointer slot for the
-        # LZ4F_dctx*. We OWN the alloc; the create/free pair zips
-        # allocate+release the dctx itself (separately from this slot).
-        var dctx_ptr = alloc[UnsafePointer[UInt8, MutUntrackedOrigin]](1)
-        dctx_ptr[0] = _null_ptr[UInt8, MutUntrackedOrigin]()
-        var create_rc = handle_ptr[].call[
-            "LZ4F_createDecompressionContext", Int
-        ](dctx_ptr, _LZ4F_VERSION)
-        var create_err = handle_ptr[].call["LZ4F_isError", Int32](create_rc)
-        if Int(create_err) != 0:
-            dctx_ptr.free()
-            raise Error(
-                "Lz4Frame.decompress: LZ4F_createDecompressionContext failed"
-                " (rc=" + String(create_rc) + ")"
-            )
-        var dctx = dctx_ptr[0]
-
         var out = List[UInt8](capacity=expected_size)
-
-        # LZ4F_decompress takes pointers to dstSize + srcSize that are
-        # ALSO outputs (read+write). Allocate transient u64 slots for
-        # them (Mojo `Int64` and `Int` are wire-compat with size_t on
-        # LP64 — same 8-byte width).
-        var dst_size_slot = alloc[Int64](1)
-        dst_size_slot[0] = Int64(expected_size)
-        var src_size_slot = alloc[Int64](1)
-        src_size_slot[0] = Int64(n)
-        # opts pointer can be NULL — defaults.
-        var null_opts = _null_ptr[UInt8, MutUntrackedOrigin]()
-        # FFI-BOUNDARY:
-        var result = handle_ptr[].call["LZ4F_decompress", Int](
-            dctx,
-            _list_ptr(out),
-            dst_size_slot,
-            _span_ptr(input),
-            src_size_slot,
-            null_opts,
-        )
-        var written = Int(dst_size_slot[0])
-        var consumed = Int(src_size_slot[0])
-        dst_size_slot.free()
-        src_size_slot.free()
-        var _free_rc = handle_ptr[].call[
-            "LZ4F_freeDecompressionContext", Int
-        ](dctx)
-        dctx_ptr.free()
-
-        var is_err = handle_ptr[].call["LZ4F_isError", Int](result)
-        if is_err != 0:
-            raise Error(
-                "Lz4Frame.decompress: LZ4F_decompress failed (result="
-                + String(result) + ", n=" + String(n)
-                + ", written=" + String(written) + ")"
-            )
-        # Successful one-shot decode returns 0 (nothing left in src) or
-        # the size of next expected input chunk (multi-call streaming).
-        # For one-shot full-frame decode, `consumed` must equal `n` and
-        # `written` must equal `expected_size`.
-        if consumed != n:
-            raise Error(
-                "Lz4Frame.decompress: incomplete decode (consumed="
-                + String(consumed) + " of " + String(n) + " bytes;"
-                + " only one-shot decode is supported, not multi-call streaming)"
-            )
-        out.resize(unsafe_uninit_length=written)
+        out.resize(unsafe_uninit_length=expected_size)
+        var written: Int
+        try:
+            written = lz4_frame_decompress_into(Span(out), input)
+        except e:
+            raise Error("Lz4Frame.decompress: " + String(e))
+        out.resize(written, UInt8(0))
         return out^
 
     @staticmethod
@@ -1329,120 +1104,57 @@ struct Lz4Frame(ArrowIpcCompression):
 
         Avoids the `List` alloc + per-buffer memcpy on the LZ4 read arm.
         """
-        var n = len(src)
         if dst_capacity <= 0:
             raise Error(
                 "Lz4Frame.decompress_into: dst_capacity must be > 0 (got "
                 + String(dst_capacity) + ")"
             )
-        var handle_ptr = _lz4_handle()
-
-        # SAFETY: dctx_ptr is a heap-allocated pointer slot for the
-        # LZ4F_dctx*. We OWN the alloc; the create/free pair zips
-        # allocate+release the dctx itself (separately from this slot).
-        var dctx_ptr = alloc[UnsafePointer[UInt8, MutUntrackedOrigin]](1)
-        dctx_ptr[0] = _null_ptr[UInt8, MutUntrackedOrigin]()
-        var create_rc = handle_ptr[].call[
-            "LZ4F_createDecompressionContext", Int
-        ](dctx_ptr, _LZ4F_VERSION)
-        var create_err = handle_ptr[].call["LZ4F_isError", Int32](create_rc)
-        if Int(create_err) != 0:
-            dctx_ptr.free()
-            raise Error(
-                "Lz4Frame.decompress_into: LZ4F_createDecompressionContext"
-                " failed (rc=" + String(create_rc) + ")"
-            )
-        var dctx = dctx_ptr[0]
-
-        # LZ4F_decompress takes pointers to dstSize + srcSize that are
-        # ALSO outputs (read+write). Allocate transient u64 slots.
-        var dst_size_slot = alloc[Int64](1)
-        dst_size_slot[0] = Int64(dst_capacity)
-        var src_size_slot = alloc[Int64](1)
-        src_size_slot[0] = Int64(n)
-        var null_opts = _null_ptr[UInt8, MutUntrackedOrigin]()
-        # FFI-BOUNDARY: `dst` lifetime guaranteed by caller per
-        # SAFETY contract on the trait method (synchronous FFI).
-        var result = handle_ptr[].call["LZ4F_decompress", Int](
-            dctx,
-            dst.unsafe_origin_cast[MutUntrackedOrigin](),
-            dst_size_slot,
-            _span_ptr(src),
-            src_size_slot,
-            null_opts,
-        )
-        var written = Int(dst_size_slot[0])
-        var consumed = Int(src_size_slot[0])
-        dst_size_slot.free()
-        src_size_slot.free()
-        var _free_rc = handle_ptr[].call[
-            "LZ4F_freeDecompressionContext", Int
-        ](dctx)
-        dctx_ptr.free()
-
-        var is_err = handle_ptr[].call["LZ4F_isError", Int](result)
-        if is_err != 0:
-            raise Error(
-                "Lz4Frame.decompress_into: LZ4F_decompress failed (result="
-                + String(result) + ", n=" + String(n)
-                + ", written=" + String(written) + ")"
-            )
-        if consumed != n:
-            raise Error(
-                "Lz4Frame.decompress_into: incomplete decode (consumed="
-                + String(consumed) + " of " + String(n) + " bytes;"
-                + " only one-shot decode is supported, not multi-call streaming)"
-            )
-        return written
+        # SAFETY: the trait contract: `dst` holds `dst_capacity` writable
+        # bytes for the duration of this synchronous call.
+        var out = Span[UInt8, o](unsafe_ptr=dst, length=dst_capacity)
+        try:
+            return lz4_frame_decompress_into(out, src)
+        except e:
+            raise Error("Lz4Frame.decompress_into: " + String(e))
 
     @staticmethod
     def create_dctx() raises -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-        """Create one `LZ4F_dctx*` via `LZ4F_createDecompressionContext`.
-        The returned pointer is opaque; pass through `free_dctx` /
-        `decompress_into_with_dctx`.
+        """A reusable decompression context, as the trait's opaque pointer:
+        a heap-boxed `Lz4FrameDecoder`. Pass it to
+        `decompress_into_with_dctx` and release it with `free_dctx`.
 
         A per-worker cache removes one LZ4F_createDecompressionContext
         + LZ4F_freeDecompressionContext pair per compressed buffer.
         Same pattern as arrow-cpp's per-thread dctx cache.
         """
-        var handle_ptr = _lz4_handle()
-        # SAFETY: dctx_ptr is a heap-allocated pointer slot for the
-        # LZ4F_dctx*. We OWN the alloc; free it BEFORE returning. The
-        # caller owns only the inner dctx pointer (returned by-value).
-        var dctx_ptr = alloc[UnsafePointer[UInt8, MutUntrackedOrigin]](1)
-        dctx_ptr[0] = _null_ptr[UInt8, MutUntrackedOrigin]()
-        # FFI-BOUNDARY:
-        var create_rc = handle_ptr[].call[
-            "LZ4F_createDecompressionContext", Int
-        ](dctx_ptr, _LZ4F_VERSION)
-        var create_err = handle_ptr[].call["LZ4F_isError", Int32](create_rc)
-        var dctx = dctx_ptr[0]
-        dctx_ptr.free()
-        if Int(create_err) != 0:
-            raise Error(
-                "Lz4Frame.create_dctx: LZ4F_createDecompressionContext"
-                " failed (rc=" + String(create_rc) + ")"
-            )
-        return dctx
+        var decoder: Lz4FrameDecoder
+        try:
+            decoder = Lz4FrameDecoder()
+        except e:
+            raise Error("Lz4Frame.create_dctx: " + String(e))
+        # SAFETY: a fresh one-element allocation, move-initialised on the next
+        # line before any read. Its single owner is the returned pointer until
+        # `free_dctx` reclaims it.
+        var box = alloc[Lz4FrameDecoder](1)
+        box.unsafe_write(decoder^)
+        return box.bitcast[UInt8]().unsafe_origin_cast[MutUntrackedOrigin]()
 
     @staticmethod
     def free_dctx(var dctx: UnsafePointer[UInt8, MutUntrackedOrigin]):
-        """Release an `LZ4F_dctx*` via `LZ4F_freeDecompressionContext`.
+        """Release a context from `create_dctx` (destroys the boxed
+        `Lz4FrameDecoder`, which frees its `LZ4F_dctx`, then frees the box).
         Null-safe.
         """
         if Int(dctx) == 0:
             return
-        try:
-            var handle_ptr = _lz4_handle()
-            # FFI-BOUNDARY: LZ4F_freeDecompressionContext returns size_t;
-            # for the well-formed-pointer case it returns 0. Ignored in
-            # the destructor path.
-            var _rc = handle_ptr[].call[
-                "LZ4F_freeDecompressionContext", Int
-            ](dctx)
-        except:
-            # Same swallow rationale as Zstd.free_dctx: destructor path.
-            pass
+        # SAFETY: `dctx` is the byte view of the `alloc[Lz4FrameDecoder](1)`
+        # box `create_dctx` filled, released here exactly once (the trait
+        # contract), so this `OwnedPointer` is its single owner: dropping it
+        # runs the decoder's destructor and frees the box.
+        var owned = OwnedPointer[Lz4FrameDecoder](
+            unsafe_from_raw_pointer=dctx.bitcast[Lz4FrameDecoder]()
+        )
+        _ = owned^
 
     @staticmethod
     def decompress_into_with_dctx[
@@ -1454,15 +1166,13 @@ struct Lz4Frame(ArrowIpcCompression):
         dst_capacity: Int,
     ) raises -> Int:
         """LZ4-Frame decompress into `dst` using the caller-supplied
-        `dctx`. Calls `LZ4F_resetDecompressionContext(dctx)` BEFORE the
-        decompress to clear any prior streaming state (per `lz4frame.h`
-        l.497: "Use LZ4F_resetDecompressionContext() to return to clean
-        state").
+        context from `create_dctx`. The context is reset before the
+        decompress (`LZ4F_resetDecompressionContext`), so a frame that failed
+        before leaves no state behind.
 
-        Same FFI call as `decompress_into` but with a caller-cached dctx,
+        Same decode as `decompress_into` but with a caller-cached context,
         so no context is created or freed per buffer.
         """
-        var n = len(src)
         if dst_capacity <= 0:
             raise Error(
                 "Lz4Frame.decompress_into_with_dctx: dst_capacity must"
@@ -1473,65 +1183,24 @@ struct Lz4Frame(ArrowIpcCompression):
                 "Lz4Frame.decompress_into_with_dctx: null dctx (call"
                 " create_dctx first)"
             )
-        var handle_ptr = _lz4_handle()
-
-        # FFI-BOUNDARY: LZ4F_resetDecompressionContext returns void per
-        # lz4frame.h l.513 ("always successful"). external_call requires
-        # a return type; declare Int for ABI compat and discard.
-        var _reset_rc = handle_ptr[].call[
-            "LZ4F_resetDecompressionContext", Int
-        ](dctx)
-
-        # LZ4F_decompress takes pointers to dstSize + srcSize that are
-        # ALSO outputs (read+write). Allocate transient u64 slots.
-        var dst_size_slot = alloc[Int64](1)
-        dst_size_slot[0] = Int64(dst_capacity)
-        var src_size_slot = alloc[Int64](1)
-        src_size_slot[0] = Int64(n)
-        var null_opts = _null_ptr[UInt8, MutUntrackedOrigin]()
-        # FFI-BOUNDARY: `dst` lifetime guaranteed by caller per SAFETY
-        # contract on the trait method (synchronous FFI).
-        var result = handle_ptr[].call["LZ4F_decompress", Int](
-            dctx,
-            dst.unsafe_origin_cast[MutUntrackedOrigin](),
-            dst_size_slot,
-            _span_ptr(src),
-            src_size_slot,
-            null_opts,
-        )
-        var written = Int(dst_size_slot[0])
-        var consumed = Int(src_size_slot[0])
-        dst_size_slot.free()
-        src_size_slot.free()
-
-        var is_err = handle_ptr[].call["LZ4F_isError", Int](result)
-        if is_err != 0:
-            raise Error(
-                "Lz4Frame.decompress_into_with_dctx: LZ4F_decompress"
-                " failed (result=" + String(result) + ", n=" + String(n)
-                + ", written=" + String(written) + ")"
-            )
-        if consumed != n:
-            raise Error(
-                "Lz4Frame.decompress_into_with_dctx: incomplete decode"
-                " (consumed=" + String(consumed) + " of " + String(n)
-                + " bytes; only one-shot decode is supported, not multi-call"
-                " streaming)"
-            )
-        return written
+        # SAFETY: the trait contract: `dctx` came from `create_dctx` (a boxed
+        # `Lz4FrameDecoder`, live until `free_dctx`) and is used by one worker
+        # at a time; `dst` holds `dst_capacity` writable bytes for the duration
+        # of this synchronous call.
+        var decoder = dctx.bitcast[Lz4FrameDecoder]()
+        var out = Span[UInt8, o](unsafe_ptr=dst, length=dst_capacity)
+        try:
+            return decoder[].decompress_into(out, src)
+        except e:
+            raise Error("Lz4Frame.decompress_into_with_dctx: " + String(e))
 
     @staticmethod
     def compress_bound(src_size: Int) raises -> Int:
-        """Worst-case LZ4-Frame compressed size via
-        `LZ4F_compressFrameBound(srcSize, prefs=NULL)`. NULL prefs
-        matches the `compress_into` shape below (default preferences,
-        same as the existing `compress` body).
+        """Worst-case LZ4-Frame compressed size with default preferences
+        (`LZ4F_compressFrameBound(srcSize, prefs=NULL)`), matching
+        `compress` / `compress_into`.
         """
-        var handle_ptr = _lz4_handle()
-        var null_prefs = _null_ptr[UInt8, MutUntrackedOrigin]()
-        return handle_ptr[].call["LZ4F_compressFrameBound", Int](
-            src_size, null_prefs
-        )
+        return lz4_frame_compress_bound(src_size)
 
     @staticmethod
     def compress_into[
@@ -1542,42 +1211,27 @@ struct Lz4Frame(ArrowIpcCompression):
         dst_capacity: Int,
     ) raises -> Int:
         """LZ4-Frame compress directly into `dst`. Zero-extra-copy
-        WRITE-side variant of `compress`: the FFI writes its output
-        into `dst` (the Arrow IPC output frame's compressed body
-        region) instead of into an intermediate `List[UInt8]` that
-        the driver then memcpys via `copy_from_bytes_list_at`.
+        WRITE-side variant of `compress`: the output goes into `dst`
+        (the Arrow IPC output frame's compressed body region) instead of
+        into an intermediate `List[UInt8]` that the driver then memcpys
+        via `copy_from_bytes_list_at`.
 
-        Write-side mirror of the read-side `decompress_into`. Caller pre-sizes the
-        output region using `compress_bound(len(src))`. Uses NULL
-        prefs (LZ4F_INIT_PREFERENCES default — clevel 0, no
-        checksums, autoFlush off) matching the existing `compress`
-        body to keep on-wire byte-identity.
+        Write-side mirror of the read-side `decompress_into`. Caller pre-sizes
+        the output region using `compress_bound(len(src))` (a smaller one is
+        refused). Default preferences, matching `compress` byte for byte.
         """
-        var n = len(src)
         if dst_capacity <= 0:
             raise Error(
                 "Lz4Frame.compress_into: dst_capacity must be > 0 (got "
                 + String(dst_capacity) + ")"
             )
-        var handle_ptr = _lz4_handle()
-        var null_prefs = _null_ptr[UInt8, MutUntrackedOrigin]()
-        # FFI-BOUNDARY: `dst` lifetime guaranteed by caller per
-        # SAFETY contract on the trait method (synchronous FFI).
-        var written = handle_ptr[].call["LZ4F_compressFrame", Int](
-            dst.unsafe_origin_cast[MutUntrackedOrigin](),
-            dst_capacity,
-            _span_ptr(src),
-            n,
-            null_prefs,
-        )
-        var is_err = handle_ptr[].call["LZ4F_isError", Int32](written)
-        if Int(is_err) != 0:
-            raise Error(
-                "Lz4Frame.compress_into: LZ4F_compressFrame failed (result="
-                + String(written) + ", n=" + String(n)
-                + ", dst_capacity=" + String(dst_capacity) + ")"
-            )
-        return written
+        # SAFETY: the trait contract: `dst` holds `dst_capacity` writable
+        # bytes for the duration of this synchronous call.
+        var out = Span[UInt8, o](unsafe_ptr=dst, length=dst_capacity)
+        try:
+            return lz4_frame_compress_into(out, src)
+        except e:
+            raise Error("Lz4Frame.compress_into: " + String(e))
 
 
 @fieldwise_init
@@ -1631,17 +1285,16 @@ struct Zlib[level: Int = 6](Compression):
 # owner / reader / writer of its slot.
 #
 # ENCAPSULATION: the raw
-# `UnsafePointer[UInt8, MutExternalOrigin]` is held in a PRIVATE field
+# `UnsafePointer[UInt8, MutUntrackedOrigin]` is held in a PRIVATE field
 # `_raw`. The handle exposes a single `decompress_into_with_dctx[o]`
 # method that forwards to `C.decompress_into_with_dctx`. The driver in
 # `ipc_body_compression.mojo` only ever sees the handle by reference;
 # the raw dctx pointer never crosses a module boundary.
 #
-# Movable semantics: handle moves transfer ownership of `_raw`; the
-# source's `_raw` becomes null (so __deinit__ is a no-op on the moved-from
-# instance). @fieldwise_init synthesizes the move correctly (UInt8*
-# field is trivially copyable; the moved-from value is dropped without
-# calling free_dctx because we manually null it out — see init / take).
+# Movable semantics: the synthesized move copies `_raw` into the destination
+# and ends the source's lifetime WITHOUT running its `__deinit__`, so a move
+# transfers ownership of the dctx and nothing frees it twice. The null check
+# in `__deinit__` covers the default-constructed handle (no dctx created yet).
 #
 # SAFETY:
 #   - One handle owns ONE dctx; the destructor calls free_dctx exactly
@@ -1649,7 +1302,8 @@ struct Zlib[level: Int = 6](Compression):
 #   - Per-worker disjointness: the dispatch driver guarantees that
 #     handle slot `tid` is touched only by worker `tid`. No cross-thread
 #     access to one handle.
-#   - The `_raw` pointer is opaque (a `LZ4F_dctx*` or `ZSTD_DCtx*`);
+#   - The `_raw` pointer is opaque (a boxed `Lz4FrameDecoder` or a
+#     `ZSTD_DCtx*`);
 #     the FFI side is the SOLE site that dereferences it. The handle
 #     does not pointer-arithmetic on it.
 # =============================================================================
@@ -1665,13 +1319,13 @@ struct _CodecDctxHandle[C: ArrowIpcCompression](
     `ipc_body_compression.mojo`.
 
     Field set:
-      var _raw: UnsafePointer[UInt8, MutExternalOrigin]
-        # SAFETY: opaque codec-specific dctx pointer
-        # (LZ4F_dctx* for Lz4Frame, ZSTD_DCtx* for Zstd, null for
-        # Uncompressed). Null sentinel = no live dctx (already freed,
-        # or moved-from, or default-constructed before first use). The
-        # destructor's null-guard ensures double-free safety on the
-        # moved-from instance.
+      var _raw: UnsafePointer[UInt8, MutUntrackedOrigin]
+        # SAFETY: opaque codec-specific dctx pointer from `C.create_dctx`
+        # (a heap-boxed `komira_lz4.frame.Lz4FrameDecoder` for Lz4Frame,
+        # ZSTD_DCtx* for Zstd, null for Uncompressed). Null = no dctx
+        # created yet (default-constructed, `acquire` not called); the
+        # destructor skips `free_dctx` then. A moved-from handle is never
+        # destroyed, so it needs no null.
     """
 
     # SAFETY: opaque codec-specific dctx pointer; never dereferenced

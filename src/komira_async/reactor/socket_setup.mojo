@@ -12,6 +12,8 @@
 #   - sockaddr_in_bytes(ip_be, port_host) -> InlineArray[UInt8, 16]
 #   - inet_loopback_be() -> UInt32                       # 127.0.0.1 in network byte order
 #   - inet_any_be() -> UInt32                            # 0.0.0.0 (INADDR_ANY) — bind all interfaces
+#   - set_so_sndbuf(fd, bytes) raises / so_sndbuf(fd) raises -> Int32
+#   - set_so_rcvbuf(fd, bytes) raises / so_rcvbuf(fd) raises -> Int32
 #
 # Pointer discipline:
 #   - All public functions return typed scalars / InlineArray.
@@ -55,7 +57,7 @@ comptime _SOCK_NONBLOCK_LINUX: Int32 = Int32(0o4000)
 #
 # all fcntl call sites in this module
 # now route through the non-variadic C shim
-# (komira_core's native POSIX wrappers plus `_posix_shim.c`). The shims
+# (the core packages' native POSIX wrappers plus `_posix_shim.c`). The shims
 # are statically linked into every binary that links this library.
 # The aliases below
 # are retained as DOCUMENTATION ONLY — do not call `external_call`
@@ -83,6 +85,13 @@ comptime _SO_REUSEADDR_MACOS: Int32 = Int32(0x0004)
 # servers. Linux: 15. macOS: 0x0200 (BSD origin).
 comptime _SO_REUSEPORT_LINUX: Int32 = Int32(15)
 comptime _SO_REUSEPORT_MACOS: Int32 = Int32(0x0200)
+# SO_SNDBUF / SO_RCVBUF — the kernel's per-socket send and receive buffer
+# sizes. Linux: 7 / 8 (asm-generic/socket.h); Darwin: 0x1001 / 0x1002
+# (sys/socket.h).
+comptime _SO_SNDBUF_LINUX: Int32 = Int32(7)
+comptime _SO_SNDBUF_MACOS: Int32 = Int32(0x1001)
+comptime _SO_RCVBUF_LINUX: Int32 = Int32(8)
+comptime _SO_RCVBUF_MACOS: Int32 = Int32(0x1002)
 # IPPROTO_TCP / TCP_NODELAY — disable Nagle on accepted conns. Required for
 # low-latency HTTP/1.1 plaintext (the bench harness's headline workload).
 comptime _IPPROTO_TCP: Int32 = Int32(6)
@@ -114,6 +123,24 @@ def _so_reuseport_value() -> Int32:
         return _SO_REUSEPORT_MACOS
     else:
         return _SO_REUSEPORT_LINUX
+
+
+@always_inline
+def _so_sndbuf_value() -> Int32:
+    """SO_SNDBUF optname — Linux: 7; Darwin: 0x1001."""
+    comptime if CompilationTarget.is_macos():
+        return _SO_SNDBUF_MACOS
+    else:
+        return _SO_SNDBUF_LINUX
+
+
+@always_inline
+def _so_rcvbuf_value() -> Int32:
+    """SO_RCVBUF optname — Linux: 8; Darwin: 0x1002."""
+    comptime if CompilationTarget.is_macos():
+        return _SO_RCVBUF_MACOS
+    else:
+        return _SO_RCVBUF_LINUX
 
 
 # -----------------------------------------------------------------------------
@@ -309,6 +336,68 @@ def set_tcp_nodelay(fd: Int32) raises:
     )
     if rc < Int32(0):
         raise Error("setsockopt(TCP_NODELAY) failed")
+
+
+def _set_sol_socket_int(fd: Int32, optname: Int32, value: Int32) -> Int32:
+    """Setsockopt(fd, SOL_SOCKET, optname, &value, 4); returns the rc.
+
+    SAFETY: optval stack-local int32; the kernel reads it during the call
+    and keeps no pointer to it. Confined FFI.
+    """
+    var optval = Array[Int32, 1](fill=value)
+    return external_call["setsockopt", Int32](
+        fd, _sol_socket_value(), optname, optval.unsafe_ptr(), UInt32(4)
+    )
+
+
+def _get_sol_socket_int(fd: Int32, optname: Int32, what: StaticString) raises -> Int32:
+    """Getsockopt(fd, SOL_SOCKET, optname) for an int-valued option.
+
+    SAFETY: optval/optlen stack-local; the kernel writes them during the
+    call and keeps no pointer to them. Confined FFI.
+    """
+    if fd < Int32(0):
+        raise Error(String("getsockopt(") + what + "): bad fd")
+    var optval = Array[Int32, 1](fill=Int32(0))
+    var optlen = Array[UInt32, 1](fill=UInt32(4))
+    var rc = external_call["getsockopt", Int32](
+        fd, _sol_socket_value(), optname, optval.unsafe_ptr(), optlen.unsafe_ptr()
+    )
+    if rc < Int32(0):
+        raise Error(String("getsockopt(") + what + ") failed")
+    return optval[0]
+
+
+def set_so_sndbuf(fd: Int32, bytes: Int32) raises:
+    """Setsockopt(SOL_SOCKET, SO_SNDBUF, bytes): cap the kernel send buffer.
+    On a listener, sockets it accepts inherit the value. Linux doubles the
+    requested size for bookkeeping (read it back with `so_sndbuf`). Raises on
+    a bad fd or a refused value."""
+    if fd < Int32(0):
+        raise Error("setsockopt(SO_SNDBUF): bad fd")
+    if _set_sol_socket_int(fd, _so_sndbuf_value(), bytes) < Int32(0):
+        raise Error("setsockopt(SO_SNDBUF) failed")
+
+
+def set_so_rcvbuf(fd: Int32, bytes: Int32) raises:
+    """Setsockopt(SOL_SOCKET, SO_RCVBUF, bytes): cap the kernel receive
+    buffer, and with it the window the peer may fill. Linux doubles the
+    requested size for bookkeeping (read it back with `so_rcvbuf`). Raises on
+    a bad fd or a refused value."""
+    if fd < Int32(0):
+        raise Error("setsockopt(SO_RCVBUF): bad fd")
+    if _set_sol_socket_int(fd, _so_rcvbuf_value(), bytes) < Int32(0):
+        raise Error("setsockopt(SO_RCVBUF) failed")
+
+
+def so_sndbuf(fd: Int32) raises -> Int32:
+    """Getsockopt(SOL_SOCKET, SO_SNDBUF): the send buffer size in bytes."""
+    return _get_sol_socket_int(fd, _so_sndbuf_value(), "SO_SNDBUF")
+
+
+def so_rcvbuf(fd: Int32) raises -> Int32:
+    """Getsockopt(SOL_SOCKET, SO_RCVBUF): the receive buffer size in bytes."""
+    return _get_sol_socket_int(fd, _so_rcvbuf_value(), "SO_RCVBUF")
 
 
 def bind_inet(fd: Int32, ip_be: UInt32, port_host: UInt16) raises:

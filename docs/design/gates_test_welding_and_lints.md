@@ -10,7 +10,7 @@ Out of scope:
 
 - Running a binary as a test with `buck2 test`: [tools/build/mojo/README.md](../../tools/build/mojo/README.md#binaries-and-tests).
 - The compiler environment, the watchdog and the toolchain pin: [Mojo rules and toolchain](mojo_rules_and_toolchain.md).
-- Linting Mojo source. The lint rules in `tools/build/lint` check shell scripts, GitHub workflows, committed build configuration and documentation links.
+- Linting Mojo source. The lint rules in `tools/build/lint` check shell scripts, GitHub workflows, committed build configuration and documentation links; `test_weld` reads only the paths of Mojo files, to find test files, and which of them the build graph's targets weld.
 
 ## How does it work?
 
@@ -142,10 +142,14 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 | `shell_lint` | every file passes shellcheck at severity warning, under the shell its shebang or `shellcheck shell=` directive names, else busybox |
 | `workflow_lint` | the GitHub workflows pass actionlint, with shellcheck over their `run:` steps |
 | `action_pins` | every `uses:` names an action by a full 40-hex commit SHA |
-| `push_verdicts` | a push-triggered workflow whose top-level `concurrency` group can hold more than one push keys that group on `github.sha`, so no push loses its run |
+| `push_verdicts` | a push-triggered workflow whose top-level `concurrency` group can hold more than one push keys that group on `github.sha`, so no push loses its run. No target declares it now: `kci.yml`, the only push-triggered workflow, is held to the opposite on purpose (its pushes to main share one group so the newest pending release replaces an older one; kci_workflow_check rule R16 holds that group byte for byte), and the lint refuses a set with no push-triggered workflow, so a target would be empty. Declare one again if a push-triggered workflow gains a concurrency group |
 | `no_endpoint` | no committed buckconfig sets a remote-execution endpoint or instance key, `.gitignore` ignores `/.buckconfig.local`, and no file names a `grpc://` or `grpcs://` address outside the `example.*` domains |
 | `markdown_docs` | every relative link and anchor in every Markdown file resolves |
 | `lint_suite` | groups lints another graph does not reach, so their validations run in any build holding the suite |
+| `retired_names` | no file of the cell holds a renamed package's or type's old name except on a line carrying a `YYYY-MM-DD` date (a history note); `tools/build/lint/retired_names.bzl`, and a target with no `names` fails at analysis |
+| `test_weld` | every `tests/test_*.mojo` under `src/` is welded (a mojo_library's `test_srcs` or a mojo_test's `main`, read from the build graph, so a computed list counts and a comment does not, and Buck2 says where each welded file is), and every package with a `.mojo` source welds a test; the exceptions are the rows of `tests/known_untested.tsv`, a ledger that only shrinks (a row whose test or package is welded is a finding). `tools/build/lint/test_weld.bzl`, test 39. Not a validation: a rule cannot query the targets of `//src/...`, so the `test_weld` target declares the lint and `buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld` checks it; the pull request's check runs that for every `test_weld` target of a unit (`release/ci/build_targets.sh`), and `./buck2 build //...` does not |
+| `pointer_lint` | the Mojo pointer rules of [mojo_safety_and_idioms.md](mojo_safety_and_idioms.md), over every `.mojo` file of the cell: no wildcard origin outside the FFI modules `tests/pointer_lint_ffi.tsv` lists (each holds a `# FFI-BOUNDARY:` comment line), no `unsafe_from_address=`, no partial move through a pointer (one statement or two), no `parallelize[`, no second declaration of libc `read` or `open`, and no public function of a library file under `src/` taking or returning a pointer; the sites that predate it are the rows of `tests/pointer_lint_holds.tsv`, per rule and file at an exact count, a ledger that only shrinks; `tools/build/lint/defs.bzl` (`pointer_lint`), the reader `pointer_lint.awk`, the action `lint.sh` |
+| `readme_api_coverage` | README API coverage: per package under `src/`, the public symbols its `__init__.mojo` exports and which of them its README examples use, written as a census (`[packages]`, `[symbols]`, `[report]`); report-only (`enforce = False`), failing on a malformed or stale row of its shrink-only ledger, `tests/readme_api_exceptions.tsv`; `tools/build/lint/readme_api_coverage.bzl`, rules and census in [readme_api_coverage.md](../readme_api_coverage.md) |
 
 ## How is it tested?
 

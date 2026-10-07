@@ -29,7 +29,8 @@
 #     key (`CasManifestStore.read_head` fast path); `test_read_head_costs_one_get`
 #     pins that. On a COLD manifest (`_HEAD` absent, the first-flush case here)
 #     a pre-flush `read_head` would instead LIST-recover the tail (2 GETs), so
-#     a first `flush` WITH it would issue 5 internal GETs; without it, 3.
+#     a first `flush` WITH it would issue 6 internal GETs; without it, 4
+#     (one of them the reaped-slot check's `_LOG_START` GET, #486).
 #   * The exact internal GET count is captured as a constant so a re-introduced
 #     read_head (or any new pre-flush GET) trips the assertion LOUD.
 #
@@ -44,13 +45,13 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
 
 from komira_broker.broker_core import BrokerCore, SegmentFooter
 from komira_broker.consume_core import ConsumeCore, SegmentRef
@@ -180,10 +181,12 @@ def test_read_head_costs_one_get() raises:
 # The exact object-store GET count internal to ONE BrokerCore.flush of one
 # buffered batch over the in-mem store, AFTER the edit.
 # The flush issues: the manifest append (its HEAD read + etag + _HEAD advance
-# GETs) and the segment staged-PUT (a conditional_put -> n_put, NOT n_get). It no
-# longer issues the pre-flush read_head GET. If a future change re-introduces a
-# pre-flush GET, this count rises and the assertion fails LOUD.
-comptime _FLUSH_GET_COUNT_AFTER_ELISION = Int64(3)
+# GETs, plus the reaped-slot check's `_LOG_START` GET after the chunk create
+# wins: #486, manifest_slot_guard.mojo) and the segment staged-PUT (a
+# conditional_put -> n_put, NOT n_get). It no longer issues the pre-flush
+# read_head GET. If a future change re-introduces a pre-flush GET, this count
+# rises and the assertion fails LOUD.
+comptime _FLUSH_GET_COUNT_AFTER_ELISION = Int64(4)
 
 
 def test_flush_drops_pre_flush_get() raises:
@@ -211,7 +214,7 @@ def test_flush_drops_pre_flush_get() raises:
         _FLUSH_GET_COUNT_AFTER_ELISION,
         (
             "flush() internal GET count with no pre-flush read_head (with one"
-            " it would be 5 — a pre-flush read_head LIST-recovers the cold"
+            " it would be 6 — a pre-flush read_head LIST-recovers the cold"
             " manifest tail; see test_read_head_costs_one_get for the warm 1-GET)"
         ),
     )

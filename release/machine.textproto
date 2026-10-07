@@ -1,0 +1,169 @@
+# The release machine (src/kci_release_machine, format kci.machine): the stages of a
+# komira release, in order, and the steps of each. `kci run --stage <S>` runs one
+# stage, every step of it in order (`--only step:<name>` runs a selection, which
+# is reported as SELECTIVE, never as a full run). kci reads THIS path by
+# convention (release/machine.textproto); `--machine <path>` overrides it.
+# .github/workflows/kci.yml runs each stage but `pr` as the job of the same name,
+# in the stage's GitHub environment; the `pr` stage is the one job (`check`) of
+# .github/workflows/pr.yml, in none. kci holds the workflow it runs under to this
+# file at start-up under GitHub Actions (a run of the pr stage: pr.yml; any other
+# stage: kci.yml), and the welded test
+# src/kci_workflow_check/tests/test_repo_kci_yml.mojo does the same on every build, so
+# a drift fails `./buck2 build //...`. This file owns the stages: edit both
+# together.
+#
+#   build  builds every artifact release/artifacts.textproto declares, for
+#          linux-x86_64, into a release directory with release.json. It is
+#          FARM-CONNECTED: its job joins the tailnet to reach the build farm,
+#          and so it may never publish.
+#   gamma  publishes that release set to the channel `gamma` (prefix.dev
+#          komira-ai/gamma, release/channels.textproto), in the GitHub
+#          environment `gamma` that the channel's trusted publisher names.
+#          Its two validations then install what was published the way a
+#          consumer gets it, each on the machine that runs kci with no
+#          container (CONDA_INSTALL_ENV: the pinned pixi, a fresh scratch
+#          directory outside the checkout, an environment built from
+#          nothing): the channel's index is read anonymously (it must list
+#          every file with the build's sha256 and serve those bytes), pixi
+#          installs at this release's version and build from the channel,
+#          with mojo-compiler from Modular's channel, and each installed
+#          library's README examples (share/doc/<name>/README.md, whose
+#          sha256 the release records) run against the install.
+#            install-komira-encoding  komira_encoding ALONE: its own
+#                                     requirements must suffice
+#            install-set              komira_all ALONE: kci reads its members
+#                                     from the built metapackage's own
+#                                     requirements (they must be exactly the
+#                                     release's libraries, at its version and
+#                                     build) and checks every one of them
+#          kci.yml runs the stage as two jobs: `gamma` (`--only
+#          step:publish`) and `validate` (`--only validation:<name>` for each
+#          of the two, no environment, no identity token), and prod waits
+#          for both.
+#          Each validation is also a target a developer runs, before or
+#          after publishing: `./buck2 run //release/validations:<name>`
+#          (release/validations/BUCK, held equal to the validations here).
+#   prod   publishes the SAME release set (never rebuilt) to the channel
+#          `prod` (prefix.dev komira-ai/prod), in the GitHub environment
+#          `prod`, after gamma's publish and validation, on every push to main
+#          (continuous auto-promotion). It is the one stage that is not
+#          break_glass: it runs only on a push to main, for the pushed commit
+#          on main's history, and never publishes a build number lower than
+#          its channel holds.
+#          The gamma job's summary lists the names new to prod (NEW NAMES).
+#   pr     the per-change check of a pull request (trigger PULL_REQUEST):
+#          `kci run --stage pr --affected-by <the pull request's base commit>`
+#          builds, with each build system's `build_targets` command, exactly
+#          the units of release/artifacts.textproto (its artifacts and
+#          checks) that the change reaches, as each build system's
+#          `affected` command says, and ships nothing. It is the only job of
+#          pr.yml (the required check `pr / check`), which has no other
+#          trigger and no other job; kci.yml has no pull_request trigger. It
+#          runs only for a pull request
+#          from a branch of this repository (a fork's runs nothing). No
+#          environment, no publishing step; FARM-CONNECTED, like build, so its
+#          identity token is the farm connection's only. It runs after no
+#          stage and no stage runs after it.
+#
+# BREAK-GLASS: build and gamma are `break_glass: true`, so a manual run (of
+# any branch, main included; with a required reason) builds and publishes
+# its revision to gamma, and stops there; prod is not, so only a push to
+# main reaches it. The break-glass stages are a prefix of the chain (the
+# machine file refuses a break_glass stage after one that is not). A
+# break-glass run of gamma runs in the GitHub environment
+# `gamma-breakglass` (`break_glass_environment`), not `gamma`: `gamma` is
+# locked to main, and `gamma-breakglass` has a required reviewer, so every
+# break-glass publish waits for an approval GitHub records (docs/ci.md,
+# "Break-glass"). The channel names both trusted publishers.
+#
+# A stage's `environment` is the GitHub environment its job runs in, and the
+# one its channel's trusted publisher names (push_identity
+# `...:environment:<env>`); kci refuses a trusted publish from any other.
+#
+# Publishing and deploying are separate stages in separate GitHub environments:
+# a deploy stage, when there is one, is added here as a stage of its own.
+# Relative paths are relative to the directory kci is started in (the
+# repository's root in kci.yml). Changes need the release approver's review
+# (.github/CODEOWNERS).
+
+# The file format's major (kci_api's format table): kci refuses a file
+# without it, and one written for a newer kci.
+schema_version: 1
+
+stage {
+  name: "build"
+  farm_connected: true
+  break_glass: true
+  step {
+    name: "build"
+    kind: BUILD
+    platform: "linux-x86_64"
+    artifacts: "release/artifacts.textproto"
+  }
+}
+
+stage {
+  name: "gamma"
+  environment: "gamma"
+  after: "build"
+  break_glass: true
+  break_glass_environment: "gamma-breakglass"
+  step {
+    name: "publish"
+    kind: PUBLISH
+    platform: "linux-x86_64"
+    artifacts: "release/artifacts.textproto"
+    channels: "release/channels.textproto"
+    channel: "gamma"
+    # Each validation installs from the step's channel only; mojo-compiler,
+    # pinned to the libraries' mojo_pin, comes from compiler_channel, and
+    # its own dependencies (python for mojo-python) from conda-forge. Only
+    # the ABSENCE of a file in the channel's index is waited for (the
+    # registry indexes an upload after it lands; a subdir's FIRST index can
+    # take a quarter of an hour); then it fails. Each poll is logged.
+    validation {
+      name: "install-komira-encoding"
+      kind: CONDA_INSTALL_ENV
+      install: "komira_encoding"
+      compiler_channel: "https://conda.modular.com/max"
+      extra_channel: "conda-forge"
+      smoke: README
+      wait_for_index_seconds: 1800
+    }
+    validation {
+      name: "install-set"
+      kind: CONDA_INSTALL_ENV
+      install: "komira_all"
+      compiler_channel: "https://conda.modular.com/max"
+      extra_channel: "conda-forge"
+      smoke: README
+      wait_for_index_seconds: 1800
+    }
+  }
+}
+
+stage {
+  name: "prod"
+  environment: "prod"
+  after: "gamma"
+  step {
+    name: "publish"
+    kind: PUBLISH
+    platform: "linux-x86_64"
+    artifacts: "release/artifacts.textproto"
+    channels: "release/channels.textproto"
+    channel: "prod"
+  }
+}
+
+stage {
+  name: "pr"
+  trigger: PULL_REQUEST
+  farm_connected: true
+  step {
+    name: "check"
+    kind: BUILD
+    platform: "linux-x86_64"
+    artifacts: "release/artifacts.textproto"
+  }
+}

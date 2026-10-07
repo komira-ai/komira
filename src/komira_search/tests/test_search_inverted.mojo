@@ -29,12 +29,12 @@ from std.testing import (
     assert_raises,
 )
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.arrow.string_array import StringArray
-from komira_core.collections.batch_view import batch_view_over
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.string_array import StringArray
+from komira_arrow.batch_view import batch_view_over
 
 from komira_hash import fnv1a_64
 
@@ -77,6 +77,7 @@ def _bytes_to_string(s: Span[UInt8, _]) -> String:
     var buf = List[UInt8]()
     for i in range(len(s)):
         buf.append(s[i])
+    # SAFETY: callers pass bytes of a String the test wrote; they are UTF-8.
     return String(StringSlice(unsafe_from_utf8=Span(buf)))
 
 

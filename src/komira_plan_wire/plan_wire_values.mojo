@@ -35,10 +35,10 @@
 # DIFFERENT PROPERTY does not cover this one, and the gap between the two
 # properties is the entire attack surface.
 #
-# ★ THE SAME RULE HOLDS AT THE OTHER UNTRUSTED-INPUT BOUNDARY. `komira_ivp` is
-# FAIL-CLOSED with a six-tag Expr allow-list that DELIBERATELY OMITS
-# `EXPR_COL_IDX`, for exactly this reason. The plan wire is the broader door,
-# so it checks every value instead.
+# ★ THE SAME RULE HOLDS AT THE OTHER UNTRUSTED-INPUT BOUNDARY.
+# `komira_viewport` is FAIL-CLOSED with a six-tag Expr allow-list that
+# DELIBERATELY OMITS `EXPR_COL_IDX`, for exactly this reason. The plan wire is
+# the broader door, so it checks every value instead.
 #
 # ========================= WHAT THIS FILE CHECKS ==============================
 #
@@ -186,10 +186,10 @@
 # `Expr` throughout, no allocation except the error text on the refusal path.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Schema
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.expr import (
     Expr,
     BIN_EQ,
     BIN_GE,
@@ -240,7 +240,7 @@ from komira_core.plan.expr import (
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
 )
-from komira_core.plan.agg_expr import (
+from komira_plan_expr.agg_expr import (
     AGG_SUM,
     AGG_COUNT,
     AGG_MIN,
@@ -269,7 +269,7 @@ from komira_core.plan.agg_expr import (
     AGG_KURTOSIS_POP,
     agg_is_bivariate,
 )
-from komira_core.plan.logical_plan import (
+from komira_plan_ir.logical_plan import (
     LogicalPlan,
     agg_func_base_name,
     PLAN_SCAN,
@@ -289,7 +289,7 @@ from komira_core.plan.logical_plan import (
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
 )
-from komira_core.plan.corr_subquery import corr_subq_inner_plan_ref
+from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
 
 
 # =============================================================================
@@ -439,7 +439,7 @@ producer is the reason this door checks values at all.
   * the engine's plan validator declines it outright —
     "positional-index validation belongs on the node, not the expr".
   ⚠ AND THE SAME RULE HOLDS AT THE OTHER UNTRUSTED BOUNDARY:
-  `komira_ivp`'s six-tag Expr allow-list DELIBERATELY OMITS `EXPR_COL_IDX`.
+  `komira_viewport`'s six-tag Expr allow-list DELIBERATELY OMITS `EXPR_COL_IDX`.
 
 ★ AND THE FIX IS ONE LINE ON THE PRODUCER, WHICH IS WHY REFUSING IS NOT A TAX.
 A message carrying `col_idx: i` has ALREADY serialized the schema it indexes —
@@ -593,22 +593,23 @@ spellings of the same shape are refused here.
     ITSELF, which this token guards at the plan-wire boundary and NOWHERE
     ELSE. Its `else: # Default: create a zero int64 column` tail is reachable
     by the SQL route (no door in front of it), by a literal PROJECTION, and by
-    a CASE arm. Fixing it there is a change to `komira_core`, not to this
+    a CASE arm. Fixing it there is a change to the core packages, not to this
     package.
   * BINARY / LARGE_BINARY columns and binary literals, deliberately passed:
     the executor's own binary-vs-string behaviour is a separate question, and
     a refusal written on a guess would be the over-broad kind.
-  * ⛔ THE OTHER UNTRUSTED BOUNDARY — `komira_ivp`. This token guards the
-    PLAN wire and nothing else. A `GridTicket` carries its own `Expr` filter,
-    and the ticket validator checks ticket SIZE, tree DEPTH, total node COUNT
-    and blank names and NEVER the (column, literal) pair, before the filter
-    reaches the same `compiler_eval_predicate`. The IVP scalar codec carries
-    BOOL / INT32 / INT64 / FLOAT32 / FLOAT64 / STRING and its Expr allow-list
-    includes `EXPR_ALIAS`, so every pair enumerated above is spellable in a
-    ticket. ⚠ THE FIX IS NOT A COPY-PASTE: the ticket validator runs before
-    the source is opened, so it has no schema to judge against — the check
-    belongs after the plan is built, where `plan_wire_check_values` is already
-    callable on a `LogicalPlan` for exactly this reason."""
+  * ⛔ THE OTHER UNTRUSTED BOUNDARY — `komira_viewport`. This token guards
+    the PLAN wire and nothing else. A `GridTicket` carries its own `Expr`
+    filter, and the ticket validator checks ticket SIZE, tree DEPTH, total
+    node COUNT and blank names and NEVER the (column, literal) pair, before
+    the filter reaches the same `compiler_eval_predicate`. The viewport scalar
+    codec carries BOOL / INT32 / INT64 / FLOAT32 / FLOAT64 / STRING and its
+    Expr allow-list includes `EXPR_ALIAS`, so every pair enumerated above is
+    spellable in a ticket. ⚠ THE FIX IS NOT A COPY-PASTE: the ticket
+    validator runs before the source is opened, so it has no schema to judge
+    against — the check belongs after the plan is built, where
+    `plan_wire_check_values` is already callable on a `LogicalPlan` for
+    exactly this reason."""
 
 
 def _schema_columns(schema: Schema) raises -> String:
@@ -1026,7 +1027,7 @@ def _literal_under_aliases(e: Expr) -> ScalarValue:
 # ⚠ AND IT IS NARROWER THAN THE MECHANISM, STATED RATHER THAN HIDDEN. The root
 # is `broadcast_scalar` itself, which is reached by the SQL route and by literal
 # PROJECTIONS with no door in front of them at all. This check governs the
-# PLAN-WIRE route only. Fixing the root is a change to `komira_core`, not to
+# PLAN-WIRE route only. Fixing the root is a change to the core packages, not to
 # this package.
 
 

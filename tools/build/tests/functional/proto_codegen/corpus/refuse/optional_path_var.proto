@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package komira.test.refuse.optional_path_var;
+
+import "google/api/annotations.proto";
+
+service S {
+  rpc M(Req) returns (Req) {
+    option (google.api.http) = { get: "/v1/{name=things/*}" };
+  }
+}
+
+message Req {
+  optional string name = 1;
+}

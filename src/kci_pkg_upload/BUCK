@@ -11,7 +11,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_http_core (methods, the connector seam), komira_async
 # (the blocking runtime the transport drives), komira_crypto (digests),
 # komira_encoding (base64), komira_json (listings and token exchanges) and
-# komira_secret_store (tokens held as zeroizing values, resolved by name).
+# komira_secret_store (tokens held as zeroizing values, resolved by name) and
+# komira_retry (the ID-token request's bounded retry).
 #
 # Every welded test drives a scripted transport: no socket, no network. The
 # fidelity test reads the `uv publish` recordings under tests/fidelity.
@@ -25,6 +26,8 @@ mojo_library(
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_retry:komira_retry",
         "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
@@ -39,7 +42,8 @@ mojo_library(
         # repodata reads: kinds, the 303 off-host, ABSENT only from a read listing;
         # package_names never answers "no names" from a listing it did not read
         "tests/test_pkg_upload_conda_reads.mojo",
-        # trusted publishing: ID-token request, both exchanges, every refusal
+        # trusted publishing: ID-token request, both exchanges, every refusal;
+        # the ID-token request retried on a fault, 5xx or 429, never on a 403
         "tests/test_pkg_upload_github_oidc_credential.mojo",
         # the HTTPS transport elaborates (nothing dials)
         "tests/test_pkg_upload_http_transport_elaborates.mojo",

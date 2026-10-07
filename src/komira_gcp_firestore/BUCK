@@ -1,0 +1,192 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Cloud Firestore: two clients generated at build time (mojo_gcp_client) from
+# the googleapis protos //tools/vendor/googleapis:firestore_v1 extracts from
+# its pinned archive (nothing of them is copied here), and the document store
+# komira's callers use, written on top of them.
+#
+# The methods are the ones Google's own Firestore client libraries use for
+# the same work: a document is read with BatchGetDocuments, written (created,
+# replaced, conditionally updated, deleted) with Commit, queried with
+# RunQuery, and watched with Listen. GetDocument, CreateDocument,
+# UpdateDocument and DeleteDocument are not generated: each is a Commit or a
+# BatchGetDocuments with one document, and a BatchGetDocuments answers a
+# missing document with `missing` inside a 200, so NOT_FOUND from it can
+# only mean the database is absent. The package's callers read that
+# distinction off the status, never off the message text.
+
+# The document methods over REST/JSON. `FirestoreClient[C, T]` sends through
+# komira_http_client's `HttpClient` over the komira_http_core `Connector` it
+# is given, takes each request's bearer token from a komira_gcp_core
+# `GcpTokenSource`, and raises a non-2xx answer through `gcp_status_error`.
+# BatchGetDocuments and RunQuery are server-streaming; over REST each answers
+# with one JSON array, which the client returns as a List (an error element
+# at its end raises like a failed status). It reads no environment.
+#
+# The generated client starts at the service's `(google.api.default_host)`,
+# firestore.googleapis.com, on https; `set_rest_host` or (for an emulator)
+# `set_rest_endpoint` points it elsewhere.
+#
+# `bundle_only` is the part of the firestore_v1 closure those methods reach.
+# Gated by its layout probe and the tests in tests/v1, hand-written against
+# the Cloud Firestore v1 REST reference, each through komira_http_core's
+# ScriptedConnector (no socket).
+mojo_gcp_client(
+    name = "komira_gcp_firestore_v1",
+    bundle_only = [
+        "google/firestore/v1/common.proto",
+        "google/firestore/v1/document.proto",
+        "google/firestore/v1/firestore.proto",
+        "google/firestore/v1/query.proto",
+        "google/firestore/v1/query_profile.proto",
+        "google/firestore/v1/write.proto",
+        "google/type/latlng.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = [
+        "Firestore.BatchGetDocuments",
+        "Firestore.Commit",
+        "Firestore.RunQuery",
+    ],
+    proto_deps = ["//tools/vendor/googleapis:firestore_v1"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        "tests/v1/test_firestore_v1_no_env_reads.mojo": {"gen": ":komira_gcp_firestore_v1_gen"},
+    },
+    test_srcs = [
+        "tests/v1/test_firestore_v1_errors.mojo",
+        "tests/v1/test_firestore_v1_no_env_reads.mojo",
+        "tests/v1/test_firestore_v1_requests.mojo",
+        "tests/v1/test_firestore_v1_responses.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)
+
+# Listen over gRPC (a bidirectional stream, which has no REST mapping).
+# `FirestoreClient[C, T].listen` calls komira_grpc's GrpcClient with classic
+# gRPC, takes each call's bearer token from a GcpTokenSource and raises a
+# non-OK status through `gcp_grpc_status_error`. komira_grpc's bidi call is
+# buffered (it returns once the stream has ended), so the long-lived watch
+# below drives its own HTTP/2 receive loop and uses these generated
+# ListenRequest / ListenResponse messages on it.
+#
+# Gated by its layout probe and the tests in tests/listen (the messages
+# against bytes built from the proto field numbers, and the buffered call
+# over a ScriptedConnector).
+mojo_gcp_client(
+    name = "komira_gcp_firestore_listen",
+    bundle_only = [
+        "google/firestore/v1/bloom_filter.proto",
+        "google/firestore/v1/common.proto",
+        "google/firestore/v1/document.proto",
+        "google/firestore/v1/firestore.proto",
+        "google/firestore/v1/query.proto",
+        "google/firestore/v1/write.proto",
+        "google/rpc/status.proto",
+        "google/type/latlng.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = ["Firestore.Listen"],
+    proto_deps = ["//tools/vendor/googleapis:firestore_v1"],
+    protocol = "grpc",
+    protos = [],
+    test_data = {
+        "tests/listen/test_firestore_listen_no_env_reads.mojo": {"gen": ":komira_gcp_firestore_listen_gen"},
+    },
+    test_srcs = [
+        "tests/listen/test_firestore_listen_client.mojo",
+        "tests/listen/test_firestore_listen_messages.mojo",
+        "tests/listen/test_firestore_listen_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_grpc:komira_grpc",
+        # Imported only by tests/listen/test_firestore_listen_client.mojo
+        # (HttpClient and Url for its scripted connector).
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)
+
+# The document store komira's callers use, on the two generated clients
+# above. It adds no wire code: firestore_client builds the generated request
+# messages and maps a failed call onto typed errors by its google.rpc.Code;
+# firestore_value converts the document value model (FsValue, and its
+# RowCell mapping) to and from the generated `Value`; firestore_listen_proto
+# builds the ListenRequest and reads a ListenResponse with the generated
+# messages, and firestore_listen_client carries them over its own HTTP/2
+# receive loop with komira_grpc's framing; the key-value DocumentStore, the
+# komira_objectstore ConditionalWriteStore conformer, and the
+# komira_snapshotter change stream sit on top. Production auth is
+# komira_gcp_core's Application Default Credentials
+# (`firestore_adc_token_source`).
+#
+# Every test drives the code through komira_http_core's ScriptedConnector
+# (firestore_scripted's ScriptedFirestore), a stateful double behind
+# firestore_fake's ExchangeConnector, or a scripted Listen stream, except
+# test_firestore_send_honours_its_request_deadline, which talks to a silent
+# peer over a socketpair of its own. None opens a network connection or
+# needs GCP credentials or the emulator.
+mojo_library(
+    name = "komira_gcp_firestore",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        ":komira_gcp_firestore_listen",
+        ":komira_gcp_firestore_v1",
+        "//src/komira_async:komira_async",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_grpc:komira_grpc",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_proto_codec:komira_proto_codec",
+        # For the tests only: test_firestore_listen and
+        # test_firestore_listen_resume_token build the server's side of the
+        # Listen wire field by field, independently of the generated messages.
+        "//src/komira_protobuf:komira_protobuf",
+        # The token-source clocks (CachingTokenSource's SystemClock), and in
+        # the tests a ManualClock.
+        "//src/komira_retry:komira_retry",
+        "//src/komira_rowcell:komira_rowcell",
+        "//src/komira_snapshotter:komira_snapshotter",
+        "//src/komira_wkt:komira_wkt",
+    ],
+    test_srcs = [
+        "tests/test_firestore_cdc_cursor.mojo",
+        "tests/test_firestore_client.mojo",
+        "tests/test_firestore_client_token_refresh.mojo",
+        "tests/test_firestore_conditional_store.mojo",
+        "tests/test_firestore_endpoint_seam.mojo",
+        "tests/test_firestore_error_classes.mojo",
+        "tests/test_firestore_kv_store.mojo",
+        "tests/test_firestore_listen.mojo",
+        "tests/test_firestore_listen_resume_token.mojo",
+        "tests/test_firestore_listen_terminal_rules.mojo",
+        "tests/test_firestore_listen_terminal_status.mojo",
+        "tests/test_firestore_preconditions.mojo",
+        "tests/test_firestore_send_honours_its_request_deadline.mojo",
+        "tests/test_firestore_value.mojo",
+        "tests/test_firestore_watch_drain.mojo",
+        "tests/test_firestore_watch_drain_slot.mojo",
+        "tests/test_firestore_watch_listener.mojo",
+        "tests/test_firestore_watch_source.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

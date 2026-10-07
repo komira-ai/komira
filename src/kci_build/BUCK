@@ -1,0 +1,104 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# One BUILD step of a stage (`kci run --stage S`; the kci binary's one parser
+# and the machine file make the request): check the release identity (--revision-id a full commit id that
+# must be the checkout's HEAD, in a full-history clone; the platform one kci
+# releases), record the run's RUNNING result (kci_api) before the first
+# effect, derive the release stamp from git, then for each artifact of the
+# artifacts file (kci_artifact), in file order and one at a
+# time (a metapackage declared last reads its members under {release_dir}),
+# create an EMPTY directory under <--release-dir>/<platform>/, run the
+# declared build system's rendered argv into it, and check what it left with
+# kci_release_set.verify_member (the same checks a PUBLISH step re-runs) and
+# the manifest's platform; when every artifact passed, write release.json
+# (major 2: revision, platform, produced_by, members, set hash) LAST, as the
+# commit marker. The outcome is a kci_api outcome word and error id; no
+# exit number is spelled here. kci knows no build tool: the program, its args
+# and "build on the farm" are the artifacts file's. The process is started
+# through the ProcessRunner seam: SupervisorRunner (komira_supervisor) for
+# real runs, ScriptedRunner for tests. Nothing here names a farm, a channel or
+# an account.
+#
+# Recorded once, as the design asked: does `-c komira.execution=remote` with
+# no reachable farm fail rather than fall back to local? MEASURED 2026-10-02
+# on linux-x86_64, in a scratch isolation dir, with the RE endpoint overridden
+# so no farm answers:
+#
+#   ./buck2 --isolation-dir kci-noremote-probe build -c komira.execution=remote \
+#     -c buck2_re_client.engine_address=grpc://kci-no-farm.invalid:30980 \
+#     -c buck2_re_client.action_cache_address=grpc://kci-no-farm.invalid:30980 \
+#     -c buck2_re_client.cas_address=grpc://kci-no-farm.invalid:30980 \
+#     //tools/build/examples:hello
+#
+# (and again with all three at grpc://127.0.0.1:1, a refused port). Observed:
+# it NEVER fell back. Every status line was a remote stage (`zig_unpack
+# [re_execute]`, `zig_build_exe [re_upload]`), no action ran locally, and
+# nothing was built. But it did not FAIL either: after 240 s (.invalid) and
+# 200 s (refused port) buck2 was still waiting, and the client was stopped
+# by `timeout` (exit 124). That matches the documented contract
+# (tools/build/platforms/README.md, "Remote workers": every platform
+# `komira_execution_platforms` registers "runs remotely only (local
+# execution disabled)"). So for a BUILD step: a farm that is down never builds
+# locally unnoticed; the first build stalls until `--build-timeout-s` ends
+# it, and kci reports it FAILED ("timed out"), naming the artifact.
+#
+# With --affected-by the step is the per-change check (affected.mojo): the
+# change from git, each build system's `affected` command (the artifacts
+# file's; kci names no tool and no path), exactly the units it reaches built
+# with the `build_targets` command (every unit when an answer is WIDENED):
+# one run per group of units sharing that command, and a failed run retried
+# unit by unit to name up to 3 failing units (affected_batch.mojo); nothing
+# written under the release directory. An empty change or one that
+# reaches no unit is refused; a tool that fails is "cannot tell", never a
+# widening.
+#
+# The welded tests drive ScriptedRunner and MemoryRecorder over files they
+# write under TEST_TMPDIR, plus SupervisorRunner over /bin/sh: no buck2, no
+# network.
+mojo_library(
+    name = "kci_build_lib",
+    import_name = "kci_build",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_artifact:kci_artifact",
+        "//src/kci_artifact_proto:kci_artifact_proto",
+        "//src/kci_artifact_manifest:kci_artifact_manifest",
+        "//src/kci_api:kci_api",
+        "//src/kci_release_set:kci_release_set",
+        "//src/komira_json:komira_json",
+        "//src/komira_supervisor:komira_supervisor",
+    ],
+    test_srcs = [
+        # the whole step over ScriptedRunner: argv, order, empty dirs, every stop with its
+        # outcome and error id, release.json v2 last, RUNNING before the first effect
+        "tests/test_build_flow.mojo",
+        # a set whose libraries require an undeclared package (the metapackage,
+        # itself) is REFUSED after every build, before release.json
+        "tests/test_build_closure.mojo",
+        # --revision-id against the checkout, the stamp from git, every refusal
+        "tests/test_revision.mojo",
+        # --affected-by: the change, the affected commands (golden argv, the
+        # files they get), exactly the reached units, widening, every stop
+        "tests/test_affected_flow.mojo",
+        # the derived checks: the derive_checks command first, its checks joining
+        # the units, a notice for a check target matching nothing, the refusals
+        "tests/test_derived_checks_flow.mojo",
+        # the build of the decided units: one batch run per shared command,
+        # a failed batch retried unit by unit (the 3-failure cap), a timed-out
+        # batch attributed to no unit, interference never a pass, BUILT only
+        # for units an exit-0 run covered; one case over SupervisorRunner
+        "tests/test_affected_batch.mojo",
+        # SupervisorRunner over /bin/sh: output files, exit codes, the timeout,
+        # an explicit child environment and inheritance
+        "tests/test_supervisor_runner.mojo",
+        # RunSpec's child environment: inherit by default, every refusal of an
+        # explicit one, recorded by ScriptedRunner
+        "tests/test_runner_env.mojo",
+    ],
+    test_data = {
+        "tests/test_build_flow.mojo": {
+            "src/kci_artifact/example.textproto": "//src/kci_artifact:example.textproto",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

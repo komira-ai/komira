@@ -1,0 +1,62 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# h2spec (github.com/summerwind/h2spec), the HTTP/2 conformance test tool,
+# MIT licensed (LICENSE below), at its release v2.6.0: the linux amd64 binary
+# archive the release publishes. The release publishes no checksum file, so
+# the sha256 below is of the archive as downloaded, twice, from the release
+# URL. Nothing of it is committed here, and nothing ships it: it is test data
+# of //src/komira_http_conformance only, run there as a child process against
+# a komira_http_server HttpServer on 127.0.0.1. No library or binary depends
+# on it.
+#
+# It lives here, beside the other pinned third-party test inputs
+# (googleapis_conformance_tests, pierrec-lz4), rather than under
+# tools/build/toolchains: it is not part of any toolchain and no build action
+# runs it, only the one welded test that names it.
+#
+# The binary is linked against the host C library (it is a Go program built
+# with the system resolver), which every Linux x86_64 worker has. It runs on
+# Linux x86_64 only: the release has no arm64 build, so the conformance
+# package is limited to linux-x86_64 (komira-limit:h2spec-linux-x86-64, on
+# that package's platform constraint). `exec_compatible_with` below places
+# only the unpacking, not where the binary can run.
+#
+# A newer pin is `_VERSION`, `_COMMIT` (the commit the tag names), `_SHA256`,
+# `_SIZE`, `_LICENSE_SHA256` and `_LICENSE_SIZE` here; the conformance test's case count
+# (`_H2SPEC_CASES`) and its allowlist then have to be re-read against the new
+# suite (src/komira_http_conformance/h2spec_allowlist.txt).
+_VERSION = "v2.6.0"
+_COMMIT = "70ac2294010887f48b18e2d64f5cccd48421fad1"
+_SHA256 = "157ee0de702e01ad40e752dbf074b366027e550c8e7504f9450da2809e279318"
+_SIZE = 5207004
+_LICENSE_SHA256 = "b4498bd7f45a2d691299a0a814a3f6f8b152693142b0a52f1a79597ede7e9fed"
+_LICENSE_SIZE = 1074
+
+pinned_file(
+    name = "h2spec_linux_amd64.tar.gz",
+    url = "https://github.com/summerwind/h2spec/releases/download/{}/h2spec_linux_amd64.tar.gz".format(_VERSION),
+    sha256 = _SHA256,
+    size_bytes = _SIZE,
+)
+
+# The archive holds the one file `h2spec`, mode 0755.
+archive_files(
+    name = "h2spec",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":h2spec_linux_amd64.tar.gz",
+    files = ["h2spec"],
+    visibility = ["//src/komira_http_conformance/..."],
+)
+
+# The release archive carries no license text; this is the LICENSE of the
+# repository at the tag's commit, pinned by commit as third_party/pierrec-lz4
+# pins its files, so a moved tag cannot change it.
+pinned_file(
+    name = "LICENSE",
+    url = "https://raw.githubusercontent.com/summerwind/h2spec/{}/LICENSE".format(_COMMIT),
+    sha256 = _LICENSE_SHA256,
+    size_bytes = _LICENSE_SIZE,
+    visibility = ["PUBLIC"],
+)

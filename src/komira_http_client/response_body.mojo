@@ -41,7 +41,7 @@ from komira_clock import now_ns as _system_now_ns
 from komira_async.cancellation.token import CancellationToken
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 from komira_http_client.body_frame import (
     BODY_FRAME_KIND_DATA,
     BODY_FRAME_KIND_END,
@@ -648,12 +648,22 @@ struct RecvRingBody[S: IoStream](
         var stream: Self.S,
         cl_total: Int,
         var pre_body_bytes: List[UInt8],
+        max_body_bytes: Int,
     ) -> RecvRingBody[Self.S]:
         """Body is Content-Length-framed. `pre_body_bytes` is the
-        already-buffered prefix from the head parse."""
+        already-buffered prefix from the head parse.
+
+        `max_body_bytes` is the caller's cap
+        (`HttpClientConfig.max_response_body_bytes` at every
+        `state_machine.mojo` site), REQUIRED like `new_chunked`'s and
+        `new_read_until_eof`'s: a defaulted cap is how this constructor
+        silently kept the 100 MiB default for every Content-Length body.
+        A declared length over the cap fails the first `poll_frame` with
+        BODY_TOO_LARGE before any byte is delivered (see `poll_frame`)."""
         var rb = RecvRingBody[Self.S](stream^)
         rb._framing = _BODY_FRAMING_CONTENT_LENGTH
         rb._cl_total = cl_total
+        rb._max_body_bytes = max_body_bytes
         # Seed any pre-body bytes into the accum (capped by cl_total).
         var n_pre = pre_body_bytes.__len__()
         if n_pre > 0:
@@ -935,6 +945,17 @@ struct RecvRingBody[S: IoStream](
         if self._framing == _BODY_FRAMING_EMPTY:
             self._done = True
             return BodyFrame.end()
+
+        # 3a. A Content-Length body declares its size up front: over the cap
+        # it is refused before any byte is delivered. The per-read guard in
+        # step 4 cannot see this case: a body shorter than one head read
+        # arrives whole in `pre_body_bytes`, is seeded into `_accum`, and the
+        # emit just below hands it over without reaching that guard.
+        if (
+            self._framing == _BODY_FRAMING_CONTENT_LENGTH
+            and self._cl_total > self._max_body_bytes
+        ):
+            return BodyFrame.error(String("BODY_TOO_LARGE"))
 
         # If we already have accumulated bytes from a prior pre-body
         # seed or a prior read, emit them now as one Data frame.

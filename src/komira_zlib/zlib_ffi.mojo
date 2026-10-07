@@ -24,28 +24,25 @@
 #
 # # API
 #
-# Stateful three-call FFI — libz's deflate API requires explicit
-# `deflateInit2_` (with version+sizeof handshake) → `deflate(Z_FINISH)` →
-# `deflateEnd` lifecycle. This wrapper hides the lifecycle inside a single
-# function that allocates a 112-byte z_stream scratch buffer, sets the
-# four I/O fields at known offsets, drives the three libz calls, reads
-# total_out, and returns.
+# Span in, caller-owned Span out, bytes written back:
 #
-#   fn zlib_deflate_ffi(
-#       dst: UnsafePointer[UInt8, dori],
-#       dst_capacity: Int,
-#       src: UnsafePointer[UInt8, sori],
-#       src_size: Int,
-#       level: Int32,         # 1..9 (0 = stored blocks via Z_STORED_STRATEGY)
-#       window_bits: Int32,   # -15 = raw deflate / 15 = zlib / 31 = gzip
-#   ) raises -> Int
+#   def zlib_deflate_into(dst, src, level: Int32, window_bits: Int32) -> Int
+#   def zlib_inflate_into(dst, src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int
+#   def zlib_compress_bound(src_len: Int, window_bits: Int32) -> Int
+#   def zlib_skip_stream(src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int
 #
-#   fn zlib_compress_bound_ffi(src_size: Int, window_bits: Int32) raises -> Int
+# libz's API is stateful: `deflateInit2_` (with a version + sizeof handshake)
+# → `deflate(Z_FINISH)` → `deflateEnd`, and the same shape for inflate. Each
+# entry hides that lifecycle in one call: it allocates a 112-byte z_stream
+# scratch buffer, sets the four I/O fields at known offsets, drives the libz
+# calls, reads the totals, and frees the stream.
 #
-# The `window_bits` parameter selects framing per libz convention:
-#   * windowBits = 15 (max)        : zlib wrapper (RFC 1950 — Adler-32 trailer)
-#   * windowBits = -15 (negative)  : raw deflate (RFC 1951 — no header/trailer)
-#   * windowBits = 15 + 16 = 31    : gzip wrapper (RFC 1952 — CRC-32 trailer)
+# `window_bits` selects the framing per libz convention (the
+# `ZLIB_WINDOW_BITS_*` constants below):
+#   * 15 (max)        : zlib wrapper (RFC 1950 — Adler-32 trailer)
+#   * -15 (negative)  : raw deflate (RFC 1951 — no header/trailer)
+#   * 15 + 16 = 31    : gzip wrapper (RFC 1952 — CRC-32 trailer)
+#   * 15 + 32 = 47    : inflate only — zlib or gzip, whichever the stream has
 #
 # # OwnedDLHandle singleton (process-lifetime, ~220us first-call cost)
 #
@@ -55,11 +52,14 @@
 #
 # # Encapsulation discipline
 #
-# Public API:
-#   * `zlib_deflate_ffi` accepts UnsafePointer with CALLER-CHOSEN origins
-#     (Origin / MutOrigin generic params), NOT wildcards, so callers can pass
-#     their own buffers without signature changes.
-# Internal FFI:
+# Public API: the Span entries at the bottom of the file (`zlib_inflate_into`,
+# `zlib_deflate_into`, `zlib_compress_bound`, `zlib_skip_stream`). No public
+# signature holds a raw pointer.
+# Internal FFI (underscore-prefixed: private to this module by convention; the
+# compiler does not enforce it):
+#   * The `_zlib_*_ffi` entries take UnsafePointer with CALLER-CHOSEN origins
+#     (Origin / MutOrigin generic params), NOT wildcards; only the Span
+#     entries call them, with pointers taken from their Spans.
 #   * The handle singleton is a stdlib `_Global` slot; `get_or_create_ptr()`
 #     returns `MutUntrackedOrigin` into process-lifetime static storage (no env
 #     var, no `unsafe_from_address`) — the documented FFI-BOUNDARY carve-out.
@@ -109,7 +109,7 @@ comptime _Z_DEFAULT_MEM_LEVEL: Int32 = 8  # libz default
 # listed in `_z_stream_set_in_out` and `_z_stream_total_in`.
 comptime _Z_STREAM_BYTES: Int = 112
 
-# `zlib_skip_stream_ffi` scratch: output is discarded, so this is a pure
+# `_zlib_skip_stream_ffi` scratch: output is discarded, so this is a pure
 # throughput/round-count tradeoff and NOT a correctness bound. 64 KiB keeps the
 # resident cost of skipping an arbitrarily large entry constant.
 comptime _SKIP_SCRATCH_BYTES: Int = 64 * 1024
@@ -207,6 +207,18 @@ def _z_stream_set_in_out(
 
 
 @always_inline
+def _z_stream_set_avail_in(z: UnsafePointer[UInt8, MutUntrackedOrigin], n: Int):
+    """Set avail_in @ offset 8 (UInt32) without moving next_in."""
+    (z + 8).bitcast[UInt32]()[0] = UInt32(n)
+
+
+@always_inline
+def _z_stream_set_avail_out(z: UnsafePointer[UInt8, MutUntrackedOrigin], n: Int):
+    """Set avail_out @ offset 32 (UInt32) without moving next_out."""
+    (z + 32).bitcast[UInt32]()[0] = UInt32(n)
+
+
+@always_inline
 def _z_stream_total_out(z: UnsafePointer[UInt8, MutUntrackedOrigin]) -> Int:
     """Read total_out @ offset 40 (UInt64)."""
     return Int((z + 40).bitcast[UInt64]()[0])
@@ -251,11 +263,11 @@ def _z_stream_set_out(
 
 
 # -----------------------------------------------------------------------------
-# Public FFI wrappers — one-shot calls a codec can delegate to directly.
+# Private FFI wrappers — one-shot libz calls the Span entries delegate to.
 # -----------------------------------------------------------------------------
 
 
-def zlib_deflate_ffi[
+def _zlib_deflate_ffi[
     sori: Origin, dori: MutOrigin
 ](
     dst: UnsafePointer[UInt8, dori],
@@ -264,9 +276,16 @@ def zlib_deflate_ffi[
     src_size: Int,
     level: Int32,
     window_bits: Int32,
+    slice: Int,
 ) raises -> Int:
-    """One-shot deflate via libz's `deflateInit2_` / `deflate(Z_FINISH)` /
-    `deflateEnd`. Returns total bytes written to dst.
+    """Deflate all of `src` as one stream via libz's `deflateInit2_` /
+    `deflate` / `deflateEnd`. Returns total bytes written to dst.
+
+    libz's `avail_in` / `avail_out` are 32-bit `uInt`, so the input and the
+    output are offered at most `slice` bytes at a time (`_UINT_MAX` in
+    production), topped up whenever libz has used them up, with `Z_FINISH` once
+    the last input slice is offered. This is the loop of libz's own `compress2`;
+    the stream is the same bytes however it is sliced, and any length works.
 
     `window_bits` selects framing per zlib.h convention:
         15 (max)       : zlib wrapper (RFC 1950 — Adler-32 trailer)
@@ -276,11 +295,11 @@ def zlib_deflate_ffi[
     `window_bits` is the framing selector a codec maps from its own
     container choice.
 
-    SAFETY: libz's `deflate(Z_FINISH)` reads exactly `src_size` bytes from
-    `src` and writes up to `dst_capacity` bytes to `dst`. Both buffers are
-    caller-owned for the duration of this synchronous call; libz retains no
-    pointer past the call (Z_FINISH drives the algorithm to completion in
-    one call, then deflateEnd releases the internal state). The handle is a
+    SAFETY: libz reads exactly `src_size` bytes from `src` and writes up to
+    `dst_capacity` bytes to `dst` (it never reads or writes past the
+    `avail_in` / `avail_out` this loop offers, which sum to those sizes). Both
+    buffers are caller-owned for the duration of this synchronous call; libz
+    retains no pointer past `deflateEnd`. The handle is a
     process-lifetime singleton (never freed). Origins are cast to
     an untracked origin ONLY at the call site.
     """
@@ -296,12 +315,13 @@ def zlib_deflate_ffi[
     # SAFETY: `strm` is freed via `deflateEnd` + alloc.free() before return.
     var strm = alloc[UInt8](_Z_STREAM_BYTES)
     _z_stream_init_zero(strm)
+    # Cursors only: the loop below offers the bytes in slices.
     _z_stream_set_in_out(
         strm,
         src.unsafe_mut_cast[True]().unsafe_origin_cast[MutUntrackedOrigin](),
-        src_size,
+        0,
         dst.unsafe_origin_cast[MutUntrackedOrigin](),
-        dst_capacity,
+        0,
     )
 
     # deflateInit2_(stream, level, method=Z_DEFLATED, windowBits,
@@ -319,8 +339,25 @@ def zlib_deflate_ffi[
             + ", window_bits=" + String(Int(window_bits)) + ")"
         )
 
-    # deflate(z, Z_FINISH) drives to completion in one call.
-    var rc = handle_ptr[].call["deflate", Int32](strm, _Z_FINISH)
+    var left_in = src_size
+    var left_out = dst_capacity
+    var rc = _Z_OK
+    while True:
+        if _z_stream_avail_out(strm) == 0:
+            var take = min(left_out, slice)
+            _z_stream_set_avail_out(strm, take)
+            left_out -= take
+        if _z_stream_avail_in(strm) == 0:
+            var take = min(left_in, slice)
+            _z_stream_set_avail_in(strm, take)
+            left_in -= take
+        # Z_FINISH once no input is left to offer; Z_OK means progress was
+        # made and the loop goes on, anything else ends it (Z_STREAM_END:
+        # done; Z_BUF_ERROR: the output space ran out).
+        var flush = _Z_FINISH if left_in == 0 else _Z_NO_FLUSH
+        rc = handle_ptr[].call["deflate", Int32](strm, flush)
+        if Int(rc) != Int(_Z_OK):
+            break
     if Int(rc) != Int(_Z_STREAM_END):
         _ = handle_ptr[].call["deflateEnd", Int32](strm)
         strm.free()
@@ -336,7 +373,7 @@ def zlib_deflate_ffi[
     return written
 
 
-def zlib_compress_bound_ffi(src_size: Int, window_bits: Int32) raises -> Int:
+def _zlib_compress_bound_ffi(src_size: Int, window_bits: Int32) raises -> Int:
     """Libz `deflateBound` — maximum possible compressed size after a
     `deflateInit2_(...)` with the given `window_bits`.
 
@@ -396,34 +433,42 @@ comptime _Z_NO_FLUSH: Int32 = 0
 comptime _WBITS_AUTO: Int32 = 15 + 32
 
 
-def zlib_inflate_ffi[
+@always_inline
+def _z_stream_avail_out(z: UnsafePointer[UInt8, MutUntrackedOrigin]) -> Int:
+    """Read avail_out @ offset 32 (UInt32) — output space still UNWRITTEN. Zero
+    after a non-Z_STREAM_END `inflate` means the output buffer filled up."""
+    return Int((z + 32).bitcast[UInt32]()[0])
+
+
+@fieldwise_init
+struct _InflateOutcome(Copyable, Movable):
+    """What one `inflate(Z_NO_FLUSH)` call left behind: libz's return code, the
+    bytes it wrote, the input it left unread and the output space it left
+    unwritten."""
+
+    var rc: Int32
+    var written: Int
+    var unread: Int
+    var unwritten: Int
+
+
+def _zlib_inflate_once[
     sori: Origin, dori: MutOrigin
 ](
     dst: UnsafePointer[UInt8, dori],
     dst_capacity: Int,
     src: UnsafePointer[UInt8, sori],
     src_size: Int,
-    window_bits: Int32 = _WBITS_AUTO,
-) raises -> Int:
-    """One-shot inflate via libz's `inflateInit2_` / `inflate(Z_NO_FLUSH)` /
-    `inflateEnd`. Returns total bytes written to dst.
-
-    `window_bits` defaults to `15 + 32` which gives libz auto-detection
-    of gzip / zlib / raw-deflate framing — load-bearing for Parquet
-    interop where parquet-mr, DuckDB, pyarrow, and Spark all disagree on
-    which framing they emit for the "GZIP" codec id.
-
-    Explicit values:
-        15 (max)       : zlib wrapper only (RFC 1950 — Adler-32 trailer)
-       -15 (negative)  : raw deflate only (RFC 1951 — no header/trailer)
-       15 + 16 = 31    : gzip wrapper only (RFC 1952 — CRC-32 trailer)
-       15 + 32 = 47    : zlib + gzip auto-detect (default; what callers want)
+    window_bits: Int32,
+) raises -> _InflateOutcome:
+    """One `inflateInit2_` / `inflate(Z_NO_FLUSH)` / `inflateEnd` round, with
+    the `inflate` return code handed back rather than judged. Raises only when
+    `inflateInit2_` fails.
 
     SAFETY: libz's `inflate(Z_NO_FLUSH)` reads up to `src_size` bytes from
     `src` and writes up to `dst_capacity` bytes to `dst`. Both buffers are
     caller-owned for the synchronous call; libz retains no pointer past
-    the call (Z_NO_FLUSH followed by inflateEnd drives one-shot decode to
-    completion). The handle is a process-lifetime singleton (never freed).
+    `inflateEnd`. The handle is a process-lifetime singleton (never freed).
     Origins are cast to an untracked origin ONLY at the call site (same
     pattern as the deflate side of this file).
     """
@@ -459,29 +504,19 @@ def zlib_inflate_ffi[
     var rc = handle_ptr[].call["inflate", Int32](strm, _Z_NO_FLUSH)
     # total_out at offset 40 (read via _z_stream_total_out).
     var written = _z_stream_total_out(strm)
+    var unread = _z_stream_avail_in(strm)
+    var unwritten = _z_stream_avail_out(strm)
     var _end_rc = handle_ptr[].call["inflateEnd", Int32](strm)
     strm.free()
-
-    # inflate may return Z_OK (more input needed) OR Z_STREAM_END (done).
-    # For one-shot Parquet pages we expect Z_STREAM_END; Z_OK with non-zero
-    # written is also acceptable (caller passed enough data) but every
-    # other rc is an error.
-    if Int(rc) != Int(_Z_OK) and Int(rc) != Int(_Z_STREAM_END):
-        raise Error(
-            "libz inflate failed (rc=" + String(Int(rc))
-            + ", input_len=" + String(src_size)
-            + ", output_cap=" + String(dst_capacity)
-            + ", window_bits=" + String(Int(window_bits)) + ")"
-        )
-    return written
+    return _InflateOutcome(rc, written, unread, unwritten)
 
 
 # -----------------------------------------------------------------------------
-# zlib_skip_stream_ffi — how many INPUT bytes does one deflate stream occupy?
+# _zlib_skip_stream_ffi — how many INPUT bytes does one deflate stream occupy?
 # -----------------------------------------------------------------------------
 
 
-def zlib_skip_stream_ffi[
+def _zlib_skip_stream_ffi[
     sori: Origin
 ](
     src: UnsafePointer[UInt8, sori],
@@ -500,7 +535,7 @@ def zlib_skip_stream_ffi[
     ★ MEMORY IS BOUNDED AND INDEPENDENT OF THE DECOMPRESSED SIZE. Output goes
     into a fixed `_SKIP_SCRATCH_BYTES` scratch buffer that is re-pointed on every
     iteration, so skipping a 1 GiB blob entry costs 64 KiB resident, not 1 GiB.
-    `zlib_inflate_ffi` cannot serve this role: it is one-shot and needs a `dst`
+    `_zlib_inflate_once` cannot serve this role: it is one-shot and needs a `dst`
     at least as large as the decompressed payload, which on a push path is the
     exact resident-memory cost the scan exists to avoid.
 
@@ -510,7 +545,7 @@ def zlib_skip_stream_ffi[
     SAFETY: `src` is caller-owned for the synchronous call; `scratch` is a local
     allocation freed before every return path. libz retains no pointer past
     `inflateEnd`. Origins are cast to an untracked origin only at the call site —
-    the same pattern as `zlib_inflate_ffi` above.
+    the same pattern as `_zlib_inflate_once` above.
     """
     var handle_ptr = _default_zlib_ffi_handle()
     var version = handle_ptr[].call[
@@ -586,3 +621,238 @@ def zlib_skip_stream_ffi[
     strm.free()
     scratch.free()
     return consumed
+
+
+# =============================================================================
+# PUBLIC API — SAFE (Span in, Span out; ZERO raw pointer in any signature).
+#
+# The raw pointers are taken from the Spans here, inside this module, for the
+# one synchronous libz call; the Span origins are concrete, so the buffers are
+# alive for the whole call. libz counts in `uInt` (32 bits): `zlib_deflate_into`
+# feeds any length in 32-bit slices (compress2's own loop); inflate and
+# `zlib_skip_stream` refuse a source past 4 GiB and offer a larger
+# destination as 4 GiB.
+# =============================================================================
+
+# `window_bits` framing selectors (zlib.h).
+# zlib wrapper (RFC 1950, Adler-32 trailer).
+comptime ZLIB_WINDOW_BITS_ZLIB: Int32 = 15
+# Raw deflate (RFC 1951, no header or trailer).
+comptime ZLIB_WINDOW_BITS_RAW: Int32 = -15
+# gzip wrapper (RFC 1952, CRC-32 trailer).
+comptime ZLIB_WINDOW_BITS_GZIP: Int32 = 15 + 16
+# Inflate only: accept a zlib or a gzip wrapper, whichever the stream has. The
+# default of `zlib_inflate_into`, and load-bearing for Parquet interop: writers
+# (parquet-mr, DuckDB, pyarrow, Spark) disagree on which framing they emit for
+# the GZIP codec id.
+comptime ZLIB_WINDOW_BITS_AUTO: Int32 = _WBITS_AUTO
+# libz's default compression level.
+comptime ZLIB_LEVEL_DEFAULT: Int32 = 6
+
+comptime _UINT_MAX: Int = 4294967295
+
+
+def zlib_compress_bound(src_len: Int, window_bits: Int32) raises -> Int:
+    """The largest stream `zlib_deflate_into` can produce from `src_len` bytes
+    under `window_bits` framing (libz's `deflateBound`)."""
+    if src_len < 0:
+        raise Error("zlib_compress_bound: negative src_len " + String(src_len))
+    return _zlib_compress_bound_ffi(src_len, window_bits)
+
+
+def zlib_deflate_into[
+    dori: MutOrigin
+](
+    dst: Span[UInt8, dori],
+    src: Span[UInt8, _],
+    level: Int32,
+    window_bits: Int32,
+) raises -> Int:
+    """Compress all of `src` into `dst` as ONE stream framed by `window_bits`
+    (`ZLIB_WINDOW_BITS_ZLIB` / `_RAW` / `_GZIP`); return the bytes written.
+
+    `dst` must hold at least `zlib_compress_bound(len(src), window_bits)` bytes;
+    a smaller one is refused before libz is called. An empty `src` is a valid
+    stream of no bytes (for gzip, 20 bytes: header, an empty final block,
+    trailer). Any length works: libz is fed in 32-bit slices.
+    """
+    return _zlib_deflate_into_sliced(dst, src, level, window_bits, _UINT_MAX)
+
+
+def _zlib_deflate_into_sliced[
+    dori: MutOrigin
+](
+    dst: Span[UInt8, dori],
+    src: Span[UInt8, _],
+    level: Int32,
+    window_bits: Int32,
+    slice: Int,
+) raises -> Int:
+    """`zlib_deflate_into` with the libz slice size as a parameter, so a test
+    can cross many slice boundaries without a 4 GiB buffer. Private by
+    convention: production passes `_UINT_MAX`."""
+    if slice <= 0 or slice > _UINT_MAX:
+        raise Error("zlib_deflate_into: bad slice " + String(slice))
+    var n = len(src)
+    var need = zlib_compress_bound(n, window_bits)
+    if len(dst) < need:
+        raise Error(
+            "zlib_deflate_into: destination holds " + String(len(dst))
+            + " bytes, below zlib_compress_bound(" + String(n) + ", "
+            + String(Int(window_bits)) + ") = " + String(need)
+        )
+    var cap = len(dst)
+    # SAFETY: `dst` holds `cap > 0` writable bytes and `src` holds `n` readable
+    # bytes, both kept alive by their Span origins for this synchronous call;
+    # libz writes at most `cap` bytes, reads exactly `n` (a null `next_in` is
+    # accepted when `avail_in == 0`), and keeps neither pointer past
+    # `deflateEnd`.
+    var written = _zlib_deflate_ffi(
+        dst.unsafe_ptr(), cap, src.unsafe_ptr(), n, level, window_bits, slice
+    )
+    if written > cap:
+        raise Error(
+            "zlib_deflate_into: libz reported " + String(written)
+            + " bytes written into a " + String(cap) + "-byte buffer"
+        )
+    return written
+
+
+def zlib_inflate_into[
+    dori: MutOrigin
+](
+    dst: Span[UInt8, dori],
+    src: Span[UInt8, _],
+    window_bits: Int32 = ZLIB_WINDOW_BITS_AUTO,
+) raises -> Int:
+    """Decompress the stream at the start of `src` into `dst`; return the bytes
+    written. The stream must END inside `src` and its output must fit in `dst`:
+
+      * output past `len(dst)` is refused (libz never writes past it),
+      * a source that ends before the stream does is refused (truncated),
+      * a corrupt stream, or one whose check value (Adler-32 / CRC-32) does not
+        match, is refused,
+      * an empty `src` is refused (no stream is zero bytes long).
+
+    Bytes in `src` after the end of the first stream are not read; a gzip file
+    of several members decodes its first member only.
+    """
+    var n = len(src)
+    if n == 0:
+        raise Error("zlib_inflate_into: empty source (no stream is empty)")
+    if n > _UINT_MAX:
+        raise Error(
+            "zlib_inflate_into: source of " + String(n)
+            + " bytes exceeds libz's 32-bit length"
+        )
+    var cap = min(len(dst), _UINT_MAX)
+    var outcome: _InflateOutcome
+    if cap == 0:
+        # libz refuses a null `next_out` even with `avail_out == 0`, and an
+        # empty Span may carry one: offer a real one-byte buffer, capacity 0.
+        var scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+        # SAFETY: `scratch` and `src` are alive across this synchronous call
+        # (local stack / the Span's concrete origin); libz writes 0 bytes and
+        # reads at most `n` from `src`.
+        outcome = _zlib_inflate_once(
+            scratch.unsafe_ptr(), 0, src.unsafe_ptr(), n, window_bits
+        )
+    else:
+        # SAFETY: `dst` holds `len(dst) >= cap` writable bytes and `src` holds
+        # `n` readable bytes, both kept alive by their Span origins for this
+        # synchronous call; libz writes at most `cap` bytes, reads at most `n`,
+        # and keeps neither pointer past `inflateEnd`.
+        outcome = _zlib_inflate_once(
+            dst.unsafe_ptr(), cap, src.unsafe_ptr(), n, window_bits
+        )
+    if outcome.written > cap:
+        raise Error(
+            "zlib_inflate_into: libz reported " + String(outcome.written)
+            + " bytes written into a " + String(cap) + "-byte buffer"
+        )
+    if Int(outcome.rc) == Int(_Z_STREAM_END):
+        return outcome.written
+    if Int(outcome.rc) == Int(_Z_OK) or Int(outcome.rc) == Int(_Z_BUF_ERROR):
+        # Input left unread means libz stopped for want of output space.
+        if outcome.unread > 0 and outcome.unwritten == 0:
+            raise Error(
+                "zlib_inflate_into: the stream decodes to more than the "
+                + String(len(dst)) + "-byte destination"
+            )
+        # Output full AND input used up: libz may have pulled the last input
+        # bytes into its bit buffer before the output filled (raw deflate has
+        # no trailer to leave unread), or the source may end right where the
+        # output did (a missing trailer). Both stop libz in the same state.
+        if outcome.unwritten == 0:
+            raise Error(
+                "zlib_inflate_into: the output filled the " + String(len(dst))
+                + "-byte destination before the stream ended (it decodes to"
+                " more than that, or the " + String(n)
+                + "-byte source is truncated)"
+            )
+        raise Error(
+            "zlib_inflate_into: truncated stream (the " + String(n)
+            + "-byte source ends before the stream does)"
+        )
+    raise Error(
+        "zlib_inflate_into: corrupt stream (libz inflate rc="
+        + String(Int(outcome.rc)) + ", window_bits="
+        + String(Int(window_bits)) + ")"
+    )
+
+
+def zlib_skip_stream(
+    src: Span[UInt8, _], window_bits: Int32 = ZLIB_WINDOW_BITS_AUTO
+) raises -> Int:
+    """The number of bytes the stream at the start of `src` occupies (decoded
+    and discarded, in constant memory). For walking concatenated streams that
+    carry no length prefix: the next stream starts at the returned offset.
+    Raises on an empty, truncated or corrupt stream."""
+    var n = len(src)
+    if n == 0:
+        raise Error("zlib_skip_stream: empty source (no stream is empty)")
+    if n > _UINT_MAX:
+        raise Error(
+            "zlib_skip_stream: source of " + String(n)
+            + " bytes exceeds libz's 32-bit length"
+        )
+    # SAFETY: `src` holds `n` readable bytes, kept alive by its Span origin for
+    # this synchronous call; libz reads at most `n` and keeps no pointer past
+    # `inflateEnd`.
+    var consumed = _zlib_skip_stream_ffi(src.unsafe_ptr(), n, window_bits)
+    if consumed > n:
+        raise Error(
+            "zlib_skip_stream: libz reported " + String(consumed)
+            + " bytes consumed from a " + String(n) + "-byte source"
+        )
+    return consumed
+
+
+# libz's `crc32` takes a 32-bit `uInt` length: feed it at most 1 GiB per call,
+# so a buffer larger than 4 GiB cannot wrap the length and yield a valid-looking
+# but wrong checksum. CRC-32 is incremental, so chunking is exact.
+comptime _CRC_CHUNK: Int = 1 << 30
+
+
+def zlib_crc32(data: Span[UInt8, _], crc: UInt32 = 0) raises -> UInt32:
+    """The CRC-32 of RFC 1952 (the gzip trailer's checksum) of `data`,
+    continuing from `crc` (0 to start; pass a previous result to extend it over
+    the next piece). libz's `crc32`."""
+    var handle_ptr = _default_zlib_ffi_handle()
+    var acc = UInt64(crc)
+    var off = 0
+    var n = len(data)
+    while off < n:
+        var take = min(_CRC_CHUNK, n - off)
+        # SAFETY: `data` holds `n` readable bytes, alive across this
+        # synchronous call through its Span origin; libz reads exactly `take`
+        # bytes from `off` (in bounds: `off + take <= n`) and keeps no pointer.
+        acc = handle_ptr[].call["crc32", UInt64](
+            acc,
+            (data.unsafe_ptr() + off)
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin](),
+            UInt32(take),
+        )
+        off += take
+    return UInt32(acc & 0xFFFFFFFF)

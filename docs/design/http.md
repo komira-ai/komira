@@ -2,7 +2,7 @@
 
 ## What is it for, and what is out of scope?
 
-The HTTP layer is four packages. `komira_http_core` (`src/komira_http_core`) holds the codecs, the TLS layer and the stream seam that the server and the client share. `komira_http_client` and `komira_http_server` are the HTTP/1.1 and HTTP/2 client and server; each depends on the core and neither on the other. `komira_http_status_hook` is the one piece that needs both. Neither the server nor the client starts a thread: each is driven by a `Reactor` from `komira_async` on the calling thread. A **reactor** waits on many sockets at once and reports each ready one as a completion.
+The HTTP layer is three packages. `komira_http_core` (`src/komira_http_core`) holds the codecs, the TLS layer and the stream seam that the server and the client share. `komira_http_client` and `komira_http_server` are the HTTP/1.1 and HTTP/2 client and server; each depends on the core and neither on the other. Neither the server nor the client starts a thread: each is driven by a `Reactor` from `komira_async` on the calling thread. A **reactor** waits on many sockets at once and reports each ready one as a completion.
 
 The design idea is **one event loop per server, and I/O as explicit state**. A handler receives the server's own reactor, so its I/O runs on the loop that serves HTTP. Only the suspendable and erased serve methods let a handler that waits on a database or an outbound call park while the loop serves other connections. In the plain and chained methods, the dispatcher returns its response synchronously.
 
@@ -12,7 +12,7 @@ Terms used below:
 - A **connector** dials a connection and returns a **stream**, a non-blocking byte stream conforming to `IoStream`.
 - A **serve round** handles one reactor event on one connection.
 
-The library depends on `komira_async`, `komira_core`, `komira_obs`, `komira_uuid`, the vendored s2n-tls (`third_party/s2n-tls`) and `komira_runtime_paths`.
+The library depends on `komira_async`, `komira_collections`, `komira_libc`, `komira_obs`, `komira_uuid`, the vendored s2n-tls (`third_party/s2n-tls`) and `komira_runtime_paths`.
 
 Out of scope:
 
@@ -75,9 +75,11 @@ Any other HTTP/2 request is matched against the server's `Router`: a match answe
 
 ### How do middleware and routing work?
 
-`MiddlewareChain` (`src/komira_http_server/middleware/chain.mojo`) holds four optional built-ins, `ErrorMappingMiddleware`, `CorsMiddleware`, `TracingMiddleware` and `LoggingMiddleware`, and runs one user middleware that the caller passes in. `run_before_legs` calls `before` on CORS, tracing, logging, then the user middleware; a `before` that returns a response skips the rest and the handler. `run_after_legs` calls `after` in reverse order on whatever response resulted, and skips the user middleware's `after` when its `before` did not run. A raise is turned into a response by `map_chain_error`. `MetricsMiddleware` and `PairMiddleware` (`middleware/metrics.mojo`) are user-slot middleware: the first reports one `RequestMetric` per request to a `MetricsSink`, and the second runs two middleware in one slot.
+`MiddlewareChain` (`src/komira_http_server/middleware/chain.mojo`) holds four optional built-ins, `ErrorMappingMiddleware`, `CorsMiddleware`, `TracingMiddleware` and `LoggingMiddleware`, and runs one user middleware that the caller passes in. `run_before_legs` calls `before` on CORS, tracing, logging, then the user middleware; a `before` that returns a response skips the rest and the handler. `run_after_legs` calls `after` in reverse order on whatever response resulted, and skips the user middleware's `after` when its `before` did not run. A raise is turned into a response by `map_chain_error`. `MetricsMiddleware` and `PairMiddleware` (`middleware/metrics.mojo`) are user-slot middleware: the first reports one `RequestMetric` per request to a `MetricsSink`, and the second runs two middleware in one slot, and nests to compose more.
 
-In `serve_one_iteration_dispatch_chained`, the dispatcher is a `CtxRequestDispatcher`: `dispatch_with_ctx` also receives the `RequestContext` the chain filled in, for example the `AuthedUser` an authentication middleware resolved.
+The library has no identity or authorization model of its own. `RequestContext` carries an optional `Principal` (an opaque `subject` string plus a `Claims` string map) and an `attributes` string map; an embedder's middleware fills them and its dispatcher reads them. `tests/test_no_product_vocabulary.mojo` fails the build if a library source names a tenancy, grant or hosted-application concept (the word list is in the test).
+
+In `serve_one_iteration_dispatch_chained`, the dispatcher is a `CtxRequestDispatcher`: `dispatch_with_ctx` also receives the `RequestContext` the chain filled in, for example the `Principal` an authentication middleware attached.
 
 Two routers exist. `Router` (`src/komira_http_server/routing/router.mojo`) maps a method and path to an integer handler id; patterns hold static segments, `:name` parameters and a `*` that matches the rest of the path and must be the last segment. `AppRouter[*Routes]` (`src/komira_http_server/routing/route.mojo`) is a `RequestDispatcher` over a compile-time pack of `Route` types, each with a `METHOD`, a `PATTERN` and a `handle[RT]` method. It matches through a `Router`, fills `req.path_params`, and answers 405 for a known path with the wrong method and 404 for an unknown path.
 
@@ -269,7 +271,7 @@ Entry points:
 
 ## How is it tested?
 
-Each package welds its own tests: `komira_http_core` 36, `komira_http_client` 105, `komira_http_server` 24 and `komira_http_status_hook` 1, 166 in all. Each runs as a build action, so a library cannot build while one of its tests fails. Run: `./buck2 build //src/komira_http_core:komira_http_core //src/komira_http_client:komira_http_client //src/komira_http_server:komira_http_server //src/komira_http_status_hook:komira_http_status_hook`.
+Each package welds its own tests: `komira_http_core` 36, `komira_http_client` 105 and `komira_http_server` 25, 166 in all. Each runs as a build action, so a library cannot build while one of its tests fails. Run: `./buck2 build //src/komira_http_core:komira_http_core //src/komira_http_client:komira_http_client //src/komira_http_server:komira_http_server`.
 
 - TLS tests link the vendored s2n-tls and AWS-LC archives and read the certificates in `src/komira_http_core/tests/fixtures/`.
 - `ScriptedStream` and `ScriptedConnector` feed byte scripts to the client, and `ScriptedTransport` records calls through the `HttpTransport` seam, so most client tests open no socket.

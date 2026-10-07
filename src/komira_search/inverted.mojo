@@ -68,8 +68,8 @@
 #   * InvertedIndexBuilder is MOVE-ONLY (Slab is Movable, NOT Copyable).
 # =============================================================================
 
-from komira_core.collections.slab import Slab
-from komira_core.collections.string_column_view import StringColumnView
+from komira_collections.slab import Slab
+from komira_arrow.string_column_view import StringColumnView
 
 from komira_hash import fnv1a_64
 
@@ -265,9 +265,7 @@ struct FinalizedIndex(Movable, Deinitable):
             )
         var off = self._term_off[ordinal]
         var ln = self._term_len[ordinal]
-        return Span[UInt8, origin_of(self._term_bytes_final)](
-            unsafe_ptr=self._term_bytes_final.unsafe_ptr() + off, length=ln
-        )
+        return Span(self._term_bytes_final)[off : off + ln]
 
     def doc_freq_at(self, ordinal: Int) raises -> Int:
         """== postings_len for the term at `ordinal`. One of the three TermInfo
@@ -304,9 +302,7 @@ struct FinalizedIndex(Movable, Deinitable):
             )
         var start = self._postings_start[ordinal]
         var ln = self._postings_len[ordinal]
-        return Span[Int, origin_of(self._doc_ids_final)](
-            unsafe_ptr=self._doc_ids_final.unsafe_ptr() + start, length=ln
-        )
+        return Span(self._doc_ids_final)[start : start + ln]
 
     def posting_tfs_at(
         self, ordinal: Int
@@ -325,9 +321,7 @@ struct FinalizedIndex(Movable, Deinitable):
             )
         var start = self._postings_start[ordinal]
         var ln = self._postings_len[ordinal]
-        return Span[Int, origin_of(self._tfs_final)](
-            unsafe_ptr=self._tfs_final.unsafe_ptr() + start, length=ln
-        )
+        return Span(self._tfs_final)[start : start + ln]
 
 
 # =============================================================================

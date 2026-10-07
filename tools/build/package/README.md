@@ -116,6 +116,85 @@ carry no time; JSON keys are sorted and every timestamp is
 image digest ([bundle.sh](../tests/functional/bundle.sh)), and `docker run` of the loaded image prints
 the greeting ([formats.sh](../tests/functional/formats.sh)).
 
+## kcov is never packed
+
+kcov ([`toolchains/kcov`](../toolchains/kcov/README.md)) is GPL-2.0 and a
+build-only tool (the licence decision is recorded in [kcov's
+README](../toolchains/kcov/README.md#licences)), so no published artifact may
+hold it. Every package format runs [`kcov_guard.sh`](kcov_guard.sh) over what
+it packs, as a build action whose output its published files depend on
+([`kcov_guard.bzl`](kcov_guard.bzl)). The guard refuses a file whose sha256 is
+`KCOV_BIN_SHA256` or whose bytes contain `KCOV_USAGE_LINE`, `Usage: kcov
+[OPTIONS] out-dir in-file [args...]`, the two constants of
+[`toolchains/kcov/identity.bzl`](../toolchains/kcov/identity.bzl). The
+message names the target and each refused file by its path in the package.
+kcov carries no `kcov v42` to search for (it prints `kcov %s` with the string
+`v42`), and the usage line is one string literal of its source, contiguous in
+every build of it.
+
+The guard depends on no kcov target: a package build never builds kcov,
+never compiles its source, and is not blocked by a kcov that fails to build or
+a kcov pin that breaks. What holds the constants to the real binary is on the
+kcov side: `//tools/build/toolchains/kcov:kcov_identity`, which gates `:kcov`,
+fails when the built `bin/kcov` has another sha256 or lacks the line, naming
+the constant to update. Between such a change and the update, the guard
+refuses kcov by its usage line alone.
+
+| format | what the guard reads | what waits for it |
+|---|---|---|
+| `mojo_bundle` | every file of the bundle | the bundle target (`[kcov_guard]` is built with it) |
+| `bundle_tarball`, `oci_image` | the bundle, through the bundle's guard | the `komira_pack tar` and `komira_pack oci` actions |
+| `conda_package` | every file `komira_pack conda` copies in: the `.mojoc`, the README, the licence files | the copies behind `[default]` and `[release]` (`[kcov_guard]` is the marker) |
+
+The image's base layers (the pinned distroless blobs) and the files the
+packers generate (`VERSION`, `SHA256SUMS`, the conda JSON) are not read: they
+hold no file a build put there. `komira_pack conda-check` refuses any member
+of a package's pkg tar other than the `.mojoc` and the README, so the guard's
+list is the package's content. The metapackage (`release_set.bzl`) carries
+only komira's `LICENSE` and is not guarded.
+
+The guard reads whole files, following symlinks. It does not open an archive
+or a compressed stream inside the package (a `.tar.gz`, `.zip` or `.xz` in a
+bundle's `data` that holds kcov is accepted), and it does not know the files
+kcov writes when it runs: its preload library (`libkcov_sowrapper.so`, which
+`bin/kcov` carries inside it and which holds no usage line) and its report
+directories. Keeping those out is review's job.
+
+The sha256 is that of the one kcov komira builds (its pin, for
+linux-x86_64); a kcov built otherwise (another version or CPU, patched or
+stripped) is refused by the usage line alone.
+
+`:kcov_guard` (the script) is gated by the validation `:kcov_guard_cases`, so
+any build that packs anything also runs the guard on known inputs (15 cases),
+and fails if one gets the wrong answer. The cases need no kcov: a fixture
+file stands for `bin/kcov`, and its sha256, written into the script, is the
+one they pass. Refused: a sha256 one digit short or in upper case, and an
+empty line, before any file is read; the fixture renamed (by its sha256, as a
+directory's file, as a file and under a destination path; the fixture holds
+no usage line, so only the sha256 can refuse it); a file holding the usage
+line after the fixture's bytes, and the line between NUL bytes (by the
+line); two offenders named together; a symlink to the fixture and one to a
+directory holding it (under the link's name). Accepted: near misses of the
+line, the line split by a NUL or a newline, and the fixture with one byte
+more. Three of the cases run the guard through its command line in its own
+process, as the package rules do (the fixture's copy refused by the sha256,
+the embedded line refused by the line, the near misses accepted, `<out>`
+written only then), so a sha256 or line read from the wrong argument is red.
+Planted, red: the sha256 comparison broken (`copy_in_dir: guard exited
+0, want 1`), `KCOV_USAGE_LINE` shortened to `Usage: kcov` (`near_misses:
+guard exited 1`) or emptied (`the fixture holds the usage line`); the
+`guard` mode reading its line with a character added (`cli_line: guard
+exited 0, want 1`) or a sha256 other than its argument (`cli_sha: guard
+exited 0, want 1`). On the
+examples: `hello_bundle` given
+`data = {"share/kcov": "//tools/build/toolchains/kcov:kcov[bin]"}` (the only
+state in which a package build depends on kcov) fails `share/kcov is kcov's
+bin/kcov (sha256 57243a23...)`, and neither the tarball nor the image is
+packed; a data file holding the usage line fails `share/marker.txt holds
+kcov's usage line`, while one holding only near misses of it builds; a conda
+package given `bin/kcov` as a licence file and a README holding the line
+fails naming `info/licenses/KCOV` and `share/doc/komira_encoding/README.md`.
+
 ## Conda packages
 
 `conda_package` ([`conda.bzl`](conda.bzl)) packages a Mojo library as a `.conda`
@@ -134,6 +213,35 @@ packaged keeps a target that builds as a refusal, and the bytes are reproducible
 `conda_manifest_kci` ([`manifest_probe/BUCK`](manifest_probe/BUCK)) is the build
 gate between the two: it builds one real package and reads its manifest with
 kci's parser, so `buck2 build //...` fails if the packer and kci disagree.
+`conda_release_set_check` ([`release_set.bzl`](release_set.bzl); the target
+`:release_set_check` in [`BUCK`](BUCK)) builds the stamped release path without a
+release's `-c komira.package_*`, in any build that includes it (`buck2 build //...`
+and the per-change check's unit that holds it). It packages each library of the
+release set (today only `komira_encoding`) with the fixed test stamp of
+`conda_package_test_stamped` in [`conda.bzl`](conda.bzl): build number 999999999,
+a made-up source commit whose first 8 hex are `7e57c0de` (no 8-hex slice of it
+repeats another or is `00000000`), commit time 86400000 ms. No release carries
+it. The target builds each package's `[release]` (so its `[release_check]` runs)
+and runs `komira_pack conda-meta --name komira_all` over those manifests. It
+fails the build in these cases:
+
+- a member or the metapackage does not carry build string `h7e57c0de_999999999`
+  (written out, not derived from the commit) in its file name and manifest, or
+  the stamp at the top level of its metadata.json; the message names the package;
+- the metapackage does not require a member at its version and build string; the
+  message names the member;
+- `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
+  metapackage;
+- its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`
+  it gives conda-meta differ from [`release_set.txt`](release_set.txt).
+
+The welded test `test_release_artifacts_file` of `src/kci_artifact` holds
+`release_set.txt` equal to `release/artifacts.textproto`'s metapackage, so a
+library added to the release set and not here is red. `:release_set_kci` reads
+the stamped metapackage's manifest with kci's parser. Not covered: the macro's
+reading of `-c komira.package_*` (these packages are given the test stamp), and,
+while the release set holds one library with no dependencies, one member's
+lockstep pin on another and agreement across members.
 [`list_conda_targets.sh`](list_conda_targets.sh) prints the package targets. The layout,
 the version scheme and the metapackage: [packaging/conda](../../../packaging/conda/README.md). The version
 a release carries comes from [`release_version.sh`](release_version.sh).

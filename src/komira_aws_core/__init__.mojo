@@ -35,9 +35,16 @@ clients.
 - `aws_xml.mojo`: the restXml body codec over komira_xml (`aws_xml_write_*`
   and `aws_xml_get_*` scalars, wrapped and flattened lists and maps,
   xmlAttribute, xmlNamespace), `aws_rest_xml_error` /
-  `aws_xml_error_info` (<ErrorResponse><Error>, a bare <Error>, the status
-  as the code of an empty or non-XML body), and `aws_xml_body_is_error`,
+  `aws_xml_error_info` (<ErrorResponse><Error>, a bare <Error>, ec2's
+  <Response><Errors><Error>, the status as the code of an empty or non-XML
+  body or a 5xx <html> page), and `aws_xml_body_is_error`,
   S3's 200-with-<Error> check.
+- `aws_query.mojo`: the awsQuery / ec2Query runtime: `AwsQueryWriter` (the
+  form body, `Action` and `Version` first, botocore's percent-encoding),
+  `aws_query_key` / `aws_query_rename_last` (parameter names),
+  `aws_query_set_body`, `aws_query_result` (the `<OpResult>` element of a
+  response) and `aws_query_error` (<ErrorResponse><Error> and ec2's
+  <Response><Errors><Error>, through `aws_xml_error_info`).
 - `endpoint.mojo`: `AwsEndpoint`, the partitions, `aws_service_endpoint`,
   `resolve_endpoint`, and `aws_endpoint_config` (AWS_ENDPOINT_URL[_<SVC>],
   FIPS and dual-stack, from the standard settings only).
@@ -51,7 +58,8 @@ clients.
   default chain over the process's environment, files and network, shared,
   and `process_creds_source`.
 - `signed_request.mojo`: `build_sigv4_signed_request`, the socket-free half
-  of a send, `AwsPayloadSigning` (hashed, unsigned or precomputed), and
+  of a send, `build_unsigned_request`, the same request for an anonymous
+  operation, `AwsPayloadSigning` (hashed, unsigned or precomputed), and
   `is_s3_signing_name`, the signing names signed by S3's rules.
 - `endpoint_rules.mojo`: `EndpointRuleSet`, the interpreter of a service's
   Smithy endpoint ruleset (`endpoint-rule-set-1.json`), with its standard
@@ -64,13 +72,17 @@ clients.
   send a generated client calls: signed, sent over komira_http_client
   through a `Connector`, and retried; `send_sigv4_signed_request_with`
   over injected seams (`AwsHttpTransport`, the clocks, the retry loop and
-  budget), and `AwsConnectorTransport`.
+  budget), and `AwsConnectorTransport`; `send_unsigned_request` and
+  `send_unsigned_request_with`, the same sends for an anonymous operation.
 - `aws_retry.mojo`: `AwsRetryClassifier`, botocore's standard retry
   conditions for komira_retry over an `AwsAttempt`, with
   `aws_standard_retry_policy` and `AwsRetryQuota`, the retry quota a
   client keeps; every operation is retried alike, whatever its method,
   but a conditional write the service may have acted on
   (`aws_request_is_conditional`), which is not resent.
+- `idempotency.mojo`: `aws_idempotency_token`, the random UUID a
+  generated client fills an unset `idempotencyToken` member with, once per
+  call, as botocore does.
 - `echo_connector.mojo`: `AwsEchoConnector`, a test double whose stream
   answers each request with an error naming the request head as it reached
   the wire, so a test of a generated client asserts each verb's request.
@@ -124,6 +136,15 @@ from .aws_error import (
     aws_json_error_info,
     aws_query_error_code,
     aws_request_id,
+)
+from .aws_query import (
+    AWS_QUERY_CONTENT_TYPE,
+    AwsQueryWriter,
+    aws_query_error,
+    aws_query_key,
+    aws_query_rename_last,
+    aws_query_result,
+    aws_query_set_body,
 )
 from .aws_request import AwsRequest, AwsResponse, HttpResult
 from .aws_rest import (
@@ -179,15 +200,15 @@ from .aws_retry import (
     aws_transport_error_kind,
     aws_transport_error_unsent,
 )
+from .idempotency import aws_idempotency_token
 from .aws_send import (
     AwsConnectorTransport,
     AwsHttpTransport,
-    AwsMonotonicClock,
-    AwsReactorSleeper,
-    aws_system_retry_loop,
     aws_response_error_code,
     send_sigv4_signed_request,
     send_sigv4_signed_request_with,
+    send_unsigned_request,
+    send_unsigned_request_with,
 )
 from .echo_connector import (
     AWS_ECHO_CODE,
@@ -332,6 +353,7 @@ from .shared_config import (
 from .signed_request import (
     AwsPayloadSigning,
     build_sigv4_signed_request,
+    build_unsigned_request,
     is_s3_signing_name,
 )
 from .sigv4 import (

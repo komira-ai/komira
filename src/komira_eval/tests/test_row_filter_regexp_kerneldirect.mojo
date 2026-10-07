@@ -62,7 +62,7 @@ from komira_kernels.runtime_expr import (
     make_regexp,
     make_not_bool,
 )
-from komira_core.eval.regexp_nfa import RegexProgram
+from komira_column_kernels.regexp_nfa import RegexProgram
 
 
 # =============================================================================

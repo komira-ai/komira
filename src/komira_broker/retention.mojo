@@ -28,8 +28,23 @@
 #        bug must never silently renumber the log).
 #
 #   ReapWorker.run(manifest, now_ms, grace_ms):
-#     For each tombstone_seq: read its schedule_ts; reap ONLY when
-#     `now_ms - schedule_ts >= grace_ms` (the grace window). Idempotent.
+#     Read `_LOG_START` ONCE (fail closed: an unreadable pointer reaps
+#     nothing). For each tombstone_seq BELOW it: read its schedule_ts; reap
+#     ONLY when `now_ms - schedule_ts >= grace_ms` (the grace window).
+#     A tombstone AT OR ABOVE it sits on a live chunk (step 6 failed or the
+#     process died between 5 and 6): skipped and counted, never deleted, and
+#     reclaimable once a later pass advances. Idempotent.
+#     A chunk with a MOVED marker (written by the sub-lineage migration and the
+#     segment fold: `_base` now references its `.seg`) is reaped as a chunk key
+#     only, whatever plain tombstone it also carries, and its grace counts from
+#     the MOVED marker's ts. The `.seg` is `_base`'s to reclaim.
+#
+# ORDER (tombstone, THEN advance) is deliberate. A crash between the two
+# strands tombstones on live chunks, which the reaper skips, and the next pass
+# re-tombstones the same chunks (they are still at the log start, still out of
+# policy) and advances. Advance-first would instead leave chunks below the log
+# start that no pass ever revisits (a pass starts AT the log start): a
+# permanent leak.
 #
 # Grace gating lives HERE (above the CasManifestStore.reap verb, which reaps
 # unconditionally once tombstoned) so the trait surface stays clock-less and
@@ -360,6 +375,8 @@ struct RetentionPass[Storage: ConditionalWriteStore](
         # Advance the persisted log_start atomically (If-Match CAS). On a
         # stale etag (a concurrent pass / driver won), re-read and retry the
         # advance — bounded; the tombstones are already idempotently persisted.
+        # If this raises, the tombstones above stay on live chunks: ReapWorker
+        # skips them, and the next pass re-tombstones and re-advances.
         var advanced = self._advance_log_start_cas(
             manifest, new_seq, new_offset
         )
@@ -499,55 +516,68 @@ struct RetentionPass[Storage: ConditionalWriteStore](
         new_seq: Int64,
         new_offset: Int64,
     ) raises -> Bool:
-        """Advance log_start to (new_seq, new_offset) via If-Match CAS, with a
-        bounded re-read-on-412 retry. Never moves the pointer backwards (a
-        stale state that already passed this point → no-op). Returns True iff
-        the pointer ended at/after the target (advanced or already there)."""
-        var attempts = 0
-        while attempts < 8:
-            attempts += 1
-            var cur = manifest.read_log_start()
-            # Already at/past the target (a concurrent pass advanced it) →
-            # done, no backwards move.
-            if cur.log_start_seq >= new_seq:
-                # Concurrent log_start advance: a concurrent pass (the
-                # other of retention/compaction) won the CAS and advanced
-                # log_start_seq AT/PAST this pass's target. `seq` and `offset`
-                # advance TOGETHER + monotonically (each advance moves both to
-                # the base of the first still-live chunk), so a seq that is
-                # at/past `new_seq` MUST carry an offset at/past `new_offset`.
-                # If it does NOT, the two passes have a DIVERGENT view of the
-                # contiguous offset log (a renumber / a torn advance) — do NOT
-                # silently no-op past that inconsistency; surface it fail-loud.
-                if cur.log_start_offset < new_offset:
-                    raise Error(
-                        "RetentionPass: concurrent log_start advance is"
-                        " INCONSISTENT — won log_start_seq "
-                        + String(cur.log_start_seq)
-                        + " >= target seq "
-                        + String(new_seq)
-                        + " but won log_start_offset "
-                        + String(cur.log_start_offset)
-                        + " < target offset "
-                        + String(new_offset)
-                        + " (offset must advance monotonically with seq; a"
-                        " divergent view means the log was renumbered)"
-                    )
-                return True
-            try:
-                _ = manifest.advance_log_start(
-                    new_seq, new_offset, cur.etag
+        """Advance log_start to (new_seq, new_offset): `advance_log_start_monotone`."""
+        return advance_log_start_monotone(manifest, new_seq, new_offset)
+
+
+def advance_log_start_monotone[
+    Storage: ConditionalWriteStore
+](
+    mut manifest: CasManifestStore[Storage],
+    new_seq: Int64,
+    new_offset: Int64,
+) raises -> Bool:
+    """Advance log_start to (new_seq, new_offset) via If-Match CAS, with a
+    bounded re-read-on-412 retry. Never moves the pointer backwards (a stale
+    state that already passed this point → no-op). Returns True iff the
+    pointer ended at/after the target (advanced or already there). Raises when
+    the retries run out, on an INCONSISTENT concurrent advance, and on any
+    other store error. Shared by RetentionPass and parent compaction."""
+    var attempts = 0
+    while attempts < 8:
+        attempts += 1
+        var cur = manifest.read_log_start()
+        # Already at/past the target (a concurrent pass advanced it) →
+        # done, no backwards move.
+        if cur.log_start_seq >= new_seq:
+            # Concurrent log_start advance: a concurrent pass (the
+            # other of retention/compaction) won the CAS and advanced
+            # log_start_seq AT/PAST this pass's target. `seq` and `offset`
+            # advance TOGETHER + monotonically (each advance moves both to
+            # the base of the first still-live chunk), so a seq that is
+            # at/past `new_seq` MUST carry an offset at/past `new_offset`.
+            # If it does NOT, the two passes have a DIVERGENT view of the
+            # contiguous offset log (a renumber / a torn advance) — do NOT
+            # silently no-op past that inconsistency; surface it fail-loud.
+            if cur.log_start_offset < new_offset:
+                raise Error(
+                    "RetentionPass: concurrent log_start advance is"
+                    " INCONSISTENT — won log_start_seq "
+                    + String(cur.log_start_seq)
+                    + " >= target seq "
+                    + String(new_seq)
+                    + " but won log_start_offset "
+                    + String(cur.log_start_offset)
+                    + " < target offset "
+                    + String(new_offset)
+                    + " (offset must advance monotonically with seq; a"
+                    " divergent view means the log was renumbered)"
                 )
-                return True
-            except e:
-                if _is_precondition(String(e)):
-                    continue  # stale etag — re-read and retry
-                raise e^
-        # Exhausted retries (heavy contention) — surface fail-loud-retryable.
-        raise Error(
-            "RetentionPass: advance_log_start exhausted retries under"
-            " contention (retryable)"
-        )
+            return True
+        try:
+            _ = manifest.advance_log_start(
+                new_seq, new_offset, cur.etag
+            )
+            return True
+        except e:
+            if _is_precondition(String(e)):
+                continue  # stale etag — re-read and retry
+            raise e^
+    # Exhausted retries (heavy contention) — surface fail-loud-retryable.
+    raise Error(
+        "RetentionPass: advance_log_start exhausted retries under"
+        " contention (retryable)"
+    )
 
 
 @always_inline
@@ -578,6 +608,28 @@ def _is_not_found(msg: String) -> Bool:
 comptime DEFAULT_GRACE_PERIOD_MS = Int64(60_000)
 
 
+@fieldwise_init
+struct ReapResult(Copyable, Movable, Deinitable):
+    """Outcome of one ReapWorker pass.
+
+    Field layout:
+      var reaped_count: Int64        — tombstoned chunks deleted (chunk key +
+                                       markers, and the `.seg` unless the
+                                       chunk has a MOVED marker).
+      var skipped_live_count: Int64  — tombstones on LIVE chunks (seq at or
+                                       above `log_start_seq`): left untouched.
+                                       Nonzero means a log-start advance
+                                       failed or has not landed yet after its
+                                       tombstones; a later advance makes them
+                                       reclaimable.
+      var log_start_seq: Int64       — the floor this pass read (once).
+    """
+
+    var reaped_count: Int64
+    var skipped_live_count: Int64
+    var log_start_seq: Int64
+
+
 struct ReapWorker[Storage: ConditionalWriteStore](
     Movable, Deinitable
 ):
@@ -594,29 +646,68 @@ struct ReapWorker[Storage: ConditionalWriteStore](
         mut segment_store: Self.Storage,
         mut manifest: CasManifestStore[Self.Storage],
         now_ms: Int64,
-    ) raises -> Int64:
-        """Reap every tombstoned chunk whose grace window has elapsed
-        (`now_ms - schedule_ts >= grace_ms`). Returns the count reaped.
+    ) raises -> ReapResult:
+        """Reap every tombstoned chunk BELOW the log start whose grace window
+        has elapsed (`now_ms - schedule_ts >= grace_ms`).
 
-        For each grace-elapsed tombstone the reaper deletes the
-        now-unreferenced SEGMENT objects:
-          1. reads the chunk body → decodes the broker `ManifestBody` to learn
+        0. Reads `_LOG_START` ONCE (one GET), before any delete. A read error
+           RAISES before anything is deleted (fail closed). The pointer only
+           moves forward, so a floor read at the start stays safe all pass.
+        1. A tombstone at or above the floor sits on a LIVE chunk: it is
+           skipped and counted in `skipped_live_count`, never deleted, and the
+           pass goes on (no raise).
+        A chunk with a MOVED marker is checked FIRST, before any plain
+        tombstone it also carries: the reaper waits until `now_ms - moved_ts
+        >= grace_ms`, then calls `manifest.reap(seq)` only (chunk key and both
+        markers), never deleting its `.seg`. The plain tombstone's ts is then
+        ignored: the MOVED marker is written when the migration or fold
+        advances past the chunk, so its ts is the later and correct start of
+        the grace window, and the `.seg` is referenced from `_base` whatever a
+        retention pass decided.
+        For each grace-elapsed plain tombstone below the floor the reaper
+        deletes the now-unreferenced SEGMENT objects:
+          2. reads the chunk body → decodes the broker `ManifestBody` to learn
              the `.seg` object key (the broker's domain payload);
-          2. DELETEs the `.seg` segment object from `segment_store` (the actual
+          3. DELETEs the `.seg` segment object from `segment_store` (the actual
              durable data — idempotent, deleting absent succeeds);
-          3. `manifest.reap(seq)` → deletes the manifest chunk + the tombstone
-             marker.
+          4. `manifest.reap(seq)` → deletes the manifest chunk + the tombstone
+             marker (it re-checks the log start: defense in depth).
 
         Idempotent: a chunk already reaped is no longer tombstoned, so a re-run
         is a no-op; a chunk still within grace is skipped (a later run reaps
         it). A chunk body that 404s mid-reap (a concurrent reaper won) is
         skipped (the manifest.reap fail-loud guard already enforces tombstone-
-        before-reap)."""
+        before-reap). A seq whose markers are both gone by the time it is read
+        (a concurrent reaper reaped it after this pass's LIST) is skipped."""
+        # Step 0. Raises on a read error: nothing deleted this pass.
+        var floor = manifest.read_log_start_seq()
         var seqs = manifest.tombstone_seqs()
         var reaped = Int64(0)
+        var skipped_live = Int64(0)
         for i in range(len(seqs)):
             var seq = seqs[i]
-            var schedule_ts = manifest.tombstone_schedule_ts(seq)
+            if seq >= floor:
+                # Step 1. A live chunk: keep its `.seg` and its chunk key.
+                skipped_live += Int64(1)
+                continue
+            var moved_ts = manifest.moved_tombstone_ts(seq)
+            if moved_ts:
+                # `_base` references this `.seg`: reap the chunk key and the
+                # markers once grace elapses, never the segment
+                # (komira-ai/komira#494).
+                if now_ms - moved_ts.value() >= self._grace_ms:
+                    manifest.reap(seq)
+                    reaped += Int64(1)
+                continue
+            var schedule_ts: Int64
+            try:
+                schedule_ts = manifest.tombstone_schedule_ts(seq)
+            except e:
+                if not _is_not_found(String(e)):
+                    raise e^
+                # Neither marker is there any more: another reaper reaped this
+                # seq after our LIST. Nothing left to do for it.
+                continue
             if now_ms - schedule_ts >= self._grace_ms:
                 # Delete the .seg segment object first (the durable data). Read
                 # the chunk body for its object_key; if the chunk is already
@@ -625,12 +716,21 @@ struct ReapWorker[Storage: ConditionalWriteStore](
                 try:
                     var body_bytes = manifest.read_chunk(seq)
                     var body = ManifestBody.decode(body_bytes)
-                    # delete is idempotent (absent .seg → success).
-                    segment_store.delete(Path.parse(body.object_key))
+                    # A chunk with no segment object (a txn COMMIT/ABORT
+                    # marker: empty key) has nothing to delete. Without this
+                    # check the reaper DELETEd `Path.parse("")`, which does not
+                    # raise: it is the bucket-root key.
+                    if body.has_segment():
+                        # delete is idempotent (absent .seg → success).
+                        segment_store.delete(Path.parse(body.object_key))
                 except e:
                     if not _is_not_found(String(e)):
                         raise e^
                     # chunk already gone — continue to reap (idempotent).
                 manifest.reap(seq)
                 reaped += Int64(1)
-        return reaped
+        return ReapResult(
+            reaped_count=reaped,
+            skipped_live_count=skipped_live,
+            log_start_seq=floor,
+        )

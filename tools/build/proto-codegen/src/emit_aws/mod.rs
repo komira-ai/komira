@@ -12,7 +12,9 @@
 //! - `rest`: the REST binding (restJson1 and restXml): URI labels and query,
 //!   headers, prefix headers, the payload, the response status, and the
 //!   restJson1 and restXml errors.
-//! - `xml_codec`: the restXml body codec.
+//! - `xml_codec`: the restXml body codec, whose reader the awsQuery and
+//!   ec2Query responses use too.
+//! - `query`: the awsQuery and ec2Query form-body codec and binding.
 //! - [`endpoint`]: endpoint resolution through the service's endpoint
 //!   ruleset, emitted when the generator is given one.
 
@@ -23,15 +25,21 @@ use crate::ir::{IrEnum, IrField, IrMessage, IrMethod, IrType, Label, ScalarKind}
 use crate::lower::{recursion_breaking_edges_under, ContainerInlining};
 use crate::overrides::AwsOverrides;
 
+mod auth;
 pub mod endpoint;
 mod json_codec;
 pub mod proto;
+mod query;
 mod rest;
 mod rpc;
 mod xml_codec;
 
 pub use endpoint::AwsEndpointRules;
-pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, REST_PROTOCOLS, XML_BODY_PROTOCOLS};
+pub use proto::{
+    AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, QUERY_PROTOCOLS, REST_PROTOCOLS,
+    XML_BODY_PROTOCOLS, XML_RESPONSE_PROTOCOLS,
+};
+use auth::OperationAuth;
 use proto::{select_protocol, Binding, BodyCodec};
 
 /// Emitter options.
@@ -43,6 +51,10 @@ pub struct AwsEmitOptions {
     /// The `s3` customization (see [`S3_CUSTOMIZATION`]): refused unless the
     /// model's serviceId is `S3` and its protocol is restXml.
     pub s3: bool,
+    /// The `route53` customization (see [`ROUTE53_CUSTOMIZATION`]): refused
+    /// unless the model's serviceId is `Route 53` and its protocol is
+    /// restXml.
+    pub route53: bool,
 }
 
 /// The `s3` customization: what botocore does to S3 beyond the
@@ -75,16 +87,34 @@ pub struct AwsEmitOptions {
 ///   `rest.rs`).
 pub const S3_CUSTOMIZATION: &str = "s3";
 
+/// The `route53` customization: what botocore does to Route 53 beyond the
+/// model, from `botocore/handlers.py` at the pinned tag.
+///
+/// - `fix_route53_ids` (on `before-parameter-build.route53`): each
+///   top-level input member whose shape is one of
+///   [`ROUTE53_ID_SHAPES`] is sent as the part of its value after the last
+///   `/`, so the `/hostedzone/Z…`, `/change/C…` and `/delegationset/N…`
+///   Ids Route 53 answers with can be passed back as they came. A bare Id
+///   is sent as itself. It applies wherever the member is bound (a label,
+///   the query, the body) and before the request is validated, as
+///   botocore's handler runs before its validator: `build_<op>_request`
+///   copies the input, cuts those members, and builds the request from the
+///   copy.
+pub const ROUTE53_CUSTOMIZATION: &str = "route53";
+
+/// The input shapes `fix_route53_ids` cuts to their last `/` segment.
+pub const ROUTE53_ID_SHAPES: &[&str] = &["ResourceId", "DelegationSetId", "ChangeId"];
+
 /// The protocols this emitter implements, by botocore name. Anything else is
 /// refused.
-pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json", "rest-xml"];
+pub const SUPPORTED_PROTOCOLS: &[&str] = &["ec2", "json", "query", "rest-json", "rest-xml"];
 
 /// The `jsonVersion` values this emitter implements.
 pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "10";
+pub const AWS_GENERATOR_VERSION: &str = "12";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -301,6 +331,44 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
         names: &[
+            "AWS_QUERY_CONTENT_TYPE",
+            "AwsQueryWriter",
+            "aws_query_key",
+            "aws_query_rename_last",
+            "aws_query_result",
+            "aws_query_set_body",
+            "aws_text_blob",
+            "aws_text_bool",
+            "aws_text_f32",
+            "aws_text_f64",
+            "aws_text_int",
+            "aws_text_ts",
+            "aws_xml_blob_of",
+            "aws_xml_bool_of",
+            "aws_xml_child",
+            "aws_xml_entry_key",
+            "aws_xml_entry_value",
+            "aws_xml_f32_of",
+            "aws_xml_f64_of",
+            "aws_xml_int_of",
+            "aws_xml_list_items",
+            "aws_xml_map_entries",
+            "aws_xml_parse",
+            "aws_xml_string_of",
+            "aws_xml_ts_of",
+        ],
+        mode: AwsImportMode::Always,
+        protocols: QUERY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_query_error"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: QUERY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
             "aws_json_bool",
             "aws_json_f32",
             "aws_json_f64",
@@ -309,7 +377,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
             "aws_json_string",
         ],
         mode: AwsImportMode::ModelJson,
-        protocols: XML_BODY_PROTOCOLS,
+        protocols: XML_RESPONSE_PROTOCOLS,
     },
     AwsImport {
         module: AWS_CORE,
@@ -338,13 +406,19 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         module: "komira_json",
         names: &["JsonValue"],
         mode: AwsImportMode::ModelJson,
-        protocols: XML_BODY_PROTOCOLS,
+        protocols: XML_RESPONSE_PROTOCOLS,
     },
     AwsImport {
         module: "komira_xml",
         names: &["XmlNode", "XmlWriter"],
         mode: AwsImportMode::Always,
         protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_xml",
+        names: &["XmlNode"],
+        mode: AwsImportMode::Always,
+        protocols: QUERY_PROTOCOLS,
     },
     AwsImport {
         module: "komira_http_client.client",
@@ -544,10 +618,25 @@ pub fn emit_aws_module_with_endpoints(
             lowering.service.service, lowering.service.service_id, lowering.service.protocol
         ));
     }
+    if options.route53
+        && (lowering.service.service_id != "Route 53"
+            || selected.protocol != AwsProtocol::RestXml)
+    {
+        return Err(format!(
+            "emit_aws: the `{ROUTE53_CUSTOMIZATION}` customization is refused unless the \
+             model's serviceId is `Route 53` and its protocol is restXml, and service `{}` \
+             has serviceId `{}` and protocol `{}`",
+            lowering.service.service, lowering.service.service_id, lowering.service.protocol
+        ));
+    }
     check_request_checksums(&lowering.facts, options)?;
     check_modeled_retryable_errors(&lowering.facts, options)?;
+    auth::check_operation_auth(&lowering.service.service, &lowering.facts, options.pure_only)?;
     if selected.protocol == AwsProtocol::RestXml {
         xml_codec::check_rest_xml_features(&lowering.facts)?;
+    }
+    if QUERY_PROTOCOLS.contains(&selected.protocol) {
+        query::check_query_features(&lowering.facts, selected.protocol)?;
     }
     overrides.check_against(lowering)?;
 
@@ -858,7 +947,7 @@ impl<'a> AwsEmitter<'a> {
                 None => self.unapplied_endpoint_bindings()?,
             };
             self.emit_header(&unapplied);
-            self.emit_imports();
+            self.emit_imports()?;
         }
         self.emit_constants();
         self.emit_enum_constants();
@@ -950,6 +1039,11 @@ impl<'a> AwsEmitter<'a> {
                 self.line("#                  the endpoint ruleset puts the bucket in the URL");
             }
         }
+        if self.options.route53 {
+            self.line("#   customize    : route53 (botocore handlers.py: each top-level");
+            self.line("#                  ResourceId, DelegationSetId or ChangeId input");
+            self.line("#                  member sent as the part after its last `/`)");
+        }
         self.line("#");
         if !self.options.pure_only {
             self.line("# THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport");
@@ -1015,7 +1109,8 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
     }
 
-    fn emit_imports(&mut self) {
+    fn emit_imports(&mut self) -> Result<(), String> {
+        let fills_token = self.fills_idempotency_tokens()?;
         let section = aws_import_section_with(
             &[self.protocol],
             self.options.pure_only,
@@ -1024,8 +1119,18 @@ impl<'a> AwsEmitter<'a> {
             self.options.s3,
         );
         self.out.push_str(&section);
+        if fills_token {
+            self.out.push_str(&format!("from {AWS_CORE} import aws_idempotency_token\n"));
+        }
+        if self.sends_unsigned()? {
+            self.out.push_str(&format!(
+                "from {AWS_CORE} import (\n    send_unsigned_request,\n    \
+                 send_unsigned_request_with,\n)\n"
+            ));
+        }
         self.blank();
         self.blank();
+        Ok(())
     }
 
     fn emit_constants(&mut self) {
@@ -1224,12 +1329,13 @@ impl<'a> AwsEmitter<'a> {
 
         // -- copy ----------------------------------------------------------
         // An explicit copy constructor: the 1.0.0 compiler can report the
-        // synthesized one of a struct with an explicit `__deinit__` as
-        // trivial (it did for S3's `DeletedObject`: three `Optional[String]`
-        // and an `Optional[Bool]`), and `List.copy()` then copies the
-        // elements with memcpy, so two lists share each String buffer and
-        // the first one destroyed frees it under the other. A user-defined
-        // constructor is never trivial.
+        // synthesized one as trivial (it did for S3's `DeletedObject`: three
+        // `Optional[String]` and an `Optional[Bool]`; the trigger is the field
+        // order, https://github.com/modular/modular/issues/7256), and
+        // `List.copy()` then copies the elements with memcpy, so two lists
+        // share each String buffer and the first one destroyed frees it under
+        // the other. A user-defined constructor is never trivial; remove this
+        // once that issue is fixed in the pinned compiler.
         self.line("def __init__(out self, *, copy: Self):");
         self.push();
         self.line("\"\"\"Explicit, never bitwise: a List copies its elements with it.\"\"\"");
@@ -1778,6 +1884,9 @@ impl<'a> AwsEmitter<'a> {
             svc.methods.clone()
         };
         let binding = self.binding;
+        if self.options.route53 {
+            self.emit_route53_bare_id_helper();
+        }
         for m in &methods {
             let facts = self.facts.operation_by_ir_method(&m.name)?.clone();
             binding.emit_request_builder(self, m, &facts)?;
@@ -1790,8 +1899,10 @@ impl<'a> AwsEmitter<'a> {
     /// The first half of a client send: the credential, and the headers
     /// split into the content type (the substrate's own argument) and the
     /// rest, the endpoint's own first when `ruleset`.
-    fn emit_send_assembly(&mut self, ruleset: bool) {
-        self.line("var cred = self._creds_source.credentials()");
+    fn emit_send_assembly(&mut self, ruleset: bool, signed: bool) {
+        if signed {
+            self.line("var cred = self._creds_source.credentials()");
+        }
         self.line("var extra = List[Header]()");
         if ruleset {
             self.line("for _i in range(len(target.header_names)):");
@@ -1812,9 +1923,14 @@ impl<'a> AwsEmitter<'a> {
         self.push();
         self.line("# Header names are case-insensitive, and the substrate refuses an");
         self.line("# `extra` Content-Type in any case.");
-        self.line("# The substrate takes the content type as its own argument and");
-        self.line("# puts it in BOTH the signed set and the wire headers. Passing it");
-        self.line("# again here would emit it twice and break the signature.");
+        if signed {
+            self.line("# The substrate takes the content type as its own argument and");
+            self.line("# puts it in BOTH the signed set and the wire headers. Passing it");
+            self.line("# again here would emit it twice and break the signature.");
+        } else {
+            self.line("# The substrate takes the content type as its own argument and");
+            self.line("# puts it in the wire headers; passing it again would send it twice.");
+        }
         self.line("content_type = req.header_values[_i].copy()");
         self.pop();
         self.line("else:");
@@ -1824,18 +1940,24 @@ impl<'a> AwsEmitter<'a> {
         self.pop();
     }
 
-    /// The request arguments both sends pass on, after their transport
-    /// arguments: method, credential, region, service, endpoint, target,
-    /// content type, body and the other headers.
-    fn emit_send_args(&mut self, ruleset: bool, p: &str) {
+    /// The request arguments every send passes on, after their transport
+    /// arguments: method, credential and region (`signed` only), service,
+    /// endpoint, target, content type, body and the other headers.
+    fn emit_send_args(&mut self, ruleset: bool, p: &str, signed: bool) {
         self.line("req.method.copy(),");
-        self.line("cred,");
+        if signed {
+            self.line("cred,");
+        }
         if ruleset {
-            self.line("target.signing_region.copy(),");
+            if signed {
+                self.line("target.signing_region.copy(),");
+            }
             self.line("target.signing_name.copy(),");
             self.line("target.endpoint.copy(),");
         } else {
-            self.line("self._region.copy(),");
+            if signed {
+                self.line("self._region.copy(),");
+            }
             self.line(&format!("String({p}_SERVICE),"));
             self.line(&format!(
                 "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
@@ -1848,16 +1970,99 @@ impl<'a> AwsEmitter<'a> {
         self.line("extra^,");
     }
 
+    /// The input fields of `m` a client verb fills with a fresh token when
+    /// the caller leaves them unset: its input's members the model marks
+    /// `idempotencyToken`. botocore fills these, and only these top-level
+    /// members, before the request is built (`generate_idempotent_uuid`,
+    /// `if name not in params`), so every attempt of one call resends the
+    /// same token and the service can tell a retry from a new request. A
+    /// required member is taken by `__init__` and so always set by the
+    /// caller; it is never filled. REFUSED, by name (`idempotency-token`):
+    /// a token member that is not a string, which botocore would fill with
+    /// a string the shape cannot hold.
+    fn idempotency_fills(&self, m: &IrMethod) -> Result<Vec<String>, String> {
+        let Some(msg) = self.messages.values().find(|x| x.fq_name == m.input.fq_name) else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for f in &msg.fields {
+            let mf = self.facts.member(&msg.fq_name, &f.name)?;
+            if !mf.idempotency_token || mf.required {
+                continue;
+            }
+            let ty = self.storage_type(msg, f)?;
+            if ty != "Optional[String]" {
+                return Err(format!(
+                    "emit_aws: REFUSED idempotency-token: the input `{}` of `{}` marks \
+                     `{}` as its idempotency token, and its type is `{ty}`; botocore fills \
+                     an unset token with a UUID string",
+                    msg.name, m.name, mf.member_name
+                ));
+            }
+            out.push(f.name.clone());
+        }
+        Ok(out)
+    }
+
+    /// Whether any client verb fills an idempotency token, and so whether
+    /// the module imports `aws_idempotency_token`. A pure-mode module has no
+    /// verb.
+    fn fills_idempotency_tokens(&self) -> Result<bool, String> {
+        if self.options.pure_only {
+            return Ok(false);
+        }
+        for m in &self.lowering.model.files[0].services[0].methods {
+            if !self.idempotency_fills(m)?.is_empty() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Whether a client verb sends unsigned ([`auth::operation_auth`]),
+    /// and so whether the client has `send_unsigned` and the module imports
+    /// the core's unsigned send. A pure-mode module has no verb.
+    fn sends_unsigned(&self) -> Result<bool, String> {
+        if self.options.pure_only {
+            return Ok(false);
+        }
+        for m in &self.lowering.model.files[0].services[0].methods {
+            let facts = self.facts.operation_by_ir_method(&m.name)?;
+            if auth::operation_auth(&self.meta.service, facts)? == OperationAuth::Anonymous {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// An operation's request, and with a ruleset the target it resolves
-    /// to: `req` and `target`, as both of its verbs send them.
-    fn emit_op_request(&mut self, m: &IrMethod, ruleset: bool, p: &str) {
+    /// to: `req` and `target`, as both of its verbs send them. A client
+    /// verb builds and resolves from a copy of its input whose unset
+    /// idempotency tokens are filled (`idempotency_fills`), once, before
+    /// the retry loop, which resends the same bytes.
+    fn emit_op_request(&mut self, m: &IrMethod, ruleset: bool, p: &str) -> Result<(), String> {
         let fp = self.fn_prefix();
-        self.line(&format!("var req = {fp}build_{}_request(input)", m.name));
+        let fills = self.idempotency_fills(m)?;
+        let input = if fills.is_empty() {
+            "input"
+        } else {
+            // Filled once per call, before the request is built: the retry
+            // loop resends the request's bytes, token and all.
+            self.line("var filled = input.copy()");
+            for f in &fills {
+                self.line(&format!("if not filled.{f}:"));
+                self.push();
+                self.line(&format!("filled.{f} = Optional[String](aws_idempotency_token())"));
+                self.pop();
+            }
+            "filled"
+        };
+        self.line(&format!("var req = {fp}build_{}_request({input})", m.name));
         if ruleset {
             self.line("var target = aws_signing_target(");
             self.push();
             self.line(&format!(
-                "{fp}resolve_{}_endpoint(self._rules, self._endpoint_config, input),",
+                "{fp}resolve_{}_endpoint(self._rules, self._endpoint_config, {input}),",
                 m.name
             ));
             self.line("self._region.copy(),");
@@ -1865,14 +2070,21 @@ impl<'a> AwsEmitter<'a> {
             self.pop();
             self.line(")");
         }
+        Ok(())
     }
 
     fn emit_client(&mut self) -> Result<(), String> {
-        let (svc_name, methods) = {
-            let svc = &self.lowering.model.files[0].services[0];
-            (svc.name.clone(), svc.methods.clone())
-        };
-        let cls = format!("{}Client", self.ty_name(&svc_name));
+        let methods = self.lowering.model.files[0].services[0].methods.clone();
+        // The prefix alone names the service: it is the serviceId, which the
+        // IR service name repeats, so `ty_name` of that name would carry it
+        // twice.
+        let cls = format!("{}Client", self.prefix);
+        if self.structs.contains(&cls) {
+            return Err(format!(
+                "emit_aws: REFUSED client-name: the model has a shape named `Client`, \
+                 emitted as `{cls}`, which is the client's own name"
+            ));
+        }
         self.parameterised.push(cls.clone());
         let p = self.prefix.to_uppercase();
 
@@ -2027,13 +2239,13 @@ impl<'a> AwsEmitter<'a> {
         for l in &doc {
             self.line(l);
         }
-        self.emit_send_assembly(ruleset);
+        self.emit_send_assembly(ruleset, true);
         self.line("return send_sigv4_signed_request[Self.C](");
         self.push();
         self.line("self._mk_connector,");
         self.line("self._http_config.copy(),");
         self.line("self._retry_quota,");
-        self.emit_send_args(ruleset, &p);
+        self.emit_send_args(ruleset, &p, true);
         if self.options.s3 {
             self.line("s3_200_error=s3_200_error,");
         }
@@ -2067,14 +2279,14 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
         self.line("    A request carrying `If-Match` or `If-None-Match` is resent only");
         self.line("    when the service cannot have acted on it (`aws_request_is_conditional`).\"\"\"");
-        self.emit_send_assembly(ruleset);
+        self.emit_send_assembly(ruleset, true);
         self.line("return send_sigv4_signed_request_with(");
         self.push();
         self.line("transport,");
         self.line("clock,");
         self.line("retry,");
         self.line("budget,");
-        self.emit_send_args(ruleset, &p);
+        self.emit_send_args(ruleset, &p, true);
         if self.options.s3 {
             self.line("s3_200_error=s3_200_error,");
         }
@@ -2082,6 +2294,11 @@ impl<'a> AwsEmitter<'a> {
         self.line(")");
         self.pop();
         self.blank();
+
+        let unsigned = self.sends_unsigned()?;
+        if unsigned {
+            self.emit_unsigned_sends(ruleset, &p, s3_flag);
+        }
 
         // -- per-operation verbs ------------------------------------------
         for m in &methods {
@@ -2134,11 +2351,17 @@ impl<'a> AwsEmitter<'a> {
             } else {
                 ""
             };
-            self.emit_op_request(m, ruleset, &p);
+            // The send this operation's auth names (`auth.rs`): an
+            // anonymous operation is sent unsigned.
+            let send = match auth::operation_auth(&self.meta.service, &facts)? {
+                OperationAuth::SigV4 => "send",
+                OperationAuth::Anonymous => "send_unsigned",
+            };
+            self.emit_op_request(m, ruleset, &p)?;
             if ruleset {
-                self.line(&format!("var res = self.send(req^, target{s3_200})"));
+                self.line(&format!("var res = self.{send}(req^, target{s3_200})"));
             } else {
-                self.line(&format!("var res = self.send(req^{s3_200})"));
+                self.line(&format!("var res = self.{send}(req^{s3_200})"));
             }
             self.line("if not aws_is_error_status(res.status):");
             self.push();
@@ -2160,17 +2383,23 @@ impl<'a> AwsEmitter<'a> {
             ));
             self.push();
             self.line(&format!(
-                "\"\"\"`{}` over the given seams (`send_with`): the response, successful",
+                "\"\"\"`{}` over the given seams (`{send}_with`): the response, successful",
                 facts.name
             ));
             self.line(&format!(
                 "    or not. `{fp}parse_{}_response` reads a successful one.\"\"\"",
                 m.name
             ));
-            self.emit_op_request(m, ruleset, &p);
+            self.emit_op_request(m, ruleset, &p)?;
             let tgt = if ruleset { "target, " } else { "" };
+            // The unsigned send reads no clock: nothing is signed.
+            let seam_vals = if send == "send" {
+                "transport, clock, retry, budget"
+            } else {
+                "transport, retry, budget"
+            };
             self.line(&format!(
-                "return self.send_with(req^, {tgt}transport, clock, retry, budget{s3_200})"
+                "return self.{send}_with(req^, {tgt}{seam_vals}{s3_200})"
             ));
             self.pop();
             self.blank();
@@ -2202,7 +2431,7 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("var msg = {msg_expr}"));
         self.line("return Error(");
         self.push();
-        self.line(&format!("String(\"{}.\")", self.ty_name(&svc_name)));
+        self.line(&format!("String(\"{}.\")", self.prefix));
         self.line("+ op");
         self.line("+ String(\" failed: HTTP \")");
         self.line("+ String(res.status)");
@@ -2549,6 +2778,63 @@ mod tests {
     }
 
     #[test]
+    fn the_service_prefix_names_the_client_and_its_errors_once() {
+        // The type prefix is the serviceId, and so is the IR service name:
+        // the client is `<prefix>Client` and a failed call is raised as
+        // `<prefix>.<Op> failed`, never with the prefix twice.
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(
+            src.contains("\nstruct TinyClient[C: Connector, T: AwsCredsSource](Movable, Deinitable):\n"),
+            "{src}"
+        );
+        assert!(src.contains("        String(\"Tiny.\")\n        + op\n"), "{src}");
+        assert!(!src.contains("TinyTiny"), "{src}");
+    }
+
+    #[test]
+    fn a_shape_named_client_is_refused_in_client_mode() {
+        // With the prefix applied once, a shape named `Client` would be
+        // emitted under the client's own name.
+        let model = crate::json::parse(
+            r#"{"version": "2.0",
+                "metadata": {"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"},
+                "operations": {"Op": {"name": "Op",
+                    "http": {"method": "POST", "requestUri": "/"},
+                    "input": {"shape": "In"}}},
+                "shapes": {"In": {"type": "structure",
+                                  "members": {"C": {"shape": "Client"}}},
+                           "Client": {"type": "structure",
+                                      "members": {"Id": {"shape": "Str"}}},
+                           "Str": {"type": "string"}}}"#,
+        )
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let emit = |pure_only| {
+            let options = AwsEmitOptions {
+                omit_preamble: true,
+                pure_only,
+                ..AwsEmitOptions::default()
+            };
+            emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, None)
+        };
+        let e = emit(false).err().expect("refused");
+        assert!(e.contains("REFUSED client-name"), "{e}");
+        assert!(e.contains("`TinyClient`"), "{e}");
+        // A pure module has no client, and so no collision.
+        assert!(emit(true).is_ok());
+    }
+
+    #[test]
     fn send_finds_the_content_type_header_in_any_case() {
         let src = json_module_with_a_list_of_timestamps();
         assert!(src.contains("if n.lower() == String(\"content-type\"):"), "{src}");
@@ -2720,6 +3006,91 @@ mod tests {
             emit_with_error(retryable, true).unwrap();
         }
         emit_with_error("", false).unwrap();
+    }
+
+    /// A one-operation awsJson module whose input `In` holds `Token`, with
+    /// the given member text and `required` list, emitted with its preamble
+    /// (so its imports) in client or pure mode.
+    fn emit_with_token(member: &str, required: &str, pure_only: bool) -> Result<String, String> {
+        let model = crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "POST", "requestUri": "/"}},
+                    "input": {{"shape": "In"}}, "output": {{"shape": "Out"}}}}}},
+                "shapes": {{"In": {{"type": "structure", "required": [{required}],
+                                   "members": {{"Token": {member},
+                                               "Name": {{"shape": "S"}}}}}},
+                           "Out": {{"type": "structure", "members": {{}}}},
+                           "S": {{"type": "string"}},
+                           "N": {{"type": "integer"}}}}}}"#
+        ))
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let options = AwsEmitOptions { pure_only, ..AwsEmitOptions::default() };
+        let prov = AwsProvenance { model_key: "tiny/2026-10-02", model_sha256: "m" };
+        emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, Some(prov))
+            .map(|e| e.source)
+    }
+
+    #[test]
+    fn an_unset_idempotency_token_is_filled_once_per_call() {
+        let token = r#"{"shape": "S", "idempotencyToken": true}"#;
+        let src = emit_with_token(token, "", false).unwrap();
+        let import = "from komira_aws_core import aws_idempotency_token\n";
+        assert_eq!(src.matches(import).count(), 1, "{src}");
+        // Both verbs fill it before building the request, and build from
+        // the filled copy.
+        let fill = "        var filled = input.copy()\n        if not filled.token:\n            \
+                    filled.token = Optional[String](aws_idempotency_token())\n        \
+                    var req = build_op_request(filled)\n";
+        assert_eq!(src.matches(fill).count(), 2, "{src}");
+        assert!(!src.contains("build_op_request(input)"), "{src}");
+        // One draw in each verb, and nowhere else.
+        assert_eq!(src.matches("aws_idempotency_token()").count(), 2, "{src}");
+        // Only the token member is filled.
+        assert!(!src.contains("filled.name"), "{src}");
+
+        // A pure-mode module has no verb, and so no fill.
+        let src = emit_with_token(token, "", true).unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
+        // A required token is the caller's: `__init__` takes it.
+        let src = emit_with_token(token, r#""Token""#, false).unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
+        // No token, no fill and no import.
+        let src = emit_with_token(r#"{"shape": "S"}"#, "", false).unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
+        assert!(src.contains("var req = build_op_request(input)\n"), "{src}");
+    }
+
+    #[test]
+    fn a_token_that_is_not_a_string_is_refused() {
+        let e = emit_with_token(r#"{"shape": "N", "idempotencyToken": true}"#, "", false)
+            .unwrap_err();
+        assert_eq!(
+            crate::aws_conformance::refusal_name(&e).as_deref(),
+            Some("idempotency-token"),
+            "{e}"
+        );
+        assert!(e.contains("`Token`"), "{e}");
+        // The refusal is the fill's: a pure module, which has no verb to
+        // fill it, sends the member as given and is not refused.
+        let src = emit_with_token(r#"{"shape": "N", "idempotencyToken": true}"#, "", true)
+            .unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
     }
 
     #[test]

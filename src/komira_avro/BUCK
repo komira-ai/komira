@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Canonical Form and fingerprint, the Avro <-> Arrow type lattice (including
 # the arrow.* logical-type round-trip), OCF header and block decode, the block
 # codecs, the serial and block-parallel readers with full schema resolution,
-# and the OCF writer. Snappy comes statically linked through komira_core;
+# and the OCF writer. Snappy comes statically linked through the core packages;
 # deflate, zstandard, bzip2 and xz are opened from the system libraries at
 # first use. komira_runtime_paths is declared because a test takes its scratch
 # directory from `test_tmpdir()`.
@@ -12,10 +12,15 @@ mojo_library(
     name = "komira_avro",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_arrow:komira_arrow",
         "//src/komira_async:komira_async",
-        "//src/komira_core:komira_core",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_fs:komira_fs",
         "//src/komira_row_format:komira_row_format",
+        "//src/komira_simd:komira_simd",
+        "//third_party/snappy:snappy",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
@@ -26,6 +31,7 @@ mojo_library(
         "tests/test_avro_codec_matrix.mojo",
         "tests/test_avro_comptime_shape_kind_decode.mojo",
         "tests/test_avro_data_level_decode.mojo",
+        "tests/test_avro_json_string_branches.mojo",
         "tests/test_avro_lineitem_decode_roundtrip.mojo",
         "tests/test_avro_logical_types_decode.mojo",
         "tests/test_avro_nullable_union_decode.mojo",
@@ -37,6 +43,7 @@ mojo_library(
         "tests/test_avro_resolve_field_skip.mojo",
         "tests/test_avro_resolve_promotions.mojo",
         "tests/test_avro_resolve_union_enum.mojo",
+        "tests/test_avro_schema_json_unicode.mojo",
         "tests/test_avro_schema_parse.mojo",
         "tests/test_avro_snappy_codec_decode.mojo",
         "tests/test_avro_write_parallel_block_compress.mojo",

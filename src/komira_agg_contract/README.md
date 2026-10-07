@@ -1,3 +1,0 @@
-# komira_agg_contract
-
-The aggregation accumulator contract: Accumulator trait, plan-time AggLayout, strategy selection, typed column pointers, COUNT(DISTINCT) key.

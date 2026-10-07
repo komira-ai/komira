@@ -58,11 +58,11 @@
 
 from std.sys import size_of
 
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.collections.byte_view import ByteView
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_arrow.string_array import StringArray
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.byte_view import ByteView
 
 from .csv_options import CsvReadOptions
 from .input_limits import check_csv_string_column_bytes

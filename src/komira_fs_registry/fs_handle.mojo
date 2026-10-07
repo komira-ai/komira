@@ -22,7 +22,7 @@
 # THE TAGS. `FS_LOCAL` and `FS_S3` are komira_plan_expr's `FS_SCHEME_FILE` and
 # `FS_SCHEME_S3`: that package's `FsDescriptorPod` is the one a plan node
 # carries. The scheme codes are also written down twice more, and those are
-# COPIES, not the same names: komira_core's `FS_SCHEME_*` (which `S3Fs.SCHEME`
+# COPIES, not the same names: the core packages' `FS_SCHEME_*` (which `S3Fs.SCHEME`
 # and the plan wire codec use) and `LocalFs.SCHEME`, a literal. The tests pin
 # all three to these tags (test_fs_handle_arms), so a drift reds the build.
 # `fs_arm_tag_for_scheme` takes the bare code, so a caller holding either

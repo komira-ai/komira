@@ -1,0 +1,582 @@
+# The release artifacts (kci.release.v1.Artifacts): what a
+# BUILD step (`kci run --stage <S>`) builds for a release of komira, in this
+# file's order, and the set a PUBLISH step ships. .github/workflows/kci.yml reads this file
+# (KCI_ARTIFACTS). Changing it changes what is released: CODEOWNERS
+# requires the release approver's review for everything under release/.
+#
+# The release is the libraries below and their metapackage. kci builds them
+# one at a time, in THIS ORDER (each library after the libraries it depends
+# on), each into its own empty directory under the
+# release directory R (`{release_dir}`: the platform's directory,
+# <--release-dir>/<platform>), with the git-derived stamp S of `kci run
+# --revision-id` (src/kci_artifact/placeholders.mojo):
+#
+#   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
+#     -c komira.package_timestamp_ms=<T> \
+#     //src/komira_encoding:komira_encoding_conda[release] --out R/komira_encoding
+#   buck2 run //tools/build/package:komira_pack -- conda-meta --name komira_all \
+#     --member-manifest R/komira_encoding/manifest.json ... --out-dir R/komira_all
+#
+# THE STAMP is never typed here: `{build_number}`, `{source_commit}` and
+# `{timestamp_ms}` are placeholders kci fills from git. A library built
+# without them has no `[release]` sub-target, so an artifact that forgets
+# the stamp fails at build rather than shipping.
+#
+# THE METAPACKAGE `komira_all` is the LAST artifact: `{release_dir}` holds
+# every artifact above it, already built and verified. Its members are every
+# library of this file, one `--member-manifest` each; adding a library is
+# two edits here: its entry above the metapackage, and its manifest in
+# the metapackage's args. A PUBLISH step refuses a set whose metapackage misses
+# a library, and the welded test
+# src/kci_artifact/tests/test_release_artifacts_file.mojo refuses
+# it at build time.
+#
+# THE NAMES A RELEASE PUBLISHES are the ones this file declares, and this file
+# is reviewed through CODEOWNERS; there is no per-run claim. A PUBLISH step
+# reads its channel first and reports every declared name the channel holds
+# no file of yet (NEW NAMES) in its result and the job summary; the gamma
+# stage reports prod's before the prod approval.
+#
+# Which farm buck2 builds on is the build job's machine configuration, written
+# by the farm-connect action (docs/ci.md), not this file's.
+#
+# THE PER-CHANGE CHECK (`kci run --stage pr --affected-by <base>`, the pr
+# stage of release/machine.textproto; the .proto's header). Its UNITS are the
+# artifacts below and the checks derived from the graph, and a unit passes only when it builds and
+# its tests pass: the check has one meaning, every unit green. Each artifact names
+# the buck2 targets it stands for (`targets`): every `//` label of its
+# combined args (its build system's, then its own), with the `[subtarget]`
+# removed, which the welded test of this file holds.
+#
+# THE UNITS ARE DERIVED FROM THE GRAPH. This file declares the artifacts
+# (and may declare explicit checks, `checks { name targets }`, to group
+# targets its own way). The rest of the units are DERIVED when the check
+# runs: the buck2 build system's `derive_checks` command
+# (release/ci/derive_checks.py) reads `//...` and `tests//functional/...`
+# from the live graph (`buck2 cquery`) and answers one check per path group
+# for every target no declared unit names or matches: one per library
+# package `//src/<p>/...` (named `<p>`: a change to one library builds that
+# library's units, not every library's), `repo_root` (`//:`) for the
+# repository's own lints, `bin`, `release`, `tests`, `third_party`,
+# `tools_<t>` for each `//tools/<t>/...` tree, and `functional_tests`
+# (`tests//functional/...`) for the tests cell's positive tests (built only,
+# as `./buck2 build tests//functional/...` builds them). A name an artifact
+# holds gets `_package`: the rest of komira_encoding's package (its library,
+# whose welded tests its conda package does not run) is the derived check
+# `komira_encoding_package`. A derived name is always one kci accepts,
+# `[a-z][a-z0-9_]*` (lower case, any other character `_`, `pkg_` before one
+# not starting with a letter). So every target of the graph is in some unit
+# by construction: a pull request that adds a package gets a check for it,
+# and one that deletes a package loses it, with no edit here.
+#
+# Naming a target that depends on another is not enough: buck2 builds only
+# the outputs a dependent consumes, so building a library's conda package
+# does not build the library itself or run its welded tests. The derivation
+# covers every target, not the roots.
+#
+# A declared target that matches nothing in the graph is reported by the
+# tool (UNMATCHED): for a CHECK it is a notice in the check's output (the
+# package it named is gone; the rest of the check still builds), for an
+# ARTIFACT it is a refusal (a release must build what an artifact names).
+# The tests cell's must-fail fixtures (`tests//negative`) are not units and
+# not in the graph the tool reads: the build system's self-tests
+# (tools/build/tests/run_tests.sh) build each one and assert its refusal.
+# `python3 release/ci/derive_checks.py --from release/artifacts.textproto`
+# prints the answer for a reader; `kci run --stage pr --affected-by <base>
+# --plan` prints the units a change would build.
+#
+# THE COMMANDS. `derive_checks` (release/ci/derive_checks.py) answers the
+# derived checks, above. `build_targets` (release/ci/build_targets.sh) builds
+# a unit's targets (both build systems share it, so kci builds every affected
+# unit in ONE run over the union of their targets, and only when that run
+# fails builds them one at a time to name the failing ones, stopping once 3
+# units have failed; a run that times out or is killed by a signal is never
+# split into units), then checks
+# each test_weld lint among them with its BXL script
+# (tools/build/lint/test_weld.bzl says why that is not a build validation; a
+# finding fails the unit), then runs `buck2 test` over the
+# targets in this cell, as `./buck2 test //...` does. `affected` runs //tools/build/ci:affected
+# (tools/build/ci/affected.mojo) over the change's files, with the base commit
+# for the files the change deleted: the units whose targets the change reaches
+# (UNIT lines, then AFFECTED <n>), or WIDENED, every unit, for a file it cannot
+# map (what widens is tools/build/ci/rules.txt). A change that reaches no unit
+# is AFFECTED 0, which kci refuses (KCI-E-AFFECTED-VACUOUS): never a pass.
+#
+# The file format's major (kci_api's format table): kci refuses a file
+# without it, and one written for a newer kci.
+
+schema_version: 1
+
+build_systems {
+  name: "buck2"
+  executable: "buck2"
+  args: "build"
+  args: "-c"
+  args: "komira.package_stamp={build_number}"
+  args: "-c"
+  args: "komira.package_commit={source_commit}"
+  args: "-c"
+  args: "komira.package_timestamp_ms={timestamp_ms}"
+  affected {
+    executable: "buck2"
+    args: "run"
+    args: "//tools/build/ci:affected"
+    args: "--"
+    args: "--files"
+    args: "{changed_files}"
+    args: "--base"
+    args: "{base_commit}"
+    args: "--units-file"
+    args: "{units_file}"
+  }
+  build_targets {
+    executable: "sh"
+    args: "release/ci/build_targets.sh"
+  }
+  derive_checks {
+    executable: "python3"
+    args: "release/ci/derive_checks.py"
+    args: "{units_file}"
+  }
+}
+
+build_systems {
+  name: "komira_pack"
+  executable: "buck2"
+  args: "run"
+  args: "//tools/build/package:komira_pack"
+  args: "--"
+  affected {
+    executable: "buck2"
+    args: "run"
+    args: "//tools/build/ci:affected"
+    args: "--"
+    args: "--files"
+    args: "{changed_files}"
+    args: "--base"
+    args: "{base_commit}"
+    args: "--units-file"
+    args: "{units_file}"
+  }
+  build_targets {
+    executable: "sh"
+    args: "release/ci/build_targets.sh"
+  }
+}
+
+artifacts {
+  name: "komira_encoding"
+  build_system: "buck2"
+  args: "//src/komira_encoding:komira_encoding_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_encoding:komira_encoding_conda"
+}
+
+artifacts {
+  name: "komira_json"
+  build_system: "buck2"
+  args: "//src/komira_json:komira_json_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_json:komira_json_conda"
+}
+
+artifacts {
+  name: "komira_protobuf"
+  build_system: "buck2"
+  args: "//src/komira_protobuf:komira_protobuf_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_protobuf:komira_protobuf_conda"
+}
+
+artifacts {
+  name: "komira_xml"
+  build_system: "buck2"
+  args: "//src/komira_xml:komira_xml_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_xml:komira_xml_conda"
+}
+
+artifacts {
+  name: "komira_retry"
+  build_system: "buck2"
+  args: "//src/komira_retry:komira_retry_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_retry:komira_retry_conda"
+}
+
+artifacts {
+  name: "komira_datetime"
+  build_system: "buck2"
+  args: "//src/komira_datetime:komira_datetime_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_datetime:komira_datetime_conda"
+}
+
+artifacts {
+  name: "komira_textproto"
+  build_system: "buck2"
+  args: "//src/komira_textproto:komira_textproto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_textproto:komira_textproto_conda"
+}
+
+artifacts {
+  name: "komira_hash"
+  build_system: "buck2"
+  args: "//src/komira_hash:komira_hash_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_hash:komira_hash_conda"
+}
+
+artifacts {
+  name: "komira_atomic_alias"
+  build_system: "buck2"
+  args: "//src/komira_atomic_alias:komira_atomic_alias_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_atomic_alias:komira_atomic_alias_conda"
+}
+
+artifacts {
+  name: "komira_proto_codec"
+  build_system: "buck2"
+  args: "//src/komira_proto_codec:komira_proto_codec_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_proto_codec:komira_proto_codec_conda"
+}
+
+artifacts {
+  name: "kci_api"
+  build_system: "buck2"
+  args: "//src/kci_api:kci_api_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_api:kci_api_conda"
+}
+
+artifacts {
+  name: "kci_release_channel"
+  build_system: "buck2"
+  args: "//src/kci_release_channel:kci_release_channel_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_release_channel:kci_release_channel_conda"
+}
+
+artifacts {
+  name: "kci_artifact_manifest"
+  build_system: "buck2"
+  args: "//src/kci_artifact_manifest:kci_artifact_manifest_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_artifact_manifest:kci_artifact_manifest_conda"
+}
+
+artifacts {
+  name: "kci_logs"
+  build_system: "buck2"
+  args: "//src/kci_logs:kci_logs_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_logs:kci_logs_conda"
+}
+
+artifacts {
+  name: "kci_params"
+  build_system: "buck2"
+  args: "//src/kci_params:kci_params_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_params:kci_params_conda"
+}
+
+artifacts {
+  name: "kci_release_machine"
+  build_system: "buck2"
+  args: "//src/kci_release_machine:kci_release_machine_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_release_machine:kci_release_machine_conda"
+}
+
+artifacts {
+  name: "komira_wkt"
+  build_system: "buck2"
+  args: "//src/komira_wkt:komira_wkt_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_wkt:komira_wkt_conda"
+}
+
+artifacts {
+  name: "kci_resource_proto"
+  build_system: "buck2"
+  args: "//src/kci_resource_proto:kci_resource_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_resource_proto:kci_resource_proto_conda"
+}
+
+artifacts {
+  name: "kci_validator_rows"
+  build_system: "buck2"
+  args: "//src/kci_validator_rows:kci_validator_rows_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_validator_rows:kci_validator_rows_conda"
+}
+
+artifacts {
+  name: "kci_validator_report"
+  build_system: "buck2"
+  args: "//src/kci_validator_report:kci_validator_report_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_validator_report:kci_validator_report_conda"
+}
+
+artifacts {
+  name: "kci_workflow_check"
+  build_system: "buck2"
+  args: "//src/kci_workflow_check:kci_workflow_check_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_workflow_check:kci_workflow_check_conda"
+}
+
+artifacts {
+  name: "komira_anomaly"
+  build_system: "buck2"
+  args: "//src/komira_anomaly:komira_anomaly_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_anomaly:komira_anomaly_conda"
+}
+
+artifacts {
+  name: "komira_clock"
+  build_system: "buck2"
+  args: "//src/komira_clock:komira_clock_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_clock:komira_clock_conda"
+}
+
+artifacts {
+  name: "komira_counters"
+  build_system: "buck2"
+  args: "//src/komira_counters:komira_counters_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_counters:komira_counters_conda"
+}
+
+artifacts {
+  name: "komira_fork_join"
+  build_system: "buck2"
+  args: "//src/komira_fork_join:komira_fork_join_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_fork_join:komira_fork_join_conda"
+}
+
+artifacts {
+  name: "komira_host"
+  build_system: "buck2"
+  args: "//src/komira_host:komira_host_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_host:komira_host_conda"
+}
+
+artifacts {
+  name: "komira_job_report_proto"
+  build_system: "buck2"
+  args: "//src/komira_job_report_proto:komira_job_report_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_job_report_proto:komira_job_report_proto_conda"
+}
+
+artifacts {
+  name: "komira_name_registry"
+  build_system: "buck2"
+  args: "//src/komira_name_registry:komira_name_registry_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_name_registry:komira_name_registry_conda"
+}
+
+artifacts {
+  name: "komira_parquet_api"
+  build_system: "buck2"
+  args: "//src/komira_parquet_api:komira_parquet_api_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_parquet_api:komira_parquet_api_conda"
+}
+
+artifacts {
+  name: "komira_runtime_paths"
+  build_system: "buck2"
+  args: "//tools/build/mojo/runtime_paths:komira_runtime_paths_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//tools/build/mojo/runtime_paths:komira_runtime_paths_conda"
+}
+
+artifacts {
+  name: "komira_resources"
+  build_system: "buck2"
+  args: "//src/komira_resources:komira_resources_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_resources:komira_resources_conda"
+}
+
+artifacts {
+  name: "komira_scalar_arithmetic"
+  build_system: "buck2"
+  args: "//src/komira_scalar_arithmetic:komira_scalar_arithmetic_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_scalar_arithmetic:komira_scalar_arithmetic_conda"
+}
+
+artifacts {
+  name: "komira_simd"
+  build_system: "buck2"
+  args: "//src/komira_simd:komira_simd_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_simd:komira_simd_conda"
+}
+
+artifacts {
+  name: "komira_validation_run"
+  build_system: "buck2"
+  args: "//src/komira_validation_run:komira_validation_run_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_validation_run:komira_validation_run_conda"
+}
+
+artifacts {
+  name: "komira_test_run_id"
+  build_system: "buck2"
+  args: "//src/komira_test_run_id:komira_test_run_id_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_test_run_id:komira_test_run_id_conda"
+}
+
+artifacts {
+  name: "komira_test_verdict"
+  build_system: "buck2"
+  args: "//src/komira_test_verdict:komira_test_verdict_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_test_verdict:komira_test_verdict_conda"
+}
+
+artifacts {
+  name: "komira_all"
+  build_system: "komira_pack"
+  args: "conda-meta"
+  args: "--name"
+  args: "komira_all"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_encoding/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_json/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_protobuf/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_xml/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_retry/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_datetime/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_textproto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_hash/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_atomic_alias/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_proto_codec/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_api/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_release_channel/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_artifact_manifest/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_logs/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_params/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_release_machine/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_wkt/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_resource_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_validator_rows/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_validator_report/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_workflow_check/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_anomaly/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_clock/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_counters/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_fork_join/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_host/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_job_report_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_name_registry/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_parquet_api/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_runtime_paths/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_resources/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_scalar_arithmetic/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_simd/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_validation_run/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_test_run_id/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_test_verdict/manifest.json"
+  args: "--license"
+  args: "Apache-2.0"
+  args: "--summary"
+  args: "Every komira library of one release."
+  args: "--home"
+  args: "https://github.com/komira-ai/komira"
+  args: "--extra-file"
+  args: "info/licenses/LICENSE=LICENSE"
+  args: "--label"
+  args: "kci run {revision_id}"
+  args: "--out-dir"
+  args: "{out_dir}"
+  targets: "//tools/build/package:komira_pack"
+}

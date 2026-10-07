@@ -8,7 +8,7 @@
 # The `komira.search.index` scan kind (its binding, split plan and split
 # reader, implementing the komira_scan_resolver contract) lives in the HIGHER
 # `komira_search_scan` package, which keeps komira_search on the light
-# komira_core edge.
+# the core packages edge.
 #
 # -----------------------------------------------------------------------------
 # WHAT THIS MODULE OWNS (PURE, S3-FREE, unit-testable on the core edge)
@@ -52,16 +52,16 @@
 # lives in the HIGHER package komira_search_scan, NOT here.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from std.memory import ArcPointer
 
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.arrow.string_array import StringArray
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.string_array import StringArray
 from std.builtin.swap import swap
-from komira_core.plan.expr import (
+from komira_plan_expr.expr import (
     Expr,
     EXPR_BINARY_OP,
     EXPR_COL_REF,
@@ -75,7 +75,7 @@ from komira_core.plan.expr import (
     BIN_GT,
     BIN_GE,
 )
-from komira_core.plan.scalar_value import (
+from komira_plan_expr.scalar_value import (
     ScalarValue,
     SCALAR_KIND_DATE32,
     SCALAR_KIND_TIMESTAMP,
@@ -524,7 +524,8 @@ struct QueryIR(Copyable, Movable, Deinitable):
       top_k:           the `size` bound (number of ranked hits to return).
       analyzer_config: the field's analyzer (the symmetry carrier; must be TEXT).
       generation:      the metastore seam — the manifest generation
-                       (SearchMetastore.generation() = num_chunks) this query
+                       (SearchMetastore.generation(), which moves on every
+                       publish, retire and reap) this query
                        reads. It is a SNAPSHOT, not identity: the
                        `komira.search.index` scan kind stamps the generation it
                        resolved for the execution (LIVE: re-read per execution;
@@ -855,9 +856,7 @@ def _read_docstore_blob[
     COMPRESSED bytes (callers wanting the decoded `_source` use
     `read_docstore_source`). Fail-loud bounds-checked."""
     var ext = _docstore_blob_extent(region, slot)
-    return Span[UInt8, o](
-        unsafe_ptr=region.unsafe_ptr() + ext[0], length=ext[1]
-    )
+    return region[ext[0] : ext[0] + ext[1]]
 
 
 def read_docstore_source[
@@ -878,17 +877,18 @@ def read_docstore_source[
     var blob_len = ext[1]
     var uncompressed_len = ext[2]
     # The STORED slot bytes as a borrowed Span tied to the SAME origin `o`.
-    var stored = Span[UInt8, o](
-        unsafe_ptr=region.unsafe_ptr() + blob_off, length=blob_len
-    )
+    var stored = region[blob_off : blob_off + blob_len]
     if flag == Int(DOCSTORE_FLAG_LZ4):
         # An empty blob (uncompressed_len == 0) has an empty stored slot — skip
         # the FFI and return "" (mirrors the builder's empty-blob convention).
         if uncompressed_len == 0:
             return String("")
         var decoded = lz4_decompress(stored, uncompressed_len)
+        # SAFETY: the docstore blob is the verbatim _source the builder wrote
+        # from a String; lz4 returns exactly those bytes.
         return String(StringSlice(unsafe_from_utf8=Span(decoded)))
     # UNCOMPRESSED: the stored bytes ARE the verbatim _source.
+    # SAFETY: as above, the builder wrote these bytes from a String.
     return String(StringSlice(unsafe_from_utf8=stored))
 
 

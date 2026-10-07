@@ -1,5 +1,5 @@
 # =============================================================================
-# Tests for Schema, Field, RecordBatch (komira_core.arrow)
+# Tests for Schema, Field, RecordBatch (the core packages)
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false

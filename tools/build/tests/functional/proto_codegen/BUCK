@@ -408,7 +408,7 @@ proto_codegen_golden(
         name = "refuse_db_" + key,
         srcs = _SRCS,
         generate = _ALL,
-        expect_error = "protoc-gen-mojo-db does not implement roots, methods, messages_only or layout_probe",
+        expect_error = "protoc-gen-mojo-db does not implement roots, methods, omit_fields, messages_only or layout_probe",
         options = _PREFIX + "," + opt,
         plugin = "mojo-db",
     )
@@ -430,37 +430,47 @@ proto_codegen_golden(
 )
 
 # ---- REST clients: path templates, query fields and refusals ---------------
-# corpus/google/api/annotations.proto declares the `(google.api.http)` option
-# every REST fixture imports.
+# The REST fixtures import googleapis' google/api/annotations.proto (the
+# `(google.api.http)` option) and, for `(google.api.default_host)`,
+# google/api/client.proto. Neither is in the corpus: protoc reads them from
+# the pinned googleapis tree, an import root after the corpus, so the goldens
+# see the definitions the Google Cloud clients are generated against.
 
-_ANNOTATIONS = "corpus/google/api/annotations.proto"
+_GOOGLEAPIS = ["komira//tools/vendor/googleapis:api_client[tree]"]
 
 # The Cloud Logging calls a log reader makes: a custom-verb literal path
 # (POST /v2/entries:list), a `{parent=projects/*}` capture and a repeated
 # query field. The REST client imports komira_gcp_core (its token source and
 # its google.rpc.Status error mapper).
+# The service declares `(google.api.default_host)`, so the client starts at
+# logging.googleapis.com.
 proto_codegen_golden(
     name = "logging_rest",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/google/logging/v2/logging.proto",
-    ],
+    srcs = ["corpus/google/logging/v2/logging.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["google/logging/v2/logging.proto"],
     golden = ["golden/logging_rest/logging.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_gcp_logging",
+    absent = ["localhost"],
+    present = ["self._rest_host = String(\"logging.googleapis.com\")"],
 )
 
 # `**`, a verb after a capture, `{x=*}`, and repeated, optional and bool
-# query fields.
+# query fields. The service declares no `(google.api.default_host)`, so the
+# client starts with no host and every method refuses to send until
+# `set_rest_host` names one.
 proto_codegen_golden(
     name = "shapes_rest",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/shapes/v1/shapes.proto",
-    ],
+    srcs = ["corpus/shapes/v1/shapes.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["shapes/v1/shapes.proto"],
     golden = ["golden/shapes_rest/shapes.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_test_shapes",
+    absent = ["localhost"],
+    present = [
+        "self._rest_host = String(\"\")",
+        "komira.test.shapes.v1.Shapes declares no google.api.default_host",
+    ],
 )
 
 # Well-known types as a GET response (Struct), a PUT response (Timestamp) and
@@ -470,10 +480,8 @@ proto_codegen_golden(
 # read and write the binary-shaped message instead.
 proto_codegen_golden(
     name = "wkt_rest",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/rest/v1/wkt_rest.proto",
-    ],
+    srcs = ["corpus/rest/v1/wkt_rest.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["rest/v1/wkt_rest.proto"],
     golden = ["golden/wkt_rest/wkt_rest.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_test_wkt_rest",
@@ -488,15 +496,38 @@ proto_codegen_golden(
     ],
 )
 
+# Well-known types in the query, and messages holding them: a Timestamp or
+# Duration query field is one parameter, its proto3 JSON string through
+# komira_wkt's `to_proto3_json()` (the codec's own formatter); a message is
+# flattened, to any depth, to dotted lowerCamelCase keys
+# (`interval.startTime`, `window.bounds.endTime`), each level sent only when
+# it is set.
+proto_codegen_golden(
+    name = "series_rest",
+    srcs = ["corpus/rest/v1/series_rest.proto"],
+    import_roots = _GOOGLEAPIS,
+    generate = ["rest/v1/series_rest.proto"],
+    golden = ["golden/series_rest/series_rest.mojo.golden"],
+    options = "default_protocol=rest,package_prefix=komira_test_series_rest",
+    present = [
+        "query += String(\"interval.startTime=\") + _rest_pct_encode(_rest_interval.start_time.value().to_proto3_json())",
+        "query += String(\"aggregation.alignmentPeriod=\") + _rest_pct_encode(_rest_aggregation.alignment_period.value().to_proto3_json())",
+        "query += String(\"window.bounds.endTime=\") + _rest_pct_encode(_rest_window__bounds.end_time.value().to_proto3_json())",
+        "query += String(\"asOf=\") + _rest_pct_encode(req.as_of.value().to_proto3_json())",
+    ],
+    absent = [
+        "startTime.seconds",
+        "alignmentPeriod.nanos",
+    ],
+)
+
 # `gcp=true` (what mojo_gcp_client passes) leaves a REST client as it is:
 # REST clients are Google Cloud clients either way. logging_rest's golden,
 # byte for byte.
 proto_codegen_golden(
     name = "logging_rest_gcp",
-    srcs = [
-        _ANNOTATIONS,
-        "corpus/google/logging/v2/logging.proto",
-    ],
+    srcs = ["corpus/google/logging/v2/logging.proto"],
+    import_roots = _GOOGLEAPIS,
     generate = ["google/logging/v2/logging.proto"],
     golden = ["golden/logging_rest/logging.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_gcp_logging,gcp=true",
@@ -554,7 +585,7 @@ proto_codegen_golden(
 _REST_REFUSALS = [
     ("bare_wildcard", "a bare `*` segment has no request field to fill it"),
     ("double_star_not_last", "must be the last segment"),
-    ("dotted_field", "names a nested field path"),
+    ("dotted_field", "reads a field of `thing`, which is not the request body"),
     ("repeated_path_var", "path variable `names` is a `repeated` field"),
     ("nested_braces", "nested `{` in a variable"),
     ("unclosed_brace", "unclosed `{`"),
@@ -566,21 +597,82 @@ _REST_REFUSALS = [
     ("empty_pattern_segment", "pattern \"x//y\" of `a` must be"),
     ("double_star_not_last_in_pattern", "pattern \"**/x\" of `a` must be"),
     ("bytes_in_url", "field `blob` is `bytes`, which has no URL"),
+    ("optional_path_var", "path variable `name` is a proto3 `optional` field"),
+    ("oneof_path_leaf", "field `thing.id` is used in the path/query but is an arm of a oneof"),
+    ("repeated_message_in_query", "query field `items` is a repeated message, which has no query form"),
+    ("binding_with_another_verb", "every binding must share them"),
 ]
 
 [
     proto_codegen_golden(
         name = "refuse_rest_" + name,
-        srcs = [
-            _ANNOTATIONS,
-            "corpus/refuse/{}.proto".format(name),
-        ],
+        srcs = ["corpus/refuse/{}.proto".format(name)],
+        import_roots = _GOOGLEAPIS,
         expect_error = expect,
         generate = ["refuse/{}.proto".format(name)],
         options = "default_protocol=rest,package_prefix=refused",
     )
     for name, expect in _REST_REFUSALS
 ]
+
+# An Update method: `{thing.name=...}` is read from the body message after a
+# presence check that comes before the token is asked for, and the
+# FieldMask `update_mask` is the `updateMask` query parameter, sent as its
+# proto3 JSON string when set.
+proto_codegen_golden(
+    name = "update_rest",
+    srcs = ["corpus/rest/v1/update_rest.proto"],
+    import_roots = _GOOGLEAPIS,
+    generate = ["rest/v1/update_rest.proto"],
+    golden = ["golden/update_rest/update_rest.mojo.golden"],
+    options = "default_protocol=rest,package_prefix=komira_test_update_rest",
+    present = [
+        "if not req.thing:",
+        "_rest_to_str(req.thing.value().name)",
+        "query += String(\"updateMask=\") + _rest_pct_encode(req.update_mask.value().to_proto3_json())",
+        "body_text = encode_json(req.thing.value())",
+    ],
+)
+
+# A rest target lists the unary method of a service that also has a
+# bidirectional-streaming one: the client holds GetItem, and nothing of WatchItems.
+proto_codegen_golden(
+    name = "rest_unary_beside_streaming",
+    srcs = ["corpus/rest/v1/feed.proto"],
+    import_roots = _GOOGLEAPIS,
+    generate = ["rest/v1/feed.proto"],
+    golden = ["golden/rest_unary_beside_streaming/feed.mojo.golden"],
+    options = "default_protocol=rest,package_prefix=komira_test_feed,methods=Feed.GetItem",
+    absent = [
+        "WatchItems",
+        "watch_items",
+    ],
+    present = ["def get_item[RT: Runtime]"],
+)
+
+# A method that streams its requests (here bidirectional), listed in
+# `methods`, is refused by name, not skipped: skipped, the target would build
+# a client without a method it lists. (A server-streaming method has a REST
+# form, and is generated.)
+proto_codegen_golden(
+    name = "refuse_rest_streaming_method_listed",
+    srcs = ["corpus/rest/v1/feed.proto"],
+    import_roots = _GOOGLEAPIS,
+    expect_error = "--mojo_out: protoc-gen-mojo: service `Feed` method `WatchItems` is bidirectional-streaming, and a `rest` target generates unary and server-streaming methods only",
+    generate = ["rest/v1/feed.proto"],
+    options = "default_protocol=rest,package_prefix=komira_test_feed,methods=Feed.GetItem+Feed.WatchItems",
+)
+
+# A `(google.api.default_host)` the client cannot send to (here a port other
+# than 443) is refused by name rather than written into the client.
+proto_codegen_golden(
+    name = "refuse_rest_default_host_with_port",
+    srcs = ["corpus/refuse/default_host_with_port.proto"],
+    import_roots = _GOOGLEAPIS,
+    expect_error = "service `refused.v1.Ported` declares `(google.api.default_host)` = \"ported.example.com:8443\", which is not a host name",
+    generate = ["refuse/default_host_with_port.proto"],
+    options = "default_protocol=rest,package_prefix=refused",
+)
 
 # The URL helpers protoc-gen-mojo emits into every REST client, cut out of
 # the shapes client and compiled on their own (they need nothing outside the
@@ -610,6 +702,34 @@ mojo_library(
 # proto-codegen/BUCK, and that file's next edit belongs to the rust_test
 # weld, which will run openapi_emit.rs's own #[test]s. TODO(rust_test weld):
 # add the plugin target and an OpenAPI golden over corpus/shapes here.
+
+# `module_names` (import path -> module, `+`-joined), refused by the plugin
+# itself as well as by mojo_gcp_client, which passes it.
+_MODULE_NAMES_REFUSALS = [
+    ("malformed", "example/logging/v1/log_entry.proto", "is not `<proto path>:<module stem>`"),
+    ("empty_stem", "example/logging/v1/log_entry.proto:", "has an empty path or stem"),
+    (
+        "twice",
+        "example/logging/v1/log_entry.proto:a+example/logging/v1/log_entry.proto:b",
+        "names `example/logging/v1/log_entry.proto` twice",
+    ),
+    ("stray", "example/audit/v1/audit.proto:audit", "names `example/audit/v1/audit.proto`, which is not a file to generate"),
+    ("not_a_module", "example/logging/v1/log_entry.proto:log-entry", "module `log-entry`, which is not a Mojo module name"),
+    ("keyword", "example/logging/v1/log_entry.proto:import", "module `import`, a Mojo keyword"),
+    ("kept_name", "example/logging/v1/log_entry.proto:__init__", "a name the generated package keeps for itself"),
+    ("clash", "example/logging/v1/log_entry.proto:logging", "would both be generated as module `logging`"),
+]
+
+[
+    proto_codegen_golden(
+        name = "refuse_module_names_" + name,
+        srcs = _SRCS,
+        generate = _ALL,
+        expect_error = expect,
+        options = _PREFIX + ",module_names=" + value,
+    )
+    for name, value, expect in _MODULE_NAMES_REFUSALS
+]
 
 proto_codegen_goldens(
     name = "all",
@@ -655,5 +775,13 @@ proto_codegen_goldens(
         ":refuse_gcp_connect",
         ":shapes_rest",
         ":wkt_rest",
-    ] + [":refuse_rest_" + name for name, _ in _REST_REFUSALS],
+        ":update_rest",
+        ":series_rest",
+        ":rest_unary_beside_streaming",
+        ":refuse_rest_streaming_method_listed",
+        ":refuse_rest_default_host_with_port",
+    ] + [":refuse_rest_" + name for name, _ in _REST_REFUSALS] + [
+        ":refuse_module_names_" + name
+        for name, _, _ in _MODULE_NAMES_REFUSALS
+    ],
 )

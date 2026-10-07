@@ -120,7 +120,8 @@
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
-#      and gRPC service clients), protoc-gen-mojo's text goldens, and
+#      and gRPC service clients), protoc-gen-mojo's text goldens,
+#      proto_fixture_check (protoc reading wire fixtures), and
 #      deterministic generation across two uncached
 #      builds (skipped with --no-uncached; about 16 minutes): see
 #      tools/build/tests/proto_tests.sh.
@@ -156,12 +157,17 @@
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
 #      is private, empty and not /tmp in each of two actions; test_env and a
-#      mojo_test's data and env arrive under `buck2 test`; a red test stays
+#      mojo_test's data and env arrive under `buck2 test`, and so do its
+#      args, each $(location) an absolute path the test opens and an
+#      $(exe_target) a binary with its lib/ (also as a build action,
+#      mojo_test_args_action, which is what a pull request builds); a mojo_test
+#      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
 #      the runner itself, run twice in ONE action directory
 #      (tests//functional/test_data:runner_cases), gives each run its own empty
 #      TEST_TMPDIR under that directory and removes it, no --env reaches
-#      the verdict, and a test killed by SIGKILL or SIGABRT fails with its
+#      the verdict, --arg values arrive in order and unexported, exit 77 is
+#      red, and a test killed by SIGKILL or SIGABRT fails with its
 #      own status (137, 134) and no marker; five inadmissible data/env
 #      declarations are refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
@@ -194,9 +200,11 @@
 #  34. aws-client-gen (tests//functional/aws_codegen): the CloudWatch Logs
 #      GetLogEvents module, pure and client, a restJson1 client of a tiny
 #      model, a restXml module of a tiny S3-shaped model (pure, with the `s3`
-#      customization), and the layout probe of each, equal their text goldens
-#      byte for byte; the generator refuses an empty or missing operation
-#      list, an operation the model lacks, a protocol it does not implement, a
+#      customization), an awsQuery module of a tiny model (pure and client),
+#      an ec2Query module of a tiny model (pure), and the layout probe of
+#      each, equal their text goldens byte for byte; the generator refuses
+#      an empty or missing operation list, an operation the model lacks, a
+#      protocol it does not implement, a
 #      restXml model reaching a union, an XML attribute or a body map, the
 #      `s3` customization unless the model's serviceId is `S3` and its
 #      protocol restXml, or an unknown customization, a
@@ -204,15 +212,16 @@
 #      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
-#      go red (tests//negative/aws_codegen). Each client module (logs and
-#      the tiny restJson1 model) must also contain, as whole lines, the
-#      strings its must_contain names (the caller's HttpClientConfig
-#      reaching the send); a must_contain whose lines the module holds only
-#      non-adjacently, or only as the tail of a longer line, goes red, and
-#      for no other reason. The tiny models' pure-mode clients
-#      (komira//tools/build/proto-codegen/aws_rest_json and aws_rest_xml)
-#      generated exactly their packages' files, and their welded tests ran:
-#      see test 36.
+#      go red (tests//negative/aws_codegen). Each client module (logs, the
+#      tiny restJson1 and the tiny awsQuery model) must also contain, as
+#      whole lines, the strings its must_contain names (the caller's
+#      HttpClientConfig reaching the send); a must_contain whose lines the
+#      module holds only non-adjacently, or only as the tail of a longer
+#      line, goes red, and for no other reason. The tiny models' clients
+#      built in the komira cell (komira//tools/build/proto-codegen/
+#      aws_rest_json and aws_rest_xml, pure; aws_query, the awsQuery client
+#      pure and client mode and the ec2Query client pure) generated exactly
+#      their files, and exactly their welded tests ran: see test 36.
 #  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
 #      inline tests of komira_proto_codegen run as a build action and pass,
 #      every one counted. In tests//negative/rust_test a failing #[test]
@@ -242,9 +251,14 @@
 #      the responses it reads pass; and a pure-mode restXml client of a tiny
 #      S3-shaped model with the `s3` customization
 #      (komira//tools/build/proto-codegen/aws_rest_xml), likewise, against
-#      komira_aws_core and komira_xml.
-#      Exactly the package's files are generated, nothing of an operation not
-#      named, and exactly those two tests ran. A second client adds a
+#      komira_aws_core and komira_xml; and in
+#      komira//tools/build/proto-codegen/aws_query, a pure-mode awsQuery and
+#      a pure-mode ec2Query client of two tiny models, likewise, against
+#      komira_aws_core and komira_xml, and a client-mode awsQuery client,
+#      which builds only once its layout probe and a caller test over a
+#      scripted connector and komira_aws_core's echo connector pass. For
+#      each, exactly its files are generated, nothing of an operation not
+#      named, and exactly its two welded tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is
 #      copied into the package, the header names its owner, and a caller test
 #      imports it. A client-mode client (tests//functional/aws_client_mode)
@@ -270,6 +284,46 @@
 #      --target-platforms is configured for it; the reserved linux-arm64 row
 #      has no platform and its `[komira_re]` key is refused
 #      (tools/build/tests/functional/platform_table/check.sh).
+#  38. README examples (tools/build/mojo/README.md#readme-examples): the
+#      examples of tests//functional/readme_examples/ok run and its marker is
+#      PASS; a README with no example (.../none) compiles and runs nothing,
+#      its marker NO EXAMPLE; tests//negative/readme_examples fail naming the
+#      README line of a raising example, a compile error and a `mojo skip` fence.
+#      A README that ships (its library has a conda package) refuses a relative
+#      link naming its line (.../relative_link); the same README in a library
+#      with `conda = False` builds (tests//functional/readme_examples/unshipped).
+#  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
+#      its BXL script: //:test_weld (every package under src/) and
+#      tests//functional/test_weld:ok (a planted tree with its ledger) pass;
+#      each target of tests//negative/test_weld fails
+#      naming its one planted finding: an unwelded test file (named only in a
+#      comment of a test_srcs list), a package with no welded test, a ledger
+#      row for a welded test or package (the ledger only shrinks; one test is
+#      welded only by a computed list), a row naming nothing, a row with no
+#      reason, and a root with no package.
+#  40. README API coverage (tools/build/lint/readme_api_coverage.bzl;
+#      docs/readme_api_coverage.md): //:readme_api_coverage (the census of
+#      every package under src/, report-only) and
+#      tests//functional/readme_api_coverage:ok (a planted tree whose census
+#      must equal its expected files, counts and statuses exactly) build; each
+#      target of tests//negative/readme_api_coverage fails naming its one
+#      planted finding: a malformed ledger row, a repeated row, a row for a
+#      symbol not exported, a row for a symbol the README uses (the ledger
+#      only shrinks), an undocumented symbol under `enforce = True`, and a
+#      root with no package.
+
+#  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
+#  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
+#      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
+#      file of the cell, against tests/pointer_lint_ffi.tsv and
+#      tests/pointer_lint_holds.tsv) and tests//functional/pointer_lint:ok (a
+#      planted tree whose every site is held at its exact count, beside near
+#      misses) build; each target of tests//negative/pointer_lint fails naming
+#      its one planted site (each rule, the two-statement partial move, a
+#      public method and __init__.mojo, one site over a hold, a non-origin
+#      site in an FFI module, an unlisted marked module) or ledger defect,
+#      an empty tree fails as checking nothing, and a target naming no tree
+#      is refused at analysis.
 set -uo pipefail
 
 umbrella=1
@@ -836,6 +890,21 @@ if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_data > "$LOG/
 else
     fail "td_mojo_test: buck2 test tests//functional/test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
 fi
+if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_args > "$LOG/td_mojo_test_args.log" 2>&1; then
+    pass "td_mojo_test_args: buck2 test of a mojo_test with args, \$(location) and \$(exe_target) expanded to files it opens"
+else
+    fail "td_mojo_test_args: buck2 test tests//functional/test_data:mojo_test_args failed (see $LOG/td_mojo_test_args.log)"
+fi
+expect_green td_mojo_test_args_action tests//functional/test_data:mojo_test_args_action
+if timeout 900 "$BUCK2" test tests//negative/test_data:skip_77 > "$LOG/td_skip_77.log" 2>&1; then
+    fail "td_skip_77: buck2 test tests//negative/test_data:skip_77 passed, but its test exits 77 (see $LOG/td_skip_77.log)"
+elif ! grep -qE "GATED TEST FAILED: [a-z]*//([a-z/]*/)?negative/test_data:skip_77 \(exit 77\)" "$LOG/td_skip_77.log"; then
+    fail "td_skip_77: failed without the test's exit 77 (see $LOG/td_skip_77.log)"
+elif ! grep -q "Fail 1" "$LOG/td_skip_77.log"; then
+    fail "td_skip_77: exit 77 was not counted as a test failure (see $LOG/td_skip_77.log)"
+else
+    pass "td_skip_77: a mojo_test exiting 77 (SKIP to some harnesses) fails, counted as Fail"
+fi
 expect_red td_env_bin_lib "GATED TEST FAILED: tests//negative/test_data:env_bin_lib:tests/test_red.mojo" tests//negative/test_data:env_bin_lib
 if timeout 900 "$BUCK2" test tests//negative/test_data:env_bin > "$LOG/td_env_bin.log" 2>&1; then
     fail "td_env_bin: buck2 test tests//negative/test_data:env_bin passed, but its test is red (env BIN reached the runner; see $LOG/td_env_bin.log)"
@@ -978,6 +1047,7 @@ fi
 expect_green mojo_aws_client tests//functional/mojo_aws_client:
 expect_green aws_rest_json //tools/build/proto-codegen/aws_rest_json:
 expect_green aws_rest_xml //tools/build/proto-codegen/aws_rest_xml:
+expect_green aws_query //tools/build/proto-codegen/aws_query:
 expect_red aws_client_no_operations '`operations` is empty' tests//negative/mojo_aws_client:no_operations
 expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/mojo_aws_client:joined_operations
 expect_red aws_client_no_runtime '`deps` is empty' tests//negative/mojo_aws_client:no_runtime
@@ -1017,6 +1087,132 @@ elif [ "$umbrella" = 1 ]; then
 else
     echo "SKIP  umbrella cache (--no-umbrella)"
 fi
+
+# 38
+expect_green readme_examples tests//functional/readme_examples/...
+for want in "ok:PASS tests//functional/readme_examples/ok:ok:README.md" \
+    "none:NO EXAMPLE tests//functional/readme_examples/none:none:README.md: no "; do
+    t=${want%%:*}
+    line=${want#*:}
+    out=$("$BUCK2" build "tests//functional/readme_examples/${t}:${t}[tests][readme]" --show-full-output 2> "$LOG/readme_marker_$t.log" | awk 'NF == 2 { print $2 }')
+    if [ -n "$out" ] && [ -f "$out" ] && [ "$(head -c "${#line}" "$out")" = "$line" ]; then
+        pass "readme_marker_$t"
+    else
+        fail "readme_marker_$t: the [tests][readme] marker must start '$line' (see $LOG/readme_marker_$t.log)"
+    fi
+done
+expect_red readme_example_raises 'negative/readme_examples/raises/README.md:13: FAILED: planted' tests//negative/readme_examples/raises:raises
+expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 checks passed' tests//negative/readme_examples/raises:raises
+expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
+expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
+expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
+
+# 39
+# A test_weld target only declares its lint; its BXL script checks it
+# (tools/build/lint/test_weld.bzl says why).
+test_weld_check() { # name, lint target: the check's exit status, its log in $LOG
+    "$BUCK2" bxl //tools/build/lint/test_weld.bxl:check -- --lint "$2" > "$LOG/$1.log" 2>&1
+}
+for lint in //:test_weld tests//functional/test_weld:ok tests//negative/test_weld/real:ok; do
+    name="test_weld_green_$(printf '%s' "${lint#*//}" | tr '/:' '__')"
+    if test_weld_check "$name" "$lint"; then pass "$name"; else fail "$name: $lint (see $LOG/$name.log)"; fi
+done
+tw_tree=tests//functional/test_weld/src
+for want in \
+    "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \
+    "untested|$tw_tree/komira_b: 1 .mojo source(s) and no welded test" \
+    "shrink_package|src/komira_c: the package welds 1 test(s) now; delete the row (the ledger only shrinks)" \
+    "shrink_file|src/komira_c/wire/tests/test_wire.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
+    "shrink_computed|src/komira_a/tests/test_one.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
+    "nothing|src/komira_a/tests/test_gone.mojo: names neither a test file nor a package with a .mojo source" \
+    "nothing|src/komira_gen: names neither a test file nor a package with a .mojo source" \
+    "malformed|ledger_malformed.tsv:2: a row is <path><TAB><reason>, with a reason" \
+    "empty|test_weld: checked nothing (no package under nosuch)"; do
+    t=${want%%|*} text=${want#*|} name="test_weld_${want%%|*}"
+    if test_weld_check "$name" "tests//negative/test_weld:$t"; then
+        fail "$name: tests//negative/test_weld:$t passed, but it must fail"
+    elif grep -qF -- "$text" "$LOG/$name.log"; then
+        pass "$name"
+    else
+        fail "$name: failed without '$text' (see $LOG/$name.log)"
+    fi
+done
+# The real rules (negative/test_weld/real/BUCK): with no ledger row, exactly
+# the three unwelded files are named, and none of the welded ones.
+name=test_weld_real_red
+tw_real=tests//negative/test_weld/real/src
+if test_weld_check "$name" tests//negative/test_weld/real:red; then
+    fail "$name: tests//negative/test_weld/real:red passed, but it must fail"
+else
+    tw_named=$(grep -o "^$tw_real/[^:]*: a test file no target welds" "$LOG/$name.log" | sed 's/:.*//' | sort -u | tr '\n' ' ')
+    tw_want="$tw_real/komira_real/tests/test_commented.mojo $tw_real/komira_real/tests/test_imported.mojo $tw_real/komira_real/tests/test_shared.mojo "
+    if [ "$tw_named" = "$tw_want" ]; then
+        pass "$name"
+    else
+        fail "$name: named '$tw_named', want '$tw_want' (see $LOG/$name.log)"
+    fi
+fi
+
+# 40
+expect_green readme_api_coverage //:readme_api_coverage tests//functional/readme_api_coverage:ok
+L=tests//functional/readme_api_coverage:exceptions.tsv
+N=tests//negative/readme_api_coverage
+for want in \
+    "malformed|$N/ledger_malformed.tsv:2: a row is <package><TAB><symbol><TAB><reason>, with a reason" \
+    "duplicate|$N/ledger_duplicate.tsv:3: komira_a top_level has a row already, on line 1" \
+    "stale_gone|$N/ledger_stale_gone.tsv:2: komira_a Circle: not exported by src/komira_a/__init__.mojo; delete the row" \
+    "stale_used|$N/ledger_stale_used.tsv:3: komira_a bye: src/komira_a/README.md uses it now; delete the row (the ledger only shrinks)" \
+    "enforce|$N:enforce[files]/src/komira_a/greet.mojo:23: komira_a Greeter.wave: exported and used by no README example" \
+    "empty|readme_api_coverage: checked nothing (no package under nosuch)"; do
+    expect_red "readme_api_coverage_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red readme_api_coverage_malformed_symbol "$N/ledger_malformed.tsv:3: a row is" "$N:malformed"
+expect_red readme_api_coverage_stale_private "$N/ledger_stale_gone.tsv:3: komira_a Greeter._secret: not exported" "$N:stale_gone"
+expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enforce"
+
+# 41
+# shellcheck source=tools/build/tests/coverage_tests.sh
+. "$ROOT/tools/build/tests/coverage_tests.sh"
+
+# 42
+expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
+N=tests//negative/pointer_lint
+S="$N/src/komira_a/plant.mojo"
+for want in \
+    "wildcard_origin|$S:2: wildcard_origin: " \
+    "from_address|$S:3: from_address: " \
+    "partial_move|$S:3: partial_move: " \
+    "partial_move_two|$S:4: partial_move: var v = p.take_pointee() (bound to a field's address at line 3)" \
+    "parallelize|$S:3: parallelize: " \
+    "libc_read|$S:3: libc_redeclare: " \
+    "libc_open|$S:3: libc_redeclare: " \
+    "public_pointer|$S:2: public_pointer: " \
+    "public_method|$S:3: public_pointer: " \
+    "public_init|$N/src/komira_b/__init__.mojo:2: public_pointer: " \
+    "held_new_site|$N/src/komira_a/held.mojo:85: parallelize: parallelize[_worker](n) -- the standard library's parallelize[: run the work on a ParallelDispatch (3 sites, held 2)" \
+    "ffi_from_address|$N/src/komira_a/ffi.mojo:11: from_address: " \
+    "ffi_unlisted|$N/src/komira_a/ffi_clean.mojo:7: wildcard_origin: " \
+    "holds_malformed|$N/holds_malformed.tsv:8: a row has 4 tab-separated fields (rule, file, count, reason), not 3" \
+    "holds_rule|$N/holds_rule.tsv:8: unknown rule \`pointer_magic\`" \
+    "holds_file|$N/holds_file.tsv:8: src/komira_a/gone.mojo is not a .mojo file of the tree; delete the row" \
+    "holds_count|$N/holds_count.tsv:8: count \`0\` is not a positive whole number" \
+    "holds_reason|$N/holds_reason.tsv:8: empty reason" \
+    "holds_duplicate|$N/holds_duplicate.tsv:8: a second row for parallelize in src/komira_a/held.mojo" \
+    "holds_lower|$N/holds_lower.tsv:6: parallelize in src/komira_a/held.mojo is held at 3 and has 2: lower the count to 2" \
+    "holds_delete|$N/holds_delete.tsv:8: from_address in src/komira_a/near.mojo is held at 1 and has 0: delete the row" \
+    "holds_ffi_wildcard|$N/holds_ffi_wildcard.tsv:8: wildcard_origin in src/komira_a/ffi.mojo is held at 2 and has 0: delete the row" \
+    "ffi_malformed|$N/ffi_malformed.tsv:3: a row has 2 tab-separated fields (file, reason), not 1" \
+    "ffi_unmarked|$N/ffi_unmarked.tsv:3: src/komira_a/near.mojo carries no \`# FFI-BOUNDARY:\` comment" \
+    "ffi_mention|$N/ffi_mention.tsv:3: src/komira_a/mention.mojo carries no \`# FFI-BOUNDARY:\` comment" \
+    "ffi_clean_row|$N/ffi_clean_row.tsv:3: src/komira_a/ffi_clean.mojo names no wildcard origin; delete the row" \
+    "ffi_file|$N/ffi_file.tsv:3: src/komira_a/gone.mojo is not a .mojo file of the tree; delete the row" \
+    "ffi_duplicate|$N/ffi_duplicate.tsv:3: a second row for src/komira_a/ffi.mojo" \
+    "ffi_reason|$N/ffi_reason.tsv:3: empty reason" \
+    "empty|pointer_lint: checked nothing"; do
+    expect_red "pointer_lint_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
+done
+expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
+expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
 # 37
 pt_rc=0

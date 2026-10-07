@@ -5,7 +5,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the typed argument model, the per-module level filter, the synchronous P1
 # stderr path, and the P2 engine behind the same call sites (per-core binary
 # record rings, decode-at-flush drain, file/stderr/metric sinks, spans). It
-# depends on komira_core (`Slab[T]`, raw fd writes), komira_spsc_ring (`SpscRing[T]`),
+# depends on the core packages (`Slab[T]`, raw fd writes), komira_spsc_ring (`SpscRing[T]`),
 # komira_clock, komira_hash (the FNV-1a constants),
 # komira_atomic_alias (the atomic level gate), komira_trace (the span-line
 # formatter the drain renders with) and komira_metrics (the metric point types
@@ -34,8 +34,9 @@ mojo_library(
         ":komira_log_holder",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
         "//src/komira_hash:komira_hash",
+        "//src/komira_libc:komira_libc",
         "//src/komira_metrics:komira_metrics",
         "//src/komira_spsc_ring:komira_spsc_ring",
         "//src/komira_trace:komira_trace",
@@ -55,6 +56,7 @@ mojo_library(
         "tests/test_log_facade_error_escalation.mojo",
         "tests/test_log_facade_smoke.mojo",
         "tests/test_log_json_severity.mojo",
+        "tests/test_log_layout_init_order.mojo",
         "tests/test_log_level_config.mojo",
         "tests/test_log_manager_global.mojo",
         "tests/test_log_p1.mojo",

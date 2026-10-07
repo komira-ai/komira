@@ -75,10 +75,10 @@
 from komira_async.runtime.sched_trace import SITE_FORMAT_READ
 from std.sys import num_physical_cores
 
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.concat import concat_record_batches_nway
-from komira_core.collections.slab import Slab
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.concat import concat_record_batches_nway
+from komira_collections.slab import Slab
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
@@ -659,7 +659,7 @@ def _reassemble_in_order(
     re-copied (k - j) times, for O(k^2) destination bytes. The N-way concat
     makes `num_columns` allocations and copies each row once.
 
-    It calls `komira_core.arrow.concat.concat_record_batches_nway` directly:
+    It calls `komira_arrow.concat.concat_record_batches_nway` directly:
     `komira_engine_operators` (which holds the shared sink fold) depends on
     `komira_avro`, so importing it here would be a build cycle. That callee
     routes validity through `_merge_validity_nway` and carries `null_count`,

@@ -2,10 +2,11 @@
 # test_fake_conformance.mojo
 # =============================================================================
 #
-# 1. "fake" passes the kci_cloud conformance kit (all eleven steps: label
+# 1. "fake" passes the kci_cloud conformance kit (all twelve steps: label
 #    stamping, an idempotent re-apply under a new provenance, the tamper
 #    pair, failed then fixed, role removal, destroy of a graph with a
-#    reference, foreign refusal and adoption, two interleaved applies) on a
+#    reference, foreign refusal and adoption, two interleaved applies, the
+#    validation-run tag under the kit's own run id and under none) on a
 #    graph with every v1 shape: a public service, an internal service reading
 #    the first one's URL and HOST, a scheduled job, and two `Uses` grants;
 #    the roles turned off are api's public ingress and web's grant.
@@ -25,7 +26,8 @@
 #    a no-op. (Read lag and a pre-existing foreign object:
 #    test_fake_faulty_variant.)
 # 7. LOWERING IS DATA: the golden JSON of a small lowering, every modelled
-#    field with its default filled in, and the turned-off schedule role.
+#    field with its default filled in, the turned-off schedule role, each
+#    private identity, and each identity's implicit cell LOGS WRITE grant.
 # 8. A DEFAULT WRITTEN OUT IS NOT A CHANGE (port 8080, scale 0..10).
 # =============================================================================
 
@@ -294,16 +296,24 @@ def test_lowering_is_data_golden() raises:
     var got = lowering_json(lower_data(fake, _list(json)))
     var want = (
         String("[\n")
-        + String('  {"id":"api/run","owner":"api","kind":"run","wanted":true,"depends_on":[],"inputs":[],')
+        + String('  {"id":"api/identity","owner":"api","kind":"identity","wanted":true,"retention":"delete",')
+        + String('"depends_on":[],"inputs":[],"desired":{}},\n')
+        + String('  {"id":"api/run","owner":"api","kind":"run","wanted":true,"retention":"delete","depends_on":["api/identity"],"inputs":[],')
         + String('"desired":{"img":"sha256:a1@linux/amd64","port":"8080","size":"1000m/512MB","scale":"0..10",')
         + String('"health":"","timeout":"60s0n","concurrency":"0","serves":"true"}},\n')
-        + String('  {"id":"api/public","owner":"api","kind":"public","wanted":true,"depends_on":["api/run"],')
+        + String('  {"id":"api/public","owner":"api","kind":"public","wanted":true,"retention":"delete","depends_on":["api/run"],')
         + String('"inputs":[],"desired":{"mechanism":"invoker"}},\n')
-        + String('  {"id":"nightly/run","owner":"nightly","kind":"run","wanted":true,"depends_on":[],"inputs":[],')
+        + String('  {"id":"api/u-gktqg5","owner":"api","kind":"grant","wanted":true,"retention":"delete",')
+        + String('"depends_on":["api/identity"],"inputs":[],"desired":{"principal":"api","cell":"LOGS","access":"WRITE"}},\n')
+        + String('  {"id":"nightly/identity","owner":"nightly","kind":"identity","wanted":true,"retention":"delete",')
+        + String('"depends_on":[],"inputs":[],"desired":{}},\n')
+        + String('  {"id":"nightly/run","owner":"nightly","kind":"run","wanted":true,"retention":"delete","depends_on":["nightly/identity"],"inputs":[],')
         + String('"desired":{"img":"sha256:b2@linux/amd64","size":"1000m/512MB","retries":"0",')
         + String('"timeout":"600s0n","serves":"false"}},\n')
         + String('  {"id":"nightly/schedule","owner":"nightly","kind":"schedule","wanted":false,')
-        + String('"depends_on":["nightly/run"],"inputs":[],"desired":{}}\n')
+        + String('"retention":"delete","depends_on":["nightly/run"],"inputs":[],"desired":{}},\n')
+        + String('  {"id":"nightly/u-g2ewtg","owner":"nightly","kind":"grant","wanted":true,"retention":"delete",')
+        + String('"depends_on":["nightly/identity"],"inputs":[],"desired":{"principal":"nightly","cell":"LOGS","access":"WRITE"}}\n')
         + String("]")
     )
     assert_equal(got, want)

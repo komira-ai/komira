@@ -4,7 +4,7 @@
 
 `komira_objectstore` (`src/komira_objectstore`) gives stateful code a durable place to keep state in a bucket without a lock service. Its traits describe an object store whose conditional write (create-if-absent, or replace-if-version-matches) lets concurrent writers coordinate: a manifest chunk, a claim or a dedup record is an object whose creation exactly one writer wins. Around those traits the library ships local and in-memory conformers, the append-only CAS manifest, batching, compaction and sharding primitives built on the manifest, a presigned-URL seam, and a readiness probe. The distributed shuffle is built on top of it, in its own package, `komira_shuffle`.
 
-The library imports `komira_core`, `komira_async` (the reactor, and the C shim that carries the manifest's process-wide lock), `komira_atomic_alias` and `komira_obs` (the metrics sink for list escalations).
+The library imports `komira_buffer`, `komira_collections`, `komira_libc`, `komira_async` (the reactor, and the C shim that carries the manifest's process-wide lock), `komira_atomic_alias` and `komira_obs` (the metrics sink for list escalations).
 
 Out of scope:
 
@@ -72,6 +72,7 @@ A CAS manifest (`cas_manifest.mojo`) is an ordered, append-only sequence of immu
 <prefix>/manifest/<chunk_seq, 20 digits>.chunk   one chunk per append
 <prefix>/_HEAD                                    last known tail (a hint)
 <prefix>/tombstones/<chunk_seq>.tomb              chunk scheduled for delete
+<prefix>/moved_tombstones/<chunk_seq>.tomb        same, payload moved to another manifest
 <prefix>/_LOG_START                               truncation point
 <prefix>/_CATALOG                                 one opaque consumer blob
 ```
@@ -82,9 +83,9 @@ On a 412 the append sleeps with full-jitter exponential backoff (`RetryPolicy.de
 
 The handle keeps its own last tail in `_LocalHeadCache`, so the next append skips reading `_HEAD`. An append that starts from this warm cache defers its `_HEAD` write, and the handle writes `_HEAD` once 64 appends have deferred it (`_HEAD_ADVANCE_DEFER_CADENCE`). An append that starts cold advances `_HEAD` with a conditional write as soon as it wins its slot. Cold includes the first append on a handle and every retry after a 412, since a 412 always leaves the cache cold. `try_append_at_seq` makes one attempt at an exact slot and never defers: a win advances `_HEAD` at once. Readers choose: `read_head` trusts the local cache, `read_head_fresh` lists the bucket when the cache is cold, `read_head_authoritative` always lists, and `read_durable_head` reads the `_HEAD` object once.
 
-`schedule_for_delete` writes a tombstone and `reap` deletes the chunk. `_LOG_START` and `_CATALOG` are single objects: the first write uses `If-None-Match: *` and later writes use `If-Match`.
+`schedule_for_delete` writes a tombstone and `reap` deletes the chunk. `schedule_moved_for_delete_at` writes a MOVED marker instead, at `<prefix>/moved_tombstones/<chunk_seq>.tomb`: another manifest now references the objects the chunk body names, so a reaper deletes only the chunk. The broker's sub-lineage migration and segment fold write it. It is a separate key so that a plain tombstone written later for the same chunk cannot overwrite it. Both bodies are the 8-byte schedule timestamp. `tombstone_seqs` lists the chunks with either marker; `moved_tombstone_seqs` and `moved_tombstone_ts` read the MOVED ones. `reap` and `purge_all` delete both kinds. `_LOG_START` and `_CATALOG` are single objects: the first write uses `If-None-Match: *` and later writes use `If-Match`.
 
-A process-wide reader-writer lock in `komira_async`'s reactor C shim (`src/komira_async/reactor/_posix_shim.c`) wraps the manifest's composite operations. The read verbs (`read_head` and its variants, `read_chunk`, `read_dedup_sentinel`, the tombstone reads, `read_log_start`, `read_catalog_sidecar`) take it shared. `rewrite_chunk_body`, `schedule_for_delete_at`, `reap`, `purge_all`, `advance_log_start` and `cas_catalog_sidecar` take it exclusive. `append` and `append_idempotent` take neither. A test can switch the lock off with `komira_cas_gate_set_disabled`; production never does.
+A process-wide reader-writer lock in `komira_async`'s reactor C shim (`src/komira_async/reactor/_posix_shim.c`) wraps the manifest's composite operations. The read verbs (`read_head` and its variants, `read_chunk`, `read_dedup_sentinel`, the tombstone reads (`tombstone_seqs`, `tombstone_schedule_ts`, `moved_tombstone_seqs`, `moved_tombstone_ts`), `read_log_start`, `read_catalog_sidecar`) take it shared. `rewrite_chunk_body`, `schedule_for_delete_at`, `schedule_moved_for_delete_at`, `reap`, `purge_all`, `advance_log_start` and `cas_catalog_sidecar` take it exclusive. `append` and `append_idempotent` take neither. A test can switch the lock off with `komira_cas_gate_set_disabled`; production never does.
 
 ### How is an append made exactly-once?
 

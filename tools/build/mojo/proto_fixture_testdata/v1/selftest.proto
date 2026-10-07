@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+// The schema of proto_fixture_check's welded self-test (../BUCK says which
+// defect each fixture plants) and of its twins in
+// tools/build/tests/negative/proto_fixture; the same as
+// tools/build/tests/functional/proto_fixture/v1/selftest.proto.
+package example.fixture.v1;
+
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  KIND_A = 1;
+}
+
+message Inner {
+  uint32 count = 1;
+}
+
+// Every kind of wire value the fixtures hold: varints of one and of two
+// bytes, a string, bytes holding 0x00 and 0xff, a packed repeated field, a
+// nested message and an enum.
+message Sample {
+  int64 id = 1;
+  string name = 2;
+  bytes raw = 3;
+  repeated int32 values = 4;
+  Inner inner = 5;
+  Kind kind = 6;
+}
+
+// Two messages with one wire form and one text form: only the root a
+// fixture names tells them apart (leg 4).
+message Meters {
+  uint32 length = 1;
+}
+
+message Feet {
+  uint32 length = 1;
+}

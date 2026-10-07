@@ -68,7 +68,7 @@
 # reserved `write` FFI declaration ("existing function with conflicting
 # signature") once a link unit's closure also pulls std.os's declaration in.
 # It legalizes fine in a SMALL closure, which is why it is not safe in
-# `komira_core`, upstream of nearly every binary. `komira_write_bytes` is a
+# the core packages, upstream of nearly every binary. `komira_write_bytes` is a
 # C shim symbol linked into every binary and test.
 #
 # # Encapsulation
@@ -132,10 +132,10 @@ def write_all_fd(
             + ", which cannot make progress. It must be > 0."
         )
     var off = 0
+    # The Span's origin pins the backing storage alive across every iteration;
+    # `write(2)` copies into the kernel and retains nothing.
     # SAFETY: `payload.unsafe_ptr()` is the caller's own buffer, read-only, and
-    # never escapes this function. The Span's origin pins the backing storage
-    # alive across every iteration; `write(2)` copies into the kernel and
-    # retains nothing. No pointer crosses a module boundary.
+    # never escapes this function. No pointer crosses a module boundary.
     var base = payload.unsafe_ptr()
     while off < total:
         var remaining = total - off

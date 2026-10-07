@@ -44,11 +44,16 @@ def parse_grpc_timeout(header_value: String) -> Int:
     The value digits + final unit char are read in one pass. Returns
     micros for any unit.
     """
-    var n = header_value.byte_length()
+    # The value is the peer's header and may hold any byte: read it through
+    # `as_bytes()`. (Indexing `header_value[byte=i]` asserts on a UTF-8
+    # continuation byte and aborts the process.) A non-ASCII byte is not a
+    # digit or a unit, so such a value is malformed: unset, like any other.
+    var bytes = header_value.as_bytes()
+    var n = len(bytes)
     if n == 0:
         return DEADLINE_UNSET_MICROS
     # Last byte is the unit
-    var unit_byte = ord(header_value[byte=n - 1])
+    var unit_byte = Int(bytes[n - 1])
     var unit_multiplier_us: Int
     if unit_byte == ord("H"):
         unit_multiplier_us = 3_600_000_000  # 3600 sec → micros
@@ -71,7 +76,7 @@ def parse_grpc_timeout(header_value: String) -> Int:
     var v = 0
     var digit_count = 0
     for i in range(n - 1):
-        var b = ord(header_value[byte=i])
+        var b = Int(bytes[i])
         if b < ord("0") or b > ord("9"):
             return DEADLINE_UNSET_MICROS
         v = v * 10 + (b - ord("0"))
@@ -99,13 +104,16 @@ def parse_connect_timeout_ms(header_value: String) -> Int:
     Plain decimal integer in milliseconds. Returns DEADLINE_UNSET_MICROS
     if absent / empty / malformed.
     """
-    var n = header_value.byte_length()
+    # Read through `as_bytes()`, as in `parse_grpc_timeout`: a non-ASCII
+    # byte is malformed, never an abort.
+    var bytes = header_value.as_bytes()
+    var n = len(bytes)
     if n == 0:
         return DEADLINE_UNSET_MICROS
     var v = 0
     var digit_count = 0
     for i in range(n):
-        var b = ord(header_value[byte=i])
+        var b = Int(bytes[i])
         if b < ord("0") or b > ord("9"):
             return DEADLINE_UNSET_MICROS
         v = v * 10 + (b - ord("0"))

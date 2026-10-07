@@ -54,6 +54,9 @@ struct Lowerer {
     /// descriptor-set re-decode (`routing_options.rs`). Keyed by
     /// `(service_name, method_name)`.
     routing_rules: RoutingRuleTable,
+    /// The module a cross-file import names, for the files whose own stem
+    /// is not their module ([`ModuleNames`]).
+    module_names: ModuleNames,
 }
 
 /// Lower the full request's descriptor set to the IR.
@@ -126,8 +129,15 @@ pub fn lower_with_http_and_routing_rules(
     http_rules: HttpRuleTable,
     routing_rules: RoutingRuleTable,
 ) -> Result<IrModel, String> {
-    lower_all(proto_file, file_to_generate, package_prefix, http_rules, routing_rules)
-        .map(|(_, model)| model)
+    lower_all(
+        proto_file,
+        file_to_generate,
+        package_prefix,
+        http_rules,
+        routing_rules,
+        &ModuleNames::new(),
+    )
+    .map(|(_, model)| model)
 }
 
 /// Which of the request's types and methods to emit.
@@ -150,12 +160,26 @@ pub struct Scope {
     /// exact, as for `roots`.
     pub methods: Vec<String>,
     pub messages_only: bool,
+    /// Fields left out of their message, each named by its fully-qualified
+    /// proto name (`pkg.Message.field`, a leading `.` optional): for a field
+    /// the client's callers do not read and whose type the runtime cannot
+    /// represent (one reaching a `google.protobuf.Api`, which `komira_wkt`
+    /// does not provide, or a `map<string, int64>`, which
+    /// `komira_proto_codec` does not decode). The generated message has no
+    /// such member, so a response's value for it is skipped as an unknown
+    /// key (a lenient JSON read skips one; a binary read skips an unknown
+    /// field number), a request never sends it, and its type is reached
+    /// through it no longer. A name that is not a field of a generated
+    /// message is refused: a field of no message in the files to generate,
+    /// and one of a message the scope prunes, which would leave out nothing.
+    /// So is a member of a `oneof`.
+    pub omit_fields: Vec<String>,
 }
 
 impl Scope {
     /// True when nothing is pruned or dropped.
     pub fn is_everything(&self) -> bool {
-        !self.prunes() && !self.messages_only
+        !self.prunes() && !self.messages_only && self.omit_fields.is_empty()
     }
 
     fn prunes(&self) -> bool {
@@ -170,6 +194,9 @@ impl Scope {
 /// file of `file_to_generate` must keep at least one type or service: the
 /// set of generated files is then exactly the closure, so a rule's
 /// `bundle_only` cannot carry a file nothing uses.
+///
+/// `module_names` names the module of each generated file whose own stem is
+/// not it ([`ModuleNames`]); a cross-file import names that module.
 pub fn lower_scoped(
     proto_file: &[FileDescriptorProto],
     file_to_generate: &[String],
@@ -177,6 +204,7 @@ pub fn lower_scoped(
     http_rules: HttpRuleTable,
     routing_rules: RoutingRuleTable,
     scope: &Scope,
+    module_names: &ModuleNames,
 ) -> Result<IrModel, String> {
     let (lowerer, mut model) = lower_all(
         proto_file,
@@ -184,12 +212,30 @@ pub fn lower_scoped(
         package_prefix,
         http_rules,
         routing_rules,
+        module_names,
     )?;
     if scope.is_everything() {
         return Ok(model);
     }
+    // Before the prune, so that the closure no longer reaches what an
+    // omitted field's type reaches; checked again after it, so that a field
+    // of a message the scope does not generate is not taken as omitted.
+    let omitted = omit_fields(&mut model, &scope.omit_fields)?;
     if scope.prunes() {
         prune(&lowerer, &mut model, scope)?;
+    }
+    for (name, msg_fq) in &omitted {
+        let generated = model
+            .files
+            .iter()
+            .flat_map(|f| f.messages.iter())
+            .any(|m| &m.fq_name == msg_fq);
+        if !generated {
+            return Err(format!(
+                "omit_fields: `{name}` is a field of `{msg_fq}`, which this scope does \
+                 not generate, so it leaves out nothing: drop it from omit_fields"
+            ));
+        }
     }
     if scope.messages_only {
         for file in &mut model.files {
@@ -211,6 +257,48 @@ pub fn lower_scoped(
             lowerer.cross_file_imports(&file.proto_path, &file.messages, &file.services);
     }
     Ok(model)
+}
+
+/// Remove each field `names` names from its message (`Scope::omit_fields`).
+/// Returns each name with the fully-qualified name of its message.
+fn omit_fields(
+    model: &mut IrModel,
+    names: &[String],
+) -> Result<Vec<(String, String)>, String> {
+    let mut omitted = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for name in names {
+        let fq = if name.starts_with('.') { name.clone() } else { format!(".{name}") };
+        if !seen.insert(fq.clone()) {
+            return Err(format!("omit_fields names `{name}` twice"));
+        }
+        let Some((msg_fq, field)) = fq.rsplit_once('.') else {
+            unreachable!("`fq` starts with a `.`")
+        };
+        let msg = model
+            .files
+            .iter_mut()
+            .flat_map(|f| f.messages.iter_mut())
+            .find(|m| m.fq_name == msg_fq)
+            .ok_or_else(|| {
+                format!(
+                    "omit_fields: `{name}` names no field of a message in the files to \
+                     generate (no message `{msg_fq}`)"
+                )
+            })?;
+        let at = msg.fields.iter().position(|f| f.name == field).ok_or_else(|| {
+            format!("omit_fields: message `{msg_fq}` has no field `{field}`")
+        })?;
+        if msg.fields[at].oneof_index.is_some() {
+            return Err(format!(
+                "omit_fields: `{name}` is a member of a oneof; leaving out one arm would \
+                 change what the others mean"
+            ));
+        }
+        msg.fields.remove(at);
+        omitted.push((name.clone(), msg_fq.to_string()));
+    }
+    Ok(omitted)
 }
 
 /// Whether `fq` (`.pkg.A.B`) is named by `name`. A name with a leading `.`
@@ -361,12 +449,14 @@ fn lower_all(
     package_prefix: &str,
     http_rules: HttpRuleTable,
     routing_rules: RoutingRuleTable,
+    module_names: &ModuleNames,
 ) -> Result<(Lowerer, IrModel), String> {
     let mut lowerer = Lowerer {
         types: BTreeMap::new(),
         mojo_package: package_prefix.to_string(),
         http_rules,
         routing_rules,
+        module_names: module_names.clone(),
     };
 
     // --- Pass 1: build the cross-file type table. ----------------------
@@ -571,7 +661,7 @@ impl Lowerer {
         // A user-imported `.proto`: the generated sibling module. The
         // `mojo_proto_library` rule emits a flat `<stem>.mojo` per file
         // under the `<mojo_package>` package directory.
-        let stem = proto_stem(nt.proto_path());
+        let stem = module_stem(nt.proto_path(), &self.module_names);
         IrImport {
             module: format!("{}.{}", self.mojo_package, stem),
             symbol: nt.mojo_name().to_string(),
@@ -853,7 +943,7 @@ impl Lowerer {
                 // `None` for every gRPC / db / OpenAPI path (the overlay is
                 // empty there); `Some` only for `rest`-target annotated
                 // methods. The `rest`-mode validation (un-annotated method =
-                // loud error; streaming + http_rule = skip-with-note) lives
+                // loud error; a streaming method = loud error) lives
                 // at the emit boundary where `ProtocolMode` is known.
                 let http_rule = self
                     .http_rules
@@ -862,6 +952,16 @@ impl Lowerer {
                         verb: r.verb.ir_token().to_string(),
                         path_template: r.path_template.clone(),
                         body: r.body.clone(),
+                        additional_bindings: r
+                            .additional_bindings
+                            .iter()
+                            .map(|b| IrHttpRule {
+                                verb: b.verb.ir_token().to_string(),
+                                path_template: b.path_template.clone(),
+                                body: b.body.clone(),
+                                additional_bindings: Vec::new(),
+                            })
+                            .collect(),
                     });
                 // The `(google.api.routing)` annotation, recovered from the
                 // descriptor-set re-decode and keyed by (service, method).
@@ -896,6 +996,9 @@ impl Lowerer {
         IrService {
             name: svc_name,
             methods,
+            // Filled after lowering from the recovered service options
+            // (`service_options.rs`), on the paths that recover them.
+            default_host: None,
         }
     }
 
@@ -952,9 +1055,26 @@ fn wkt_symbol(fq_name: &str) -> Option<&'static str> {
     }
 }
 
+/// The module a generated `.proto` is written as, for the files whose own
+/// stem cannot be it: `proto path -> module stem`. A file named here is
+/// `<stem>.mojo` and imported as `<package>.<stem>`; every other file keeps
+/// [`proto_stem`]. Two cases need it: a basename that is not a Mojo module
+/// name (`k8s.min.proto`), and two files of one package with the same
+/// basename (`google/rpc/status.proto` beside `google/cloud/run/v2/status.proto`),
+/// which the flat generated package cannot hold apart.
+pub type ModuleNames = BTreeMap<String, String>;
+
+/// The module stem `proto_path` is generated as under `names`.
+pub fn module_stem(proto_path: &str, names: &ModuleNames) -> String {
+    names
+        .get(proto_path)
+        .cloned()
+        .unwrap_or_else(|| proto_stem(proto_path))
+}
+
 /// The flat module stem of a `.proto` path — `google/protobuf/foo.proto`
 /// -> `foo`. Mirrors `emit::proto_to_mojo_path` (which appends `.mojo`).
-fn proto_stem(proto_path: &str) -> String {
+pub fn proto_stem(proto_path: &str) -> String {
     let basename = proto_path.rsplit('/').next().unwrap_or(proto_path);
     basename
         .rsplit_once('.')
@@ -1313,5 +1433,83 @@ mod nested_container_reference_edges {
             ),
             "a `map<_, Self>` member is a self-loop on its own"
         );
+    }
+}
+
+#[cfg(test)]
+mod omitted_fields {
+    use super::*;
+
+    fn scalar(name: &str) -> IrField {
+        IrField {
+            name: name.to_string(),
+            ty: IrType::Scalar(ScalarKind::String),
+            label: Label::Single,
+            proto_field_number: 1,
+            json_name: name.to_string(),
+            oneof_index: None,
+        }
+    }
+
+    fn model() -> IrModel {
+        let mut arm = scalar("arm");
+        arm.oneof_index = Some(0);
+        IrModel {
+            files: vec![IrFile {
+                proto_path: "t/fixture.proto".to_string(),
+                proto_package: "t".to_string(),
+                mojo_package: "t".to_string(),
+                messages: vec![IrMessage {
+                    name: "Config".to_string(),
+                    mojo_name: "Config".to_string(),
+                    fq_name: ".t.Config".to_string(),
+                    is_map_entry: false,
+                    fields: vec![scalar("name"), scalar("apis"), scalar("title"), arm],
+                    oneofs: Vec::new(),
+                }],
+                enums: Vec::new(),
+                services: Vec::new(),
+                imports: Vec::new(),
+            }],
+        }
+    }
+
+    fn field_names(m: &IrModel) -> Vec<String> {
+        m.files[0].messages[0].fields.iter().map(|f| f.name.clone()).collect()
+    }
+
+    #[test]
+    fn a_named_field_leaves_its_message_and_the_rest_stay_in_order() {
+        for name in ["t.Config.apis", ".t.Config.apis"] {
+            let mut m = model();
+            omit_fields(&mut m, &[name.to_string()]).unwrap();
+            assert_eq!(field_names(&m), ["name", "title", "arm"], "{name}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_message_or_field_is_refused() {
+        let mut m = model();
+        let err = omit_fields(&mut m, &["t.Other.apis".to_string()]).unwrap_err();
+        assert!(err.contains("no message `.t.Other`"), "{err}");
+        let err = omit_fields(&mut m, &["t.Config.nope".to_string()]).unwrap_err();
+        assert!(err.contains("has no field `nope`"), "{err}");
+        assert_eq!(field_names(&m), ["name", "apis", "title", "arm"]);
+    }
+
+    #[test]
+    fn a_oneof_arm_or_a_repeated_name_is_refused() {
+        let mut m = model();
+        let err = omit_fields(&mut m, &["t.Config.arm".to_string()]).unwrap_err();
+        assert!(err.contains("member of a oneof"), "{err}");
+        let err = omit_fields(&mut m, &["t.Config.apis".to_string(), ".t.Config.apis".to_string()])
+            .unwrap_err();
+        assert!(err.contains("twice"), "{err}");
+    }
+
+    #[test]
+    fn omit_fields_alone_is_not_everything() {
+        let scope = Scope { omit_fields: vec!["t.Config.apis".to_string()], ..Default::default() };
+        assert!(!scope.is_everything());
     }
 }

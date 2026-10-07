@@ -14,9 +14,9 @@ the compiler sees. Worked uses of each rule are in
 
 | rule | produces | example |
 |---|---|---|
-| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
+| `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
-| `mojo_test(srcs, deps, main, optimization_level, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
+| `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -65,7 +65,56 @@ L/ungated/I.mojoc   the compiler's output (sub-target [ungated])
 L/pkg/I.mojoc       the public package, gated on every test's PASS marker
 L/src/I/...         the staged package sources
 L/tests/<t>/...     one binary and one PASS marker per test
+L/tests/readme/...  the README's generated program, binary and marker
 ```
+
+### README examples
+
+A library whose package holds a `README.md` runs the README's examples as one
+more welded test, `[tests][readme]`, so the documentation cannot rot. Nothing
+declares it: the README is declared by existing. The reader and the program
+generator are [`//tools/build/readme_examples`](../readme_examples/BUCK)
+(pure Mojo; `buildtools.doc_links` reads code through the same CommonMark
+fence reader, so the link check and the examples agree on what is code).
+
+- **An example** is a fenced block whose info string is exactly `mojo`
+  (```` ``` ```` or `~~~`; a closing fence is the same character, at least as
+  long, so a ```` ```` ```` fence may quote ```` ``` ````). Every example
+  runs: there is no skip word. A sketch that cannot run is fenced ```` ```text ````.
+  Any word after `mojo` (`mojo skip`) and any near miss (`Mojo`, `mojo,`,
+  `.mojo`) is refused, naming `README.md:<line>`.
+- **A fragment**, as a Rust doctest: its column-0 `from`/`import` lines are
+  hoisted (deduplicated) and so are its column-0 declarations (`def`,
+  `struct`, `trait`, `comptime`, a decorator); the rest becomes
+  `def _example_<line>() raises:`. Assertions are visible `std.testing`
+  calls. Examples share one module, so two declaring the same name collide.
+- **Hidden lines**: an HTML comment `<!-- mojo-hidden ... -->` ending on the
+  line just before an example's fence is prepended to it, and one starting on
+  the line just after is appended (one line, or `<!-- mojo-hidden`, the code,
+  then `-->`). GitHub's page does not render it; every raw view, and the
+  installed copy, shows it. A `mojo-hidden` comment next to no example, or a
+  misspelled marker, is refused.
+- **The program** is `readme_<I>.mojo` (never `<I>.mojo`: a file named like the
+  package beside the program would shadow it). It runs every example inside
+  `try`, prints `<package>/README.md:<line>: FAILED: <error>` for each that
+  raises, then `readme_<I> validation: P of E checks passed`, and fails if any
+  failed. Each line copied from the README ends with `# README.md:<n>`, so a
+  compile error, which quotes the line, names the README line too.
+- **No example**: whether a README holds one is in its bytes, which analysis
+  cannot read, so a dynamic action reads the count. With none, nothing is
+  compiled or run and the marker reads `NO EXAMPLE <label>`, never `PASS`. A
+  README's examples do not count as the tests a conda package needs.
+- The tool's own package, `tools/build/readme_examples`, may hold no README:
+  the tool would depend on itself.
+- **A README that ships** (the library has a conda package the build can
+  make, which installs it at `share/doc/<conda name>/README.md`; see
+  [Conda packages](../../../packaging/conda/README.md#the-readme-in-the-package))
+  refuses a relative link outside code, naming `README.md:<line>`: the
+  installed copy has no neighbours. Link an absolute URL or an `#anchor`.
+
+Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
+a README that uses every form, and requires a raising example, a compile
+error and a `mojo skip` fence each to fail naming its README line.
 
 ### The compile watchdog
 
@@ -112,6 +161,11 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
 - **`buck2 test <mojo_test>`**: runs the test binary remotely through
   [`gate_runner.sh`](gate_runner.sh). `buck2 run` of a `mojo_test` runs its
   binary directly, from the runnable directory.
+- **Exit status.** A test passes only by exiting 0. Every other status fails,
+  77 included: 77 means SKIP to automake and some test harnesses, but here
+  it is a failure (`GATED TEST FAILED: <label> (exit 77)`), so a test cannot
+  skip itself green, whether gated or run by `buck2 test`
+  ([`tests//negative/test_data:skip_77`](../tests/negative/test_data/BUCK)).
 
 ### Outputs and the runnable directory
 
@@ -195,6 +249,7 @@ mojo_test(
     ...
     data = {"golden/out.txt": "fixtures/expected.txt"},  # a dict: {dest: source}
     env = {"READER_MODE": "strict"},
+    args = ["--reader-binary=$(exe_target //tools:reader)", "--golden=$(location :golden)", "--strict"],
 )
 ```
 
@@ -218,6 +273,27 @@ mojo_test(
   own shell, so a name the runner uses internally (`BIN`, `rc`, `MARKER`)
   reaches the test and cannot change the verdict
   ([`tests//functional/test_data:runner_cases`](../tests/functional/test_data/runner_cases.sh)).
+- **`args`** (`mojo_test` only) are the test's command-line arguments under
+  `buck2 test`, in order. Configuration reaches a test as flags, so a test
+  that needs a tool or file is given its path this way rather than through
+  `env`. `$(location <target>)` is the path of the target's default output:
+  use it for a file. `$(exe_target <target>)` is the target's run command
+  (`RunInfo`), built for the test's platform: use it for a program. For a
+  `mojo_binary` that is the binary inside its runnable directory, with lib/
+  beside it; `$(location)` of a `mojo_binary` is the bare executable, which
+  cannot load its runtime libraries. A run command of more than one word is
+  not split: it reaches the test as one argument. (`$(exe <target>)` is the
+  same command built for the execution platform; the two are the same
+  binary only while the test's platform is its execution platform.) What a
+  macro names becomes an input of the test, so it is present on the worker;
+  because the test runs from `root/share`, every such path is absolute (the
+  rule writes it under `@KOMIRA_ACTION_DIR@/` and the runner replaces that
+  with the action's directory, so an argument may not hold that text
+  literally). An argument is never exported, whatever its text.
+  `buck2 run` and `[runnable]` do not pass `args`. A library's `test_srcs`
+  take none: a gated test is a unit test of its package and gets everything
+  it reads through `test_data`
+  ([`tests//functional/test_data:mojo_test_args`](../tests/functional/test_data/BUCK)).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
@@ -302,6 +378,112 @@ The toolchain, `toolchains//:mojo_proto` (declared by
 crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
 in [`../proto-codegen/`](../proto-codegen/);
 [`tests//functional/proto`](../tests/functional/proto/BUCK) holds the example protos and tests.
+
+### Wire fixtures: proto_fixture_check
+
+```python
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_check")
+```
+
+protoc, the reference implementation, reads committed wire fixtures in a build
+action, so a producer and a reader under test are held to an implementation
+that never saw their code, as far as the legs below reach. A fixture `<stem>`
+is three files:
+
+| file | holds |
+|---|---|
+| `<stem>.hex` | the bytes a producer under test wrote |
+| `<stem>.txtpb` | the line `# proto-message: <root>`, then exactly what `protoc --decode=<root>` prints for those bytes |
+| `<stem>.canonical.hex` | what `protoc --encode=<root>` writes for the `.txtpb`, the bytes for a reader under test |
+
+The hex format: hex digits, either case, two per byte; spaces, tabs and line
+breaks anywhere are ignored; any other character, an odd number of digits and
+an empty file are refused. `proto_encode` writes lowercase, 64 digits a line.
+
+`proto_fixture_check(name, fixtures, dir, files, hex, canonical_producer, srcs,
+import_prefix, proto_deps)` checks each entry `<stem>: <root>` of `fixtures`
+(the root a fully qualified message name, `package.Message`), reading
+`<dir>/<stem>.hex`, `.txtpb` and `.canonical.hex` from the package, or from
+the `staged_files` target `files` names (`<files>[<dir>/<stem>.hex]`) when
+they are another package's. `hex = {<stem>: <label>}` replaces a `.hex` with a
+build output. Legs 0 and 5 read the schema as protoc's own descriptor set
+(`--descriptor_set_out`, decoded with protoc's `descriptor.proto`), never a
+list; the check fails (`SCHEMA`) if that table does not hold one complete row
+for every field it declares.
+
+0. The bytes show a producer: the `.hex` is not byte for byte the
+   `.canonical.hex` (then both ends of legs 1 and 3 are protoc, and no
+   producer is checked), unless the stem is in `canonical_producer`, which
+   declares a producer that writes protoc's bytes; and no singular field of
+   `<root>` is written twice at the top level (protoc's decode shows only the
+   last). This is a necessary condition, not provenance: bytes that differ
+   from protoc's can still be hand-made.
+1. `protoc --decode=<root>` of the `.hex` is the `.txtpb` after its first
+   line, compared byte for byte.
+2. That decode holds no field the schema does not declare, at any depth:
+   protoc prints one as a bare number (`99: 1`, or `99 {` for a group or a
+   length-delimited value that parses as a message) and does not fail, so leg
+   1 alone passes it once the `.txtpb` holds the number too.
+3. `protoc --encode=<root>` of the `.txtpb` is the bytes of the
+   `.canonical.hex`.
+4. The `.txtpb`'s first line is `# proto-message: <root>`, so a fixture of
+   another message is refused even when both messages give the same bytes and
+   text.
+5. Every enum value in the decode has a name: protoc prints a value an open
+   (proto3) enum does not declare as a number on the field (`kind: 99`),
+   exits 0, and parses the number back, so legs 1 to 4 all pass it. The decode
+   is walked from `<root>` with the schema table, which places each line in
+   its message; a line it cannot place is a failure, not skipped.
+
+Each leg reads protoc's output and the committed files itself, never another
+leg's verdict: every leg runs whatever the others found, except that legs 2
+and 5 need a decode (when protoc refuses the bytes, leg 1 says so), and a
+`.hex` or `.canonical.hex` that is not hex, or a root the schema does not
+declare, fails the fixture before any leg (`FIXTURE`). Each failure is
+reported on its own line, `proto_fixture: <stem>: LEG <n>: ...`, naming the
+file read (for a `hex` override, the build output). The output is a report
+with one `PASS` line per fixture, written only when every leg of every fixture
+passed: building the target is the check.
+
+What the check cannot see. Under proto3's text format a scalar at its default
+is absent from the decode whether or not the producer wrote it, so a producer
+that drops a field and one that writes it as zero give the same `.txtpb`; a
+singular field written twice inside a nested message decodes as the last
+value (leg 0 counts top-level fields only); a forger who appends a repeated
+field's tag passes leg 0. So the `.txtpb` says what the bytes mean to protoc,
+not everything the producer wrote. Leg 5 proves an enum value has a name, not
+that it is the right one. Leg 4 compares two strings an author wrote (the
+`fixtures` root and the header line), nothing in the bytes.
+
+The check is held to its own legs: `proto_fixture_case` targets
+([`proto_fixture_testdata/BUCK`](proto_fixture_testdata/BUCK)) run it over a
+control fixture it must accept and one planted defect per refusal (each leg,
+leg 2 at the top level, nested and as a group, and an odd-length `.hex`), and
+assert the refusal and its message. Every `proto_fixture_check` and
+`proto_encode` action takes their verdicts as an input, so a check that stops
+refusing a defect fails every build that checks a fixture, the pull-request
+check's included. [Test 23](../tests/README.md#23-protobuf) builds the same
+defects end to end as planted-defect twins; those run only in
+`build_system_selftests.yml` (nightly and on demand), not in the pull-request
+check.
+
+`proto_encode(name, root, txtpb, srcs, import_prefix, proto_deps)` writes
+`protoc --encode=<root>` of `txtpb` (which must begin with the same
+`# proto-message: <root>` line) as `<name>.hex`, and refuses a text that
+encodes to no bytes. It is how a `.canonical.hex` is made:
+`./buck2 build <proto_encode target> --out <dir>/<stem>.canonical.hex`. It
+runs as a build action, so on the remote executors when the build is
+configured for remote execution (as this repository's farm configuration is),
+and nobody hand-makes the bytes. Its output is protoc's, so as a `.hex` it
+checks no producer (leg 0).
+
+`srcs` are staged at `import_prefix` joined with their path in the package,
+and the `proto_deps` closure (`mojo_proto_library`, its welded `<name>_gen`,
+`proto_srcs`) and protoc's well-known types are on the proto path, as for
+`mojo_proto_library`; protoc reads every `.proto` file of `srcs` and of that
+closure. protoc comes from `toolchains//:mojo_proto`; the macros default
+`exec_compatible_with` to linux x86_64, the one execution platform that
+toolchain pins protoc for.
 
 ### Generated Google Cloud clients: mojo_gcp_client
 
@@ -489,6 +671,72 @@ tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake
 ([`../examples/s2n_tls`](../examples/s2n_tls)) from Mojo. The aarch64
 assembly lists are generated but not built yet.
 
+## Coverage builds
+
+`-c komira.coverage=true` (default `false`) gives every `mojo_library` one
+more binary per `test_srcs` entry: the test compiled at `-O0` with
+`--debug-level line-tables`, against
+the same ungated package its gated test uses, for a coverage tool (kcov) to
+map what ran to source lines. They are `[coverage][bin][<test>]`
+(`cov/tests/<test>/<test>`, action category `mojo_build_cov_test`), and
+`[coverage]` is all of them. Nothing depends on them yet: the package, its
+tests and their markers are what they are without the switch.
+
+```sh
+./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
+```
+
+The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
+and does one thing: it sets the attribute `coverage_debug` to
+`komira//tools/build/coverage/kcov:cov_link`. A buckconfig value is not part
+of the configuration, so no output path moves; with the switch off the
+attribute is absent and analysis is what it was without coverage builds. With
+it on, the release actions (`mojo_precompile`, `mojo_build_test`,
+`mojo_gated_test`, the README's, `mojo_gate_join`) keep their command lines and
+inputs, so they keep their cache hits, and the coverage builds are new
+actions. A value other than `true` or `false` fails at load, naming it.
+
+The macro reads the switch from the buckconfig of the cell whose BUCK file
+it runs in. `-c komira.coverage=true` on the command line, or a global
+buckconfig (`~/.buckconfig.d`), applies to every cell. `[komira] coverage =
+true` in a cell's own `.buckconfig` or `.buckconfig.local` applies to that
+cell only: in a repository that mounts komira as the cell `komira`, setting it
+in the root cell's file leaves komira's libraries without `[coverage]`
+("unknown subtarget").
+
+A coverage build runs the same `mojo_wrapper.sh` as every compile, byte for
+byte, with one argument changed: its link directory (`<zig_dir>`) is
+`cov_link` instead of the toolchain's zig. That directory holds the
+toolchain's zig as `real/` and, as `zig`, `cov_zig`
+([kcov README](../coverage/kcov/README.md#cov_zig)), which for a link drops
+`-Wl,--strip-debug`, asks for no build id and no compressed debug section,
+and after the link overwrites the action's directory with a placeholder of
+the same length, with `debug_relocate`. The pinned Mojo records no
+compilation directory and names its sources by relative paths (`tests/...`,
+the staged library sources under `buck-out/`, the standard library under
+`oss/modular/`); the directory overwritten is the one zig's C runtime units
+record ([names in a coverage binary](../coverage/kcov/README.md#names-in-a-coverage-binary)).
+The wrapper's own check, that no output holds the action's working directory
+(exit 4), runs on the result as on any compile; a relocation that did not
+happen fails there ([test 41](../tests/README.md#41-coverage-builds)).
+
+Scope, for now:
+
+- linux-x86_64. On another target platform the attribute is None (a
+  `select`) and the library builds as with the switch off: it has no
+  `[coverage]` sub-target, so asking for one is an "unknown subtarget" error,
+  not an empty result. Whatever collects coverage asks only on linux-x86_64.
+- A library's `test_srcs` that are source files. A README's examples,
+  `mojo_test`, the drivers of `mojo_shared_lib` and generated test sources
+  (a `test_srcs` entry that is a build output) get no coverage binary.
+- Nothing runs the binaries yet: running them under kcov and reading the
+  reports comes next.
+
+A library in the `tests` cell may pass `coverage_debug` itself (a
+`cov_link_dir`): it then has coverage binaries whatever the switch says, which
+is how test 41 builds them, and plants a defective relocator, without `-c`.
+Anywhere else passing it is refused.
+
 ## Errors
 
 | message | from | meaning |
@@ -496,12 +744,16 @@ assembly lists are generated but not built yet.
 | `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
 | `<target>: tests_known_failing was removed: every welded test must pass` | [`defs.bzl`](defs.bzl) | a `mojo_library` call names `tests_known_failing`; delete it and make the test pass |
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
-| `<target>: ... data destination <d> ...` | [`defs.bzl`](defs.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
-| `<target>: ... env sets <NAME>, which the test runner sets itself` | [`defs.bzl`](defs.bzl) | `test_env`/`env` names a variable the runner owns |
+| `<target>: ... data destination <d> ...` | [`test_runtime.bzl`](test_runtime.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
+| `<target>: ... env sets <NAME>, which the test runner sets itself` | [`test_runtime.bzl`](test_runtime.bzl) | `test_env`/`env` names a variable the runner owns |
 | `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
 | `mojo_wrapper: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([test 4](../tests/README.md#4-closure-refusal)) |
 | `mojo_wrapper: <output> contains this action's working directory` (exit 4) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | a compile output embeds a machine-specific path |
 | `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
+| ``[komira] coverage = "<v>": it must be `true` or `false` (default false)`` | [`coverage.bzl`](coverage.bzl) | the coverage switch has another value; it fails at load rather than reading a typo as off |
+| `cov_zig: ... has debug sections but holds the working directory (...) nowhere` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link's debug info holds neither spelling of the working directory: zig's C runtime units (the only ones that record a directory) record one the relocation was not given, so the binary would differ by machine, or have no debug info |
+| `cov_zig: a link with the optimization level <level> is refused` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link at a release level, where lld would merge string tails the relocation cannot see |
+| `cov_zig: debug_relocate refused <output>` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | the relocation refused a coverage link's output (a longer name starting with the directory, a compressed section); its own message follows |
 | `run_check: stdout of <binary> differs from <expected>` | [`run_check.sh`](run_check.sh) | `[run_check]` output did not match `expected_stdout` |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |

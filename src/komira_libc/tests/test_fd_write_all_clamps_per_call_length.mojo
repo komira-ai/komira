@@ -123,6 +123,7 @@ def _set_buf(fd: Int32, optname: Int32) raises:
         fd,
         _sol_socket(),
         optname,
+        # SAFETY: `val` is a stack local read synchronously; nothing retains it.
         UnsafePointer(to=val).bitcast[UInt8](),
         UInt32(4),
     )
@@ -146,6 +147,7 @@ def _dgram_pair() raises -> Array[Int32, 2]:
     does not retain the pointer. Confined to this helper.
     """
     var pair = Array[Int32, 2](fill=Int32(-1))
+    # SAFETY: `pair` outlives the call; socketpair(2) writes two ints into it.
     var rc = external_call["socketpair", Int32](
         _AF_UNIX, _SOCK_DGRAM, Int32(0), pair.unsafe_ptr()
     )
@@ -174,6 +176,7 @@ def _drain(fd: Int32, mut lengths: List[Int], mut bytes_out: List[UInt8]):
     # A cap, so a rig that never reports "empty" fails the count assertion
     # rather than spinning forever.
     for _attempt in range(4096):
+        # SAFETY: `scratch` holds _RECV_CAP bytes and outlives the call.
         var n = external_call["recv", Int](
             fd, scratch.unsafe_ptr(), UInt(_RECV_CAP), Int32(0)
         )

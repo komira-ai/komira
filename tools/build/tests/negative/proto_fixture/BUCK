@@ -1,0 +1,39 @@
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_fixture_check")
+
+# proto_fixture_check's planted defects (test 23), end to end: each target
+# must fail, with the message run_tests.sh requires (proto_tests.sh). These
+# run only in build_system_selftests.yml (nightly and on demand), never in the
+# pull-request check; what gates a pull request is the same defects as
+# proto_fixture_case targets (tools/build/mojo/proto_fixture_testdata/BUCK),
+# which every proto_fixture_check action takes as an input. The schema and
+# fixtures are that package's, named by label, so the two cannot drift; a
+# label of the komira cell resolves both in this repository's `tests` cell
+# and in a repository holding komira as a cell.
+
+_TESTDATA = "komira//tools/build/mojo/proto_fixture_testdata"
+
+_SAMPLE = "example.fixture.v1.Sample"
+
+_DEFECTS = {
+    "hex_odd": "example.fixture.v1.Meters",
+    "leg0_duplicate": _SAMPLE,
+    "leg0_identical": _SAMPLE,
+    "leg1_value": _SAMPLE,
+    "leg2_group": _SAMPLE,
+    "leg2_nested": _SAMPLE,
+    "leg2_unknown": _SAMPLE,
+    "leg3_noncanonical": _SAMPLE,
+    # A Meters fixture checked as a Feet; its producer is declared to write
+    # protoc's bytes, so only leg 4 fires.
+    "leg4_root": "example.fixture.v1.Feet",
+    "leg5_enum": _SAMPLE,
+}
+
+[proto_fixture_check(
+    name = stem,
+    canonical_producer = ["leg4_root"] if stem == "leg4_root" else [],
+    dir = "fixtures",
+    files = _TESTDATA + ":fixtures",
+    fixtures = {stem: root},
+    proto_deps = [_TESTDATA + ":selftest_proto"],
+) for stem, root in _DEFECTS.items()]

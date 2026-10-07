@@ -1837,9 +1837,8 @@ def read_type_decimal[
     """Read a Decimal Type table."""
     var precision = Int(_read_table_field_u32(reader, table_pos, 0))
     var scale = Int(_read_table_field_u32(reader, table_pos, 1))
-    var bit_width = Int(_read_table_field_u32(reader, table_pos, 2))
-    if bit_width == 0:
-        bit_width = 128  # default per Schema.fbs
+    # Schema.fbs: `bitWidth: int = 128`.
+    var bit_width = Int(_read_table_field_u32_or(reader, table_pos, 2, 128))
     return DecimalTypeDescriptor(
         precision=precision, scale=scale, bit_width=bit_width
     )
@@ -1848,26 +1847,33 @@ def read_type_decimal[
 def read_type_date[
     bo: Origin[mut=False]
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> DateTypeDescriptor:
-    """Read a Date Type table."""
-    return DateTypeDescriptor(unit=_read_table_field_u8(reader, table_pos, 0))
+    """Read a Date Type table. Schema.fbs: `unit: DateUnit = MILLISECOND`,
+    so an absent unit is date64, not date32."""
+    return DateTypeDescriptor(
+        unit=_read_table_field_u8_or(
+            reader, table_pos, 0, DATE_UNIT_MILLISECOND
+        )
+    )
 
 
 def read_type_time[
     bo: Origin[mut=False]
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> TimeTypeDescriptor:
-    """Read a Time Type table."""
-    var unit = _read_table_field_u8(reader, table_pos, 0)
-    var bit_width = Int(_read_table_field_u32(reader, table_pos, 1))
-    if bit_width == 0:
-        bit_width = 32  # default
+    """Read a Time Type table. Schema.fbs:
+    `unit: TimeUnit = MILLISECOND; bitWidth: int = 32`."""
+    var unit = _read_table_field_u8_or(
+        reader, table_pos, 0, TIME_UNIT_MILLISECOND
+    )
+    var bit_width = Int(_read_table_field_u32_or(reader, table_pos, 1, 32))
     return TimeTypeDescriptor(unit=unit, bit_width=bit_width)
 
 
 def read_type_timestamp[
     bo: Origin[mut=False]
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> TimestampTypeDescriptor:
-    """Read a Timestamp Type table."""
-    var unit = _read_table_field_u8(reader, table_pos, 0)
+    """Read a Timestamp Type table. Schema.fbs: `unit: TimeUnit` (default
+    SECOND)."""
+    var unit = _read_table_field_u8_or(reader, table_pos, 0, TIME_UNIT_SECOND)
     var tz_pos = _read_table_field_offset(reader, table_pos, 1)
     var tz_str = String("")
     if tz_pos >= 0:
@@ -1878,18 +1884,24 @@ def read_type_timestamp[
 def read_type_interval[
     bo: Origin[mut=False]
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> IntervalTypeDescriptor:
-    """Read an Interval Type table."""
+    """Read an Interval Type table. Schema.fbs: `unit: IntervalUnit`
+    (default YEAR_MONTH)."""
     return IntervalTypeDescriptor(
-        unit=_read_table_field_u8(reader, table_pos, 0)
+        unit=_read_table_field_u8_or(
+            reader, table_pos, 0, INTERVAL_UNIT_YEAR_MONTH
+        )
     )
 
 
 def read_type_duration[
     bo: Origin[mut=False]
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> DurationTypeDescriptor:
-    """Read a Duration Type table."""
+    """Read a Duration Type table. Schema.fbs:
+    `unit: TimeUnit = MILLISECOND`."""
     return DurationTypeDescriptor(
-        unit=_read_table_field_u8(reader, table_pos, 0)
+        unit=_read_table_field_u8_or(
+            reader, table_pos, 0, TIME_UNIT_MILLISECOND
+        )
     )
 
 
@@ -1927,8 +1939,9 @@ def read_type_map[
 def read_type_union[
     bo: Origin[mut=False]
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> UnionTypeDescriptor:
-    """Read a Union Type table."""
-    var mode = _read_table_field_u8(reader, table_pos, 0)
+    """Read a Union Type table. Schema.fbs: `mode: UnionMode` (default
+    Sparse)."""
+    var mode = _read_table_field_u8_or(reader, table_pos, 0, UNION_MODE_SPARSE)
     var ids_vec_pos = _read_table_field_offset(reader, table_pos, 1)
     var ids = List[Int32]()
     if ids_vec_pos >= 0:
@@ -2097,11 +2110,31 @@ struct SchemaDescriptor(Copyable, Movable):
     var fields: List[FieldDescriptor]
 
 
-def _read_table_field_u32[
+# Absent fields and schema defaults.
+#
+# A FlatBuffers writer omits a scalar field whose value equals the default
+# the schema declares for it (pyarrow and every flatc-generated builder do).
+# A reader must then return that declared default, not 0. A field is absent
+# when the vtable is too short to hold its slot or when its slot holds 0.
+# The `_or` readers take the declared default; the plain readers are the
+# `_or` readers with default 0, correct only for fields whose declared
+# default is 0. Fields with a non-zero default in Schema.fbs:
+# `Decimal.bitWidth = 128`, `Date.unit = MILLISECOND`,
+# `Time.unit = MILLISECOND`, `Time.bitWidth = 32`,
+# `Duration.unit = MILLISECOND`.
+
+
+def _read_table_field_u32_or[
     bo: Origin[mut=False]
-](reader: FlatbufReader[bo], table_pos: Int, field_id: Int) raises -> UInt32:
+](
+    reader: FlatbufReader[bo],
+    table_pos: Int,
+    field_id: Int,
+    default_value: UInt32,
+) raises -> UInt32:
     """Read the u32 stored at field `field_id` of the table at
-    `table_pos`. Returns 0 if the field is absent (default value).
+    `table_pos`. Returns `default_value`, the field's declared schema
+    default, if the field is absent.
 
     Resolves vtable, reads field_offset[field_id], then the inline slot.
     """
@@ -2115,21 +2148,39 @@ def _read_table_field_u32[
     # Each field is a u16 at vtable_pos + 4 + field_id * 2.
     var slot_offset = 4 + field_id * 2
     if slot_offset + 2 > vtable_size:
-        return UInt32(0)  # field beyond declared slots → default
+        return default_value  # field beyond declared slots: absent
     var inline_offset = Int(reader.read_u16_le(vtable_pos + slot_offset))
     if inline_offset == 0:
-        return UInt32(0)  # absent → default
+        return default_value  # slot present but empty: absent
     return reader.read_u32_le(table_pos + inline_offset)
 
 
-def _read_table_field_u8[
+def _read_table_field_u32[
     bo: Origin[mut=False]
-](reader: FlatbufReader[bo], table_pos: Int, field_id: Int) raises -> UInt8:
-    """Read a u8 field. Reads EXACTLY 1 byte (NOT 4 via u32 mask) so the
+](reader: FlatbufReader[bo], table_pos: Int, field_id: Int) raises -> UInt32:
+    """Read a u32 field whose declared schema default is 0. Returns 0 if
+    the field is absent."""
+    return _read_table_field_u32_or(reader, table_pos, field_id, UInt32(0))
+
+
+def _read_table_field_u8_or[
+    bo: Origin[mut=False]
+](
+    reader: FlatbufReader[bo],
+    table_pos: Int,
+    field_id: Int,
+    default_value: UInt8,
+) raises -> UInt8:
+    """Read a u8 field. Returns `default_value`, the field's declared schema
+    default, if the field is absent.
+
+    Reads EXACTLY 1 byte (NOT 4 via u32 mask) so the
     read fits inside the FB payload even when the field is at the
     very end of the buffer. The previous u32-read-then-mask shape
     over-read by 3 bytes at end-of-buffer positions (a SparseTensor CSX
-    decode failure).
+    decode failure). Arrow's `short` enums (DateUnit, TimeUnit, ...) are
+    read through this too: the low byte of the little-endian i16 holds
+    every value those enums define.
     """
     var soffset = reader.read_i32_le(table_pos)
     var vtable_pos = table_pos - Int(soffset)
@@ -2140,11 +2191,19 @@ def _read_table_field_u8[
     var vtable_size = Int(reader.read_u16_le(vtable_pos))
     var slot_offset = 4 + field_id * 2
     if slot_offset + 2 > vtable_size:
-        return UInt8(0)  # field beyond declared slots → default
+        return default_value  # field beyond declared slots: absent
     var inline_offset = Int(reader.read_u16_le(vtable_pos + slot_offset))
     if inline_offset == 0:
-        return UInt8(0)
+        return default_value  # slot present but empty: absent
     return reader.read_u8(table_pos + inline_offset)
+
+
+def _read_table_field_u8[
+    bo: Origin[mut=False]
+](reader: FlatbufReader[bo], table_pos: Int, field_id: Int) raises -> UInt8:
+    """Read a u8 field whose declared schema default is 0. Returns 0 if
+    the field is absent."""
+    return _read_table_field_u8_or(reader, table_pos, field_id, UInt8(0))
 
 
 def _read_table_field_bool[
@@ -2244,8 +2303,11 @@ def read_type_floating_point[
 ](
     reader: FlatbufReader[bo], table_pos: Int
 ) raises -> FloatingPointTypeDescriptor:
-    """Read a FloatingPoint Type table."""
-    var precision = _read_table_field_u8(reader, table_pos, 0)
+    """Read a FloatingPoint Type table. Schema.fbs: `precision: Precision`
+    (default HALF)."""
+    var precision = _read_table_field_u8_or(
+        reader, table_pos, 0, PRECISION_HALF
+    )
     return FloatingPointTypeDescriptor(precision=precision)
 
 
@@ -2316,7 +2378,10 @@ def read_schema[
     """Read a Schema table.
 
     Walks the [Field] vector + decodes each FieldDescriptor."""
-    var endianness = _read_table_field_u8(reader, table_pos, 0)
+    # Schema.fbs: `endianness: Endianness = Little`.
+    var endianness = _read_table_field_u8_or(
+        reader, table_pos, 0, ENDIANNESS_LITTLE
+    )
     var fields_vec_pos = _read_table_field_offset(reader, table_pos, 1)
     var fields = List[FieldDescriptor]()
     if fields_vec_pos >= 0:
@@ -2879,18 +2944,37 @@ def read_record_batch[
     )
 
 
+def _read_version_field[
+    bo: Origin[mut=False]
+](reader: FlatbufReader[bo], table_pos: Int) raises -> Int16:
+    """Read the i16 `version` (field 0) of a Message or Footer table; 0 when
+    absent. Reads EXACTLY the field's 2 bytes through the bounds-checked
+    reader: a 4-byte read masked to 16 bits reaches 2 bytes past the field,
+    which is past the payload when the field ends the buffer."""
+    var soffset = reader.read_i32_le(table_pos)
+    var vtable_pos = table_pos - Int(soffset)
+    if vtable_pos < 0:
+        raise Error(
+            "FlatbufReader: invalid vtable position " + String(vtable_pos)
+        )
+    var vtable_size = Int(reader.read_u16_le(vtable_pos))
+    if vtable_size < 6:
+        return Int16(0)  # field 0 beyond the declared slots → default
+    var inline_offset = Int(reader.read_u16_le(vtable_pos + 4))
+    if inline_offset == 0:
+        return Int16(0)  # absent → default
+    return reader.read_u16_le(table_pos + inline_offset).cast[DType.int16]()
+
+
 def read_message[
     bo: Origin[mut=False]
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> MessageDescriptor:
     """Read a Message table.
 
-    WIRE-CANONICAL: version is 2-byte u16; bodyLength is 8-byte i64
+    WIRE-CANONICAL: version is 2-byte i16; bodyLength is 8-byte i64
     inline.
     """
-    var version_u32 = _read_table_field_u32(reader, table_pos, 0)
-    # version is u16 in spec; we wrote 2 bytes; reading u32 includes
-    # 2 high bytes that belong to the next field. Mask to low 16 bits.
-    var version = Int16(Int(version_u32) & 0xFFFF)
+    var version = _read_version_field(reader, table_pos)
     var header_tag = _read_table_field_u8(reader, table_pos, 1)
     var header_pos = _read_table_field_offset(reader, table_pos, 2)
     if header_pos < 0:
@@ -2973,8 +3057,7 @@ def read_footer[
     is 24 bytes inline (8 i64 offset + 4 i32 metaDataLength + 4 pad +
     8 i64 bodyLength) — same shape as `_read_block` reads.
     """
-    var version_u32 = _read_table_field_u32(reader, table_pos, 0)
-    var version = Int16(Int(version_u32) & 0xFFFF)
+    var version = _read_version_field(reader, table_pos)
 
     var schema_pos = _read_table_field_offset(reader, table_pos, 1)
     if schema_pos < 0:

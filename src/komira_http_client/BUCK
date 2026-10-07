@@ -16,8 +16,9 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
         "//src/komira_http_core:komira_http_core",
+        "//src/komira_libc:komira_libc",
         "//src/komira_net:komira_net",
     ],
     test_srcs = [
@@ -57,6 +58,7 @@ mojo_library(
         "tests/test_bulk_extend_recv_buf.mojo",
         "tests/test_client_send_buffered_honors_request_timeout.mojo",
         "tests/test_clock.mojo",
+        "tests/test_content_length_body_cap.mojo",
         "tests/test_dial_resolve_is_lazy.mojo",
         "tests/test_drain_bodies_round_robin.mojo",
         "tests/test_e2e_dns_public_ca_tls.mojo",

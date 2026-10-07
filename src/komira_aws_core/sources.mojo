@@ -6,7 +6,7 @@
 # three seams, each a trait:
 #
 #   EnvSource   -- environment variables. `ProcessEnv` calls getenv(3) through
-#                  komira_core_ffi's one `_read_env`; `MapEnv` is an in-memory
+#                  komira_libc's one `_read_env`; `MapEnv` is an in-memory
 #                  map for tests (and for any caller that wants to hand the
 #                  chain a fixed environment).
 #   FileSource  -- whole small files: the shared config and credentials files
@@ -33,7 +33,7 @@ from std.collections import Dict
 from std.os.path import exists, isfile
 
 from komira_clock import now_unix_ms
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 
 
 trait EnvSource:
@@ -48,7 +48,7 @@ trait EnvSource:
 
 
 struct ProcessEnv(EnvSource, Movable, Deinitable):
-    """The process environment, through komira_core_ffi's one getenv."""
+    """The process environment, through komira_libc's one getenv."""
 
     def __init__(out self):
         pass

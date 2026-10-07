@@ -1,9 +1,13 @@
 # Conda packages of the Mojo libraries
 
-A Mojo library published as a conda package (a `.conda`) installs one file,
-`lib/mojo/<name>.mojoc`, into the prefix. The Mojo compiler's default import
+A Mojo library published as a conda package (a `.conda`) installs
+`lib/mojo/<name>.mojoc` into the prefix, and, when the library has a README.md,
+`share/doc/<name>/README.md`. The Mojo compiler's default import
 path is that prefix's `lib/mojo`, where `std.mojoc` already sits, so a program
 that imports the library compiles with no `-I` flag and no activation script.
+The README is the library's documentation and its examples, the same bytes the
+library's welded `[tests][readme]` runs, so what a user reads is inside what
+they installed.
 Nothing here uploads anything: the build produces files; publishing is a
 separate, gated step that belongs to the release tool (kci).
 
@@ -21,9 +25,9 @@ separate, gated step that belongs to the release tool (kci).
 |---|---|---|
 | 1. Mojo packages | `mojo_library`: built, and consumed by other libraries through `deps`. Unchanged by anything here | `src/*/BUCK` |
 | 2. packaging rules | `conda_package`: turns one library into a `.conda` directory (this page). A Python wheel rule is a design only, see below | `tools/build/package/conda.bzl`, `komira_pack` |
-| 3. the release tool | declares **which artifacts exist and how to build them**, builds them through the rules above, and publishes the BUILT files | kci: a reviewed list of artifact declarations |
+| 3. the release tool | declares **which artifacts exist and how to build them**, builds them through the rules above, and publishes the BUILT files | kci: a reviewed list of artifacts |
 
-So there is **one list of published packages, and it is kci's declarations**,
+So there is **one list of published packages, and it is kci's artifacts**,
 not a file in Buck. Buck states how to make a package of any library; kci says
 which of them ship.
 
@@ -65,24 +69,30 @@ metadata.json              everything else the build knows
 ```
 
 `manifest.json` is **exactly** the artifact manifest that kci's
-`kci_artifact_manifest` parses (`kci build` writes it and `kci publish` reads
-it): seven string keys, in this order, compact, one trailing newline.
+`kci_artifact_manifest` parses (the BUILD step writes it and the PUBLISH step reads
+it): ten keys, in this order, compact, one trailing newline.
 
 ```json
-{"artifact_type":"CONDA","name":"komira_json","version":"1.0.0","subdir":"linux-64","file":"komira_json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>","metadata":"metadata.json"}
+{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"komira_json","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"komira_json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>","metadata":"metadata.json"}
 ```
+
+`format` and `schema_version` are kci's format name and major (kci_api's
+format table): kci refuses another format or a major it does not read, and
+ignores a key it does not know inside a major it reads (a writer only ever
+adds keys inside a major). `platform` is the kci platform of `subdir`.
 
 `file` is the channel's file name, relative to the manifest; `sha256` is that
 file's; `metadata` is `metadata.json`, the file next to the manifest. The
 parser requires `metadata` on a CONDA manifest and refuses one that is not a
 bare file name (no `/`, not `.` or `..`), so copying the manifest's directory
-cannot separate the two. The parser refuses any other key, so every other fact
-is in `metadata.json` (sorted compact JSON): `schema`, `kind` (`library` or
+cannot separate the two. Every other fact is in `metadata.json` (sorted
+compact JSON): `format` (`kci.conda_metadata`), `schema_version`, `kind` (`library` or
 `metapackage`), `name`, `version`, `subdir`, `build` (the build string),
 `build_number`, `file_name`, `size`, `depends`, `timestamp_ms`,
 `source_commit`, `stamped`, `label`, and for a library `import_name`,
-`mojo_pin`, `payload_path`, `payload_sha256`; for a metapackage `members`
-(name, version, build, sha256 each). The manifest's `version` is the compiler
+`mojo_pin`, `payload_path`, `payload_sha256`, `doc_files` (path and sha256
+of each documentation file the package installs, `[]` when none); for a
+metapackage `members` (name, version, build, sha256 each). The manifest's `version` is the compiler
 version; the build number, build string and source commit are metadata (kci's
 manifest has no key for them).
 `tools/build/package/manifest_probe` runs kci's parser and writer over a
@@ -90,6 +100,22 @@ manifest: the build gate `//tools/build/package/manifest_probe:conda_manifest_kc
 runs it over one real package on every `buck2 build //...`, and
 `tools/build/tests/functional/conda_set.sh` runs it over every manifest the
 build emits.
+
+### The README in the package
+
+`komira_pack conda --doc-file README.md=<the library's README.md>` places the
+file at `share/doc/<name>/README.md`: a file of the pkg tar (mode 0644), one
+`info/paths.json` row, and one `doc_files` row of `metadata.json`. It is not an
+`info/` file: those are not installed into the environment. conda.bzl passes
+the library's README (the one `mojo_library` declares by its existing) to the
+packer and to its check, and `conda-check` holds the package to exactly the
+`.mojoc` and the declared doc files, byte-equal, so a README missing, placed
+elsewhere or changed by one byte is refused. The build gate
+`//tools/build/package/manifest_probe:conda_ships_readme` checks
+komira_encoding's package against the README read from the library rather than
+from the package rule, so a package rule that stopped passing it is red. A
+README that ships refuses relative links (`readme_examples generate --links
+refuse`): the installed copy has no neighbours. A metapackage ships no doc.
 
 ### A library that cannot be packaged
 
@@ -132,7 +158,19 @@ LAST makes it the switch for users.
 
 Buck cannot enumerate targets, and does not know which libraries are published.
 So it is **not** a Buck target: the release tool, which has the list, passes the
-members' manifests to the packer.
+members' manifests to the packer. One Buck target builds the same path with a
+fixed test stamp, so a build with no release stamp still runs it:
+`//tools/build/package:release_set_check`
+([`release_set.bzl`](../../tools/build/package/release_set.bzl)) makes `komira_all`
+from the `[release]` manifests of the libraries named in
+[`release_set.txt`](../../tools/build/package/release_set.txt), which a welded test of
+`src/kci_artifact` holds equal to the release set of `release/artifacts.textproto`.
+The libraries are packaged with build number 999999999 and a made-up source commit
+(build string `h7e57c0de_999999999`). The target is red unless that stamp reaches
+every file name, manifest and metadata, and `conda-check --require-stamped`
+accepts the metapackage. No step uploads its output. A PUBLISH step would refuse
+it in any case: it requires each package's source commit to be the commit of the
+release version it publishes, and the test commit is not a real one.
 
 ```sh
 komira_pack conda-meta --name komira --member-manifest <dir>/manifest.json ... \
@@ -142,11 +180,11 @@ komira_pack conda-check --dir <dir> --kind metapackage --name komira --expect-su
     --member-manifest <dir>/manifest.json ... [--mojo-pin <compiler version>] [--require-stamped true] --out <marker>
 ```
 
-It reads each member (its manifest against the manifest contract, its file
+It reads each member (its manifest against the manifest format, its file
 against the manifest's sha256, its metadata), requires one release (one
 version, build string, subdir, source commit and commit time; no member twice; no member that
 is itself a metapackage; a name that is not a member's), and writes the same
-directory a library does (the same manifest contract). `conda-check` re-derives
+directory a library does (the same manifest format). `conda-check` re-derives
 the requirements from the member manifests it is given, independently of the
 writer.
 
@@ -158,7 +196,7 @@ Versions are in lockstep, so every release is a whole new set.
 ## What the release tool does with them
 
 The release tool (kci) owns the list. For each declared artifact it runs the
-build system on the declaration's build rule, collects the manifests, builds the
+build system on the artifact's build rule, collects the manifests, builds the
 metapackage with `conda-meta`, and publishes. What its publish step must do is
 its own requirements; the ones that depend on how this directory is built:
 
@@ -313,12 +351,12 @@ rule, when it is written:
   front end); there are few wheels, and each is a reviewed decision.
 - **front end only.** The wheel is the Python package that drives komira, not a
   per-library artifact.
-- **same contract as the conda rule**: `[release]` is a directory holding the
-  `.whl`, `manifest.json` in the artifact-manifest contract for a PYTHON
+- **same rules as the conda rule**: `[release]` is a directory holding the
+  `.whl`, `manifest.json` in the artifact-manifest format for a PYTHON
   artifact (`artifact_type`, `name`, `version`, `file`, `sha256`, `metadata`,
   where `metadata` is the wheel's `METADATA`), gated on a stamp tied to git, built
   reproducibly, read back by an independent check.
-- **declared in kci** like every other artifact (a `PYTHON_WHEEL` declaration
+- **declared in kci** like every other artifact (a `PYTHON_WHEEL` artifact
   whose build rule is that target); nothing in Buck lists it as published.
 
 ## Not done yet

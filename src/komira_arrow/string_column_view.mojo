@@ -203,7 +203,7 @@ struct StringView[origin: Origin[mut=False]](
         `ASSERT=none`. Callers iterate `0 .. len()` and must not index past it.
 
         SAFETY: module-private `_unsafe_ptr` escape, permitted for files under
-        `komira_core/collections/`; this is the same
+        the core packages; this is the same
         seam `BatchView.col_string_dict_bytes_view` uses. The cast widens the
         column slab's sub-origin to the enclosing BATCH origin — both are
         ASAP-tracked real origins, neither is a wildcard — and the batch owns

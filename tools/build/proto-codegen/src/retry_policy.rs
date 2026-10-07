@@ -147,6 +147,7 @@ mod tests {
                 verb: v.to_string(),
                 path_template: "/v2/x".to_string(),
                 body: String::new(),
+                additional_bindings: vec![],
             }),
             routing_rule: None,
         }

@@ -20,7 +20,7 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_KQUEUE, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_client.response_body import (
     RecvRingBody,
@@ -60,6 +60,7 @@ def _seeded_body(
     var stream = ScriptedStream.from_read_script(List[UInt8]())
     return RecvRingBody[ScriptedStream].new_content_length(
         stream^, cl, content^,
+        100 * 1024 * 1024,
     )
 
 

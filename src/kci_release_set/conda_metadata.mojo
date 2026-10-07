@@ -7,12 +7,17 @@
 # (packaging/conda/README.md, "What a package is"): one JSON object, sorted
 # compact, with
 #
-#   every package   schema (integer, 1), kind ("library" | "metapackage"),
+#   every package   format ("kci.conda_metadata"), schema_version (integer,
+#                   kci_api's format table), kind ("library" |
+#                   "metapackage"),
 #                   name, version, subdir, build, build_number (integer >= 0),
 #                   file_name, size (integer > 0), depends (array of
 #                   strings), timestamp_ms (integer), source_commit,
 #                   stamped (boolean), label
-#   a library       import_name, mojo_pin, payload_path, payload_sha256
+#   a library       import_name, mojo_pin, payload_path, payload_sha256;
+#                   optionally doc_files: an array of {path, sha256} objects,
+#                   the documentation the package installs, each path under
+#                   share/doc/<name>/ and given once
 #   a metapackage   members: an array of {name, version, sha256} objects,
 #                   each optionally with build
 #
@@ -20,14 +25,24 @@
 # {name, sha256, version} and the compiler-version change of the packer adds
 # `build`; the reader accepts both and records whether it was there
 # (`MetaMember.has_build`). Whether a release may ship a row without it is
-# `kci publish`'s rule, not the reader's.
+# the PUBLISH step's rule, not the reader's.
+#
+# `doc_files` is optional because a package the packer wrote before it
+# shipped docs has none; the reader records whether it was there
+# (`CondaMetadata.has_doc_files`). Whether a release needs it is the
+# validation's rule, not the reader's.
+#
+# `format` and `schema_version` are read first (kci_api's
+# `produced_header`): another format, or a major this kci does not read, is
+# refused. Inside a known major an unknown key is IGNORED and listed in
+# `ignored_keys` (kci_api's policy: writers only ever add keys inside a
+# major).
 #
 # Refused, naming the file and the key: not JSON, not an object, a key given
-# twice, an unknown key, a key of the other kind, a missing key, a value of
-# the wrong JSON type, an empty string (only `source_commit` of an unstamped
-# package may be empty: the packer writes "" when no commit was given), a
-# sha256 that is not 64 lowercase hex characters, an unknown `kind`, a
-# `schema` other than 1.
+# twice, a key of the other kind, a missing key, a value of the wrong JSON
+# type, an empty string (only `source_commit` of an unstamped package may be
+# empty: the packer writes "" when no commit was given), a sha256 that is not
+# 64 lowercase hex characters, an unknown `kind`.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -45,9 +60,7 @@ from komira_json import (
 )
 
 from kci_artifact_manifest import is_sha256_hex
-
-comptime CONDA_METADATA_SCHEMA: Int = 1
-"""The one `schema` this reader knows."""
+from kci_api import FORMAT_CONDA_METADATA, produced_header
 
 comptime KIND_LIBRARY: String = "library"
 comptime KIND_METAPACKAGE: String = "metapackage"
@@ -73,6 +86,20 @@ struct MetaMember(Copyable, Movable):
         self.sha256_hex = String("")
 
 
+struct DocFile(Copyable, Movable):
+    """One row of a library's `doc_files`: a documentation file the package
+    installs (`path`, under share/doc/<name>/) and the sha256 of its bytes.
+
+    Layout: owned values only. No pointer field."""
+
+    var path: String
+    var sha256_hex: String
+
+    def __init__(out self):
+        self.path = String("")
+        self.sha256_hex = String("")
+
+
 struct CondaMetadata(Copyable, Movable):
     """A parsed `metadata.json`. The library-only fields are "" on a
     metapackage and `members` is empty on a library. `source` names the file
@@ -81,7 +108,7 @@ struct CondaMetadata(Copyable, Movable):
     Layout: owned values only. No pointer field."""
 
     var source: String
-    var schema: Int
+    var schema_version: Int
     var kind: String
     var name: String
     var version: String
@@ -100,10 +127,16 @@ struct CondaMetadata(Copyable, Movable):
     var payload_path: String
     var payload_sha256: String
     var members: List[MetaMember]
+    # A library's documentation files; `has_doc_files` is False when the key
+    # is absent (a package written before the packer shipped docs).
+    var doc_files: List[DocFile]
+    var has_doc_files: Bool
+    # Set by the parser only: keys of a known major it ignored (file header).
+    var ignored_keys: List[String]
 
     def __init__(out self, var source: String):
         self.source = source^
-        self.schema = 0
+        self.schema_version = 0
         self.kind = String("")
         self.name = String("")
         self.version = String("")
@@ -122,6 +155,9 @@ struct CondaMetadata(Copyable, Movable):
         self.payload_path = String("")
         self.payload_sha256 = String("")
         self.members = List[MetaMember]()
+        self.doc_files = List[DocFile]()
+        self.has_doc_files = False
+        self.ignored_keys = List[String]()
 
     def is_metapackage(self) -> Bool:
         return self.kind == KIND_METAPACKAGE
@@ -133,7 +169,8 @@ def _refuse(source: String, why: String) raises:
 
 def _common_keys() -> List[String]:
     var k = List[String]()
-    k.append(String("schema"))
+    k.append(String("format"))
+    k.append(String("schema_version"))
     k.append(String("kind"))
     k.append(String("name"))
     k.append(String("version"))
@@ -159,6 +196,12 @@ def _library_keys() -> List[String]:
     return k^
 
 
+def _library_optional_keys() -> List[String]:
+    var k = List[String]()
+    k.append(String("doc_files"))
+    return k^
+
+
 def _metapackage_keys() -> List[String]:
     var k = List[String]()
     k.append(String("members"))
@@ -172,16 +215,23 @@ def _in(keys: List[String], key: String) -> Bool:
     return False
 
 
-def _no_twice_no_unknown(
-    doc: JsonValue, known: List[String], source: String, what: String
+def _no_twice_note_unknown(
+    doc: JsonValue,
+    known: List[String],
+    source: String,
+    what: String,
+    note: String,
+    mut ignored: List[String],
 ) raises:
+    """Refuse a key given twice; list (never refuse) a key not in `known`, as
+    `note + key`."""
     for i in range(doc.num_members()):
         var key = doc.key_at(i)
         for j in range(i):
             if doc.key_at(j) == key:
                 _refuse(source, what + String("'") + key + String("' is given twice"))
         if not _in(known, key):
-            _refuse(source, what + String("unknown key '") + key + String("'"))
+            ignored.append(note + key)
 
 
 def _need(doc: JsonValue, key: String, source: String, what: String) raises -> JsonValue:
@@ -216,7 +266,7 @@ def _hex(doc: JsonValue, key: String, source: String, what: String = String(""))
     return s^
 
 
-def _member_row(row: JsonValue, index: Int, source: String) raises -> MetaMember:
+def _member_row(row: JsonValue, index: Int, source: String, mut ignored: List[String]) raises -> MetaMember:
     var what = String("members[") + String(index) + String("]: ")
     if row.kind_tag() != JSON_OBJECT:
         _refuse(source, what + String("not an object"))
@@ -225,7 +275,9 @@ def _member_row(row: JsonValue, index: Int, source: String) raises -> MetaMember
     known.append(String("version"))
     known.append(String("build"))
     known.append(String("sha256"))
-    _no_twice_no_unknown(row, known, source, what)
+    _no_twice_note_unknown(
+        row, known, source, what, String("members[") + String(index) + String("]."), ignored
+    )
     var m = MetaMember()
     m.name = _string(row, String("name"), source, what)
     m.version = _string(row, String("version"), source, what)
@@ -234,6 +286,43 @@ def _member_row(row: JsonValue, index: Int, source: String) raises -> MetaMember
         m.build = _string(row, String("build"), source, what)
         m.has_build = True
     return m^
+
+
+def _doc_row(
+    row: JsonValue, index: Int, under: String, seen: List[DocFile], source: String, mut ignored: List[String]
+) raises -> DocFile:
+    var what = String("doc_files[") + String(index) + String("]: ")
+    if row.kind_tag() != JSON_OBJECT:
+        _refuse(source, what + String("not an object"))
+    var known = List[String]()
+    known.append(String("path"))
+    known.append(String("sha256"))
+    _no_twice_note_unknown(
+        row, known, source, what, String("doc_files[") + String(index) + String("]."), ignored
+    )
+    var d = DocFile()
+    d.path = _string(row, String("path"), source, what)
+    d.sha256_hex = _hex(row, String("sha256"), source, what)
+    var ok = d.path.startswith(under) and d.path.byte_length() > under.byte_length()
+    if ok:
+        var rest = String(d.path[byte = under.byte_length() :])
+        for part in rest.split("/"):
+            if part == "" or part == "." or part == "..":
+                ok = False
+    if not ok:
+        _refuse(
+            source,
+            what
+            + String("'path' ")
+            + d.path
+            + String(" is not under ")
+            + under
+            + String(" with no empty, '.' or '..' component"),
+        )
+    for i in range(len(seen)):
+        if seen[i].path == d.path:
+            _refuse(source, what + String("'path' ") + d.path + String(" is given twice"))
+    return d^
 
 
 def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
@@ -248,13 +337,20 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
         _refuse(source, String("not a JSON object"))
     var common = _common_keys()
     var library = _library_keys()
+    var optional = _library_optional_keys()
     var meta = _metapackage_keys()
     var all_keys = common.copy()
     all_keys.extend(library.copy())
+    all_keys.extend(optional.copy())
     all_keys.extend(meta.copy())
-    _no_twice_no_unknown(doc, all_keys, source, String(""))
-
     var md = CondaMetadata(source.copy())
+    _no_twice_note_unknown(doc, all_keys, source, String(""), String(""), md.ignored_keys)
+    # produced_header's refusals start "<its source>: ", so it is given this
+    # file's refusal prefix as its source.
+    md.schema_version = produced_header(
+        doc, String(FORMAT_CONDA_METADATA), String("conda metadata '") + source + String("'")
+    )
+
     md.kind = _string(doc, String("kind"), source)
     var own: List[String]
     var other: List[String]
@@ -264,6 +360,7 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
     elif md.kind == KIND_METAPACKAGE:
         own = meta.copy()
         other = library.copy()
+        other.extend(optional.copy())
     else:
         _refuse(
             source,
@@ -282,13 +379,6 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
     for i in range(len(own)):
         _ = _need(doc, own[i], source, String(""))
 
-    md.schema = _integer(doc, String("schema"), source)
-    if md.schema != CONDA_METADATA_SCHEMA:
-        _refuse(
-            source,
-            String("schema ") + String(md.schema) + String(" is not ")
-            + String(CONDA_METADATA_SCHEMA),
-        )
     md.name = _string(doc, String("name"), source)
     md.version = _string(doc, String("version"), source)
     md.subdir = _string(doc, String("subdir"), source)
@@ -325,12 +415,21 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
         md.mojo_pin = _string(doc, String("mojo_pin"), source)
         md.payload_path = _string(doc, String("payload_path"), source)
         md.payload_sha256 = _hex(doc, String("payload_sha256"), source)
+        if doc.has(String("doc_files")):
+            md.has_doc_files = True
+            var docs = doc.get(String("doc_files"))
+            if docs.kind_tag() != JSON_ARRAY:
+                _refuse(source, String("'doc_files' is not an array"))
+            var under = String("share/doc/") + md.name + String("/")
+            for i in range(docs.array_len()):
+                var d = _doc_row(docs.element_at(i), i, under, md.doc_files, source, md.ignored_keys)
+                md.doc_files.append(d^)
     else:
         var rows = doc.get(String("members"))
         if rows.kind_tag() != JSON_ARRAY:
             _refuse(source, String("'members' is not an array"))
         for i in range(rows.array_len()):
-            md.members.append(_member_row(rows.element_at(i), i, source))
+            md.members.append(_member_row(rows.element_at(i), i, source, md.ignored_keys))
     return md^
 
 

@@ -20,7 +20,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 from komira_fs.file_discovery import GlobDiscoveryOptions
 from komira_fs.partition_codec import (
     encode_partition_value,
@@ -320,7 +320,9 @@ def test_prefix_empty_predicate_lists_base() raises:
 
 def test_prefix_encodes_special_value() raises:
     """An equality on a string col with a special char encodes into the
-    prefix (round-trip-safe) — 'matches nothing' guard in action."""
+    prefix (round-trip-safe) — 'matches nothing' guard in action. A space is
+    one of the bytes komira escapes and Spark writes raw, so the prefix set
+    is komira's spelling first, then Spark's."""
     var cols = List[String]()
     cols.append(String("region"))
     var types = List[ArrowType]()
@@ -331,8 +333,9 @@ def test_prefix_encodes_special_value() raises:
     )
     var p = PartitionPredicate(constraints=preds^)
     var d = evaluate_partition_prefix(String("t/"), cols, types, p)
-    assert_equal(len(d.prefixes), 1)
+    assert_equal(len(d.prefixes), 2)
     assert_equal(d.prefixes[0], String("t/region=us%20west/"))
+    assert_equal(d.prefixes[1], String("t/region=us west/"))
 
 
 # =============================================================================

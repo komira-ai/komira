@@ -55,10 +55,10 @@ from komira_aws_core import (
     AwsRetryQuota,
     HttpResult,
     aws_is_error_status,
-    aws_system_retry_loop,
     aws_xml_body_is_error,
     aws_xml_error_info,
 )
+from komira_retry import system_retry_loop
 from komira_aws_s3.komira_aws_s3 import (
     S3AbortMultipartUploadRequest,
     S3CompleteMultipartUploadRequest,
@@ -70,7 +70,7 @@ from komira_aws_s3.komira_aws_s3 import (
     S3HeadObjectRequest,
     S3ListObjectsV2Request,
     S3PutObjectRequest,
-    S3S3Client,
+    S3Client,
     S3UploadPartRequest,
     S3_ENCODING_TYPE_URL,
     parse_complete_multipart_upload_response,
@@ -81,7 +81,7 @@ from komira_aws_s3.komira_aws_s3 import (
     parse_put_object_response,
     parse_upload_part_response,
 )
-from komira_core.collections.byte_view import ByteView
+from komira_buffer.byte_view import ByteView
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_objectstore.coalesce import plan_coalesce
@@ -215,7 +215,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
     """
 
     var _config: S3Config
-    var _client: S3S3Client[Self.C, Self.T]
+    var _client: S3Client[Self.C, Self.T]
     var _transport: AwsConnectorTransport[Self.C]
     var _clock: Self.K
     # The retry quota every request of this store spends from.
@@ -235,7 +235,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         self._transport = AwsConnectorTransport[Self.C](
             http_config, mk_connector()
         )
-        self._client = S3S3Client[Self.C, Self.T](
+        self._client = S3Client[Self.C, Self.T](
             mk_connector,
             http_config,
             creds^,
@@ -263,7 +263,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         """HeadObject: the size, the ETag (also the CAS handle in
         `version`) and the last-modified time. An absent key raises
         NOT_FOUND (S3 sends no body, so the code is "404")."""
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.head_object_with(
             S3HeadObjectRequest(bucket, key),
             self._transport,
@@ -297,7 +297,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
             input.set_range_(range_header)
         if if_match.byte_length() > 0:
             input.set_if_match(if_match)
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.get_object_with(
             input, self._transport, self._clock, loop, self._retry_quota
         )
@@ -499,7 +499,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
             input.set_continuation_token(continuation_token)
         input.set_encoding_type(String(S3_ENCODING_TYPE_URL))
         input.set_max_keys(Int32(max_keys if max_keys > 0 else self._config.list_page_size))
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.list_objects_v2_with(
             input, self._transport, self._clock, loop, self._retry_quota
         )
@@ -591,7 +591,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         without a body) is read the same way. Any other 404, such as
         NoSuchBucket, raises NOT_FOUND: the key was not deleted, the bucket
         or endpoint is wrong."""
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.delete_object_with(
             S3DeleteObjectRequest(bucket, key),
             self._transport,
@@ -652,7 +652,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
             if precond.etag.byte_length() == 0:
                 raise Error("S3Store.conditional_put: If-None-Match with an empty ETag")
             input.set_if_none_match(precond.etag)
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.put_object_with(
             input, self._transport, self._clock, loop, self._retry_quota
         )
@@ -676,7 +676,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         """CreateMultipartUpload: the UploadId every later part, the
         completion and the abort name. An upload once created costs storage
         until it is completed or aborted."""
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.create_multipart_upload_with(
             S3CreateMultipartUploadRequest(bucket, key),
             self._transport,
@@ -709,7 +709,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
             )
         var input = S3UploadPartRequest(bucket, key, Int32(part_number), upload_id)
         input.set_body(bytes.copy())
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.upload_part_with(
             input, self._transport, self._clock, loop, self._retry_quota
         )
@@ -747,7 +747,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         doc.set_parts(listed^)
         var input = S3CompleteMultipartUploadRequest(bucket, key, upload_id)
         input.set_multipart_upload(doc^)
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.complete_multipart_upload_with(
             input, self._transport, self._clock, loop, self._retry_quota
         )
@@ -769,7 +769,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         """AbortMultipartUpload. An upload that is already gone (404
         NoSuchUpload) counts as aborted: it is gone either way. Any other
         404, such as NoSuchBucket, raises NOT_FOUND."""
-        var loop = aws_system_retry_loop(self._config.retry.copy())
+        var loop = system_retry_loop(self._config.retry.copy())
         var res = self._client.abort_multipart_upload_with(
             S3AbortMultipartUploadRequest(bucket, key, upload_id),
             self._transport,

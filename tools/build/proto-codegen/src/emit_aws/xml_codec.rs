@@ -26,11 +26,17 @@
 //! - Reading matches elements by local name, takes the last occurrence of a
 //!   non-list member and ignores elements the shape does not name
 //!   (`komira_aws_core.aws_xml`).
+//! - A map is read, never written: wrapped (an element named for the member
+//!   holding one `<entry>` per entry) or `flattened` (one element per entry,
+//!   each named for the member), each entry holding the key and value
+//!   elements its `locationName`s name (`key` and `value` by default). The
+//!   awsQuery and ec2Query responses (`query`) read maps through it; their
+//!   requests are not XML.
 //!
 //! What this codec does not write or read is REFUSED by name before any
 //! text is emitted ([`check_rest_xml_features`]): a union (`union`), a
-//! member bound to an XML attribute (`xml-attribute`), and a map in a body
-//! (`xml-map`). A map bound to prefixed headers, or to the query of a
+//! member bound to an XML attribute (`xml-attribute`), and, in restXml, a
+//! map in a body (`xml-map`). A map bound to prefixed headers, or to the query of a
 //! request, is the REST binding's and is not refused; a response has no
 //! URI or query, so a map bound to either in an output shape is a body map
 //! and is refused too.
@@ -170,6 +176,15 @@ struct XmlList {
     elem_shape: String,
 }
 
+/// How one map is read: the key and value element names, whether the
+/// entries are flattened into the parent, and the value shape.
+struct XmlMap {
+    key: String,
+    value: String,
+    flattened: bool,
+    value_shape: String,
+}
+
 impl AwsEmitter<'_> {
     /// The namespace on member `mf`'s element: the member's own, else the
     /// one of the shape it targets.
@@ -204,6 +219,57 @@ impl AwsEmitter<'_> {
             flattened: member_flattened || s.flattened,
             elem_shape,
         })
+    }
+
+    /// The map shape `map_shape`, reached by a member that is `flattened`
+    /// itself when `member_flattened`.
+    fn xml_map_of(&self, map_shape: &str, member_flattened: bool) -> Result<XmlMap, String> {
+        let s = self.facts.shape(map_shape)?;
+        let value_shape = s.element_shape.clone().ok_or_else(|| {
+            format!("emit_aws: map shape `{map_shape}` has no value shape")
+        })?;
+        Ok(XmlMap {
+            key: s
+                .map_key_location_name
+                .clone()
+                .unwrap_or_else(|| "key".to_string()),
+            value: s
+                .map_value_location_name
+                .clone()
+                .unwrap_or_else(|| "value".to_string()),
+            flattened: member_flattened || s.flattened,
+            value_shape,
+        })
+    }
+
+    /// Insert each entry element of `{entries}` (a `List[XmlNode]`) into
+    /// the map `local`: its key's text, and its value read as `value_ty`. A
+    /// later entry for a key replaces an earlier one.
+    #[allow(clippy::too_many_arguments)]
+    fn xml_read_entries(
+        &mut self,
+        msg: &IrMessage,
+        f: &IrField,
+        value_ty: &IrType,
+        map: &XmlMap,
+        entries: &str,
+        local: &str,
+        depth: usize,
+    ) -> Result<(), String> {
+        let iv = format!("_xk{depth}");
+        let ev = format!("_xv{depth}_{}", f.name);
+        let (k, v) = (escape(&map.key), escape(&map.value));
+        self.line(&format!("for {iv} in range(len({entries})):"));
+        self.push();
+        self.line(&format!(
+            "var {ev} = aws_xml_entry_value({entries}[{iv}], String(\"{k}\"), String(\"{v}\"))"
+        ));
+        let value = self.xml_read_value(msg, f, value_ty, &map.value_shape, &ev, depth + 1)?;
+        self.line(&format!(
+            "{local}[aws_xml_entry_key({entries}[{iv}], String(\"{k}\"), String(\"{v}\"))] = {value}"
+        ));
+        self.pop();
+        Ok(())
     }
 
     /// `aws_xml_namespace` on the element just started, when there is one.
@@ -400,7 +466,7 @@ impl AwsEmitter<'_> {
     // Reading
     // ======================================================================
 
-    fn emit_from_xml(&mut self, msg: &IrMessage) -> Result<(), String> {
+    pub(super) fn emit_from_xml(&mut self, msg: &IrMessage) -> Result<(), String> {
         let ty = self.ty_name(&msg.mojo_name);
         self.line("@staticmethod");
         self.line(&format!("def from_aws_xml(node: XmlNode) raises -> {ty}:"));
@@ -453,6 +519,19 @@ impl AwsEmitter<'_> {
             (Label::Repeated, ty) => {
                 self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
                 self.xml_read_list_into(msg, f, &mf, ty, &local)?;
+            }
+            (_, IrType::Map(_, v)) => {
+                self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
+                let entries = format!("_xs_{}", f.name);
+                let map = self.xml_map_of(&mf.shape, mf.flattened)?;
+                self.line(&format!(
+                    "var {entries} = aws_xml_map_entries(node, {n}, {})",
+                    if map.flattened { "True" } else { "False" }
+                ));
+                self.line(&format!("if {entries}:"));
+                self.push();
+                self.xml_read_entries(msg, f, v, &map, &format!("{entries}.value()"), &local, 1)?;
+                self.pop();
             }
             (_, IrType::Message(_)) if self.needs_no_nullary(f) => {
                 let idx = format!("_xc_{}", f.name);
@@ -516,6 +595,21 @@ impl AwsEmitter<'_> {
                 self.push();
                 self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
                 self.xml_read_items(msg, f, ty, &list, &items, &local)?;
+                self.line(&format!("out.set_{}({local}^)", f.name));
+                self.pop();
+            }
+            (_, IrType::Map(_, v)) => {
+                let local = format!("_v_{}", f.name);
+                let entries = format!("_xs_{}", f.name);
+                let map = self.xml_map_of(&mf.shape, mf.flattened)?;
+                self.line(&format!(
+                    "var {entries} = aws_xml_map_entries(node, {n}, {})",
+                    if map.flattened { "True" } else { "False" }
+                ));
+                self.line(&format!("if {entries}:"));
+                self.push();
+                self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
+                self.xml_read_entries(msg, f, v, &map, &format!("{entries}.value()"), &local, 1)?;
                 self.line(&format!("out.set_{}({local}^)", f.name));
                 self.pop();
             }
@@ -623,10 +717,36 @@ impl AwsEmitter<'_> {
                 self.pop();
                 Ok(format!("{tmp}^"))
             }
-            IrType::Map(_, _) => Err(format!(
-                "emit_aws: REFUSED xml-map: {}.{} holds a map in an XML body",
-                msg.name, f.name
-            )),
+            IrType::Map(_, v) => {
+                // A map nested in a list or a map: its element `src` is
+                // the wrapper of its <entry> elements, or, for a map shape
+                // that is flattened, the one entry. Only the wrapper's
+                // `<entry>` children are read; botocore's `_handle_map`
+                // takes every child as an entry (and raises on an unknown
+                // key or value tag), so a child of another name is ignored
+                // here where botocore would fail.
+                let map = self.xml_map_of(shape, false)?;
+                let node = format!("_xn{depth}_{}", f.name);
+                let tmp = format!("_xm{depth}_{}", f.name);
+                let entries = format!("_xe{depth}_{}", f.name);
+                let jv = format!("_xj{depth}");
+                self.line(&format!("ref {node} = {src}"));
+                self.line(&format!("var {tmp} = Dict[String, {}]()", self.elem_type(msg, f, v)?));
+                self.line(&format!("var {entries} = List[XmlNode]()"));
+                if map.flattened {
+                    self.line(&format!("{entries}.append({node}.copy())"));
+                } else {
+                    self.line(&format!("for {jv} in range(len({node}.children)):"));
+                    self.push();
+                    self.line(&format!("if {node}.children[{jv}].local == String(\"entry\"):"));
+                    self.push();
+                    self.line(&format!("{entries}.append({node}.children[{jv}].copy())"));
+                    self.pop();
+                    self.pop();
+                }
+                self.xml_read_entries(msg, f, v, &map, &entries, &tmp, depth + 1)?;
+                Ok(format!("{tmp}^"))
+            }
             IrType::Message(t) => {
                 let n = self
                     .by_fq
@@ -1025,8 +1145,9 @@ mod tests {
         let check = head.find("if aws_xml_body_is_error(resp):").expect("the 200 check");
         assert!(check < head.find("aws_xml_parse(resp.body)").expect("body"), "{src}");
         // Named as the client's error builder names the service: the type
-        // prefix, then the service name.
-        assert!(head.contains("String(\"S3S3.Head failed: HTTP 500 \")"), "{head}");
+        // prefix, once.
+        assert!(head.contains("String(\"S3.Head failed: HTTP 500 \")"), "{head}");
+        assert!(!src.contains("S3S3"), "{src}");
         // Not where the payload is a blob, streaming (`Get`, read by its head
         // parser) or not (`GetBytes`), or a string (`GetText`).
         for name in ["s3_parse_get_bytes_response", "s3_parse_get_text_response"] {

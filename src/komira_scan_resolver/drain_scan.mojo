@@ -29,8 +29,8 @@
 
 from std.memory import ArcPointer
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.collections.slab import Slab
+from komira_arrow.record_batch import RecordBatch
+from komira_collections.slab import Slab
 from komira_scan_resolver.scan_source_resolver import (
     ScanOpened,
     ScanRequest,

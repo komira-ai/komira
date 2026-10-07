@@ -1,6 +1,6 @@
 # The embedded MinIO over a scripted process runner: both addresses bind
-# 127.0.0.1; the child environment is exactly the two *_FILE paths and
-# MINIO_BROWSER=off; the credential files have the right shape and modes; a
+# 127.0.0.1; the child environment is exactly the two *_FILE paths,
+# MINIO_BROWSER=off and HOME; the credential files have the right shape and modes; a
 # binary that is not the pin raises; an early exit is retried on fresh ports;
 # `stop()` stops with a 5 s grace and removes the directory, and a stop that
 # cannot be confirmed is CANNOT_TELL; an unstopped server stops before its
@@ -14,7 +14,7 @@ from std.os import listdir, mkdir, stat
 from std.os.path import exists, isdir
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 from komira_test_minio import (
     MINIO_REGION,
     UNSTOPPED_SERVER_MARKER,
@@ -111,15 +111,19 @@ def test_start_retry_files_env_and_stop() raises:
     assert_true(r.specs[1].die_with_parent)
     assert_equal(r.specs[1].cwd, dir)
 
-    # Environment: exactly the two *_FILE paths and MINIO_BROWSER=off.
+    # Environment: exactly the two *_FILE paths, MINIO_BROWSER=off and HOME,
+    # the run's own directory. A real server exits 1 at start without a HOME
+    # ("Unable to get mcConfigDir") when it cannot look the user up either.
     ref env = r.specs[1].child_env
-    assert_equal(len(env), 3)
+    assert_equal(len(env), 4)
     assert_equal(env[0].name, "MINIO_ROOT_USER_FILE")
     assert_equal(env[0].value, dir + "/root_user")
     assert_equal(env[1].name, "MINIO_ROOT_PASSWORD_FILE")
     assert_equal(env[1].value, dir + "/root_password")
     assert_equal(env[2].name, "MINIO_BROWSER")
     assert_equal(env[2].value, "off")
+    assert_equal(env[3].name, "HOME")
+    assert_equal(env[3].value, dir)
 
     # Files: shapes and modes. The credential is in files only.
     assert_equal(_mode(dir), 0o700)

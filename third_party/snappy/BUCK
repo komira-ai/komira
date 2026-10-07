@@ -8,6 +8,7 @@ pinned_file(
     name = "snappy-1.2.2.tar.gz",
     url = "https://github.com/google/snappy/archive/refs/tags/1.2.2.tar.gz",
     sha256 = "90f74bc1fbf78a6c56b3c4a082a05103b3a56bb17bca1a27e052ea11723292dc",
+    size_bytes = 1108618,
 )
 
 archive_files(
@@ -35,6 +36,36 @@ archive_files(
         "${PROJECT_VERSION_PATCH}": "2",
     },
     templates = {"snappy-stubs-public.h": "snappy-stubs-public.h.in"},
+)
+
+# Test data of //src/komira_parquet_codec (tests/test_snappy_corpus.mojo): the
+# snappy correctness corpus (the files snappy_unittest compresses and
+# decompresses) and the three corrupt blobs a decoder must refuse, out of the
+# same pinned archive, as one tree.
+archive_files(
+    name = "testdata",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":snappy-1.2.2.tar.gz",
+    one_tree = True,
+    files = [
+        "COPYING",
+        "testdata/alice29.txt",
+        "testdata/asyoulik.txt",
+        "testdata/baddata1.snappy",
+        "testdata/baddata2.snappy",
+        "testdata/baddata3.snappy",
+        "testdata/fireworks.jpeg",
+        "testdata/geo.protodata",
+        "testdata/html",
+        "testdata/html_x_4",
+        "testdata/kppkn.gtb",
+        "testdata/lcet10.txt",
+        "testdata/paper-100k.pdf",
+        "testdata/plrabn12.txt",
+        "testdata/urls.10K",
+    ],
+    strip_prefix = "snappy-1.2.2",
+    visibility = ["PUBLIC"],
 )
 
 # The library and its C API (snappy-c.h). C++, so it carries zig's libc++

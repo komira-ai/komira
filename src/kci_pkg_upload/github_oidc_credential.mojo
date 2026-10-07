@@ -42,6 +42,19 @@
 # the caller requires (`with_required_environment`) — a second check beside the
 # registry's own trusted-publisher restriction, never instead of it.
 #
+# THE ID-TOKEN REQUEST IS RETRIED; nothing else is. The runner's token
+# service is a GET with no effect, and a release job that cannot reach it on
+# the first try (a connect timeout, a 5xx, a 429) would otherwise fail the
+# whole PUBLISH step. `ID_TOKEN_RETRY_*` bound it: at most 4 sends; before
+# retry n a full-jitter wait drawn from [0, 1 s], [0, 2 s], [0, 4 s]; a
+# `Retry-After` of delta-seconds up to 10 s waited out when it is longer, one
+# over 10 s final after that send; nothing started past 60 s from the first
+# send. Any other answer (a 403: the job lacks `id-token: write`; a 404; a
+# malformed body) is final at once. The exchanges that MINT a token are not retried. The
+# credential waits through the caller's `Sleeper` (komira_retry), so a test
+# never sleeps and a binary that links komira_async picks a sleeper that
+# does not redeclare `nanosleep`.
+#
 # Minting is lazy: the first `authorization(surface, host)` fetches one ID token per
 # audience and mints once; later calls reuse the minted token. The token is
 # presented only to the host it was minted at: the prefix.dev host for
@@ -51,11 +64,22 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from std.os import getenv
+from komira_libc.posix import _read_env
 
 from komira_encoding import base64_url_decode
 from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
 from komira_json import JSON_STRING, JsonValue, parse_json_value, write_json_string
+from komira_retry import (
+    MAX_WAIT_MS,
+    Backoff,
+    Jitter,
+    RetryLoop,
+    RetryPolicy,
+    Sleeper,
+    SplitMix64Rng,
+    SystemClock,
+    Verdict,
+)
 from komira_secret_store import SecretValue
 
 from .coordinate import repo_host, repo_path
@@ -74,12 +98,73 @@ from .transport import PkgRequest, PkgResponse, PkgTransport, try_exchange
 from .wire import bytes_of, decode_utf8
 
 
-comptime ACTIONS_ID_TOKEN_REQUEST_URL: String = "ACTIONS_ID_TOKEN_REQUEST_URL"
-comptime ACTIONS_ID_TOKEN_REQUEST_TOKEN: String = "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+comptime ACTIONS_ID_TOKEN_REQUEST_URL: StaticString = "ACTIONS_ID_TOKEN_REQUEST_URL"
+comptime ACTIONS_ID_TOKEN_REQUEST_TOKEN: StaticString = "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
 comptime PREFIX_DEV_MINT_PATH: String = "/api/oidc/mint_token"
 comptime PYPI_OIDC_AUDIENCE_PATH: String = "/_/oidc/audience"
 comptime PYPI_OIDC_MINT_PATH: String = "/_/oidc/mint-token"
 comptime PREFIX_DEV_AUDIENCE: String = "prefix.dev"
+comptime ID_TOKEN_RETRY_MAX_ATTEMPTS: Int = 4
+comptime ID_TOKEN_RETRY_INITIAL_MS: Int64 = 1000
+comptime ID_TOKEN_RETRY_MAX_MS: Int64 = 4000
+comptime ID_TOKEN_RETRY_DEADLINE_MS: Int64 = 60_000
+comptime ID_TOKEN_RETRY_MAX_SERVER_DELAY_MS: Int64 = 10_000
+
+
+def id_token_retry_policy() raises -> RetryPolicy:
+    """How the ID-token request is retried (file header)."""
+    return RetryPolicy(
+        Backoff(
+            initial_ms=ID_TOKEN_RETRY_INITIAL_MS,
+            multiplier=2.0,
+            max_ms=ID_TOKEN_RETRY_MAX_MS,
+            jitter=Jitter.full(),
+        ),
+        max_attempts=ID_TOKEN_RETRY_MAX_ATTEMPTS,
+        deadline_ms=ID_TOKEN_RETRY_DEADLINE_MS,
+        max_server_delay_ms=ID_TOKEN_RETRY_MAX_SERVER_DELAY_MS,
+    )
+
+
+def _retry_after_ms(resp: PkgResponse) -> Int64:
+    """A `Retry-After` of delta-seconds, in ms; -1 when absent or not
+    digits (an HTTP-date is not honoured: the backoff applies). More than 6
+    digits saturates to `MAX_WAIT_MS`, over any limit, never to absent."""
+    var v = String(resp.header(String("Retry-After")).strip())
+    var b = v.as_bytes()
+    if len(b) == 0:
+        return -1
+    for i in range(len(b)):
+        if b[i] < UInt8(ord("0")) or b[i] > UInt8(ord("9")):
+            return -1
+    if len(b) > 6:
+        return MAX_WAIT_MS
+    var secs = Int64(0)
+    for i in range(len(b)):
+        secs = secs * 10 + Int64(Int(b[i]) - ord("0"))
+    return secs * 1000
+
+
+def id_token_verdict(ok: Bool, resp: PkgResponse, fault: String) -> Verdict:
+    """One failed ID-token send, read for the retry loop: a transport fault
+    and a 5xx are transient, a 429 is a throttle (with its `Retry-After`),
+    any other status is final. The reason is never shown: the caller's error
+    is built from the last answer."""
+    if not ok:
+        return Verdict.transient(String("fault: ") + fault)
+    var status = resp.status
+    if status == 429:
+        return Verdict.throttle(String("HTTP 429"), _retry_after_ms(resp))
+    if status >= 500 and status <= 599:
+        return Verdict.transient(String("HTTP ") + String(status), _retry_after_ms(resp))
+    return Verdict.stop(String("HTTP ") + String(status))
+
+
+def _after_attempts(n: Int) -> String:
+    """` (after N attempts)` when the request was retried, else empty."""
+    if n <= 1:
+        return String("")
+    return String(" (after ") + String(n) + String(" attempts)")
 
 
 def prefix_dev_audience(host: String) -> String:
@@ -259,18 +344,20 @@ def _refuse_raw_token(body: List[UInt8], what: String) raises:
             )
 
 
-struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
+struct GithubOidcCredential[T: PkgTransport, S: Sleeper](RegistryCredential, Deinitable):
     """Trusted publishing from a GitHub Actions job (see the file header).
 
     `prefix_dev_host` — the prefix.dev server host whose mint endpoint serves
                         PREFIX_DEV; EMPTY = PREFIX_DEV is not served.
     `pypi_index`      — the warehouse (`pypi.org`, `test.pypi.org`) whose mint
                         endpoint serves PYPI_UPLOAD; EMPTY = not served.
+    `S`               — the `Sleeper` the ID-token retry waits through.
 
-    Layout: the transport by value, owned Strings, zeroizing `SecretValue`s
+    Layout: the transport and the retry loop by value, owned Strings, zeroizing `SecretValue`s
     and Bools. No pointer field."""
 
     var _transport: Self.T
+    var _id_token_retry: RetryLoop[SystemClock, Self.S, SplitMix64Rng]
     var _endpoint: IdTokenEndpoint
     var _request_token: SecretValue
     var _prefix_dev_host: String
@@ -286,6 +373,7 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
     def __init__(
         out self,
         var transport: Self.T,
+        var sleeper: Self.S,
         request_url: String,
         var request_token: SecretValue,
         var prefix_dev_host: String,
@@ -314,6 +402,12 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
                 )
         self._endpoint = IdTokenEndpoint.parse(request_url)
         self._transport = transport^
+        self._id_token_retry = RetryLoop[SystemClock, Self.S, SplitMix64Rng](
+            id_token_retry_policy(),
+            SystemClock(),
+            sleeper^,
+            SplitMix64Rng.seeded_from_clock(),
+        )
         self._request_token = request_token^
         self._prefix_dev_host = prefix_dev_host^
         self._pypi_index = pypi_index^
@@ -327,14 +421,20 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
 
     @staticmethod
     def from_actions_env(
-        var transport: Self.T, var prefix_dev_host: String, var pypi_index: String
-    ) raises -> GithubOidcCredential[Self.T]:
+        var transport: Self.T,
+        var sleeper: Self.S,
+        var prefix_dev_host: String,
+        var pypi_index: String,
+    ) raises -> GithubOidcCredential[Self.T, Self.S]:
         """From the Actions runner's two handshake variables — the ONLY
         environment this package reads. RAISES naming each one that is unset
         or empty: the job lacks `permissions: id-token: write`, or is not a
         GitHub Actions job."""
-        var url = getenv(String(ACTIONS_ID_TOKEN_REQUEST_URL), String(""))
-        var token = getenv(String(ACTIONS_ID_TOKEN_REQUEST_TOKEN), String(""))
+        # Read through komira_libc, the one getenv declaration: a second
+        # (std.os.getenv) in the same binary is a conflicting-signature
+        # link error once komira_libc is linked too (bin/kci links both).
+        var url = _read_env(ACTIONS_ID_TOKEN_REQUEST_URL)
+        var token = _read_env(ACTIONS_ID_TOKEN_REQUEST_TOKEN)
         var missing = String("")
         if url.byte_length() == 0:
             missing += String(ACTIONS_ID_TOKEN_REQUEST_URL)
@@ -352,8 +452,8 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
                 )
             )
         var secret = SecretValue.from_string(token)
-        return GithubOidcCredential[Self.T](
-            transport^, url, secret^, prefix_dev_host^, pypi_index^
+        return GithubOidcCredential[Self.T, Self.S](
+            transport^, sleeper^, url, secret^, prefix_dev_host^, pypi_index^
         )
 
     def with_required_environment(mut self, var environment: String):
@@ -364,6 +464,13 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
     def transport(ref self) -> ref [self._transport] Self.T:
         """Borrow the transport (a test asserts over the conversation)."""
         return self._transport
+
+    def id_token_retry(
+        ref self,
+    ) -> ref [self._id_token_retry] RetryLoop[SystemClock, Self.S, SplitMix64Rng]:
+        """Borrow the ID-token retry loop (a test reads its sleeper and
+        attempts)."""
+        return self._id_token_retry
 
     def has_claims(self) -> Bool:
         return self._has_claims
@@ -382,11 +489,22 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
         req.with_header(String("Accept"), String("application/json"))
         var auth = _as_bearer(_secret_string(self._request_token))
         req.with_authorization(auth)
+        self._id_token_retry.start()
         var ex = try_exchange(self._transport, req)
+        while not (ex.ok and ex.response.status == 200):
+            var d = self._id_token_retry.after_failure(
+                id_token_verdict(ex.ok, ex.response, ex.fault)
+            )
+            if not d.retry:
+                break
+            ex = try_exchange(self._transport, req)
+        var tries = _after_attempts(self._id_token_retry.attempts())
         if not ex.ok:
             raise Error(
                 withhold_if_echoes(
-                    String("GithubOidcCredential: the ID-token request faulted: ")
+                    String("GithubOidcCredential: the ID-token request faulted")
+                    + tries
+                    + String(": ")
                     + ex.fault,
                     auth,
                 )
@@ -396,6 +514,7 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
                 withhold_if_echoes(
                     String("GithubOidcCredential: the ID-token request answered HTTP ")
                     + String(ex.response.status)
+                    + tries
                     + String(": ")
                     + excerpt_unless_echoes(ex.response.body, auth),
                     auth,

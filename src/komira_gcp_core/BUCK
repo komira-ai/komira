@@ -1,49 +1,67 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The one hand-written core of the Google Cloud SDK, GCP-specific code only.
-# This part (P18a-1) holds four pieces:
+# The one hand-written core of the Google Cloud SDK, GCP-specific code only:
 #   token      - the `GcpTokenSource` contract the generated
 #                `komira_gcp_<service>` clients call, and a token cache on
 #                komira_retry's injected `MonotonicClock`;
 #   status     - the google.rpc.Status error envelope, and the gRPC status
 #                of a call over gRPC (never echoes a body or a grpc-message);
 #   pagination - the PURE paging pieces (`PageCursor`, `next_page_token`);
-#   retry      - `GcpRetryClassifier` and `gcp_retry_policy` for komira_retry.
-# and the Cloud Storage V4 signing primitives:
-#   v4_sign    - GOOG4-RSA-SHA256 canonicalization, string to sign, RSA
-#                signature and signed URL; the signing time is a parameter.
+#   retry      - `GcpRetryClassifier` and `gcp_retry_policy` for komira_retry;
+#   v4_sign    - Cloud Storage V4 signing: GOOG4-RSA-SHA256
+#                canonicalization, string to sign, RSA signature and signed
+#                URL; the signing time is a parameter;
+# and the production token sources:
+#   token_wire    - pure: the metadata request and probe, the
+#                   service-account key and authorized_user files, the RS256
+#                   JWTs, the grant requests and the token response;
+#   token_http    - the fetchers' one exchange (`GcpHttpTransport`) and its
+#                   komira_http_client implementation over a caller's
+#                   Connector and HttpClientConfig;
+#   token_sources - the metadata-server, service-account key, self-signed
+#                   JWT and authorized_user fetchers;
+#   adc           - Application Default Credentials in Google's order;
+#   sources       - the env, file and wall-clock seams. The ONLY file that
+#                   reads the environment, and only Google's variables.
 # Generic pieces come from dependencies: the UTC calendar and the
-# YYYYMMDDTHHMMSSZ / YYYYMMDD stamps from komira_datetime; server bodies
-# (and their UTF-8 validation) from komira_json; retry policy, backoff, loop and the clock
-# seam from komira_retry; SHA-256, RSA and the PEM-to-PKCS#8 step for a key
-# file's `private_key` from komira_crypto (AWS-LC; the PEM armor under it is
-# komira_encoding's). It never imports a generated module, reads no
-# environment and opens no socket, and owns no transport: the one transport
-# seam is komira_http's `Connector`.
+# YYYYMMDDTHHMMSSZ / YYYYMMDD stamps from komira_datetime; JSON (and its
+# UTF-8 validation) from komira_json; retry policy, backoff, loop and the
+# clock seam from komira_retry; SHA-256, RSA and the PEM-to-PKCS#8 step for a
+# key file's `private_key` from komira_crypto (AWS-LC; the PEM armor under it
+# is komira_encoding's, as is base64url); the HTTP client, its runtime and
+# the Connector seam from komira_http_client, komira_async and
+# komira_http_core. It never imports a generated module.
 #
 # test_v4_sign_conformance runs Google's published V4 signing vectors and
 # signs with their published dummy key. Neither is copied here: both are read
 # from the conformance-tests archive //third_party/googleapis_conformance_tests
-# pins by sha256, and staged at conformance/.
+# pins by sha256, and staged at conformance/. test_token_wire signs its JWTs
+# with the same dummy key, staged the same way, and checks one against a JWT
+# an independent implementation signed.
 #
-# test_env_source_only scans the package's own sources, staged as its data,
-# for any environment read. Only a Google auth-chain file it names may read
-# the environment; today it names none.
+# test_token_sources sends each fetcher's request through komira_http_client
+# over a ScriptedConnector (no socket) and checks the bytes on the wire, the
+# reading of the answer (expires_in to expiry) and the error mapping.
+# test_adc runs every branch of the Application Default Credentials search
+# over a MapEnv, MapFiles and a scripted probe, its refusal texts, and that
+# every variable read is one of Google's.
 #
-# Still to come, in order: P18a-2 (pure, no http) - service-account key file
-# parse, the RS256 JWT assertion, the authorized_user refresh form, the
-# metadata/oauth token-response parse, and the STS exchange +
-# generateAccessToken request/response codecs. P18b (needs the transport
-# stack) - the token sources that send those over a `Connector`, plus the
-# send/decide/sleep retry loop. P21b - the paging loop in the generated
-# logging client. P18b depends on P18a-2.
+# test_env_source_only scans the package's own sources, staged as its data:
+# only sources.mojo may read the environment, and no source may name a
+# variable to it that Google's auth libraries do not read.
 mojo_library(
     name = "komira_gcp_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_clock:komira_clock",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_datetime:komira_datetime",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
         "//src/komira_retry:komira_retry",
     ],
     test_srcs = [
@@ -53,10 +71,23 @@ mojo_library(
         "tests/test_gcp_token.mojo",
         "tests/test_v4_sign_conformance.mojo",
         "tests/test_env_source_only.mojo",
+        "tests/test_token_wire.mojo",
+        "tests/test_token_sources.mojo",
+        "tests/test_adc.mojo",
+        "tests/test_rest_stream.mojo",
     ],
     test_data = {
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),
         "tests/test_v4_sign_conformance.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+        "tests/test_token_wire.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+        "tests/test_token_sources.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+        "tests/test_adc.mojo": {
             "conformance": "//third_party/googleapis_conformance_tests:files",
         },
     },

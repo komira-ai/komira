@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # SIMD structural scanner (byte-class masks and carry-less-multiply quote
 # regions), quote-safe chunk splitting, typed cell parsers and column
 # builders, schema sampling and type inference, the parallel reader on the
-# komira_async dispatcher, and the CSV sink. It depends on komira_core
+# komira_async dispatcher, and the CSV sink. It depends on the core packages
 # (Arrow types, record batches, SIMD byte classes), komira_row_format (the row
 # format the sink drains) and komira_async (the dispatcher, cancellation
 # and the local filesystem). komira_runtime_paths is declared because two
@@ -13,13 +13,20 @@ mojo_library(
     name = "komira_csv",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_async:komira_async",
-        "//src/komira_core:komira_core",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_fs:komira_fs",
         "//src/komira_row_format:komira_row_format",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_byte_span_numeric_parsers.mojo",
         "tests/test_csv_cell_parsers.mojo",
         "tests/test_csv_cell_parsers_wire_to_builders.mojo",
         "tests/test_csv_dtype_completion.mojo",
@@ -39,6 +46,11 @@ mojo_library(
         "tests/test_csv_simd_int_column.mojo",
         "tests/test_csv_simd_string_column.mojo",
         "tests/test_csv_simd_temporal_parsers.mojo",
+        "tests/test_csv_blank_lines.mojo",
+        "tests/test_csv_record_shape.mojo",
+        "tests/test_csv_record_shape_edges.mojo",
+        "tests/test_csv_record_shape_parallel.mojo",
+        "tests/test_csv_sink_quoting.mojo",
         "tests/test_phase_4_stage_breakdown.mojo",
         "tests/test_simd_row_boundary_scan.mojo",
     ],

@@ -10,6 +10,9 @@ def _include_arg(pkg):
 MojoPkgTSet = transitive_set(args_projections = {"include": _include_arg})
 
 MojoInfo = provider(fields = {
+    # The definition `pkgs` was built with: this module as buck2 loaded it for
+    # the BUILD file's cell. See mojo_pkg_children.
+    "pkgs_def": provider_field(typing.Any, default = None),
     # C/C++ libraries (the prelude's MergedLinkInfo, e.g. from `cxx_library`)
     # that code in this package calls, with those of every package it depends
     # on: what a binary linking this package must also link. None when there
@@ -32,6 +35,10 @@ MojoInfo = provider(fields = {
     "direct_conda": provider_field(typing.Any, default = {}),
     "import_name": provider_field(str),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
+    # The package's README.md (the source artifact), None without one. Its
+    # conda package installs it at share/doc/<conda name>/README.md
+    # (tools/build/package/conda.bzl).
+    "readme": provider_field(typing.Any, default = None),
 })
 
 MojoToolchainInfo = provider(fields = {
@@ -85,3 +92,53 @@ MojoProgramInfo = provider(fields = {
     "runtime": provider_field(typing.Any),  # artifact: directory of runtime libraries
     "target_cpu": provider_field(str),  # the CPU the program was compiled for
 })
+
+
+def mojo_pkg_children(ctx, infos):
+    """The `pkgs` of each MojoInfo in `infos`, as children of a MojoPkgTSet of this module.
+
+    buck2 keys a .bzl module by the cell of the BUILD file that loads it, so a
+    target in a consuming repository's own cell and a target in the `komira`
+    cell get two MojoPkgTSet definitions, and a transitive set refuses
+    children of another definition. The packages of a closure built with
+    another definition are re-wrapped here as a chain of this definition, in
+    their original order and without repeating one already taken from an
+    earlier dependency; a closure built with this definition is passed
+    through, so a build where every package is in one cell creates exactly the
+    sets it always did.
+    """
+    children = []
+    seen = {}
+    for info in infos:
+        if info.pkgs_def == MojoPkgTSet:
+            children.append(info.pkgs)
+            continue
+        pkgs = []
+        for pkg in info.pkgs.traverse():
+            key = str(pkg)
+            if key not in seen:
+                seen[key] = True
+                pkgs.append(pkg)
+        chain = None
+        for pkg in reversed(pkgs):
+            chain = ctx.actions.tset(MojoPkgTSet, value = pkg, children = [chain] if chain else [])
+        if chain:
+            children.append(chain)
+    return children
+
+# The test files a target runs as tests, as the build graph resolved them: a
+# mojo_library's `test_srcs` (each built and run alone) and a mojo_test's
+# `main` (its binary runs `main` only: the other `srcs` are modules `main`
+# imports). The source artifacts themselves, not paths: the test_weld lint
+# (tools/build/lint/test_weld.bzl) asks Buck2 where each file is, so an entry
+# naming a file of another package (a label, e.g. an export_file) counts for
+# that file and never for a same-named one of this package. A generated
+# source (a target's output) is no file of the tree and is left out. A test
+# counts as welded by what the rule received, however the BUCK file spelt it.
+WeldedTestsInfo = provider(fields = {
+    "srcs": provider_field(list[Artifact]),
+})
+
+def welded_tests_info(srcs):
+    """WeldedTestsInfo of `srcs`, the test source artifacts a target runs."""
+    return WeldedTestsInfo(srcs = [s for s in srcs if s.is_source])

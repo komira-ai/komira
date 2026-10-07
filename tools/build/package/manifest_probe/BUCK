@@ -1,11 +1,11 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
-load("@komira//tools/build/package:conda.bzl", "conda_manifest_kci")
+load("@komira//tools/build/package:conda.bzl", "conda_doc_check", "conda_manifest_kci")
 
 # Reads each artifact manifest named on the command line with kci's own parser
 # (src/kci_artifact_manifest), renders it again with kci's writer, and says
 # whether the bytes are the same. tools/build/tests/functional/conda_set.sh runs
 # it over the manifests the conda packages emit: the proof that what the build
-# writes is what `kci publish` reads. Nothing publishes it.
+# writes is what the PUBLISH step reads. Nothing publishes it.
 mojo_binary(
     name = "parse_manifest",
     srcs = ["parse_manifest.mojo"],
@@ -24,4 +24,16 @@ mojo_binary(
 conda_manifest_kci(
     name = "conda_manifest_kci",
     package = "//src/komira_hash:komira_hash_conda",
+)
+
+# The package ships its docs: komira_encoding's package must install the
+# library's README.md at share/doc/komira_encoding/README.md, byte-equal to
+# src/komira_encoding/README.md, listed in info/paths.json and in
+# metadata.json's `doc_files` (tools/build/package/conda.bzl,
+# `conda_doc_check`). The README is read from the library, not from the
+# package rule, so a package rule that dropped it is a red `buck2 build //...`.
+conda_doc_check(
+    name = "conda_ships_readme",
+    lib = "//src/komira_encoding:komira_encoding",
+    package = "//src/komira_encoding:komira_encoding_conda",
 )

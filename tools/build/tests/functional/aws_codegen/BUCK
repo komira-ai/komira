@@ -1,5 +1,6 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/proto-codegen/aws_query:model.bzl", "TINY_EC2", "TINY_QUERY")
 load("@komira//tools/build/proto-codegen/aws_rest_json:model.bzl", "TINY_REST_JSON")
 load("@komira//tools/build/proto-codegen/aws_rest_xml:model.bzl", "TINY_REST_XML")
 load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
@@ -15,12 +16,12 @@ load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
 # restXml models (a non-S3 one for the customization refusals, one per
 # restXml refusal, one that requires a request checksum), a tiny Smithy RPC
 # v2 CBOR model and a tiny awsJson model that declares SigV2. The tiny
-# restJson1 and S3-shaped restXml models come from
-# komira//tools/build/proto-codegen/aws_rest_json and aws_rest_xml (model
-# and digest in each one's model.bzl), where their pure-mode clients are
-# compiled against the real runtime, which only the komira cell can depend
-# on; this package holds those clients' generated files and welded tests to
-# exact sets.
+# restJson1, S3-shaped restXml, awsQuery and ec2Query models come from
+# komira//tools/build/proto-codegen/aws_rest_json, aws_rest_xml and
+# aws_query (model and digest in each one's model.bzl), where their
+# clients are compiled against the real runtime, which only the
+# komira cell can depend on; this package holds those clients' generated
+# files and welded tests to exact sets.
 
 _LOGS_SHA256 = botocore_model("logs").sha256
 
@@ -241,6 +242,190 @@ tests_check(
     markers = "komira//tools/build/proto-codegen/aws_rest_xml:komira_aws_tiny_xml[tests]",
 )
 
+# An awsQuery client of a tiny model, pure mode: the form encoder of every
+# scalar kind, a wrapped list, a flattened list whose member is renamed, a
+# flattened and a wrapped map, a nested structure; the response read from
+# the operation's resultWrapper element, maps included; an operation with no
+# input and no output. The model is
+# komira//tools/build/proto-codegen/aws_query's, where the same module is
+# compiled against the real runtime and tested.
+_TINY_QUERY_OPERATIONS = ["Ping", "SendThing"]
+
+# The client adds two anonymous operations (`authtype` `none`, `auth`
+# `smithy.api#noAuth`), which it sends unsigned.
+_TINY_QUERY_CLIENT_OPERATIONS = ["Ping", "PingAnonymous", "PingNoAuth", "SendThing"]
+
+aws_codegen_golden(
+    name = "query_pure",
+    gen_args = [
+        "--model-sha256",
+        TINY_QUERY.sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        ",".join(_TINY_QUERY_OPERATIONS),
+        "--pure-only",
+        "--probe-import",
+        "komira_aws_tiny_query.komira_aws_tiny_query",
+    ],
+    golden = "golden/query_pure.mojo",
+    golden_probe = "golden/query_pure_probe.mojo",
+    model = TINY_QUERY.model,
+    module = "komira_aws_tiny_query",
+)
+
+# The same module, built in the komira cell: exactly the package's three
+# files were generated, with no transport and no JSON runtime.
+gen_check(
+    name = "tiny_query_pure_scoped",
+    absent = [
+        "komira_http",
+        "komira_json",
+    ],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "komira_aws_tiny_query.mojo",
+    ],
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query[gen]",
+    present = [
+        "protocol     : query (awsQuery)",
+        "mode         : pure (no transport)",
+        "operations   : " + ", ".join(_TINY_QUERY_OPERATIONS),
+        "model sha256 : " + TINY_QUERY.sha256,
+        "aws_query_set_body(req, q)",
+        "aws_query_result(resp.body, String(\"SendThingResult\"))",
+    ],
+)
+
+# Its layout probe and its caller test are welded into it, and each ran and
+# passed.
+tests_check(
+    name = "tiny_query_pure_tests",
+    expect = [
+        "_layout_probe",
+        "test_tiny_query",
+    ],
+    markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query[tests]",
+)
+
+# The client-mode module of the same model, built in the komira cell: the
+# transport is imported, the JSON runtime is not, and errors are read as
+# awsQuery errors.
+gen_check(
+    name = "tiny_query_client_scoped",
+    absent = ["komira_json"],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "komira_aws_tiny_query_client.mojo",
+    ],
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client[gen]",
+    present = [
+        "protocol     : query (awsQuery)",
+        "mode         : client",
+        "var info = aws_query_error(res.to_response())",
+        "from komira_http_core.transport.io_stream import Connector",
+        "var res = self.send_unsigned(req^)",
+        "return send_unsigned_request[Self.C](",
+    ],
+)
+
+tests_check(
+    name = "tiny_query_client_tests",
+    expect = [
+        "_layout_probe",
+        "test_tiny_query_client",
+    ],
+    markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client[tests]",
+)
+
+# The client-mode module of the tiny awsQuery model as a text golden, as for
+# logs_client and tiny_rest_json_client: the caller's HttpClientConfig
+# reaches the signed send, and the anonymous operations go through the
+# unsigned one.
+aws_codegen_golden(
+    name = "query_client",
+    gen_args = [
+        "--model-sha256",
+        TINY_QUERY.sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        ",".join(_TINY_QUERY_CLIENT_OPERATIONS),
+        "--probe-import",
+        "komira_aws_tiny_query.komira_aws_tiny_query",
+    ],
+    golden = "golden/query_client.mojo",
+    golden_probe = "golden/query_client_probe.mojo",
+    model = TINY_QUERY.model,
+    module = "komira_aws_tiny_query",
+    must_contain = _CONFIG_PINS,
+)
+
+# An ec2Query client of a tiny model, pure mode: queryName and capitalized
+# locationName parameter names, a plain member name kept, a list of
+# structures holding a list (never wrapped), an empty list writing nothing;
+# the response read from the root, with wrapped `item` lists of structures;
+# an operation with no input and no output. The model is
+# komira//tools/build/proto-codegen/aws_query's, where the same module is
+# compiled against the real runtime and tested.
+_TINY_EC2_OPERATIONS = ["DescribeThings", "Ping"]
+
+aws_codegen_golden(
+    name = "ec2_pure",
+    gen_args = [
+        "--model-sha256",
+        TINY_EC2.sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        ",".join(_TINY_EC2_OPERATIONS),
+        "--pure-only",
+        "--probe-import",
+        "komira_aws_tiny_ec2.komira_aws_tiny_ec2",
+    ],
+    golden = "golden/ec2_pure.mojo",
+    golden_probe = "golden/ec2_pure_probe.mojo",
+    model = TINY_EC2.model,
+    module = "komira_aws_tiny_ec2",
+)
+
+# The same module, built in the komira cell: exactly the package's three
+# files were generated, with no transport and no JSON runtime.
+gen_check(
+    name = "tiny_ec2_pure_scoped",
+    absent = [
+        "komira_http",
+        "komira_json",
+    ],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "komira_aws_tiny_ec2.mojo",
+    ],
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2[gen]",
+    present = [
+        "protocol     : ec2 (ec2Query)",
+        "mode         : pure (no transport)",
+        "operations   : " + ", ".join(_TINY_EC2_OPERATIONS),
+        "model sha256 : " + TINY_EC2.sha256,
+        "aws_query_set_body(req, q)",
+    ],
+)
+
+# Its layout probe and its caller test are welded into it, and each ran and
+# passed.
+tests_check(
+    name = "tiny_ec2_pure_tests",
+    expect = [
+        "_layout_probe",
+        "test_tiny_ec2",
+    ],
+    markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2[tests]",
+)
+
+
 aws_codegen_refusal(
     name = "refuse_unsupported_protocol",
     expect = "declares protocol `smithy-rpc-v2-cbor`",
@@ -255,8 +440,8 @@ aws_codegen_refusal(
     model = "model/tiny_rpcv2cbor.json",
 )
 
-# The `s3` customization is for S3's model only, and no other customization
-# exists.
+# The `s3` customization is for S3's model only, `route53` for Route 53's
+# only, and no other customization exists.
 aws_codegen_refusal(
     name = "refuse_s3_customization_on_another_service",
     expect = "customization is refused unless the model's serviceId is `S3` and its protocol is restXml",
@@ -269,6 +454,22 @@ aws_codegen_refusal(
         "Ping",
         "--customization",
         "s3",
+    ],
+    model = "model/tiny_restxml.json",
+)
+
+aws_codegen_refusal(
+    name = "refuse_route53_customization_on_another_service",
+    expect = "customization is refused unless the model's serviceId is `Route 53` and its protocol is restXml",
+    gen_args = [
+        "--model-sha256",
+        _TINY_RESTXML_SHA256,
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping",
+        "--customization",
+        "route53",
     ],
     model = "model/tiny_restxml.json",
 )
@@ -325,6 +526,23 @@ aws_codegen_refusal(
         "Ping",
     ],
     model = "model/tiny_restxml_checksum.json",
+)
+
+# A bearer-token operation of the tiny awsQuery model (`authtype` `bearer`):
+# the client has no token source, and a SigV4 signature is the wrong
+# credential.
+aws_codegen_refusal(
+    name = "refuse_bearer_operation",
+    expect = "REFUSED bearer-auth: operation `PingBearer`",
+    gen_args = [
+        "--model-sha256",
+        TINY_QUERY.sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping,PingBearer",
+    ],
+    model = TINY_QUERY.model,
 )
 
 # The generated client signs with SigV4 only: a supported protocol whose

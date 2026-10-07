@@ -38,7 +38,8 @@ scripts belong to the root package of the cell, and are linted by `tests//:shell
 names. At the top of this directory are the driver,
 [`tool_lib.sh`](tool_lib.sh), and the sections the driver sources
 ([`cxx_tests.sh`](cxx_tests.sh), [`rust_tests.sh`](rust_tests.sh),
-[`proto_tests.sh`](proto_tests.sh), [`c_libs_tests.sh`](c_libs_tests.sh)).
+[`proto_tests.sh`](proto_tests.sh), [`c_libs_tests.sh`](c_libs_tests.sh),
+[`coverage_tests.sh`](coverage_tests.sh)).
 
 The tests run where the checkout builds, read from the execution platforms
 buck2 registers, and the first line of output names it:
@@ -173,6 +174,14 @@ with C targets had 8 of 28 actions re-run in a submodule). They also include
 Rust (`rust:prost_roundtrip` and the protobuf plugin,
 `proto-codegen:protoc-gen-mojo`), whose compiles copy their sources into
 buck-out for the same reason (without it, 3 of 55 actions re-ran).
+
+It also builds, in the `./komira` submodule consumer and in the external-cell
+consumer, a package of the consumer's own cell that depends on
+`komira//tools/build/examples:hellopkg`, its gated test, and a binary on it
+whose run check compares stdout; the binary's compile must put both packages on -I.
+buck2 loads the rules once per cell of the BUCK file that loads them, and a
+transitive set of one load refuses children of the other, so before
+`mojo_pkg_children` this failed in analysis.
 
 A fifth consumer, fetched as a git external cell, has no `.buckconfig.local`:
 the remote-execution settings are appended to its root `.buckconfig`, and it
@@ -398,6 +407,40 @@ a selection outside the closure is refused (`roster_bad_selection`).
 `komira_db`, and a declared `outs` file the plugin does not write (a `.proto`
 without a table) fails the generation (`tasks_db_wrong_outs`).
 
+[`proto_fixture_check`](../mojo/README.md#wire-fixtures-proto_fixture_check):
+building [`functional/proto_fixture`](functional/proto_fixture/BUCK) is its
+self-test, so the pull-request check runs it, and with it the check's welded
+`proto_fixture_case` targets
+([`mojo/proto_fixture_testdata`](../mojo/proto_fixture_testdata/BUCK)), which
+every `proto_fixture_check` action takes as an input. `selftest` passes two
+fixtures, one of them a producer's bytes that are not protoc's serialization
+(the fields in reverse order, a packed field unpacked; a `bytes` value holding
+0x00 and 0xff); `selftest_encoded` reads `proto_encode`'s output back as the
+`.hex` (declared in `canonical_producer`, since it checks no producer).
+[`negative/proto_fixture`](negative/proto_fixture/BUCK) builds the welded
+cases' fixtures end to end, one defect per refusal, each a fixture one change
+away from the self-test's, and each must fail naming its leg: `leg0_identical`
+(the `.hex` is protoc's own bytes), `leg0_duplicate` (`id` written twice,
+which the decode shows once), `leg1_value` (the `.txtpb` says `id: 151` where
+the bytes hold 150; its `.canonical.hex` is protoc's encoding of that text, so
+only leg 1 fires), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
+the top level, field 9 inside `inner`, and an empty group 99, which protoc
+prints as `99: 1`, `  9: 1` and `99 {`; the `.txtpb` holds them, so leg 1
+passes, and protoc's text parser refuses the numbers, so leg 3 fires too),
+`leg3_noncanonical` (the `.canonical.hex` is a second non-protoc form of the
+message), `leg4_root` (a `Meters` fixture checked as a `Feet`, the same wire
+and text form), `leg5_enum` (`kind: 99`, a value `Kind` does not declare,
+which protoc decodes and encodes back as a number) and `hex_odd` (a `.hex`
+with three digits). These twins are `expect_red` lines of `proto_tests.sh`,
+so they run only in `build_system_selftests.yml` (nightly and on demand), not
+in the pull-request check; per pull request the same defects are gated by the
+welded cases, through `tests//functional/proto_fixture`.
+
+```sh
+./buck2 build tests//functional/proto_fixture:
+./buck2 build tests//negative/proto_fixture:leg4_root   # must fail: LEG 4: leg4_root.txtpb names example.fixture.v1.Meters ...
+```
+
 Generation is deterministic: two uncached builds (an isolated daemon,
 `komira_tests_det`, its buck-out cleaned, `--no-remote-cache`) of both
 plugins, the generated sources of three packages (one of them
@@ -490,14 +533,34 @@ in [`negative/test_data`](negative/test_data/BUCK), `undeclared` must fail
 with `GATED TEST FAILED` and the test's
 `No such file or directory` for a fixture that exists in the repository but
 was not declared. `buck2 test tests//functional/test_data:mojo_test_data` must pass: a
-`mojo_test` with dict `data` and `env`. Five `bad_*` targets must each fail
+`mojo_test` with dict `data` and `env`. `buck2 test
+tests//functional/test_data:mojo_test_args` must pass: a `mojo_test` whose
+`args` hold a `$(location)` of a build output, one of a source and one
+argument with both, each of which it must open as an absolute path from its
+`share/`, an `$(exe_target)` of a `mojo_binary` that must arrive as an
+absolute path with the runnable directory's `lib/` beside it, plus plain
+arguments that arrive verbatim, in order, and unexported (dropping `args`
+from the test command, their absolute prefix, or the inputs behind the
+`$(location)` paths turns it red). `mojo_test_args_action` runs that same
+`buck2 test` command as a build action and must build: the pull-request
+check builds `tests//functional/...` and runs no `buck2 test`, so this
+target is what gates `args` on a pull request; the `buck2 test` runs of this
+section run only here, in the nightly self-tests. `buck2 test
+tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
+<label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
+and some harnesses, is a failure. On a pull request that rule is checked
+only by `runner_cases` (below), which runs the runner itself; mapping the
+runner's status to a verdict is Buck2's. Five `bad_*` targets must each fail
 at analysis with their own refusal: a `..` destination, a destination that
 is also another's directory, a `test_data` key that is not a test, a
 runner-owned env name, an env name that is not a variable name. The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 `runner_cases` also runs the runner on a stand-in that kills itself: with
-SIGKILL it must exit 137 and with SIGABRT 134, each with no marker.
+SIGKILL it must exit 137 and with SIGABRT 134, each with no marker; one that
+exits 77 must exit 77 with no marker; `--arg` values must reach the
+stand-in in order, unexported, with every `@KOMIRA_ACTION_DIR@` replaced by
+the action's directory; and an `--env` after an `--arg` is refused (exit 2).
 
 ## 30. Optimization levels
 
@@ -630,24 +693,36 @@ tools/build/tests/run_tests.sh --host-check-only
 CloudWatch Logs model as check actions ([`defs.bzl`](functional/aws_codegen/defs.bzl)).
 The GetLogEvents module, pure and client, a restJson1 client of a tiny model,
 a restXml module of a tiny S3-shaped model (pure, with the `s3`
-customization), and the layout probe of each, must equal their goldens under
-`golden/` byte for byte. The generator must refuse, naming the reason and
+customization), an awsQuery module of a tiny model (pure and client), an
+ec2Query module of a tiny model (pure), and the layout probe of each, must
+equal their goldens under `golden/` byte for byte. The generator must refuse, naming the reason and
 writing no file: an empty or missing `--operations`, an operation the model
 lacks, a protocol it does not implement (smithy-rpc-v2-cbor), a restXml
 model that reaches a union, an XML attribute or a map in the body (each by
 its refusal name), the `s3` customization unless the model's serviceId is
-`S3` and its protocol restXml, an unknown customization, a
+`S3` and its protocol restXml, the `route53` customization unless it is
+`Route 53` and restXml, an unknown customization, a
 missing `--model-sha256`, one that is not 64 lowercase hex digits (upper case,
 or one digit short), one that is not the model's, a zero-byte model, and
 `--probe-import` without `--probe-out`.
 
-Each client module (`logs_client`, `tiny_rest_json_client`) must also contain
-each `must_contain` string, matched as whole lines against the GENERATED module
-with leading spaces dropped, so a string may span lines: the constructor's
-`http_config: HttpClientConfig,` (no default), its
+Each client module (`logs_client`, `tiny_rest_json_client`, `query_client`)
+must also contain each `must_contain` string, matched as whole lines against
+the GENERATED module with leading spaces dropped, so a string may span lines:
+the constructor's `http_config: HttpClientConfig,` (no default), its
 `self._http_config = http_config.copy()`, and the send call passing that field.
 This holds even if someone re-copies the golden over a regression. An empty
 `must_contain` string is refused at analysis.
+
+The tiny awsQuery and ec2Query modules are also built in the komira cell
+([`proto-codegen/aws_query`](../proto-codegen/aws_query/BUCK)), against the
+real runtime: a `gen_check` holds each to exactly its generated files and the
+lines that name its protocol and mode, and a `tests_check` to exactly its two
+welded tests (the layout probe and its caller test), for the pure awsQuery
+module (`tiny_query_pure_scoped`, `tiny_query_pure_tests`), the client-mode
+one (`tiny_query_client_scoped`, `tiny_query_client_tests`) and the pure
+ec2Query one (`tiny_ec2_pure_scoped`, `tiny_ec2_pure_tests`), as for the
+restJson1 and restXml modules.
 
 Four negatives in [`negative/aws_codegen`](negative/aws_codegen/BUCK) must fail
 their builds: a golden that differs from the generated module (`golden_differs`),
@@ -753,6 +828,185 @@ is refused with a reason (a Linux arm64 host: the row is reserved).
    one hex digit of one hash changed is refused naming the sample.
 
 Analysis only.
+
+## 38. README examples
+
+A library's `README.md` examples are a welded test, `[tests][readme]`
+([README examples](../mojo/README.md#readme-examples)).
+[`functional/readme_examples/ok`](functional/readme_examples/ok/BUCK) builds a
+README using every form (hidden lines before and after, a hoisted decorated
+struct, a triple-quoted string, an example in a list item, a `~~~~` fence
+quoting ```` ``` ````) and its marker is a PASS line;
+[`functional/readme_examples/none`](functional/readme_examples/none/BUCK), a
+README with no example, builds and its marker reads `NO EXAMPLE`, so nothing
+was compiled or run. [`negative/readme_examples`](negative/readme_examples/raises/BUCK)
+plants three defects, each of which must fail naming its README line: an
+example that raises (`README.md:13: FAILED`, while the other example still
+runs), one that does not compile (the compiler quotes the line, ending
+`# README.md:9`) and a `mojo skip` fence (refused at `README.md:3`).
+A README that ships (its library has a conda package, which installs it at
+`share/doc/<name>/README.md`) refuses a relative link:
+[`negative/readme_examples/relative_link`](negative/readme_examples/relative_link/BUCK)
+fails naming `README.md:11`, and
+[`functional/readme_examples/unshipped`](functional/readme_examples/unshipped/BUCK),
+the same README in a library with `conda = False`, builds.
+
+```sh
+./buck2 build tests//functional/readme_examples/...
+./buck2 build tests//negative/readme_examples/raises:raises   # must fail: README.md:13: FAILED
+./buck2 build tests//negative/readme_examples/relative_link:relative_link   # must fail: README.md:11: greet.mojo: a relative link
+```
+
+## 39. Test welding
+
+A test file that no target welds never runs, and nothing else notices.
+[`test_weld`](../lint/test_weld.bzl) is a lint over the packages under
+`src/` (each directory directly under it). It requires every `test_*.mojo`
+under a `tests/` directory to be welded, and every package with a `.mojo`
+source to weld a test. What is welded is read from the build graph, not from
+the text of a BUCK file: the `test_srcs` of every `mojo_library` and the
+`main` of every `mojo_test` under `src/` (its binary runs `main` only), as the
+rules received them. A query of the graph gives the targets; each rule gives
+its test files in a `WeldedTestsInfo` ([`providers.bzl`](../mojo/providers.bzl)),
+and Buck2 says where each file is. So a list a BUCK file computes counts entry
+by entry, an entry left in a comment does not, and an entry naming another
+package's file by label welds that file, not a same-named one.
+The exceptions are the rows of
+[`tests/known_untested.tsv`](../../../tests/known_untested.tsv), each with its
+reason, and that ledger only shrinks: a row whose test is welded, or whose
+package welds a test, is a finding, as is a row naming nothing. `//:test_weld`
+in the root [`BUCK`](../../../BUCK) holds the repository to them.
+
+[`functional/test_weld:ok`](functional/test_weld/BUCK) is a planted tree
+([`fixture.bzl`](functional/test_weld/fixture.bzl): a computed `test_srcs`
+list holding an entry in a comment, a helper under `tests/`, a nested test, a
+test welded by a target of its own, a package with no `.mojo`) whose ledger
+holds it exactly, and each target of
+[`negative/test_weld`](negative/test_weld/BUCK) plants one defect in the same
+tree and must fail naming it; `shrink_computed` is a ledger row for a test
+welded only by the computed list. That tree's welds come from a stand-in rule;
+[`negative/test_weld/real`](negative/test_weld/real/BUCK) runs the lint over a
+real `mojo_library` (a computed `test_srcs` with an entry in a comment and an
+entry naming another package's file by label) and a real `mojo_test` (a
+second `srcs` beside its `main`): `real:ok` holds the three unwelded files in
+its ledger and must pass, `real:red` has no row and must name exactly those
+three. Neither is built: the lint only analyses them.
+
+A rule cannot query the targets of `//src/...` (a query attribute takes
+labels only), so building a `test_weld` target checks nothing: it declares the
+lint, and [`test_weld.bxl`](../lint/test_weld.bxl) checks it, running the
+check as a build action whose inputs are the list of `.mojo` paths, the list
+of welded paths and the ledger. The pull request's check runs it for each
+`test_weld` target of a unit it builds
+([`build_targets.sh`](../../../release/ci/build_targets.sh)); this test runs it
+for each target above.
+
+```sh
+./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld
+./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//functional/test_weld:ok
+./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//negative/test_weld:untested   # must fail: .../src/komira_b: 1 .mojo source(s) and no welded test
+```
+
+## 40. README API coverage
+
+A package's README examples are its smoke tests (test 38), so a public name
+no example uses is a public name nothing smoke-tests.
+[`readme_api_coverage`](../lint/readme_api_coverage.bzl) is a validation
+that counts, per package under `src/`, the public API its `__init__.mojo`
+exports (and the public methods of the structs among it) and which of it the
+README's examples use, reading each README through the tool the gate runs, so
+hidden lines count and prose does not. It writes the census (`[packages]`,
+`[symbols]`, `[report]`) and is report-only today; it fails on its ledger,
+[`tests/readme_api_exceptions.tsv`](../../../tests/readme_api_exceptions.tsv),
+when a row is malformed, repeated, or names a symbol that is not exported or
+that the README now uses (the ledger only shrinks). The rules and today's
+numbers are in [`docs/readme_api_coverage.md`](../../../docs/readme_api_coverage.md).
+[`functional/readme_api_coverage:ok`](functional/readme_api_coverage/BUCK)
+builds a planted tree ([`fixture.bzl`](functional/readme_api_coverage/fixture.bzl):
+an alias, a parenthesised and a backslash-continued import, a self-qualified
+import, a module export, declarations in `__init__.mojo`, overloads, a
+docstring `def`, a struct in `tests/`, a struct header over three lines, a
+same-named struct outside the imported module, a `write_to`, hidden lines, a
+name only in a comment, a string, an import line, a README declaration, a
+`text` fence or prose, a package with no README, one with no example, one
+the readme tool refuses, a `from .x import *`, one with no `__init__.mojo`)
+whose census must equal
+[`expect_packages.tsv`](functional/readme_api_coverage/expect_packages.tsv),
+[`expect_symbols.tsv`](functional/readme_api_coverage/expect_symbols.tsv)
+and [`expect_report.txt`](functional/readme_api_coverage/expect_report.txt)
+byte for byte; each target of
+[`negative/readme_api_coverage`](negative/readme_api_coverage/BUCK) plants one
+defect in the same tree and must fail naming it, `enforce = True` included.
+
+```sh
+./buck2 build //:readme_api_coverage tests//functional/readme_api_coverage:ok
+./buck2 build tests//negative/readme_api_coverage:stale_used   # must fail: komira_a bye: src/komira_a/README.md uses it now
+```
+
+## 41. Coverage builds
+
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`)
+add one -O0 binary with line tables per `test_srcs` entry and must leave
+every release action as it is. [`coverage_tests.sh`](coverage_tests.sh) runs
+these checks:
+
+| check | what it proves | the defect planted to see it go red |
+|---|---|---|
+| [`coverage_keys.sh`](functional/coverage_keys.sh) | over [`covlib`](functional/coverage/BUCK) and `//src/komira_retry`, read from `buck2 aquery` and `cquery` (analysis only) with the switch off and on: each target keeps its execution platform, and every release action keeps its command line, the actions that make its inputs (a README's gate join: its command line only, since aquery cannot traverse the README's dynamic actions) and its execution attributes (executor preference and configuration, cache upload, weight, dep files); with it off there is no coverage action; with it on every new action is one (`mojo_build_cov_test`, or an output under `cov/`), one build per test; with it unset (`-c komira.coverage=`, which clears a global value) every fact is the one of `=false`; on `darwin-arm64` with it on no target has the `coverage_debug` attribute (cquery). A README's build and run, which aquery cannot see, are compared by building `//src/komira_retry` with the switch off, then on, in one daemon: every action of it the second build runs (`buck2 log what-ran`) must have run in the first under the same digest (cache hits only). Not seen: an action's environment (aquery prints none; a planted `env` passes) and a hidden source-file input | the release test build given the debug link directory when coverage is on (command lines differ); the coverage binaries added to the gate join's inputs (inputs differ); `prefer_local` on the release test build when coverage is on (execution attributes differ; the test before them passed it); the switch's default `true` (unset differs from `=false`); the platform `select` giving every platform the link directory (the darwin cquery fails); the README's build at -O0 when coverage is on (its build and run run again under new digests) |
+| [`:aggregates`](functional/coverage/BUCK) | `covlib_forced[coverage]` and `[coverage][bin]` have exactly the binaries `[coverage][bin][<test>]` of its two tests as default outputs (checked at analysis) | either list missing its first binary |
+| [`:hermetic`](functional/coverage/BUCK) | each binary of `covlib_forced[coverage][bin]` has a `.debug_line` section and the string `value.mojo`, the library source both tests call, which only the compile's line tables put there (zig's C runtime has line tables of its own, and without `--debug-level` an -O0 binary still names the test's own file, its compile unit, but no library file), names its sources by relative directories, as the pinned Mojo writes them (whole strings `tests` and `buck-out/.../__covlib_forced__/<hash>/src/covlib`; Mojo records no compilation directory), holds a placeholder `/___...` (the compilation directory of zig's C runtime units, the only ones that record one, relocated), holds no placeholder followed by `/` and no whole string that is an absolute path other than the placeholder and the ELF interpreter (whatever the executor's directory layout), and has no compressed section (debug_relocate, which refuses one, runs over a copy) | the coverage compile without `--debug-level line-tables` (the binary still has `.debug_line` and its own file name, but not `value.mojo`); planted strings, `tests//negative/coverage:abs_relocated` (a relocated absolute Mojo path), `:abs_other` (an absolute path of another build directory) and `:no_reldir` (no `tests` directory), each fail with its message |
+| [`tests//negative/coverage:noop[coverage]`](negative/coverage/BUCK) | must fail with `contains this action's working directory`: a relocator that rewrites nothing and claims it did (`noop_relocate.zig`) gets past `cov_zig`, and mojo_wrapper.sh's exit 4 stops it, so the wrapper's check stays on for coverage builds | it is the planted defect |
+| [`:reproducible`](functional/coverage/BUCK) | `repro_a` and `repro_b` build one test (it imports only their common dependency) in two actions with different keys, so two sandboxes: the binaries have one sha256. No `--no-remote-cache` | `-Wl,--build-id=uuid` in cov_zig (the binaries differ) |
+| `-c komira.coverage=yes` | fails at load, naming the value | |
+
+The library fixtures in the tests cell may name their link directory
+(`coverage_debug`), which gives them coverage binaries whatever the switch
+says; that is how `:hermetic`, `:reproducible` and the negative build without
+`-c`.
+
+```sh
+tools/build/tests/functional/coverage_keys.sh
+./buck2 build tests//functional/coverage/...
+./buck2 build 'tests//negative/coverage:noop[coverage]'   # must fail: contains this action's working directory
+./buck2 build tests//negative/coverage:abs_relocated   # must fail: holds an absolute path under the working directory
+./buck2 build tests//negative/coverage:abs_other       # must fail: holds an absolute path (/var/build/...
+./buck2 build tests//negative/coverage:no_reldir       # must fail: no relative directory matching 'tests'
+./buck2 build tests//functional/coverage:covlib -c komira.coverage=yes   # must fail at load
+```
+
+## 42. Pointer lint
+
+[`pointer_lint`](../lint/defs.bzl) is a validation over every `.mojo` file of
+a tree that enforces the pointer rules of
+[`docs/design/mojo_safety_and_idioms.md`](../../../docs/design/mojo_safety_and_idioms.md):
+no wildcard origin outside an FFI module, no `unsafe_from_address=`, no
+partial move through a pointer, no `parallelize[`, no second declaration of
+libc `read` or `open`, and no public function of a library file taking or
+returning a pointer. Its reader is [`pointer_lint.awk`](../lint/pointer_lint.awk),
+its action [`lint.sh`](../lint/lint.sh) (kind `pointer_lint`), which holds
+the sites against two ledgers: the FFI modules
+([`tests/pointer_lint_ffi.tsv`](../../../tests/pointer_lint_ffi.tsv) for
+`//:pointer_lint`) and the holds, per rule and file at an exact count
+([`tests/pointer_lint_holds.tsv`](../../../tests/pointer_lint_holds.tsv)),
+which only shrink. [`functional/pointer_lint:ok`](functional/pointer_lint/BUCK)
+builds a planted tree ([`fixture.bzl`](functional/pointer_lint/fixture.bzl))
+whose `held.mojo` holds every rule's sites in each form a statement takes
+(one line, several lines, type parameters, the two-statement partial move, a
+dunder, a trait method, a return type), held at their exact counts, so a
+site the reader missed would fail the build; and whose `near.mojo` names
+every banned spelling where it is not a site (docstrings, comments, strings,
+longer identifiers, private and nested functions, whole-value moves, a
+rebound name). Each target of [`negative/pointer_lint`](negative/pointer_lint/BUCK)
+plants one site of a rule in the same tree, or one defect in a ledger (a
+malformed, repeated, unknown-rule, zero-count or reasonless row, a row for
+no file, a count above the sites, a row for an FFI module's origins, an FFI
+row with no `# FFI-BOUNDARY:` comment line or no wildcard origin), or empties
+the tree, and must fail naming it.
+
+```sh
+./buck2 build //:pointer_lint tests//functional/pointer_lint:ok
+./buck2 build tests//negative/pointer_lint:partial_move_two   # must fail: plant.mojo:4: partial_move
+```
 
 ## Diagnostics
 

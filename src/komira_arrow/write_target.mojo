@@ -5,16 +5,16 @@
 # `(path, format, compression)`. Three fields, one struct, and the two
 # enumerations they name.
 #
-# ★ WHY THIS IS IN `komira_core` AND NOT BESIDE THE SQL PARSER THAT USES IT.
+# ★ WHY THIS IS IN `komira_arrow` AND NOT BESIDE THE SQL PARSER THAT USES IT.
 # `WFMT_*` and `WCOMP_*` are not a SQL-frontend detail: `komira.plan.v1.WirePlanEnvelope`
 # carries a `write_target` field, and a code that crosses the wire is a WIRE
 # VOCABULARY. A wire-vocabulary completeness check derives its candidate
-# universe from the TRANSITIVE `komira_core` IMPORT CLOSURE of the plan wire
+# universe from the TRANSITIVE the core packages IMPORT CLOSURE of the plan wire
 # codec. The SQL frontend is not in that closure and never can be (the codec
 # sits BELOW the engine), so a write vocabulary declared there is one the
 # completeness check CANNOT SEE — structurally, not by oversight.
 #
-# `komira_sdk` imports `komira_core`, so declaring it here is legal and
+# `komira_sdk` imports the core packages, so declaring it here is legal and
 # declaring it above is not. The codec imports this file, which puts it in
 # that closure, which is what makes `WriteFormat` / `WriteCompression`
 # registrable wire spaces.
@@ -70,7 +70,7 @@ comptime WCOMP_LZ4: UInt8 = 4             # parquet: lz4_raw (id 7); csv/jsonl: 
 # independently relocated bases, and a link can bind such a pair CROSSED — a
 # query then dies with SIGSEGV. The binding is a property of the whole LINK, so
 # every returning ladder in a linked artifact is a ticket in the same lottery.
-# `komira_core` is reached by nearly every target, so the exposure is wide.
+# the core packages is reached by nearly every target, so the exposure is wide.
 def write_format_name(fmt: UInt8) -> StaticString:
     """Render a WFMT_* code as the word the SQL surface uses — for error text
     ONLY. Kept beside the codes so a new format cannot be added without a name."""

@@ -17,11 +17,11 @@ The network-free core:
 The real S3/GCS/Azure backends live in their own per-cloud packages.
 
 Per placement:
-  * The abstract `CredentialProvider` trait lives in `komira_core/traits/`
+  * The abstract `CredentialProvider` trait lives in the core packages
     (NOT in this package) — runtime-free, vendor-neutral, so it sits
     below the per-cloud `_core` packages that conform to it.
   * `ByteBuf` (= `ByteBuffer`) and `ByteBufMut` (= `ByteView[mut=True]`)
-    are existing `komira_core/collections/` types — consumed, not
+    are existing the core packages types — consumed, not
     redefined.
 """
 
@@ -94,6 +94,7 @@ from .cas_manifest import (
     head_key,
     lifecycle_name,
     log_start_key,
+    moved_tombstone_key,
     tombstone_key,
 )
 # The object-store READINESS predicate every object-store-backed managed app answers
@@ -123,7 +124,7 @@ from .coalesce import (
     plan_coalesce,
 )
 # The neutral, low-level shard-id + sub-lineage PATH KERNEL. It lives here,
-# low in the dependency graph, so the pgsql/pgstore index-sharding path can
+# low in the dependency graph, so the pgsql/table-store index-sharding path can
 # reuse it WITHOUT importing the search packages; the search metastore
 # re-exports it.
 from .sublineage_shard_keys import (

@@ -11,7 +11,7 @@
 # ── THE PROBLEM IT SOLVES ────────────────────────────────────────────────────
 # Five+ subsystems independently re-implement the same shape: accumulate small
 # writes in RAM, then periodically fold them into ONE object-store round-trip
-# (the broker's producer flush; pgstore's group-commit; the comms Tier-2 index
+# (the broker's producer flush; the table store's group-commit; the comms Tier-2 index
 # delta-log; mail flags; calendar sync). Each open-codes a buffer + a
 # size/linger/count flush policy + a read-HEAD -> encode -> append -> 412-retry
 # loop. This primitive factors that shape ONCE, behind a typed trait surface, so
@@ -31,7 +31,7 @@
 #                      RamAccumulator over a Slab[Item]).
 #   5. BatchAppender — the PARKABLE, MODE-CORRECT durable write (the write half
 #                      of the commit loop). The consumer's conformer chooses the
-#                      MODE: EXACT-SLOT create-CAS at auth_head+1 (pgstore OCC —
+#                      MODE: EXACT-SLOT create-CAS at auth_head+1 (table-store OCC —
 #                      a 412 surfaces a real lost-slot the spine's 412-loop
 #                      handles), ESCALATING append (broker at-least-once —
 #                      escalation past auth_head+1 is OK), or IDEMPOTENT append
@@ -43,7 +43,7 @@
 # Wiring the write to `MetadataStore.append` (= CasManifestStore's
 # `_append_inner`), a BLOCKING, internally-412-retrying, ESCALATING-past-
 # auth_head+1 verb, is WRONG on four counts:
-#   (1) it STRUCTURALLY BLOCKS pgstore group-commit, which needs an EXACT-slot
+#   (1) it STRUCTURALLY BLOCKS table-store group-commit, which needs an EXACT-slot
 #       create-CAS at auth_head+1 (an escalated slot is a silent lost-update);
 #   (2) it CANNOT express broker-EOS append_idempotent (not on MetadataStore);
 #   (3) it makes the spine's OUTER 412-loop DEAD CODE (the inner verb retries
@@ -52,7 +52,7 @@
 #       a burst-stall, the very thing AsyncReassignOp / AsyncManifestAppendOp
 #       were built to avoid).
 # The BatchAppender seam fixes all four: the consumer's conformer drives the
-# MODE-correct parkable write (exact-slot AsyncManifestAppendOp for pgstore,
+# MODE-correct parkable write (exact-slot AsyncManifestAppendOp for the table store,
 # an escalating/idempotent op for the broker), so the write PARKS, the 412-loop
 # is LIVE (the exact-slot create-CAS surfaces a real 412 the spine re-reads +
 # re-encodes against), and each consumer gets its correct durability semantics.
@@ -117,7 +117,7 @@
 
 from std.memory import OwnedPointer
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.reactor import Reactor
@@ -391,7 +391,7 @@ trait AuthHeadReader(Movable, Deinitable):
 #
 # ARBITRATION FOLDED INTO ENCODE: the dominant 5-of-6 consumers ship the
 # IDENTITY arbitration — every item is a winner, loser_outcomes is empty, zero
-# extra alloc. The 6th (pgstore OCC) folds first-committer-wins arbitration into
+# extra alloc. The 6th (table-store OCC) folds first-committer-wins arbitration into
 # encode (losers get their conflict Outcome there). The spine NEVER arbitrates —
 # it just routes winner_idxs / loser_outcomes back out via take_outcomes.
 
@@ -656,7 +656,7 @@ struct RamAccumulator[Item_: Movable & Deinitable](
 # typed CasOpProgress (park) + the AppendOutcome (WON / LOST_SLOT / ERR).
 #
 # THE THREE MODES (consumer-selected by which conformer plugs in):
-#   * EXACT-SLOT create-CAS at auth_head+1 (pgstore group-commit / OCC). The
+#   * EXACT-SLOT create-CAS at auth_head+1 (table-store group-commit / OCC). The
 #     conformer create-CASes at EXACTLY `slot` (= auth_head+1; the
 #     AsyncManifestAppendOp shape). A 412 is a REAL lost slot, returned as
 #     LOST_SLOT — the spine's 412-loop re-reads the authoritative head +
@@ -1439,7 +1439,7 @@ struct CoalescingWindow[
         already in flight. Returns the biased op_id the started flush parks on.
 
         COMMITTED SINGLETON FAST-PATH: reason==EXPLICIT with exactly one buffered
-        item is the broker / pgstore single-record commit hot path; the drain is
+        item is the broker / table-store single-record commit hot path; the drain is
         an O(1) whole-Slab move (no per-item realloc), so a 1-item EXPLICIT flush
         compiles to ~ a direct flush (no policy re-eval, no List realloc)."""
         if self._buf.pending_count() == 0 or self._inflight:
@@ -1555,9 +1555,9 @@ struct CoalescingWindow[
 
 
 # =============================================================================
-# multi_snapshot_occ_check — the pgstore group-commit OCC helper.
+# multi_snapshot_occ_check — the table-store group-commit OCC helper.
 # =============================================================================
-# For pgstore group-commit OCC. Given a list of (member_idx,
+# For table-store group-commit OCC. Given a list of (member_idx,
 # snapshot_seq) pairs and the authoritative HEAD seq, returns the member_idxs
 # whose snapshot is STALE (snapshot_seq < auth_seq) — the OCC conflicts. The
 # encode-side arbitration uses this to split winners (fresh snapshot) from losers

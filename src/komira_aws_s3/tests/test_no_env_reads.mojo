@@ -33,7 +33,7 @@ def test_no_environment_read() raises:
         "EnvSource",
         "ProcessEnv",
         "aws_endpoint_config",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
         # Not a read: komira_aws_core's endpoint path for a client with no
         # ruleset (an override, else https://<host>), whose override a
@@ -68,7 +68,7 @@ def test_the_scan_saw_the_client() raises:
     assert_equal(_count(text, "#   mode         : client"), 1)
     # The client sends where the ruleset resolves each call, over the
     # configuration it was given.
-    assert_equal(_count(text, "\nstruct S3S3Client["), 1)
+    assert_equal(_count(text, "\nstruct S3Client["), 1)
     assert_equal(
         _count(
             text,

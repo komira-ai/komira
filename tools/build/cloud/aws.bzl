@@ -8,7 +8,7 @@
         model_sha256 = botocore_model("logs").sha256,
         operations = ["GetLogEvents"],
         mode = "pure",                  # or "client"
-        customizations = [],            # optional; "s3" for S3's model only
+        customizations = [],            # optional; "s3" or "route53", each for its own service
         # optional; set both or neither
         endpoint_rules = botocore_model("logs").endpoint_rules,
         partitions = botocore_model("logs").partitions,
@@ -75,13 +75,19 @@ botocore's S3 handling the model does not state (a 200 whose body is an
 with `endpoint_rules`, a request path's leading `/{Bucket}` is dropped,
 because the ruleset puts the bucket in the URL), and the generator refuses
 it unless the model's serviceId is `S3` and its protocol is restXml.
+`route53` applies botocore's Route 53 Id handling (each top-level input
+member of shape ResourceId, DelegationSetId or ChangeId is sent as the part
+after its last `/`, so an Id Route 53 answered with can be passed back), and
+the generator refuses it unless the model's serviceId is `Route 53` and its
+protocol is restXml.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
 generated code imports its runtime (komira_aws_core; komira_json for a JSON
-protocol, komira_xml for restXml; and in client mode komira_http_core,
-komira_http_client and komira_retry), which the caller names as `komira//`
-labels, or as stubs in a test. They are the library's `deps`, so they take
-what `mojo_library.deps` takes; `<name>_gen` sees only their count.
+protocol, komira_xml for restXml, awsQuery and ec2Query; and in client mode
+komira_http_core, komira_http_client and komira_retry), which the caller
+names as `komira//` labels, or as stubs in a test. They are the library's
+`deps`, so they take what `mojo_library.deps` takes; `<name>_gen` sees only
+their count.
 
 Every refusal of the rule happens at analysis, in `<name>_gen`, so a BUCK
 file with one wrong mojo_aws_client still loads.
@@ -158,7 +164,7 @@ def _aws_client_gen_impl(ctx):
             fail("{}: `operations` names `{}` twice".format(ctx.label, op))
         seen[op] = True
     if ctx.attrs.runtime_dep_count == 0:
-        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core; komira_json for a JSON protocol, komira_xml for restXml; and in client mode komira_http_core, komira_http_client and komira_retry); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
+        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core; komira_json for a JSON protocol, komira_xml for restXml, awsQuery and ec2Query; and in client mode komira_http_core, komira_http_client and komira_retry); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if ctx.attrs.overrides and not ctx.attrs.hand_srcs:
         fail("{}: `overrides` is set and `hand_srcs` is empty: the manifest names hand-written owners, and they are its `hand_srcs`".format(ctx.label))
     if ctx.attrs.hand_srcs and not ctx.attrs.overrides:
@@ -230,7 +236,7 @@ def _aws_client_gen_impl(ctx):
 _aws_client_gen = rule(
     impl = _aws_client_gen_impl,
     attrs = {
-        "customizations": attrs.list(attrs.enum(["s3"]), default = []),
+        "customizations": attrs.list(attrs.enum(["route53", "s3"]), default = []),
         "endpoint_rules": attrs.option(attrs.source(), default = None),
         "hand_src_paths": attrs.list(attrs.string(), default = []),
         "hand_srcs": attrs.list(attrs.source(), default = []),

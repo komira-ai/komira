@@ -29,11 +29,11 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema, SchemaBuilder, Field
 
 from komira_broker.broker_core import (
     BrokerCore,
@@ -375,7 +375,7 @@ def test_retention_pass_and_consume() raises:
 
     # Reap (grace=0 so all tombstoned chunks reap now).
     var reaped = broker.reap_partition(Int64(10000), Int64(0))
-    assert_equal(reaped, Int64(3), "3 chunks reaped")
+    assert_equal(reaped.reaped_count, Int64(3), "3 chunks reaped")
 
     # CONSUME from 0 → survivors are chunks 3,4 with CORRECT absolute offsets
     # 30..49 (NOT renumbered to 0..19). read_from(0) serves the surviving range.
@@ -475,8 +475,11 @@ def test_reap_grace_and_failloud() raises:
     _ = broker^
 
     var m = _make_manifest(store, cluster, topic, pid)
-    # Tombstone chunk 0 at ts=1000.
+    # Tombstone chunk 0 at ts=1000, then retire it (log start -> chunk 1) the
+    # way RetentionPass does: the reaper deletes only below the log start.
     m.schedule_for_delete_at(Int64(0), Int64(1000))
+    var ls0 = m.read_log_start()
+    _ = m.advance_log_start(Int64(1), Int64(10), ls0.etag)
 
     # PRE-grace reap (grace=60000, now=2000 → age=1000 < 60000) → no-op.
     # The worker also deletes the .seg object, so it takes a segment store
@@ -484,18 +487,18 @@ def test_reap_grace_and_failloud() raises:
     var seg_store = store.clone()
     var w = ReapWorker[_Store](Int64(60000))
     var pre = w.run(seg_store, m, Int64(2000))
-    assert_equal(pre, Int64(0), "pre-grace reap is a no-op")
+    assert_equal(pre.reaped_count, Int64(0), "pre-grace reap is a no-op")
     # The chunk is still readable.
     var still = m.read_chunk(Int64(0))
     assert_true(len(still) > 0, "chunk survives within grace")
 
     # POST-grace reap (now=61001 → age=60001 >= 60000) → deletes.
     var post = w.run(seg_store, m, Int64(61001))
-    assert_equal(post, Int64(1), "post-grace reap deletes")
+    assert_equal(post.reaped_count, Int64(1), "post-grace reap deletes")
 
     # Idempotent: re-run reaps nothing (tombstone consumed).
     var again = w.run(seg_store, m, Int64(61002))
-    assert_equal(again, Int64(0), "reap is idempotent")
+    assert_equal(again.reaped_count, Int64(0), "reap is idempotent")
 
     # fail-loud: reaping a non-tombstoned chunk raises (tombstone-first).
     var raised = False
@@ -569,7 +572,7 @@ def test_retire_all_nonactive_chunks() raises:
         res.new_log_start_offset, Int64(20), "new log_start_offset = 20 (active)"
     )
     var reaped = broker.reap_partition(Int64(10000), Int64(0))
-    assert_equal(reaped, Int64(2), "both retired chunks reaped")
+    assert_equal(reaped.reaped_count, Int64(2), "both retired chunks reaped")
 
     var consumer = _make_consume(store, cluster, topic, pid)
     var checked = consumer.read_from_checked(Int64(0))

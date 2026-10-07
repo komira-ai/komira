@@ -222,6 +222,7 @@ def _stream_body_and_assert_flat_rss(
     var stream = LazyByteStream.with_total(body_size)
     var body = RecvRingBody[LazyByteStream].new_content_length(
         stream^, cl_total=Int(body_size), pre_body_bytes=List[UInt8](),
+        max_body_bytes=100 * 1024 * 1024,
     )
     body.set_scratch_size(scratch_size)
     body.set_max_body_bytes(Int(body_size) + 1024)

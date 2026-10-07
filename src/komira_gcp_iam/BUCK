@@ -1,0 +1,142 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# IAM v1: a REST/JSON client generated at build time from the googleapis
+# protos //tools/vendor/googleapis:iam_admin_v1 extracts from its pinned
+# archive (nothing of them is copied here). `IAMClient` sends through
+# komira_http_client's `HttpClient` over the komira_http_core `Connector` it
+# is given, takes each request's bearer token from a komira_gcp_core
+# `GcpTokenSource`, and raises a non-2xx answer through komira_gcp_core's
+# `gcp_status_error`. It reads no environment.
+#
+# `methods` is what komira's deploy side and its validators call, each for:
+#
+#   ListServiceAccounts   a teardown check lists a project's accounts, to
+#                         find any a deployment left behind
+#   GetServiceAccount     the service-account resource reads an account
+#                         before creating it; a readback checks it exists
+#   CreateServiceAccount  the service-account resource creates the account
+#                         a workload runs as
+#   DeleteServiceAccount  the service-account resource and the reaper
+#                         delete one
+#   GetIamPolicy          the IAM-binding resource reads a service account's
+#                         policy (who may act as it or mint its tokens)
+#   SetIamPolicy          and writes it back changed
+#   GetRole               the custom-role resource reads a role, to compare
+#                         its permissions with the declared ones
+#   CreateRole            it creates the role
+#   UpdateRole            it replaces the role's permissions
+#   DeleteRole            it deletes the role
+#
+# Not generated, so not reachable through this package: the service-account
+# keys (List, Get, Create, Upload, Delete, Disable and
+# EnableServiceAccountKey; a deployed workload authenticates with no key),
+# SignBlob and SignJwt (deprecated in favour of IAM Credentials), Update,
+# Patch, Enable, Disable and UndeleteServiceAccount, ListRoles, UndeleteRole,
+# QueryGrantableRoles, QueryTestablePermissions, QueryAuditableServices,
+# LintPolicy and TestIamPermissions. A method joins the list with its own
+# rows in the tests below.
+#
+# IAM Credentials (iamcredentials.googleapis.com) has no client here. Its
+# callers mint credentials: komira_gcp_core's token sources call
+# generateAccessToken through the core's own codecs (the core is beneath
+# every generated client, so it cannot use one), and the workload identity
+# federation library calls signJwt. An identity-token source
+# (generateIdToken) belongs with them in komira_gcp_core. No other caller
+# uses IAM Credentials.
+#
+# The role methods have more than one binding in iam.proto. GetRole has
+# three: a predefined role `roles/<id>`, `organizations/<org>/roles/<id>` and
+# `projects/<project>/roles/<id>`. CreateRole, UpdateRole and DeleteRole have
+# two, the organization one first and the project one second, and none for a
+# predefined role, which cannot be created, changed or deleted. The client
+# sends to the first binding whose path variables the request's values match
+# and refuses a name matching none before anything is sent.
+#
+# GetIamPolicy's binding has no body, so its `GetPolicyOptions` (the policy
+# version asked for) rides the query as `options.requestedPolicyVersion`.
+# A method whose body is the whole request (`body: "*"`) sends every field
+# but those its path carries, as google/api/http.proto defines that body:
+# SetIamPolicy's `resource`, CreateRole's `parent` and
+# CreateServiceAccount's `name` are in the URL only.
+#
+# A policy change is a read-modify-write: the caller reads the policy with
+# GetIamPolicy, changes the bindings and sends it back with SetIamPolicy
+# carrying the etag it read. The client passes the etag through untouched
+# (decoded from base64 on the read, encoded back on the write), so the write
+# is conditional: a policy changed since the read is refused with 409
+# ABORTED, which the caller answers by reading again. The client invents no
+# etag, and a policy sent with none is written unconditionally.
+#
+# `bundle_only` is the files the methods reach, each generated into this
+# package: iam (the service, accounts and roles), iam_policy (the policy
+# requests), options (GetPolicyOptions), policy (Policy, Binding,
+# AuditConfig) and expr (a binding's condition).
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the IAM v1 REST reference (no upstream test body is copied), each
+# sending through the generated client over komira_http_core's
+# ScriptedConnector (no socket, no DNS): test_iam_default_host (a fresh
+# client starts at iam.googleapis.com; `set_rest_host` replaces it, and the
+# replacement is what is dialled and named in the Host header),
+# test_iam_service_accounts (the request line, headers and body of each
+# account method, the answers read back, a name outside the binding refused
+# before the dial), test_iam_roles (each binding chosen by the name, a name
+# matching none refused before the dial, the create body, an update with
+# and without a mask, a delete with and without an etag),
+# test_iam_policy (the version asked for in the query, a policy with a
+# conditional binding read, the read-modify-write sending the etag it read
+# byte for byte), test_iam_errors (the google.rpc.Status envelope mapped to
+# its code, a stale etag's ABORTED among them, the body never quoted) and
+# test_no_env_reads (every generated module reads no environment and holds
+# no method but those listed).
+#
+# No test here talks to the service.
+
+mojo_gcp_client(
+    name = "komira_gcp_iam",
+    bundle_only = [
+        "google/iam/admin/v1/iam.proto",
+        "google/iam/v1/iam_policy.proto",
+        "google/iam/v1/options.proto",
+        "google/iam/v1/policy.proto",
+        "google/type/expr.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = [
+        "IAM.ListServiceAccounts",
+        "IAM.GetServiceAccount",
+        "IAM.CreateServiceAccount",
+        "IAM.DeleteServiceAccount",
+        "IAM.GetIamPolicy",
+        "IAM.SetIamPolicy",
+        "IAM.GetRole",
+        "IAM.CreateRole",
+        "IAM.UpdateRole",
+        "IAM.DeleteRole",
+    ],
+    proto_deps = ["//tools/vendor/googleapis:iam_admin_v1"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_iam_gen"},
+    },
+    test_srcs = [
+        "tests/test_iam_default_host.mojo",
+        "tests/test_iam_errors.mojo",
+        "tests/test_iam_policy.mojo",
+        "tests/test_iam_roles.mojo",
+        "tests/test_iam_service_accounts.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        # base64_encode, for DeleteRole's `etag` query parameter.
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)

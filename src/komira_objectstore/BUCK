@@ -1,3 +1,4 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The vendor-neutral object-storage layer: the Path / URI types, the
@@ -6,20 +7,39 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # engine, the in-memory / local-filesystem conformers, the coalescing and
 # compaction windows, the sub-lineage shard kernel and the presigned-URL
 # signing seam. (The distributed shuffle lives in `komira_shuffle`, which depends
-# on this package.) It depends on komira_core, komira_async
+# on this package.) It depends on the core packages, komira_async
 # (the reactor and its C shim, which also carries the CAS-manifest gate lock),
 # komira_atomic_alias and komira_metrics (the escalation metrics sink).
 # komira_runtime_paths is declared because several tests take their scratch
 # directory from `test_tmpdir()`.
 
+# The errno-surfacing file primitives behind LocalFsConditionalStore's reads
+# (`local_fs_file_read.mojo`), delete and create-if-absent (temp write +
+# link(2)): errno is read in C right after the failing call, and the errno
+# constants and names stay out of Mojo.
+staged_files(
+    name = "objectstore_shim_files",
+    srcs = ["_objectstore_shim.c"],
+)
+
+cxx_library(
+    name = "komira_objectstore_posix",
+    srcs = [":objectstore_shim_files[_objectstore_shim.c]"],
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
+    visibility = ["PUBLIC"],
+)
+
 mojo_library(
     name = "komira_objectstore",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        ":komira_objectstore_posix",
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_core:komira_core",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_fs:komira_fs_posix",
+        "//src/komira_libc:komira_libc",
         "//src/komira_metrics:komira_metrics",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
@@ -29,12 +49,20 @@ mojo_library(
         "tests/test_cas_manifest_property.mojo",
         "tests/test_cas_recovery_log_start_aware_offline.mojo",
         "tests/test_cas_stale_head_forward_progress_offline.mojo",
+        "tests/test_chunk_reclaim_guard_offline.mojo",
         "tests/test_coalesce.mojo",
         "tests/test_coalescing_window.mojo",
         "tests/test_compact_window.mojo",
         "tests/test_delimiter_listing_byte_faithful.mojo",
         "tests/test_local_fs_conditional_store.mojo",
+        "tests/test_local_fs_read_errno.mojo",
+        "tests/test_local_fs_store_create_write_failure.mojo",
+        "tests/test_local_fs_store_delete_errno.mojo",
         "tests/test_local_fs_store_list_bytes_non_ascii.mojo",
+        "tests/test_local_fs_store_list_dir_errno.mojo",
+        "tests/test_manifest_reaped_slot_async_offline.mojo",
+        "tests/test_manifest_reaped_slot_guard_offline.mojo",
+        "tests/test_moved_tombstone_offline.mojo",
         "tests/test_objectstore_bytes_non_ascii.mojo",
         "tests/test_path_uri.mojo",
         "tests/test_sharded_lineage_kernel.mojo",

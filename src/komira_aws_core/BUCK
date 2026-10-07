@@ -80,6 +80,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the connector-factory entry point; and one dial to a closed loopback
 # port through the kernel connector, so the classifier reads the text the
 # production dial raises.
+# test_idempotency_token checks the token a generated client fills an
+# unset idempotencyToken member with: a version 4 UUID as Python's
+# str(uuid.uuid4()) writes it, fresh on each call.
 # test_s3_endpoint_rules runs every case of botocore's S3 endpoint tests
 # through the ruleset interpreter (endpoint_rules.mojo) over S3's published
 # ruleset, and requires each to pass. test_env_source_only scans the
@@ -138,13 +141,13 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_encoding:komira_encoding",
         "//src/komira_fork_join:komira_fork_join",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
         "//src/komira_retry:komira_retry",
         "//src/komira_sync:komira_sync",
         "//src/komira_xml:komira_xml",
@@ -152,12 +155,14 @@ mojo_library(
     test_srcs = [
         "tests/test_aws_codec.mojo",
         "tests/test_aws_json.mojo",
+        "tests/test_aws_query.mojo",
         "tests/test_aws_response.mojo",
         "tests/test_aws_rest_headers.mojo",
         "tests/test_aws_rest_uri.mojo",
         "tests/test_aws_rest_xml_errors.mojo",
         "tests/test_aws_retry.mojo",
         "tests/test_aws_send.mojo",
+        "tests/test_aws_send_unsigned.mojo",
         "tests/test_aws_text.mojo",
         "tests/test_aws_xml_codec.mojo",
         "tests/test_credential_chain.mojo",
@@ -168,6 +173,7 @@ mojo_library(
         "tests/test_endpoint_signing.mojo",
         "tests/test_http_credential_transport.mojo",
         "tests/test_env_source_only.mojo",
+        "tests/test_idempotency_token.mojo",
         "tests/test_s3_endpoint_rules.mojo",
         "tests/test_s3_wire.mojo",
         "tests/test_shared_config.mojo",

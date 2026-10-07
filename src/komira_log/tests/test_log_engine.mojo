@@ -83,9 +83,9 @@ def _build_dict() raises -> SiteDictionary:
     d.register["scanned {} rows, {} bytes", "komira_engine"]()
     d.register["opened file {}", "komira_parquet"]()
     d.register["ratio {} over baseline {}", "komira_bench"]()
-    d.register["no args here", "komira_core"]()
+    d.register["no args here", "komira_arrow"]()
     d.register["t={} name={} f={}", "komira_engine"]()
-    d.register["retry {}", "komira_agent"]()
+    d.register["retry {}", "komira_job_supervisor"]()
     return d^
 
 
@@ -108,14 +108,14 @@ def test_core_round_trip() raises:
     _ = emit_record["ratio {} over baseline {}", "komira_bench"](
         ring, LEVEL_INFO, UInt64(0), ArgF64(0.988), ArgF64(1.0)
     )
-    _ = emit_record["no args here", "komira_core"](
+    _ = emit_record["no args here", "komira_arrow"](
         ring, LEVEL_WARN, UInt64(0)
     )
     _ = emit_record["t={} name={} f={}", "komira_engine"](
         ring, LEVEL_INFO, UInt64(0), ArgI64(7), ArgStr(String("q1")), ArgF64(3.5)
     )
     # A site with a trailing key=value Field.
-    _ = emit_record["retry {}", "komira_agent"](
+    _ = emit_record["retry {}", "komira_job_supervisor"](
         ring, LEVEL_ERROR, UInt64(0), ArgI64(3), Field("fatal", ArgBool(False))
     )
 
@@ -140,14 +140,14 @@ def test_core_round_trip() raises:
         _suffix(lines[3]),
         String("INFO [komira_bench] ratio 0.988 over baseline 1.0"),
     )
-    assert_equal(_suffix(lines[4]), String("WARN [komira_core] no args here"))
+    assert_equal(_suffix(lines[4]), String("WARN [komira_arrow] no args here"))
     assert_equal(
         _suffix(lines[5]),
         String("INFO [komira_engine] t=7 name=q1 f=3.5"),
     )
     assert_equal(
         _suffix(lines[6]),
-        String("ERROR [komira_agent] retry 3 fatal=false"),
+        String("ERROR [komira_job_supervisor] retry 3 fatal=false"),
     )
 
 
@@ -159,9 +159,9 @@ def test_per_core_isolation() raises:
     var ring1 = LogRecordRing(capacity=16, overflow_policy=OVERFLOW_BLOCK)
 
     # Producer 0 → ring0; producer 1 → ring1.
-    _ = emit_record["retry {}", "komira_agent"](ring0, LEVEL_INFO, UInt64(0), ArgI64(100))
-    _ = emit_record["retry {}", "komira_agent"](ring0, LEVEL_INFO, UInt64(0), ArgI64(101))
-    _ = emit_record["retry {}", "komira_agent"](ring1, LEVEL_INFO, UInt64(0), ArgI64(900))
+    _ = emit_record["retry {}", "komira_job_supervisor"](ring0, LEVEL_INFO, UInt64(0), ArgI64(100))
+    _ = emit_record["retry {}", "komira_job_supervisor"](ring0, LEVEL_INFO, UInt64(0), ArgI64(101))
+    _ = emit_record["retry {}", "komira_job_supervisor"](ring1, LEVEL_INFO, UInt64(0), ArgI64(900))
 
     var l0 = drain_to_lines(ring0, dict, anchor)
     var l1 = drain_to_lines(ring1, dict, anchor)
@@ -181,12 +181,12 @@ def test_backpressure_drop() raises:
     """A DROP-policy ring at capacity drops + counts; never blocks."""
     var ring = LogRecordRing(capacity=4, overflow_policy=OVERFLOW_DROP)
     # capacity rounds up to 4; push 4 OK then 2 dropped.
-    var ok0 = emit_record["retry {}", "komira_agent"](ring, LEVEL_INFO, UInt64(0), ArgI64(0))
-    var ok1 = emit_record["retry {}", "komira_agent"](ring, LEVEL_INFO, UInt64(0), ArgI64(1))
-    var ok2 = emit_record["retry {}", "komira_agent"](ring, LEVEL_INFO, UInt64(0), ArgI64(2))
-    var ok3 = emit_record["retry {}", "komira_agent"](ring, LEVEL_INFO, UInt64(0), ArgI64(3))
-    var ok4 = emit_record["retry {}", "komira_agent"](ring, LEVEL_INFO, UInt64(0), ArgI64(4))
-    var ok5 = emit_record["retry {}", "komira_agent"](ring, LEVEL_INFO, UInt64(0), ArgI64(5))
+    var ok0 = emit_record["retry {}", "komira_job_supervisor"](ring, LEVEL_INFO, UInt64(0), ArgI64(0))
+    var ok1 = emit_record["retry {}", "komira_job_supervisor"](ring, LEVEL_INFO, UInt64(0), ArgI64(1))
+    var ok2 = emit_record["retry {}", "komira_job_supervisor"](ring, LEVEL_INFO, UInt64(0), ArgI64(2))
+    var ok3 = emit_record["retry {}", "komira_job_supervisor"](ring, LEVEL_INFO, UInt64(0), ArgI64(3))
+    var ok4 = emit_record["retry {}", "komira_job_supervisor"](ring, LEVEL_INFO, UInt64(0), ArgI64(4))
+    var ok5 = emit_record["retry {}", "komira_job_supervisor"](ring, LEVEL_INFO, UInt64(0), ArgI64(5))
 
     assert_true(ok0)
     assert_true(ok1)
@@ -202,7 +202,7 @@ def test_backpressure_block_no_drop() raises:
     """A BLOCK-policy ring with room never reports a drop."""
     var ring = LogRecordRing(capacity=8, overflow_policy=OVERFLOW_BLOCK)
     for i in range(8):
-        var ok = emit_record["retry {}", "komira_agent"](
+        var ok = emit_record["retry {}", "komira_job_supervisor"](
             ring, LEVEL_INFO, UInt64(0), ArgI64(Int64(i))
         )
         assert_true(ok)
@@ -288,13 +288,13 @@ def test_microbench_emit() raises:
     var N = 100000
     # Warm.
     for i in range(1000):
-        _ = emit_record["retry {}", "komira_agent"](
+        _ = emit_record["retry {}", "komira_job_supervisor"](
             ring, LEVEL_INFO, UInt64(0), ArgI64(Int64(i))
         )
         _ = ring.try_pop()
     var t0 = perf_counter_ns()
     for i in range(N):
-        _ = emit_record["retry {}", "komira_agent"](
+        _ = emit_record["retry {}", "komira_job_supervisor"](
             ring, LEVEL_INFO, UInt64(0), ArgI64(Int64(i))
         )
         _ = ring.try_pop()  # keep the ring from filling under DROP

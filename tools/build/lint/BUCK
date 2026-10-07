@@ -6,6 +6,15 @@ load(":defs.bzl", "shell_lint", "tar_member")
 
 export_file(name = "lint.sh", visibility = ["PUBLIC"])
 
+export_file(name = "retired_names.sh", visibility = ["PUBLIC"])
+
+export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
+
+export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
+
+# The reader of lint kind pointer_lint (lint.sh; the rule is pointer_lint in defs.bzl).
+export_file(name = "pointer_lint.awk", visibility = ["PUBLIC"])
+
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
 tar_member(
@@ -24,9 +33,9 @@ tar_member(
     visibility = ["PUBLIC"],
 )
 
-# The lint action's own script.
+# The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["lint.sh"],
+    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
 )

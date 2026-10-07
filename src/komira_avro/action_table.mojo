@@ -10,7 +10,7 @@
 #
 # Architecture:
 #   - `FieldAction` is a runtime tagged-union (explicit Int8 tag + Optional
-#     payload-per-arm), matching `komira_core`'s logical-plan
+#     payload-per-arm), matching the core packages' logical-plan
 #     tagged-union precedent. NO byte-erased fn-ptr dispatch (no
 #     trampolines). Identity resolution emits only the `ReadField` arm; full
 #     resolution adds the 6 resolution arms (SynthesizeDefault / ReadAndPromote /
@@ -28,21 +28,21 @@
 
 from std.sys import size_of
 
-from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.binary_array import BinaryArray
-from komira_core.arrow.bitmap import Bitmap, bytes_for_bits
-from komira_core.io.heap_region import HeapRegion
-from komira_core.simd.validity_pack import pack_validity_from_null_flags
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.column import Column
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.schema import Schema, SchemaBuilder, Field
-from komira_core.collections.slab import Slab
+from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.binary_array import BinaryArray
+from komira_arrow.bitmap import Bitmap, bytes_for_bits
+from komira_buffer.heap_region import HeapRegion
+from komira_simd.validity_pack import pack_validity_from_null_flags
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.column import Column
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.schema import Schema, SchemaBuilder, Field
+from komira_collections.slab import Slab
 
 from .avro_schema import (
     AvroSchema,
@@ -82,6 +82,7 @@ from .avro_schema import (
 # twice (overflow-safe length guards, a validated cursor constructor) and
 # stays hardened only by memory — for a path that is slower.
 from .varint_decode_scalar import AvroByteReader
+from .json_string import utf8_to_string
 # The arrow.* override-aware Avro->Arrow mapper. The identity read path
 # consults the override table (BEFORE the standard mapping) so a column the
 # writer stamped with an arrow.* annotation (e.g. arrow.date64 over `long`)
@@ -969,7 +970,7 @@ struct _StringAcc(Copyable, Movable):
         self._null_count += 1
 
     def build(var self) raises -> Column[HeapRegion]:
-        from komira_core.arrow.string_array import StringArray
+        from komira_arrow.string_array import StringArray
 
         comptime int32_size = size_of[Int32]()
         var num_strings = len(self.offsets) - 1
@@ -1144,7 +1145,7 @@ def _null_count(nulls: List[Bool]) -> Int:
 def _bitmap_from_nulls(nulls: List[Bool]) raises -> Optional[Bitmap[HeapRegion]]:
     """Return a validity Bitmap iff any row is null; else None (all-valid).
 
-    Packs with the shared `komira_core.simd.validity_pack` movemask packer
+    Packs with the shared `komira_simd.validity_pack` movemask packer
     (16 rows/iteration, an order of magnitude faster than a bit-by-bit
     `create_all_valid + per-null clear` scalar pack). Output is bit-for-bit
     identical to the scalar pack. Cold on all-present columns (this
@@ -1820,11 +1821,13 @@ struct ActionTableInterpreter(Movable):
                 b.append(sb[i])
             self.accs[oi].push_binary(b^)
         elif promo == PROMOTE_BYTES_TO_STRING:
-            # bytes → string: read raw bytes, reinterpret as a UTF-8/Latin-1 str.
-            var raw = reader.read_bytes()
-            var s = String("")
-            for i in range(len(raw)):
-                s += String(chr(Int(raw[i])))
+            # bytes → string: the Avro spec reads the writer's bytes as UTF-8.
+            # They are copied byte-exact and must be well-formed; widening
+            # each byte through chr() turned C3 BC into "Ã¼".
+            var raw = reader.read_bytes_span()
+            var s = utf8_to_string(
+                raw, "AvroDecodeError.MALFORMED: bytes value promoted to string"
+            )
             self.accs[oi].push_string(s^)
         else:
             raise Error(

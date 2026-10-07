@@ -14,7 +14,7 @@
 #                site key). P1 substitutes args into it synchronously; P2
 #                binary-encodes `[site-id, ts, args]` against the same literal.
 #   - `module` : a comptime `StringLiteral` module/target tag (e.g.
-#                "komira_agent") for per-module `EnvFilter` filtering. Defaults
+#                "komira_job_supervisor") for per-module `EnvFilter` filtering. Defaults
 #                to "komira" so a tagless call still works.
 #   - `*args`  : a variadic `*LogArg` pack — typed structured fields. Positional
 #                args fill `fmt`'s `{}`; trailing `Field("k", v)` args render
@@ -167,7 +167,7 @@ def _write_rendered(
     # here means the engine was resolved by the caller and cannot have vanished,
     # so the branch is unreachable in practice and silent rather than fatal.
     var eng = LogManager._resolve()
-    # MOJO-1.0.0: `Bool(ptr)` is gone (Pointer is non-null by design). `Int(p) != 0` is exactly what b2's `UnsafePointer.__bool__` computed.
+    # A null address (`Int(p) == 0`) means nothing is installed.
     if Int(eng) == 0:
         return
     if sink == _SINK_ESCALATE:
@@ -208,8 +208,7 @@ def _emit[
     # The call shape, the gate, and the args are IDENTICAL on both paths — only
     # which backend the admitted record reaches differs. The binary path is
     # inlined here (NOT a separate fn) so the comptime `*args` pack stays in
-    # scope — forwarding a VariadicPack across a fn boundary is fragile in
-    # Mojo 1.0.0b1.
+    # scope — a VariadicPack is not forwarded across a fn boundary.
     # ONE resolve: `LogManager._resolve()` loads the engine address from the
     # process-global C cell. A null pointer == no engine installed →
     # fall through to the P1 synchronous fallback below.
@@ -218,7 +217,7 @@ def _emit[
     # Null == no global installed → the P1 synchronous fallback below. See
     # LogManager._resolve. Null-checked here before any deref.
     var eng = LogManager._resolve()
-    # MOJO-1.0.0: `Bool(ptr)` is gone (Pointer is non-null by design). `Int(p) != 0` is exactly what b2's `UnsafePointer.__bool__` computed.
+    # A null address (`Int(p) == 0`) means nothing is installed.
     if Int(eng) != 0:
         # Bind ONE ref to the resolved engine so the gate/encode sequence does
         # not re-deref the `MutExternalOrigin` pointer per call (the compiler
@@ -263,7 +262,7 @@ def _emit[
             # `wid` read. The non-worker arm below renders on the caller and
             # writes a finished String, so it never reaches a drain and its
             # (fmt, module) is never looked up. Registering there would put
-            # every unbound thread in the process (HTTP handlers, the agent
+            # every unbound thread in the process (HTTP handlers, the job supervisor
             # heartbeat, CLI tools) into an unsynchronised `List.append` on the
             # shared SiteDictionary, for an entry nothing would ever read. Only a record that will be
             # DECODED needs its site registered.
@@ -505,7 +504,7 @@ def span_open[
     correlation); a fresh trace_id is minted for a root span. `name` is
     comptime — the digest is a literal at the call site, zero runtime hash."""
     var eng = LogManager._resolve()
-    # MOJO-1.0.0: `Bool(ptr)` is gone (Pointer is non-null by design). `Int(p) != 0` is exactly what b2's `UnsafePointer.__bool__` computed.
+    # A null address (`Int(p) == 0`) means nothing is installed.
     if Int(eng) == 0:
         return UInt64(0)
     return eng[].start_span[name, module](worker_id)
@@ -518,7 +517,7 @@ def span_close(span_id: UInt64, worker_id: Int):
     if span_id == 0:
         return
     var eng = LogManager._resolve()
-    # MOJO-1.0.0: `Bool(ptr)` is gone (Pointer is non-null by design). `Int(p) != 0` is exactly what b2's `UnsafePointer.__bool__` computed.
+    # A null address (`Int(p) == 0`) means nothing is installed.
     if Int(eng) == 0:
         return
     eng[].end_span(span_id, worker_id)

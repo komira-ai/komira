@@ -1,33 +1,29 @@
 # =============================================================================
-# komira_log_query/search_seam.mojo — the NON-GENERIC seam a service dispatcher
-#   can hold as ONE plain field to read its own operational log.
+# komira_log_query/search_seam.mojo — the NON-GENERIC seam a service can hold
+#   as ONE plain field to read its log.
 # =============================================================================
 #
-# ── WHY ERASE RATHER THAN PARAMETERISE THE DISPATCHER ────────────────────────
-# The shipped conformer (`komira_log_index.split_log_search.SplitIndexLogSearch`)
-# is generic over `Storage: CloneableConditionalWriteStore`, and the concrete
-# Storage (an object-store client over its transport) is bound at the BINARY.
-# Threading that parameter into a service dispatcher that is already generic
-# over other parameters, and is instantiated by many tests, would monomorphize
-# the object-store transport into every one of them.
+# ── WHY ERASE RATHER THAN PARAMETERISE THE SERVICE ──────────────────────────
+# A reader conformer is typically generic over its storage (an object-store
+# client over a transport), and the concrete storage is bound in the BINARY.
+# Threading that parameter into a service router that is already generic over
+# other parameters, and is instantiated by many tests, would monomorphize the
+# object-store transport into every one of them.
 #
-# The facade is non-generic, so a dispatcher holds ONE plain field and `Storage`
-# instantiates ONLY at `erase[S]` time.
+# The facade is non-generic, so a router holds ONE plain field and the storage
+# type instantiates ONLY at `erase[S]` time.
 #
-# ⭐ AND IT BUYS A SECOND THING: this package stays a CLEAN LEAF on `komira_http`.
-# A dispatcher that links `komira_http` and must not link `komira_search`,
-# `komira_search_s3` or `komira_log_index` can depend on THIS package without
-# widening its closure.
+# ⭐ AND IT BUYS A SECOND THING: this package stays a CLEAN LEAF on
+# `komira_http_core`. Service code that must not link a search or storage
+# library can depend on THIS package without widening its closure.
 #
 # ── ⛔ WHAT THIS SEAM DELIBERATELY CANNOT EXPRESS ────────────────────────────
-# There is NO tenant parameter, and adding one would be a mistake rather than a
-# feature. The records behind this seam are the service's OWN diagnostics, and
-# they cannot be filed per-tenant: a service-level record carries no `org_id`
-# and no `run_id`, so it cannot be filed into a tenant's readable keyspace
-# without inventing an attribution — which would be a tenancy leak, not a
-# logging upgrade. A `search(org_id, ...)` overload here would be exactly that
-# invented attribution. A customer-visible, genuinely run-scoped stream belongs
-# in a DIFFERENT, tenant-scoped sink behind a DIFFERENT, tenant-gated route.
+# There is NO caller or scope parameter: a conformer reads ONE log and answers
+# from all of it. Who may read that log is decided BEFORE the read, by the
+# route's `LogReadAccess` hook (`access.mojo`). A service that keeps separate
+# logs for separate audiences wires a separate reader, and mounts a separate
+# route with its own hook, for each; filtering one shared log by a caller
+# argument here would make every conformer an access-control enforcer.
 #
 # Encapsulation: the PUBLIC surface takes/returns only value types (`String`,
 # `Int`, `ServiceLogPage`) + owned `Self`. ZERO UnsafePointer crosses a public
@@ -36,7 +32,7 @@
 # lives only in the alias signature and the cast-site bodies); NO
 # `unsafe_from_address`; NO wildcard-origin FIELD.
 #
-# A dispatcher value built once at boot and dropped at teardown — not a
+# A router value built once at boot and dropped at teardown — not a
 # byte-slab element, not a destroy-recreate pool field.
 # =============================================================================
 
@@ -49,19 +45,17 @@ from komira_log_query.hit import ServiceLogPage, ServiceLogQuery
 # §1 — ServiceLogSearch — the trait every conformer answers.
 # =============================================================================
 trait ServiceLogSearch(Movable, Deinitable):
-    """A readable index of THIS service's own operational log records.
+    """A readable index of one service's log records.
 
     `Movable, Deinitable` are supertraits because `erase[S]` heap-boxes a
     conformer (`init_pointee_move`) and the drop trampoline reconstructs one
     `OwnedPointer[S]` to destroy it.
 
     ⭐ THE ARGUMENT IS A `ServiceLogQuery`, WHOSE FIRST TWO FIELDS ARE A TIME
-    WINDOW. The base at-rest artifact is time-partitioned Parquet and the text
-    index is an optional sidecar, so the primary bound on a log read is a TIME
-    RANGE and the term is optional. `hit.mojo`'s `ServiceLogQuery` docstring
-    carries the full reasoning, including why a term-only `search(query, limit)`
-    shape would encode a property of the SPLIT FORMAT into the seam every reader
-    has to satisfy.
+    WINDOW. The primary bound on a log read is a TIME RANGE and the term is
+    optional. `hit.mojo`'s `ServiceLogQuery` docstring carries the reasoning,
+    including why a term-only `search(query, limit)` shape would encode a
+    property of one at-rest layout into the seam every reader has to satisfy.
 
     ⛔ `term` IS A REQUEST-DERIVED STRING, AND THAT IS DELIBERATE. A seam that
     DIALS must take no request byte at all; this one READS, so the input is a
@@ -72,7 +66,7 @@ trait ServiceLogSearch(Movable, Deinitable):
     term.
 
     ⚠ A CONFORMER THAT CANNOT ANSWER A TERM-FREE WINDOW MUST RAISE, AND THE
-    MESSAGE IS PART OF ITS CONTRACT — the route renders it to the operator as a
+    MESSAGE IS PART OF ITS CONTRACT — the route renders it to the caller as a
     400, so it must name the FORMAT limitation and what to supply instead.
     Returning an empty page would say "nothing was logged in that window", which
     is a different and false answer.
@@ -82,7 +76,7 @@ trait ServiceLogSearch(Movable, Deinitable):
     one query materialise an entire log index in memory on a service instance
     sized for HTTP.
 
-    `raises` because a store fault is REAL information: an operator whose read
+    `raises` because a store fault is REAL information: a reader whose read
     fails against the bucket needs the fault, not an empty page that reads as
     "nothing was logged". The route turns a raise into a 500 that names it — see
     `route.mojo`.

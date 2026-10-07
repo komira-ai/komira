@@ -1,0 +1,109 @@
+{
+ "version": "2.0",
+ "metadata": {
+  "apiVersion": "2026-10-02",
+  "endpointPrefix": "tinyquery",
+  "protocol": "query",
+  "protocols": ["query"],
+  "serviceFullName": "Tiny awsQuery Example",
+  "serviceId": "TinyQuery",
+  "signatureVersion": "v4",
+  "uid": "tinyquery-2026-10-02"
+ },
+ "operations": {
+  "SendThing": {
+   "name": "SendThing",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "SendThingRequest"},
+   "output": {"shape": "SendThingResult", "resultWrapper": "SendThingResult"},
+   "errors": [{"shape": "ThingNotFound"}]
+  },
+  "Ping": {
+   "name": "Ping",
+   "http": {"method": "POST", "requestUri": "/"}
+  },
+  "PingAnonymous": {
+   "name": "PingAnonymous",
+   "http": {"method": "POST", "requestUri": "/"},
+   "authtype": "none"
+  },
+  "PingNoAuth": {
+   "name": "PingNoAuth",
+   "http": {"method": "POST", "requestUri": "/"},
+   "auth": ["smithy.api#noAuth"]
+  },
+  "PingBearer": {
+   "name": "PingBearer",
+   "http": {"method": "POST", "requestUri": "/"},
+   "authtype": "bearer"
+  }
+ },
+ "shapes": {
+  "SendThingRequest": {
+   "type": "structure",
+   "required": ["Name"],
+   "members": {
+    "Name": {"shape": "String"},
+    "Count": {"shape": "Integer"},
+    "Enabled": {"shape": "Boolean"},
+    "Ratio": {"shape": "Double"},
+    "Payload": {"shape": "Blob"},
+    "At": {"shape": "Timestamp"},
+    "Tags": {"shape": "TagList"},
+    "Ids": {"shape": "IdList", "flattened": true},
+    "Attributes": {"shape": "AttributeMap", "flattened": true, "locationName": "Attribute"},
+    "Labels": {"shape": "LabelMap"},
+    "Detail": {"shape": "Detail"}
+   }
+  },
+  "SendThingResult": {
+   "type": "structure",
+   "required": ["MessageId"],
+   "members": {
+    "MessageId": {"shape": "String"},
+    "Sizes": {"shape": "SizeList"},
+    "Attributes": {"shape": "AttributeMap", "flattened": true, "locationName": "Attribute"},
+    "Labels": {"shape": "LabelMap"},
+    "Detail": {"shape": "Detail"},
+    "Created": {"shape": "Timestamp"}
+   }
+  },
+  "Detail": {
+   "type": "structure",
+   "members": {
+    "Note": {"shape": "String"},
+    "Parts": {"shape": "PartList"}
+   }
+  },
+  "Part": {
+   "type": "structure",
+   "members": {
+    "Number": {"shape": "Integer"},
+    "Digest": {"shape": "Blob"}
+   }
+  },
+  "ThingNotFound": {
+   "type": "structure",
+   "members": {"message": {"shape": "String"}},
+   "error": {"code": "Tiny.ThingNotFound", "httpStatusCode": 400, "senderFault": true},
+   "exception": true
+  },
+  "TagList": {"type": "list", "member": {"shape": "String"}},
+  "IdList": {"type": "list", "member": {"shape": "String", "locationName": "Id"}},
+  "SizeList": {"type": "list", "member": {"shape": "Long", "locationName": "Size"}},
+  "PartList": {"type": "list", "member": {"shape": "Part"}},
+  "AttributeMap": {
+   "type": "map",
+   "key": {"shape": "String", "locationName": "Name"},
+   "value": {"shape": "String", "locationName": "Value"}
+  },
+  "LabelMap": {"type": "map", "key": {"shape": "String"}, "value": {"shape": "String"}},
+  "String": {"type": "string"},
+  "Integer": {"type": "integer"},
+  "Long": {"type": "long"},
+  "Boolean": {"type": "boolean"},
+  "Double": {"type": "double"},
+  "Blob": {"type": "blob"},
+  "Timestamp": {"type": "timestamp"}
+ }
+}

@@ -21,15 +21,15 @@
 # crosses any module boundary.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.large_string_array import LargeStringArray
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
+from komira_arrow.large_string_array import LargeStringArray
+from komira_arrow.boolean_array import BooleanArray
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
@@ -86,6 +86,7 @@ from .footer import (
     ORC_COMPRESSION_NONE,
 )
 from .bloom_filter import OrcBloomFilter, make_orc_bloom_filter
+from .int_stats_sum import add_to_int_sum
 from std.memory import bitcast
 
 
@@ -240,7 +241,7 @@ struct ColumnStats(Copyable, Movable):
     var is_string: Bool
     var int_min: Int64
     var int_max: Int64
-    var int_sum: Int64
+    var int_sum: Optional[Int64]  # None once the running sum overflowed
     var dbl_min: Float64
     var dbl_max: Float64
     var dbl_sum: Float64
@@ -252,7 +253,7 @@ struct ColumnStats(Copyable, Movable):
     def empty() -> ColumnStats:
         return ColumnStats(
             0, False, False, False, False,
-            Int64(0), Int64(0), Int64(0),
+            Int64(0), Int64(0), Optional[Int64](Int64(0)),
             Float64(0), Float64(0), Float64(0),
             String(""), String(""), Int64(0),
         )
@@ -1345,7 +1346,7 @@ def _acc_int(mut st: ColumnStats, v: Int64, first: Bool):
             st.int_min = v
         if v > st.int_max:
             st.int_max = v
-    st.int_sum += v
+    add_to_int_sum(st.int_sum, v)
 
 
 def _emit_float32(

@@ -18,7 +18,7 @@ The produce path:
 Protocol front ends (for example the Kafka wire server) sit above this one
 core as thin edge structs and do not change its surface.
 
-Dependencies (cycle-free): komira_core (RecordBatch / Schema / Column and the
+Dependencies (cycle-free): the core packages (RecordBatch / Schema / Column and the
 Arrow-IPC encoder), komira_objectstore (ConditionalWriteStore +
 CasManifestStore), komira_async and komira_metrics. The concrete cloud store is
 injected by whichever program instantiates the core.
@@ -36,6 +36,7 @@ from .broker_core import (
     FLUSH_MS,
     SEGMENT_FOOTER_LEN,
 )
+from .flush_fence import FlushLeakStats
 
 # The broker PRODUCE path on the CoalescingWindow primitive (the parkable
 # path). The three broker conformers (BrokerHeadReader / BrokerSegCodec /
@@ -76,6 +77,7 @@ from .manifest_body import (
 # Retention — time/size policy, the pure decision, the pass orchestrator, and
 # the grace-gated reaper.
 from .retention import (
+    ReapResult,
     ReapWorker,
     RetentionPass,
     RetentionPolicy,
@@ -259,11 +261,11 @@ from .cluster_assignment_store import (
     StoredAssignment,
 )
 
-# Multi-node placement — the in-process agent->broker relay: the co-located
-# node's owned-partition set + apply_assignment(assigned[]) -> the START/STOP
-# ReconcileDelta the integration caller applies to the Kafka server's
-# per-partition leader map. Pure value (no DB/object-store/RPC); the agent holds
-# a borrowed ref riding the per-dispatch heartbeat value.
+# Multi-node placement — the in-process job-supervisor->broker relay: the
+# co-located node's owned-partition set + apply_assignment(assigned[]) -> the
+# START/STOP ReconcileDelta the integration caller applies to the Kafka
+# server's per-partition leader map. Pure value (no DB/object-store/RPC); the
+# job supervisor holds a borrowed ref riding the per-dispatch heartbeat value.
 from .broker_node_state import (
     BrokerNodeState,
     ReconcileDelta,

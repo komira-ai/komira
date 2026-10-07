@@ -49,7 +49,7 @@
 #   B6: block first-terms are STRICTLY lexicographically ascending (the
 #       upper_bound-minus-1 binary-search precondition).
 #   B7: TermInfo stays pure-POD (guard comment on the struct).
-#   B8: write_uleb128 is imported from komira_core.collections.byte_buffer.
+#   B8: write_uleb128 is imported from komira_buffer.byte_buffer.
 #
 # -----------------------------------------------------------------------------
 # ENCAPSULATION / SAFETY (owner re-audit)
@@ -64,7 +64,7 @@
 #     the same idiom as FinalizedIndex.
 # =============================================================================
 
-from komira_core.collections.byte_buffer import ByteBuffer, write_uleb128
+from komira_buffer.byte_buffer import ByteBuffer, write_uleb128
 
 from .inverted import FinalizedIndex
 
@@ -238,9 +238,7 @@ struct SortedBlockTermMap(Movable, Deinitable):
             )
         var off = self._first_offset[b]
         var ln = self._first_offset[b + 1] - off
-        return Span[UInt8, origin_of(self._first_bytes)](
-            unsafe_ptr=self._first_bytes.unsafe_ptr() + off, length=ln
-        )
+        return Span(self._first_bytes)[off : off + ln]
 
     # ---- lookup: term-bytes -> ordinal, or None ----
 
@@ -328,9 +326,7 @@ struct SortedBlockTermMap(Movable, Deinitable):
                 self._check_term_len(len(scratch))
 
             # Compare the decoded term to the query.
-            var decoded = Span[UInt8, origin_of(scratch)](
-                unsafe_ptr=scratch.unsafe_ptr(), length=len(scratch)
-            )
+            var decoded = Span(scratch)
             if _lex_equal(decoded, term_bytes):
                 return block * BLOCK_TERMS + k
             if _lex_less(term_bytes, decoded):
@@ -783,6 +779,8 @@ struct TermDictionary(Movable, Deinitable):
             )
         var fname_bytes = List[UInt8]()
         cur.read_into_list(fname_bytes, fname_len)
+        # SAFETY: the field name was written from a String by the serializer; its
+        # length was bounds-checked above.
         var field_name = String(
             StringSlice(unsafe_from_utf8=Span(fname_bytes))
         )

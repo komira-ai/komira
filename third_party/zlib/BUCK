@@ -1,0 +1,36 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# The zlib 1.3.1 release, zlib License (LICENSE in the archive). Test data
+# only: nothing here is built or linked (//src/komira_zlib opens the system
+# libz at run time). Nothing of it is committed here: the archive is fetched at
+# build time and checked against its sha256.
+#
+# Test data of //src/komira_zlib (tests/test_zlib_into.mojo):
+#   zlib-1.3.1.tar.gz - the release tarball itself, a gzip stream upstream
+#                       produced: the known-answer vector for gzip inflate;
+#   :files            - members of the same tarball, extracted by the build's
+#                       busybox tar rather than by the code under test, which
+#                       the inflated tar's members must equal byte for byte.
+pinned_file(
+    name = "zlib-1.3.1.tar.gz",
+    url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz",
+    sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+    size_bytes = 1512791,
+    visibility = ["PUBLIC"],
+)
+
+archive_files(
+    name = "files",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":zlib-1.3.1.tar.gz",
+    one_tree = True,
+    files = [
+        "LICENSE",
+        "README",
+        "zlib.h",
+    ],
+    strip_prefix = "zlib-1.3.1",
+    visibility = ["PUBLIC"],
+)

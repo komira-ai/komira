@@ -47,7 +47,7 @@
 #     bounds-check overhead in -O3).
 #
 # Cross-references:
-#   - Stage 1 structural index: `komira_jsonl.structural_index`.
+#   - Stage 1 structural index: `komira_json_index.structural_index`.
 #   - Typed materializer (companion read path):
 #     `komira_jsonl.columnar_materializer`.
 # =============================================================================
@@ -64,14 +64,15 @@ from komira_async.runtime.parallel_fork_join import (
     parallel_fork_join,
     parallel_fork_join_serial,
 )
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_collections.slab import Slab
 
 from komira_jsonl.columnar_materializer import _compute_jsonl_line_ranges
-from komira_jsonl.input_limits import check_json_column_count
+from komira_json_index.input_limits import check_json_column_count
 from komira_jsonl.key_dispatch import KeyRegistryBuilder
-from komira_jsonl.simd_primitives import (
+from komira_jsonl.key_unescape import key_has_escape, unescape_key
+from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,
@@ -81,7 +82,7 @@ from komira_jsonl.simd_primitives import (
     TAG_QUOTE_OPEN,
     TAG_QUOTE_CLOSE,
 )
-from komira_jsonl.structural_index import (
+from komira_json_index.structural_index import (
     build_structural_index,
     JsonlPartitions,
     StructuralIndex,
@@ -300,6 +301,12 @@ def infer_jsonl_schema(bytes: Span[UInt8, _]) raises -> Schema:
          - Promote `inferred[ki]` with the observed type.
       3. After all records consumed, build a Schema with one Field
          per column (insertion order, nullable=True).
+
+    Inference does not check that each line is one JSON object, nor the
+    grammar of values it does not classify: it skips a top-level token that
+    is not `{`. The read does check (`materialize_jsonl_to_batch` and the
+    paths built on it refuse a bad line naming it, `line_check.mojo`), so
+    a file inferred here and then read is refused there.
 
     Raises on:
       * Malformed JSON structure (unbalanced braces, missing colon).
@@ -746,6 +753,8 @@ def _infer_partial_into(
 
     var tape_len = idx.size()
     var input_len = len(bytes)
+    # The decoded spelling of a key that holds an escape, reused per key.
+    var key_buf = List[UInt8]()
 
     var t: Int = 0
     while t < tape_len:
@@ -857,9 +866,14 @@ def _infer_partial_into(
                 observed = _classify_scalar(bytes, s_start, s_end)
             # Lookup-or-insert by byte span (O(1)
             # avg hash hit; String allocation only on first-seen insert).
-            var ki = builder.lookup_or_insert_bytes(
-                bytes[key_start:key_end]
-            )
+            # The column is named by the text the key spells, as the
+            # reader looks it up (key_unescape.mojo).
+            var ki: Int
+            if key_has_escape(bytes[key_start:key_end]):
+                unescape_key(bytes[key_start:key_end], key_buf)
+                ki = builder.lookup_or_insert_bytes(key_buf)
+            else:
+                ki = builder.lookup_or_insert_bytes(bytes[key_start:key_end])
             # Grow the parallel `column_inferred` list to keep in lockstep
             # with the builder's column count (the builder appended a new
             # column iff ki == len(column_inferred)).

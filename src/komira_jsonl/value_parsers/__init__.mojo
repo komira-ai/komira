@@ -9,8 +9,10 @@
 #
 #   Tier 1 (primitive + variable-length):
 #     - `parse_int`       — JSON number → Int64 (or schema-narrowed Int*).
-#     - `parse_float`     — JSON number → Float64 (scalar).
-#     - `parse_string`    — JSON string (with unescape) → StringArray.
+#     - `parse_float`     — JSON number → Float64, correctly rounded (helpers:
+#                           `float_decimal_to_f64`, `float_long_decimal`,
+#                           `float_pow5_table`).
+#     - `parse_string`    — JSON string (with unescape) → StringArray (in `komira_json_index`).
 #     - `parse_bool`      — JSON true/false → Bool.
 #     - `parse_date`      — ISO 8601 string → Int32 days-since-epoch.
 #     - `parse_decimal`   — JSON number/string → Decimal128(p, s).

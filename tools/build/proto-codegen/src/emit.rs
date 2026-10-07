@@ -37,6 +37,49 @@ fn map_scalar_write_suffix(t: &IrType) -> &'static str {
     }
 }
 
+/// The `WireEncoder` comptime constant a generated `encode` reads to decide
+/// whether an implicit-presence field at its default is written. The proto3
+/// JSON mapping omits such a field, so `JsonEncoder` sets it; `PbEncoder`
+/// does not, so the binary bytes do not change.
+const OMITS_IMPLICIT_DEFAULTS: &str = "OMITS_IMPLICIT_DEFAULTS";
+
+/// The Mojo condition that `value_expr`, a plain (implicit-presence) proto3
+/// scalar or enum field, is off its default: the test the proto3 JSON
+/// mapping omits a field by, as `emit_rest`'s query parameters do. A float
+/// compares its bits rather than its value, so `-0.0` (whose sign JSON
+/// keeps) is written and only `+0.0` is the default. `None` for a type with
+/// no implicit presence (a message).
+fn implicit_presence_test(ty: &IrType, value_expr: &str) -> Option<String> {
+    use ScalarKind as K;
+    match ty {
+        IrType::Scalar(s) => Some(match s {
+            K::String => format!("{value_expr}.byte_length() > 0"),
+            K::Bytes => format!("len({value_expr}) > 0"),
+            K::Bool => value_expr.to_string(),
+            K::Float => format!("bitcast[DType.uint32]({value_expr}) != 0"),
+            K::Double => format!("bitcast[DType.uint64]({value_expr}) != 0"),
+            K::Int64 | K::Uint64 | K::Int32 | K::Uint32 | K::Sint64 | K::Sint32
+            | K::Fixed64 | K::Fixed32 | K::Sfixed64 | K::Sfixed32 => {
+                format!("{value_expr} != 0")
+            }
+        }),
+        IrType::Enum(_) => Some(format!("{value_expr}.number() != 0")),
+        IrType::Message(_) | IrType::Map(_, _) | IrType::List(_) => None,
+    }
+}
+
+/// Whether a generated `encode` in `file` compares a float's bits (a plain
+/// `float` or `double` field), which takes `bitcast` from `std.memory`.
+fn encode_tests_float_bits(file: &IrFile) -> bool {
+    file.messages.iter().filter(|m| !m.is_map_entry).any(|m| {
+        m.fields.iter().any(|f| {
+            f.oneof_index.is_none()
+                && f.label == Label::Single
+                && matches!(f.ty, IrType::Scalar(ScalarKind::Float | ScalarKind::Double))
+        })
+    })
+}
+
 /// The `read_into_<suffix>_<suffix>_map` component suffix for a map key/value.
 fn map_scalar_read_suffix(t: &IrType) -> &'static str {
     // read/write suffixes coincide for every scalar kind.
@@ -116,6 +159,11 @@ pub struct Emitter<'a> {
     /// status through [`GCP_GRPC_STATUS_ERROR`]. REST clients are Google
     /// Cloud clients either way.
     gcp: bool,
+    /// The other files of the model, where a REST method finds a request,
+    /// a query parameter's message, or a message a dotted path variable
+    /// reads through (`{service.name}` reads `Service`), declared in another
+    /// `.proto`. Empty unless [`Emitter::with_peers`] sets it.
+    peers: &'a [IrFile],
 }
 
 impl<'a> Emitter<'a> {
@@ -144,7 +192,15 @@ impl<'a> Emitter<'a> {
             indent: 0,
             protocol,
             gcp,
+            peers: &[],
         }
+    }
+
+    /// This emitter, looking a REST method's request up in `peers` (the
+    /// files of the whole model) when this file does not declare it.
+    pub fn with_peers(mut self, peers: &'a [IrFile]) -> Self {
+        self.peers = peers;
+        self
     }
 
     /// Whether this file's service clients are Google Cloud gRPC clients.
@@ -154,7 +210,15 @@ impl<'a> Emitter<'a> {
 
     /// Emit the whole file and return the generated Mojo source.
     pub fn emit(mut self) -> String {
-        self.emit_header();
+        // The REST clients first: whether one sends a `bytes` query value
+        // decides an import of the header.
+        let rest: Vec<crate::emit_rest::RestServiceEmit> =
+            if self.protocol == ProtocolMode::Rest {
+                self.file.services.iter().map(|svc| self.rest_service_or_panic(svc)).collect()
+            } else {
+                Vec::new()
+            };
+        self.emit_header(rest.iter().any(|r| r.needs_base64));
         for en in &self.file.enums {
             self.emit_enum(en);
         }
@@ -169,8 +233,8 @@ impl<'a> Emitter<'a> {
             // client bodies call.
             self.buf.push('\n');
             self.buf.push_str(crate::emit_rest::rest_helper_functions());
-            for svc in &self.file.services {
-                self.emit_rest_service_or_panic(svc);
+            for r in &rest {
+                self.buf.push_str(&r.source);
             }
         } else {
             if self.gcp_grpc() {
@@ -183,16 +247,9 @@ impl<'a> Emitter<'a> {
         self.buf
     }
 
-    fn emit_rest_service_or_panic(&mut self, svc: &IrService) {
-        match crate::emit_rest::emit_rest_service(self.file, svc) {
-            Ok(emit) => {
-                self.buf.push_str(&emit.source);
-                // Validation notes (streaming methods skipped) — emitted as a
-                // trailing comment block so they are visible in the output.
-                for note in &emit.notes {
-                    self.buf.push_str(&format!("# REST-NOTE: {note}\n"));
-                }
-            }
+    fn rest_service_or_panic(&self, svc: &IrService) -> crate::emit_rest::RestServiceEmit {
+        match crate::emit_rest::emit_rest_service_in(self.file, self.peers, svc) {
+            Ok(emit) => emit,
             Err(e) => panic!("REST emit failed for service `{}`: {e}", svc.name),
         }
     }
@@ -226,7 +283,10 @@ impl<'a> Emitter<'a> {
 
     // -- file header ----------------------------------------------------
 
-    fn emit_header(&mut self) {
+    /// The file header and imports; `base64` adds `komira_encoding`'s
+    /// `base64_encode`, which a REST client sending a `bytes` query value
+    /// calls.
+    fn emit_header(&mut self, base64: bool) {
         self.line("# GENERATED by protoc-gen-mojo — do not hand-edit.");
         self.line(&format!("# Source: {}", self.file.proto_path));
         self.line(&format!("# proto package: {}", self.file.proto_package));
@@ -253,10 +313,19 @@ impl<'a> Emitter<'a> {
             self.line("    WireDecoder,");
             self.line(")");
         }
+        if encode_tests_float_bits(self.file) {
+            self.line("from std.memory import bitcast");
+        }
         if !self.file.services.is_empty() {
             if self.protocol == ProtocolMode::Rest {
                 for imp in crate::emit_rest::rest_imports() {
                     self.line(imp);
+                }
+                if let Some(imp) = crate::emit_rest::rest_stream_import(self.file) {
+                    self.line(&imp);
+                }
+                if base64 {
+                    self.line("from komira_encoding import base64_encode");
                 }
             } else if self.gcp {
                 self.line(&format!(
@@ -540,13 +609,16 @@ impl<'a> Emitter<'a> {
     /// An explicit copy constructor, so the struct is never trivially
     /// copyable.
     ///
-    /// On Mojo 1.0.0 the synthesized copy constructor of a struct with an
-    /// explicit `__deinit__` can be treated as trivial for some layouts (three
-    /// `Optional[String]` plus an `Optional[Bool]` or `Optional[Int64]` was
-    /// measured), and then `List.copy()` and `List.extend` copy the elements
-    /// with a memcpy: the copy and the original share their String buffers, and
-    /// dropping the copy frees them under the original. An explicit
-    /// constructor is never trivial. Every field is copied by its own
+    /// On Mojo 1.0.0 the synthesized copy constructor can be reported as
+    /// trivial (https://github.com/modular/modular/issues/7256): two fields of
+    /// the same non-trivial Variant-backed type (e.g. `Optional[String]`)
+    /// followed by a trivially copyable Variant-backed field (e.g.
+    /// `Optional[Bool]`) make `__copy_ctor_is_trivial` True, whether or not
+    /// the struct declares `__deinit__`. `List.copy()` and `List.extend` then
+    /// copy the elements with a memcpy: the copy and the original share their
+    /// heap buffers, and dropping the copy frees them under the original. An
+    /// explicit constructor is never trivial; remove this once that issue is
+    /// fixed in the pinned compiler. Every field is copied by its own
     /// `.copy()`, so a nested message, a repeated field, a map, an `Optional`
     /// and a oneof arm each go through that type's real copy.
     fn emit_explicit_copy_ctor(&mut self, msg: &IrMessage) {
@@ -732,7 +804,8 @@ impl<'a> Emitter<'a> {
                     ));
                     self.pop_indent();
                 } else {
-                    self.line(&self.write_call(s, field, value_expr));
+                    let write = self.write_call(s, field, value_expr);
+                    self.emit_implicit_presence_write(field, value_expr, &write);
                 }
             }
             IrType::Enum(r) => {
@@ -759,10 +832,11 @@ impl<'a> Emitter<'a> {
                     ));
                     self.pop_indent();
                 } else {
-                    self.line(&format!(
+                    let write = format!(
                         "enc.write_enum_field[{}]({}, \"{}\", {})",
                         en, field.proto_field_number, field.json_name, value_expr
-                    ));
+                    );
+                    self.emit_implicit_presence_write(field, value_expr, &write);
                 }
             }
             IrType::Message(r) => {
@@ -850,6 +924,23 @@ impl<'a> Emitter<'a> {
             }
             IrType::List(_) => unreachable!("{}", crate::ir::LIST_IS_AWS_FRONT_END_ONLY),
         }
+    }
+
+    /// Emit `write`, the `enc.write_*` call of a plain (implicit-presence)
+    /// scalar or enum field, behind its default test: an encoder whose
+    /// `OMITS_IMPLICIT_DEFAULTS` holds (proto3 JSON) skips the field at its
+    /// default, as the JSON mapping omits it; any other (binary) writes it.
+    /// The test is a comptime constant `or` a runtime one, so each
+    /// monomorphized `encode` keeps only its own half.
+    fn emit_implicit_presence_write(&mut self, field: &IrField, value_expr: &str, write: &str) {
+        let Some(test) = implicit_presence_test(&field.ty, value_expr) else {
+            self.line(write);
+            return;
+        };
+        self.line(&format!("if not E.{OMITS_IMPLICIT_DEFAULTS} or {test}:"));
+        self.push_indent();
+        self.line(write);
+        self.pop_indent();
     }
 
     /// Emit the `enc.write_*` call for one oneof arm, guarded by the caller's
@@ -957,6 +1048,34 @@ impl<'a> Emitter<'a> {
 
     // -- the `decode` body ---------------------------------------------
 
+    /// The JSON spellings (the `json_name`, then the proto name when it
+    /// differs) of every non-repeated field of `msg` whose JSON `null` is a
+    /// value rather than "absent", in declaration order. The proto3 JSON
+    /// mapping names two: the enum `google.protobuf.NullValue` (`null` is
+    /// NULL_VALUE) and the message `google.protobuf.Value` (`null` is a
+    /// Value of kind NULL_VALUE; komira-ai/komira#62). A repeated or map
+    /// field of either reads `null` as an absent list or map.
+    fn null_is_a_value_field_spellings(msg: &IrMessage) -> Vec<String> {
+        let mut out = Vec::new();
+        for f in &msg.fields {
+            let null_is_a_value = matches!(
+                &f.ty,
+                IrType::Enum(t) if t.fq_name == ".google.protobuf.NullValue"
+            ) || matches!(
+                &f.ty,
+                IrType::Message(t) if t.fq_name == ".google.protobuf.Value"
+            );
+            if !null_is_a_value || f.label == Label::Repeated {
+                continue;
+            }
+            out.push(f.json_name.clone());
+            if f.name != f.json_name {
+                out.push(f.name.clone());
+            }
+        }
+        out
+    }
+
     fn emit_decode(&mut self, msg: &IrMessage) {
         Self::assert_field_spellings_are_injective(msg);
         self.line("@staticmethod");
@@ -976,6 +1095,17 @@ impl<'a> Emitter<'a> {
             msg.fq_name.trim_start_matches('.'),
             Self::accepted_field_spellings(msg).join(","),
         ));
+        // A `google.protobuf.NullValue` or singular `google.protobuf.Value`
+        // field's JSON value may be `null`, which the JSON backend otherwise
+        // reads as an absent field (and, for a oneof arm, as no arm at all):
+        // name its spellings to the decoder.
+        let null_keys = Self::null_is_a_value_field_spellings(msg);
+        if !null_keys.is_empty() {
+            self.line(&format!(
+                "dec.keep_null_fields(\"{}\")",
+                null_keys.join("|")
+            ));
+        }
 
         // Local accumulators, default-initialised. The struct is built
         // from these once the field loop is exhausted.
@@ -1860,12 +1990,26 @@ pub fn emit_model_with_options(
     protocol: ProtocolMode,
     gcp: bool,
 ) -> Vec<(String, String)> {
+    emit_model_with_names(model, protocol, gcp, &crate::lower::ModuleNames::new())
+}
+
+/// [`emit_model_with_options`], writing each file named in `names` as that
+/// module ([`crate::lower::ModuleNames`]) and every other as its stem.
+pub fn emit_model_with_names(
+    model: &IrModel,
+    protocol: ProtocolMode,
+    gcp: bool,
+    names: &crate::lower::ModuleNames,
+) -> Vec<(String, String)> {
     model
         .files
         .iter()
         .map(|file| {
-            let mojo_path = proto_to_mojo_path(&file.proto_path);
-            let source = Emitter::with_options(file, protocol, gcp).emit();
+            let mojo_path =
+                format!("{}.mojo", crate::lower::module_stem(&file.proto_path, names));
+            let source = Emitter::with_options(file, protocol, gcp)
+                .with_peers(&model.files)
+                .emit();
             (mojo_path, source)
         })
         .collect()
@@ -1885,11 +2029,20 @@ pub const LAYOUT_PROBE_FILE: &str = "_layout_probe.mojo";
 /// prints the sizes. A generator that accepts a `.proto` does not prove the
 /// emitted code lays out; compiling and running this does.
 pub fn emit_layout_probe(model: &IrModel) -> (String, String) {
+    emit_layout_probe_with_names(model, &crate::lower::ModuleNames::new())
+}
+
+/// [`emit_layout_probe`] of a model whose files `names` writes as other
+/// modules ([`emit_model_with_names`]).
+pub fn emit_layout_probe_with_names(
+    model: &IrModel,
+    names: &crate::lower::ModuleNames,
+) -> (String, String) {
     let mut imports = String::new();
     let mut body = String::new();
     for file in &model.files {
-        let stem = proto_to_mojo_path(&file.proto_path);
-        let stem = stem.strip_suffix(".mojo").unwrap_or(&stem);
+        let stem = crate::lower::module_stem(&file.proto_path, names);
+        let stem = stem.as_str();
         imports.push_str(&format!("from {} import {stem}\n", file.mojo_package));
         let names = file
             .enums
@@ -1919,6 +2072,10 @@ pub fn emit_layout_probe(model: &IrModel) -> (String, String) {
     );
     (LAYOUT_PROBE_FILE.to_string(), source)
 }
+
+#[cfg(test)]
+#[path = "emit_presence_tests.rs"]
+mod presence_tests;
 
 #[cfg(test)]
 mod oneof_recursion_box_tests {
@@ -2175,6 +2332,7 @@ mod mojo_100_service_client_tests {
             enums: vec![],
             services: vec![IrService {
                 name: "Thing".to_string(),
+                default_host: None,
                 methods: vec![IrMethod {
                     name: "DoThing".to_string(),
                     input: tref("Req"),
@@ -2215,8 +2373,8 @@ mod mojo_100_service_client_tests {
         assert_eq!(
             ctors, 2,
             "one copy constructor per MESSAGE struct (2 messages, none on the \
-             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for a struct with \
-             an explicit __deinit__, and List.copy() then shares String buffers; \
+             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for some field \
+             orders (modular/modular#7256), and List.copy() then shares heap buffers; \
              got:\n{out}"
         );
     }
@@ -2283,6 +2441,7 @@ mod gcp_grpc_client_tests {
             enums: vec![],
             services: vec![IrService {
                 name: "Thing".to_string(),
+                default_host: None,
                 methods: vec![
                     method("Get", false, false),
                     method("Watch", false, true),
@@ -2412,5 +2571,138 @@ mod gcp_grpc_client_tests {
         let out = Emitter::with_options(&f, ProtocolMode::Grpc, true).emit();
         assert_eq!(out, Emitter::with_protocol(&f, ProtocolMode::Grpc).emit());
         assert!(!out.contains("komira_gcp_core"), "got:\n{out}");
+    }
+}
+
+#[cfg(test)]
+mod null_value_field_tests {
+    use super::*;
+    use crate::ir::{IrField, IrFile, IrMessage, IrOneof, IrType, Label, TypeRef};
+
+    fn field(name: &str, json: &str, ty: IrType, label: Label, oneof: Option<u32>) -> IrField {
+        IrField {
+            name: name.to_string(),
+            ty,
+            label,
+            proto_field_number: 1,
+            json_name: json.to_string(),
+            oneof_index: oneof,
+        }
+    }
+
+    fn null_enum() -> IrType {
+        IrType::Enum(TypeRef {
+            fq_name: ".google.protobuf.NullValue".to_string(),
+            mojo_name: "NullValue".to_string(),
+        })
+    }
+
+    fn file(fields: Vec<IrField>, oneofs: Vec<IrOneof>) -> IrFile {
+        IrFile {
+            proto_path: "v/v.proto".to_string(),
+            proto_package: "v".to_string(),
+            mojo_package: "v".to_string(),
+            messages: vec![IrMessage {
+                name: "V".to_string(),
+                mojo_name: "V".to_string(),
+                fq_name: ".v.V".to_string(),
+                is_map_entry: false,
+                fields,
+                oneofs,
+            }],
+            enums: vec![],
+            services: vec![],
+            imports: vec![],
+        }
+    }
+
+    #[test]
+    fn a_null_value_arm_keeps_its_json_null() {
+        let f = file(
+            vec![
+                field("null_value", "nullValue", null_enum(), Label::Optional, Some(0)),
+                field("s", "s", IrType::Scalar(ScalarKind::String), Label::Optional, Some(0)),
+            ],
+            vec![IrOneof {
+                name: "kind".to_string(),
+                arms: vec!["null_value".to_string(), "s".to_string()],
+            }],
+        );
+        let src = Emitter::new(&f).emit();
+        let expect = src.find("dec.expect_fields(").unwrap();
+        let keep = src.find("dec.keep_null_fields(\"nullValue|null_value\")").unwrap();
+        let lp = src.find("while True:").unwrap();
+        assert!(expect < keep && keep < lp, "{src}");
+    }
+
+    #[test]
+    fn other_messages_and_repeated_null_values_declare_nothing() {
+        let plain = file(
+            vec![field("s", "s", IrType::Scalar(ScalarKind::String), Label::Single, None)],
+            vec![],
+        );
+        assert!(!Emitter::new(&plain).emit().contains("keep_null_fields"));
+        let repeated = file(
+            vec![field("nulls", "nulls", null_enum(), Label::Repeated, None)],
+            vec![],
+        );
+        assert!(!Emitter::new(&repeated).emit().contains("keep_null_fields"));
+        // A plain (non-oneof) field whose JSON name is its proto name is
+        // named once.
+        let single = file(vec![field("n", "n", null_enum(), Label::Single, None)], vec![]);
+        assert!(Emitter::new(&single).emit().contains("dec.keep_null_fields(\"n\")"));
+    }
+
+    fn message(fq: &str, mojo: &str) -> IrType {
+        IrType::Message(TypeRef { fq_name: fq.to_string(), mojo_name: mojo.to_string() })
+    }
+
+    fn value_msg() -> IrType {
+        message(".google.protobuf.Value", "Value")
+    }
+
+    // komira-ai/komira#62: proto3 JSON reads `null` in a singular
+    // `google.protobuf.Value` field as NULL_VALUE, so its key is named to the
+    // decoder like a NullValue field's: plain, `optional` and oneof arm alike
+    // (LOWER gives a singular message field `Label::Optional` either way).
+    #[test]
+    fn a_singular_value_field_keeps_its_json_null() {
+        let f = file(
+            vec![
+                field("v", "v", value_msg(), Label::Optional, None),
+                field("opt_v", "optV", value_msg(), Label::Optional, None),
+                field("arm_v", "armV", value_msg(), Label::Optional, Some(0)),
+                field("arm_s", "armS", IrType::Scalar(ScalarKind::String), Label::Optional, Some(0)),
+            ],
+            vec![IrOneof {
+                name: "kind".to_string(),
+                arms: vec!["arm_v".to_string(), "arm_s".to_string()],
+            }],
+        );
+        let src = Emitter::new(&f).emit();
+        let expect = src.find("dec.expect_fields(").unwrap();
+        let keep = src.find("dec.keep_null_fields(\"v|optV|opt_v|armV|arm_v\")").unwrap();
+        let lp = src.find("while True:").unwrap();
+        assert!(expect < keep && keep < lp, "{src}");
+    }
+
+    // Every other type keeps `null` as absent: a repeated Value (`null` for
+    // the whole list is no list), the other struct WKTs, an ordinary message
+    // and the scalars declare nothing.
+    #[test]
+    fn null_stays_absent_for_every_other_field_type() {
+        for (ty, label) in [
+            (value_msg(), Label::Repeated),
+            (message(".google.protobuf.Struct", "Struct"), Label::Optional),
+            (message(".google.protobuf.ListValue", "ListValue"), Label::Optional),
+            (message(".google.protobuf.Int64Value", "Int64Value"), Label::Optional),
+            (message(".v.Value", "Value"), Label::Optional),
+            (IrType::Scalar(ScalarKind::String), Label::Single),
+            (IrType::Scalar(ScalarKind::Int64), Label::Optional),
+        ] {
+            let f = file(vec![field("x", "x", ty.clone(), label, None)], vec![]);
+            let src = Emitter::new(&f).emit();
+            assert!(!src.contains("keep_null_fields"), "{ty:?}:\n{src}");
+        }
     }
 }

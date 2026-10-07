@@ -94,7 +94,7 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_http_client.client import HttpClient, build_get_request
 from komira_http_client.header_map import HeaderMap
@@ -494,6 +494,7 @@ def test_expired_deadline_fires_on_first_poll_even_with_bytes_ready() raises:
     var stream = ScriptedStream.from_read_script(_body_bytes(64))
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, 128, content^,
+        100 * 1024 * 1024,
     )
     # 64 of the 128 announced bytes are already decoded and waiting, and the
     # stream holds 64 more that are READY to read. Neither may save it.
@@ -541,6 +542,7 @@ def test_deadline_only_ever_tightens() raises:
     var stream = ScriptedStream.from_read_script(List[UInt8]())
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, 128, List[UInt8](),
+        100 * 1024 * 1024,
     )
     body.set_deadline_us(1_000_000)
     assert_equal(body.deadline_us(), 1_000_000)
@@ -577,6 +579,7 @@ def test_absurd_budget_does_not_wrap_into_the_past() raises:
     var stream = ScriptedStream.from_read_script(List[UInt8]())
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, 8, content^,
+        100 * 1024 * 1024,
     )
     # Int.MAX-ish. Saturation must keep it in the future.
     body.set_deadline_us((1 << 62) + (1 << 61))
@@ -611,6 +614,7 @@ def test_a_finished_body_still_returns_end_after_its_deadline() raises:
     var stream = ScriptedStream.from_read_script(List[UInt8]())
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, 16, content^,
+        100 * 1024 * 1024,
     )
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
@@ -689,6 +693,7 @@ def test_one_stalled_stream_among_k_still_hits_its_own_deadline() raises:
         bodies.append(
             RecvRingBody[ScriptedStream].new_content_length(
                 healthy_stream^, 32, _body_bytes(32),
+                100 * 1024 * 1024,
             )
         )
         i = i + 1
@@ -698,6 +703,7 @@ def test_one_stalled_stream_among_k_still_hits_its_own_deadline() raises:
     bodies.append(
         RecvRingBody[ScriptedStream].new_content_length(
             silent_stream^, 4096, List[UInt8](),
+            100 * 1024 * 1024,
         )
     )
     # Stamp every body, exactly as `finish_into_response` does.
@@ -761,6 +767,7 @@ def test_timed_out_body_refuses_to_surrender_its_stream() raises:
     stream.set_pending_after_script(_STALL_PENDING_READS)
     var body = RecvRingBody[ScriptedStream].new_content_length(
         stream^, 4096, List[UInt8](),
+        100 * 1024 * 1024,
     )
     body.set_deadline_us(Int(_now_ns() // UInt64(1000)) - 1)
 

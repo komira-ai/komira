@@ -20,10 +20,20 @@
 # keeps only: the HTTP status, the envelope's numeric `code`, the `status`
 # name IF it is a bare `[A-Z_]+` token of at most 64 bytes (so a server cannot
 # smuggle text through it), the BYTE LENGTH of `error.message`, the byte
-# count of the whole body, and the wait a `google.rpc.RetryInfo` detail asks
+# count of the whole body, the wait a `google.rpc.RetryInfo` detail asks
 # for, as a number of milliseconds (`retry_delay_ms`; the retry classifier's
-# server delay). `gcp_status_error` is the contract the generated
-# REST clients call (proto-codegen `emit_rest.rs`, `GCP_STATUS_ERROR`).
+# server delay), and the first `error.errors[].reason` IF it is a bare
+# `[A-Za-z0-9_]+` token of at most 64 bytes (`reason`).
+#
+# `reason` is the older envelope's (Compute Engine v1 answers with
+# `error.errors[]` of `{message, domain, reason}` and no `error.status`). Its
+# reason is a fixed machine token (`alreadyExists`, `notFound`,
+# `resourceNotReady`), and it is the only thing that tells a 409 for a
+# resource that already exists from any other 409, which an idempotent
+# insert needs. The `message` beside it is counted, never kept.
+#
+# `gcp_status_error` is the contract the generated REST clients call
+# (proto-codegen `emit_rest.rs`, `GCP_STATUS_ERROR`).
 #
 # The same API called over gRPC answers with a gRPC status instead;
 # `gcp_grpc_status_error` (at the end of this file) is the generated gRPC
@@ -142,6 +152,24 @@ def _is_status_token(s: String) -> Bool:
     return True
 
 
+def _is_reason_token(s: String) -> Bool:
+    """A bare `[A-Za-z0-9_]+` token of at most 64 bytes: an
+    `error.errors[].reason` this package will repeat."""
+    var b = s.as_bytes()
+    if len(b) == 0 or len(b) > _MAX_STATUS_TOKEN_BYTES:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not (
+            (c >= ord("A") and c <= ord("Z"))
+            or (c >= ord("a") and c <= ord("z"))
+            or (c >= ord("0") and c <= ord("9"))
+            or c == ord("_")
+        ):
+            return False
+    return True
+
+
 @fieldwise_init
 struct GcpStatusError(Copyable, Movable, Deinitable):
     """A failed Google API call, as much as can be said without the body.
@@ -150,7 +178,10 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
     field (or a wrong-typed one); `status` is "" when absent or not a bare
     status token. `retry_delay_ms` is the first `google.rpc.RetryInfo`
     detail's `retryDelay` in milliseconds (rounded up), or -1 when there is
-    none or it is not a well-formed non-negative proto3 JSON Duration."""
+    none or it is not a well-formed non-negative proto3 JSON Duration.
+    `reason` is the first `error.errors[]` entry's `reason` when it is a bare
+    token (`_is_reason_token`), else "" (the older envelope only; see the
+    module header)."""
 
     var verb: String
     var rpc: String
@@ -161,6 +192,7 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
     var message_bytes: Int
     var body_bytes: Int
     var retry_delay_ms: Int64
+    var reason: String
 
     def code(self) -> Int:
         """The canonical `google.rpc.Code`: the envelope's `status` name when it
@@ -184,15 +216,17 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
             + String(self.code())
             + ")"
         )
+        if self.reason.byte_length() > 0:
+            out += ", reason " + self.reason
         if self.envelope == ENVELOPE_PRESENT:
             if self.status.byte_length() == 0:
-                out += ", error.status absent or not a status token"
+                out += String(_UNLABELLED_NO_STATUS)
             if self.message_bytes >= 0:
                 out += ", error.message " + String(self.message_bytes) + " bytes"
         elif self.envelope == ENVELOPE_ABSENT:
-            out += ", no google.rpc.Status envelope"
+            out += String(_UNLABELLED_NO_ENVELOPE)
         else:
-            out += ", body is not a JSON document"
+            out += String(_UNLABELLED_NOT_JSON)
         out += ", body " + String(self.body_bytes) + " bytes"
         if self.retry_delay_ms >= 0:
             out += ", RetryInfo " + String(self.retry_delay_ms) + " ms"
@@ -209,7 +243,7 @@ def parse_gcp_status(
     beyond the allow-listed fields described in the module header."""
     var out = GcpStatusError(
         verb.copy(), rpc.copy(), http_status, ENVELOPE_MALFORMED, -1, String(),
-        -1, len(body), -1,
+        -1, len(body), -1, String(),
     )
     # Whitespace-only (or empty) body: nothing to parse.
     var blank = True
@@ -257,9 +291,30 @@ def parse_gcp_status(
             out.message_bytes = err.get("message").as_string().byte_length()
         if err.has("details") and err.get("details").is_array():
             out.retry_delay_ms = _retry_info_delay_ms(err.get("details"))
+        if err.has("errors") and err.get("errors").is_array():
+            out.reason = _first_reason(err.get("errors"))
     except:
         pass
     return out^
+
+
+def _first_reason(errors: JsonValue) -> String:
+    """The first `errors[]` entry's `reason` if it is a bare token, else ""."""
+    try:
+        if errors.array_len() == 0:
+            return String()
+        var first = errors.element_at(0)
+        if not first.is_object() or not first.has("reason"):
+            return String()
+        var r = first.get("reason")
+        if r.kind_tag() != JSON_STRING:
+            return String()
+        var s = r.as_string()
+        if _is_reason_token(s):
+            return s^
+    except:
+        pass
+    return String()
 
 
 comptime RETRY_INFO_TYPE = "type.googleapis.com/google.rpc.RetryInfo"
@@ -341,6 +396,74 @@ def gcp_status_error(
 ) -> Error:
     """The `Error` a generated REST client raises for a non-2xx response."""
     return parse_gcp_status(verb, rpc, http_status, body).to_error()
+
+
+def gcp_status_error_code(verb: String, rpc: String, text: String) -> Int:
+    """The `google.rpc.Code` in an error a generated REST client raised for
+    `verb rpc` (`gcp_status_error`, or a mid-stream error element raised by
+    `gcp_rest_stream_items`), or -1 when `text` is not such an error.
+
+    `text` must begin as `GcpStatusError.message` renders it:
+    `<verb> <rpc>: HTTP <status>, <CODE_NAME> (code <code>)`, the name being
+    `code_name(<code>)`. An error raised before any response arrived (a
+    refused dial, a timeout), which a generated client passes on unchanged,
+    an error for another method, and a message that merely contains
+    `(code N)` all return -1. A caller that maps statuses onto its own
+    errors reads the code here instead of parsing the message itself."""
+    var head = verb + " " + rpc + ": HTTP "
+    if not text.startswith(head):
+        return -1
+    var http = _digits_at(text, head.byte_length())
+    if http[0] < 0 or not _starts_at(text, ", ", http[1]):
+        return -1
+    var name_at = http[1] + 2
+    var at = _find_bytes(text, " (code ", name_at)
+    if at < 0:
+        return -1
+    var code = _digits_at(text, at + 7)
+    if code[0] < 0:
+        return -1
+    var b = text.as_bytes()
+    if code[1] >= len(b) or b[code[1]] != UInt8(ord(")")):
+        return -1
+    var name = code_name(code[0])
+    if name.byte_length() == 0 or at - name_at != name.byte_length():
+        return -1
+    if not _starts_at(text, name, name_at):
+        return -1
+    return code[0]
+
+
+comptime _UNLABELLED_NO_ENVELOPE: StaticString = ", no google.rpc.Status envelope"
+comptime _UNLABELLED_NOT_JSON: StaticString = ", body is not a JSON document"
+comptime _UNLABELLED_NO_STATUS: StaticString = (
+    ", error.status absent or not a status token"
+)
+
+
+def gcp_status_error_unlabelled(verb: String, rpc: String, text: String) -> Bool:
+    """Whether `text`, an error a generated REST client raised for
+    `verb rpc` (as `gcp_status_error_code` reads it), came from a body that
+    named no status: no `google.rpc.Status` envelope, a body that is not
+    JSON, or an envelope whose `error.status` is absent or not a status
+    token. Its code was then derived from the HTTP status alone. False for
+    any text `gcp_status_error_code` does not read.
+
+    Like `gcp_status_error_code`, this reads komira_gcp_core's own rendering
+    (`GcpStatusError.message`), never a byte of Google's body, so the two
+    stay beside the renderer they parse."""
+    if gcp_status_error_code(verb, rpc, text) < 0:
+        return False
+    var at = _find_bytes(text, " (code ", 0)
+    var close = _find_bytes(text, ")", at)
+    if at < 0 or close < 0:
+        return False
+    var after = close + 1
+    return (
+        _starts_at(text, String(_UNLABELLED_NO_ENVELOPE), after)
+        or _starts_at(text, String(_UNLABELLED_NOT_JSON), after)
+        or _starts_at(text, String(_UNLABELLED_NO_STATUS), after)
+    )
 
 
 # =============================================================================

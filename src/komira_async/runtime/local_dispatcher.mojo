@@ -108,9 +108,9 @@ from komira_async.runtime.wake_primitives import (
     wait_on_address,
     wake_one_by_address,
 )
-from komira_core.collections.slab import Slab
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
-from komira_core.runtime_traits.parallel_dispatch import ParallelDispatch
+from komira_collections.slab import Slab
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.parallel_dispatch import ParallelDispatch
 
 # -----------------------------------------------------------------------------
 # ⚠ THE BARRIER-STALL DUMP GOES TO **STDERR**, NEVER STDOUT.
@@ -989,7 +989,7 @@ struct _DispatchShard[
 # =============================================================================
 #
 # Increments a process-global atomic depth counter
-# (`komira_on_pool_enter`/`komira_on_pool_exit` in komira_core) on
+# (`komira_on_pool_enter`/`komira_on_pool_exit` in the core packages) on
 # construction and decrements it on destruction. Constructed as a local at the
 # top of `run_with_state` so the WHOLE dispatch window (enqueue + worker drain +
 # wake-word barrier) is bracketed; the RAII destructor fires on EVERY exit path

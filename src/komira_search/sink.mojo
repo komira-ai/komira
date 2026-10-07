@@ -16,7 +16,7 @@
 #     InvertedIndexBuilder.add_text_column) + appends each
 #     row's _source cell. flush_segment runs the flush sequence and
 #     returns the OWNED split bytes.
-#   * SearchSink — the DataFrame write operator. Conforms komira_core's Sink
+#   * SearchSink — the DataFrame write operator. Conforms the core packages' Sink
 #     (init_sink / accept_batch / finish; inherit default accept_row_blocks;
 #     is_text_output_sink -> False). Move-only (it owns an IndexCore with a
 #     Slab; copying it would mean two writers to one split = corruption).
@@ -42,11 +42,11 @@
 #     InlineArray[UInt8, 16]: no heap.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Schema
-from komira_core.collections.batch_view import batch_view_over
-from komira_core.source.sink import Sink
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Schema
+from komira_arrow.batch_view import batch_view_over
+from komira_scan_source.sink import Sink
 
 from .analyzer import (
     AnalyzerConfig,
@@ -70,7 +70,7 @@ from .split import DocStoreBuilder, serialize_split, FOOTER_NO_TOTAL_TOKENS
 
 from std.memory import bitcast
 
-from komira_core.collections.batch_view import BatchView
+from komira_arrow.batch_view import BatchView
 
 
 # =============================================================================
@@ -110,6 +110,7 @@ def _ingest_numeric_column[
         var col = bv.col_f64(ci)
         for r in range(n):
             var v = col.load[1](r)[0]
+            # SAFETY: value bitcast between same-width scalars; no memory is read.
             builder.append_float_bits(
                 bitcast[DType.uint64](v), bv.col_is_null(ci, r)
             )
@@ -117,6 +118,7 @@ def _ingest_numeric_column[
         var col = bv.col_f32(ci)
         for r in range(n):
             var v = col.load[1](r)[0]
+            # SAFETY: value bitcast between same-width scalars; no memory is read.
             builder.append_float_bits(
                 UInt64(bitcast[DType.uint32](v)), bv.col_is_null(ci, r)
             )
@@ -368,7 +370,7 @@ struct IndexCore(Movable, Deinitable):
 
 struct SearchSink(Sink, Movable):
     """Write destination that builds ONE immutable search split from its feeding
-    DataFrame. Conforms komira_core's Sink (the DataFrame terminal-sink trait, NOT
+    DataFrame. Conforms the core packages' Sink (the DataFrame terminal-sink trait, NOT
     MorselSinkImpl). Move-only: owns an IndexCore (which owns the
     InvertedIndexBuilder/Slab + the doc-store builder).
 
@@ -591,6 +593,8 @@ struct SearchSink(Sink, Movable):
         var prefix_buf = List[UInt8]()
         for i in range(plen):
             prefix_buf.append(pb[i])
+        # SAFETY: `prefix_buf` is a prefix of a String's bytes minus a trailing '/', so
+        # it is still UTF-8.
         var prefix = String(StringSlice(unsafe_from_utf8=Span(prefix_buf)))
         return prefix + "/" + self._index + "/splits/" + uuid_hex + ".split"
 

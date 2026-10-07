@@ -1,0 +1,73 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Azure Blob Storage, hand-written: Shared Key signing (the 13-field
+# string-to-sign) as a pure function and as SharedKeySigningLayer, an
+# HttpService layer that stamps `x-ms-date` and signs each request, its query
+# parameters included; AzureStore (HEAD, range GET and List Blobs over any
+# komira_http_client HttpService, real Azure or Azurite addressing) and the
+# List Blobs / error XML readers; AzureClient, the per-worker bundle of
+# HttpClient, signing layer, store, connector and reactor; AzureFs,
+# komira_fs's FileSystem over one container (read-only); and AzureSasSigner,
+# komira_objectstore's ObjectUrlSigner as a blob service SAS. The account
+# key comes from komira_azure_core's AzureSharedKey. No environment is read.
+#
+# komira_buffer and komira_collections are deps because komira_fs's
+# FileSystem signatures name their types (SharedAlignedBuffer and HeapRegion,
+# Slab), so any conformer must import them from there; AzureFs also takes
+# FS_SCHEME_AZURE from komira_plan_expr. S3Fs and GcsFs depend on them for the
+# same reason.
+#
+# The tests are hermetic, no socket: test_azure_signing (canonicalization,
+# mixed-case query parameter names included, and the string-to-sign, an
+# Authorization header against a golden computed independently, and a blob
+# key's byte-wise encoding shared by the wire path and the canonicalized
+# resource), test_azure_signing_layer (the layer over a capturing HttpService:
+# a pinned x-ms-date stamped and signed, the wall clock's date stamped when
+# none is pinned, a caller's date kept or replaced without a duplicate, a List
+# Blobs request's query parameters signed, each against an independent golden,
+# and query values that are not UTF-8 refused), test_azure_xml (List Blobs
+# entries, prefixes, markers, error bodies and entity decoding),
+# test_azure_store_fs (AzureStore, AzureClient and AzureFs over scripted HTTP:
+# URLs, each verb, the status taxonomy, NextMarker pagination and its page cap
+# (a NextMarker that never ends is refused after AZURE_LIST_MAX_PAGES
+# requests), the shallow listing, the read verbs reaching the transport, the
+# refused writes and the inherited delete default), test_azure_presign (the
+# service SAS against independent goldens, its sixteen-field string-to-sign
+# and its refusals) and test_no_env_reads (the package's sources read no
+# environment). The same verbs over a real socket, against a fake service
+# that checks each signature itself, are komira_azure_blob_e2e's test.
+mojo_library(
+    name = "komira_azure_blob",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_azure_core:komira_azure_core",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_xml:komira_xml",
+    ],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in glob(["*.mojo"])
+        },
+    },
+    test_srcs = [
+        "tests/test_azure_presign.mojo",
+        "tests/test_azure_signing.mojo",
+        "tests/test_azure_signing_layer.mojo",
+        "tests/test_azure_store_fs.mojo",
+        "tests/test_azure_xml.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

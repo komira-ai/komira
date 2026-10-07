@@ -26,7 +26,7 @@ Two layers produce a shipped artifact, and this document is about the first:
    the release machine.
 2. **The release machine** runs the build, then stages and publishes what it
    made, deploys it where it is a service, and validates the outcome in the
-   environment. Its driver is `komira_ci`.
+   cell it deployed to. Its driver is `komira_ci`.
 
 Held, because the libraries that implement them are not part of this
 repository yet, and described here only so the build outputs below make
@@ -136,6 +136,44 @@ tool that writes them is itself a pinned build output.
 - A program run through its bundle behaves as the executable does: arguments,
   environment, output and exit status.
 - Only linux x86_64 bundles are built.
+
+## What does this repository's release machine say?
+
+[`release/machine.textproto`](../../release/machine.textproto) (format
+`kci.machine`, read by `src/kci_release_machine`) is komira's own release machine:
+its stages in order, and the steps of each. `kci run --stage <S>` runs one
+stage. Three stages today: `build` (one BUILD step), `gamma` and `prod` (one
+PUBLISH step each, to prefix.dev `komira-ai/gamma` and `komira-ai/prod`). Three
+fields of a stage carry what the CI workflow must agree with:
+
+| field | meaning |
+|---|---|
+| `stage.environment` | the GitHub environment the stage's job runs in (default: the stage's name). A trusted-publishing channel's push identity must name it, or kci refuses the publish. |
+| `stage.farm_connected` | the stage's job joins the build farm's tailnet (the `farm-connect` action), which needs the job's ID token. A farm-connected stage may not publish: the job that holds a farm network node never holds a publishing token. |
+| `step.validation` | a check of what a PUBLISH step published, by kind (`CONDA_INSTALL_SMOKE`: `image` pinned by digest, `install` (repeated), `compiler_channel`, `extra_channel`, `program` under `release/`, `wait_for_index_seconds`). A FULL run runs it after its step; `--only validation:<name>` runs it alone against what is published; `--only step:<name>` runs the step without it. A failure is exit 7, never a skip. |
+
+The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this
+file by `kci run` itself at start-up under GitHub Actions and by a welded test
+([docs/ci.md](../ci.md#kciyml-the-release)).
+
+A second validation kind, `CONDA_INSTALL_ENV`, runs on the machine that runs
+kci, with no container. It takes the same fields as `CONDA_INSTALL_SMOKE`
+except `image` and `program`, plus an optional `smoke: README` (the one word,
+and the default): what it runs is each installed library's README examples
+(`share/doc/<name>/README.md`, whose bytes the release pins). An install of a
+metapackage is checked member by member: kci reads the members from the built
+metapackage's own requirements (each at the release's version and build, the
+list equal to the release's libraries, never empty) while `pixi.toml` names
+only the metapackage. `kci run` then takes `--pixi` and `--pixi-sha256`, the
+pinned pixi and its sha256. gamma's two validations are of this kind:
+`install-komira-encoding` (the library alone) and `install-set` (`komira_all`
+alone). Before anything is published, `--channel file:///<dir>` points such a
+run at a local channel that `komira_pack conda-index` wrote from the release
+directory; it is accepted only on a run that selects nothing but
+`CONDA_INSTALL_ENV` validations, and never under GitHub Actions.
+Its one result that is not a pass or a failure: when no declared host answers
+at all (no network), the validation is `INDETERMINATE`, exit 5, never a pass,
+and its row carries a `skip_reason`.
 
 ## Where is the code?
 
