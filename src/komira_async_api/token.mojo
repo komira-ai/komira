@@ -40,8 +40,9 @@
 #   `DynamicFilter` (manual `copy()` method).
 #
 # Atomic dtype rationale:
-#   * cancel flag: Atomic[DType.uint8] — only needs store/load (no
-#     compare_exchange or fetch_*). uint8 supports those on Mojo 0.26.3.
+#   * cancel flag: Atomic[DType.uint8] — load, store, and one
+#     compare_exchange (LIVE -> CLAIMED) in `cancel`, so racing cancels
+#     elect exactly one writer of the reason.
 #   * NOT Atomic[DType.bool]: bool dtype rejects pop.atomic.rmw.
 #
 # Pointer discipline:
@@ -53,6 +54,15 @@
 
 from std.memory import ArcPointer, OwnedPointer, alloc
 from komira_atomic_alias import AtomicU8
+
+
+# Slot states. A slot goes LIVE -> CLAIMED -> CANCELLED exactly once.
+# CLAIMED means one `cancel` won the compare-exchange and is writing the
+# reason; `is_cancelled()` already reports True (any non-LIVE state), and
+# `reason()` waits for CANCELLED before it reads the reason.
+comptime _LIVE = UInt8(0)
+comptime _CANCELLED = UInt8(1)
+comptime _CLAIMED = UInt8(2)
 
 
 # Single ancestor-chain entry. Holds flag + reason + frozen flag for one
@@ -172,8 +182,11 @@ struct CancellationToken(Movable, Deinitable):
         downward is implicit: descendants share the same slot via their
         ancestor chain.
 
-        Idempotent: first call sets the flag; second call is a no-op (flag
-        already non-zero; we don't overwrite the reason).
+        Idempotent, including under concurrency: exactly one call per slot
+        performs the transition and writes the reason (the one whose
+        compare-exchange LIVE -> CLAIMED wins); every other call, concurrent
+        or later, is a no-op and never touches the reason. When any call
+        returns, `is_cancelled()` is True on every holder of the slot.
 
         Frozen tokens (from never()) silently ignore cancel.
         """
@@ -183,13 +196,23 @@ struct CancellationToken(Movable, Deinitable):
         var last_idx = n - 1
         if self._chain[last_idx][]._frozen:
             return
-        if self._chain[last_idx][]._flag[].load() != UInt8(0):
-            return  # Already cancelled; idempotent no-op.
-        # Write reason BEFORE flag (Release fence implicit via Atomic.store).
+        if self._chain[last_idx][]._flag[].load() != _LIVE:
+            return  # Already claimed or cancelled; idempotent no-op.
+        # Claim the transition. A plain load-then-store here let two racing
+        # cancels both write `_reason` (a String: a data race on its heap
+        # buffer), and let a reader see one reason and later another.
+        var expected = _LIVE
+        if not self._chain[last_idx][]._flag[].compare_exchange(
+            expected, _CLAIMED
+        ):
+            return  # Another cancel owns the transition.
+        # Only the claimant writes the reason, then publishes it with the
+        # CANCELLED store (seq_cst, so the reason write happens-before any
+        # load that observes _CANCELLED).
         self._chain[last_idx][]._reason = reason
         AtomicU8.store(
             UnsafePointer(to=self._chain[last_idx][]._flag[])
-            .unsafe_bitcast[Scalar[DType.uint8]](), UInt8(1),
+            .unsafe_bitcast[Scalar[DType.uint8]](), _CANCELLED,
         )
 
     def child(self) -> CancellationToken:
@@ -216,10 +239,19 @@ struct CancellationToken(Movable, Deinitable):
         Walks root-to-leaf so the OUTERMOST cancellation reason wins (which
         matches the user's mental model: a parent cancelling for a query-
         deadline reason should surface that reason in every descendant).
+
+        A slot that is CLAIMED (a cancel is between its claim and its
+        publish) is waited out by spinning: its reason is being written and
+        is readable only once the slot is CANCELLED. The wait is bounded by
+        one String assignment on the claiming thread.
         """
         for i in range(len(self._chain)):
-            if self._chain[i][]._flag[].load() != UInt8(0):
-                return self._chain[i][]._reason
+            var state = self._chain[i][]._flag[].load()
+            if state == _LIVE:
+                continue
+            while state == _CLAIMED:
+                state = self._chain[i][]._flag[].load()
+            return self._chain[i][]._reason
         return String("")
 
 
