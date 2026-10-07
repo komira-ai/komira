@@ -47,7 +47,8 @@
 #   * build_gcs_tls_connector disables verification: test 1 reds.
 #   * build_gcs_tls_connector_trusting disables verification: test 3 reds
 #     (the wrong name is accepted).
-#   * build_gcs_tls_connector_trusting skips `add_trust_pem`: test 2 reds.
+#   * build_gcs_tls_connector_trusting skips `add_trust_pem`: test 2 reds
+#     (and test 4: the non-PEM root is no longer refused).
 #   * build_gcs_tls_connector_trusting does not pin SNI: test 3 reds (the
 #     client then checks the URL host 127.0.0.1, which the leaf carries).
 #   * build_gcs_tls_connector_trusting drops its empty-name check: test 4
@@ -408,8 +409,8 @@ def test_trusting_connector_construction() raises:
 
 def main() raises:
     tls_init()
-    test_trusting_connector_construction()
     test_default_connector_refuses_a_private_root()
     test_trusting_connector_accepts_its_root()
     test_trusting_connector_refuses_another_name()
+    test_trusting_connector_construction()
     print("PASS komira_objectstore_gcs test_gcs_grpc_trust")
