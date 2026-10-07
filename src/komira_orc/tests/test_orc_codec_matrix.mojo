@@ -173,7 +173,7 @@ def _snappy_compress(src: List[UInt8]) raises -> List[UInt8]:
     var out_buf = alloc[UInt8](out_cap)
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(out_cap)
-    var status = external_call["snappy_compress", Int32](
+    var status = external_call["komira_snappy_compress", Int32](
         in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
         Int64(len(src)),
         out_buf.unsafe_origin_cast[MutUntrackedOrigin](),

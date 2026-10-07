@@ -449,7 +449,7 @@ def _snappy_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(out_cap)
     # FFI-BOUNDARY: snappy is statically linked (the core packages' deps).
-    var status = external_call["snappy_compress", Int32](
+    var status = external_call["komira_snappy_compress", Int32](
         _span_ptr(src),
         Int64(in_len),
         _list_ptr(out),
@@ -725,7 +725,7 @@ def _snappy_decompress_chunk(
     # FFI-BOUNDARY: snappy is statically linked (the core packages' deps).
     var ulen_buf = alloc[Int64](1)
     ulen_buf[0] = Int64(0)
-    var ul_status = external_call["snappy_uncompressed_length", Int32](
+    var ul_status = external_call["komira_snappy_uncompressed_length", Int32](
         in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
         Int64(len(chunk)),
         ulen_buf,
@@ -742,7 +742,7 @@ def _snappy_decompress_chunk(
     # SAFETY: 1-element in/out length slot (in: capacity, out: actual length).
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(out_cap)
-    var status = external_call["snappy_uncompress", Int32](
+    var status = external_call["komira_snappy_uncompress", Int32](
         in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
         Int64(len(chunk)),
         out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
@@ -850,8 +850,8 @@ def _lzo_decompress_chunk(
 #
 # Per-OS soname; the first call per process pays the dlopen, subsequent calls
 # reuse the handle from its `_Global` slot. Snappy is not here: it is
-# statically linked (the core packages links //third_party/snappy) and called
-# through `external_call`.
+# statically linked (this package's deps name //third_party/snappy) and its C
+# API, renamed komira_snappy_*, is called through `external_call`.
 
 comptime _LIBZSTD: StaticString = (
     "libzstd.dylib" if CompilationTarget.is_macos() else "libzstd.so.1"

@@ -250,7 +250,7 @@ def _snappy_uncompress(
     var in_ptr = _span_ptr(payload)
     var len_buf = alloc[Int64](1)
     len_buf[0] = Int64(0)
-    var len_status = external_call["snappy_uncompressed_length", Int32](
+    var len_status = external_call["komira_snappy_uncompressed_length", Int32](
         in_ptr,
         Int64(snappy_len),
         len_buf,
@@ -283,7 +283,7 @@ def _snappy_uncompress(
     var out = List[UInt8](capacity=max(ulen, 1))
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(ulen)
-    var status = external_call["snappy_uncompress", Int32](
+    var status = external_call["komira_snappy_uncompress", Int32](
         in_ptr,
         Int64(snappy_len),
         _list_ptr(out),
@@ -990,7 +990,7 @@ def _compress_snappy_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
 
     var size_buf = alloc[Int64](1)
     size_buf[0] = Int64(out_cap)
-    var status = external_call["snappy_compress", Int32](
+    var status = external_call["komira_snappy_compress", Int32](
         _span_ptr(payload),
         Int64(in_len),
         _list_ptr(out),

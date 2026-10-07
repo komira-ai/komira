@@ -177,7 +177,7 @@ def snappy_uncompressed_length(compressed: Span[UInt8, _]) raises -> Int:
         )
     var size: Int64 = 0
     var status = external_call[
-        "snappy_uncompressed_length",
+        "komira_snappy_uncompressed_length",
         Int32,
         UnsafePointer[UInt8, MutUntrackedOrigin],
         UInt64,
@@ -232,7 +232,7 @@ def snappy_decompress[
         )
     var size: Int64 = Int64(output_cap)
     var status = external_call[
-        "snappy_uncompress",
+        "komira_snappy_uncompress",
         Int32,
         UnsafePointer[UInt8, MutUntrackedOrigin],
         UInt64,
@@ -276,7 +276,7 @@ def snappy_compress[
     var output_cap = len(dst)
     var size: Int64 = Int64(output_cap)
     var status = external_call[
-        "snappy_compress",
+        "komira_snappy_compress",
         Int32,
         UnsafePointer[UInt8, MutUntrackedOrigin],
         UInt64,

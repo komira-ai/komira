@@ -372,7 +372,7 @@ struct Snappy(Compression):
         var size_buf = alloc[Int64](1)
         size_buf[0] = Int64(max_out)
         # FFI-BOUNDARY:
-        var status = external_call["snappy_compress", Int32](
+        var status = external_call["komira_snappy_compress", Int32](
             _span_ptr(input),
             Int64(n),
             _list_ptr(out),
@@ -404,7 +404,7 @@ struct Snappy(Compression):
             # Ask snappy for the declared uncompressed length.
             var sz = alloc[Int64](1)
             sz[0] = Int64(0)
-            var status = external_call["snappy_uncompressed_length", Int32](
+            var status = external_call["komira_snappy_uncompressed_length", Int32](
                 _span_ptr(input),
                 Int64(n),
                 sz,
@@ -422,7 +422,7 @@ struct Snappy(Compression):
         var size_buf = alloc[Int64](1)
         size_buf[0] = Int64(out_len)
         # FFI-BOUNDARY:
-        var status2 = external_call["snappy_uncompress", Int32](
+        var status2 = external_call["komira_snappy_uncompress", Int32](
             _span_ptr(input),
             Int64(n),
             _list_ptr(out),
