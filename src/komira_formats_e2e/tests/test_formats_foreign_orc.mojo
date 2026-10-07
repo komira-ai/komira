@@ -52,8 +52,8 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
 from komira_async.runtime.runtime import PerCoreAsyncRuntime, PLACEMENT_FIXED
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.record_batch import RecordBatch
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.record_batch import RecordBatch
 from komira_orc import (
     OrcFileTail,
     read_orc_bytes,
