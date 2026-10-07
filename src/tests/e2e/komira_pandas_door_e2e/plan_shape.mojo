@@ -33,7 +33,7 @@ What it does not compare, and why:
   3 and 4), the partition columns' types (field 6) and the partition values
   (field 7). Fields 8 to 10 (`hive_dir_scan`, `has_hive_predicate`,
   `fs_is_local`) are not compared either; the decoder refuses a hive scan and
-  a non-local file system, so a decoded plan holds only their defaults. The
+  a non-local file system, so a decoded plan is always non-hive and local. The
   door's parquet fixtures set none of them.
 - `ScanData.payload_narrow`: an optimizer annotation that the wire does not
   carry, so a decoded plan always has it empty.
