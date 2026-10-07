@@ -1,0 +1,125 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load(":defs.bzl", "cov_debug_check", "cov_set_check")
+
+# Coverage builds (tools/build/mojo/README.md, "Coverage builds"; test 41 of
+# tools/build/tests/run_tests.sh).
+
+# A library with two tests and no README, coverage by the switch: with
+# `-c komira.coverage=true` it has [coverage]; without it, none.
+# tools/build/tests/functional/coverage_keys.sh compares its actions with the
+# switch off and on.
+mojo_library(
+    name = "covlib",
+    srcs = [
+        "covlib/__init__.mojo",
+        "covlib/value.mojo",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_describe.mojo",
+        "tests/test_value.mojo",
+    ],
+)
+
+# The same library with coverage whatever the switch says (a tests-cell
+# fixture may name the link directory), linked through the one every library
+# uses: what the checks below read.
+mojo_library(
+    name = "covlib_forced",
+    srcs = [
+        "covlib/__init__.mojo",
+        "covlib/value.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    import_name = "covlib",
+    test_srcs = [
+        "tests/test_describe.mojo",
+        "tests/test_value.mojo",
+    ],
+)
+
+# Each coverage binary has line tables naming the library source its test
+# calls, holds the placeholder of the working directory, names no sandbox
+# path, and has no compressed section.
+cov_debug_check(
+    name = "hermetic",
+    bins = [
+        ":covlib_forced[coverage][bin][test_describe]",
+        ":covlib_forced[coverage][bin][test_value]",
+    ],
+    # The directories of the tests and of the library's staged sources, as
+    # the pinned Mojo writes them: relative.
+    dirs = [
+        "tests",
+        "buck-out/v2/art/tests/functional/coverage/__covlib_forced__/[0-9a-f]+/src/covlib",
+    ],
+    mode = "hermetic",
+    # Both tests call covlib/value.mojo.
+    names = ["value.mojo"],
+    script = "check.sh",
+)
+
+# [coverage] and [coverage][bin] are every test's binary, no more and no
+# fewer (checked at analysis).
+cov_set_check(
+    name = "aggregates",
+    aggregates = [
+        ":covlib_forced[coverage]",
+        ":covlib_forced[coverage][bin]",
+    ],
+    members = [
+        ":covlib_forced[coverage][bin][test_describe]",
+        ":covlib_forced[coverage][bin][test_value]",
+    ],
+)
+
+# Reproducibility without --no-remote-cache: two libraries build the same
+# test, so two actions with different keys (their output paths differ) run on
+# the farm, in different sandboxes. The test imports only reprodep, a
+# dependency of both, so nothing of the two libraries themselves is in its
+# debug info: the binaries must be the same bytes.
+mojo_library(
+    name = "reprodep",
+    srcs = [
+        "reprodep/__init__.mojo",
+        "reprodep/calc.mojo",
+    ],
+    conda = False,
+)
+
+[
+    mojo_library(
+        name = name,
+        srcs = ["repro/__init__.mojo"],
+        conda = False,
+        coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+        deps = [":reprodep"],
+        import_name = "repro",
+        test_srcs = ["tests/test_same.mojo"],
+    )
+    for name in ("repro_a", "repro_b")
+]
+
+cov_debug_check(
+    name = "reproducible",
+    bins = [
+        ":repro_a[coverage][bin][test_same]",
+        ":repro_b[coverage][bin][test_same]",
+    ],
+    mode = "same",
+    script = "check.sh",
+)
+
+# For the planted defects of tests//negative/coverage.
+export_file(
+    name = "check.sh",
+    visibility = ["//negative/coverage:"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["check.sh"],
+    visibility = ["komira//:tests_lints"],
+)

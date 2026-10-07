@@ -15,7 +15,11 @@
 #      cannot see signedness — `AtomicI8` and `AtomicU8` are both one byte — so
 #      every row also round-trips a value that only its own dtype can hold: a
 #      NEGATIVE one for the signed rows, and the unsigned MAXIMUM (which reads
-#      back negative through a signed alias) for the unsigned ones.
+#      back negative through a signed alias) for the unsigned ones. Those
+#      round trips go through `Int`, which is 64 bits wide, so at 64 bits a
+#      sign swap wraps in and wraps back out unseen: the bound dtype is
+#      therefore also compared exactly, and the two 64-bit rows compare
+#      against zero in their own scalar type after a `fetch_sub` below zero.
 #
 # ⛔ This test must stay green ACROSS the cutover edit. If it goes red after
 # `Atomic[DType.int64]` becomes `Atomic[Int64]`, the cutover is wrong — the two
@@ -24,7 +28,7 @@
 # =============================================================================
 
 from std.sys import align_of, size_of
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_false, assert_true
 
 from komira_atomic_alias import (
     AtomicI8,
@@ -79,6 +83,46 @@ def test_unsigned_rows_hold_the_unsigned_maximum() raises:
 
     var u64 = AtomicU64(9_223_372_036_854_775_807)
     assert_equal(Int(u64.load()), 9_223_372_036_854_775_807)
+
+
+def test_dtype_is_pinned_exactly() raises:
+    """Each row is bound to EXACTLY the dtype its name claims.
+
+    The round trips above go through `Int`, which is 64 bits wide: a 64-bit
+    row bound to the wrong signedness wraps on the way in and wraps back on
+    the way out, so `AtomicI64` on `DType.uint64` (or `AtomicU64` on
+    `DType.int64`) passes them unchanged. Comparing the bound dtype itself
+    sees the swap at every width.
+    """
+    assert_true(AtomicI8.dtype == DType.int8)
+    assert_true(AtomicI32.dtype == DType.int32)
+    assert_true(AtomicI64.dtype == DType.int64)
+    assert_true(AtomicU8.dtype == DType.uint8)
+    assert_true(AtomicU32.dtype == DType.uint32)
+    assert_true(AtomicU64.dtype == DType.uint64)
+
+
+def test_64_bit_rows_compare_with_their_own_sign() raises:
+    """Behavioural twin of the dtype check for the two 64-bit rows, where an
+    `Int` round trip cannot see signedness. The comparison runs in the row's
+    own scalar type, never through `Int`.
+
+    A signed row taken below zero by `fetch_sub` reads back less than zero; an
+    unsigned row wraps to its maximum instead. An unsigned row holding its
+    maximum reads back greater than zero; a signed row holding the same bits
+    reads back -1.
+    """
+    var i64 = AtomicI64(0)
+    _ = i64.fetch_sub(1)
+    var i = i64.load()
+    assert_true(i < 0)
+    assert_true(i == -1)
+
+    var u64 = AtomicU64(0)
+    _ = u64.fetch_sub(1)
+    var u = u64.load()
+    assert_false(u < 0)
+    assert_true(u > 0)
 
 
 def test_fetch_add_round_trip() raises:
@@ -144,6 +188,8 @@ def main() raises:
     test_alignment_is_natural()
     test_signed_rows_hold_negative_values()
     test_unsigned_rows_hold_the_unsigned_maximum()
+    test_dtype_is_pinned_exactly()
+    test_64_bit_rows_compare_with_their_own_sign()
     test_fetch_add_round_trip()
     test_store_then_load()
     test_alias_as_struct_field()

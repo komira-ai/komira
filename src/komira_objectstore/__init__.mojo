@@ -94,6 +94,7 @@ from .cas_manifest import (
     head_key,
     lifecycle_name,
     log_start_key,
+    moved_tombstone_key,
     tombstone_key,
 )
 # The object-store READINESS predicate every object-store-backed managed app answers

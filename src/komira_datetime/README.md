@@ -1,7 +1,7 @@
 # komira_datetime
 
 Calendar arithmetic and timestamp text, in pure Mojo with no dependencies. It
-converts between a day count since 1970-01-01 and a (year, month, day) in the
+converts between a day count since the Unix epoch (day 0) and a (year, month, day) in the
 proleptic Gregorian calendar, between epoch seconds and UTC fields, and reads
 and writes ISO 8601 / RFC 3339 timestamps (with offsets and fractions), plain
 `YYYY-MM-DD` dates, the compact `YYYYMMDDTHHMMSSZ` form and the HTTP-date. A
@@ -16,12 +16,12 @@ Days, dates and weekdays:
 ```mojo
 from komira_datetime import civil_from_days, days_from_civil, format_iso_date, is_leap_year, weekday_from_days
 
-var leap_day = days_from_civil(2024, 2, 29)
-assert_equal(leap_day, 19782)
-assert_equal(weekday_from_days(leap_day), 4)  # 0 = Sunday, so a Thursday
-assert_equal(format_iso_date(leap_day + 1), "2024-03-01")
-assert_equal(civil_from_days(leap_day + 366).year, 2025)
-assert_true(is_leap_year(2000) and not is_leap_year(1900))
+var leap_day = days_from_civil(2028, 2, 29)
+assert_equal(leap_day, 21243)
+assert_equal(weekday_from_days(leap_day), 2)  # 0 = Sunday, so a Tuesday
+assert_equal(format_iso_date(leap_day + 1), "2028-03-01")
+assert_equal(civil_from_days(leap_day + 366).year, 2029)
+assert_true(is_leap_year(2400) and not is_leap_year(2100))
 ```
 
 Read an RFC 3339 timestamp with an offset, and write it back in UTC:
@@ -43,8 +43,8 @@ The HTTP-date, both ways:
 ```mojo
 from komira_datetime import format_http_date, parse_http_date
 
-assert_equal(format_http_date(784111777), "Sun, 06 Nov 1994 08:49:37 GMT")
-assert_equal(parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT"), 784111777)
+assert_equal(format_http_date(1793954977), "Fri, 06 Nov 2026 08:49:37 GMT")
+assert_equal(parse_http_date("Fri, 06 Nov 2026 08:49:37 GMT"), 1793954977)
 ```
 
 A date that does not exist is refused:
@@ -55,8 +55,8 @@ from komira_datetime import days_from_date
 
 var message = String()
 try:
-    _ = days_from_date(2023, 2, 29)
+    _ = days_from_date(2027, 2, 29)
 except e:
     message = String(e)
-assert_equal(message, "day 29 does not exist in month 2 of year 2023")
+assert_equal(message, "day 29 does not exist in month 2 of year 2027")
 ```

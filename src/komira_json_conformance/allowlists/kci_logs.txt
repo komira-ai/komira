@@ -1,0 +1,6 @@
+# kci_logs: crash-only (testees.mojo): its verdicts are printed, not gated.
+# This file lists only the JSONTestSuite files that abort kci_logs' json_scan scanner and body parsers,
+# as `<file> ABORTS: <text the abort prints> | <note>` (gate.mojo). Each runs
+# in a child process that must still abort with that text; a fix makes the
+# line STALE and the test red until the line goes.
+
