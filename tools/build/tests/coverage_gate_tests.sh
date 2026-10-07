@@ -49,8 +49,10 @@ expect_red coverage_gate_notests "- **NotMeasured** \`$P\`: no line of this pack
 expect_red coverage_gate_unmeasured "- **UnmeasuredFile** \`$P\` \`$P/covun/unused.mojo\`: no test binary compiled this file" "$N:covun[coverage][gate]"
 expect_red coverage_gate_branch "- **BranchNotMeasured** \`$P\`: no branch of this package was measured" "$N:covfull[coverage][gate]"
 # Each red is its own finding: covlow's is BelowTarget, and covfull's only
-# finding is BranchNotMeasured (line 100%, a ratchet row).
+# finding is BranchNotMeasured (line 100%, a ratchet row). The enforce
+# banner names what a red gate blocks: the conda package only.
 for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is below the target 100.00%" \
+    "coverage_gate_enforce|The conda package (covlow_conda) is not produced until its coverage meets the policy;" \
     "coverage_gate_branch|### Findings (1)"; do
     if grep -qF -- "${want#*|}" "$LOG/${want%%|*}.log"; then
         pass "${want%%|*}_finding"
