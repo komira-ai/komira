@@ -1,0 +1,10 @@
+# The release set of tests//negative/release_set_native:no_native (BUCK):
+# never read, the target fails analysis first. It lists what the set would
+# need: the native package, last.
+metapackage komira_native_set
+member komira_encoding
+member komira_crypto
+member komira_native
+license Apache-2.0
+summary Every komira library of one release.
+home https://github.com/komira-ai/komira

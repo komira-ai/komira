@@ -12,7 +12,9 @@
 #       read back although pixi.toml names only the library; an environment
 #       without it FAILS by name
 #     ENV refusals, before anything runs: a library pinning komira_native at
-#       another build; a metapackage that does not require komira_native
+#       another build or another version, or in another shape (another
+#       operator, a fourth word, no build, a tab, a leading space); a
+#       metapackage that does not require komira_native
 #     ENV, komira_native alone: no library, so no README runs: a FAIL, never
 #       a pass (and never "not a metapackage")
 #     SMOKE, a library requiring komira_native: pinned, served, read back,
@@ -368,6 +370,73 @@ def test_env_a_library_pinning_another_native_build_is_refused() raises:
     )
     assert_equal(len(runner.calls), 0)
     assert_equal(t.call_count(), 0)
+
+
+def _refused_requirement(sub: String, json_req: String, needle: String) raises:
+    """komira_alpha's `depends` holds `json_req` (a JSON string body, so a
+    tab is spelled `\\t`) for komira_native: refused, naming the library,
+    before anything runs."""
+    var depends = String('["__linux","mojo-compiler ==1.0.0","') + json_req + String('"]')
+    var fx = Fixture(
+        sub, String(VALIDATION_KIND_CONDA_INSTALL_ENV), _names(String("komira_alpha")), String("komira_alpha"),
+        String("komira_alpha"), String("depends"), depends,
+    )
+    var runner = ScriptedRunner()
+    var t = ScriptedPkgTransport()
+    var row = _env(runner, t, fx)
+    _assert_fails_with(row, String("release: library 'komira_alpha' requires ") + needle)
+    assert_equal(len(runner.calls), 0)
+    assert_equal(t.call_count(), 0)
+
+
+def _shape(req: String) -> String:
+    return (
+        String("'") + req
+        + String("', which is not `<native> ==<version> <build>`: kci cannot tell what it installs")
+    )
+
+
+def test_env_a_native_requirement_of_another_shape_is_refused() raises:
+    # each row would reach the version and build check, or pass it, if the
+    # shape were not read first
+    var b = ExampleRelease().build()
+    var n = String(NATIVE)
+    # an operator other than ==
+    _refused_requirement(String("shape_ge"), n + String(" >=1.0.0 ") + b, _shape(n + String(" >=1.0.0 ") + b))
+    # a fourth word
+    _refused_requirement(
+        String("shape_four"), n + String(" ==1.0.0 ") + b + String(" x"), _shape(n + String(" ==1.0.0 ") + b + String(" x"))
+    )
+    # no build: any build of 1.0.0 would do
+    _refused_requirement(String("shape_nobuild"), n + String(" ==1.0.0"), _shape(n + String(" ==1.0.0")))
+
+
+def test_env_a_native_requirement_with_a_tab_is_refused() raises:
+    # split on single spaces, the first word would be `komira_native\t==1.0.0`
+    # and the requirement taken for another package's, never checked
+    var b = ExampleRelease().build()
+    var n = String(NATIVE)
+    _refused_requirement(
+        String("shape_tab"), n + String("\\t==1.0.0 ") + b, _shape(n + String("\t==1.0.0 ") + b)
+    )
+
+
+def test_env_a_native_requirement_with_a_leading_space_is_refused() raises:
+    # split on single spaces, the first word would be empty
+    var b = ExampleRelease().build()
+    var n = String(NATIVE)
+    _refused_requirement(
+        String("shape_lead"), String(" ") + n + String(" ==1.0.0 ") + b, _shape(String(" ") + n + String(" ==1.0.0 ") + b)
+    )
+
+
+def test_env_a_native_requirement_at_another_version_is_refused() raises:
+    var b = ExampleRelease().build()
+    var n = String(NATIVE)
+    _refused_requirement(
+        String("otherversion"), n + String(" ==1.0.1 ") + b,
+        n + String(" 1.0.1 ") + b + String(", but the release has ") + n + String(" 1.0.0 ") + b,
+    )
 
 
 def test_env_a_metapackage_not_requiring_the_native_package_is_refused() raises:

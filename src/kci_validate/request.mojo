@@ -59,7 +59,10 @@
 # it through the library's requirement, never through pixi.toml. The
 # requirement must be `<native> ==<version> <build>` at release.json's
 # version and build, or it RAISES naming the library: the solver would
-# bring a build nobody validated.
+# bring a build nobody validated. A requirement is the native package's when
+# its name, past any leading whitespace and up to the first byte no package
+# name holds, is; its shape is then exact: single spaces, no tab or other
+# control byte, three words.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -383,10 +386,47 @@ def _kind_word(kind: String) -> String:
     return kind.copy()
 
 
+def _is_name_byte(b: UInt8) -> Bool:
+    """A byte a conda package name may hold: a letter, a digit, `_`, `-`, `.`."""
+    return (
+        (b >= UInt8(ord("a")) and b <= UInt8(ord("z")))
+        or (b >= UInt8(ord("A")) and b <= UInt8(ord("Z")))
+        or (b >= UInt8(ord("0")) and b <= UInt8(ord("9")))
+        or b == UInt8(ord("_"))
+        or b == UInt8(ord("-"))
+        or b == UInt8(ord("."))
+    )
+
+
+def _requirement_name(req: String) -> String:
+    """The name a requirement is about, as the solver reads it: past any
+    leading whitespace, the run of name bytes. A tab, a leading space or a
+    glued operator after the name does not hide it from `with_native`."""
+    var b = req.as_bytes()
+    var start = 0
+    while start < len(b) and b[start] <= UInt8(0x20):
+        start += 1
+    var end = start
+    while end < len(b) and _is_name_byte(b[end]):
+        end += 1
+    return String(req[byte=start:end])
+
+
+def _only_spaces(req: String) -> Bool:
+    """True when every whitespace or control byte of `req` is a plain space."""
+    var b = req.as_bytes()
+    for i in range(len(b)):
+        if b[i] < UInt8(0x20) or b[i] == UInt8(0x7F):
+            return False
+    return True
+
+
 def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[InstallPin]:
     """`pins`, then the native package of the set each LIBRARY pin requires,
     when it is not already a pin (file header). RAISES naming a library that
-    requires it at another version or build, or in another shape."""
+    requires it at another version or build, or in another shape: a
+    requirement whose name, past any whitespace, is the native package must
+    be exactly `<native> ==<version> <build>`, single spaces, nothing else."""
     var out = pins.copy()
     for i in range(len(pins)):
         if not pins[i].is_library:
@@ -398,8 +438,7 @@ def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[I
                 continue
             for d in range(len(mem.conda.depends)):
                 ref req = mem.conda.depends[d]
-                var words = req.split(String(" "))
-                var name = String(words[0])
+                var name = _requirement_name(req)
                 var native = False
                 for n in range(len(release.members)):
                     ref other = release.members[n]
@@ -407,7 +446,15 @@ def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[I
                         native = True
                 if not native:
                     continue
-                if len(words) != 3 or not String(words[1]).startswith(String("==")):
+                var words = req.split(String(" "))
+                if (
+                    not _only_spaces(req)
+                    or len(words) != 3
+                    or String(words[0]) != name
+                    or not String(words[1]).startswith(String("=="))
+                    or String(words[1]).byte_length() < 3
+                    or String(words[2]).byte_length() == 0
+                ):
                     raise Error(
                         who + String(" requires '") + req
                         + String("', which is not `<native> ==<version> <build>`: kci cannot tell what it installs")
