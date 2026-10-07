@@ -59,7 +59,9 @@
 #      The run is bounded: gate_runner runs in a session of its own (setsid),
 #      and when it has not exited after <limit> seconds, every process of
 #      that session (gate_runner, kcov, the test and any child it left) is
-#      killed and the action fails, saying so. kcov waits for every process
+#      killed and the action fails, saying so; a process of the group still
+#      running (not a zombie) 10 s after the kill fails it with its own
+#      message (survived the kill). kcov waits for every process
 #      the test started, so without the bound a test leaving a child running
 #      would hold the action open.
 #   3. kcov writes exactly one report (<out>/cov.xml); anything else fails.
@@ -165,6 +167,23 @@ red() {
     exit 1
 }
 
+# The processes of process group $1 that are not zombies (or dead), one
+# "pid state comm" per line, read from /proc/<pid>/stat: the fields after the
+# last ')' (comm may hold one) are state, ppid and pgrp. A process that exits
+# while this reads is skipped.
+group_left() {
+    { find /proc -mindepth 1 -maxdepth 1 -name '[0-9]*' 2>/dev/null || :; } |
+        while read -r d; do cat "$d/stat" 2>/dev/null || :; done |
+        awk -v g="$1" '{
+            i = length($0)
+            while (i > 0 && substr($0, i, 1) != ")") i--
+            if (i == 0) next
+            split(substr($0, i + 2), f, " ")
+            if (f[3] == g && f[1] != "Z" && f[1] != "X")
+                print $1, f[1], substr($0, index($0, "(") + 1, i - index($0, "(") - 1)
+        }'
+}
+
 # 0. Where the binary names the library's sources. Each string is on a line
 # of its own (tr), so the expression sees one name at a time. Only a
 # src/<import> component inside an artifact (after buck2's __<target>__/
@@ -243,6 +262,20 @@ wait "$gate" || rc=$?
 kill "$watch" 2>/dev/null || true
 wait "$watch" || true
 if [ -e "$K/timed_out" ]; then
+    # The kill must have reached every process of the group, not gate_runner
+    # alone: a process of it that is not a zombie after up to 10 s (SIGKILL
+    # is delivered when a process next runs) survived it. A zombie has
+    # exited (whoever reaps the orphans may not have yet), so it is not one.
+    [ -r /proc/self/stat ] || red "cov_run: /proc is not readable, so whether the time limit's kill reached every process of the run cannot be checked."
+    n=0
+    while left=$(group_left "$gate") && [ -n "$left" ] && [ "$n" -lt 10 ]; do
+        sleep 1
+        n=$((n + 1))
+    done
+    if [ -n "$left" ]; then
+        kill -s KILL "-$gate" 2>/dev/null || true
+        red "After the time limit ($LIMIT s), processes of the coverage run survived the kill of its process group $gate (pid state comm: $(printf '%s' "$left" | tr '\n' ';')). The limit must kill the whole group, gate_runner, kcov, the test and every child it left; they are killed now."
+    fi
     # gate_runner was killed, so its directory (mktemp under this one) and
     # the test's output in it are still there.
     find . -maxdepth 2 -path './.komira_test.*/log' -type f >"$K/logs" 2>/dev/null || true

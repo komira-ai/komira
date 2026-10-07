@@ -304,7 +304,9 @@ hold the action open. `gate_runner.sh` runs in a session of its own
 that whole process group when the run has not ended after the limit, 450 s
 (the file `limit` of the `cov_run_dir`, its `limit_s`): the action fails
 with `The test left processes running or did not finish within 450 s under
-kcov`, after the output the test wrote. The slowest run measured took
+kcov`, after the output the test wrote. A process of the group still
+running (not a zombie) 10 s after that kill fails the action instead with
+`processes of the coverage run survived the kill`, naming it. The slowest run measured took
 119.6 s of worker time; the limit is over three times that and under 600
 s, buck2's default timeout of a test action. Only a fixture of the tests
 cell may set another `limit_s` (test 43 uses 20 s). kcov refused by the executor (a line of

@@ -23,7 +23,8 @@
 #      without gate_runner's banner (the package is not affected);
 #      tests//negative/coverage:linger and linger[coverage][tests][test_brief]
 #      green, ...[test_lingers] red (a child left sleeping 100 s holds kcov,
-#      and the run's 20 s test-only limit kills the run);
+#      and the run's 20 s test-only limit kills the run), and its log without
+#      "survived the kill" (the kill reached the run's whole process group);
 #      tests//negative/coverage:lost[coverage] red (sources staged where the
 #      line tables do not name them are refused as unmapped, not dropped);
 #      lostdir[coverage] red (a binary naming the sources by another
@@ -56,3 +57,10 @@ fi
 expect_red coverage_run_lostdir "this run stages them at buck-out/v2/art/tests/negative/coverage/__lostdir__/" 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'
 expect_red coverage_run_refused "kcov could not trace the test" 'tests//negative/coverage:refused[coverage][tests][test_one]'
 expect_red coverage_run_lingers "The test left processes running or did not finish within 20 s under kcov" 'tests//negative/coverage:linger[coverage][tests][test_lingers]'
+# The limit's kill reached the whole group: cov_run.sh says when a process
+# of it survived (a kill of gate_runner alone, its pid without the '-').
+if grep -F "processes of the coverage run survived the kill" "$LOG/coverage_run_lingers.log" > "$LOG/coverage_run_lingers_survivors.txt"; then
+    fail "coverage_run_lingers_group: the time limit's kill left processes of the run: $(head -n 1 "$LOG/coverage_run_lingers_survivors.txt") (see $LOG/coverage_run_lingers.log)"
+else
+    pass coverage_run_lingers_group
+fi
