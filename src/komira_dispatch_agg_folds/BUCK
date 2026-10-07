@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Aggregate folds over resident batches: the grouped and scalar COUNT(DISTINCT) folds, the grouped string MIN/MAX fold, the mixed fold that serves COUNT(DISTINCT) or a string MIN/MAX beside fixed-cell aggregates, the ordered MIN/MAX reader and emitter of the scalar fold, the resolution of an aggregate's parquet leaf, and the process-global witnesses of which aggregate driver ran.
+mojo_library(
+    name = "komira_dispatch_agg_folds",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_agg_api:komira_agg_api",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        # a grouped string MIN/MAX beside COUNT(*) and COUNT(DISTINCT), the
+        # empty string as a value, and the split gate (welded from the source)
+        "tests/test_grouped_string_min_beside_another_agg.mojo",
+        # the mixed fold's row ceiling is one derived number, over enough
+        # groups to rehash the group table (welded from the source)
+        "tests/test_mixed_cd_fold_row_ceiling_is_derived.mojo",
+        # a string MIN/MAX costs nothing per row (peak RSS), and the byte
+        # order of the in-place compare (welded from the source)
+        "tests/test_mixed_fold_string_minmax_is_flat_in_rows.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
