@@ -182,10 +182,6 @@ whose run check compares stdout; the binary's compile must put both packages on 
 buck2 loads the rules once per cell of the BUCK file that loads them, and a
 transitive set of one load refuses children of the other, so before
 `mojo_pkg_children` this failed in analysis.
-The `./komira` consumer also plants, in its own cell, a `mojo_library` that passes
-coverage attributes (refused at load) and four direct `mojo_library_rule` calls refused in analysis
-(another mode, another gate directory, runs with no gate, the ledger's join off the ledger): test 44,
-[`coverage_runs.md`](coverage_runs.md#test-44-the-coverage-gate).
 
 A fifth consumer, fetched as a git external cell, has no `.buckconfig.local`:
 the remote-execution settings are appended to its root `.buckconfig`, and it
