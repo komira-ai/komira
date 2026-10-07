@@ -369,7 +369,7 @@ struct _Expander(Movable):
                         return _Got.of_value(ins[k].default.value())
                     return _Got.dropped()
             # cov: unreachable once load has no finding, every Value.input
-            # inside definition `def_i` names one of its STRING inputs:
+            # inside definition `def_i` names one of its STRING, INT or BOOL inputs:
             # check_component refuses any other on a primitive component, and
             # check_instance (with `in_def`) on a nested instance's bindings.
             # resolve_value runs with `def_i` >= 0 only on those sites

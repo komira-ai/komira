@@ -5,7 +5,7 @@
 #
 # kci ships two definitions, `kci.job` and `kci.app`, as files of the
 # `kci_composites` package. They are DATA, read by the same loader as any
-# author's definition (compose.mojo's load), and nothing in expansion
+# author's definition (compose_load.mojo's load), and nothing in expansion
 # branches on them. The one rule this module adds is that the namespace is
 # kci's: a definition named `kci.<name>` is refused at load unless its name,
 # version and digest are one of the rows below, so an author's file named
