@@ -176,7 +176,7 @@ def _src_layout_impl(ctx):
 
 src_layout_rule = rule(
     impl = _src_layout_impl,
-    doc = "`root` (src) holds what komira ships: each of `packages` (package paths in the cell) is `<root>/<name>`, or a test-only package `<root>/tests/<kind>/<name>`, kind `e2e` (named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `support` (neither). A `komira_test_*` package directly under `root` must be one `shipped` names. With `map` (a Markdown file: the module map, docs/architecture.md), each package under `root` has exactly one table row `| [`<name>`](<link>) |` whose link, less its leading `../`s and trailing `/`, is the package's path and whose `<name>` is its last component, and no such row links a path under `root` that is not one of `packages`. The `src_layout` macro fills `packages` from the build graph.",
+    doc = "`root` (src) holds what komira ships: each of `packages` (package paths in the cell) is `<root>/<name>`, or a test-only package `<root>/tests/<kind>/<name>`, kind `e2e` (named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `helpers` (neither). A `komira_test_*` package directly under `root` must be one `shipped` names. With `map` (a Markdown file: the module map, docs/architecture.md), each package under `root` has exactly one table row `| [`<name>`](<link>) |` whose link, less its leading `../`s and trailing `/`, is the package's path and whose `<name>` is its last component, and no such row links a path under `root` that is not one of `packages`. The `src_layout` macro fills `packages` from the build graph.",
     attrs = _COMMON | {
         "map": attrs.option(attrs.source(), default = None),
         "packages": attrs.list(attrs.string()),

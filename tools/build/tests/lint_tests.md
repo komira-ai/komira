@@ -31,7 +31,7 @@ in the root [`BUCK`](../../../BUCK) holds the repository to them.
 list holding an entry in a comment, a helper under `tests/`, a nested test, a
 test welded by a target of its own, a package with no `.mojo`, and under
 `src/tests/` a test-only package that welds its test and one that has a
-ledger row by its path, `src/tests/support/komira_e`) whose ledger
+ledger row by its path, `src/tests/helpers/komira_e`) whose ledger
 holds it exactly, and each target of
 [`negative/test_weld`](negative/test_weld/BUCK) plants one defect in the same
 tree and must fail naming it; `shrink_computed` is a ledger row for a test
@@ -102,7 +102,7 @@ exists only to test others is under `src/tests/`, by kind
 ([architecture](../../../docs/architecture.md#end-to-end-tests)).
 [`src_layout`](../lint/defs.bzl) is a validation over the packages under
 `src/`: each is `src/<name>`, or `src/tests/<kind>/<name>` with kind `e2e`
-(named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `support`
+(named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `helpers`
 (neither). An `*_e2e`, `*_loopback` or `*_conformance` package directly under
 `src/` is a finding, and so is a `komira_test_*` one its `shipped` list does
 not name, a `shipped` name that is no package there, and any package not at
