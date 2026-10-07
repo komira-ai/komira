@@ -116,6 +116,15 @@ def _words_at(p: Void) -> Words:
 
 
 # --- C function pointers as slot words ----------------------------------------
+#
+# SAFETY: a C function pointer and a `void *` are both one machine word on
+# the platforms this runs on. The driver's own slots hold `abi("C")`
+# functions, as the C struct definitions declare, and so do the library's
+# get_schema, get_next and get_last_error slots. The library's release slots
+# hold Mojo default-convention `thin` functions (c_data_stream.mojo, the
+# comment above `_ArrayReleaseFn`); calling them through this C-typed pointer
+# is the cross-seam measurement this gate makes on linux-x86_64, not a
+# guarantee.
 
 
 def _release_word(f: ReleaseFn) -> Void:

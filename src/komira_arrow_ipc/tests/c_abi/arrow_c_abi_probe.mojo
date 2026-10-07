@@ -1,11 +1,11 @@
 # =============================================================================
 # FFI-BOUNDARY: the C ABI of the arrow_c_abi_probe shared library.
 # =============================================================================
-# Two `@export abi("C")` functions put komira_arrow_ipc's Arrow C Stream
-# Interface behind a real dynamic-library boundary, so a separately compiled
-# consumer (arrow_c_abi_driver.mojo, which shares no type with this file)
-# reaches every callback through a C function pointer, as pyarrow or arrow-rs
-# would:
+# Three `@export abi("C")` functions put komira_arrow_ipc's Arrow C Stream
+# Interface behind a real dynamic-library boundary, so separately compiled
+# consumers (the two gate drivers, arrow_c_abi_driver.mojo and
+# arrow_c_abi_error_driver.mojo, which share no type with this file) reach
+# every callback through a C function pointer, as pyarrow or arrow-rs would:
 #
 #   probe_export_stream(struct ArrowArrayStream *out) -> int32
 #       fills the caller's struct with a stream of two fixed record batches
