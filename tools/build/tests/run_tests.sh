@@ -1189,7 +1189,7 @@ tw_tree=tests//functional/test_weld/src
 for want in \
     "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \
     "untested|$tw_tree/komira_b: 1 .mojo source(s) and no welded test" \
-    "untested|$tw_tree/tests/support/komira_e: 1 .mojo source(s) and no welded test" \
+    "untested|$tw_tree/tests/helpers/komira_e: 1 .mojo source(s) and no welded test" \
     "shrink_package|src/komira_c: the package welds 1 test(s) now; delete the row (the ledger only shrinks)" \
     "shrink_file|src/komira_c/wire/tests/test_wire.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
     "shrink_computed|src/komira_a/tests/test_one.mojo: the test is welded now; delete the row (the ledger only shrinks)" \
@@ -1311,8 +1311,8 @@ for want in \
     "shallow|//src/tests/komira_z_e2e: src/tests holds packages only at src/tests/<kind>/<name>" \
     "e2e_in_conformance|this one belongs in src/tests/e2e/komira_w_e2e" \
     "conformance_in_e2e|this one belongs in src/tests/conformance/komira_v_conformance" \
-    "e2e_in_support|this one belongs in src/tests/e2e/komira_u_loopback" \
-    "harness_in_e2e|this one belongs in src/tests/support/komira_t" \
+    "e2e_in_helpers|this one belongs in src/tests/e2e/komira_u_loopback" \
+    "harness_in_e2e|this one belongs in src/tests/helpers/komira_t" \
     "empty|src_layout: checked nothing"; do
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
