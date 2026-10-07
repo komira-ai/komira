@@ -280,7 +280,10 @@ def test_read_csv_scan() raises:
         "read_csv: the file mtime pins the snapshot",
     )
     assert_equal(b.snapshot_token, DOOR_MTIME_NS, "read_csv: snapshot token")
-    assert_equal(b.params.num_params(), 4, "read_csv: four dialect params")
+    assert_equal(
+        b.params.num_params(), 4,
+        "read_csv: three dialect parameters plus the path",
+    )
     _assert_same_plan(String("read_csv"), p, read_csv_plan())
 
 

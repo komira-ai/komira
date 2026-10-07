@@ -1,15 +1,35 @@
-"""A plan's full shape as text, and the wire bytes a fixture's encoding holds.
+"""A plan's shape as text, and the wire bytes a fixture's encoding holds.
 
-`plan_shape` renders every payload field of the plan arms the pandas door
-emits (SCAN, SORT, JOIN, AGGREGATE) and every carried field of their schemas,
-sources and expressions, so two plans with equal shapes are structurally
-identical. It reads the `*Data` payloads directly because the plan's own
+`plan_shape` renders the plan arms the pandas door emits (SCAN, SORT, JOIN,
+AGGREGATE). It reads the `*Data` payloads directly because the plan's own
 render (`String(plan)`, which `structural_hash` folds) leaves fields out: it
 emits no output schema, and it omits a sort's `nulls_first` when it equals the
 placement derived from `descending`, which is exactly the
-`na_position="first"` case on an ascending key. It raises on a plan arm,
-expression arm or source it does not render, so a door plan that grows a new
-node cannot compare equal by omission.
+`na_position="first"` case on an ascending key. It raises on a plan arm or an
+expression arm it does not render, so a door plan that grows a new node or
+expression cannot compare equal by omission.
+
+What it compares:
+- SORT, JOIN and AGGREGATE: every payload field.
+- SCAN: the source, `source_path`, `source_type`, `schema`, `projection`,
+  `filter`, `row_count`, whether `table_stats` is set, `source_kind`.
+- A binding-backed source: every carried field of its `ScanBinding`.
+- Every schema: per field, name, Arrow type, dtype, nullability, decimal
+  precision and scale, time zone, dictionary index type, flags, union type
+  ids, children; the field's metadata by count only (`Field` publishes no
+  key list).
+- Expressions: column references (name and side).
+
+What it does not compare, and why:
+- A non-binding source (the parquet leaves) is compared only through what
+  `SourceVariant` publishes: kind name, fingerprint, structural id and schema.
+  `ParquetSource.fingerprint()` folds the paths, the mtime and the partition
+  column NAMES. The parquet arm itself is private, so the rest of what the
+  wire carries for it is not compared: the `name` (`WireParquetSource` fields
+  3 and 4), the partition columns' types (field 6) and the partition values
+  (field 7). The door's parquet fixtures set none of them.
+- `ScanData.payload_narrow`: an optimizer annotation that the wire does not
+  carry, so a decoded plan always has it empty.
 
 `wire_bytes_from_hex` reads the hex format `proto_encode` writes (hex digits,
 whitespace ignored).
@@ -53,7 +73,8 @@ def _strs(v: List[String]) -> String:
 
 
 def field_shape(f: Field) -> String:
-    """Every carried slot of a `Field`, through its public accessors."""
+    """Every carried slot of a `Field` through its public accessors; the
+    metadata by count only (`Field` publishes no key list)."""
     var out = (
         String("F(") + f.name
         + " arrow=" + String(Int(f.arrow_type.type_id))
@@ -64,9 +85,14 @@ def field_shape(f: Field) -> String:
         + " dict_index=" + String(Int(f.dict_index_type().type_id))
         + " flags=" + String(Int(f.flags()))
         + " metadata=" + String(f.metadata_count())
-        + " union_ids=" + String(len(f.union_type_ids()))
-        + " children=["
+        + " union_ids=["
     )
+    var ids = f.union_type_ids()
+    for i in range(len(ids)):
+        if i > 0:
+            out += ","
+        out += String(ids[i])
+    out += "] children=["
     for i in range(f.num_children()):
         if i > 0:
             out += ","
@@ -163,7 +189,8 @@ def binding_shape(b: ScanBinding) raises -> String:
 def source_shape(s: SourceVariant) raises -> String:
     """A binding-backed source by its binding; any other source by what
     `SourceVariant` publishes (its kind, fingerprint, structural id and
-    schema). A parquet source's fingerprint folds its paths and mtime."""
+    schema). A parquet source's fingerprint folds its paths, its mtime and
+    its partition column names; see the module docstring for what is left."""
     var out = String("src(tag=") + String(Int(s.tag)) + " "
     if s.is_binding_backed():
         out += binding_shape(s.binding_ref())
