@@ -130,9 +130,10 @@ struct FakeBlobService(RequestDispatcher):
     var blobs: List[FakeBlob]
     var log: List[RequestRecord]
     var auth_failures: Int
-    # The string the fake signed for the last request it refused (empty if
-    # none), for a failing test to print.
-    var last_refused_string_to_sign: String
+    # The string the fake signed for each request it refused, in order: the
+    # 403 message carries it, and it holds the request's x-ms-date, so a test
+    # asserting that message exactly takes it from here.
+    var refused_strings_to_sign: List[String]
 
     def __init__(
         out self,
@@ -148,7 +149,7 @@ struct FakeBlobService(RequestDispatcher):
         self.blobs = List[FakeBlob]()
         self.log = List[RequestRecord]()
         self.auth_failures = 0
-        self.last_refused_string_to_sign = String("")
+        self.refused_strings_to_sign = List[String]()
 
     def put(mut self, name: String, var data: List[UInt8]):
         """Store a blob, keeping the list sorted by name."""
@@ -328,7 +329,7 @@ struct FakeBlobService(RequestDispatcher):
         var has_date = req.headers.get(String("x-ms-date"))
         if not got or got.value() != want or not has_date:
             self.auth_failures += 1
-            self.last_refused_string_to_sign = sts
+            self.refused_strings_to_sign.append(sts)
             return Self._error(
                 403, "AuthenticationFailed",
                 "Server failed to authenticate the request. The MAC signature"

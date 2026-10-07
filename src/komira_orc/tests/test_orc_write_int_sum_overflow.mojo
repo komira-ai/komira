@@ -33,8 +33,11 @@
 #     [5, 6, MAX, 1] — the overflowed stripe has no sum, the other has 11,
 #     the file has none, in either order. Catches a merge that drops the
 #     flag of either side.
-#   * merge overflows only at file level: [MAX, 0, 1, 0] — stripe sums MAX
-#     and 1 are written, the file sum is absent. Catches an unchecked merge.
+#   * merge overflows only at file level, both directions: [MAX, 0, 1, 0]
+#     (stripe sums MAX and 1) and [MIN, 0, -1, 0] (stripe sums MIN and -1)
+#     write both stripe sums and no file sum. Catches an unchecked merge,
+#     including one that checks only the positive direction (the negative
+#     case would write the wrapped file sum MAX).
 #   * row-index entries: one stripe of two strides [MAX, 1, 5, 6] — entry 0
 #     has no sum, entry 1 has 11, stripe and file have none.
 #   * nullable column: [MAX, null, 1, null, 5, 6] with stride 4 runs the
@@ -341,6 +344,21 @@ def test_merge_overflows_at_file_level_only() raises:
     assert_equal(
         _file_line(bytes), "n=4 min=0 max=9223372036854775807 sum=absent",
         "file-only overflow: file",
+    )
+    # Negative mirror: the merge of stripe sums MIN and -1 underflows.
+    var neg = _write(_l(MIN, 0, -1, 0), 2)
+    var sn = _stripe_lines(neg)
+    assert_equal(len(sn), 2, "file-only underflow: stripe count")
+    assert_equal(
+        sn[0], "n=2 min=-9223372036854775808 max=0 sum=-9223372036854775808",
+        "file-only underflow: stripe 0",
+    )
+    assert_equal(
+        sn[1], "n=2 min=-1 max=0 sum=-1", "file-only underflow: stripe 1"
+    )
+    assert_equal(
+        _file_line(neg), "n=4 min=-9223372036854775808 max=0 sum=absent",
+        "file-only underflow: file",
     )
 
 

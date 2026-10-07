@@ -34,6 +34,10 @@
 #     A tombstone AT OR ABOVE it sits on a live chunk (step 6 failed or the
 #     process died between 5 and 6): skipped and counted, never deleted, and
 #     reclaimable once a later pass advances. Idempotent.
+#     A chunk with a MOVED marker (written by the sub-lineage migration and the
+#     segment fold: `_base` now references its `.seg`) is reaped as a chunk key
+#     only, whatever plain tombstone it also carries, and its grace counts from
+#     the MOVED marker's ts. The `.seg` is `_base`'s to reclaim.
 #
 # ORDER (tombstone, THEN advance) is deliberate. A crash between the two
 # strands tombstones on live chunks, which the reaper skips, and the next pass
@@ -609,8 +613,9 @@ struct ReapResult(Copyable, Movable, Deinitable):
     """Outcome of one ReapWorker pass.
 
     Field layout:
-      var reaped_count: Int64        — tombstoned chunks deleted (`.seg` +
-                                       chunk key + marker).
+      var reaped_count: Int64        — tombstoned chunks deleted (chunk key +
+                                       markers, and the `.seg` unless the
+                                       chunk has a MOVED marker).
       var skipped_live_count: Int64  — tombstones on LIVE chunks (seq at or
                                        above `log_start_seq`): left untouched.
                                        Nonzero means a log-start advance
@@ -651,8 +656,16 @@ struct ReapWorker[Storage: ConditionalWriteStore](
         1. A tombstone at or above the floor sits on a LIVE chunk: it is
            skipped and counted in `skipped_live_count`, never deleted, and the
            pass goes on (no raise).
-        For each grace-elapsed tombstone below the floor the reaper deletes
-        the now-unreferenced SEGMENT objects:
+        A chunk with a MOVED marker is checked FIRST, before any plain
+        tombstone it also carries: the reaper waits until `now_ms - moved_ts
+        >= grace_ms`, then calls `manifest.reap(seq)` only (chunk key and both
+        markers), never deleting its `.seg`. The plain tombstone's ts is then
+        ignored: the MOVED marker is written when the migration or fold
+        advances past the chunk, so its ts is the later and correct start of
+        the grace window, and the `.seg` is referenced from `_base` whatever a
+        retention pass decided.
+        For each grace-elapsed plain tombstone below the floor the reaper
+        deletes the now-unreferenced SEGMENT objects:
           2. reads the chunk body → decodes the broker `ManifestBody` to learn
              the `.seg` object key (the broker's domain payload);
           3. DELETEs the `.seg` segment object from `segment_store` (the actual
@@ -664,7 +677,8 @@ struct ReapWorker[Storage: ConditionalWriteStore](
         is a no-op; a chunk still within grace is skipped (a later run reaps
         it). A chunk body that 404s mid-reap (a concurrent reaper won) is
         skipped (the manifest.reap fail-loud guard already enforces tombstone-
-        before-reap)."""
+        before-reap). A seq whose markers are both gone by the time it is read
+        (a concurrent reaper reaped it after this pass's LIST) is skipped."""
         # Step 0. Raises on a read error: nothing deleted this pass.
         var floor = manifest.read_log_start_seq()
         var seqs = manifest.tombstone_seqs()
@@ -676,7 +690,24 @@ struct ReapWorker[Storage: ConditionalWriteStore](
                 # Step 1. A live chunk: keep its `.seg` and its chunk key.
                 skipped_live += Int64(1)
                 continue
-            var schedule_ts = manifest.tombstone_schedule_ts(seq)
+            var moved_ts = manifest.moved_tombstone_ts(seq)
+            if moved_ts:
+                # `_base` references this `.seg`: reap the chunk key and the
+                # markers once grace elapses, never the segment
+                # (komira-ai/komira#494).
+                if now_ms - moved_ts.value() >= self._grace_ms:
+                    manifest.reap(seq)
+                    reaped += Int64(1)
+                continue
+            var schedule_ts: Int64
+            try:
+                schedule_ts = manifest.tombstone_schedule_ts(seq)
+            except e:
+                if not _is_not_found(String(e)):
+                    raise e^
+                # Neither marker is there any more: another reaper reaped this
+                # seq after our LIST. Nothing left to do for it.
+                continue
             if now_ms - schedule_ts >= self._grace_ms:
                 # Delete the .seg segment object first (the durable data). Read
                 # the chunk body for its object_key; if the chunk is already
