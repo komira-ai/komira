@@ -31,22 +31,35 @@
 # its file name, and for a library its payload path and payload sha256, its
 # import name and build label, and the sha256 its `doc_files` records for
 # share/doc/<name>/README.md ("" when it records none) from its
-# metadata.json. `mojo_pin_of` is the compiler version every library of
-# the set was built with (they must agree). A name that is not a member, a
-# member that is not a conda package, or a value that could not be put in a
-# shell word safely RAISES.
+# metadata.json. A pin of the NATIVE package (kci_release_set `is_native`:
+# libkomira_native.so.1, no Mojo) is marked `is_native` and carries none of
+# the library's values: it has no payload to hash and no README to run.
+# `mojo_pin_of` is the compiler version every library of the set was built
+# with (they must agree); the native package records none and is not asked.
+# A name that is not a member, a member that is not a conda package, or a
+# value that could not be put in a shell word safely RAISES.
 #
 # `with_members` adds, after the named pins, every member of a named
 # METAPACKAGE, so a validation that installs only the metapackage checks
-# every library it brings. The member list is read from the built
-# metapackage's own `depends` (its metadata.json, the requirements the
-# packer wrote: the platform guard, then `<member> ==<version> <build>` for
-# each member): each requirement must be at the version and build
-# release.json records for that name, and the list must EQUAL the release
-# set's conda libraries. An empty list, a requirement of another shape, a
-# name that is not a library of the set, another version or build, and a
-# library of the set the metapackage does not require each RAISE, naming
-# it: a metapackage that brings nothing is never a vacuous pass.
+# every library it brings, then what `with_native` adds. The member list is
+# read from the built metapackage's own `depends` (its metadata.json, the
+# requirements the packer wrote: the platform guard, then `<member>
+# ==<version> <build>` for each member): each requirement must be at the
+# version and build release.json records for that name, and the list must
+# EQUAL the release set's members (`is_member_kind`: its libraries and its
+# native package). An empty list, a requirement of another shape, a name
+# that is neither a library nor the native package of the set, another
+# version or build, and a library or native package of the set the
+# metapackage does not require each RAISE, naming it: a metapackage that
+# brings nothing is never a vacuous pass.
+#
+# `with_native` adds, after `pins`, the native package of the set that a
+# LIBRARY among them requires (its metadata.json `depends` names it), so the
+# environment that library brings is read back with it: the solver installs
+# it through the library's requirement, never through pixi.toml. The
+# requirement must be `<native> ==<version> <build>` at release.json's
+# version and build, or it RAISES naming the library: the solver would
+# bring a build nobody validated.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -57,7 +70,7 @@ from kci_artifact import read_artifacts
 from kci_api import release_platform_dir
 from kci_publish.inputs import LoadedRelease, load_release
 from kci_release_channel import ARTIFACT_TYPE_CONDA, find_channel, parse_channels_file
-from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE
+from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE, KIND_NATIVE, is_member_kind
 from kci_release_set.release_manifest import RELEASE_MANIFEST_NAME, read_release_manifest
 from kci_release_machine import StageValidation
 
@@ -160,9 +173,9 @@ def load_validated_release(req: ValidateRequest) raises -> ValidatedRelease:
 struct InstallPin(Copyable, Movable):
     """One package the validation installs, pinned to the release's own
     (file header). `payload_path` and `payload_sha256` are "" for a
-    metapackage.
+    metapackage and for the native package (`is_native`).
 
-    Layout: owned Strings and a Bool. No pointer field."""
+    Layout: owned Strings and Bools. No pointer field."""
 
     var name: String
     var version: String
@@ -170,6 +183,7 @@ struct InstallPin(Copyable, Movable):
     var sha256: String
     var subdir: String
     var is_library: Bool
+    var is_native: Bool
     var payload_path: String
     var payload_sha256: String
     var import_name: String
@@ -184,6 +198,7 @@ struct InstallPin(Copyable, Movable):
         self.sha256 = String("")
         self.subdir = String("")
         self.is_library = False
+        self.is_native = False
         self.payload_path = String("")
         self.payload_sha256 = String("")
         self.import_name = String("")
@@ -255,6 +270,8 @@ def install_pins(release: LoadedRelease, names: List[String]) raises -> List[Ins
                     for d in range(len(mem.conda.doc_files)):
                         if mem.conda.doc_files[d].path == readme:
                             pin.readme_sha256 = mem.conda.doc_files[d].sha256_hex.copy()
+                elif mem.has_conda and mem.conda.name == name and mem.conda.is_native():
+                    pin.is_native = True
             for word in [pin.version.copy(), pin.build.copy(), pin.subdir.copy()]:
                 if not _shell_safe(word):
                     raise Error(String("'") + name + String("' has a version, build or subdir '") + word + String("' kci will not write into a script"))
@@ -323,13 +340,16 @@ def metapackage_members(release: LoadedRelease, meta_name: String) raises -> Lis
                 )
         if not pinned:
             raise Error(who + String(" requires '") + name + String("', which is not a member of the release set"))
-        var library = False
+        var member = False
         for m in range(len(release.members)):
             ref mem = release.members[m]
-            if mem.has_conda and mem.conda.name == name and mem.conda.kind == KIND_LIBRARY:
-                library = True
-        if not library:
-            raise Error(who + String(" requires '") + name + String("', which is not a library of the release set"))
+            if mem.has_conda and mem.conda.name == name and is_member_kind(mem.conda.kind):
+                member = True
+        if not member:
+            raise Error(
+                who + String(" requires '") + name
+                + String("', which is neither a library nor the native package of the release set")
+            )
         for k in range(len(names)):
             if names[k] == name:
                 raise Error(who + String(" requires '") + name + String("' twice"))
@@ -341,26 +361,85 @@ def metapackage_members(release: LoadedRelease, meta_name: String) raises -> Lis
         )
     for m in range(len(release.members)):
         ref mem = release.members[m]
-        if not mem.has_conda or mem.conda.kind != KIND_LIBRARY:
+        if not mem.has_conda or not is_member_kind(mem.conda.kind):
             continue
         var listed = False
         for k in range(len(names)):
             if names[k] == mem.conda.name:
                 listed = True
         if not listed:
+            var what = _kind_word(mem.conda.kind)
             raise Error(
-                String("library '") + mem.conda.name + String("' of the release set is not required by ") + who
-                + String(": installing it would not bring that library")
+                what + String(" '") + mem.conda.name + String("' of the release set is not required by ") + who
+                + String(": installing it would not bring that ") + what
             )
     return names^
 
 
-def with_members(release: LoadedRelease, pins: List[InstallPin]) raises -> List[InstallPin]:
-    """`pins`, then every member of each metapackage among them that is not
-    already a pin (file header). RAISES as `metapackage_members` does."""
+def _kind_word(kind: String) -> String:
+    """How a refusal names a member of `kind`."""
+    if kind == KIND_NATIVE:
+        return String("native package")
+    return kind.copy()
+
+
+def with_native(release: LoadedRelease, pins: List[InstallPin]) raises -> List[InstallPin]:
+    """`pins`, then the native package of the set each LIBRARY pin requires,
+    when it is not already a pin (file header). RAISES naming a library that
+    requires it at another version or build, or in another shape."""
     var out = pins.copy()
     for i in range(len(pins)):
-        if pins[i].is_library:
+        if not pins[i].is_library:
+            continue
+        var who = String("library '") + pins[i].name + String("'")
+        for m in range(len(release.members)):
+            ref mem = release.members[m]
+            if not mem.has_conda or mem.conda.name != pins[i].name:
+                continue
+            for d in range(len(mem.conda.depends)):
+                ref req = mem.conda.depends[d]
+                var words = req.split(String(" "))
+                var name = String(words[0])
+                var native = False
+                for n in range(len(release.members)):
+                    ref other = release.members[n]
+                    if other.has_conda and other.conda.name == name and other.conda.is_native():
+                        native = True
+                if not native:
+                    continue
+                if len(words) != 3 or not String(words[1]).startswith(String("==")):
+                    raise Error(
+                        who + String(" requires '") + req
+                        + String("', which is not `<native> ==<version> <build>`: kci cannot tell what it installs")
+                    )
+                var version = String(String(words[1])[byte = 2 :])
+                var build = String(words[2])
+                for e in range(len(release.recomputed.entries)):
+                    ref entry = release.recomputed.entries[e]
+                    if entry.name != name:
+                        continue
+                    if entry.version != version or entry.build != build:
+                        raise Error(
+                            who + String(" requires ") + name + String(" ") + version + String(" ") + build
+                            + String(", but the release has ") + name + String(" ") + entry.version + String(" ")
+                            + entry.build + String(": the solver would bring another build than the one validated")
+                        )
+                if _has_pin(out, name):
+                    continue
+                var one = List[String]()
+                one.append(name^)
+                var got = install_pins(release, one)
+                out.append(got[0].copy())
+    return out^
+
+
+def with_members(release: LoadedRelease, pins: List[InstallPin]) raises -> List[InstallPin]:
+    """`pins`, then every member of each metapackage among them that is not
+    already a pin, then what `with_native` adds (file header). RAISES as
+    `metapackage_members` and `with_native` do."""
+    var out = pins.copy()
+    for i in range(len(pins)):
+        if pins[i].is_library or pins[i].is_native:
             continue
         var members = metapackage_members(release, pins[i].name)
         for k in range(len(members)):
@@ -370,12 +449,13 @@ def with_members(release: LoadedRelease, pins: List[InstallPin]) raises -> List[
             one.append(members[k].copy())
             var got = install_pins(release, one)
             out.append(got[0].copy())
-    return out^
+    return with_native(release, out)
 
 
 def mojo_pin_of(release: LoadedRelease) raises -> String:
-    """The `mojo_pin` every library of the set records; RAISES when there is
-    no library, one has none, or two disagree."""
+    """The `mojo_pin` every library of the set records (the native package
+    records none and is not asked); RAISES when there is no library, one has
+    none, or two disagree."""
     var pin = String("")
     var seen = False
     for m in range(len(release.members)):

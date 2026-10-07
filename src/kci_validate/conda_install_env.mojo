@@ -15,9 +15,14 @@
 #                every member of a named metapackage (request.mojo
 #                `with_members`: read from the built metapackage's own
 #                depends, at release.json's version and build, equal to
-#                the set's libraries). pixi.toml names ONLY the install
-#                names, so the solver must bring each member through the
-#                metapackage; every later check covers EVERY pin
+#                the set's libraries and native package), then the native
+#                package a library pin requires (`with_native`). pixi.toml
+#                names ONLY the install names, so the solver must bring each
+#                member through the metapackage and the native package
+#                through the library requiring it; every later check
+#                covers EVERY pin. The native package (no Mojo) has no
+#                README, no payload and no mojo_pin: checks 1 and 2 cover
+#                it, `readme`, 3 and 4 skip it
 #   -  network   every declared host asked once (network.mojo): NONE
 #                answered is no network, the one case that is not a FAIL:
 #                outcome INDETERMINATE (exit 5, never a pass) with
