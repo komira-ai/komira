@@ -1,4 +1,4 @@
-"""The planted packages of test 44 (src_layout), as package paths in the cell.
+"""The planted packages of test 45 (src_layout), as package paths in the cell.
 
 Under src/: two shipped libraries, one of them named komira_test_* and
 listed in SRC_LAYOUT_SHIPPED; a name that holds `e2e` but does not end with
