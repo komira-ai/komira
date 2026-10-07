@@ -186,6 +186,34 @@ def test_duplicate_kid_refused() raises:
     )
 
 
+def test_skipped_key_sharing_a_kid_is_not_a_duplicate() raises:
+    # The duplicate-kid check compares accepted keys only. A P-384 key
+    # skipped from the set does not make a P-256 key under the same kid
+    # ambiguous: a verifier can select only the accepted one. Defect caught:
+    # a check that also counts skipped keys, which would let one unsupported
+    # key a reader is told to ignore (RFC 7517 section 5) refuse the set.
+    var p384 = (
+        String('{"kty":"EC","crv":"P-384","kid":"k","x":"')
+        + _b64(48, 1)
+        + '","y":"'
+        + _b64(48, 2)
+        + '"}'
+    )
+    var p256 = (
+        String('{"kty":"EC","crv":"P-256","kid":"k","x":"')
+        + _b64(32, 1)
+        + '","y":"'
+        + _b64(32, 2)
+        + '"}'
+    )
+    var s = parse_jwk_set(_set(p384 + "," + p256))
+    assert_equal(len(s.keys), 1)
+    assert_equal(s.keys[0].crv(), "P-256")
+    assert_equal(s.keys[0].kid().value(), "k")
+    assert_equal(len(s.skipped), 1)
+    assert_equal(s.skipped[0], "key 0: EC curve \"P-384\" is not supported (P-256 is)")
+
+
 def test_structure_refused() raises:
     assert_equal(_err_of_set("[]"), "JwksError: a JWK Set is a JSON object")
     assert_equal(_err_of_set("{}"), "JwksError: member \"keys\" is missing")
@@ -459,6 +487,7 @@ def main() raises:
     test_every_private_member_refused()
     test_private_member_refused_even_on_an_unsupported_key()
     test_duplicate_kid_refused()
+    test_skipped_key_sharing_a_kid_is_not_a_duplicate()
     test_structure_refused()
     test_p384_key_skipped_from_a_p256_set()
     test_unsupported_keys_do_not_hide_the_others()
