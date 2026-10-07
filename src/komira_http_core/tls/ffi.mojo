@@ -1057,7 +1057,7 @@ def s2n_connection_get_actual_protocol_version(
         struct s2n_connection *conn)`.
     """
     # SAFETY: synchronous accessor; no pointer escapes.
-    return external_call["s2n_connection_get_actual_protocol_version", Int32](
+    return external_call["komira_s2n_connection_get_actual_protocol_version", Int32](
         conn
     )
 
