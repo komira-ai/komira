@@ -30,7 +30,7 @@
 #
 # MECHANISM: a name-keyed, init-once, cross-compile-unit process-global
 # `Atomic[int64]` via the stdlib `_Global` runtime slot — the SAME idiom as
-# `mark_semi_anti_route_counter` / `komira_parquet.dict_mat_counter`. ⛔ NO
+# `komira_arrow.dict_interner`'s `_DICT_MERGE_PROBE_COUNTER`. ⛔ NO
 # ENV VAR (engine behaviour is derived, not configured): the recording is
 # unconditional and costs two relaxed atomic stores and one relaxed atomic add
 # per aggregate; this module prints nothing, and a reader turns a code into
@@ -116,7 +116,7 @@ def agg_route_name(code: Int) -> StaticString:
 
 def _init_agg_witness_slot() -> OwnedPointer[AtomicI64]:
     """`_Global` init_fn (non-raising): allocate one witness Atomic per process,
-    initialised to 0. Mirrors `mark_semi_anti_route_counter`'s init (`alloc` +
+    initialised to 0. Mirrors `komira_arrow.dict_interner`'s counter init (`alloc` +
     a zero write + `OwnedPointer(unsafe_from_raw_pointer=)`) since
     `Atomic` is not movable-by-value. ONE init fn serves all six slots — they
     differ only in the `_Global` NAME, which is what keys the storage."""

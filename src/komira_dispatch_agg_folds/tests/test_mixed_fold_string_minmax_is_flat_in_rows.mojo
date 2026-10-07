@@ -128,8 +128,7 @@ def _peak_rss_units() -> Int:
 
     Field offset: `struct rusage` opens with two `struct timeval` (two 64-bit
     words each on every 64-bit target here), so `ru_maxrss` — a `long` — sits at
-    byte offset 32 on both glibc/x86-64 and Darwin/arm64. The same read as
-    `test_scalar_agg_fanout_past_max_aggs._peak_rss_units`.
+    byte offset 32 on both glibc/x86-64 and Darwin/arm64.
 
     Returns:
         `ru_maxrss`, or 0 if the call failed — which §1 treats as a REFUSAL, not

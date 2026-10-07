@@ -40,7 +40,7 @@
 #     cols + n_aggs INT64 counts" — an emit shape that cannot express a FLOAT64
 #     AVG column. Teaching it both would roughly double the size of that file
 #     AND put the byte-equiv oracle (`_fold_grouped_cd_stringkey`, pinned by
-#     `test_cd_grouped_native_hash_byte_equiv`) at risk on every future edit.
+#     `tests/test_cd_grouped_fold.mojo`) at risk on every future edit.
 #   * Arm 2 (`agg_extended_grouped`) IS a mixed variable-state + base
 #     accumulator engine (MEDIAN's per-group value buffer sits beside a SUM
 #     cell), so it looks like the natural host — but it serves INT64 keys only
