@@ -19,6 +19,9 @@
 #     with liblz4's default preferences (NULL prefs: level 0, no checksums).
 #   * `lz4_frame_decompress_into(dst: Span[mut], src: Span) -> Int`: one-shot
 #     decode with a fresh decompression context.
+#   * `lz4_frames_decompress_into(dst: Span[mut], src: Span) -> Int`: a
+#     looping decode of one or more concatenated frames (see its docstring;
+#     the one-shot contract below is not its).
 #   * `Lz4FrameDecoder`: owns one `LZ4F_dctx` for reuse across frames (a
 #     per-worker cache); `decompress_into` resets it before each frame, and
 #     its destructor frees it.
@@ -259,6 +262,99 @@ def lz4_frame_decompress_into[
         return decoder._decode(dst, src, reset=False)
     except e:
         raise Error("lz4_frame_decompress_into: " + String(e))
+
+
+def lz4_frames_decompress_into[
+    dori: MutOrigin
+](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> Int:
+    """Decode the LZ4 frames in `src`, one or more back to back (skippable
+    frames among them, as `lz4 -d` accepts), into `dst`; return the bytes
+    written. Unlike `lz4_frame_decompress_into`, this drives `LZ4F_decompress`
+    in a loop with a fresh context, so it takes concatenated frames.
+
+    `len(dst)` is the capacity; liblz4 writes no byte past it. Refusals:
+      * `LZ4F dst buffer too small` when the output fills before the last
+        frame ends (a grow-and-retry caller matches this text),
+      * `LZ4F frame truncated: the <n>-byte input ends before the frame does`
+        when the input ends inside a frame,
+      * `LZ4F_decompress failed (code=<c>)` for anything liblz4 flags as an
+        error (bytes after a frame that are not one among them).
+    """
+    var src_size = len(src)
+    var dst_capacity = len(dst)
+    var decoder = Lz4FrameDecoder()
+    var handle_ptr = _default_lz4_codec_handle()
+    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var total_out = 0
+    var src_pos = 0
+    while True:
+        # LZ4F_decompress reads `*dstSizePtr` / `*srcSizePtr` as the space
+        # offered and writes back the bytes produced / consumed.
+        var dst_size = dst_capacity - total_out
+        var src_left = src_size - src_pos
+        var dst_ptr = dst_scratch.unsafe_ptr().unsafe_origin_cast[
+            MutUntrackedOrigin
+        ]()
+        if dst_size > 0:
+            dst_ptr = (dst.unsafe_ptr() + total_out).unsafe_origin_cast[
+                MutUntrackedOrigin
+            ]()
+        var src_ptr = (
+            src_scratch.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        if src_left > 0:
+            src_ptr = (
+                (src.unsafe_ptr() + src_pos)
+                .unsafe_mut_cast[True]()
+                .unsafe_origin_cast[MutUntrackedOrigin]()
+            )
+        # SAFETY: `decoder` (borrowed for the whole loop) holds a live
+        # context. The destination window is the `dst_size` bytes of `dst`
+        # past `total_out` (or the local one-byte `dst_scratch` with
+        # capacity 0), the source window the `src_left` bytes of `src` past
+        # `src_pos` (or `src_scratch` with 0 bytes); the Spans and locals keep
+        # them alive across this synchronous call, as are the two local size
+        # slots. liblz4 writes at most `dst_size` bytes, reads at most
+        # `src_left`, and keeps no pointer to any of them past the call.
+        var hint = handle_ptr[].call["LZ4F_decompress", Int](
+            decoder._dctx,
+            dst_ptr,
+            UnsafePointer(to=dst_size).unsafe_origin_cast[MutUntrackedOrigin](),
+            src_ptr,
+            UnsafePointer(to=src_left).unsafe_origin_cast[MutUntrackedOrigin](),
+            _null_bytes(),
+        )
+        if _lz4f_is_error(hint):
+            raise Error("LZ4F_decompress failed (code=" + String(hint) + ")")
+        var produced = dst_size
+        var consumed = src_left
+        total_out += produced
+        src_pos += consumed
+        if total_out > dst_capacity or src_pos > src_size:
+            raise Error(
+                "LZ4F_decompress reported " + String(total_out)
+                + " bytes written into a " + String(dst_capacity)
+                + "-byte buffer, " + String(src_pos) + " read from "
+                + String(src_size)
+            )
+        if hint == 0:
+            # A frame ended. liblz4 has reset the context to read the next
+            # frame header; bytes left over must be one.
+            if src_pos >= src_size:
+                break
+            continue
+        if consumed == 0 and produced == 0:
+            # No progress, and the frame has not ended.
+            if src_pos >= src_size and total_out < dst_capacity:
+                raise Error(
+                    "LZ4F frame truncated: the " + String(src_size)
+                    + "-byte input ends before the frame does"
+                )
+            raise Error("LZ4F dst buffer too small")
+    return total_out
 
 
 struct Lz4FrameDecoder(Movable):
