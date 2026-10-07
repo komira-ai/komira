@@ -265,7 +265,9 @@ def test_onprem_refuses_a_table_naming_q17() raises:
     var cloud = FakeCloud(String("p-onp"), shape=ProviderShape.onprem())
     assert_true(not cloud.complete(), "a cloud with a NOT_YET type is not complete")
     var absent = cloud.absences()
-    assert_equal(len(absent), 1)
+    assert_equal(
+        len(absent), 7, "the table, the three messaging types (test_fake_messaging) and the three name types (test_fake_dns)"
+    )
     assert_equal(absent[0].field, FIELD_TABLE)
     assert_equal(absent[0].kind, NOT_YET)
     var raised = False

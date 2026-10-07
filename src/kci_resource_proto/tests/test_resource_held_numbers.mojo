@@ -33,8 +33,9 @@
 # "declared": a probe that could not see a declaration would pass the census
 # vacuously.
 #
-# Held ENUM values (`Output` 5, `Access` 5, 6, 7 and 9, `CellResource` 4)
-# render as bare numbers: no name has taken them.
+# Held ENUM values (`Output` 5, `Access` 7 and 9, `CellResource` 4) render
+# as bare numbers: no name has taken them. `Access` 5 and 6 are SEND and
+# RECEIVE (messaging), declared, and pinned in test_resource_field_numbers.
 #
 # When a held number is declared, its row here changes in the same pull
 # request as the schema. Nothing else may change a row.
@@ -47,14 +48,21 @@ from kci_resource_proto.resource import (
     Access,
     Bucket,
     CellResource,
+    Certificate,
+    DnsRecord,
+    DnsZone,
     Grant,
     Image,
     Job,
     Output,
+    Queue,
     Resource,
+    Secret,
     Service,
     ServiceAccount,
+    Subscription,
     Table,
+    Topic,
     Uses,
     Value,
 )
@@ -79,14 +87,15 @@ def _held() -> List[Held]:
     l.append(Held("Resource", 5, 5, "a typed per-cloud settings map"))
     l.append(Held("Resource", 6, 6, "physical_name"))
     l.append(Held("Resource", 12, 12, "worker"))
-    l.append(Held("Resource", 15, 19, "queue, secret, 17 unused, DNS zone, 19 unused"))
-    l.append(Held("Resource", 21, 24, "topic, schedule, network, registry"))
+    l.append(Held("Resource", 17, 17, "unused"))
+    l.append(Held("Resource", 19, 19, "unused"))
+    l.append(Held("Resource", 22, 24, "schedule, network, registry"))
     l.append(
         Held(
             "Resource",
-            26,
+            29,
             36,
-            "DNS record .. virtual machine (the later neutral primitives)",
+            "subnet .. virtual machine (the later neutral primitives)",
         )
     )
     l.append(Held("Resource", 80, 80, "a composite instance"))
@@ -109,6 +118,13 @@ def _held() -> List[Held]:
     l.append(Held("Bucket", 50, 53, "per-cloud extensions"))
     l.append(Held("ServiceAccount", 50, 53, "per-cloud extensions"))
     l.append(Held("Grant", 50, 53, "per-cloud extensions"))
+    l.append(Held("Queue", 50, 53, "per-cloud extensions"))
+    l.append(Held("Topic", 50, 53, "per-cloud extensions"))
+    l.append(Held("Subscription", 50, 53, "per-cloud extensions"))
+    l.append(Held("Secret", 50, 53, "per-cloud extensions"))
+    l.append(Held("DnsZone", 50, 53, "per-cloud extensions"))
+    l.append(Held("DnsRecord", 50, 53, "per-cloud extensions"))
+    l.append(Held("Certificate", 50, 53, "per-cloud extensions"))
     return l^
 
 
@@ -198,6 +214,35 @@ def _undeclared_in(message: String, n: Int) raises -> Bool:
         head.append(0x18)  # 3: access
         head.append(UInt8(Access.READ))
         return _undeclared[Grant](head, n)
+    if message == "Queue":
+        head.append(0x18)  # 3: max_deliveries
+        head.append(5)
+        return _undeclared[Queue](head, n)
+    if message == "Topic":
+        return _undeclared[Topic](head, n)
+    if message == "Subscription":
+        head.append(0x0A)  # 1: topic, a Ref { resource: "t" }
+        head.append(3)
+        head.append(0x0A)
+        head.append(1)
+        head.append(UInt8(ord("t")))
+        return _undeclared[Subscription](head, n)
+    if message == "Secret":
+        return _undeclared[Secret](head, n)
+    if message == "DnsZone":
+        head.append(0x0A)  # 1: name
+        head.append(1)
+        head.append(UInt8(ord("z")))
+        return _undeclared[DnsZone](head, n)
+    if message == "DnsRecord":
+        head.append(0x18)  # 3: type
+        head.append(3)
+        return _undeclared[DnsRecord](head, n)
+    if message == "Certificate":
+        head.append(0x0A)  # 1: domains
+        head.append(1)
+        head.append(UInt8(ord("d")))
+        return _undeclared[Certificate](head, n)
     raise Error(String("no probe for message ") + message)
 
 
@@ -279,6 +324,37 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("Grant")
     nums.append(1)
     what.append("principal (a message)")
+    names.append("Resource")
+    nums.append(21)
+    what.append("the topic arm (an empty message in a oneof)")
+    names.append("Queue")
+    nums.append(1)
+    what.append("ack_deadline (a well-known message)")
+    names.append("Queue")
+    nums.append(3)
+    what.append("max_deliveries (an optional number)")
+    names.append("Subscription")
+    nums.append(2)
+    what.append("queue (a message)")
+    names.append("Resource")
+    nums.append(16)
+    what.append("the secret arm (an empty message in a oneof)")
+    for arm in [18, 26, 27]:
+        names.append("Resource")
+        nums.append(arm)
+        what.append("a DNS or certificate arm (a message in a oneof)")
+    names.append("DnsZone")
+    nums.append(1)
+    what.append("name (a string)")
+    names.append("DnsRecord")
+    nums.append(4)
+    what.append("values (a repeated message)")
+    names.append("DnsRecord")
+    nums.append(3)
+    what.append("type (an enum)")
+    names.append("Certificate")
+    nums.append(1)
+    what.append("domains (a repeated string)")
     for i in range(len(names)):
         assert_true(
             not _undeclared_in(names[i], nums[i]),
@@ -293,13 +369,10 @@ def test_the_probe_sees_a_declared_number() raises:
 
 
 def test_held_enum_values_are_unnamed() raises:
-    """`Output` 5 (REVISION), `Access` 5 (SEND), 6 (RECEIVE), 7 (ACT_AS) and
-    9 (MANAGE), `CellResource` 4 (COMPUTE): each renders as its bare
-    number."""
+    """`Output` 5 (REVISION), `Access` 7 (ACT_AS) and 9 (MANAGE),
+    `CellResource` 4 (COMPUTE): each renders as its bare number."""
     assert_equal(Output(5).json_name(), "5", "Output 5 is held")
     var access = List[Int]()
-    access.append(5)
-    access.append(6)
     access.append(7)
     access.append(9)
     for i in range(len(access)):

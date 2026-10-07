@@ -1,0 +1,60 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "rx"
+  uses {
+    target {
+      resource: "work"
+    }
+    access: RECEIVE
+  }
+  service_account {
+  }
+}
+resource {
+  id: "dl"
+  retention: DELETE
+  queue {
+  }
+}
+resource {
+  id: "work"
+  retention: KEEP
+  queue {
+    ack_deadline {
+      seconds: 45
+    }
+    dead_letter {
+      resource: "dl"
+    }
+    max_deliveries: 7
+  }
+}
+resource {
+  id: "ev"
+  retention: DELETE
+  topic {
+  }
+}
+resource {
+  id: "ev-work"
+  subscription {
+    topic {
+      resource: "ev"
+    }
+    queue {
+      resource: "work"
+    }
+  }
+}
+resource {
+  id: "rx-send"
+  grant {
+    principal {
+      resource: "rx"
+    }
+    target {
+      resource: "ev"
+    }
+    access: SEND
+  }
+}

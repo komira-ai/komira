@@ -7,26 +7,27 @@
 #   - SNAPPY:       the statically linked snappy C API, or the Mojo decoder
 #                   (snappy/snappy_ffi.mojo).
 #   - ZSTD:         libzstd (zstd/zstd_ffi.mojo).
-#   - LZ4_RAW:      a liblz4 raw block (codec id 7), through komira_lz4; read
-#                   and write.
+#   - LZ4_RAW:      a liblz4 raw block (codec id 7), through
+#                   komira_compression's lz4; read and write.
 #   - LZ4:          the DEPRECATED codec id 5, READ ONLY, by framing
 #                   detection across its three in-the-wild layouts. A distinct
 #                   codec from LZ4_RAW; never written.
-#   - GZIP:         libz through komira_zlib (window_bits=15+32: a gzip or a
-#                   zlib wrapper).
+#   - GZIP:         libz through komira_compression's zlib (window_bits=15+32:
+#                   a gzip or a zlib wrapper).
 #   - BROTLI:       the statically linked Brotli decoder
 #                   (brotli/brotli_ffi.mojo); read only.
 # The LZ4 frame codec (lz4_frame/lz4_ffi.mojo) is also reachable directly,
-# for `.lz4` text files. Every library but snappy and Brotli is opened by
-# name at run time, and each such shim keeps its own process-lifetime handle.
+# for `.lz4` text files. snappy, libzstd, libz and liblz4 are
+# komira_compression's (it declares the snappy symbols and owns every codec
+# soname); only the Brotli decoder is linked and called from this package.
 #
 # Contract:
 #   - Every entry takes its input as a `Span[UInt8]` and writes into a
 #     caller-owned `Span[UInt8, mut]`; the output Span's length is the
 #     capacity, and the entry returns the number of bytes written. No raw
-#     pointer is in any signature here or in the shims this module calls: the
-#     pointers are taken from the Spans inside each shim, for one synchronous
-#     FFI call.
+#     pointer is in any signature here or in the codecs this module calls:
+#     the pointers are taken from the Spans inside each codec, for one
+#     synchronous FFI call.
 #   - The C libraries never retain a pointer across a call.
 # =============================================================================
 
@@ -43,9 +44,8 @@ from .zstd.zstd_ffi import (
     _zstd_compress_into,
     _zstd_compress_bound,
 )
-# zlib/GZIP codec: the libz FFI shim is its own zero-dependency library, so a
-# consumer that needs only zlib framing does not depend on Parquet.
-from komira_zlib import (
+# zlib/GZIP codec: komira_compression's zlib (komira_zlib, the libz owner).
+from komira_compression.zlib import (
     ZLIB_LEVEL_DEFAULT,
     ZLIB_WINDOW_BITS_AUTO,
     ZLIB_WINDOW_BITS_GZIP,
@@ -53,15 +53,15 @@ from komira_zlib import (
     zlib_deflate_into,
     zlib_inflate_into,
 )
-# LZ4 RAW-BLOCK codec: a shared leaf library, so the Parquet page codec and
-# other LZ4 raw-block users depend on one copy and not on each other.
-from komira_lz4.codec import (
+# LZ4 RAW-BLOCK codec: komira_compression's lz4 (komira_lz4, the liblz4
+# owner).
+from komira_compression.lz4 import (
     lz4_compress_bound,
     lz4_compress_into,
     lz4_decompress_into,
 )
 # LZ4 FRAME codec (the interoperable framing Kafka and Arrow IPC use): a
-# distinct codec from the raw block, kept in this package.
+# distinct codec from the raw block.
 from .lz4_frame.lz4_ffi import (
     _lz4_frame_decompress_into,
     _lz4_frame_compress_into,
