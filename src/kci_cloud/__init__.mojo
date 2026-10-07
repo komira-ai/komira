@@ -41,6 +41,9 @@ interface. This package names no cloud:
                        target, target type, cron, time zone), handed to
                        every adapter's `check` and `lower`; and the
                        schedule's versioned time zone.
+  * network.mojo     — the rules of the network types (network, subnet, IP
+                       address) and of a service's `network`: their graph
+                       findings and the IPv4 range form.
   * triggers.mojo    — the rules of the trigger types (schedule, event
                        trigger): their graph findings, the portable cron
                        form and a time zone name's shape.
@@ -108,6 +111,9 @@ from kci_cloud.catalog import (
     FIELD_SUBSCRIPTION,
     FIELD_SCHEDULE,
     FIELD_EVENT_TRIGGER,
+    FIELD_NETWORK,
+    FIELD_SUBNET,
+    FIELD_IP_ADDRESS,
     OUTPUT_URL,
     OUTPUT_HOST,
     OUTPUT_ADDRESS,
@@ -136,6 +142,9 @@ from kci_cloud.catalog import (
     ROLE_CERT,
     ROLE_SCHEDULE,
     ROLE_TRIGGER,
+    ROLE_NETWORK,
+    ROLE_SUBNET,
+    ROLE_ADDRESS,
     BodyArm,
     body_arms,
     body_field,
@@ -208,6 +217,20 @@ from kci_cloud.triggers import (
     cron_problem,
     timezone_problem,
     trigger_findings,
+)
+from kci_cloud.network import (
+    CIDR_PREFIX_MAX,
+    CIDR_PREFIX_MIN,
+    ZONE_MAX,
+    ZONE_MIN,
+    contains,
+    ipv4_cidr_problem,
+    ipv4_text,
+    is_private,
+    network_findings,
+    overlaps,
+    service_network_findings,
+    service_subnet,
 )
 from kci_cloud.workload import Workload, is_workload, workload_of
 from kci_cloud.compute import (

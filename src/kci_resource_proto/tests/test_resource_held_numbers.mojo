@@ -56,6 +56,8 @@ from kci_resource_proto.resource import (
     Grant,
     ContainerJob,
     Image,
+    IpAddress,
+    Network,
     Output,
     Queue,
     Resource,
@@ -64,6 +66,7 @@ from kci_resource_proto.resource import (
     Service,
     ServiceAccount,
     SourceEvent,
+    Subnet,
     Subscription,
     Table,
     Topic,
@@ -93,8 +96,7 @@ def _held() -> List[Held]:
     l.append(Held("Resource", 6, 6, "physical_name"))
     l.append(Held("Resource", 17, 17, "unused"))
     l.append(Held("Resource", 19, 19, "unused"))
-    l.append(Held("Resource", 23, 24, "network, registry"))
-    l.append(Held("Resource", 29, 30, "subnet, IP address"))
+    l.append(Held("Resource", 24, 24, "registry"))
     l.append(
         Held(
             "Resource",
@@ -137,6 +139,9 @@ def _held() -> List[Held]:
     l.append(Held("Certificate", 50, 53, "per-cloud extensions"))
     l.append(Held("Schedule", 50, 53, "per-cloud extensions"))
     l.append(Held("EventTrigger", 50, 53, "per-cloud extensions"))
+    l.append(Held("Network", 50, 53, "per-cloud extensions"))
+    l.append(Held("Subnet", 50, 53, "per-cloud extensions"))
+    l.append(Held("IpAddress", 50, 53, "per-cloud extensions"))
     return l^
 
 
@@ -269,6 +274,17 @@ def _undeclared_in(message: String, n: Int) raises -> Bool:
         head.append(0x10)  # 2: event
         head.append(UInt8(SourceEvent.OBJECT_CREATED))
         return _undeclared[EventTrigger](head, n)
+    if message == "Network":
+        head.append(0x0A)  # 1: ipv4_cidr
+        head.append(1)
+        head.append(UInt8(ord("n")))
+        return _undeclared[Network](head, n)
+    if message == "Subnet":
+        head.append(0x18)  # 3: zone
+        head.append(2)
+        return _undeclared[Subnet](head, n)
+    if message == "IpAddress":
+        return _undeclared[IpAddress](head, n)
     raise Error(String("no probe for message ") + message)
 
 
@@ -412,6 +428,25 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("EventTrigger")
     nums.append(2)
     what.append("event (an enum)")
+    for arm in [23, 29, 30]:
+        names.append("Resource")
+        nums.append(arm)
+        what.append("a network arm (a message in a oneof)")
+    names.append("Network")
+    nums.append(1)
+    what.append("ipv4_cidr (a string)")
+    names.append("Subnet")
+    nums.append(1)
+    what.append("network (a message)")
+    names.append("Subnet")
+    nums.append(2)
+    what.append("ipv4_cidr (a string)")
+    names.append("Subnet")
+    nums.append(3)
+    what.append("zone (an optional number)")
+    names.append("Service")
+    nums.append(16)
+    what.append("network (a message)")
     for i in range(len(names)):
         assert_true(
             not _undeclared_in(names[i], nums[i]),

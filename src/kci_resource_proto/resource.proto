@@ -30,18 +30,17 @@
 //     field is the provider's own language, or one provider object would be
 //     shared by several owners).
 //
-// V1 DECLARES SIXTEEN PRIMITIVES: `service` 10, `container_job` 11,
+// V1 DECLARES NINETEEN PRIMITIVES: `service` 10, `container_job` 11,
 // `worker` 12, `table` 13, `bucket` 14, `queue` 15, `secret` 16, `dns_zone`
-// 18, `service_account` 20, `topic` 21, `schedule` 22, `grant` 25,
-// `dns_record` 26, `certificate` 27, `subscription` 28 and `event_trigger`
-// 31. Every other number below is HELD:
+// 18, `service_account` 20, `topic` 21, `schedule` 22, `network` 23, `grant`
+// 25, `dns_record` 26, `certificate` 27, `subscription` 28, `subnet` 29,
+// `ip_address` 30 and `event_trigger` 31. Every other number below is HELD:
 // not declared, so it decodes as an unknown field today, and declaring it
 // later is an addition, never a renumber. The welded tests pin each held
 // number as undeclared.
-//   * `Resource.body` 17, 19, 23, 24, 29, 30 and 32 to 36: the later
-//     neutral primitives (17 and 19 unused, 23 network, 24 registry, 29
-//     subnet, 30 IP address, 32 mail domain, 33 parameter, 34 encryption
-//     key, 35 function, 36 virtual machine).
+//   * `Resource.body` 17, 19, 24 and 32 to 36: the later neutral
+//     primitives (17 and 19 unused, 24 registry, 32 mail domain, 33
+//     parameter, 34 encryption key, 35 function, 36 virtual machine).
 //   * `Resource.body` 80: a composite instance.
 //   * `Resource.body` 90: the `raw` escape hatch, specified separately.
 //   * `Resource.body` 100-299, 300-499, 500-699 and 700-899: provider
@@ -52,7 +51,7 @@
 // test `test_held_numbers_are_unused` reads: no field of the named message may
 // use a held number, and no message may reuse a `reserved` number. A held
 // number leaves this list in the same change that declares it.
-// held-numbers: Resource 5 6 17 19 23 24 29 30 32-36 80 90 100-299 300-499 500-699 700-899
+// held-numbers: Resource 5 6 17 19 24 32-36 80 90 100-299 300-499 500-699 700-899
 // held-numbers: Value 4
 // held-numbers: Image 4
 // held-numbers: Uses 3
@@ -72,6 +71,9 @@
 // held-numbers: Certificate 50-53
 // held-numbers: Schedule 50-53
 // held-numbers: EventTrigger 50-53
+// held-numbers: Network 50-53
+// held-numbers: Subnet 50-53
+// held-numbers: IpAddress 50-53
 // The list of clouds is data (a cloud is a value checked against the
 // built-in clouds); the four ranges and the four extension numbers are held
 // for the four built-in clouds, never named by a type here.
@@ -114,8 +116,9 @@
 //     any other edge; it is never a grant's principal, and it has no `uses`.
 //
 // WHAT IS NOT HERE YET, ON PURPOSE
-//   * Permission sets, raw provider role bindings, federation, networks,
-//     gateways, load balancers and mail domains as resources of their own.
+//   * Permission sets, raw provider role bindings, federation, firewalls,
+//     NAT, peering, gateways, load balancers and mail domains as resources
+//     of their own.
 //     Each is a later primitive at a held number above (or a provider
 //     primitive).
 //   * Stage names. A stage's list of resources lives in the release machine
@@ -128,11 +131,11 @@
 //
 // RETENTION (`Resource.retention`) says whether a resource's objects are
 // deleted when the resource leaves the file or the graph is destroyed. It
-// is for the primitives that hold data, messages, secrets or names (v1:
-// `table`, `bucket`, `queue`, `topic`, `secret`, `dns_zone`, `dns_record` and
-// `certificate`); each such type has a versioned default (KEEP for a table, a
-// bucket and a secret, DELETE for a queue, a topic, a DNS zone, a DNS record
-// and a certificate) that applies while the field is unset. A workload (a
+// is for the primitives that hold data, messages, secrets, names or
+// addresses (v1: `table`, `bucket`, `queue`, `topic`, `secret`, `dns_zone`,
+// `dns_record`, `certificate`, `network`, `subnet` and `ip_address`); each
+// such type has a versioned default (KEEP for a table, a bucket and a
+// secret, DELETE for the others) that applies while the field is unset. A workload (a
 // service, a container job, a worker), a service account, a grant, a
 // subscription, a schedule or an event trigger is always deleted with its
 // resource, and setting retention on one is refused when the graph is
@@ -150,8 +153,8 @@
 // differs per cloud, so it waits for a decision). Per-cloud extensions 50 to
 // 53 are held on `Service`, `ContainerJob`, `Worker`, `Table`, `Bucket`,
 // `ServiceAccount`, `Grant`, `Queue`, `Topic`, `Subscription`, `Secret`,
-// `DnsZone`, `DnsRecord`, `Certificate`, `Schedule` and `EventTrigger` as on
-// every primitive. `SourceEvent` 3 is held for a message published to a
+// `DnsZone`, `DnsRecord`, `Certificate`, `Schedule`, `EventTrigger`,
+// `Network`, `Subnet` and `IpAddress` as on every primitive. `SourceEvent` 3 is held for a message published to a
 // topic.
 //
 // "PLATFORM" MEANS OS + CPU AND NOTHING ELSE (`Image.platform`). The deploy
@@ -182,8 +185,8 @@ enum Portability {
 extend google.protobuf.MessageOptions {
   // Marks each resource type message below (v1: `Service`, `ContainerJob`,
   // `Worker`, `Table`, `Bucket`, `Queue`, `Secret`, `DnsZone`,
-  // `ServiceAccount`, `Topic`, `Schedule`, `Grant`, `DnsRecord`,
-  // `Certificate`, `Subscription`, `EventTrigger`).
+  // `ServiceAccount`, `Topic`, `Schedule`, `Network`, `Grant`, `DnsRecord`,
+  // `Certificate`, `Subscription`, `Subnet`, `IpAddress`, `EventTrigger`).
   Portability portability = 50001;
   // The outputs a type exposes to a `Ref`. A `Ref` asking a type for an
   // output it does not expose is refused when the graph is loaded.
@@ -219,7 +222,8 @@ message Ref {
 
 // What a consumer may do to a resource. CALL is accepted by a service (call
 // it) and a container job (start a run of it); a worker accepts no verb, and
-// neither does a schedule or an event trigger.
+// neither does a schedule, an event trigger, a network, a subnet or an IP
+// address.
 // READ, WRITE and READ_WRITE by a table, a bucket and a secret (on a
 // secret: READ its value, WRITE a new version of it); SEND (put a
 // message in) by a queue and a topic; RECEIVE (take a message out and
@@ -348,7 +352,7 @@ message Resource {
   // 5 is held for a typed per-cloud settings map, 6 for `physical_name`.
 
   // Typed and closed. Held, not declared (see the file header): 17, 19,
-  // 23, 24, 29, 30 and 32 to 36 the later neutral primitives, 80
+  // 24 and 32 to 36 the later neutral primitives, 80
   // a composite instance, 90 the escape hatch, 100-299 / 300-499 / 500-699 /
   // 700-899 the provider primitives of four clouds.
   oneof body {
@@ -363,10 +367,13 @@ message Resource {
     ServiceAccount service_account = 20;
     Topic topic = 21;
     Schedule schedule = 22;
+    Network network = 23;
     Grant grant = 25;
     DnsRecord dns_record = 26;
     Certificate certificate = 27;
     Subscription subscription = 28;
+    Subnet subnet = 29;
+    IpAddress ip_address = 30;
     EventTrigger event_trigger = 31;
   }
 }
@@ -439,6 +446,13 @@ message Service {
   // The program to run, replacing the image's entrypoint; `args` follow it.
   // Unset: the image's own entrypoint.
   repeated string command = 15;
+  // The `subnet` the service's outbound connections leave through (the
+  // resource itself, no output). Every outbound connection takes it: the
+  // service reaches the private addresses of the subnet's network, and
+  // reaches a public address only if the network has a way out (a NAT is not
+  // a primitive yet). It says nothing about who may call the service. Unset:
+  // the cloud's own outbound path, in no network of the list.
+  Ref network = 16;
   // 50 to 53 are held for the per-cloud extensions (file header).
 
   // Reachable from outside the graph at a URL.
@@ -811,4 +825,58 @@ message EventTrigger {
   // The `service` each event is delivered to, as an HTTP POST to its URL.
   Ref target = 3;
   // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// ---- networks: network, subnet and IP address --------------------------------------
+//
+// A private NETWORK (an address space), the SUBNETS cut from it, and a static
+// public IP ADDRESS. None runs as an identity or accepts a verb; each takes
+// retention, DELETE by default. A network and a subnet expose their cloud
+// name (NAME), an IP address the address itself (ADDRESS). This version
+// speaks IPv4 only: another address family would be a new field of each
+// message (an addition), and whether one is added is not decided. Firewalls,
+// NAT, peering and the objects a cloud needs to attach a workload are not
+// primitives here yet.
+
+// A private network: the IPv4 range its subnets are cut from.
+message Network {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // "a.b.c.d/n": a private range (inside 10.0.0.0/8, 172.16.0.0/12 or
+  // 192.168.0.0/16, the ranges every built-in cloud takes alike), n from 16
+  // to 28, no bit set after the first n. Every subnet of the network lies
+  // inside it.
+  string ipv4_cidr = 1;
+  // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// A range of a `network`'s addresses that the workloads placed in it take
+// their private addresses from.
+message Subnet {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // The `network` (the resource itself, no output).
+  Ref network = 1;
+  // "a.b.c.d/n": inside its network's range, n from 16 to 28, no bit set
+  // after the first n, overlapping no other subnet of the network.
+  string ipv4_cidr = 2;
+  // A zone of the cell's region, from 1 to 3 (the cloud's own zones, in its
+  // own order). Presence: an explicit 0 is refused when the graph is
+  // validated. A cloud whose subnets are each in one zone refuses an unset
+  // zone; a cloud whose subnets span the region has the subnet in every
+  // zone, the one written included.
+  optional uint32 zone = 3;
+  // 50 to 53 are held for the per-cloud extensions (file header).
+}
+
+// A static public IPv4 address, reserved in the cell's region: it stays the
+// same until the resource is deleted, and once deleted it cannot be taken
+// back. Its ADDRESS is the address. Nothing in this version serves on it (a load
+// balancer is a later primitive). No field yet; 50 to 53 are held for the
+// per-cloud extensions (file header).
+message IpAddress {
+  option (portability) = PORTABLE;
+  option (exposes) = ADDRESS;
 }

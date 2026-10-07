@@ -10,8 +10,9 @@
 #     built for a catalog that marks it CLOUD_BOUND), `worker`, `table`,
 #     `bucket`,
 #     `service_account`, `grant`, `queue`, `topic`, `subscription`,
-#     `secret`, `dns_zone`, `dns_record`, `certificate`, `schedule` nor
-#     `event_trigger` (NOT_YET), and it has no public ingress,
+#     `secret`, `dns_zone`, `dns_record`, `certificate`, `schedule`,
+#     `event_trigger`, `network`, `subnet` nor `ip_address` (NOT_YET), and
+#     it has no public ingress,
 #     so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
@@ -41,6 +42,10 @@
 #              (triggers.mojo; on a shape that folds a schedule into the
 #              container job it starts, all three turned off and the job's
 #              run carries the schedule, from kci's firings)
+#   network, subnet, IP address -> `<id>/network`, `<id>/subnet`,
+#              `<id>/address` (network.mojo; no identity, no grants); a
+#              subnet reads its network's NAME, and a service's run its
+#              `network` subnet's NAME, as inputs
 # The grants are kci's EDGES (`kci_cloud.grants`), handed to `lower` with
 # each target's type: a `uses` line, the implicit `cell LOGS WRITE` of an
 # identity the resource holds itself, or a grant resource. An edge lowers to
@@ -64,7 +69,8 @@
 # aws shape a queue's policy; on the gcp shape a certificate's DNS
 # authorization and its record. A shape's NOT_YET types (onprem: `table`,
 # `queue`, `topic`, `subscription`, `dns_zone`, `dns_record`,
-# `certificate`, `event_trigger`) are the cloud's absences, and such a cloud is not complete. `list_owned` reports a table object's stored key
+# `certificate`, `event_trigger`, `network`, `subnet`, `ip_address`) are the
+# cloud's absences, and such a cloud is not complete. `list_owned` reports a table object's stored key
 # (`OwnedRecord.key`) and the validation run that created the object (its
 # `kci-run-id` label, `OwnedRecord.validation_run_id`), both read back from
 # the object.
@@ -126,6 +132,9 @@ from kci_cloud import (
     FIELD_EVENT_TRIGGER,
     FIELD_GRANT,
     FIELD_CONTAINER_JOB,
+    FIELD_IP_ADDRESS,
+    FIELD_NETWORK,
+    FIELD_SUBNET,
     FIELD_QUEUE,
     FIELD_SCHEDULE,
     FIELD_SECRET,
@@ -163,6 +172,7 @@ from kci_cloud_fake.limits import (
     fold_limits,
     index_limits,
 )
+from kci_cloud_fake.network import lower_address, lower_network, lower_subnet, network_limits
 from kci_cloud_fake.nodes import FakeNode, live_key
 from kci_cloud_fake.secrets import lower_secret
 from kci_cloud_fake.shapes import (
@@ -307,6 +317,12 @@ def _lower(
         return lower_record(r, shape)
     if field == FIELD_CERTIFICATE:
         return lower_certificate(r, shape)
+    if field == FIELD_NETWORK:
+        return lower_network(r, shape)
+    if field == FIELD_SUBNET:
+        return lower_subnet(r, shape)
+    if field == FIELD_IP_ADDRESS:
+        return lower_address(r, shape)
     var out = List[LoweredNode]()
     if field == FIELD_GRANT:
         _lower_edges(r, edges, shape, out)
@@ -461,6 +477,9 @@ struct FakeCloud(ConformanceTarget, Movable):
         all.append(FIELD_CERTIFICATE)
         all.append(FIELD_SCHEDULE)
         all.append(FIELD_EVENT_TRIGGER)
+        all.append(FIELD_NETWORK)
+        all.append(FIELD_SUBNET)
+        all.append(FIELD_IP_ADDRESS)
         var l = List[Int]()
         for i in range(len(all)):
             if self._shape.hosts(all[i]):
@@ -506,6 +525,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         dns_limits(r, self._shape, self._id, out)
         workload_limits(r, self._shape, self._id, out)
         trigger_limits(r, firings, self._shape, self._id, out)
+        network_limits(r, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
@@ -597,8 +617,8 @@ struct FakeCloud(ConformanceTarget, Movable):
 
 struct FakeLimitedCloud(ConformanceTarget, Movable):
     """The deliberately partial fake cloud: no `container_job`, no
-    `worker`, no `bucket`, no `service_account`, no `grant`, no trigger
-    (NOT_YET), no public ingress.
+    `worker`, no `bucket`, no `service_account`, no `grant`, no trigger, no
+    network type (NOT_YET), no public ingress.
 
     `job_absence` is how it declares the missing `container_job`: NOT_YET
     (the default, for the v1 catalog, where it is PORTABLE) or
@@ -660,6 +680,8 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
         l.append(Absence(FIELD_CERTIFICATE, NOT_YET, String("fake-limited issues no certificates")))
         l.append(Absence(FIELD_SCHEDULE, NOT_YET, String("fake-limited has no scheduler")))
         l.append(Absence(FIELD_EVENT_TRIGGER, NOT_YET, String("fake-limited delivers no events")))
+        for f in [FIELD_NETWORK, FIELD_SUBNET, FIELD_IP_ADDRESS]:
+            l.append(Absence(f, NOT_YET, String("fake-limited has no networks")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:

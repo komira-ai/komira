@@ -11,8 +11,8 @@
 #
 # RETENTION. A data primitive has a VERSIONED retention default, used while
 # `Resource.retention` is unset (KEEP for a table, a bucket and a secret,
-# DELETE for a queue, a topic, a DNS zone, a DNS record and a certificate). A
-# type whose default is
+# DELETE for a queue, a topic, a DNS zone, a DNS record, a certificate, a
+# network, a subnet and an IP address). A type whose default is
 # `RETENTION_NONE` takes no retention: it is deleted with its resource, and
 # writing `retention` on it is refused at validate. Changing a default is a
 # behaviour change for every stored list, so a default is never edited in
@@ -24,8 +24,9 @@
 # bucket, `queue` for a queue, `secret` for a secret, `topic` for a topic,
 # `sub` for a subscription, `identity` for a service account, `grant` for a
 # grant, `zone` for a DNS zone, `record` for a DNS record, `cert` for a
-# certificate, `schedule` for a schedule, `trigger` for an event trigger. A
-# cloud adapter
+# certificate, `schedule` for a schedule, `trigger` for an event trigger,
+# `network` for a network, `subnet` for a subnet, `address` for an IP
+# address. A cloud adapter
 # writes a dependency or an input on ANOTHER resource as that resource's id
 # alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
 # an adapter lowers one resource without reading the others.
@@ -75,6 +76,8 @@ comptime FIELD_TOPIC: Int = 21
 """`Resource.body` field number of `topic`."""
 comptime FIELD_SCHEDULE: Int = 22
 """`Resource.body` field number of `schedule`."""
+comptime FIELD_NETWORK: Int = 23
+"""`Resource.body` field number of `network`."""
 comptime FIELD_GRANT: Int = 25
 """`Resource.body` field number of `grant`."""
 comptime FIELD_DNS_RECORD: Int = 26
@@ -83,6 +86,10 @@ comptime FIELD_CERTIFICATE: Int = 27
 """`Resource.body` field number of `certificate`."""
 comptime FIELD_SUBSCRIPTION: Int = 28
 """`Resource.body` field number of `subscription`."""
+comptime FIELD_SUBNET: Int = 29
+"""`Resource.body` field number of `subnet`."""
+comptime FIELD_IP_ADDRESS: Int = 30
+"""`Resource.body` field number of `ip_address`."""
 comptime FIELD_EVENT_TRIGGER: Int = 31
 """`Resource.body` field number of `event_trigger`."""
 
@@ -131,6 +138,12 @@ comptime ROLE_SCHEDULE = "schedule"
 comptime ROLE_TRIGGER = "trigger"
 """An event trigger's primary role: the rule or subscription that delivers
 the events."""
+comptime ROLE_NETWORK = "network"
+"""A network's one role: the network object."""
+comptime ROLE_SUBNET = "subnet"
+"""A subnet's one role: the subnet object."""
+comptime ROLE_ADDRESS = "address"
+"""An IP address's one role: the reserved address."""
 
 
 def retention_word(r: Int) -> String:
@@ -248,8 +261,9 @@ struct Catalog(Copyable, Movable, Deinitable):
     def v1() raises -> Catalog:
         """`kci.resource.v1` as declared today: `service`, `container_job`,
         `worker`, `table`, `bucket`, `queue`, `secret`, `dns_zone`,
-        `service_account`, `topic`, `schedule`, `grant`, `dns_record`,
-        `certificate`, `subscription` and `event_trigger`."""
+        `service_account`, `topic`, `schedule`, `network`, `grant`,
+        `dns_record`, `certificate`, `subscription`, `subnet`, `ip_address`
+        and `event_trigger`."""
         var c = Catalog()
         var svc_out = List[String]()
         svc_out.append(String(OUTPUT_URL))
@@ -463,6 +477,48 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_TRIGGER),
             )
         )
+        # Networks. A network and a subnet expose their cloud name, an IP
+        # address the address itself. Each holds what the author wrote (a
+        # range, a reserved address), so each takes retention with the
+        # default DELETE. None runs as an identity or accepts a verb: placing
+        # a workload in a subnet is a field of the workload, not a grant.
+        var net_out = List[String]()
+        net_out.append(String(OUTPUT_NAME))
+        c.add(
+            CatalogType(
+                FIELD_NETWORK,
+                String("network"),
+                PORTABLE,
+                net_out.copy(),
+                List[String](),
+                retention_default=RETENTION_DELETE,
+                primary_role=String(ROLE_NETWORK),
+            )
+        )
+        c.add(
+            CatalogType(
+                FIELD_SUBNET,
+                String("subnet"),
+                PORTABLE,
+                net_out^,
+                List[String](),
+                retention_default=RETENTION_DELETE,
+                primary_role=String(ROLE_SUBNET),
+            )
+        )
+        var ip_out = List[String]()
+        ip_out.append(String(OUTPUT_ADDRESS))
+        c.add(
+            CatalogType(
+                FIELD_IP_ADDRESS,
+                String("ip_address"),
+                PORTABLE,
+                ip_out^,
+                List[String](),
+                retention_default=RETENTION_DELETE,
+                primary_role=String(ROLE_ADDRESS),
+            )
+        )
         return c^
 
 
@@ -491,10 +547,13 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_SERVICE_ACCOUNT, String("service_account")))
     l.append(BodyArm(FIELD_TOPIC, String("topic")))
     l.append(BodyArm(FIELD_SCHEDULE, String("schedule")))
+    l.append(BodyArm(FIELD_NETWORK, String("network")))
     l.append(BodyArm(FIELD_GRANT, String("grant")))
     l.append(BodyArm(FIELD_DNS_RECORD, String("dns_record")))
     l.append(BodyArm(FIELD_CERTIFICATE, String("certificate")))
     l.append(BodyArm(FIELD_SUBSCRIPTION, String("subscription")))
+    l.append(BodyArm(FIELD_SUBNET, String("subnet")))
+    l.append(BodyArm(FIELD_IP_ADDRESS, String("ip_address")))
     l.append(BodyArm(FIELD_EVENT_TRIGGER, String("event_trigger")))
     return l^
 

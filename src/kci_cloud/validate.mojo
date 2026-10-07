@@ -39,7 +39,11 @@
 #      cron of the portable form, a time zone of an IANA name's shape, a
 #      schedule's target a container job or a service; an event trigger's
 #      source a bucket, its event known, its target a service, each
-#      (source, event, target) once.
+#      (source, event, target) once. And the network rules (network.mojo): no
+#      `uses` on a network, a subnet or an IP address; IPv4 ranges of the
+#      form, a network's private, a subnet's inside its network's and
+#      overlapping no other; a subnet's zone from 1 to 3; a service's
+#      `network` a subnet.
 #      And the identity rules (grants.mojo): no `uses` on a grant; a `uses`
 #      line or a grant names exactly one of a target and a cell resource,
 #      with a verb that target accepts; a grant's principal is an identity
@@ -91,10 +95,13 @@ from kci_cloud.catalog import (
     FIELD_DNS_ZONE,
     FIELD_EVENT_TRIGGER,
     FIELD_GRANT,
+    FIELD_IP_ADDRESS,
+    FIELD_NETWORK,
     FIELD_QUEUE,
     FIELD_SCHEDULE,
     FIELD_SECRET,
     FIELD_SERVICE_ACCOUNT,
+    FIELD_SUBNET,
     FIELD_SUBSCRIPTION,
     FIELD_TABLE,
     FIELD_TOPIC,
@@ -114,6 +121,7 @@ from kci_cloud.secrets import secret_env_findings, secret_findings
 from kci_cloud.dns import dns_findings
 from kci_cloud.firing import firings_of
 from kci_cloud.triggers import trigger_findings
+from kci_cloud.network import network_findings, service_network_findings
 from kci_cloud.workload import is_workload, workload_of
 from kci_cloud.grants import (
     GrantEdge,
@@ -509,6 +517,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
         if field == FIELD_SCHEDULE or field == FIELD_EVENT_TRIGGER:
             out.extend(trigger_findings(resources, field, r))
             continue
+        if field == FIELD_NETWORK or field == FIELD_SUBNET or field == FIELD_IP_ADDRESS:
+            out.extend(network_findings(resources, field, r))
+            continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
             if len(r.uses) > 0:
@@ -542,6 +553,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             continue
         out.extend(workload_findings(catalog, resources, r))
         out.extend(secret_env_findings(resources, r))
+        out.extend(service_network_findings(resources, r))
         for u in range(len(r.uses)):
             ref use = r.uses[u]
             var has = Bool(use.target)
