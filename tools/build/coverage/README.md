@@ -22,7 +22,7 @@ gate's JSON entry for a package equal to the report's.
 | `:covcheck_bin` | the command line (`main.mojo`, dispatching to `covcheck/cli.mojo`) |
 | `:ratchet.tsv` | the floors (`ratchet.tsv`) |
 | `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
-| `policy.bzl` | the gate's mode and target, and the ledger of libraries whose package cannot wait for its own gate |
+| `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
 
 ## What line coverage means here
@@ -325,18 +325,25 @@ covcheck refuses, bad usage) fail it in every mode with `COVERAGE GATE ERROR`
 and covcheck's message: a malformed ratchet fails a census gate too (test
 46). Census and neutral mode never fail on a finding.
 
-The library's package (its `mojo_gate_join`) waits for the gate's marker and
-every coverage run's, so dependents compile against a package whose
-coverage runs passed and whose gate held: a test failing at -O0 or under
-kcov leaves the package unbuilt with coverage on, and a gate failing in
-enforce mode does too. A library with no test gets that join as well
-(without coverage it has one only if it has a README).
+**What the gate blocks: the shipped package, nothing else.** The library's
+conda package (`<name>_conda`, `tools/build/package/conda.bzl`: both its
+`conda_join` and its `conda_release_join`, the `[release]` an uploader
+reads) waits for the gate's marker and every coverage run's, which the
+library hands it in its `MojoCoverageGateInfo`: a test failing at -O0 or
+under kcov leaves the conda package unbuilt with coverage on, and so does a
+gate failing in enforce mode. A library with no test has a gate too
+(`NotMeasured`), and its conda package (a refused one, since it has no
+test) waits for it as well.
 
-Every dependent compiles against that package, so with coverage on a
-library's dependents wait for its coverage runs and its gate, not only its
-tests: the gate is on the critical path of every build with the switch on
-(and a library whose test fails at -O0 leaves all its dependents red). With
-the switch off nothing waits for them.
+The library itself does not wait: its package (`mojo_gate_join`) waits for
+its tests alone, as with the switch off, so the library builds, and every
+dependent compiles and runs its tests against it, whatever the library's
+coverage. A red coverage run or gate keeps the package it measures from
+shipping and is on no other target's path (test 46: `covlow_user` builds
+against `covlow`, whose gate is red). With the switch off nothing waits for
+them. Bundles and OCI images (`tools/build/package/defs.bzl`) do not wait
+for the gates of the libraries their program is built from: a program's
+libraries are not packages it ships.
 
 **Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
 `COVERAGE_TARGET_BP = 10000`. A fixture of the `tests` cell may name another mode
@@ -344,8 +351,8 @@ the switch off nothing waits for them.
 `cov_gate_dir` with another ratchet or script); anywhere else both are
 refused at load, and at analysis (a BUCK file calling the rule itself) a
 mode other than the policy's, a link, run or gate directory other than
-komira's, coverage runs with no gate, or the ledger's join (runs, no gate)
-for a library not in the ledger is refused. These refusals are outside the
+komira's, or coverage runs with no gate for a library not in the ledger is
+refused. These refusals are outside the
 tests cell, so test 46 cannot plant them there: test 7
 (`tests/functional/umbrella_cache.sh`) plants each in a consumer
 repository's own cell.
@@ -366,19 +373,30 @@ is not a one-line change today:
 **The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
 runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
 (`covcheck`, `komira_json`, and `readme_examples`, whose tool runs the
-examples of their README) cannot have their package wait for a gate: it
-would depend on itself. Each has a row with its reason; their packages still
-wait for their coverage runs, and their gate is the target `<name>_cov_gate`,
-which their conda package (what ships) waits for. `no_gate.bxl` fails
+examples of their README) cannot have the gate as an action of their own:
+the library would depend on the gate's directory, which depends on
+`covcheck_bin`, which depends on the library. That is a cycle of configured
+targets (a dependency of the rule, whatever waits for the gate's output),
+so it stays with the gate blocking only what ships. Each has a row with its
+reason; their gate is the target `<name>_cov_gate`, the same action over
+the library's `MojoCoverageGateInfo`, which their conda package waits for
+(with their coverage runs, as every library's does). `no_gate.bxl` fails
 unless the ledger names exactly the Mojo libraries `:cov_gate` depends on,
 the ledger is within the frozen list `_CEILING` in the same file (so it
 only shrinks: a new row also needs a reviewed edit of that list), and each
-one's conda package waits for its gate (test 46). A check that builds only
-the libraries a change affects must also build their `<name>_cov_gate` (an
-rdep of the library) or these three ship ungated:
+one's conda package waits for its gate (test 46).
 
 ```sh
 ./buck2 bxl //tools/build/coverage/no_gate.bxl:check -c komira.coverage=true
+```
+
+A check that builds only the libraries a change affects sees no coverage
+failure unless it also builds their conda packages (`<name>_conda`, an
+rdep of the library in its own package), which wait for every gate,
+`<name>_cov_gate` included:
+
+```sh
+./buck2 build komira//src/komira_retry:komira_retry_conda -c komira.coverage=true
 ```
 
 **Branch coverage**: kcov reports none, so every measured package has
@@ -495,8 +513,8 @@ informational. It is not `pr / check`, it is not a required check, and its
 result cannot make `pr / check` red; its conclusion is `neutral` in census
 mode (the policy's today). Making it required, or switching coverage on in
 `pr / check` itself, waits for the tree-wide sweep of tests that fail at
-`-O0` or under kcov: today a library whose test fails there leaves every
-dependent unbuilt in a coverage build. Like `pr / check` it runs only for a
+`-O0` or under kcov: today such a library's conda package is unbuilt in a
+coverage build (its dependents build). Like `pr / check` it runs only for a
 pull request from a branch of this repository, and only for one whose base
 is `main` (`pull_request: branches: [main]` filters on the base): a pull
 request stacked on another branch gets no coverage run until it is
@@ -526,8 +544,9 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    target too). Any other failure lists the library as `not measured
    (coverage build failed)`, in the summary and in the check run's summary,
    and none of its reports is used; the job stays green. A dependency's
-   failed gate fails the library's runs, so in enforce mode a library is
-   measured only when its dependencies pass theirs;
+   failed run or gate does not reach the library's runs (nothing of a
+   library waits for coverage, only its conda package does), so a library
+   is measured whatever its dependencies' coverage;
 5. `covcheck report` over the reports of the libraries measured, with the
    policy's mode and target, `git ls-files -z` as `--repo-files`, the head
    as `--head-sha`, and the ratchet's comment lines and the rows of the
