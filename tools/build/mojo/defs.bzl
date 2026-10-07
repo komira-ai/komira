@@ -26,7 +26,7 @@ load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoProg
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":native_facts.bzl", "dlopen_refusal", "dlopen_rows", "native_facts", "native_refusal")
-load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_kwargs", "coverage_link_dir")
+load(":coverage.bzl", "COVERAGE_ATTRS", "coverage_kwargs", "coverage_link_dir", "coverage_run", "coverage_sub_targets")
 load(
     ":test_runtime.bzl",
     _arg_args = "arg_args",
@@ -353,10 +353,13 @@ def _library_impl(ctx):
     markers = []
     test_subtargets = {}
     # A coverage build (coverage.bzl): per test that is a source file, a
-    # second binary at -O0 with line tables, under cov/. None when coverage
-    # is off.
+    # second binary at -O0 with line tables and its run under kcov, under
+    # cov/. None when coverage is off.
     cov_link = coverage_link_dir(ctx)
     cov_bins = {}
+    cov_runs = {}
+    # The package root of [src]: `root` names each test's staged tree below.
+    src_root = root
     for t in ctx.attrs.test_srcs:
         stem = _stem(t)
         if stem in test_subtargets:
@@ -396,6 +399,7 @@ def _library_impl(ctx):
         markers.append(marker)
         if cov_link and t.is_source:
             cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, [ungated_tset], "0", "mojo_build_cov_test", stem, c_link, debug_link = cov_link)
+            cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, src_root, test_data.get(key, {}), env_args)
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether
@@ -440,13 +444,7 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | ({"coverage": [DefaultInfo(
-                default_outputs = [cov_bins[k] for k in sorted(cov_bins)],
-                sub_targets = {"bin": [DefaultInfo(
-                    default_outputs = [cov_bins[k] for k in sorted(cov_bins)],
-                    sub_targets = {k: [DefaultInfo(default_output = v)] for k, v in cov_bins.items()},
-                )]},
-            )]} if cov_link else {}),
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs) if cov_link else {}),
         ),
         MojoInfo(
             c_link = c_link,
