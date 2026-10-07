@@ -29,7 +29,7 @@
 # Hot-path SIMD (hand-staged)
 # ---------------------------
 # Mirrors `eval_col_gt` / `eval_col_eq` / `eval_col_lt` in
-# `komira_core.eval.comparison`. Each kernel body:
+# `komira_column_kernels.comparison`. Each kernel body:
 #
 #   1. Comptime-pick W = simd_width_of[dt]() (NEON: 2 for Int64,
 #      2 for Float64; AVX2: 4; AVX-512: 8).
@@ -61,9 +61,9 @@
 
 from std.sys import simd_width_of
 
-from komira_core.arrow.bitmap import Bitmap, bytes_for_bits
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.plan.expr import (
+from komira_arrow.bitmap import Bitmap, bytes_for_bits
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_plan_expr.expr import (
     BIN_LT,
     BIN_LE,
     BIN_GT,
@@ -137,7 +137,7 @@ def _cmp_ne[T: DType, W: Int](lhs: SIMD[T, W], rhs: SIMD[T, W]) -> SIMD[DType.bo
 #
 # This is the canonical body of the match kernel; all per-(T, OP)
 # conformers delegate to it via `eval_chunk`. The shape mirrors
-# `eval_col_gt` in `komira_core.eval.comparison` exactly
+# `eval_col_gt` in `komira_column_kernels.comparison` exactly
 # but takes a `mut out_mask: Bitmap` write-target rather than allocating
 # a fresh Bitmap, and incorporates validity at comptime.
 
@@ -238,7 +238,7 @@ def _simd_cmp_pack_impl[
 ) -> Int:
     """SIMD compare-pack with comptime (OP, LHS_VALID, RHS_VALID) fanout.
 
-    Mirrors `eval_col_gt` in `komira_core.eval.comparison`
+    Mirrors `eval_col_gt` in `komira_column_kernels.comparison`
     — chunked compare-pack with weighted-OR byte assembly — but takes
     `mut out_mask` and incorporates validity at comptime.
 

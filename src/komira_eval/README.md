@@ -1,6 +1,6 @@
 # `komira_eval`
 
-The row-mode expression executor over `komira_core`.
+The row-mode expression executor over the core packages (`komira_arrow`, `komira_column_kernels`, `komira_plan_expr`).
 
 ## Responsibility
 
@@ -12,9 +12,9 @@ The row-mode expression executor over `komira_core`.
 - **Typed conformers.** `expr_x_conformers` provides the concrete column,
   literal and operator structs that conform to the `komira_expr` typed
   expression traits.
-- **Column-kernel tests.** 26 tests of the `komira_core.eval` kernels (string
+- **Column-kernel tests.** 26 tests of the evaluation kernels now in `komira_column_kernels` (string
   and numeric comparison, arithmetic, casts, fused predicates, selection) run
-  here, because they exercise the evaluation layer through `komira_core`
+  here, because they exercise the evaluation layer through core-package
   imports only.
 - **Sum of an expression.** `builtin_agg_fns_sum_expr`, the aggregate over an
   expression-valued aggregand.
@@ -28,7 +28,7 @@ Everything else the old layer held is its own package, imported directly:
 | `komira_udf` | the UDF trait surface, schema descriptors, and `float_quotient_order` (the float equality and ordering model) |
 | `komira_expr` | the runtime expression trees, `ExprX` traits, `stage_program` |
 | `komira_agg` | aggregate-function traits, builtin aggregates, hash-aggregate state |
-| `komira_core` | the `komira_core.eval` kernels (arithmetic, comparison, casts, selection vectors, regexp) |
+| `komira_column_kernels` | the evaluation kernels (arithmetic, comparison, casts, selection vectors, regexp) |
 | `komira_hash` | the FNV-1a constants and byte-span hash |
 
 There are no root re-exports: import each name from the module that defines it.
@@ -37,7 +37,9 @@ There are no root re-exports: import each name from the module that defines it.
 
 ```
 komira_eval -> komira_row_format, komira_kernels, komira_expr, komira_udf,
-               komira_agg, komira_core
+               komira_agg, komira_arrow, komira_buffer, komira_collections,
+               komira_column_kernels, komira_plan_expr,
+               komira_scalar_arithmetic, komira_simd
 ```
 
 `komira_atomic_alias` is listed as a dependency only for

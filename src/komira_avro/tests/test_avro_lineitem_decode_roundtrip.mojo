@@ -17,7 +17,7 @@
 from std.testing import assert_equal, assert_true
 
 from komira_avro import read_avro_bytes, OCF_SYNC_LEN
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 
 def _enc_long(n: Int64, mut out: List[UInt8]):

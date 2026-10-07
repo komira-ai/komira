@@ -1,6 +1,6 @@
 # `komira_agg`
 
-The aggregate kernels, built on `komira_udf` and `komira_core`.
+The aggregate kernels, built on `komira_udf` and `komira_arrow`.
 
 - `aggregator` and `agg_op_traits`, with `agg_fn_agg` and `pod_state_gate`.
 - Built-in aggregate functions: `builtin_agg_fns_*` (avg, bool, corr, count,

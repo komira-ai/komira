@@ -17,7 +17,7 @@
 #                 `_bridge_to_record_batch` reads off `_out_layout`. It is a
 #                 standalone value (no `RowLayout` dependency in the public sig)
 #                 so the trait surface stays a self-contained
-#                 `komira_core`-reachable carrier.
+#                 the core packages-reachable carrier.
 #   * `schema`  — the output Arrow schema (column names + types).
 #
 # `bridge_row_output_to_record_batch` is the SHARED bridge — it is BYTE-IDENTICAL
@@ -33,14 +33,14 @@
 # value and is moved by `^` across the package boundary.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import Schema
-from komira_core.arrow.string_builder import ArrowStringBuilder
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.collections.slab import Slab
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import Schema
+from komira_arrow.string_builder import ArrowStringBuilder
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_collections.slab import Slab
 
 from komira_row_format.row_block import (
     RowBlock,

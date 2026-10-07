@@ -5,7 +5,8 @@ with per-column payload heaps, and per-column validity bitmaps
 (`ColumnFormatStorage`). The grouping, join and sort kernels of the operator
 packages keep their keys and payloads in this storage.
 
-It depends on `komira_core` only.
+It depends on `komira_arrow`, `komira_buffer`, `komira_collections` and
+`komira_simd` only.
 
 Public API: import directly from sub-modules. No facade.
 """

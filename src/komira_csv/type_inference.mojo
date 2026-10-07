@@ -24,7 +24,7 @@
 # inferred ArrowType through to the builder layer regardless.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 from .csv_options import CsvReadOptions
 from .scanned_cells import ScannedCells

@@ -17,7 +17,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # version per prefetched fetch, one-request footers, multipart writes,
 # delete; its settings in S3FsOptions).
 #
-# komira_core supplies the ByteView of komira_objectstore's RangeFetchStore
+# the core packages supplies the ByteView of komira_objectstore's RangeFetchStore
 # signature, and S3Fs's buffers, Slab and FS_SCHEME_S3. komira_async is the
 # tests': the fake S3 connector implements komira_http_core's Connector over
 # its reactor and runtime.
@@ -60,14 +60,17 @@ mojo_library(
     name = "komira_objectstore_s3",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_arrow:komira_arrow",
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_async:komira_async",
         "//src/komira_aws_s3:komira_aws_s3",
-        "//src/komira_core:komira_core",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_fs:komira_fs",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_retry:komira_retry",
     ],
     test_data = {

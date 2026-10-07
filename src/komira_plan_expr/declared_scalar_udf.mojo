@@ -40,13 +40,13 @@
 # value, and that value's name came from `register_scalar`'s single `name`
 # parameter. ⇒ `catalog.declare_udf(affine)` restates NOTHING.
 #
-# ── WHY IT LIVES IN `komira_core` ───────────────────────────────────────────
+# ── WHY IT LIVES IN `komira_plan_expr` ───────────────────────────────────────────
 #
 # The two parties are `komira_engine_operators` (declares `ScalarUdf`) and
 # `komira_sdk` (declares the SQL catalog the binder reads). The edge runs
 # komira_sdk -> komira_engine_operators, so engine_operators cannot name a type
 # from the SDK, and `komira_sdk` HAS NO SOURCE IMPORT OF ENGINE_OPERATORS AT
-# ALL (the SDK is engine-free by design). Both packages depend on `komira_core`, and this
+# ALL (the SDK is engine-free by design). Both packages depend on the core packages, and this
 # trait is what lets the SQL catalog accept a `ScalarUdf` WITHOUT NAMING IT:
 # the catalog's method is generic over the trait, and the concrete type is
 # supplied by the one caller that can already see both (`komira_sdk_exec`).

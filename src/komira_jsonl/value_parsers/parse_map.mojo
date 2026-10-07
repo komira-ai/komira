@@ -30,7 +30,7 @@
 #   - Nested LIST / STRUCT / MAP value (recursive nested) RAISES (single-level nesting only).
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 
 from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
@@ -51,7 +51,7 @@ from komira_json_index.parse_string import (
     parse_string_raw,
     parse_string_with_escapes,
 )
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 
 
 comptime DEPTH_LIMIT: Int = 20

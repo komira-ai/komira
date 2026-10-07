@@ -43,7 +43,7 @@ from std.testing import (
     assert_raises,
 )
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_objectstore import (
     CasManifestStore,

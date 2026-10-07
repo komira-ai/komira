@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # komira_plan_wire's `test_plan_wire_golden_bytes.mojo` freezes `topic_live`
-# and `index_pinned` from bindings it RESTATES out of komira_core primitives:
+# and `index_pinned` from bindings it RESTATES out of the core packages primitives:
 # the codec may not import a scan kind. So nothing there can notice a kind
 # drifting away from the restatement. A changed identity fold, param set or
 # canonical order, gate, orientation, schema or appended `__partition` column
@@ -25,12 +25,12 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.plan.logical_plan import LogicalPlan
-from komira_core.source.scan_binding import ScanBinding
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.source_variant import SourceVariant
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_plan_ir.logical_plan import LogicalPlan
+from komira_scan_source.scan_binding import ScanBinding
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.source_variant import SourceVariant
 
 from komira_plan_wire import plan_to_bytes
 

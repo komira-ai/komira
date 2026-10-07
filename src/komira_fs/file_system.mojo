@@ -68,9 +68,9 @@
 #     surface itself only references the value type.
 # =============================================================================
 
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.collections.slab import Slab
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_collections.slab import Slab
+from komira_buffer.heap_region import HeapRegion
 from komira_fs.footer_region import FooterRegion
 from komira_fs.shallow_dir_entry import ShallowDirEntry
 
@@ -303,7 +303,7 @@ trait FileSystem(Movable, Deinitable):
     comptime SUPPORTS_LAZY_HIVE: Bool = False
 
     # ---- Capability flag: SCHEME ----
-    # The FS scheme code, BYTE-IDENTICAL to `komira_core.plan.fs_descriptor_pod`
+    # The FS scheme code, BYTE-IDENTICAL to `komira_plan_expr.fs_descriptor_pod`
     # `FS_SCHEME_*` and to the fs registry's `FsHandle.FS_*`:
     #   FILE = 0, S3 = 1, GCS = 2, AZURE = 3.
     # Defaulted to FILE (local). Cloud conformers (S3Fs / GcsFs / AzureFs)
@@ -573,7 +573,7 @@ trait FileSystem(Movable, Deinitable):
     # The chunked-write 64 MiB workaround for the Mojo 1.0.0b1 stdlib
     # `FileHandle.write` >2 GB silent-flush bug is absorbed INSIDE
     # `LocalFs.write_at`. Codec writers do not import
-    # `komira_core.io.chunked_write` directly.
+    # `komira_libc.chunked_write` directly.
     # =========================================================================
 
     def open_write(

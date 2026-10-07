@@ -15,7 +15,7 @@
 # (the sink) and the consumer (the source) are two independently-moved values
 # that the morsel executor owns at the same time; neither can hold a `ref` to
 # the other. Shared ownership of ONE cell is the whole requirement, so the shape
-# is `komira_core.cancellation.token`'s verbatim:
+# is `komira_async_api.token`'s verbatim:
 #
 #   * `OwnedPointer[Atomic[...]]` because `Atomic` is NOT Movable on this
 #     compiler and `ArcPointer` requires `T: Movable`;
@@ -55,7 +55,7 @@ comptime _DESC_UNSET: Int64 = Int64.MIN
 
 struct _BoundaryCell(Movable, Deinitable):
     """The one shared 64-bit word. `OwnedPointer[Atomic[...]]` indirection for
-    the same reason `komira_core.cancellation.token._AtomicSlot` has it:
+    the same reason `komira_async_api.token._AtomicSlot` has it:
     `Atomic` is not Movable and `ArcPointer` requires a Movable payload."""
 
     var _v: OwnedPointer[AtomicI64]

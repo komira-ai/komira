@@ -64,9 +64,9 @@ from komira_async.runtime.parallel_fork_join import (
     parallel_fork_join,
     parallel_fork_join_serial,
 )
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_collections.slab import Slab
 
 from komira_jsonl.columnar_materializer import _compute_jsonl_line_ranges
 from komira_json_index.input_limits import check_json_column_count

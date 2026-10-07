@@ -10,4 +10,4 @@ The JSON structural index and the `json_extract` kernel, split out of `komira_js
 
 ## Dependency direction
 
-`komira_json_index` depends on `komira_core` only. `komira_jsonl` depends on it, so a package that needs `json_extract` or the structural index and nothing else (the expression evaluators, for one) no longer pulls in the JSONL readers and writers, `komira_async` and `komira_row_format`.
+`komira_json_index` depends on `komira_arrow`, `komira_buffer`, `komira_plan_expr` and `komira_simd` only. `komira_jsonl` depends on it, so a package that needs `json_extract` or the structural index and nothing else (the expression evaluators, for one) no longer pulls in the JSONL readers and writers, `komira_async` and `komira_row_format`.

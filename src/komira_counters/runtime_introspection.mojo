@@ -28,7 +28,7 @@
 # singleton), so the hooks emit one line per event.
 #
 # IMPORTANT: this module is a PURE-STDLIB LEAF (sys.defines + std.reflection
-# only). It sits at the bottom of the dep DAG inside `komira_core` so
+# only). It sits at the bottom of the dep DAG inside the core packages so
 # hot-path callers (the worker pool, the aggregation hash table, the arrow
 # IPC dispatch, etc.) can import it without a layering violation.
 # =============================================================================

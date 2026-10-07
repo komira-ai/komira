@@ -35,8 +35,8 @@ from komira_fs.file_system import FileSystem
 from komira_fs.local_fs import LocalFile, LocalFs
 from komira_async.ops.waker_sink import NoopSink
 from komira_fs.local_fs import PREFETCH_DEPTH_LOCAL_NVME
-from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
 
 
 # ---------------------------------------------------------------------------

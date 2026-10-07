@@ -28,7 +28,7 @@
 # confined to the FFI call site with a # SAFETY: comment.
 #
 # The codec bindings are local to this package (it does not depend on
-# komira_parquet): snappy is statically linked through `komira_core`'s
+# komira_parquet): snappy is statically linked through the core packages'
 # dependency on it; the other codec libraries are opened with a
 # process-lifetime OwnedDLHandle per library (per-OS soname).
 # =============================================================================
@@ -51,7 +51,7 @@ from .ocf_header import (
 
 
 # =============================================================================
-# FFI buffer-coercion helpers (like komira_core.arrow.compression_codecs).
+# FFI buffer-coercion helpers (like komira_compression.compression_codecs).
 # =============================================================================
 #
 # The compress / decompress helpers pass the input Span pointer DIRECTLY to
