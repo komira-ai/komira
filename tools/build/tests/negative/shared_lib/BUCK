@@ -1,9 +1,10 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
 
-# Every mojo_shared_lib below must FAIL to build. All but the last one,
-# duplicate_definition, have an [ungated] library that builds: their red
-# comes from the gate, not from the compile.
+# Every mojo_shared_lib below must FAIL to build. All but two have an
+# [ungated] library that builds, so their red comes from the gate, not from
+# the compile. The two exceptions are empty_exports, which is refused at
+# analysis, and duplicate_definition, which is refused at the link.
 
 # The gate expects `neg_missing`, which the library does not export.
 mojo_shared_lib(
@@ -70,8 +71,9 @@ mojo_shared_lib(
 
 # Two C libraries defining the same global symbol, both linked whole
 # (`force_load`): the link fails with `duplicate symbol: komira_neg_dup`.
-# Linked as ordinary `deps`, the first archive's definition would win and the
-# second be left out without a word. This is the mechanism of the
+# In an ordinary link that references komira_neg_dup, the first archive's
+# member would satisfy the reference and dup_b's would never be pulled in, so
+# the duplicate would go unreported. This is the mechanism of the
 # one-definition gate (komira//tools/build/one_definition:one_definition), so
 # this target, unlike the ones above, has no [ungated] library: the red is the
 # link itself.
