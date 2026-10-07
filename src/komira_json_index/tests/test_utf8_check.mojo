@@ -30,11 +30,11 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.string_array import StringArray
-from komira_core.io.heap_region import HeapRegion
-from komira_core.plan.expr import parse_json_path
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.string_array import StringArray
+from komira_buffer.heap_region import HeapRegion
+from komira_plan_expr.expr import parse_json_path
 
 from komira_json_index.json_extract_kernel import extract_column
 from komira_json_index.parse_string import (
