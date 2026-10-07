@@ -15,7 +15,9 @@
 # 1. CREATED UNDER A RUN: on a graph holding every catalog type the cloud
 #    hosts (checked against `implemented()`, so a type the lowering skipped
 #    is seen) with a KEEP bucket, a default-KEEP table and a queue, a topic
-#    and a subscription (where hosted), a default-KEEP secret and a DELETE
+#    and a subscription (where hosted), a default-KEEP secret, a zone, a
+#    CNAME and a certificate (where hosted; gcp adds the certificate's DNS
+#    authorization and its record) and a DELETE
 #    bucket, every wanted node's live object carries exactly one
 #    run-id label, with the key `validation_run_tag_key("kci")` (spelled
 #    `kci-run-id`) and the run id verbatim, and exactly one retention mark
@@ -90,6 +92,7 @@ from kci_cloud import (
     Clouds,
     ConformanceTarget,
     FIELD_QUEUE,
+    FIELD_DNS_ZONE,
     FIELD_SUBSCRIPTION,
     FIELD_TABLE,
     LoweredNode,
@@ -161,6 +164,15 @@ queue's `jobs/policy`; gcp lowers the queue as `jobs/topic` (turned off:
 the queue is fed) and `jobs/queue`, and the subscription's one node turned
 off."""
 
+comptime _NAMES = (
+    '{"id":"site","dnsZone":{"name":"example.com"}},'
+    '{"id":"www","dnsRecord":{"name":"www.example.com","zone":{"resource":"site"},"type":"CNAME",'
+    '"values":[{"ref":{"resource":"api","standard":"HOST"}}]}},'
+    '{"id":"tls","certificate":{"domains":["example.com"],"zone":{"resource":"site"}}}'
+)
+"""A zone, a CNAME that follows `api`'s HOST, and a certificate: gcp adds
+`tls/dnsauth` and `tls/authrec`."""
+
 
 def _full(
     api_port: String,
@@ -169,12 +181,14 @@ def _full(
     table: Bool = False,
     messaging: Bool = False,
     secret: Bool = False,
+    names: Bool = False,
 ) -> String:
     """A public service with a `uses` grant, an internal service reading its
     URL, a scheduled job running as an account, an account, a grant
     resource and a DELETE bucket. `kept` adds a bucket with the default
     retention (KEEP); `table` adds `_TABLE`; `messaging` adds `_MESSAGING`;
-    `secret` adds a secret with the default retention (KEEP).
+    `secret` adds a secret with the default retention (KEEP); `names` adds
+    `_NAMES`.
     `roles_on` False makes api
     internal and removes web's grant on api."""
     var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
@@ -203,6 +217,7 @@ def _full(
         + ((String(",") + String(_TABLE)) if table else String(""))
         + ((String(",") + String(_MESSAGING)) if messaging else String(""))
         + (String(',{"id":"creds","secret":{}}') if secret else String(""))
+        + ((String(",") + String(_NAMES)) if names else String(""))
         + String("]}")
     )
 
@@ -219,6 +234,14 @@ def _hosts_messaging[S: ConformanceTarget](cloud: S) -> Bool:
     var l = cloud.implemented()
     for i in range(len(l)):
         if l[i] == FIELD_QUEUE:
+            return True
+    return False
+
+
+def _hosts_names[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_DNS_ZONE:
             return True
     return False
 
@@ -410,7 +433,12 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
         var cloud = FakeCloud(shape=shapes[s].copy())
         var where = shapes[s].name
         var json = _full(
-            "8080", kept=True, table=_hosts_table(cloud), messaging=_hosts_messaging(cloud), secret=True
+            "8080",
+            kept=True,
+            table=_hosts_table(cloud),
+            messaging=_hosts_messaging(cloud),
+            secret=True,
+            names=_hosts_names(cloud),
         )
         _ = _apply_and_check(cloud, json, _run(String(_RUN)), String(_RUN), where)
         var resources = _list(json)
@@ -435,7 +463,12 @@ def test_outside_a_run_no_object_carries_a_tag() raises:
     for s in range(len(shapes)):
         var cloud = FakeCloud(shape=shapes[s].copy())
         var json = _full(
-            "8080", kept=True, table=_hosts_table(cloud), messaging=_hosts_messaging(cloud), secret=True
+            "8080",
+            kept=True,
+            table=_hosts_table(cloud),
+            messaging=_hosts_messaging(cloud),
+            secret=True,
+            names=_hosts_names(cloud),
         )
         _ = _apply_and_check(cloud, json, None, String("(none)"), shapes[s].name)
     var limited = FakeLimitedCloud()

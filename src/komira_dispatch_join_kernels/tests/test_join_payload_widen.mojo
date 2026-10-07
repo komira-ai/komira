@@ -1,5 +1,5 @@
 # =============================================================================
-# test_join_payload_widen -- the LEAF-EXIT half of PAYLOAD-NARROW
+# test_join_payload_widen -- the LEAF-EXIT half of join payload narrowing
 # =============================================================================
 #
 # Split from `test_join_payload_narrow_exec.mojo` for the 1000-line file rule.

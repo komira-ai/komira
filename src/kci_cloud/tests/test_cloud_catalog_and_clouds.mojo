@@ -9,7 +9,7 @@
 #    exactly once; ABSENT_BY_DESIGN only for CLOUD_BOUND; NOT_YET only for
 #    PORTABLE; a complete cloud has no NOT_YET; nothing outside the
 #    catalog. v1 has no CLOUD_BOUND type, so the bound rows here are a
-#    synthetic catalog row (field 18, a number held for a later type),
+#    synthetic catalog row (field 32, a number held for a later type),
 #    which is exactly how the rule must already hold when one is added.
 # 3. `Clouds` refuses a duplicate id and an illegal declaration at add, and
 #    `resolve` refuses an id that is not built in, suggesting the closest.
@@ -23,9 +23,9 @@
 #    READ_WRITE and DESCRIBE (not CALL), retention default KEEP, primary
 #    role `table`; it is the third body arm, field 13.
 # 7. THE MESSAGING ROWS: a queue (field 15, the fifth arm) and a topic (21,
-#    the eighth) are PORTABLE, expose NAME and ADDRESS, take retention with
+#    the ninth) are PORTABLE, expose NAME and ADDRESS, take retention with
 #    the default DELETE, and land on `queue` / `topic`; a queue accepts SEND
-#    and RECEIVE, a topic SEND only. A subscription (28, the tenth) exposes
+#    and RECEIVE, a topic SEND only. A subscription (28, the thirteenth) exposes
 #    and accepts nothing, takes no retention, and lands on `sub` (a role
 #    word is 8 bytes at most).
 #    SEND and RECEIVE are values of the generated `Access`.
@@ -98,8 +98,9 @@ def test_catalog_arms_match_the_wire() raises:
     var c = Catalog.v1()
     assert_equal(
         len(c.types),
-        10,
-        "v1 declares service, job, table, bucket, queue, secret, service_account, topic, grant and subscription",
+        13,
+        "v1 declares service, job, table, bucket, queue, secret, dns_zone, service_account, topic, grant,"
+        + " dns_record, certificate and subscription",
     )
     for i in range(len(c.types)):
         var field = c.types[i].field
@@ -175,7 +176,7 @@ def test_catalog_refuses_unset_and_duplicates() raises:
 
 def _with_bound() raises -> Catalog:
     var c = Catalog.v1()
-    c.add(CatalogType(18, String("bound_thing"), CLOUD_BOUND, List[String](), List[String]()))
+    c.add(CatalogType(32, String("bound_thing"), CLOUD_BOUND, List[String](), List[String]()))
     return c^
 
 
@@ -189,9 +190,9 @@ def _ints(
     a: Int, b: Int = -1, c: Int = -1, d: Int = -1, e: Int = -1, f: Int = -1
 ) -> List[Int]:
     """The fields given, then the messaging fields (15 queue, 21 topic, 28
-    subscription) and 16 secret, which every entry in these tests
-    implements."""
-    var l: List[Int] = [15, 21, 28, 16]
+    subscription), 16 secret and the name fields (18 DNS zone, 26 DNS
+    record, 27 certificate), which every entry in these tests implements."""
+    var l: List[Int] = [15, 21, 28, 16, 18, 26, 27]
     l.append(a)
     if b >= 0:
         l.append(b)
@@ -211,13 +212,13 @@ def test_artifact_rules() raises:
 
     # legal: complete, hosts every portable type, bound type absent by design
     var ok = List[Absence]()
-    ok.append(Absence(18, ABSENT_BY_DESIGN, String("no such service here")))
+    ok.append(Absence(32, ABSENT_BY_DESIGN, String("no such service here")))
     assert_equal(len(artifact_problems(c, _entry(True, _ints(10, 11, 13, 14, 20, 25), ok^))), 0)
 
     # legal: not complete, a portable type not yet
     var later = List[Absence]()
     later.append(Absence(11, NOT_YET, String("no runner")))
-    later.append(Absence(18, ABSENT_BY_DESIGN, String("none")))
+    later.append(Absence(32, ABSENT_BY_DESIGN, String("none")))
     assert_equal(len(artifact_problems(c, _entry(False, _ints(10, 13, 14, 20, 25), later^))), 0)
 
     # a type nobody decided about
@@ -227,38 +228,38 @@ def test_artifact_rules() raises:
     # ABSENT_BY_DESIGN on a portable type
     var a1 = List[Absence]()
     a1.append(Absence(11, ABSENT_BY_DESIGN, String("x")))
-    a1.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
+    a1.append(Absence(32, ABSENT_BY_DESIGN, String("x")))
     p = _joined(artifact_problems(c, _entry(False, _ints(10, 13, 14, 20, 25), a1^)))
     assert_true(_has(p, "'job' is PORTABLE; ABSENT_BY_DESIGN is legal only"), p)
 
     # NOT_YET on a bound type
     var a2 = List[Absence]()
-    a2.append(Absence(18, NOT_YET, String("x")))
+    a2.append(Absence(32, NOT_YET, String("x")))
     p = _joined(artifact_problems(c, _entry(False, _ints(10, 11, 13, 14, 20, 25), a2^)))
     assert_true(_has(p, "'bound_thing' is CLOUD_BOUND; NOT_YET is legal only"), p)
 
     # complete, yet a portable type is not yet
     var a3 = List[Absence]()
     a3.append(Absence(11, NOT_YET, String("x")))
-    a3.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
+    a3.append(Absence(32, ABSENT_BY_DESIGN, String("x")))
     p = _joined(artifact_problems(c, _entry(True, _ints(10, 13, 14, 20, 25), a3^)))
     assert_true(_has(p, "claims to be complete but does not host PORTABLE type 'job'"), p)
 
     # declared twice
     var a4 = List[Absence]()
     a4.append(Absence(11, NOT_YET, String("x")))
-    a4.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
+    a4.append(Absence(32, ABSENT_BY_DESIGN, String("x")))
     p = _joined(artifact_problems(c, _entry(False, _ints(10, 11, 13, 14, 20, 25), a4^)))
     assert_true(_has(p, "'job' is declared more than once"), p)
 
     # outside the catalog
     var a5 = List[Absence]()
-    a5.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
+    a5.append(Absence(32, ABSENT_BY_DESIGN, String("x")))
     a5.append(Absence(77, NOT_YET, String("x")))
     p = _joined(artifact_problems(c, _entry(True, _ints(10, 11, 13, 14, 20, 25), a5^)))
     assert_true(_has(p, "declares field 77 absent, which is not in the catalog"), p)
     var a6 = List[Absence]()
-    a6.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
+    a6.append(Absence(32, ABSENT_BY_DESIGN, String("x")))
     var impl = _ints(10, 11, 13, 14, 20, 25)
     impl.append(40)
     p = _joined(artifact_problems(c, _entry(True, impl^, a6^)))
@@ -445,7 +446,7 @@ def test_the_messaging_rows() raises:
     var arms = body_arms()
     var fields = [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]
     var names = ["queue", "topic", "subscription"]
-    var positions = [4, 7, 9]
+    var positions = [4, 8, 12]
     for i in range(3):
         ref t = c.types[c.index_of(fields[i])]
         assert_equal(t.name, String(names[i]))

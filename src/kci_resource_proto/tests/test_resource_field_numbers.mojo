@@ -23,10 +23,11 @@
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 #
-# ALSO PINNED: the ten v1 `Resource.body` arms (10 service, 11 job, 13 table,
-# 14 bucket, 15 queue, 16 secret, 20 service account, 21 topic, 25 grant, 28
-# subscription) by number AND by which field each fills; the retired field 4
-# is ignored; and every enum's ordinals in both
+# ALSO PINNED: the thirteen v1 `Resource.body` arms (10 service, 11 job, 13
+# table, 14 bucket, 15 queue, 16 secret, 18 DNS zone, 20 service account, 21
+# topic, 25 grant, 26 DNS record, 27 certificate, 28 subscription) by number
+# AND by which field each fills; the retired field 4 is ignored; and every
+# enum's ordinals in both
 # directions, held values undeclared. EVERY HELD NUMBER (each number of each
 # held range of each message) is pinned as undeclared by one table in
 # test_resource_held_numbers.mojo.
@@ -69,9 +70,11 @@
 # arm 28 (by number and by the field each fills, here, and restated in
 # `test_added_numbers_are_kept`); `Access` SEND 5 and RECEIVE 6 (in
 # `test_enum_ordinals`, and restated). `Queue`, `Topic` and `Subscription`
-# field by field are in test_resource_messaging_numbers.mojo, and `Secret`
-# and `SecretRef.secret` 4 in test_resource_secret_numbers.mojo (this file
-# is past the size a Mojo source should stay under).
+# field by field are in test_resource_messaging_numbers.mojo, `Secret` and
+# `SecretRef.secret` 4 in test_resource_secret_numbers.mojo, and `DnsZone`,
+# `DnsRecord`, `Certificate` and `RecordType` in
+# test_resource_dns_numbers.mojo (this file is past the size a Mojo source
+# should stay under).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -676,12 +679,18 @@ def _arm_of(r: Resource) -> String:
         return "queue"
     if r.secret:
         return "secret"
+    if r.dns_zone:
+        return "dns_zone"
     if r.service_account:
         return "service_account"
     if r.topic:
         return "topic"
     if r.grant:
         return "grant"
+    if r.dns_record:
+        return "dns_record"
+    if r.certificate:
+        return "certificate"
     if r.subscription:
         return "subscription"
     return ""
@@ -693,9 +702,9 @@ def test_resource_body_arms() raises:
     The arm numbers are the adapter registry's key (one adapter per arm), so a
     renumber would hand a resource to another type's adapter.
     """
-    var names: List[String] = ["service", "job", "table", "bucket", "queue", "secret"]
-    names.extend(["service_account", "topic", "grant", "subscription"])
-    var fields: List[Int] = [10, 11, 13, 14, 15, 16, 20, 21, 25, 28]
+    var names: List[String] = ["service", "job", "table", "bucket", "queue", "secret", "dns_zone"]
+    names.extend(["service_account", "topic", "grant", "dns_record", "certificate", "subscription"])
+    var fields: List[Int] = [10, 11, 13, 14, 15, 16, 18, 20, 21, 25, 26, 27, 28]
     for i in range(len(names)):
         var field = fields[i]
         var b = List[UInt8]()
@@ -989,7 +998,7 @@ def test_service_account_and_grant() raises:
     _empty(a, 20)
     var ra = decode_proto[Resource](a.copy())
     assert_equal(_arm_of(ra), "service_account", "body 20 is `service_account`")
-    assert_equal(ra._oneof0_case, 7, "the service account is the seventh arm")
+    assert_equal(ra._oneof0_case, 8, "the service account is the eighth arm")
     _same(encode_proto(ra), a, "Resource with a service account")
 
     var g = List[UInt8]()
@@ -1017,7 +1026,7 @@ def test_service_account_and_grant() raises:
     _msg(r, 25, g)
     var rr = decode_proto[Resource](r.copy())
     assert_equal(_arm_of(rr), "grant", "body 25 is `grant`")
-    assert_equal(rr._oneof0_case, 9, "the grant is the ninth arm")
+    assert_equal(rr._oneof0_case, 10, "the grant is the tenth arm")
     assert_equal(rr.grant.value().principal.value().resource, "runner")
     _same(encode_proto(rr), r, "Resource with a grant")
 
