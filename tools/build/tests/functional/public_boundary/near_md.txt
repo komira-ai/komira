@@ -17,6 +17,8 @@ https://{host}/x, https://$HOST/p, https://<host>/p, s3://bucket/key, gs://b/o,
 file:///home/user/x, https://…, the pattern https://[^"]+, https://u:p@example.com:8443/x.
 Addresses of mail: noreply@tools.zz, no-reply@tools.zz, alice@example.com,
 ops@team.example, x@y.test, user@host.invalid, a decorator @always_inline.
+The user of a URL is no address: abfss://lake@acct.dfs.core.windows.net/p,
+az://lake@acct.blob.core.windows.net/p.
 Hex in prose that is no commit: ba7816bf... and cf83e135…, 0b00001101, 86400e9,
 ed25519, 0190ab1c-3d4e-7f80-8a1b-2c3d4e5f6071, "1a2b3c4d", deadbeef, x1a2b3c4d,
 1a2b3c4d5e6f7a8b9c, /commit/1a2b3c4d5e, actions/checkout@1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b,

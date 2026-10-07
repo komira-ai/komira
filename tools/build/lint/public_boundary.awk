@@ -65,8 +65,16 @@
 #               read; an IPv4 host is the ip rule's.
 #   email       An address local@domain, unless the domain is reserved
 #               (example.com, example.net, example.org, *.example, *.test,
-#               *.invalid, *.localhost) or the local part is noreply or
-#               no-reply (a commit trailer's address names no person).
+#               *.invalid, *.localhost), the local part is noreply or
+#               no-reply (a commit trailer's address names no person), or
+#               the local part starts right after `://` and the domain is a
+#               domain of <hosts> or under one: that is the user of a URL's
+#               authority on a host the ledger names (`scheme://user@host`,
+#               such as Hadoop ABFS's
+#               abfss://<container>@<account>.dfs.core.windows.net). A
+#               user before any other host (`s3://<user>@<host>/k`,
+#               `git+ssh://<user>@<host>/r`) is read, as are `mailto:` and an
+#               address elsewhere in a URL.
 #   commit_sha  In prose, a hex string shaped like a commit id: 7 to 12, or
 #               40, lowercase hex digits holding at least two changes
 #               between digit and letter, standing alone (no letter, digit,
@@ -285,14 +293,18 @@ function find_host(s,    rest, off, pos, scheme, h, i) {
     return ""
 }
 
-function find_email(s,    rest, e, at, local, dom) {
-    rest = s
+function find_email(s,    rest, off, pos, e, at, local, dom) {
+    rest = s; off = 0
     while (match(rest, /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*[.][A-Za-z][A-Za-z]+/)) {
+        pos = off + RSTART
         e = substr(rest, RSTART, RLENGTH)
-        rest = substr(rest, RSTART + RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH); off = pos + length(e) - 1
         at = index(e, "@")
         local = tolower(substr(e, 1, at - 1)); dom = tolower(substr(e, at + 1))
         if (local == "noreply" || local == "no-reply" || reserved(dom)) continue
+        # The user of a URL's authority, right after `://`, is no address when
+        # the host is a domain of <hosts> or under one.
+        if (pos > 3 && substr(s, pos - 3, 3) == "://" && allowed(dom)) continue
         return e
     }
     return ""

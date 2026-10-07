@@ -10,15 +10,18 @@
 #      tests//functional/public_boundary:ok (a planted tree whose every finding
 #      is held at its exact count, beside near misses, and binary
 #      data) build; each target of tests//negative/public_boundary fails
-#      naming its one planted finding (each rule in each spelling, a date in
-#      a third_party BUCK file and C header, a `//` comment after a string
-#      holding `//`, a date, home directory or deny-list word in a path, the
-#      path of binary data, a file given by `paths`, one finding over a hold,
-#      a word of a deny list) or ledger defect (a row for binary data among
-#      them, and a row holding a deny-list word), a window with month 13 or
-#      not ending on the first day of a month is refused, the root target's
-#      window is pinned (uquery of window_from and public_from), an empty tree fails as checking
-#      nothing, and a target naming no tree is refused at analysis. The
+#      naming its one planted finding (each rule in each spelling, an email
+#      address after `mailto:`, in a URL's path and after a URL's user, which
+#      is none on a host of the hosts ledger, and a URL's user before a host
+#      no row names (s3://, git+ssh://), a date in a third_party BUCK file and
+#      C header, a `//` comment after a string holding `//`, a date, home
+#      directory or deny-list word in a path, the path of binary data, a file
+#      given by `paths`, one finding over a hold, a word of a deny list) or
+#      ledger defect (a row for binary data among them, and a row holding a
+#      deny-list word), a window with month 13 or not ending on the first day
+#      of a month is refused, the root target's window is pinned (uquery of
+#      window_from and public_from), an empty tree fails as checking nothing,
+#      and a target naming no tree is refused at analysis. The
 #      planted tree's window is 2030 to 2031-09-01, so no file of it holds a
 #      date of the root target's window.
 
@@ -48,7 +51,12 @@ for want in \
     "host_unlisted|$M: host: build.corp.zz -- a URL host that is neither a reserved example name nor under a domain of $HS" \
     "host_private|$M: host: svc.corp.internal -- " \
     "host_ipv6|$M: host: [2001:db8::1] -- " \
-    "email|$M: email: jdoe@corp.zz -- " \
+    "email|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
+    "email_mailto|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
+    "email_url_path|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
+    "email_after_url|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
+    "email_s3_user|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
+    "email_git_ssh_user|$M: email: jdoe@corp.zz -- an email address outside the reserved example domains" \
     "sha_md|$M: commit_sha: 1a2b3c4d -- " \
     "sha_comment|$N/src/komira_a/plant.mojo:1: commit_sha: 9f8e7d6c5b -- " \
     "sha_docstring|$N/src/komira_a/plant.mojo:3: commit_sha: 9f8e7d6c5b -- " \
@@ -73,11 +81,11 @@ for want in \
     "holds_duplicate|$N/holds_duplicate.tsv:10: a second row for date in src/komira_a/held.mojo" \
     "holds_lower|$N/holds_lower.tsv:3: date in src/komira_a/held.mojo is held at 16 and has 15: lower the count to 15" \
     "holds_delete|$N/holds_delete.tsv:10: date in docs/near.md is held at 1 and has 0: delete the row" \
-    "hosts_malformed|$N/hosts_malformed.tsv:4: a row has 2 tab-separated fields (domain, reason), not 1" \
-    "hosts_reason|$N/hosts_reason.tsv:4: empty reason" \
-    "hosts_reserved|$N/hosts_reserved.tsv:4: example.com is reserved for examples and needs no row; delete the row" \
-    "hosts_duplicate|$N/hosts_duplicate.tsv:4: a second row for amazonaws.com" \
-    "hosts_unused|$N/hosts_unused.tsv:4: no URL host of the tree is unused.zz or under it; delete the row" \
+    "hosts_malformed|$N/hosts_malformed.tsv:5: a row has 2 tab-separated fields (domain, reason), not 1" \
+    "hosts_reason|$N/hosts_reason.tsv:5: empty reason" \
+    "hosts_reserved|$N/hosts_reserved.tsv:5: example.com is reserved for examples and needs no row; delete the row" \
+    "hosts_duplicate|$N/hosts_duplicate.tsv:5: a second row for amazonaws.com" \
+    "hosts_unused|$N/hosts_unused.tsv:5: no URL host of the tree is unused.zz or under it; delete the row" \
     "window_month|public_boundary: the window is from year \`2030\` to \`2031-13-01\`" \
     "window_bad|public_boundary: the window is from year \`2030\` to \`2031-09-15\`; name a year and a later first day of a month (YYYY-MM-01)" \
     "empty|public_boundary: checked nothing"; do
