@@ -708,21 +708,62 @@ def _contains(list: List[String], target: String) -> Bool:
     return False
 
 
-def _default_target(nodes: List[AvroNode], type_idx: Int) -> Int:
-    """The arena index of the type a field default is read as: the field's
-    type, or a union's first branch. A by-name reference to a fixed (built as
-    a record placeholder carrying the name) resolves to the fixed node."""
-    var idx = type_idx
-    if nodes[idx].kind == AVRO_KIND_UNION and len(nodes[idx].children) > 0:
-        idx = nodes[idx].children[0]
+def _resolve_named_ref(nodes: List[AvroNode], idx: Int) -> Int:
+    """A by-name reference is built as a record placeholder carrying the name;
+    when that name belongs to a fixed or an enum, return that node instead."""
     if nodes[idx].kind == AVRO_KIND_RECORD and len(nodes[idx].children) == 0:
         for j in range(len(nodes)):
-            if (
+            if nodes[j].name == nodes[idx].name and (
                 nodes[j].kind == AVRO_KIND_FIXED
-                and nodes[j].name == nodes[idx].name
+                or nodes[j].kind == AVRO_KIND_ENUM
             ):
                 return j
     return idx
+
+
+def _default_matches(kind: Int, tag: Int) -> Bool:
+    """Whether a JSON default of `tag` is a value of Avro type `kind`
+    (Avro field default table: numbers for int/long/float/double, strings
+    for bytes/string/enum/fixed, objects for record/map)."""
+    if kind == AVRO_KIND_NULL:
+        return tag == _JSON_NULL
+    if kind == AVRO_KIND_BOOLEAN:
+        return tag == _JSON_BOOL
+    if kind == AVRO_KIND_INT or kind == AVRO_KIND_LONG:
+        return tag == _JSON_INT
+    if kind == AVRO_KIND_FLOAT or kind == AVRO_KIND_DOUBLE:
+        return tag == _JSON_INT or tag == _JSON_FLOAT
+    if (
+        kind == AVRO_KIND_BYTES
+        or kind == AVRO_KIND_STRING
+        or kind == AVRO_KIND_ENUM
+        or kind == AVRO_KIND_FIXED
+    ):
+        return tag == _JSON_STRING
+    if kind == AVRO_KIND_RECORD or kind == AVRO_KIND_MAP:
+        return tag == _JSON_OBJECT
+    if kind == AVRO_KIND_ARRAY:
+        return tag == _JSON_ARRAY
+    return False
+
+
+def _default_target(nodes: List[AvroNode], type_idx: Int, tag: Int) -> Int:
+    """The arena index of the type a field default of JSON `tag` is read as.
+    For a non-union field it is the field's type. For a union it is the first
+    branch the default matches (Avro spec: "Default values for union fields
+    correspond to the first schema that matches in the union"), or the first
+    branch when none matches. By-name references to a fixed or an enum are
+    resolved to that node."""
+    if nodes[type_idx].kind != AVRO_KIND_UNION:
+        return _resolve_named_ref(nodes, type_idx)
+    var n = len(nodes[type_idx].children)
+    if n == 0:
+        return type_idx
+    for i in range(n):
+        var b = _resolve_named_ref(nodes, nodes[type_idx].children[i])
+        if _default_matches(nodes[b].kind, tag):
+            return b
+    return _resolve_named_ref(nodes, nodes[type_idx].children[0])
 
 
 def _capture_default(
@@ -735,10 +776,10 @@ def _capture_default(
     yields AvroDefault.none(). Complex defaults (object / array) are treated
     as `none()` (a complex default is not synthesized).
 
-    When the default is read as `bytes` or `fixed` (the field's type, or a
-    union's first branch), it must be a JSON string; its code points are read
-    as Latin-1 byte values (AVRO_DEFAULT_BYTES), and a fixed default must be
-    exactly the fixed size."""
+    When the default is read as `bytes` or `fixed` (the field's type, or the
+    union branch `_default_target` picks), it must be a JSON string; its code
+    points are read as Latin-1 byte values (AVRO_DEFAULT_BYTES), and a fixed
+    default must be exactly the fixed size."""
     # Detect presence: scan the object keys for "default".
     var found = False
     for i in range(len(fobj.obj_keys)):
@@ -748,7 +789,7 @@ def _capture_default(
     if not found:
         return AvroDefault.none()
     var v = _obj_get(fobj, "default")
-    var target = _default_target(nodes, type_idx)
+    var target = _default_target(nodes, type_idx, v.tag)
     var tkind = nodes[target].kind
     if tkind == AVRO_KIND_BYTES or tkind == AVRO_KIND_FIXED:
         if v.tag != _JSON_STRING:
