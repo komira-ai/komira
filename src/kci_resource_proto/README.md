@@ -6,17 +6,19 @@ The kci resource catalog (`kci.resource.v1`) as protobuf messages and the
 Mojo structs generated from them: what an author writes in a deploy step.
 A `ResourceList` holds `Resource` entries; each has an author-chosen `id`,
 the other resources it `uses` (a `Ref` plus an `Access`), a `retention`, and
-one `body` arm. Version 1 declares nine primitives as body arms: `service`
-(10), `job` (11), `table` (13), `bucket` (14), `queue` (15),
+one `body` arm. Version 1 declares ten primitives as body arms: `service`
+(10), `job` (11), `table` (13), `bucket` (14), `queue` (15), `secret` (16),
 `service_account` (20), `topic` (21), `grant` (25) and `subscription` (28).
 Every other number the header of `resource.proto` lists is
 held: undeclared today, so it decodes as an unknown field, and declaring it
-later is an addition. Secrets are referenced by name (`SecretRef`), never
-carried as values.
+later is an addition. A `secret` resource is the container only; a service
+or a job receives a secret by reference (`SecretRef`: by name, or a `secret`
+resource of the list), never as a value.
 
 The field numbers are the contract. `tests/test_resource_field_numbers.mojo`
 pins every declared number as wire bytes (the messaging types in
-`tests/test_resource_messaging_numbers.mojo`), and
+`tests/test_resource_messaging_numbers.mojo`, the secret in
+`tests/test_resource_secret_numbers.mojo`), and
 `tests/test_resource_held_numbers.mojo` and
 `tests/test_held_numbers_are_unused.mojo` pin every held number as
 undeclared.

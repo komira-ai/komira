@@ -1,12 +1,12 @@
 # =============================================================================
-# test_resource_graph_golden_bytes.mojo: the bytes of two resource graphs,
+# test_resource_graph_golden_bytes.mojo: the bytes of four resource graphs,
 # frozen, so protoc can read them.
 # =============================================================================
 #
 # The other tests of this package hold `kci.resource.v1` to bytes written by
 # hand here and to this package's own decoder. Neither is read by anything
 # that did not come from this repository. This file freezes the bytes this
-# package's encoder writes for two composed graphs, as `.hex` fixtures; the
+# package's encoder writes for four composed graphs, as `.hex` fixtures; the
 # `resource_graph_fixtures` check in BUCK has protoc (which learned the format
 # from `resource.proto` alone) decode those bytes to the committed `.txtpb`,
 # and encode that text to the committed `.canonical.hex`. A symmetric defect,
@@ -15,7 +15,7 @@
 #
 # THE CORPUS. Each graph is authored as proto3 JSON, the form an author
 # writes and the one kci reads (`decode_json[ResourceList]`), then encoded
-# with `encode_proto`. Between them the three graphs set every field of every
+# with `encode_proto`. Between them the four graphs set every field of every
 # message of `resource.proto` at least once, to a value other than its
 # default (a field at its default is not on protoc's side of the wire, so it
 # would check nothing), and every `Resource.body` arm:
@@ -39,6 +39,11 @@
 #                   dead-letter queue, a topic, the subscription that feeds
 #                   the queue from the topic, an identity that RECEIVEs from
 #                   the queue, and a grant that lets it SEND to the topic.
+#   secret_graph    a secret kept on delete and one deleted (`Retention`
+#                   written both ways), a service that receives both by
+#                   `SecretRef.secret` (one pinned to a version) and READs
+#                   both, an identity that may READ_WRITE one, and a grant
+#                   that lets it WRITE the other.
 #
 # Map keys are authored in sorted order. protoc prints and re-encodes a map
 # sorted by key, and this encoder writes a map in insertion order, so a
@@ -190,6 +195,26 @@ comptime _MESSAGING_GRAPH = (
     # A grant: the identity may SEND to the topic.
     + '{"id":"rx-send","grant":{"principal":{"resource":"rx"},'
     + '"target":{"resource":"ev"},"access":"SEND"}}'
+    + "]}"
+)
+
+
+comptime _SECRET_GRAPH = (
+    '{"resource":['
+    # Two secrets: one kept on delete, one deleted with its resource.
+    + '{"id":"db","retention":"KEEP","secret":{}},'
+    + '{"id":"token","retention":"DELETE","secret":{}},'
+    # A service that receives both by reference and may READ both.
+    + '{"id":"api","service":{"image":{"digest":"sha256:5ec2"},"internal":{},'
+    + '"secretEnv":{"DB_PASSWORD":{"version":"2","secret":{"resource":"db"}},'
+    + '"TOKEN":{"secret":{"resource":"token"}}}},'
+    + '"uses":[{"target":{"resource":"db"},"access":"READ"},'
+    + '{"target":{"resource":"token"},"access":"READ"}]},'
+    # The identity that rotates them: READ_WRITE one, a grant to WRITE the other.
+    + '{"id":"rotator","serviceAccount":{},'
+    + '"uses":[{"target":{"resource":"token"},"access":"READ_WRITE"}]},'
+    + '{"id":"rotator-db","grant":{"principal":{"resource":"rotator"},'
+    + '"target":{"resource":"db"},"access":"WRITE"}}'
     + "]}"
 )
 
@@ -401,12 +426,18 @@ def test_messaging_graph_bytes_are_frozen() raises:
     _assert_frozen("messaging_graph", _MESSAGING_GRAPH, 6)
 
 
+def test_secret_graph_bytes_are_frozen() raises:
+    _assert_frozen("secret_graph", _SECRET_GRAPH, 5)
+
+
 def main() raises:
     print("test_resource_graph_golden_bytes")
     _print_golden("service_graph", _SERVICE_GRAPH)
     _print_golden("job_bucket_graph", _JOB_BUCKET_GRAPH)
     _print_golden("messaging_graph", _MESSAGING_GRAPH)
+    _print_golden("secret_graph", _SECRET_GRAPH)
     test_service_graph_bytes_are_frozen()
     test_job_bucket_graph_bytes_are_frozen()
     test_messaging_graph_bytes_are_frozen()
+    test_secret_graph_bytes_are_frozen()
     print("ALL kci.resource.v1 GRAPH GOLDEN-BYTES TESTS PASSED")

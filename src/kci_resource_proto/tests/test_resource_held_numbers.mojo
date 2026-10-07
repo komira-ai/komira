@@ -54,6 +54,7 @@ from kci_resource_proto.resource import (
     Output,
     Queue,
     Resource,
+    Secret,
     Service,
     ServiceAccount,
     Subscription,
@@ -83,7 +84,7 @@ def _held() -> List[Held]:
     l.append(Held("Resource", 5, 5, "a typed per-cloud settings map"))
     l.append(Held("Resource", 6, 6, "physical_name"))
     l.append(Held("Resource", 12, 12, "worker"))
-    l.append(Held("Resource", 16, 19, "secret, 17 unused, DNS zone, 19 unused"))
+    l.append(Held("Resource", 17, 19, "17 unused, DNS zone, 19 unused"))
     l.append(Held("Resource", 22, 24, "schedule, network, registry"))
     l.append(Held("Resource", 26, 27, "DNS record, certificate"))
     l.append(
@@ -117,6 +118,7 @@ def _held() -> List[Held]:
     l.append(Held("Queue", 50, 53, "per-cloud extensions"))
     l.append(Held("Topic", 50, 53, "per-cloud extensions"))
     l.append(Held("Subscription", 50, 53, "per-cloud extensions"))
+    l.append(Held("Secret", 50, 53, "per-cloud extensions"))
     return l^
 
 
@@ -219,6 +221,8 @@ def _undeclared_in(message: String, n: Int) raises -> Bool:
         head.append(1)
         head.append(UInt8(ord("t")))
         return _undeclared[Subscription](head, n)
+    if message == "Secret":
+        return _undeclared[Secret](head, n)
     raise Error(String("no probe for message ") + message)
 
 
@@ -312,6 +316,9 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("Subscription")
     nums.append(2)
     what.append("queue (a message)")
+    names.append("Resource")
+    nums.append(16)
+    what.append("the secret arm (an empty message in a oneof)")
     for i in range(len(names)):
         assert_true(
             not _undeclared_in(names[i], nums[i]),
