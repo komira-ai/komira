@@ -73,12 +73,15 @@
 #            READING rather than an argument.
 #   M8  `plain.decode_plain_byte_array`: make the dispatch call the two-pass
 #       arm on BOTH branches (i.e. the lever never arms)
-#         -> KILLED BY `test_a_conforming_page_costs_zero_extra_bytes`: only
+#         -> KILLED BY `test_dictionary_page_decode_takes_the_gated_arm`, which
+#            drives a PRODUCTION call site (`DictionaryDecoder.
+#            init_dict_byte_array`) with the gate off and then on and asserts
+#            the FUSED counter moved, and by
+#            `test_a_conforming_page_costs_zero_extra_bytes`: only
 #            the fused walk records its allocation, so with the gate ON
 #            `plain_ba_fused_alloc_bytes() >= payload` fails. ⛔ None of the
 #            byte-equality tests can catch it: they would keep comparing the
-#            two-pass arm against itself and pass. (The dictionary-page call
-#            site of the same dispatch is tested with the dictionary decoder.)
+#            two-pass arm against itself and pass.
 #   M9  `scan_copy_trace.plain_ba_fused_enabled` reads the latch the wrong way
 #       round
 #         -> KILLED BY `test_gate_flips_in_process`.
@@ -101,7 +104,7 @@ from std.testing import (
 
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 
-from komira_parquet import decode_plain_byte_array
+from komira_parquet import DictionaryDecoder, decode_plain_byte_array
 from komira_parquet.scan_copy_trace import (
     plain_ba_fused_alloc_bytes,
     plain_ba_fused_count,
@@ -526,7 +529,97 @@ def test_page_too_small_for_its_prefixes_is_refused_up_front() raises:
 
 
 # =============================================================================
-# 3. The gate itself
+# 3. The wiring — a PRODUCTION call site must reach the gated arm
+# =============================================================================
+
+
+def test_dictionary_page_decode_takes_the_gated_arm() raises:
+    """⛔ THE FALSIFIER FOR M8 — the one no byte-equality test can be.
+
+    Every test above calls `decode_plain_byte_array` directly. If the dispatch
+    were reverted to call the two-pass arm on both branches, they would all
+    keep comparing the two-pass arm against ITSELF and stay green. This drives
+    a real production call site — `DictionaryDecoder.init_dict_byte_array`
+    (`dictionary.mojo`), the PLAIN BYTE_ARRAY dictionary-page decode taken by
+    every dictionary-encoded string column — with the gate off and then on, and
+    asserts the FUSED counter moved and the resolved values are unchanged."""
+    var lengths = List[Int]()
+    lengths.append(5)
+    lengths.append(0)
+    lengths.append(11)
+    lengths.append(3)
+    var page = _plain_page(lengths)
+    var nvals = len(lengths)
+
+    reset_scan_copy_counts()
+
+    set_plain_ba_fused_enabled(False)
+    var buf_off = _buf_from(page)
+    var dec_off = DictionaryDecoder()
+    dec_off.init_dict_byte_array(
+        buf_off.into_span_capacity()[: buf_off.len()], nvals
+    )
+    var vals_off = List[String]()
+    for i in range(nvals):
+        vals_off.append(dec_off.dict_values_bytes.value().get(i))
+    _ = dec_off^
+    _ = buf_off^
+
+    var two_pass_after_off = plain_ba_two_pass_count()
+    assert_true(
+        two_pass_after_off >= 1,
+        "the dictionary-page decode must reach the gated dispatch with the"
+        " gate OFF (two-pass count did not move) — the call site is not wired",
+    )
+    assert_equal(
+        plain_ba_fused_count(),
+        0,
+        "nothing may take the fused arm while the gate is OFF",
+    )
+
+    set_plain_ba_fused_enabled(True)
+    var buf_on = _buf_from(page)
+    var dec_on = DictionaryDecoder()
+    dec_on.init_dict_byte_array(buf_on.into_span_capacity()[: buf_on.len()], nvals)
+    var vals_on = List[String]()
+    for i in range(nvals):
+        vals_on.append(dec_on.dict_values_bytes.value().get(i))
+    _ = dec_on^
+    _ = buf_on^
+
+    assert_equal(
+        plain_ba_fused_count(),
+        two_pass_after_off,
+        "with the gate ON, every dictionary page that took the TWO-PASS arm"
+        " with it off must now take the FUSED arm — an unequal count means"
+        " the dispatch is not reached on this route",
+    )
+    assert_equal(
+        plain_ba_two_pass_count(),
+        two_pass_after_off,
+        "the two-pass counter must NOT move again with the gate ON",
+    )
+    assert_equal(
+        len(vals_on), len(vals_off), "resolved dictionary size must match"
+    )
+    for i in range(len(vals_off)):
+        assert_equal(
+            vals_on[i],
+            vals_off[i],
+            "dictionary entry " + String(i) + " must be unchanged by the arm",
+        )
+    assert_equal(
+        plain_ba_slack_bytes(),
+        0,
+        "a writer-conforming dictionary page must cost zero extra bytes",
+    )
+    reset_scan_copy_counts()
+    set_plain_ba_fused_enabled(False)
+    print("  OK the dictionary-page call site reaches the gated arm")
+
+
+# =============================================================================
+# 4. The gate itself
 # =============================================================================
 
 

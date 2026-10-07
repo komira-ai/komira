@@ -35,8 +35,15 @@ comptime _FILES: List[String] = [
     "byte_stream_split.mojo",
     "decimal_decode.mojo",
     "decode_arm_trace.mojo",
+    "decode_helpers.mojo",
+    "def_level_bitmap.mojo",
     "delta.mojo",
     "delta_byte_array.mojo",
+    "dict_gather_fused.mojo",
+    "dictionary.mojo",
+    "dictionary_resolve.mojo",
+    "nested.mojo",
+    "null_expand.mojo",
     "payload_sel_trace.mojo",
     "plain.mojo",
     "plain_flba.mojo",
@@ -177,6 +184,7 @@ def test_imports_only_its_deps() raises:
         "komira_arrow",
         "komira_atomic_alias",
         "komira_buffer",
+        "komira_parquet_api",
         "komira_simd",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde", "komira_" + "core"]
