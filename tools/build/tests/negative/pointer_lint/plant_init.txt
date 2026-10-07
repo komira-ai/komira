@@ -1,0 +1,3 @@
+# A planted site in a package's __init__.mojo, which is public.
+def take(p: OpaquePointer):
+    pass
