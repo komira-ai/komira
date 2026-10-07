@@ -45,7 +45,6 @@ PER_LIBRARY = [
 CALLERS = [
     "//src/komira_async:komira_async",
     "//src/komira_async_api:komira_async_api",
-    "//src/komira_avro:komira_avro",
     "//src/komira_buffer:komira_buffer",
     "//src/komira_column_kernels:komira_column_kernels",
     "//src/komira_compression:komira_compression",
@@ -58,7 +57,6 @@ CALLERS = [
     "//src/komira_log:komira_log",
     "//src/komira_metrics:komira_metrics",
     "//src/komira_objectstore:komira_objectstore",
-    "//src/komira_orc:komira_orc",
     "//src/komira_parquet_codec:komira_parquet_codec",
     "//src/komira_scan_source:komira_scan_source",
     "//src/komira_supervisor:komira_supervisor",
