@@ -1047,6 +1047,21 @@ def s2n_connection_is_session_resumed(
     return external_call["komira_s2n_connection_is_session_resumed", Int32](conn)
 
 
+def s2n_connection_get_actual_protocol_version(
+    conn: S2nOpaquePtr,
+) -> Int32:
+    """The TLS version the handshake negotiated, as s2n's protocol-version
+    number (S2N_TLS12 = 33, S2N_TLS13 = 34), or -1 on failure.
+
+    Maps to s2n.h `int s2n_connection_get_actual_protocol_version(
+        struct s2n_connection *conn)`.
+    """
+    # SAFETY: synchronous accessor; no pointer escapes.
+    return external_call["s2n_connection_get_actual_protocol_version", Int32](
+        conn
+    )
+
+
 # =============================================================================
 # Handshake diagnostics
 # =============================================================================

@@ -1261,6 +1261,25 @@ struct TlsConnector[
 # UnsafePointer / wildcard origin / unsafe_from_address crosses this boundary.
 
 
+def default_client_tls_config(alpn_h2: Bool = False) raises -> TlsConfig:
+    """The client TLS configuration both public-CA connectors build on:
+    the `"default_tls13"` security policy (TLS 1.3 and 1.2 offered; a fresh
+    s2n config offers TLS 1.2 only, which a TLS 1.3-only server refuses
+    before ServerHello), ALPN `["http/1.1"]` or `["h2", "http/1.1"]`, and
+    peer verification on. The trust store is s2n's default; a caller that
+    pins a CA wipes it and adds its own.
+    """
+    var config = TlsConfig()
+    config.set_cipher_preferences(String("default_tls13"))
+    var alpn = List[String]()
+    if alpn_h2:
+        alpn.append(String("h2"))
+    alpn.append(String("http/1.1"))
+    config.set_alpn_protocols(alpn)
+    config.enable_verify_default()
+    return config^
+
+
 def build_public_ca_tls_connector(
     server_name: String, alpn_h2: Bool = False,
 ) raises -> TlsConnector[KernelTcpConnector]:
@@ -1288,13 +1307,7 @@ def build_public_ca_tls_connector(
 
     Raises on any s2n FFI configuration failure.
     """
-    var config = TlsConfig()
-    config.set_cipher_preferences(String("default_tls13"))
-    var alpn = List[String]()
-    if alpn_h2:
-        alpn.append(String("h2"))
-    alpn.append(String("http/1.1"))
-    config.set_alpn_protocols(alpn)
+    var config = default_client_tls_config(alpn_h2)
     # PUBLIC-CA TRUST: keep s2n's default OS trust store (do NOT wipe_trust /
     # add_trust_pem) and keep verification ON. enable_verify_default() is the
     # documented no-op that marks the verify-peer intent at the call site.
@@ -1343,13 +1356,7 @@ def build_unpinned_public_ca_tls_connector(
     connector is UNPINNED and `set_dial_host` fills it per request.
 
     Raises on any s2n FFI configuration failure."""
-    var config = TlsConfig()
-    config.set_cipher_preferences(String("default_tls13"))
-    var alpn = List[String]()
-    if alpn_h2:
-        alpn.append(String("h2"))
-    alpn.append(String("http/1.1"))
-    config.set_alpn_protocols(alpn)
+    var config = default_client_tls_config(alpn_h2)
     config.enable_verify_default()
 
     # ⛔ NO `set_server_name_for_next_connect` HERE. Adding one "for safety"

@@ -27,7 +27,11 @@
 #      messaging rules (messaging.mojo): no `uses` on a queue, a topic or a
 #      subscription; a queue's ack deadline and max deliveries in range, its
 #      dead-letter queue a queue, never in a cycle; a subscription's topic
-#      and queue of their types, each pair once.
+#      and queue of their types, each pair once. And the name rules
+#      (dns.mojo): no `uses` on a DNS zone, a DNS record or a certificate;
+#      DNS names of the name grammar, each in its zone; one zone per domain
+#      and one record set per name and type; a record's values of its type;
+#      a certificate's domains from 1 to 10, none twice.
 #      And the identity rules (grants.mojo): `run_as` names a
 #      `service_account`; no `uses` on a grant; a `uses` line or a grant
 #      names exactly one of a target and a cell resource, with a verb that
@@ -75,6 +79,9 @@ from kci_cloud.adapter import (
 from kci_cloud.catalog import (
     Catalog,
     FIELD_BUCKET,
+    FIELD_CERTIFICATE,
+    FIELD_DNS_RECORD,
+    FIELD_DNS_ZONE,
     FIELD_GRANT,
     FIELD_JOB,
     FIELD_QUEUE,
@@ -96,6 +103,8 @@ from kci_cloud.data import data_findings
 from kci_cloud.feed import feeds_of
 from kci_cloud.messaging import messaging_findings
 from kci_cloud.secrets import secret_env_findings, secret_findings
+from kci_cloud.dns import dns_findings
+from kci_cloud.values import check_value
 from kci_cloud.grants import (
     GrantEdge,
     cell_accepted,
@@ -112,112 +121,6 @@ def _index_of_id(resources: List[Resource], id: String) -> Int:
         if resources[i].id == id:
             return i
     return -1
-
-
-def _check_value_ref(
-    catalog: Catalog,
-    resources: List[Resource],
-    owner: String,
-    path: String,
-    r: Ref,
-    mut out: List[Finding],
-):
-    """A `Ref` used as a VALUE: it must name another resource of the list and
-    one of the outputs that resource's type exposes."""
-    if r.resource == owner:
-        out.append(
-            Finding(FINDING_GRAPH, owner, path, String("refers to its own resource"))
-        )
-        return
-    var p = _index_of_id(resources, r.resource)
-    if p < 0:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("ref to missing resource \"") + r.resource + String("\""),
-            )
-        )
-        return
-    if r._oneof0_case == 2:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String(
-                    "a named output is only for the escape hatch, which this kci"
-                    " does not have"
-                ),
-            )
-        )
-        return
-    if r._oneof0_case != 1:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("a value ref must name an output of \"")
-                + r.resource
-                + String("\""),
-            )
-        )
-        return
-    var output = r.standard.value().json_name()
-    var field: Int
-    try:
-        field = body_field(resources[p])
-    except:
-        return  # the producer's own missing type is reported on the producer
-    var t = catalog.index_of(field)
-    if t < 0 or not catalog.types[t].exposes_output(output):
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("\"")
-                + r.resource
-                + String("\" (")
-                + catalog.name_of(field)
-                + String(") does not expose ")
-                + output,
-            )
-        )
-
-
-def _check_value(
-    catalog: Catalog,
-    resources: List[Resource],
-    owner: String,
-    path: String,
-    v: Value,
-    mut out: List[Finding],
-):
-    var arm = v._oneof0_case
-    if arm == 1:
-        return
-    if arm == 3:
-        _check_value_ref(catalog, resources, owner, path, v.ref_.value(), out)
-        return
-    if arm == 2:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path,
-                String("release parameter \"")
-                + v.param.value()
-                + String(
-                    "\" is unresolved; parameters are substituted before a cloud"
-                    " sees the graph"
-                ),
-            )
-        )
-        return
-    out.append(Finding(FINDING_GRAPH, owner, path, String("has no value")))
 
 
 comptime ID_MAX_BYTES = 24
@@ -707,6 +610,9 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
         if field == FIELD_SECRET:
             out.extend(secret_findings(field, r))
             continue
+        if field == FIELD_DNS_ZONE or field == FIELD_DNS_RECORD or field == FIELD_CERTIFICATE:
+            out.extend(dns_findings(catalog, resources, field, r))
+            continue
         if field == FIELD_GRANT:
             ref g = r.grant.value()
             if len(r.uses) > 0:
@@ -743,7 +649,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             if svc.run_as:
                 _check_run_as(catalog, resources, id, String("service.run_as"), svc.run_as.value(), out)
             for entry in svc.env.items():
-                _check_value(
+                check_value(
                     catalog,
                     resources,
                     id,
@@ -756,7 +662,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
             if job.run_as:
                 _check_run_as(catalog, resources, id, String("job.run_as"), job.run_as.value(), out)
             for entry in job.env.items():
-                _check_value(
+                check_value(
                     catalog,
                     resources,
                     id,

@@ -228,7 +228,7 @@ def flatten_selection_table_parallel[
     for _ in range(n_chunks):
         out_slab.append(RecordBatch())
 
-    # PARALLELIZE-BOUNDARY: (chunk) selection egress.
+    # Parallel region: (chunk) selection egress.
     # Disjointness: task `i` READS `chunks[][i]` only and WRITES `out[][i]`
     #   only, via `Slab.replace(i, ...)` which touches exactly one slot. The
     #   chunks are independent by the carrier's own invariant -- a selection
