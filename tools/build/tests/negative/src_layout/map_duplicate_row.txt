@@ -1,0 +1,12 @@
+The map of functional/src_layout with one defect: komira_a has two rows.
+
+| module | what it is |
+|---|---|
+| [`komira_a`](../src/komira_a/) | a shipped library. |
+| [`komira_e2ex_codec`](../src/komira_e2ex_codec/) | a name holding e2e. |
+| [`komira_test_shipped`](../src/komira_test_shipped/) | a shipped test library. |
+| [`komira_b_conformance`](../src/tests/conformance/komira_b_conformance/) | a conformance package. |
+| [`komira_c_e2e`](../src/tests/e2e/komira_c_e2e/) | an e2e package. |
+| [`komira_d_loopback`](../src/tests/e2e/komira_d_loopback/) | a loopback package. |
+| [`komira_test_harness`](../src/tests/helpers/komira_test_harness/) | a harness. |
+| [`komira_a`](../src/komira_a/) | the second row. |
