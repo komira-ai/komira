@@ -29,8 +29,10 @@
 #       and down one unit in its last digit. Catches: a reader that rounds
 #       twice or truncates, a shifted-out bit that never reaches the sticky
 #       flag, a dropped digit that never sets the tail flag in either the
-#       integer or the fraction loop, and a significant-digit cap below 768 (the
-#       midpoint's 768th digit would join the sticky tail and read as above).
+#       integer or the fraction loop, and a significant-digit cap below 768 in
+#       either loop (the cap drops the midpoint's last digits, so the midpoint
+#       plus a nonzero digit 829 places in, written as a fraction or as an
+#       integer, reads below the midpoint and rounds down).
 #   R4  subnormals and zeros: 5e-324, 4.9e-324, 2.5e-324 and 3e-324 are the
 #       smallest subnormal, 2^-1075 exactly (752 digits) ties to +0.0 and
 #       with a nonzero digit 853 places in is the smallest subnormal, the
@@ -348,6 +350,11 @@ def test_r3_correct_rounding() raises:
         p + m + _zeros(60) + "1",
         MAX_SUBNORMAL_BITS,
         "768-digit midpoint, nonzero digit 829 places in",
+    )
+    _expect_read(
+        m + _zeros(60) + "1e-1136",
+        MAX_SUBNORMAL_BITS,
+        "768-digit midpoint as an integer, nonzero digit 829 places in",
     )
     _expect_read(
         p + _mid_ffe_head() + "4", UInt64(0x000FFFFFFFFFFFFE), "just below it"
