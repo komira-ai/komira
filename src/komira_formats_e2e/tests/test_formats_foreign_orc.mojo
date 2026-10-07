@@ -576,9 +576,9 @@ def test_cancelled_parallel_read_leaves_reader_usable() raises:
     """A dispatch that raises (here: a token cancelled before the read)
     surfaces as an error and leaves the next read intact.
 
-    Reach: the token is cancelled before dispatch, so the dispatcher's
-    first between-task poll raises before any column task runs; no
-    accumulator slot has been taken when the decode state drops. A cancel
+    Reach: the token is cancelled before dispatch, so the dispatcher
+    refuses the work before anything is queued and no column task runs;
+    no accumulator slot has been taken when the decode state drops. A cancel
     landing BETWEEN two column tasks (some slots taken, the state dropped)
     cannot be produced deterministically through the public API: the token
     is only cancelled from outside the decode, and the dispatcher polls it
