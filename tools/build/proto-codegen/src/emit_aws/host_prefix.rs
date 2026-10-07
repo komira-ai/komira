@@ -64,9 +64,9 @@ impl AwsEmitter<'_> {
                     )
                 })?;
             let mf = self.facts.member(&msg.fq_name, &field.name)?;
-            // `String` is the storage type of a required string member only:
-            // an optional one is `Optional[String]`, a timestamp `Float64`
-            // and an enum its own type.
+            // A required string member, an enum-valued one included, is
+            // stored as `String`; an optional one is `Optional[String]` and
+            // a timestamp is `Float64`.
             let ty = self.storage_type(msg, field)?;
             if !mf.host_label || ty != "String" {
                 return Err(format!(
@@ -105,6 +105,17 @@ mod tests {
     /// in the `required` list when `required`.
     fn emit_with_prefix(host_prefix: &str, label: &str, required: bool) -> Result<String, String> {
         let required = if required { r#""Label""# } else { "" };
+        emit_with_members(host_prefix, label, r#"{"shape": "S"}"#, required)
+    }
+
+    /// As `emit_with_prefix`, with the member texts of `Label` and `Other`
+    /// and the `required` list's contents given verbatim.
+    fn emit_with_members(
+        host_prefix: &str,
+        label: &str,
+        other: &str,
+        required: &str,
+    ) -> Result<String, String> {
         let model = crate::json::parse(&format!(
             r#"{{"version": "2.0",
                 "metadata": {{"apiVersion": "2026-10-06", "endpointPrefix": "tiny",
@@ -117,7 +128,7 @@ mod tests {
                     "input": {{"shape": "In"}}, "output": {{"shape": "Out"}}}}}},
                 "shapes": {{"In": {{"type": "structure", "required": [{required}],
                                    "members": {{"Label": {label},
-                                               "Other": {{"shape": "S"}}}}}},
+                                               "Other": {other}}}}},
                            "Out": {{"type": "structure", "members": {{}}}},
                            "S": {{"type": "string"}}}}}}"#
         ))
@@ -155,6 +166,15 @@ mod tests {
         assert_eq!(src.matches(endpoint).count(), 2, "{src}");
         assert_eq!(src.matches("resolve_endpoint(self._endpoint_override").count(), 2, "{src}");
         assert!(src.contains("    aws_host_label,\n"), "{src}");
+    }
+
+    #[test]
+    fn a_prefix_with_two_labels_substitutes_both() {
+        let src = emit_with_members("{Label}-{Other}.", LABEL, LABEL, r#""Label", "Other""#)
+            .unwrap();
+        let build = "    req.host_prefix = aws_host_label(input.label) + String(\"-\") + \
+                     aws_host_label(input.other) + String(\".\")\n";
+        assert_eq!(src.matches(build).count(), 1, "{}", builder_of(&src));
     }
 
     #[test]
