@@ -2,11 +2,14 @@
 #
 # usage: busybox awk -F '\t' -v HN=<holds name> -v AN=<hosts name> -v P=<prefix>
 #            -v FROM=<year> -v PUBLIC=<YYYY-MM-01>
-#            -f public_boundary.awk <file list> <hosts> <deny list or /dev/null> <holds>
+#            -f public_boundary.awk <file list> <path list> <hosts> <deny list or /dev/null> <holds>
 #
-# Reads every file the list names (paths relative to the working directory,
-# one per line) and prints the findings no row of <holds> holds, then each
-# defect of the two ledgers. Every rule is generic: it names no word, host
+# Reads every file <file list> names (paths relative to the working
+# directory, one per line), and every path <path list> names (every staged
+# file, those not read included), and prints the findings no row of <holds>
+# holds, then each defect of the two ledgers. A path is read for the date,
+# home_path and deny rules; its findings are at line 0, marked `(in the
+# path)`. A file that cannot be read (getline fails) is a finding. Every rule is generic: it names no word, host
 # or person of any owner, so this file can be public. A private consumer
 # passes words of its own in <deny list>, kept outside the repository.
 #
@@ -17,12 +20,15 @@
 #               FROM up to PUBLIC, the day the public history starts: what
 #               the repository says happened before it is not public (the
 #               root target reads from 2025 to 2026-09-01). Spellings:
-#               Y-M-D with `-`, `_`, `/` or `.` between the parts; Y-M
+#               Y-M-D with `-`, `_`, `/` or `.` between the parts and a
+#               two-digit month and day, or a one-digit month or day between
+#               two `-` or two `/` (a dotted Y.M.D of one digit is read as a
+#               version); Y-M
 #               (not followed by a digit or `-`); the eight digits YYYYMMDD
 #               standing alone (no letter or digit before it, no digit
 #               after); a month name or its three-letter form, with or
 #               without a day, before the year (`Mon D, YYYY`, `D Month
-#               YYYY`, `Month YYYY`); and D/M/YYYY or M/D/YYYY (`/` or `.`),
+#               YYYY`, `Month YYYY`); and D/M/YYYY or M/D/YYYY (`/`, `.` or `-`),
 #               when either of the first two numbers can be a month of the
 #               window. The year must not touch another digit.
 #               Years before FROM are not read: a date there is data (epochs,
@@ -91,11 +97,27 @@
 # repeated or unknown-rule row, a file the list does not name, a count that
 # is not a positive whole number and an empty reason are findings.
 #
-# Limits (a text reader's): vocabulary is not a shape, so a name of the
-# owner's systems is found only through <deny list>; a host outside a URL
-# (a bare name, `name:port`) is not read; a host under an allowed cloud
-# domain may name a resource of its own (a bucket, a function URL); an IPv6
-# address outside a URL is not read; a date before FROM is not read.
+# Limits (a text reader's):
+# - Vocabulary is not a shape, so a name of the owner's systems is found only
+#   through <deny list>.
+# - A host outside a URL (a bare name, `name:port`) is not read; a host under
+#   an allowed cloud domain may name a resource of its own (a bucket, a
+#   function URL); an IPv6 address outside a URL is not read.
+# - Object-store URLs (s3://, gs://, az://, abfs://, and any scheme not listed
+#   under host) are not host-checked: their authority is a bucket or
+#   container name, which the object-store clients' tests make up by the
+#   hundred and which no allow-list of domains could name. A deny-list word
+#   still finds a real bucket name.
+# - A commit id inside a URL (after a `/`, as in a link to an upstream
+#   commit) is not read, nor one in code.
+# - commit_sha needs two switches between digit and letter, so a real id
+#   with fewer is missed: for random ids about 14% of 7-hex ones, 9% of 8,
+#   6% of 9, 4% of 10, 1.4% of 12, and none of 40.
+# - A date before FROM is not read; Y-M with a one-digit month is not read.
+# - "Only shrinks" is held by exact counts: a site more or one fewer fails.
+#   A row added or a count raised in the same change as the site passes the
+#   build, so review of the ledger's diff is the other half of the rule.
+# - Binary data is skipped by suffix (lint.sh says which); its path is read.
 
 # A regular expression with a `/` or a backslash in a bracket expression is a
 # string, so no awk reads the escape its own way; a backslash or `]` is found
@@ -112,7 +134,7 @@ function add(rule, file, line, text, msg,    k) {
 }
 
 # The first date of the window on line s (lowercased), or "".
-function find_date(s,    rest, off, pos, y, pre, post, m, tail, a, b, sfx) {
+function find_date(s,    rest, off, pos, y, pre, post, m, tail, a, b, sfx, mm, dd, sep) {
     rest = s; off = 0
     while (match(rest, YEARS)) {
         pos = off + RSTART
@@ -121,8 +143,15 @@ function find_date(s,    rest, off, pos, y, pre, post, m, tail, a, b, sfx) {
         pre = pos > 1 ? substr(s, pos - 1, 1) : ""
         post = substr(s, pos + 4)
         if (pre ~ "[0-9]") continue
-        if (match(post, "^[-_/.](0[1-9]|1[0-2])[-_/.](0[1-9]|[12][0-9]|3[01])([^0-9]|$)")) {
-            if (in_window(y, substr(post, 2, 2) + 0)) return substr(s, pos, 10)
+        if (match(post, "^[-_/.][0-9][0-9]?[-_/.][0-9][0-9]?([^0-9]|$)")) {
+            # Y-M-D: two-digit month and day with any separator, or one-digit
+            # ones between `-` or `/` (a dotted 2026.1.5 is a version).
+            mm = substr(post, 2); sub("[^0-9].*", "", mm)
+            dd = substr(post, length(mm) + 3); sub("[^0-9].*", "", dd)
+            sep = substr(post, 1, 1)
+            if ((length(mm) == 2 && length(dd) == 2) || (sep ~ "[-/]" && substr(post, length(mm) + 2, 1) == sep))
+                if (mm + 0 >= 1 && mm + 0 <= 12 && dd + 0 >= 1 && dd + 0 <= 31 && in_window(y, mm + 0))
+                    return substr(s, pos, 6 + length(mm) + length(dd))
             continue
         }
         if (match(post, "^-(0[1-9]|1[0-2])([^-0-9]|$)")) {
@@ -145,11 +174,11 @@ function find_date(s,    rest, off, pos, y, pre, post, m, tail, a, b, sfx) {
             if (in_window(y, m)) return sfx substr(s, pos, 4)
             continue
         }
-        if (match(tail, "(^|[^0-9./])[0-9]?[0-9][/.][0-9]?[0-9][/.]$")) {
+        if (match(tail, "(^|[^0-9./-])[0-9]?[0-9][-/.][0-9]?[0-9][-/.]$")) {
             sfx = substr(tail, RSTART)
             if (sfx ~ "^[^0-9]") sfx = substr(sfx, 2)
-            a = sfx; sub("[/.].*", "", a)
-            b = substr(sfx, length(a) + 2); sub("[/.].*", "", b)
+            a = sfx; sub("[-/.].*", "", a)
+            b = substr(sfx, length(a) + 2); sub("[-/.].*", "", b)
             if ((a + 0 <= 12 && in_window(y, a + 0)) || (b + 0 <= 12 && in_window(y, b + 0)))
                 return sfx substr(s, pos, 4)
         }
@@ -324,7 +353,15 @@ function prose(s, fk,    i, out, q, rest) {
     }
     if (fk == "slash") {
         if (s ~ /^[ \t]*([*]|\/[*])/) return s
-        if (match(s, /(^|[ \t])\/\//)) return substr(s, RSTART)
+        # The first `//` at the start or after a space or tab that is not in
+        # a string literal (an even number of double quotes before it).
+        out = 0
+        while ((i = index(substr(s, out + 1), "//")) > 0) {
+            i += out
+            q = substr(s, 1, i - 1)
+            if ((i == 1 || substr(s, i - 1, 1) ~ /[ \t]/) && gsub("\"", "", q) % 2 == 0) return substr(s, i)
+            out = i + 1
+        }
     }
     return ""
 }
@@ -336,11 +373,24 @@ function kind_of(f) {
     return ""
 }
 
-function scan(f,    line, lno, lc, fk, t, p, w, y) {
+# The path of every staged file, read or not: a date, a home directory or a
+# word of the deny list in a directory or file name is a finding at line 0.
+function scan_path(f,    p, lc, t, y, w) {
+    p = "/" f; lc = tolower(p)
+    for (y = FROM; y <= PY && !index(p, y ""); y++) ;
+    if (y <= PY && (t = find_date(lc)) != "")
+        add("date", f, 0, t " (in the path)", "a date before " PUBLIC ", when the public history starts")
+    if ((t = find_home(p)) != "")
+        add("home_path", f, 0, t " (in the path)", "a home directory names a person: use a placeholder such as /home/user")
+    for (w = 1; w <= ndeny; w++)
+        if (index(lc, deny[w])) { add("deny", f, 0, deny[w] " (in the path)", "a word of the private deny list"); break }
+}
+
+function scan(f,    line, lno, lc, fk, t, p, w, y, r) {
     fk = kind_of(f)
     dq = f ~ "[.](mojo|py)$"
     indoc = 0; lno = 0
-    while ((getline line < f) > 0) {
+    while ((r = (getline line < f)) > 0) {
         lno++
         for (y = FROM; y <= PY && !index(line, y ""); y++) ;
         lc = (ndeny || y <= PY) ? tolower(line) : ""
@@ -360,12 +410,15 @@ function scan(f,    line, lno, lc, fk, t, p, w, y) {
         for (w = 1; w <= ndeny; w++)
             if (index(lc, deny[w])) { add("deny", f, lno, deny[w], "a word of the private deny list"); break }
     }
+    # getline returns -1 on a read error: a file not read is a finding, never
+    # a file without findings.
+    if (r < 0) problems[++np] = P f ": cannot be read (getline failed after line " lno "); the lint read nothing more of it"
     close(f)
 }
 
 BEGIN {
     # The window: the years FROM to PY, and the months before PM of PY.
-    if (FROM !~ /^[0-9][0-9][0-9][0-9]$/ || PUBLIC !~ /^[0-9][0-9][0-9][0-9]-[01][0-9]-01$/ || substr(PUBLIC, 1, 4) + 0 < FROM + 0) {
+    if (FROM !~ /^[0-9][0-9][0-9][0-9]$/ || PUBLIC !~ /^[0-9][0-9][0-9][0-9]-(0[1-9]|1[0-2])-01$/ || substr(PUBLIC, 1, 4) + 0 < FROM + 0) {
         print "public_boundary: the window is from year `" FROM "` to `" PUBLIC "`; name a year and a later first day of a month (YYYY-MM-01)"
         bad = 1
         exit 1
@@ -383,9 +436,11 @@ BEGIN {
     ndeny = 0
 }
 
-FILENAME == ARGV[1] { if ($0 != "") { files[++nf] = $0; known[$0] = 1 } next }
+FILENAME == ARGV[1] { if ($0 != "") files[++nf] = $0; next }
 
-FILENAME == ARGV[2] {
+FILENAME == ARGV[2] { if ($0 != "") { paths[++npaths] = $0; known[$0] = 1 } next }
+
+FILENAME == ARGV[3] {
     if ($0 ~ "^[ \t]*(#|$)") next
     where = AN ":" FNR ": "
     if (NF != 2) { problems[++np] = where "a row has 2 tab-separated fields (domain, reason), not " NF; next }
@@ -397,19 +452,19 @@ FILENAME == ARGV[2] {
     next
 }
 
-FILENAME == ARGV[3] {
+FILENAME == ARGV[4] {
     if ($0 ~ "^[ \t]*(#|$)") next
     w = tolower($0); sub("^[ \t]+", "", w); sub("[ \t]+$", "", w)
     deny[++ndeny] = w
     next
 }
 
-FILENAME == ARGV[4] {
+FILENAME == ARGV[5] {
     if ($0 ~ "^[ \t]*(#|$)") next
     where = HN ":" FNR ": "
     if (NF != 4) { problems[++np] = where "a row has 4 tab-separated fields (rule, file, count, reason), not " NF; next }
     if (!($1 in rule)) { problems[++np] = where "unknown rule `" $1 "` (the rules a row can hold: " rules ")"; next }
-    if (!($2 in known)) { problems[++np] = where $2 " is not a file the lint reads; delete the row"; next }
+    if (!($2 in known)) { problems[++np] = where $2 " is not a file of the tree; delete the row"; next }
     if ($3 !~ "^[1-9][0-9]*$") { problems[++np] = where "count `" $3 "` is not a positive whole number"; next }
     if ($4 !~ "[^ \t]") { problems[++np] = where "empty reason: say why the file holds it"; next }
     k = $1 SUBSEP $2
@@ -420,6 +475,7 @@ FILENAME == ARGV[4] {
 
 END {
     if (bad) exit 1
+    for (i = 1; i <= npaths; i++) scan_path(paths[i])
     for (i = 1; i <= nf; i++) scan(files[i])
     for (k in n) {
         h = (k in held) ? held[k] : 0
