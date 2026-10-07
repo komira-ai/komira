@@ -5,14 +5,25 @@ komira's async substrate: per-core workers, each owning an I/O reactor
 async code is built from, in one package:
 
 - `channel`: bounded MPSC (Vyukov ring, power-of-two capacity), SPSC,
-  oneshot and broadcast channels. `try_send` returns a status
-  (`TRY_SEND_OK`, `TRY_SEND_FULL`, `TRY_SEND_CLOSED`) instead of blocking,
-  and `try_recv` an outcome (`TRY_RECV_OK`, `TRY_RECV_EMPTY`,
-  `TRY_RECV_CLOSED`); a value is moved, never copied.
-- `cancellation`: `CancellationToken`, a tree of tokens where cancelling a
-  parent cancels every child (never the reverse); a token cancelled twice
-  keeps its first reason, and a token reports the reason of the outermost
-  cancelled token on its chain; `ExecutionBudget`.
+  oneshot and broadcast channels. For MPSC, SPSC and oneshot, `try_send`
+  returns a status (`TRY_SEND_OK`, `TRY_SEND_FULL`, `TRY_SEND_CLOSED`;
+  oneshot's `send` returns `SEND_OK` or `SEND_CLOSED`) instead of
+  blocking, `try_recv` an outcome (`TRY_RECV_OK`, `TRY_RECV_EMPTY`,
+  `TRY_RECV_CLOSED`), and a value is moved, never copied. Broadcast is
+  different: `T` must be `Copyable & ImplicitlyCopyable`, every subscriber
+  receives its own copy, and `send` never fails (it returns the live
+  subscriber count) because it overwrites the oldest slot of a full ring.
+  A subscriber's `try_recv` returns a `BroadcastRecvOutcome` whose status is
+  `BCAST_RECV_OK`, `BCAST_RECV_EMPTY`, `BCAST_RECV_CLOSED` or
+  `BCAST_RECV_LAGGED`; LAGGED means the subscriber fell more than a ring's
+  capacity behind and lost values, and its cursor jumps to the oldest value
+  still held.
+- `cancellation`: `CancellationToken` (re-exported from
+  `komira_async_api.token`, where it is defined; both import paths name the
+  same type), a tree of tokens where cancelling a parent cancels every child
+  (never the reverse); a token cancelled twice keeps its first reason, and a
+  token reports the reason of the outermost cancelled token on its chain;
+  `ExecutionBudget`.
 - `sync`: `AsyncMutex`, `AsyncRwLock`, `Semaphore`, `Notify`.
 - `reactor`, `ops` (`IoOp`, the `WakerSink` trait), `timer` (a hierarchical
   timer wheel), `spawner` (fork-join spawning, join handles, task scopes),

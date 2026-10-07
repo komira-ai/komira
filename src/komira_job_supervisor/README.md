@@ -1,7 +1,7 @@
 # komira_job_supervisor
 
 A generic job supervisor. It runs one job (a local binary, or one fetched from
-an object store and checked against its SHA-256), sends a heartbeat with the
+an object store), sends a heartbeat with the
 job's phase while it runs, stops the job when a heartbeat reply asks it to
 cancel, and when the job exits classifies the result (COMPLETED, FAILED or
 CANCELLED). With a log store it streams the job's output there in chunks as it
@@ -20,7 +20,15 @@ The embedding binary supplies:
   `ConditionalWriteStore`. `make_s3_store` and `run_job_supervisor_on_s3`
   build S3 or S3-compatible ones from flags.
 
-Process handling (pipes, pids, signals) is komira_supervisor's.
+A fetched binary is checked against a SHA-256 digest only when one is known:
+the `--binary-sha256` flag when given, otherwise the first segment of the
+object key that is 64 lowercase hex characters (a content-addressed layout
+such as `<sha256>/binary`). A key with neither is fetched and run
+unverified; pass `--binary-sha256` when the key does not carry the digest.
+
+Process handling (pipes, pids, signals) is komira_supervisor's. A job is
+stopped by signalling its pid, not its process group, so a child the job
+spawns itself is not signalled.
 
 ## Examples
 
