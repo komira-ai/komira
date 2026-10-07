@@ -21,9 +21,14 @@ nesting before it decodes; use it to send a plan. The generated
 `.proto` see typed enums; the Mojo codec computes wire numbers through its
 own vocabulary and only wraps them in these types.
 
-`tests/test_plan_field_numbers.mojo` pins the envelope, two leaf messages
-and two vocabulary spaces as wire bytes; `komira_plan_wire`'s round trips
-exercise the rest.
+The field-number census pins every field of every message and every enum
+value by number, as wire bytes written by hand and read back by name:
+`tests/test_plan_field_numbers_{scan,expr,plan}.mojo` and
+`tests/test_plan_enum_numbers_{nodes,functions}.mojo`, each from a
+hand-written `LEDGER`. `tests/test_plan_census_complete.mojo` fails when
+protoc declares a field or value no ledger lists. A new field or value
+therefore needs a ledger row and a byte test in the same change, and a
+shipped number never changes.
 
 ## API
 

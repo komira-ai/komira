@@ -1,9 +1,11 @@
 # =============================================================================
 # src/kci_build/tests/test_supervisor_runner.mojo
 #   SupervisorRunner over real /bin/sh processes: both streams reach their
-#   files byte for byte, the exit status comes back, the cwd is applied, a
-#   run past its timeout is stopped and reported as timed out, and an explicit
-#   environment is exactly what the child sees (None inherits).
+#   files byte for byte, every exit status comes back as itself (each bit of
+#   the 0..255 range, so a decode that drops or clamps bits fails), the cwd
+#   is applied, a run past its timeout is stopped and reported as timed out,
+#   and an explicit environment is exactly what the child sees (None
+#   inherits).
 # =============================================================================
 
 from std.ffi import external_call
@@ -50,6 +52,20 @@ def test_streams_exit_code_and_cwd() raises:
     assert_equal(Path(d + String("/cwd_marker.txt")).read_text(), String("here\n"))
     assert_equal(Path(spec.stderr_path).read_text(), String("to err"))
     assert_equal(r.stderr_tail, String("to err"))
+
+
+def test_every_exit_status_comes_back_as_itself() raises:
+    # kci's own exit numbers (2, 3, 4, ...) travel through here: a status
+    # decoded to fewer bits, clamped or collapsed to 1 would misreport them.
+    # 1, 2, 4, ..., 128 set each bit alone; 255 sets all eight.
+    var d = _dir(String("statuses"))
+    var runner = SupervisorRunner()
+    for code in [1, 2, 4, 8, 16, 32, 64, 128, 255]:
+        var r = runner.run(_sh(d, String("exit ") + String(code)))
+        assert_equal(Int(r.exit_code), code, String("exit ") + String(code) + String(" came back as ") + r.describe())
+        assert_false(r.signaled, String("exit ") + String(code))
+        assert_false(r.timed_out, String("exit ") + String(code))
+        assert_false(r.ok(), String("exit ") + String(code))
 
 
 def test_a_large_stderr_keeps_only_its_tail() raises:
