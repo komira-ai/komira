@@ -348,11 +348,11 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 - **Current behaviour.** As §3.11 (`src/komira_plan_ir/logical_plan.mojo:1234-1235`).
 - **Mark.** MATCHES.
 
-### 3.13 Output columns of INNER, LEFT, RIGHT and FULL joins
+### 3.13 Output columns of INNER, LEFT, RIGHT, FULL and CROSS joins
 
-- **Rule.** The output is every left column in the left input's order, then every right column in the right input's order. Both sides' key columns are kept (there is no `USING` merge of keys in the plan; a frontend that wants one projects it). The columns of a side that is padded (the right side of LEFT, the left side of RIGHT, both of FULL) are nullable whatever their input nullability. Name collisions are §3.14.
-- **DuckDB.** `SELECT *` over `l JOIN r ON ...` lists `l`'s columns then `r`'s, both key columns included; `USING` and `NATURAL` merge the keys ([FROM and JOIN](https://duckdb.org/docs/current/sql/query_syntax/from.html)).
-- **Current behaviour.** `LogicalPlan.join` builds left then right (`src/komira_plan_ir/logical_plan.mojo:1255-1273`) but keeps each side's input nullability, so a padded column can be declared non-nullable ("Code that does not follow", item 12). The ASOF builder forces the right side nullable (`:1500-1502`).
+- **Rule.** The output is every left column in the left input's order, then every right column in the right input's order. Both sides' key columns are kept (there is no `USING` merge of keys in the plan; a frontend that wants one projects it). The columns of a side that is padded (the right side of LEFT, the left side of RIGHT, both of FULL) are nullable whatever their input nullability. A CROSS join has the same columns, left then right, and pads nothing, so each column keeps its input nullability; it emits every pair of rows, so a CROSS join with an empty side has zero rows (§11.6). Name collisions are §3.14.
+- **DuckDB.** `SELECT *` over `l JOIN r ON ...` lists `l`'s columns then `r`'s, both key columns included; `USING` and `NATURAL` merge the keys. `CROSS JOIN` returns all pairs of rows, with the same left-then-right columns ([FROM and JOIN](https://duckdb.org/docs/current/sql/query_syntax/from.html)).
+- **Current behaviour.** `LogicalPlan.join` builds left then right for every join type except SEMI and ANTI, CROSS (`JOIN_CROSS`, `:475`) included (`src/komira_plan_ir/logical_plan.mojo:1255-1273`), but keeps each side's input nullability, so a padded column can be declared non-nullable ("Code that does not follow", item 12). The ASOF builder forces the right side nullable (`:1500-1502`).
 - **Mark.** MATCHES.
 
 ### 3.14 Name collisions in join output
