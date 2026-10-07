@@ -39,12 +39,12 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow import (
+from komira_arrow.interval_mdn_array import (
     IntervalMonthDayNanoArray,
     INTERVAL_MDN_BYTE_WIDTH,
 )
-from komira_core.io.heap_region import HeapRegion
-from komira_core.eval import (
+from komira_buffer.heap_region import HeapRegion
+from komira_column_kernels.interval_mdn_kernels import (
     add_interval_mdn,
     sub_interval_mdn,
     _scalar_add_interval_mdn,

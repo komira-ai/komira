@@ -29,9 +29,9 @@
 
 from std.sys.info import simd_width_of
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.simd.gather import gather_f64xW
-from komira_core.eval.selection_vector_row import RowSelectionVector, load_via_sel
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_simd.gather import gather_f64xW
+from komira_arrow.selection_vector_row import RowSelectionVector, load_via_sel
 from komira_kernels.sel_kernels import (
     BIN_OP_GE,
     BIN_OP_LE,

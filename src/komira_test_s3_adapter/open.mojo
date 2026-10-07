@@ -16,7 +16,7 @@
 # tests do not call it; the opt-in MinIO end-to-end binaries that use it do.
 # =============================================================================
 
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 from komira_test_bucket import (
     BACKEND_CHOICE_EMBEDDED_MINIO,
     FLAG_MINIO_BINARY,

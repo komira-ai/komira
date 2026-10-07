@@ -37,7 +37,7 @@ from std.memory import UnsafePointer
 
 from komira_simd.byte_class.byte_equal import bytes_equal
 from komira_simd.byte_class.horizontal_reduce import any_true
-from komira_counters.string_eq_arm_counter import string_eq_ladder_counter_incr
+from komira_column_kernels.string_eq_arm_counter import string_eq_ladder_counter_incr
 from komira_column_kernels.string_contains_scan import string_contains_scan_kernel
 from komira_arrow.string_array import StringArray
 from komira_arrow.large_string_array import LargeStringArray

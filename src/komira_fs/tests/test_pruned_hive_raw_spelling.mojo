@@ -29,7 +29,7 @@
 from std.ffi import external_call
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
+from komira_arrow.arrow_types import ArrowType
 from komira_runtime_paths import test_tmpdir
 from komira_async.ops.waker_sink import NoopSink
 from komira_fs.local_fs import LocalFs

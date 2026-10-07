@@ -11,11 +11,11 @@
 # join sums the parts' row counts instead: one empty record per object.
 # =============================================================================
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow_helpers.streaming_concat import (
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.streaming_concat import (
     _concat_variable_width_batches,
 )
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 
 def _concat_jsonl_parts(

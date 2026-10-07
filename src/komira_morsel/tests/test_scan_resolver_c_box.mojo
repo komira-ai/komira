@@ -12,21 +12,21 @@
 from std.memory import ArcPointer
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.c_data_interface import _null_ptr
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.collections.slab import Slab
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import (
+from komira_arrow_ipc.c_data_interface import _null_ptr
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_collections.slab import Slab
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import (
     ScanBinding,
     SCAN_EPOCH_NONE,
     SNAPSHOT_LIVE,
     scan_kind_id,
 )
-from komira_core.source.scan_kind_registry import ScanKindDescriptor
-from komira_core.source.scan_params import ScanParams
+from komira_scan_source.scan_kind_registry import ScanKindDescriptor
+from komira_scan_source.scan_params import ScanParams
 from komira_morsel.scan_morsel_resolver import (
     ErasedScanMorselResolver,
     ScanMorselResolver,

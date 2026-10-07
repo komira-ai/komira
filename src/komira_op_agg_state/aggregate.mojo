@@ -11,8 +11,8 @@
 # Reference: Rust aggregate/hash_map.rs, aggregate/accumulator.rs
 # =============================================================================
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.dictionary_array import StringDictionaryArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.dictionary_array import StringDictionaryArray
 
 # Re-export accumulators so existing imports still work
 from .accumulators import (

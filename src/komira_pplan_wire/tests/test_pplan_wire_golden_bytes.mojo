@@ -71,9 +71,9 @@
 from std.memory import bitcast
 from std.testing import assert_equal, assert_true
 
-from komira_core.arrow.schema import Field
-from komira_core.collections import Slab
-from komira_core.plan.expr import (
+from komira_arrow.schema import Field
+from komira_collections.slab import Slab
+from komira_plan_expr.expr import (
     Expr,
     BIN_ADD,
     BIN_AND,
@@ -83,19 +83,19 @@ from komira_core.plan.expr import (
     UN_IS_NOT_NULL,
     UN_NOT,
 )
-from komira_core.plan.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
-from komira_core.plan.logical_plan import ExprArray
-from komira_core.plan.physical_plan import (
+from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
+from komira_plan_ir.logical_plan import ExprArray
+from komira_plan_ir.physical_plan import (
     MorselOp,
     ParquetRowWindow,
     ParquetSourceData,
 )
-from komira_core.plan.scalar_value import (
+from komira_plan_expr.scalar_value import (
     ScalarValue,
     SCALAR_KIND_TIMESTAMP,
     SCALAR_TIME_UNIT_NANO,
 )
-from komira_core.plan.excel_error_code import XL_ERR_NA
+from komira_plan_expr.excel_error_code import XL_ERR_NA
 
 from komira_pplan_wire import pplan_fields_equal, pplan_from_bytes, pplan_to_bytes
 

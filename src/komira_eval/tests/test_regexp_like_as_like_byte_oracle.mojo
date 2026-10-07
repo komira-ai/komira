@@ -29,11 +29,11 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
-from komira_core.eval.regexp_nfa import RegexProgram
-from komira_core.eval.regexp_functions import (
+from komira_arrow.string_array import StringArray
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
+from komira_column_kernels.regexp_nfa import RegexProgram
+from komira_column_kernels.regexp_functions import (
     eval_regexp_like,
     regexp_like_as_like_pattern,
 )

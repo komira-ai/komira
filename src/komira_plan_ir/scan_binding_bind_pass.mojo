@@ -36,7 +36,7 @@
 #     and `arrow_ipc_typed_source._build_chunked_inmem_scan_plan` take no
 #     context at all — they are the ergonomic seeds a user reaches for.
 #   * `LogicalPlan.scan` and `optimizer_helpers._rebuild_scan` build in-memory
-#     scan nodes from `komira_core`, BELOW the SDK. `EngineContext` is not a
+#     scan nodes from the core packages, BELOW the SDK. `EngineContext` is not a
 #     name core is allowed to spell.
 #   * and the decisive one: the SAME plan can be materialized by TWO different
 #     contexts, or by one context and then re-materialized after that context is

@@ -71,8 +71,8 @@
 from komira_atomic_alias import AtomicI8
 
 from komira_morsel.dynamic_join_filter import DynamicJoinFilter
-from komira_core.traits.expr_id import ExprId
-from komira_core.plan.expr_pool import ExprPool
+from komira_plan_expr.expr_id import ExprId
+from komira_plan_expr.expr_pool import ExprPool
 from komira_morsel.morsel_source import MorselSourceImpl, SourceCapabilities
 
 

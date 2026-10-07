@@ -41,8 +41,8 @@
 # String. No UnsafePointer, no pointer arithmetic, no wildcard origins.
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.schema import Schema
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema
 
 from .avro_schema import (
     AvroSchema,

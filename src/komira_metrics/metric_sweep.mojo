@@ -141,7 +141,7 @@
 # tables and the sink as PARAMETERS, so the compiler tracks both lifetimes.
 # =============================================================================
 
-from komira_core.collections import Slab
+from komira_collections.slab import Slab
 
 from komira_metrics.metric_point import (
     counter_point,

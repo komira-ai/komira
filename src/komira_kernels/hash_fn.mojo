@@ -108,8 +108,8 @@
 # for null rows.
 # =============================================================================
 
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.string_array import StringArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
 
 
 # =============================================================================

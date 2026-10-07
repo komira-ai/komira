@@ -19,13 +19,13 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema
-from komira_core.collections import batch_view_over
-from komira_core.collections.batch_view import BatchView
-from komira_core.plan.expr import Expr
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_arrow.batch_view import batch_view_over
+from komira_arrow.batch_view import BatchView
+from komira_plan_expr.expr import Expr
 from komira_expr.expr_x import ExprXBool, ExprXI64
 from komira_udf.predicate import Predicate
 from komira_udf.row_transform import RowTransform

@@ -103,7 +103,7 @@ from komira_async.runtime.runtime import (
 )
 from komira_async.runtime.shared_erasure import ErasedHandle
 from komira_async.runtime.wake_primitives import WorkerWakeHandle
-from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 
 # -----------------------------------------------------------------------------

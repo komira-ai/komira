@@ -17,7 +17,7 @@ Out of scope:
 A Mojo package here exposes safe types and keeps its unsafe code private:
 
 ```
-caller module                      owning module (e.g. komira_core.collections)
+caller module                      owning module (e.g. komira_collections)
   value / ref [origin] T   ───►      struct with private raw storage
   ByteView[origin]         ◄───        UnsafePointer with a concrete origin
   OwnedPointer[T]                       + a `# SAFETY:` comment
@@ -36,7 +36,7 @@ On the pinned compiler `Pointer` and `UnsafePointer` are one type, so the rules 
 
 ### How do the collection types keep pointers private?
 
-They lend views and references whose origin is the collection. `ByteView[origin]` in `src/komira_core/collections/byte_view.mojo` is parameterised on the origin of the bytes it views, so a view cannot outlive its source. `Slab[T]` in `src/komira_core/collections/slab.mojo` stores its elements in a `List[UInt8]` field, `_bytes`, and returns elements by reference or by move (`take_slot_unchecked`, `swap_remove`).
+They lend views and references whose origin is the collection. `ByteView[origin]` in `src/komira_buffer/byte_view.mojo` is parameterised on the origin of the bytes it views, so a view cannot outlive its source. `Slab[T]` in `src/komira_collections/slab.mojo` stores its elements in a `List[UInt8]` field, `_bytes`, and returns elements by reference or by move (`take_slot_unchecked`, `swap_remove`).
 
 ### How do I move a field out of a struct?
 
@@ -44,11 +44,11 @@ Use a primitive that ends the source's ownership on the record: `Optional.take()
 
 ### How is work run in parallel?
 
-Through a fork-join dispatcher, never through the standard library's `parallelize[`. `komira_core` defines the contract in `src/komira_core/runtime_traits/`: the `ParallelDispatch` trait, whose one method `run_with_state[State, T]` runs a closure over a shared state on the dispatcher's workers, and `fork_join_shared` (`fork_join_shared.mojo`), which splits work into chunks and runs them on a `ParallelDispatch` or inline. The async runtime supplies the real dispatcher. `NoDispatch` is a zero-sized serial stand-in: a caller with no dispatcher names it, and the branch that would call it is removed at compile time.
+Through a fork-join dispatcher, never through the standard library's `parallelize[`. `komira_async_api` defines the contract in `src/komira_async_api/`: the `ParallelDispatch` trait, whose one method `run_with_state[State, T]` runs a closure over a shared state on the dispatcher's workers, and `fork_join_shared` (`fork_join_shared.mojo`), which splits work into chunks and runs them on a `ParallelDispatch` or inline. The async runtime supplies the real dispatcher. `NoDispatch` is a zero-sized serial stand-in: a caller with no dispatcher names it, and the branch that would call it is removed at compile time.
 
 ### How do I call a C function?
 
-With `external_call`, from the module that owns the foreign resource, behind a safe function. The convention is a `# FFI-BOUNDARY:` comment that names the library and who owns and frees each pointer; 21 of the 46 non-test files under `src/` that call `external_call` carry one. Do not declare libc's `read` or `open` again: the Mojo standard library already binds both, and a second declaration with a different signature fails to lower on Linux only. When a call depends on platform constants, put it in a C shim instead: `MmapRegion.open_readonly` in `src/komira_core/io/mmap_region.mojo` calls the C shim `komira_open_ro` (`src/komira_core/native/komira_core_posix.c`), which calls `openat` with the platform's own `AT_FDCWD` (-2 on macOS, -100 on Linux).
+With `external_call`, from the module that owns the foreign resource, behind a safe function. The convention is a `# FFI-BOUNDARY:` comment that names the library and who owns and frees each pointer; 21 of the 46 non-test files under `src/` that call `external_call` carry one. Do not declare libc's `read` or `open` again: the Mojo standard library already binds both, and a second declaration with a different signature fails to lower on Linux only. When a call depends on platform constants, put it in a C shim instead: `MmapRegion.open_readonly` in `src/komira_buffer/mmap_region.mojo` calls the C shim `komira_open_ro` (`src/komira_libc/native/komira_libc_posix.c`), which calls `openat` with the platform's own `AT_FDCWD` (-2 on macOS, -100 on Linux).
 
 ### Which Mojo 1.0 spellings does the compiler require?
 
@@ -123,9 +123,9 @@ The spelling rules in the table above are different: the compiler refuses the ol
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_core/collections/byte_view.mojo`, `slab.mojo` | the view and slab types that keep pointers private | `ByteView`, `Slab` |
-| `src/komira_core/runtime_traits/parallel_dispatch.mojo`, `fork_join_shared.mojo` | the parallel dispatch contract | `ParallelDispatch`, `NoDispatch`, `fork_join_shared` |
-| `src/komira_core/io/mmap_region.mojo`, `src/komira_core/native/komira_core_posix.c` | an FFI boundary through a C shim that resolves platform constants in C | `open_readonly`, `komira_open_ro` |
+| `src/komira_buffer/byte_view.mojo`, `slab.mojo` | the view and slab types that keep pointers private | `ByteView`, `Slab` |
+| `src/komira_async_api/parallel_dispatch.mojo`, `fork_join_shared.mojo` | the parallel dispatch contract | `ParallelDispatch`, `NoDispatch`, `fork_join_shared` |
+| `src/komira_buffer/mmap_region.mojo`, `src/komira_libc/native/komira_libc_posix.c` | an FFI boundary through a C shim that resolves platform constants in C | `open_readonly`, `komira_open_ro` |
 | `tools/build/toolchains/BUCK` | the compiler pin | the `mojo-compiler` 1.0.0 packages |
 | `tools/build/lint/pointer_lint.awk`, `lint.sh`, `defs.bzl`; `tests/pointer_lint_ffi.tsv`, `tests/pointer_lint_holds.tsv` | the pointer lint, and its two ledgers | `pointer_lint`, `//:pointer_lint` |
 

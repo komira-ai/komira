@@ -21,16 +21,16 @@
 # decoder is about to hand back the plan that was encoded?
 # =============================================================================
 
-from komira_core.plan.expr import Expr
-from komira_core.plan.scalar_value import ScalarValue
-from komira_core.plan.physical_plan import (
+from komira_plan_expr.expr import Expr
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_ir.physical_plan import (
     ParquetSourceData,
     MorselOp,
     OP_FILTER,
     OP_PROJECT,
     OP_LIMIT,
 )
-from komira_core.collections import Slab
+from komira_collections.slab import Slab
 from std.memory import bitcast
 
 

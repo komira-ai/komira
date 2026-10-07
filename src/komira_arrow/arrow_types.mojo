@@ -1215,7 +1215,7 @@ def extract_union_type_ids(fmt: String) raises -> List[Int]:
 # WHY IT LIVES IN `arrow_types.mojo`. The byte width of an ArrowType is a
 # property OF the ArrowType, and this module is a LEAF — it imports nothing.
 # Every consumer in the tree can therefore reach it, including the ones inside
-# `komira_core/arrow/` that cannot import `komira_core/helpers/`
+# the core packages that cannot import the core packages
 # (`arrow/__init__.mojo` imports `.concat`, and `compiler_helpers` imports
 # `..arrow.schema`, so an `arrow/* -> helpers/*` edge closes a package-init
 # cycle). That reachability is the whole point: every width helper consults

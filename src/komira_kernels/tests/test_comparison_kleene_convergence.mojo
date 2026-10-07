@@ -25,11 +25,11 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.boolean_array import BooleanArray
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.decimal_array import Decimal128Array
-from komira_core.arrow.bitmap import Bitmap
-from komira_core.io.heap_region import HeapRegion
+from komira_arrow.boolean_array import BooleanArray
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.decimal_array import Decimal128Array
+from komira_arrow.bitmap import Bitmap
+from komira_buffer.heap_region import HeapRegion
 from komira_kernels.comparison_kleene import (
     NullPolicy,
     NULL_POLICY_THREE_VALUED,
@@ -44,7 +44,7 @@ from komira_kernels.comparison_kleene import (
     eval_col_le_nullable,
     eval_col_ge_nullable,
 )
-from komira_core.eval.decimal_compare import (
+from komira_scalar_arithmetic.decimal_compare import (
     decimal_cmp_i128,
     DEC_CMP_LT, DEC_CMP_LE, DEC_CMP_GT, DEC_CMP_GE, DEC_CMP_EQ, DEC_CMP_NE,
 )

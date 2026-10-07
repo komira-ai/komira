@@ -65,7 +65,9 @@
 from komira_counters.global_counter import GlobalCounter
 
 
-comptime _PQ_SOURCE_READS = GlobalCounter["komira_core_parquet_source_reads"]
+comptime _PQ_SOURCE_READS = GlobalCounter[
+    "komira_counters_parquet_source_reads"
+]
 
 
 @always_inline
@@ -120,7 +122,7 @@ def parquet_source_reads() raises -> Int:
 
 
 comptime _PQ_COLUMNS_DECODED = GlobalCounter[
-    "komira_core_parquet_columns_decoded"
+    "komira_counters_parquet_columns_decoded"
 ]
 
 
@@ -220,10 +222,10 @@ def parquet_columns_decoded() raises -> Int:
 
 
 comptime _PQ_CHUNKS_DECODED = GlobalCounter[
-    "komira_core_parquet_chunks_decoded"
+    "komira_counters_parquet_chunks_decoded"
 ]
 
-comptime _PQ_CHUNK_BYTES = GlobalCounter["komira_core_parquet_chunk_bytes"]
+comptime _PQ_CHUNK_BYTES = GlobalCounter["komira_counters_parquet_chunk_bytes"]
 
 
 @always_inline

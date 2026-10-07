@@ -58,7 +58,7 @@
 
 from std.memory import ArcPointer, OwnedPointer
 
-from komira_core.collections.slab import Slab
+from komira_collections.slab import Slab
 
 from komira_async.sync.select import SelectFirstNotify
 

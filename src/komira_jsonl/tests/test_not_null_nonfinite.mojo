@@ -50,12 +50,12 @@
 from std.memory import bitcast
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.collections.slab import Slab
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_collections.slab import Slab
 from komira_row_format.row_block import DT_F32, DT_F64, RowBlock
 from komira_row_format.row_output import RowOutput, RowOutputLayout
 

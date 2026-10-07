@@ -58,11 +58,11 @@
 
 from std.memory import UnsafePointer
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import RecordBatch
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import RecordBatch
 from komira_op_agg_state.accumulator_trait import Accumulator
-from komira_core.io.heap_region import HeapRegion
+from komira_buffer.heap_region import HeapRegion
 from komira_udf.agg_fn import AggFn
 from komira_agg.pod_state_gate import assert_pod_state
 from komira_kernels.simd_of import SimdOf

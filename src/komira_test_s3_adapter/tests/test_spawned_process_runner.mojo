@@ -34,7 +34,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_aws_core import AwsHttpTransport, HttpResult
 from komira_aws_core.credential_transport import CredentialHttpRequest
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 from komira_supervisor.supervisor import DetachedExit
 from komira_test_minio import EnvEntry, ProcessSpec, READINESS_EXITED, READINESS_TIMEOUT
 
