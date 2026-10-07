@@ -205,6 +205,58 @@ mojo_aws_client(
     deps = _RUNTIME,
 )
 
+# "env_semicolon.mojo imports std.pathlib, which is not on the environment
+# scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is the second statement of a line, after `;`.
+mojo_aws_client(
+    name = "env_read_semicolon",
+    hand_srcs = ["hand/env_semicolon.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_semicolon.json",
+    deps = _RUNTIME,
+)
+
+# "env_import_as.mojo imports std.pathlib, which is not on the environment
+# scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a plain `import`, std.pathlib the second name of its list, renamed.
+mojo_aws_client(
+    name = "env_read_import_as",
+    hand_srcs = ["hand/env_import_as.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_import_as.json",
+    deps = _RUNTIME,
+)
+
+# "env_indented.mojo imports std.pathlib, which is not on the environment
+# scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is inside a function body, at an indent.
+mojo_aws_client(
+    name = "env_read_indented",
+    hand_srcs = ["hand/env_indented.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_indented.json",
+    deps = _RUNTIME,
+)
+
+# "env_compound.mojo imports std.pathlib, which is not on the environment
+# scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is the body of a one-line function, after its `:`.
+mojo_aws_client(
+    name = "env_read_compound",
+    hand_srcs = ["hand/env_compound.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_compound.json",
+    deps = _RUNTIME,
+)
+
 # "`test_data` has an entry for `tests/_no_env_reads.mojo`", at analysis:
 # the scan's data is the package, staged by the rule.
 mojo_aws_client(

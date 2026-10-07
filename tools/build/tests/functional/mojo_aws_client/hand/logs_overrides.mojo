@@ -4,9 +4,17 @@
 operation's plain verb; aws-client-gen refuses the manifest unless this file
 defines it, and mojo_aws_client copies this file into the generated package next
 to the generated module.
+
+The generated environment scan reads the imports of code only. This
+docstring, the comment and the string below name std.pathlib, which is off
+its allow-list, where it would read an import if they were code:
+from std.pathlib import Path
 """
 
 from komira_aws_core import AwsRequest
+
+# Not code: import std.pathlib
+comptime _NOT_AN_IMPORT = "a string; import std.pathlib: from std.pathlib import Path"
 
 from .komira_aws_logs_hand import (
     CloudWatchLogsGetLogEventsRequest,

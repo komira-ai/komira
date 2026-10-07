@@ -44,8 +44,11 @@ read goes through (`komira_libc`, `external_call`, `DLHandle`), or, with
 path around the ruleset. It also fails if a file imports a module outside
 an allow-list: the package itself, the runtime the generator imports
 (komira_aws_core, komira_http_client, komira_http_core, komira_json,
-komira_retry, komira_xml) and std.sys, each with its submodules. An
-import is a line, at any indent, that starts with `from ` or `import `.
+komira_retry, komira_xml) and std.sys, each with its submodules. The scan
+reads an import statement (`from X ...`, `import A, B as c`) where a
+statement can start: a line, at any indent, or after a `;` or a `:` (a
+one-line function body), in the file with its comments and string literals
+blanked out. Mojo refuses an import inside a block such as an `if`.
 Every variable is refused, the provider-standard `AWS_*` ones included: a
 client takes each input as a parameter, and reading the credential
 variables is komira_aws_core's EnvSource. The scan also checks that it read
@@ -204,11 +207,55 @@ def _read(name: String) raises -> String:
         return f.read()
 
 
+def _code(text: String) -> String:
+    \"\"\"`text` with each comment and each string literal replaced by one space,
+    newlines outside them kept.\"\"\"
+    var b = text.as_bytes()
+    var n = len(b)
+    var out = String()
+    var start = 0
+    var i = 0
+    while i < n:
+        var c = Int(b[i])
+        if c == 35:  # `#`: a comment, to the end of its line
+            out += String(text[byte=start:i])
+            while i < n and Int(b[i]) != 10:
+                i += 1
+            start = i
+        elif c == 34 or c == 39:  # a double or single quote: a string literal
+            out += String(text[byte=start:i]) + " "
+            var triple = i + 2 < n and Int(b[i + 1]) == c and Int(b[i + 2]) == c
+            i += 3 if triple else 1
+            while i < n:
+                var d = Int(b[i])
+                if d == 92:  # a backslash: the next byte is escaped
+                    i += 2
+                elif triple and d == c and i + 2 < n and Int(b[i + 1]) == c and Int(b[i + 2]) == c:
+                    i += 3
+                    break
+                elif not triple and d == c:
+                    i += 1
+                    break
+                elif not triple and d == 10:
+                    break
+                else:
+                    i += 1
+            i = min(i, n)
+            start = i
+        else:
+            i += 1
+    out += String(text[byte=start:n])
+    return out^
+
+
 def _imports(text: String) -> List[String]:
-    \"\"\"The module each import of `text` names: the `X` of each line `from X ...`
-    and each `A` of `import A, B as c`, at any indent.\"\"\"
+    \"\"\"The module each import statement of `text` names: the `X` of `from X ...`
+    and each `A` of `import A, B as c`. A statement is read where it starts:
+    a line, at any indent, or after a `;` or a `:`, in `text` without its
+    comments and string literals (_code).\"\"\"
     var out = List[String]()
-    for raw in text.replace("\\t", " ").split("\\n"):
+    var code = _code(text).replace("\\t", " ").replace(";", "\\n").replace(":", "\\n")
+    for raw in code.split("\\n"):
         var line = String(String(raw).strip())
         if line.startswith("from "):
             var rest = String(String(line[byte=5:]).strip())

@@ -276,7 +276,12 @@
 #      `test_data` entry for the environment scan; an operation the model
 #      lacks by the generator; a failing caller test reds the client; and so
 #      does a hand-written module of the package that reads HOME, through
-#      the environment scan (tests//negative/mojo_aws_client).
+#      the environment scan (tests//negative/mojo_aws_client): by a banned
+#      name, or by an import of std.pathlib off its allow-list, which it reads
+#      at the start of a line, at an indent, after a `;`, after a one-line
+#      function's `:`, and as the second name of a plain `import` list;
+#      the same text in a docstring, a comment or a string is not an import
+#      (the hand_srcs client of tests//functional/mojo_aws_client builds).
 #  37. The platform table (tools/build/platforms/table.bzl, one row per
 #      (os, cpu)) is complete and the default target platform is the client's
 #      own: loading tests//functional/platform_table: runs the load-time
@@ -1067,6 +1072,10 @@ expect_red aws_client_service_unreadable 'the botocore service id cannot be read
 expect_red aws_client_env_read_hand 'env_reader.mojo names getenv; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_hand
 expect_red aws_client_env_read_home "env_home.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_home
 expect_red aws_client_env_read_std_os 'env_std_os.mojo names expanduser; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_std_os
+expect_red aws_client_env_read_semicolon "env_semicolon.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_semicolon
+expect_red aws_client_env_read_import_as "env_import_as.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_import_as
+expect_red aws_client_env_read_indented "env_indented.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_indented
+expect_red aws_client_env_read_compound "env_compound.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_compound
 expect_red aws_client_env_scan_data_given '`test_data` has an entry for `tests/_no_env_reads.mojo`, the generated environment scan' tests//negative/mojo_aws_client:env_scan_data_given
 
 # 9

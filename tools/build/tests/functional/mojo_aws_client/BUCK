@@ -149,7 +149,9 @@ tests_check(
 
 # hand_srcs + overrides: the manifest names logs_overrides.get_log_events as
 # the owner of GetLogEvents, the generator checks that it is defined there,
-# and the module is copied into the package next to the generated one.
+# and the module is copied into the package next to the generated one. The
+# module names std.pathlib in its docstring, a comment and a string, where
+# the environment scan reads no import: the client builds.
 mojo_aws_client(
     name = "komira_aws_logs_hand",
     hand_srcs = ["hand/logs_overrides.mojo"],
