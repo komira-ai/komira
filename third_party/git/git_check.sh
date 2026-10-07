@@ -25,7 +25,7 @@
 #      (git-receive-pack) carry that commit; fsck --strict passes on both.
 #   8. The HTTP transport is compiled in and HTTPS is not: ls-remote to a
 #      closed port on 127.0.0.1 fails in libcurl's connect, and to an https
-#      URL fails as an unsupported protocol.
+#      URL fails as a disabled protocol (libcurl's whole messages).
 #   9. `git-lfs version` prints `git-lfs/<lfs_version> `, and `git lfs
 #      version`, which git runs as git-lfs from PATH, prints the same line.
 #      git-lfs runs `git` from PATH, so a test that runs git-lfs itself puts
