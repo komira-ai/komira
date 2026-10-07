@@ -36,7 +36,7 @@ Checked against `main` and the stack head.
 |---|---|
 | `kci_release_machine/graph.mojo` | DEPLOY is refused ("needs a newer kci"). The header already says a DEPLOY step names a cell, and the cell names its cloud, but neither has a field. A PR stage refuses any step that is not BUILD. A farm-connected stage refuses a PUBLISH step. |
 | the machine file's name | **There is none.** `ReleaseMachine` holds `schema_version` and `stages`, and the parser refuses any other top-level field. Every stamp, the `(machine, cell)` scope and the registry name need one. |
-| `kci_cloud/deploy.mojo` (stack) | `plan_resources`, `apply_resources` and `destroy_resources` all take `(clouds, cloud, ctx: CellContext, resources, creds, store, definitions)`. Before anything else happens, each one refuses a scope that is not owned, checks the validation run id, runs the adapter's `configure`, expands the composites and validates. `ApplyOutcome` carries `applied`, `landed`, `pending`, `error`, `leftover` and `left_behind`. **`plan_resources` returns only the change actions**: its `leftover` and `left_behind` are computed and dropped. `group_plan` renders a plan. |
+| `kci_cloud/deploy.mojo` (stack) | `plan_resources`, `apply_resources` and `destroy_resources` all take `(clouds, cloud, ctx: CellContext, resources, creds, store, definitions)`. Before anything else happens, each one refuses a scope that is not owned, runs the adapter's `configure`, expands the composites and validates. Plan and apply also check the validation run id; destroy passes `check_validation_run=False`, because it writes no run-id label. `ApplyOutcome` carries `applied`, `landed`, `pending`, `error`, `leftover` and `left_behind`. **`plan_resources` returns only the change actions**: its `leftover` and `left_behind` are computed and dropped. `group_plan` renders a plan. |
 | `CellContext` | Holds a `CellScope` (machine, cell, provenance, adopt, validation run id), `settings`, `artifacts: List[ResolvedArtifact]` and `bootstrap_level`. **No code reads `bootstrap_level`.** |
 | state store | `InMemoryStateStore` only. |
 | adapters | `FakeCloud` and `FakeLimitedCloud` only. A fake's `bootstrap_resources` lists a state store and a `registry` (`<machine>-<cell>-images`, "where the cell pulls images by digest"). |
@@ -57,7 +57,7 @@ Checked against `main` and the stack head.
 | `kci_cloud/labels.mojo` | "an IAM binding carries the identity as the first line of its description" | An IAM member binding has no description and no labels. The gcp fake stamps grants with in-memory labels, so the fake hides this. Fixed in G3. |
 | `kci_cloud/labels.mojo` | a description carrier holds "the identity" | Kit step 3 also requires one retention mark and the run-id label on every node, so a description carrier must hold all three. Fixed in G4. |
 | artifact type of an image | `OCI` (channel), `OCI_IMAGE` (`kci_publish_oci`), `oci-image` (`ArtifactNeed`) | There should be one word. It becomes `OCI`, the `kci_release_channel` constant. Fixed in I1. |
-| `CellScope` docstring (stack) | `--adopt <id>` | After P12, adoption is the `adopt` field. There is no flag, and this design adds none. |
+| `kci_reconciler` (stack): the `CellScope` docstring, the ownership-rule comment in `ownership.mojo`, and the foreign refusal text `ownership.mojo` builds | `--adopt <id>`; the refusal tells the operator to pass `(--adopt <id>)` | After P12, adoption is the `adopt` field. There is no flag, and this design adds none. A refusal that names a flag that does not exist sends the operator nowhere (question Q10). |
 | `docs/design/release_machine.md` | the driver is `komira_ci`; channels and conda packages are held | The driver is `kci`, and channels and conda publishing exist. Fixed with this document. |
 
 ## The machine name
@@ -170,8 +170,9 @@ The design uses what R15 and R16 already guarantee:
 - A newer push replaces only a **pending** run, and a pending run has written nothing. The newer
   revision's resource list is the whole desired state, so dropping the older pending run loses no
   change. This is the replacement R16 already accepts for a release.
-- Within one run, one DEPLOY step per cell (refused above), and D6 keeps a cell's PUBLISH and DEPLOY in
-  one job (see "The workflow check").
+- Within one run, one DEPLOY step per cell (refused above). R9 already runs every step of a stage in
+  the job named after the stage (a part job runs validations only), so a cell's PUBLISH and DEPLOY run
+  in that one job, in step order. D6 adds only the probe rule (see "The workflow check").
 
 What remains, said in the summary and in `docs/ci.md`:
 
@@ -238,17 +239,21 @@ this one in D3. The step row also gains `cell` and `cloud`.
 | situation | outcome | exit | retry |
 |---|---|---|---|
 | Any refusal above, an adapter `configure` or trust finding, an expansion or validate finding, a name or key change, a foreign or conflicting object (the typed refusal) | REFUSED | 3 | NEEDS_HUMAN |
-| A read failed before the engine's first mutating call (`list_owned`, `whoami`, transport) | FAILED | 4 | SAFE |
-| **Any engine error after apply started that is not a typed refusal**, even with `landed` empty | PARTIAL | 6 | UNSAFE |
+| A read failed before the engine was called: `whoami` (step 2), or the `list_owned` that `_graph_for` runs to find removals, or the transport under either | FAILED | 4 | SAFE |
+| **Any error from `apply_graph_owned` that is not a typed refusal**, even with `landed` empty. This includes a failed presence read in `refuse_unless_owned`, which runs inside the engine before any change | PARTIAL | 6 | UNSAFE |
 | `--plan`, or an apply that changed something | SUCCEEDED | 0 | SAFE |
 | An apply where every action was a no-op | NOOP | 0 | SAFE |
 | A `DEPLOY_PROBE` validation failed / could not tell | VALIDATION_FAILED / INDETERMINATE | 7 / 5 | NEEDS_HUMAN |
 
-Two notes on this table.
+Three notes on this table.
 
 - **An engine error with nothing landed is PARTIAL, not FAILED.** `ApplyOutcome.partial()` is false
   when `landed` is empty, but the failing node's own call (a create whose wait timed out) may have
   landed. Exit 4 promises that no effect landed, and kci cannot promise that here.
+- **The FAILED row is only the reads made before `apply_graph_owned` is called.** The engine's own
+  pre-flight (`refuse_unless_owned` in `kci_reconciler/cell_walk.mojo`) also reads before any change,
+  but its error reaches kci as the same untyped engine error as a create that timed out, so it is
+  PARTIAL. Telling the two apart needs the engine to type its pre-flight errors, which is not in v1.
 - **`leftover` and `left_behind` do not change the outcome.** The summary lists them and says kci will
   not delete them. Exit 8 stays reserved for a destroy verb.
 
@@ -338,7 +343,7 @@ a binding's stamp is computed from what the cloud holds.
 | not ours | A binding whose member is not this cell's, or whose IAM role is not in the table, is an unmanaged difference: reported, and never removed. A hand-made binding equal to a wanted one is ours, whoever wrote it, and is a no-op. |
 | writing | An etag read-modify-write of the policy that adds or removes **only** members attributed to this cell. A foreign member on an adopted object is never removed. |
 | the fake | The gcp fake stops stamping grants with labels and models the derived rule, `check` included. Then a green kit on the gcp fake means something for the real carriers. |
-| the kit | Steps 3 and 12 read a `DERIVED` node's labels through the `live_labels` hook, which returns what attribution derives. The step 3 text says so. A new step 13, **foreign member**, plants a foreign member and an unmapped IAM role on an owned target and on the project, applies, and requires both to be reported and left in place. |
+| the kit | Steps 3 and 12 read a `DERIVED` node's labels through the `live_labels` hook, which returns what attribution derives. The step 3 text says so. A new step 13, **foreign member**, plants a foreign member and an unmapped IAM role on an owned target and on the project, applies, and requires both to be reported and left in place. A new step 14 is described under "Testing the adapter". |
 | the docs | The false sentence in `labels.mojo` goes away. |
 
 ### How adoption plugs in (the interface P12 defines)
@@ -365,8 +370,27 @@ a binding's stamp is computed from what the cloud holds.
 | layer | proves | does not prove |
 |---|---|---|
 | Lowering golden over the shared shape | That gcp lowers as the fake does, byte for byte. | Wire behaviour. |
-| Conformance kit over a **stateful GCP REST emulator** (test-only, behind `komira_http_core`'s `Connector`; Run, IAM, CRM, Scheduler and Secret Manager paths, with real error envelopes) | The adapter's real wire code against all 13 kit steps, including tamper, fail, race, plant-foreign and foreign member, which a recorded transport cannot replay. | That GCP behaves like the emulator. |
+| Conformance kit over a **stateful GCP REST emulator** (test-only, behind `komira_http_core`'s `Connector`; Run, IAM, CRM, Scheduler and Secret Manager paths, with real error envelopes) | The adapter's real wire code against all 14 kit steps, including tamper, fail, race, plant-foreign, foreign member and born stamped, which a recorded transport cannot replay. | That GCP behaves like the emulator. |
 | A live kit pass in a dedicated project | The real API. | It is an operator-run step that costs money, not a PR test. It is required before the adapter is called production-ready. |
+
+**Kit step 14, born stamped (new, added in G3).** The kit has steps 1 to 12 today, and G3 adds step 13
+(foreign member, above) and this one. A create that writes the object and then writes the stamp in a
+second call leaves an unstamped object whenever the second call never happens, and the next run then
+refuses that object as foreign. Step 14 makes that window observable:
+
+- `ConformanceTarget` gains two hooks, after the shape of `race_next_create` and `raced`.
+  `fail_after_next_create()` makes the next create the cloud serves store the object exactly as the
+  request carried it, then report an error to the caller (the wait timed out). `failed_after_create()`
+  names the node it hit.
+- The kit arms the hook and applies `base` into the emptied cloud. The apply must stop with an error.
+  The node `failed_after_create()` names must then pass step 3's label check as it stands, before
+  anything else runs: its identity, one retention mark and the scope's run id, all from the create
+  request alone.
+- A re-apply under a new provenance must settle with no foreign refusal, and `creates_of` that node
+  must not grow (the object is recognised as ours and is never created twice).
+
+The fakes implement the hooks in memory. G4's emulator implements them on its create paths, so the
+step checks the request body the adapter sent.
 
 ## Images into a cell, and promotion by digest
 
@@ -434,12 +458,28 @@ The run reuses `container.mojo`'s command line: `--read-only`, `--cap-drop=ALL`,
 `/work`, and the image writes `/work/out/results.jsonl`, one `{id, outcome, detail}` per line.
 **kci decides the verdict; the image never does.**
 
+Two things differ from `container.mojo` today, and V2 changes both for the probe:
+
+- **The container is named, and a timeout removes it.** `run_argv` gives the container no `--name`,
+  and the timeout ends only the `docker` client process. The container keeps running after the client
+  is gone, holding the work mount and reaching the target. A probe runs as
+  `--name kci-probe-<validation run id>`, and on timeout kci runs `docker rm -f <that name>` with the
+  same docker environment before it writes the row. A failed `rm -f` is said in the row's detail.
+- **The probe cannot reach the link-local range.** `--network=bridge` reaches `169.254.0.0/16`, and on
+  a runner hosted in a cloud that range holds the VM's metadata server, which hands out the runner
+  VM's own credentials. The probe image is the operator's, but it talks to a freshly deployed service,
+  so it must not hold a path to those. kci creates a network of its own for the run
+  (`docker network create kci-probe-<id>`, IPv6 off) and, before the container starts, inserts a
+  `DOCKER-USER` rule that rejects traffic from that network's subnet to `169.254.0.0/16`. The rule
+  and the network are removed after the run, timeout included. If the rule cannot be inserted (no
+  privilege on the runner), the probe does not run: INDETERMINATE, never a run without the block.
+
 | condition | effect, outcome, exit |
 |---|---|
 | Every `expect` id has exactly one row with outcome `pass`, there are no other rows, and the exit is 0 | VALIDATED, SUCCEEDED |
 | An `expect` id has no row, a row's id is not in `expect`, an id appears twice, a row is not `pass`, a line is malformed, or the exit is non-zero | VALIDATED, VALIDATION_FAILED, 7 |
-| The timeout is reached | killed; VALIDATION_FAILED, 7 |
-| The pull fails, docker is missing, or the container cannot start | INDETERMINATE, 5, with a `skip_reason`; never a pass |
+| The timeout is reached | the client killed and the container removed by name; VALIDATION_FAILED, 7 |
+| The pull fails, docker is missing, the container cannot start, or the link-local block cannot be put in place | INDETERMINATE, 5, with a `skip_reason`; never a pass |
 | The DEPLOY step did not succeed | NOT_REACHED |
 
 Each case becomes its own row in the result document and in the summary. An image that writes
@@ -476,8 +516,8 @@ at a time").
 
 | rule | change |
 |---|---|
-| R4 | `id-token: write` is also required on, and only on, the job of a stage that holds a DEPLOY step or a PUBLISH into a cell: kci authenticates to a cell from CI by OIDC only. `id_token_stages` gains these stages; a validation-only part job still carries no token. |
-| part jobs (R9) | The part job that runs a DEPLOY step also runs every PUBLISH into the same cell of its stage, and every `DEPLOY_PROBE` with a `target` on that step. Parts of one stage run in parallel, so a split would let a DEPLOY start before its images were pushed, or a probe run without the outputs it reads. |
+| R4 | R4 already puts `id-token: write` on a job exactly when its stage needs an identity token. `id_token_stages` gains every stage that holds a DEPLOY step or a PUBLISH into a cell, because kci authenticates to a cell from CI by OIDC only. A part job still carries no token: R9 already refuses one that does. |
+| part jobs (R9) | R9 already lets only the job named after the stage run steps, and makes every part job validation-only, with no environment and no `id-token: write`. So a cell's PUBLISH and DEPLOY can never be split apart, and D6 adds nothing for them. **New:** a part job's `--only validation:<name>` must not name a `DEPLOY_PROBE` that has a `target`. A part job holds neither the DEPLOY step's recorded outputs (they are in the main job's run) nor a token, so such a probe would be refused at start by `kci run` (see "Fields" above); the workflow check refuses the split before any run. A `DEPLOY_PROBE` with no `target` may still run in a part job. |
 
 ## PR split
 
@@ -489,25 +529,25 @@ The PR body records the red build.
 | **D0** | this doc, `release_machine.md`, `docs/index.md` | none | The new links (index, `release_machine.md`) resolve under the `markdown_docs` lint (`komira//:docs`, which the PR check builds). This is the existing link lint; no test of design content is possible for a docs-only PR. | the `deploy_step.md` link misspelt in `release_machine.md` |
 | **D1** cells file | new `kci_cell`, `kci_api` formats (`kci.cells`) | none | A golden parse, and one red case per refusal listed under "Cells". | the duplicate-name check removed: the duplicate case parses |
 | **D2** grammar | `kci_release_machine/{parse,deploy,graph}.mojo` | D1 | The machine `name` parses and every rule of "The machine name" has a red case; a machine file with DEPLOY parses; every row of "Refusals in the machine file" has a red case. | `platform` allowed on DEPLOY; the same-cell check removed; DEPLOY allowed in a `farm_connected` stage; DEPLOY allowed in a `break_glass` stage |
-| **D3** result keys | `kci_api/result.mojo`, the parser, `exit_codes` | none | A round trip of every step-row key. The parser refuses a FINISHED step row with `landed` non-empty and outcome FAILED, and a top-level `landed`. | an engine error with `landed` empty mapped to FAILED |
+| **D3** result keys | `kci_api/result.mojo`, the parser, `exit_codes` | none | A round trip of every step-row key. The parser refuses a FINISHED step row with `landed` non-empty and outcome FAILED, and a top-level `landed`. | the landed-with-FAILED check removed from the parser: that row parses; the top-level `landed` refusal removed: it goes to `ignored_keys` and the document parses |
 | **D4** `kci_cloud` outcomes | `kci_cloud/deploy.mojo`, `kci_cloud_fake` tests | stack | Each refusal path (validate, expansion, key change, foreign, conflict) yields the typed refusal with its findings, and an engine fault never does. `plan_resources` reports the `leftover` and `left_behind` an apply of the same graph reports. | the foreign refusal returned as an untyped error; `leftover` dropped from `PlanOutcome` |
-| **D5** wiring | `kci_cli/deploy_step.mojo`, `args`, `summary`, BUCK | D2, D3, D4 | End to end on `FakeCloud` + `InMemoryStateStore`: `--plan` writes nothing; apply, then a second run is all NOOP; a planted foreign object is REFUSED with `landed` empty; a planted mid-graph fault is PARTIAL/UNSAFE with `landed` + `pending`; a `kci.app` instance plans to its primitives (golden); a wrong `--release-set-hash` is REFUSED; the scope's machine is the file's `name`. | `--plan` routed to apply (store non-empty); the set-hash recompute skipped |
-| **D6** workflow check | `kci_workflow_check` | D2 | A DEPLOY stage's job carries `id-token: write` and is refused without it; a validation-only part job is refused with it; a part split that separates a cell's PUBLISH from its DEPLOY is refused. | the R4 arm for DEPLOY stages removed; the part-split check removed |
+| **D5** wiring | `kci_cli/deploy_step.mojo`, `args`, `summary`, BUCK | D2, D3, D4 | End to end on `FakeCloud` + `InMemoryStateStore`: `--plan` writes nothing; apply, then a second run is all NOOP; a planted foreign object is REFUSED with `landed` empty; a planted mid-graph fault is PARTIAL/UNSAFE with `landed` + `pending`; a fault planted on the **first** mutating node, so `landed` is empty, is PARTIAL, exit 6, UNSAFE, with `pending` starting at that node; a `kci.app` instance plans to its primitives (golden); a wrong `--release-set-hash` is REFUSED; the scope's machine is the file's `name`. | `--plan` routed to apply (store non-empty); the set-hash recompute skipped; an engine error with `landed` empty mapped to FAILED (`ApplyOutcome.partial()` used as the classifier): the first-node case goes red |
+| **D6** workflow check | `kci_workflow_check` | D2, V1 | A DEPLOY stage's job carries `id-token: write` and is refused without it (R4 through `id_token_stages`); a stage that publishes into a cell likewise. A split DEPLOY stage whose part job runs `--only validation:<probe>` for a `DEPLOY_PROBE` with a `target` is refused naming R9; the same split for a probe with no `target` is accepted. | the DEPLOY arm removed from `id_token_stages`: the job without the token is accepted; the targeted-probe arm removed from `_check_split`: the refused split is accepted |
 | **G1** client methods | `komira_gcp_{run,iam,cloudscheduler,secretmanager,artifactregistry}`, token info, WIF provider `get` | none | One wire row per new method (path, verb, body). | one path template changed: its wire row goes red |
 | **G2** external account | `komira_gcp_core` ADC, `komira_gcp_wif` | none | A file- or URL-sourced subject is exchanged at STS (fake connector), then impersonation; the env names read are still the documented set. | the audience dropped from the STS form |
-| **G3** shared lowering + derived stamp | `kci_cloud` (lifted shapes, the `DERIVED` carrier, kit step 13), `kci_cloud_fake`, `kci_reconciler` | stack | The fake's lowering goldens are unchanged byte for byte. On the gcp fake: the kit passes, steps 3 and 12 included; a foreign member and an unmapped role are reported and kept (step 13); a `uses` line on a `run_as` workload and a `grant` resource are refused by `check`. | the member check removed from attribution: the foreign member is deleted (step 13 red) |
-| **G4** adapter + service account | new `kci_cloud_gcp`, a test-only GCP emulator | G1, G2, G3 | The kit on the emulator for `service_account` (the three description lines), plus `configure`, `whoami`, `trust_check`, `image_registry`; a description over 256 bytes refused at validate. | the stamp written in a second call after create (kit "stamp born with the object" step); the retention line dropped (kit step 3) |
-| **G5** workloads | `kci_cloud_gcp` | G4 | The kit for `service`, `worker`, `container_job`, `schedule`, `grant` and `secret`; the IAM role table is injective. | `public` lowered with no invoker binding (lowering golden); the Scheduler description stamp dropped (kit labels step); two verbs mapped to one IAM role (injectivity test) |
+| **G3** shared lowering + derived stamp | `kci_cloud` (lifted shapes, the `DERIVED` carrier, kit steps 13 and 14 and their two hooks), `kci_cloud_fake`, `kci_reconciler` | stack | The fake's lowering goldens are unchanged byte for byte. On the gcp fake: the kit passes, steps 3, 12 and 14 included; a foreign member and an unmapped role are reported and kept (step 13); a `uses` line on a `run_as` workload and a `grant` resource are refused by `check`. | the member check removed from attribution: the foreign member is deleted (step 13 red); `public` lowered with no invoker binding in the shared shape: the fake's lowering golden goes red |
+| **G4** adapter + service account | new `kci_cloud_gcp`, a test-only GCP emulator | G1, G2, G3 | The kit on the emulator for `service_account` (the three description lines), plus `configure`, `whoami`, `trust_check`, `image_registry`; a description over 256 bytes refused at validate. | the service account created with an empty description and the three lines written by a second `PatchServiceAccount`: the object left by the failed create is unstamped (kit step 14 red); the retention line dropped (kit step 3) |
+| **G5** workloads | `kci_cloud_gcp` | G4 | The kit for `service`, `worker`, `container_job`, `schedule`, `grant` and `secret`; the IAM role table is injective. | the Scheduler description stamp dropped (kit step 3); two verbs mapped to one IAM role (injectivity test) |
 | **I1** one type word | `kci_release_channel`, `kci_publish_oci`, `kci_cloud` | none | The manifest reader accepts `OCI` and refuses `OCI_IMAGE` and `oci-image`. | the arm keeps `OCI_IMAGE`: the publish row's type assertion fails |
-| **I2** image in the release set | `tools/build/package` (`oci_image[release]`), `kci_artifact_manifest`, `kci_release_set` | I1 | `hello_image[release]` verifies, and its digest is in `set_hash`. A directory is refused for CONDA. | one layer byte flipped: verification still passes |
-| **I3** PUBLISH into a cell | `kci_publish`, `kci_cli`, `kci_cloud` (two trait methods) | I2, D1, D5 | A push to the fake cell registry; the read-back digest equals the set; a second push is NOOP. | the read-back comparison removed: a registry that rewrites the manifest is accepted |
+| **I2** image in the release set | `tools/build/package` (`oci_image[release]`), `kci_artifact_manifest`, `kci_release_set` | I1 | `hello_image[release]` verifies, and its digest is in `set_hash`. A copy of its layout with one layer byte flipped is refused by `verify_member`. A directory is refused for CONDA. | `verify_member` checks the manifest digest without hashing the blobs: the flipped-byte case verifies |
+| **I3** PUBLISH into a cell | `kci_publish`, `kci_cli`, `kci_cloud` (two trait methods) | I2, D1, D5 | A push to the fake cell registry; the read-back digest equals the set; a second push is NOOP. `test_publish_cell_readback`: a fake registry that rewrites the pushed manifest (re-serialised, so the read-back digest differs) makes the PUBLISH REFUSED. | the read-back comparison removed: a registry that rewrites the manifest is accepted |
 | **I4** resolve images in DEPLOY | `kci_cli/deploy_step.mojo`, `refs.proto` comment | I3 | `StepOutput` resolves to `registry/name@digest`; a `step` that is not a BUILD step, a `name` that step does not declare, a member missing from the set and a wrong platform are each REFUSED before any change. | resolving by `name` while ignoring `step`; resolving by name while ignoring platform |
 | **V1** `DEPLOY_PROBE` grammar | `kci_release_machine`, `kci_api/verbs.mojo` | D2 | A red case per field rule; `CONDA_*` refused on DEPLOY and `DEPLOY_PROBE` refused on PUBLISH; a promoted DEPLOY stage without a probe refused. | a tag accepted as `image`; the promoted-stage probe check removed |
-| **V2** runner and verdict | `kci_validate` | V1 | Every row of the verdict table, with a scripted fake process runner; the argv golden keeps the hardening flags. | a missing `expect` row treated as a pass; `--cap-drop=ALL` dropped from the argv |
+| **V2** runner and verdict | `kci_validate` | V1 | Every row of the verdict table, with a scripted fake process runner; the argv golden keeps the hardening flags, `--name kci-probe-<id>` and `--network=kci-probe-<id>`. A run the runner times out is followed by `docker rm -f kci-probe-<id>` in the recorded calls. The recorded calls insert the `169.254.0.0/16` reject rule before `docker run` and remove it after, timeout included; a runner whose rule insert fails records no `docker run` and the row is INDETERMINATE. | a missing `expect` row treated as a pass; `--cap-drop=ALL` dropped from the argv; the `rm -f` on timeout dropped: the recorded calls end at the run; the probe run when the rule insert failed: the INDETERMINATE case records a `docker run` |
 | **V3** wiring and gate | `kci_cli` | V2, D5 | A failed probe row empties `set_hash`; under `--plan` it is WOULD_VALIDATE; a target that no step output declares is REFUSED; a probe with a `target` selected without its DEPLOY step is REFUSED at start. | `keep_set_hash_only_if_validated` counting VALIDATED regardless of outcome |
 
 **Merge order.** D1, D3 and D4 can merge in parallel with the G1, G2 and I1 group. D2 merges after D1;
-D5 after D2, D3 and D4; D6 after D2; I3 after D5; I4 after I3; V3 after V2 and D5. G4 needs G1, G2 and
+D5 after D2, D3 and D4; D6 after D2 and V1; I3 after D5; I4 after I3; V3 after V2 and D5. G4 needs G1, G2 and
 G3, and G5 follows G4. No PR depends on a later one.
 
 ## Open questions (recommendation first)
@@ -523,7 +563,8 @@ G3, and G5 follows G4. No PR depends on a later one.
 | Q7 | `bootstrap_level` has no reader. Keep it at `1`, or drop it? | Keep it, accepting only `1`, so the cells file does not change major when level 2 is defined. |
 | Q8 | `worker` on GCP: wait for worker-pool client methods, or lower a worker as a Service with no ingress? | Use worker pools, as in the fake's shape. Changing the lowering means changing the shared shape first, never only in the adapter. |
 | Q9 | Should apply emit `plan_hash` and take `--expect-plan-hash`, so that an approved plan is what runs? | Yes, after D5, with the engine returning the plan it executed. Without a plan job that holds read-only credentials it cannot be used, so it is not in v1. |
-| Q10 | Should the stack's `CellScope` docstring (`--adopt <id>`) be fixed in P12? | Yes. That docstring belongs to the stack, not to this design. |
+| Q10 | Should the stack's `--adopt <id>` wording be fixed in P12? It is in the `CellScope` docstring, the ownership-rule comment at the top of `ownership.mojo`, and the foreign refusal text `ownership.mojo` builds, which tells an operator to pass `(--adopt <id>)` (a `kci_reconciler` test asserts that text). The same word is in comments in `engine.mojo`, `resource.mojo`, `described_resource.mojo`, `erased_resource.mojo` and `kci_cloud/adapter.mojo`. | Yes, all of them in one change. The refusal text matters most: it should name the resource's `adopt` field, and its test should assert that. That text belongs to the stack, not to this design. |
 | Q11 | Should a break-glass run be able to deploy? | Not in v1. A break-glass run sits in a group per ref and would race a push. It needs the cell lease; until then a fix reaches a cell through main. |
 | Q12 | A re-run of an older workflow run rolls a cell back. Should kci refuse a revision older than the one the cell runs? | Yes, once the durable store records the deployed revision per cell. v1 documents it; the operator must not re-run an older run's deploy job. |
 | Q13 | On a `DERIVED` shape, `uses` on a `run_as` workload and `grant` resources are refused. Lift this by owning such an edge's node by its principal? | Not in v1. Changing node ownership changes ids on every cloud, so it is a reconciler design of its own. Writing the `uses` line on the account is an exact equivalent today. |
+| Q14 | Machine names are not globally unique. Two machine files with the same `name` (two repositories, or a second machine file run by hand) deploying into one cell compute the same stamps, so each would see the other's objects as its own and update or remove them. `CellScope.provenance` holds only a run id and a revision, is never part of the identity and is never compared, so it cannot tell them apart. How is a cell kept to one machine? | Make the cell's trust say which repository may deploy into it. Bootstrap writes the workload-identity provider's attribute condition for exactly one repository, and `trust_check` refuses a cell whose provider admits any other, or none named. Then from CI only that repository's runs can obtain the deploy identity. Inside one repository, R10 already holds every `kci run` of the release workflow to the one machine file being checked. A hand run is not covered; it is already unsupported against a cell CI deploys (see "One run at a time"). Adding the repository to provenance would not help while provenance is never compared. |
