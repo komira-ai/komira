@@ -334,8 +334,6 @@
 #      root with no package.
 
 #  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
-#  45. Assert level, defines and memory cap: see
-#      tools/build/tests/assert_level_tests.sh.
 #  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
 #      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
 #      file of the cell, against tests/pointer_lint_ffi.tsv and
@@ -359,6 +357,8 @@
 #      where none is, a src/tests kind it does not hold or a package not at
 #      src/tests/<kind>/<name>, a package under the wrong kind, and a root with
 #      no package.
+#  49. Assert level, defines and memory cap: see
+#      tools/build/tests/assert_level_tests.sh.
 set -uo pipefail
 
 umbrella=1
@@ -1243,10 +1243,6 @@ expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enfor
 # shellcheck source=tools/build/tests/coverage_tests.sh
 . "$ROOT/tools/build/tests/coverage_tests.sh"
 
-# 45
-# shellcheck source=tools/build/tests/assert_level_tests.sh
-. "$ROOT/tools/build/tests/assert_level_tests.sh"
-
 # 42
 expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
 N=tests//negative/pointer_lint
@@ -1316,6 +1312,10 @@ for want in \
     "empty|src_layout: checked nothing"; do
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
+
+# 49
+# shellcheck source=tools/build/tests/assert_level_tests.sh
+. "$ROOT/tools/build/tests/assert_level_tests.sh"
 
 # 37
 pt_rc=0

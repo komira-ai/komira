@@ -981,12 +981,12 @@ and must fail naming it.
 `src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`. The test is in
 [the repository lint tests](lint_tests.md#45-the-layout-of-src).
 
+## 49. Assert level, defines and memory cap
+
+[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
 records what a remote worker provides, the evidence behind the
 [host floor](../toolchains/README.md#host-floor).
-
-## 45. Assert level, defines and memory cap
-
-[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).

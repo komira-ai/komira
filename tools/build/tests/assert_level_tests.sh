@@ -4,7 +4,7 @@
 # Sourced by tools/build/tests/run_tests.sh (uses its BUCK2, ROOT, LOG, pass,
 # fail, expect_green and expect_red); not run on its own.
 #
-#  45. Assert level, defines and memory cap: the commands carry `-D
+#  49. Assert level, defines and memory cap: the commands carry `-D
 #      ASSERT=<level>` and each define where a target sets them, the gated
 #      test runs under mem_cap.sh at 4096 MiB by default at ASSERT=none and at
 #      the cap a target names, and a target that sets none of them has neither

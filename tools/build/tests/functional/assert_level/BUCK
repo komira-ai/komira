@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 
-# Per-target assert level and defines (test 45; tools/build/mojo/defines.bzl).
+# Per-target assert level and defines (test 49; tools/build/mojo/defines.bzl).
 # Every target here builds; tests//negative/assert_level holds the twins that
 # must go red, and tools/build/tests/assert_level_tests.sh reads the commands.
 
