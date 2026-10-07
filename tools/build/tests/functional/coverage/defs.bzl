@@ -74,6 +74,10 @@ def _report_impl(ctx):
         if len(ctx.attrs.goldens) != len(ctx.attrs.reports):
             fail("{}: one golden per report".format(ctx.label))
         args = [["--golden", g, r] for g, r in zip(ctx.attrs.goldens, ctx.attrs.reports)]
+    elif ctx.attrs.mode == "result":
+        if len(ctx.attrs.reports) != 1:
+            fail("{}: result reads one gate result".format(ctx.label))
+        args = [[["--expect", e] for e in ctx.attrs.expect], "--json", ctx.attrs.reports[0]]
     else:
         if ctx.attrs.covcheck == None:
             fail("{}: census needs covcheck".format(ctx.label))
@@ -94,6 +98,8 @@ def _report_impl(ctx):
 # action (report.sh): `golden`, each report is its golden file byte for byte;
 # `census`, covcheck's build gate in census mode reads the reports over the
 # package's sources (`files`, {repository path: source}) and its result JSON
+# holds each `expect` string; `result` (test 46), the result JSON of a
+# library's own gate (its [coverage][gate][result], the one `reports` entry)
 # holds each `expect` string.
 cov_report_check = rule(
     impl = _report_impl,
@@ -102,7 +108,7 @@ cov_report_check = rule(
         "expect": attrs.list(attrs.string(), default = []),
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "goldens": attrs.list(attrs.source(), default = []),
-        "mode": attrs.enum(["golden", "census"]),
+        "mode": attrs.enum(["golden", "census", "result"]),
         "package": attrs.string(default = ""),
         # [coverage][tests][<test>] sub-targets.
         "reports": attrs.list(attrs.source()),
