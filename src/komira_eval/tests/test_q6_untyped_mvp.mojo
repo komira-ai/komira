@@ -18,12 +18,12 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.primitive_array import PrimitiveArray
+from komira_arrow.primitive_array import PrimitiveArray
 from komira_eval.expr_executor_mvp import (
     Q6Result,
     execute_q6_filter_and_sum,
 )
-from komira_core.eval.selection_vector_row import RowSelectionVector
+from komira_arrow.selection_vector_row import RowSelectionVector
 
 
 # -----------------------------------------------------------------------------

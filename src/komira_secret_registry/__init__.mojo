@@ -18,7 +18,7 @@ WHAT IT SHIPS:
     RAII is the "wiped at execution end" guarantee.
   * `SecretRegistryEntry` / `SecretBindings`: the flat `(node_id, name_handle,
     secret_ref)` binding and the store-less bindings table. They live in
-    `komira_core.plan.secret_bindings` and are re-exported here.
+    `komira_secret_registry.secret_bindings` and are re-exported here.
   * `CredentialConsumer`: the reveal consumer seam. The reveal boundary hands it
     the scoped `revealed_bytes()` `Span` entirely inside the reveal call; a real
     connector opens its connection there, a test asserts the bytes. The `Span`
@@ -39,7 +39,7 @@ to the local file system for an unbound node, a benign default that a missing
 secret does not have.
 
 Dependencies: `komira_secret_store` (the `SecretStore` trait and `SecretValue`)
-and `komira_core` (`Slab` and the bindings table). Nothing from the engine,
+and the core packages (`Slab` and the bindings table). Nothing from the engine,
 the compiler or the file formats enters this closure.
 
 A resolve cache is deliberately absent: resolve-on-demand is the tightest
@@ -48,12 +48,12 @@ custody default. If one is ever added it must hold
 """
 
 # `SecretBindings` and `SecretRegistryEntry` are two flat value types that import
-# nothing. They live in `komira_core.plan.secret_bindings` because the logical
+# nothing. They live in `komira_secret_registry.secret_bindings` because the logical
 # plan carries a `SecretBindings` field, and the plan tier must not depend on
 # the secret-store stack. They are re-exported here so this package's surface is
 # complete; a plan-tier consumer imports them from
-# `komira_core.plan.secret_bindings` directly, never through this facade.
-from komira_core.plan.secret_bindings import (
+# `komira_secret_registry.secret_bindings` directly, never through this facade.
+from komira_secret_registry.secret_bindings import (
     SecretBindings,
     SecretRegistryEntry,
 )

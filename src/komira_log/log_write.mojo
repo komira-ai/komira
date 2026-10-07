@@ -23,7 +23,7 @@
 # # ⛔ What this does NOT change
 #
 # A logger loop is RIGHT to give up rather than raise — "losing a diagnostic
-# beats wedging the process" (the rule `komira_core.io.fd_write_all` states).
+# beats wedging the process" (the rule `komira_libc.fd_write_all` states).
 # Nothing here raises. Nothing here blocks, sleeps or yields. Nothing here can
 # iterate more than `len(payload) + budget` times. What this adds is that
 # giving up is BOUNDED, CLASSIFIED and COUNTED instead of immediate, blind and
@@ -36,13 +36,13 @@
 # argument `fd_write_all` makes for itself — a call site gets the policy by
 # CALLING, not by remembering.
 #
-# # Why `komira_log` and not `komira_core`
+# # Why `komira_log` and not the core packages
 #
 # It has to be reachable from BOTH `komira_log` and `komira_http`, and
-# `komira_log` is the package `komira_http` already depends on for logging. `komira_core`
+# `komira_log` is the package `komira_http` already depends on for logging. The core packages
 # would also work and is the more obvious home for an io helper, but nearly
 # every package depends on it and this does not need to be upstream of
-# everything to do its job. This module imports only `komira_core`, so the
+# everything to do its job. This module imports only the core packages, so the
 # edge is acyclic and the blast radius is the logging consumers — exactly the
 # population that cares.
 #
@@ -80,7 +80,7 @@
 # choice `fd_write_all` made and for its reason: a bare `write` declaration
 # collides with the stdlib's own reserved one once a link unit's closure also
 # pulls in `std.os`'s, and `komira_log` sits in large closures. The shim is
-# `komira_core`'s C wrapper library, and it is a direct `return write(...)`
+# the core packages' C wrapper library, and it is a direct `return write(...)`
 # with no intervening libc call — so errno survives the extra C frame. The
 # syscall arms of the test assert exactly that against a real kernel.
 #
@@ -91,7 +91,7 @@
 from std.sys.info import CompilationTarget
 from std.ffi import external_call
 
-from komira_core.io.fd_write_all import FD_WRITE_MAX_CALL_BYTES
+from komira_libc.fd_write_all import FD_WRITE_MAX_CALL_BYTES
 
 
 # -----------------------------------------------------------------------------
@@ -405,7 +405,7 @@ def write_line_best_effort(fd: Int32, payload: Span[UInt8, _]) -> LineWrite:
             it is an `LOG_WRITE_FATAL` outcome with `EBADF` recorded.
         payload: The fully-rendered line, newline included. Empty issues NO
             syscall and reports complete, mirroring
-            `komira_core.io.fd_write_all.write_all_fd`.
+            `komira_libc.fd_write_all.write_all_fd`.
 
     Returns:
         The `LineWrite` describing what happened. `complete()` on the healthy
@@ -431,8 +431,8 @@ def write_line_best_effort(fd: Int32, payload: Span[UInt8, _]) -> LineWrite:
             request = FD_WRITE_MAX_CALL_BYTES
         # ⚠ `fd` GOES IN AS `Int32`, NOT `Int(fd)`. Mojo legalizes ONE
         # signature per external symbol per link unit, and the two existing
-        # declarations of this shim (`komira_core.io.posix_io.RawWriteFd.
-        # write_bytes` and `komira_core.io.fd_write_all.write_all_fd`) both
+        # declarations of this shim (`komira_libc.posix_io.RawWriteFd.
+        # write_bytes` and `komira_libc.fd_write_all.write_all_fd`) both
         # pass it as `Int32`. An `Int(fd)` here widens the first argument to
         # `index` and the link fails with "existing function with conflicting
         # signature" as soon as this module shares a closure with another

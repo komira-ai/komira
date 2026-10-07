@@ -9,7 +9,7 @@
 # import line put fifty modules that `Expr` never names into `Expr`'s
 # translation-unit closure.
 #
-# MEASURED as the komira_core-restricted import closure, seed included:
+# MEASURED as the core packages-restricted import closure, seed included:
 #
 #     closure(expr.mojo)                                       90
 #     ... with the `logical_plan` edge cut                     59

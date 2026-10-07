@@ -40,9 +40,9 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, SchemaBuilder
-from komira_core.plan.partition_expr import (
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_plan_expr.partition_expr import (
     FRAME_BOUND_CURRENT_ROW,
     FRAME_BOUND_FOLLOWING,
     FRAME_BOUND_PRECEDING,

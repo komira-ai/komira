@@ -95,7 +95,7 @@ defect in the same tree and must fail naming it, `enforce = True` included.
 ./buck2 build tests//negative/readme_api_coverage:stale_used   # must fail: komira_a bye: src/komira_a/README.md uses it now
 ```
 
-## 42. The layout of src/
+## 43. The layout of src/
 
 `src/` holds what komira ships, one package per directory; a package that
 exists only to test others is under `src/tests/`, by kind

@@ -22,7 +22,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_http_client and komira_http_core (the S3 store, the signed
 # CreateBucket and the health probe), komira_test_run_id and
 # komira_test_verdict (the run id and the CANNOT_TELL exit of the opener),
-# and komira_core_ffi (`_read_env`, for the scratch root).
+# and komira_libc (`_read_env`, for the scratch root).
 #
 # The welded tests are hermetic: the store's verbs over komira_http_core's
 # `ScriptedConnector` and a test connector that logs each request to a
@@ -36,10 +36,11 @@ mojo_library(
     name = "komira_test_s3_adapter",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_async:komira_async",
         "//src/komira_aws_core:komira_aws_core",
-        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
+        "//src/komira_libc:komira_libc",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_objectstore_s3:komira_objectstore_s3",
         "//src/komira_supervisor:komira_supervisor",

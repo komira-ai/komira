@@ -79,11 +79,11 @@ from komira_plan_wire import (
     binding_to_bytes,
     scan_params_from_bytes,
 )
-from komira_core.arrow.schema import Schema, SchemaBuilder
-from komira_core.source.pushdown_gate import PushdownGate
-from komira_core.source.scan_binding import ScanBinding
-from komira_core.source.scan_params import ScanParams
-from komira_core.source.source_variant import SOURCE_VARIANT_BINDING
+from komira_arrow.schema import Schema, SchemaBuilder
+from komira_scan_source.pushdown_gate import PushdownGate
+from komira_scan_source.scan_binding import ScanBinding
+from komira_scan_source.scan_params import ScanParams
+from komira_scan_source.source_variant import SOURCE_VARIANT_BINDING
 
 
 comptime _FIXTURE_DIR: String = "src/komira_plan_wire/tests/fixtures/hostile/"

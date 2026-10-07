@@ -311,7 +311,7 @@ struct TcpStream(Movable):
                                               TcpStream values race the
                                               close at drop. Pattern
                                               borrowed from
-                                              `komira_core.collections.OwnedFd`.)
+                                              `the core packages.OwnedFd`.)
       var _registration: Optional[RegistrationHandle]
                                             — None until first EWOULDBLOCK
       var _epoll_fd: OwnedPointer[Int32]    — multiplexer fd captured at

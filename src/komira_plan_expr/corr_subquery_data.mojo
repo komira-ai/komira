@@ -9,9 +9,9 @@
 # If `CorrelatedSubqueryData` held a `var inner_plan: OwnedPointer[LogicalPlan]`
 # field, `expr.mojo` would have to import it (plus `LogicalPlan` itself, plus
 # the four `CORR_KIND_*`) out of `logical_plan.mojo`, and that single import
-# line would pull most of `komira_core` into `Expr`'s translation-unit closure:
+# line would pull most of the core packages into `Expr`'s translation-unit closure:
 #
-#     closure(plan/expr.mojo), komira_core-restricted, seed included
+#     closure(plan/expr.mojo), the core packages-restricted, seed included
 #       with the `logical_plan` edge .......................... 90
 #       with the `logical_plan` edge cut ...................... 59
 #       with `logical_plan` AND `partition_expr` cut ...........  7

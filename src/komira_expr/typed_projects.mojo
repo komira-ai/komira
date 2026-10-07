@@ -58,20 +58,20 @@
 #   - ProjectsLike trait + ProjectListStub: komira_expr.stage_program
 #   - RowTransform trait: komira_udf.row_transform
 #   - Layer A ExprX conformers: komira_eval.expr_x_conformers
-#   - Variadic pattern: komira_core.collections.variadic_pack
+#   - Variadic pattern: komira_collections.variadic_pack
 # =============================================================================
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.schema import (
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.schema import (
     RecordBatch,
     RecordBatchBuilder,
     SchemaBuilder,
     Field,
 )
-from komira_core.collections.batch_view import BatchView
-from komira_core.collections.multi_column_builder import (
+from komira_arrow.batch_view import BatchView
+from komira_arrow.multi_column_builder import (
     MultiColumnBuilder,
     ColumnSlot,
     SinkKind,

@@ -6,7 +6,7 @@
 # EnvSource. Every library source of the package is staged as test data
 # (src/komira_aws_core/*.mojo); the test reads each one and fails if any file
 # other than sources.mojo -- the one home of `ProcessEnv` -- names getenv,
-# `_read_env`, komira_core_ffi or an `external_call`. sources.mojo itself must
+# `_read_env`, komira_libc or an `external_call`. sources.mojo itself must
 # reach getenv exactly once, through `_read_env`, so the scan is not vacuous.
 #
 # The behavioural half lives in test_credential_chain.mojo: every read the
@@ -37,7 +37,7 @@ def test_scan() raises:
     var banned: List[String] = [
         "getenv",
         "_read_env",
-        "komira_core_ffi",
+        "komira_libc",
         "external_call",
     ]
     for i in range(len(names)):
@@ -52,7 +52,7 @@ def test_scan() raises:
             saw_sources = True
             assert_equal(_count(text, "external_call"), 0, name)
             assert_equal(
-                _count(text, "from komira_core_ffi.posix import _read_env"), 1, name
+                _count(text, "from komira_libc.posix import _read_env"), 1, name
             )
             assert_equal(_count(text, "return _read_env(name)"), 1, name)
             continue

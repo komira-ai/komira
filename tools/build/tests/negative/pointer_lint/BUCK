@@ -1,0 +1,104 @@
+load("@komira//tools/build/lint:defs.bzl", "pointer_lint")
+load("//functional/pointer_lint:fixture.bzl", "POINTER_FFI", "POINTER_HOLDS", "POINTER_TREE")
+
+# Test 41 (the pointer lint), the half that must go red: one planted defect
+# per target, in the tree of functional/pointer_lint (whose `ok` builds).
+# run_tests.sh requires each to fail naming its finding.
+
+# A site of each rule, in a file no row holds (src/komira_a/plant.mojo unless
+# the target names another path), or one more site than a row holds.
+[
+    pointer_lint(
+        name = name,
+        ffi = POINTER_FFI,
+        files = POINTER_TREE | {path: src},
+        holds = POINTER_HOLDS,
+    )
+    for name, path, src in [
+        ("wildcard_origin", "src/komira_a/plant.mojo", "plant_wildcard_origin.txt"),
+        ("from_address", "src/komira_a/plant.mojo", "plant_from_address.txt"),
+        ("partial_move", "src/komira_a/plant.mojo", "plant_partial_move.txt"),
+        # The two-statement form: the site is the take.
+        ("partial_move_two", "src/komira_a/plant.mojo", "plant_partial_move_two.txt"),
+        ("parallelize", "src/komira_a/plant.mojo", "plant_parallelize.txt"),
+        ("libc_read", "src/komira_a/plant.mojo", "plant_libc_read.txt"),
+        ("libc_open", "src/komira_a/plant.mojo", "plant_libc_open.txt"),
+        ("public_pointer", "src/komira_a/plant.mojo", "plant_public_pointer.txt"),
+        ("public_method", "src/komira_a/plant.mojo", "plant_public_method.txt"),
+        # A library file of a test-only package (src/tests/<kind>/<pkg>):
+        # the src/tests container is not a package's tests directory.
+        ("public_pointer_container", "src/tests/e2e/komira_c_e2e/plant.mojo", "plant_public_pointer.txt"),
+        # A package's __init__.mojo is public, though its name starts with `_`.
+        ("public_init", "src/komira_b/__init__.mojo", "plant_init.txt"),
+        # held.mojo with a third parallelize: the row holds two.
+        ("held_new_site", "src/komira_a/held.mojo", "held_plus.txt"),
+        # The FFI module with an unsafe_from_address=: only origins are exempt.
+        ("ffi_from_address", "src/komira_a/ffi.mojo", "ffi_from_address.txt"),
+        # A wildcard origin in a marked module the FFI ledger does not list.
+        ("ffi_unlisted", "src/komira_a/ffi_clean.mojo", "ffi_unlisted.txt"),
+    ]
+]
+
+# A defect in one ledger: the holds (holds_*.tsv) or the FFI modules
+# (ffi_*.tsv), each the fixture's ledger with one row changed or added.
+[
+    pointer_lint(
+        name = name,
+        ffi = ffi or POINTER_FFI,
+        files = POINTER_TREE | ({"src/komira_a/mention.mojo": "ffi_mention.txt"} if name == "ffi_mention" else {}),
+        holds = holds or POINTER_HOLDS,
+    )
+    for name, holds, ffi in [
+        # A row of three fields.
+        ("holds_malformed", "holds_malformed.tsv", None),
+        ("holds_rule", "holds_rule.tsv", None),
+        # A row for a file the tree does not hold.
+        ("holds_file", "holds_file.tsv", None),
+        ("holds_count", "holds_count.tsv", None),
+        ("holds_reason", "holds_reason.tsv", None),
+        ("holds_duplicate", "holds_duplicate.tsv", None),
+        # A count above the sites (the holds only shrink).
+        ("holds_lower", "holds_lower.tsv", None),
+        # A row for a file with no site of its rule.
+        ("holds_delete", "holds_delete.tsv", None),
+        # A wildcard_origin row for the FFI module: its origins are not sites.
+        ("holds_ffi_wildcard", "holds_ffi_wildcard.tsv", None),
+        # A row of one field.
+        ("ffi_malformed", None, "ffi_malformed.tsv"),
+        # A module with no `# FFI-BOUNDARY:` comment.
+        ("ffi_unmarked", None, "ffi_unmarked.tsv"),
+        # A module (mention.mojo, planted for this target) whose docstring
+        # names `# FFI-BOUNDARY:`, which is not a comment line: the row is
+        # refused, so its wildcard origin is a site too.
+        ("ffi_mention", None, "ffi_mention.tsv"),
+        # A marked module that names no wildcard origin.
+        ("ffi_clean_row", None, "ffi_clean_row.tsv"),
+        ("ffi_file", None, "ffi_file.tsv"),
+        ("ffi_duplicate", None, "ffi_duplicate.tsv"),
+        ("ffi_reason", None, "ffi_reason.tsv"),
+    ]
+]
+
+# No .mojo file in the tree: the lint checks nothing, so it fails.
+pointer_lint(
+    name = "empty",
+    ffi = POINTER_FFI,
+    files = {"src/komira_a/notes.txt": "plant_parallelize.txt"},
+    holds = POINTER_HOLDS,
+)
+
+# Neither `tree` nor `files`: refused at analysis.
+pointer_lint(
+    name = "no_tree",
+    ffi = POINTER_FFI,
+    holds = POINTER_HOLDS,
+)
+
+# Both `tree` and `files`: refused at analysis.
+pointer_lint(
+    name = "both_tree_and_files",
+    ffi = POINTER_FFI,
+    files = POINTER_TREE,
+    holds = POINTER_HOLDS,
+    tree = ":doc_tree",
+)

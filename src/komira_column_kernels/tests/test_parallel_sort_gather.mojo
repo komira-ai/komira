@@ -50,14 +50,14 @@ from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Field, Schema
 from komira_arrow.string_array import StringArray
 from komira_arrow.arrow_types import ArrowType
-from komira_concurrency.token import CancellationToken
+from komira_async_api.token import CancellationToken
 from komira_buffer.heap_region import HeapRegion
 from komira_column_kernels.compiler_helpers import (
     GATHER_SERIAL_ONLY,
     gather_batch_dispatch,
 )
-from komira_concurrency.parallel_dispatch import ParallelDispatch
-from komira_concurrency.worker_pool_traits import KeepAlive, Segment
+from komira_async_api.parallel_dispatch import ParallelDispatch
+from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
 
 # -----------------------------------------------------------------------------

@@ -16,7 +16,7 @@
 #      `_read_small_file_to_string`, `_parse_decimal_int`,
 #      `_find_substring_bytes` and the ASCII codepoint constants.
 #
-# # WHY IT IS IN `komira_core.runtime` AND NOT IN THE ENGINE
+# # WHY IT IS IN `komira_host`.runtime` AND NOT IN THE ENGINE
 #
 # A host probe with no engine semantics must not put an engine package into
 # the closure of everything that needs it: the Parquet footer cache sizes

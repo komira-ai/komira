@@ -1,0 +1,4 @@
+# old	new: the packages renamed after their copy commit. repoint.py --renames does the rename; the gates read this to find the renamed directory (the maps keep the old names, because copy_exact compares a trailered commit with what the map generates for it)
+komira_scalar_arith	komira_scalar_arithmetic
+komira_concurrency	komira_async_api
+komira_agg_contract	komira_agg_api

@@ -42,7 +42,7 @@
 # =============================================================================
 
 from komira_kernels.simd_of import SimdOf
-from komira_core.eval.cast_null import round_half_to_even
+from komira_column_kernels.cast_null import round_half_to_even
 
 
 # =============================================================================

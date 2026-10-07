@@ -50,18 +50,18 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_core.arrow.column import Column
-from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.arrow.schema import Field, Schema, SchemaBuilder
-from komira_core.arrow.string_array import StringArray
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.io.heap_region import HeapRegion
-from komira_core.helpers.compiler_join_assembly import (
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_arrow.string_array import StringArray
+from komira_arrow.arrow_types import ArrowType
+from komira_buffer.heap_region import HeapRegion
+from komira_join_assembly.compiler_join_assembly import (
     assemble_join_result,
     assemble_join_result_dispatch,
 )
-from komira_core.helpers.compiler_helpers import GATHER_SERIAL_ONLY
+from komira_column_kernels.compiler_helpers import GATHER_SERIAL_ONLY
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK

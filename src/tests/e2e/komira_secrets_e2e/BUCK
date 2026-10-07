@@ -76,8 +76,6 @@ mojo_library(
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_aws_secretsmanager:komira_aws_secretsmanager",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
-        "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_datetime:komira_datetime",
         "//src/komira_encoding:komira_encoding",

@@ -8,8 +8,8 @@
 # properties the sink side keeps:
 #
 #   LAYERING — all 7 `SourceLike` conformers must live inside
-#   `komira_core/source/`, so nothing above the engine can be a source. Adding
-#   a broker arm would force komira_core to depend on the broker and its
+#   the core packages, so nothing above the engine can be a source. Adding
+#   a broker arm would force the core packages to depend on the broker and its
 #   object-store and HTTP stack, INVERTING THE BUILD DAG. Sinks, a trait
 #   PARAMETER, can be defined in any package. One field is the whole
 #   difference.
@@ -170,7 +170,7 @@ def scan_kind_id(name: String) -> UInt32:
 
     ⚠ WHY NOT A TAG BYTE. Hand-assigned ids (`SCAN_KIND_PARQUET: UInt8 = 2`)
     need a central allocation table, and a central allocation table in
-    `komira_core` is the closed union again in another spelling — every new
+    the core packages is the closed union again in another spelling — every new
     kind would edit core just to claim a number.
 
     A hashed name needs no table (no core edit to claim an id) and is stable

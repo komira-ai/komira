@@ -24,8 +24,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_core.arrow.arrow_types import ArrowType
-from komira_core.plan.expr import (
+from komira_arrow.arrow_types import ArrowType
+from komira_plan_expr.expr import (
     Expr,
     EXPR_BINARY_OP,
     BIN_EQ,
@@ -34,7 +34,7 @@ from komira_core.plan.expr import (
     BIN_AND,
     BIN_OR,
 )
-from komira_core.plan.scalar_value import ScalarValue
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_scan_planning.partition_predicate_split import (
     split_partition_predicate,
     should_use_pruned_discovery,

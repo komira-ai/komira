@@ -8,7 +8,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_core:komira_core",
+        "//src/komira_collections:komira_collections",
     ],
     test_srcs = [
         "tests/test_spsc_ring.mojo",

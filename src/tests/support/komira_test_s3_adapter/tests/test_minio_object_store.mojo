@@ -34,7 +34,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
-from komira_core_ffi.posix import _read_env
+from komira_libc.posix import _read_env
 from komira_http_core.transport.io_stream import (
     Connector,
     IoStream,

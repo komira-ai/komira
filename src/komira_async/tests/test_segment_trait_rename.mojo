@@ -4,7 +4,7 @@
 #
 # Verifies:
 #   1. `Segment` resolves from its canonical home in
-#      `komira_core.runtime_traits.worker_pool_traits`.
+#      `komira_async_api.worker_pool_traits`.
 #   2. A struct annotated `Segment, Deinitable` compiles
 #      and satisfies run_with_state's `T: Segment` bound.
 #
@@ -32,7 +32,7 @@ from komira_async.runtime.runtime import (
     PLACEMENT_FIXED,
     PerCoreAsyncRuntime,
 )
-from komira_core.runtime_traits.worker_pool_traits import (
+from komira_async_api.worker_pool_traits import (
     KeepAlive,
     Segment,
 )

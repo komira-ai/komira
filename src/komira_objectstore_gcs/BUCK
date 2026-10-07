@@ -38,11 +38,12 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
+        "//src/komira_buffer:komira_buffer",
         "//src/komira_clock:komira_clock",
-        "//src/komira_core:komira_core",
         # For the tests only: mojo_library has no test-only deps, and they
         # load the dummy account's PEM key with komira_crypto's
         # `rsa_pkcs8_der_from_pem`.
+        "//src/komira_collections:komira_collections",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_fs:komira_fs",
         "//src/komira_gcp_core:komira_gcp_core",
@@ -53,6 +54,7 @@ mojo_library(
         # For the tests only: they parse the conformance JSON with it.
         "//src/komira_json:komira_json",
         "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_retry:komira_retry",
     ],

@@ -5,10 +5,10 @@
 # These two symbols — the row-mode `RowSelectionVector` and the
 # column-borrow-site gather primitive `load_via_sel` — depend ONLY on
 # `komira_arrow.primitive_array.PrimitiveArray` (strictly DOWN into
-# core), so they live in this leaf layer. Consumers inside `komira_core`
+# core), so they live in this leaf layer. Consumers inside the core packages
 # (`collections/chunk_typed.mojo`, `arrow/gather_recordbatch.mojo`) import
 # them from here; `komira_eval` re-exports them (the SAME struct, so type
-# identity and codegen are preserved), so no `komira_core -> komira_eval`
+# identity and codegen are preserved), so no `the core packages -> komira_eval`
 # up-edge exists. A hermetic build that stages only declared inputs would
 # reject such an edge even where a local sibling-source search accepts it.
 #
@@ -81,7 +81,7 @@ comptime HIGH_SELECTIVITY_THRESHOLD: Float32 = 0.95
 # Memory:
 # - Backed by a `_raw: OwnedPointer[UInt8]` over `capacity *
 #   sizeof(UInt32)` bytes plus 64-byte tail padding for SIMD over-read
-#   safety, matching the MmapAlignedBuffer pattern in `komira_core/arrow/`.
+#   safety, matching the MmapAlignedBuffer pattern in the core packages.
 # - The OwnedPointer wraps an UnsafePointer with a CONCRETE origin —
 #   no wildcard origin, so destroy-recreate cycles cannot reinterpret stale
 #   bytes under a new struct's lifetime.
