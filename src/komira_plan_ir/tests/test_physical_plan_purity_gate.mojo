@@ -431,9 +431,9 @@ def test_door_refuses_a_subquery_on_the_pushed_parquet_filter() raises:
 
 
 def test_door_refuses_a_subquery_on_a_filter_op() raises:
-    """SITE 2 of 4: `ops[i].filter_predicate` — the site the cutter's PLAN_FILTER
-    arm writes verbatim from `FilterData.predicate`, i.e. the one a real
-    undecorrelated plan lands on."""
+    """SITE 2 of 4: `ops[i].filter_predicate`, which `MorselOp.filter` sets —
+    the field a filter predicate is held in, so the one an undecorrelated
+    `WHERE EXISTS (...)` would occupy."""
     var ops = Slab[MorselOp]()
     ops.append(MorselOp.filter(_corr()))
     var segs = List[SegmentDescPod]()
@@ -480,8 +480,8 @@ def test_door_refuses_a_subquery_in_a_project_expr_array() raises:
 
 
 def test_door_refuses_a_subquery_in_a_probe_residual() raises:
-    """SITE 4 of 4: `ops[i].probe_residual` — the non-equi join residual the
-    cutter carries onto the probe op."""
+    """SITE 4 of 4: `ops[i].probe_residual` — the non-equi join residual that
+    `MorselOp.join_probe_with_residual` sets on the probe op."""
     var ops = Slab[MorselOp]()
     ops.append(
         MorselOp.join_probe_with_residual(
