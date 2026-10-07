@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: keys=a
+#  float: ulps=0
+# derivation: TOPN 3 BY a ASC NULLS FIRST (§4.2): the NULLs (id 2, 5) and
+# then a = 1 (id 3). The boundary row a = 1 is unique, so which rows come
+# back is fixed; id 2 and 5 tie on a and compare as a multiset (§4.7).
+# Types: a TOPN keeps its input columns, as scanned.
+id:int64	a:int64?	b:int64?	f:float64?
+2	\N	2	0.0
+5	\N	1	\N
+3	1	2	-0.0

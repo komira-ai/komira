@@ -15,10 +15,17 @@
 from .plan_case import Case
 from .cases_agg_grouping import cases as agg_grouping_cases
 from .cases_filter_3vl import cases as filter_3vl_cases
+from .cases_join_residual_nullkeys import cases as join_residual_nullkeys_cases
+from .cases_sort_topn_limit import cases as sort_topn_limit_cases
 
 
 def shard_names() -> List[String]:
-    return [String("filter_3vl"), String("agg_grouping")]
+    return [
+        String("filter_3vl"),
+        String("agg_grouping"),
+        String("join_residual_nullkeys"),
+        String("sort_topn_limit"),
+    ]
 
 
 def shard_cases(name: String) raises -> List[Case]:
@@ -26,6 +33,10 @@ def shard_cases(name: String) raises -> List[Case]:
         return filter_3vl_cases()
     if name == "agg_grouping":
         return agg_grouping_cases()
+    if name == "join_residual_nullkeys":
+        return join_residual_nullkeys_cases()
+    if name == "sort_topn_limit":
+        return sort_topn_limit_cases()
     raise Error("plan_conformance: no shard named '" + name + "'")
 
 

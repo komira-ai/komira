@@ -1,0 +1,7 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §4.8: LIMIT n without a sort returns n rows of its input;
+# n = 0 returns none. The empty result keeps the input columns.
+# Types: a LIMIT keeps its input columns, as scanned.
+id:int64	a:int64?	b:int64?	f:float64?

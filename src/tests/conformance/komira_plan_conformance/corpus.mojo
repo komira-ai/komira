@@ -477,11 +477,17 @@ def check_expectation(c: Case, text: String, plan: LogicalPlan) -> List[String]:
 # -----------------------------------------------------------------------------
 
 
-def _value_fits(t: ArrowType, v_is_int: Bool, v_is_bool: Bool, v_is_string: Bool) raises -> Bool:
+def _value_fits(
+    t: ArrowType, v_is_int: Bool, v_is_number: Bool, v_is_bool: Bool, v_is_string: Bool
+) raises -> Bool:
     if t == ArrowType.BOOL:
         return v_is_bool
     if t == ArrowType.INT64:
         return v_is_int
+    if t == ArrowType.FLOAT64:
+        # Any JSON number. JSON has no NaN or infinity, so a dataset cannot
+        # hold them.
+        return v_is_number
     if t == ArrowType.STRING:
         return v_is_string
     raise Error("no JSON check for column type " + arrow_type_name(t))
@@ -525,7 +531,9 @@ def check_dataset(ds: Dataset, text: String) -> List[String]:
                         problems.append(at + "'" + name + "' is null in a non-nullable column")
                     continue
                 var t = ds.schema.field_arrow_type(i)
-                if not _value_fits(t, v.is_integral_number(), v.is_bool(), v.is_string()):
+                if not _value_fits(
+                    t, v.is_integral_number(), v.is_number(), v.is_bool(), v.is_string()
+                ):
                     problems.append(
                         at + "'" + name + "' is " + v.serialize()
                         + ", not a " + arrow_type_name(t)
