@@ -666,6 +666,7 @@ pub fn lower_aws_service(
         vec![IrService {
             name: service_struct_name(&lowerer.meta),
             default_host: None,
+            host_from_service_config: false,
             methods,
         }]
     };

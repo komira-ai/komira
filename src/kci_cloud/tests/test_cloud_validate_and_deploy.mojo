@@ -103,7 +103,7 @@ from kci_cloud import (
     FIELD_TABLE,
     FIELD_BUCKET,
     FIELD_SERVICE_ACCOUNT,
-    FIELD_GRANT,
+    FIELD_GRANT, FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION, Feed,
     apply_resources,
     body_field,
     describe,
@@ -269,11 +269,10 @@ struct _Stub(CloudAdapter, Movable):
         var l = List[Int]()
         l.append(FIELD_SERVICE)
         if self._full:
-            l.append(FIELD_JOB)
-            l.append(FIELD_TABLE)
-            l.append(FIELD_BUCKET)
-            l.append(FIELD_SERVICE_ACCOUNT)
+            for f in [FIELD_JOB, FIELD_TABLE, FIELD_BUCKET, FIELD_QUEUE, FIELD_SERVICE_ACCOUNT, FIELD_TOPIC]:
+                l.append(f)
             l.append(FIELD_GRANT)
+            l.append(FIELD_SUBSCRIPTION)
         return l^
 
     def absences(self) -> List[Absence]:
@@ -284,6 +283,8 @@ struct _Stub(CloudAdapter, Movable):
             l.append(Absence(FIELD_BUCKET, NOT_YET, String("no object store")))
             l.append(Absence(FIELD_SERVICE_ACCOUNT, NOT_YET, String("no identities")))
             l.append(Absence(FIELD_GRANT, NOT_YET, String("no grants")))
+            for f in [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]:
+                l.append(Absence(f, NOT_YET, String("no messaging")))
         return l^
 
     def configure(mut self, ctx: CellContext) -> List[Finding]:
@@ -319,7 +320,7 @@ struct _Stub(CloudAdapter, Movable):
     def public_mechanism(self) -> String:
         return self._mechanism.copy()
 
-    def check(self, r: Resource) -> List[Finding]:
+    def check(self, r: Resource, feeds: List[Feed]) -> List[Finding]:
         var l = List[Finding]()
         if r._oneof0_case == 1 and r.service.value().port == 1:
             l.append(
@@ -337,7 +338,7 @@ struct _Stub(CloudAdapter, Movable):
     def required_artifact(self, r: Resource) -> ArtifactNeed:
         return ArtifactNeed(String("oci-image"), String("linux/amd64"))
 
-    def lower(self, r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
+    def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
         if self._bad_owner:
             owner = String("someone-else")

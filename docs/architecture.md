@@ -46,6 +46,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 | [`komira_join_assembly`](../src/komira_join_assembly/) | Join result assembly: gather-index planning, chunked parallel gather, join-key common-subexpression. |
 | [`komira_libc`](../src/komira_libc/) | the canonical libc / POSIX FFI declarations: one declaration per C symbol, so two packages in one link unit never declare the same symbol with conflicting signatures. |
 | [`komira_atomic_alias`](../src/komira_atomic_alias/) | the one place the repository spells `Atomic[...]`; it imports only `std.atomic`, so any package may depend on it. |
+| [`komira_sync`](../src/komira_sync/) | `SpinMutex`, a mutual-exclusion lock for plain code whose waiters yield and then sleep, for state several OS threads reach through one shared handle. A leaf over `komira_atomic_alias`. |
 | [`komira_rowcell`](../src/komira_rowcell/) | the typed table-cell value model: one `RowCell` struct, its six scalar type tags, typed constructors and value equality. A leaf that imports only the Mojo standard library. |
 
 ### Codecs and wire formats
@@ -84,7 +85,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 
 | module | what it is |
 |---|---|
-| [`komira_aws_core`](../src/komira_aws_core/) | the one hand-written AWS core under the generated AWS clients: the credential value, SigV4 signing (headers and presigned URLs), the SDK default credential chain and region resolution, the shared config file parser, and the network-backed credential providers as request builders and response parsers. |
+| [`komira_aws_core`](../src/komira_aws_core/) | the one hand-written AWS core under the generated AWS clients: the credential value, SigV4 signing (headers and presigned URLs), the SDK default credential chain and region resolution, the shared config file parser, the network-backed credential providers as request builders and response parsers, and a Copyable credential source whose clones share one refreshing chain (so a cloned client never signs with an expired temporary credential), with the HTTP transport that chain sends over. |
 | [`komira_aws_s3`](../src/komira_aws_s3/) | the Amazon S3 client, generated at build time from botocore's pinned S3 model (no source is committed): each operation's request builder and response parser, and its endpoint resolved through S3's published endpoint ruleset, and `S3Client`, which signs and sends each call through `komira_aws_core` over the connector it is given. It reads no environment. |
 | [`komira_aws_dynamodb`](../src/komira_aws_dynamodb/) | the Amazon DynamoDB client, generated at build time from botocore's pinned DynamoDB model (no source is committed): the item, query, scan and table operations' request builders and response parsers, and their endpoints resolved through DynamoDB's published endpoint ruleset. Pure: it opens no connection and reads no environment; a caller signs a built request with `komira_aws_core`. |
 | [`komira_aws_dynamodbstreams`](../src/komira_aws_dynamodbstreams/) | the Amazon DynamoDB Streams client, generated at build time from botocore's pinned DynamoDB Streams model (no source is committed): DescribeStream, GetShardIterator and GetRecords, their endpoints resolved through the service's published endpoint ruleset, and a client that signs and sends each call through `komira_aws_core` over a connector it is given. It reads no environment. |
@@ -159,6 +160,16 @@ dependency order is the order of the rows.
 | [`komira_test_minio`](../src/komira_test_minio/) | an embedded MinIO the test starts itself: pinned by sha256, a private temporary directory, a random root credential in 0600 files, random loopback-only ports, dies with the test. It hands back the endpoint, region and credentials-file path, and `stop()` returns a verdict. |
 | [`komira_test_bucket`](../src/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
 | [`komira_test_s3_adapter`](../src/komira_test_s3_adapter/) | the real adapters behind those seams, for a test that runs on an embedded MinIO: `SpawnedProcessRunner` (starts the server through `spawn_detached` and setpriv so it dies with the test, Linux only; readiness from MinIO's health endpoint) and `MinioObjectStore` (an `S3Store`, path-style plaintext, the credential from the shared-credentials file), and `open_embedded_minio_test_bucket`, which opens a run's bucket from the test's flags with both. The only one of these libraries with an HTTP stack and a process supervisor. |
+
+[`komira_test_fake_s3`](../src/tests/support/komira_test_fake_s3/) is a
+test-support library of another kind: a fake S3 in memory for hermetic
+welded tests, with no flags and no socket. It is a komira_http_core
+`Connector` whose streams answer GET (ranges, suffix ranges, If-Match),
+HEAD, ListObjectsV2, conditional PutObject, DeleteObject and multipart
+uploads, with faults a test sets (a 409 conflict, a request budget, a
+trapped key, an overwrite racing a read, failed multipart steps).
+komira_objectstore_s3 names it in `test_deps`, which reaches its welded
+tests and nothing it ships.
 
 ### End-to-end test packages
 
@@ -245,7 +256,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 | storage formats: Parquet, text and row formats, Iceberg and CDC, an MVCC table store | komira_parquet, komira_csv, komira_iceberg, komira_table_store |
 | execution and operators: pipelines and morsel dispatch, aggregation, joins, sort, top-N, window | the engine libraries |
 | plan and optimizer: logical and physical planning, the plan wire format, the query optimizer | komira_compiler, komira_optimizer |
-| SDK and SQL: the plan-carrier surface, UDFs, the Python package, the SQL front ends | komira_sdk |
+| SDK and SQL: the plan-carrier surface, UDFs, the Python package, the SQL parser and binder | komira_sdk, komira_sql (its lexer and syntax tree are in `src/`) |
 | runtime: the async runtime, the job supervisor and its job report wire | komira_async, komira_job_supervisor, komira_job_report_proto |
 | observability: logging and telemetry | komira_log |
 | agents: MCP and local models | komira_mcp_server, komira_localmodel |
