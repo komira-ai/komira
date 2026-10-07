@@ -1,4 +1,4 @@
-The planted module map of test 43 (src_layout): the rows of
+The planted module map of test 45 (src_layout): the rows of
 fixture.bzl's packages, as docs/architecture.md writes them. It is .txt so
 the Markdown link check, which would find these links dead, does not read
 it; the src_layout lint reads any file.

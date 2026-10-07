@@ -1,0 +1,2 @@
+# A word a private consumer keeps out of its public repository.
+zanzibar

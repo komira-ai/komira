@@ -33,11 +33,17 @@ def _read(name: String) raises -> String:
 comptime _FILES: List[String] = [
     "__init__.mojo",
     "byte_stream_split.mojo",
+    "decimal_decode.mojo",
     "decode_arm_trace.mojo",
     "delta.mojo",
     "delta_byte_array.mojo",
+    "payload_sel_trace.mojo",
+    "plain.mojo",
+    "plain_flba.mojo",
     "rle.mojo",
     "rle_bitunpack.mojo",
+    "scan_copy_trace.mojo",
+    "staged_filter_trace.mojo",
 ]
 
 
@@ -171,6 +177,7 @@ def test_imports_only_its_deps() raises:
         "komira_arrow",
         "komira_atomic_alias",
         "komira_buffer",
+        "komira_simd",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde", "komira_" + "core"]
     var files = materialize[_FILES]()
