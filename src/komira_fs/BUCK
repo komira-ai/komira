@@ -46,6 +46,7 @@ mojo_library(
         "tests/test_local_fs_list_dir_shallow.mojo",
         "tests/test_local_fs_list_recursive.mojo",
         "tests/test_local_fs_read_at_mmap.mojo",
+        "tests/test_local_fs_real_file_read.mojo",
         "tests/test_local_fs_trait_elaboration.mojo",
         "tests/test_local_fs_write_at.mojo",
         "tests/test_path_discovery.mojo",

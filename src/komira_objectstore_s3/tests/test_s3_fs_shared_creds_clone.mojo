@@ -1,14 +1,13 @@
-# The S3 arm of an FsHandle signs with the credential the shared default chain
-# holds NOW. The handle's credential source is komira_aws_core's
-# SharedCredsSource over the real chain (the container endpoint, scripted: no
-# network) and a clock the test advances; the arm's connector is
-# AwsEchoConnector, whose answer carries the request as it reached the wire.
+# An S3Fs signs with the credential the shared default chain holds NOW. The
+# file system's credential source is komira_aws_core's SharedCredsSource over
+# the real chain (the container endpoint, scripted: no network) and a clock
+# the test advances; its connector is AwsEchoConnector, whose answer carries
+# the request as it reached the wire.
 #
-# Rows: the handle and a clone of it made before the rotation share ONE
+# Rows: a file system and a clone of it made before the rotation share ONE
 # refresh: after the first credential's refresh window opens, the clone signs
 # with credential 2, then the original does, and the endpoint was called twice
-# (once per credential), not once per handle; the production handle type
-# (`FsHandle`) takes the shared chain as its credential source by default.
+# (once per credential), not once per file system.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
@@ -23,15 +22,12 @@ from komira_aws_core import (
     DefaultChainCredsSource,
     MapEnv,
     MapFiles,
-    ProcessCredsSource,
     SharedCredsSource,
     SystemAwsClock,
 )
-from komira_fs_registry import FsHandle, FsHandleOver, S3Arm, S3ProdConnector
 from komira_http_client.client import HttpClientConfig
-from komira_objectstore_s3 import AddressingStyle, S3Config
+from komira_objectstore_s3 import AddressingStyle, S3Config, S3Fs
 from komira_retry import Backoff, Jitter, RetryPolicy
-from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_S3
 
 
 # 2026-09-19T12:00:00Z
@@ -85,7 +81,7 @@ struct _Endpoint(CredentialTransport, Copyable, Movable, Deinitable):
 comptime _Creds = SharedCredsSource[
     DefaultChainCredsSource[MapEnv, MapFiles, _Endpoint, _CredClock]
 ]
-comptime _Handle = FsHandleOver[AwsEchoConnector, _Creds]
+comptime _Fs = S3Fs[AwsEchoConnector, _Creds, SystemAwsClock]
 
 
 def _mk_echo() raises -> AwsEchoConnector:
@@ -107,8 +103,8 @@ def _creds(script: ArcPointer[_Script], now: ArcPointer[_Now]) -> _Creds:
     )
 
 
-def _arm(var creds: _Creds) raises -> S3Arm[AwsEchoConnector, _Creds]:
-    return S3Arm[AwsEchoConnector, _Creds](
+def _fs(var creds: _Creds) raises -> _Fs:
+    return _Fs(
         "lake",
         S3Config(
             "us-east-1",
@@ -123,14 +119,13 @@ def _arm(var creds: _Creds) raises -> S3Arm[AwsEchoConnector, _Creds]:
         _mk_echo,
         HttpClientConfig.defaults(),
         creds^,
-        # SystemAwsClock: the arm signs at the wall clock; only the key id and
+        # SystemAwsClock: the file system signs at the wall clock; only the key id and
         # token are asserted.
         SystemAwsClock(),
     )
 
 
-def _wire(h: _Handle) raises -> String:
-    ref fs = h.s3_ref().value()
+def _wire(fs: _Fs) raises -> String:
     var file = fs.open("data/a.parquet")
     try:
         _ = fs.read_at(file, 0, 4)
@@ -146,24 +141,18 @@ def _assert_signed_with(wire: String, n: Int) raises:
     assert_true(wire.find(token) >= 0, token + " is not in " + wire)
 
 
-def test_handle_and_clone_share_one_refresh() raises:
+def test_fs_and_clone_share_one_refresh() raises:
     var script = ArcPointer[_Script](_Script())
     var now = ArcPointer[_Now](_Now(_NOW))
-    var h = _Handle.from_s3(_arm(_creds(script, now)))
+    var h = _fs(_creds(script, now))
     var c = h.clone()
-    assert_equal(h.tag(), FS_SCHEME_S3)
     _assert_signed_with(_wire(h), 1)
     now[].seconds = _IN_WINDOW
     _assert_signed_with(_wire(c), 2)
     _assert_signed_with(_wire(h), 2)
-    assert_equal(script[].calls, 2, "the handle and its clone refreshed apart")
-
-
-def test_the_production_handle_takes_the_shared_chain() raises:
-    assert_true(FsHandle.is_arm_type[S3Arm[S3ProdConnector, ProcessCredsSource]]())
+    assert_equal(script[].calls, 2, "the file system and its clone refreshed apart")
 
 
 def main() raises:
-    test_handle_and_clone_share_one_refresh()
-    test_the_production_handle_takes_the_shared_chain()
+    test_fs_and_clone_share_one_refresh()
     print("OK")

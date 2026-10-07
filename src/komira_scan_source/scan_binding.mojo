@@ -24,8 +24,8 @@
 #
 # PRECEDENT — the same seam exists for filesystems.
 # `komira_plan_expr/fs_descriptor_pod.mojo` is a pure identity POD on the
-# plan node whose live counterpart (`FsHandle`) lives in an upper-layer
-# `komira_fs_registry` side table, paired by node_id at materialize time.
+# plan node naming its source, whose live counterpart (the file system its
+# scheme names) is constructed above core at execute time.
 # `partition_pred_pod.mojo` is a second instance. ScanBinding is that same seam
 # applied to SOURCES.
 #
