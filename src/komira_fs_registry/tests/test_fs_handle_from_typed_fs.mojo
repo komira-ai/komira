@@ -3,7 +3,7 @@
 # tag; any other file system gets None.
 #
 # Rows: LocalFs[NoopSink] wraps with the local tag and keeps its root; the
-# production S3 arm (S3Fs over the TLS connector) wraps with the S3 tag and
+# production S3 arm (S3Fs over S3ProdConnector) wraps with the S3 tag and
 # keeps its bucket, and nothing is dialed (its connector factory raises);
 # an S3Fs over ScriptedConnector advertises the S3 scheme but is not the arm's
 # type, so it is not an arm and wraps to None, as does an S3Fs over the plain

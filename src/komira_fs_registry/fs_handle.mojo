@@ -48,20 +48,16 @@
 # parameters (`process_creds_source`) or names another source as the handle's
 # second parameter (`FsHandleOver[C, StaticCredsSource]`, used by tests).
 # The connector stays a parameter of `FsHandleOver[C, T]`, and `FsHandle` is
-# the production handle, `FsHandleOver[S3ProdConnector]` with
-# `S3ProdConnector = TlsConnector[KernelTcpConnector]`.
+# the production handle, `FsHandleOver[S3ProdConnector]`.
 #
-# One limit of the production arm follows, and it is deliberate for now:
-#
-#   * TLS ONLY. komira_http_client sends an https request only over a
-#     connector whose streams speak TLS, and refuses an http:// request over
-#     one (`HttpError[URL_INVALID]`). The production arm therefore serves
-#     https endpoints only; a plaintext S3-compatible endpoint
-#     (`S3Config.custom_endpoint(..., "http://...")`) is refused on the first
-#     request (test_fs_handle_s3_read). Serving one needs a connector that
-#     picks TLS or plaintext per URL scheme, or a second arm. (The credential
-#     providers' own requests are not subject to this: the production chain
-#     picks plain or TLS per request, `SchemeSplitCredentialTransport`.)
+# THE ENDPOINT'S SCHEME. komira_http_client sends an https request only over
+# a TLS connector and an http request only over a plaintext one. The
+# production connector (`S3ProdConnector`, s3_connector.mojo) is either,
+# fixed when it is made, and `s3_prod_arm` makes the arm's connectors
+# plaintext only when its endpoint is `http://` (a local MinIO or an
+# emulator) and TLS for an `https://` endpoint or AWS's own. An arm built
+# directly over a factory dials what that factory makes: a TLS connector
+# refuses an http:// endpoint on the first request (`HttpError[URL_INVALID]`).
 #
 # A test drives the same handle over komira_http_core's ScriptedConnector
 # (`FsHandleOver[ScriptedConnector]`), so the S3 arm is read through without a
@@ -89,9 +85,7 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_aws_core import AwsCredsSource, ProcessCredsSource, SystemAwsClock
 from komira_fs.file_system import FileSystem
 from komira_fs.local_fs import LocalFs
-from komira_http_client.tls_connector import TlsConnector
 from komira_http_core.transport.io_stream import Connector
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_objectstore_s3 import S3Fs
 from komira_plan_expr.fs_descriptor_pod import (
     FS_SCHEME_AZURE,
@@ -101,9 +95,8 @@ from komira_plan_expr.fs_descriptor_pod import (
     FsDescriptorPod,
 )
 
+from .s3_connector import S3ProdConnector
 
-# The production S3 arm's connector: TLS over a kernel TCP dial.
-comptime S3ProdConnector = TlsConnector[KernelTcpConnector]
 
 # The local arm: komira_fs's `LocalFs` with no waker sink.
 comptime LocalArm = LocalFs[NoopSink]
@@ -115,7 +108,8 @@ comptime S3Arm[
     C: Connector, T: AwsCredsSource & Copyable = ProcessCredsSource
 ] = S3Fs[C, T, SystemAwsClock]
 
-# The production handle: its S3 arm speaks TLS.
+# The production handle: its S3 arm dials plaintext or TLS as its endpoint
+# says (`s3_prod_arm`).
 comptime FsHandle = FsHandleOver[S3ProdConnector]
 
 

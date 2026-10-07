@@ -8,16 +8,16 @@
 # finds its own script spent (the clone's arm built a store of its own); a
 # file system wrapped by `from_typed_fs` is MOVED into the arm, so a store it
 # has already built is kept (its script, spent before the wrap, stays spent;
-# a rebuilt store would answer again); the production arm over a plaintext
-# http:// endpoint is refused on its first read (TLS only).
+# a rebuilt store would answer again); an arm whose factory makes the
+# production connector in its TLS form refuses a plaintext http:// endpoint
+# on its first read (test_fs_handle_s3_scheme: `s3_prod_arm` picks the
+# plaintext form for such an endpoint).
 from std.testing import assert_equal, assert_raises, assert_true
 
 from komira_aws_core import AwsCredential, StaticCredsSource, SystemAwsClock
-from komira_fs_registry import FsHandleOver, S3Arm, S3ProdConnector
+from komira_fs_registry import FsHandleOver, S3Arm, S3ProdConnector, s3_prod_tls_connector
 from komira_http_client.client import HttpClientConfig
-from komira_http_core.tls import TlsConfig
 from komira_http_core.transport.io_stream import Connector
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_objectstore_s3 import S3Config
 from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_S3
@@ -46,8 +46,9 @@ def _mk_one_range() raises -> ScriptedConnector:
 
 
 def _mk_tls() raises -> S3ProdConnector:
-    """A real production connector; the refusal comes before any dial."""
-    return S3ProdConnector.over(TlsConfig(), KernelTcpConnector.new())
+    """A real production connector in its TLS form; the refusal comes
+    before any dial."""
+    return s3_prod_tls_connector()
 
 
 def _http() -> HttpClientConfig:
@@ -124,7 +125,7 @@ def test_wrapping_keeps_a_built_store() raises:
         _ = _text(h, "data/a.parquet")
 
 
-def test_prod_arm_refuses_a_plaintext_endpoint() raises:
+def test_a_tls_connector_refuses_a_plaintext_endpoint() raises:
     var h = _ProdStaticHandle.from_s3(
         S3Arm[S3ProdConnector, StaticCredsSource](
             "lake",
@@ -144,5 +145,5 @@ def test_prod_arm_refuses_a_plaintext_endpoint() raises:
 def main() raises:
     test_s3_arm_reads_through_a_scripted_connector()
     test_wrapping_keeps_a_built_store()
-    test_prod_arm_refuses_a_plaintext_endpoint()
+    test_a_tls_connector_refuses_a_plaintext_endpoint()
     print("OK")
