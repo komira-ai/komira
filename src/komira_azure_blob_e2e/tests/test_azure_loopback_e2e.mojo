@@ -87,6 +87,8 @@ from komira_azure_blob_e2e import (
     FakeBlobService,
     serve_while,
 )
+from komira_azure_blob import AzureClientSpec, AzureCredential
+from komira_azure_core import AzureSharedKey
 
 
 comptime _Fs = AzureFs[KernelTcpConnector]
@@ -142,10 +144,18 @@ def _client(port: UInt16, key_b64: String) raises -> AzureClient[KernelTcpConnec
     )
 
 
-def _no_factory() raises -> AzureClient[KernelTcpConnector]:
-    """`AzureFs`'s clone factory. These tests never clone (a thin function
-    cannot carry the port the server picked at run time)."""
-    raise Error("the loopback tests do not clone an AzureFs")
+def _kernel_connector() raises -> KernelTcpConnector:
+    return KernelTcpConnector.new()
+
+
+def _spec(port: UInt16, key_b64: String) raises -> AzureClientSpec[KernelTcpConnector]:
+    """What a clone's client is built from: the account and key of
+    `_client(port, key_b64)`."""
+    return AzureClientSpec[KernelTcpConnector](
+        AzureConfig.azurite(String(AZURITE_ACCOUNT), String("127.0.0.1"), port),
+        AzureCredential.shared_key(AzureSharedKey(String(AZURITE_ACCOUNT), key_b64)),
+        _kernel_connector,
+    )
 
 
 def _wrong_key() -> String:
@@ -265,7 +275,7 @@ struct _Leg(ClientLeg):
         var fs = _Fs(
             container=String(_CONTAINER),
             client=_client(self.port, self.key_b64),
-            mk_client=_no_factory,
+            spec=_spec(self.port, self.key_b64),
         )
         if self.scenario == _SCENARIO_READS:
             self._reads(fs)
@@ -416,7 +426,7 @@ struct _Leg(ClientLeg):
         var other = _Fs(
             container=String("nocontainer"),
             client=_client(self.port, self.key_b64),
-            mk_client=_no_factory,
+            spec=_spec(self.port, self.key_b64),
         )
         # A List Blobs error names the prefix where a blob would go: the
         # container root here, so the path ends in `/`.

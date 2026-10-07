@@ -40,10 +40,23 @@ jobs:
           farm-address: ${{ vars.FARM_ADDRESS }}
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
-      - name: tools/build/tests/run_tests.sh
+      # The pinned pixi the conda install cases (33a, 33b) run: the platform
+      # table's linux-x86_64 pin (tools/build/platforms/table.bzl), which
+      # buck2 downloads and keeps only at the pin's sha256. With
+      # --require-install below, no pixi on PATH (or no network) FAILs those
+      # cases instead of skipping them.
+      - name: the pinned pixi
+        run: |
+          out=$(./buck2 build //tools/build/toolchains:pixi --materializations all --show-full-output | sed -n 's/^[^ ]* //p' | tail -n 1)
+          [ -x "$out" ] || { echo "the pinned pixi is not an executable file: '$out'"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/pixi"
+          cp "$out" "$RUNNER_TEMP/pixi/pixi"
+          "$RUNNER_TEMP/pixi/pixi" --version
+          echo "$RUNNER_TEMP/pixi" >> "$GITHUB_PATH"
+      - name: tools/build/tests/run_tests.sh --require-install
         run: |
           mkdir -p "$RUNNER_TEMP/tests"
-          TMPDIR="$RUNNER_TEMP/tests" tools/build/tests/run_tests.sh
+          TMPDIR="$RUNNER_TEMP/tests" tools/build/tests/run_tests.sh --require-install
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
