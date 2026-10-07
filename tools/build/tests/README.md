@@ -988,6 +988,29 @@ querying its attributes, so narrowing it fails.
 `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in
 [the repository lint tests](lint_tests.md#45-the-layout-of-src).
 
+## 52. API JSON: mojo_doc_json
+
+[`mojo_doc_json`](../mojo/README.md#api-json-mojo_doc_json) runs the pinned
+`mojo doc` on a library's sources. Test 1 builds
+`//tools/build/examples:hellopkg_doc`, whose JSON must equal the golden
+[`hellopkg_doc.json`](../examples/hellopkg_doc.json) byte for byte and
+declare `greet.greeting`. [`functional/mojo_doc_json`](functional/mojo_doc_json/BUCK)
+documents a package that imports hellopkg (so `mojo doc` sees its `deps` on
+`-I`) and requires a path of each kind the symbol check walks: a function of
+`__init__`, an alias, a trait and its method, a struct with a parametric
+header spanning lines and its methods, and a function of a subpackage's
+module. Each target of [`negative/mojo_doc_json`](negative/mojo_doc_json/BUCK)
+must fail naming its defect: a source that does not compile, a golden with
+one function renamed, and three paths the JSON does not declare (a private
+function, a function without its module, a struct field).
+
+```sh
+./buck2 build tests//functional/mojo_doc_json:docpkg_doc
+./buck2 build tests//negative/mojo_doc_json:compile_error    # must fail: could not generate documentation
+./buck2 build tests//negative/mojo_doc_json:golden_differs   # must fail: the JSON differs from its golden
+./buck2 build tests//negative/mojo_doc_json:missing_symbol   # must fail: the JSON declares no `shout`
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`

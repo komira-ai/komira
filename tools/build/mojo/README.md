@@ -18,6 +18,7 @@ the compiler sees. Worked uses of each rule are in
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
+| `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](#api-json-mojo_doc_json)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
 
@@ -862,6 +863,51 @@ says, which is how tests 41 and 43 build them and plant a defective
 relocator or run script, without `-c`. Anywhere else passing either is
 refused.
 
+## API JSON: mojo_doc_json
+
+```python
+load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
+
+mojo_doc_json(
+    name = "hellopkg_doc",
+    lib = ":hellopkg",
+    golden = "hellopkg_doc.json",      # optional
+    symbols = ["greet.greeting"],      # optional
+)
+```
+
+- **What runs.** The pinned compiler's `mojo doc`, through
+  [`mojo_wrapper.sh`](mojo_wrapper.sh) like every compile (the same
+  environment, the watchdog, and the refusal of an empty output or one
+  holding the action's working directory), on the library's staged sources
+  (its `[src]`), with the packages of its `deps` on `-I`. The library's own
+  package is not an input, so the JSON does not wait for its welded tests. A
+  source that does not compile fails the target: `mojo doc` exits 1 with
+  `could not generate documentation` after the compiler's error.
+- **What the JSON holds** (mojo 1.0.0): the package, its modules (a
+  package's `__init__.mojo` is the module `__init__`) and subpackages, and
+  per module its functions, structs, traits and aliases, with signatures,
+  parameters, argument lists and doc strings. It holds **no source
+  location**, and no declaration whose name starts with `_` (a struct's
+  dunder methods excepted). [`hellopkg_doc.json`](../examples/hellopkg_doc.json)
+  is a whole one.
+- **`golden`**: the JSON must equal this file byte for byte, else
+  `mojo_doc_json: <target>: the JSON differs from its golden <file>` and the
+  first differences. The golden pins the bytes: an output that varied by
+  worker or run would differ from it whenever the action runs again. A
+  compiler bump that changes the JSON changes the golden in the same commit.
+- **`symbols`**: each entry is a declaration's dotted path inside the
+  package: `<module>.<name>`, `<module>.<struct or trait>.<method>`, a
+  subpackage's name first (`sub.leaf.leaf_value`). The check reads the JSON
+  with [`//tools/build/inspect`](../inspect/BUCK) (`inspect json`), not by
+  matching text; a missing one fails with
+  ``mojo_doc_json: <target>: the JSON declares no `<path>` ``, one line per
+  path.
+- With either check, `[raw]` is the unchecked JSON.
+
+Test 52 ([`tests/README.md`](../tests/README.md#52-api-json-mojo_doc_json))
+covers both checks and a source that does not compile.
+
 ## Errors
 
 | message | from | meaning |
@@ -888,6 +934,8 @@ refused.
 | `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`mem_cap.sh`](mem_cap.sh) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
+| `mojo_doc_json: <target>: the JSON differs from its golden <file>` | [`doc.bzl`](doc.bzl) | the library's `mojo doc` JSON changed; if on purpose, replace the golden with `[raw]` |
+| ``mojo_doc_json: <target>: the JSON declares no `<path>` `` | [`doc.bzl`](doc.bzl) | a `symbols` entry names no declaration of the JSON (or a private one, which `mojo doc` leaves out) |
 | `unable to locate module '<pkg>'` | the compiler | the importing target does not list that package in `deps` |
 
 ## Not yet supported
