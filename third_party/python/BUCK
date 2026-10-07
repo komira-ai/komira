@@ -12,7 +12,10 @@ load(":pins.bzl", "PYTHON", "WHEELS")
 # visible only to the test-only packages listed in _TEST_ONLY, and a py_test
 # hands its dependents nothing but its pass marker (README.md, Never shipped).
 # A new consumer is a new line here.
-_TEST_ONLY = ["komira//src/tests/helpers/komira_test_python/..."]
+_TEST_ONLY = [
+    "komira//src/tests/helpers/komira_test_oracle/...",
+    "komira//src/tests/helpers/komira_test_python/...",
+]
 
 pinned_file(
     name = PYTHON["archive"],
