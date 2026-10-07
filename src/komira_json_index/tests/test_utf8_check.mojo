@@ -34,6 +34,11 @@
 #   U13 the Unicode Table 3-7 second-byte ranges at both edges, one byte
 #       inside and one outside: E0 A0..BF, ED 80..9F, F0 90..BF, F4 80..8F,
 #       with the exact reason for each refused row
+#   U14 the Table 3-7 lead ranges at their edges: C2, DF, E1, EC, EE, EF,
+#       F1, F3 accepted with second bytes 80 and BF; BF, C1, F5, F7, F8
+#       refused with the exact reason; and after a well-formed 2-, 3- and
+#       4-byte sequence a stray 0x80 is refused at its own index, so a lead
+#       given the wrong sequence length is red
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -534,6 +539,85 @@ def test_second_byte_special_ranges() raises:
     _raise_if_any(bad)
 
 
+def _refused_at(
+    label: String, b: List[UInt8], at: Int, reason: String, mut bad: List[String]
+):
+    """Record `label` in `bad` unless `parse_string_raw` over all of `b`
+    raises exactly `reason` for the sequence at byte `at`."""
+    var want = (
+        "parse_string_raw: invalid UTF-8 at byte " + String(at) + ": " + reason
+    )
+    var got = _raw_error(b)
+    if got != want:
+        bad.append(label + " -> " + got)
+
+
+def test_lead_byte_edges() raises:
+    var bad = List[String]()
+    # Table 3-7 lead ranges: C2..DF opens 2 bytes, E0..EF 3, F0..F4 4. Each
+    # range edge, and each lead next to E0, ED, F0, F4 (whose second byte is
+    # restricted), is accepted with the full 80..BF second-byte range.
+    _accepted("C2 80", _with("", 0xC2, 0x80), bad)
+    _accepted("C2 BF", _with("", 0xC2, 0xBF), bad)
+    _accepted("DF 80", _with("", 0xDF, 0x80), bad)
+    _accepted("DF BF", _with("", 0xDF, 0xBF), bad)
+    _accepted("E1 80 80", _with("", 0xE1, 0x80, 0x80), bad)
+    _accepted("E1 BF BF", _with("", 0xE1, 0xBF, 0xBF), bad)
+    _accepted("EC 80 80", _with("", 0xEC, 0x80, 0x80), bad)
+    _accepted("EC BF BF", _with("", 0xEC, 0xBF, 0xBF), bad)
+    _accepted("EE 80 80", _with("", 0xEE, 0x80, 0x80), bad)
+    _accepted("EE BF BF", _with("", 0xEE, 0xBF, 0xBF), bad)
+    _accepted("EF 80 80", _with("", 0xEF, 0x80, 0x80), bad)
+    _accepted("EF BF BF", _with("", 0xEF, 0xBF, 0xBF), bad)
+    _accepted("F1 80 80 80", _with("", 0xF1, 0x80, 0x80, 0x80), bad)
+    _accepted("F3 BF BF BF", _with("", 0xF3, 0xBF, 0xBF, 0xBF), bad)
+    # The bytes just outside the lead ranges.
+    _refused("BF", _with("", 0xBF), "stray continuation byte 0xBF", bad)
+    _refused(
+        "C1 80", _with("", 0xC1, 0x80), "overlong encoding: lead byte 0xC1", bad
+    )
+    _refused(
+        "F5 80 80 80",
+        _with("", 0xF5, 0x80, 0x80, 0x80),
+        "code point above U+10FFFF: lead byte 0xF5",
+        bad,
+    )
+    _refused(
+        "F7 80 80 80",
+        _with("", 0xF7, 0x80, 0x80, 0x80),
+        "code point above U+10FFFF: lead byte 0xF7",
+        bad,
+    )
+    _refused("F8", _with("", 0xF8), "invalid lead byte 0xF8", bad)
+    # The check resumes right after a well-formed sequence of each length, so
+    # a lead given the wrong length cannot skip the stray 0x80 that follows.
+    _refused_at(
+        "C2 BF 80", _with("", 0xC2, 0xBF, 0x80), 2,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "DF BF 80", _with("", 0xDF, 0xBF, 0x80), 2,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "E0 A0 80 80", _with("", 0xE0, 0xA0, 0x80, 0x80), 3,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "EF BF BF 80", _with("", 0xEF, 0xBF, 0xBF, 0x80), 3,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "F0 90 80 80 80", _with("", 0xF0, 0x90, 0x80, 0x80, 0x80), 4,
+        "stray continuation byte 0x80", bad,
+    )
+    _refused_at(
+        "F4 8F BF BF 80", _with("", 0xF4, 0x8F, 0xBF, 0xBF, 0x80), 4,
+        "stray continuation byte 0x80", bad,
+    )
+    _raise_if_any(bad)
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Run one case; a failure is recorded, not fatal, so a red build names
     EVERY failing case rather than only the first."""
@@ -560,6 +644,7 @@ def main() raises:
     _run("test_extract_column_nulls_ill_formed_rows", test_extract_column_nulls_ill_formed_rows, failed)
     _run("test_continuation_bounds_every_position", test_continuation_bounds_every_position, failed)
     _run("test_second_byte_special_ranges", test_second_byte_special_ranges, failed)
+    _run("test_lead_byte_edges", test_lead_byte_edges, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
-    print("utf8_check: ALL 13 CASES PASS")
+    print("utf8_check: ALL 14 CASES PASS")

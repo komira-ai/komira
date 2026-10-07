@@ -37,6 +37,10 @@
 #       inside and one outside: E0 A0..BF, ED 80..9F, F0 90..BF, F4 80..8F.
 #       A second byte outside its range ends a one-byte subpart, so each
 #       following continuation byte is a subpart of its own.
+#   J13 the Table 3-7 lead ranges at their edges: C2, DF, E1, EC, EE, EF,
+#       F1, F3 kept with second bytes 80 and BF; BF, C1, F5, F8 each a
+#       one-byte subpart; and after a well-formed 2-, 3- and 4-byte sequence
+#       a following 0x80 is its own U+FFFD, so a wrong sequence length is red
 #   Every case also asserts the scan ends just after the closing quote.
 # =============================================================================
 
@@ -285,6 +289,60 @@ def test_second_byte_special_ranges() raises:
     _raise_if_any(bad)
 
 
+def test_lead_byte_edges() raises:
+    var bad = List[String]()
+    # Table 3-7 lead ranges: C2..DF opens 2 bytes, E0..EF 3, F0..F4 4. Each
+    # range edge, and each lead next to E0, ED, F0, F4 (whose second byte is
+    # restricted), is kept with the full 80..BF second-byte range.
+    _kept("C2 80", _quoted("", 0xC2, 0x80), bad)
+    _kept("C2 BF", _quoted("", 0xC2, 0xBF), bad)
+    _kept("DF 80", _quoted("", 0xDF, 0x80), bad)
+    _kept("DF BF", _quoted("", 0xDF, 0xBF), bad)
+    _kept("E1 80 80", _quoted("", 0xE1, 0x80, 0x80), bad)
+    _kept("E1 BF BF", _quoted("", 0xE1, 0xBF, 0xBF), bad)
+    _kept("EC 80 80", _quoted("", 0xEC, 0x80, 0x80), bad)
+    _kept("EC BF BF", _quoted("", 0xEC, 0xBF, 0xBF), bad)
+    _kept("EE 80 80", _quoted("", 0xEE, 0x80, 0x80), bad)
+    _kept("EE BF BF", _quoted("", 0xEE, 0xBF, 0xBF), bad)
+    _kept("EF 80 80", _quoted("", 0xEF, 0x80, 0x80), bad)
+    _kept("EF BF BF", _quoted("", 0xEF, 0xBF, 0xBF), bad)
+    _kept("F1 80 80 80", _quoted("", 0xF1, 0x80, 0x80, 0x80), bad)
+    _kept("F3 BF BF BF", _quoted("", 0xF3, 0xBF, 0xBF, 0xBF), bad)
+    # The bytes just outside the lead ranges are each a one-byte subpart.
+    _repaired("BF", _quoted("", 0xBF), String(R) + "z", bad)
+    _repaired("C1 80", _quoted("", 0xC1, 0x80), String(R) + R + "z", bad)
+    _repaired(
+        "F5 80 80 80", _quoted("", 0xF5, 0x80, 0x80, 0x80),
+        String(R) + R + R + R + "z", bad,
+    )
+    _repaired("F8", _quoted("", 0xF8), String(R) + "z", bad)
+    # After a well-formed sequence of each length the next byte starts a new
+    # sequence, so a lead given the wrong length cannot absorb the 0x80.
+    _repaired(
+        "C2 BF 80", _quoted("", 0xC2, 0xBF, 0x80), chr(0xBF) + R + "z", bad
+    )
+    _repaired(
+        "DF BF 80", _quoted("", 0xDF, 0xBF, 0x80), chr(0x7FF) + R + "z", bad
+    )
+    _repaired(
+        "E0 A0 80 80", _quoted("", 0xE0, 0xA0, 0x80, 0x80),
+        chr(0x800) + R + "z", bad,
+    )
+    _repaired(
+        "EF BF BF 80", _quoted("", 0xEF, 0xBF, 0xBF, 0x80),
+        chr(0xFFFF) + R + "z", bad,
+    )
+    _repaired(
+        "F0 90 80 80 80", _quoted("", 0xF0, 0x90, 0x80, 0x80, 0x80),
+        chr(0x10000) + R + "z", bad,
+    )
+    _repaired(
+        "F4 8F BF BF 80", _quoted("", 0xF4, 0x8F, 0xBF, 0xBF, 0x80),
+        chr(0x10FFFF) + R + "z", bad,
+    )
+    _raise_if_any(bad)
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Run one case; a failure is recorded, not fatal, so a red build names
     EVERY failing case rather than only the first."""
@@ -310,6 +368,7 @@ def main() raises:
     _run("test_above_range_continuation", test_above_range_continuation, failed)
     _run("test_continuation_bounds_every_position", test_continuation_bounds_every_position, failed)
     _run("test_second_byte_special_ranges", test_second_byte_special_ranges, failed)
+    _run("test_lead_byte_edges", test_lead_byte_edges, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
-    print("test_json_scan_utf8: ALL 12 CASES PASS")
+    print("test_json_scan_utf8: ALL 13 CASES PASS")
