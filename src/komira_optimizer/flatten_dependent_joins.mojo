@@ -200,10 +200,21 @@ def _expr_contains_correlated_subquery(expr: Expr) -> Bool:
         return _expr_contains_correlated_subquery(expr._in_list.value().child[])
     if expr.tag == EXPR_AGG_FN:
         return _expr_contains_correlated_subquery(expr._agg_fn.value().child[])
-    # EXPR_COL_REF / EXPR_COL_IDX / EXPR_LITERAL / EXPR_WHEN / EXPR_WINDOW_FN:
-    # WHEN has its own arms but is rare in correlated bodies; in this pass the
-    # supported parent-Expr shapes are: bare CorrelatedSubquery (Filter root)
-    # and CorrelatedSubquery within a binary-op (e.g. `>` for SCALAR/Q17).
+    if expr.tag == EXPR_WHEN:
+        # No lowering handles a subquery under a CASE; seeing it makes the
+        # pass refuse the shape instead of leaving the node in the plan.
+        ref wd = expr._when.value()
+        for i in range(len(wd.cases)):
+            if _expr_contains_correlated_subquery(wd.cases[i].condition[]):
+                return True
+            if _expr_contains_correlated_subquery(wd.cases[i].result[]):
+                return True
+        return _expr_contains_correlated_subquery(wd.default[])
+    # EXPR_COL_REF / EXPR_COL_IDX / EXPR_LITERAL / EXPR_WINDOW_FN (its
+    # arguments are column names, not expressions) and the remaining tags
+    # are not descended. The supported parent-Expr shapes are: bare
+    # CorrelatedSubquery (Filter root) and CorrelatedSubquery within a
+    # binary-op (e.g. `>` for SCALAR/Q17).
     return False
 
 

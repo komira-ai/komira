@@ -5,7 +5,7 @@ IN-list and aggregate expressions.
 Each test names the defect it catches.
 """
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_true, assert_false
 
 from komira_arrow.schema import SchemaBuilder, Field
 from komira_arrow.arrow_types import ArrowType
@@ -32,10 +32,12 @@ from komira_plan_ir.logical_plan import (
     SOURCE_PARQUET,
     CORR_KIND_EXISTS,
     JOIN_SEMI,
+    ExprArray,
 )
 
 from komira_optimizer.flatten_dependent_joins import (
     flatten_dependent_joins,
+    _expr_contains_correlated_subquery,
     _rewrite_inner_none_to_right,
 )
 from komira_optimizer.join_predicate_decompose import join_predicate_decompose
@@ -146,7 +148,67 @@ def test_rewrite_inner_none_to_right_descends_alias_when_in_list_and_agg() raise
     assert_equal(g.agg_fn_child_ref().col_ref_side(), COL_SIDE_RIGHT)
 
 
+def _exists() -> Expr:
+    """`EXISTS (SELECT 1 FROM t)` correlated on `k` (bare inner scan)."""
+    var refs = List[String]()
+    refs.append("k")
+    return Expr.correlated_subquery(_t(), refs^, CORR_KIND_EXISTS)
+
+
+def _bool(b: Bool) -> Expr:
+    return Expr.literal(ScalarValue.from_bool(b))
+
+
+def _when_with_exists_at(slot: Int) -> Expr:
+    """A CASE with the EXISTS in its condition (0), result (1) or default (2)."""
+    var cases = List[WhenCaseData]()
+    if slot == 0:
+        cases.append(WhenCaseData(_exists(), _bool(True)))
+    elif slot == 1:
+        cases.append(WhenCaseData(_bool(True), _exists()))
+    else:
+        cases.append(WhenCaseData(_bool(True), _bool(True)))
+    if slot == 2:
+        return Expr.when(cases^, _exists())
+    return Expr.when(cases^, _bool(False))
+
+
+def _raises_with(var plan: LogicalPlan, needle: String) raises -> Bool:
+    try:
+        _ = flatten_dependent_joins(plan^)
+    except e:
+        return String(e).find(needle) >= 0
+    return False
+
+
+def test_subquery_inside_when_is_seen_and_refused() raises:
+    """A correlated EXISTS in a CASE condition, result or default is found
+    by `_expr_contains_correlated_subquery`, and the pass refuses the shape
+    (it has no lowering for it) in a Filter and in a Project instead of
+    returning a plan that still holds the subquery node.
+
+    Catches: the walker not descending WHEN (or one of its three slots), so
+    the subquery survives the pass that promises to remove every one."""
+    for slot in range(3):
+        assert_true(_expr_contains_correlated_subquery(_when_with_exists_at(slot)))
+    var cases = List[WhenCaseData]()
+    cases.append(WhenCaseData(_bool(True), Expr.col_ref("v")))
+    assert_false(_expr_contains_correlated_subquery(Expr.when(cases^, _bool(False))))
+
+    assert_true(_raises_with(
+        LogicalPlan.filter(_when_with_exists_at(0), _t()),
+        "unsupported parent-shape for correlated subquery",
+    ))
+    var exprs = ExprArray()
+    exprs.append(_when_with_exists_at(1))
+    assert_true(_raises_with(
+        LogicalPlan.project(exprs^, _t()),
+        "correlated subquery in Project not yet supported",
+    ))
+
+
 def main() raises:
     test_inner_ref_inside_when_reads_the_right_column_after_decompose()
     test_rewrite_inner_none_to_right_descends_alias_when_in_list_and_agg()
+    test_subquery_inside_when_is_seen_and_refused()
     print("All flatten_dependent_joins nested-expression tests passed.")
