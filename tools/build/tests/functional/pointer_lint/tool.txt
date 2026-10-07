@@ -1,0 +1,3 @@
+# A file outside the public root (src/): not a library file.
+def run(p: OpaquePointer):
+    pass
