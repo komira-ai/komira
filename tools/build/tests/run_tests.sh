@@ -1065,6 +1065,8 @@ expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is n
 expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/mojo_aws_client:hand_src_clashes
 expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/mojo_aws_client:service_unreadable
 expect_red aws_client_env_read_hand 'env_reader.mojo names getenv; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_hand
+expect_red aws_client_env_read_home "env_home.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_home
+expect_red aws_client_env_read_std_os 'env_std_os.mojo names expanduser; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_std_os
 expect_red aws_client_env_scan_data_given '`test_data` has an entry for `tests/_no_env_reads.mojo`, the generated environment scan' tests//negative/mojo_aws_client:env_scan_data_given
 
 # 9

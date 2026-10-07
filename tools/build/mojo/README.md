@@ -543,8 +543,10 @@ writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
 ordinary `mojo_library` over them, welded like mojo_gcp_client's: the probe is
 its first `test_srcs` entry, then `_no_env_reads.mojo`, an environment scan
 written for the client at analysis (every file of the package is its data;
-it fails if any names a way to read the environment or the FFI a read goes
-through), then the caller's. `model` and
+it fails if any names one of the environment reads or FFI routes it lists,
+or imports a module outside an allow-list of the runtime the generator
+imports and std.sys, and it checks that it read the whole generated
+module), then the caller's. `model` and
 `model_sha256` are normally `botocore_model("<service>").model` and
 `.sha256` from [`third_party/botocore`](../../../third_party/botocore/BUCK);
 the service id is read from the model's botocore path unless `service`
