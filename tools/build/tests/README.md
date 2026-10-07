@@ -364,7 +364,11 @@ without it (`test_source_paths`). C compiles and archives
 and the Mojo targets using them resolve to `linux-x86_64`. The
 snappy test binary, which links C++ with zig's static libc++, carries
 libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose
-on the `libstdc++.so.6` the Mojo runtime loads.
+on the `libstdc++.so.6` the Mojo runtime loads. An unconfigured query, `buck2
+uquery 'deps(//tools/build/examples/cshim:cadd_user)'`, answers and reaches
+`toolchains//:cxx_no_default_deps`: the prelude's C/C++ toolchain select names
+that target on a branch no configured build takes, and the query fails with
+`Unknown target` if the toolchains cell does not declare it.
 
 ## 21. Location path
 

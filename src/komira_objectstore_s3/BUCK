@@ -21,13 +21,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # the core packages supplies the ByteView of komira_objectstore's RangeFetchStore
 # signature, and S3Fs's buffers, Slab and FS_SCHEME_S3. komira_async is the
-# tests': the fake S3 connector implements komira_http_core's Connector over
-# its reactor and runtime.
+# tests': the fake connectors of test_s3_fs_inflight and
+# test_s3_fs_one_version implement komira_http_core's Connector over its
+# reactor and runtime.
 #
 # The tests are hermetic, no socket: komira_http_core's ScriptedConnector
-# (S3's answers, one stream per request), a fake S3 connector in the tests
-# that keeps objects in memory and honours If-Match / If-None-Match (so a
-# compare-and-swap loop runs against it), and komira_aws_core's
+# (S3's answers, one stream per request), komira_test_fake_s3's fake S3
+# connector, which keeps objects in memory and honours If-Match /
+# If-None-Match (so a compare-and-swap loop runs against it), and
+# komira_aws_core's
 # AwsEchoConnector (each request as it reached the wire). They are:
 # test_s3_basics (the configuration, the status table and the error
 # message, the range arithmetic, the key decoding), test_s3_store (each
@@ -65,11 +67,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # S3ConditionalStore and each one's clone, one refresh for all of them) and
 # test_no_env_reads (the package's sources read no environment).
 #
-# test_s3_conditional_store and test_s3_fs each hold a fake S3: a test here
-# is built from its one source file, so the two cannot share a module
-# without a library of their own. They differ in what they serve (the
-# conditional PutObject and its 409; budgets, traps, suffix ranges and
-# multipart), and a change to S3's answers is made in both.
+# test_s3_conditional_store and test_s3_fs share one fake S3,
+# komira_test_fake_s3 (src/tests/support), named in `test_deps`: it reaches
+# the welded tests only, never this library's package, closure or conda
+# package (tools/build/mojo/test_deps.bzl).
 mojo_library(
     name = "komira_objectstore_s3",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -89,6 +90,7 @@ mojo_library(
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_retry:komira_retry",
     ],
+    test_deps = ["//src/tests/support/komira_test_fake_s3:komira_test_fake_s3"],
     test_data = {
         "tests/test_no_env_reads.mojo": {
             "src/" + f: f
