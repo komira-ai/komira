@@ -33,7 +33,7 @@ sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
 
 | sub-target | action category | output | what it does |
 |---|---|---|---|
-| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables` against the same ungated closure, with the same source root, as the test's `[coverage][bin]` |
+| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables` against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
 | `[coverage][pgo_bin][<test>]` | `mojo_cov_pgo_link` | `cov/branch/<test>` | [cov_branch_link](#cov_branch_link) |
 | `[coverage][branch][<test>]` | `mojo_cov_branch_run` | `cov/branch/<test>.profdata` | [cov_branch_run](#cov_branch_run) |
 | `[coverage][branch_ir][<test>]` | `mojo_cov_branch_annotate` | `cov/branch/<test>.ll` | [cov_branch_annotate](#cov_branch_annotate) |
@@ -57,7 +57,7 @@ waits for them).
    a release test (the line `mojo build` gives it: the compiler's
    `libKGENCompilerRTShared.so`, `--gc-sections`, `-lm`; the shim's
    `--strip-debug` and the one run path `$ORIGIN/lib`; then the C libraries
-   of the closure), with `llvm/runtime/libclang_rt.profile-x86_64.a` as a
+   of the closure, `test_deps` included), with `llvm/runtime/libclang_rt.profile-x86_64.a` as a
    whole archive. Test 46's `link_line` records the line zig is given by
    both links (a stand-in zig) and fails when they differ by more than the
    profile runtime, so a Mojo release that links with another library, or
@@ -304,9 +304,10 @@ the tests cell: a fixture library whose test takes some arms of an
 ternary, an `or` chain and a plain `@always_inline` helper, whose profile
 must hold that function's counters, and whose branch records must be their
 golden file; the link line check; a test that the run gives no `LC_ALL`; a
-library with a C library in its closure; and the planted defects that must
-go red, among them an annotation whose profile does not fit the bitcode or
-lacks a function, a bitcode holding branch weights before the profile, a
-`nodebug` helper's decision at its call, and an `or` whose result is
-returned. The classifier's cases ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh))
+library with a C library in its closure; one whose test needs a `test_deps`
+package with a C library; and the planted defects that must go red, among
+them an annotation whose profile does not fit the bitcode or lacks a
+function, a bitcode holding branch weights before the profile, a `nodebug`
+helper's decision at its call, and an `or` whose result is returned. The
+classifier's cases ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh))
 gate every build that uses it; each names the mutant it kills.

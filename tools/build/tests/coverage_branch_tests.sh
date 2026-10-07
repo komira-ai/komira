@@ -17,7 +17,9 @@
 #      is its release link plus the profile runtime); :branchlib and its
 #      [coverage][branch][test_gate_env] (the run gives the test no LC_ALL,
 #      as the release gate does not); :branchc and its [coverage][branch]
-#      (a closure with a C library: the link tail); :reproducible_branch and
+#      (a closure with a C library: the link tail); :branchtd and its
+#      [coverage][branch] (a test needing a test_deps package with a C
+#      library: the tests' closure and C link); :reproducible_branch and
 #      :reproducible_pgo_bin (one test's bitcode and instrumented binary,
 #      built in two actions with different keys, are the same bytes);
 #      :branch_info (the branch records cov_branch_classify writes for
@@ -49,6 +51,7 @@
 expect_green coverage_branch tests//functional/coverage:branch_counts tests//functional/coverage:link_line \
     tests//functional/coverage:branchlib 'tests//functional/coverage:branchlib[coverage][branch][test_gate_env]' \
     tests//functional/coverage:branchc 'tests//functional/coverage:branchc[coverage][branch]' \
+    tests//functional/coverage:branchtd 'tests//functional/coverage:branchtd[coverage][branch]' \
     tests//functional/coverage:reproducible_branch tests//functional/coverage:reproducible_pgo_bin \
     tests//functional/coverage:branch_info \
     tests//negative/coverage:branchfail tests//negative/coverage:branchannotate \

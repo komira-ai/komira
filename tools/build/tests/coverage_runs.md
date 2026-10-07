@@ -154,6 +154,7 @@ these checks:
 | `tests//negative/coverage:branchannotate[coverage][branch_ir][test_one]` | must fail with `diagnostic(s) applying the profile: lld: warning: ld-temp.o: function control flow change detected (hash mismatch)`: a `cov_branch_annotate.sh` copy runs `function(simplifycfg)` before `pgo-instr-use`, so the control flow the profile is applied to is not the instrumented one (as with a profile of other bitcode), and LLVM drops those functions' counts with a warning, which the annotation refuses rather than pass the dropped counts as branches that never ran | it is the planted defect |
 | `:branchlib` and `[coverage][branch][test_gate_env]` | `test_gate_env` asserts `LC_ALL` is unset: it passes in the release gate, and must pass in the branch coverage run, whose script sets `LC_ALL=C` for its own tools only after the test | the script exporting `LC_ALL=C` before the runner, as it first did (`LC_ALL is set, which the release gate does not set`) |
 | `:branchc` and `[coverage][branch]` | `branchc` calls into C (`komira//tools/build/examples/cshim:add`, a `cxx_library` in `deps`); its release gate passes, and its branch coverage link ends with that C library, given to `cov_branch_link.sh` as `mojo_wrapper.sh` is given it (`--link-tail`) | `cov_branch_link.sh` without the link tail (`"$@"`): `ld.lld: error: undefined symbol: komira_example_add` |
+| `:branchtd` and `[coverage][branch]` | `branchtd`'s test imports `branchtdsup`, a package only the library's `test_deps` give it, which calls into C (`komira//tools/build/examples/cshim:add`): its release gate passes, and its branch coverage bitcode is compiled against the tests' closure (`test_deps` included) and its link ends with the tests' C libraries (`test_deps` included), as its release build and `[coverage][bin]` are | `coverage_branch` given the library's closure (`ungated_tset`), as it first was: `error: unable to locate module 'branchtdsup'` (`mojo_emit_cov_bc`); given the tests' closure but the library's C link (`c_link`): `ld.lld: error: undefined symbol: komira_example_add` (`mojo_cov_pgo_link`) |
 
 The link's own check, that the instrumented binary holds no directory of
 its action, went red with `--strip-debug` left out of
@@ -174,6 +175,7 @@ verdict is the exit status, as the gate's is.
 ./buck2 build 'tests//negative/coverage:branchversion[coverage][branch][test_one]'       # must fail: raw profile version 12, not 11
 ./buck2 build tests//negative/coverage:branchenv                                        # must fail at analysis
 ./buck2 build tests//functional/coverage:link_line tests//functional/coverage:branchc 'tests//functional/coverage:branchc[coverage][branch]'
+./buck2 build tests//functional/coverage:branchtd 'tests//functional/coverage:branchtd[coverage][branch]'
 ./buck2 build tests//negative/coverage:branchlinkline                                   # must fail: not the release link
 ./buck2 build tests//functional/coverage:branch_info tests//negative/coverage:branchannotate
 ./buck2 build 'tests//negative/coverage:branchannotate[coverage][branch_ir][test_one]'   # must fail: diagnostic(s) applying the profile
