@@ -27,6 +27,16 @@
 #       ends a 3-byte subpart and is kept: U+FFFD then `A`
 #   J10 a byte ABOVE the continuation range at position 2 (E2 82 C3 A9)
 #       or 3 (F0 9F 98 FF) ends the subpart; a following lead byte is kept
+#   J11 every continuation bound at every position of a 2-, 3- and 4-byte
+#       sequence (C3 x; E2 x 82 / E2 82 x; F1 x 98 80 / F1 9F x 80 /
+#       F1 9F 98 x): 0x80 and 0xBF kept byte for byte; 0x7F ends the subpart
+#       and is kept (U+FFFD then DEL); 0xC0 ends the subpart and is its own
+#       subpart (U+FFFD U+FFFD). One row per bound per position, so moving
+#       0x80 or 0xBF by one in either direction is red.
+#   J12 the Unicode Table 3-7 second-byte ranges at both edges, one byte
+#       inside and one outside: E0 A0..BF, ED 80..9F, F0 90..BF, F4 80..8F.
+#       A second byte outside its range ends a one-byte subpart, so each
+#       following continuation byte is a subpart of its own.
 #   Every case also asserts the scan ends just after the closing quote.
 # =============================================================================
 
@@ -139,6 +149,142 @@ def test_above_range_continuation() raises:
     )
 
 
+def _repaired(
+    label: String, b: List[UInt8], want: String, mut bad: List[String]
+):
+    """Record `label` in `bad` unless `json_scan_string` over `b` gives
+    exactly `want` and ends after the closing quote."""
+    var out = String()
+    var end = json_scan_string(Span(b), 0, out)
+    if end != len(b):
+        bad.append(label + " -> scan ended at " + String(end))
+    elif out != want:
+        bad.append(label + " -> " + out)
+
+
+def _kept(label: String, b: List[UInt8], mut bad: List[String]):
+    """Record `label` in `bad` unless `json_scan_string` over `b` returns the
+    bytes between the quotes unchanged."""
+    var out = String()
+    var end = json_scan_string(Span(b), 0, out)
+    var ob = out.as_bytes()
+    if end != len(b):
+        bad.append(label + " -> scan ended at " + String(end))
+        return
+    if len(ob) != len(b) - 2:
+        bad.append(label + " -> wrong length " + String(len(ob)))
+        return
+    for i in range(len(ob)):
+        if ob[i] != b[i + 1]:
+            bad.append(label + " -> byte " + String(i) + " differs")
+            return
+
+
+def _raise_if_any(bad: List[String]) raises:
+    """Raise naming EVERY failed row, so a red build shows which bounds a
+    defect moved rather than only the first."""
+    if len(bad) == 0:
+        return
+    var msg = String(len(bad)) + " row(s) failed:"
+    for i in range(len(bad)):
+        msg += " [" + bad[i] + "]"
+    raise Error(msg)
+
+
+def test_continuation_bounds_every_position() raises:
+    var bad = List[String]()
+    _kept("C3 80", _quoted("", 0xC3, 0x80), bad)
+    _kept("C3 BF", _quoted("", 0xC3, 0xBF), bad)
+    _repaired(
+        "C3 7F", _quoted("", 0xC3, 0x7F), String(R) + chr(0x7F) + "z", bad
+    )
+    _repaired(
+        "C3 C0", _quoted("", 0xC3, 0xC0), String(R) + R + "z", bad
+    )
+    _kept("E2 80 82", _quoted("", 0xE2, 0x80, 0x82), bad)
+    _kept("E2 BF 82", _quoted("", 0xE2, 0xBF, 0x82), bad)
+    _kept("E2 82 80", _quoted("", 0xE2, 0x82, 0x80), bad)
+    _kept("E2 82 BF", _quoted("", 0xE2, 0x82, 0xBF), bad)
+    _repaired(
+        "E2 7F", _quoted("", 0xE2, 0x7F), String(R) + chr(0x7F) + "z", bad
+    )
+    _repaired(
+        "E2 C0", _quoted("", 0xE2, 0xC0), String(R) + R + "z", bad
+    )
+    _repaired(
+        "E2 82 7F", _quoted("", 0xE2, 0x82, 0x7F), String(R) + chr(0x7F) + "z", bad
+    )
+    _repaired(
+        "E2 82 C0", _quoted("", 0xE2, 0x82, 0xC0), String(R) + R + "z", bad
+    )
+    _kept("F1 80 98 80", _quoted("", 0xF1, 0x80, 0x98, 0x80), bad)
+    _kept("F1 BF 98 80", _quoted("", 0xF1, 0xBF, 0x98, 0x80), bad)
+    _kept("F1 9F 80 80", _quoted("", 0xF1, 0x9F, 0x80, 0x80), bad)
+    _kept("F1 9F BF 80", _quoted("", 0xF1, 0x9F, 0xBF, 0x80), bad)
+    _kept("F1 9F 98 80", _quoted("", 0xF1, 0x9F, 0x98, 0x80), bad)
+    _kept("F1 9F 98 BF", _quoted("", 0xF1, 0x9F, 0x98, 0xBF), bad)
+    _repaired(
+        "F1 7F", _quoted("", 0xF1, 0x7F), String(R) + chr(0x7F) + "z", bad
+    )
+    _repaired(
+        "F1 C0", _quoted("", 0xF1, 0xC0), String(R) + R + "z", bad
+    )
+    _repaired(
+        "F1 9F 7F", _quoted("", 0xF1, 0x9F, 0x7F), String(R) + chr(0x7F) + "z", bad
+    )
+    _repaired(
+        "F1 9F C0", _quoted("", 0xF1, 0x9F, 0xC0), String(R) + R + "z", bad
+    )
+    _repaired(
+        "F1 9F 98 7F", _quoted("", 0xF1, 0x9F, 0x98, 0x7F), String(R) + chr(0x7F) + "z", bad
+    )
+    _repaired(
+        "F1 9F 98 C0", _quoted("", 0xF1, 0x9F, 0x98, 0xC0), String(R) + R + "z", bad
+    )
+    _raise_if_any(bad)
+
+
+def test_second_byte_special_ranges() raises:
+    var bad = List[String]()
+    # E0 A0..BF: below is overlong, above is not a continuation byte.
+    _repaired(
+        "E0 9F 80", _quoted("", 0xE0, 0x9F, 0x80), String(R) + R + R + "z", bad
+    )
+    _kept("E0 A0 80", _quoted("", 0xE0, 0xA0, 0x80), bad)
+    _kept("E0 BF 80", _quoted("", 0xE0, 0xBF, 0x80), bad)
+    _repaired(
+        "E0 C0", _quoted("", 0xE0, 0xC0), String(R) + R + "z", bad
+    )
+    # ED 80..9F: above is a UTF-16 surrogate (U+D800).
+    _repaired(
+        "ED 7F", _quoted("", 0xED, 0x7F), String(R) + chr(0x7F) + "z", bad
+    )
+    _kept("ED 80 80", _quoted("", 0xED, 0x80, 0x80), bad)
+    _kept("ED 9F 80", _quoted("", 0xED, 0x9F, 0x80), bad)
+    _repaired(
+        "ED A0 80", _quoted("", 0xED, 0xA0, 0x80), String(R) + R + R + "z", bad
+    )
+    # F0 90..BF: below is overlong.
+    _repaired(
+        "F0 8F 80 80", _quoted("", 0xF0, 0x8F, 0x80, 0x80), String(R) + R + R + R + "z", bad
+    )
+    _kept("F0 90 80 80", _quoted("", 0xF0, 0x90, 0x80, 0x80), bad)
+    _kept("F0 BF 80 80", _quoted("", 0xF0, 0xBF, 0x80, 0x80), bad)
+    _repaired(
+        "F0 C0", _quoted("", 0xF0, 0xC0), String(R) + R + "z", bad
+    )
+    # F4 80..8F: above is beyond U+10FFFF.
+    _repaired(
+        "F4 7F", _quoted("", 0xF4, 0x7F), String(R) + chr(0x7F) + "z", bad
+    )
+    _kept("F4 80 80 80", _quoted("", 0xF4, 0x80, 0x80, 0x80), bad)
+    _kept("F4 8F 80 80", _quoted("", 0xF4, 0x8F, 0x80, 0x80), bad)
+    _repaired(
+        "F4 90 80 80", _quoted("", 0xF4, 0x90, 0x80, 0x80), String(R) + R + R + R + "z", bad
+    )
+    _raise_if_any(bad)
+
+
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
     """Run one case; a failure is recorded, not fatal, so a red build names
     EVERY failing case rather than only the first."""
@@ -162,6 +308,8 @@ def main() raises:
     _run("test_escape_then_bad_byte", test_escape_then_bad_byte, failed)
     _run("test_non_continuation_at_position_3", test_non_continuation_at_position_3, failed)
     _run("test_above_range_continuation", test_above_range_continuation, failed)
+    _run("test_continuation_bounds_every_position", test_continuation_bounds_every_position, failed)
+    _run("test_second_byte_special_ranges", test_second_byte_special_ranges, failed)
     if len(failed) > 0:
         raise Error(String(len(failed)) + " case(s) failed")
-    print("test_json_scan_utf8: ALL 10 CASES PASS")
+    print("test_json_scan_utf8: ALL 12 CASES PASS")
