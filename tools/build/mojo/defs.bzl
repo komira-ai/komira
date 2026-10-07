@@ -404,7 +404,7 @@ def _library_impl(ctx):
             cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link)
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, src_root, test_data.get(key, {}), env_args)
             if ctx.attrs.coverage_branch:
-                cov_branch[stem] = coverage_branch(ctx, tc, t, stem, ungated_tset, _mojo_cmd, _link_tail(c_link), test_data.get(key, {}), env_args)
+                cov_branch[stem] = coverage_branch(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args)
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether

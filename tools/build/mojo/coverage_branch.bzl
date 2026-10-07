@@ -6,8 +6,8 @@ linux-x86_64), per `test_srcs` entry that is a source file:
 
 - `[coverage][bc][<test>]` (category `mojo_emit_cov_bc`): the test compiled
   by mojo_wrapper.sh as its coverage binary is (`[coverage][bin]`: -O0, line
-  tables, the same ungated closure and source root), but emitted as LLVM
-  bitcode, `cov/branch/<test>.bc`;
+  tables, the same closure, `test_deps` included, and source root), but
+  emitted as LLVM bitcode, `cov/branch/<test>.bc`;
 - `[coverage][pgo_bin][<test>]` (category `mojo_cov_pgo_link`): that
   bitcode instrumented with IR profile counters by Mojo's lld and linked as a
   release test is, with the profile runtime (cov_branch_link.sh),
@@ -20,18 +20,23 @@ Nothing waits for them: the package's join, `[coverage]` and the gate are
 what they are without them.
 """
 
+load(":providers.bzl", "MojoPkgTSet")
 load(":test_runtime.bzl", "test_root")
 
-def coverage_branch(ctx, tc, t, stem, closure, mojo_cmd, link_tail, data, env_args):
+def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args):
     """Declares the three branch coverage actions of test source `t`
-    (module docstring) and returns (bitcode, binary, profdata). `closure` is
-    the MojoPkgTSet the test compiles against, `mojo_cmd` defs.bzl's
-    _mojo_cmd, `link_tail` the C libraries of the test's link (or None),
+    (module docstring) and returns (bitcode, binary, profdata).
+    `closure_tsets` are the MojoPkgTSets the test compiles against (defs.bzl's
+    tests_closure: the ungated package and its deps, then the `test_deps`),
+    `mojo_cmd` defs.bzl's _mojo_cmd, `link_tail` the C libraries of the
+    test's link, `test_deps` included (or None),
     `data` its staged data and `env_args` its runner's --env arguments."""
     where = "{}: branch coverage of {}".format(ctx.label.raw_target(), t.short_path)
     if "LLVM_PROFILE_FILE" in ctx.attrs.test_env:
         fail("{}: test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself (where the test's profile is written)".format(where))
     link_dir, run_dir = ctx.attrs.coverage_branch[DefaultInfo].default_outputs
+    # As _build_executable makes the release test's closure from the same list.
+    closure = ctx.actions.tset(MojoPkgTSet, children = closure_tsets)
 
     # The test, staged as _build_executable stages it: the wrapper strips the
     # staged directory, so the bitcode names the test by its package path.

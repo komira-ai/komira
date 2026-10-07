@@ -280,6 +280,27 @@ mojo_library(
     deps = ["komira//tools/build/examples/cshim:add"],
 )
 
+# Test 46: a library whose test imports a package only its `test_deps`
+# give it (branchtdsup), which has a C library in its closure (the cshim
+# example's): the test's branch coverage bitcode is compiled against that
+# package and its binary links that C library, as its release build and its
+# [coverage][bin] are.
+mojo_library(
+    name = "branchtdsup",
+    srcs = ["branchtdsup/__init__.mojo"],
+    conda = False,
+    deps = ["komira//tools/build/examples/cshim:add"],
+)
+
+mojo_library(
+    name = "branchtd",
+    srcs = ["branchtd/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_deps = [":branchtdsup"],
+    test_srcs = ["tests/test_with_support.mojo"],
+)
+
 # The profile of test_score_arms's instrumented run holds one function named
 # like classify_score (`ld-temp.o;branchlib::score::classify_score(...)`),
 # with six counters. IR profile counters sit on the edges outside a spanning
