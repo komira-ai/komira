@@ -1,8 +1,9 @@
 # =============================================================================
 # test_avro_bytes_fixed_defaults.mojo — a bytes or fixed field default is a
 # JSON string read as Latin-1 (Avro 1.11.1, field default table): code points
-# U+0000..U+00FF are the byte values; a union default applies to its first
-# branch.
+# U+0000..U+00FF are the byte values; a union default is read as the first
+# branch it matches (spec: "the first schema that matches"), or as the first
+# branch when none matches.
 # =============================================================================
 #
 #   T1 bytes default "ÿ" (raw UTF-8 or the \u00ff escape) is one byte, FF, not C3 BF.
@@ -160,7 +161,7 @@ def test_refusals() raises:
     )
 
 
-def test_union_first_branch() raises:
+def test_union_first_matching_branch() raises:
     """T4."""
     var ub = _field_default_bytes(_one_field('["bytes","null"]', '"ÿ"'), 0)
     assert_equal(len(ub), 1)
@@ -564,7 +565,7 @@ def main() raises:
     test_bytes_default_is_latin1()
     test_fixed_default()
     test_refusals()
-    test_union_first_branch()
+    test_union_first_matching_branch()
     test_resolution_applies_latin1_default()
     test_writer_union_null_default_opens()
     test_resolution_refuses_unfit_default()
