@@ -23,7 +23,8 @@
 # (//third_party/botocore:cloudwatch, api 2010-08-01) declares `protocol: smithy-rpc-v2-cbor`
 # and lists `smithy-rpc-v2-cbor`, `json` and `query` in `protocols`. The AWS
 # generator chooses the first protocol of that list it supports, `json`
-# (`tools/build/proto-codegen/src/emit_aws/proto.rs`, `select_protocol`).
+# (`tools/build/proto-codegen/src/aws_in.rs`, `lower_metadata`;
+# `emit_aws/proto.rs`, `select_protocol`, refuses the choice if unsupported).
 # Generating the CloudWatch client into this package is a follow-up; when it
 # lands, this file becomes the reader's adapter over it.
 #
