@@ -3,15 +3,21 @@
 # the re-read leave the map output and the seal as they were. Every task is
 # its own `shuffle_task` process over a LocalFs root under $TEST_TMPDIR.
 #
+# The phases run in this order:
 #   faulted    after the maps and the seal (snapshot S0 of every object: key,
 #              size, content etag):
-#                * the reducer of partition 2 is SIGKILLed after it read the
-#                  seal and one of its four slices; the store must equal S0;
-#                * another is SIGKILLed after reading the whole partition,
-#                  before reporting; the store must equal S0;
-#   baseline   then a no-fault run in a root of its own: every partition's
-#              bytes equal the rows computed in this test
-#              (komira_shuffle_e2e.rows);
+#                * the reducer of partition 2 is SIGKILLed inside the
+#                  production read_shuffle_partition, after it read the seal
+#                  and the first of its four slices (shuffle_task's
+#                  `first-slice` stage); the store must equal S0;
+#                * another is SIGKILLed after read_shuffle_partition returned
+#                  the whole partition, before reporting; the store must equal
+#                  S0;
+#   baseline   only then, a no-fault run in a root of its own: every
+#              partition's bytes equal the rows computed in this test
+#              (komira_shuffle_e2e.rows). It runs after the kills so that a
+#              reduce that changes the store is reported at the kill that
+#              did it, not as a baseline failure;
 #   re-read    back in the faulted root:
 #                * two fresh reducers of partition 2 run at once: each reads
 #                  the baseline's bytes exactly; then every partition is read
@@ -59,7 +65,7 @@ def main() raises:
 
     var mid = run.start_reduce(VICTIM, "first-slice")
     run.kill_when_parked(mid, "first-slice", S)
-    _require_unchanged(run, s0, S, "the reducer killed after its first slice")
+    _require_unchanged(run, s0, S, "the reducer killed inside read_shuffle_partition after its first slice")
 
     var late = run.start_reduce(VICTIM, "read")
     run.kill_when_parked(late, "read", S)

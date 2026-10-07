@@ -6,7 +6,9 @@
 # claims); each round below starts with no claims, and after each:
 #   * every partition 0..R-1 was claimed by exactly one worker, and reduced by
 #     that worker only (one SHUFFLE_REDUCE line per partition, from its owner);
-#   * each partition's bytes are its rows computed in this test, exactly once;
+#   * each partition's bytes are its rows computed in this test, exactly once
+#     (komira_shuffle_e2e.rows: this test has no no-fault baseline run; the
+#     computed rows are what every round is compared with);
 #   * there are R claim objects and the rest of the store equals S0.
 #
 # Rounds:

@@ -19,8 +19,17 @@
 # wait to be killed (the test SIGKILLs it); a task nobody kills exits 4 after
 # 120 s. Stages: `segment` (map: the `.seg` is written, the `_entries` entry is
 # not), `entry` (map: the whole sink write is done, the task has not reported),
-# `first-slice` (reduce: the seal and one slice of K are read, the rest are
-# not), `read` (reduce: the whole partition is read, nothing is reported).
+# `first-slice` (reduce: inside `read_shuffle_partition`, after the seal and
+# the first `.seg` slice of K are read and before the rest are), `read`
+# (reduce: `read_shuffle_partition` returned, nothing is reported).
+#
+# The `first-slice` stop is made by the store, not by komira_shuffle: the
+# reduce runs the production `read_shuffle_partition` over `_StopAtFirstSlice`,
+# a store that passes every call through to `LocalFsConditionalStore` and,
+# right after returning the bytes of the first range read of a `.seg` object
+# (the first slice; the seal reads touch only `_seal` and `_entries`
+# objects), parks the process. So the kill lands mid-read in the code a real
+# reducer runs.
 #
 # The `segment` stage writes the `.seg` the way `sink_shuffle_write` does,
 # through the package's public pieces (HashPartitioner, encode_partition_body,
@@ -37,9 +46,11 @@ from std.time import perf_counter_ns, sleep
 
 from komira_objectstore.local_fs_conditional_store import LocalFsConditionalStore
 from komira_objectstore.path import Path
+from komira_objectstore.store import CloneableConditionalWriteStore, ConditionalWriteStore, ObjectStore
+from komira_objectstore.types import CoalescePolicy, ListResult, ObjectMeta, WritePrecondition
 from komira_shuffle.claim import claim_partition
 from komira_shuffle.partitioner import HashPartitioner
-from komira_shuffle.seal_driver import read_seal, seal_step
+from komira_shuffle.seal_driver import seal_step
 from komira_shuffle.segment import SegWriter, write_segment
 from komira_shuffle.sink import (
     ShuffleRow,
@@ -186,18 +197,56 @@ def _reduce_one(store: LocalFsConditionalStore, f: Flags, partition: Int) raises
     )
 
 
+struct _StopAtFirstSlice(CloneableConditionalWriteStore, ConditionalWriteStore, ObjectStore, Movable, Deinitable):
+    """`LocalFsConditionalStore`, except that the first `get_range` of a
+    `.seg` object returns its bytes to nobody: the process parks there (see
+    the module header). Clones park the same way."""
+
+    var inner: LocalFsConditionalStore
+
+    def __init__(out self, var inner: LocalFsConditionalStore):
+        self.inner = inner^
+
+    def clone(self) -> Self:
+        return Self(self.inner.clone())
+
+    def head(self, path: Path) raises -> ObjectMeta:
+        return self.inner.head(path)
+
+    def list_with_delimiter(self, prefix: Path) raises -> ListResult:
+        return self.inner.list_with_delimiter(prefix)
+
+    def coalesce_policy(self) -> CoalescePolicy:
+        return self.inner.coalesce_policy()
+
+    def conditional_put(self, path: Path, bytes: List[UInt8], precond: WritePrecondition) raises -> ObjectMeta:
+        return self.inner.conditional_put(path, bytes, precond)
+
+    def compare_and_swap(self, path: Path, bytes: List[UInt8], expected_version: String) raises -> ObjectMeta:
+        return self.inner.compare_and_swap(path, bytes, expected_version)
+
+    def put(self, path: Path, bytes: List[UInt8]) raises -> ObjectMeta:
+        return self.inner.put(path, bytes)
+
+    def get_range(self, path: Path, start: Int64, length: Int64) raises -> List[UInt8]:
+        var bytes = self.inner.get_range(path, start, length)
+        if path.raw().endswith(".seg"):
+            _park("first-slice")
+        return bytes^
+
+    def get(self, path: Path) raises -> List[UInt8]:
+        return self.inner.get(path)
+
+    def delete(self, path: Path) raises -> None:
+        self.inner.delete(path)
+
+
 def _run_reduce(f: Flags) raises:
     var store = LocalFsConditionalStore(f.root.copy())
     if f.die_after == "first-slice":
-        var seal = read_seal(store, f.shuffle_id, f.step, f.expected_producers())
-        for i in range(len(seal.read_plan_producer_ids)):
-            var slot = seal.dense_slot(i, f.partition)
-            if slot[1] == Int64(0):
-                continue
-            var key = Path.parse(seal.read_plan_object_keys[i])
-            _ = store.get_range(key, slot[0], slot[1])
-            _park("first-slice")
-        raise Error("shuffle_task: partition " + String(f.partition) + " has no non-empty slice")
+        var stopping = _StopAtFirstSlice(store^)
+        _ = read_shuffle_partition(stopping, f.shuffle_id, f.step, Int64(f.partition), f.expected_producers())
+        raise Error("shuffle_task: the read of partition " + String(f.partition) + " fetched no .seg slice")
     _reduce_one(store, f, f.partition)
 
 

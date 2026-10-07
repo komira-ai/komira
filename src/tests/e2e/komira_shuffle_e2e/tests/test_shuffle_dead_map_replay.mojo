@@ -2,7 +2,8 @@
 # run once: no row lost, none doubled. Every task is its own `shuffle_task`
 # process over one LocalFs root under $TEST_TMPDIR.
 #
-#   baseline     4 maps, the driver and 4 reduces with no fault: each
+# The phases run in this order:
+#   baseline     first, 4 maps, the driver and 4 reduces with no fault: each
 #                partition's bytes equal the rows computed in this test
 #                (komira_shuffle_e2e.rows), so the oracle is checked against
 #                the real pipeline before it judges the faulted runs.

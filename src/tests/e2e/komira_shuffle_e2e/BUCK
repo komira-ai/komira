@@ -49,12 +49,15 @@ mojo_binary(
 #   _entries entry (the driver must refuse to seal), and one SIGKILLed after
 #   its entry and replayed twice at once (_entries keeps one chunk per
 #   producer); every partition then reads its rows exactly once.
-# test_shuffle_dead_reducer_reread: reducers SIGKILLed mid-read and after
-#   reading; fresh ones read bytes identical to a no-fault run, and the map
-#   output and the seal are unchanged.
+# test_shuffle_dead_reducer_reread: reducers SIGKILLed inside
+#   read_shuffle_partition after its first slice (a store wrapper in the
+#   binary parks there) and after the whole read; fresh ones read bytes
+#   identical to a no-fault run made after the kills, and the map output and
+#   the seal are unchanged.
 # test_shuffle_elastic_reducers: 4, 4, 4 and 2 racing pool workers, then one
 #   that leaves after one claim and three that join; every partition is
-#   claimed and reduced exactly once each round.
+#   claimed and reduced exactly once each round, with the bytes the library
+#   computes (no no-fault baseline run).
 [
     mojo_test(
         name = name,
