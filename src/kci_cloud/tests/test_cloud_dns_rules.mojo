@@ -159,10 +159,20 @@ def _cert(id: String, body: String) -> String:
 def test_every_name_refusal_in_one_pass() raises:
     """Catches: any one rule dropped (its line is missing), a rule that fires
     on the wrong resource or path, a rule that also fires on a good entry or
-    reports one defect twice (the total)."""
+    reports one defect twice (the total). Every refusal branch of the
+    literal checks has its own line: a TTL above the range or fractional;
+    an IPv4 with a leading zero, three parts, an empty part, a part longer
+    than three digits (it would wrap a 64-bit sum to a legal octet) or a
+    letter; an IPv6 longer than 45 bytes, in uppercase or with one colon;
+    an empty TXT; an MX preference above 65535, of six digits, not a
+    number, before a bad host, or missing; and a CNAME written before
+    another record set at its name as well as after one."""
     var txt256 = String("")
     for _ in range(256):
         txt256 += String("t")
+    var v6long = String("::")
+    for _ in range(44):
+        v6long += String("a")  # 46 bytes, the right shape
     var many = String("")
     for i in range(11):
         many += String('"d') + String(i) + String('.example.com"') + (String(",") if i < 10 else String(""))
@@ -206,10 +216,29 @@ def test_every_name_refusal_in_one_pass() raises:
         + _site_rec("r-refq", "rq.example.com", "CNAME", String('{"ref":{"resource":"q","standard":"HOST"}}'))
         + _site_rec("r-param", "p.example.com", "TXT", String('{"param":"region"}'))
         + _site_rec("r-ttl", "ttl.example.com", "A", _lit("192.0.2.1"), String(',"ttl":"30s"'))
+        + _site_rec("r-ttl-hi", "ttlhi.example.com", "A", _lit("192.0.2.1"), String(',"ttl":"86401s"'))
+        + _site_rec("r-ttl-frac", "ttlfr.example.com", "A", _lit("192.0.2.1"), String(',"ttl":"60.500s"'))
+        # records: each literal check of its type
+        + _site_rec("r-ip-lead0", "ip1.example.com", "A", _lit("192.0.2.01"))
+        + _site_rec("r-ip-three", "ip2.example.com", "A", _lit("192.0.2"))
+        + _site_rec("r-ip-empty", "ip3.example.com", "A", _lit("192..2.1"))
+        + _site_rec("r-ip-long", "ip4.example.com", "A", _lit("18446744073709551617.0.2.1"))
+        + _site_rec("r-ip-alpha", "ip5.example.com", "A", _lit("192.0.2.a"))
+        + _site_rec("r-v6-long", "ip6a.example.com", "AAAA", _lit(v6long))
+        + _site_rec("r-v6-upper", "ip6b.example.com", "AAAA", _lit("2001:DB8::1"))
+        + _site_rec("r-v6-colon", "ip6c.example.com", "AAAA", _lit("2001db8:1"))
+        + _site_rec("r-txt-empty", "txt0.example.com", "TXT", _lit(""))
+        + _site_rec("r-mx-big", "mx1.example.com", "MX", _lit("65536 mail.example.com"))
+        + _site_rec("r-mx-six", "mx2.example.com", "MX", _lit("000010 mail.example.com"))
+        + _site_rec("r-mx-alpha", "mx3.example.com", "MX", _lit("x1 mail.example.com"))
+        + _site_rec("r-mx-host", "mx4.example.com", "MX", _lit("10 Mail.example.com"))
+        + _site_rec("r-mx-lead", "mx5.example.com", "MX", _lit(" mail.example.com"))
         # records: one set per name and type, a CNAME alone
         + _site_rec("r-dup1", "dup.example.com", "A", _lit("192.0.2.1"))
         + _site_rec("r-dup2", "dup.example.com", "A", _lit("192.0.2.2"))
         + _site_rec("r-cn-side", "dup.example.com", "CNAME", _lit("x.example.net"))
+        + _site_rec("r-cn-first", "cnf.example.com", "CNAME", _lit("x.example.net"))
+        + _site_rec("r-cn-after", "cnf.example.com", "TXT", _lit("v=spf1 -all"))
         + String('{"id":"r-uses","dnsRecord":{"name":"u.example.com","zone":{"resource":"site"},"type":"A",')
         + String('"values":[') + _lit("192.0.2.1") + String(']},"uses":[{"cell":"LOGS","access":"WRITE"}]},')
         # certificates
@@ -254,8 +283,25 @@ def test_every_name_refusal_in_one_pass() raises:
     _expect(l, "r-refq|dns_record.values[0]|", '"q" (queue) does not expose HOST')
     _expect(l, "r-param|dns_record.values[0]|", 'release parameter "region" is unresolved')
     _expect(l, "r-ttl|dns_record.ttl|", "whole seconds from 60 to 86400; unset means 300")
+    _expect(l, "r-ttl-hi|dns_record.ttl|", "whole seconds from 60 to 86400")
+    _expect(l, "r-ttl-frac|dns_record.ttl|", "whole seconds from 60 to 86400")
+    _expect(l, "r-ip-lead0|dns_record.values[0]|", '"192.0.2.01" is not an IPv4 address')
+    _expect(l, "r-ip-three|dns_record.values[0]|", '"192.0.2" is not an IPv4 address')
+    _expect(l, "r-ip-empty|dns_record.values[0]|", '"192..2.1" is not an IPv4 address')
+    _expect(l, "r-ip-long|dns_record.values[0]|", '"18446744073709551617.0.2.1" is not an IPv4 address')
+    _expect(l, "r-ip-alpha|dns_record.values[0]|", '"192.0.2.a" is not an IPv4 address')
+    _expect(l, "r-v6-long|dns_record.values[0]|", "is not an IPv6 address")
+    _expect(l, "r-v6-upper|dns_record.values[0]|", '"2001:DB8::1" is not an IPv6 address')
+    _expect(l, "r-v6-colon|dns_record.values[0]|", '"2001db8:1" is not an IPv6 address')
+    _expect(l, "r-txt-empty|dns_record.values[0]|", "a TXT value is 1 to 255 bytes")
+    _expect(l, "r-mx-big|dns_record.values[0]|", '"65536 mail.example.com" is not an MX value')
+    _expect(l, "r-mx-six|dns_record.values[0]|", '"000010 mail.example.com" is not an MX value')
+    _expect(l, "r-mx-alpha|dns_record.values[0]|", '"x1 mail.example.com" is not an MX value')
+    _expect(l, "r-mx-host|dns_record.values[0]|", '"10 Mail.example.com" is not an MX value')
+    _expect(l, "r-mx-lead|dns_record.values[0]|", '" mail.example.com" is not an MX value')
     _expect(l, "r-dup2|dns_record|", '"r-dup1" already holds the A records of "dup.example.com"')
     _expect(l, "r-cn-side|dns_record|", '"r-dup1" holds the A records of "dup.example.com"; a CNAME is the only')
+    _expect(l, "r-cn-after|dns_record|", '"r-cn-first" holds the CNAME records of "cnf.example.com"; a CNAME is the only')
     _expect(l, "r-uses|uses|", "a dns_record runs as no identity")
     # certificates
     _expect(l, "c-nozone|certificate.zone|", "no zone")
@@ -265,7 +311,7 @@ def test_every_name_refusal_in_one_pass() raises:
     _expect(l, "c-wild|certificate.domains[0]|", "a wildcard `*` is only the first label")
     _expect(l, "c-twice|certificate.domains[1]|", '"www.example.com" is listed twice')
     _expect(l, "c-uses|uses|", "a certificate runs as no identity")
-    assert_equal(len(l), 37, "no other finding")
+    assert_equal(len(l), 54, "no other finding")
     print("  test_every_name_refusal_in_one_pass: PASS")
 
 
