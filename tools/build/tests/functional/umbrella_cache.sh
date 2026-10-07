@@ -58,7 +58,11 @@ if [ -z "${BUCK2:-}" ]; then
 fi
 case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; esac
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_umbrella.XXXXXX")
-GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init.defaultBranch=main)
+# gc.auto=0: the snapshot commit may start a background `git gc --auto`,
+# which repacks $W/src while the local clones below hardlink its objects
+# ("hardlink different from source"). `-c` reaches the git commands these
+# start (submodule add's clone) too.
+GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init.defaultBranch=main -c gc.auto=0)
 
 die() { echo "FAIL  umbrella cache: $1"; echo "logs: $W"; exit 1; }
 
