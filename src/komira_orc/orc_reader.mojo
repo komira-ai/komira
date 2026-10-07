@@ -644,6 +644,10 @@ struct _OrcDecodeColsTask[
         # `j % n_workers == tid` (balanced load).
         var j = tid
         while j < n_cols_local:
+            # Whether slot j of `accs` has been moved out. Every path below
+            # leaves it moved out (see the except), so the driver can mark the
+            # slab empty on success and on failure alike.
+            var taken = False
             try:
                 ref acc = sp[].accs.value().get_mut_interior(j)
                 var col_id = sp[].col_ids.value()[j]
@@ -666,10 +670,13 @@ struct _OrcDecodeColsTask[
                 # now-decoded accumulator out of its slab slot. The driver
                 # marks `accs` empty so the moved-out slot is never dropped.
                 var owned_acc = sp[].accs.value().take_slot_unchecked(j)
+                taken = True
                 ref out_slot = sp[].col_out.value().get_mut_interior(j)
                 out_slot = Optional[Column[HeapRegion]](owned_acc^.build())
             except e:
                 sp[].col_errors.value()[j] = Optional[String](String(e))
+                if not taken:
+                    _ = sp[].accs.value().take_slot_unchecked(j)
             j = j + n_workers
 
 
@@ -881,6 +888,7 @@ def _decode_orc_columns_impl[
         # parallelize.
         _ = cancel_token^
         for j in range(n_cols):
+            var taken = False  # as in _OrcDecodeColsTask.execute
             try:
                 ref acc = accs.get_mut_interior(j)
                 var col_id = col_ids[j]
@@ -899,10 +907,13 @@ def _decode_orc_columns_impl[
                         stripe_nrows[s],
                     )
                 var owned_acc = accs.take_slot_unchecked(j)
+                taken = True
                 ref out_slot = col_out.get_mut_interior(j)
                 out_slot = Optional[Column[HeapRegion]](owned_acc^.build())
             except e:
                 col_errors[j] = Optional[String](String(e))
+                if not taken:
+                    _ = accs.take_slot_unchecked(j)
         return _OrcDecodeColsResult(accs^, col_out^, col_errors^)
 
 
@@ -1134,6 +1145,13 @@ def _read_orc_bytes_core[
         col_errors = _r.col_errors.take()
 
 
+    # SAFETY CONTRACT (Slab.take_slot_unchecked): every `accs` slot has been
+    # moved out, by the worker / serial loop on success and by its except
+    # branch on failure. Mark the slab empty BEFORE the re-raise below: the
+    # error path drops `accs` too, and a drop over moved-out slots is a
+    # double free that crashed the next read in the process (SIGSEGV).
+    accs.set_len_unchecked(0)
+
     # Re-raise the first column failure, if any.
     for j in range(n_cols):
         if col_errors[j]:
@@ -1155,13 +1173,6 @@ def _read_orc_bytes_core[
         var slot = col_out.take_slot_unchecked(j)
         builder.add_column(slot.take())
     col_out.set_len_unchecked(0)
-    # SAFETY CONTRACT (Slab.take_slot_unchecked): every `accs` + `col_out` slot
-    # was moved out (inside the workers / serial loop for accs; in the drain
-    # loop above for col_out). Mark both slabs empty so their destructors do
-    # NOT destroy the moved-out (uninitialized) slots — without this the slab
-    # drop reads freed memory (UB; observed as a heap crash on the 2nd decode
-    # call).
-    accs.set_len_unchecked(0)
     return builder.build(out_schema.copy())
 
 
