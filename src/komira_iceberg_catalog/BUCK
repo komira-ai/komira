@@ -39,7 +39,7 @@ mojo_test(
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_http_server:komira_http_server",
-        "//src/komira_http_tls_e2e:komira_http_tls_e2e",
+        "//src/tests/e2e/komira_http_tls_e2e:komira_http_tls_e2e",
         "//src/komira_json:komira_json",
     ],
 )
