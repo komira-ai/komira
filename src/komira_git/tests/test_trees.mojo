@@ -232,6 +232,7 @@ def test_modes() raises:
 def test_add_name_refusals() raises:
     assert_equal(_add_err(MODE_BLOB, ""), "komira_git: tree entry has an empty name")
     assert_equal(_add_err(MODE_BLOB, "a/b"), "komira_git: tree entry name contains '/'")
+    assert_equal(_add_err(MODE_BLOB, "a" + chr(0) + "b"), "komira_git: tree entry name contains NUL")
     assert_equal(_add_err(MODE_BLOB, "."), "komira_git: tree entry name is '.' or '..'")
     assert_equal(_add_err(MODE_TREE, ".."), "komira_git: tree entry name is '.' or '..'")
     assert_equal(_add_err(MODE_TREE, ".git"), "komira_git: tree entry name is '.git'")

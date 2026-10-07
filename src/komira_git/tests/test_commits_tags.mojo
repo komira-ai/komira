@@ -23,7 +23,15 @@
 #     serialize back to the same bytes.
 #   * test_merge_commit: extra headers lost, reordered, or their
 #     continuation lines mangled; a non-UTF-8 message byte altered.
-#   * test_*_refusals: each fsck rule by its exact message.
+#   * test_*_refusals: each fsck rule by its exact message, and each form
+#     git accepts that komira refuses (listed in commit.mojo) by its own.
+#   * test_date_range: a date git writes and fsck accepts (up to 2^63-1,
+#     19 digits) parsed and serialized back; 2^63 and above refused as
+#     fsck's badDateOverflow refuses them.
+#   * test_constructor_refusals: the checks that keep header bytes out of a
+#     serialized object (a line break in an e-mail, a header key or a tag
+#     name would start a new header line), each by its exact message; the
+#     test reports every mismatch before it fails.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -33,6 +41,7 @@ from komira_git import (
     ExtraHeader,
     ObjectFormat,
     ObjectId,
+    ObjectKind,
     Signature,
     Tag,
     parse_commit,
@@ -280,7 +289,7 @@ def test_signature_refusals() raises:
     var p = "komira_git: commit author: "
     assert_equal(_ident_err(_A), "OK")
     assert_equal(_ident_err(" <a@b> 1 +0000"), "OK")  # empty name
-    assert_equal(_ident_err(""), p + "missing name before email")
+    assert_equal(_ident_err(""), p + "missing email")
     assert_equal(_ident_err("<a@b> 1 +0000"), p + "missing name before email")
     assert_equal(_ident_err("A > <a@b> 1 +0000"), p + "bad name")
     assert_equal(_ident_err("A U Thor 1 +0000"), p + "missing email")
@@ -289,12 +298,16 @@ def test_signature_refusals() raises:
     assert_equal(_ident_err("A <a@b 1 +0000"), p + "bad email")
     assert_equal(_ident_err("A <a@b>1 +0000"), p + "missing space before date")
     assert_equal(_ident_err("A <a@b> 01 +0000"), p + "zero-padded date")
-    assert_equal(_ident_err("A <a@b> 1234567890123456789 +0000"), p + "date overflows")
+    assert_equal(_ident_err("A <a@b> 0 +0000"), "OK")
+    assert_equal(_ident_err("A <a@b> 0x +0000"), p + "zero-padded date")
+    assert_equal(_ident_err("A <a@b>  1 +0000"), p + "extra whitespace before date")
+    assert_equal(_ident_err("A <a@b> \t1 +0000"), p + "extra whitespace before date")
     assert_equal(_ident_err("A <a@b> x +0000"), p + "bad date")
     assert_equal(_ident_err("A <a@b> 1+0000"), p + "bad date")
     assert_equal(_ident_err("A <a@b> 1 0000"), p + "bad timezone")
     assert_equal(_ident_err("A <a@b> 1 +000"), p + "bad timezone")
     assert_equal(_ident_err("A <a@b> 1 +0000 "), p + "bad timezone")
+    assert_equal(_ident_err("A <a@b> 1 +000x"), p + "bad timezone")
     try:
         _ = Signature("A <x>", "a@b", 1, "+0000")
         assert_true(False)
@@ -394,11 +407,100 @@ def test_tag_refusals() raises:
     assert_equal(_tag_err(o + "type tree\ntag x\n"), "komira_git: tag: no empty line after the header")
 
 
+def _parse_time(line: String) raises -> Int:
+    var b = _b(line)
+    return parse_signature(Span(b), "commit author").time
+
+
+def test_date_range() raises:
+    var p = "komira_git: commit author: "
+    # git 2.51.0 `git commit-tree` writes this date and `git fsck --strict`
+    # accepts it: fsck's badDateOverflow is by value (above 2^63-1 here,
+    # where time_t is 64 bits), not by digit count.
+    var line = "A <a@b> 1234567890123456789 +0000"
+    assert_equal(_parse_time(line), 1234567890123456789)
+    assert_equal(_parse_time("A <a@b> 9223372036854775807 +0000"), 9223372036854775807)
+    var b = _b(line)
+    assert_true(_same(parse_signature(Span(b), "x").serialize(), b))
+    assert_equal(_ident_err("A <a@b> 9223372036854775808 +0000"), p + "date overflows")
+    assert_equal(_ident_err("A <a@b> 9999999999999999999 +0000"), p + "date overflows")
+    assert_equal(_ident_err("A <a@b> 10000000000000000000 +0000"), p + "date overflows")
+    assert_equal(_ident_err("A <a@b> 99999999999999999999999 +0000"), p + "date overflows")
+
+
+def _sig_err(name: String, email: String, time: Int, tz: String) -> String:
+    try:
+        _ = Signature(name, email, time, tz)
+    except e:
+        return String(e)
+    return String("OK")
+
+
+def _hdr_err(key: String, value: String) -> String:
+    try:
+        _ = ExtraHeader(key, value)
+    except e:
+        return String(e)
+    return String("OK")
+
+
+def _tag_name_err(name: String) -> String:
+    var t = Tag(
+        ObjectId.zero(ObjectFormat.sha1()),
+        ObjectKind.tree(),
+        List[UInt8](name.as_bytes()),
+        Optional[Signature](None),
+        List[ExtraHeader](),
+        List[UInt8](),
+    )
+    try:
+        _ = t.serialize()
+    except e:
+        return String(e)
+    return String("OK")
+
+
+def _expect(mut fails: String, got: String, want: String):
+    if got != want:
+        fails += "\n  got: " + got + "\n  want: " + want
+
+
+def test_constructor_refusals() raises:
+    var fails = String()
+    var nul = chr(0)
+    var sig_email = "komira_git: signature email holds '<', '>', a line break or NUL"
+    _expect(fails, _sig_err("A", "a@b", 0, "+0000"), "OK")
+    _expect(fails, _sig_err("A", "a>b", 1, "+0000"), sig_email)
+    _expect(fails, _sig_err("A", "a>\nparent x", 1, "+0000"), sig_email)
+    _expect(fails, _sig_err("A", "a" + nul, 1, "+0000"), sig_email)
+    _expect(fails, _sig_err("A", "a@b", -1, "+0000"), "komira_git: signature time is negative")
+    _expect(
+        fails,
+        _sig_err("A", "a@b", 1, "+000x"),
+        "komira_git: signature time zone '+000x' is not +hhmm or -hhmm",
+    )
+    _expect(fails, _ident_err("A <a@b> 1 +000x"), "komira_git: commit author: bad timezone")
+    var key_msg = "komira_git: header key holds a space, line break or NUL"
+    _expect(fails, _hdr_err("k", "v\nw"), "OK")
+    _expect(fails, _hdr_err("", "v"), "komira_git: header key is empty")
+    _expect(fails, _hdr_err("a b", "v"), key_msg)
+    _expect(fails, _hdr_err("k\nparent", "v"), key_msg)
+    _expect(fails, _hdr_err("k" + nul, "v"), key_msg)
+    _expect(fails, _hdr_err("k", "a" + nul), "komira_git: header value holds NUL")
+    var tag_msg = "komira_git: tag: name holds a line break or NUL"
+    _expect(fails, _tag_name_err("v1"), "OK")
+    _expect(fails, _tag_name_err("x\ntagger A <a@b> 1 +0000"), tag_msg)
+    _expect(fails, _tag_name_err("x" + nul), tag_msg)
+    assert_equal(fails, "")
+
+
 def main() raises:
     test_commit_vectors()
     test_merge_commit()
     test_tag_vectors()
     test_signature_refusals()
+    test_date_range()
+    test_constructor_refusals()
     test_commit_refusals()
     test_tag_refusals()
     print("komira_git commit and tag tests passed")
