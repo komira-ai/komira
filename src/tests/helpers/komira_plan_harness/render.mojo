@@ -7,7 +7,9 @@
 #
 #   bool                          true | false
 #   int8..int64, uint8..uint64    decimal integer
-#   float16/32/64                 <shortest decimal>|0x<IEEE bits> (float_text)
+#   float16/32/64                 <shortest decimal>|0x<IEEE bits> (float_text);
+#                                 inside a nested value 0x<IEEE bits> alone,
+#                                 or NaN for any NaN
 #   string, large_string          escaped UTF-8 (escape.mojo)
 #   binary, large_binary,
 #   fixed_size_binary             lower-case hex, two digits a byte
@@ -19,15 +21,19 @@
 #   decimal128, decimal256        <unscaled integer>e<-scale>: 12345 at scale
 #                                 2 is `12345e-2`, at scale 0 `12345e0`
 #   dictionary                    the decoded value, rendered as its value type
+#                                 (float values read as raw bits)
 #   list, large_list,
 #   fixed_size_list               [<v>,<v>,...]
 #   struct                        {<name>:<v>,...} in field order
-#   map                           {<k>:<v>,...} sorted by the key's text
+#   map                           {<k>:<v>,...} sorted by the key's text, then
+#                                 (duplicate keys) the value's
 #   union_sparse, union_dense     (<type code>:<v>)
 #   null                          \N
 #
 # Inside brackets each <v> is a cell of the child type, `\N` for a NULL, with
-# the bracket characters escaped in strings. The view types (binary_view,
+# the bracket characters escaped in strings and struct names escaped as names
+# (escape.mojo). The schema entry spells the whole type tree (type_text.mojo),
+# so two columns whose cells could read alike never share a schema line. The view types (binary_view,
 # utf8_view, list_view, large_list_view), `error` and any unknown type are
 # REFUSED by name: canon never renders a value it cannot render exactly.
 #
@@ -52,178 +58,30 @@ from .canon_text import CanonPolicy, CanonText
 from .escape import (
     ESC_NESTED,
     ESC_SCALAR,
-    bytes_to_string,
+    _bytes_to_string,
     escape_bytes_into,
     escape_name,
 )
-from .float_text import float_cell_text
-
-
-# ---------------------------------------------------------------------------
-# Type spelling
-# ---------------------------------------------------------------------------
-
-
-def arrow_type_name(t: ArrowType) raises -> String:
-    """plan_vocabulary's ArrowType name without `ARROW_TYPE_`, lower case."""
-    if t == ArrowType.NULL:
-        return String("null")
-    if t == ArrowType.BOOL:
-        return String("bool")
-    if t == ArrowType.INT8:
-        return String("int8")
-    if t == ArrowType.INT16:
-        return String("int16")
-    if t == ArrowType.INT32:
-        return String("int32")
-    if t == ArrowType.INT64:
-        return String("int64")
-    if t == ArrowType.UINT8:
-        return String("uint8")
-    if t == ArrowType.UINT16:
-        return String("uint16")
-    if t == ArrowType.UINT32:
-        return String("uint32")
-    if t == ArrowType.UINT64:
-        return String("uint64")
-    if t == ArrowType.FLOAT16:
-        return String("float16")
-    if t == ArrowType.FLOAT32:
-        return String("float32")
-    if t == ArrowType.FLOAT64:
-        return String("float64")
-    if t == ArrowType.STRING:
-        return String("string")
-    if t == ArrowType.BINARY:
-        return String("binary")
-    if t == ArrowType.DATE32:
-        return String("date32")
-    if t == ArrowType.DATE64:
-        return String("date64")
-    if t == ArrowType.TIMESTAMP:
-        return String("timestamp")
-    if t == ArrowType.DECIMAL128:
-        return String("decimal128")
-    if t == ArrowType.DICTIONARY:
-        return String("dictionary")
-    if t == ArrowType.LIST:
-        return String("list")
-    if t == ArrowType.STRUCT:
-        return String("struct")
-    if t == ArrowType.TIMESTAMP_S:
-        return String("timestamp_s")
-    if t == ArrowType.TIMESTAMP_MS:
-        return String("timestamp_ms")
-    if t == ArrowType.TIMESTAMP_US:
-        return String("timestamp_us")
-    if t == ArrowType.TIMESTAMP_NS:
-        return String("timestamp_ns")
-    if t == ArrowType.LARGE_STRING:
-        return String("large_string")
-    if t == ArrowType.LARGE_BINARY:
-        return String("large_binary")
-    if t == ArrowType.MAP:
-        return String("map")
-    if t == ArrowType.DECIMAL256:
-        return String("decimal256")
-    if t == ArrowType.TIME32_S:
-        return String("time32_s")
-    if t == ArrowType.TIME32_MS:
-        return String("time32_ms")
-    if t == ArrowType.TIME64_US:
-        return String("time64_us")
-    if t == ArrowType.TIME64_NS:
-        return String("time64_ns")
-    if t == ArrowType.DURATION_S:
-        return String("duration_s")
-    if t == ArrowType.DURATION_MS:
-        return String("duration_ms")
-    if t == ArrowType.DURATION_US:
-        return String("duration_us")
-    if t == ArrowType.DURATION_NS:
-        return String("duration_ns")
-    if t == ArrowType.INTERVAL_YEAR_MONTH:
-        return String("interval_year_month")
-    if t == ArrowType.INTERVAL_DAY_TIME:
-        return String("interval_day_time")
-    if t == ArrowType.INTERVAL_MONTH_DAY_NANO:
-        return String("interval_month_day_nano")
-    if t == ArrowType.UNION_SPARSE:
-        return String("union_sparse")
-    if t == ArrowType.UNION_DENSE:
-        return String("union_dense")
-    if t == ArrowType.LARGE_LIST:
-        return String("large_list")
-    if t == ArrowType.FIXED_SIZE_BINARY:
-        return String("fixed_size_binary")
-    if t == ArrowType.FIXED_SIZE_LIST:
-        return String("fixed_size_list")
-    if t == ArrowType.BINARY_VIEW:
-        return String("binary_view")
-    if t == ArrowType.UTF8_VIEW:
-        return String("utf8_view")
-    if t == ArrowType.LIST_VIEW:
-        return String("list_view")
-    if t == ArrowType.LARGE_LIST_VIEW:
-        return String("large_list_view")
-    if t == ArrowType.ERROR:
-        return String("error")
-    raise Error("canon: unknown arrow type id " + String(Int(t.type_id)))
-
-
-def float_width_of(t: ArrowType) -> Int:
-    if t == ArrowType.FLOAT16:
-        return 16
-    if t == ArrowType.FLOAT32:
-        return 32
-    if t == ArrowType.FLOAT64:
-        return 64
-    return 0
-
-
-def type_spelling(f: Field) raises -> String:
-    """The type part of a schema entry (see canon_text.mojo)."""
-    var t = f.arrow_type
-    var s = arrow_type_name(t)
-    if t == ArrowType.DECIMAL128 or t == ArrowType.DECIMAL256:
-        s += "(" + String(f.decimal_precision) + "," + String(f.decimal_scale) + ")"
-    elif t.is_timestamp():
-        var tz = f.timezone()
-        if tz.byte_length() > 0:
-            s += "(" + escape_name(tz) + ")"
-    elif t == ArrowType.DICTIONARY:
-        s += "(" + arrow_type_name(f.dict_index_type()) + ")"
-    elif t == ArrowType.UNION_SPARSE or t == ArrowType.UNION_DENSE:
-        var ids = f.union_type_ids()
-        s += "("
-        for i in range(len(ids)):
-            if i > 0:
-                s += ","
-            s += String(ids[i])
-        s += ")"
-    if f.num_children() > 0:
-        s += "<"
-        for i in range(f.num_children()):
-            if i > 0:
-                s += ","
-            s += escape_name(f.child_name(i)) + ":"
-            s += arrow_type_name(f.child_arrow_type(i))
-            if f.child_nullable(i):
-                s += "?"
-        s += ">"
-    return s
-
-
-def schema_entry(f: Field) raises -> String:
-    var s = escape_name(f.name) + ":" + type_spelling(f)
-    if f.nullable:
-        s += "?"
-    return s
+from .type_text import (
+    arrow_type_name,
+    column_float_width,
+    float_width_of,
+    schema_entry,
+    schema_entry_of_field,
+)
+from .float_text import bits_hex, float_cell_text, float_is_nan
 
 
 # ---------------------------------------------------------------------------
 # Buffer reads, checked
 # ---------------------------------------------------------------------------
+
+
+@always_inline
+def _phys(col: Column[HeapRegion], row: Int) -> Int:
+    """The physical index of logical row `row`: the ONE place canon applies a
+    column's slice offset (validity applies it inside `is_null_at`)."""
+    return col.offset() + row
 
 
 @always_inline
@@ -264,7 +122,7 @@ def _span(
 ) raises -> Tuple[Int, Int]:
     """[start, end) of logical row `row` by the offsets buffer, checked to be
     ordered and within `limit`."""
-    var p = col.offset() + row
+    var p = _phys(col, row)
     var start = _offset_at(col, p, wide, path)
     var end = _offset_at(col, p + 1, wide, path)
     if start < 0 or end < start or end > limit:
@@ -288,12 +146,12 @@ def _bytes_cell(col: Column[HeapRegion], start: Int, end: Int, hex: Bool, nested
     if hex:
         for i in range(start, end):
             _hex_into(res, view.read_u8_at(i))
-        return bytes_to_string(res)
+        return _bytes_to_string(res)
     var raw = List[UInt8](capacity=end - start)
     for i in range(start, end):
         raw.append(view.read_u8_at(i))
     escape_bytes_into(res, Span(raw), ESC_NESTED if nested else ESC_SCALAR)
-    return bytes_to_string(res)
+    return _bytes_to_string(res)
 
 
 def _decimal_cell(col: Column[HeapRegion], pos: Int, nbytes: Int, scale: Int) -> String:
@@ -347,10 +205,21 @@ def _fixed_width(t: ArrowType) -> Int:
     return 0
 
 
-def _fixed_cell(col: Column[HeapRegion], row: Int) -> String:
+def _float_cell(bits: UInt64, width: Int, nested: Bool) -> String:
+    """A top-level float is `<decimal>|0x<bits>`; one inside a nested value
+    is its bits alone (`0x<bits>`), or `NaN` for any NaN, so the text of a
+    nested value never depends on how a decimal is printed."""
+    if not nested:
+        return float_cell_text(bits, width)
+    if float_is_nan(bits, width):
+        return String("NaN")
+    return bits_hex(bits, width)
+
+
+def _fixed_cell(col: Column[HeapRegion], row: Int, nested: Bool) -> String:
     var t = col.arrow_type
     var w = _fixed_width(t)
-    var pos = (col.offset() + row) * w
+    var pos = (_phys(col, row)) * w
     var view = col.values_view_native()
     if t == ArrowType.INT8:
         return String(Int(bitcast[DType.int8](view.read_u8_at(pos))))
@@ -361,15 +230,15 @@ def _fixed_cell(col: Column[HeapRegion], row: Int) -> String:
     if t == ArrowType.UINT16:
         return String(Int(view.read_u16_le_at(pos)))
     if t == ArrowType.FLOAT16:
-        return float_cell_text(UInt64(view.read_u16_le_at(pos)), 16)
+        return _float_cell(UInt64(view.read_u16_le_at(pos)), 16, nested)
     if t == ArrowType.UINT32:
         return String(view.read_u32_le_at(pos))
     if t == ArrowType.FLOAT32:
-        return float_cell_text(UInt64(view.read_u32_le_at(pos)), 32)
+        return _float_cell(UInt64(view.read_u32_le_at(pos)), 32, nested)
     if t == ArrowType.UINT64:
         return String(view.read_u64_le_at(pos))
     if t == ArrowType.FLOAT64:
-        return float_cell_text(view.read_u64_le_at(pos), 64)
+        return _float_cell(view.read_u64_le_at(pos), 64, nested)
     if t == ArrowType.INTERVAL_DAY_TIME:
         return (
             String(view.read_i32_le_at(pos)) + "d"
@@ -411,16 +280,22 @@ def _dict_cell(col: Column[HeapRegion], row: Int, nested: Bool, path: String) ra
             raw.append(v.read_u8_at(i))
         var res = List[UInt8]()
         escape_bytes_into(res, Span(raw), ESC_NESTED if nested else ESC_SCALAR)
-        return bytes_to_string(res)
+        return _bytes_to_string(res)
     if col.is_numeric_dict():
         var dt = col.dict_value_dtype()
+        var vw = 8 if (dt == DType.int64 or dt == DType.float64) else 4
+        if (code + 1) * vw > col._dict_data.value().len():
+            raise Error("canon: column " + path + ": dictionary values buffer too short")
         if dt == DType.int32 or dt == DType.int64:
             return String(col.dict_value_i64(code))
         if dt == DType.float64:
-            return float_cell_text(bitcast[DType.uint64](col.dict_value_f64(code)), 64)
+            # Raw bits from the dictionary's value buffer, never through a
+            # float conversion (which may quiet a signalling NaN).
+            return _float_cell(col._dict_data.value().read_u64_le_at(code * 8), 64, nested)
         if dt == DType.float32:
-            var f = Float32(col.dict_value_f64(code))
-            return float_cell_text(UInt64(bitcast[DType.uint32](f)), 32)
+            return _float_cell(
+                UInt64(col._dict_data.value().read_u32_le_at(code * 4)), 32, nested
+            )
         raise Error(
             "canon: column " + path + ": dictionary value type " + String(dt)
             + " is not rendered"
@@ -428,25 +303,53 @@ def _dict_cell(col: Column[HeapRegion], row: Int, nested: Bool, path: String) ra
     raise Error("canon: column " + path + ": dictionary with no value layout")
 
 
+def _entry_less(keys: List[String], vals: List[String], i: Int, j: Int) -> Bool:
+    """Entry i before entry j: by key text, ties (duplicate keys) by value
+    text."""
+    if keys[i] != keys[j]:
+        return keys[i] < keys[j]
+    return vals[i] < vals[j]
+
+
 def _sorted_map_entries(
     keys: List[String], vals: List[String], start: Int, end: Int
 ) -> String:
-    var idx = List[Int]()
+    # Bottom-up merge sort of the entry indices: n log n, and a total order,
+    # so a map with duplicate keys still has one canonical text.
+    var src = List[Int](capacity=end - start)
     for i in range(start, end):
-        idx.append(i)
-    # Insertion sort by key text (a map row is small).
-    for i in range(1, len(idx)):
-        var j = i
-        while j > 0 and keys[idx[j]] < keys[idx[j - 1]]:
-            var tmp = idx[j]
-            idx[j] = idx[j - 1]
-            idx[j - 1] = tmp
-            j -= 1
+        src.append(i)
+    var n = len(src)
+    var width = 1
+    while width < n:
+        var dst = List[Int](capacity=n)
+        var lo = 0
+        while lo < n:
+            var mid = min(lo + width, n)
+            var hi = min(lo + 2 * width, n)
+            var i = lo
+            var j = mid
+            while i < mid and j < hi:
+                if _entry_less(keys, vals, src[j], src[i]):
+                    dst.append(src[j])
+                    j += 1
+                else:
+                    dst.append(src[i])
+                    i += 1
+            while i < mid:
+                dst.append(src[i])
+                i += 1
+            while j < hi:
+                dst.append(src[j])
+                j += 1
+            lo = hi
+        src = dst^
+        width *= 2
     var s = String("{")
-    for i in range(len(idx)):
+    for i in range(n):
         if i > 0:
             s += ","
-        s += keys[idx[i]] + ":" + vals[idx[i]]
+        s += keys[src[i]] + ":" + vals[src[i]]
     return s + "}"
 
 
@@ -465,19 +368,19 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
 
     var w = _fixed_width(t)
     if w > 0:
-        _need_values(col, (col.offset() + n) * w, path)
+        _need_values(col, (_phys(col, n)) * w, path)
         for r in range(n):
-            cells.append(null_cell if _is_null(col, r) else _fixed_cell(col, r))
+            cells.append(null_cell if _is_null(col, r) else _fixed_cell(col, r, nested))
         return cells^
 
     if t == ArrowType.BOOL:
-        _need_values(col, (col.offset() + n + 7) // 8, path)
+        _need_values(col, (_phys(col, n) + 7) // 8, path)
         var view = col.values_view_native()
         for r in range(n):
             if _is_null(col, r):
                 cells.append(null_cell)
                 continue
-            var p = col.offset() + r
+            var p = _phys(col, r)
             var bit = (view.read_u8_at(p >> 3) >> UInt8(p & 7)) & 1
             cells.append(String("true") if bit == 1 else String("false"))
         return cells^
@@ -502,12 +405,12 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
         var bw = col._inner_size
         if bw <= 0:
             raise Error("canon: column " + path + ": fixed_size_binary width " + String(bw))
-        _need_values(col, (col.offset() + n) * bw, path)
+        _need_values(col, (_phys(col, n)) * bw, path)
         for r in range(n):
             if _is_null(col, r):
                 cells.append(null_cell)
                 continue
-            var p = (col.offset() + r) * bw
+            var p = (_phys(col, r)) * bw
             cells.append(_bytes_cell(col, p, p + bw, True, nested))
         return cells^
 
@@ -533,7 +436,7 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
             raise Error("canon: column " + path + ": a list needs one child")
         var size = col._inner_size
         var child = render_column(col.child_at(0), path + ".item", True)
-        if size <= 0 or (col.offset() + n) * size > len(child):
+        if size <= 0 or (_phys(col, n)) * size > len(child):
             raise Error(
                 "canon: column " + path + ": fixed_size_list of " + String(size)
                 + " over a child of " + String(len(child)) + " rows"
@@ -542,7 +445,7 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
             if _is_null(col, r):
                 cells.append(null_cell)
                 continue
-            var p = (col.offset() + r) * size
+            var p = (_phys(col, r)) * size
             cells.append(_join(child, p, p + size, "[", "]"))
         return cells^
 
@@ -554,7 +457,7 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
             var name = escape_name(col.field_name(c))
             kids.append(render_column(col.child_at(c), path + "." + name, True))
             names.append(name^)
-            if len(kids[c]) < col.offset() + n:
+            if len(kids[c]) < _phys(col, n):
                 raise Error("canon: column " + path + "." + names[c] + " is shorter than its struct")
         for r in range(n):
             if _is_null(col, r):
@@ -564,7 +467,7 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
             for c in range(nc):
                 if c > 0:
                     s += ","
-                s += names[c] + ":" + kids[c][col.offset() + r]
+                s += names[c] + ":" + kids[c][_phys(col, r)]
             cells.append(s + "}")
         return cells^
 
@@ -572,7 +475,7 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
         if col.num_children() != 1 or col.child_at(0).num_children() != 2:
             raise Error("canon: column " + path + ": a map needs one entries struct of two children")
         ref entries = col.child_at(0)
-        var ko = entries.offset()
+        var ko = _phys(entries, 0)
         var keys = render_column(entries.child_at(0), path + ".key", True)
         var vals = render_column(entries.child_at(1), path + ".value", True)
         var limit = min(len(keys), len(vals)) - ko
@@ -590,10 +493,10 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
         var kids = List[List[String]]()
         for c in range(col.num_children()):
             kids.append(render_column(col.child_at(c), path + "." + String(c), True))
-        _need_values(col, col.offset() + n, path)
+        _need_values(col, _phys(col, n), path)
         var view = col.values_view_native()
         for r in range(n):
-            var p = col.offset() + r
+            var p = _phys(col, r)
             var code = Int(bitcast[DType.int8](view.read_u8_at(p)))
             var child = -1
             if len(ids) == 0:
@@ -624,10 +527,27 @@ def render_column(col: Column[HeapRegion], path: String, nested: Bool) raises ->
 # ---------------------------------------------------------------------------
 
 
-def _schema_into(mut res: CanonText, schema: Schema) raises:
+def _schema_of_batch(mut res: CanonText, batch: RecordBatch) raises:
+    """Schema entries from the batch's Fields and the trees of its columns
+    (type_text.mojo)."""
+    var nc = batch.schema.num_columns()
+    if nc != batch.num_columns():
+        raise Error(
+            "canon: batch has " + String(batch.num_columns()) + " columns, schema "
+            + String(nc)
+        )
+    for c in range(nc):
+        var f = batch.schema.field_at(c)
+        ref col = batch.column_at(c)
+        res.schema.append(schema_entry(f, col))
+        res.names.append(escape_name(f.name))
+        res.float_widths.append(column_float_width(f, col))
+
+
+def _schema_of_fields(mut res: CanonText, schema: Schema) raises:
     for c in range(schema.num_columns()):
         var f = schema.field_at(c)
-        res.schema.append(schema_entry(f))
+        res.schema.append(schema_entry_of_field(f))
         res.names.append(escape_name(f.name))
         res.float_widths.append(float_width_of(f.arrow_type))
 
@@ -675,7 +595,7 @@ def render_batch(batch: RecordBatch, var policy: CanonPolicy) raises -> CanonTex
     """The canonical text of one batch (rows a selection mask drops are not
     rows of the result)."""
     var res = CanonText(policy^)
-    _schema_into(res, batch.schema)
+    _schema_of_batch(res, batch)
     _rows_into(res, batch)
     return res^
 
@@ -691,13 +611,17 @@ def _same_strings(a: List[String], b: List[String]) -> Bool:
 
 def render_table(table: Table, var policy: CanonPolicy) raises -> CanonText:
     """The canonical text of a chunked result: its chunks' rows in order.
-    Every chunk must carry the table's schema."""
+    The schema is spelled from the first chunk's columns (from the Fields
+    alone when there is no chunk), and every chunk must spell the same."""
     var res = CanonText(policy^)
-    _schema_into(res, table.schema())
+    if table.num_chunks() == 0:
+        _schema_of_fields(res, table.schema())
+        return res^
+    _schema_of_batch(res, table.chunk(0))
     for i in range(table.num_chunks()):
         ref chunk = table.chunk(i)
         var probe = CanonText(CanonPolicy())
-        _schema_into(probe, chunk.schema)
+        _schema_of_batch(probe, chunk)
         if not _same_strings(probe.schema, res.schema):
             raise Error("canon: table chunk " + String(i) + " has another schema")
         _rows_into(res, chunk)

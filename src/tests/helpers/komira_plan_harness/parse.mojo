@@ -13,7 +13,10 @@
 # `order:` / `float:` line; a key or float override naming no column (or a
 # float override naming a column that is not a float); a raw CR; a row with
 # the wrong number of cells; a scalar cell with an escape canon does not
-# write (escape.check_scalar_cell); a float cell float_text refuses.
+# write (escape.check_scalar_cell); a nested cell that is not well formed or
+# holds such an escape (escape.check_nested_cell; the check is structural, not
+# typed: a nested value's leaves are compared as text, floats in them as bits,
+# see render.mojo); a float cell float_text refuses.
 # =============================================================================
 
 from .canon_text import (
@@ -24,7 +27,12 @@ from .canon_text import (
     CanonPolicy,
     CanonText,
 )
-from .escape import check_scalar_cell, find_unescaped, split_unescaped
+from .escape import (
+    check_nested_cell,
+    check_scalar_cell,
+    find_unescaped,
+    split_unescaped,
+)
 from .float_text import FloatTolerance, parse_float_cell
 
 
@@ -55,6 +63,11 @@ def _float_width_of_spelling(type_part: String) -> Int:
     if t == "float32":
         return 32
     if t == "float64":
+        return 64
+    # A dictionary of floats compares as floats: dictionary<index,float64>.
+    if t.startswith("dictionary<") and t.endswith(",float32>"):
+        return 32
+    if t.startswith("dictionary<") and t.endswith(",float64>"):
         return 64
     return 0
 
@@ -196,7 +209,9 @@ def parse_canon(text: String) raises -> CanonText:
                 try:
                     if w > 0:
                         row[c] = parse_float_cell(row[c], w).canonical(w)
-                    elif not nested[c]:
+                    elif nested[c]:
+                        check_nested_cell(row[c])
+                    else:
                         check_scalar_cell(row[c])
                 except e:
                     raise Error(

@@ -192,6 +192,55 @@ def test_malformed_expected_files_are_refused() raises:
         )
 
 
+def test_escapes_canon_does_not_write_are_refused() raises:
+    with assert_raises(contains="escape canon does not write"):
+        _ = parse_canon(_doc("total", "s:string", "\\x41\n"))
+    with assert_raises(contains="escape canon does not write"):
+        _ = parse_canon(_doc("total", "s:string", "\\xFF\n"))
+    with assert_raises(contains="escape canon does not write"):
+        _ = parse_canon(_doc("total", "s:string", "\\x09\n"))
+    assert_equal(parse_canon(_doc("total", "s:string", "\\xff\\x01\n")).num_rows(), 1)
+
+
+def test_nested_cells_are_checked() raises:
+    var s = String("l:list<string>")
+    assert_equal(parse_canon(_doc("total", s, "[\\N,a\\,b,\\\\N]\n")).num_rows(), 1)
+    assert_equal(parse_canon(_doc("total", s, "\\N\n")).num_rows(), 1)
+    with assert_raises(contains="unclosed bracket"):
+        _ = parse_canon(_doc("total", s, "[1,2\n"))
+    with assert_raises(contains="mismatched bracket"):
+        _ = parse_canon(_doc("total", s, "[1}\n"))
+    with assert_raises(contains="text after its value"):
+        _ = parse_canon(_doc("total", s, "[1]x\n"))
+    with assert_raises(contains="not \\N or a bracketed value"):
+        _ = parse_canon(_doc("total", s, "1\n"))
+    with assert_raises(contains="holds \\N inside a value"):
+        _ = parse_canon(_doc("total", s, "[a\\Nb]\n"))
+    with assert_raises(contains="unknown escape"):
+        _ = parse_canon(_doc("total", s, "[a\\qb]\n"))
+    with assert_raises(contains="escape canon does not write"):
+        _ = parse_canon(_doc("total", s, "[\\x41]\n"))
+
+
+def test_float_against_text_column_is_compared_as_text() raises:
+    var e = parse_canon(_doc("total", "x:float64", "1.0\n"))
+    var a = parse_canon(_doc("total", "x:string", "abc\n"))
+    var report = compare_canon(e, a)
+    assert_equal(report.count_of("schema"), 1)
+    assert_equal(report.count_of("cell"), 1)
+
+
+def test_unordered_pairs_what_the_sorted_walk_misses() raises:
+    # Sorted, the bare NaN goes last and NaN|..01 pairs against ..00 first;
+    # the search after the walk pairs the rest.
+    var s = String("x:float64")
+    var e = parse_canon(_doc("none", s, "NaN\nNaN|0x7FF8000000000001\n"))
+    var a = parse_canon(_doc("none", s, "NaN|0x7FF8000000000000\nNaN|0x7FF8000000000001\n"))
+    var report = compare_canon(e, a)
+    if not report.ok():
+        raise Error(String(report))
+
+
 def test_check_batch_end_to_end() raises:
     var bb = BatchBuilder()
     var k: List[Int] = [2, 1]

@@ -94,7 +94,7 @@ def _expected_cells() -> List[List[String]]:
         ["llst", "[a\\,b]", "[]", "\\N"],
         ["fsl", "[1,2]", "\\N", "[-3,\\N]"],
         ["st", "{a:1,b:x}", "\\N", "{a:3,b:\\N}"],
-        ["mp", "{a:1,b:2}", "\\N", "{}"],
+        ["mp", "{a:\\N,b:2}", "\\N", "{}"],
         ["us", "(5:10)", "(7:q)", "(5:\\N)"],
         ["ud", "(1:true)", "(0:100)", "(1:false)"],
     ]
@@ -129,18 +129,20 @@ def test_schema_spelling() raises:
     var want: List[String] = [
         "b:bool?",
         "ts_us:timestamp_us(UTC)?",
-        "ts:timestamp?",
+        "ts:timestamp_us?",
         "dec:decimal128(38,2)?",
         "dec256:decimal256(76,4)?",
-        "dict_s:dictionary(int64)?",
+        "fsb:fixed_size_binary(2)?",
+        "dict_s:dictionary<int64,string>?",
+        "dict_f:dictionary<int32,float64>?",
         "nul:null?",
-        "lst:list<item:int32?>?",
-        "llst:large_list<item:string?>?",
-        "fsl:fixed_size_list<item:int16?>?",
-        "st:struct<a:int32,b:string?>?",
-        "mp:map<entries:struct>?",
-        "us:union_sparse(5,7)?",
-        "ud:union_dense(0,1)?",
+        "lst:list<int32>?",
+        "llst:large_list<string>?",
+        "fsl:fixed_size_list(2)<int16>?",
+        "st:struct<a:int32,b:string>?",
+        "mp:map<string,int64>?",
+        "us:union_sparse(5,7)<int32,string>?",
+        "ud:union_dense(0,1)<int64,bool>?",
     ]
     for w in want:
         var found = False
