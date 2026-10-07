@@ -13,7 +13,7 @@
 #   repository's files and an empty ratchet. It must exit 0, and its result
 #   JSON must hold each --expect string (the package's numbers): the reports
 #   cov_run.sh writes are what covcheck reads, end to end.
-# result (test 44): the result JSON of a library's coverage gate holds each
+# result (test 45): the result JSON of a library's coverage gate holds each
 #   --expect string.
 # Writes what it checked to <out>; exits 1 naming the first failure.
 set -euf

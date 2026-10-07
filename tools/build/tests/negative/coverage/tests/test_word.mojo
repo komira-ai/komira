@@ -1,5 +1,5 @@
 # Calls word(0) only: the arms for a positive and a negative x never run, so
-# covlow's line coverage is below 100% (test 44).
+# covlow's line coverage is below 100% (test 45).
 from covlow import word
 from std.testing import assert_equal
 

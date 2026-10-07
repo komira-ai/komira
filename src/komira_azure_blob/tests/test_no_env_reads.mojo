@@ -25,8 +25,10 @@ comptime _FILES: List[String] = [
     "__init__.mojo",
     "azure.mojo",
     "azure_client.mojo",
+    "azure_client_spec.mojo",
     "azure_fs.mojo",
     "azure_sas.mojo",
+    "azure_sas_query.mojo",
     "azure_signing.mojo",
     "azure_xml.mojo",
 ]
@@ -75,7 +77,7 @@ def test_the_scan_saw_the_package() raises:
     # Not vacuous: each file is the package's, whole.
     assert_equal(_count(_read("azure.mojo"), "\nstruct AzureStore["), 1)
     assert_equal(_count(_read("azure_fs.mojo"), "\nstruct AzureFs["), 1)
-    assert_equal(_count(_read("azure_sas.mojo"), "\nstruct AzureSasSigner("), 1)
+    assert_equal(_count(_read("azure_sas.mojo"), "\nstruct AzureSasSigner["), 1)
     assert_equal(_count(_read("azure_signing.mojo"), "\nstruct SharedKeySigningLayer["), 1)
     assert_true(_read("azure_fs.mojo").byte_length() > 10000)
 
