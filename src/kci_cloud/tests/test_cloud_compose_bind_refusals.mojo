@@ -11,14 +11,18 @@
 # from a second check all go red.
 #
 # 1. TYPED INPUTS: a default on an IMAGE or a VALUE_MAP input, an INT
-#    default that is not an integer, a BOOL default that is not true or
-#    false.
+#    default that is not an integer (a leading zero, a bare `-`, 19
+#    digits), a BOOL default that is not true or false; an INT default of
+#    exactly 18 digits, negative, is accepted.
 # 2. A BINDING: of no component, of an undeclared input, of a REF input;
 #    two of one field; a field outside the component's type; a field the
 #    input's type cannot be written to (a STRING into a port, an INT into a
 #    flag-free message); a field inside a reference (a STRING into
 #    `run_as.resource`, which would name a resource outside the closed
-#    definition); on a nested instance: a plain input (it passes down as
+#    definition); a field with an empty segment (`service..port`,
+#    `service.`); a field below a scalar the component writes (a STRING
+#    into `service.port.x`); a VALUE_MAP into a string the component
+#    writes; on a nested instance: a plain input (it passes down as
 #    `composite.input`), an IMAGE not under `composite.image_input.`, an
 #    input the nested definition does not declare or declares of another
 #    type, and one the instance binds too.
@@ -31,7 +35,9 @@
 #    `image_input` key that is not an IMAGE input, an image with no source,
 #    a `map_input` key that is not a VALUE_MAP input, a map value with
 #    nothing in it, a required IMAGE input unbound, and (nested) an INT
-#    input passed a STRING input of the enclosing definition.
+#    input passed a STRING input of the enclosing definition, an INT input
+#    or a map value passed an IMAGE input of the enclosing definition, and
+#    a map value that is a reference naming no output.
 # 6. THE KCI NAMESPACE: a definition named `kci.job` whose digest is not
 #    the one kci ships is refused (the shipped list is named), and so is
 #    `kci.other`, which kci does not ship; `acme.job`, the same bytes in the
@@ -91,23 +97,35 @@ comptime _SVC = '{"id":"api","service":{"image":{"digest":"sha256:a1"}}}'
 def test_typed_input_defaults() raises:
     """Catches: a default accepted on an IMAGE or VALUE_MAP input (it has no
     literal form), an INT default that is not an integer, a BOOL default
-    that is not true or false (N11)."""
+    that is not true or false (N11); a bare `-` taken as an integer (N26:
+    the digit count not checked once the sign is skipped); a 19-digit INT
+    taken (N27: the 18-digit bound dropped); and an 18-digit negative INT
+    refused (an off-by-one in the bound or the sign)."""
     var comp = String('"component":[') + _B + "],"
     var cases: List[String] = [
         comp + '"input":[{"name":"n","type":"INPUT_IMAGE","default":{"literal":"x"}}]',
         comp + '"input":[{"name":"n","type":"INPUT_VALUE_MAP","default":{"literal":"x"}}]',
         comp + '"input":[{"name":"n","type":"INPUT_INT","default":{"literal":"08"}}]',
         comp + '"input":[{"name":"n","type":"INPUT_BOOL","default":{"literal":"yes"}}]',
+        comp + '"input":[{"name":"n","type":"INPUT_INT","default":{"literal":"-"}}]',
+        comp + '"input":[{"name":"n","type":"INPUT_INT","default":{"literal":"1234567890123456789"}}]',
     ]
     var needles: List[String] = [
         "an IMAGE input has no default",
         "a VALUE_MAP input has no default",
         "an INT input is a decimal integer",
         "a BOOL input is true or false",
+        "an INT input is a decimal integer",
+        "an INT input is a decimal integer of at most 18 digits",
     ]
     for i in range(len(cases)):
         var d: List[String] = [_x(cases[i])]
         _one(d, String(_EMPTY), "acme.x@1", "input[n].default", needles[i])
+    # The bound itself is accepted: a mutant that counts the sign as a
+    # digit, or bounds at 17, refuses this one.
+    var edge: List[String] = [_x(comp + '"input":[{"name":"n","type":"INPUT_INT","default":{"literal":"-123456789012345678"}}]')]
+    var x = expand(Catalog.v1(), _defs(edge), _list(String(_EMPTY)))
+    assert_equal(len(x.findings), 0, _all(x.findings))
     print("  test_typed_input_defaults: PASS")
 
 
@@ -121,7 +139,10 @@ def _bound(inputs: String, binds: String, comps: String = String(_SVC)) -> Strin
 def test_a_binding() raises:
     """Catches: each binding rule missing (N12: no field check, so a typo
     would bind nothing; N13: the reference check, so a STRING could name a
-    resource outside the definition)."""
+    resource outside the definition; N28: the empty-segment check, so
+    `service..port` would write a member named "" and `service.` the
+    message itself). The last two cases pin the reason the writer gives
+    for a field below a scalar and for a map merged into a string."""
     var s = String('{"name":"s","type":"INPUT_STRING"}')
     var i = String('{"name":"i","type":"INPUT_INT"}')
     var r = String('{"name":"r","type":"INPUT_REF"}')
@@ -155,6 +176,21 @@ def test_a_binding() raises:
     cases.append(_bound(s, '{"component":"api","field":"service.nope","input":"s"}'))
     fields.append("bind[0].field")
     needles.append("a STRING input cannot be written to service.nope")
+    cases.append(_bound(i, '{"component":"api","field":"service..port","input":"i"}'))
+    fields.append("bind[0].field")
+    needles.append("a binding's field is a path of non-empty segments, service.<field>")
+    cases.append(_bound(s, '{"component":"api","field":"service.","input":"s"}'))
+    fields.append("bind[0].field")
+    needles.append("a binding's field is a path of non-empty segments, service.<field>")
+    var port = String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":8080}}')
+    cases.append(_bound(s, '{"component":"api","field":"service.port.x","input":"s"}', port))
+    fields.append("bind[0].field")
+    needles.append("a STRING input cannot be written to service.port.x: \"port\" is not a message or a map")
+    var path = String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"healthPath":"/h"}}')
+    var m = String('{"name":"m","type":"INPUT_VALUE_MAP"}')
+    cases.append(_bound(m, '{"component":"api","field":"service.health_path","input":"m"}', path))
+    fields.append("bind[0].field")
+    needles.append("a VALUE_MAP input cannot be written to service.health_path: \"health_path\" is not a map")
     for k in range(len(cases)):
         var d: List[String] = [cases[k]]
         _one(d, String(_EMPTY), "acme.x@1", fields[k], needles[k])
@@ -276,7 +312,12 @@ comptime _IMG = '"imageInput":{"img":{"digest":"sha256:a1"}}'
 def test_an_instance_of_typed_inputs() raises:
     """Catches: each instance rule of the typed inputs missing (N17: an INT
     literal not checked, so `8o80` reaches a port; N18: a required IMAGE
-    input left unbound accepted)."""
+    input left unbound accepted). Nested: an IMAGE input of the enclosing
+    definition passed as a plain value, to an INT input or into a map
+    (N29: the type of the passed input not checked, so an image has no
+    value to write), and a map value naming a resource but none of its
+    outputs (N30: a whole resource, which has no value, written into the
+    env)."""
     var cases = List[String]()
     var fields = List[String]()
     var needles = List[String]()
@@ -317,6 +358,17 @@ def test_an_instance_of_typed_inputs() raises:
     )
     var d3: List[String] = [String(_TYPED), outer]
     _one(d3, String(_EMPTY), "acme.o@1", "component[t].composite.input.n", "input \"s\" is a STRING input; this one takes an INT")
+    var head = String(
+        '{"name":"acme.o","version":"1","input":[{"name":"i","type":"INPUT_IMAGE"}],"component":[' + _B + ','
+        + '{"id":"t","composite":{"definition":"acme.t","version":"1",'
+    )
+    var tail = String('}}],"bind":[{"component":"t","field":"composite.image_input.img","input":"i"}]}')
+    var d4: List[String] = [String(_TYPED), head + '"input":{"n":{"input":"i"}}' + tail]
+    _one(d4, String(_EMPTY), "acme.o@1", "component[t].composite.input.n", "input \"i\" is an IMAGE input: a binding passes it down")
+    var d5: List[String] = [String(_TYPED), head + '"mapInput":{"env":{"value":{"E":{"input":"i"}}}}' + tail]
+    _one(d5, String(_EMPTY), "acme.o@1", "component[t].composite.map_input.env.E", "input \"i\" is an IMAGE input: a binding passes it down")
+    var d6: List[String] = [String(_TYPED), head + '"mapInput":{"env":{"value":{"E":{"ref":{"local":"b"}}}}}' + tail]
+    _one(d6, String(_EMPTY), "acme.o@1", "component[t].composite.map_input.env.E", "a value names an output of the resource (standard or named)")
     print("  test_an_instance_of_typed_inputs: PASS")
 
 

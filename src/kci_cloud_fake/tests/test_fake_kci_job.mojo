@@ -315,7 +315,9 @@ def _refused(job: String, rid: String, field: String, needle: String) raises:
 
 def test_refusals() raises:
     """Catches: kci.job's required input not required (N23), and each input
-    accepted where its type or the expanded primitive's rule refuses it."""
+    accepted where its type or the expanded primitive's rule refuses it
+    (timezone: a binding that dropped it, or wrote it anywhere but the
+    schedule, would leave this graph accepted)."""
     _refused(_job(image=False), "nightly", "composite.input", "required input \"image\" of kci.job@1 is not bound")
     _refused(
         _job(String('"image":{"literal":"sha256:99"}'), image=False),
@@ -324,6 +326,12 @@ def test_refusals() raises:
         "an IMAGE input is bound in image_input",
     )
     _refused(_job(String('"cron":{"literal":"every night"}')), "nightly/timer", "schedule.cron", "a cron is five fields")
+    _refused(
+        _job(String('"cron":{"literal":"30 2 * * 1-5"},"timezone":{"literal":"9am"}')),
+        "nightly/timer",
+        "schedule.timezone",
+        "starts with a letter",
+    )
     _refused(_job(String('"max_retries":{"literal":"two"}')), "nightly", "composite.input.max_retries", "an INT input is a decimal integer")
     _refused(_job(env=String('"E":{}')), "nightly", "composite.map_input.env.E", "has no value")
     _refused(_job(String('"schedule":{"literal":"daily"}')), "nightly", "composite.input.schedule", "kci.job@1 declares no input \"schedule\"")

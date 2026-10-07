@@ -317,7 +317,12 @@ def _refused(graph: String, rid: String, field: String, needle: String) raises:
 def test_refusals() raises:
     """Catches: kci.app's required inputs not required (N25: `public` with a
     default would decide the exposure for the author), and each input
-    accepted where its type or the expanded record's rule refuses it."""
+    accepted where its type or the expanded record's rule refuses it
+    (zone: a binding that dropped the record's zone type check would
+    accept a service as a zone; min_instances: a negative scale is refused
+    when the binding writes it, since Scale.min is unsigned). No rule
+    orders min and max today, so a max below the min has no refusal to
+    test."""
     _refused(_graph(image=False), "web", "composite.input", "required input \"image\" of kci.app@1 is not bound")
     _refused(
         _graph(String('"port":{"literal":"8081"}')), "web", "composite.input", "required input \"public\" of kci.app@1 is not bound"
@@ -341,6 +346,20 @@ def test_refusals() raises:
         "dns_record.name",
         "a CNAME is never at its zone's own name",
     )
+    _refused(
+        _graph(String('"public":{"literal":"true"},"domain":{"literal":"shop.example.com"},"zone":{"ref":{"resource":"web","path":"api"}}')),
+        "web/host",
+        "dns_record.zone",
+        "must name a dns_zone",
+    )
+    _refused(
+        _graph(String('"public":{"literal":"true"},"min_instances":{"literal":"-1"},"max_instances":{"literal":"2"}')),
+        "web/api",
+        "bind[3] service.scale.min",
+        "input \"min_instances\": JsonError: non-digit in integer text",
+    )
+    var noenv = _graph(String('"public":{"literal":"true"}')).replace('"LEVEL":{"literal":"info"}', '"LEVEL":{}')
+    _refused(noenv, "web", "composite.map_input.env.LEVEL", "has no value")
     print("  test_refusals: PASS")
 
 
