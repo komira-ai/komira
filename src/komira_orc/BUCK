@@ -29,11 +29,6 @@ mojo_library(
         "//src/komira_simd:komira_simd",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
-    dlopen = [
-        "liblz4.so.1",
-        "libz.so.1",
-        "libzstd.so.1",
-    ],
     test_srcs = [
         "tests/test_orc_acid_default_suppress.mojo",
         "tests/test_orc_acid_row_lift_preserves_leaf_metadata.mojo",
