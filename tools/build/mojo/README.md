@@ -692,7 +692,16 @@ assembly lists are generated but not built yet.
   killed and the action fails, saying the test left processes running or
   did not finish. komira's kcov exits with the test's status (128+N for
   signal N), so a test that fails at `-O0` or traced fails this action,
-  whatever its gated run did.
+  whatever its gated run did;
+- its branch coverage, which nothing waits for yet: the test emitted as
+  LLVM bitcode at `-O0` with line tables (`[coverage][bc][<test>]`,
+  `mojo_emit_cov_bc`, through the same `mojo_wrapper.sh`), instrumented
+  with IR profile counters by the Mojo package's lld and linked with the
+  LLVM profile runtime (`[coverage][pgo_bin][<test>]`, `mojo_cov_pgo_link`),
+  and run through the same `gate_runner.sh` with `LLVM_PROFILE_FILE` set,
+  whose merged profile is `[coverage][branch][<test>]` (`cov/branch/<test>.profdata`,
+  `mojo_cov_branch_run`; [branch coverage runs](../coverage/branch/README.md)).
+  A `test_env` setting `LLVM_PROFILE_FILE` is refused.
 
 and, per library, with tests or without:
 
@@ -715,7 +724,8 @@ gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of `policy.bzl`
 (`covcheck`, `komira_json`, `readme_examples`): their package waits for their
 coverage runs only, and their gate, `<name>_cov_gate`, is what their conda
 package waits for. `[coverage]` is the binaries, the reports and the gate's
-outputs.
+outputs; the branch coverage files are only its sub-targets `[bc]`,
+`[pgo_bin]` and `[branch]`.
 
 ```sh
 ./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
@@ -726,7 +736,9 @@ The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
 and does one thing: it sets the attributes `coverage_debug` to
 `komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
 `komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and
-cov_normalize), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
+cov_normalize), `coverage_branch` to
+`komira//tools/build/coverage/branch:cov_branch` (the branch coverage
+scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
 (cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
 (for a library of the ledger: no gate, and `coverage_join`). A buckconfig
 value is not part of the configuration, so no output path moves; with the

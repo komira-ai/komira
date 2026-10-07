@@ -2,7 +2,8 @@
 # coverage_run_tests.sh -- tests of coverage runs (tools/build/coverage/kcov/README.md#cov_run).
 # Sourced by tools/build/tests/run_tests.sh (uses its BUCK2, LOG, pass, fail,
 # expect_green and expect_red); not run on its own. Sources test 44's
-# coverage_gate_tests.sh after its own.
+# coverage_gate_tests.sh after its own, then test 45's
+# coverage_branch_tests.sh.
 #
 #  43. Coverage runs: each test's coverage binary runs under kcov through the
 #      release gate's runner, and its report is in repository paths.
@@ -16,7 +17,8 @@
 #      [coverage]); covenv[coverage] (test_env, data, PATH, HOME, TMPDIR, no
 #      LD_PRELOAD and the CPUs the test may run on are the gate's under kcov;
 #      a data file where the binary names a standard library source stays
-#      out of the report);
+#      out of the report); branchlib[coverage][tests][test_gate_env] (no
+#      LC_ALL under kcov: cov_run.sh's own is not exported to the test);
 #      tests//negative/coverage:tracer green, its kcov run red (kcov traced
 #      the test and passed its exit status on); orphan[coverage] green and
 #      exits[coverage] red, exit 1 and exit 137 (the status is the test's,
@@ -42,7 +44,7 @@
 expect_green coverage_runs tests//functional/coverage:numbers tests//functional/coverage:census \
     tests//functional/coverage:aggregates_tests tests//functional/coverage:aggregates_all \
     tests//functional/coverage:covenv 'tests//functional/coverage:covenv[coverage]' \
-    tests//functional/coverage:covgen \
+    tests//functional/coverage:covgen 'tests//functional/coverage:branchlib[coverage][tests][test_gate_env]' \
     tests//negative/coverage:tracer tests//negative/coverage:lost \
     tests//negative/coverage:orphan 'tests//negative/coverage:orphan[coverage]' \
     tests//negative/coverage:linger 'tests//negative/coverage:linger[coverage][tests][test_brief]'
@@ -80,3 +82,7 @@ expect_red coverage_run_proc "/proc is not readable as this run's own" 'tests//n
 # 44
 # shellcheck source=tools/build/tests/coverage_gate_tests.sh
 . "$ROOT/tools/build/tests/coverage_gate_tests.sh"
+
+# 45
+# shellcheck source=tools/build/tests/coverage_branch_tests.sh
+. "$ROOT/tools/build/tests/coverage_branch_tests.sh"

@@ -10,7 +10,13 @@ linux-x86_64, per `test_srcs` entry:
   `[coverage][bin][<test>]` (category `mojo_build_cov_test`);
 - one run of it under kcov, through the release gate's runner, whose
   Cobertura report in repository paths is `[coverage][tests][<test>]`
-  (category `mojo_cov_run`, `cov_run.sh` in the same directory).
+  (category `mojo_cov_run`, `cov_run.sh` in the same directory);
+- its branch coverage: the test as LLVM bitcode, that bitcode instrumented
+  with profile counters and linked, and the merged profile of its run
+  through the release gate's runner, `[coverage][bc]`, `[coverage][pgo_bin]`
+  and `[coverage][branch]` (coverage_branch.bzl; categories
+  `mojo_emit_cov_bc`, `mojo_cov_pgo_link`, `mojo_cov_branch_run`), which
+  nothing waits for yet.
 
 and, per library (tests or none):
 
@@ -56,6 +62,7 @@ is NotMeasured in its gate.
 """
 
 load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_MODE", "COVERAGE_NO_GATE", "COVERAGE_TARGET_BP")
+load(":coverage_branch.bzl", "coverage_branch_sub_targets")
 load(":providers.bzl", "MojoToolchainInfo")
 
 # The link directory of every coverage build (cov_link_dir, kcov/defs.bzl):
@@ -70,6 +77,10 @@ _COVERAGE_RUN = "komira//tools/build/coverage/kcov:cov_run"
 # The directory every coverage gate runs from (cov_gate_dir,
 # tools/build/coverage/defs.bzl): cov_gate.sh, covcheck and the ratchet.
 _COVERAGE_GATE = "komira//tools/build/coverage:cov_gate"
+
+# The directory every branch coverage build links and runs from
+# (cov_branch_dir, tools/build/coverage/branch/defs.bzl; coverage_branch.bzl).
+_COVERAGE_BRANCH = "komira//tools/build/coverage/branch:cov_branch"
 
 # What a library's coverage gate reads (coverage_gate): `package`, its
 # repository directory as covcheck names it; `root`, its sources at their
@@ -102,6 +113,9 @@ COVERAGE_ATTRS = {
     # The gate's mode, with coverage_gate: policy.bzl's COVERAGE_MODE (a
     # fixture of the tests cell may set another).
     "coverage_mode": attrs.option(attrs.enum(["census", "neutral", "enforce"]), default = None),
+    # A cov_branch_dir, set together with coverage_debug: the branch
+    # coverage builds and runs of coverage_branch.bzl. None otherwise.
+    "coverage_branch": attrs.option(attrs.exec_dep(), default = None),
 }
 
 def coverage_on():
@@ -126,7 +140,8 @@ def coverage_kwargs(kwargs):
 
     A fixture in the `tests` cell may pass `coverage_debug` itself (a
     cov_link_dir), and with it `coverage_run` (a cov_run_dir; the one every
-    library uses when not given) and `coverage_gate` (a cov_gate_dir) with
+    library uses when not given), `coverage_branch` (a cov_branch_dir;
+    likewise) and `coverage_gate` (a cov_gate_dir) with
     `coverage_mode` (policy.bzl's when not given): its library then has
     coverage binaries and runs, and with `coverage_gate` the gate and the
     join, whatever the switch says, through the directories it names, so a
@@ -138,21 +153,24 @@ def coverage_kwargs(kwargs):
     run = kwargs.get("coverage_run")
     gate = kwargs.get("coverage_gate")
     mode = kwargs.get("coverage_mode")
+    branch = kwargs.get("coverage_branch")
     if "coverage_join" in kwargs:
         fail("{}: `coverage_join` is set by mojo_library; do not pass it".format(name))
     ledger = None
-    if link != None or run != None or gate != None or mode != None:
+    if link != None or run != None or gate != None or mode != None or branch != None:
         if get_cell_name() != "tests":
-            fail("{}: `coverage_debug`, `coverage_run`, `coverage_gate` and `coverage_mode` are set by mojo_library from `[komira] coverage` and tools/build/coverage/policy.bzl; do not pass them".format(name))
+            fail("{}: `coverage_debug`, `coverage_run`, `coverage_gate` and `coverage_mode` are set by mojo_library from `[komira] coverage` and tools/build/coverage/policy.bzl, and so is `coverage_branch`; do not pass them".format(name))
         if link == None:
-            fail("{}: `coverage_run` and `coverage_gate` need `coverage_debug`: a run measures the coverage binary, and the gate reads the runs".format(name))
+            fail("{}: `coverage_run`, `coverage_branch` and `coverage_gate` need `coverage_debug`: a run measures the coverage binary, and the gate reads the runs".format(name))
         if mode != None and gate == None:
             fail("{}: `coverage_mode` needs `coverage_gate`".format(name))
         run = run or _COVERAGE_RUN
+        branch = branch or _COVERAGE_BRANCH
         mode = mode or COVERAGE_MODE
     elif coverage_on():
         link = _COVERAGE_LINK
         run = _COVERAGE_RUN
+        branch = _COVERAGE_BRANCH
         mode = COVERAGE_MODE
         if "{}//{}:{}".format(get_cell_name(), package_name(), name) in COVERAGE_NO_GATE:
             ledger = name + "_cov_gate"
@@ -164,6 +182,7 @@ def coverage_kwargs(kwargs):
         return None
     kwargs["coverage_debug"] = _linux(link)
     kwargs["coverage_run"] = _linux(run)
+    kwargs["coverage_branch"] = _linux(branch)
     if gate != None:
         kwargs["coverage_gate"] = _linux(gate)
         kwargs["coverage_mode"] = mode
@@ -247,9 +266,12 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     )
     return xml, marker
 
-def coverage_sub_targets(bins, runs, gate):
+def coverage_sub_targets(bins, runs, gate, branch):
     """The `coverage` sub-target of a library: `bins` {stem: binary},
-    `runs` {stem: (report, marker)} and `gate` (coverage_gate's, or None)."""
+    `runs` {stem: (report, marker)}, `gate` (coverage_gate's, or None) and
+    `branch` {stem: coverage_branch's struct} (coverage_branch.bzl: `[bc]`,
+    `[pgo_bin]` and `[branch]`, which are not among `[coverage]`'s
+    outputs)."""
     b = [bins[k] for k in sorted(bins)]
     x = [runs[k][0] for k in sorted(runs)]
     m = [runs[k][1] for k in sorted(runs)]
@@ -268,7 +290,7 @@ def coverage_sub_targets(bins, runs, gate):
     return {"coverage": [DefaultInfo(
         default_outputs = b + x,
         other_outputs = m,
-        sub_targets = g | {
+        sub_targets = g | coverage_branch_sub_targets(branch) | {
             "bin": [DefaultInfo(
                 default_outputs = b,
                 sub_targets = {k: [DefaultInfo(default_output = v)] for k, v in bins.items()},
@@ -356,7 +378,7 @@ def _check_tools(ctx):
     if ctx.label.cell == "tests":
         return
     where = ctx.label.raw_target()
-    for attr, want in (("coverage_debug", _COVERAGE_LINK), ("coverage_run", _COVERAGE_RUN), ("coverage_gate", _COVERAGE_GATE)):
+    for attr, want in (("coverage_debug", _COVERAGE_LINK), ("coverage_run", _COVERAGE_RUN), ("coverage_branch", _COVERAGE_BRANCH), ("coverage_gate", _COVERAGE_GATE)):
         d = getattr(ctx.attrs, attr)
         if d != None and str(d.label.raw_target()) != want:
             fail("{}: {} is {}, not {}: only a fixture of the tests cell may name another (tools/build/mojo/coverage.bzl)".format(where, attr, d.label.raw_target(), want))

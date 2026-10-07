@@ -990,7 +990,7 @@ Each test's coverage binary also runs under kcov ([cov_run](../coverage/kcov/REA
 ## 44. Coverage gate
 
 With coverage, a library's package waits for its runs and [its gate](../coverage/README.md#the-build-gate);
-[`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-44-the-coverage-gate).
+[`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-44-the-coverage-gate); test 45, [branch coverage runs](coverage_runs.md#test-45-branch-coverage-runs), is [`coverage_branch_tests.sh`](coverage_branch_tests.sh).
 
 ## Diagnostics
 

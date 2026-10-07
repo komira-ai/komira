@@ -1,6 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load(":defs.bzl", "cov_debug_check", "cov_plant", "cov_report_check", "cov_set_check")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
 # Coverage builds and runs (tools/build/mojo/README.md, "Coverage builds";
 # tests 41 and 43 of tools/build/tests/run_tests.sh).
@@ -247,6 +248,95 @@ cov_debug_check(
     script = "check.sh",
 )
 
+# Test 45: branch coverage. A library whose function has every kind of
+# source decision (`if`, `elif`, `or`, `and`) and whose test takes some of
+# its arms, never the first: with coverage (forced here, as for covlib_forced)
+# it has [coverage][bc], [coverage][pgo_bin] and [coverage][branch].
+mojo_library(
+    name = "branchlib",
+    srcs = [
+        "branchlib/__init__.mojo",
+        "branchlib/score.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = [
+        "tests/test_gate_env.mojo",
+        "tests/test_score_arms.mojo",
+    ],
+)
+
+# Test 45: a library with a C library in its closure (the cshim example's,
+# a cxx_library): its tests' links end with the C library, as mojo_wrapper.sh
+# appends it (--link-tail), and its branch coverage links pass the same
+# arguments in the same order. Its test calls into C and takes two of the
+# three arms of add_clamped.
+mojo_library(
+    name = "branchc",
+    srcs = ["branchc/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_add_clamped.mojo"],
+    deps = ["komira//tools/build/examples/cshim:add"],
+)
+
+# The profile of test_score_arms's instrumented run holds one function named
+# like classify_score (`ld-temp.o;branchlib::score::classify_score(...)`),
+# with six counters. IR profile counters sit on the edges outside a spanning
+# tree of the function's control flow, not one per arm, so the list is what
+# the instrumentation of this function gives, sorted, as measured remotely:
+# 1 and 1 are "top" and "high" (one call each), 2 is "pass" (two calls), and
+# the zeros include the "invalid" arm, which the test never takes. A run
+# whose counters were not written would read all zeros, and a test taking
+# another set of arms other numbers.
+cov_branch_check(
+    name = "branch_counts",
+    counts = [0, 0, 1, 1, 2, 2],
+    exec_compatible_with = LINUX_X86_64,
+    function = "classify_score",
+    profdata = ":branchlib[coverage][branch][test_score_arms]",
+    script = "branch_check.sh",
+)
+
+# Test 45: the branch coverage link of test_score_arms is the link of its
+# release build plus the profile runtime: mojo_wrapper.sh's `cc` shim gives
+# zig what `mojo build` asks for (the compiler's runtime library,
+# --gc-sections, -lm, the shim's --strip-debug and run path), and
+# cov_branch_link.sh gives zig the same line for the instrumented object
+# (link_line.sh). A Mojo release linking with another library, or a link
+# script that drops one, fails here.
+cov_link_line_check(
+    name = "link_line",
+    bc = ":branchlib[coverage][bc][test_score_arms]",
+    exec_compatible_with = LINUX_X86_64,
+    lib = ":branchlib",
+    script = "link_line.sh",
+    src = "tests/test_score_arms.mojo",
+)
+
+# Test 45: the bitcode and the instrumented binary of one test built in two
+# actions with different keys (repro_a and repro_b, above), so two
+# sandboxes, are the same bytes. No --no-remote-cache.
+cov_debug_check(
+    name = "reproducible_branch",
+    bins = [
+        ":repro_a[coverage][bc][test_same]",
+        ":repro_b[coverage][bc][test_same]",
+    ],
+    mode = "same",
+    script = "check.sh",
+)
+
+cov_debug_check(
+    name = "reproducible_pgo_bin",
+    bins = [
+        ":repro_a[coverage][pgo_bin][test_same]",
+        ":repro_b[coverage][pgo_bin][test_same]",
+    ],
+    mode = "same",
+    script = "check.sh",
+)
+
 # For the planted defects and the gate checks of tests//negative/coverage.
 export_file(
     name = "check.sh",
@@ -258,10 +348,17 @@ export_file(
     visibility = ["//negative/coverage:"],
 )
 
+export_file(
+    name = "link_line.sh",
+    visibility = ["//negative/coverage:"],
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = [
+        "branch_check.sh",
         "check.sh",
+        "link_line.sh",
         "report.sh",
     ],
     visibility = ["komira//:tests_lints"],

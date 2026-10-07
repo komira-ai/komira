@@ -1,0 +1,34 @@
+# Branch coverage of a mojo_library's welded tests (README.md): the scripts
+# that link a test's LLVM bitcode with profile counters and run it.
+# linux-x86_64 only, like the coverage builds that use it.
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "cov_branch_dir")
+
+# The directory every mojo_library's branch coverage build links and runs
+# from (tools/build/mojo/coverage_branch.bzl).
+cov_branch_dir(
+    name = "cov_branch",
+    exec_compatible_with = LINUX_X86_64,
+    visibility = ["PUBLIC"],
+)
+
+# The scripts, for cov_branch_dir's defaults and for planted defects (the
+# tests cell copies them with one fault: test 45).
+export_file(
+    name = "cov_branch_link.sh",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "cov_branch_run.sh",
+    visibility = ["PUBLIC"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "cov_branch_link.sh",
+        "cov_branch_run.sh",
+    ],
+)

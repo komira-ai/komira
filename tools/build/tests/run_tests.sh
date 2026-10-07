@@ -326,6 +326,7 @@
 #      is refused at analysis.
 #  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
 #  44. The coverage gate and join: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
+#  45. Branch coverage runs: tools/build/tests/coverage_branch_tests.sh (sourced by 43's).
 set -uo pipefail
 
 umbrella=1

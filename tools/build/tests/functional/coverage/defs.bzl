@@ -1,10 +1,14 @@
 """Checks of coverage builds, as build actions: check.sh over the binaries
 (test 41), with debug_relocate, which refuses a file holding a compressed
 section; report.sh over the per-test reports of the coverage runs (test 43);
-and cov_plant, a copy of a script with one planted defect, and kcov_stub_dir,
-a kcov distribution whose bin/kcov is a stand-in (test 43)."""
+cov_plant, a copy of a script with one planted defect, and kcov_stub_dir,
+a kcov distribution whose bin/kcov is a stand-in (test 43); and
+cov_branch_check, branch_check.sh over a branch coverage run's profile,
+and cov_link_line_check, link_line.sh over a branch coverage link
+(test 45)."""
 
-load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
+load("@komira//tools/build/toolchains/llvm_branch:defs.bzl", "LlvmBranchInfo")
 
 def _impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
@@ -165,5 +169,79 @@ kcov_stub_dir = rule(
     impl = _stub_impl,
     attrs = {
         "kcov": attrs.exec_dep(),
+    },
+)
+
+def _branch_check_impl(ctx):
+    tc = ctx.attrs._toolchain[MojoToolchainInfo]
+    out = ctx.actions.declare_output(ctx.label.name + ".txt")
+    ctx.actions.run(
+        cmd_args(
+            tc.busybox,
+            "sh",
+            ctx.attrs.script,
+            tc.busybox,
+            out.as_output(),
+            ctx.attrs._llvm[LlvmBranchInfo].tools_dir,
+            ctx.attrs.profdata,
+            ctx.attrs.function,
+            ",".join([str(c) for c in ctx.attrs.counts]),
+        ),
+        category = "cov_branch_check",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# Test 45: the profile of a branch coverage run ([coverage][branch][<test>])
+# holds exactly one function named like `function`, whose block counts,
+# sorted, are `counts` (branch_check.sh).
+cov_branch_check = rule(
+    impl = _branch_check_impl,
+    attrs = {
+        "counts": attrs.list(attrs.int()),
+        "function": attrs.string(),
+        "profdata": attrs.source(),
+        "script": attrs.source(),
+        "_llvm": attrs.exec_dep(providers = [LlvmBranchInfo], default = "komira//tools/build/toolchains/llvm_branch:llvm_branch"),
+        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+    },
+)
+
+def _link_line_impl(ctx):
+    tc = ctx.attrs._toolchain[MojoToolchainInfo]
+    out = ctx.actions.declare_output(ctx.label.name + ".txt")
+    ctx.actions.run(
+        cmd_args(
+            tc.busybox,
+            "sh",
+            ctx.attrs.script,
+            tc.busybox,
+            out.as_output(),
+            tc.wrapper,
+            tc.compiler,
+            tc.link,
+            tc.cc_target,
+            tc.target_cpu,
+            ctx.attrs.src,
+            ctx.attrs.bc,
+            ctx.attrs.branch[DefaultInfo].default_outputs[0],
+            ctx.attrs.lib[MojoInfo].pkgs.project_as_args("include"),
+        ),
+        category = "cov_link_line_check",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# Test 45: the branch coverage link of `src` (its bitcode `bc`, linked by
+# the link directory of `branch`) is the link mojo_wrapper.sh gives `mojo
+# build` of `src` against `lib`'s closure, plus the profile runtime
+# (link_line.sh).
+cov_link_line_check = rule(
+    impl = _link_line_impl,
+    attrs = {
+        "bc": attrs.source(),
+        "branch": attrs.dep(default = "komira//tools/build/coverage/branch:cov_branch"),
+        "lib": attrs.dep(providers = [MojoInfo]),
+        "script": attrs.source(),
+        "src": attrs.source(),
+        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
     },
 )

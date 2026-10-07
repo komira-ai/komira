@@ -161,7 +161,8 @@ RUN_CHECKS=("komira//tools/build/examples:hello[run_check]" "komira//tools/build
 # cell, a BUCK file passing them to mojo_library is refused when it loads
 # (even the policy's mode with komira's directories), and one calling
 # mojo_library_rule itself is refused in analysis for a mode other than the
-# policy's, a gate directory other than komira's, coverage runs with no gate,
+# policy's, a gate or branch coverage directory other than komira's,
+# coverage runs with no gate,
 # and the join of the ledger (runs, no gate) for a library not in it.
 CR="$W/umbrella/covrefuse"
 mkdir -p "$CR/macro/lib" "$CR/rule/lib"
@@ -183,6 +184,7 @@ mojo_library(
 BUCKEOF
 cat > "$CR/rule/BUCK" <<'BUCKEOF'
 load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
+load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_MODE")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library_rule")
 
@@ -191,6 +193,10 @@ _GATE = "komira//tools/build/coverage:cov_gate"
 cov_gate_dir(
     name = "lenient",
     ratchet = "ratchet.tsv",
+)
+
+cov_branch_dir(
+    name = "mybranch",
 )
 
 [
@@ -206,6 +212,7 @@ cov_gate_dir(
     for name, kw in {
         "mode": {"coverage_gate": _GATE, "coverage_mode": "neutral" if COVERAGE_MODE != "neutral" else "census"},
         "gate": {"coverage_gate": ":lenient", "coverage_mode": COVERAGE_MODE},
+        "branch": {"coverage_branch": ":mybranch", "coverage_gate": _GATE, "coverage_mode": COVERAGE_MODE},
         "runs": {},
         "join": {"coverage_join": True},
     }.items()
@@ -220,6 +227,7 @@ other=neutral
 for c in "macro|uquery|app//covrefuse/macro:lib|fail: lib: \`coverage_debug\`, \`coverage_run\`, \`coverage_gate\` and \`coverage_mode\` are set by mojo_library" \
     "mode|audit providers|app//covrefuse/rule:mode|app//covrefuse/rule:mode: coverage_mode is $other, but the policy's is $pol" \
     "gate|audit providers|app//covrefuse/rule:gate|app//covrefuse/rule:gate: coverage_gate is app//covrefuse/rule:lenient, not komira//tools/build/coverage:cov_gate" \
+    "branch|audit providers|app//covrefuse/rule:branch|app//covrefuse/rule:branch: coverage_branch is app//covrefuse/rule:mybranch, not komira//tools/build/coverage/branch:cov_branch" \
     "runs|audit providers|app//covrefuse/rule:runs|app//covrefuse/rule:runs: coverage builds with neither coverage_gate nor coverage_join" \
     "join|audit providers|app//covrefuse/rule:join|app//covrefuse/rule:join: coverage_join without a gate is for a library of the ledger COVERAGE_NO_GATE"; do
     IFS='|' read -r n cmd t want <<< "$c"
@@ -231,7 +239,7 @@ for c in "macro|uquery|app//covrefuse/macro:lib|fail: lib: \`coverage_debug\`, \
         die "umbrella: $t was refused without '$want' (see $W/umbrella.covrefuse_$n.log)"
 done
 (cd "$W/umbrella" && "$BUCK2" kill > /dev/null 2>&1)
-echo "      coverage attributes: refused in the consumer's cell, passed to mojo_library or to the rule (another mode, another gate, runs without a gate, the ledger's join)"
+echo "      coverage attributes: refused in the consumer's cell, passed to mojo_library or to the rule (another mode, another gate, another branch coverage directory, runs without a gate, the ledger's join)"
 
 # Analysis only. The toolchains cell of every checkout declares the expected
 # targets; a planted override in a consumer's toolchains cell reaches hello's

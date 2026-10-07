@@ -80,8 +80,9 @@
 # its working directory share/ also holds its own source at <test> and the
 # library's at <src_dir>, kcov shares its TMPDIR, its environment also holds
 # KCOV_SOLIB_PATH, which kcov always sets (with --skip-solibs, no
-# LD_PRELOAD), and the run ends when every process the test started has
-# exited (kcov follows each fork), where the gate waits for the test alone;
+# LD_PRELOAD), but nothing of this script's own (its LC_ALL=C, below), and
+# the run ends when every process the test started has exited (kcov follows
+# each fork), where the gate waits for the test alone;
 # so it is bounded (step 2). Its CPUs are the gate's (kcov's pin is patched
 # out).
 #
@@ -161,7 +162,10 @@ esac
 "$BB" mkdir -p "$K/bin"
 "$BB" --install -s "$K/bin"
 PATH="$K/bin"
-export PATH LC_ALL=C
+# LC_ALL=C is given to this script's own tools: per command before the test
+# runs, exported after it. The test gets the gate's environment, and the gate
+# sets no LC_ALL (gate_runner passes on what it does not set).
+export PATH
 
 red() {
     echo "==================================================================" >&2
@@ -194,9 +198,9 @@ group_left() {
 # directory) counts, and a name is cut after the last one: a komira
 # library's package path is itself src/<import>
 # (buck-out/v2/art/komira/src/<import>/__<import>__/<hash>/src/<import>).
-tr '\000' '\n' <"$BIN" | grep -a -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*' >"$K/names" || true
-grep -E "/__[^/]+__/.*/src/$IMPORT(/|\$)" "$K/names" | sed -E "s|^(.*/src/$IMPORT)(/.*)?\$|\1|" | sort -u >"$K/dirs" || true
-grep -v -x -F -e "$SRC_REL" "$K/dirs" >"$K/elsewhere" || true
+LC_ALL=C tr '\000' '\n' <"$BIN" | LC_ALL=C grep -a -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*' >"$K/names" || true
+LC_ALL=C grep -E "/__[^/]+__/.*/src/$IMPORT(/|\$)" "$K/names" | LC_ALL=C sed -E "s|^(.*/src/$IMPORT)(/.*)?\$|\1|" | LC_ALL=C sort -u >"$K/dirs" || true
+LC_ALL=C grep -v -x -F -e "$SRC_REL" "$K/dirs" >"$K/elsewhere" || true
 if [ -s "$K/elsewhere" ]; then
     red "the test binary names the library's sources by $(tr '\n' ' ' <"$K/elsewhere")but this run stages them at $SRC_REL: kcov would drop them without an error (README.md, \"cov_run\")."
 fi
@@ -265,6 +269,7 @@ watch=$!
 wait "$gate" || rc=$?
 kill "$watch" 2>/dev/null || true
 wait "$watch" || true
+export LC_ALL=C
 if [ -e "$K/timed_out" ]; then
     # The kill must have reached every process of the group, not gate_runner
     # alone: a process of it that is not a zombie after up to 10 s (SIGKILL
