@@ -713,10 +713,9 @@ def _release_schema(sch_ptr: _SchemaPtr) -> None:
 # heap allocation) satisfies every Mojo-side test (`release` non-NULL ⇒
 # `is_released()` False) while guaranteeing that pyarrow, pandas, polars, or
 # arrow-rs jump the program counter into a heap data byte: SIGBUS, PC at an
-# unmapped heap address. Mojo spells the type `def (T) thin -> None` — this
-# file stores three such pointers in
-# `CArrowArrayStream.get_schema/get_next/get_last_error` — and the whole point
-# of the C Data Interface is foreign consumers. Arrow's own C helpers
+# unmapped heap address. Mojo spells the type `def (T) thin -> None`; the
+# `release` slot of each of the three structs holds a `thin` fn pointer of
+# that type, and the whole point of the C Data Interface is foreign consumers. Arrow's own C helpers
 # additionally `abort()` when a release callback fails to null itself out,
 # which a heap byte can never do. The release-callback-is-a-function-pointer
 # unit test guards this.
@@ -725,8 +724,14 @@ def _release_schema(sch_ptr: _SchemaPtr) -> None:
 #     void (*release)(struct ArrowSchema*);
 #     void (*release)(struct ArrowArray*);
 #     void (*release)(struct ArrowArrayStream*);
-# `thin` = non-capturing (no context word) — same convention already used for
-# the stream's three callback fields above. VERIFIED against a real C caller,
+# `thin` = non-capturing (no context word). These release slots keep the Mojo
+# default calling convention, unlike the three `abi("C")` stream slots
+# (`_GetSchemaFn`/`_GetNextFn`/`_GetLastErrorFn`): a release callback returns
+# nothing, and the return value is where the conventions differ. Evidence that
+# this works across the seam: the RELEASE arm of the measurement block above
+# `drain_c_abi_record_batch_stream`, and the dlopen gate of
+# `:arrow_c_abi_probe`, which releases every exported and imported struct
+# through these slots. VERIFIED against a real C caller,
 # not assumed: a `cc`-compiled C function that casts the `void*` slot to
 # `void (*)(struct*)` and calls it reaches the Mojo callback with the correct
 # argument, and observes `release == NULL` on return — i.e. exactly the
