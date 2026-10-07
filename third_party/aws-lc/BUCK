@@ -121,13 +121,17 @@ cxx_library(
 # `bssl`, aws-lc's command-line tool, is the external TLS peer of the interop
 # tests (src/tests/e2e/komira_tls_interop_e2e): `bssl s_server` and
 # `bssl s_client` against komira's TLS (s2n-tls). Nothing komira ships links
-# libssl. Both are C++, compiled as the CMake build compiles them: C++11
-# without exceptions or RTTI, its Release flags, the global defines above
-# (BORINGSSL_IMPLEMENTATION on libssl's own objects only, INTERNAL_TOOL on
-# the tool's), and CMake's -I include, which both are given: the tool's
+# libssl. Both are C++, compiled as the CMake build compiles them: gnu++11
+# (CMake's C++11 with its default extensions) without exceptions or RTTI,
+# its Release flags, the global defines above (BORINGSSL_IMPLEMENTATION on
+# libssl's own objects only, INTERNAL_TOOL on the tool's), and CMake's
+# -I include, which both are given: the tool's
 # bssl_bm.h includes <../crypto/<dir>/internal.h> through it. Their sources,
 # the private headers they include and the public headers are one tree of
-# their own, so libcrypto's actions above do not change.
+# their own, so libcrypto's actions above do not change. libssl's one C
+# file, ssl/ssl_decrepit.c, gets libcrypto's C flags (_C_FLAGS) and, as
+# CMake adds to every C compile on Linux, -D_XOPEN_SOURCE=700. Only
+# //src/tests/e2e/komira_tls_interop_e2e may use bssl.
 archive_files(
     name = "ssl_src",
     exec_compatible_with = LINUX_X86_64,
@@ -139,7 +143,7 @@ archive_files(
 )
 
 _CXX_FLAGS = [
-    "-std=c++11",
+    "-std=gnu++11",
     "-O3",
     "-fvisibility=hidden",
     "-fno-exceptions",
@@ -156,7 +160,10 @@ _SSL_TOOL_DEFINES = [
 
 cxx_library(
     name = "ssl",
-    srcs = [":ssl_src[{}]".format(f) for f in SSL_SRCS],
+    srcs = [
+        (":ssl_src[{}]".format(f), ["-D_XOPEN_SOURCE=700"]) if f.endswith(".c") else ":ssl_src[{}]".format(f)
+        for f in SSL_SRCS
+    ],
     raw_headers = [":ssl_src[{}]".format(f) for f in SSL_TOOL_HEADERS],
     compiler_flags = ["-w"],
     lang_compiler_flags = {
@@ -179,5 +186,5 @@ cxx_binary(
     preprocessor_flags = _SSL_TOOL_DEFINES + ["-DINTERNAL_TOOL"],
     deps = [":ssl"],
     target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
-    visibility = ["PUBLIC"],
+    visibility = ["//src/tests/e2e/komira_tls_interop_e2e/..."],
 )
