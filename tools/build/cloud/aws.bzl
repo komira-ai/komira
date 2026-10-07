@@ -53,7 +53,9 @@ identifier is read whole (a quote or `#` in it is part of the name), and a
 backslash pairs with the byte after it in every string, raw ones included
 (Mojo refuses `r"\\"` as unterminated). A file with a t-string is refused:
 its braces hold code with strings of their own, which the scan does not
-lex. Mojo refuses an import inside a block such as an `if`.
+lex. So is a file with a carriage return: Mojo ends a line at a lone one,
+and the scan reads only line feeds. Mojo refuses an import inside a block
+such as an `if`.
 Every variable is refused, the provider-standard `AWS_*` ones included: a
 client takes each input as a parameter, and reading the credential
 variables is komira_aws_core's EnvSource. The scan also checks that it read
@@ -224,7 +226,14 @@ def _code(name: String, text: String) raises -> String:
     (prefix `r`) or not, a backslash and the byte after it are one pair, so
     an escaped quote does not end it (Mojo refuses `r"\\\\"` as unterminated).
     Raises on a t-string (prefix `t`, `rt` or `tr`, any case): its braces hold
-    code with string literals of their own, which this does not lex.\"\"\"
+    code with string literals of their own, which this does not lex. Raises
+    on a carriage return: Mojo ends a line at a lone one and joins a backslash
+    before one and a line feed, and this reads only line feeds.\"\"\"
+    if text.find("\\r") >= 0:
+        raise Error(
+            name + " has a carriage return, which the environment scan does"
+            " not read"
+        )
     var b = text.as_bytes()
     var n = len(b)
     var out = String()
