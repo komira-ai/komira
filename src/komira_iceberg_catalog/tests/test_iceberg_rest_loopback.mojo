@@ -147,7 +147,10 @@ struct _FakeCatalog(RequestDispatcher):
         mut self, mut reactor: Reactor[RT.Sink], var req: HttpRequest
     ) raises -> HttpResponse:
         var path = String(req.path)
-        var auth = req.headers.get(String("authorization")).or_else(String(""))
+        # "<absent>" (not "") so a missing header and an empty one differ.
+        var auth = req.headers.get(String("authorization")).or_else(
+            String("<absent>")
+        )
         self.paths.append(path.copy())
         self.auths.append(auth.copy())
         self.hosts.append(req.headers.get(String("host")).or_else(String("")))
@@ -269,7 +272,7 @@ def test_production_transport_over_loopback() raises:
     var auths = List[String]()
     for _ in range(4):
         auths.append(bearer.copy())
-    auths.append(String(""))
+    auths.append(String("<absent>"))
     _expect_list(loop.dispatcher.auths, auths, String("Authorization"))
 
     var host = String(_HOST) + String(":") + String(Int(port))

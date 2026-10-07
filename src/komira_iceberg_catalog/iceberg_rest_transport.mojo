@@ -284,6 +284,8 @@ struct HttpIcebergRestTransport[C: Connector](
         # Dial a fresh connector + drive one synchronous GET (one
         # connector per call).
         var connector = self._mk_connector()
+        # The scheme follows the connector. A plaintext connector sends the
+        # bearer token in cleartext: it is for loopback tests only.
         var url: Url
         if connector.is_tls():
             url = Url.https(
